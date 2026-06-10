@@ -5,10 +5,18 @@
 //! business-agnostic: it knows the git on-disk object format and nothing
 //! about alt.
 
+mod commit;
+mod headers;
 mod kind;
 mod loose;
 mod oid;
+mod tag;
+mod tree;
 
+pub use commit::Commit;
+pub use headers::ObjectParseError;
 pub use kind::{ObjectKind, ParseKindError};
 pub use loose::{LooseError, LooseStore, RawObject};
 pub use oid::{HashAlgo, ObjectId, ParseOidError};
+pub use tag::Tag;
+pub use tree::{EntryMode, Tree, TreeEntry};
