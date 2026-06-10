@@ -10,6 +10,8 @@ edition = "2024"
 alt-git-codec = { path = "crates/alt-git-codec" }
 alt-repo = { path = "crates/alt-repo" }
 
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
 sha1 = "0.10"
 sha2 = "0.10"
+tempfile = "3"
 thiserror = "2"
