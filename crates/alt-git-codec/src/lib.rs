@@ -4,3 +4,9 @@
 //! and computes their object ids (SHA-1 / SHA-256). This crate is
 //! business-agnostic: it knows the git on-disk object format and nothing
 //! about alt.
+
+mod kind;
+mod oid;
+
+pub use kind::{ObjectKind, ParseKindError};
+pub use oid::{HashAlgo, ObjectId, ParseOidError};
