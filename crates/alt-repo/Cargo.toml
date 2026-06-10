@@ -1,0 +1,8 @@
+[package]
+name = "alt-repo"
+description = "Repository facade: storage backend abstraction over alt's native store and imported git repositories"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+alt-git-codec.workspace = true

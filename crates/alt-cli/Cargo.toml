@@ -1,0 +1,12 @@
+[package]
+name = "alt-cli"
+description = "The alt command-line interface"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "alt"
+path = "src/main.rs"
+
+[dependencies]
+alt-repo.workspace = true

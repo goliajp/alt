@@ -1,0 +1,7 @@
+[package]
+name = "alt-git-codec"
+description = "Git object model codec: loose objects, commits, trees, tags, and object hashing (SHA-1/SHA-256)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
