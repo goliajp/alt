@@ -1,6 +1,5 @@
-//! Packs a real git repository and verifies idx lookup and non-delta
-//! decoding against re-hashing. Delta entries are counted and skipped
-//! until S5.
+//! Packs a real git repository and verifies that every entry — plain and
+//! delta — resolves and re-hashes to its idx oid.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -33,36 +32,25 @@ fn verify_pack(algo: HashAlgo, object_format: &str) {
         let oid = idx.oid_at(i);
         assert_eq!(idx.lookup(&oid), Some(i), "lookup must invert oid_at");
 
-        let info = pack.entry_info(idx.offset_at(i).unwrap()).unwrap();
-        match info.kind {
-            EntryKind::Plain(kind) => {
-                let data = pack.inflate(info.data_at, info.size).unwrap();
-                assert_eq!(
-                    ObjectId::hash_object(algo, kind, &data),
-                    oid,
-                    "re-hash mismatch for {oid}"
-                );
-                plain += 1;
-            }
-            EntryKind::OfsDelta { base_at } => {
-                // base must be a parseable entry earlier in the pack
-                pack.entry_info(base_at).unwrap();
-                delta += 1;
-            }
-            EntryKind::RefDelta { base } => {
-                assert!(
-                    idx.lookup(&base).is_some(),
-                    "ref-delta base must be in pack"
-                );
-                delta += 1;
-            }
+        let offset = idx.offset_at(i).unwrap();
+        match pack.entry_info(offset).unwrap().kind {
+            EntryKind::Plain(_) => plain += 1,
+            EntryKind::OfsDelta { .. } | EntryKind::RefDelta { .. } => delta += 1,
         }
+
+        let obj = indexed.read(&oid).unwrap().expect("indexed oid must read");
+        assert_eq!(
+            ObjectId::hash_object(algo, obj.kind, &obj.data),
+            oid,
+            "re-hash mismatch for {oid}"
+        );
     }
-    assert!(plain >= 10, "expected mostly plain entries, got {plain}");
+    assert!(plain >= 10, "expected plain entries, got {plain}");
+    assert!(delta >= 1, "fixture should produce delta entries");
     println!("{object_format}: {plain} plain + {delta} delta entries verified");
 
     let absent = ObjectId::hash_object(algo, alt_git_codec::ObjectKind::Blob, b"not in pack");
-    assert_eq!(idx.lookup(&absent), None);
+    assert!(indexed.read(&absent).unwrap().is_none());
 }
 
 #[test]

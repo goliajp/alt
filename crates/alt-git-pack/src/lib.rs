@@ -3,13 +3,17 @@
 //! Business-agnostic stone: knows the on-disk pack/idx formats and nothing
 //! about alt.
 
+mod cache;
+pub mod delta;
 mod idx;
 mod pack;
 
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
-use alt_git_codec::{ObjectId, RawObject};
+use alt_git_codec::{ObjectId, ObjectKind, RawObject};
 
+use cache::DeltaBaseCache;
 pub use idx::PackIndex;
 pub use pack::{EntryInfo, EntryKind, Pack};
 
@@ -19,14 +23,31 @@ pub enum PackError {
     Io(#[from] std::io::Error),
     #[error("pack format: {0}")]
     Format(&'static str),
-    #[error("delta resolution not yet implemented (M1/S5)")]
-    UnresolvedDelta,
 }
 
-/// A pack plus its index: oid-addressed object reading.
+/// A fully resolved object read from a pack. Data is shared with the
+/// delta-base cache, so cloning is cheap.
+#[derive(Debug, Clone)]
+pub struct PackedObject {
+    pub kind: ObjectKind,
+    pub data: Arc<Vec<u8>>,
+}
+
+impl PackedObject {
+    pub fn to_raw(&self) -> RawObject {
+        RawObject {
+            kind: self.kind,
+            data: (*self.data).clone(),
+        }
+    }
+}
+
+/// A pack plus its index: oid-addressed object reading with full delta
+/// resolution.
 pub struct IndexedPack {
     idx: PackIndex,
     pack: Pack,
+    cache: Mutex<DeltaBaseCache>,
 }
 
 impl IndexedPack {
@@ -36,6 +57,7 @@ impl IndexedPack {
         Ok(Self {
             idx: PackIndex::open(&idx_path, algo)?,
             pack: Pack::open(pack_path, algo)?,
+            cache: Mutex::new(DeltaBaseCache::new(cache::DEFAULT_BUDGET)),
         })
     }
 
@@ -48,19 +70,53 @@ impl IndexedPack {
     }
 
     /// Reads the object `oid` if this pack contains it.
-    pub fn read(&self, oid: &ObjectId) -> Result<Option<RawObject>, PackError> {
-        let Some(i) = self.idx.lookup(oid) else {
-            return Ok(None);
-        };
-        let info = self.pack.entry_info(self.idx.offset_at(i)?)?;
-        match info.kind {
-            EntryKind::Plain(kind) => Ok(Some(RawObject {
-                kind,
-                data: self.pack.inflate(info.data_at, info.size)?,
-            })),
-            EntryKind::OfsDelta { .. } | EntryKind::RefDelta { .. } => {
-                Err(PackError::UnresolvedDelta)
-            }
+    pub fn read(&self, oid: &ObjectId) -> Result<Option<PackedObject>, PackError> {
+        match self.idx.lookup(oid) {
+            None => Ok(None),
+            Some(i) => self.read_at(self.idx.offset_at(i)?).map(Some),
         }
+    }
+
+    /// Reads the object stored at pack offset `offset`, resolving its delta
+    /// chain iteratively (deep chains must not recurse).
+    pub fn read_at(&self, offset: u64) -> Result<PackedObject, PackError> {
+        // walk down the chain until a cached result or a plain entry
+        let mut frames: Vec<(u64, EntryInfo)> = Vec::new();
+        let mut cur = offset;
+        let (kind, mut data) = loop {
+            if let Some(hit) = self.cache.lock().unwrap().get(cur) {
+                break hit;
+            }
+            let info = self.pack.entry_info(cur)?;
+            match info.kind {
+                EntryKind::Plain(kind) => {
+                    let data = Arc::new(self.pack.inflate(info.data_at, info.size)?);
+                    self.cache.lock().unwrap().put(cur, kind, data.clone());
+                    break (kind, data);
+                }
+                EntryKind::OfsDelta { base_at } => {
+                    frames.push((cur, info));
+                    cur = base_at;
+                }
+                EntryKind::RefDelta { base } => {
+                    // on-disk packs are self-contained; thin packs exist only
+                    // on the wire
+                    let i = self
+                        .idx
+                        .lookup(&base)
+                        .ok_or(PackError::Format("ref-delta base not in pack"))?;
+                    frames.push((cur, info));
+                    cur = self.idx.offset_at(i)?;
+                }
+            }
+        };
+        // apply deltas back up, caching every intermediate result
+        for (off, info) in frames.iter().rev() {
+            let raw_delta = self.pack.inflate(info.data_at, info.size)?;
+            let out = Arc::new(delta::apply(&data, &raw_delta)?);
+            self.cache.lock().unwrap().put(*off, kind, out.clone());
+            data = out;
+        }
+        Ok(PackedObject { kind, data })
     }
 }

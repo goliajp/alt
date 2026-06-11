@@ -32,7 +32,7 @@ run_corpus() {
     # absolute path: cargo test sets the package dir, not the workspace
     # root, as the tests' working directory
     ALT_CORPUS="${ALT_CORPUS:-$PWD/.claude/corpus}" \
-        cargo test -p alt-git-codec --test it -- --ignored
+        cargo test --workspace --tests -- --ignored
 }
 
 case "$class" in

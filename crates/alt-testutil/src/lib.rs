@@ -48,6 +48,11 @@ pub fn make_repo(dir: &Path, object_format: &str) {
     );
 
     fs::write(dir.join("a.txt"), "hello world\n").unwrap();
+    // large enough that repacking will delta its two versions
+    let big: String = (0..200)
+        .map(|i| format!("line {i} of some text\n"))
+        .collect();
+    fs::write(dir.join("big.txt"), &big).unwrap();
     fs::write(dir.join("b.bin"), [0u8, 159, 146, 150]).unwrap();
     fs::create_dir(dir.join("sub")).unwrap();
     fs::write(dir.join("sub/c.txt"), "nested\n").unwrap();
@@ -77,6 +82,10 @@ pub fn make_repo(dir: &Path, object_format: &str) {
     git(dir, &["commit", "-q", "-m", "feat work"]);
     git(dir, &["checkout", "-q", "main"]);
     fs::write(dir.join("a.txt"), "hello again\n").unwrap();
+    let big: String = (0..201)
+        .map(|i| format!("line {i} of some text\n"))
+        .collect();
+    fs::write(dir.join("big.txt"), &big).unwrap();
     git(dir, &["commit", "-q", "-am", "second"]);
     git(dir, &["merge", "-q", "--no-ff", "-m", "merge feat", "feat"]);
 
