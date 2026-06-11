@@ -59,14 +59,26 @@ impl DeltaBaseCache {
             self.bytes -= old.data.len();
         }
         self.bytes += data.len();
-        while self.bytes > self.budget {
-            let (&victim, _) = self
-                .map
-                .iter()
-                .min_by_key(|(_, e)| e.last)
-                .expect("bytes > 0 implies entries exist");
-            let evicted = self.map.remove(&victim).unwrap();
-            self.bytes -= evicted.data.len();
+        if self.bytes > self.budget {
+            // watermark eviction: dropping to half budget in one sorted pass
+            // amortizes the scan, instead of a full scan per evicted entry
+            self.evict_to(self.budget / 2);
+        }
+    }
+
+    fn evict_to(&mut self, target: usize) {
+        let mut by_age: Vec<(u64, u64, usize)> = self
+            .map
+            .iter()
+            .map(|(&off, e)| (e.last, off, e.data.len()))
+            .collect();
+        by_age.sort_unstable();
+        for (_, off, size) in by_age {
+            if self.bytes <= target {
+                break;
+            }
+            self.map.remove(&off);
+            self.bytes -= size;
         }
     }
 }

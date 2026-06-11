@@ -1,0 +1,11 @@
+[package]
+name = "alt-verify"
+description = "Internal harness: re-hash every object (loose and packed) of git repositories, in parallel"
+publish = false
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+alt-git-codec.workspace = true
+alt-git-pack.workspace = true
+rayon.workspace = true
