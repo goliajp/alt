@@ -9,4 +9,11 @@ name = "alt"
 path = "src/main.rs"
 
 [dependencies]
+alt-git-codec.workspace = true
 alt-repo.workspace = true
+bstr.workspace = true
+clap.workspace = true
+
+[dev-dependencies]
+alt-testutil.workspace = true
+tempfile.workspace = true

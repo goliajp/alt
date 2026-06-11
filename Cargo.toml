@@ -16,6 +16,7 @@ alt-repo = { path = "crates/alt-repo" }
 alt-testutil = { path = "crates/alt-testutil" }
 
 bstr = "1"
+clap = { version = "4", features = ["derive"] }
 flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
 memmap2 = "0.9"
 rayon = "1"
