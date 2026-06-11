@@ -1,10 +1,11 @@
 //! Corpus sweep over real packfiles: resolves every entry of every pack
-//! under `$ALT_CORPUS` and re-hashes it against the idx oid.
+//! under `$ALT_CORPUS`, re-hashes it against the idx oid, and pairs every
+//! read with an export (parse → serialize must reproduce the bytes).
 
 use std::fs;
 use std::path::Path;
 
-use alt_git_codec::{HashAlgo, ObjectId};
+use alt_git_codec::{Commit, HashAlgo, ObjectId, ObjectKind, Tag, Tree};
 use alt_git_pack::{EntryKind, IndexedPack};
 
 fn sweep_pack(pack_path: &Path) -> (u32, u32) {
@@ -32,6 +33,19 @@ fn sweep_pack(pack_path: &Path) -> (u32, u32) {
             oid,
             "re-hash mismatch for {oid} in {pack_path:?}"
         );
+        // read ↔ export pairing
+        let reserialized = match obj.kind {
+            ObjectKind::Blob => None,
+            ObjectKind::Commit => Some(Commit::parse(&obj.data).unwrap().serialize()),
+            ObjectKind::Tree => Some(Tree::parse(&obj.data, HashAlgo::Sha1).unwrap().serialize()),
+            ObjectKind::Tag => Some(Tag::parse(&obj.data).unwrap().serialize()),
+        };
+        if let Some(reserialized) = reserialized {
+            assert_eq!(
+                reserialized, *obj.data,
+                "export mismatch for {oid} in {pack_path:?}"
+            );
+        }
     }
     (plain, delta)
 }

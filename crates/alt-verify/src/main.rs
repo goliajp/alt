@@ -1,5 +1,7 @@
-//! Re-hashes every object — loose and packed — of the given repositories
-//! and reports throughput. The M1 verification harness and bench baseline.
+//! Re-hashes every object — loose and packed — of the given repositories,
+//! pairs every read with an export (parse → serialize must reproduce the
+//! bytes), and reports throughput. The M1 verification harness and bench
+//! baseline.
 //!
 //! ```sh
 //! cargo run --release -p alt-verify -- <repo>…
@@ -10,9 +12,21 @@ use std::process::exit;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
-use alt_git_codec::{HashAlgo, LooseStore, ObjectId};
+use alt_git_codec::{Commit, HashAlgo, LooseStore, ObjectId, ObjectKind, RawObject, Tag, Tree};
 use alt_git_pack::IndexedPack;
 use rayon::prelude::*;
+
+/// Read ↔ export pairing: every parsed object must serialize back to the
+/// exact bytes it was read from.
+fn verify_export(algo: HashAlgo, oid: &ObjectId, raw: &RawObject) {
+    let reserialized = match raw.kind {
+        ObjectKind::Blob => return,
+        ObjectKind::Commit => Commit::parse(&raw.data).unwrap().serialize(),
+        ObjectKind::Tree => Tree::parse(&raw.data, algo).unwrap().serialize(),
+        ObjectKind::Tag => Tag::parse(&raw.data).unwrap().serialize(),
+    };
+    assert_eq!(reserialized, raw.data, "export mismatch for {oid}");
+}
 
 fn main() {
     let repos: Vec<String> = std::env::args().skip(1).collect();
@@ -42,6 +56,7 @@ fn verify_repo(repo: &Path) {
             *oid,
             "loose re-hash mismatch in {repo:?}"
         );
+        verify_export(algo, oid, &raw);
         bytes.fetch_add(raw.data.len() as u64, Ordering::Relaxed);
     });
 
@@ -64,6 +79,14 @@ fn verify_repo(repo: &Path) {
                 ObjectId::hash_object(algo, obj.kind, &obj.data),
                 oid,
                 "packed re-hash mismatch in {pack_path:?}"
+            );
+            verify_export(
+                algo,
+                &oid,
+                &RawObject {
+                    kind: obj.kind,
+                    data: (*obj.data).clone(),
+                },
             );
             bytes.fetch_add(obj.data.len() as u64, Ordering::Relaxed);
         });
