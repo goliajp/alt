@@ -39,6 +39,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "alt-git-index"
+version = "0.0.0"
+dependencies = [
+ "alt-git-codec",
+ "alt-testutil",
+ "bstr",
+ "sha1",
+ "sha2",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "alt-git-pack"
 version = "0.0.0"
 dependencies = [

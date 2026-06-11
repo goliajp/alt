@@ -1,0 +1,16 @@
+[package]
+name = "alt-git-index"
+description = "Git index (dircache) reading: versions 2-4, extensions preserved raw"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+alt-git-codec.workspace = true
+bstr.workspace = true
+sha1.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+alt-testutil.workspace = true
+tempfile.workspace = true
