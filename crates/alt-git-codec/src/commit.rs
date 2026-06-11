@@ -48,6 +48,15 @@ impl Commit {
         self.block.value(b"committer")
     }
 
+    /// Committer timestamp (epoch seconds) from the ident's trailing
+    /// `<timestamp> <tz>` tokens.
+    pub fn committer_date(&self) -> Option<i64> {
+        let ident = self.committer()?;
+        let mut tokens = ident.rsplit(|&b| b == b' ');
+        let _tz = tokens.next()?;
+        core::str::from_utf8(tokens.next()?).ok()?.parse().ok()
+    }
+
     pub fn message(&self) -> &BString {
         &self.block.message
     }

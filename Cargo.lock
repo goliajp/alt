@@ -79,6 +79,13 @@ name = "alt-repo"
 version = "0.0.0"
 dependencies = [
  "alt-git-codec",
+ "alt-git-config",
+ "alt-git-pack",
+ "alt-git-refs",
+ "alt-testutil",
+ "bstr",
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]
