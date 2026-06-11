@@ -3,6 +3,7 @@ name = "alt-git-refs"
 description = "Git reference storage reading: loose refs, packed-refs, symref resolution"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 alt-git-codec.workspace = true

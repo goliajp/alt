@@ -3,6 +3,7 @@ name = "alt-git-config"
 description = "Git config reading: full file syntax, value semantics, include and includeIf resolution"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 bstr.workspace = true

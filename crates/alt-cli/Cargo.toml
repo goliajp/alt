@@ -3,6 +3,7 @@ name = "alt-cli"
 description = "The alt command-line interface"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [[bin]]
 name = "alt"

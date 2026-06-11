@@ -4,6 +4,7 @@ description = "Internal test fixtures: real-git repository builders and object w
 publish = false
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 alt-git-codec.workspace = true

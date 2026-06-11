@@ -3,6 +3,7 @@ name = "alt-git-pack"
 description = "Git packfile reading: idx lookup, entry decoding, delta resolution"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 alt-git-codec.workspace = true

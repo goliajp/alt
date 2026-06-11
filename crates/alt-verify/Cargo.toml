@@ -4,6 +4,7 @@ description = "Internal harness: re-hash every object (loose and packed) of git 
 publish = false
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 alt-git-codec.workspace = true
