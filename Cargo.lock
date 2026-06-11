@@ -19,6 +19,7 @@ dependencies = [
 name = "alt-git-codec"
 version = "0.0.0"
 dependencies = [
+ "alt-testutil",
  "bstr",
  "flate2",
  "sha1",
@@ -28,7 +29,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "alt-git-pack"
+version = "0.0.0"
+dependencies = [
+ "alt-git-codec",
+ "alt-testutil",
+ "flate2",
+ "memmap2",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "alt-repo"
+version = "0.0.0"
+dependencies = [
+ "alt-git-codec",
+]
+
+[[package]]
+name = "alt-testutil"
 version = "0.0.0"
 dependencies = [
  "alt-git-codec",
@@ -236,6 +256,15 @@ name = "memchr"
 version = "2.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6b947ae49db0d222b1dbc6b113ce7248a3fc3a6ca21b696717bfc000ba4484d8"
+
+[[package]]
+name = "memmap2"
+version = "0.9.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "714098028fe011992e1c3962653c96b2d578c4b4bce9036e15ff220319b1e0e3"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "miniz_oxide"

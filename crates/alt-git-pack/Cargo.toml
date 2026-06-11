@@ -1,14 +1,13 @@
 [package]
-name = "alt-git-codec"
-description = "Git object model codec: loose objects, commits, trees, tags, and object hashing (SHA-1/SHA-256)"
+name = "alt-git-pack"
+description = "Git packfile reading: idx lookup, entry decoding, delta resolution"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-bstr.workspace = true
+alt-git-codec.workspace = true
 flate2.workspace = true
-sha1.workspace = true
-sha2.workspace = true
+memmap2.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

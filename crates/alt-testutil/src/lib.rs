@@ -1,6 +1,5 @@
-//! Shared fixture: builds a real git repository exercising every object kind
-//! and tree-entry mode, and walks its loose objects.
-#![allow(dead_code)]
+//! Internal test fixtures: builds real git repositories exercising every
+//! object kind and tree-entry mode, and walks their objects.
 
 use std::fs;
 use std::os::unix::fs::{PermissionsExt, symlink};
@@ -85,6 +84,13 @@ pub fn make_repo(dir: &Path, object_format: &str) {
         dir,
         &["tag", "-a", "v0", "-m", "annotated tag\n\nwith body"],
     );
+}
+
+/// Repacks everything into a single packfile (deltas allowed) and drops the
+/// loose copies; returns the `.git/objects/pack` directory.
+pub fn pack_repo(dir: &Path) -> std::path::PathBuf {
+    git(dir, &["repack", "-adq"]);
+    dir.join(".git/objects/pack")
 }
 
 /// Calls `f` with every loose object in the repository; returns the count.

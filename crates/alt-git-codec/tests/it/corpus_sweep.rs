@@ -9,7 +9,7 @@ use std::path::Path;
 
 use alt_git_codec::{Commit, ObjectId, ObjectKind, Tag, Tree};
 
-use crate::common;
+use alt_testutil as common;
 
 fn sweep_repo(repo: &Path) -> (usize, usize) {
     let mut non_blob = 0;

@@ -3,7 +3,7 @@
 
 use alt_git_codec::{HashAlgo, ObjectId};
 
-use crate::common;
+use alt_testutil as common;
 
 fn verify_all_loose(algo: HashAlgo, object_format: &str) {
     let tmp = tempfile::tempdir().unwrap();
