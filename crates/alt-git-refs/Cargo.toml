@@ -1,0 +1,14 @@
+[package]
+name = "alt-git-refs"
+description = "Git reference storage reading: loose refs, packed-refs, symref resolution"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+alt-git-codec.workspace = true
+bstr.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+alt-testutil.workspace = true
+tempfile.workspace = true

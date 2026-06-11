@@ -9,6 +9,7 @@ edition = "2024"
 [workspace.dependencies]
 alt-git-codec = { path = "crates/alt-git-codec" }
 alt-git-pack = { path = "crates/alt-git-pack" }
+alt-git-refs = { path = "crates/alt-git-refs" }
 alt-repo = { path = "crates/alt-repo" }
 alt-testutil = { path = "crates/alt-testutil" }
 
