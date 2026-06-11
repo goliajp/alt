@@ -2,9 +2,9 @@
 //! that serialization reproduces the original bytes exactly (L1 fidelity,
 //! read direction).
 
-mod common;
-
 use alt_git_codec::{Commit, HashAlgo, ObjectKind, Tag, Tree};
+
+use crate::common;
 
 fn roundtrip_repo(algo: HashAlgo, object_format: &str) {
     let tmp = tempfile::tempdir().unwrap();

@@ -117,10 +117,7 @@ pub enum LooseError {
     #[error("object {0} not found in loose store")]
     NotFound(ObjectId),
     #[error("io error on loose object {oid}")]
-    Io {
-        oid: ObjectId,
-        source: io::Error,
-    },
+    Io { oid: ObjectId, source: io::Error },
     #[error("corrupt loose object {oid}: {reason}")]
     Corrupt { oid: ObjectId, reason: &'static str },
 }
@@ -130,8 +127,8 @@ mod tests {
     use std::fs;
     use std::io::Write;
 
-    use flate2::write::ZlibEncoder;
     use flate2::Compression;
+    use flate2::write::ZlibEncoder;
 
     use super::*;
     use crate::HashAlgo;
@@ -178,10 +175,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let oid = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, b"x");
         for raw in [
-            &b"blob12\0x"[..],                          // no space
-            &b"sock 1\0x"[..],                          // unknown kind
-            &b"blob nan\0x"[..],                        // bad size
-            &b"blob 2\0x"[..],                          // size mismatch
+            &b"blob12\0x"[..],                             // no space
+            &b"sock 1\0x"[..],                             // unknown kind
+            &b"blob nan\0x"[..],                           // bad size
+            &b"blob 2\0x"[..],                             // size mismatch
             &b"blob 11111111111111111111111111111\0x"[..], // header too long
         ] {
             let store = store_with(dir.path(), &oid, raw);

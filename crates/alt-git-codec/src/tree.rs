@@ -80,7 +80,9 @@ impl EntryMode {
     /// Accepts 1–6 octal digits, as git's tree parser does.
     pub fn from_bytes(mode: &[u8]) -> Result<Self, ObjectParseError> {
         if mode.is_empty() || mode.len() > 6 {
-            return Err(ObjectParseError::Tree("entry mode must be 1-6 octal digits"));
+            return Err(ObjectParseError::Tree(
+                "entry mode must be 1-6 octal digits",
+            ));
         }
         if !mode.iter().all(|b| (b'0'..=b'7').contains(b)) {
             return Err(ObjectParseError::Tree("entry mode has non-octal digit"));
@@ -181,9 +183,9 @@ mod tests {
     fn rejects_malformed_trees() {
         let oid = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, b"x");
         for data in [
-            b"100644".to_vec(),                       // no space
-            b"100648 a\0".to_vec(),                   // non-octal mode
-            b"100644 noterm".to_vec(),                // no NUL
+            b"100644".to_vec(),                               // no space
+            b"100648 a\0".to_vec(),                           // non-octal mode
+            b"100644 noterm".to_vec(),                        // no NUL
             entry_bytes("100644", b"a", &oid)[..20].to_vec(), // truncated oid
         ] {
             assert!(Tree::parse(&data, HashAlgo::Sha1).is_err(), "{data:?}");

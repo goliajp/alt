@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 
 use std::fs;
-use std::os::unix::fs::{symlink, PermissionsExt};
+use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::Path;
 use std::process::Command;
 
@@ -81,7 +81,10 @@ pub fn make_repo(dir: &Path, object_format: &str) {
     git(dir, &["commit", "-q", "-am", "second"]);
     git(dir, &["merge", "-q", "--no-ff", "-m", "merge feat", "feat"]);
 
-    git(dir, &["tag", "-a", "v0", "-m", "annotated tag\n\nwith body"]);
+    git(
+        dir,
+        &["tag", "-a", "v0", "-m", "annotated tag\n\nwith body"],
+    );
 }
 
 /// Calls `f` with every loose object in the repository; returns the count.

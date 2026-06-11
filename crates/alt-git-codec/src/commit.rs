@@ -84,7 +84,11 @@ mod tests {
         assert_eq!(commit.serialize(), SAMPLE);
         // and the serialization hashes back to the same id as the input
         assert_eq!(
-            ObjectId::hash_object(HashAlgo::Sha1, crate::ObjectKind::Commit, &commit.serialize()),
+            ObjectId::hash_object(
+                HashAlgo::Sha1,
+                crate::ObjectKind::Commit,
+                &commit.serialize()
+            ),
             ObjectId::hash_object(HashAlgo::Sha1, crate::ObjectKind::Commit, SAMPLE),
         );
     }

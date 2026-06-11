@@ -1,9 +1,9 @@
 //! Reads every loose object of real git repositories (SHA-1 and SHA-256)
 //! and verifies each one by re-hashing.
 
-mod common;
-
 use alt_git_codec::{HashAlgo, ObjectId};
+
+use crate::common;
 
 fn verify_all_loose(algo: HashAlgo, object_format: &str) {
     let tmp = tempfile::tempdir().unwrap();

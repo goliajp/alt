@@ -1,8 +1,8 @@
 use core::fmt;
 use core::str::FromStr;
 
-use sha1::digest::{Digest, Output};
 use sha1::Sha1;
+use sha1::digest::{Digest, Output};
 use sha2::Sha256;
 
 use crate::ObjectKind;

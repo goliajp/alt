@@ -2,14 +2,14 @@
 //! and re-hash every loose object. Run explicitly:
 //!
 //! ```sh
-//! ALT_CORPUS=.claude/corpus cargo test -p alt-git-codec --test corpus_sweep -- --ignored
+//! ALT_CORPUS=.claude/corpus cargo test -p alt-git-codec --test it -- --ignored
 //! ```
-
-mod common;
 
 use std::path::Path;
 
 use alt_git_codec::{Commit, ObjectId, ObjectKind, Tag, Tree};
+
+use crate::common;
 
 fn sweep_repo(repo: &Path) -> (usize, usize) {
     let mut non_blob = 0;
@@ -26,7 +26,10 @@ fn sweep_repo(repo: &Path) -> (usize, usize) {
             ObjectKind::Tree => Tree::parse(&raw.data, algo).unwrap().serialize(),
             ObjectKind::Tag => Tag::parse(&raw.data).unwrap().serialize(),
         };
-        assert_eq!(reserialized, raw.data, "round-trip mismatch for {oid} in {repo:?}");
+        assert_eq!(
+            reserialized, raw.data,
+            "round-trip mismatch for {oid} in {repo:?}"
+        );
         non_blob += 1;
     });
     (total, non_blob)
