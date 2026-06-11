@@ -36,8 +36,15 @@ pub fn git(repo: &Path, args: &[&str]) -> String {
 /// Two branches with a merge, an annotated tag, a gitlink, a symlink, an
 /// executable, and awkward file names — all objects left loose (no gc).
 pub fn make_repo(dir: &Path, object_format: &str) {
+    make_repo_opts(dir, object_format, "files");
+}
+
+/// [`make_repo`] with an explicit ref storage format (`files`/`reftable`).
+pub fn make_repo_opts(dir: &Path, object_format: &str, ref_format: &str) {
     let out = Command::new("git")
-        .args(["init", "-q", "-b", "main", "--object-format", object_format])
+        .args(["init", "-q", "-b", "main"])
+        .args(["--object-format", object_format])
+        .args(["--ref-format", ref_format])
         .arg(dir)
         .output()
         .unwrap();
