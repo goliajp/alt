@@ -65,14 +65,18 @@ fn write_raw(
     writeln!(out, "commit {oid}")?;
     out.write_all(headers)?;
     out.write_all(b"\n")?;
-    for line in message.lines() {
-        if line.is_empty() {
-            out.write_all(b"\n")?;
-        } else {
-            out.write_all(b"    ")?;
-            out.write_all(line)?;
-            out.write_all(b"\n")?;
-        }
+    // every message line: 4-space indent + the line with trailing
+    // whitespace stripped; interior blank lines come out as "    \n" (the
+    // indent survives) but trailing blank lines are dropped entirely.
+    // (All three rules verified against real git output on the corpus.)
+    let mut lines: Vec<&[u8]> = message.lines().map(|l| l.trim_end()).collect();
+    while lines.last() == Some(&&b""[..]) {
+        lines.pop();
+    }
+    for line in lines {
+        out.write_all(b"    ")?;
+        out.write_all(line)?;
+        out.write_all(b"\n")?;
     }
     Ok(())
 }
@@ -89,15 +93,17 @@ fn write_oneline(
         Some(at) => &obj.data[at + 2..],
         None => &[][..],
     };
-    write!(out, "{oid} ")?;
-    let mut first = true;
+    // title lines fold into one space-separated line, trailing whitespace
+    // stripped (verified against git on the corpus)
+    let mut subject: Vec<u8> = Vec::new();
     for line in message.lines().take_while(|l| !l.is_empty()) {
-        if !first {
-            out.write_all(b" ")?;
+        if !subject.is_empty() {
+            subject.push(b' ');
         }
-        first = false;
-        out.write_all(line)?;
+        subject.extend_from_slice(line);
     }
+    write!(out, "{oid} ")?;
+    out.write_all(subject.trim_end())?;
     out.write_all(b"\n")?;
     Ok(())
 }
