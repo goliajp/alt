@@ -1,0 +1,15 @@
+[package]
+name = "alt-refs"
+description = "alt native ref store: transactional ref state replayed from the oplog, with snapshot acceleration"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+alt-git-codec.workspace = true
+alt-oplog.workspace = true
+blake3.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

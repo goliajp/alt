@@ -107,6 +107,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "alt-refs"
+version = "0.0.0"
+dependencies = [
+ "alt-git-codec",
+ "alt-oplog",
+ "blake3",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "alt-repo"
 version = "0.0.0"
 dependencies = [

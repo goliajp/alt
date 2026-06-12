@@ -272,6 +272,11 @@ impl OpLog {
         self.by_id.get(id).map(|&at| &self.ops[at as usize])
     }
 
+    /// Position of an op in chain order (for replaying from a snapshot).
+    pub fn index_of(&self, id: &OpId) -> Option<usize> {
+        self.by_id.get(id).map(|&at| at as usize)
+    }
+
     pub fn len(&self) -> usize {
         self.ops.len()
     }
