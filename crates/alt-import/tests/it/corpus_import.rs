@@ -52,7 +52,7 @@ fn verify_repo_against_store(repo_dir: &Path, alt_dir: &Path) -> u64 {
 
     // refs incl. HEAD
     let native = RefStore::open(alt_dir).unwrap();
-    for r in repo.refs().iter_refs().unwrap() {
+    for r in repo.git_refs().unwrap().iter_refs().unwrap() {
         let name = std::str::from_utf8(&r.name).unwrap();
         let got = native.get(name).unwrap_or_else(|| panic!("missing {name}"));
         match (&r.target, got) {

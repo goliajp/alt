@@ -7,6 +7,8 @@ license.workspace = true
 
 [dependencies]
 alt-git-codec.workspace = true
+alt-odb.workspace = true
+alt-refs.workspace = true
 alt-git-config.workspace = true
 alt-git-pack.workspace = true
 alt-git-refs.workspace = true
@@ -14,5 +16,6 @@ bstr.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+alt-import.workspace = true
 alt-testutil.workspace = true
 tempfile.workspace = true

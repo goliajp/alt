@@ -39,6 +39,8 @@ pub enum ImportError {
     GitRefs(#[from] alt_git_refs::RefError),
     #[error("ref name is not utf-8: {0}")]
     NonUtf8Ref(String),
+    #[error("import source must be a git repository, not a native .alt store")]
+    NotAGitSource,
 }
 
 /// What one import run did.
@@ -65,6 +67,7 @@ pub fn import_git(
     actor: &str,
     timestamp_ms: u64,
 ) -> Result<ImportReport, ImportError> {
+    let git_refs = repo.git_refs().ok_or(ImportError::NotAGitSource)?;
     let mut odb = NativeOdb::open(alt_dir)?;
     let mut refs = RefStore::open(alt_dir)?;
 
@@ -123,7 +126,6 @@ pub fn import_git(
     odb.flush()?;
 
     // --- refs + HEAD: one atomic transaction = the import op ---
-    let git_refs = repo.refs();
     let mut wanted: Vec<(String, RefTarget)> = Vec::new();
     if let Some(head) = git_refs.read("HEAD")? {
         wanted.push(("HEAD".to_owned(), convert_target(head)?));

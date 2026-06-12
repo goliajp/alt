@@ -44,7 +44,7 @@ fn full_import_migrates_objects_refs_head_and_config() {
     // refs: compare against the git-side view, name by name
     let repo = Repository::discover(repo_dir.path()).unwrap();
     let native = RefStore::open(&alt_dir).unwrap();
-    let git_refs = repo.refs().iter_refs().unwrap();
+    let git_refs = repo.git_refs().unwrap().iter_refs().unwrap();
     assert_eq!(native.len(), git_refs.len() + 1, "all refs + HEAD");
     for r in &git_refs {
         let name = std::str::from_utf8(&r.name).unwrap();
@@ -64,7 +64,7 @@ fn full_import_migrates_objects_refs_head_and_config() {
         RefTarget::Symbolic(t) if t == "refs/heads/main"
     ));
     // resolving HEAD through the native store equals git's resolution
-    let git_head = repo.refs().resolve("HEAD").unwrap().unwrap();
+    let git_head = repo.git_refs().unwrap().resolve("HEAD").unwrap().unwrap();
     assert_eq!(native.resolve("HEAD").unwrap(), Some(git_head));
 
     // contract 2: config preserved byte-for-byte
@@ -114,7 +114,12 @@ fn reimport_after_upstream_moves_updates_only_what_moved() {
 
     let repo = Repository::discover(repo_dir.path()).unwrap();
     let native = RefStore::open(&alt_dir).unwrap();
-    let want: ObjectId = repo.refs().resolve("refs/heads/main").unwrap().unwrap();
+    let want: ObjectId = repo
+        .git_refs()
+        .unwrap()
+        .resolve("refs/heads/main")
+        .unwrap()
+        .unwrap();
     assert_eq!(native.resolve("refs/heads/main").unwrap(), Some(want));
     assert_eq!(native.oplog().len(), 2, "one more op, not a rewrite");
     assert_objects_migrated(repo_dir.path(), &alt_dir);

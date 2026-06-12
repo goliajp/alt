@@ -16,11 +16,13 @@ fn run(bin: &str, repo: &Path, args: &[&str]) -> Output {
         .unwrap()
 }
 
-/// Runs the same args through alt and git; both must succeed with
-/// identical stdout bytes.
-fn assert_same(repo: &Path, args: &[&str]) {
-    let alt = run(env!("CARGO_BIN_EXE_alt"), repo, args);
-    let git = run("git", repo, args);
+/// Runs the same args through alt (in `alt_cwd`) and git (in `git_cwd`);
+/// both must succeed with identical stdout bytes. The two directories
+/// differ exactly when alt reads a native .alt store imported from the
+/// git repository (no coexistence: the stores live apart).
+fn assert_same_split(alt_cwd: &Path, git_cwd: &Path, args: &[&str]) {
+    let alt = run(env!("CARGO_BIN_EXE_alt"), alt_cwd, args);
+    let git = run("git", git_cwd, args);
     assert!(
         git.status.success(),
         "git {args:?}: {}",
@@ -34,29 +36,35 @@ fn assert_same(repo: &Path, args: &[&str]) {
     assert_eq!(
         alt.stdout.as_bstr(),
         git.stdout.as_bstr(),
-        "stdout mismatch for {args:?} in {repo:?}"
+        "stdout mismatch for {args:?} in {alt_cwd:?}"
     );
 }
 
 use bstr::ByteSlice;
 
 fn matrix(repo: &Path) {
+    matrix_split(repo, repo)
+}
+
+/// The same matrix with alt reading `alt_cwd` while git reads `git_cwd`.
+fn matrix_split(alt_cwd: &Path, git_cwd: &Path) {
+    let repo = git_cwd;
     let head = common::git(repo, &["rev-parse", "HEAD"]);
     let tree = common::git(repo, &["rev-parse", "HEAD^{tree}"]);
     let blob = common::git(repo, &["rev-parse", "HEAD:a.txt"]);
     let (head, tree, blob) = (head.trim(), tree.trim(), blob.trim());
 
     for rev in ["HEAD", "main", "feat", "v0", "refs/heads/main", head] {
-        assert_same(repo, &["rev-parse", rev]);
+        assert_same_split(alt_cwd, git_cwd, &["rev-parse", rev]);
     }
     for oid in [head, tree, blob] {
         for flag in ["-t", "-s", "-p"] {
-            assert_same(repo, &["cat-file", flag, oid]);
+            assert_same_split(alt_cwd, git_cwd, &["cat-file", flag, oid]);
         }
     }
     // annotated tag: type/size/payload without peeling
     for flag in ["-t", "-s", "-p"] {
-        assert_same(repo, &["cat-file", flag, "v0"]);
+        assert_same_split(alt_cwd, git_cwd, &["cat-file", flag, "v0"]);
     }
     for extra in [
         &["--pretty=raw"][..],
@@ -69,7 +77,7 @@ fn matrix(repo: &Path) {
     ] {
         let mut args = vec!["log"];
         args.extend_from_slice(extra);
-        assert_same(repo, &args);
+        assert_same_split(alt_cwd, git_cwd, &args);
     }
 }
 
@@ -83,5 +91,21 @@ fn matrix_matches_git() {
         matrix(tmp.path());
         common::pack_repo(tmp.path());
         matrix(tmp.path());
+
+        // the same matrix over the native backend: import via the real
+        // CLI into a clean directory, then alt reads .alt while git
+        // still reads the original repository
+        let alt_root = tempfile::tempdir().unwrap();
+        let import = run(
+            env!("CARGO_BIN_EXE_alt"),
+            tmp.path(),
+            &["import", alt_root.path().to_str().unwrap()],
+        );
+        assert!(
+            import.status.success(),
+            "alt import: {}",
+            String::from_utf8_lossy(&import.stderr)
+        );
+        matrix_split(alt_root.path(), tmp.path());
     }
 }

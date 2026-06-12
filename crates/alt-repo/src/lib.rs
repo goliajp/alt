@@ -1,8 +1,9 @@
 //! Repository facade.
 //!
 //! Domain layer between the storage stones (codec, pack, refs, config,
-//! index) and the CLI. M1 scope: read-only access to existing git
-//! repositories — discovery, object reads, rev-parse, revision walking.
+//! index, native store) and the CLI. Read-only access to repositories —
+//! discovery, object reads, rev-parse, revision walking — over either
+//! backend: a `.git` directory (M1) or a native `.alt` store (M2).
 
 mod odb;
 mod revwalk;
@@ -14,26 +15,47 @@ use alt_git_codec::{Commit, HashAlgo, LooseStore, ObjectId, ObjectKind, RawObjec
 use alt_git_config::{Config, IncludeContext};
 use alt_git_pack::IndexedPack;
 use alt_git_refs::{RefStore, RefTarget};
+use alt_odb::NativeOdb;
 use bstr::{BString, ByteSlice};
 
 pub use revwalk::RevWalk;
 
+/// Where objects and refs actually come from.
+enum Backend {
+    Git {
+        refs: RefStore,
+        loose: LooseStore,
+        packs: Vec<IndexedPack>,
+    },
+    Alt(Box<AltBackend>),
+}
+
+struct AltBackend {
+    odb: NativeOdb,
+    refs: alt_refs::RefStore,
+}
+
 pub struct Repository {
-    git_dir: PathBuf,
+    /// The backing store directory: `.git` or `.alt`.
+    repo_dir: PathBuf,
     work_tree: Option<PathBuf>,
     algo: HashAlgo,
     config: Config,
-    refs: RefStore,
-    loose: LooseStore,
-    packs: Vec<IndexedPack>,
+    backend: Backend,
 }
 
 impl Repository {
     /// Walks up from `start` until a repository is found, like git does.
+    /// A native `.alt` store wins over `.git` at the same level (they are
+    /// not supposed to coexist; the preference makes detection total).
     pub fn discover(start: &Path) -> Result<Self, RepoError> {
         let start = start.canonicalize()?;
         let mut dir = start.as_path();
         loop {
+            let dot_alt = dir.join(".alt");
+            if dot_alt.is_dir() {
+                return Self::open_alt_dir(dot_alt, Some(dir.to_owned()));
+            }
             let dot_git = dir.join(".git");
             if dot_git.is_dir() {
                 return Self::open_git_dir(dot_git, Some(dir.to_owned()));
@@ -105,18 +127,74 @@ impl Repository {
         let objects = git_dir.join("objects");
         let packs = odb::open_packs(&objects.join("pack"), algo)?;
         Ok(Self {
-            git_dir,
+            repo_dir: git_dir,
             work_tree,
             algo,
             config,
-            refs,
-            loose: LooseStore::new(&objects),
-            packs,
+            backend: Backend::Git {
+                refs,
+                loose: LooseStore::new(&objects),
+                packs,
+            },
         })
     }
 
+    /// Opens a native `.alt` store. The hash algorithm and config come
+    /// from the preserved git config (`git-import/config`, contract 2);
+    /// a store without one defaults like a fresh git repository.
+    fn open_alt_dir(alt_dir: PathBuf, work_tree: Option<PathBuf>) -> Result<Self, RepoError> {
+        let config_path = alt_dir.join("git-import/config");
+        let plain = match fs::read(&config_path) {
+            Ok(data) => Config {
+                entries: alt_git_config::parse_file(&data)?,
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Config::default(),
+            Err(e) => return Err(e.into()),
+        };
+        let algo = match plain.get_str("extensions", None, "objectformat") {
+            None => HashAlgo::Sha1,
+            Some(v) if v.as_ref() as &[u8] == b"sha256" => HashAlgo::Sha256,
+            Some(_) => return Err(RepoError::Format("unknown extensions.objectFormat")),
+        };
+
+        let refs = alt_refs::RefStore::open(&alt_dir)?;
+        let branch = match refs.get("HEAD") {
+            Some(alt_refs::RefTarget::Symbolic(name)) => name
+                .strip_prefix("refs/heads/")
+                .map(|short| BString::from(short.as_bytes().to_vec())),
+            _ => None,
+        };
+        let config = if config_path.is_file() {
+            // include paths resolve relative to the preserved copy; the
+            // original .git is gone by design (no coexistence)
+            let ctx = IncludeContext {
+                git_dir: Some(alt_dir.join("git-import")),
+                branch,
+                home: std::env::var_os("HOME").map(PathBuf::from),
+            };
+            Config::load(&config_path, &ctx)?
+        } else {
+            Config::default()
+        };
+
+        let odb = NativeOdb::open(&alt_dir)?;
+        Ok(Self {
+            repo_dir: alt_dir,
+            work_tree,
+            algo,
+            config,
+            backend: Backend::Alt(Box::new(AltBackend { odb, refs })),
+        })
+    }
+
+    /// The backing store directory: the `.git` dir for a git repository,
+    /// the `.alt` dir for a native one.
     pub fn git_dir(&self) -> &Path {
-        &self.git_dir
+        &self.repo_dir
+    }
+
+    pub fn is_native(&self) -> bool {
+        matches!(self.backend, Backend::Alt(_))
     }
 
     pub fn work_tree(&self) -> Option<&Path> {
@@ -131,21 +209,38 @@ impl Repository {
         &self.config
     }
 
-    pub fn refs(&self) -> &RefStore {
-        &self.refs
+    /// The git-side ref store; None on a native `.alt` repository.
+    pub fn git_refs(&self) -> Option<&RefStore> {
+        match &self.backend {
+            Backend::Git { refs, .. } => Some(refs),
+            Backend::Alt(_) => None,
+        }
+    }
+
+    /// Resolves a ref name (following symrefs) on either backend.
+    pub fn resolve_ref(&self, name: &str) -> Result<Option<ObjectId>, RepoError> {
+        match &self.backend {
+            Backend::Git { refs, .. } => Ok(refs.resolve(name)?),
+            Backend::Alt(alt) => Ok(alt.refs.resolve(name)?),
+        }
     }
 
     /// Reads any object by id: packs first (bulk), then loose (recent).
     pub fn read_object(&self, oid: &ObjectId) -> Result<Option<RawObject>, RepoError> {
-        for pack in &self.packs {
-            if let Some(obj) = pack.read(oid)? {
-                return Ok(Some(obj.to_raw()));
+        match &self.backend {
+            Backend::Git { packs, loose, .. } => {
+                for pack in packs {
+                    if let Some(obj) = pack.read(oid)? {
+                        return Ok(Some(obj.to_raw()));
+                    }
+                }
+                match loose.read(oid) {
+                    Ok(obj) => Ok(Some(obj)),
+                    Err(alt_git_codec::LooseError::NotFound(_)) => Ok(None),
+                    Err(e) => Err(e.into()),
+                }
             }
-        }
-        match self.loose.read(oid) {
-            Ok(obj) => Ok(Some(obj)),
-            Err(alt_git_codec::LooseError::NotFound(_)) => Ok(None),
-            Err(e) => Err(e.into()),
+            Backend::Alt(alt) => Ok(alt.odb.get(oid)?),
         }
     }
 
@@ -191,7 +286,7 @@ impl Repository {
             format!("refs/remotes/{spec}"),
             format!("refs/remotes/{spec}/HEAD"),
         ] {
-            if let Some(oid) = self.refs.resolve(&candidate)? {
+            if let Some(oid) = self.resolve_ref(&candidate)? {
                 return Ok(Some(oid));
             }
         }
@@ -227,4 +322,8 @@ pub enum RepoError {
     Refs(#[from] alt_git_refs::RefError),
     #[error(transparent)]
     Config(#[from] alt_git_config::ConfigError),
+    #[error(transparent)]
+    Odb(#[from] alt_odb::OdbError),
+    #[error(transparent)]
+    NativeRefs(#[from] alt_refs::RefError),
 }
