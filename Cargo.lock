@@ -17,6 +17,7 @@ name = "alt-cli"
 version = "0.0.0"
 dependencies = [
  "alt-git-codec",
+ "alt-import",
  "alt-repo",
  "alt-testutil",
  "bstr",
@@ -78,6 +79,22 @@ name = "alt-git-refs"
 version = "0.0.0"
 dependencies = [
  "alt-git-codec",
+ "alt-testutil",
+ "bstr",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
+name = "alt-import"
+version = "0.0.0"
+dependencies = [
+ "alt-git-codec",
+ "alt-git-pack",
+ "alt-git-refs",
+ "alt-odb",
+ "alt-refs",
+ "alt-repo",
  "alt-testutil",
  "bstr",
  "tempfile",

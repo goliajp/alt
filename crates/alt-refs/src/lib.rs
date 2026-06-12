@@ -18,8 +18,9 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use alt_git_codec::ObjectId;
-use alt_oplog::{OpId, OpLog, OpLogError};
+use alt_oplog::{OpLog, OpLogError};
 
+pub use alt_oplog::OpId;
 pub use tx::{PAYLOAD_REF_TX, RefChange};
 
 #[derive(Debug, thiserror::Error)]

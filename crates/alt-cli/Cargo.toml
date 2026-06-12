@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 alt-git-codec.workspace = true
+alt-import.workspace = true
 alt-repo.workspace = true
 bstr.workspace = true
 clap.workspace = true

@@ -1,5 +1,6 @@
 //! The `alt` CLI. M1 scope: read-only commands whose output is byte-exact
-//! with git — `cat-file`, `rev-parse`, `log` (raw / oneline).
+//! with git — `cat-file`, `rev-parse`, `log` (raw / oneline). M2 adds
+//! `import` (.git → .alt migration).
 
 mod log_cmd;
 mod quote;
@@ -26,6 +27,13 @@ enum Command {
     RevParse { rev: String },
     /// Show commit logs
     Log(log_cmd::LogArgs),
+    /// Import this git repository into a .alt store
+    Import {
+        /// Destination directory: the store is created at <DIR>/.alt
+        /// (keep it outside any git work tree — .alt does not coexist
+        /// with .git)
+        target: std::path::PathBuf,
+    },
 }
 
 #[derive(clap::Args)]
@@ -79,6 +87,31 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             }
         }
         Command::Log(args) => log_cmd::run(&mut out, &repo, args)?,
+        Command::Import { target } => {
+            let alt_dir = target.join(".alt");
+            let timestamp_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            let actor = format!(
+                "cli/import@{}",
+                std::env::var("USER").as_deref().unwrap_or("unknown")
+            );
+            let report = alt_import::import_git(&repo, &alt_dir, &actor, timestamp_ms)?;
+            writeln!(
+                out,
+                "imported {} objects ({} new), {} refs ({} changed) into {}",
+                report.objects_seen,
+                report.objects_new,
+                report.refs_seen,
+                report.refs_changed,
+                alt_dir.display()
+            )?;
+            match report.op {
+                Some(op) => writeln!(out, "op {op}")?,
+                None => writeln!(out, "already up to date, no op recorded")?,
+            }
+        }
     }
     out.flush()?;
     Ok(ExitCode::SUCCESS)

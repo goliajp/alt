@@ -201,6 +201,11 @@ impl ObjectMap {
             .map(|&at| &self.entries[at as usize])
     }
 
+    /// All entries in append order.
+    pub fn iter(&self) -> impl Iterator<Item = &MapEntry> {
+        self.entries.iter()
+    }
+
     pub fn len(&self) -> usize {
         self.entries.len()
     }

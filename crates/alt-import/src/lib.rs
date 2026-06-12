@@ -1,0 +1,193 @@
+//! `alt import`: full `.git` → `.alt` migration.
+//!
+//! Every object's canonical bytes go through the native odb (which
+//! re-hashes them against their git id — a corrupt source dies here, not
+//! at export); all refs plus HEAD land as one atomic ref transaction (the
+//! single import op); the source's `config` is preserved byte-for-byte
+//! under `git-import/` (compatibility contract 2).
+//!
+//! Ordering is the crash story: objects are flushed durable *before* the
+//! ref op is recorded, so an interrupted import leaves orphaned content at
+//! worst, never a ref pointing at missing objects. Re-running converges:
+//! object puts dedup, an unchanged ref set records no op at all.
+
+use std::fs;
+use std::path::Path;
+
+use alt_git_codec::{LooseStore, ObjectId};
+use alt_git_pack::IndexedPack;
+use alt_odb::{NativeOdb, OdbError};
+use alt_refs::{RefChange, RefError, RefStore, RefTarget};
+use alt_repo::{RepoError, Repository};
+use bstr::ByteSlice;
+
+#[derive(Debug, thiserror::Error)]
+pub enum ImportError {
+    #[error("io")]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Repo(#[from] RepoError),
+    #[error(transparent)]
+    Odb(#[from] OdbError),
+    #[error(transparent)]
+    Refs(#[from] RefError),
+    #[error(transparent)]
+    Pack(#[from] alt_git_pack::PackError),
+    #[error(transparent)]
+    Loose(#[from] alt_git_codec::LooseError),
+    #[error(transparent)]
+    GitRefs(#[from] alt_git_refs::RefError),
+    #[error("ref name is not utf-8: {0}")]
+    NonUtf8Ref(String),
+}
+
+/// What one import run did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportReport {
+    /// Objects enumerated in the source (packed + loose).
+    pub objects_seen: u64,
+    /// Objects actually written (the rest were already present).
+    pub objects_new: u64,
+    /// Refs (incl. HEAD) in the source.
+    pub refs_seen: usize,
+    /// Refs created or moved by this run.
+    pub refs_changed: usize,
+    /// The import op — None when state was already converged (rerun).
+    pub op: Option<alt_refs::OpId>,
+}
+
+/// Imports `repo` into the `.alt` directory at `alt_dir` (created if
+/// missing). Idempotent: re-running against an unchanged source changes
+/// nothing and records no op.
+pub fn import_git(
+    repo: &Repository,
+    alt_dir: &Path,
+    actor: &str,
+    timestamp_ms: u64,
+) -> Result<ImportReport, ImportError> {
+    let mut odb = NativeOdb::open(alt_dir)?;
+    let mut refs = RefStore::open(alt_dir)?;
+
+    // --- objects: packed first (bulk), then loose ---
+    let mut seen = 0u64;
+    let before = odb.len() as u64;
+    let algo = repo.algo();
+    let objects_dir = repo.git_dir().join("objects");
+
+    let pack_dir = objects_dir.join("pack");
+    if let Ok(entries) = fs::read_dir(&pack_dir) {
+        for entry in entries {
+            let path = entry?.path();
+            if path.extension().is_some_and(|e| e == "pack") {
+                let indexed = IndexedPack::open(&path, algo)?;
+                let idx = indexed.idx();
+                // ascending pack offset: bases before their deltas, the
+                // cache-friendly order (same as the verify harness)
+                let mut order: Vec<(u64, u32)> = (0..idx.len())
+                    .map(|i| (idx.offset_at(i).expect("idx in range"), i))
+                    .collect();
+                order.sort_unstable();
+                for (offset, i) in order {
+                    let obj = indexed.read_at(offset)?;
+                    odb.put(idx.oid_at(i), obj.kind, &obj.data)?;
+                    seen += 1;
+                }
+            }
+        }
+    }
+
+    let loose = LooseStore::new(&objects_dir);
+    for entry in fs::read_dir(&objects_dir)? {
+        let entry = entry?;
+        let fanout = entry.file_name();
+        let Some(fanout) = fanout.to_str() else {
+            continue;
+        };
+        if fanout.len() != 2 || !fanout.bytes().all(|b| b.is_ascii_hexdigit()) {
+            continue; // pack/, info/
+        }
+        for obj in fs::read_dir(entry.path())? {
+            let rest = obj?.file_name();
+            let Some(rest) = rest.to_str() else { continue };
+            let hex = format!("{fanout}{rest}");
+            let Ok(oid) = ObjectId::from_hex(hex.as_bytes()) else {
+                continue; // tmp_obj_* and other non-object files
+            };
+            let raw = loose.read(&oid)?;
+            odb.put(oid, raw.kind, &raw.data)?;
+            seen += 1;
+        }
+    }
+
+    // objects must be durable before any ref names them
+    odb.flush()?;
+
+    // --- refs + HEAD: one atomic transaction = the import op ---
+    let git_refs = repo.refs();
+    let mut wanted: Vec<(String, RefTarget)> = Vec::new();
+    if let Some(head) = git_refs.read("HEAD")? {
+        wanted.push(("HEAD".to_owned(), convert_target(head)?));
+    }
+    for r in git_refs.iter_refs()? {
+        let name = r
+            .name
+            .to_str()
+            .map_err(|_| ImportError::NonUtf8Ref(r.name.to_str_lossy().into_owned()))?
+            .to_owned();
+        if name == "HEAD" {
+            continue; // already handled
+        }
+        wanted.push((name, convert_target(r.target)?));
+    }
+
+    let refs_seen = wanted.len();
+    let changes: Vec<RefChange> = wanted
+        .into_iter()
+        .filter_map(|(name, new)| {
+            let old = refs.get(&name).cloned();
+            if old.as_ref() == Some(&new) {
+                None // already converged
+            } else {
+                Some(RefChange {
+                    name,
+                    old,
+                    new: Some(new),
+                })
+            }
+        })
+        .collect();
+
+    let refs_changed = changes.len();
+    let op = if changes.is_empty() {
+        None
+    } else {
+        Some(refs.commit(actor, timestamp_ms, &changes)?)
+    };
+
+    // --- compatibility contract 2: preserve the source config verbatim ---
+    let config_src = repo.git_dir().join("config");
+    if config_src.is_file() {
+        let dst_dir = alt_dir.join("git-import");
+        fs::create_dir_all(&dst_dir)?;
+        fs::copy(&config_src, dst_dir.join("config"))?;
+    }
+
+    Ok(ImportReport {
+        objects_seen: seen,
+        objects_new: odb.len() as u64 - before,
+        refs_seen,
+        refs_changed,
+        op,
+    })
+}
+
+fn convert_target(target: alt_git_refs::RefTarget) -> Result<RefTarget, ImportError> {
+    Ok(match target {
+        alt_git_refs::RefTarget::Direct(oid) => RefTarget::Oid(oid),
+        alt_git_refs::RefTarget::Symbolic(name) => RefTarget::Symbolic(
+            name.to_str()
+                .map_err(|_| ImportError::NonUtf8Ref(name.to_str_lossy().into_owned()))?
+                .to_owned(),
+        ),
+    })
+}

@@ -118,6 +118,12 @@ impl NativeOdb {
         self.map.by_git(oid).is_some()
     }
 
+    /// All mapped objects in import order (full-iteration basis for export
+    /// and verification sweeps).
+    pub fn entries(&self) -> impl Iterator<Item = &MapEntry> {
+        self.map.iter()
+    }
+
     /// Number of mapped git objects.
     pub fn len(&self) -> usize {
         self.map.len()
