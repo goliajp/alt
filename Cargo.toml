@@ -8,6 +8,7 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+alt-cdc = { path = "crates/alt-cdc" }
 alt-git-codec = { path = "crates/alt-git-codec" }
 alt-git-config = { path = "crates/alt-git-config" }
 alt-git-index = { path = "crates/alt-git-index" }

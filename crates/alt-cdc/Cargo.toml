@@ -1,0 +1,8 @@
+[package]
+name = "alt-cdc"
+description = "FastCDC content-defined chunking: gear hash, normalized cut-points, bounded chunk sizes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
