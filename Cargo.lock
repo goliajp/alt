@@ -102,6 +102,10 @@ dependencies = [
 name = "alt-store"
 version = "0.0.0"
 dependencies = [
+ "alt-cdc",
+ "alt-git-codec",
+ "alt-git-pack",
+ "alt-testutil",
  "blake3",
  "memmap2",
  "tempfile",

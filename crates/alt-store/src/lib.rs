@@ -19,8 +19,12 @@
 //! left by a crash. Reads decode the payload and re-hash it — a chunk that
 //! does not hash to its own address is reported as corrupt, never returned.
 
+mod blob;
+mod blobmap;
 mod idx;
 mod pack;
+
+pub use blob::{BlobOptions, BlobStore};
 
 use std::collections::HashMap;
 use std::fmt;
@@ -40,6 +44,8 @@ pub enum StoreError {
     Format(&'static str),
     #[error("chunk {0} not found")]
     NotFound(ChunkId),
+    #[error("blob {0} not found")]
+    BlobNotFound(BlobId),
     #[error("chunk {id} corrupt: {reason}")]
     Corrupt { id: ChunkId, reason: &'static str },
     #[error("chunk too large: {0} bytes")]
@@ -70,6 +76,57 @@ impl fmt::Debug for ChunkId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "ChunkId({self})")
     }
+}
+
+/// BLAKE3 hash of a blob's full content — the blob's address, independent
+/// of how it was chunked, so retuning CDC parameters never moves blobs.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct BlobId(pub [u8; 32]);
+
+/// Above this size the rayon-parallel hasher wins; below it, plain BLAKE3.
+const RAYON_HASH_THRESHOLD: usize = 128 * 1024;
+
+impl BlobId {
+    pub fn of(data: &[u8]) -> Self {
+        if data.len() >= RAYON_HASH_THRESHOLD {
+            Self(
+                *blake3::Hasher::new()
+                    .update_rayon(data)
+                    .finalize()
+                    .as_bytes(),
+            )
+        } else {
+            Self(*blake3::hash(data).as_bytes())
+        }
+    }
+}
+
+impl fmt::Display for BlobId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for b in self.0 {
+            write!(f, "{b:02x}")?;
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Debug for BlobId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "BlobId({self})")
+    }
+}
+
+/// Session-scoped dedup/volume accounting (not persisted).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Counters {
+    /// `put` calls.
+    pub puts: u64,
+    /// `put` calls answered by an already-stored chunk.
+    pub dedup_hits: u64,
+    /// Original bytes offered to `put`, including dedup hits.
+    pub bytes_in: u64,
+    /// Bytes appended to packs (record headers + payloads).
+    pub bytes_written: u64,
 }
 
 /// How a record is stored on disk (reserved encodings never reach callers:
@@ -136,6 +193,7 @@ pub struct ChunkStore {
     sealed: HashMap<u32, Sealed>,
     active: Active,
     index: HashMap<ChunkId, Location>,
+    counters: Counters,
 }
 
 fn pack_path(dir: &Path, seq: u32) -> PathBuf {
@@ -253,6 +311,7 @@ impl ChunkStore {
                     sealed,
                     active,
                     index,
+                    counters: Counters::default(),
                 });
             }
         };
@@ -299,6 +358,7 @@ impl ChunkStore {
             sealed,
             active,
             index,
+            counters: Counters::default(),
         })
     }
 
@@ -306,7 +366,10 @@ impl ChunkStore {
     /// not written again. Returns the chunk's address either way.
     pub fn put(&mut self, data: &[u8]) -> Result<ChunkId, StoreError> {
         let id = ChunkId::of(data);
+        self.counters.puts += 1;
+        self.counters.bytes_in += data.len() as u64;
         if self.index.contains_key(&id) {
+            self.counters.dedup_hits += 1;
             return Ok(id);
         }
         let orig_len = u32::try_from(data.len()).map_err(|_| StoreError::TooLarge(data.len()))?;
@@ -335,6 +398,7 @@ impl ChunkStore {
             return Err(e.into());
         }
         self.active.len += (REC_HEADER_LEN + payload.len()) as u64;
+        self.counters.bytes_written += (REC_HEADER_LEN + payload.len()) as u64;
         self.active.entries.push((id, offset));
         self.index.insert(
             id,
@@ -433,6 +497,10 @@ impl ChunkStore {
 
     pub fn is_empty(&self) -> bool {
         self.index.is_empty()
+    }
+
+    pub fn counters(&self) -> Counters {
+        self.counters
     }
 
     /// Fsyncs the active pack — the durability point between seals.
