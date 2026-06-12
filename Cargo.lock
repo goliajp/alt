@@ -98,6 +98,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "alt-oplog"
+version = "0.0.0"
+dependencies = [
+ "blake3",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "alt-repo"
 version = "0.0.0"
 dependencies = [
