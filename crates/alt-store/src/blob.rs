@@ -220,6 +220,21 @@ impl BlobStore {
         self.map.contains(id) || self.chunks.contains(ChunkId(id.0))
     }
 
+    /// Re-encodes `blob` as a lineage delta against `base` when both are
+    /// single-chunk blobs (small files — exactly where CDC cannot share
+    /// and lineage wins). Multi-chunk blobs already dedup chunk-wise, so
+    /// they are left alone. Returns whether a re-encoding happened.
+    pub fn lineage_delta(&mut self, blob: BlobId, base: BlobId) -> Result<bool, StoreError> {
+        if blob == base || self.map.contains(blob) || self.map.contains(base) {
+            return Ok(false);
+        }
+        let (blob, base) = (ChunkId(blob.0), ChunkId(base.0));
+        if !self.chunks.contains(blob) || !self.chunks.contains(base) {
+            return Ok(false);
+        }
+        self.chunks.reencode_as_delta(blob, base)
+    }
+
     /// Chunk-level dedup/volume accounting for this session.
     pub fn counters(&self) -> Counters {
         self.chunks.counters()

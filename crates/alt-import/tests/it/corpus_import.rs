@@ -90,8 +90,9 @@ fn corpus_repos_import_fully_and_idempotently() {
 
         let checked = verify_repo_against_store(&repo_dir, &alt_dir);
         eprintln!(
-            "{repo_dir:?}: {} objects imported, {checked} read back verified, {} refs",
-            report.objects_seen, report.refs_seen
+            "{repo_dir:?}: {} objects imported, {checked} read back verified, {} refs, \
+             {} lineage deltas",
+            report.objects_seen, report.refs_seen, report.lineage_deltas
         );
     }
 }

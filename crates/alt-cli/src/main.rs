@@ -100,11 +100,13 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             let report = alt_import::import_git(&repo, &alt_dir, &actor, timestamp_ms)?;
             writeln!(
                 out,
-                "imported {} objects ({} new), {} refs ({} changed) into {}",
+                "imported {} objects ({} new), {} refs ({} changed), \
+                 {} lineage deltas into {}",
                 report.objects_seen,
                 report.objects_new,
                 report.refs_seen,
                 report.refs_changed,
+                report.lineage_deltas,
                 alt_dir.display()
             )?;
             match report.op {

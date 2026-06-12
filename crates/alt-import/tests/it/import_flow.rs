@@ -155,3 +155,38 @@ fn import_completes_from_a_partial_object_state() {
     assert!(report.op.is_some(), "refs were still missing");
     assert_objects_migrated(repo_dir.path(), &alt_dir);
 }
+
+#[test]
+fn import_delta_encodes_same_path_history() {
+    let repo_dir = tempfile::tempdir().unwrap();
+    alt_testutil::make_repo(repo_dir.path(), "sha1");
+
+    // a file evolving across commits: each version shares most content
+    let file = repo_dir.path().join("evolving.txt");
+    let body = "the quick brown fox jumps over the lazy dog\n".repeat(50);
+    for round in 0..4 {
+        std::fs::write(&file, format!("{body}version {round}\n")).unwrap();
+        alt_testutil::git(repo_dir.path(), &["add", "evolving.txt"]);
+        alt_testutil::git(
+            repo_dir.path(),
+            &["commit", "-q", "-m", &format!("evolve {round}")],
+        );
+    }
+
+    let alt_root = tempfile::tempdir().unwrap();
+    let alt_dir = alt_root.path().join(".alt");
+    let report = import_here(repo_dir.path(), &alt_dir);
+    assert!(
+        report.lineage_deltas >= 3,
+        "three predecessors of evolving.txt must delta, got {}",
+        report.lineage_deltas
+    );
+
+    // every object still reads back byte-identical through the chains
+    assert_objects_migrated(repo_dir.path(), &alt_dir);
+
+    // idempotent rerun: nothing new to re-encode, no op
+    let rerun = import_here(repo_dir.path(), &alt_dir);
+    assert_eq!(rerun.lineage_deltas, 0);
+    assert!(rerun.op.is_none());
+}

@@ -11,10 +11,11 @@
 //! worst, never a ref pointing at missing objects. Re-running converges:
 //! object puts dedup, an unchanged ref set records no op at all.
 
+use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::path::Path;
 
-use alt_git_codec::{LooseStore, ObjectId};
+use alt_git_codec::{Commit, HashAlgo, LooseStore, ObjectId, ObjectKind, Tag, Tree};
 use alt_git_pack::IndexedPack;
 use alt_odb::{NativeOdb, OdbError};
 use alt_refs::{RefChange, RefError, RefStore, RefTarget};
@@ -37,6 +38,8 @@ pub enum ImportError {
     Loose(#[from] alt_git_codec::LooseError),
     #[error(transparent)]
     GitRefs(#[from] alt_git_refs::RefError),
+    #[error(transparent)]
+    Object(#[from] alt_git_codec::ObjectParseError),
     #[error("ref name is not utf-8: {0}")]
     NonUtf8Ref(String),
     #[error("import source must be a git repository, not a native .alt store")]
@@ -54,6 +57,8 @@ pub struct ImportReport {
     pub refs_seen: usize,
     /// Refs created or moved by this run.
     pub refs_changed: usize,
+    /// Same-path blob versions re-encoded as lineage deltas.
+    pub lineage_deltas: u64,
     /// The import op — None when state was already converged (rerun).
     pub op: Option<alt_refs::OpId>,
 }
@@ -142,6 +147,17 @@ pub fn import_git(
         wanted.push((name, convert_target(r.target)?));
     }
 
+    // --- same-path lineage deltas: storage form only, identity untouched ---
+    let tips: Vec<ObjectId> = wanted
+        .iter()
+        .filter_map(|(_, target)| match target {
+            RefTarget::Oid(oid) => Some(*oid),
+            RefTarget::Symbolic(_) => None,
+        })
+        .collect();
+    let lineage_deltas = lineage_pass(&mut odb, &tips, algo)?;
+    odb.flush()?;
+
     let refs_seen = wanted.len();
     let changes: Vec<RefChange> = wanted
         .into_iter()
@@ -179,8 +195,116 @@ pub fn import_git(
         objects_new: odb.len() as u64 - before,
         refs_seen,
         refs_changed,
+        lineage_deltas,
         op,
     })
+}
+
+/// Walks history from the tips (each commit once) and re-encodes each
+/// changed file's predecessor as a delta against its successor — the
+/// same-path lineage recorded at write time, not guessed at read time.
+/// First-parent diffs with subtree pruning: equal tree ids cut the walk.
+fn lineage_pass(
+    odb: &mut NativeOdb,
+    tips: &[ObjectId],
+    algo: HashAlgo,
+) -> Result<u64, ImportError> {
+    let mut visited: HashSet<ObjectId> = HashSet::new();
+    let mut queue: VecDeque<ObjectId> = VecDeque::new();
+    for &tip in tips {
+        // peel tags down to commits; refs at blobs/trees have no history
+        let mut oid = tip;
+        while let Some(obj) = odb.get(&oid)? {
+            match obj.kind {
+                ObjectKind::Tag => match Tag::parse(&obj.data)?.object() {
+                    Some(next) => oid = next,
+                    None => break,
+                },
+                ObjectKind::Commit => {
+                    if visited.insert(oid) {
+                        queue.push_back(oid);
+                    }
+                    break;
+                }
+                _ => break,
+            }
+        }
+    }
+
+    let mut deltas = 0u64;
+    let mut edges: Vec<(ObjectId, ObjectId)> = Vec::new();
+    while let Some(oid) = queue.pop_front() {
+        let Some(obj) = odb.get(&oid)? else { continue };
+        let commit = Commit::parse(&obj.data)?;
+        let parents: Vec<ObjectId> = commit.parents().collect();
+        for &parent in &parents {
+            if visited.insert(parent) {
+                queue.push_back(parent);
+            }
+        }
+        let (Some(new_tree), Some(&first_parent)) = (commit.tree(), parents.first()) else {
+            continue;
+        };
+        let Some(parent_obj) = odb.get(&first_parent)? else {
+            continue;
+        };
+        let Some(old_tree) = Commit::parse(&parent_obj.data)?.tree() else {
+            continue;
+        };
+        edges.clear();
+        diff_trees(odb, old_tree, new_tree, algo, &mut edges)?;
+        for (old_blob, new_blob) in edges.drain(..) {
+            if odb.lineage_delta(&old_blob, &new_blob)? {
+                deltas += 1;
+            }
+        }
+    }
+    Ok(deltas)
+}
+
+/// Collects (old blob, new blob) pairs for paths whose content changed
+/// between two trees. Order anomalies or shape changes just skip a pair —
+/// a missed edge only costs compression, never correctness.
+fn diff_trees(
+    odb: &NativeOdb,
+    old: ObjectId,
+    new: ObjectId,
+    algo: HashAlgo,
+    edges: &mut Vec<(ObjectId, ObjectId)>,
+) -> Result<(), ImportError> {
+    if old == new {
+        return Ok(());
+    }
+    let (Some(old_obj), Some(new_obj)) = (odb.get(&old)?, odb.get(&new)?) else {
+        return Ok(());
+    };
+    if old_obj.kind != ObjectKind::Tree || new_obj.kind != ObjectKind::Tree {
+        return Ok(());
+    }
+    let old_tree = Tree::parse(&old_obj.data, algo)?;
+    let new_tree = Tree::parse(&new_obj.data, algo)?;
+    let (mut i, mut j) = (0, 0);
+    while i < old_tree.entries.len() && j < new_tree.entries.len() {
+        let (oe, ne) = (&old_tree.entries[i], &new_tree.entries[j]);
+        match oe.name.cmp(&ne.name) {
+            std::cmp::Ordering::Less => i += 1,
+            std::cmp::Ordering::Greater => j += 1,
+            std::cmp::Ordering::Equal => {
+                if oe.oid != ne.oid {
+                    match (oe.mode.object_kind(), ne.mode.object_kind()) {
+                        (ObjectKind::Blob, ObjectKind::Blob) => edges.push((oe.oid, ne.oid)),
+                        (ObjectKind::Tree, ObjectKind::Tree) => {
+                            diff_trees(odb, oe.oid, ne.oid, algo, edges)?
+                        }
+                        _ => {}
+                    }
+                }
+                i += 1;
+                j += 1;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn convert_target(target: alt_git_refs::RefTarget) -> Result<RefTarget, ImportError> {

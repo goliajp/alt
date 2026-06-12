@@ -223,3 +223,78 @@ fn missing_idx_is_rebuilt_from_the_pack() {
     // the cache got repaired on open
     assert_eq!(store_files(dir.path(), ".altidx").len(), idxs.len());
 }
+
+#[test]
+fn lineage_deltas_survive_reopen_and_pack_seals() {
+    let dir = tempfile::tempdir().unwrap();
+    let opts = Options {
+        seal_threshold: 16 * 1024,
+        ..Options::default()
+    };
+
+    // versions of a small file: shared body, distinct marker
+    let body = random_bytes(4096, 50);
+    let vs: Vec<Vec<u8>> = (0..6u64)
+        .map(|i| {
+            let mut v = body.clone();
+            v[100..108].copy_from_slice(&i.to_le_bytes());
+            v
+        })
+        .collect();
+
+    let ids: Vec<alt_store::ChunkId> = {
+        let mut store = ChunkStore::open_with(dir.path(), opts).unwrap();
+        // bulk filler so bases and deltas land in different packs
+        for i in 0..8u64 {
+            store.put(&random_bytes(4096, 1000 + i)).unwrap();
+        }
+        let ids: Vec<alt_store::ChunkId> = vs.iter().map(|v| store.put(v).unwrap()).collect();
+        for i in (0..ids.len() - 1).rev() {
+            assert!(store.reencode_as_delta(ids[i], ids[i + 1]).unwrap());
+        }
+        store.flush().unwrap();
+        ids
+    };
+
+    let store = ChunkStore::open_with(dir.path(), opts).unwrap();
+    for (v, id) in vs.iter().zip(&ids) {
+        assert_eq!(&store.get(*id).unwrap(), v, "delta chain after reopen");
+    }
+    assert_eq!(
+        store.stat(ids[0]).unwrap().encoding,
+        alt_store::Encoding::Delta
+    );
+}
+
+#[test]
+fn flipped_delta_payload_is_detected() {
+    let dir = tempfile::tempdir().unwrap();
+    let body = random_bytes(4096, 60);
+    let mut v1 = body.clone();
+    v1[7] ^= 0x55;
+
+    let id = {
+        let mut store = ChunkStore::open(dir.path()).unwrap();
+        let base = store.put(&body).unwrap();
+        let id = store.put(&v1).unwrap();
+        assert!(store.reencode_as_delta(id, base).unwrap());
+        store.flush().unwrap();
+        id
+    };
+
+    // the delta record sits at the tail of the pack; flip a byte inside
+    // its zstd frame (past the 32-byte base id)
+    let pack = dir
+        .path()
+        .join(store_files(dir.path(), ".altpack")[0].clone());
+    let mut bytes = fs::read(&pack).unwrap();
+    let at = bytes.len() - 4;
+    bytes[at] ^= 0xFF;
+    fs::write(&pack, &bytes).unwrap();
+
+    let store = ChunkStore::open(dir.path()).unwrap();
+    assert!(
+        matches!(store.get(id), Err(StoreError::Corrupt { .. })),
+        "a flipped delta byte must surface as corruption"
+    );
+}
