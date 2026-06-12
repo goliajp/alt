@@ -15,6 +15,7 @@ alt-store = { path = "crates/alt-store" }
 alt-git-index = { path = "crates/alt-git-index" }
 alt-git-pack = { path = "crates/alt-git-pack" }
 alt-git-refs = { path = "crates/alt-git-refs" }
+alt-odb = { path = "crates/alt-odb" }
 alt-repo = { path = "crates/alt-repo" }
 alt-testutil = { path = "crates/alt-testutil" }
 

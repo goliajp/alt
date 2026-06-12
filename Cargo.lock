@@ -85,6 +85,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "alt-odb"
+version = "0.0.0"
+dependencies = [
+ "alt-git-codec",
+ "alt-git-pack",
+ "alt-store",
+ "alt-testutil",
+ "blake3",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "alt-repo"
 version = "0.0.0"
 dependencies = [

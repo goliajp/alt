@@ -1,0 +1,17 @@
+[package]
+name = "alt-odb"
+description = "alt native object database: canonical git object bytes in the chunk store, bridged by the sha <-> blake3 map"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+alt-git-codec.workspace = true
+alt-store.workspace = true
+blake3.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+alt-git-pack.workspace = true
+alt-testutil.workspace = true
+tempfile.workspace = true
