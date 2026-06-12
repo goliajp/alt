@@ -11,12 +11,14 @@ license = "MIT OR Apache-2.0"
 alt-cdc = { path = "crates/alt-cdc" }
 alt-git-codec = { path = "crates/alt-git-codec" }
 alt-git-config = { path = "crates/alt-git-config" }
+alt-store = { path = "crates/alt-store" }
 alt-git-index = { path = "crates/alt-git-index" }
 alt-git-pack = { path = "crates/alt-git-pack" }
 alt-git-refs = { path = "crates/alt-git-refs" }
 alt-repo = { path = "crates/alt-repo" }
 alt-testutil = { path = "crates/alt-testutil" }
 
+blake3 = { version = "1", features = ["rayon"] }
 bstr = "1"
 clap = { version = "4", features = ["derive"] }
 encoding_rs = "0.8"
@@ -27,3 +29,4 @@ sha1 = "0.10"
 sha2 = "0.10"
 tempfile = "3"
 thiserror = "2"
+zstd = "0.13"

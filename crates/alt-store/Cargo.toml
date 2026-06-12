@@ -1,0 +1,15 @@
+[package]
+name = "alt-store"
+description = "alt chunk store: append-only altpack files, zstd-compressed, BLAKE3-addressed"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+blake3.workspace = true
+memmap2.workspace = true
+thiserror.workspace = true
+zstd.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
