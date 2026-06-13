@@ -30,6 +30,7 @@ version = "0.0.0"
 dependencies = [
  "alt-diff",
  "alt-export",
+ "alt-flow",
  "alt-git-codec",
  "alt-git-index",
  "alt-import",
@@ -66,6 +67,10 @@ dependencies = [
  "tempfile",
  "thiserror",
 ]
+
+[[package]]
+name = "alt-flow"
+version = "0.0.0"
 
 [[package]]
 name = "alt-git-codec"

@@ -14,6 +14,7 @@ alt-diff.workspace = true
 alt-git-codec.workspace = true
 alt-git-index.workspace = true
 alt-export.workspace = true
+alt-flow.workspace = true
 alt-import.workspace = true
 alt-merge.workspace = true
 alt-odb.workspace = true

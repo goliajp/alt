@@ -1,0 +1,8 @@
+[package]
+name = "alt-flow"
+description = "git-flow branch model: names and the source/target rules for feature/release/hotfix flows"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

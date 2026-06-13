@@ -644,76 +644,271 @@ impl NativeRepo {
             .ok_or("cannot merge into an unborn branch")?;
         self.ensure_clean("merge")?;
 
+        match self.compute_merge(ours, theirs, branch_name)? {
+            MergeOutcome::UpToDate => {
+                writeln!(out, "Already up to date.")?;
+                Ok(false)
+            }
+            MergeOutcome::FastForward(commit) => {
+                let target = self.commit_entries(commit)?;
+                let old = index_entries(&self.index()?);
+                self.checkout(&old, &target)?;
+                self.advance_branch(&cur, ours, commit)?;
+                writeln!(out, "Fast-forward to {commit}")?;
+                Ok(false)
+            }
+            MergeOutcome::Merged { commit, entries } => {
+                let old = index_entries(&self.index()?);
+                self.checkout(&old, &entries)?;
+                self.advance_branch(&cur, ours, commit)?;
+                writeln!(out, "Merge made by the 'ort' strategy.")?;
+                Ok(false)
+            }
+            MergeOutcome::Conflicted(resolved) => {
+                self.write_conflicted(&resolved)?;
+                for r in resolved.iter().filter(|r| r.conflicted) {
+                    writeln!(out, "CONFLICT (content): Merge conflict in {}", r.path)?;
+                }
+                writeln!(
+                    out,
+                    "Automatic merge failed; fix conflicts and then commit the result."
+                )?;
+                Ok(true)
+            }
+        }
+    }
+
+    /// Computes how merging `theirs` into `ours` resolves, writing any merged
+    /// blobs / tree / merge commit to the object store but touching no refs or
+    /// working tree. The caller applies the outcome (advancing refs, checking
+    /// out, or recording a conflict) — which lets both `alt merge` and the
+    /// atomic `flow finish` share one merge engine.
+    fn compute_merge(
+        &mut self,
+        ours: ObjectId,
+        theirs: ObjectId,
+        label: &str,
+    ) -> Res<MergeOutcome> {
         let base = self.merge_base(ours, theirs)?;
         if base == Some(theirs) {
-            writeln!(out, "Already up to date.")?;
-            return Ok(false);
+            return Ok(MergeOutcome::UpToDate);
         }
         if base == Some(ours) {
-            // fast-forward: our branch is an ancestor of theirs
-            let target = self.commit_entries(theirs)?;
-            let old = index_entries(&self.index()?);
-            self.checkout(&old, &target)?;
-            self.advance_branch(&cur, ours, theirs)?;
-            writeln!(out, "Fast-forward to {theirs}")?;
-            return Ok(false);
+            return Ok(MergeOutcome::FastForward(theirs));
         }
 
-        // true three-way merge of the two trees over their base
         let base_entries = match base {
             Some(b) => self.commit_entries(b)?,
             None => Vec::new(), // unrelated histories: empty base
         };
         let ours_entries = self.commit_entries(ours)?;
         let theirs_entries = self.commit_entries(theirs)?;
-        let resolved =
-            self.merge_trees(&base_entries, &ours_entries, &theirs_entries, branch_name)?;
+        let resolved = self.merge_trees(&base_entries, &ours_entries, &theirs_entries, label)?;
         self.odb.flush()?;
 
-        let conflicts: Vec<&BString> = resolved
-            .iter()
-            .filter(|r| r.conflicted)
-            .map(|r| &r.path)
-            .collect();
-
-        if conflicts.is_empty() {
-            let clean: Vec<WorkEntry> = resolved.iter().filter_map(|r| r.entry.clone()).collect();
-            let tree = write_tree(&mut self.odb, &clean, self.algo)?;
-            let when = (now_ms() / 1000) as i64;
-            let (name, email) = identity();
-            let sig = Sig {
-                name: &name,
-                email: &email,
-                when,
-                tz: "+0000",
-            };
-            let msg = format!("Merge branch '{branch_name}'\n");
-            let commit = write_commit(
-                &mut self.odb,
-                tree,
-                &[ours, theirs],
-                &sig,
-                &sig,
-                &msg,
-                self.algo,
-            )?;
-            self.odb.flush()?;
-            let old = index_entries(&self.index()?);
-            self.checkout(&old, &clean)?;
-            self.advance_branch(&cur, ours, commit)?;
-            writeln!(out, "Merge made by the 'ort' strategy.")?;
-            Ok(false)
-        } else {
-            self.write_conflicted(&resolved)?;
-            for p in &conflicts {
-                writeln!(out, "CONFLICT (content): Merge conflict in {p}")?;
-            }
-            writeln!(
-                out,
-                "Automatic merge failed; fix conflicts and then commit the result."
-            )?;
-            Ok(true)
+        if resolved.iter().any(|r| r.conflicted) {
+            return Ok(MergeOutcome::Conflicted(resolved));
         }
+
+        let entries: Vec<WorkEntry> = resolved.iter().filter_map(|r| r.entry.clone()).collect();
+        let tree = write_tree(&mut self.odb, &entries, self.algo)?;
+        let when = (now_ms() / 1000) as i64;
+        let (name, email) = identity();
+        let sig = Sig {
+            name: &name,
+            email: &email,
+            when,
+            tz: "+0000",
+        };
+        let msg = format!("Merge branch '{label}'\n");
+        let commit = write_commit(
+            &mut self.odb,
+            tree,
+            &[ours, theirs],
+            &sig,
+            &sig,
+            &msg,
+            self.algo,
+        )?;
+        self.odb.flush()?;
+        Ok(MergeOutcome::Merged { commit, entries })
+    }
+
+    /// `alt flow init`: create `develop` off `main` (or the current branch's
+    /// commit) and switch to it, in one ref transaction.
+    pub fn flow_init(&mut self, out: &mut impl Write) -> Res<()> {
+        let model = alt_flow::BranchModel::default();
+        let dev_ref = format!("refs/heads/{}", model.develop);
+        if self.refs.get(&dev_ref).is_some() {
+            writeln!(out, "flow already initialized (branch '{}')", model.develop)?;
+            return Ok(());
+        }
+        let main_ref = format!("refs/heads/{}", model.main);
+        let start = match self.refs.resolve(&main_ref)? {
+            Some(c) => c,
+            None => self
+                .refs
+                .resolve(&self.head_branch()?)?
+                .ok_or("create an initial commit before 'alt flow init'")?,
+        };
+        let head_old = self.refs.get("HEAD").cloned();
+        self.refs.commit(
+            &actor("flow"),
+            now_ms(),
+            &[
+                RefChange {
+                    name: dev_ref.clone(),
+                    old: None,
+                    new: Some(RefTarget::Oid(start)),
+                },
+                RefChange {
+                    name: "HEAD".to_owned(),
+                    old: head_old,
+                    new: Some(RefTarget::Symbolic(dev_ref.clone())),
+                },
+            ],
+        )?;
+        writeln!(
+            out,
+            "Initialized flow: created '{}' at {start}",
+            model.develop
+        )?;
+        Ok(())
+    }
+
+    /// `alt flow feature start <name>`: branch `feature/<name>` off `develop`
+    /// and switch to it, atomically (one op log entry → O(1) undo).
+    pub fn flow_feature_start(&mut self, name: &str, out: &mut impl Write) -> Res<()> {
+        let flow = alt_flow::BranchModel::default().feature(name)?;
+        let feat_ref = format!("refs/heads/{}", flow.branch);
+        let base_ref = format!("refs/heads/{}", flow.base);
+        if self.refs.get(&feat_ref).is_some() {
+            return Err(format!("a branch named '{}' already exists", flow.branch).into());
+        }
+        let base = self
+            .refs
+            .resolve(&base_ref)?
+            .ok_or("develop branch missing; run 'alt flow init' first")?;
+        self.ensure_clean("flow start")?;
+
+        // the feature branch starts at develop's commit, so its tree equals
+        // develop's; materialize it (a no-op when already on develop)
+        let target = self.commit_entries(base)?;
+        let old = index_entries(&self.index()?);
+        self.checkout(&old, &target)?;
+
+        let head_old = self.refs.get("HEAD").cloned();
+        self.refs.commit(
+            &actor("flow"),
+            now_ms(),
+            &[
+                RefChange {
+                    name: feat_ref.clone(),
+                    old: None,
+                    new: Some(RefTarget::Oid(base)),
+                },
+                RefChange {
+                    name: "HEAD".to_owned(),
+                    old: head_old,
+                    new: Some(RefTarget::Symbolic(feat_ref.clone())),
+                },
+            ],
+        )?;
+        writeln!(out, "Switched to a new branch '{}'", flow.branch)?;
+        Ok(())
+    }
+
+    /// `alt flow feature finish <name>`: merge `feature/<name>` into `develop`,
+    /// delete the feature branch, and move HEAD to `develop` — all in one
+    /// atomic ref transaction (one op log entry → O(1) undo). Aborts if the
+    /// merge conflicts.
+    pub fn flow_feature_finish(&mut self, name: &str, out: &mut impl Write) -> Res<()> {
+        let flow = alt_flow::BranchModel::default().feature(name)?;
+        let feat_ref = format!("refs/heads/{}", flow.branch);
+        let dev_ref = format!("refs/heads/{}", flow.target);
+        let feat = self
+            .refs
+            .resolve(&feat_ref)?
+            .ok_or_else(|| format!("no such feature branch '{}'", flow.branch))?;
+        let dev = self
+            .refs
+            .resolve(&dev_ref)?
+            .ok_or("develop branch missing; run 'alt flow init' first")?;
+        self.ensure_clean("flow finish")?;
+
+        // merge the feature into develop without yet touching refs/work tree
+        let (new_dev, entries) = match self.compute_merge(dev, feat, &flow.branch)? {
+            MergeOutcome::UpToDate => (dev, self.commit_entries(dev)?),
+            MergeOutcome::FastForward(c) => (c, self.commit_entries(c)?),
+            MergeOutcome::Merged { commit, entries } => (commit, entries),
+            MergeOutcome::Conflicted(_) => {
+                return Err(format!(
+                    "merge of '{}' into '{}' has conflicts; \
+                     run 'alt merge' on '{}' and resolve manually",
+                    flow.branch, flow.target, flow.target
+                )
+                .into());
+            }
+        };
+
+        // one atomic op: advance develop, delete the feature, move HEAD
+        let head_old = self.refs.get("HEAD").cloned();
+        self.refs.commit(
+            &actor("flow"),
+            now_ms(),
+            &[
+                RefChange {
+                    name: dev_ref.clone(),
+                    old: Some(RefTarget::Oid(dev)),
+                    new: Some(RefTarget::Oid(new_dev)),
+                },
+                RefChange {
+                    name: feat_ref.clone(),
+                    old: Some(RefTarget::Oid(feat)),
+                    new: None,
+                },
+                RefChange {
+                    name: "HEAD".to_owned(),
+                    old: head_old,
+                    new: Some(RefTarget::Symbolic(dev_ref.clone())),
+                },
+            ],
+        )?;
+
+        // bring the working tree to the merged develop
+        let old = index_entries(&self.index()?);
+        self.checkout(&old, &entries)?;
+        writeln!(
+            out,
+            "Merged '{}' into '{}' and deleted it",
+            flow.branch, flow.target
+        )?;
+        Ok(())
+    }
+
+    /// `alt undo`: invert the most recent ref transaction (restoring the prior
+    /// branch/HEAD state) and re-materialize HEAD's tree. The inverse is
+    /// itself recorded as an op, so undo is append-only and re-undoable.
+    pub fn undo(&mut self, out: &mut impl Write) -> Res<()> {
+        let changes = self.refs.last_transaction()?.ok_or("nothing to undo")?;
+        self.ensure_clean("undo")?;
+
+        // capture the current HEAD tree to drive the checkout's removals
+        let old = index_entries(&self.index()?);
+        let inverse: Vec<RefChange> = changes
+            .iter()
+            .map(|c| RefChange {
+                name: c.name.clone(),
+                old: c.new.clone(),
+                new: c.old.clone(),
+            })
+            .collect();
+        self.refs.commit(&actor("undo"), now_ms(), &inverse)?;
+
+        let target = self.head_entries()?;
+        self.checkout(&old, &target)?;
+        writeln!(out, "Undid the last operation")?;
+        Ok(())
     }
 
     /// Advances `branch` from `old` to `new` in one ref transaction.
@@ -923,6 +1118,21 @@ impl NativeRepo {
         )?;
         Ok(())
     }
+}
+
+/// How a merge resolves once computed (no refs or work tree touched yet).
+enum MergeOutcome {
+    /// `theirs` is already an ancestor of `ours`; nothing to do.
+    UpToDate,
+    /// `ours` is an ancestor of `theirs`; advance to this commit.
+    FastForward(ObjectId),
+    /// A clean three-way merge: this merge commit and its flattened tree.
+    Merged {
+        commit: ObjectId,
+        entries: Vec<WorkEntry>,
+    },
+    /// At least one path conflicts; the per-path resolutions to write out.
+    Conflicted(Vec<Resolved>),
 }
 
 /// One path's merge resolution.

@@ -193,6 +193,18 @@ impl RefStore {
     pub fn oplog(&self) -> &OpLog {
         &self.oplog
     }
+
+    /// The most recent ref transaction in the log (skipping non-ref ops like
+    /// import), as its list of changes — the unit `undo` inverts. `None` when
+    /// no ref transaction has ever been recorded.
+    pub fn last_transaction(&self) -> Result<Option<Vec<RefChange>>, RefError> {
+        for op in self.oplog.ops().iter().rev() {
+            if let Some(changes) = tx::parse_tx(&op.payload)? {
+                return Ok(Some(changes));
+            }
+        }
+        Ok(None)
+    }
 }
 
 /// Applies changes to a map, enforcing expected-old values. `replaying`

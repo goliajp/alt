@@ -2,6 +2,7 @@
 mod branch_switch;
 mod commit_loop;
 mod diff;
+mod flow;
 mod merge;
 
 mod cli_matrix;

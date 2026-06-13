@@ -86,6 +86,32 @@ enum Command {
         /// Branch to merge into the current branch
         branch: String,
     },
+    /// git-flow workflow operations (atomic, undoable)
+    Flow {
+        #[command(subcommand)]
+        op: FlowOp,
+    },
+    /// Undo the last branch/HEAD operation (inverts one op log entry)
+    Undo,
+}
+
+#[derive(Subcommand)]
+enum FlowOp {
+    /// Create the `develop` branch off `main` and switch to it
+    Init,
+    /// Feature-branch operations
+    Feature {
+        #[command(subcommand)]
+        op: FlowTopicOp,
+    },
+}
+
+#[derive(Subcommand)]
+enum FlowTopicOp {
+    /// Branch `feature/<name>` off develop and switch to it
+    Start { name: String },
+    /// Merge `feature/<name>` back into develop and delete it
+    Finish { name: String },
 }
 
 #[derive(clap::Args)]
@@ -165,6 +191,25 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
                 ExitCode::SUCCESS
             });
         }
+        Command::Flow { op } => {
+            let mut repo = native::NativeRepo::discover(&cwd)?;
+            match op {
+                FlowOp::Init => repo.flow_init(&mut out)?,
+                FlowOp::Feature {
+                    op: FlowTopicOp::Start { name },
+                } => repo.flow_feature_start(name, &mut out)?,
+                FlowOp::Feature {
+                    op: FlowTopicOp::Finish { name },
+                } => repo.flow_feature_finish(name, &mut out)?,
+            }
+            out.flush()?;
+            return Ok(ExitCode::SUCCESS);
+        }
+        Command::Undo => {
+            native::NativeRepo::discover(&cwd)?.undo(&mut out)?;
+            out.flush()?;
+            return Ok(ExitCode::SUCCESS);
+        }
         _ => {}
     }
 
@@ -239,7 +284,9 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         | Command::Branch { .. }
         | Command::Switch { .. }
         | Command::Diff { .. }
-        | Command::Merge { .. } => {
+        | Command::Merge { .. }
+        | Command::Flow { .. }
+        | Command::Undo => {
             unreachable!("native commands are dispatched before git discovery")
         }
     }
