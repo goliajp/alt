@@ -15,7 +15,7 @@
 use std::path::PathBuf;
 
 use crate::blobmap::BlobMap;
-use crate::{BlobId, ChunkId, ChunkStore, Counters, Options, StoreError};
+use crate::{BlobId, ChunkId, ChunkStore, CompactReport, Counters, Options, StoreError};
 
 const NODE_MAGIC: [u8; 4] = *b"ALTM";
 const NODE_VERSION: u8 = 1;
@@ -265,6 +265,13 @@ impl BlobStore {
     /// Chunk-level dedup/volume accounting for this session.
     pub fn counters(&self) -> Counters {
         self.chunks.counters()
+    }
+
+    /// Compacts the underlying chunk store, reclaiming the dead weight left
+    /// by lineage delta re-encoding. Blob ids are content hashes and the
+    /// blobmap is unaffected — only physical chunk storage is rewritten.
+    pub fn compact(&mut self) -> Result<CompactReport, StoreError> {
+        self.chunks.compact()
     }
 
     pub fn chunk_store(&self) -> &ChunkStore {

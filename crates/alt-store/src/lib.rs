@@ -166,6 +166,17 @@ pub struct ChunkStat {
     pub stored_len: u32,
 }
 
+/// What one compaction did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CompactReport {
+    pub packs_before: usize,
+    pub packs_after: usize,
+    pub bytes_before: u64,
+    pub bytes_after: u64,
+    /// Live records carried into the compacted pack.
+    pub records: usize,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Options {
     /// Roll to a fresh pack once the active one reaches this many bytes.
@@ -282,6 +293,15 @@ fn pack_path(dir: &Path, seq: u32) -> PathBuf {
 
 fn idx_path(dir: &Path, seq: u32) -> PathBuf {
     dir.join(format!("pack-{seq:08}.altidx"))
+}
+
+/// Total on-disk bytes of the given pack files.
+fn pack_bytes(dir: &Path, seqs: &[u32]) -> Result<u64, StoreError> {
+    let mut total = 0u64;
+    for &seq in seqs {
+        total += std::fs::metadata(pack_path(dir, seq))?.len();
+    }
+    Ok(total)
 }
 
 fn list_pack_seqs(dir: &Path) -> Result<Vec<u32>, StoreError> {
@@ -607,6 +627,95 @@ impl ChunkStore {
         pack::fsync_dir(&self.dir)?;
         self.active = active;
         Ok(())
+    }
+
+    /// Rewrites every live record into one fresh pack, dropping the dead
+    /// weight `reencode_as_delta` leaves behind (superseded full records) and
+    /// merging all packs into one. Records are copied verbatim, so ids,
+    /// encodings and delta chains are preserved (a delta names its base by
+    /// id, not offset). Identity-preserving — content, ids and the blobmap
+    /// are untouched — so there is nothing to record in the op log.
+    ///
+    /// Crash-safe by construction: the compacted pack lands by atomic rename
+    /// and the old packs survive until it is durable. Any crash leaves either
+    /// the old packs intact (compaction did not happen) or both sets present
+    /// (the higher-seq compacted pack wins, old records become dead) — never
+    /// a missing or unopenable store.
+    pub fn compact(&mut self) -> Result<CompactReport, StoreError> {
+        self.active.write.sync_all()?; // every active record on disk first
+
+        let old_seqs = list_pack_seqs(&self.dir)?;
+        let bytes_before = pack_bytes(&self.dir, &old_seqs)?;
+        let comp_seq = old_seqs.iter().copied().max().unwrap_or(0) + 1;
+
+        // live records in ascending (seq, offset) — the bases-before-deltas
+        // order the writer kept, so the compacted pack reads cache-friendly
+        let mut live: Vec<(ChunkId, Location)> =
+            self.index.iter().map(|(&id, &loc)| (id, loc)).collect();
+        live.sort_unstable_by_key(|(_, loc)| (loc.seq, loc.offset));
+
+        // write the compacted pack to a temp file, then rename it into place
+        let final_path = pack_path(&self.dir, comp_seq);
+        let tmp_path = final_path.with_extension("altpack.tmp");
+        let mut entries: Vec<(ChunkId, u64)> = Vec::with_capacity(live.len());
+        {
+            let mut w = File::create(&tmp_path)?;
+            w.write_all(&pack::file_header())?;
+            let mut offset = pack::HEADER_LEN as u64;
+            for (id, loc) in &live {
+                let (header, payload) = self.read_record(*id, *loc)?;
+                w.write_all(&header.encode())?;
+                w.write_all(&payload)?;
+                entries.push((*id, offset));
+                offset += (REC_HEADER_LEN + payload.len()) as u64;
+            }
+            w.sync_all()?;
+        }
+        idx::write(&idx_path(&self.dir, comp_seq), &entries)?;
+        std::fs::rename(&tmp_path, &final_path)?;
+        pack::fsync_dir(&self.dir)?;
+
+        // a fresh empty active above the compacted pack
+        let active_seq = comp_seq + 1;
+        let mut active = open_active(&pack_path(&self.dir, active_seq), true)?;
+        active.seq = active_seq;
+        pack::fsync_dir(&self.dir)?;
+
+        // compacted pack + active are durable: now drop the old packs
+        for &seq in &old_seqs {
+            let _ = std::fs::remove_file(pack_path(&self.dir, seq));
+            let _ = std::fs::remove_file(idx_path(&self.dir, seq));
+        }
+        pack::fsync_dir(&self.dir)?;
+
+        // rebuild in-memory state. Ids are stable, so the delta cache (keyed
+        // by id) stays valid across the relocation.
+        let file = File::open(&final_path)?;
+        let map = unsafe { Mmap::map(&file)? };
+        self.sealed = HashMap::from([(comp_seq, Sealed { map })]);
+        self.index = entries
+            .iter()
+            .map(|(id, off)| {
+                (
+                    *id,
+                    Location {
+                        seq: comp_seq,
+                        offset: *off,
+                    },
+                )
+            })
+            .collect();
+        self.active = active;
+        self.counters.bytes_superseded = 0;
+
+        let after_seqs = list_pack_seqs(&self.dir)?;
+        Ok(CompactReport {
+            packs_before: old_seqs.len(),
+            packs_after: after_seqs.len(),
+            bytes_before,
+            bytes_after: pack_bytes(&self.dir, &after_seqs)?,
+            records: entries.len(),
+        })
     }
 
     /// Reads a chunk back, resolving any lineage delta chain. The default

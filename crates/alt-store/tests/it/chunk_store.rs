@@ -4,6 +4,8 @@
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::Path;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use alt_store::{ChunkId, ChunkStore, Options, StoreError};
 
@@ -341,5 +343,188 @@ fn reading_a_tail_detects_corruption_in_its_base() {
     match store.verify_chunk(tail) {
         Err(StoreError::Corrupt { id, .. }) => assert_eq!(id, base, "deep verify localizes"),
         other => panic!("deep verify must localize the corrupt base, got {other:?}"),
+    }
+}
+
+fn total_pack_bytes(dir: &Path) -> u64 {
+    store_files(dir, ".altpack")
+        .iter()
+        .map(|n| fs::metadata(dir.join(n)).unwrap().len())
+        .sum()
+}
+
+/// Builds a store where many versions delta against a base, so each version's
+/// full record is superseded (dead weight). Returns (ids, datas).
+fn store_with_dead_weight(dir: &Path) -> (Vec<ChunkId>, Vec<Vec<u8>>) {
+    let mut ids = Vec::new();
+    let mut datas = Vec::new();
+    let mut store = ChunkStore::open(dir).unwrap();
+    let base_data = random_bytes(8192, 200);
+    let base = store.put(&base_data).unwrap();
+    ids.push(base);
+    datas.push(base_data.clone());
+    let mut cur = base_data;
+    for k in 0..30 {
+        let at = k * 7 % cur.len();
+        cur[at] ^= 0x5a; // small edit -> delta wins
+        let id = store.put(&cur).unwrap();
+        // re-encode supersedes the full record just written
+        assert!(store.reencode_as_delta(id, base).unwrap());
+        ids.push(id);
+        datas.push(cur.clone());
+    }
+    store.flush().unwrap();
+    (ids, datas)
+}
+
+#[test]
+fn compact_reclaims_dead_weight_and_preserves_reads() {
+    let dir = tempfile::tempdir().unwrap();
+    let (ids, datas) = store_with_dead_weight(dir.path());
+    let before = total_pack_bytes(dir.path());
+
+    let mut store = ChunkStore::open(dir.path()).unwrap();
+    let report = store.compact().unwrap();
+    assert!(
+        report.bytes_after < report.bytes_before,
+        "compaction must reclaim dead weight: {} -> {}",
+        report.bytes_before,
+        report.bytes_after
+    );
+    assert_eq!(report.records, ids.len(), "every live record carried over");
+
+    // every chunk still reads byte-identical right after compaction
+    for (id, data) in ids.iter().zip(&datas) {
+        assert_eq!(&store.get(*id).unwrap(), data, "post-compact read");
+    }
+    drop(store);
+
+    // and the reclaim + correctness survive a reopen
+    let store = ChunkStore::open(dir.path()).unwrap();
+    for (id, data) in ids.iter().zip(&datas) {
+        assert_eq!(&store.get(*id).unwrap(), data, "post-reopen read");
+    }
+    assert!(
+        total_pack_bytes(dir.path()) < before,
+        "reclaim must persist across reopen"
+    );
+}
+
+#[test]
+fn compact_is_idempotent_on_a_clean_store() {
+    let dir = tempfile::tempdir().unwrap();
+    let (ids, datas) = store_with_dead_weight(dir.path());
+
+    let mut store = ChunkStore::open(dir.path()).unwrap();
+    let first = store.compact().unwrap();
+    let once = total_pack_bytes(dir.path());
+    // a second compaction has no dead weight left to reclaim
+    let second = store.compact().unwrap();
+    assert_eq!(second.records, first.records, "same live record set");
+    assert!(
+        total_pack_bytes(dir.path()) <= once,
+        "second compaction must not grow the store"
+    );
+    for (id, data) in ids.iter().zip(&datas) {
+        assert_eq!(&store.get(*id).unwrap(), data);
+    }
+}
+
+#[test]
+fn an_orphan_compaction_tmp_pack_is_ignored() {
+    // crash before the rename: a leftover `pack-<n>.altpack.tmp` must not be
+    // mistaken for a real pack — the store opens cleanly from the old packs
+    let dir = tempfile::tempdir().unwrap();
+    let id = {
+        let mut store = ChunkStore::open(dir.path()).unwrap();
+        let id = store.put(b"survivor").unwrap();
+        store.flush().unwrap();
+        id
+    };
+    fs::write(dir.path().join("pack-00000099.altpack.tmp"), b"garbage").unwrap();
+
+    let store = ChunkStore::open(dir.path()).unwrap();
+    assert_eq!(store.get(id).unwrap(), b"survivor");
+}
+
+/// Helper child: compacts the store at `$ALT_COMPACT_DIR`. A no-op without
+/// the env var (so it passes instantly in plain `--ignored` sweeps).
+#[test]
+#[ignore = "helper child workload, spawned by killed_compaction_leaves_a_readable_store"]
+fn compact_child_workload() {
+    let Ok(dir) = std::env::var("ALT_COMPACT_DIR") else {
+        return;
+    };
+    let mut store = ChunkStore::open(&dir).unwrap();
+    store.compact().unwrap();
+}
+
+#[test]
+#[ignore = "spawns a child and kill -9s it mid-compaction"]
+fn killed_compaction_leaves_a_readable_store() {
+    let dir = tempfile::tempdir().unwrap();
+    // a store large enough that compaction outlasts the poll+kill latency
+    let (ids, datas) = {
+        let mut ids = Vec::new();
+        let mut datas = Vec::new();
+        let mut store = ChunkStore::open(dir.path()).unwrap();
+        let base = random_bytes(8192, 900);
+        let base_id = store.put(&base).unwrap();
+        ids.push(base_id);
+        datas.push(base.clone());
+        // each version differs from the base at one distinct byte: unique
+        // (no dedup) and a clear delta win
+        for k in 0..4000usize {
+            let mut v = base.clone();
+            v[k] = v[k].wrapping_add(1);
+            let id = store.put(&v).unwrap();
+            assert!(store.reencode_as_delta(id, base_id).unwrap());
+            ids.push(id);
+            datas.push(v);
+        }
+        store.flush().unwrap();
+        (ids, datas)
+    };
+
+    let mut child = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--ignored",
+            "--exact",
+            "chunk_store::compact_child_workload",
+        ])
+        .env("ALT_COMPACT_DIR", dir.path())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+
+    // kill as soon as compaction starts writing (the tmp pack appears) — or
+    // shortly after, exercising a kill at an arbitrary point
+    let deadline = Duration::from_secs(30);
+    let start = Instant::now();
+    loop {
+        let has_tmp = fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .any(|e| e.file_name().to_string_lossy().ends_with(".altpack.tmp"));
+        if has_tmp || start.elapsed() > Duration::from_millis(200) {
+            break;
+        }
+        assert!(start.elapsed() < deadline, "compaction never started");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    child.kill().unwrap();
+    child.wait().unwrap();
+
+    // whatever point the kill landed on, the store reopens and every chunk
+    // still reads back byte-identical (old packs survive until the compacted
+    // pack is durable; a partial tmp is ignored)
+    let store = ChunkStore::open(dir.path()).unwrap();
+    for (id, data) in ids.iter().zip(&datas) {
+        assert_eq!(
+            &store.get(*id).unwrap(),
+            data,
+            "chunk lost across a killed compaction"
+        );
     }
 }
