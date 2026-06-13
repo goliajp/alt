@@ -15,4 +15,9 @@ thiserror.workspace = true
 
 [dev-dependencies]
 alt-testutil.workspace = true
+criterion.workspace = true
 tempfile.workspace = true
+
+[[bench]]
+name = "delta_apply"
+harness = false

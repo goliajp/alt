@@ -26,6 +26,7 @@ alt-testutil = { path = "crates/alt-testutil" }
 blake3 = { version = "1", features = ["rayon"] }
 bstr = "1"
 clap = { version = "4", features = ["derive"] }
+criterion = "0.5"
 encoding_rs = "0.8"
 flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
 memmap2 = "0.9"
