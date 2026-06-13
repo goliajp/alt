@@ -61,6 +61,8 @@ pub struct ImportReport {
     pub lineage_deltas: u64,
     /// The subset of `lineage_deltas` that are tree objects (M3.5 S5).
     pub tree_lineage_deltas: u64,
+    /// The subset of `lineage_deltas` that are commit objects (M3.5 S6).
+    pub commit_lineage_deltas: u64,
     /// The import op — None when state was already converged (rerun).
     pub op: Option<alt_refs::OpId>,
 }
@@ -157,7 +159,8 @@ pub fn import_git(
             RefTarget::Symbolic(_) => None,
         })
         .collect();
-    let (lineage_deltas, tree_lineage_deltas) = lineage_pass(&mut odb, &tips, algo)?;
+    let (lineage_deltas, tree_lineage_deltas, commit_lineage_deltas) =
+        lineage_pass(&mut odb, &tips, algo)?;
     odb.flush()?;
 
     let refs_seen = wanted.len();
@@ -199,6 +202,7 @@ pub fn import_git(
         refs_changed,
         lineage_deltas,
         tree_lineage_deltas,
+        commit_lineage_deltas,
         op,
     })
 }
@@ -211,7 +215,7 @@ fn lineage_pass(
     odb: &mut NativeOdb,
     tips: &[ObjectId],
     algo: HashAlgo,
-) -> Result<(u64, u64), ImportError> {
+) -> Result<(u64, u64, u64), ImportError> {
     let mut visited: HashSet<ObjectId> = HashSet::new();
     let mut queue: VecDeque<ObjectId> = VecDeque::new();
     for &tip in tips {
@@ -236,6 +240,7 @@ fn lineage_pass(
 
     let mut deltas = 0u64;
     let mut tree_deltas = 0u64;
+    let mut commit_deltas = 0u64;
     let mut edges: Vec<(ObjectId, ObjectId, bool)> = Vec::new();
     while let Some(oid) = queue.pop_front() {
         let Some(obj) = odb.get(&oid)? else { continue };
@@ -265,8 +270,15 @@ fn lineage_pass(
                 }
             }
         }
+        // commit lineage: the older first-parent deltas against this commit
+        // (the newer one stays full). Commits share author/committer/message
+        // bytes with their parent, so the patch is usually a clear win.
+        if odb.lineage_delta(&first_parent, &oid)? {
+            deltas += 1;
+            commit_deltas += 1;
+        }
     }
-    Ok((deltas, tree_deltas))
+    Ok((deltas, tree_deltas, commit_deltas))
 }
 
 /// Collects same-path lineage edges (old, new, is_tree) for objects whose

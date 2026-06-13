@@ -188,6 +188,12 @@ fn import_delta_encodes_same_path_history() {
         "predecessor trees must delta, got {}",
         report.tree_lineage_deltas
     );
+    // and the parent commits delta against their children (M3.5 S6)
+    assert!(
+        report.commit_lineage_deltas >= 3,
+        "parent commits must delta, got {}",
+        report.commit_lineage_deltas
+    );
 
     // every object still reads back byte-identical through the chains —
     // trees included, now that they are delta-encoded
