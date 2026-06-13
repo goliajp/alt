@@ -431,6 +431,26 @@ fn compact_is_idempotent_on_a_clean_store() {
 }
 
 #[test]
+fn for_each_decoded_yields_every_chunk_once_and_correct() {
+    let dir = tempfile::tempdir().unwrap();
+    let (ids, datas) = store_with_dead_weight(dir.path()); // base + 30 delta tails
+
+    let store = ChunkStore::open(dir.path()).unwrap();
+    let mut seen: std::collections::HashMap<ChunkId, Vec<u8>> = Default::default();
+    store
+        .for_each_decoded(|id, bytes| {
+            assert!(seen.insert(id, bytes.to_vec()).is_none(), "each chunk once");
+        })
+        .unwrap();
+
+    // every live chunk surfaces, byte-identical to the verifying get()
+    assert_eq!(seen.len(), store.len(), "bulk must cover every live chunk");
+    for (id, data) in ids.iter().zip(&datas) {
+        assert_eq!(seen.get(id).unwrap(), data, "bulk bytes match get()");
+    }
+}
+
+#[test]
 fn an_orphan_compaction_tmp_pack_is_ignored() {
     // crash before the rename: a leftover `pack-<n>.altpack.tmp` must not be
     // mistaken for a real pack — the store opens cleanly from the old packs

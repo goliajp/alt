@@ -17,6 +17,17 @@ use std::path::PathBuf;
 use crate::blobmap::BlobMap;
 use crate::{BlobId, ChunkId, ChunkStore, CompactReport, Counters, Options, StoreError};
 
+/// How the blob assembler reads each chunk.
+#[derive(Clone, Copy)]
+enum ChunkRead {
+    /// boundary-verified per the daily read (one hash at the chunk address)
+    Fast,
+    /// deep per-layer scrub (fsck)
+    Deep,
+    /// zero-copy, no hashing — the bulk export / clone-serve read
+    Bulk,
+}
+
 const NODE_MAGIC: [u8; 4] = *b"ALTM";
 const NODE_VERSION: u8 = 1;
 /// Node header: magic + version + level u8 + count u32.
@@ -166,23 +177,35 @@ impl BlobStore {
     /// the bytes, so one boundary hash still detects it (M3.5 §阶段 B). Deep
     /// per-chunk verification is [`verify`].
     pub fn get(&self, id: BlobId) -> Result<Vec<u8>, StoreError> {
-        self.materialize(id, false)
+        self.materialize(id, ChunkRead::Fast, true)
     }
 
     /// Deep scrub: re-hash every chunk and layer of the blob (fsck), then the
     /// blob boundary — corruption is localized, not just detected.
     pub fn verify(&self, id: BlobId) -> Result<(), StoreError> {
-        self.materialize(id, true).map(drop)
+        self.materialize(id, ChunkRead::Deep, true).map(drop)
     }
 
-    fn materialize(&self, id: BlobId, deep: bool) -> Result<Vec<u8>, StoreError> {
+    /// Assembles a blob with no hashing at all, reading chunks zero-copy from
+    /// the sealed mmap — the bulk read for export / full-clone serving, where
+    /// integrity is the output boundary's concern (`git fsck`), not each read.
+    pub fn get_unverified(&self, id: BlobId) -> Result<Vec<u8>, StoreError> {
+        self.materialize(id, ChunkRead::Bulk, false)
+    }
+
+    fn materialize(
+        &self,
+        id: BlobId,
+        mode: ChunkRead,
+        hash_boundary: bool,
+    ) -> Result<Vec<u8>, StoreError> {
         let Some((root, total_len)) = self.map.get(id) else {
             // no manifest: the blob is a single chunk under the same hash
             let chunk = ChunkId(id.0);
-            let res = if deep {
-                self.chunks.verify_chunk(chunk).map(|()| Vec::new())
-            } else {
-                self.chunks.get(chunk)
+            let res = match mode {
+                ChunkRead::Deep => self.chunks.verify_chunk(chunk).map(|()| Vec::new()),
+                ChunkRead::Fast => self.chunks.get(chunk),
+                ChunkRead::Bulk => self.chunks.decode_chunk_unverified(chunk),
             };
             return match res {
                 Ok(data) => Ok(data),
@@ -191,14 +214,14 @@ impl BlobStore {
             };
         };
         let mut out = Vec::with_capacity(total_len as usize);
-        self.walk(root, None, &mut out, deep)?;
+        self.walk(root, None, &mut out, mode)?;
         if out.len() as u64 != total_len {
             return Err(StoreError::Corrupt {
                 id: root,
                 reason: "manifest span mismatch",
             });
         }
-        if BlobId::of(&out) != id {
+        if hash_boundary && BlobId::of(&out) != id {
             return Err(StoreError::Corrupt {
                 id: root,
                 reason: "blob hash mismatch",
@@ -212,14 +235,12 @@ impl BlobStore {
         node_id: ChunkId,
         expect_level: Option<u8>,
         out: &mut Vec<u8>,
-        deep: bool,
+        mode: ChunkRead,
     ) -> Result<(), StoreError> {
-        let read = |id| {
-            if deep {
-                self.chunks.read_deep(id)
-            } else {
-                self.chunks.read_unverified(id)
-            }
+        let read = |id| match mode {
+            ChunkRead::Deep => self.chunks.read_deep(id),
+            ChunkRead::Fast => self.chunks.read_unverified(id),
+            ChunkRead::Bulk => self.chunks.decode_chunk_unverified(id),
         };
         let bytes = read(node_id)?;
         let (level, entries) = parse_node(&bytes)?;
@@ -237,7 +258,7 @@ impl BlobStore {
                 }
                 out.extend_from_slice(&piece);
             } else {
-                self.walk(entry.id, Some(level - 1), out, deep)?;
+                self.walk(entry.id, Some(level - 1), out, mode)?;
             }
         }
         Ok(())
@@ -272,6 +293,12 @@ impl BlobStore {
     /// blobmap is unaffected — only physical chunk storage is rewritten.
     pub fn compact(&mut self) -> Result<CompactReport, StoreError> {
         self.chunks.compact()
+    }
+
+    /// Whether `id` is a multi-chunk blob (has a manifest). Single-chunk
+    /// blobs are stored directly as one chunk under the same address.
+    pub fn is_multi_chunk(&self, id: BlobId) -> bool {
+        self.map.contains(id)
     }
 
     pub fn chunk_store(&self) -> &ChunkStore {

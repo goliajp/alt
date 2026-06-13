@@ -94,6 +94,17 @@ fn corpus_bench_volume_and_throughput() {
             "both paths read the same bytes"
         );
 
+        // --- bulk decode-once read: the export / full-clone-serve path ---
+        let t0 = Instant::now();
+        let mut bulk_bytes = 0u64;
+        odb.for_each_object_unverified(|_e, data| bulk_bytes += data.len() as u64)
+            .unwrap();
+        let bulk_s = t0.elapsed().as_secs_f64();
+        assert_eq!(
+            bulk_bytes, git_read_bytes,
+            "bulk reads the same total bytes"
+        );
+
         let mib = |b: u64| b as f64 / (1 << 20) as f64;
         eprintln!(
             "| {name} | {:.1} MiB | {:.1} MiB | {:.1} MiB | {:.2}x | {:.1}s ({:.0} obj/s) | {:.1}s ({:.0} MiB/s) | {:.1}s ({:.0} MiB/s) |",
@@ -116,6 +127,13 @@ fn corpus_bench_volume_and_throughput() {
             compact.packs_before,
             compact.packs_after,
             mib(compact.bytes_before.saturating_sub(compact.bytes_after)),
+        );
+        eprintln!(
+            "  ↳ bulk read (export path): {:.1}s ({:.0} MiB/s)  vs  read .git {:.0} MiB/s  vs  per-object .alt {:.0} MiB/s",
+            bulk_s,
+            mib(bulk_bytes) / bulk_s,
+            mib(git_read_bytes) / git_read_s,
+            mib(alt_read_bytes) / alt_read_s,
         );
     }
 }

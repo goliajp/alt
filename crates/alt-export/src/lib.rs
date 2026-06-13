@@ -91,18 +91,26 @@ pub fn export_git(alt_dir: &Path, target: &Path) -> Result<ExportReport, ExportE
         )?;
     }
 
-    // --- objects: one plain pack with every mapped object ---
+    // --- objects: one plain pack with every mapped object. The bulk
+    // decode-once read materializes each object once (a base shared by many
+    // lineage deltas is decoded just once) without per-object re-hashing —
+    // git fsck on the output is the integrity boundary. ---
     let odb = NativeOdb::open(alt_dir)?;
     let count = u32::try_from(odb.len()).map_err(|_| ExportError::Format("store too large"))?;
     let mut writer = PackWriter::create(&git_dir.join("objects/pack"), algo, count)?;
-    for entry in odb.entries() {
-        if entry.git.algo() != algo {
-            return Err(ExportError::Format("store holds mixed hash algorithms"));
+    let mut fail: Option<ExportError> = None;
+    odb.for_each_object_unverified(|entry, data| {
+        if fail.is_some() {
+            return;
         }
-        let raw = odb
-            .get(&entry.git)?
-            .ok_or(ExportError::Format("map entry without content"))?;
-        writer.add(entry.git, raw.kind, &raw.data)?;
+        if entry.git.algo() != algo {
+            fail = Some(ExportError::Format("store holds mixed hash algorithms"));
+        } else if let Err(e) = writer.add(entry.git, entry.kind, data) {
+            fail = Some(e.into());
+        }
+    })?;
+    if let Some(e) = fail {
+        return Err(e);
     }
     let written = writer.finish()?;
 

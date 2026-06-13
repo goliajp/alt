@@ -124,6 +124,33 @@ impl NativeOdb {
         self.map.iter()
     }
 
+    /// Bulk-materializes every mapped object's bytes exactly once, without
+    /// per-object re-hashing — the read path for export / full-clone serving.
+    /// Single-chunk objects (the lineage-delta'd ones) go through the chunk
+    /// store's decode-once forest, so a base shared by many versions is
+    /// decoded just once; multi-chunk blobs (not delta'd) are assembled
+    /// normally. Integrity belongs to the output boundary (export →
+    /// `git fsck`), not to each read.
+    pub fn for_each_object_unverified(
+        &self,
+        mut f: impl FnMut(&MapEntry, &[u8]),
+    ) -> Result<(), OdbError> {
+        self.blobs
+            .chunk_store()
+            .for_each_decoded(|chunk_id, bytes| {
+                for entry in self.map.by_alt(BlobId(chunk_id.0)) {
+                    f(entry, bytes);
+                }
+            })?;
+        for entry in self.map.iter() {
+            if self.blobs.is_multi_chunk(entry.alt) {
+                let bytes = self.blobs.get_unverified(entry.alt)?;
+                f(entry, &bytes);
+            }
+        }
+        Ok(())
+    }
+
     /// Re-encodes `old`'s content as a lineage delta against `new`'s
     /// (same-path predecessor → successor). Identity is untouched; only
     /// the storage form changes. Returns whether a re-encoding happened.
