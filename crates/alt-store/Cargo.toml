@@ -18,7 +18,12 @@ alt-git-pack.workspace = true
 alt-testutil.workspace = true
 criterion.workspace = true
 tempfile.workspace = true
+zstd.workspace = true
 
 [[bench]]
 name = "store_hot"
+harness = false
+
+[[bench]]
+name = "read_path"
 harness = false
