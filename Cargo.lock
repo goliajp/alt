@@ -244,6 +244,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "alt-worktree"
+version = "0.0.0"
+dependencies = [
+ "alt-git-codec",
+ "alt-git-index",
+ "alt-import",
+ "alt-odb",
+ "alt-repo",
+ "alt-testutil",
+ "bstr",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "anes"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -24,6 +24,7 @@ alt-prism-deflate = { path = "crates/alt-prism-deflate" }
 alt-prism-store = { path = "crates/alt-prism-store" }
 alt-refs = { path = "crates/alt-refs" }
 alt-repo = { path = "crates/alt-repo" }
+alt-worktree = { path = "crates/alt-worktree" }
 alt-testutil = { path = "crates/alt-testutil" }
 
 blake3 = { version = "1", features = ["rayon"] }

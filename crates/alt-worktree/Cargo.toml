@@ -1,0 +1,19 @@
+[package]
+name = "alt-worktree"
+description = "Working-tree status: scan the tree, flatten trees, and three-way compare HEAD / index / worktree"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+alt-git-codec.workspace = true
+alt-git-index.workspace = true
+alt-odb.workspace = true
+bstr.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+alt-import.workspace = true
+alt-repo.workspace = true
+alt-testutil.workspace = true
+tempfile.workspace = true
