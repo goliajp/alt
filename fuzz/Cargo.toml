@@ -1,0 +1,43 @@
+[package]
+name = "alt-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+alt-git-codec = { path = "../crates/alt-git-codec" }
+alt-git-pack = { path = "../crates/alt-git-pack" }
+alt-store = { path = "../crates/alt-store" }
+
+# Standalone workspace: the fuzz crate needs nightly + libfuzzer and must
+# not be built by the parent workspace's stable `cargo build --workspace`.
+[workspace]
+
+[profile.release]
+debug = true
+
+[[bin]]
+name = "codec_parse"
+path = "fuzz_targets/codec_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pack_delta_apply"
+path = "fuzz_targets/pack_delta_apply.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "store_delta_decode"
+path = "fuzz_targets/store_delta_decode.rs"
+test = false
+doc = false
+bench = false

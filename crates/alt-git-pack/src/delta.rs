@@ -1,5 +1,10 @@
 use crate::PackError;
 
+/// Upper bound on how much we pre-allocate from a delta's declared target
+/// size. The size comes from an untrusted header (an imported pack can be
+/// adversarial); reserving it verbatim is a decompression-bomb vector.
+const MAX_PREALLOC: usize = 64 << 20;
+
 /// Applies a git delta (the inflated payload of an ofs/ref-delta entry)
 /// to `base`: `<src size varint><tgt size varint><copy|insert ops…>`.
 pub fn apply(base: &[u8], delta: &[u8]) -> Result<Vec<u8>, PackError> {
@@ -10,7 +15,10 @@ pub fn apply(base: &[u8], delta: &[u8]) -> Result<Vec<u8>, PackError> {
     }
     let tgt_size = varint(delta, &mut pos)?;
 
-    let mut out = Vec::with_capacity(tgt_size as usize);
+    // never reserve the untrusted tgt_size unbounded (fuzz found a 32 GiB
+    // reservation OOM); grow the vec naturally and let the final length
+    // check validate the real result against tgt_size
+    let mut out = Vec::with_capacity((tgt_size as usize).min(MAX_PREALLOC));
     while pos < delta.len() {
         let op = delta[pos];
         pos += 1;
@@ -64,13 +72,17 @@ fn next(d: &[u8], pos: &mut usize) -> Result<u8, PackError> {
 
 fn varint(d: &[u8], pos: &mut usize) -> Result<u64, PackError> {
     let mut v = 0u64;
-    let mut shift = 0;
+    let mut shift = 0u32;
     loop {
         let b = *d
             .get(*pos)
             .ok_or(PackError::Format("truncated delta size varint"))?;
         *pos += 1;
-        v |= u64::from(b & 0x7f) << shift;
+        // checked_shl rejects a varint with more continuation bytes than a
+        // u64 can hold (shift >= 64) — fuzz found this shift-overflow panic
+        v |= u64::from(b & 0x7f)
+            .checked_shl(shift)
+            .ok_or(PackError::Format("delta size varint too long"))?;
         if b & 0x80 == 0 {
             return Ok(v);
         }
@@ -106,5 +118,21 @@ mod tests {
         assert!(apply(b"", b"\x00\x01\x00").is_err()); // reserved opcode
         assert!(apply(b"ab", b"\x02\x05\x91\x00\x05").is_err()); // copy oob
         assert!(apply(b"", b"\x00\x02\x01x").is_err()); // tgt size mismatch
+    }
+
+    #[test]
+    fn huge_target_size_does_not_preallocate() {
+        // empty base, a declared target of ~34 GiB, and no ops: fuzz found
+        // this OOM'd by reserving the declared size. It must Err on the
+        // length check instead, capping the reservation at MAX_PREALLOC.
+        let delta = b"\x00\x80\x80\x80\x80\x80\x01";
+        assert!(apply(b"", delta).is_err());
+    }
+
+    #[test]
+    fn rejects_overlong_size_varint() {
+        // 10 continuation bytes push the shift past 63: must Err, not panic
+        let delta = b"\x80\x80\x80\x80\x80\x80\x80\x80\x80\x80\x00";
+        assert!(apply(b"", delta).is_err());
     }
 }
