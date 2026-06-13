@@ -1,0 +1,8 @@
+[package]
+name = "alt-prism"
+description = "Prism layer: encoding-aware reversible decomposition (Tier 1) with verify-before-store fidelity"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

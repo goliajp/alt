@@ -158,6 +158,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "alt-prism"
+version = "0.0.0"
+
+[[package]]
 name = "alt-refs"
 version = "0.0.0"
 dependencies = [
