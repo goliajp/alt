@@ -3,6 +3,7 @@
 //! `import` (.git → .alt migration).
 
 mod log_cmd;
+mod native;
 mod quote;
 
 use std::io::Write;
@@ -40,6 +41,24 @@ enum Command {
         /// rebuilt at <DIR>/.git with L1 semantic fidelity
         target: std::path::PathBuf,
     },
+    /// Create an empty native .alt repository
+    Init {
+        /// Directory to create the repo in (default: current directory)
+        dir: Option<std::path::PathBuf>,
+    },
+    /// Stage file contents into the index
+    Add {
+        /// Paths to stage; `.` stages the whole working tree
+        paths: Vec<String>,
+    },
+    /// Record staged changes as a new commit
+    Commit {
+        /// Commit message
+        #[arg(short = 'm')]
+        message: String,
+    },
+    /// Show the working tree status
+    Status,
 }
 
 #[derive(clap::Args)]
@@ -68,9 +87,36 @@ fn main() -> ExitCode {
 
 fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-    let repo = Repository::discover(&std::env::current_dir()?)?;
     let stdout = std::io::stdout().lock();
     let mut out = std::io::BufWriter::new(stdout);
+    let cwd = std::env::current_dir()?;
+
+    // native .alt commands open (or create) their own repo, not a git one
+    match &cli.command {
+        Command::Init { dir } => {
+            native::init(dir.clone(), &mut out)?;
+            out.flush()?;
+            return Ok(ExitCode::SUCCESS);
+        }
+        Command::Add { paths } => {
+            native::NativeRepo::discover(&cwd)?.add(paths, &mut out)?;
+            out.flush()?;
+            return Ok(ExitCode::SUCCESS);
+        }
+        Command::Commit { message } => {
+            native::NativeRepo::discover(&cwd)?.commit(message, &mut out)?;
+            out.flush()?;
+            return Ok(ExitCode::SUCCESS);
+        }
+        Command::Status => {
+            native::NativeRepo::discover(&cwd)?.status(&mut out)?;
+            out.flush()?;
+            return Ok(ExitCode::SUCCESS);
+        }
+        _ => {}
+    }
+
+    let repo = Repository::discover(&cwd)?;
 
     match cli.command {
         Command::RevParse { rev } => {
@@ -133,6 +179,9 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
                 Some(op) => writeln!(out, "op {op}")?,
                 None => writeln!(out, "already up to date, no op recorded")?,
             }
+        }
+        Command::Init { .. } | Command::Add { .. } | Command::Commit { .. } | Command::Status => {
+            unreachable!("native commands are dispatched before git discovery")
         }
     }
     out.flush()?;

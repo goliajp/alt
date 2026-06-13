@@ -30,9 +30,13 @@ version = "0.0.0"
 dependencies = [
  "alt-export",
  "alt-git-codec",
+ "alt-git-index",
  "alt-import",
+ "alt-odb",
+ "alt-refs",
  "alt-repo",
  "alt-testutil",
+ "alt-worktree",
  "bstr",
  "clap",
  "encoding_rs",
