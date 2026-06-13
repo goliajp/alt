@@ -3,11 +3,13 @@
 
 use std::path::Path;
 
-use alt_git_codec::HashAlgo;
+use alt_git_codec::{HashAlgo, ObjectId};
 use alt_odb::NativeOdb;
 use alt_repo::Repository;
 use alt_testutil as common;
-use alt_worktree::{flatten_tree, index_entries, scan_worktree, status};
+use alt_worktree::{
+    Sig, flatten_tree, index_entries, scan_worktree, status, write_commit, write_tree,
+};
 
 /// A controlled little repo: a file, a nested file, an executable.
 fn make_small_repo(dir: &Path) {
@@ -55,4 +57,60 @@ fn flatten_matches_git_ls_tree_and_status_is_clean() {
         s.staged.is_empty() && s.unstaged.is_empty() && s.untracked.is_empty(),
         "a clean checkout has no changes, got {s:?}"
     );
+}
+
+#[test]
+fn write_tree_matches_git_write_tree() {
+    let src = tempfile::tempdir().unwrap();
+    common::git(src.path(), &["init", "-q", "-b", "main"]);
+    std::fs::write(src.path().join("a.txt"), "hello\n").unwrap();
+    std::fs::create_dir(src.path().join("sub")).unwrap();
+    std::fs::write(src.path().join("sub/b.txt"), "nested\n").unwrap();
+    common::git(src.path(), &["add", "."]);
+    let git_tree = common::git(src.path(), &["write-tree"]);
+
+    let algo = HashAlgo::Sha1;
+    let scan = scan_worktree(src.path(), algo).unwrap();
+    let alt = tempfile::tempdir().unwrap();
+    let mut odb = NativeOdb::open(alt.path()).unwrap();
+    let tree = write_tree(&mut odb, &scan, algo).unwrap();
+    odb.flush().unwrap();
+    assert_eq!(tree.to_string(), git_tree.trim(), "vs git write-tree");
+}
+
+#[test]
+fn write_commit_matches_git_commit_tree() {
+    let src = tempfile::tempdir().unwrap();
+    common::git(src.path(), &["init", "-q"]);
+    std::fs::write(src.path().join("f"), "x").unwrap();
+    common::git(src.path(), &["add", "f"]);
+    let tree_hex = common::git(src.path(), &["write-tree"]);
+    let tree_hex = tree_hex.trim();
+
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(src.path())
+        .env("GIT_AUTHOR_NAME", "A")
+        .env("GIT_AUTHOR_EMAIL", "a@b")
+        .env("GIT_AUTHOR_DATE", "@100 +0000")
+        .env("GIT_COMMITTER_NAME", "A")
+        .env("GIT_COMMITTER_EMAIL", "a@b")
+        .env("GIT_COMMITTER_DATE", "@100 +0000")
+        .args(["commit-tree", tree_hex, "-m", "hi"])
+        .output()
+        .unwrap();
+    let git_commit = String::from_utf8(out.stdout).unwrap();
+
+    let algo = HashAlgo::Sha1;
+    let tree = ObjectId::from_hex(tree_hex.as_bytes()).unwrap();
+    let alt = tempfile::tempdir().unwrap();
+    let mut odb = NativeOdb::open(alt.path()).unwrap();
+    let sig = Sig {
+        name: "A",
+        email: "a@b",
+        when: 100,
+        tz: "+0000",
+    };
+    let commit = write_commit(&mut odb, tree, &[], &sig, &sig, "hi\n", algo).unwrap();
+    assert_eq!(commit.to_string(), git_commit.trim(), "vs git commit-tree");
 }

@@ -167,6 +167,117 @@ fn flatten_into(
     Ok(())
 }
 
+/// Builds the tree hierarchy for `entries` (each a file path + blob id +
+/// mode), writing every (sub)tree object to `odb`, and returns the root
+/// tree id. Entries need not be pre-sorted. The encoding matches git's
+/// exactly (git tree ordering: a directory sorts as if its name ended in
+/// `/`), so the resulting ids equal `git write-tree`'s.
+pub fn write_tree(
+    odb: &mut NativeOdb,
+    entries: &[WorkEntry],
+    algo: HashAlgo,
+) -> Result<ObjectId, WorktreeError> {
+    let mut flat: Vec<(&[u8], ObjectId, u32)> = entries
+        .iter()
+        .map(|e| (e.path.as_bytes(), e.oid, e.mode))
+        .collect();
+    flat.sort_by(|a, b| a.0.cmp(b.0));
+    write_subtree(odb, &flat, algo)
+}
+
+fn write_subtree(
+    odb: &mut NativeOdb,
+    entries: &[(&[u8], ObjectId, u32)],
+    algo: HashAlgo,
+) -> Result<ObjectId, WorktreeError> {
+    // (name, id, mode) entries of this level, files and built sub-trees
+    let mut level: Vec<(Vec<u8>, ObjectId, u32)> = Vec::new();
+    let mut i = 0;
+    while i < entries.len() {
+        let (path, oid, mode) = entries[i];
+        match path.iter().position(|&b| b == b'/') {
+            None => {
+                level.push((path.to_vec(), oid, mode));
+                i += 1;
+            }
+            Some(slash) => {
+                let dir = &path[..slash];
+                // all entries under this directory are a contiguous run
+                let mut group: Vec<(&[u8], ObjectId, u32)> = Vec::new();
+                while i < entries.len() {
+                    let p = entries[i].0;
+                    if p.len() > slash && &p[..slash] == dir && p[slash] == b'/' {
+                        group.push((&p[slash + 1..], entries[i].1, entries[i].2));
+                        i += 1;
+                    } else {
+                        break;
+                    }
+                }
+                let sub = write_subtree(odb, &group, algo)?;
+                level.push((dir.to_vec(), sub, 0o040000));
+            }
+        }
+    }
+
+    // git tree order: compare names with a '/' appended for directories
+    let key = |name: &[u8], mode: u32| {
+        let mut k = name.to_vec();
+        if mode == 0o040000 {
+            k.push(b'/');
+        }
+        k
+    };
+    level.sort_by_key(|e| key(&e.0, e.2));
+
+    let mut bytes = Vec::new();
+    for (name, id, mode) in &level {
+        bytes.extend_from_slice(format!("{mode:o}").as_bytes());
+        bytes.push(b' ');
+        bytes.extend_from_slice(name);
+        bytes.push(0);
+        bytes.extend_from_slice(id.as_bytes());
+    }
+    let id = ObjectId::hash_object(algo, ObjectKind::Tree, &bytes);
+    odb.put(id, ObjectKind::Tree, &bytes)?;
+    Ok(id)
+}
+
+/// A commit author/committer line: `Name <email> <unix-ts> <tz>`.
+pub struct Sig<'a> {
+    pub name: &'a str,
+    pub email: &'a str,
+    /// Seconds since the epoch.
+    pub when: i64,
+    /// Timezone like `+0000`.
+    pub tz: &'a str,
+}
+
+/// Writes a commit object and returns its id. The bytes are git-canonical,
+/// so the id equals `git commit-tree`'s for the same inputs.
+pub fn write_commit(
+    odb: &mut NativeOdb,
+    tree: ObjectId,
+    parents: &[ObjectId],
+    author: &Sig,
+    committer: &Sig,
+    message: &str,
+    algo: HashAlgo,
+) -> Result<ObjectId, WorktreeError> {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(format!("tree {tree}\n").as_bytes());
+    for p in parents {
+        bytes.extend_from_slice(format!("parent {p}\n").as_bytes());
+    }
+    let line = |s: &Sig| format!("{} <{}> {} {}", s.name, s.email, s.when, s.tz);
+    bytes.extend_from_slice(format!("author {}\n", line(author)).as_bytes());
+    bytes.extend_from_slice(format!("committer {}\n", line(committer)).as_bytes());
+    bytes.push(b'\n');
+    bytes.extend_from_slice(message.as_bytes());
+    let id = ObjectId::hash_object(algo, ObjectKind::Commit, &bytes);
+    odb.put(id, ObjectKind::Commit, &bytes)?;
+    Ok(id)
+}
+
 /// The index's tracked entries (stage 0 only) as `WorkEntry`s.
 pub fn index_entries(index: &Index) -> Vec<WorkEntry> {
     let mut out: Vec<WorkEntry> = index
