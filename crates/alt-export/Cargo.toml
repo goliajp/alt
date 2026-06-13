@@ -1,0 +1,22 @@
+[package]
+name = "alt-export"
+description = "alt export: rebuild a semantically equivalent .git from a native .alt store (L1 fidelity)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+alt-git-codec.workspace = true
+alt-git-config.workspace = true
+alt-git-pack.workspace = true
+alt-git-refs.workspace = true
+alt-odb.workspace = true
+alt-refs.workspace = true
+bstr.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+alt-import.workspace = true
+alt-repo.workspace = true
+alt-testutil.workspace = true
+tempfile.workspace = true

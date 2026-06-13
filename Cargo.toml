@@ -14,6 +14,7 @@ alt-git-config = { path = "crates/alt-git-config" }
 alt-store = { path = "crates/alt-store" }
 alt-git-index = { path = "crates/alt-git-index" }
 alt-git-pack = { path = "crates/alt-git-pack" }
+alt-export = { path = "crates/alt-export" }
 alt-git-refs = { path = "crates/alt-git-refs" }
 alt-import = { path = "crates/alt-import" }
 alt-odb = { path = "crates/alt-odb" }

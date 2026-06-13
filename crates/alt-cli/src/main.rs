@@ -34,6 +34,12 @@ enum Command {
         /// with .git)
         target: std::path::PathBuf,
     },
+    /// Export this .alt store back to a git repository
+    Export {
+        /// Destination directory (must not exist or be empty): a .git is
+        /// rebuilt at <DIR>/.git with L1 semantic fidelity
+        target: std::path::PathBuf,
+    },
 }
 
 #[derive(clap::Args)]
@@ -87,6 +93,20 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             }
         }
         Command::Log(args) => log_cmd::run(&mut out, &repo, args)?,
+        Command::Export { target } => {
+            if !repo.is_native() {
+                return Err("export needs a .alt store; run inside one (see 'alt import')".into());
+            }
+            let report = alt_export::export_git(repo.git_dir(), &target)?;
+            writeln!(
+                out,
+                "exported {} objects, {} refs{} into {}",
+                report.objects,
+                report.refs,
+                if report.head { " + HEAD" } else { "" },
+                target.join(".git").display()
+            )?;
+        }
         Command::Import { target } => {
             let alt_dir = target.join(".alt");
             let timestamp_ms = std::time::SystemTime::now()
