@@ -7,6 +7,7 @@ mod cache;
 pub mod delta;
 mod idx;
 mod pack;
+mod write;
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -16,6 +17,7 @@ use alt_git_codec::{ObjectId, ObjectKind, RawObject};
 use cache::DeltaBaseCache;
 pub use idx::PackIndex;
 pub use pack::{EntryInfo, EntryKind, Pack};
+pub use write::{PackWriter, WrittenPack};
 
 #[derive(Debug, thiserror::Error)]
 pub enum PackError {

@@ -70,6 +70,8 @@ dependencies = [
  "alt-testutil",
  "flate2",
  "memmap2",
+ "sha1",
+ "sha2",
  "tempfile",
  "thiserror",
 ]
