@@ -20,6 +20,8 @@ alt-import = { path = "crates/alt-import" }
 alt-odb = { path = "crates/alt-odb" }
 alt-oplog = { path = "crates/alt-oplog" }
 alt-prism = { path = "crates/alt-prism" }
+alt-prism-deflate = { path = "crates/alt-prism-deflate" }
+alt-prism-store = { path = "crates/alt-prism-store" }
 alt-refs = { path = "crates/alt-refs" }
 alt-repo = { path = "crates/alt-repo" }
 alt-testutil = { path = "crates/alt-testutil" }

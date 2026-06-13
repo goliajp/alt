@@ -1,0 +1,17 @@
+[package]
+name = "alt-prism-store"
+description = "Tier 1 storage layer: applies the prism pipeline over a blob store, storing parts + a recipe and recomposing on read"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+alt-prism.workspace = true
+alt-store.workspace = true
+blake3.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+alt-prism-deflate.workspace = true
+libz-sys = "1"
+tempfile.workspace = true

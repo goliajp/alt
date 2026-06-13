@@ -171,6 +171,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "alt-prism-store"
+version = "0.0.0"
+dependencies = [
+ "alt-prism",
+ "alt-prism-deflate",
+ "alt-store",
+ "blake3",
+ "libz-sys",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "alt-refs"
 version = "0.0.0"
 dependencies = [
