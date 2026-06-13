@@ -2,3 +2,4 @@
 
 mod refs_interop;
 mod refs_reftable;
+mod refs_write;

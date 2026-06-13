@@ -4,6 +4,9 @@
 
 mod packed;
 mod reftable;
+mod write;
+
+pub use write::write_loose;
 
 use std::fs;
 use std::io;
