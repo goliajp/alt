@@ -54,7 +54,10 @@ fn fast_forward_merge() {
     ok(alt(root, &["switch", "main"]));
     let out = ok(alt(root, &["merge", "feat"]));
     assert!(out.contains("Fast-forward"), "{out}");
-    assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "two\n");
+    assert_eq!(
+        std::fs::read_to_string(root.join("a.txt")).unwrap(),
+        "two\n"
+    );
 }
 
 #[test]
