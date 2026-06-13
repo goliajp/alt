@@ -59,6 +59,22 @@ enum Command {
     },
     /// Show the working tree status
     Status,
+    /// List, create, or delete branches
+    Branch {
+        /// Branch name to create (omit to list branches)
+        name: Option<String>,
+        /// Delete the named branch
+        #[arg(short = 'd')]
+        delete: Option<String>,
+    },
+    /// Switch branches, materializing the target tree into the work tree
+    Switch {
+        /// Branch to switch to
+        name: String,
+        /// Create the branch before switching
+        #[arg(short = 'c')]
+        create: bool,
+    },
 }
 
 #[derive(clap::Args)]
@@ -110,6 +126,16 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         }
         Command::Status => {
             native::NativeRepo::discover(&cwd)?.status(&mut out)?;
+            out.flush()?;
+            return Ok(ExitCode::SUCCESS);
+        }
+        Command::Branch { name, delete } => {
+            native::NativeRepo::discover(&cwd)?.branch(name.clone(), delete.clone(), &mut out)?;
+            out.flush()?;
+            return Ok(ExitCode::SUCCESS);
+        }
+        Command::Switch { name, create } => {
+            native::NativeRepo::discover(&cwd)?.switch(name, *create, &mut out)?;
             out.flush()?;
             return Ok(ExitCode::SUCCESS);
         }
@@ -180,7 +206,12 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
                 None => writeln!(out, "already up to date, no op recorded")?,
             }
         }
-        Command::Init { .. } | Command::Add { .. } | Command::Commit { .. } | Command::Status => {
+        Command::Init { .. }
+        | Command::Add { .. }
+        | Command::Commit { .. }
+        | Command::Status
+        | Command::Branch { .. }
+        | Command::Switch { .. } => {
             unreachable!("native commands are dispatched before git discovery")
         }
     }

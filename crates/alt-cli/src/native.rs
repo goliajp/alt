@@ -278,6 +278,301 @@ impl NativeRepo {
             None => Ok("refs/heads/main".to_owned()),
         }
     }
+
+    /// `alt branch`: list branches (no args), create one at HEAD (`name`),
+    /// or delete one (`delete`).
+    pub fn branch(
+        &mut self,
+        name: Option<String>,
+        delete: Option<String>,
+        out: &mut impl Write,
+    ) -> Res<()> {
+        match (name, delete) {
+            (_, Some(target)) => self.delete_branch(&target, out),
+            (Some(new), None) => self.create_branch(&new, out),
+            (None, None) => self.list_branches(out),
+        }
+    }
+
+    fn list_branches(&self, out: &mut impl Write) -> Res<()> {
+        let current = self.head_branch()?;
+        for (name, _) in self.refs.iter() {
+            if let Some(short) = name.strip_prefix("refs/heads/") {
+                let mark = if name == current { "* " } else { "  " };
+                writeln!(out, "{mark}{short}")?;
+            }
+        }
+        Ok(())
+    }
+
+    fn create_branch(&mut self, name: &str, out: &mut impl Write) -> Res<()> {
+        check_branch_name(name)?;
+        let full = format!("refs/heads/{name}");
+        if self.refs.get(&full).is_some() {
+            return Err(format!("a branch named '{name}' already exists").into());
+        }
+        let commit = self
+            .refs
+            .resolve(&self.head_branch()?)?
+            .ok_or("cannot create a branch before the first commit")?;
+        self.refs.commit(
+            &actor("branch"),
+            now_ms(),
+            &[RefChange {
+                name: full,
+                old: None,
+                new: Some(RefTarget::Oid(commit)),
+            }],
+        )?;
+        writeln!(out, "branch '{name}' created at {commit}")?;
+        Ok(())
+    }
+
+    fn delete_branch(&mut self, name: &str, out: &mut impl Write) -> Res<()> {
+        let full = format!("refs/heads/{name}");
+        if full == self.head_branch()? {
+            return Err(format!("cannot delete branch '{name}': it is the current branch").into());
+        }
+        let old = self
+            .refs
+            .get(&full)
+            .cloned()
+            .ok_or_else(|| format!("branch '{name}' not found"))?;
+        self.refs.commit(
+            &actor("branch"),
+            now_ms(),
+            &[RefChange {
+                name: full,
+                old: Some(old),
+                new: None,
+            }],
+        )?;
+        writeln!(out, "deleted branch '{name}'")?;
+        Ok(())
+    }
+
+    /// `alt switch <name>`: point HEAD at branch `name` and materialize its
+    /// tree into the working tree. `-c` creates the branch first. Switching
+    /// to an existing branch requires a clean tree (no staged/unstaged
+    /// changes) so no uncommitted work is lost.
+    pub fn switch(&mut self, name: &str, create: bool, out: &mut impl Write) -> Res<()> {
+        let full = format!("refs/heads/{name}");
+        let current = self.head_branch()?;
+
+        if create {
+            check_branch_name(name)?;
+            if self.refs.get(&full).is_some() {
+                return Err(format!("a branch named '{name}' already exists").into());
+            }
+            // a new branch starts at the current commit (if any); the working
+            // tree and index carry over unchanged, so no checkout is needed.
+            if let Some(commit) = self.refs.resolve(&current)? {
+                self.refs.commit(
+                    &actor("branch"),
+                    now_ms(),
+                    &[RefChange {
+                        name: full.clone(),
+                        old: None,
+                        new: Some(RefTarget::Oid(commit)),
+                    }],
+                )?;
+            }
+            self.move_head(&current, &full)?;
+            writeln!(out, "Switched to a new branch '{name}'")?;
+            return Ok(());
+        }
+
+        if self.refs.get(&full).is_none() {
+            return Err(format!("invalid reference: {name}").into());
+        }
+        if full == current {
+            writeln!(out, "Already on '{name}'")?;
+            return Ok(());
+        }
+        self.ensure_clean_for_switch()?;
+
+        let target = match self.refs.resolve(&full)? {
+            Some(commit) => {
+                let obj = self.odb.get(&commit)?.ok_or("branch commit missing")?;
+                let tree = alt_git_codec::Commit::parse(&obj.data)?
+                    .tree()
+                    .ok_or("commit has no tree")?;
+                flatten_tree(&self.odb, tree, self.algo)?
+            }
+            None => Vec::new(), // unborn target: tree becomes empty
+        };
+        let old = index_entries(&self.index()?);
+        self.checkout(&old, &target)?;
+        self.move_head(&current, &full)?;
+        writeln!(out, "Switched to branch '{name}'")?;
+        Ok(())
+    }
+
+    /// Refuses the switch if any tracked file has staged or unstaged changes.
+    fn ensure_clean_for_switch(&self) -> Res<()> {
+        let branch = self.head_branch()?;
+        let head = match self.refs.resolve(&branch)? {
+            Some(commit) => {
+                let obj = self.odb.get(&commit)?.ok_or("HEAD commit missing")?;
+                let tree = alt_git_codec::Commit::parse(&obj.data)?
+                    .tree()
+                    .ok_or("commit has no tree")?;
+                flatten_tree(&self.odb, tree, self.algo)?
+            }
+            None => Vec::new(),
+        };
+        let index = index_entries(&self.index()?);
+        let worktree = scan_worktree(&self.root, self.algo)?;
+        let st = status(&head, &index, &worktree);
+        if !st.staged.is_empty() || !st.unstaged.is_empty() {
+            return Err("your local changes would be overwritten by switch; \
+                 commit them first"
+                .into());
+        }
+        Ok(())
+    }
+
+    /// Materializes `target` into the working tree, removing tracked files in
+    /// `old` that are absent from `target`, and rewrites the index to match.
+    fn checkout(&mut self, old: &[WorkEntry], target: &[WorkEntry]) -> Res<()> {
+        use std::collections::HashSet;
+        let old_paths: HashSet<&BString> = old.iter().map(|e| &e.path).collect();
+        let target_paths: HashSet<&BString> = target.iter().map(|e| &e.path).collect();
+
+        // validate first: an untracked file in the way of a target file is a
+        // collision — refuse before touching anything.
+        for t in target {
+            if !old_paths.contains(&t.path) && self.abs(&t.path)?.symlink_metadata().is_ok() {
+                return Err(format!(
+                    "untracked working tree file '{}' would be overwritten by switch",
+                    t.path
+                )
+                .into());
+            }
+        }
+
+        for o in old {
+            if !target_paths.contains(&o.path) {
+                let abs = self.abs(&o.path)?;
+                if abs.symlink_metadata().is_ok() {
+                    std::fs::remove_file(&abs)?;
+                    self.prune_empty_dirs(abs.parent());
+                }
+            }
+        }
+
+        let mut entries = Vec::with_capacity(target.len());
+        for t in target {
+            self.materialize(t)?;
+            entries.push(self.make_entry(t)?);
+        }
+        save_index(
+            &self.alt_dir,
+            &Index {
+                version: 2,
+                entries,
+                extensions: Vec::new(),
+            },
+        )?;
+        Ok(())
+    }
+
+    /// Writes one tree entry to the working tree (regular file, executable,
+    /// or symlink), creating parent dirs and replacing whatever was there.
+    fn materialize(&self, w: &WorkEntry) -> Res<()> {
+        let abs = self.abs(&w.path)?;
+        if let Some(parent) = abs.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        if abs.symlink_metadata().is_ok() {
+            std::fs::remove_file(&abs)?;
+        }
+        let obj = self.odb.get(&w.oid)?.ok_or("blob missing from store")?;
+        if w.mode == 0o120000 {
+            symlink_to(&obj.data, &abs)?;
+        } else {
+            std::fs::write(&abs, &obj.data)?;
+            set_exec(&abs, w.mode == 0o100755)?;
+        }
+        Ok(())
+    }
+
+    /// Removes now-empty directories from `dir` up toward the root.
+    fn prune_empty_dirs(&self, dir: Option<&Path>) {
+        let mut cur = dir;
+        while let Some(d) = cur {
+            if d == self.root || std::fs::remove_dir(d).is_err() {
+                break; // reached the root or a non-empty directory
+            }
+            cur = d.parent();
+        }
+    }
+
+    fn abs(&self, rel: &BString) -> Res<PathBuf> {
+        Ok(self.root.join(rel.to_path().map_err(|_| "non-utf8 path")?))
+    }
+
+    /// Moves HEAD's symbolic target from `from` to `to` in one ref op.
+    fn move_head(&mut self, from: &str, to: &str) -> Res<()> {
+        let old = self.refs.get("HEAD").cloned();
+        self.refs.commit(
+            &actor("switch"),
+            now_ms(),
+            &[RefChange {
+                name: "HEAD".to_owned(),
+                old: old.or_else(|| Some(RefTarget::Symbolic(from.to_owned()))),
+                new: Some(RefTarget::Symbolic(to.to_owned())),
+            }],
+        )?;
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+fn symlink_to(target: &[u8], at: &Path) -> Res<()> {
+    use std::os::unix::ffi::OsStrExt;
+    std::os::unix::fs::symlink(std::ffi::OsStr::from_bytes(target), at)?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn symlink_to(target: &[u8], at: &Path) -> Res<()> {
+    // no symlink support: fall back to a regular file holding the target text
+    std::fs::write(at, target)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_exec(path: &Path, exec: bool) -> Res<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let perm = if exec { 0o755 } else { 0o644 };
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(perm))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_exec(_path: &Path, _exec: bool) -> Res<()> {
+    Ok(())
+}
+
+/// Minimal git check-ref-format: no empty/space/control chars, no `..`,
+/// no leading/trailing slash, no segment starting with a dot.
+fn check_branch_name(name: &str) -> Res<()> {
+    let bad = name.is_empty()
+        || name.starts_with('/')
+        || name.ends_with('/')
+        || name.ends_with(".lock")
+        || name.contains("..")
+        || name.contains("//")
+        || name.contains(['\\', ' ', '~', '^', ':', '?', '*', '['])
+        || name.bytes().any(|b| b < 0x20 || b == 0x7f)
+        || name
+            .split('/')
+            .any(|seg| seg.is_empty() || seg.starts_with('.'));
+    if bad {
+        return Err(format!("'{name}' is not a valid branch name").into());
+    }
+    Ok(())
 }
 
 fn identity() -> (String, String) {
