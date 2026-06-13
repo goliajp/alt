@@ -24,6 +24,7 @@ dependencies = [
  "alt-git-codec",
  "alt-git-index",
  "alt-git-pack",
+ "alt-merge",
  "alt-prism",
  "alt-prism-deflate",
  "alt-store",
@@ -64,6 +65,13 @@ dependencies = [
  "sha1",
  "sha2",
  "thiserror",
+]
+
+[[package]]
+name = "alt-merge"
+version = "0.0.0"
+dependencies = [
+ "alt-diff",
 ]
 
 [[package]]

@@ -18,6 +18,7 @@ alt-git-pack = { path = "crates/alt-git-pack" }
 alt-export = { path = "crates/alt-export" }
 alt-git-refs = { path = "crates/alt-git-refs" }
 alt-import = { path = "crates/alt-import" }
+alt-merge = { path = "crates/alt-merge" }
 alt-odb = { path = "crates/alt-odb" }
 alt-oplog = { path = "crates/alt-oplog" }
 alt-prism = { path = "crates/alt-prism" }

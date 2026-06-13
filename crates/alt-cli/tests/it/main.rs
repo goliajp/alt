@@ -2,6 +2,7 @@
 mod branch_switch;
 mod commit_loop;
 mod diff;
+mod merge;
 
 mod cli_matrix;
 mod corpus_cli;

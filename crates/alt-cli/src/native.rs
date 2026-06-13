@@ -215,13 +215,26 @@ impl NativeRepo {
         Ok(())
     }
 
-    /// `alt status`: staged / unstaged / untracked against HEAD and the index.
+    /// `alt status`: staged / unstaged / untracked against HEAD and the index,
+    /// plus any unmerged (conflicted) paths left by a merge.
     pub fn status(&self, out: &mut impl Write) -> Res<()> {
         let branch = self.head_branch()?;
         let head = self.head_entries()?;
-        let index = index_entries(&self.index()?);
+        let raw = self.index()?;
+        let unmerged: std::collections::BTreeSet<BString> = raw
+            .entries
+            .iter()
+            .filter(|e| e.stage() > 0)
+            .map(|e| e.path.clone())
+            .collect();
+        let index = index_entries(&raw);
         let worktree = scan_worktree(&self.root, self.algo)?;
-        let st = status(&head, &index, &worktree);
+        let mut st = status(&head, &index, &worktree);
+        // unmerged paths are reported in their own section, not as
+        // staged/unstaged/untracked noise driven by the missing stage-0 entry
+        st.staged.retain(|(p, _)| !unmerged.contains(p));
+        st.unstaged.retain(|(p, _)| !unmerged.contains(p));
+        st.untracked.retain(|p| !unmerged.contains(p));
 
         let short = branch.strip_prefix("refs/heads/").unwrap_or(&branch);
         writeln!(out, "On branch {short}")?;
@@ -230,6 +243,12 @@ impl NativeRepo {
             ChangeKind::Modified => "modified",
             ChangeKind::Deleted => "deleted",
         };
+        if !unmerged.is_empty() {
+            writeln!(out, "Unmerged paths:")?;
+            for p in &unmerged {
+                writeln!(out, "\tboth modified:   {p}")?;
+            }
+        }
         if !st.staged.is_empty() {
             writeln!(out, "Changes to be committed:")?;
             for (p, k) in &st.staged {
@@ -248,7 +267,11 @@ impl NativeRepo {
                 writeln!(out, "\t{p}")?;
             }
         }
-        if st.staged.is_empty() && st.unstaged.is_empty() && st.untracked.is_empty() {
+        if unmerged.is_empty()
+            && st.staged.is_empty()
+            && st.unstaged.is_empty()
+            && st.untracked.is_empty()
+        {
             writeln!(out, "nothing to commit, working tree clean")?;
         }
         Ok(())
@@ -257,15 +280,18 @@ impl NativeRepo {
     /// The HEAD commit's tree flattened to entries (empty when unborn).
     fn head_entries(&self) -> Res<Vec<WorkEntry>> {
         match self.refs.resolve(&self.head_branch()?)? {
-            Some(commit) => {
-                let obj = self.odb.get(&commit)?.ok_or("HEAD commit missing")?;
-                let tree = alt_git_codec::Commit::parse(&obj.data)?
-                    .tree()
-                    .ok_or("commit has no tree")?;
-                Ok(flatten_tree(&self.odb, tree, self.algo)?)
-            }
+            Some(commit) => self.commit_entries(commit),
             None => Ok(Vec::new()),
         }
+    }
+
+    /// A commit's tree flattened to path-sorted entries.
+    fn commit_entries(&self, commit: ObjectId) -> Res<Vec<WorkEntry>> {
+        let obj = self.odb.get(&commit)?.ok_or("commit missing from store")?;
+        let tree = alt_git_codec::Commit::parse(&obj.data)?
+            .tree()
+            .ok_or("commit has no tree")?;
+        Ok(flatten_tree(&self.odb, tree, self.algo)?)
     }
 
     /// `alt diff` (index → working tree) or `alt diff --cached` (HEAD →
@@ -476,16 +502,10 @@ impl NativeRepo {
             writeln!(out, "Already on '{name}'")?;
             return Ok(());
         }
-        self.ensure_clean_for_switch()?;
+        self.ensure_clean("switch")?;
 
         let target = match self.refs.resolve(&full)? {
-            Some(commit) => {
-                let obj = self.odb.get(&commit)?.ok_or("branch commit missing")?;
-                let tree = alt_git_codec::Commit::parse(&obj.data)?
-                    .tree()
-                    .ok_or("commit has no tree")?;
-                flatten_tree(&self.odb, tree, self.algo)?
-            }
+            Some(commit) => self.commit_entries(commit)?,
             None => Vec::new(), // unborn target: tree becomes empty
         };
         let old = index_entries(&self.index()?);
@@ -495,16 +515,18 @@ impl NativeRepo {
         Ok(())
     }
 
-    /// Refuses the switch if any tracked file has staged or unstaged changes.
-    fn ensure_clean_for_switch(&self) -> Res<()> {
+    /// Refuses `action` if any tracked file has staged or unstaged changes, so
+    /// a tree-rewriting operation never clobbers uncommitted work.
+    fn ensure_clean(&self, action: &str) -> Res<()> {
         let head = self.head_entries()?;
         let index = index_entries(&self.index()?);
         let worktree = scan_worktree(&self.root, self.algo)?;
         let st = status(&head, &index, &worktree);
         if !st.staged.is_empty() || !st.unstaged.is_empty() {
-            return Err("your local changes would be overwritten by switch; \
-                 commit them first"
-                .into());
+            return Err(format!(
+                "your local changes would be overwritten by {action}; commit them first"
+            )
+            .into());
         }
         Ok(())
     }
@@ -602,6 +624,376 @@ impl NativeRepo {
             }],
         )?;
         Ok(())
+    }
+
+    /// `alt merge <branch>`: three-way merge `branch` into the current branch.
+    /// Returns whether the merge stopped in conflict. Fast-forwards when our
+    /// branch is strictly behind; otherwise writes a two-parent merge commit
+    /// (clean) or leaves conflict markers + unmerged index entries and makes
+    /// no commit (conflicting). A clean working tree is required.
+    pub fn merge(&mut self, branch_name: &str, out: &mut impl Write) -> Res<bool> {
+        let their_ref = format!("refs/heads/{branch_name}");
+        let theirs = self
+            .refs
+            .resolve(&their_ref)?
+            .ok_or_else(|| format!("merge: {branch_name} - not something we can merge"))?;
+        let cur = self.head_branch()?;
+        let ours = self
+            .refs
+            .resolve(&cur)?
+            .ok_or("cannot merge into an unborn branch")?;
+        self.ensure_clean("merge")?;
+
+        let base = self.merge_base(ours, theirs)?;
+        if base == Some(theirs) {
+            writeln!(out, "Already up to date.")?;
+            return Ok(false);
+        }
+        if base == Some(ours) {
+            // fast-forward: our branch is an ancestor of theirs
+            let target = self.commit_entries(theirs)?;
+            let old = index_entries(&self.index()?);
+            self.checkout(&old, &target)?;
+            self.advance_branch(&cur, ours, theirs)?;
+            writeln!(out, "Fast-forward to {theirs}")?;
+            return Ok(false);
+        }
+
+        // true three-way merge of the two trees over their base
+        let base_entries = match base {
+            Some(b) => self.commit_entries(b)?,
+            None => Vec::new(), // unrelated histories: empty base
+        };
+        let ours_entries = self.commit_entries(ours)?;
+        let theirs_entries = self.commit_entries(theirs)?;
+        let resolved =
+            self.merge_trees(&base_entries, &ours_entries, &theirs_entries, branch_name)?;
+        self.odb.flush()?;
+
+        let conflicts: Vec<&BString> = resolved
+            .iter()
+            .filter(|r| r.conflicted)
+            .map(|r| &r.path)
+            .collect();
+
+        if conflicts.is_empty() {
+            let clean: Vec<WorkEntry> = resolved.iter().filter_map(|r| r.entry.clone()).collect();
+            let tree = write_tree(&mut self.odb, &clean, self.algo)?;
+            let when = (now_ms() / 1000) as i64;
+            let (name, email) = identity();
+            let sig = Sig {
+                name: &name,
+                email: &email,
+                when,
+                tz: "+0000",
+            };
+            let msg = format!("Merge branch '{branch_name}'\n");
+            let commit = write_commit(
+                &mut self.odb,
+                tree,
+                &[ours, theirs],
+                &sig,
+                &sig,
+                &msg,
+                self.algo,
+            )?;
+            self.odb.flush()?;
+            let old = index_entries(&self.index()?);
+            self.checkout(&old, &clean)?;
+            self.advance_branch(&cur, ours, commit)?;
+            writeln!(out, "Merge made by the 'ort' strategy.")?;
+            Ok(false)
+        } else {
+            self.write_conflicted(&resolved)?;
+            for p in &conflicts {
+                writeln!(out, "CONFLICT (content): Merge conflict in {p}")?;
+            }
+            writeln!(
+                out,
+                "Automatic merge failed; fix conflicts and then commit the result."
+            )?;
+            Ok(true)
+        }
+    }
+
+    /// Advances `branch` from `old` to `new` in one ref transaction.
+    fn advance_branch(&mut self, branch: &str, old: ObjectId, new: ObjectId) -> Res<()> {
+        self.refs.commit(
+            &actor("merge"),
+            now_ms(),
+            &[RefChange {
+                name: branch.to_owned(),
+                old: Some(RefTarget::Oid(old)),
+                new: Some(RefTarget::Oid(new)),
+            }],
+        )?;
+        Ok(())
+    }
+
+    /// The merge base (lowest common ancestor) of two commits, or `None` for
+    /// unrelated histories. Picks one base when several exist (criss-cross
+    /// histories aren't a dogfood concern yet).
+    fn merge_base(&self, a: ObjectId, b: ObjectId) -> Res<Option<ObjectId>> {
+        if a == b {
+            return Ok(Some(a));
+        }
+        let anc_a = self.ancestors(a)?;
+        let anc_b = self.ancestors(b)?;
+        let common: std::collections::HashSet<ObjectId> =
+            anc_a.intersection(&anc_b).copied().collect();
+        // a base is a common commit that is not a proper ancestor of another
+        // common commit (i.e. a maximal element of the common set)
+        let mut bases = common.clone();
+        for c in &common {
+            for x in self.ancestors(*c)? {
+                if x != *c {
+                    bases.remove(&x);
+                }
+            }
+        }
+        Ok(bases.into_iter().next())
+    }
+
+    /// All commits reachable from `start` (inclusive) via parent links.
+    fn ancestors(&self, start: ObjectId) -> Res<std::collections::HashSet<ObjectId>> {
+        let mut seen = std::collections::HashSet::new();
+        let mut stack = vec![start];
+        while let Some(c) = stack.pop() {
+            if !seen.insert(c) {
+                continue;
+            }
+            let obj = self.odb.get(&c)?.ok_or("commit missing from store")?;
+            for p in alt_git_codec::Commit::parse(&obj.data)?.parents() {
+                if !seen.contains(&p) {
+                    stack.push(p);
+                }
+            }
+        }
+        Ok(seen)
+    }
+
+    /// Three-way merges two trees over their common base, path by path.
+    fn merge_trees(
+        &mut self,
+        base: &[WorkEntry],
+        ours: &[WorkEntry],
+        theirs: &[WorkEntry],
+        their_label: &str,
+    ) -> Res<Vec<Resolved>> {
+        use std::collections::{BTreeSet, HashMap};
+        let map = |es: &[WorkEntry]| -> HashMap<BString, WorkEntry> {
+            es.iter().map(|e| (e.path.clone(), e.clone())).collect()
+        };
+        let (bm, om, tm) = (map(base), map(ours), map(theirs));
+        let paths: BTreeSet<BString> = bm
+            .keys()
+            .chain(om.keys())
+            .chain(tm.keys())
+            .cloned()
+            .collect();
+
+        let mut out = Vec::with_capacity(paths.len());
+        for path in paths {
+            let bo = bm.get(&path).cloned();
+            let ao = om.get(&path).cloned();
+            let to = tm.get(&path).cloned();
+            out.push(self.resolve_path(path, bo, ao, to, their_label)?);
+        }
+        Ok(out)
+    }
+
+    /// Resolves one path's three-way state into a clean entry or a conflict.
+    fn resolve_path(
+        &mut self,
+        path: BString,
+        bo: Option<WorkEntry>,
+        ao: Option<WorkEntry>,
+        to: Option<WorkEntry>,
+        their_label: &str,
+    ) -> Res<Resolved> {
+        let same = |x: &Option<WorkEntry>, y: &Option<WorkEntry>| match (x, y) {
+            (None, None) => true,
+            (Some(p), Some(q)) => p.oid == q.oid && p.mode == q.mode,
+            _ => false,
+        };
+        if same(&ao, &to) {
+            return Ok(Resolved::clean(path, ao)); // both agree (incl. both-deleted)
+        }
+        if same(&ao, &bo) {
+            return Ok(Resolved::clean(path, to)); // ours unchanged → take theirs
+        }
+        if same(&to, &bo) {
+            return Ok(Resolved::clean(path, ao)); // theirs unchanged → take ours
+        }
+
+        // both sides diverged from base
+        match (&ao, &to) {
+            (Some(a), Some(t)) => {
+                let base_bytes = match &bo {
+                    Some(b) => self.blob_bytes(b.oid)?,
+                    None => Vec::new(),
+                };
+                let ours_bytes = self.blob_bytes(a.oid)?;
+                let theirs_bytes = self.blob_bytes(t.oid)?;
+                let unmergeable = a.mode != t.mode
+                    || alt_diff::is_binary(&base_bytes)
+                    || alt_diff::is_binary(&ours_bytes)
+                    || alt_diff::is_binary(&theirs_bytes);
+                if unmergeable {
+                    // keep ours in the working tree, record all three stages
+                    return Ok(make_conflict(path, bo, ao, to, ours_bytes));
+                }
+                let labels = alt_merge::Labels {
+                    ours: "HEAD",
+                    theirs: their_label,
+                };
+                let m = alt_merge::merge(&base_bytes, &ours_bytes, &theirs_bytes, &labels);
+                if m.is_clean() {
+                    let oid = ObjectId::hash_object(self.algo, ObjectKind::Blob, &m.content);
+                    self.odb.put(oid, ObjectKind::Blob, &m.content)?;
+                    Ok(Resolved::clean(
+                        path.clone(),
+                        Some(WorkEntry {
+                            path,
+                            oid,
+                            mode: a.mode,
+                        }),
+                    ))
+                } else {
+                    Ok(make_conflict(path, bo, ao, to, m.content))
+                }
+            }
+            // modify/delete: one side changed the file, the other removed it
+            (Some(a), None) => {
+                let bytes = self.blob_bytes(a.oid)?;
+                Ok(make_conflict(path, bo, ao, to, bytes))
+            }
+            (None, Some(t)) => {
+                let bytes = self.blob_bytes(t.oid)?;
+                Ok(make_conflict(path, bo, ao, to, bytes))
+            }
+            (None, None) => unreachable!("same(ao, to) already handled both-None"),
+        }
+    }
+
+    /// Writes a conflicted merge state to disk: each resolution's working-tree
+    /// bytes, then an index carrying stage-0 entries for clean paths and
+    /// stage 1/2/3 entries for conflicted ones (so git tools see the merge).
+    fn write_conflicted(&mut self, resolved: &[Resolved]) -> Res<()> {
+        for r in resolved {
+            let abs = self.abs(&r.path)?;
+            if let Some(bytes) = &r.worktree {
+                if let Some(parent) = abs.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                if abs.symlink_metadata().is_ok() {
+                    std::fs::remove_file(&abs)?;
+                }
+                std::fs::write(&abs, bytes)?;
+            } else {
+                match &r.entry {
+                    Some(e) => self.materialize(e)?,
+                    None => {
+                        if abs.symlink_metadata().is_ok() {
+                            std::fs::remove_file(&abs)?;
+                            self.prune_empty_dirs(abs.parent());
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut entries = Vec::new();
+        for r in resolved {
+            if r.conflicted {
+                for (stage, w) in &r.stages {
+                    entries.push(stage_entry(w, *stage));
+                }
+            } else if let Some(e) = &r.entry {
+                entries.push(self.make_entry(e)?);
+            }
+        }
+        save_index(
+            &self.alt_dir,
+            &Index {
+                version: 2,
+                entries,
+                extensions: Vec::new(),
+            },
+        )?;
+        Ok(())
+    }
+}
+
+/// One path's merge resolution.
+struct Resolved {
+    path: BString,
+    /// The clean result entry (`None` = deleted); meaningless when conflicted.
+    entry: Option<WorkEntry>,
+    conflicted: bool,
+    /// Bytes to write to the working tree on conflict (markers or the kept
+    /// side); `None` for a clean resolution.
+    worktree: Option<Vec<u8>>,
+    /// Unmerged index entries `(stage, entry)` for a conflict.
+    stages: Vec<(u8, WorkEntry)>,
+}
+
+impl Resolved {
+    fn clean(path: BString, entry: Option<WorkEntry>) -> Self {
+        Resolved {
+            path,
+            entry,
+            conflicted: false,
+            worktree: None,
+            stages: Vec::new(),
+        }
+    }
+}
+
+/// Builds a conflicted resolution: working-tree `bytes` plus stage 1/2/3
+/// index entries for whichever of base/ours/theirs are present.
+fn make_conflict(
+    path: BString,
+    bo: Option<WorkEntry>,
+    ao: Option<WorkEntry>,
+    to: Option<WorkEntry>,
+    bytes: Vec<u8>,
+) -> Resolved {
+    let mut stages = Vec::new();
+    if let Some(b) = bo {
+        stages.push((1u8, b));
+    }
+    if let Some(a) = ao {
+        stages.push((2u8, a));
+    }
+    if let Some(t) = to {
+        stages.push((3u8, t));
+    }
+    Resolved {
+        path,
+        entry: None,
+        conflicted: true,
+        worktree: Some(bytes),
+        stages,
+    }
+}
+
+/// A zero-stat index entry at a given merge `stage` (1=base, 2=ours,
+/// 3=theirs).
+fn stage_entry(w: &WorkEntry, stage: u8) -> IndexEntry {
+    IndexEntry {
+        ctime: (0, 0),
+        mtime: (0, 0),
+        dev: 0,
+        ino: 0,
+        mode: w.mode,
+        uid: 0,
+        gid: 0,
+        size: 0,
+        oid: w.oid,
+        flags: ((stage as u16) << 12) | (w.path.len().min(0x0FFF) as u16),
+        extended_flags: None,
+        path: w.path.clone(),
     }
 }
 

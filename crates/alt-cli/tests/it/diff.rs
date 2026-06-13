@@ -58,7 +58,10 @@ fn diff_unstaged_and_cached_match_git_hunks() {
     // edit the file in the working tree; `alt diff` shows the unstaged change
     std::fs::write(root.join("f.txt"), "line1\nCHANGED\nline3\nline4\n").unwrap();
     let unstaged = ok(alt(root, &["diff"]));
-    assert!(unstaged.contains("diff --git a/f.txt b/f.txt"), "{unstaged}");
+    assert!(
+        unstaged.contains("diff --git a/f.txt b/f.txt"),
+        "{unstaged}"
+    );
     assert!(unstaged.contains("--- a/f.txt"), "{unstaged}");
 
     // cross-check the hunk body against real git on the same edit
@@ -85,7 +88,11 @@ fn diff_unstaged_and_cached_match_git_hunks() {
     );
     ok(alt(root, &["add", "."]));
     let cached = ok(alt(root, &["diff", "--cached"]));
-    assert_eq!(hunk_body(&cached), hunk_body(&gdiff), "staged hunk matches git");
+    assert_eq!(
+        hunk_body(&cached),
+        hunk_body(&gdiff),
+        "staged hunk matches git"
+    );
     // and now the working tree matches the index, so unstaged is empty
     assert!(ok(alt(root, &["diff"])).is_empty(), "work tree == index");
 

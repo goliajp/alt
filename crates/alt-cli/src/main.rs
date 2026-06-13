@@ -81,6 +81,11 @@ enum Command {
         #[arg(long, visible_alias = "staged")]
         cached: bool,
     },
+    /// Join another branch into the current one
+    Merge {
+        /// Branch to merge into the current branch
+        branch: String,
+    },
 }
 
 #[derive(clap::Args)]
@@ -149,6 +154,16 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             native::NativeRepo::discover(&cwd)?.diff(*cached, &mut out)?;
             out.flush()?;
             return Ok(ExitCode::SUCCESS);
+        }
+        Command::Merge { branch } => {
+            let conflicts = native::NativeRepo::discover(&cwd)?.merge(branch, &mut out)?;
+            out.flush()?;
+            // git exits 1 when a merge stops in conflict
+            return Ok(if conflicts {
+                ExitCode::from(1)
+            } else {
+                ExitCode::SUCCESS
+            });
         }
         _ => {}
     }
@@ -223,7 +238,8 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         | Command::Status
         | Command::Branch { .. }
         | Command::Switch { .. }
-        | Command::Diff { .. } => {
+        | Command::Diff { .. }
+        | Command::Merge { .. } => {
             unreachable!("native commands are dispatched before git discovery")
         }
     }

@@ -33,6 +33,7 @@ dependencies = [
  "alt-git-codec",
  "alt-git-index",
  "alt-import",
+ "alt-merge",
  "alt-odb",
  "alt-refs",
  "alt-repo",
@@ -142,6 +143,13 @@ dependencies = [
  "bstr",
  "tempfile",
  "thiserror",
+]
+
+[[package]]
+name = "alt-merge"
+version = "0.0.0"
+dependencies = [
+ "alt-diff",
 ]
 
 [[package]]
