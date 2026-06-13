@@ -218,24 +218,7 @@ impl NativeRepo {
     /// `alt status`: staged / unstaged / untracked against HEAD and the index.
     pub fn status(&self, out: &mut impl Write) -> Res<()> {
         let branch = self.head_branch()?;
-        let head_tree = match self.refs.resolve(&branch)? {
-            Some(commit) => {
-                let obj = self
-                    .odb
-                    .get(&commit)?
-                    .ok_or("HEAD commit missing from store")?;
-                Some(
-                    alt_git_codec::Commit::parse(&obj.data)?
-                        .tree()
-                        .ok_or("commit has no tree")?,
-                )
-            }
-            None => None,
-        };
-        let head = match head_tree {
-            Some(t) => flatten_tree(&self.odb, t, self.algo)?,
-            None => Vec::new(),
-        };
+        let head = self.head_entries()?;
         let index = index_entries(&self.index()?);
         let worktree = scan_worktree(&self.root, self.algo)?;
         let st = status(&head, &index, &worktree);
@@ -269,6 +252,110 @@ impl NativeRepo {
             writeln!(out, "nothing to commit, working tree clean")?;
         }
         Ok(())
+    }
+
+    /// The HEAD commit's tree flattened to entries (empty when unborn).
+    fn head_entries(&self) -> Res<Vec<WorkEntry>> {
+        match self.refs.resolve(&self.head_branch()?)? {
+            Some(commit) => {
+                let obj = self.odb.get(&commit)?.ok_or("HEAD commit missing")?;
+                let tree = alt_git_codec::Commit::parse(&obj.data)?
+                    .tree()
+                    .ok_or("commit has no tree")?;
+                Ok(flatten_tree(&self.odb, tree, self.algo)?)
+            }
+            None => Ok(Vec::new()),
+        }
+    }
+
+    /// `alt diff` (index → working tree) or `alt diff --cached` (HEAD →
+    /// index): a git-style unified diff of the tracked changes.
+    pub fn diff(&self, cached: bool, out: &mut impl Write) -> Res<()> {
+        // old side is always read from the object store; the new side is the
+        // index (cached) or the live working tree (default).
+        let (old, new, new_on_disk, show_added) = if cached {
+            (
+                self.head_entries()?,
+                index_entries(&self.index()?),
+                false,
+                true,
+            )
+        } else {
+            let index = index_entries(&self.index()?);
+            let work = scan_worktree(&self.root, self.algo)?;
+            (index, work, true, false)
+        };
+
+        let mut buf = Vec::new();
+        for ch in alt_worktree::changes(&old, &new) {
+            // a working-tree file with no index entry is untracked, not a diff
+            if ch.old.is_none() && !show_added {
+                continue;
+            }
+            self.emit_file_diff(&mut buf, &ch, new_on_disk)?;
+        }
+        out.write_all(&buf)?;
+        Ok(())
+    }
+
+    /// Writes one file's `diff --git` stanza (header + hunks, or a binary
+    /// notice) to `buf`.
+    fn emit_file_diff(
+        &self,
+        buf: &mut Vec<u8>,
+        ch: &alt_worktree::Change,
+        new_on_disk: bool,
+    ) -> Res<()> {
+        let path = ch.path;
+        let old_bytes = match ch.old {
+            Some(w) => self.blob_bytes(w.oid)?,
+            None => Vec::new(),
+        };
+        let new_bytes = match ch.new {
+            Some(w) if new_on_disk => self.read_for(w)?,
+            Some(w) => self.blob_bytes(w.oid)?,
+            None => Vec::new(),
+        };
+
+        buf.extend_from_slice(format!("diff --git a/{path} b/{path}\n").as_bytes());
+        match (ch.old, ch.new) {
+            (None, Some(w)) => {
+                buf.extend_from_slice(format!("new file mode {:06o}\n", w.mode).as_bytes());
+            }
+            (Some(w), None) => {
+                buf.extend_from_slice(format!("deleted file mode {:06o}\n", w.mode).as_bytes());
+            }
+            (Some(o), Some(n)) if o.mode != n.mode => {
+                buf.extend_from_slice(format!("old mode {:06o}\n", o.mode).as_bytes());
+                buf.extend_from_slice(format!("new mode {:06o}\n", n.mode).as_bytes());
+            }
+            _ => {}
+        }
+        let o7 = abbrev(ch.old.map(|w| w.oid));
+        let n7 = abbrev(ch.new.map(|w| w.oid));
+        buf.extend_from_slice(format!("index {o7}..{n7}\n").as_bytes());
+
+        if alt_diff::is_binary(&old_bytes) || alt_diff::is_binary(&new_bytes) {
+            buf.extend_from_slice(
+                format!("Binary files a/{path} and b/{path} differ\n").as_bytes(),
+            );
+            return Ok(());
+        }
+
+        match ch.old {
+            Some(_) => buf.extend_from_slice(format!("--- a/{path}\n").as_bytes()),
+            None => buf.extend_from_slice(b"--- /dev/null\n"),
+        }
+        match ch.new {
+            Some(_) => buf.extend_from_slice(format!("+++ b/{path}\n").as_bytes()),
+            None => buf.extend_from_slice(b"+++ /dev/null\n"),
+        }
+        alt_diff::write_unified(buf, &old_bytes, &new_bytes, 3);
+        Ok(())
+    }
+
+    fn blob_bytes(&self, oid: ObjectId) -> Res<Vec<u8>> {
+        Ok(self.odb.get(&oid)?.ok_or("object missing from store")?.data)
     }
 
     fn head_branch(&self) -> Res<String> {
@@ -410,17 +497,7 @@ impl NativeRepo {
 
     /// Refuses the switch if any tracked file has staged or unstaged changes.
     fn ensure_clean_for_switch(&self) -> Res<()> {
-        let branch = self.head_branch()?;
-        let head = match self.refs.resolve(&branch)? {
-            Some(commit) => {
-                let obj = self.odb.get(&commit)?.ok_or("HEAD commit missing")?;
-                let tree = alt_git_codec::Commit::parse(&obj.data)?
-                    .tree()
-                    .ok_or("commit has no tree")?;
-                flatten_tree(&self.odb, tree, self.algo)?
-            }
-            None => Vec::new(),
-        };
+        let head = self.head_entries()?;
         let index = index_entries(&self.index()?);
         let worktree = scan_worktree(&self.root, self.algo)?;
         let st = status(&head, &index, &worktree);
@@ -573,6 +650,14 @@ fn check_branch_name(name: &str) -> Res<()> {
         return Err(format!("'{name}' is not a valid branch name").into());
     }
     Ok(())
+}
+
+/// A 7-hex-char object id abbreviation, or all-zero for an absent side.
+fn abbrev(oid: Option<ObjectId>) -> String {
+    match oid {
+        Some(o) => o.to_string()[..7].to_owned(),
+        None => "0000000".to_owned(),
+    }
 }
 
 fn identity() -> (String, String) {

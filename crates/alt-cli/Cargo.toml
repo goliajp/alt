@@ -10,6 +10,7 @@ name = "alt"
 path = "src/main.rs"
 
 [dependencies]
+alt-diff.workspace = true
 alt-git-codec.workspace = true
 alt-git-index.workspace = true
 alt-export.workspace = true

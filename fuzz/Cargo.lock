@@ -13,14 +13,23 @@ name = "alt-cdc"
 version = "0.0.0"
 
 [[package]]
+name = "alt-diff"
+version = "0.0.0"
+
+[[package]]
 name = "alt-fuzz"
 version = "0.0.0"
 dependencies = [
+ "alt-diff",
  "alt-git-codec",
+ "alt-git-index",
  "alt-git-pack",
+ "alt-prism",
+ "alt-prism-deflate",
  "alt-store",
  "arbitrary",
  "libfuzzer-sys",
+ "sha1",
 ]
 
 [[package]]
@@ -29,6 +38,17 @@ version = "0.0.0"
 dependencies = [
  "bstr",
  "flate2",
+ "sha1",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
+name = "alt-git-index"
+version = "0.0.0"
+dependencies = [
+ "alt-git-codec",
+ "bstr",
  "sha1",
  "sha2",
  "thiserror",
@@ -44,6 +64,19 @@ dependencies = [
  "sha1",
  "sha2",
  "thiserror",
+]
+
+[[package]]
+name = "alt-prism"
+version = "0.0.0"
+
+[[package]]
+name = "alt-prism-deflate"
+version = "0.0.0"
+dependencies = [
+ "alt-prism",
+ "flate2",
+ "libz-sys",
 ]
 
 [[package]]
@@ -276,6 +309,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "libz-sys"
+version = "1.1.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85bc9657773828b90eeb625adff10eeac83cc21bbfd8e23a03eaa8a33c9e28d9"
+dependencies = [
+ "cc",
+ "libc",
+ "pkg-config",
+ "vcpkg",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -451,6 +496,12 @@ name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+
+[[package]]
+name = "vcpkg"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "version_check"

@@ -75,6 +75,12 @@ enum Command {
         #[arg(short = 'c')]
         create: bool,
     },
+    /// Show changes between the index and the working tree (or HEAD)
+    Diff {
+        /// Show staged changes (HEAD vs index) instead of unstaged
+        #[arg(long, visible_alias = "staged")]
+        cached: bool,
+    },
 }
 
 #[derive(clap::Args)]
@@ -136,6 +142,11 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         }
         Command::Switch { name, create } => {
             native::NativeRepo::discover(&cwd)?.switch(name, *create, &mut out)?;
+            out.flush()?;
+            return Ok(ExitCode::SUCCESS);
+        }
+        Command::Diff { cached } => {
+            native::NativeRepo::discover(&cwd)?.diff(*cached, &mut out)?;
             out.flush()?;
             return Ok(ExitCode::SUCCESS);
         }
@@ -211,7 +222,8 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         | Command::Commit { .. }
         | Command::Status
         | Command::Branch { .. }
-        | Command::Switch { .. } => {
+        | Command::Switch { .. }
+        | Command::Diff { .. } => {
             unreachable!("native commands are dispatched before git discovery")
         }
     }

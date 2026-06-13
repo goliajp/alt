@@ -1,0 +1,8 @@
+[package]
+name = "alt-diff"
+description = "Histogram line diff (git's default algorithm) + unified-diff formatting"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

@@ -16,6 +16,7 @@ alt-store = { path = "../crates/alt-store" }
 alt-prism = { path = "../crates/alt-prism" }
 alt-prism-deflate = { path = "../crates/alt-prism-deflate" }
 alt-git-index = { path = "../crates/alt-git-index" }
+alt-diff = { path = "../crates/alt-diff" }
 sha1 = "0.10"
 
 # Standalone workspace: the fuzz crate needs nightly + libfuzzer and must
@@ -56,6 +57,13 @@ bench = false
 [[bin]]
 name = "index_parse"
 path = "fuzz_targets/index_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "diff_apply"
+path = "fuzz_targets/diff_apply.rs"
 test = false
 doc = false
 bench = false

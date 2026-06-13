@@ -294,6 +294,69 @@ pub fn index_entries(index: &Index) -> Vec<WorkEntry> {
     out
 }
 
+/// One path that differs between two entry lists, carrying both sides so a
+/// caller can fetch and diff their contents. `old`/`new` are `None` when the
+/// path is absent from that side (a pure add or delete).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Change<'a> {
+    pub path: &'a BString,
+    pub old: Option<&'a WorkEntry>,
+    pub new: Option<&'a WorkEntry>,
+}
+
+/// Sorted-merge of two path-sorted entry lists into the set of differing
+/// paths (added / deleted / oid-or-mode changed). Equal entries are dropped.
+pub fn changes<'a>(old: &'a [WorkEntry], new: &'a [WorkEntry]) -> Vec<Change<'a>> {
+    let mut out = Vec::new();
+    let (mut i, mut j) = (0, 0);
+    while i < old.len() && j < new.len() {
+        match old[i].path.cmp(&new[j].path) {
+            std::cmp::Ordering::Less => {
+                out.push(Change {
+                    path: &old[i].path,
+                    old: Some(&old[i]),
+                    new: None,
+                });
+                i += 1;
+            }
+            std::cmp::Ordering::Greater => {
+                out.push(Change {
+                    path: &new[j].path,
+                    old: None,
+                    new: Some(&new[j]),
+                });
+                j += 1;
+            }
+            std::cmp::Ordering::Equal => {
+                if old[i].oid != new[j].oid || old[i].mode != new[j].mode {
+                    out.push(Change {
+                        path: &new[j].path,
+                        old: Some(&old[i]),
+                        new: Some(&new[j]),
+                    });
+                }
+                i += 1;
+                j += 1;
+            }
+        }
+    }
+    for e in &old[i..] {
+        out.push(Change {
+            path: &e.path,
+            old: Some(e),
+            new: None,
+        });
+    }
+    for e in &new[j..] {
+        out.push(Change {
+            path: &e.path,
+            old: None,
+            new: Some(e),
+        });
+    }
+    out
+}
+
 /// Three-way status. Inputs must each be sorted by path. `head` and `index`
 /// drive the staged column (index vs HEAD); `index` and `worktree` drive the
 /// unstaged column and the untracked list.

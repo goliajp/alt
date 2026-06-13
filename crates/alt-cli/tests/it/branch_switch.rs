@@ -61,7 +61,10 @@ fn branch_switch_materializes_tree_and_exports_clean() {
     // switch to main: b.txt must vanish, a.txt stays
     let sw = ok(alt(root, &["switch", "main"]));
     assert!(sw.contains("Switched to branch 'main'"), "{sw}");
-    assert!(!root.join("b.txt").exists(), "feat-only file removed on main");
+    assert!(
+        !root.join("b.txt").exists(),
+        "feat-only file removed on main"
+    );
     assert!(root.join("a.txt").exists(), "shared file kept");
     assert!(
         ok(alt(root, &["status"])).contains("working tree clean"),
@@ -85,7 +88,10 @@ fn branch_switch_materializes_tree_and_exports_clean() {
 
     // -c creates and switches in one step, carrying the staged c.txt over
     let created = ok(alt(root, &["switch", "-c", "feat2"]));
-    assert!(created.contains("Switched to a new branch 'feat2'"), "{created}");
+    assert!(
+        created.contains("Switched to a new branch 'feat2'"),
+        "{created}"
+    );
     assert!(ok(alt(root, &["branch"])).contains("* feat2"));
     ok(alt(root, &["commit", "-m", "third"])); // commit so the tree is clean
 
