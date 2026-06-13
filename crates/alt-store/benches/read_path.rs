@@ -5,7 +5,7 @@
 //! a depth-D chain is D decodes + D re-hashes. The slope across depth
 //! attributes the read cost to per-layer unchain vs the fixed read floor.
 
-use alt_store::{ChunkId, ChunkStore};
+use alt_store::{BlobStore, ChunkId, ChunkStore};
 use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 
 const CHUNK: usize = 64 << 10;
@@ -87,6 +87,26 @@ fn bench(c: &mut Criterion) {
     });
     g.bench_function("blake3_rehash_64kib", |b| {
         b.iter(|| black_box(ChunkId::of(black_box(&raw))))
+    });
+    g.finish();
+
+    // the win: a multi-chunk blob read. Tiered verification assembles the
+    // chunks unverified and hashes once at the blob boundary with the
+    // parallel hasher, instead of one single-threaded hash per chunk.
+    let blob_dir = tempfile::tempdir().unwrap();
+    let mut blobs = BlobStore::open(blob_dir.path()).unwrap();
+    let big = fill(4 << 20, 0xE5); // ~64 chunks
+    let blob = blobs.put(&big).unwrap();
+    blobs.flush().unwrap();
+    let mut g = c.benchmark_group("blob");
+    g.throughput(Throughput::Bytes(big.len() as u64));
+    g.bench_function("read_4mib", |b| {
+        b.iter(|| black_box(blobs.get(black_box(blob)).unwrap()))
+    });
+    // deep verify re-hashes every chunk single-threaded (the pre-tiered
+    // behavior) — the gap to read_4mib is the win
+    g.bench_function("verify_4mib", |b| {
+        b.iter(|| blobs.verify(black_box(blob)).unwrap())
     });
     g.finish();
 }

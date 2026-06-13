@@ -186,6 +186,26 @@ impl Default for Options {
     }
 }
 
+/// How much a chunk read re-hashes. Tiered verification (M3.5 §阶段 B):
+/// the per-layer/per-chunk hash was the dominant read cost, so the default
+/// read verifies once at the boundary and deep scrubbing is opt-in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Verify {
+    /// no hashing — the caller verifies at a higher boundary (the blob hash)
+    None,
+    /// hash only the requested address (the assembled result)
+    Boundary,
+    /// hash every layer (fsck: localize, not just detect)
+    Deep,
+}
+
+impl Verify {
+    /// Whether to hash a layer; `is_boundary` is true for the requested id.
+    fn hash_at(self, is_boundary: bool) -> bool {
+        matches!(self, Verify::Deep) || (matches!(self, Verify::Boundary) && is_boundary)
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct Location {
     seq: u32,
@@ -589,17 +609,47 @@ impl ChunkStore {
         Ok(())
     }
 
-    /// Reads a chunk back. The payload is decoded (resolving any lineage
-    /// delta chain) and re-hashed level by level: a result is only ever
-    /// the exact bytes the address was computed from.
+    /// Reads a chunk back, resolving any lineage delta chain. The default
+    /// re-hashes once, at the requested address: a corrupt layer anywhere in
+    /// the chain changes the assembled bytes, so a single boundary hash still
+    /// detects it (tiered verification, M3.5 §阶段 B — the per-chunk hash was
+    /// ~89% of read time). Deep per-layer verification is [`verify_chunk`];
+    /// the blob assembler reads with [`read_unverified`] and hashes at the
+    /// blob boundary instead.
     pub fn get(&self, id: ChunkId) -> Result<Vec<u8>, StoreError> {
+        self.resolve(id, Verify::Boundary)
+    }
+
+    /// Deep scrub: resolve `id` re-hashing every layer from disk (bypassing
+    /// the read cache), so corruption is localized to the failing layer
+    /// rather than only detected at the boundary. The fsck path.
+    pub fn verify_chunk(&self, id: ChunkId) -> Result<(), StoreError> {
+        self.resolve(id, Verify::Deep).map(drop)
+    }
+
+    /// Resolves a chunk with no hashing (structural checks only). Internal:
+    /// the caller must verify at a higher boundary — the blob hash.
+    pub(crate) fn read_unverified(&self, id: ChunkId) -> Result<Vec<u8>, StoreError> {
+        self.resolve(id, Verify::None)
+    }
+
+    /// Resolves a chunk re-hashing every layer; the bytes are returned so the
+    /// blob deep-verify can reassemble and check the blob boundary too.
+    pub(crate) fn read_deep(&self, id: ChunkId) -> Result<Vec<u8>, StoreError> {
+        self.resolve(id, Verify::Deep)
+    }
+
+    fn resolve(&self, id: ChunkId, verify: Verify) -> Result<Vec<u8>, StoreError> {
         // descend: collect delta frames until a full record or a cached
         // base; iterative so chain length never threatens the stack
         let mut frames: Vec<(ChunkId, u32, Vec<u8>)> = Vec::new();
         let mut cur = id;
         let data: Vec<u8>;
         loop {
-            if !frames.is_empty()
+            // a deep scrub re-reads every layer from disk; the cache may hold
+            // bytes that were only boundary-verified, so deep bypasses it
+            if verify != Verify::Deep
+                && !frames.is_empty()
                 && let Some(hit) = self.cache.lock().unwrap().get(&cur)
             {
                 data = (*hit).clone();
@@ -623,7 +673,10 @@ impl ChunkStore {
             }
             match header.encoding {
                 ENC_RAW => {
-                    data = Self::verified(cur, payload, header.orig_len)?;
+                    data = Self::sized(cur, payload, header.orig_len)?;
+                    if verify.hash_at(frames.is_empty()) {
+                        Self::check_hash(cur, &data)?;
+                    }
                     break;
                 }
                 ENC_ZSTD => {
@@ -631,7 +684,10 @@ impl ChunkStore {
                         id: cur,
                         reason: "zstd decode failed",
                     })?;
-                    data = Self::verified(cur, raw, header.orig_len)?;
+                    data = Self::sized(cur, raw, header.orig_len)?;
+                    if verify.hash_at(frames.is_empty()) {
+                        Self::check_hash(cur, &data)?;
+                    }
                     break;
                 }
                 ENC_DELTA => {
@@ -647,7 +703,8 @@ impl ChunkStore {
             }
         }
 
-        // unwind: apply frames top-down, keeping every base hot
+        // unwind: apply frames top-down, keeping every base hot. The last
+        // frame popped is the requested id — its hash is the boundary.
         let mut data = data;
         let mut base_id = cur;
         while let Some((fid, orig_len, z)) = frames.pop() {
@@ -657,7 +714,10 @@ impl ChunkStore {
                     reason: "delta decode failed",
                 },
             )?;
-            let out = Self::verified(fid, out, orig_len)?;
+            let out = Self::sized(fid, out, orig_len)?;
+            if verify.hash_at(frames.is_empty()) {
+                Self::check_hash(fid, &out)?;
+            }
             self.cache.lock().unwrap().put(base_id, Arc::new(data));
             data = out;
             base_id = fid;
@@ -665,20 +725,26 @@ impl ChunkStore {
         Ok(data)
     }
 
-    fn verified(id: ChunkId, data: Vec<u8>, orig_len: u32) -> Result<Vec<u8>, StoreError> {
+    /// Structural length check (always run — cheap, catches gross corruption).
+    fn sized(id: ChunkId, data: Vec<u8>, orig_len: u32) -> Result<Vec<u8>, StoreError> {
         if data.len() != orig_len as usize {
             return Err(StoreError::Corrupt {
                 id,
                 reason: "length mismatch",
             });
         }
-        if ChunkId::of(&data) != id {
+        Ok(data)
+    }
+
+    /// BLAKE3 re-hash against the address (the expensive, deferrable check).
+    fn check_hash(id: ChunkId, data: &[u8]) -> Result<(), StoreError> {
+        if ChunkId::of(data) != id {
             return Err(StoreError::Corrupt {
                 id,
                 reason: "hash mismatch",
             });
         }
-        Ok(data)
+        Ok(())
     }
 
     pub fn contains(&self, id: ChunkId) -> bool {

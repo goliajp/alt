@@ -127,9 +127,16 @@ fn flipped_data_chunk_surfaces_through_blob_get() {
     fs::write(&pack_path, &bytes).unwrap();
 
     let store = BlobStore::open(dir.path()).unwrap();
+    // the fast read assembles chunks unverified and hashes once at the blob
+    // boundary; a corrupt chunk still surfaces there
     assert!(
         matches!(store.get(id), Err(StoreError::Corrupt { .. })),
         "blob reads must surface chunk corruption"
+    );
+    // the deep scrub re-hashes every chunk too
+    assert!(
+        matches!(store.verify(id), Err(StoreError::Corrupt { .. })),
+        "deep verify must surface chunk corruption"
     );
 }
 

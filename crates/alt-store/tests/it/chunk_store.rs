@@ -298,3 +298,48 @@ fn flipped_delta_payload_is_detected() {
         "a flipped delta byte must surface as corruption"
     );
 }
+
+#[test]
+fn reading_a_tail_detects_corruption_in_its_base() {
+    // Tiered verification: a fast read no longer re-hashes every layer, only
+    // the requested address. Corruption in a *base* (never hashed directly
+    // when reading the tail) must still surface, caught by the tail's
+    // boundary hash — and a deep scrub must localize it to the base.
+    let dir = tempfile::tempdir().unwrap();
+    let base_data = random_bytes(4096, 71); // incompressible -> stored raw
+    let mut tail_data = base_data.clone();
+    tail_data[9] ^= 0x33;
+
+    let (base, tail) = {
+        let mut store = ChunkStore::open(dir.path()).unwrap();
+        let base = store.put(&base_data).unwrap();
+        let tail = store.put(&tail_data).unwrap();
+        assert!(store.reencode_as_delta(tail, base).unwrap());
+        store.flush().unwrap();
+        (base, tail)
+    };
+
+    // flip a byte inside the base's raw payload. The base is the first
+    // record, so its payload starts after the file header (5) and the
+    // record header (41) = offset 46.
+    let pack = dir
+        .path()
+        .join(store_files(dir.path(), ".altpack")[0].clone());
+    let mut bytes = fs::read(&pack).unwrap();
+    bytes[46 + 100] ^= 0xFF;
+    fs::write(&pack, &bytes).unwrap();
+
+    let store = ChunkStore::open(dir.path()).unwrap();
+    // fast read of the tail catches the corrupt base at the boundary
+    assert!(
+        matches!(store.get(tail), Err(StoreError::Corrupt { .. })),
+        "a corrupt base must surface when reading the tail, never as data"
+    );
+    // and reading the base directly catches it at its own boundary
+    assert!(matches!(store.get(base), Err(StoreError::Corrupt { .. })));
+    // deep scrub of the tail localizes the fault to the base layer
+    match store.verify_chunk(tail) {
+        Err(StoreError::Corrupt { id, .. }) => assert_eq!(id, base, "deep verify localizes"),
+        other => panic!("deep verify must localize the corrupt base, got {other:?}"),
+    }
+}

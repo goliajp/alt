@@ -160,19 +160,38 @@ impl BlobStore {
         Ok(id)
     }
 
-    /// Materializes a blob. The result is re-hashed against the blob id on
-    /// top of the chunk store's per-chunk verification.
+    /// Materializes a blob. The chunks are read without per-chunk hashing
+    /// and the assembled result is re-hashed once against the blob id, using
+    /// the parallel BLAKE3 path — any corrupt chunk or manifest node changes
+    /// the bytes, so one boundary hash still detects it (M3.5 §阶段 B). Deep
+    /// per-chunk verification is [`verify`].
     pub fn get(&self, id: BlobId) -> Result<Vec<u8>, StoreError> {
+        self.materialize(id, false)
+    }
+
+    /// Deep scrub: re-hash every chunk and layer of the blob (fsck), then the
+    /// blob boundary — corruption is localized, not just detected.
+    pub fn verify(&self, id: BlobId) -> Result<(), StoreError> {
+        self.materialize(id, true).map(drop)
+    }
+
+    fn materialize(&self, id: BlobId, deep: bool) -> Result<Vec<u8>, StoreError> {
         let Some((root, total_len)) = self.map.get(id) else {
             // no manifest: the blob is a single chunk under the same hash
-            return match self.chunks.get(ChunkId(id.0)) {
+            let chunk = ChunkId(id.0);
+            let res = if deep {
+                self.chunks.verify_chunk(chunk).map(|()| Vec::new())
+            } else {
+                self.chunks.get(chunk)
+            };
+            return match res {
                 Ok(data) => Ok(data),
                 Err(StoreError::NotFound(_)) => Err(StoreError::BlobNotFound(id)),
                 Err(e) => Err(e),
             };
         };
         let mut out = Vec::with_capacity(total_len as usize);
-        self.walk(root, None, &mut out)?;
+        self.walk(root, None, &mut out, deep)?;
         if out.len() as u64 != total_len {
             return Err(StoreError::Corrupt {
                 id: root,
@@ -193,15 +212,23 @@ impl BlobStore {
         node_id: ChunkId,
         expect_level: Option<u8>,
         out: &mut Vec<u8>,
+        deep: bool,
     ) -> Result<(), StoreError> {
-        let bytes = self.chunks.get(node_id)?;
+        let read = |id| {
+            if deep {
+                self.chunks.read_deep(id)
+            } else {
+                self.chunks.read_unverified(id)
+            }
+        };
+        let bytes = read(node_id)?;
         let (level, entries) = parse_node(&bytes)?;
         if expect_level.is_some_and(|expect| level != expect) {
             return Err(StoreError::Format("manifest level mismatch"));
         }
         for entry in entries {
             if level == 0 {
-                let piece = self.chunks.get(entry.id)?;
+                let piece = read(entry.id)?;
                 if piece.len() as u64 != entry.span {
                     return Err(StoreError::Corrupt {
                         id: entry.id,
@@ -210,7 +237,7 @@ impl BlobStore {
                 }
                 out.extend_from_slice(&piece);
             } else {
-                self.walk(entry.id, Some(level - 1), out)?;
+                self.walk(entry.id, Some(level - 1), out, deep)?;
             }
         }
         Ok(())
