@@ -15,6 +15,8 @@ alt-git-pack = { path = "../crates/alt-git-pack" }
 alt-store = { path = "../crates/alt-store" }
 alt-prism = { path = "../crates/alt-prism" }
 alt-prism-deflate = { path = "../crates/alt-prism-deflate" }
+alt-git-index = { path = "../crates/alt-git-index" }
+sha1 = "0.10"
 
 # Standalone workspace: the fuzz crate needs nightly + libfuzzer and must
 # not be built by the parent workspace's stable `cargo build --workspace`.
@@ -47,6 +49,13 @@ bench = false
 [[bin]]
 name = "prism_deflate"
 path = "fuzz_targets/prism_deflate.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "index_parse"
+path = "fuzz_targets/index_parse.rs"
 test = false
 doc = false
 bench = false

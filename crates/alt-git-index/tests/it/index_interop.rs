@@ -84,6 +84,34 @@ fn index_matches_git(algo: HashAlgo, object_format: &str) {
 }
 
 #[test]
+fn serialize_round_trips_and_git_reads_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path();
+    common::make_repo(repo, "sha1");
+    let algo = HashAlgo::Sha1;
+
+    let before = git_stage_list(repo);
+    let index = Index::open(&repo.join(".git/index"), algo).unwrap();
+
+    // parse → serialize → parse reproduces the entries (and the TREE ext)
+    let bytes = index.serialize(algo);
+    let reparsed = Index::parse(&bytes, algo).unwrap();
+    assert_eq!(reparsed.entries, index.entries, "entries round-trip");
+    assert_eq!(
+        reparsed.extensions, index.extensions,
+        "extensions preserved"
+    );
+
+    // and git itself reads our serialized index identically
+    std::fs::write(repo.join(".git/index"), &bytes).unwrap();
+    assert_eq!(
+        git_stage_list(repo),
+        before,
+        "git must read our serialized index the same"
+    );
+}
+
+#[test]
 fn index_matches_git_sha1() {
     index_matches_git(HashAlgo::Sha1, "sha1");
 }
