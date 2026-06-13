@@ -57,8 +57,10 @@ pub struct ImportReport {
     pub refs_seen: usize,
     /// Refs created or moved by this run.
     pub refs_changed: usize,
-    /// Same-path blob versions re-encoded as lineage deltas.
+    /// Same-path versions re-encoded as lineage deltas (blobs + trees).
     pub lineage_deltas: u64,
+    /// The subset of `lineage_deltas` that are tree objects (M3.5 S5).
+    pub tree_lineage_deltas: u64,
     /// The import op — None when state was already converged (rerun).
     pub op: Option<alt_refs::OpId>,
 }
@@ -155,7 +157,7 @@ pub fn import_git(
             RefTarget::Symbolic(_) => None,
         })
         .collect();
-    let lineage_deltas = lineage_pass(&mut odb, &tips, algo)?;
+    let (lineage_deltas, tree_lineage_deltas) = lineage_pass(&mut odb, &tips, algo)?;
     odb.flush()?;
 
     let refs_seen = wanted.len();
@@ -196,6 +198,7 @@ pub fn import_git(
         refs_seen,
         refs_changed,
         lineage_deltas,
+        tree_lineage_deltas,
         op,
     })
 }
@@ -208,7 +211,7 @@ fn lineage_pass(
     odb: &mut NativeOdb,
     tips: &[ObjectId],
     algo: HashAlgo,
-) -> Result<u64, ImportError> {
+) -> Result<(u64, u64), ImportError> {
     let mut visited: HashSet<ObjectId> = HashSet::new();
     let mut queue: VecDeque<ObjectId> = VecDeque::new();
     for &tip in tips {
@@ -232,7 +235,8 @@ fn lineage_pass(
     }
 
     let mut deltas = 0u64;
-    let mut edges: Vec<(ObjectId, ObjectId)> = Vec::new();
+    let mut tree_deltas = 0u64;
+    let mut edges: Vec<(ObjectId, ObjectId, bool)> = Vec::new();
     while let Some(oid) = queue.pop_front() {
         let Some(obj) = odb.get(&oid)? else { continue };
         let commit = Commit::parse(&obj.data)?;
@@ -253,24 +257,30 @@ fn lineage_pass(
         };
         edges.clear();
         diff_trees(odb, old_tree, new_tree, algo, &mut edges)?;
-        for (old_blob, new_blob) in edges.drain(..) {
-            if odb.lineage_delta(&old_blob, &new_blob)? {
+        for (old, new, is_tree) in edges.drain(..) {
+            if odb.lineage_delta(&old, &new)? {
                 deltas += 1;
+                if is_tree {
+                    tree_deltas += 1;
+                }
             }
         }
     }
-    Ok(deltas)
+    Ok((deltas, tree_deltas))
 }
 
-/// Collects (old blob, new blob) pairs for paths whose content changed
-/// between two trees. Order anomalies or shape changes just skip a pair —
-/// a missed edge only costs compression, never correctness.
+/// Collects same-path lineage edges (old, new, is_tree) for objects whose
+/// content changed between two trees: the changed tree pair itself plus,
+/// recursively, every changed sub-tree and blob. Tree objects are highly
+/// similar across commits, so delta'ing them is the main volume win (M3.5
+/// S5). Order anomalies or shape changes just skip a pair — a missed edge
+/// only costs compression, never correctness.
 fn diff_trees(
     odb: &NativeOdb,
     old: ObjectId,
     new: ObjectId,
     algo: HashAlgo,
-    edges: &mut Vec<(ObjectId, ObjectId)>,
+    edges: &mut Vec<(ObjectId, ObjectId, bool)>,
 ) -> Result<(), ImportError> {
     if old == new {
         return Ok(());
@@ -281,6 +291,9 @@ fn diff_trees(
     if old_obj.kind != ObjectKind::Tree || new_obj.kind != ObjectKind::Tree {
         return Ok(());
     }
+    // this tree changed: record the tree pair as a lineage edge, then
+    // descend for the children that changed within it
+    edges.push((old, new, true));
     let old_tree = Tree::parse(&old_obj.data, algo)?;
     let new_tree = Tree::parse(&new_obj.data, algo)?;
     let (mut i, mut j) = (0, 0);
@@ -292,7 +305,7 @@ fn diff_trees(
             std::cmp::Ordering::Equal => {
                 if oe.oid != ne.oid {
                     match (oe.mode.object_kind(), ne.mode.object_kind()) {
-                        (ObjectKind::Blob, ObjectKind::Blob) => edges.push((oe.oid, ne.oid)),
+                        (ObjectKind::Blob, ObjectKind::Blob) => edges.push((oe.oid, ne.oid, false)),
                         (ObjectKind::Tree, ObjectKind::Tree) => {
                             diff_trees(odb, oe.oid, ne.oid, algo, edges)?
                         }

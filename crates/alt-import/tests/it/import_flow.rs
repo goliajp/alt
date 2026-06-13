@@ -181,8 +181,16 @@ fn import_delta_encodes_same_path_history() {
         "three predecessors of evolving.txt must delta, got {}",
         report.lineage_deltas
     );
+    // each of those commits also changed the root tree, so the predecessor
+    // trees delta too (M3.5 S5 — the main volume win)
+    assert!(
+        report.tree_lineage_deltas >= 3,
+        "predecessor trees must delta, got {}",
+        report.tree_lineage_deltas
+    );
 
-    // every object still reads back byte-identical through the chains
+    // every object still reads back byte-identical through the chains —
+    // trees included, now that they are delta-encoded
     assert_objects_migrated(repo_dir.path(), &alt_dir);
 
     // idempotent rerun: nothing new to re-encode, no op
