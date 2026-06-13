@@ -40,8 +40,10 @@ fn corpus_bench_volume_and_throughput() {
     }
     let corpus = std::env::var("ALT_CORPUS").expect("set ALT_CORPUS to the corpus directory");
 
-    eprintln!("| repo | git objects | .alt store | ratio | import | read .alt | read .git (M1) |");
-    eprintln!("|---|---|---|---|---|---|---|");
+    eprintln!(
+        "| repo | git objects | .alt raw | .alt compact | ratio | import | read .alt | read .git (M1) |"
+    );
+    eprintln!("|---|---|---|---|---|---|---|---|");
 
     for entry in fs::read_dir(&corpus).unwrap() {
         let repo_dir = entry.unwrap().path();
@@ -58,9 +60,19 @@ fn corpus_bench_volume_and_throughput() {
         let t0 = Instant::now();
         let report = import_git(&repo, &alt_dir, "bench", 1).unwrap();
         let import_s = t0.elapsed().as_secs_f64();
+        let alt_raw = dir_bytes(&alt_dir);
+
+        // --- compact: reclaim the dead weight from lineage delta re-encoding
+        // (S5/S6 supersede full tree/commit/blob records; S7 drops them) ---
+        let compact = {
+            let mut odb = NativeOdb::open(&alt_dir).unwrap();
+            let r = odb.compact().unwrap();
+            odb.flush().unwrap();
+            r
+        };
         let alt_bytes = dir_bytes(&alt_dir);
 
-        // --- full-store read throughput, .alt backend ---
+        // --- full-store read throughput, .alt backend (post-compaction) ---
         let odb = NativeOdb::open(&alt_dir).unwrap();
         let oids: Vec<_> = odb.entries().map(|e| e.git).collect();
         let t0 = Instant::now();
@@ -84,8 +96,9 @@ fn corpus_bench_volume_and_throughput() {
 
         let mib = |b: u64| b as f64 / (1 << 20) as f64;
         eprintln!(
-            "| {name} | {:.1} MiB | {:.1} MiB | {:.2}x | {:.1}s ({:.0} obj/s) | {:.1}s ({:.0} MiB/s) | {:.1}s ({:.0} MiB/s) |",
+            "| {name} | {:.1} MiB | {:.1} MiB | {:.1} MiB | {:.2}x | {:.1}s ({:.0} obj/s) | {:.1}s ({:.0} MiB/s) | {:.1}s ({:.0} MiB/s) |",
             mib(git_bytes),
+            mib(alt_raw),
             mib(alt_bytes),
             alt_bytes as f64 / git_bytes as f64,
             import_s,
@@ -94,6 +107,15 @@ fn corpus_bench_volume_and_throughput() {
             mib(alt_read_bytes) / alt_read_s,
             git_read_s,
             mib(git_read_bytes) / git_read_s,
+        );
+        eprintln!(
+            "  ↳ lineage deltas: {} total ({} tree, {} commit); compaction {} -> {} packs, reclaimed {:.1} MiB",
+            report.lineage_deltas,
+            report.tree_lineage_deltas,
+            report.commit_lineage_deltas,
+            compact.packs_before,
+            compact.packs_after,
+            mib(compact.bytes_before.saturating_sub(compact.bytes_after)),
         );
     }
 }

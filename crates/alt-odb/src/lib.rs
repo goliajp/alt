@@ -20,7 +20,7 @@ mod map;
 use std::path::PathBuf;
 
 use alt_git_codec::{ObjectId, ObjectKind, RawObject};
-use alt_store::{BlobId, BlobOptions, BlobStore, StoreError};
+use alt_store::{BlobId, BlobOptions, BlobStore, CompactReport, StoreError};
 
 pub use map::{MapEntry, ObjectMap};
 
@@ -134,6 +134,13 @@ impl NativeOdb {
         };
         let (old_alt, new_alt) = (old_entry.alt, new_entry.alt);
         Ok(self.blobs.lineage_delta(old_alt, new_alt)?)
+    }
+
+    /// Compacts the underlying chunk store, reclaiming the dead weight left
+    /// by lineage delta re-encoding. Object identities and the map are
+    /// untouched — only physical storage is rewritten.
+    pub fn compact(&mut self) -> Result<CompactReport, OdbError> {
+        Ok(self.blobs.compact()?)
     }
 
     /// Number of mapped git objects.
