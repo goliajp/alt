@@ -13,6 +13,8 @@ arbitrary = { version = "1", features = ["derive"] }
 alt-git-codec = { path = "../crates/alt-git-codec" }
 alt-git-pack = { path = "../crates/alt-git-pack" }
 alt-store = { path = "../crates/alt-store" }
+alt-prism = { path = "../crates/alt-prism" }
+alt-prism-deflate = { path = "../crates/alt-prism-deflate" }
 
 # Standalone workspace: the fuzz crate needs nightly + libfuzzer and must
 # not be built by the parent workspace's stable `cargo build --workspace`.
@@ -38,6 +40,13 @@ bench = false
 [[bin]]
 name = "store_delta_decode"
 path = "fuzz_targets/store_delta_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "prism_deflate"
+path = "fuzz_targets/prism_deflate.rs"
 test = false
 doc = false
 bench = false

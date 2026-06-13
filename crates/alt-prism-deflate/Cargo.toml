@@ -1,0 +1,11 @@
+[package]
+name = "alt-prism-deflate"
+description = "Deflate/zlib strip prism: inflate transparent compression, record the producer's params, recompose bit-exactly via C libz"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+alt-prism.workspace = true
+flate2.workspace = true
+libz-sys = "1"
