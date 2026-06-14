@@ -25,7 +25,7 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::fs::{File, OpenOptions};
-use std::io::{Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 const MAGIC: [u8; 4] = *b"ALTL";
@@ -131,6 +131,81 @@ pub struct OpLog {
     file: File,
     ops: Vec<Op>,
     by_id: HashMap<OpId, u32>,
+    /// Byte offset just past the last record we have replayed — where the
+    /// next record goes, absent a concurrent writer. Lets `append` read only
+    /// the tail another process may have added, rather than the whole file.
+    len_bytes: u64,
+}
+
+/// Walks length-prefixed records in `data[from..]`, verifying the hash chain
+/// continues from `prev_head`, pushing each op into `ops`/`by_id`. Returns the
+/// offset just past the last whole, valid record (so the caller can truncate a
+/// torn tail). A corrupt record that is not the final one is real corruption.
+fn replay_records(
+    data: &[u8],
+    from: usize,
+    mut prev_head: OpId,
+    ops: &mut Vec<Op>,
+    by_id: &mut HashMap<OpId, u32>,
+) -> Result<usize, OpLogError> {
+    let mut at = from;
+    let mut valid = from;
+    while let Some(len_bytes) = data.get(at..at + 4) {
+        let body_len = u32::from_le_bytes(len_bytes.try_into().unwrap()) as usize;
+        let Some(rec) = data.get(at + 4..at + 4 + body_len + CHECKSUM_LEN) else {
+            break; // torn record at EOF
+        };
+        let (body, check) = rec.split_at(body_len);
+        let hash = blake3::hash(body);
+        if hash.as_bytes()[..CHECKSUM_LEN] != *check {
+            if at + 4 + body_len + CHECKSUM_LEN == data.len() {
+                break; // torn final record: caller truncates
+            }
+            return Err(OpLogError::Format("oplog record corrupt"));
+        }
+        let op = parse_body(body)?;
+        if op.parent != prev_head {
+            return Err(OpLogError::Format("oplog chain broken"));
+        }
+        prev_head = op.id;
+        by_id.insert(op.id, ops.len() as u32);
+        ops.push(op);
+        at += 4 + body_len + CHECKSUM_LEN;
+        valid = at;
+    }
+    Ok(valid)
+}
+
+/// Takes an exclusive advisory lock on the log file for the duration of one
+/// append. `flock` is per-open-file-description and auto-releases when the fd
+/// closes (incl. a crash), so there are no stale lock files. Non-unix has no
+/// cross-process lock yet — single-writer there (documented limitation).
+#[cfg(unix)]
+fn lock_exclusive(file: &File) -> std::io::Result<()> {
+    use std::os::unix::io::AsRawFd;
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn unlock(file: &File) -> std::io::Result<()> {
+    use std::os::unix::io::AsRawFd;
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn lock_exclusive(_file: &File) -> std::io::Result<()> {
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn unlock(_file: &File) -> std::io::Result<()> {
+    Ok(())
 }
 
 impl OpLog {
@@ -150,6 +225,7 @@ impl OpLog {
         let Some(data) = existing else {
             let mut file = OpenOptions::new()
                 .create_new(true)
+                .read(true)
                 .write(true)
                 .open(&path)?;
             file.write_all(&file_header())?;
@@ -158,6 +234,7 @@ impl OpLog {
                 file,
                 ops: Vec::new(),
                 by_id: HashMap::new(),
+                len_bytes: HEADER_LEN as u64,
             });
         };
 
@@ -178,50 +255,39 @@ impl OpLog {
 
         let mut ops: Vec<Op> = Vec::new();
         let mut by_id = HashMap::new();
-        let mut at = HEADER_LEN.min(data.len());
-        let mut valid_len = at as u64;
         // a record that runs past EOF (torn length field or torn body) ends
         // the walk; the file is truncated back to the last whole record
-        while let Some(len_bytes) = data.get(at..at + 4) {
-            let body_len = u32::from_le_bytes(len_bytes.try_into().unwrap()) as usize;
-            let Some(rec) = data.get(at + 4..at + 4 + body_len + CHECKSUM_LEN) else {
-                break; // torn record at EOF
-            };
-            let (body, check) = rec.split_at(body_len);
-            let hash = blake3::hash(body);
-            if hash.as_bytes()[..CHECKSUM_LEN] != *check {
-                if at + 4 + body_len + CHECKSUM_LEN == data.len() {
-                    break; // torn final record: truncate below
-                }
-                return Err(OpLogError::Format("oplog record corrupt"));
-            }
-            let op = parse_body(body)?;
-            let expected_parent = ops.last().map_or(ROOT, |prev: &Op| prev.id);
-            if op.parent != expected_parent {
-                return Err(OpLogError::Format("oplog chain broken"));
-            }
-            by_id.insert(op.id, ops.len() as u32);
-            ops.push(op);
-            at += 4 + body_len + CHECKSUM_LEN;
-            valid_len = at as u64;
-        }
+        let start = HEADER_LEN.min(data.len());
+        let valid_len = replay_records(&data, start, ROOT, &mut ops, &mut by_id)? as u64;
 
-        let mut file = OpenOptions::new().write(true).open(&path)?;
-        if valid_len < HEADER_LEN as u64 {
+        let mut file = OpenOptions::new().read(true).write(true).open(&path)?;
+        let len_bytes = if valid_len < HEADER_LEN as u64 {
             file.set_len(0)?;
             file.write_all(&file_header())?;
             file.sync_all()?;
+            HEADER_LEN as u64
         } else {
             if valid_len < data.len() as u64 {
                 file.set_len(valid_len)?;
                 file.sync_all()?;
             }
             file.seek(SeekFrom::Start(valid_len))?;
-        }
-        Ok(Self { file, ops, by_id })
+            valid_len
+        };
+        Ok(Self {
+            file,
+            ops,
+            by_id,
+            len_bytes,
+        })
     }
 
-    /// Appends one op with the current head as parent and returns its id.
+    /// Appends one op, chaining it onto the **current on-disk head**, and
+    /// returns its id. Cross-process safe: an exclusive `flock` brackets a
+    /// short critical section that first catches up on any ops another writer
+    /// appended (so this op parents on the true head, not a stale in-memory
+    /// one), then writes. Concurrent writers serialize on the lock; the hash
+    /// chain stays linear and unbroken.
     pub fn append(
         &mut self,
         actor: &str,
@@ -235,6 +301,22 @@ impl OpLog {
             return Err(OpLogError::TooLarge(payload.len()));
         }
 
+        lock_exclusive(&self.file)?;
+        let result = self.append_locked(actor, timestamp_ms, payload);
+        // release explicitly; the lock is also dropped if the fd closes
+        let _ = unlock(&self.file);
+        result
+    }
+
+    /// The body of `append`, run while holding the exclusive lock.
+    fn append_locked(
+        &mut self,
+        actor: &str,
+        timestamp_ms: u64,
+        payload: &[u8],
+    ) -> Result<OpId, OpLogError> {
+        self.catch_up()?;
+
         let parent = self.head().unwrap_or(ROOT);
         let body = encode_body(&parent, timestamp_ms, actor, payload);
         let hash = blake3::hash(&body);
@@ -243,7 +325,9 @@ impl OpLog {
         rec.extend_from_slice(&(body.len() as u32).to_le_bytes());
         rec.extend_from_slice(&body);
         rec.extend_from_slice(&hash.as_bytes()[..CHECKSUM_LEN]);
+        self.file.seek(SeekFrom::Start(self.len_bytes))?;
         self.file.write_all(&rec)?;
+        self.len_bytes += rec.len() as u64;
 
         let op = Op {
             id: OpId(*hash.as_bytes()),
@@ -256,6 +340,30 @@ impl OpLog {
         self.by_id.insert(op.id, self.ops.len() as u32);
         self.ops.push(op);
         Ok(OpId(*hash.as_bytes()))
+    }
+
+    /// Replays any records appended past our known tail (by another writer),
+    /// extending the in-memory chain so the next append parents on the real
+    /// head. A torn tail left by a crashed writer is truncated (we hold the
+    /// lock, so no live writer is mid-append).
+    fn catch_up(&mut self) -> Result<(), OpLogError> {
+        let size = self.file.metadata()?.len();
+        if size <= self.len_bytes {
+            return Ok(());
+        }
+        let mut tail = vec![0u8; (size - self.len_bytes) as usize];
+        self.file.seek(SeekFrom::Start(self.len_bytes))?;
+        self.file.read_exact(&mut tail)?;
+
+        let head = self.head().unwrap_or(ROOT);
+        let valid = replay_records(&tail, 0, head, &mut self.ops, &mut self.by_id)? as u64;
+        let new_len = self.len_bytes + valid;
+        if valid < tail.len() as u64 {
+            self.file.set_len(new_len)?; // drop a crashed writer's torn record
+            self.file.sync_all()?;
+        }
+        self.len_bytes = new_len;
+        Ok(())
     }
 
     /// The latest op — the state the log currently describes.
@@ -349,5 +457,90 @@ mod tests {
         let id = log.append("", 0, b"").unwrap();
         assert_eq!(log.get(&id).unwrap().actor, "");
         assert_eq!(log.get(&id).unwrap().payload, b"");
+    }
+
+    #[test]
+    fn catches_up_on_a_concurrently_grown_log() {
+        // two independent openers of the same log: one appends, the other must
+        // see it (catch-up) and chain onto it rather than fork the chain.
+        let dir = tempfile::tempdir().unwrap();
+        let mut a = OpLog::open(dir.path()).unwrap();
+        let mut b = OpLog::open(dir.path()).unwrap();
+
+        let a1 = a.append("a", 1, b"a1").unwrap();
+        // b still thinks the log is empty; its append must catch up to a1 first
+        let b1 = b.append("b", 2, b"b1").unwrap();
+        assert_eq!(b.get(&b1).unwrap().parent, a1, "b1 chains onto a1");
+
+        // and a, in turn, catches up to b1 on its next append
+        let a2 = a.append("a", 3, b"a2").unwrap();
+        assert_eq!(a.get(&a2).unwrap().parent, b1, "a2 chains onto b1");
+
+        // a fresh reader sees a single unbroken chain of all three
+        let reopened = OpLog::open(dir.path()).unwrap();
+        assert_eq!(reopened.len(), 3);
+        assert_eq!(reopened.head(), Some(a2));
+    }
+
+    #[test]
+    fn concurrent_writers_keep_the_chain_linear_and_complete() {
+        use std::sync::{Arc, Barrier};
+
+        let dir = tempfile::tempdir().unwrap();
+        OpLog::open(dir.path()).unwrap(); // create the file up front
+
+        const WRITERS: usize = 8;
+        const PER_WRITER: usize = 25;
+        let barrier = Arc::new(Barrier::new(WRITERS));
+        let path = dir.path().to_path_buf();
+
+        let mut handles = Vec::new();
+        for w in 0..WRITERS {
+            let barrier = Arc::clone(&barrier);
+            let path = path.clone();
+            handles.push(std::thread::spawn(move || {
+                // each thread opens its OWN log handle → separate flock
+                // descriptions, exactly like separate processes contending.
+                let mut log = OpLog::open(&path).unwrap();
+                barrier.wait();
+                for i in 0..PER_WRITER {
+                    let payload = format!("w{w}-{i}");
+                    log.append(
+                        &format!("agent/{w}"),
+                        (w * 1000 + i) as u64,
+                        payload.as_bytes(),
+                    )
+                    .unwrap();
+                }
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        // reopening replays + verifies the whole chain; success means it never
+        // broke. Every writer's every op must be present exactly once.
+        let log = OpLog::open(&path).unwrap();
+        assert_eq!(
+            log.len(),
+            WRITERS * PER_WRITER,
+            "no op lost and none duplicated"
+        );
+        let mut seen: std::collections::HashSet<Vec<u8>> = std::collections::HashSet::new();
+        for op in log.ops() {
+            assert!(
+                seen.insert(op.payload.clone()),
+                "duplicate op {:?}",
+                op.payload
+            );
+        }
+        for w in 0..WRITERS {
+            for i in 0..PER_WRITER {
+                assert!(
+                    seen.contains(format!("w{w}-{i}").as_bytes()),
+                    "missing op w{w}-{i}"
+                );
+            }
+        }
     }
 }

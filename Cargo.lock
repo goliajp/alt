@@ -175,6 +175,7 @@ name = "alt-oplog"
 version = "0.0.0"
 dependencies = [
  "blake3",
+ "libc",
  "tempfile",
  "thiserror",
 ]
