@@ -10,6 +10,7 @@ use std::path::Path;
 use std::process::Command;
 
 use alt_cli::native::{Store, resolve_workspace};
+use alt_repo::Repository;
 use criterion::{Criterion, criterion_group, criterion_main};
 
 /// Builds a repo with `commits` commits via the real `alt` binary (setup runs
@@ -40,17 +41,27 @@ fn run(cwd: &Path, args: &[&str]) {
 }
 
 fn bench(c: &mut Criterion) {
-    let (_dir, alt_dir) = fixture(200);
+    let (dir, alt_dir) = fixture(200);
+    let root = dir.path();
 
-    // cold: what every direct `alt` invocation pays to start serving a command
+    // native reads (status/branch/diff): cold open vs the daemon's per-request
+    // store catch-up
     c.bench_function("store_open", |b| {
         b.iter(|| Store::open(alt_dir.clone()).unwrap());
     });
-
-    // warm: what the daemon pays per request on a held store (idle catch-up)
     let mut store = Store::open(alt_dir.clone()).unwrap();
     c.bench_function("store_refresh", |b| {
         b.iter(|| store.refresh().unwrap());
+    });
+
+    // `log` (git-layer): cold Repository discover vs the daemon's per-request
+    // repository catch-up — the open it now amortizes too
+    c.bench_function("repo_open", |b| {
+        b.iter(|| Repository::discover(root).unwrap());
+    });
+    let mut repo = Repository::discover(root).unwrap();
+    c.bench_function("repo_refresh", |b| {
+        b.iter(|| repo.refresh().unwrap());
     });
 }
 

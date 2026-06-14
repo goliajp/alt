@@ -209,6 +209,28 @@ impl Repository {
         &self.config
     }
 
+    /// Brings a held-open repository up to date with writes other processes
+    /// committed since it was opened, so a long-lived reader (the `altd`
+    /// daemon) never serves a stale git-layer read. The native backend reuses
+    /// the store's catch-up machinery (tail reads under the read lock); the git
+    /// backend re-reads its refs and re-scans its pack directory. Config is
+    /// loaded once at open and not reloaded here.
+    pub fn refresh(&mut self) -> Result<(), RepoError> {
+        let repo_dir = &self.repo_dir;
+        let algo = self.algo;
+        match &mut self.backend {
+            Backend::Alt(alt) => {
+                alt.odb.refresh()?;
+                alt.refs.refresh()?;
+            }
+            Backend::Git { refs, packs, .. } => {
+                *refs = RefStore::open(repo_dir, algo)?;
+                *packs = odb::open_packs(&repo_dir.join("objects").join("pack"), algo)?;
+            }
+        }
+        Ok(())
+    }
+
     /// The git-side ref store; None on a native `.alt` repository.
     pub fn git_refs(&self) -> Option<&RefStore> {
         match &self.backend {

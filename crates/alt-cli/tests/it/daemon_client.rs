@@ -63,6 +63,7 @@ fn client_routes_reads_through_an_autospawned_daemon() {
         ["status", "--json"].as_slice(),
         ["branch", "--json"].as_slice(),
         ["diff", "--json"].as_slice(),
+        ["log", "--json"].as_slice(),
     ] {
         let direct = ok(alt(root, args, false));
         let viad = ok(alt(root, args, true));
@@ -93,6 +94,34 @@ fn client_reuses_a_running_daemon() {
     }
     let second = ok(alt(root, &["status", "--json"], true));
     assert_eq!(first, second);
+}
+
+/// `log` routes through the held `Repository`, which is refreshed per request:
+/// a commit made by an outside process after the daemon is warm must show up in
+/// the next daemon-served `log` (never a stale git-layer read).
+#[test]
+fn client_log_sees_external_commits_through_the_warm_daemon() {
+    let dir = repo_with_changes();
+    let root = dir.path();
+    let sock = root.join(".alt").join("daemon.sock");
+
+    // warm the daemon with one routed log
+    let before = ok(alt(root, &["log", "--json"], true));
+    assert!(before.contains("\"message\":\"base\\n\""), "{before}");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline && UnixStream::connect(&sock).is_err() {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+
+    // an outside process commits; the warm daemon must catch it up
+    ok(alt(root, &["add", "."], false));
+    ok(alt(root, &["commit", "-m", "external"], false));
+
+    let after = ok(alt(root, &["log", "--json"], true));
+    assert!(
+        after.contains("\"message\":\"external\\n\""),
+        "warm daemon served a stale log: {after}"
+    );
 }
 
 /// `ALT_NO_DAEMON=1` keeps the command working and never spawns a daemon — the

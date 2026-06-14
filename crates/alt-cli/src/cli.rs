@@ -323,11 +323,14 @@ pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, out: &mut W) -> Res<(
 
 /// Dispatches one command against a held store (the daemon path): native
 /// commands resolve their workspace from `cwd` and attach to `store`; git-layer
-/// commands open their own repository at `cwd`. The caller is responsible for
-/// having refreshed `store` first.
+/// commands run against the held `repo` (the daemon's own repository), so they
+/// amortize the open just like native commands do — `log` reopens nothing per
+/// request. The caller is responsible for having refreshed both `store` and
+/// `repo` first.
 pub fn run_on_store<W: Write>(
     cli: &Cli,
     store: &mut Store,
+    repo: &Repository,
     cwd: &Path,
     id: Identity,
     out: &mut W,
@@ -340,8 +343,7 @@ pub fn run_on_store<W: Write>(
             run_native(&mut repo, c, out)
         }
         c => {
-            let repo = Repository::discover(cwd)?;
-            run_git(&repo, c, out)?;
+            run_git(repo, c, out)?;
             Ok(0)
         }
     }

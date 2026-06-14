@@ -5,11 +5,11 @@
 //! reach or spawn the daemon, or a wire error before a complete response — falls
 //! through to running the command directly. The daemon is never a dependency.
 //!
-//! Only *read* commands route here, and only the ones the daemon actually
-//! amortizes: the native-store reads (`status`/`branch`/`diff`). Write commands
-//! are D4 (they need the in-process group-commit path). Git-layer reads (`log`)
-//! reopen their own `Repository` per request inside the daemon, so routing them
-//! would add a socket round-trip without amortizing anything — they stay direct.
+//! Only *read* commands route here: the native-store reads
+//! (`status`/`branch`/`diff`), served against the daemon's held `Store`, and
+//! `log`, served against its held `Repository` — both refreshed per request so
+//! neither reopens anything. Write commands are D4 (they need the in-process
+//! group-commit path).
 
 #[cfg(unix)]
 pub use imp::{disabled, routes_through_daemon, try_serve};
@@ -24,13 +24,13 @@ mod imp {
     use crate::cli::Command as Cmd;
     use crate::daemon::{self, Request, Response};
 
-    /// The read commands whose per-request cost the daemon amortizes by holding
-    /// the native store open. See the module docs for why writes and `log` are
-    /// excluded.
+    /// The read commands the daemon amortizes by holding state open across
+    /// requests: native-store reads (`status`/`branch`/`diff`) against the held
+    /// `Store`, and `log` against the held `Repository`. Writes are D4.
     pub fn routes_through_daemon(cmd: &Cmd) -> bool {
         matches!(
             cmd,
-            Cmd::Status { .. } | Cmd::Branch { .. } | Cmd::Diff { .. }
+            Cmd::Status { .. } | Cmd::Branch { .. } | Cmd::Diff { .. } | Cmd::Log(_)
         )
     }
 

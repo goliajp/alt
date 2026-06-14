@@ -38,6 +38,7 @@ mod unix {
     use alt_cli::cli::{self, Cli};
     use alt_cli::daemon::{self, Request, Response};
     use alt_cli::native::{Identity, Store};
+    use alt_repo::Repository;
     use clap::Parser;
 
     type Res<T> = Result<T, Box<dyn std::error::Error>>;
@@ -54,7 +55,11 @@ mod unix {
         let sock_path = alt_dir.join("daemon.sock");
 
         let listener = bind(&sock_path)?;
+        // the held store serves native commands; the held repository serves
+        // git-layer reads (`log`) — both opened once and refreshed per request
+        let repo_root = alt_dir.parent().unwrap_or(&alt_dir).to_path_buf();
         let mut store = Store::open(alt_dir)?;
+        let mut repo = Repository::discover(&repo_root)?;
 
         let idle_ms = std::env::var("ALT_DAEMON_IDLE_MS")
             .ok()
@@ -64,7 +69,7 @@ mod unix {
         // serve until an idle timeout (None) — then exit and let the next
         // client respawn us
         while let Some(stream) = accept_with_timeout(&listener, idle_ms)? {
-            if let Err(e) = serve(&mut store, stream) {
+            if let Err(e) = serve(&mut store, &mut repo, stream) {
                 eprintln!("altd: request error: {e}");
             }
         }
@@ -119,19 +124,19 @@ mod unix {
         }
     }
 
-    /// Reads one request, runs it against the held store, writes the response.
-    fn serve(store: &mut Store, mut stream: UnixStream) -> Res<()> {
+    /// Reads one request, runs it against the held store/repo, writes back.
+    fn serve(store: &mut Store, repo: &mut Repository, mut stream: UnixStream) -> Res<()> {
         let payload = daemon::read_frame(&mut stream)?;
         let req = Request::decode(&payload)?;
-        let resp = handle(store, &req);
+        let resp = handle(store, repo, &req);
         daemon::write_frame(&mut stream, &resp.encode())?;
         Ok(())
     }
 
     /// Runs a request, turning any error into a `fatal:` stderr + exit 128 — the
     /// same shape the `alt` binary reports for an uncaught error.
-    fn handle(store: &mut Store, req: &Request) -> Response {
-        match dispatch(store, req) {
+    fn handle(store: &mut Store, repo: &mut Repository, req: &Request) -> Response {
+        match dispatch(store, repo, req) {
             Ok((exit_code, stdout)) => Response {
                 exit_code,
                 stdout,
@@ -145,16 +150,18 @@ mod unix {
         }
     }
 
-    fn dispatch(store: &mut Store, req: &Request) -> Res<(u8, Vec<u8>)> {
+    fn dispatch(store: &mut Store, repo: &mut Repository, req: &Request) -> Res<(u8, Vec<u8>)> {
         // the request argv carries no program name; clap expects one
         let argv = std::iter::once("alt".to_owned()).chain(req.args.iter().cloned());
         let cli = Cli::try_parse_from(argv)?;
         let id = Identity::from_map(&req.env);
-        // per-request catch-up: see writes other processes committed since the
-        // last request, so a served read is never stale
+        // per-request catch-up on both the native store and the git-layer
+        // repository: see writes other processes committed since the last
+        // request, so a served read is never stale
         store.refresh()?;
+        repo.refresh()?;
         let mut out = Vec::new();
-        let code = cli::run_on_store(&cli, store, &req.cwd, id, &mut out)?;
+        let code = cli::run_on_store(&cli, store, repo, &req.cwd, id, &mut out)?;
         Ok((code, out))
     }
 }
