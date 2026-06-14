@@ -2,10 +2,7 @@
 //! with git — `cat-file`, `rev-parse`, `log` (raw / oneline). M2 adds
 //! `import` (.git → .alt migration).
 
-mod json;
-mod log_cmd;
-mod native;
-mod quote;
+use alt_cli::{log_cmd, native, quote};
 
 use std::io::Write;
 use std::process::ExitCode;
