@@ -25,7 +25,7 @@ impl Json {
     }
 
     /// Writes this value as compact JSON (no insignificant whitespace).
-    pub fn write(&self, out: &mut impl Write) -> std::io::Result<()> {
+    pub fn write(&self, out: &mut (impl Write + ?Sized)) -> std::io::Result<()> {
         match self {
             Json::Null => out.write_all(b"null"),
             Json::Bool(b) => out.write_all(if *b { b"true" } else { b"false" }),
@@ -57,9 +57,22 @@ impl Json {
     }
 }
 
+/// Writes `{schema_version:1, <fields>}` as one compact JSON line — the shape
+/// every native command's `--json` result takes.
+pub fn emit(
+    out: &mut (impl Write + ?Sized),
+    fields: Vec<(&'static str, Json)>,
+) -> std::io::Result<()> {
+    let mut all = Vec::with_capacity(fields.len() + 1);
+    all.push(("schema_version", Json::Num(1)));
+    all.extend(fields);
+    Json::Object(all).write(out)?;
+    out.write_all(b"\n")
+}
+
 /// Writes `bytes` as a quoted JSON string: invalid UTF-8 is replaced (lossy),
 /// `"`/`\` and the control characters get the standard JSON escapes.
-fn write_json_string(out: &mut impl Write, bytes: &[u8]) -> std::io::Result<()> {
+fn write_json_string(out: &mut (impl Write + ?Sized), bytes: &[u8]) -> std::io::Result<()> {
     out.write_all(b"\"")?;
     for c in String::from_utf8_lossy(bytes).chars() {
         match c {

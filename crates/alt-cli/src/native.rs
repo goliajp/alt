@@ -103,7 +103,7 @@ impl NativeRepo {
 
     /// `alt add <paths>`: stage the given paths (or everything for `.`),
     /// updating the index to match the working tree.
-    pub fn add(&mut self, paths: &[String], out: &mut impl Write) -> Res<()> {
+    pub fn add(&mut self, paths: &[String], json: bool, out: &mut impl Write) -> Res<()> {
         let scan = scan_worktree(&self.root, self.algo)?;
         let staging_all = paths.iter().any(|p| p == ".");
 
@@ -142,7 +142,11 @@ impl NativeRepo {
                 extensions: Vec::new(),
             },
         )?;
-        writeln!(out, "staged {staged} path(s)")?;
+        if json {
+            crate::json::emit(out, vec![("staged", crate::json::Json::Num(staged as i64))])?;
+        } else {
+            writeln!(out, "staged {staged} path(s)")?;
+        }
         Ok(())
     }
 
@@ -170,7 +174,7 @@ impl NativeRepo {
 
     /// `alt commit -m <msg>`: write a tree + commit from the index, advance
     /// the current branch in one ref transaction.
-    pub fn commit(&mut self, message: &str, out: &mut impl Write) -> Res<()> {
+    pub fn commit(&mut self, message: &str, json: bool, out: &mut impl Write) -> Res<()> {
         let index = self.index()?;
         let staged = index_entries(&index);
         if staged.is_empty() {
@@ -207,11 +211,20 @@ impl NativeRepo {
                 new: Some(RefTarget::Oid(commit)),
             }],
         )?;
-        writeln!(
-            out,
-            "[{}] {commit}",
-            branch.strip_prefix("refs/heads/").unwrap_or(&branch)
-        )?;
+        let short = branch.strip_prefix("refs/heads/").unwrap_or(&branch);
+        if json {
+            use crate::json::Json;
+            crate::json::emit(
+                out,
+                vec![
+                    ("branch", Json::str(short)),
+                    ("commit", Json::str(commit.to_string())),
+                    ("tree", Json::str(tree.to_string())),
+                ],
+            )?;
+        } else {
+            writeln!(out, "[{short}] {commit}")?;
+        }
         Ok(())
     }
 
@@ -574,9 +587,29 @@ impl NativeRepo {
     /// tree into the working tree. `-c` creates the branch first. Switching
     /// to an existing branch requires a clean tree (no staged/unstaged
     /// changes) so no uncommitted work is lost.
-    pub fn switch(&mut self, name: &str, create: bool, out: &mut impl Write) -> Res<()> {
+    pub fn switch(
+        &mut self,
+        name: &str,
+        create: bool,
+        json: bool,
+        out: &mut impl Write,
+    ) -> Res<()> {
         let full = format!("refs/heads/{name}");
         let current = self.head_branch()?;
+
+        // emit either the human line or `{schema_version, branch, result}`
+        let report = |out: &mut dyn Write, result: &'static str, human: &str| -> Res<()> {
+            if json {
+                use crate::json::Json;
+                crate::json::emit(
+                    out,
+                    vec![("branch", Json::str(name)), ("result", Json::str(result))],
+                )?;
+            } else {
+                writeln!(out, "{human}")?;
+            }
+            Ok(())
+        };
 
         if create {
             check_branch_name(name)?;
@@ -597,16 +630,18 @@ impl NativeRepo {
                 )?;
             }
             self.move_head(&current, &full)?;
-            writeln!(out, "Switched to a new branch '{name}'")?;
-            return Ok(());
+            return report(
+                out,
+                "created",
+                &format!("Switched to a new branch '{name}'"),
+            );
         }
 
         if self.refs.get(&full).is_none() {
             return Err(format!("invalid reference: {name}").into());
         }
         if full == current {
-            writeln!(out, "Already on '{name}'")?;
-            return Ok(());
+            return report(out, "already_on", &format!("Already on '{name}'"));
         }
         self.ensure_clean("switch")?;
 
@@ -617,8 +652,7 @@ impl NativeRepo {
         let old = index_entries(&self.index()?);
         self.checkout(&old, &target)?;
         self.move_head(&current, &full)?;
-        writeln!(out, "Switched to branch '{name}'")?;
-        Ok(())
+        report(out, "switched", &format!("Switched to branch '{name}'"))
     }
 
     /// Refuses `action` if any tracked file has staged or unstaged changes, so
@@ -737,7 +771,7 @@ impl NativeRepo {
     /// branch is strictly behind; otherwise writes a two-parent merge commit
     /// (clean) or leaves conflict markers + unmerged index entries and makes
     /// no commit (conflicting). A clean working tree is required.
-    pub fn merge(&mut self, branch_name: &str, out: &mut impl Write) -> Res<bool> {
+    pub fn merge(&mut self, branch_name: &str, json: bool, out: &mut impl Write) -> Res<bool> {
         let their_ref = format!("refs/heads/{branch_name}");
         let theirs = self
             .refs
@@ -752,7 +786,7 @@ impl NativeRepo {
 
         match self.compute_merge(ours, theirs, branch_name)? {
             MergeOutcome::UpToDate => {
-                writeln!(out, "Already up to date.")?;
+                self.report_merge(json, out, "up_to_date", None, &[], "Already up to date.")?;
                 Ok(false)
             }
             MergeOutcome::FastForward(commit) => {
@@ -760,28 +794,87 @@ impl NativeRepo {
                 let old = index_entries(&self.index()?);
                 self.checkout(&old, &target)?;
                 self.advance_branch(&cur, ours, commit)?;
-                writeln!(out, "Fast-forward to {commit}")?;
+                self.report_merge(
+                    json,
+                    out,
+                    "fast_forward",
+                    Some(commit),
+                    &[],
+                    &format!("Fast-forward to {commit}"),
+                )?;
                 Ok(false)
             }
             MergeOutcome::Merged { commit, entries } => {
                 let old = index_entries(&self.index()?);
                 self.checkout(&old, &entries)?;
                 self.advance_branch(&cur, ours, commit)?;
-                writeln!(out, "Merge made by the 'ort' strategy.")?;
+                self.report_merge(
+                    json,
+                    out,
+                    "merged",
+                    Some(commit),
+                    &[],
+                    "Merge made by the 'ort' strategy.",
+                )?;
                 Ok(false)
             }
             MergeOutcome::Conflicted(resolved) => {
                 self.write_conflicted(&resolved)?;
-                for r in resolved.iter().filter(|r| r.conflicted) {
-                    writeln!(out, "CONFLICT (content): Merge conflict in {}", r.path)?;
+                let conflicts: Vec<BString> = resolved
+                    .iter()
+                    .filter(|r| r.conflicted)
+                    .map(|r| r.path.clone())
+                    .collect();
+                if json {
+                    self.report_merge(true, out, "conflicted", None, &conflicts, "")?;
+                } else {
+                    for p in &conflicts {
+                        writeln!(out, "CONFLICT (content): Merge conflict in {p}")?;
+                    }
+                    writeln!(
+                        out,
+                        "Automatic merge failed; fix conflicts and then commit the result."
+                    )?;
                 }
-                writeln!(
-                    out,
-                    "Automatic merge failed; fix conflicts and then commit the result."
-                )?;
                 Ok(true)
             }
         }
+    }
+
+    /// Emits one merge outcome: the human line, or `{schema_version, result,
+    /// commit?, conflicts}` for `--json`.
+    fn report_merge(
+        &self,
+        json: bool,
+        out: &mut impl Write,
+        result: &'static str,
+        commit: Option<ObjectId>,
+        conflicts: &[BString],
+        human: &str,
+    ) -> Res<()> {
+        if json {
+            use crate::json::Json;
+            crate::json::emit(
+                out,
+                vec![
+                    ("result", Json::str(result)),
+                    (
+                        "commit",
+                        match commit {
+                            Some(c) => Json::str(c.to_string()),
+                            None => Json::Null,
+                        },
+                    ),
+                    (
+                        "conflicts",
+                        Json::Array(conflicts.iter().map(Json::str).collect()),
+                    ),
+                ],
+            )?;
+        } else {
+            writeln!(out, "{human}")?;
+        }
+        Ok(())
     }
 
     /// Computes how merging `theirs` into `ours` resolves, writing any merged
@@ -842,11 +935,22 @@ impl NativeRepo {
 
     /// `alt flow init`: create `develop` off `main` (or the current branch's
     /// commit) and switch to it, in one ref transaction.
-    pub fn flow_init(&mut self, out: &mut impl Write) -> Res<()> {
+    pub fn flow_init(&mut self, json: bool, out: &mut impl Write) -> Res<()> {
+        use crate::json::Json;
         let model = alt_flow::BranchModel::default();
         let dev_ref = format!("refs/heads/{}", model.develop);
         if self.refs.get(&dev_ref).is_some() {
-            writeln!(out, "flow already initialized (branch '{}')", model.develop)?;
+            if json {
+                crate::json::emit(
+                    out,
+                    vec![
+                        ("develop", Json::str(model.develop)),
+                        ("already_initialized", Json::Bool(true)),
+                    ],
+                )?;
+            } else {
+                writeln!(out, "flow already initialized (branch '{}')", model.develop)?;
+            }
             return Ok(());
         }
         let main_ref = format!("refs/heads/{}", model.main);
@@ -874,17 +978,28 @@ impl NativeRepo {
                 },
             ],
         )?;
-        writeln!(
-            out,
-            "Initialized flow: created '{}' at {start}",
-            model.develop
-        )?;
+        if json {
+            crate::json::emit(
+                out,
+                vec![
+                    ("develop", Json::str(model.develop)),
+                    ("already_initialized", Json::Bool(false)),
+                    ("commit", Json::str(start.to_string())),
+                ],
+            )?;
+        } else {
+            writeln!(
+                out,
+                "Initialized flow: created '{}' at {start}",
+                model.develop
+            )?;
+        }
         Ok(())
     }
 
     /// `alt flow feature start <name>`: branch `feature/<name>` off `develop`
     /// and switch to it, atomically (one op log entry → O(1) undo).
-    pub fn flow_feature_start(&mut self, name: &str, out: &mut impl Write) -> Res<()> {
+    pub fn flow_feature_start(&mut self, name: &str, json: bool, out: &mut impl Write) -> Res<()> {
         let flow = alt_flow::BranchModel::default().feature(name)?;
         let feat_ref = format!("refs/heads/{}", flow.branch);
         let base_ref = format!("refs/heads/{}", flow.base);
@@ -920,7 +1035,19 @@ impl NativeRepo {
                 },
             ],
         )?;
-        writeln!(out, "Switched to a new branch '{}'", flow.branch)?;
+        if json {
+            use crate::json::Json;
+            crate::json::emit(
+                out,
+                vec![
+                    ("branch", Json::str(&flow.branch)),
+                    ("base", Json::str(flow.base)),
+                    ("commit", Json::str(base.to_string())),
+                ],
+            )?;
+        } else {
+            writeln!(out, "Switched to a new branch '{}'", flow.branch)?;
+        }
         Ok(())
     }
 
@@ -928,7 +1055,7 @@ impl NativeRepo {
     /// delete the feature branch, and move HEAD to `develop` — all in one
     /// atomic ref transaction (one op log entry → O(1) undo). Aborts if the
     /// merge conflicts.
-    pub fn flow_feature_finish(&mut self, name: &str, out: &mut impl Write) -> Res<()> {
+    pub fn flow_feature_finish(&mut self, name: &str, json: bool, out: &mut impl Write) -> Res<()> {
         let flow = alt_flow::BranchModel::default().feature(name)?;
         let feat_ref = format!("refs/heads/{}", flow.branch);
         let dev_ref = format!("refs/heads/{}", flow.target);
@@ -984,18 +1111,30 @@ impl NativeRepo {
         // bring the working tree to the merged develop
         let old = index_entries(&self.index()?);
         self.checkout(&old, &entries)?;
-        writeln!(
-            out,
-            "Merged '{}' into '{}' and deleted it",
-            flow.branch, flow.target
-        )?;
+        if json {
+            use crate::json::Json;
+            crate::json::emit(
+                out,
+                vec![
+                    ("target", Json::str(&flow.target)),
+                    ("commit", Json::str(new_dev.to_string())),
+                    ("deleted", Json::str(&flow.branch)),
+                ],
+            )?;
+        } else {
+            writeln!(
+                out,
+                "Merged '{}' into '{}' and deleted it",
+                flow.branch, flow.target
+            )?;
+        }
         Ok(())
     }
 
     /// `alt undo`: invert the most recent ref transaction (restoring the prior
     /// branch/HEAD state) and re-materialize HEAD's tree. The inverse is
     /// itself recorded as an op, so undo is append-only and re-undoable.
-    pub fn undo(&mut self, out: &mut impl Write) -> Res<()> {
+    pub fn undo(&mut self, json: bool, out: &mut impl Write) -> Res<()> {
         let changes = self.refs.last_transaction()?.ok_or("nothing to undo")?;
         self.ensure_clean("undo")?;
 
@@ -1013,7 +1152,16 @@ impl NativeRepo {
 
         let target = self.head_entries()?;
         self.checkout(&old, &target)?;
-        writeln!(out, "Undid the last operation")?;
+        if json {
+            use crate::json::Json;
+            let refs = changes.iter().map(|c| Json::str(&c.name)).collect();
+            crate::json::emit(
+                out,
+                vec![("undone", Json::Bool(true)), ("refs", Json::Array(refs))],
+            )?;
+        } else {
+            writeln!(out, "Undid the last operation")?;
+        }
         Ok(())
     }
 

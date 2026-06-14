@@ -6,6 +6,7 @@ mod flow;
 mod merge;
 mod read_json;
 mod status_json;
+mod write_json;
 
 mod cli_matrix;
 mod corpus_cli;

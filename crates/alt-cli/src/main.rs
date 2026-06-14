@@ -51,12 +51,18 @@ enum Command {
     Add {
         /// Paths to stage; `.` stages the whole working tree
         paths: Vec<String>,
+        /// Emit a structured JSON result instead of the human line
+        #[arg(long)]
+        json: bool,
     },
     /// Record staged changes as a new commit
     Commit {
         /// Commit message
         #[arg(short = 'm')]
         message: String,
+        /// Emit the new commit/tree oids as a JSON object
+        #[arg(long)]
+        json: bool,
     },
     /// Show the working tree status
     Status {
@@ -82,6 +88,9 @@ enum Command {
         /// Create the branch before switching
         #[arg(short = 'c')]
         create: bool,
+        /// Emit a structured JSON result instead of the human line
+        #[arg(long)]
+        json: bool,
     },
     /// Show changes between the index and the working tree (or HEAD)
     Diff {
@@ -96,14 +105,24 @@ enum Command {
     Merge {
         /// Branch to merge into the current branch
         branch: String,
+        /// Emit a structured JSON result instead of the human lines
+        #[arg(long)]
+        json: bool,
     },
     /// git-flow workflow operations (atomic, undoable)
     Flow {
         #[command(subcommand)]
         op: FlowOp,
+        /// Emit a structured JSON result instead of the human line
+        #[arg(long, global = true)]
+        json: bool,
     },
     /// Undo the last branch/HEAD operation (inverts one op log entry)
-    Undo,
+    Undo {
+        /// Emit a structured JSON result instead of the human line
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -162,13 +181,13 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             out.flush()?;
             return Ok(ExitCode::SUCCESS);
         }
-        Command::Add { paths } => {
-            native::NativeRepo::discover(&cwd)?.add(paths, &mut out)?;
+        Command::Add { paths, json } => {
+            native::NativeRepo::discover(&cwd)?.add(paths, *json, &mut out)?;
             out.flush()?;
             return Ok(ExitCode::SUCCESS);
         }
-        Command::Commit { message } => {
-            native::NativeRepo::discover(&cwd)?.commit(message, &mut out)?;
+        Command::Commit { message, json } => {
+            native::NativeRepo::discover(&cwd)?.commit(message, *json, &mut out)?;
             out.flush()?;
             return Ok(ExitCode::SUCCESS);
         }
@@ -187,8 +206,8 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             out.flush()?;
             return Ok(ExitCode::SUCCESS);
         }
-        Command::Switch { name, create } => {
-            native::NativeRepo::discover(&cwd)?.switch(name, *create, &mut out)?;
+        Command::Switch { name, create, json } => {
+            native::NativeRepo::discover(&cwd)?.switch(name, *create, *json, &mut out)?;
             out.flush()?;
             return Ok(ExitCode::SUCCESS);
         }
@@ -197,8 +216,8 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             out.flush()?;
             return Ok(ExitCode::SUCCESS);
         }
-        Command::Merge { branch } => {
-            let conflicts = native::NativeRepo::discover(&cwd)?.merge(branch, &mut out)?;
+        Command::Merge { branch, json } => {
+            let conflicts = native::NativeRepo::discover(&cwd)?.merge(branch, *json, &mut out)?;
             out.flush()?;
             // git exits 1 when a merge stops in conflict
             return Ok(if conflicts {
@@ -207,22 +226,22 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
                 ExitCode::SUCCESS
             });
         }
-        Command::Flow { op } => {
+        Command::Flow { op, json } => {
             let mut repo = native::NativeRepo::discover(&cwd)?;
             match op {
-                FlowOp::Init => repo.flow_init(&mut out)?,
+                FlowOp::Init => repo.flow_init(*json, &mut out)?,
                 FlowOp::Feature {
                     op: FlowTopicOp::Start { name },
-                } => repo.flow_feature_start(name, &mut out)?,
+                } => repo.flow_feature_start(name, *json, &mut out)?,
                 FlowOp::Feature {
                     op: FlowTopicOp::Finish { name },
-                } => repo.flow_feature_finish(name, &mut out)?,
+                } => repo.flow_feature_finish(name, *json, &mut out)?,
             }
             out.flush()?;
             return Ok(ExitCode::SUCCESS);
         }
-        Command::Undo => {
-            native::NativeRepo::discover(&cwd)?.undo(&mut out)?;
+        Command::Undo { json } => {
+            native::NativeRepo::discover(&cwd)?.undo(*json, &mut out)?;
             out.flush()?;
             return Ok(ExitCode::SUCCESS);
         }
@@ -302,7 +321,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         | Command::Diff { .. }
         | Command::Merge { .. }
         | Command::Flow { .. }
-        | Command::Undo => {
+        | Command::Undo { .. } => {
             unreachable!("native commands are dispatched before git discovery")
         }
     }
