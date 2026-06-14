@@ -166,6 +166,7 @@ dependencies = [
  "alt-store",
  "alt-testutil",
  "blake3",
+ "libc",
  "tempfile",
  "thiserror",
 ]

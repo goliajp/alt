@@ -327,17 +327,24 @@ fn list_pack_seqs(dir: &Path) -> Result<Vec<u32>, StoreError> {
 /// a clean offset.
 fn open_active(path: &Path, create: bool) -> Result<Active, StoreError> {
     if create {
-        let mut write = OpenOptions::new().create_new(true).write(true).open(path)?;
-        write.write_all(&pack::file_header())?;
-        write.sync_all()?;
-        let read = File::open(path)?;
-        return Ok(Active {
-            seq: 0, // caller fills in
-            write,
-            read,
-            len: pack::HEADER_LEN as u64,
-            entries: Vec::new(),
-        });
+        // create-new can lose a race to another process bringing the same
+        // fresh store up; if it already exists, fall through and open it.
+        match OpenOptions::new().create_new(true).write(true).open(path) {
+            Ok(mut write) => {
+                write.write_all(&pack::file_header())?;
+                write.sync_all()?;
+                let read = File::open(path)?;
+                return Ok(Active {
+                    seq: 0, // caller fills in
+                    write,
+                    read,
+                    len: pack::HEADER_LEN as u64,
+                    entries: Vec::new(),
+                });
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(e.into()),
+        }
     }
 
     let read = File::open(path)?;
@@ -387,6 +394,69 @@ fn open_active(path: &Path, create: bool) -> Result<Active, StoreError> {
     })
 }
 
+/// The in-memory pack state a [`ChunkStore`] holds: sealed packs (mmapped),
+/// the active pack (open for append), and the id → location index.
+type PackState = (HashMap<u32, Sealed>, Active, HashMap<ChunkId, Location>);
+
+/// Loads the on-disk pack set into the in-memory state a [`ChunkStore`] needs:
+/// every sealed pack mmapped + indexed, and the active pack opened for append.
+/// Factored out of the constructor so `sync_from_disk` can reload in place
+/// without going through `ChunkStore` (which has a `Drop`, so its fields can't
+/// be moved out).
+fn load(dir: &Path) -> Result<PackState, StoreError> {
+    std::fs::create_dir_all(dir)?;
+    let seqs = list_pack_seqs(dir)?;
+    let mut sealed = HashMap::new();
+    let mut index = HashMap::new();
+
+    let (&active_seq, sealed_seqs) = match seqs.split_last() {
+        Some((last, rest)) => (last, rest),
+        None => {
+            let mut active = open_active(&pack_path(dir, 1), true)?;
+            active.seq = 1;
+            pack::fsync_dir(dir)?;
+            return Ok((sealed, active, index));
+        }
+    };
+
+    for &seq in sealed_seqs {
+        let file = File::open(pack_path(dir, seq))?;
+        let map = unsafe { Mmap::map(&file)? };
+        pack::check_file_header(&map)?;
+        let entries = match idx::read(&idx_path(dir, seq)) {
+            Ok(entries) => entries,
+            Err(_) => {
+                // idx is a cache: rebuild from the pack and repair it
+                let (recs, valid_len) = pack::scan(&map)?;
+                if valid_len != map.len() as u64 {
+                    return Err(StoreError::Format("sealed pack truncated"));
+                }
+                let entries: Vec<_> = recs.iter().map(|(hdr, off)| (hdr.id, *off)).collect();
+                idx::write(&idx_path(dir, seq), &entries)?;
+                pack::fsync_dir(dir)?;
+                entries
+            }
+        };
+        for (id, offset) in entries {
+            index.insert(id, Location { seq, offset });
+        }
+        sealed.insert(seq, Sealed { map });
+    }
+
+    let mut active = open_active(&pack_path(dir, active_seq), false)?;
+    active.seq = active_seq;
+    for (id, offset) in &active.entries {
+        index.insert(
+            *id,
+            Location {
+                seq: active_seq,
+                offset: *offset,
+            },
+        );
+    }
+    Ok((sealed, active, index))
+}
+
 impl ChunkStore {
     pub fn open(dir: impl Into<PathBuf>) -> Result<Self, StoreError> {
         Self::open_with(dir, Options::default())
@@ -394,66 +464,7 @@ impl ChunkStore {
 
     pub fn open_with(dir: impl Into<PathBuf>, opts: Options) -> Result<Self, StoreError> {
         let dir = dir.into();
-        std::fs::create_dir_all(&dir)?;
-        let seqs = list_pack_seqs(&dir)?;
-
-        let mut sealed = HashMap::new();
-        let mut index = HashMap::new();
-
-        let (&active_seq, sealed_seqs) = match seqs.split_last() {
-            Some((last, rest)) => (last, rest),
-            None => {
-                let mut active = open_active(&pack_path(&dir, 1), true)?;
-                active.seq = 1;
-                pack::fsync_dir(&dir)?;
-                return Ok(Self {
-                    dir,
-                    opts,
-                    sealed,
-                    active,
-                    index,
-                    counters: Counters::default(),
-                    cache: Mutex::new(DeltaCache::new()),
-                });
-            }
-        };
-
-        for &seq in sealed_seqs {
-            let file = File::open(pack_path(&dir, seq))?;
-            let map = unsafe { Mmap::map(&file)? };
-            pack::check_file_header(&map)?;
-            let entries = match idx::read(&idx_path(&dir, seq)) {
-                Ok(entries) => entries,
-                Err(_) => {
-                    // idx is a cache: rebuild from the pack and repair it
-                    let (recs, valid_len) = pack::scan(&map)?;
-                    if valid_len != map.len() as u64 {
-                        return Err(StoreError::Format("sealed pack truncated"));
-                    }
-                    let entries: Vec<_> = recs.iter().map(|(hdr, off)| (hdr.id, *off)).collect();
-                    idx::write(&idx_path(&dir, seq), &entries)?;
-                    pack::fsync_dir(&dir)?;
-                    entries
-                }
-            };
-            for (id, offset) in entries {
-                index.insert(id, Location { seq, offset });
-            }
-            sealed.insert(seq, Sealed { map });
-        }
-
-        let mut active = open_active(&pack_path(&dir, active_seq), false)?;
-        active.seq = active_seq;
-        for (id, offset) in &active.entries {
-            index.insert(
-                *id,
-                Location {
-                    seq: active_seq,
-                    offset: *offset,
-                },
-            );
-        }
-
+        let (sealed, active, index) = load(&dir)?;
         Ok(Self {
             dir,
             opts,
@@ -463,6 +474,37 @@ impl ChunkStore {
             counters: Counters::default(),
             cache: Mutex::new(DeltaCache::new()),
         })
+    }
+
+    /// Reconciles in-memory state with the packs on disk (another process may
+    /// have appended to the active pack, sealed/rolled it, or compacted). A
+    /// no-op when nothing changed. Callers hold the odb write lock across this
+    /// and their append, so the reconciled state stays current through the
+    /// write. Counters and the delta cache (keyed by stable ids) survive a
+    /// reload.
+    pub fn sync_from_disk(&mut self) -> Result<(), StoreError> {
+        if !self.disk_changed()? {
+            return Ok(());
+        }
+        let (sealed, active, index) = load(&self.dir)?;
+        self.sealed = sealed;
+        self.active = active;
+        self.index = index;
+        Ok(())
+    }
+
+    /// Whether the on-disk pack set or the active pack's length differs from
+    /// what we hold — the cheap check that gates a reload.
+    fn disk_changed(&self) -> Result<bool, StoreError> {
+        let seqs = list_pack_seqs(&self.dir)?;
+        let mut known: Vec<u32> = self.sealed.keys().copied().collect();
+        known.push(self.active.seq);
+        known.sort_unstable();
+        if seqs != known {
+            return Ok(true);
+        }
+        let size = std::fs::metadata(pack_path(&self.dir, self.active.seq))?.len();
+        Ok(size != self.active.len)
     }
 
     /// Stores `data`, deduplicating by content: a chunk already present is

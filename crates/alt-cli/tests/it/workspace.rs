@@ -84,9 +84,6 @@ fn workspaces_isolate_and_share_the_store() {
 }
 
 #[test]
-#[ignore = "needs ODB multi-process write safety (S7): concurrent `alt add` \
-            processes corrupt the shared blob store — flock the pack/blobmap \
-            append like the oplog. Spec for that step; un-ignore when it lands."]
 fn two_workspaces_commit_concurrently_as_separate_processes() {
     use std::sync::{Arc, Barrier};
 

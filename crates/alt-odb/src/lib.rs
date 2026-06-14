@@ -17,12 +17,45 @@
 
 mod map;
 
+use std::fs::{File, OpenOptions};
 use std::path::PathBuf;
 
 use alt_git_codec::{ObjectId, ObjectKind, RawObject};
 use alt_store::{BlobId, BlobOptions, BlobStore, CompactReport, StoreError};
 
 pub use map::{MapEntry, ObjectMap};
+
+/// Takes an exclusive advisory lock on the odb write-lock file for the duration
+/// of one write batch. `flock` is per-open-file-description and auto-releases on
+/// close/crash, so there are no stale locks. Non-unix has no cross-process lock
+/// yet — single-writer there (documented limitation, like the op log).
+#[cfg(unix)]
+fn lock_exclusive(file: &File) -> std::io::Result<()> {
+    use std::os::unix::io::AsRawFd;
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn unlock(file: &File) -> std::io::Result<()> {
+    use std::os::unix::io::AsRawFd;
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn lock_exclusive(_file: &File) -> std::io::Result<()> {
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn unlock(_file: &File) -> std::io::Result<()> {
+    Ok(())
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum OdbError {
@@ -39,9 +72,18 @@ pub enum OdbError {
 }
 
 /// The native object database: blob store + git-identity map.
+///
+/// Writes (`put`/`lineage_delta`/`compact`) are serialized across processes by
+/// an exclusive `flock` on `odb.lock`, held from the first write of a batch
+/// until `flush`. On acquiring it, the in-memory state is reconciled with
+/// whatever other writers appended (`sync_from_disk`), so this batch dedups and
+/// appends against the true current store. Reads take no lock.
 pub struct NativeOdb {
     blobs: BlobStore,
     map: ObjectMap,
+    /// The advisory write lock; `held` tracks whether this batch owns it.
+    lock: File,
+    held: bool,
 }
 
 impl NativeOdb {
@@ -55,7 +97,38 @@ impl NativeOdb {
         std::fs::create_dir_all(&alt_dir)?;
         let blobs = BlobStore::open_with(alt_dir.join("store"), opts)?;
         let map = ObjectMap::open(&alt_dir.join("map.alt"))?;
-        Ok(Self { blobs, map })
+        let lock = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(alt_dir.join("odb.lock"))?;
+        Ok(Self {
+            blobs,
+            map,
+            lock,
+            held: false,
+        })
+    }
+
+    /// Acquires the write lock for this batch (if not already held) and brings
+    /// the in-memory state up to date with concurrent writers.
+    fn acquire(&mut self) -> Result<(), OdbError> {
+        if self.held {
+            return Ok(());
+        }
+        lock_exclusive(&self.lock)?;
+        self.held = true;
+        self.blobs.sync_from_disk()?;
+        self.map.sync_from_disk()?;
+        Ok(())
+    }
+
+    /// Releases the write lock (best-effort; the fd closing also releases it).
+    fn release(&mut self) {
+        if self.held {
+            let _ = unlock(&self.lock);
+            self.held = false;
+        }
     }
 
     /// Stores one git object's canonical payload and records its identity
@@ -67,6 +140,9 @@ impl NativeOdb {
         kind: ObjectKind,
         data: &[u8],
     ) -> Result<BlobId, OdbError> {
+        self.acquire()?;
+        // dedup against the now-current map (post-catch-up): a concurrent
+        // writer may already have stored this object
         if let Some(entry) = self.map.by_git(&oid) {
             return Ok(entry.alt);
         }
@@ -155,6 +231,7 @@ impl NativeOdb {
     /// (same-path predecessor → successor). Identity is untouched; only
     /// the storage form changes. Returns whether a re-encoding happened.
     pub fn lineage_delta(&mut self, old: &ObjectId, new: &ObjectId) -> Result<bool, OdbError> {
+        self.acquire()?;
         let (Some(old_entry), Some(new_entry)) = (self.map.by_git(old), self.map.by_git(new))
         else {
             return Ok(false);
@@ -167,6 +244,7 @@ impl NativeOdb {
     /// by lineage delta re-encoding. Object identities and the map are
     /// untouched — only physical storage is rewritten.
     pub fn compact(&mut self) -> Result<CompactReport, OdbError> {
+        self.acquire()?;
         Ok(self.blobs.compact()?)
     }
 
@@ -188,7 +266,17 @@ impl NativeOdb {
     /// pointing at lost content.
     pub fn flush(&mut self) -> Result<(), OdbError> {
         self.blobs.flush()?;
-        self.map.sync()
+        self.map.sync()?;
+        // the batch is durable; let other writers in
+        self.release();
+        Ok(())
+    }
+}
+
+impl Drop for NativeOdb {
+    fn drop(&mut self) {
+        // release the write lock if a batch never reached flush
+        self.release();
     }
 }
 
@@ -301,5 +389,141 @@ mod tests {
         let oid = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, b"absent");
         assert!(odb.get(&oid).unwrap().is_none());
         assert!(odb.lookup(&oid).is_none());
+    }
+
+    #[test]
+    fn concurrent_writers_store_everything_without_corruption() {
+        use std::sync::{Arc, Barrier};
+
+        let dir = tempfile::tempdir().unwrap();
+        NativeOdb::open(dir.path()).unwrap(); // create the store up front
+
+        const WRITERS: usize = 6;
+        const UNIQUE: usize = 20;
+        const SHARED: usize = 5;
+        let barrier = Arc::new(Barrier::new(WRITERS));
+        let path = dir.path().to_path_buf();
+
+        // content helpers shared by writers and the verifier
+        let unique = |w: usize, i: usize| format!("w{w}-obj{i}").into_bytes();
+        let shared = |i: usize| format!("shared-obj{i}").into_bytes();
+        let oid = |data: &[u8]| ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, data);
+
+        let mut handles = Vec::new();
+        for w in 0..WRITERS {
+            let barrier = Arc::clone(&barrier);
+            let path = path.clone();
+            handles.push(std::thread::spawn(move || {
+                // each thread is its own opener → its own flock description,
+                // exactly like separate processes contending on the store.
+                let mut odb = NativeOdb::open(&path).unwrap();
+                barrier.wait();
+                // interleave unique and shared puts so writers race on both
+                // appends and dedup of the same content
+                for i in 0..UNIQUE {
+                    let d = unique(w, i);
+                    odb.put(oid(&d), ObjectKind::Blob, &d).unwrap();
+                    if i < SHARED {
+                        let s = shared(i);
+                        odb.put(oid(&s), ObjectKind::Blob, &s).unwrap();
+                    }
+                }
+                odb.flush().unwrap();
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        // reopen and verify: every object present with the right bytes, and
+        // shared content deduped to exactly one map entry (no torn appends).
+        let odb = NativeOdb::open(&path).unwrap();
+        for w in 0..WRITERS {
+            for i in 0..UNIQUE {
+                let d = unique(w, i);
+                let got = odb.get(&oid(&d)).unwrap().expect("unique object present");
+                assert_eq!(got.data, d, "w{w} obj{i}");
+            }
+        }
+        for i in 0..SHARED {
+            let s = shared(i);
+            let got = odb.get(&oid(&s)).unwrap().expect("shared object present");
+            assert_eq!(got.data, s);
+        }
+        assert_eq!(
+            odb.len(),
+            WRITERS * UNIQUE + SHARED,
+            "shared content stored once; no duplicate map records"
+        );
+    }
+
+    #[test]
+    fn concurrent_writers_through_pack_seals_and_rolls() {
+        use std::sync::{Arc, Barrier};
+
+        let dir = tempfile::tempdir().unwrap();
+        // a tiny seal threshold so writers roll packs constantly, exercising
+        // the seq-set-change reload and the seal-roll create-race fallback
+        let mut opts = BlobOptions::default();
+        opts.chunks.seal_threshold = 1024;
+        NativeOdb::open_with(dir.path(), opts).unwrap();
+
+        const WRITERS: usize = 4;
+        const PER: usize = 40;
+        let barrier = Arc::new(Barrier::new(WRITERS));
+        let path = dir.path().to_path_buf();
+
+        // incompressible 200-byte content (stored raw), unique per (w, i)
+        let content = |w: usize, i: usize| {
+            let mut s = (w as u64)
+                .wrapping_mul(1_000_003)
+                .wrapping_add(i as u64 + 1);
+            let mut v = Vec::with_capacity(200);
+            while v.len() < 200 {
+                s = s.wrapping_add(0x9e37_79b9_7f4a_7c15);
+                let mut z = s;
+                z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+                z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+                v.extend_from_slice(&(z ^ (z >> 31)).to_le_bytes());
+            }
+            v.truncate(200);
+            v
+        };
+        let oid = |d: &[u8]| ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, d);
+
+        let mut handles = Vec::new();
+        for w in 0..WRITERS {
+            let barrier = Arc::clone(&barrier);
+            let path = path.clone();
+            handles.push(std::thread::spawn(move || {
+                let mut odb = NativeOdb::open_with(&path, opts).unwrap();
+                barrier.wait();
+                for i in 0..PER {
+                    let d = content(w, i);
+                    odb.put(oid(&d), ObjectKind::Blob, &d).unwrap();
+                    // flush mid-stream to release + re-acquire (more catch-ups)
+                    if i % 7 == 0 {
+                        odb.flush().unwrap();
+                    }
+                }
+                odb.flush().unwrap();
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        let odb = NativeOdb::open_with(&path, opts).unwrap();
+        for w in 0..WRITERS {
+            for i in 0..PER {
+                let d = content(w, i);
+                assert_eq!(
+                    odb.get(&oid(&d)).unwrap().expect("present").data,
+                    d,
+                    "w{w} obj{i} survives concurrent seals"
+                );
+            }
+        }
+        assert_eq!(odb.len(), WRITERS * PER);
     }
 }

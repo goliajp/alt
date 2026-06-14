@@ -11,6 +11,9 @@ alt-store.workspace = true
 blake3.workspace = true
 thiserror.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
 [dev-dependencies]
 alt-git-pack.workspace = true
 alt-testutil.workspace = true

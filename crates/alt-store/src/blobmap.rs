@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::io::{Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use crate::pack::fsync_dir;
@@ -30,6 +30,9 @@ fn checksum(checked: &[u8]) -> [u8; 8] {
 pub struct BlobMap {
     file: File,
     map: HashMap<BlobId, (ChunkId, u64)>,
+    /// Byte offset past the last record we have read — lets `sync_from_disk`
+    /// fold in only the records another writer appended since.
+    len: u64,
 }
 
 impl BlobMap {
@@ -47,6 +50,7 @@ impl BlobMap {
         let Some(data) = existing else {
             let mut file = OpenOptions::new()
                 .create_new(true)
+                .read(true)
                 .write(true)
                 .open(&path)?;
             file.write_all(&file_header())?;
@@ -55,6 +59,7 @@ impl BlobMap {
             return Ok(Self {
                 file,
                 map: HashMap::new(),
+                len: HEADER_LEN as u64,
             });
         };
 
@@ -93,7 +98,7 @@ impl BlobMap {
             valid_len = at as u64;
         }
 
-        let mut file = OpenOptions::new().write(true).open(&path)?;
+        let mut file = OpenOptions::new().read(true).write(true).open(&path)?;
         if valid_len < HEADER_LEN as u64 {
             file.set_len(0)?;
             file.write_all(&file_header())?;
@@ -105,7 +110,8 @@ impl BlobMap {
             }
             file.seek(SeekFrom::Start(valid_len))?;
         }
-        Ok(Self { file, map })
+        let len = valid_len.max(HEADER_LEN as u64);
+        Ok(Self { file, map, len })
     }
 
     pub fn append(
@@ -122,6 +128,42 @@ impl BlobMap {
         rec[CHECKED_LEN..].copy_from_slice(&check);
         self.file.write_all(&rec)?;
         self.map.insert(blob, (root, total_len));
+        self.len += REC_LEN as u64;
+        Ok(())
+    }
+
+    /// Folds in records another writer appended since our last read, extending
+    /// the in-memory map. Run under the odb write lock. A torn tail left by a
+    /// crashed writer is truncated (we hold the lock, so none is mid-append).
+    pub fn sync_from_disk(&mut self) -> Result<(), StoreError> {
+        let size = self.file.metadata()?.len();
+        if size <= self.len {
+            return Ok(());
+        }
+        let mut tail = vec![0u8; (size - self.len) as usize];
+        self.file.seek(SeekFrom::Start(self.len))?;
+        self.file.read_exact(&mut tail)?;
+
+        let mut at = 0usize;
+        while let Some(rec) = tail.get(at..at + REC_LEN) {
+            if checksum(&rec[..CHECKED_LEN]) != rec[CHECKED_LEN..] {
+                break; // torn final record (we hold the lock): truncate below
+            }
+            let mut blob = [0u8; 32];
+            blob.copy_from_slice(&rec[..32]);
+            let mut root = [0u8; 32];
+            root.copy_from_slice(&rec[32..64]);
+            let total_len = u64::from_le_bytes(rec[64..72].try_into().unwrap());
+            self.map.insert(BlobId(blob), (ChunkId(root), total_len));
+            at += REC_LEN;
+        }
+        let new_len = self.len + at as u64;
+        if (at as u64) < tail.len() as u64 {
+            self.file.set_len(new_len)?; // drop a crashed writer's torn record
+            self.file.sync_all()?;
+            self.file.seek(SeekFrom::Start(new_len))?;
+        }
+        self.len = new_len;
         Ok(())
     }
 

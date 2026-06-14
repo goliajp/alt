@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::io::{Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
@@ -106,6 +106,9 @@ pub struct ObjectMap {
     /// One content can back several git objects (same bytes, different
     /// kind, or both hash algos), so the reverse edge is a list.
     by_alt: HashMap<BlobId, Vec<u32>>,
+    /// Byte offset past the last record we have read — lets `sync_from_disk`
+    /// fold in only what another writer appended since.
+    len: u64,
 }
 
 impl ObjectMap {
@@ -117,7 +120,11 @@ impl ObjectMap {
         };
 
         let Some(data) = existing else {
-            let mut file = OpenOptions::new().create_new(true).write(true).open(path)?;
+            let mut file = OpenOptions::new()
+                .create_new(true)
+                .read(true)
+                .write(true)
+                .open(path)?;
             file.write_all(&file_header())?;
             file.sync_all()?;
             return Ok(Self::empty(file));
@@ -138,7 +145,7 @@ impl ObjectMap {
             }
         }
 
-        let mut this = Self::empty(OpenOptions::new().write(true).open(path)?);
+        let mut this = Self::empty(OpenOptions::new().read(true).write(true).open(path)?);
         let mut at = HEADER_LEN.min(data.len());
         let mut valid_len = at as u64;
         while let Some(rec) = data.get(at..at + REC_LEN) {
@@ -164,6 +171,7 @@ impl ObjectMap {
             }
             this.file.seek(SeekFrom::Start(valid_len))?;
         }
+        this.len = valid_len.max(HEADER_LEN as u64);
         Ok(this)
     }
 
@@ -173,6 +181,7 @@ impl ObjectMap {
             entries: Vec::new(),
             by_git: HashMap::new(),
             by_alt: HashMap::new(),
+            len: HEADER_LEN as u64,
         }
     }
 
@@ -186,6 +195,36 @@ impl ObjectMap {
     pub fn append(&mut self, entry: MapEntry) -> Result<(), OdbError> {
         self.file.write_all(&entry.encode())?;
         self.insert(entry);
+        self.len += REC_LEN as u64;
+        Ok(())
+    }
+
+    /// Folds in records another writer appended since our last read. Run under
+    /// the odb write lock. A torn tail left by a crashed writer is truncated.
+    pub fn sync_from_disk(&mut self) -> Result<(), OdbError> {
+        let size = self.file.metadata()?.len();
+        if size <= self.len {
+            return Ok(());
+        }
+        let mut tail = vec![0u8; (size - self.len) as usize];
+        self.file.seek(SeekFrom::Start(self.len))?;
+        self.file.read_exact(&mut tail)?;
+
+        let mut at = 0usize;
+        while let Some(rec) = tail.get(at..at + REC_LEN) {
+            if checksum(&rec[..CHECKED_LEN]) != rec[CHECKED_LEN..] {
+                break; // torn final record (we hold the lock): truncate below
+            }
+            self.insert(MapEntry::parse(rec)?);
+            at += REC_LEN;
+        }
+        let new_len = self.len + at as u64;
+        if (at as u64) < tail.len() as u64 {
+            self.file.set_len(new_len)?;
+            self.file.sync_all()?;
+            self.file.seek(SeekFrom::Start(new_len))?;
+        }
+        self.len = new_len;
         Ok(())
     }
 

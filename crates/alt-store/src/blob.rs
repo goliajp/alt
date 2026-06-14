@@ -311,6 +311,13 @@ impl BlobStore {
         self.chunks.flush()?;
         self.map.sync()
     }
+
+    /// Reconciles in-memory state with what other writers appended, before a
+    /// write batch. Called by the odb under its write lock.
+    pub fn sync_from_disk(&mut self) -> Result<(), StoreError> {
+        self.chunks.sync_from_disk()?;
+        self.map.sync_from_disk()
+    }
 }
 
 #[cfg(test)]
