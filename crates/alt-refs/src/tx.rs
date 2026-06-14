@@ -12,7 +12,20 @@ use crate::{RefError, RefTarget};
 
 /// Payload kind byte for ref transactions.
 pub const PAYLOAD_REF_TX: u8 = 1;
-const TX_VERSION: u8 = 1;
+/// v2 appends an optional idempotency key after the changes; v1 (no key) still
+/// parses (key = None), so a store written before D5c reads back unchanged.
+const TX_VERSION: u8 = 2;
+
+/// A client idempotency token, persisted in the ref transaction so a retried
+/// write (even across a daemon restart) is detected and not applied twice.
+pub type IdemKey = [u8; 16];
+
+/// A parsed ref transaction: its changes and the optional idempotency key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedTx {
+    pub changes: Vec<RefChange>,
+    pub key: Option<IdemKey>,
+}
 
 const TARGET_ABSENT: u8 = 0;
 const TARGET_OID: u8 = 1;
@@ -85,7 +98,7 @@ fn parse_target(data: &[u8], at: &mut usize) -> Result<Option<RefTarget>, RefErr
     })
 }
 
-pub fn encode_tx(changes: &[RefChange]) -> Vec<u8> {
+pub fn encode_tx(changes: &[RefChange], key: Option<IdemKey>) -> Vec<u8> {
     let mut out = vec![PAYLOAD_REF_TX, TX_VERSION];
     out.extend_from_slice(&(changes.len() as u32).to_le_bytes());
     for change in changes {
@@ -94,15 +107,24 @@ pub fn encode_tx(changes: &[RefChange]) -> Vec<u8> {
         encode_target(&mut out, &change.old);
         encode_target(&mut out, &change.new);
     }
+    // optional idempotency key: a length byte (0 or 16) then the key bytes
+    match key {
+        Some(k) => {
+            out.push(k.len() as u8);
+            out.extend_from_slice(&k);
+        }
+        None => out.push(0),
+    }
     out
 }
 
 /// Parses a ref-transaction payload; returns None for other op kinds.
-pub fn parse_tx(payload: &[u8]) -> Result<Option<Vec<RefChange>>, RefError> {
+pub fn parse_tx(payload: &[u8]) -> Result<Option<ParsedTx>, RefError> {
     if payload.first() != Some(&PAYLOAD_REF_TX) {
         return Ok(None);
     }
-    if payload.get(1) != Some(&TX_VERSION) {
+    let version = payload.get(1).copied();
+    if version != Some(1) && version != Some(TX_VERSION) {
         return Err(RefError::Format("unsupported ref tx version"));
     }
     let count_bytes = payload
@@ -128,8 +150,28 @@ pub fn parse_tx(payload: &[u8]) -> Result<Option<Vec<RefChange>>, RefError> {
         let new = parse_target(payload, &mut at)?;
         changes.push(RefChange { name, old, new });
     }
+    // v1 ends here (no key field); v2 carries the optional key
+    let key = if version == Some(1) {
+        None
+    } else {
+        let key_len = *payload
+            .get(at)
+            .ok_or(RefError::Format("ref tx truncated"))? as usize;
+        at += 1;
+        match key_len {
+            0 => None,
+            16 => {
+                let raw = payload
+                    .get(at..at + 16)
+                    .ok_or(RefError::Format("ref tx truncated"))?;
+                at += 16;
+                Some(raw.try_into().unwrap())
+            }
+            _ => return Err(RefError::Format("bad idempotency key length in ref tx")),
+        }
+    };
     if at != payload.len() {
         return Err(RefError::Format("ref tx has trailing bytes"));
     }
-    Ok(Some(changes))
+    Ok(Some(ParsedTx { changes, key }))
 }

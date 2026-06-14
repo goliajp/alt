@@ -14,14 +14,14 @@
 mod snapshot;
 mod tx;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
 use alt_git_codec::ObjectId;
 use alt_oplog::{OpLog, OpLogError};
 
 pub use alt_oplog::OpId;
-pub use tx::{PAYLOAD_REF_TX, RefChange};
+pub use tx::{IdemKey, PAYLOAD_REF_TX, RefChange};
 
 #[derive(Debug, thiserror::Error)]
 pub enum RefError {
@@ -63,6 +63,12 @@ pub struct RefStore {
     /// transaction CAS-validates against the true current state, not a stale
     /// in-memory snapshot.
     applied: usize,
+    /// Idempotency index: a write's client key → the op that applied it. Built
+    /// by replay alongside `refs` (so it is durable and survives a restart),
+    /// it lets a retried write be detected and not applied twice (D5c). Only the
+    /// recent (post-snapshot) keys are kept — long enough for any in-flight
+    /// retry, which happens within one client invocation.
+    by_key: HashMap<IdemKey, OpId>,
 }
 
 impl RefStore {
@@ -86,9 +92,13 @@ impl RefStore {
         };
 
         let mut ops_since_snapshot = 0;
+        let mut by_key = HashMap::new();
         for op in &oplog.ops()[replay_from..] {
-            if let Some(changes) = tx::parse_tx(&op.payload)? {
-                apply_changes(&mut refs, &changes, true)?;
+            if let Some(tx) = tx::parse_tx(&op.payload)? {
+                apply_changes(&mut refs, &tx.changes, true)?;
+                if let Some(k) = tx.key {
+                    by_key.insert(k, op.id);
+                }
             }
             ops_since_snapshot += 1;
         }
@@ -100,6 +110,7 @@ impl RefStore {
             refs,
             ops_since_snapshot,
             applied,
+            by_key,
         })
     }
 
@@ -112,25 +123,51 @@ impl RefStore {
         timestamp_ms: u64,
         changes: &[RefChange],
     ) -> Result<OpId, RefError> {
+        self.commit_idempotent(actor, timestamp_ms, changes, None)
+    }
+
+    /// Like [`commit`](Self::commit) but stamps the transaction with a client
+    /// idempotency `key`, recorded durably with the op. A later write carrying
+    /// the same key is detected via [`applied_request`](Self::applied_request)
+    /// and not applied again — the basis of the daemon's exactly-once retry.
+    pub fn commit_idempotent(
+        &mut self,
+        actor: &str,
+        timestamp_ms: u64,
+        changes: &[RefChange],
+        key: Option<IdemKey>,
+    ) -> Result<OpId, RefError> {
         // The validate → append must be atomic against other writers: inside
         // the append lock, fold in any ops they committed since (so `refs` is
         // the true current state), then CAS-validate this transaction against
         // it. A rejected transaction aborts with nothing written.
         let refs = &mut self.refs;
         let applied = &mut self.applied;
+        let by_key = &mut self.by_key;
         let op_id =
             self.oplog
                 .append_checked(actor, timestamp_ms, |ops| -> Result<Vec<u8>, RefError> {
-                    fold_new(refs, applied, ops)?;
+                    fold_new(refs, applied, by_key, ops)?;
                     apply_changes(&mut refs.clone(), changes, false)?;
-                    Ok(tx::encode_tx(changes))
+                    Ok(tx::encode_tx(changes, key))
                 })?;
         self.oplog.sync()?;
-        // our own op is durable now; fold it into the map and the cursor
+        // our own op is durable now; fold it into the map, the cursor, and the
+        // idempotency index (so a retry with the same key is detected)
         apply_changes(&mut self.refs, changes, false)?;
+        if let Some(k) = key {
+            self.by_key.insert(k, op_id);
+        }
         self.applied = self.oplog.len();
         self.note_op()?;
         Ok(op_id)
+    }
+
+    /// The op that applied a write carrying `key`, if one is in the idempotency
+    /// index — i.e. the write already happened. The daemon checks this before
+    /// executing a keyed write, so a retry returns instead of applying twice.
+    pub fn applied_request(&self, key: &IdemKey) -> Option<OpId> {
+        self.by_key.get(key).copied()
     }
 
     /// Records a non-ref op (import, future workflow ops) in the shared
@@ -146,11 +183,12 @@ impl RefStore {
         }
         let refs = &mut self.refs;
         let applied = &mut self.applied;
+        let by_key = &mut self.by_key;
         let owned = payload.to_vec();
         let op_id =
             self.oplog
                 .append_checked(actor, timestamp_ms, |ops| -> Result<Vec<u8>, RefError> {
-                    fold_new(refs, applied, ops)?;
+                    fold_new(refs, applied, by_key, ops)?;
                     Ok(owned)
                 })?;
         self.oplog.sync()?;
@@ -165,7 +203,12 @@ impl RefStore {
     /// process held at open.
     pub fn refresh(&mut self) -> Result<(), RefError> {
         self.oplog.refresh()?;
-        fold_new(&mut self.refs, &mut self.applied, self.oplog.ops())?;
+        fold_new(
+            &mut self.refs,
+            &mut self.applied,
+            &mut self.by_key,
+            self.oplog.ops(),
+        )?;
         Ok(())
     }
 
@@ -255,8 +298,8 @@ impl RefStore {
     /// no ref transaction has ever been recorded.
     pub fn last_transaction(&self) -> Result<Option<Vec<RefChange>>, RefError> {
         for op in self.oplog.ops().iter().rev() {
-            if let Some(changes) = tx::parse_tx(&op.payload)? {
-                return Ok(Some(changes));
+            if let Some(tx) = tx::parse_tx(&op.payload)? {
+                return Ok(Some(tx.changes));
             }
         }
         Ok(None)
@@ -270,11 +313,15 @@ impl RefStore {
 fn fold_new(
     refs: &mut BTreeMap<String, RefTarget>,
     applied: &mut usize,
+    by_key: &mut HashMap<IdemKey, OpId>,
     ops: &[alt_oplog::Op],
 ) -> Result<(), RefError> {
     for op in &ops[*applied..] {
-        if let Some(changes) = tx::parse_tx(&op.payload)? {
-            apply_changes(refs, &changes, true)?;
+        if let Some(tx) = tx::parse_tx(&op.payload)? {
+            apply_changes(refs, &tx.changes, true)?;
+            if let Some(k) = tx.key {
+                by_key.insert(k, op.id);
+            }
         }
     }
     *applied = ops.len();
@@ -385,6 +432,40 @@ mod tests {
         assert!(store.get("refs/heads/new").is_none(), "nothing applied");
         assert_eq!(store.oplog().len(), 1, "nothing recorded");
         assert_eq!(store.get("refs/heads/main"), Some(&RefTarget::Oid(oid(1))));
+    }
+
+    #[test]
+    fn idempotency_key_is_indexed_and_survives_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let key: IdemKey = [7u8; 16];
+        let other: IdemKey = [8u8; 16];
+        let op = {
+            let mut store = RefStore::open(dir.path()).unwrap();
+            // a keyless commit leaves the index empty for any key
+            store
+                .commit("a", 1, &[set("refs/heads/main", None, oid(1))])
+                .unwrap();
+            assert_eq!(store.applied_request(&key), None);
+            // a keyed commit is found by its key, and only its key
+            let op = store
+                .commit_idempotent("a", 2, &[set("refs/heads/feat", None, oid(2))], Some(key))
+                .unwrap();
+            assert_eq!(store.applied_request(&key), Some(op));
+            assert_eq!(store.applied_request(&other), None);
+            op
+        };
+        // the key is durable: a fresh open rebuilds the index from the log, so a
+        // retry after a daemon restart still sees the write as already applied
+        let reopened = RefStore::open(dir.path()).unwrap();
+        assert_eq!(
+            reopened.applied_request(&key),
+            Some(op),
+            "idempotency key must survive a reopen (the point of persistent dedup)"
+        );
+        assert_eq!(
+            reopened.get("refs/heads/feat"),
+            Some(&RefTarget::Oid(oid(2)))
+        );
     }
 
     #[test]
