@@ -43,6 +43,7 @@ dependencies = [
  "bstr",
  "clap",
  "encoding_rs",
+ "libc",
  "tempfile",
 ]
 

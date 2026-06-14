@@ -363,6 +363,17 @@ impl OpLog {
         result
     }
 
+    /// Read-path catch-up for a long-lived log (the daemon between requests):
+    /// replays records appended by other writers so reads see the current
+    /// chain, writing nothing. Like `append` it takes the exclusive lock (so a
+    /// torn tail from a crashed writer is truncated safely).
+    pub fn refresh(&mut self) -> Result<(), OpLogError> {
+        lock_exclusive(&self.file)?;
+        let result = self.catch_up();
+        let _ = unlock(&self.file);
+        result
+    }
+
     /// The body of `append`, run while holding the exclusive lock.
     fn append_locked(
         &mut self,

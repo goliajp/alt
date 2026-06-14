@@ -159,6 +159,16 @@ impl RefStore {
         Ok(op_id)
     }
 
+    /// Read-path catch-up for a long-lived store (the daemon between requests):
+    /// pull in ops other writers committed and fold them into the ref map, so a
+    /// served read reflects the true on-disk state — not the snapshot this
+    /// process held at open.
+    pub fn refresh(&mut self) -> Result<(), RefError> {
+        self.oplog.refresh()?;
+        fold_new(&mut self.refs, &mut self.applied, self.oplog.ops())?;
+        Ok(())
+    }
+
     fn note_op(&mut self) -> Result<(), RefError> {
         self.ops_since_snapshot += 1;
         if self.ops_since_snapshot >= SNAPSHOT_EVERY {

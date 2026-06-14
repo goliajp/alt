@@ -25,11 +25,190 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-fn actor(verb: &str) -> String {
-    format!(
-        "cli/{verb}@{}",
-        std::env::var("USER").as_deref().unwrap_or("unknown")
-    )
+/// Who is acting: the actor suffix for op-log entries and the author identity
+/// for commits. Built per request from the caller's environment, not from
+/// process globals — so the daemon can serve concurrent callers with distinct
+/// identities without racing on `std::env`.
+#[derive(Clone)]
+pub struct Identity {
+    user: String,
+    author_name: String,
+    author_email: String,
+}
+
+impl Identity {
+    /// From this process's environment (the `alt` CLI path).
+    pub fn from_env() -> Self {
+        Self::from_lookup(|k| std::env::var(k).ok())
+    }
+
+    /// From a request's forwarded env vars (the daemon path).
+    pub fn from_map(env: &[(String, String)]) -> Self {
+        Self::from_lookup(|k| {
+            env.iter()
+                .find(|(name, _)| name == k)
+                .map(|(_, v)| v.clone())
+        })
+    }
+
+    fn from_lookup(get: impl Fn(&str) -> Option<String>) -> Self {
+        let user = get("USER").unwrap_or_else(|| "unknown".to_owned());
+        let author_name = get("GIT_AUTHOR_NAME")
+            .or_else(|| get("USER"))
+            .unwrap_or_else(|| "alt".to_owned());
+        let author_email =
+            get("GIT_AUTHOR_EMAIL").unwrap_or_else(|| format!("{author_name}@localhost"));
+        Self {
+            user,
+            author_name,
+            author_email,
+        }
+    }
+
+    /// The op-log actor string for a verb, e.g. `cli/commit@alice`.
+    fn actor(&self, verb: &str) -> String {
+        format!("cli/{verb}@{}", self.user)
+    }
+
+    /// The commit author/committer identity (name, email).
+    fn sig(&self) -> (&str, &str) {
+        (&self.author_name, &self.author_email)
+    }
+}
+
+/// The shared, per-repository state under `<root>/.alt`: the object database,
+/// the ref store, and the hash algorithm. These are the parts the local daemon
+/// holds open across requests (amortizing the per-command open ~21ms); the
+/// per-workspace coordinates live in [`NativeRepo`], attached per request.
+pub struct Store {
+    alt_dir: PathBuf,
+    odb: NativeOdb,
+    refs: RefStore,
+    algo: HashAlgo,
+}
+
+impl Store {
+    /// Opens (does not create) the store whose control dir is `alt_dir`.
+    pub fn open(alt_dir: PathBuf) -> Res<Self> {
+        Ok(Self {
+            odb: NativeOdb::open(&alt_dir)?,
+            refs: RefStore::open(&alt_dir)?,
+            alt_dir,
+            algo: HashAlgo::Sha1,
+        })
+    }
+
+    /// The control directory (`…/.alt`).
+    pub fn alt_dir(&self) -> &Path {
+        &self.alt_dir
+    }
+
+    /// Read-path catch-up: bring the odb and ref state up to date with writes
+    /// committed by other processes since the last refresh. The daemon calls
+    /// this at the start of every request so a served read is never stale.
+    pub fn refresh(&mut self) -> Res<()> {
+        self.odb.refresh()?;
+        self.refs.refresh()?;
+        Ok(())
+    }
+}
+
+/// The per-workspace coordinates within a repo: the working-tree root, the
+/// workspace name, the ref naming its HEAD, and its index file. Resolved per
+/// request and cheap to carry by value.
+#[derive(Clone)]
+pub struct Coord {
+    root: PathBuf,
+    workspace: String,
+    head_ref: String,
+    index_path: PathBuf,
+}
+
+impl Coord {
+    /// The default workspace's coordinates for the repo rooted at `repo_root`
+    /// (its HEAD stays the bare `HEAD` ref and its index `.alt/index`, so
+    /// existing repos are unchanged).
+    fn default_at(repo_root: &Path) -> Coord {
+        let alt_dir = repo_root.join(".alt");
+        Coord {
+            index_path: alt_dir.join("index"),
+            root: repo_root.to_path_buf(),
+            workspace: DEFAULT_WORKSPACE.to_owned(),
+            head_ref: "HEAD".to_owned(),
+        }
+    }
+
+    /// The coordinates of workspace `name` in the repo whose control dir is
+    /// `alt_dir`. The default workspace's working tree is the repo root; a
+    /// named one's comes from its registry `meta`.
+    fn for_name(alt_dir: &Path, name: &str) -> Res<Coord> {
+        let repo_root = alt_dir.parent().unwrap_or(alt_dir);
+        if name == DEFAULT_WORKSPACE {
+            return Ok(Coord::default_at(repo_root));
+        }
+        let ws_dir = alt_dir.join("workspaces").join(name);
+        let worktree = std::fs::read_to_string(ws_dir.join("meta"))
+            .map_err(|_| format!("no such workspace '{name}'"))?;
+        Ok(Coord {
+            root: PathBuf::from(worktree.trim()),
+            workspace: name.to_owned(),
+            head_ref: format!("workspaces/{name}/HEAD"),
+            index_path: ws_dir.join("index"),
+        })
+    }
+}
+
+/// Walks up from `start` for a directory holding `.alt`, resolving which
+/// workspace applies, and returns the control dir plus the coordinates. An
+/// explicit `workspace` name always wins. Otherwise the workspace is inferred:
+/// under a repo root (a `.alt` directory) → the default workspace; inside a
+/// named workspace's working tree (a `.alt` *file* pointing back at the repo,
+/// git-worktree style) → that workspace.
+pub fn resolve_workspace(start: &Path, workspace: Option<&str>) -> Res<(PathBuf, Coord)> {
+    let mut dir: &Path = start;
+    loop {
+        let marker = dir.join(".alt");
+        if marker.is_dir() {
+            let coord = Coord::for_name(&marker, workspace.unwrap_or(DEFAULT_WORKSPACE))?;
+            return Ok((marker, coord));
+        }
+        if marker.is_file() {
+            let (repo_root, name) = parse_workspace_marker(&marker)?;
+            let alt_dir = repo_root.join(".alt");
+            let coord = Coord::for_name(&alt_dir, workspace.unwrap_or(&name))?;
+            return Ok((alt_dir, coord));
+        }
+        dir = dir
+            .parent()
+            .ok_or("not an alt repository (no .alt found)")?;
+    }
+}
+
+/// Owns an opened store plus the resolved workspace + identity for one CLI
+/// invocation. The daemon does not use this — it holds a [`Store`] across
+/// requests and attaches a [`NativeRepo`] per request.
+pub struct OpenRepo {
+    store: Store,
+    coord: Coord,
+    id: Identity,
+}
+
+impl OpenRepo {
+    /// Discovers the repo from `start`, selecting the default (or named)
+    /// workspace, and opens its store with the given caller identity.
+    pub fn discover(start: &Path, workspace: Option<&str>, id: Identity) -> Res<Self> {
+        let (alt_dir, coord) = resolve_workspace(start, workspace)?;
+        Ok(Self {
+            store: Store::open(alt_dir)?,
+            coord,
+            id,
+        })
+    }
+
+    /// The bound repo for issuing one command.
+    pub fn repo(&mut self) -> NativeRepo<'_> {
+        NativeRepo::attach(&mut self.store, self.coord.clone(), self.id.clone())
+    }
 }
 
 /// `alt init [dir]`: create an empty native repo with an unborn HEAD → main.
@@ -44,7 +223,7 @@ pub fn init(dir: Option<PathBuf>, out: &mut impl Write) -> Res<()> {
     odb.flush()?;
     let mut refs = RefStore::open(&alt_dir)?;
     refs.commit(
-        &actor("init"),
+        &Identity::from_env().actor("init"),
         now_ms(),
         &[RefChange {
             name: "HEAD".to_owned(),
@@ -65,15 +244,14 @@ pub fn init(dir: Option<PathBuf>, out: &mut impl Write) -> Res<()> {
 /// index stays at `.alt/index`, so existing repos are unchanged.
 const DEFAULT_WORKSPACE: &str = "default";
 
-/// An opened native repo, bound to one workspace. The odb, branch refs, and
-/// op log are shared across workspaces; the HEAD ref, index, and working tree
-/// are per-workspace, so N agents can work in parallel without colliding.
-pub struct NativeRepo {
+/// An opened native repo bound to one workspace, for the span of one command.
+/// It borrows the shared [`Store`] (so the daemon can reuse one across requests)
+/// and owns the per-request coordinates and caller identity. The odb, branch
+/// refs, and op log are shared across workspaces; the HEAD ref, index, and
+/// working tree are per-workspace, so N agents can work in parallel.
+pub struct NativeRepo<'a> {
+    store: &'a mut Store,
     root: PathBuf,
-    alt_dir: PathBuf,
-    odb: NativeOdb,
-    refs: RefStore,
-    algo: HashAlgo,
     /// This workspace's name (`default` for the repo-root workspace).
     workspace: String,
     /// The ref naming this workspace's HEAD: `HEAD` for the default workspace,
@@ -81,91 +259,21 @@ pub struct NativeRepo {
     head_ref: String,
     /// This workspace's index file.
     index_path: PathBuf,
+    /// The caller acting through this view.
+    id: Identity,
 }
 
-impl NativeRepo {
-    /// Walks up from `start` for a directory holding `.alt`, opening its
-    /// default workspace (working tree = the directory that holds `.alt`).
-    pub fn discover(start: &Path) -> Res<Self> {
-        Self::discover_workspace(start, None)
-    }
-
-    /// Like `discover`, but selects a workspace. An explicit `workspace` name
-    /// always wins. Otherwise the workspace is inferred from where `start`
-    /// lands: under a repo root (a `.alt` directory) → the default workspace;
-    /// inside a named workspace's working tree (a `.alt` *file* pointing back
-    /// at the repo, git-worktree style) → that workspace.
-    pub fn discover_workspace(start: &Path, workspace: Option<&str>) -> Res<Self> {
-        let mut dir: &Path = start;
-        loop {
-            let marker = dir.join(".alt");
-            if marker.is_dir() {
-                return match workspace {
-                    Some(name) => Self::open_workspace(dir, name),
-                    None => Self::open_default(dir),
-                };
-            }
-            if marker.is_file() {
-                let (repo_root, name) = parse_workspace_marker(&marker)?;
-                return Self::open_workspace(&repo_root, workspace.unwrap_or(&name));
-            }
-            dir = dir
-                .parent()
-                .ok_or("not an alt repository (no .alt found)")?;
+impl<'a> NativeRepo<'a> {
+    /// Binds a borrowed store to a workspace + identity for one command.
+    pub fn attach(store: &'a mut Store, coord: Coord, id: Identity) -> Self {
+        Self {
+            store,
+            root: coord.root,
+            workspace: coord.workspace,
+            head_ref: coord.head_ref,
+            index_path: coord.index_path,
+            id,
         }
-    }
-
-    /// Opens the default workspace of the repo rooted at `repo_root`.
-    fn open_default(repo_root: &Path) -> Res<Self> {
-        let alt_dir = repo_root.join(".alt");
-        let index_path = alt_dir.join("index");
-        Self::open_with(
-            repo_root.to_path_buf(),
-            alt_dir,
-            DEFAULT_WORKSPACE.to_owned(),
-            "HEAD".to_owned(),
-            index_path,
-        )
-    }
-
-    /// Shared constructor for any workspace.
-    fn open_with(
-        root: PathBuf,
-        alt_dir: PathBuf,
-        workspace: String,
-        head_ref: String,
-        index_path: PathBuf,
-    ) -> Res<Self> {
-        Ok(Self {
-            odb: NativeOdb::open(&alt_dir)?,
-            refs: RefStore::open(&alt_dir)?,
-            root,
-            alt_dir,
-            algo: HashAlgo::Sha1,
-            workspace,
-            head_ref,
-            index_path,
-        })
-    }
-
-    /// Opens a specific workspace of the repo at `repo_root` (the directory
-    /// that holds `.alt`). The `default` workspace is the repo root; a named
-    /// workspace's working tree comes from its registry `meta`.
-    pub fn open_workspace(repo_root: &Path, name: &str) -> Res<Self> {
-        if name == DEFAULT_WORKSPACE {
-            return Self::open_default(repo_root);
-        }
-        let alt_dir = repo_root.join(".alt");
-        let ws_dir = alt_dir.join("workspaces").join(name);
-        let worktree = std::fs::read_to_string(ws_dir.join("meta"))
-            .map_err(|_| format!("no such workspace '{name}'"))?;
-        Self::open_with(
-            PathBuf::from(worktree.trim()),
-            alt_dir,
-            name.to_owned(),
-            format!("workspaces/{name}/HEAD"),
-            ws_dir.join("index"),
-        )
     }
 
     /// `alt workspace add <name> <path>`: create a parallel workspace whose
@@ -175,11 +283,12 @@ impl NativeRepo {
     pub fn create_workspace(&mut self, name: &str, worktree: &Path, branch: &str) -> Res<()> {
         check_workspace_name(name)?;
         let head_ref = format!("workspaces/{name}/HEAD");
-        if self.refs.get(&head_ref).is_some() {
+        if self.store.refs.get(&head_ref).is_some() {
             return Err(format!("a workspace named '{name}' already exists").into());
         }
         let branch_ref = format!("refs/heads/{branch}");
         let commit = self
+            .store
             .refs
             .resolve(&branch_ref)?
             .ok_or_else(|| format!("invalid reference: {branch}"))?;
@@ -188,12 +297,13 @@ impl NativeRepo {
         // under another workspace's would show up there as untracked files.
         std::fs::create_dir_all(worktree)?;
         let abs = std::fs::canonicalize(worktree)?;
-        let repo_root = std::fs::canonicalize(self.alt_dir.parent().unwrap_or(&self.alt_dir))?;
+        let repo_root =
+            std::fs::canonicalize(self.store.alt_dir.parent().unwrap_or(&self.store.alt_dir))?;
         if abs.starts_with(&repo_root) {
             return Err("workspace working tree must be outside the repository".into());
         }
 
-        let ws_dir = self.alt_dir.join("workspaces").join(name);
+        let ws_dir = self.store.alt_dir.join("workspaces").join(name);
         std::fs::create_dir_all(&ws_dir)?;
         std::fs::write(
             ws_dir.join("meta"),
@@ -211,8 +321,8 @@ impl NativeRepo {
         )?;
 
         // point this workspace's HEAD at the branch (one ref transaction)
-        self.refs.commit(
-            &actor("workspace"),
+        self.store.refs.commit(
+            &self.id.actor("workspace"),
             now_ms(),
             &[RefChange {
                 name: head_ref.clone(),
@@ -222,14 +332,15 @@ impl NativeRepo {
         )?;
 
         // materialize the branch tree into the new working tree + index by
-        // opening the workspace and checking out from an empty base
-        let mut ws = Self::open_with(
-            abs,
-            self.alt_dir.clone(),
-            name.to_owned(),
+        // attaching a child view (sharing this store) and checking out from an
+        // empty base
+        let child = Coord {
+            root: abs,
+            workspace: name.to_owned(),
             head_ref,
-            ws_dir.join("index"),
-        )?;
+            index_path: ws_dir.join("index"),
+        };
+        let mut ws = NativeRepo::attach(&mut *self.store, child, self.id.clone());
         let target = ws.commit_entries(commit)?;
         ws.checkout(&[], &target)?;
         Ok(())
@@ -244,12 +355,13 @@ impl NativeRepo {
         }
         let head_ref = format!("workspaces/{name}/HEAD");
         let old = self
+            .store
             .refs
             .get(&head_ref)
             .cloned()
             .ok_or_else(|| format!("no such workspace '{name}'"))?;
-        self.refs.commit(
-            &actor("workspace"),
+        self.store.refs.commit(
+            &self.id.actor("workspace"),
             now_ms(),
             &[RefChange {
                 name: head_ref,
@@ -257,7 +369,7 @@ impl NativeRepo {
                 new: None,
             }],
         )?;
-        let ws_dir = self.alt_dir.join("workspaces").join(name);
+        let ws_dir = self.store.alt_dir.join("workspaces").join(name);
         // drop the working tree's `.alt` marker so it no longer resolves
         if let Ok(worktree) = std::fs::read_to_string(ws_dir.join("meta")) {
             let _ = std::fs::remove_file(PathBuf::from(worktree.trim()).join(".alt"));
@@ -273,10 +385,14 @@ impl NativeRepo {
     pub fn list_workspaces(&self) -> Res<Vec<(String, PathBuf, bool)>> {
         let mut out = vec![(
             DEFAULT_WORKSPACE.to_owned(),
-            self.alt_dir.parent().unwrap_or(&self.alt_dir).to_path_buf(),
+            self.store
+                .alt_dir
+                .parent()
+                .unwrap_or(&self.store.alt_dir)
+                .to_path_buf(),
             self.workspace == DEFAULT_WORKSPACE,
         )];
-        let ws_root = self.alt_dir.join("workspaces");
+        let ws_root = self.store.alt_dir.join("workspaces");
         if let Ok(entries) = std::fs::read_dir(&ws_root) {
             let mut named: Vec<_> = entries.filter_map(|e| e.ok()).collect();
             named.sort_by_key(|e| e.file_name());
@@ -369,7 +485,7 @@ impl NativeRepo {
     }
 
     fn index(&self) -> Res<Index> {
-        match Index::open(&self.index_path, self.algo) {
+        match Index::open(&self.index_path, self.store.algo) {
             Ok(i) => Ok(i),
             Err(alt_git_index::IndexError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
                 Ok(empty_index())
@@ -381,7 +497,7 @@ impl NativeRepo {
     /// `alt add <paths>`: stage the given paths (or everything for `.`),
     /// updating the index to match the working tree.
     pub fn add(&mut self, paths: &[String], json: bool, out: &mut impl Write) -> Res<()> {
-        let scan = scan_worktree(&self.root, self.algo)?;
+        let scan = scan_worktree(&self.root, self.store.algo)?;
         let staging_all = paths.iter().any(|p| p == ".");
 
         // start from the current stage-0 entries (or empty when restaging all)
@@ -404,13 +520,15 @@ impl NativeRepo {
         for rel in &targets {
             entries.retain(|e| &e.path != rel);
             if let Some(w) = scan.iter().find(|w| &w.path == rel) {
-                self.odb.put(w.oid, ObjectKind::Blob, &self.read_for(w)?)?;
+                self.store
+                    .odb
+                    .put(w.oid, ObjectKind::Blob, &self.read_for(w)?)?;
                 entries.push(self.make_entry(w)?);
                 staged += 1;
             } // a path that vanished from the tree is dropped (staged deletion)
         }
 
-        self.odb.flush()?;
+        self.store.odb.flush()?;
         save_index(
             &self.index_path,
             &Index {
@@ -457,17 +575,17 @@ impl NativeRepo {
         if staged.is_empty() {
             return Err("nothing to commit (empty index)".into());
         }
-        let tree = write_tree(&mut self.odb, &staged, self.algo)?;
+        let tree = write_tree(&mut self.store.odb, &staged, self.store.algo)?;
 
         let branch = self.head_branch()?;
-        let parent = self.refs.resolve(&branch)?;
+        let parent = self.store.refs.resolve(&branch)?;
         let parents: Vec<ObjectId> = parent.into_iter().collect();
 
         let when = (now_ms() / 1000) as i64;
-        let (name, email) = identity();
+        let (name, email) = self.id.sig();
         let sig = Sig {
-            name: &name,
-            email: &email,
+            name,
+            email,
             when,
             tz: "+0000",
         };
@@ -476,11 +594,19 @@ impl NativeRepo {
         } else {
             format!("{message}\n")
         };
-        let commit = write_commit(&mut self.odb, tree, &parents, &sig, &sig, &msg, self.algo)?;
-        self.odb.flush()?;
+        let commit = write_commit(
+            &mut self.store.odb,
+            tree,
+            &parents,
+            &sig,
+            &sig,
+            &msg,
+            self.store.algo,
+        )?;
+        self.store.odb.flush()?;
 
-        self.refs.commit(
-            &actor("commit"),
+        self.store.refs.commit(
+            &self.id.actor("commit"),
             now_ms(),
             &[RefChange {
                 name: branch.clone(),
@@ -519,7 +645,7 @@ impl NativeRepo {
             .map(|e| e.path.clone())
             .collect();
         let index = index_entries(&raw);
-        let worktree = scan_worktree(&self.root, self.algo)?;
+        let worktree = scan_worktree(&self.root, self.store.algo)?;
         let mut st = status(&head, &index, &worktree);
         // unmerged paths are reported in their own section, not as
         // staged/unstaged/untracked noise driven by the missing stage-0 entry
@@ -573,7 +699,7 @@ impl NativeRepo {
 
     /// The HEAD commit's tree flattened to entries (empty when unborn).
     fn head_entries(&self) -> Res<Vec<WorkEntry>> {
-        match self.refs.resolve(&self.head_branch()?)? {
+        match self.store.refs.resolve(&self.head_branch()?)? {
             Some(commit) => self.commit_entries(commit),
             None => Ok(Vec::new()),
         }
@@ -581,11 +707,15 @@ impl NativeRepo {
 
     /// A commit's tree flattened to path-sorted entries.
     fn commit_entries(&self, commit: ObjectId) -> Res<Vec<WorkEntry>> {
-        let obj = self.odb.get(&commit)?.ok_or("commit missing from store")?;
+        let obj = self
+            .store
+            .odb
+            .get(&commit)?
+            .ok_or("commit missing from store")?;
         let tree = alt_git_codec::Commit::parse(&obj.data)?
             .tree()
             .ok_or("commit has no tree")?;
-        Ok(flatten_tree(&self.odb, tree, self.algo)?)
+        Ok(flatten_tree(&self.store.odb, tree, self.store.algo)?)
     }
 
     /// `alt diff` (index → working tree) or `alt diff --cached` (HEAD →
@@ -603,7 +733,7 @@ impl NativeRepo {
             )
         } else {
             let index = index_entries(&self.index()?);
-            let work = scan_worktree(&self.root, self.algo)?;
+            let work = scan_worktree(&self.root, self.store.algo)?;
             (index, work, true, false)
         };
 
@@ -744,11 +874,16 @@ impl NativeRepo {
     }
 
     fn blob_bytes(&self, oid: ObjectId) -> Res<Vec<u8>> {
-        Ok(self.odb.get(&oid)?.ok_or("object missing from store")?.data)
+        Ok(self
+            .store
+            .odb
+            .get(&oid)?
+            .ok_or("object missing from store")?
+            .data)
     }
 
     fn head_branch(&self) -> Res<String> {
-        match self.refs.get(&self.head_ref) {
+        match self.store.refs.get(&self.head_ref) {
             Some(RefTarget::Symbolic(b)) => Ok(b.clone()),
             Some(RefTarget::Oid(_)) => Err("detached HEAD is not supported yet".into()),
             None => Ok("refs/heads/main".to_owned()),
@@ -776,7 +911,7 @@ impl NativeRepo {
         if json {
             return self.list_branches_json(&current, out);
         }
-        for (name, _) in self.refs.iter() {
+        for (name, _) in self.store.refs.iter() {
             if let Some(short) = name.strip_prefix("refs/heads/") {
                 let mark = if name == current { "* " } else { "  " };
                 writeln!(out, "{mark}{short}")?;
@@ -790,9 +925,9 @@ impl NativeRepo {
     fn list_branches_json(&self, current: &str, out: &mut impl Write) -> Res<()> {
         use crate::json::Json;
         let mut branches = Vec::new();
-        for (name, _) in self.refs.iter() {
+        for (name, _) in self.store.refs.iter() {
             if let Some(short) = name.strip_prefix("refs/heads/") {
-                let oid = match self.refs.resolve(name)? {
+                let oid = match self.store.refs.resolve(name)? {
                     Some(o) => Json::str(o.to_string()),
                     None => Json::Null,
                 };
@@ -817,15 +952,16 @@ impl NativeRepo {
     fn create_branch(&mut self, name: &str, out: &mut impl Write) -> Res<()> {
         check_branch_name(name)?;
         let full = format!("refs/heads/{name}");
-        if self.refs.get(&full).is_some() {
+        if self.store.refs.get(&full).is_some() {
             return Err(format!("a branch named '{name}' already exists").into());
         }
         let commit = self
+            .store
             .refs
             .resolve(&self.head_branch()?)?
             .ok_or("cannot create a branch before the first commit")?;
-        self.refs.commit(
-            &actor("branch"),
+        self.store.refs.commit(
+            &self.id.actor("branch"),
             now_ms(),
             &[RefChange {
                 name: full,
@@ -843,12 +979,13 @@ impl NativeRepo {
             return Err(format!("cannot delete branch '{name}': it is the current branch").into());
         }
         let old = self
+            .store
             .refs
             .get(&full)
             .cloned()
             .ok_or_else(|| format!("branch '{name}' not found"))?;
-        self.refs.commit(
-            &actor("branch"),
+        self.store.refs.commit(
+            &self.id.actor("branch"),
             now_ms(),
             &[RefChange {
                 name: full,
@@ -890,14 +1027,14 @@ impl NativeRepo {
 
         if create {
             check_branch_name(name)?;
-            if self.refs.get(&full).is_some() {
+            if self.store.refs.get(&full).is_some() {
                 return Err(format!("a branch named '{name}' already exists").into());
             }
             // a new branch starts at the current commit (if any); the working
             // tree and index carry over unchanged, so no checkout is needed.
-            if let Some(commit) = self.refs.resolve(&current)? {
-                self.refs.commit(
-                    &actor("branch"),
+            if let Some(commit) = self.store.refs.resolve(&current)? {
+                self.store.refs.commit(
+                    &self.id.actor("branch"),
                     now_ms(),
                     &[RefChange {
                         name: full.clone(),
@@ -914,7 +1051,7 @@ impl NativeRepo {
             );
         }
 
-        if self.refs.get(&full).is_none() {
+        if self.store.refs.get(&full).is_none() {
             return Err(format!("invalid reference: {name}").into());
         }
         if full == current {
@@ -922,7 +1059,7 @@ impl NativeRepo {
         }
         self.ensure_clean("switch")?;
 
-        let target = match self.refs.resolve(&full)? {
+        let target = match self.store.refs.resolve(&full)? {
             Some(commit) => self.commit_entries(commit)?,
             None => Vec::new(), // unborn target: tree becomes empty
         };
@@ -937,7 +1074,7 @@ impl NativeRepo {
     fn ensure_clean(&self, action: &str) -> Res<()> {
         let head = self.head_entries()?;
         let index = index_entries(&self.index()?);
-        let worktree = scan_worktree(&self.root, self.algo)?;
+        let worktree = scan_worktree(&self.root, self.store.algo)?;
         let st = status(&head, &index, &worktree);
         if !st.staged.is_empty() || !st.unstaged.is_empty() {
             return Err(format!(
@@ -1003,7 +1140,11 @@ impl NativeRepo {
         if abs.symlink_metadata().is_ok() {
             std::fs::remove_file(&abs)?;
         }
-        let obj = self.odb.get(&w.oid)?.ok_or("blob missing from store")?;
+        let obj = self
+            .store
+            .odb
+            .get(&w.oid)?
+            .ok_or("blob missing from store")?;
         if w.mode == 0o120000 {
             symlink_to(&obj.data, &abs)?;
         } else {
@@ -1030,9 +1171,9 @@ impl NativeRepo {
 
     /// Moves HEAD's symbolic target from `from` to `to` in one ref op.
     fn move_head(&mut self, from: &str, to: &str) -> Res<()> {
-        let old = self.refs.get(&self.head_ref).cloned();
-        self.refs.commit(
-            &actor("switch"),
+        let old = self.store.refs.get(&self.head_ref).cloned();
+        self.store.refs.commit(
+            &self.id.actor("switch"),
             now_ms(),
             &[RefChange {
                 name: self.head_ref.clone(),
@@ -1051,11 +1192,13 @@ impl NativeRepo {
     pub fn merge(&mut self, branch_name: &str, json: bool, out: &mut impl Write) -> Res<bool> {
         let their_ref = format!("refs/heads/{branch_name}");
         let theirs = self
+            .store
             .refs
             .resolve(&their_ref)?
             .ok_or_else(|| format!("merge: {branch_name} - not something we can merge"))?;
         let cur = self.head_branch()?;
         let ours = self
+            .store
             .refs
             .resolve(&cur)?
             .ok_or("cannot merge into an unborn branch")?;
@@ -1180,33 +1323,33 @@ impl NativeRepo {
         let ours_entries = self.commit_entries(ours)?;
         let theirs_entries = self.commit_entries(theirs)?;
         let resolved = self.merge_trees(&base_entries, &ours_entries, &theirs_entries, label)?;
-        self.odb.flush()?;
+        self.store.odb.flush()?;
 
         if resolved.iter().any(|r| r.conflicted) {
             return Ok(MergeOutcome::Conflicted(resolved));
         }
 
         let entries: Vec<WorkEntry> = resolved.iter().filter_map(|r| r.entry.clone()).collect();
-        let tree = write_tree(&mut self.odb, &entries, self.algo)?;
+        let tree = write_tree(&mut self.store.odb, &entries, self.store.algo)?;
         let when = (now_ms() / 1000) as i64;
-        let (name, email) = identity();
+        let (name, email) = self.id.sig();
         let sig = Sig {
-            name: &name,
-            email: &email,
+            name,
+            email,
             when,
             tz: "+0000",
         };
         let msg = format!("Merge branch '{label}'\n");
         let commit = write_commit(
-            &mut self.odb,
+            &mut self.store.odb,
             tree,
             &[ours, theirs],
             &sig,
             &sig,
             &msg,
-            self.algo,
+            self.store.algo,
         )?;
-        self.odb.flush()?;
+        self.store.odb.flush()?;
         Ok(MergeOutcome::Merged { commit, entries })
     }
 
@@ -1216,7 +1359,7 @@ impl NativeRepo {
         use crate::json::Json;
         let model = alt_flow::BranchModel::default();
         let dev_ref = format!("refs/heads/{}", model.develop);
-        if self.refs.get(&dev_ref).is_some() {
+        if self.store.refs.get(&dev_ref).is_some() {
             if json {
                 crate::json::emit(
                     out,
@@ -1231,16 +1374,17 @@ impl NativeRepo {
             return Ok(());
         }
         let main_ref = format!("refs/heads/{}", model.main);
-        let start = match self.refs.resolve(&main_ref)? {
+        let start = match self.store.refs.resolve(&main_ref)? {
             Some(c) => c,
             None => self
+                .store
                 .refs
                 .resolve(&self.head_branch()?)?
                 .ok_or("create an initial commit before 'alt flow init'")?,
         };
-        let head_old = self.refs.get(&self.head_ref).cloned();
-        self.refs.commit(
-            &actor("flow"),
+        let head_old = self.store.refs.get(&self.head_ref).cloned();
+        self.store.refs.commit(
+            &self.id.actor("flow"),
             now_ms(),
             &[
                 RefChange {
@@ -1280,10 +1424,11 @@ impl NativeRepo {
         let flow = alt_flow::BranchModel::default().feature(name)?;
         let feat_ref = format!("refs/heads/{}", flow.branch);
         let base_ref = format!("refs/heads/{}", flow.base);
-        if self.refs.get(&feat_ref).is_some() {
+        if self.store.refs.get(&feat_ref).is_some() {
             return Err(format!("a branch named '{}' already exists", flow.branch).into());
         }
         let base = self
+            .store
             .refs
             .resolve(&base_ref)?
             .ok_or("develop branch missing; run 'alt flow init' first")?;
@@ -1295,9 +1440,9 @@ impl NativeRepo {
         let old = index_entries(&self.index()?);
         self.checkout(&old, &target)?;
 
-        let head_old = self.refs.get(&self.head_ref).cloned();
-        self.refs.commit(
-            &actor("flow"),
+        let head_old = self.store.refs.get(&self.head_ref).cloned();
+        self.store.refs.commit(
+            &self.id.actor("flow"),
             now_ms(),
             &[
                 RefChange {
@@ -1337,10 +1482,12 @@ impl NativeRepo {
         let feat_ref = format!("refs/heads/{}", flow.branch);
         let dev_ref = format!("refs/heads/{}", flow.target);
         let feat = self
+            .store
             .refs
             .resolve(&feat_ref)?
             .ok_or_else(|| format!("no such feature branch '{}'", flow.branch))?;
         let dev = self
+            .store
             .refs
             .resolve(&dev_ref)?
             .ok_or("develop branch missing; run 'alt flow init' first")?;
@@ -1362,9 +1509,9 @@ impl NativeRepo {
         };
 
         // one atomic op: advance develop, delete the feature, move HEAD
-        let head_old = self.refs.get(&self.head_ref).cloned();
-        self.refs.commit(
-            &actor("flow"),
+        let head_old = self.store.refs.get(&self.head_ref).cloned();
+        self.store.refs.commit(
+            &self.id.actor("flow"),
             now_ms(),
             &[
                 RefChange {
@@ -1412,7 +1559,11 @@ impl NativeRepo {
     /// branch/HEAD state) and re-materialize HEAD's tree. The inverse is
     /// itself recorded as an op, so undo is append-only and re-undoable.
     pub fn undo(&mut self, json: bool, out: &mut impl Write) -> Res<()> {
-        let changes = self.refs.last_transaction()?.ok_or("nothing to undo")?;
+        let changes = self
+            .store
+            .refs
+            .last_transaction()?
+            .ok_or("nothing to undo")?;
         self.ensure_clean("undo")?;
 
         // capture the current HEAD tree to drive the checkout's removals
@@ -1425,7 +1576,9 @@ impl NativeRepo {
                 new: c.old.clone(),
             })
             .collect();
-        self.refs.commit(&actor("undo"), now_ms(), &inverse)?;
+        self.store
+            .refs
+            .commit(&self.id.actor("undo"), now_ms(), &inverse)?;
 
         let target = self.head_entries()?;
         self.checkout(&old, &target)?;
@@ -1444,8 +1597,8 @@ impl NativeRepo {
 
     /// Advances `branch` from `old` to `new` in one ref transaction.
     fn advance_branch(&mut self, branch: &str, old: ObjectId, new: ObjectId) -> Res<()> {
-        self.refs.commit(
-            &actor("merge"),
+        self.store.refs.commit(
+            &self.id.actor("merge"),
             now_ms(),
             &[RefChange {
                 name: branch.to_owned(),
@@ -1488,7 +1641,7 @@ impl NativeRepo {
             if !seen.insert(c) {
                 continue;
             }
-            let obj = self.odb.get(&c)?.ok_or("commit missing from store")?;
+            let obj = self.store.odb.get(&c)?.ok_or("commit missing from store")?;
             for p in alt_git_codec::Commit::parse(&obj.data)?.parents() {
                 if !seen.contains(&p) {
                     stack.push(p);
@@ -1575,8 +1728,8 @@ impl NativeRepo {
                 };
                 let m = alt_merge::merge(&base_bytes, &ours_bytes, &theirs_bytes, &labels);
                 if m.is_clean() {
-                    let oid = ObjectId::hash_object(self.algo, ObjectKind::Blob, &m.content);
-                    self.odb.put(oid, ObjectKind::Blob, &m.content)?;
+                    let oid = ObjectId::hash_object(self.store.algo, ObjectKind::Blob, &m.content);
+                    self.store.odb.put(oid, ObjectKind::Blob, &m.content)?;
                     Ok(Resolved::clean(
                         path.clone(),
                         Some(WorkEntry {
@@ -1893,14 +2046,6 @@ fn abbrev(oid: Option<ObjectId>) -> String {
     }
 }
 
-fn identity() -> (String, String) {
-    let name = std::env::var("GIT_AUTHOR_NAME")
-        .or_else(|_| std::env::var("USER"))
-        .unwrap_or_else(|_| "alt".to_owned());
-    let email = std::env::var("GIT_AUTHOR_EMAIL").unwrap_or_else(|_| format!("{name}@localhost"));
-    (name, email)
-}
-
 fn empty_index() -> Index {
     Index {
         version: 2,
@@ -1964,6 +2109,11 @@ fn stat_entry(_meta: &std::fs::Metadata, w: &WorkEntry) -> IndexEntry {
 mod tests {
     use super::*;
 
+    /// Opens an owning handle on `root`'s default (or named) workspace.
+    fn open(root: &Path, ws: Option<&str>) -> OpenRepo {
+        OpenRepo::discover(root, ws, Identity::from_env()).unwrap()
+    }
+
     /// A named workspace gets its own HEAD, index, and working tree, while the
     /// odb and branch refs stay shared — so work in one does not disturb the
     /// other.
@@ -1976,7 +2126,8 @@ mod tests {
         // default workspace: first commit on main, then a `feat` branch
         init(Some(root.to_path_buf()), &mut sink).unwrap();
         std::fs::write(root.join("a.txt"), "main\n").unwrap();
-        let mut repo = NativeRepo::discover(root).unwrap();
+        let mut o = open(root, None);
+        let mut repo = o.repo();
         repo.add(&[".".to_owned()], false, &mut sink).unwrap();
         repo.commit("first", false, &mut sink).unwrap();
         repo.branch(Some("feat".to_owned()), None, false, &mut sink)
@@ -1994,7 +2145,8 @@ mod tests {
 
         // commit in ws2 (advancing feat) — the default workspace is untouched
         std::fs::write(wt.join("a.txt"), "feat-work\n").unwrap();
-        let mut ws2 = NativeRepo::open_workspace(root, "ws2").unwrap();
+        let mut o2 = open(root, Some("ws2"));
+        let mut ws2 = o2.repo();
         ws2.add(&[".".to_owned()], false, &mut sink).unwrap();
         ws2.commit("ws2 work", false, &mut sink).unwrap();
 
@@ -2003,19 +2155,17 @@ mod tests {
             std::fs::read_to_string(root.join("a.txt")).unwrap(),
             "main\n"
         );
-        let def = NativeRepo::discover(root).unwrap();
+        let mut od = open(root, None);
+        let def = od.repo();
         assert_eq!(def.head_branch().unwrap(), "refs/heads/main");
         assert_eq!(
-            NativeRepo::open_workspace(root, "ws2")
-                .unwrap()
-                .head_branch()
-                .unwrap(),
+            open(root, Some("ws2")).repo().head_branch().unwrap(),
             "refs/heads/feat",
             "ws2 is on feat"
         );
 
         // shared store: the default workspace sees feat advanced by ws2
-        assert!(def.refs.resolve("refs/heads/feat").unwrap().is_some());
+        assert!(def.store.refs.resolve("refs/heads/feat").unwrap().is_some());
 
         // listing shows both; removing ws2 drops it
         let names: Vec<String> = def
@@ -2026,11 +2176,8 @@ mod tests {
             .collect();
         assert!(names.contains(&"default".to_owned()));
         assert!(names.contains(&"ws2".to_owned()));
-        NativeRepo::discover(root)
-            .unwrap()
-            .remove_workspace("ws2")
-            .unwrap();
-        assert!(NativeRepo::open_workspace(root, "ws2").is_err());
+        open(root, None).repo().remove_workspace("ws2").unwrap();
+        assert!(OpenRepo::discover(root, Some("ws2"), Identity::from_env()).is_err());
     }
 
     #[test]
@@ -2040,7 +2187,8 @@ mod tests {
         let mut sink = Vec::new();
         init(Some(root.to_path_buf()), &mut sink).unwrap();
         std::fs::write(root.join("a.txt"), "x\n").unwrap();
-        let mut repo = NativeRepo::discover(root).unwrap();
+        let mut o = open(root, None);
+        let mut repo = o.repo();
         repo.add(&[".".to_owned()], false, &mut sink).unwrap();
         repo.commit("c", false, &mut sink).unwrap();
 

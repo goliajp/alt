@@ -3,6 +3,7 @@
 //! the `altd` binary (daemon) build on this, so command logic and the wire
 //! protocol live here, not in either binary.
 
+pub mod cli;
 pub mod daemon;
 pub mod json;
 pub mod log_cmd;

@@ -202,6 +202,17 @@ impl NativeOdb {
         }
     }
 
+    /// Read-path catch-up for a long-lived odb (the daemon between requests):
+    /// brings the in-memory state up to date with on-disk writes by concurrent
+    /// processes, then releases — reusing the proven write-path catch-up so a
+    /// torn tail is handled correctly. Must not be called mid-batch (it is a
+    /// request-boundary operation; a batch always reaches `flush` first).
+    pub fn refresh(&mut self) -> Result<(), OdbError> {
+        self.acquire()?;
+        self.release();
+        Ok(())
+    }
+
     /// Stores one git object's canonical payload and records its identity
     /// bridge. The payload is re-hashed against `oid` — a wrong claimed id
     /// is rejected here rather than discovered at export. Idempotent.
