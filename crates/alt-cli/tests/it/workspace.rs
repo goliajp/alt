@@ -8,6 +8,7 @@ use std::process::{Command, Output};
 fn alt(cwd: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_alt"))
         .current_dir(cwd)
+        .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", "tester")
         .env("GIT_AUTHOR_EMAIL", "t@e")
         .args(args)
@@ -30,6 +31,7 @@ fn ok(o: Output) -> String {
 fn alt_fast(cwd: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_alt"))
         .current_dir(cwd)
+        .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", "tester")
         .env("GIT_AUTHOR_EMAIL", "t@e")
         .env("ALT_RELAXED_DURABILITY", "1")

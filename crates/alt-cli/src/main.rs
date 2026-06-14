@@ -26,21 +26,36 @@ fn run() -> Result<u8, Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let cwd = std::env::current_dir()?;
 
-    // Hot read commands route through the per-repo daemon to skip the ~21ms
-    // store open; the daemon is auto-spawned if not already up. Local-first:
-    // anything that can't (disabled, no repo, daemon unreachable, wire error)
-    // falls through to the direct path below — the daemon is never required.
+    // Hot commands route through the per-repo daemon to skip the store open;
+    // the daemon is auto-spawned if not already up. Local-first: anything the
+    // daemon can't serve falls through to the direct path below. Fallback is
+    // at-most-once — a read re-runs harmlessly, but a write whose request was
+    // sent and whose response was then lost must not run again (it may have
+    // already committed), so we error instead of risking a double write.
     #[cfg(unix)]
     if alt_cli::client::routes_through_daemon(&cli.command)
         && !alt_cli::client::disabled()
         && let Ok((alt_dir, _)) = native::resolve_workspace(&cwd, cli.workspace.as_deref())
-        && let Some(resp) =
-            alt_cli::client::try_serve(&alt_dir, &std::env::args().skip(1).collect::<Vec<_>>())
     {
-        use std::io::Write as _;
-        std::io::stdout().write_all(&resp.stdout)?;
-        std::io::stderr().write_all(&resp.stderr)?;
-        return Ok(resp.exit_code);
+        use alt_cli::client::Outcome;
+        let args = std::env::args().skip(1).collect::<Vec<_>>();
+        match alt_cli::client::try_serve(&alt_dir, &args) {
+            Outcome::Served(resp) => {
+                use std::io::Write as _;
+                std::io::stdout().write_all(&resp.stdout)?;
+                std::io::stderr().write_all(&resp.stderr)?;
+                return Ok(resp.exit_code);
+            }
+            Outcome::LostAfterSend if !alt_cli::client::is_idempotent(&cli.command) => {
+                return Err("the daemon connection dropped after the command was sent; \
+                    it may have already taken effect — check with `alt status` / `alt log` \
+                    before retrying"
+                    .into());
+            }
+            // NotSent (daemon never acted), or a lost response for an idempotent
+            // read — fall through and run the command directly
+            Outcome::NotSent | Outcome::LostAfterSend => {}
+        }
     }
 
     let stdout = std::io::stdout().lock();

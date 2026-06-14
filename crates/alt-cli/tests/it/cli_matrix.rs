@@ -9,6 +9,7 @@ use alt_testutil as common;
 fn run(bin: &str, repo: &Path, args: &[&str]) -> Output {
     Command::new(bin)
         .current_dir(repo)
+        .env("ALT_NO_DAEMON", "1")
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .args(args)

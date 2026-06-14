@@ -8,6 +8,7 @@ use std::process::{Command, Output, Stdio};
 fn alt(repo: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_alt"))
         .current_dir(repo)
+        .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", "tester")
         .env("GIT_AUTHOR_EMAIL", "t@e")
         .args(args)

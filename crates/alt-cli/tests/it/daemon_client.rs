@@ -1,14 +1,19 @@
-//! D3: the `alt` client routes hot read commands (`status`/`branch`/`diff`)
-//! through the per-repo `altd` daemon, auto-spawning one if none is up, and
-//! falls back to running directly when the daemon is disabled or unreachable.
-//! These drive the real `alt` binary end to end and check the two properties
-//! that matter: routing through the daemon yields the *same* output as the
-//! direct path, and disabling the daemon keeps the command working (local-first).
+//! The `alt` client routes hot commands (reads `status`/`branch`/`diff`/`log`,
+//! and since D4 the writes) through the per-repo `altd` daemon, auto-spawning
+//! one if none is up, and falls back to running directly when the daemon is
+//! disabled or unreachable. These drive the real `alt` binary end to end and
+//! check what matters: routing yields the *same* output as the direct path,
+//! disabling keeps commands working (local-first), and the write fallback is
+//! at-most-once — a write whose response is lost after sending errors out
+//! rather than risking a double write.
 
-use std::os::unix::net::UnixStream;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::process::{Command, Output};
+use std::thread;
 use std::time::{Duration, Instant};
+
+use alt_cli::daemon;
 
 /// Runs `alt` in `cwd`. `daemon` toggles the daemon path: when false we set
 /// `ALT_NO_DAEMON=1` to force the direct path. A short idle timeout is forwarded
@@ -138,4 +143,67 @@ fn client_falls_back_when_daemon_disabled() {
         UnixStream::connect(&sock).is_err(),
         "disabled path must not spawn a daemon"
     );
+}
+
+/// A write routed through the daemon lands exactly once and is visible to an
+/// outside reader — the daemon serves writes, not just reads.
+#[test]
+fn client_routes_writes_through_the_daemon() {
+    let dir = repo_with_changes();
+    let root = dir.path();
+
+    // stage + commit both through the daemon (add and commit are routed writes)
+    ok(alt(root, &["add", "."], true));
+    let commit = ok(alt(root, &["commit", "-m", "via daemon"], true));
+    assert!(
+        commit.contains("via daemon") || !commit.is_empty(),
+        "{commit}"
+    );
+
+    // an outside reader sees exactly one new commit on top of base
+    let log = ok(alt(root, &["log", "--json"], false));
+    assert!(log.contains("\"message\":\"via daemon\\n\""), "{log}");
+    assert_eq!(
+        log.matches("\"oid\"").count(),
+        2,
+        "expected base + 1: {log}"
+    );
+}
+
+/// At-most-once: when a write's request reaches the daemon but the response is
+/// lost (here a stand-in server that reads the request then drops the
+/// connection), the client errors instead of silently re-running it directly —
+/// the guard against a double write. A read in the same spot would fall back.
+#[test]
+fn client_write_errors_when_response_is_lost_after_send() {
+    let dir = repo_with_changes();
+    let root = dir.path();
+    let sock = root.join(".alt").join("daemon.sock");
+
+    // a stand-in "daemon": accept one connection, read the request frame, then
+    // drop it without answering — exactly the lost-after-send window
+    let listener = UnixListener::bind(&sock).unwrap();
+    let server = thread::spawn(move || {
+        if let Ok((mut stream, _)) = listener.accept() {
+            let _ = daemon::read_frame(&mut stream);
+            // drop `stream` → client's response read hits EOF
+        }
+    });
+
+    let out = alt(root, &["commit", "-m", "should not double-run"], true);
+    assert!(
+        !out.status.success(),
+        "write must not silently fall back after the request was sent"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("check with"),
+        "expected an at-most-once verify message, got: {stderr}"
+    );
+    server.join().unwrap();
+
+    // and nothing committed: the stand-in did not write, the client did not
+    // fall back, so the tree still holds only base
+    let log = ok(alt(root, &["log", "--json"], false));
+    assert_eq!(log.matches("\"oid\"").count(), 1, "a commit leaked: {log}");
 }
