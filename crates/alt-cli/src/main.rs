@@ -71,6 +71,9 @@ enum Command {
         /// Delete the named branch
         #[arg(short = 'd')]
         delete: Option<String>,
+        /// Emit the branch list as a stable JSON object
+        #[arg(long)]
+        json: bool,
     },
     /// Switch branches, materializing the target tree into the work tree
     Switch {
@@ -85,6 +88,9 @@ enum Command {
         /// Show staged changes (HEAD vs index) instead of unstaged
         #[arg(long, visible_alias = "staged")]
         cached: bool,
+        /// Emit a structured JSON diff instead of unified text
+        #[arg(long)]
+        json: bool,
     },
     /// Join another branch into the current one
     Merge {
@@ -171,8 +177,13 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             out.flush()?;
             return Ok(ExitCode::SUCCESS);
         }
-        Command::Branch { name, delete } => {
-            native::NativeRepo::discover(&cwd)?.branch(name.clone(), delete.clone(), &mut out)?;
+        Command::Branch { name, delete, json } => {
+            native::NativeRepo::discover(&cwd)?.branch(
+                name.clone(),
+                delete.clone(),
+                *json,
+                &mut out,
+            )?;
             out.flush()?;
             return Ok(ExitCode::SUCCESS);
         }
@@ -181,8 +192,8 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             out.flush()?;
             return Ok(ExitCode::SUCCESS);
         }
-        Command::Diff { cached } => {
-            native::NativeRepo::discover(&cwd)?.diff(*cached, &mut out)?;
+        Command::Diff { cached, json } => {
+            native::NativeRepo::discover(&cwd)?.diff(*cached, *json, &mut out)?;
             out.flush()?;
             return Ok(ExitCode::SUCCESS);
         }

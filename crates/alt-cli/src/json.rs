@@ -10,6 +10,7 @@ use std::io::Write;
 /// UTF-8; serialization is lossy-UTF-8 (invalid sequences become U+FFFD) with
 /// the standard JSON escapes, so the output is always valid JSON.
 pub enum Json {
+    Null,
     Bool(bool),
     Num(i64),
     Str(Vec<u8>),
@@ -26,6 +27,7 @@ impl Json {
     /// Writes this value as compact JSON (no insignificant whitespace).
     pub fn write(&self, out: &mut impl Write) -> std::io::Result<()> {
         match self {
+            Json::Null => out.write_all(b"null"),
             Json::Bool(b) => out.write_all(if *b { b"true" } else { b"false" }),
             Json::Num(n) => write!(out, "{n}"),
             Json::Str(bytes) => write_json_string(out, bytes),

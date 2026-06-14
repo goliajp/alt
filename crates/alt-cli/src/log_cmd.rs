@@ -57,12 +57,15 @@ fn strip_encoding_header(data: &[u8]) -> Vec<u8> {
 
 #[derive(clap::Args)]
 pub struct LogArgs {
-    /// pretty-print commits: raw | oneline
-    #[arg(long)]
+    /// pretty-print commits: raw | oneline (ignored with --json)
+    #[arg(long, default_value = "oneline")]
     pretty: String,
     /// limit the number of commits
     #[arg(short = 'n')]
     max_count: Option<usize>,
+    /// emit the commit list as a stable JSON object
+    #[arg(long)]
+    json: bool,
     /// start revision
     #[arg(default_value = "HEAD")]
     rev: String,
@@ -78,6 +81,10 @@ pub fn run(
         .ok_or_else(|| format!("bad revision '{}'", args.rev))?;
     let limit = args.max_count.unwrap_or(usize::MAX);
 
+    if args.json {
+        return run_json(out, repo, start, limit);
+    }
+
     let mut first = true;
     for item in repo.rev_walk(start)?.take(limit) {
         let (oid, _) = item?;
@@ -89,6 +96,50 @@ pub fn run(
             other => return Err(format!("unsupported --pretty={other} (M1: raw, oneline)").into()),
         }
     }
+    Ok(())
+}
+
+/// `log --json`: `{schema_version, commits:[{oid, tree, parents, author,
+/// committer, message}]}`. `author`/`committer` are the raw ident lines
+/// (`Name <email> ts tz`); `message` is the full commit message.
+fn run_json(
+    out: &mut impl Write,
+    repo: &Repository,
+    start: ObjectId,
+    limit: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::json::Json;
+    let mut commits = Vec::new();
+    for item in repo.rev_walk(start)?.take(limit) {
+        let (oid, _) = item?;
+        let obj = repo.read_object(&oid)?.expect("walked oid exists");
+        let commit = alt_git_codec::Commit::parse(&obj.data)?;
+        let opt = |v: Option<&bstr::BStr>| match v {
+            Some(s) => Json::str(s),
+            None => Json::Null,
+        };
+        let parents: Vec<Json> = commit.parents().map(|p| Json::str(p.to_string())).collect();
+        commits.push(Json::Object(vec![
+            ("oid", Json::str(oid.to_string())),
+            (
+                "tree",
+                match commit.tree() {
+                    Some(t) => Json::str(t.to_string()),
+                    None => Json::Null,
+                },
+            ),
+            ("parents", Json::Array(parents)),
+            ("author", opt(commit.author())),
+            ("committer", opt(commit.committer())),
+            ("message", Json::str(commit.message())),
+        ]));
+    }
+    let doc = Json::Object(vec![
+        ("schema_version", Json::Num(1)),
+        ("commits", Json::Array(commits)),
+    ]);
+    doc.write(out)?;
+    out.write_all(b"\n")?;
     Ok(())
 }
 

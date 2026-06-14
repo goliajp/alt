@@ -4,6 +4,7 @@ mod commit_loop;
 mod diff;
 mod flow;
 mod merge;
+mod read_json;
 mod status_json;
 
 mod cli_matrix;

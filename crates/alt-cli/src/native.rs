@@ -299,8 +299,9 @@ impl NativeRepo {
     }
 
     /// `alt diff` (index → working tree) or `alt diff --cached` (HEAD →
-    /// index): a git-style unified diff of the tracked changes.
-    pub fn diff(&self, cached: bool, out: &mut impl Write) -> Res<()> {
+    /// index): a git-style unified diff of the tracked changes. With `json`,
+    /// emits the structured per-file/per-hunk schema (VISION §4 A1).
+    pub fn diff(&self, cached: bool, json: bool, out: &mut impl Write) -> Res<()> {
         // old side is always read from the object store; the new side is the
         // index (cached) or the live working tree (default).
         let (old, new, new_on_disk, show_added) = if cached {
@@ -316,15 +317,83 @@ impl NativeRepo {
             (index, work, true, false)
         };
 
-        let mut buf = Vec::new();
-        for ch in alt_worktree::changes(&old, &new) {
+        let changes: Vec<_> = alt_worktree::changes(&old, &new)
+            .into_iter()
             // a working-tree file with no index entry is untracked, not a diff
-            if ch.old.is_none() && !show_added {
-                continue;
-            }
-            self.emit_file_diff(&mut buf, &ch, new_on_disk)?;
+            .filter(|ch| ch.old.is_some() || show_added)
+            .collect();
+
+        if json {
+            return self.diff_json(&changes, new_on_disk, out);
+        }
+        let mut buf = Vec::new();
+        for ch in &changes {
+            self.emit_file_diff(&mut buf, ch, new_on_disk)?;
         }
         out.write_all(&buf)?;
+        Ok(())
+    }
+
+    /// Builds the `diff --json` document: `{schema_version, files:[…]}`, one
+    /// entry per changed file with its oids/modes, a `binary` flag, and the
+    /// structured hunks (empty for binary files).
+    fn diff_json(
+        &self,
+        changes: &[alt_worktree::Change],
+        new_on_disk: bool,
+        out: &mut impl Write,
+    ) -> Res<()> {
+        use crate::json::Json;
+        let mut files = Vec::with_capacity(changes.len());
+        for ch in changes {
+            let old_bytes = match ch.old {
+                Some(w) => self.blob_bytes(w.oid)?,
+                None => Vec::new(),
+            };
+            let new_bytes = match ch.new {
+                Some(w) if new_on_disk => self.read_for(w)?,
+                Some(w) => self.blob_bytes(w.oid)?,
+                None => Vec::new(),
+            };
+            let status = match (ch.old, ch.new) {
+                (None, _) => "added",
+                (_, None) => "deleted",
+                _ => "modified",
+            };
+            let binary = alt_diff::is_binary(&old_bytes) || alt_diff::is_binary(&new_bytes);
+            let hunks = if binary {
+                Vec::new()
+            } else {
+                alt_diff::hunks(&old_bytes, &new_bytes, 3)
+                    .iter()
+                    .map(hunk_json)
+                    .collect()
+            };
+            let oid = |w: Option<&WorkEntry>| match w {
+                Some(w) => Json::str(w.oid.to_string()),
+                None => Json::Null,
+            };
+            let mode = |w: Option<&WorkEntry>| match w {
+                Some(w) => Json::str(format!("{:06o}", w.mode)),
+                None => Json::Null,
+            };
+            files.push(Json::Object(vec![
+                ("path", Json::str(ch.path)),
+                ("status", Json::str(status)),
+                ("old_oid", oid(ch.old)),
+                ("new_oid", oid(ch.new)),
+                ("old_mode", mode(ch.old)),
+                ("new_mode", mode(ch.new)),
+                ("binary", Json::Bool(binary)),
+                ("hunks", Json::Array(hunks)),
+            ]));
+        }
+        let doc = Json::Object(vec![
+            ("schema_version", Json::Num(1)),
+            ("files", Json::Array(files)),
+        ]);
+        doc.write(out)?;
+        out.write_all(b"\n")?;
         Ok(())
     }
 
@@ -402,23 +471,56 @@ impl NativeRepo {
         &mut self,
         name: Option<String>,
         delete: Option<String>,
+        json: bool,
         out: &mut impl Write,
     ) -> Res<()> {
         match (name, delete) {
             (_, Some(target)) => self.delete_branch(&target, out),
             (Some(new), None) => self.create_branch(&new, out),
-            (None, None) => self.list_branches(out),
+            (None, None) => self.list_branches(json, out),
         }
     }
 
-    fn list_branches(&self, out: &mut impl Write) -> Res<()> {
+    fn list_branches(&self, json: bool, out: &mut impl Write) -> Res<()> {
         let current = self.head_branch()?;
+        if json {
+            return self.list_branches_json(&current, out);
+        }
         for (name, _) in self.refs.iter() {
             if let Some(short) = name.strip_prefix("refs/heads/") {
                 let mark = if name == current { "* " } else { "  " };
                 writeln!(out, "{mark}{short}")?;
             }
         }
+        Ok(())
+    }
+
+    /// `branch --json`: `{schema_version, current, branches:[{name,current,oid}]}`
+    /// — every local branch with its tip oid and which one HEAD is on.
+    fn list_branches_json(&self, current: &str, out: &mut impl Write) -> Res<()> {
+        use crate::json::Json;
+        let mut branches = Vec::new();
+        for (name, _) in self.refs.iter() {
+            if let Some(short) = name.strip_prefix("refs/heads/") {
+                let oid = match self.refs.resolve(name)? {
+                    Some(o) => Json::str(o.to_string()),
+                    None => Json::Null,
+                };
+                branches.push(Json::Object(vec![
+                    ("name", Json::str(short)),
+                    ("current", Json::Bool(name == current)),
+                    ("oid", oid),
+                ]));
+            }
+        }
+        let short = current.strip_prefix("refs/heads/").unwrap_or(current);
+        let doc = Json::Object(vec![
+            ("schema_version", Json::Num(1)),
+            ("current", Json::str(short)),
+            ("branches", Json::Array(branches)),
+        ]);
+        doc.write(out)?;
+        out.write_all(b"\n")?;
         Ok(())
     }
 
@@ -1170,6 +1272,32 @@ fn render_status_json(
     doc.write(out)?;
     out.write_all(b"\n")?;
     Ok(())
+}
+
+/// One diff hunk as JSON: the `@@` coordinates plus tagged lines, where each
+/// line is `{tag: context|add|remove, content}` (content keeps its raw bytes,
+/// including any trailing newline).
+fn hunk_json(h: &alt_diff::Hunk) -> crate::json::Json {
+    use crate::json::Json;
+    let lines = h
+        .lines
+        .iter()
+        .map(|(tag, line)| {
+            let kind = match tag {
+                b'+' => "add",
+                b'-' => "remove",
+                _ => "context",
+            };
+            Json::Object(vec![("tag", Json::str(kind)), ("content", Json::str(line))])
+        })
+        .collect();
+    Json::Object(vec![
+        ("old_start", Json::Num(h.old_start as i64)),
+        ("old_len", Json::Num(h.old_len as i64)),
+        ("new_start", Json::Num(h.new_start as i64)),
+        ("new_len", Json::Num(h.new_len as i64)),
+        ("lines", Json::Array(lines)),
+    ])
 }
 
 /// How a merge resolves once computed (no refs or work tree touched yet).
