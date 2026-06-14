@@ -308,6 +308,31 @@ impl OpLog {
         result
     }
 
+    /// Catches up, then validates+builds the payload, then appends — the whole
+    /// read-modify-write under one exclusive lock. `build` is called with every
+    /// op that exists *now* (post-catch-up) so a higher layer (e.g. the ref
+    /// store) can fold concurrent ops into its own state and CAS-validate its
+    /// transaction against the true current state, atomically with the append.
+    /// `build` returning `Err` aborts cleanly with nothing written.
+    pub fn append_checked<F, E>(
+        &mut self,
+        actor: &str,
+        timestamp_ms: u64,
+        build: F,
+    ) -> Result<OpId, E>
+    where
+        F: FnOnce(&[Op]) -> Result<Vec<u8>, E>,
+        E: From<OpLogError>,
+    {
+        if actor.len() > u16::MAX as usize {
+            return Err(OpLogError::TooLarge(actor.len()).into());
+        }
+        lock_exclusive(&self.file).map_err(OpLogError::from)?;
+        let result = self.append_checked_locked(actor, timestamp_ms, build);
+        let _ = unlock(&self.file);
+        result
+    }
+
     /// The body of `append`, run while holding the exclusive lock.
     fn append_locked(
         &mut self,
@@ -316,7 +341,37 @@ impl OpLog {
         payload: &[u8],
     ) -> Result<OpId, OpLogError> {
         self.catch_up()?;
+        self.write_record(actor, timestamp_ms, payload)
+    }
 
+    /// The body of `append_checked`, run while holding the exclusive lock.
+    fn append_checked_locked<F, E>(
+        &mut self,
+        actor: &str,
+        timestamp_ms: u64,
+        build: F,
+    ) -> Result<OpId, E>
+    where
+        F: FnOnce(&[Op]) -> Result<Vec<u8>, E>,
+        E: From<OpLogError>,
+    {
+        self.catch_up().map_err(E::from)?;
+        let payload = build(&self.ops)?;
+        if u32::try_from(payload.len()).is_err() {
+            return Err(OpLogError::TooLarge(payload.len()).into());
+        }
+        self.write_record(actor, timestamp_ms, &payload)
+            .map_err(E::from)
+    }
+
+    /// Encodes and appends one record onto the current head and folds it into
+    /// the in-memory chain. The caller must hold the lock and have caught up.
+    fn write_record(
+        &mut self,
+        actor: &str,
+        timestamp_ms: u64,
+        payload: &[u8],
+    ) -> Result<OpId, OpLogError> {
         let parent = self.head().unwrap_or(ROOT);
         let body = encode_body(&parent, timestamp_ms, actor, payload);
         let hash = blake3::hash(&body);

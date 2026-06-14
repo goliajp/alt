@@ -58,6 +58,11 @@ pub struct RefStore {
     snapshot_path: PathBuf,
     refs: BTreeMap<String, RefTarget>,
     ops_since_snapshot: usize,
+    /// How many oplog ops are already folded into `refs`. Lets a commit, under
+    /// the append lock, replay only the ops another writer added since — so a
+    /// transaction CAS-validates against the true current state, not a stale
+    /// in-memory snapshot.
+    applied: usize,
 }
 
 impl RefStore {
@@ -88,11 +93,13 @@ impl RefStore {
             ops_since_snapshot += 1;
         }
 
+        let applied = oplog.len();
         Ok(Self {
             oplog,
             snapshot_path,
             refs,
             ops_since_snapshot,
+            applied,
         })
     }
 
@@ -105,13 +112,23 @@ impl RefStore {
         timestamp_ms: u64,
         changes: &[RefChange],
     ) -> Result<OpId, RefError> {
-        // validate first: a rejected transaction must leave no trace
-        apply_changes(&mut self.refs.clone(), changes, false)?;
-
-        let payload = tx::encode_tx(changes);
-        let op_id = self.oplog.append(actor, timestamp_ms, &payload)?;
+        // The validate → append must be atomic against other writers: inside
+        // the append lock, fold in any ops they committed since (so `refs` is
+        // the true current state), then CAS-validate this transaction against
+        // it. A rejected transaction aborts with nothing written.
+        let refs = &mut self.refs;
+        let applied = &mut self.applied;
+        let op_id =
+            self.oplog
+                .append_checked(actor, timestamp_ms, |ops| -> Result<Vec<u8>, RefError> {
+                    fold_new(refs, applied, ops)?;
+                    apply_changes(&mut refs.clone(), changes, false)?;
+                    Ok(tx::encode_tx(changes))
+                })?;
         self.oplog.sync()?;
+        // our own op is durable now; fold it into the map and the cursor
         apply_changes(&mut self.refs, changes, false)?;
+        self.applied = self.oplog.len();
         self.note_op()?;
         Ok(op_id)
     }
@@ -127,8 +144,17 @@ impl RefStore {
         if payload.first() == Some(&PAYLOAD_REF_TX) {
             return Err(RefError::ReservedPayload(PAYLOAD_REF_TX));
         }
-        let op_id = self.oplog.append(actor, timestamp_ms, payload)?;
+        let refs = &mut self.refs;
+        let applied = &mut self.applied;
+        let owned = payload.to_vec();
+        let op_id =
+            self.oplog
+                .append_checked(actor, timestamp_ms, |ops| -> Result<Vec<u8>, RefError> {
+                    fold_new(refs, applied, ops)?;
+                    Ok(owned)
+                })?;
         self.oplog.sync()?;
+        self.applied = self.oplog.len();
         self.note_op()?;
         Ok(op_id)
     }
@@ -205,6 +231,24 @@ impl RefStore {
         }
         Ok(None)
     }
+}
+
+/// Folds the oplog ops not yet applied to `refs` (`ops[*applied..]`) into the
+/// map — ref transactions only, re-verifying each — and advances the cursor.
+/// Run under the append lock so it sees (and chains onto) the true current
+/// state another writer may have produced.
+fn fold_new(
+    refs: &mut BTreeMap<String, RefTarget>,
+    applied: &mut usize,
+    ops: &[alt_oplog::Op],
+) -> Result<(), RefError> {
+    for op in &ops[*applied..] {
+        if let Some(changes) = tx::parse_tx(&op.payload)? {
+            apply_changes(refs, &changes, true)?;
+        }
+    }
+    *applied = ops.len();
+    Ok(())
 }
 
 /// Applies changes to a map, enforcing expected-old values. `replaying`
@@ -382,6 +426,92 @@ mod tests {
             store.resolve("refs/x"),
             Err(RefError::SymrefDepth(_))
         ));
+    }
+
+    #[test]
+    fn concurrent_distinct_branches_all_apply() {
+        use std::sync::{Arc, Barrier};
+
+        let dir = tempfile::tempdir().unwrap();
+        RefStore::open(dir.path()).unwrap(); // create the log up front
+        const N: usize = 8;
+        let barrier = Arc::new(Barrier::new(N));
+        let path = dir.path().to_path_buf();
+
+        let mut handles = Vec::new();
+        for w in 0..N {
+            let barrier = Arc::clone(&barrier);
+            let path = path.clone();
+            handles.push(std::thread::spawn(move || {
+                // separate process-like opener per thread
+                let mut store = RefStore::open(&path).unwrap();
+                barrier.wait();
+                store
+                    .commit(
+                        &format!("agent/{w}"),
+                        w as u64,
+                        &[set(&format!("refs/heads/w{w}"), None, oid(w as u8))],
+                    )
+                    .unwrap();
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        // reopen: replay re-verifies the whole chain, so a clean open proves no
+        // commit forked or corrupted it. Every distinct branch must be present.
+        let store = RefStore::open(&path).unwrap();
+        assert_eq!(store.len(), N, "every distinct branch applied");
+        assert_eq!(store.oplog().len(), N, "one op per commit, chain intact");
+        for w in 0..N {
+            assert_eq!(
+                store.get(&format!("refs/heads/w{w}")),
+                Some(&RefTarget::Oid(oid(w as u8)))
+            );
+        }
+    }
+
+    #[test]
+    fn concurrent_create_same_branch_exactly_one_wins() {
+        use std::sync::{Arc, Barrier};
+
+        let dir = tempfile::tempdir().unwrap();
+        RefStore::open(dir.path()).unwrap();
+        const N: usize = 8;
+        let barrier = Arc::new(Barrier::new(N));
+        let path = dir.path().to_path_buf();
+
+        let mut handles = Vec::new();
+        for w in 0..N {
+            let barrier = Arc::clone(&barrier);
+            let path = path.clone();
+            handles.push(std::thread::spawn(move || -> bool {
+                let mut store = RefStore::open(&path).unwrap();
+                barrier.wait();
+                // all race to create the same branch from old=None; OCC means
+                // the first writer wins and the rest see their expected-old
+                // (None) no longer match.
+                match store.commit(
+                    &format!("agent/{w}"),
+                    w as u64,
+                    &[set("refs/heads/shared", None, oid(w as u8))],
+                ) {
+                    Ok(_) => true,
+                    Err(RefError::Conflict { .. }) => false,
+                    Err(e) => panic!("unexpected error: {e:?}"),
+                }
+            }));
+        }
+        let wins: usize = handles
+            .into_iter()
+            .map(|h| h.join().unwrap() as usize)
+            .sum();
+        assert_eq!(wins, 1, "exactly one writer creates the branch");
+
+        let store = RefStore::open(&path).unwrap();
+        assert!(store.get("refs/heads/shared").is_some());
+        assert_eq!(store.oplog().len(), 1, "only the winning op was recorded");
     }
 
     #[test]
