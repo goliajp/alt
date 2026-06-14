@@ -288,6 +288,12 @@ pub struct ChunkStore {
     cache: Mutex<DeltaCache>,
 }
 
+/// Repro/diagnostic knob (env `ALT_RELAXED_DURABILITY`): skip per-commit
+/// fsyncs to open the concurrency race window for investigation.
+pub fn relaxed_durability() -> bool {
+    std::env::var_os("ALT_RELAXED_DURABILITY").is_some()
+}
+
 fn pack_path(dir: &Path, seq: u32) -> PathBuf {
     dir.join(format!("pack-{seq:08}.altpack"))
 }
@@ -1048,7 +1054,9 @@ impl ChunkStore {
 
     /// Fsyncs the active pack — the durability point between seals.
     pub fn flush(&mut self) -> Result<(), StoreError> {
-        self.active.write.sync_all()?;
+        if !relaxed_durability() {
+            self.active.write.sync_all()?;
+        }
         Ok(())
     }
 

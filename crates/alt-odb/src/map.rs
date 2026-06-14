@@ -254,7 +254,9 @@ impl ObjectMap {
     }
 
     pub fn sync(&mut self) -> Result<(), OdbError> {
-        self.file.sync_all()?;
+        if !alt_store::relaxed_durability() {
+            self.file.sync_all()?;
+        }
         Ok(())
     }
 }

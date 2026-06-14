@@ -450,9 +450,17 @@ impl OpLog {
 
     /// Durability point for everything appended so far.
     pub fn sync(&mut self) -> Result<(), OpLogError> {
-        self.file.sync_all()?;
+        if !relaxed_durability() {
+            self.file.sync_all()?;
+        }
         Ok(())
     }
+}
+
+/// Repro/diagnostic knob (env `ALT_RELAXED_DURABILITY`): skip per-commit
+/// fsyncs. Used to open the concurrency race window for investigation.
+pub fn relaxed_durability() -> bool {
+    std::env::var_os("ALT_RELAXED_DURABILITY").is_some()
 }
 
 impl Drop for OpLog {

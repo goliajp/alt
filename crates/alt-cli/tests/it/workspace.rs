@@ -24,6 +24,20 @@ fn ok(o: Output) -> String {
     String::from_utf8(o.stdout).unwrap()
 }
 
+/// Like `alt`, but with relaxed durability (no per-commit fsync). Commits land
+/// back-to-back, which is what surfaces concurrency races that fsync's spacing
+/// would otherwise hide — the env is set on the child only (sound).
+fn alt_fast(cwd: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_alt"))
+        .current_dir(cwd)
+        .env("GIT_AUTHOR_NAME", "tester")
+        .env("GIT_AUTHOR_EMAIL", "t@e")
+        .env("ALT_RELAXED_DURABILITY", "1")
+        .args(args)
+        .output()
+        .unwrap()
+}
+
 #[test]
 fn workspaces_isolate_and_share_the_store() {
     let repo = tempfile::tempdir().unwrap();
@@ -114,6 +128,71 @@ fn commands_infer_the_workspace_from_the_working_tree() {
         std::fs::read_to_string(root.join("a.txt")).unwrap(),
         "main\n"
     );
+}
+
+#[test]
+fn concurrent_commits_under_relaxed_durability_dont_corrupt_the_store() {
+    // Regression for the open-vs-append race: a fresh `alt` open scanning the
+    // active pack must not truncate a record another process is mid-append.
+    // Relaxed durability removes the fsync spacing that used to hide it, so
+    // every round of N concurrent commits exercises the window. Pre-fix this
+    // lost/corrupted commits (`fatal: store` on read); the shared open lock
+    // closes it.
+    let repo = tempfile::tempdir().unwrap();
+    let trees = tempfile::tempdir().unwrap();
+    let root = repo.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("f.txt"), "base\n").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "base"]));
+
+    const N: usize = 8;
+    const ROUNDS: usize = 12;
+    let mut trees_v = Vec::new();
+    for w in 0..N {
+        let br = format!("b{w}");
+        ok(alt(root, &["branch", &br]));
+        let tree = trees.path().join(format!("w{w}"));
+        ok(alt(
+            root,
+            &[
+                "workspace",
+                "add",
+                &format!("w{w}"),
+                tree.to_str().unwrap(),
+                &br,
+            ],
+        ));
+        trees_v.push(tree);
+    }
+
+    for r in 0..ROUNDS {
+        let handles: Vec<_> = trees_v
+            .iter()
+            .cloned()
+            .map(|tree| {
+                std::thread::spawn(move || {
+                    std::fs::write(tree.join("f.txt"), format!("round {r}\n")).unwrap();
+                    assert!(alt_fast(&tree, &["add", "."]).status.success(), "add");
+                    assert!(
+                        alt_fast(&tree, &["commit", "-m", "work"]).status.success(),
+                        "commit"
+                    );
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+    }
+
+    // every branch must hold base + ROUNDS commits, and the store must read
+    // back cleanly (a corrupt record would make `log` fail)
+    for w in 0..N {
+        let log = ok(alt(root, &["log", "--json", &format!("b{w}")]));
+        let commits = log.matches("\"oid\"").count();
+        assert_eq!(commits, ROUNDS + 1, "b{w} lost commits: {log}");
+    }
 }
 
 #[test]

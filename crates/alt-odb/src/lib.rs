@@ -38,12 +38,29 @@ fn lock_exclusive(file: &File) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Shared (read) lock — taken while opening, so the open's reads + crash
+/// recovery of the append files can't overlap an exclusive writer's append.
+/// Multiple opens share it; an exclusive writer waits for them and vice versa.
+#[cfg(unix)]
+fn lock_shared(file: &File) -> std::io::Result<()> {
+    use std::os::unix::io::AsRawFd;
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 #[cfg(unix)]
 fn unlock(file: &File) -> std::io::Result<()> {
     use std::os::unix::io::AsRawFd;
     if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) } != 0 {
         return Err(std::io::Error::last_os_error());
     }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn lock_shared(_file: &File) -> std::io::Result<()> {
     Ok(())
 }
 
@@ -95,13 +112,23 @@ impl NativeOdb {
     pub fn open_with(alt_dir: impl Into<PathBuf>, opts: BlobOptions) -> Result<Self, OdbError> {
         let alt_dir = alt_dir.into();
         std::fs::create_dir_all(&alt_dir)?;
-        let blobs = BlobStore::open_with(alt_dir.join("store"), opts)?;
-        let map = ObjectMap::open(&alt_dir.join("map.alt"))?;
         let lock = OpenOptions::new()
             .create(true)
             .truncate(false)
             .write(true)
             .open(alt_dir.join("odb.lock"))?;
+        // Open the append files (active pack, blobmap, map.alt — read and
+        // crash-recovered here) under a shared lock, so the open never overlaps
+        // another process's exclusive append. Without this, an open scanning a
+        // writer's half-written record truncates it and corrupts the store.
+        lock_shared(&lock)?;
+        let opened = (|| -> Result<(BlobStore, ObjectMap), OdbError> {
+            let blobs = BlobStore::open_with(alt_dir.join("store"), opts)?;
+            let map = ObjectMap::open(&alt_dir.join("map.alt"))?;
+            Ok((blobs, map))
+        })();
+        let _ = unlock(&lock);
+        let (blobs, map) = opened?;
         Ok(Self {
             blobs,
             map,

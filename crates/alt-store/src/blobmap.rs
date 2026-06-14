@@ -176,7 +176,9 @@ impl BlobMap {
     }
 
     pub fn sync(&mut self) -> Result<(), StoreError> {
-        self.file.sync_all()?;
+        if !crate::relaxed_durability() {
+            self.file.sync_all()?;
+        }
         Ok(())
     }
 }
