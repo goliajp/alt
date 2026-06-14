@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
 use alt_git_index::{Index, IndexEntry};
 use alt_odb::NativeOdb;
-use alt_refs::{RefChange, RefStore, RefTarget};
+use alt_refs::{IdemKey, OpId, RefChange, RefStore, RefTarget};
 use alt_worktree::{
     ChangeKind, Sig, WorkEntry, flatten_tree, index_entries, scan_worktree, status, write_commit,
     write_tree,
@@ -110,6 +110,15 @@ impl Store {
         self.odb.refresh()?;
         self.refs.refresh()?;
         Ok(())
+    }
+
+    /// The op that applied a keyed write, if one is in the durable idempotency
+    /// index — i.e. a request carrying `key` already took effect. The daemon
+    /// checks this (after [`refresh`](Self::refresh)) before running a keyed
+    /// write, so a same-id retry is acked instead of applied twice (D5c). Built
+    /// by replay, so it survives a daemon restart.
+    pub fn applied_request(&self, key: &IdemKey) -> Option<OpId> {
+        self.refs.applied_request(key)
     }
 
     /// Turns deferred durability on or off across the odb and the ref log. The
@@ -254,9 +263,10 @@ impl OpenRepo {
         })
     }
 
-    /// The bound repo for issuing one command.
+    /// The bound repo for issuing one command (direct CLI: no idempotency key,
+    /// so its writes are plain commits).
     pub fn repo(&mut self) -> NativeRepo<'_> {
-        NativeRepo::attach(&mut self.store, self.coord.clone(), self.id.clone())
+        NativeRepo::attach(&mut self.store, self.coord.clone(), self.id.clone(), None)
     }
 }
 
@@ -310,11 +320,22 @@ pub struct NativeRepo<'a> {
     index_path: PathBuf,
     /// The caller acting through this view.
     id: Identity,
+    /// The idempotency key stamped on this command's terminal ref transaction
+    /// (D5c). `Some` only on the daemon's exactly-once write path; `None` for
+    /// reads and the direct CLI (where `commit_idempotent` is a plain commit).
+    idem_key: Option<IdemKey>,
 }
 
 impl<'a> NativeRepo<'a> {
-    /// Binds a borrowed store to a workspace + identity for one command.
-    pub fn attach(store: &'a mut Store, coord: Coord, id: Identity) -> Self {
+    /// Binds a borrowed store to a workspace + identity for one command, with an
+    /// optional idempotency `idem_key` (the daemon injects it for a keyed write;
+    /// `None` everywhere else).
+    pub fn attach(
+        store: &'a mut Store,
+        coord: Coord,
+        id: Identity,
+        idem_key: Option<IdemKey>,
+    ) -> Self {
         Self {
             store,
             root: coord.root,
@@ -322,6 +343,7 @@ impl<'a> NativeRepo<'a> {
             head_ref: coord.head_ref,
             index_path: coord.index_path,
             id,
+            idem_key,
         }
     }
 
@@ -389,7 +411,7 @@ impl<'a> NativeRepo<'a> {
             head_ref,
             index_path: ws_dir.join("index"),
         };
-        let mut ws = NativeRepo::attach(&mut *self.store, child, self.id.clone());
+        let mut ws = NativeRepo::attach(&mut *self.store, child, self.id.clone(), None);
         let target = ws.commit_entries(commit)?;
         ws.checkout(&[], &target)?;
         Ok(())
@@ -654,7 +676,7 @@ impl<'a> NativeRepo<'a> {
         )?;
         self.store.odb.flush()?;
 
-        self.store.refs.commit(
+        self.store.refs.commit_idempotent(
             &self.id.actor("commit"),
             now_ms(),
             &[RefChange {
@@ -662,6 +684,7 @@ impl<'a> NativeRepo<'a> {
                 old: parent.map(RefTarget::Oid),
                 new: Some(RefTarget::Oid(commit)),
             }],
+            self.idem_key,
         )?;
         let short = branch.strip_prefix("refs/heads/").unwrap_or(&branch);
         if json {
@@ -1009,7 +1032,7 @@ impl<'a> NativeRepo<'a> {
             .refs
             .resolve(&self.head_branch()?)?
             .ok_or("cannot create a branch before the first commit")?;
-        self.store.refs.commit(
+        self.store.refs.commit_idempotent(
             &self.id.actor("branch"),
             now_ms(),
             &[RefChange {
@@ -1017,6 +1040,7 @@ impl<'a> NativeRepo<'a> {
                 old: None,
                 new: Some(RefTarget::Oid(commit)),
             }],
+            self.idem_key,
         )?;
         writeln!(out, "branch '{name}' created at {commit}")?;
         Ok(())
@@ -1033,7 +1057,7 @@ impl<'a> NativeRepo<'a> {
             .get(&full)
             .cloned()
             .ok_or_else(|| format!("branch '{name}' not found"))?;
-        self.store.refs.commit(
+        self.store.refs.commit_idempotent(
             &self.id.actor("branch"),
             now_ms(),
             &[RefChange {
@@ -1041,6 +1065,7 @@ impl<'a> NativeRepo<'a> {
                 old: Some(old),
                 new: None,
             }],
+            self.idem_key,
         )?;
         writeln!(out, "deleted branch '{name}'")?;
         Ok(())
@@ -1221,7 +1246,7 @@ impl<'a> NativeRepo<'a> {
     /// Moves HEAD's symbolic target from `from` to `to` in one ref op.
     fn move_head(&mut self, from: &str, to: &str) -> Res<()> {
         let old = self.store.refs.get(&self.head_ref).cloned();
-        self.store.refs.commit(
+        self.store.refs.commit_idempotent(
             &self.id.actor("switch"),
             now_ms(),
             &[RefChange {
@@ -1229,6 +1254,7 @@ impl<'a> NativeRepo<'a> {
                 old: old.or_else(|| Some(RefTarget::Symbolic(from.to_owned()))),
                 new: Some(RefTarget::Symbolic(to.to_owned())),
             }],
+            self.idem_key,
         )?;
         Ok(())
     }
@@ -1432,7 +1458,7 @@ impl<'a> NativeRepo<'a> {
                 .ok_or("create an initial commit before 'alt flow init'")?,
         };
         let head_old = self.store.refs.get(&self.head_ref).cloned();
-        self.store.refs.commit(
+        self.store.refs.commit_idempotent(
             &self.id.actor("flow"),
             now_ms(),
             &[
@@ -1447,6 +1473,7 @@ impl<'a> NativeRepo<'a> {
                     new: Some(RefTarget::Symbolic(dev_ref.clone())),
                 },
             ],
+            self.idem_key,
         )?;
         if json {
             crate::json::emit(
@@ -1490,7 +1517,7 @@ impl<'a> NativeRepo<'a> {
         self.checkout(&old, &target)?;
 
         let head_old = self.store.refs.get(&self.head_ref).cloned();
-        self.store.refs.commit(
+        self.store.refs.commit_idempotent(
             &self.id.actor("flow"),
             now_ms(),
             &[
@@ -1505,6 +1532,7 @@ impl<'a> NativeRepo<'a> {
                     new: Some(RefTarget::Symbolic(feat_ref.clone())),
                 },
             ],
+            self.idem_key,
         )?;
         if json {
             use crate::json::Json;
@@ -1559,7 +1587,7 @@ impl<'a> NativeRepo<'a> {
 
         // one atomic op: advance develop, delete the feature, move HEAD
         let head_old = self.store.refs.get(&self.head_ref).cloned();
-        self.store.refs.commit(
+        self.store.refs.commit_idempotent(
             &self.id.actor("flow"),
             now_ms(),
             &[
@@ -1579,6 +1607,7 @@ impl<'a> NativeRepo<'a> {
                     new: Some(RefTarget::Symbolic(dev_ref.clone())),
                 },
             ],
+            self.idem_key,
         )?;
 
         // bring the working tree to the merged develop
@@ -1625,9 +1654,12 @@ impl<'a> NativeRepo<'a> {
                 new: c.old.clone(),
             })
             .collect();
-        self.store
-            .refs
-            .commit(&self.id.actor("undo"), now_ms(), &inverse)?;
+        self.store.refs.commit_idempotent(
+            &self.id.actor("undo"),
+            now_ms(),
+            &inverse,
+            self.idem_key,
+        )?;
 
         let target = self.head_entries()?;
         self.checkout(&old, &target)?;
@@ -1646,7 +1678,7 @@ impl<'a> NativeRepo<'a> {
 
     /// Advances `branch` from `old` to `new` in one ref transaction.
     fn advance_branch(&mut self, branch: &str, old: ObjectId, new: ObjectId) -> Res<()> {
-        self.store.refs.commit(
+        self.store.refs.commit_idempotent(
             &self.id.actor("merge"),
             now_ms(),
             &[RefChange {
@@ -1654,6 +1686,7 @@ impl<'a> NativeRepo<'a> {
                 old: Some(RefTarget::Oid(old)),
                 new: Some(RefTarget::Oid(new)),
             }],
+            self.idem_key,
         )?;
         Ok(())
     }

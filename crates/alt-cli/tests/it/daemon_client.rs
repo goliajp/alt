@@ -170,40 +170,48 @@ fn client_routes_writes_through_the_daemon() {
     );
 }
 
-/// At-most-once: when a write's request reaches the daemon but the response is
-/// lost (here a stand-in server that reads the request then drops the
-/// connection), the client errors instead of silently re-running it directly —
-/// the guard against a double write. A read in the same spot would fall back.
+/// Exactly-once (D5c): when a write's request reaches the daemon but the
+/// response is lost (a stand-in server that reads the request then drops the
+/// connection), the client retries with the *same* idempotency id rather than
+/// erroring or silently double-running. The first attempt's response is eaten
+/// by the stand-in; the retry reconnects (spawning a real daemon, since the
+/// stand-in is gone) and the write lands exactly once.
 #[test]
-fn client_write_errors_when_response_is_lost_after_send() {
+fn client_write_retries_with_same_id_when_response_is_lost_after_send() {
     let dir = repo_with_changes();
     let root = dir.path();
     let sock = root.join(".alt").join("daemon.sock");
 
+    // stage a real change so the commit has something to record
+    std::fs::write(root.join("c.txt"), "staged\n").unwrap();
+    ok(alt(root, &["add", "."], false));
+
     // a stand-in "daemon": accept one connection, read the request frame, then
-    // drop it without answering — exactly the lost-after-send window
+    // drop it without answering — exactly the lost-after-send window. After its
+    // single accept the listener drops, so the client's retry finds nothing
+    // listening and brings up the real daemon.
     let listener = UnixListener::bind(&sock).unwrap();
     let server = thread::spawn(move || {
         if let Ok((mut stream, _)) = listener.accept() {
             let _ = daemon::read_frame(&mut stream);
-            // drop `stream` → client's response read hits EOF
+            // drop `stream` → client's response read hits EOF (lost-after-send)
         }
     });
 
-    let out = alt(root, &["commit", "-m", "should not double-run"], true);
-    assert!(
-        !out.status.success(),
-        "write must not silently fall back after the request was sent"
-    );
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.contains("check with"),
-        "expected an at-most-once verify message, got: {stderr}"
-    );
+    let out = alt(root, &["commit", "-m", "retried"], true);
     server.join().unwrap();
+    assert!(
+        out.status.success(),
+        "the write should be retried to success after a lost response, got: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 
-    // and nothing committed: the stand-in did not write, the client did not
-    // fall back, so the tree still holds only base
+    // exactly one new commit on top of base: the retry landed it once, not twice
     let log = ok(alt(root, &["log", "--json"], false));
-    assert_eq!(log.matches("\"oid\"").count(), 1, "a commit leaked: {log}");
+    assert!(log.contains("\"message\":\"retried\\n\""), "{log}");
+    assert_eq!(
+        log.matches("\"oid\"").count(),
+        2,
+        "expected base + exactly one commit: {log}"
+    );
 }

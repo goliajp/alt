@@ -333,11 +333,7 @@ mod unix {
     /// same shape the `alt` binary reports for an uncaught error.
     fn handle(store: &mut Store, repo: &mut Repository, req: &Request) -> Response {
         match dispatch(store, repo, req) {
-            Ok((exit_code, stdout)) => Response {
-                exit_code,
-                stdout,
-                stderr: Vec::new(),
-            },
+            Ok(resp) => resp,
             Err(e) => Response {
                 exit_code: 128,
                 stdout: Vec::new(),
@@ -346,7 +342,7 @@ mod unix {
         }
     }
 
-    fn dispatch(store: &mut Store, repo: &mut Repository, req: &Request) -> Res<(u8, Vec<u8>)> {
+    fn dispatch(store: &mut Store, repo: &mut Repository, req: &Request) -> Res<Response> {
         // the request argv carries no program name; clap expects one
         let argv = std::iter::once("alt".to_owned()).chain(req.args.iter().cloned());
         let cli = Cli::try_parse_from(argv)?;
@@ -356,8 +352,30 @@ mod unix {
         // request, so a served read is never stale
         store.refresh()?;
         repo.refresh()?;
+        // exactly-once (D5c): a keyed write whose key is already in the durable
+        // idempotency index has taken effect — a retry after a lost response (or
+        // even after this daemon was restarted, since the index is rebuilt on
+        // open). Ack it without re-running, so the write lands exactly once. The
+        // ack does not byte-reproduce the original stdout (documented caveat);
+        // the client just needs a response to stop retrying, and an agent can
+        // re-query for the result.
+        if let Some(key) = req.id
+            && store.applied_request(&key).is_some()
+        {
+            return Ok(Response {
+                exit_code: 0,
+                stdout: Vec::new(),
+                stderr: b"note: request already applied (idempotent retry); \
+                    query with `alt status` / `alt log` for the result\n"
+                    .to_vec(),
+            });
+        }
         let mut out = Vec::new();
-        let code = cli::run_on_store(&cli, store, repo, &req.cwd, id, &mut out)?;
-        Ok((code, out))
+        let code = cli::run_on_store(&cli, store, repo, &req.cwd, id, req.id, &mut out)?;
+        Ok(Response {
+            exit_code: code,
+            stdout: out,
+            stderr: Vec::new(),
+        })
     }
 }

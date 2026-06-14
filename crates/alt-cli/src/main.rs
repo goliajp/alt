@@ -28,10 +28,13 @@ fn run() -> Result<u8, Box<dyn std::error::Error>> {
 
     // Hot commands route through the per-repo daemon to skip the store open;
     // the daemon is auto-spawned if not already up. Local-first: anything the
-    // daemon can't serve falls through to the direct path below. Fallback is
-    // at-most-once — a read re-runs harmlessly, but a write whose request was
-    // sent and whose response was then lost must not run again (it may have
-    // already committed), so we error instead of risking a double write.
+    // daemon can't serve falls through to the direct path below. A read is
+    // idempotent (re-runs harmlessly on any failure). A write is exactly-once:
+    // it carries an idempotency id and `serve_write` retries with that id on a
+    // lost response (the daemon dedups a completed write, durably). Only a
+    // first-attempt `NotSent` falls back to a direct run; a write whose request
+    // had gone out and never got a response surfaces an error after the retry
+    // budget rather than risk a double run.
     #[cfg(unix)]
     if alt_cli::client::routes_through_daemon(&cli.command)
         && !alt_cli::client::disabled()
@@ -39,18 +42,26 @@ fn run() -> Result<u8, Box<dyn std::error::Error>> {
     {
         use alt_cli::client::Outcome;
         let args = std::env::args().skip(1).collect::<Vec<_>>();
-        match alt_cli::client::try_serve(&alt_dir, &args) {
+        let idempotent = alt_cli::client::is_idempotent(&cli.command);
+        let outcome = if idempotent {
+            alt_cli::client::try_serve(&alt_dir, &args)
+        } else {
+            alt_cli::client::serve_write(&alt_dir, &args)
+        };
+        match outcome {
             Outcome::Served(resp) => {
                 use std::io::Write as _;
                 std::io::stdout().write_all(&resp.stdout)?;
                 std::io::stderr().write_all(&resp.stderr)?;
                 return Ok(resp.exit_code);
             }
-            Outcome::LostAfterSend if !alt_cli::client::is_idempotent(&cli.command) => {
-                return Err("the daemon connection dropped after the command was sent; \
-                    it may have already taken effect — check with `alt status` / `alt log` \
-                    before retrying"
-                    .into());
+            Outcome::LostAfterSend if !idempotent => {
+                return Err(
+                    "the daemon connection dropped after the command was sent and \
+                    repeated retries did not reconnect; it may have already taken effect — \
+                    check with `alt status` / `alt log` before retrying"
+                        .into(),
+                );
             }
             // NotSent (daemon never acted), or a lost response for an idempotent
             // read — fall through and run the command directly

@@ -333,13 +333,17 @@ pub fn run_on_store<W: Write>(
     repo: &Repository,
     cwd: &Path,
     id: Identity,
+    request_id: Option<alt_refs::IdemKey>,
     out: &mut W,
 ) -> Res<u8> {
     match &cli.command {
         Command::Init { .. } => Err("the daemon does not serve 'init'".into()),
         c if is_native(c) => {
             let (_alt_dir, coord) = native::resolve_workspace(cwd, cli.workspace.as_deref())?;
-            let mut repo = NativeRepo::attach(store, coord, id);
+            // the idempotency key is stamped on the command's terminal ref
+            // transaction; the daemon's earlier `applied_request` check (in
+            // dispatch) already short-circuited a completed duplicate
+            let mut repo = NativeRepo::attach(store, coord, id, request_id);
             run_native(&mut repo, c, out)
         }
         c => {

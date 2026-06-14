@@ -20,13 +20,24 @@ pub const FORWARDED_ENV: &[&str] = &[
     "ALT_RELAXED_DURABILITY",
 ];
 
+/// A client-chosen idempotency token: 16 bytes, unique per command invocation
+/// and stable across that invocation's retries. The daemon stamps it on the
+/// command's ref transaction and, on a same-id retry, detects the write as
+/// already applied instead of running it twice (D5c, exactly-once). Structurally
+/// identical to `alt_refs::IdemKey`.
+pub type RequestId = [u8; 16];
+
 /// A command to run: the alt argv (without the program name), the client's
-/// working directory, and the forwarded env vars.
+/// working directory, the forwarded env vars, and an optional idempotency id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Request {
     pub args: Vec<String>,
     pub cwd: PathBuf,
     pub env: Vec<(String, String)>,
+    /// Exactly-once token for a non-idempotent write (D5c). `None` for reads,
+    /// for the direct CLI path, and for an old client whose frame carries no
+    /// trailing id field (the daemon then degrades to at-most-once).
+    pub id: Option<RequestId>,
 }
 
 /// The captured result of running a command.
@@ -88,6 +99,16 @@ impl Request {
             put_bytes(&mut out, k.as_bytes());
             put_bytes(&mut out, v.as_bytes());
         }
+        // trailing optional id: a presence byte, then the 16 bytes if present.
+        // An old daemon stops decoding after `env` and ignores these extra
+        // bytes; a new daemon reading an old (untrailed) frame sees no id.
+        match self.id {
+            Some(id) => {
+                out.push(1);
+                out.extend_from_slice(&id);
+            }
+            None => out.push(0),
+        }
         out
     }
 
@@ -106,18 +127,33 @@ impl Request {
             let v = get_string(buf, &mut at)?;
             env.push((k, v));
         }
-        Ok(Request { args, cwd, env })
+        // trailing optional id (see `encode`): absent on an old client's frame
+        let id = match buf.get(at) {
+            None | Some(0) => None, // old client (no field) or explicit absent
+            Some(_) => {
+                let start = at + 1;
+                let end = start
+                    .checked_add(16)
+                    .filter(|e| *e <= buf.len())
+                    .ok_or_else(truncated)?;
+                let mut id = [0u8; 16];
+                id.copy_from_slice(&buf[start..end]);
+                Some(id)
+            }
+        };
+        Ok(Request { args, cwd, env, id })
     }
 
-    /// Builds a request from the current process's argv tail, cwd, and the
-    /// forwarded env vars that are set.
-    pub fn from_env(args: Vec<String>) -> io::Result<Request> {
+    /// Builds a request from the current process's argv tail, cwd, the
+    /// forwarded env vars that are set, and an optional idempotency `id` (set
+    /// by the client for a non-idempotent write, `None` for a read).
+    pub fn from_env(args: Vec<String>, id: Option<RequestId>) -> io::Result<Request> {
         let cwd = std::env::current_dir()?;
         let env = FORWARDED_ENV
             .iter()
             .filter_map(|&k| std::env::var(k).ok().map(|v| (k.to_owned(), v)))
             .collect();
-        Ok(Request { args, cwd, env })
+        Ok(Request { args, cwd, env, id })
     }
 }
 
@@ -174,8 +210,34 @@ mod tests {
                 ("GIT_AUTHOR_NAME".into(), "tester".into()),
                 ("ALT_RELAXED_DURABILITY".into(), "1".into()),
             ],
+            id: Some([7u8; 16]),
         };
         assert_eq!(Request::decode(&req.encode()).unwrap(), req);
+    }
+
+    #[test]
+    fn request_without_id_round_trips() {
+        let req = Request {
+            args: vec!["status".into()],
+            cwd: PathBuf::from("/x"),
+            env: Vec::new(),
+            id: None,
+        };
+        assert_eq!(Request::decode(&req.encode()).unwrap(), req);
+    }
+
+    #[test]
+    fn an_old_clients_frame_without_the_id_field_decodes_as_no_id() {
+        // a pre-D5c frame ends after `env`, with no trailing id byte; the new
+        // decoder must read it back as `id: None` (backward compatibility)
+        let mut legacy = Vec::new();
+        legacy.extend_from_slice(&1u32.to_le_bytes()); // 1 arg
+        put_bytes(&mut legacy, b"status");
+        put_bytes(&mut legacy, b"/x"); // cwd
+        legacy.extend_from_slice(&0u32.to_le_bytes()); // 0 env pairs
+        let req = Request::decode(&legacy).unwrap();
+        assert_eq!(req.id, None);
+        assert_eq!(req.args, vec!["status".to_string()]);
     }
 
     #[test]
@@ -194,6 +256,7 @@ mod tests {
             args: Vec::new(),
             cwd: PathBuf::from(""),
             env: Vec::new(),
+            id: None,
         };
         assert_eq!(Request::decode(&req.encode()).unwrap(), req);
         let resp = Response {
@@ -210,6 +273,7 @@ mod tests {
             args: vec!["status".into(), "--json".into()],
             cwd: PathBuf::from("/x"),
             env: Vec::new(),
+            id: None,
         }
         .encode();
         let mut buf = Vec::new();

@@ -50,8 +50,11 @@ impl Daemon {
             .spawn()
             .unwrap();
         // wait for the socket to become connectable (deadline poll, not a fixed
-        // sleep): the daemon binds before it accepts
-        let deadline = Instant::now() + Duration::from_secs(10);
+        // sleep): the daemon binds before it accepts. The deadline is generous
+        // because binding is one syscall right after process start — when it is
+        // slow it is CPU-starvation under heavy parallel daemon spawning, not a
+        // real failure, so a tight bound here only produces false negatives.
+        let deadline = Instant::now() + Duration::from_secs(30);
         while Instant::now() < deadline {
             if UnixStream::connect(&sock).is_ok() {
                 return Daemon { child, sock };
@@ -72,6 +75,7 @@ impl Daemon {
                 ("GIT_AUTHOR_EMAIL".into(), "t@e".into()),
                 ("USER".into(), "tester".into()),
             ],
+            id: None,
         };
         let mut stream = UnixStream::connect(&self.sock).unwrap();
         daemon::write_frame(&mut stream, &req.encode()).unwrap();
@@ -188,6 +192,18 @@ fn daemon_sees_external_writes_via_per_request_refresh() {
 /// Sends one request carrying a caller-chosen identity, on a fresh connection.
 /// Mirrors `Daemon::run` but lets each concurrent caller pick its own author.
 fn run_as(sock: &Path, cwd: &Path, args: &[&str], author: &str) -> Response {
+    run_keyed(sock, cwd, args, author, None)
+}
+
+/// Like [`run_as`] but carries an explicit idempotency `id` (the D5c
+/// exactly-once token) so a test can replay the same request.
+fn run_keyed(
+    sock: &Path,
+    cwd: &Path,
+    args: &[&str],
+    author: &str,
+    id: Option<[u8; 16]>,
+) -> Response {
     let req = Request {
         args: args.iter().map(|s| s.to_string()).collect(),
         cwd: cwd.to_path_buf(),
@@ -196,12 +212,108 @@ fn run_as(sock: &Path, cwd: &Path, args: &[&str], author: &str) -> Response {
             ("GIT_AUTHOR_EMAIL".into(), format!("{author}@e")),
             ("USER".into(), author.into()),
         ],
+        id,
     };
     let mut stream = UnixStream::connect(sock).unwrap();
     daemon::write_frame(&mut stream, &req.encode()).unwrap();
     let mut buf = Vec::new();
     let len = read_one_frame(&mut stream, &mut buf);
     Response::decode(&buf[..len]).unwrap()
+}
+
+/// Stages a no-diff change so a `commit` always has a non-empty index: without
+/// dedup, replaying the same commit would create a second (same-tree) commit, so
+/// the commit count is a clean witness of exactly-once.
+fn stage_one(root: &Path) {
+    std::fs::write(root.join("a.txt"), "v2\n").unwrap();
+    ok(alt(root, &["add", "."]));
+}
+
+/// D5c: a keyed write sent twice to one daemon applies once. The second send
+/// (same id) hits the in-memory idempotency index, so the daemon acks it without
+/// re-running — exactly one commit lands.
+#[test]
+fn a_keyed_write_sent_twice_to_one_daemon_applies_once() {
+    let repo = tempfile::tempdir().unwrap();
+    let root = repo.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("a.txt"), "base\n").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "base"]));
+    stage_one(root);
+
+    let d = Daemon::start(&root.join(".alt"));
+    let id = Some([9u8; 16]);
+
+    let first = run_keyed(&d.sock, root, &["commit", "-m", "once"], "tester", id);
+    assert_eq!(first.exit_code, 0, "first: {}", err_str(&first));
+
+    // same id again: the daemon detects it as already applied and acks
+    let retry = run_keyed(&d.sock, root, &["commit", "-m", "once"], "tester", id);
+    assert_eq!(retry.exit_code, 0, "retry: {}", err_str(&retry));
+    assert!(
+        err_str(&retry).contains("already applied"),
+        "retry should be an idempotent ack, got: {}",
+        err_str(&retry)
+    );
+
+    // exactly one new commit on top of base — the retry did not double-apply
+    let log = ok(alt(root, &["log", "--json"]));
+    assert_eq!(
+        log.matches("\"oid\"").count(),
+        2,
+        "the keyed retry double-wrote: {log}"
+    );
+}
+
+/// D5c (the crux): the dedup index is durable, so a retry with the same id after
+/// the daemon has *died and been replaced* still does not double-apply. This is
+/// what an in-memory LRU could not give (it dies with the daemon); the index is
+/// rebuilt by replay on open, so a fresh daemon sees the prior write as applied.
+#[test]
+fn a_keyed_write_retried_after_the_daemon_dies_does_not_double_apply() {
+    let repo = tempfile::tempdir().unwrap();
+    let root = repo.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("a.txt"), "base\n").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "base"]));
+    stage_one(root);
+
+    let alt_dir = root.join(".alt");
+    let id = Some([42u8; 16]);
+
+    // daemon #1 applies the keyed commit, then dies (dropped at the block end)
+    {
+        let d1 = Daemon::start(&alt_dir);
+        let r = run_keyed(&d1.sock, root, &["commit", "-m", "once"], "tester", id);
+        assert_eq!(r.exit_code, 0, "first commit: {}", err_str(&r));
+    }
+    let log1 = ok(alt(root, &["log", "--json"]));
+    assert_eq!(
+        log1.matches("\"oid\"").count(),
+        2,
+        "the first keyed commit should land: {log1}"
+    );
+
+    // daemon #2 is a fresh process: it rebuilds the dedup index from the durable
+    // op log on open. The same id replayed must be acked, not re-run.
+    let d2 = Daemon::start(&alt_dir);
+    let retry = run_keyed(&d2.sock, root, &["commit", "-m", "once"], "tester", id);
+    assert_eq!(retry.exit_code, 0, "retry: {}", err_str(&retry));
+    assert!(
+        err_str(&retry).contains("already applied"),
+        "a restarted daemon should still dedup a durable key, got: {}",
+        err_str(&retry)
+    );
+
+    // still exactly one commit — no double write across the daemon restart
+    let log2 = ok(alt(root, &["log", "--json"]));
+    assert_eq!(
+        log2.matches("\"oid\"").count(),
+        2,
+        "double write across the daemon restart: {log2}"
+    );
 }
 
 /// D5a: the daemon serves requests concurrently (a thread per connection) over
@@ -327,6 +439,7 @@ fn daemon_reads_stay_coherent_under_concurrent_external_writers() {
                         args: vec!["branch".into(), "--json".into()],
                         cwd: root.clone(),
                         env: vec![("USER".into(), "tester".into())],
+                        id: None,
                     };
                     if daemon::write_frame(&mut s, &req.encode()).is_ok() {
                         let mut hdr = [0u8; 4];
