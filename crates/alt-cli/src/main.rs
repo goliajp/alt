@@ -2,6 +2,7 @@
 //! with git — `cat-file`, `rev-parse`, `log` (raw / oneline). M2 adds
 //! `import` (.git → .alt migration).
 
+mod json;
 mod log_cmd;
 mod native;
 mod quote;
@@ -58,7 +59,11 @@ enum Command {
         message: String,
     },
     /// Show the working tree status
-    Status,
+    Status {
+        /// Emit a stable JSON object instead of the human-readable view
+        #[arg(long)]
+        json: bool,
+    },
     /// List, create, or delete branches
     Branch {
         /// Branch name to create (omit to list branches)
@@ -161,8 +166,8 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             out.flush()?;
             return Ok(ExitCode::SUCCESS);
         }
-        Command::Status => {
-            native::NativeRepo::discover(&cwd)?.status(&mut out)?;
+        Command::Status { json } => {
+            native::NativeRepo::discover(&cwd)?.status(*json, &mut out)?;
             out.flush()?;
             return Ok(ExitCode::SUCCESS);
         }
@@ -280,7 +285,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         Command::Init { .. }
         | Command::Add { .. }
         | Command::Commit { .. }
-        | Command::Status
+        | Command::Status { .. }
         | Command::Branch { .. }
         | Command::Switch { .. }
         | Command::Diff { .. }

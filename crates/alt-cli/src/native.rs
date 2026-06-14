@@ -216,8 +216,9 @@ impl NativeRepo {
     }
 
     /// `alt status`: staged / unstaged / untracked against HEAD and the index,
-    /// plus any unmerged (conflicted) paths left by a merge.
-    pub fn status(&self, out: &mut impl Write) -> Res<()> {
+    /// plus any unmerged (conflicted) paths left by a merge. With `json`, emits
+    /// the stable structured schema instead of the human view (VISION §4 A1).
+    pub fn status(&self, json: bool, out: &mut impl Write) -> Res<()> {
         let branch = self.head_branch()?;
         let head = self.head_entries()?;
         let raw = self.index()?;
@@ -237,6 +238,9 @@ impl NativeRepo {
         st.untracked.retain(|p| !unmerged.contains(p));
 
         let short = branch.strip_prefix("refs/heads/").unwrap_or(&branch);
+        if json {
+            return render_status_json(out, short, &st, &unmerged);
+        }
         writeln!(out, "On branch {short}")?;
         let mark = |k: ChangeKind| match k {
             ChangeKind::Added => "new file",
@@ -1118,6 +1122,54 @@ impl NativeRepo {
         )?;
         Ok(())
     }
+}
+
+/// Renders `status` as the stable JSON schema (version 1):
+/// `{schema_version, branch, staged:[{path,change}], unstaged:[...],
+/// untracked:[path...], unmerged:[path...], clean:bool}`. `change` is one of
+/// `added`/`modified`/`deleted`; the human view is a parallel rendering of the
+/// same facts.
+fn render_status_json(
+    out: &mut impl Write,
+    branch: &str,
+    st: &alt_worktree::Status,
+    unmerged: &std::collections::BTreeSet<BString>,
+) -> Res<()> {
+    use crate::json::Json;
+    let change = |k: ChangeKind| match k {
+        ChangeKind::Added => "added",
+        ChangeKind::Modified => "modified",
+        ChangeKind::Deleted => "deleted",
+    };
+    let entries = |v: &[(BString, ChangeKind)]| {
+        Json::Array(
+            v.iter()
+                .map(|(p, k)| {
+                    Json::Object(vec![
+                        ("path", Json::str(p)),
+                        ("change", Json::str(change(*k))),
+                    ])
+                })
+                .collect(),
+        )
+    };
+    let paths = |it: &mut dyn Iterator<Item = &BString>| Json::Array(it.map(Json::str).collect());
+    let clean = unmerged.is_empty()
+        && st.staged.is_empty()
+        && st.unstaged.is_empty()
+        && st.untracked.is_empty();
+    let doc = Json::Object(vec![
+        ("schema_version", Json::Num(1)),
+        ("branch", Json::str(branch)),
+        ("staged", entries(&st.staged)),
+        ("unstaged", entries(&st.unstaged)),
+        ("untracked", paths(&mut st.untracked.iter())),
+        ("unmerged", paths(&mut unmerged.iter())),
+        ("clean", Json::Bool(clean)),
+    ]);
+    doc.write(out)?;
+    out.write_all(b"\n")?;
+    Ok(())
 }
 
 /// How a merge resolves once computed (no refs or work tree touched yet).
