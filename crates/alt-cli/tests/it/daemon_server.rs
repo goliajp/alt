@@ -185,6 +185,96 @@ fn daemon_sees_external_writes_via_per_request_refresh() {
     );
 }
 
+/// Sends one request carrying a caller-chosen identity, on a fresh connection.
+/// Mirrors `Daemon::run` but lets each concurrent caller pick its own author.
+fn run_as(sock: &Path, cwd: &Path, args: &[&str], author: &str) -> Response {
+    let req = Request {
+        args: args.iter().map(|s| s.to_string()).collect(),
+        cwd: cwd.to_path_buf(),
+        env: vec![
+            ("GIT_AUTHOR_NAME".into(), author.into()),
+            ("GIT_AUTHOR_EMAIL".into(), format!("{author}@e")),
+            ("USER".into(), author.into()),
+        ],
+    };
+    let mut stream = UnixStream::connect(sock).unwrap();
+    daemon::write_frame(&mut stream, &req.encode()).unwrap();
+    let mut buf = Vec::new();
+    let len = read_one_frame(&mut stream, &mut buf);
+    Response::decode(&buf[..len]).unwrap()
+}
+
+/// D5a: the daemon serves requests concurrently (a thread per connection) over
+/// one shared store behind a Mutex. Several callers commit at the same time,
+/// each with its own identity into its own workspace/branch. The Mutex must
+/// serialize the store work without corruption, and the per-request identity
+/// must not bleed between concurrent threads.
+#[test]
+fn daemon_serves_concurrent_requests_without_identity_bleed() {
+    let repo = tempfile::tempdir().unwrap();
+    let trees = tempfile::tempdir().unwrap();
+    let root = repo.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("f.txt"), "base\n").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "base"]));
+
+    const N: usize = 6;
+    let mut work = Vec::new();
+    for w in 0..N {
+        let br = format!("b{w}");
+        ok(alt(root, &["branch", &br]));
+        let tree = trees.path().join(format!("w{w}"));
+        let ws = format!("ws{w}");
+        ok(alt(
+            root,
+            &["workspace", "add", &ws, tree.to_str().unwrap(), &br],
+        ));
+        work.push((br, tree));
+    }
+
+    let d = Daemon::start(&root.join(".alt"));
+
+    // each thread drives the daemon concurrently: stage + commit in its own
+    // workspace with a distinct author. All connections are live at once.
+    let handles: Vec<_> = work
+        .iter()
+        .enumerate()
+        .map(|(w, (_br, tree))| {
+            let sock = d.sock.clone();
+            let tree = tree.clone();
+            let author = format!("author{w}");
+            std::thread::spawn(move || {
+                std::fs::write(tree.join("f.txt"), format!("from {author}\n")).unwrap();
+                let add = run_as(&sock, &tree, &["add", "."], &author);
+                assert_eq!(add.exit_code, 0, "add: {}", err_str(&add));
+                let commit = run_as(&sock, &tree, &["commit", "-m", "concurrent"], &author);
+                assert_eq!(commit.exit_code, 0, "commit: {}", err_str(&commit));
+            })
+        })
+        .collect();
+    for h in handles {
+        h.join().unwrap();
+    }
+
+    // every branch advanced by exactly one commit, authored by its own author —
+    // identities did not bleed across the concurrent threads, and no commit was
+    // lost or corrupted
+    for (w, (br, _tree)) in work.iter().enumerate() {
+        let log = ok(alt(root, &["log", "--json", br]));
+        assert_eq!(
+            log.matches("\"oid\"").count(),
+            2,
+            "b{w} should hold base + 1 commit: {log}"
+        );
+        let author = format!("author{w}");
+        assert!(
+            log.contains(&format!("{author} <{author}@e>")),
+            "b{w} HEAD has wrong author (identity bleed?): {log}"
+        );
+    }
+}
+
 /// The daemon is just another participant on the store: it serves reads while
 /// several outside processes commit concurrently (relaxed durability removes
 /// the fsync spacing that would otherwise hide races). No corruption, no lost

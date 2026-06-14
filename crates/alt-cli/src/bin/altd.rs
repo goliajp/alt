@@ -6,10 +6,15 @@
 //! store at the start of every request (the same concurrency machinery the
 //! direct CLI uses — the daemon is just another reader/writer).
 //!
-//! D2 scope: a single-threaded accept loop (one request at a time against the
-//! held store). Concurrent in-process request handling is a later step; the
-//! meaningful concurrency today is the daemon contending with *other processes*
-//! on the store, which the file locks already serialize.
+//! D5a scope: a multi-threaded accept loop. Each connection is served on its
+//! own thread, but the held `(Store, Repository)` is wrapped in one `Mutex`, so
+//! request *execution* is serialized while connection accept and response
+//! write-back run concurrently (a slow request never blocks accepting the next
+//! connection). The in-process `Mutex` is load-bearing: `flock` does not make
+//! threads of one process mutually exclusive (the lock lives on the shared open
+//! file description), so the daemon cannot lean on the S4–S10 file locks to
+//! serialize its own threads — only across processes. Read-concurrency and
+//! in-process group commit are later D5 steps; D5a is the concurrency skeleton.
 
 #[cfg(not(unix))]
 fn main() -> std::process::ExitCode {
@@ -34,6 +39,8 @@ mod unix {
     use std::os::fd::AsRawFd;
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
 
     use alt_cli::cli::{self, Cli};
     use alt_cli::daemon::{self, Request, Response};
@@ -42,6 +49,11 @@ mod unix {
     use clap::Parser;
 
     type Res<T> = Result<T, Box<dyn std::error::Error>>;
+
+    /// The daemon's shared state: one open store + git-layer repository behind a
+    /// single `Mutex`. One lock for both avoids any lock-ordering question and
+    /// matches how a request uses them together (refresh both, then dispatch).
+    type Shared = Arc<Mutex<(Store, Repository)>>;
 
     /// Exit when no request arrives within this window (overridable via
     /// `ALT_DAEMON_IDLE_MS`, mainly for tests).
@@ -56,22 +68,50 @@ mod unix {
 
         let listener = bind(&sock_path)?;
         // the held store serves native commands; the held repository serves
-        // git-layer reads (`log`) — both opened once and refreshed per request
+        // git-layer reads (`log`) — both opened once and refreshed per request,
+        // and shared across request threads behind one Mutex
         let repo_root = alt_dir.parent().unwrap_or(&alt_dir).to_path_buf();
-        let mut store = Store::open(alt_dir)?;
-        let mut repo = Repository::discover(&repo_root)?;
+        let store = Store::open(alt_dir)?;
+        let repo = Repository::discover(&repo_root)?;
+        let shared: Shared = Arc::new(Mutex::new((store, repo)));
 
         let idle_ms = std::env::var("ALT_DAEMON_IDLE_MS")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(DEFAULT_IDLE_MS);
 
-        // serve until an idle timeout (None) — then exit and let the next
-        // client respawn us
-        while let Some(stream) = accept_with_timeout(&listener, idle_ms)? {
-            if let Err(e) = serve(&mut store, &mut repo, stream) {
-                eprintln!("altd: request error: {e}");
+        // count of requests accepted but not yet fully served. Incremented in
+        // this thread before the worker spawns (so an immediate idle poll can't
+        // race past an in-flight request), decremented when the worker is done.
+        let active = Arc::new(AtomicUsize::new(0));
+        let mut workers: Vec<std::thread::JoinHandle<()>> = Vec::new();
+
+        // serve until an idle window with no request in flight, then exit and
+        // let the next client respawn us. A slow request runs on its own thread,
+        // so it blocks neither accepting the next connection nor other requests'
+        // I/O — only the shared store, via the Mutex inside `serve`.
+        loop {
+            match accept_with_timeout(&listener, idle_ms)? {
+                Some(stream) => {
+                    active.fetch_add(1, Ordering::SeqCst);
+                    let shared = Arc::clone(&shared);
+                    let active = Arc::clone(&active);
+                    workers.push(std::thread::spawn(move || {
+                        if let Err(e) = serve(&shared, stream) {
+                            eprintln!("altd: request error: {e}");
+                        }
+                        active.fetch_sub(1, Ordering::SeqCst);
+                    }));
+                    // reap finished workers so the handle vec stays bounded
+                    workers.retain(|h| !h.is_finished());
+                }
+                None if active.load(Ordering::SeqCst) == 0 => break,
+                None => {} // idle window elapsed but a request is still in flight
             }
+        }
+        // join any worker still finishing its write-back before we tear down
+        for h in workers {
+            let _ = h.join();
         }
         let _ = std::fs::remove_file(&sock_path);
         Ok(())
@@ -125,10 +165,16 @@ mod unix {
     }
 
     /// Reads one request, runs it against the held store/repo, writes back.
-    fn serve(store: &mut Store, repo: &mut Repository, mut stream: UnixStream) -> Res<()> {
+    /// Framing I/O happens outside the lock; only `handle` (refresh + dispatch)
+    /// holds it, so the serialized section is the store work, not the wire I/O.
+    fn serve(shared: &Shared, mut stream: UnixStream) -> Res<()> {
         let payload = daemon::read_frame(&mut stream)?;
         let req = Request::decode(&payload)?;
-        let resp = handle(store, repo, &req);
+        let resp = {
+            let mut guard = shared.lock().expect("daemon store mutex poisoned");
+            let (store, repo) = &mut *guard;
+            handle(store, repo, &req)
+        };
         daemon::write_frame(&mut stream, &resp.encode())?;
         Ok(())
     }
