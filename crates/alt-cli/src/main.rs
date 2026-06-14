@@ -24,9 +24,27 @@ fn main() -> ExitCode {
 
 fn run() -> Result<u8, Box<dyn std::error::Error>> {
     let cli = Cli::parse();
+    let cwd = std::env::current_dir()?;
+
+    // Hot read commands route through the per-repo daemon to skip the ~21ms
+    // store open; the daemon is auto-spawned if not already up. Local-first:
+    // anything that can't (disabled, no repo, daemon unreachable, wire error)
+    // falls through to the direct path below — the daemon is never required.
+    #[cfg(unix)]
+    if alt_cli::client::routes_through_daemon(&cli.command)
+        && !alt_cli::client::disabled()
+        && let Ok((alt_dir, _)) = native::resolve_workspace(&cwd, cli.workspace.as_deref())
+        && let Some(resp) =
+            alt_cli::client::try_serve(&alt_dir, &std::env::args().skip(1).collect::<Vec<_>>())
+    {
+        use std::io::Write as _;
+        std::io::stdout().write_all(&resp.stdout)?;
+        std::io::stderr().write_all(&resp.stderr)?;
+        return Ok(resp.exit_code);
+    }
+
     let stdout = std::io::stdout().lock();
     let mut out = std::io::BufWriter::new(stdout);
-    let cwd = std::env::current_dir()?;
     let id = Identity::from_env();
 
     let code = match &cli.command {

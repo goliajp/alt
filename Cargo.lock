@@ -42,6 +42,7 @@ dependencies = [
  "alt-worktree",
  "bstr",
  "clap",
+ "criterion",
  "encoding_rs",
  "libc",
  "tempfile",
