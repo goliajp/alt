@@ -406,3 +406,142 @@ fn daemon_reads_stay_coherent_under_concurrent_external_writers() {
         );
     }
 }
+
+/// D5b: under in-process group commit (concurrent commits coalesce their
+/// fsyncs), no commit is lost or corrupted. Several workspaces commit many
+/// rounds concurrently through the daemon; every branch must end with exactly
+/// base + ROUNDS commits, and the whole store must read back cleanly afterward.
+#[test]
+fn daemon_group_commit_loses_no_concurrent_writes() {
+    let repo = tempfile::tempdir().unwrap();
+    let trees = tempfile::tempdir().unwrap();
+    let root = repo.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("f.txt"), "base\n").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "base"]));
+
+    const N: usize = 5;
+    const ROUNDS: usize = 12;
+    let mut trees_v = Vec::new();
+    for w in 0..N {
+        let br = format!("b{w}");
+        ok(alt(root, &["branch", &br]));
+        let tree = trees.path().join(format!("w{w}"));
+        ok(alt(
+            root,
+            &[
+                "workspace",
+                "add",
+                &format!("ws{w}"),
+                tree.to_str().unwrap(),
+                &br,
+            ],
+        ));
+        trees_v.push(tree);
+    }
+
+    let d = Daemon::start(&root.join(".alt"));
+    let handles: Vec<_> = trees_v
+        .into_iter()
+        .enumerate()
+        .map(|(w, tree)| {
+            let sock = d.sock.clone();
+            std::thread::spawn(move || {
+                for r in 0..ROUNDS {
+                    std::fs::write(tree.join("f.txt"), format!("w{w} r{r}\n")).unwrap();
+                    let add = run_as(&sock, &tree, &["add", "."], "tester");
+                    assert_eq!(add.exit_code, 0, "add: {}", err_str(&add));
+                    let c = run_as(&sock, &tree, &["commit", "-m", "x"], "tester");
+                    assert_eq!(c.exit_code, 0, "commit: {}", err_str(&c));
+                }
+            })
+        })
+        .collect();
+    for h in handles {
+        h.join().unwrap();
+    }
+
+    // every branch holds exactly base + ROUNDS commits — nothing lost to the
+    // coalesced fsync — and an external process reads the store back cleanly
+    for w in 0..N {
+        let log = ok(alt(root, &["log", "--json", &format!("b{w}")]));
+        assert_eq!(
+            log.matches("\"oid\"").count(),
+            ROUNDS + 1,
+            "b{w} lost commits under group commit: {log}"
+        );
+    }
+}
+
+/// D5b bench (manual): concurrent-commit throughput through the daemon. Commits
+/// are fsync-bound; the daemon's in-process group commit coalesces the fsyncs of
+/// commits that overlap in flight, so aggregate throughput at higher concurrency
+/// should exceed the serial (one-fsync-per-commit) rate. Prints commits/sec at a
+/// few concurrency levels; not an assertion (fsync timing is hardware-dependent,
+/// and the fast tier forbids ratio assertions). Run:
+///   cargo test --release -p alt-cli --test it -- --ignored --nocapture daemon_commit_throughput
+#[test]
+#[ignore = "bench: concurrent commit throughput through the daemon, run manually"]
+fn daemon_commit_throughput() {
+    // each concurrency level commits into its own pool of workspaces so writers
+    // never contend on the same branch (that would serialize on a ref conflict,
+    // not on fsync — we want to measure the fsync coalescing)
+    fn measure(concurrency: usize, rounds: usize) -> f64 {
+        let repo = tempfile::tempdir().unwrap();
+        let trees = tempfile::tempdir().unwrap();
+        let root = repo.path();
+        ok(alt(root, &["init", "."]));
+        std::fs::write(root.join("f.txt"), "base\n").unwrap();
+        ok(alt(root, &["add", "."]));
+        ok(alt(root, &["commit", "-m", "base"]));
+
+        let mut trees_v = Vec::new();
+        for w in 0..concurrency {
+            let br = format!("c{w}");
+            ok(alt(root, &["branch", &br]));
+            let tree = trees.path().join(format!("w{w}"));
+            ok(alt(
+                root,
+                &[
+                    "workspace",
+                    "add",
+                    &format!("ws{w}"),
+                    tree.to_str().unwrap(),
+                    &br,
+                ],
+            ));
+            trees_v.push(tree);
+        }
+
+        let d = Daemon::start(&root.join(".alt"));
+        let start = Instant::now();
+        let handles: Vec<_> = trees_v
+            .into_iter()
+            .enumerate()
+            .map(|(w, tree)| {
+                let sock = d.sock.clone();
+                std::thread::spawn(move || {
+                    for r in 0..rounds {
+                        std::fs::write(tree.join("f.txt"), format!("w{w} r{r}\n")).unwrap();
+                        let add = run_as(&sock, &tree, &["add", "."], "bench");
+                        assert_eq!(add.exit_code, 0, "add: {}", err_str(&add));
+                        let c = run_as(&sock, &tree, &["commit", "-m", "x"], "bench");
+                        assert_eq!(c.exit_code, 0, "commit: {}", err_str(&c));
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+        let elapsed = start.elapsed().as_secs_f64();
+        (concurrency * rounds) as f64 / elapsed
+    }
+
+    const ROUNDS: usize = 40;
+    for concurrency in [1usize, 2, 4, 8] {
+        let rate = measure(concurrency, ROUNDS);
+        println!("daemon commit throughput: concurrency={concurrency:>2}  {rate:>8.1} commits/s");
+    }
+}

@@ -139,6 +139,15 @@ pub struct OpLog {
     /// durable, so N concurrent committers coalesce to ~1 fsync.
     sync_lock: File,
     durable_path: std::path::PathBuf,
+    /// Deferred durability (the daemon): when set, `sync` skips its inline
+    /// fsync (the daemon's group-commit coordinator fsyncs off the write path,
+    /// via [`OpLog::sync_handle`], so concurrent appends overlap the fsync).
+    /// flock does not serialize threads of one process, so the cross-process
+    /// marker machinery alone cannot batch them — the daemon coordinates
+    /// in-process.
+    defer: bool,
+    /// Counts deferred writes, so the daemon can tell whether a request wrote.
+    write_count: u64,
 }
 
 /// The durable byte length from the marker file (0 when missing).
@@ -263,6 +272,8 @@ impl OpLog {
                 len_bytes: HEADER_LEN as u64,
                 sync_lock,
                 durable_path,
+                defer: false,
+                write_count: 0,
             });
         };
 
@@ -309,6 +320,8 @@ impl OpLog {
             len_bytes,
             sync_lock,
             durable_path,
+            defer: false,
+            write_count: 0,
         })
     }
 
@@ -498,7 +511,37 @@ impl OpLog {
         if relaxed_durability() {
             return Ok(());
         }
-        let target = self.len_bytes;
+        if self.defer {
+            // the daemon's group-commit coordinator fsyncs off the write path
+            // (via `sync_handle`); here we only note that a write happened
+            self.write_count += 1;
+            return Ok(());
+        }
+        self.sync_to(self.len_bytes)
+    }
+
+    /// Turns deferred durability on or off (the daemon turns it on so its
+    /// group-commit coordinator batches fsyncs in-process; the direct CLI
+    /// leaves it off and fsyncs inline).
+    pub fn set_defer_durability(&mut self, on: bool) {
+        self.defer = on;
+    }
+
+    /// A monotonic count of deferred writes — the daemon snapshots it around a
+    /// request to tell whether the command wrote.
+    pub fn write_count(&self) -> u64 {
+        self.write_count
+    }
+
+    /// An independent fd to the (stable, append-only) `log` file, for the
+    /// daemon's off-write-path fsync.
+    pub fn sync_handle(&self) -> Result<File, OpLogError> {
+        Ok(self.file.try_clone()?)
+    }
+
+    /// The fsync-coalescing core: fsync only if no other committer already made
+    /// our target durable (the inline, direct-CLI path).
+    fn sync_to(&mut self, target: u64) -> Result<(), OpLogError> {
         if read_durable(&self.durable_path) >= target {
             return Ok(());
         }

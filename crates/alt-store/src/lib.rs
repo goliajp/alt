@@ -27,7 +27,7 @@ pub mod delta;
 mod idx;
 mod pack;
 
-pub use blob::{BlobOptions, BlobStore};
+pub use blob::{BlobOptions, BlobSink, BlobStore};
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
@@ -309,6 +309,29 @@ fn pack_bytes(dir: &Path, seqs: &[u32]) -> Result<u64, StoreError> {
         total += std::fs::metadata(pack_path(dir, seq))?.len();
     }
     Ok(total)
+}
+
+/// An off-write-path fsync handle for the chunk store's active pack (see
+/// [`ChunkStore::sink`]). Holds only the pack directory; it re-opens the
+/// highest-seq (active) pack on each `fsync`, so a roll between calls is handled
+/// by construction.
+pub struct ChunkSink {
+    dir: PathBuf,
+}
+
+impl ChunkSink {
+    /// Fsyncs the active pack. A read+write handle (we only fsync, never write)
+    /// is opened fresh so this needs no shared state with the live `ChunkStore`.
+    pub fn fsync(&self) -> Result<(), StoreError> {
+        if let Some(seq) = list_pack_seqs(&self.dir)?.into_iter().max() {
+            let f = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(pack_path(&self.dir, seq))?;
+            f.sync_all()?;
+        }
+        Ok(())
+    }
 }
 
 fn list_pack_seqs(dir: &Path) -> Result<Vec<u32>, StoreError> {
@@ -1065,6 +1088,16 @@ impl ChunkStore {
     pub fn fsync(&self) -> Result<(), StoreError> {
         self.active.write.sync_all()?;
         Ok(())
+    }
+
+    /// An independent fsync handle (the daemon's group commit fsyncs off the
+    /// write path, without `&mut self`, so appends overlap the fsync). It
+    /// re-finds the active pack on each call because the pack rolls; sealed
+    /// packs are fsynced at seal time, so only the active one needs flushing.
+    pub fn sink(&self) -> ChunkSink {
+        ChunkSink {
+            dir: self.dir.clone(),
+        }
     }
 
     /// Our in-memory write cursor (bytes we have appended to the active pack).

@@ -169,6 +169,26 @@ impl RefStore {
         Ok(())
     }
 
+    /// Turns deferred durability on or off on the underlying oplog (the daemon
+    /// turns it on so `commit`/`record_op` record the fsync target instead of
+    /// fsyncing inline; `ensure_durable` then coalesces it across concurrent
+    /// transactions).
+    pub fn set_defer_durability(&mut self, on: bool) {
+        self.oplog.set_defer_durability(on);
+    }
+
+    /// A monotonic count of deferred ref-transaction writes (for the daemon's
+    /// write detection).
+    pub fn write_count(&self) -> u64 {
+        self.oplog.write_count()
+    }
+
+    /// An independent fd to the oplog `log` file, for the daemon's
+    /// off-write-path fsync.
+    pub fn sync_handle(&self) -> Result<std::fs::File, RefError> {
+        Ok(self.oplog.sync_handle()?)
+    }
+
     fn note_op(&mut self) -> Result<(), RefError> {
         self.ops_since_snapshot += 1;
         if self.ops_since_snapshot >= SNAPSHOT_EVERY {

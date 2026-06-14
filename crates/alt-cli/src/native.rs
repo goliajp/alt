@@ -111,6 +111,55 @@ impl Store {
         self.refs.refresh()?;
         Ok(())
     }
+
+    /// Turns deferred durability on or off across the odb and the ref log. The
+    /// daemon turns it on once at open: a write appends under the request lock
+    /// but skips its inline fsync; the daemon then fsyncs off the write path via
+    /// its group-commit coordinator ([`Store::sink`]), coalescing concurrent
+    /// commits onto ~1 fsync. The direct CLI leaves it off (it fsyncs inline).
+    pub fn set_defer_durability(&mut self, on: bool) {
+        self.odb.set_defer_durability(on);
+        self.refs.set_defer_durability(on);
+    }
+
+    /// A monotonic count of deferred writes across the odb and ref log. The
+    /// daemon snapshots this around a request to tell whether the command wrote
+    /// (and so must wait for the group-commit fsync) — so reads (and write-free
+    /// commands) never pay a durability round trip.
+    pub fn write_epoch(&self) -> u64 {
+        self.odb.write_count() + self.refs.write_count()
+    }
+
+    /// An independent fsync handle over the odb (chunks → blobmap → `map.alt`)
+    /// and the ref log, in that durability order. The daemon holds one and
+    /// fsyncs off the write path — it owns its own fds, so a fsync overlaps
+    /// concurrent appends and N commits coalesce onto one fsync.
+    pub fn sink(&self) -> Res<StoreSink> {
+        Ok(StoreSink {
+            odb: self.odb.sink()?,
+            oplog: self.refs.sync_handle()?,
+        })
+    }
+}
+
+/// Off-write-path durability handle for a [`Store`] (see [`Store::sink`]): the
+/// odb (objects) then the oplog (ref ops), so a durable ref op always has its
+/// commit object durable. Fsyncs through independent fds, needing no `&mut
+/// Store`, so the daemon's group commit overlaps the fsync with appends.
+pub struct StoreSink {
+    odb: alt_odb::OdbSink,
+    oplog: std::fs::File,
+}
+
+impl StoreSink {
+    /// One fsync of everything currently on disk, in durability order. Because
+    /// fsync flushes the whole inode, this makes durable every append present
+    /// when it runs — one call covers any number of concurrent commits.
+    pub fn fsync_all(&self) -> Res<()> {
+        self.odb.fsync()?;
+        self.oplog.sync_all()?;
+        Ok(())
+    }
 }
 
 /// The per-workspace coordinates within a repo: the working-tree root, the

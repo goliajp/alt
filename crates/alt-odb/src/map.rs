@@ -266,6 +266,12 @@ impl ObjectMap {
         Ok(())
     }
 
+    /// An independent fd to the (stable, never-rewritten) `map.alt` file, for
+    /// the daemon's off-write-path fsync.
+    pub fn sync_handle(&self) -> Result<std::fs::File, OdbError> {
+        Ok(self.file.try_clone()?)
+    }
+
     /// Bytes we have appended (our write cursor).
     pub fn appended_len(&self) -> u64 {
         self.len

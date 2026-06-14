@@ -108,6 +108,16 @@ pub struct NativeOdb {
     /// no-fsync throughput while staying durable).
     sync_lock: File,
     durable_path: PathBuf,
+    /// Deferred durability (the daemon): when set, `flush` skips its inline
+    /// fsync (the daemon's group-commit coordinator fsyncs off the write path,
+    /// via [`NativeOdb::sink`], so concurrent appends overlap the fsync). flock
+    /// does not serialize threads of one process, so the cross-process marker
+    /// machinery alone cannot batch them — the daemon coordinates in-process.
+    defer: bool,
+    /// Counts deferred writes, so the daemon can tell whether a request wrote
+    /// (and thus needs to wait for the group-commit fsync) without inspecting
+    /// the command.
+    write_count: u64,
 }
 
 /// The 3 durable EOFs (active pack, blobmap, map.alt) from the marker file;
@@ -178,6 +188,8 @@ impl NativeOdb {
             held: false,
             sync_lock,
             durable_path: alt_dir.join("odb.durable"),
+            defer: false,
+            write_count: 0,
         })
     }
 
@@ -357,12 +369,46 @@ impl NativeOdb {
         if alt_store::relaxed_durability() {
             return Ok(());
         }
+        if self.defer {
+            // the daemon's group-commit coordinator fsyncs off the write path
+            // (via `sink`); here we only note that a write happened
+            self.write_count += 1;
+            return Ok(());
+        }
+        self.sync_to(target)
+    }
+
+    /// Turns deferred durability on or off (the daemon turns it on so its
+    /// group-commit coordinator batches fsyncs in-process; the direct CLI
+    /// leaves it off and fsyncs inline).
+    pub fn set_defer_durability(&mut self, on: bool) {
+        self.defer = on;
+    }
+
+    /// A monotonic count of deferred writes — the daemon snapshots it around a
+    /// request to tell whether the command wrote.
+    pub fn write_count(&self) -> u64 {
+        self.write_count
+    }
+
+    /// An independent fsync handle (chunks → blobmap → `map.alt`) for the
+    /// daemon's off-write-path group commit.
+    pub fn sink(&self) -> Result<OdbSink, OdbError> {
+        Ok(OdbSink {
+            blobs: self.blobs.sink()?,
+            map: self.map.sync_handle()?,
+        })
+    }
+
+    /// The fsync-coalescing core (blob store first — chunks before blobmap —
+    /// then `map.alt`, so a crash never leaves a durable identity record
+    /// pointing at lost content). One fsync covers my appends and any
+    /// concurrent ones; the marker then lets the others skip theirs.
+    fn sync_to(&mut self, target: [u64; 3]) -> Result<(), OdbError> {
         // fast path: another writer already fsynced past my appends
         if covers(read_durable(&self.durable_path), target) {
             return Ok(());
         }
-        // else become the syncer for this batch: one fsync covers my appends and
-        // any concurrent ones, then the marker lets them all skip their fsync
         lock_exclusive(&self.sync_lock)?;
         let result = (|| -> Result<(), OdbError> {
             if covers(read_durable(&self.durable_path), target) {
@@ -377,6 +423,23 @@ impl NativeOdb {
         })();
         let _ = unlock(&self.sync_lock);
         result
+    }
+}
+
+/// Off-write-path fsync handle for a [`NativeOdb`]: the blob store (chunks then
+/// blobmap) then `map.alt`, the durability order so a crash never leaves a
+/// durable identity record pointing at lost content. Holds its own fds, so the
+/// daemon fsyncs without `&mut NativeOdb` and appends overlap the fsync.
+pub struct OdbSink {
+    blobs: alt_store::BlobSink,
+    map: std::fs::File,
+}
+
+impl OdbSink {
+    pub fn fsync(&self) -> Result<(), OdbError> {
+        self.blobs.fsync()?;
+        self.map.sync_all()?;
+        Ok(())
     }
 }
 

@@ -336,6 +336,31 @@ impl BlobStore {
     pub fn file_lens(&self) -> Result<(u64, u64), StoreError> {
         Ok((self.chunks.pack_file_len()?, self.map.file_len()?))
     }
+
+    /// An independent fsync handle (chunks + blobmap) for the daemon's
+    /// off-write-path group commit.
+    pub fn sink(&self) -> Result<BlobSink, StoreError> {
+        Ok(BlobSink {
+            chunks: self.chunks.sink(),
+            blobmap: self.map.sync_handle()?,
+        })
+    }
+}
+
+/// Off-write-path fsync handle for a [`BlobStore`]: the chunk pack then the blob
+/// map, the same order [`BlobStore::fsync`] keeps so a crash never leaves a
+/// durable map record pointing at lost chunks.
+pub struct BlobSink {
+    chunks: crate::ChunkSink,
+    blobmap: std::fs::File,
+}
+
+impl BlobSink {
+    pub fn fsync(&self) -> Result<(), StoreError> {
+        self.chunks.fsync()?;
+        self.blobmap.sync_all()?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

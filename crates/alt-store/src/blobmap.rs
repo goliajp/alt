@@ -197,6 +197,13 @@ impl BlobMap {
     pub fn file_len(&self) -> Result<u64, StoreError> {
         Ok(self.file.metadata()?.len())
     }
+
+    /// An independent fd to the (stable, never-rolled) blobmap file, for the
+    /// daemon's off-write-path fsync. `fsync` flushes the inode regardless of
+    /// which fd it is called on, so this dup is enough.
+    pub fn sync_handle(&self) -> Result<File, StoreError> {
+        Ok(self.file.try_clone()?)
+    }
 }
 
 impl Drop for BlobMap {
