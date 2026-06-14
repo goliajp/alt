@@ -1060,6 +1060,23 @@ impl ChunkStore {
         Ok(())
     }
 
+    /// Raw fsync of the active pack (no relaxed-durability gate) — the group
+    /// commit layer decides whether/when to call it.
+    pub fn fsync(&self) -> Result<(), StoreError> {
+        self.active.write.sync_all()?;
+        Ok(())
+    }
+
+    /// Our in-memory write cursor (bytes we have appended to the active pack).
+    pub fn appended_len(&self) -> u64 {
+        self.active.len
+    }
+
+    /// The active pack's true on-disk size (includes other writers' appends).
+    pub fn pack_file_len(&self) -> Result<u64, StoreError> {
+        Ok(std::fs::metadata(pack_path(&self.dir, self.active.seq))?.len())
+    }
+
     fn read_header(&self, id: ChunkId, loc: Location) -> Result<RecordHeader, StoreError> {
         if loc.seq == self.active.seq {
             let mut buf = [0u8; REC_HEADER_LEN];

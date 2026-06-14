@@ -181,6 +181,22 @@ impl BlobMap {
         }
         Ok(())
     }
+
+    /// Raw fsync (no relaxed gate) — called by the group commit layer.
+    pub fn fsync(&self) -> Result<(), StoreError> {
+        self.file.sync_all()?;
+        Ok(())
+    }
+
+    /// Bytes we have appended (our write cursor).
+    pub fn appended_len(&self) -> u64 {
+        self.len
+    }
+
+    /// The blobmap's true on-disk size.
+    pub fn file_len(&self) -> Result<u64, StoreError> {
+        Ok(self.file.metadata()?.len())
+    }
 }
 
 impl Drop for BlobMap {

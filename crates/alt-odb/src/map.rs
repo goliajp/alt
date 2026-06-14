@@ -259,6 +259,22 @@ impl ObjectMap {
         }
         Ok(())
     }
+
+    /// Raw fsync (no relaxed gate) — called by the group commit layer.
+    pub fn fsync(&self) -> Result<(), OdbError> {
+        self.file.sync_all()?;
+        Ok(())
+    }
+
+    /// Bytes we have appended (our write cursor).
+    pub fn appended_len(&self) -> u64 {
+        self.len
+    }
+
+    /// The map's true on-disk size.
+    pub fn file_len(&self) -> Result<u64, OdbError> {
+        Ok(self.file.metadata()?.len())
+    }
 }
 
 impl Drop for ObjectMap {

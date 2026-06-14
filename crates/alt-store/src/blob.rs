@@ -318,6 +318,24 @@ impl BlobStore {
         self.chunks.sync_from_disk()?;
         self.map.sync_from_disk()
     }
+
+    /// Raw fsync of chunks then the blob map, in that order — so a crash never
+    /// leaves a durable map record pointing at lost chunks. Group commit calls
+    /// this once for a batch of coalesced commits.
+    pub fn fsync(&self) -> Result<(), StoreError> {
+        self.chunks.fsync()?;
+        self.map.fsync()
+    }
+
+    /// Our appended cursors: (chunk pack, blob map) bytes we have written.
+    pub fn appended_lens(&self) -> (u64, u64) {
+        (self.chunks.appended_len(), self.map.appended_len())
+    }
+
+    /// The true on-disk sizes of (chunk pack, blob map).
+    pub fn file_lens(&self) -> Result<(u64, u64), StoreError> {
+        Ok((self.chunks.pack_file_len()?, self.map.file_len()?))
+    }
 }
 
 #[cfg(test)]

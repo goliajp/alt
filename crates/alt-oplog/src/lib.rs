@@ -135,6 +135,26 @@ pub struct OpLog {
     /// next record goes, absent a concurrent writer. Lets `append` read only
     /// the tail another process may have added, rather than the whole file.
     len_bytes: u64,
+    /// Group commit: a lock around the fsync + a marker of how far the log is
+    /// durable, so N concurrent committers coalesce to ~1 fsync.
+    sync_lock: File,
+    durable_path: std::path::PathBuf,
+}
+
+/// The durable byte length from the marker file (0 when missing).
+fn read_durable(path: &Path) -> u64 {
+    match std::fs::read(path) {
+        Ok(b) if b.len() >= 8 => u64::from_le_bytes(b[..8].try_into().unwrap()),
+        _ => 0,
+    }
+}
+
+/// Atomically records the durable length (temp + rename), written only after
+/// the fsync so the marker never claims durability that has not happened.
+fn write_durable(path: &Path, len: u64) -> std::io::Result<()> {
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, len.to_le_bytes())?;
+    std::fs::rename(&tmp, path)
 }
 
 /// Walks length-prefixed records in `data[from..]`, verifying the hash chain
@@ -215,6 +235,12 @@ impl OpLog {
     pub fn open(dir: &Path) -> Result<Self, OpLogError> {
         std::fs::create_dir_all(dir)?;
         let path = dir.join("log");
+        let sync_lock = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(dir.join("sync.lock"))?;
+        let durable_path = dir.join("durable");
 
         let existing = match std::fs::read(&path) {
             Ok(data) => Some(data),
@@ -235,6 +261,8 @@ impl OpLog {
                 ops: Vec::new(),
                 by_id: HashMap::new(),
                 len_bytes: HEADER_LEN as u64,
+                sync_lock,
+                durable_path,
             });
         };
 
@@ -279,6 +307,8 @@ impl OpLog {
             ops,
             by_id,
             len_bytes,
+            sync_lock,
+            durable_path,
         })
     }
 
@@ -448,12 +478,31 @@ impl OpLog {
         self.ops.is_empty()
     }
 
-    /// Durability point for everything appended so far.
+    /// Durability point for everything appended so far. Group commit: fsync
+    /// only if another committer has not already made our appends durable, so
+    /// N concurrent commits coalesce to ~1 fsync. With `ALT_RELAXED_DURABILITY`
+    /// the fsync is skipped entirely (appended bytes stay cross-process visible
+    /// regardless).
     pub fn sync(&mut self) -> Result<(), OpLogError> {
-        if !relaxed_durability() {
-            self.file.sync_all()?;
+        if relaxed_durability() {
+            return Ok(());
         }
-        Ok(())
+        let target = self.len_bytes;
+        if read_durable(&self.durable_path) >= target {
+            return Ok(());
+        }
+        lock_exclusive(&self.sync_lock)?;
+        let result = (|| -> Result<(), OpLogError> {
+            if read_durable(&self.durable_path) >= target {
+                return Ok(());
+            }
+            let eof = self.file.metadata()?.len();
+            self.file.sync_all()?;
+            write_durable(&self.durable_path, eof)?;
+            Ok(())
+        })();
+        let _ = unlock(&self.sync_lock);
+        result
     }
 }
 

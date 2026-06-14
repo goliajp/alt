@@ -18,7 +18,7 @@
 mod map;
 
 use std::fs::{File, OpenOptions};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use alt_git_codec::{ObjectId, ObjectKind, RawObject};
 use alt_store::{BlobId, BlobOptions, BlobStore, CompactReport, StoreError};
@@ -101,6 +101,43 @@ pub struct NativeOdb {
     /// The advisory write lock; `held` tracks whether this batch owns it.
     lock: File,
     held: bool,
+    /// Group commit: a separate lock around the fsync, and a marker recording
+    /// how far each append file is durable. A batch fsyncs only if no other
+    /// writer already made its appends durable — so N concurrent commits
+    /// coalesce to ~1 fsync (durability stops being per-commit, matching the
+    /// no-fsync throughput while staying durable).
+    sync_lock: File,
+    durable_path: PathBuf,
+}
+
+/// The 3 durable EOFs (active pack, blobmap, map.alt) from the marker file;
+/// all-zero when missing (everything must be re-fsynced).
+fn read_durable(path: &Path) -> [u64; 3] {
+    match std::fs::read(path) {
+        Ok(b) if b.len() >= 24 => [
+            u64::from_le_bytes(b[0..8].try_into().unwrap()),
+            u64::from_le_bytes(b[8..16].try_into().unwrap()),
+            u64::from_le_bytes(b[16..24].try_into().unwrap()),
+        ],
+        _ => [0; 3],
+    }
+}
+
+/// Atomically records the durable EOFs (temp + rename) so a lock-free reader
+/// sees the old or new value, never a torn one. Written only after the fsync,
+/// so the marker never claims durability that has not happened.
+fn write_durable(path: &Path, eofs: [u64; 3]) -> std::io::Result<()> {
+    let mut buf = [0u8; 24];
+    buf[0..8].copy_from_slice(&eofs[0].to_le_bytes());
+    buf[8..16].copy_from_slice(&eofs[1].to_le_bytes());
+    buf[16..24].copy_from_slice(&eofs[2].to_le_bytes());
+    let tmp = path.with_extension("durable.tmp");
+    std::fs::write(&tmp, buf)?;
+    std::fs::rename(&tmp, path)
+}
+
+fn covers(durable: [u64; 3], target: [u64; 3]) -> bool {
+    durable[0] >= target[0] && durable[1] >= target[1] && durable[2] >= target[2]
 }
 
 impl NativeOdb {
@@ -129,11 +166,18 @@ impl NativeOdb {
         })();
         let _ = unlock(&lock);
         let (blobs, map) = opened?;
+        let sync_lock = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(alt_dir.join("odb.sync.lock"))?;
         Ok(Self {
             blobs,
             map,
             lock,
             held: false,
+            sync_lock,
+            durable_path: alt_dir.join("odb.durable"),
         })
     }
 
@@ -292,11 +336,36 @@ impl NativeOdb {
     /// then `map.alt`, so a crash never leaves a durable identity record
     /// pointing at lost content.
     pub fn flush(&mut self) -> Result<(), OdbError> {
-        self.blobs.flush()?;
-        self.map.sync()?;
-        // the batch is durable; let other writers in
+        // my durability target = how far my appends reached in each file
+        let (pack, blobmap) = self.blobs.appended_lens();
+        let target = [pack, blobmap, self.map.appended_len()];
+        // release the exclusive append lock first, so other writers append (and
+        // pile onto the same fsync) instead of waiting behind my durability
         self.release();
-        Ok(())
+
+        if alt_store::relaxed_durability() {
+            return Ok(());
+        }
+        // fast path: another writer already fsynced past my appends
+        if covers(read_durable(&self.durable_path), target) {
+            return Ok(());
+        }
+        // else become the syncer for this batch: one fsync covers my appends and
+        // any concurrent ones, then the marker lets them all skip their fsync
+        lock_exclusive(&self.sync_lock)?;
+        let result = (|| -> Result<(), OdbError> {
+            if covers(read_durable(&self.durable_path), target) {
+                return Ok(());
+            }
+            let (pf, bf) = self.blobs.file_lens()?;
+            let eofs = [pf, bf, self.map.file_len()?];
+            self.blobs.fsync()?; // chunks then blobmap, in order
+            self.map.fsync()?; // then map.alt
+            write_durable(&self.durable_path, eofs)?;
+            Ok(())
+        })();
+        let _ = unlock(&self.sync_lock);
+        result
     }
 }
 
