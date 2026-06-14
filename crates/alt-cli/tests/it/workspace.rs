@@ -84,6 +84,39 @@ fn workspaces_isolate_and_share_the_store() {
 }
 
 #[test]
+fn commands_infer_the_workspace_from_the_working_tree() {
+    let repo = tempfile::tempdir().unwrap();
+    let trees = tempfile::tempdir().unwrap();
+    let root = repo.path();
+
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("a.txt"), "main\n").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "first"]));
+    ok(alt(root, &["branch", "feat"]));
+    let wt = trees.path().join("ws2");
+    ok(alt(
+        root,
+        &["workspace", "add", "ws2", wt.to_str().unwrap(), "feat"],
+    ));
+
+    // run from inside the working tree with no --workspace: it resolves to ws2
+    // via the `.alt` marker file, and that marker is not working-tree content
+    assert!(ok(alt(&wt, &["status"])).contains("On branch feat"));
+    std::fs::write(wt.join("a.txt"), "inferred\n").unwrap();
+    ok(alt(&wt, &["add", "."]));
+    ok(alt(&wt, &["commit", "-m", "via cwd"]));
+    assert!(ok(alt(&wt, &["status"])).contains("working tree clean"));
+
+    // the default workspace at the repo root is untouched
+    assert!(ok(alt(root, &["status"])).contains("On branch main"));
+    assert_eq!(
+        std::fs::read_to_string(root.join("a.txt")).unwrap(),
+        "main\n"
+    );
+}
+
+#[test]
 fn two_workspaces_commit_concurrently_as_separate_processes() {
     use std::sync::{Arc, Barrier};
 

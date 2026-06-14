@@ -90,16 +90,24 @@ impl NativeRepo {
         Self::discover_workspace(start, None)
     }
 
-    /// Like `discover`, but opens the named workspace (or the default when
-    /// `workspace` is `None`).
+    /// Like `discover`, but selects a workspace. An explicit `workspace` name
+    /// always wins. Otherwise the workspace is inferred from where `start`
+    /// lands: under a repo root (a `.alt` directory) → the default workspace;
+    /// inside a named workspace's working tree (a `.alt` *file* pointing back
+    /// at the repo, git-worktree style) → that workspace.
     pub fn discover_workspace(start: &Path, workspace: Option<&str>) -> Res<Self> {
         let mut dir: &Path = start;
         loop {
-            if dir.join(".alt").is_dir() {
+            let marker = dir.join(".alt");
+            if marker.is_dir() {
                 return match workspace {
                     Some(name) => Self::open_workspace(dir, name),
                     None => Self::open_default(dir),
                 };
+            }
+            if marker.is_file() {
+                let (repo_root, name) = parse_workspace_marker(&marker)?;
+                return Self::open_workspace(&repo_root, workspace.unwrap_or(&name));
             }
             dir = dir
                 .parent()
@@ -191,6 +199,16 @@ impl NativeRepo {
             ws_dir.join("meta"),
             abs.to_str().ok_or("non-utf8 worktree path")?,
         )?;
+        // a `.alt` *file* in the working tree points back at the repo, so
+        // commands run from inside it auto-select this workspace (git-worktree
+        // style). scan_worktree skips `.alt` by name, so it is not content.
+        std::fs::write(
+            abs.join(".alt"),
+            format!(
+                "{}\n{name}\n",
+                repo_root.to_str().ok_or("non-utf8 repo path")?
+            ),
+        )?;
 
         // point this workspace's HEAD at the branch (one ref transaction)
         self.refs.commit(
@@ -240,6 +258,10 @@ impl NativeRepo {
             }],
         )?;
         let ws_dir = self.alt_dir.join("workspaces").join(name);
+        // drop the working tree's `.alt` marker so it no longer resolves
+        if let Ok(worktree) = std::fs::read_to_string(ws_dir.join("meta")) {
+            let _ = std::fs::remove_file(PathBuf::from(worktree.trim()).join(".alt"));
+        }
         if ws_dir.exists() {
             std::fs::remove_dir_all(&ws_dir)?;
         }
@@ -1835,6 +1857,16 @@ fn check_branch_name(name: &str) -> Res<()> {
         return Err(format!("'{name}' is not a valid branch name").into());
     }
     Ok(())
+}
+
+/// Reads a working tree's `.alt` marker file: line 1 is the repo root (the
+/// directory holding the real `.alt`), line 2 is the workspace name.
+fn parse_workspace_marker(path: &Path) -> Res<(PathBuf, String)> {
+    let content = std::fs::read_to_string(path)?;
+    let mut lines = content.lines();
+    let repo_root = lines.next().ok_or("malformed .alt workspace marker")?;
+    let name = lines.next().ok_or("malformed .alt workspace marker")?;
+    Ok((PathBuf::from(repo_root), name.to_owned()))
 }
 
 /// A workspace name: a single path segment (it becomes part of the ref name
