@@ -19,6 +19,9 @@ use clap::{Parser, Subcommand};
 struct Cli {
     #[command(subcommand)]
     command: Command,
+    /// Operate in the named parallel workspace instead of the default one
+    #[arg(long, global = true)]
+    workspace: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -123,6 +126,34 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Manage parallel workspaces (isolated HEAD/index/working tree)
+    Workspace {
+        #[command(subcommand)]
+        op: WorkspaceOp,
+        /// Emit a structured JSON result instead of the human view
+        #[arg(long, global = true)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum WorkspaceOp {
+    /// Create a workspace with its own working tree, checked out on a branch
+    Add {
+        /// Workspace name
+        name: String,
+        /// Working-tree directory for the workspace
+        path: std::path::PathBuf,
+        /// Branch to check out (defaults to the current branch)
+        branch: Option<String>,
+    },
+    /// List the workspaces
+    List,
+    /// Remove a workspace (its HEAD ref and control dir; files are kept)
+    Remove {
+        /// Workspace name
+        name: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -173,6 +204,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let stdout = std::io::stdout().lock();
     let mut out = std::io::BufWriter::new(stdout);
     let cwd = std::env::current_dir()?;
+    let ws = cli.workspace.as_deref();
 
     // native .alt commands open (or create) their own repo, not a git one
     match &cli.command {
@@ -182,22 +214,22 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             return Ok(ExitCode::SUCCESS);
         }
         Command::Add { paths, json } => {
-            native::NativeRepo::discover(&cwd)?.add(paths, *json, &mut out)?;
+            native::NativeRepo::discover_workspace(&cwd, ws)?.add(paths, *json, &mut out)?;
             out.flush()?;
             return Ok(ExitCode::SUCCESS);
         }
         Command::Commit { message, json } => {
-            native::NativeRepo::discover(&cwd)?.commit(message, *json, &mut out)?;
+            native::NativeRepo::discover_workspace(&cwd, ws)?.commit(message, *json, &mut out)?;
             out.flush()?;
             return Ok(ExitCode::SUCCESS);
         }
         Command::Status { json } => {
-            native::NativeRepo::discover(&cwd)?.status(*json, &mut out)?;
+            native::NativeRepo::discover_workspace(&cwd, ws)?.status(*json, &mut out)?;
             out.flush()?;
             return Ok(ExitCode::SUCCESS);
         }
         Command::Branch { name, delete, json } => {
-            native::NativeRepo::discover(&cwd)?.branch(
+            native::NativeRepo::discover_workspace(&cwd, ws)?.branch(
                 name.clone(),
                 delete.clone(),
                 *json,
@@ -207,17 +239,19 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             return Ok(ExitCode::SUCCESS);
         }
         Command::Switch { name, create, json } => {
-            native::NativeRepo::discover(&cwd)?.switch(name, *create, *json, &mut out)?;
+            native::NativeRepo::discover_workspace(&cwd, ws)?
+                .switch(name, *create, *json, &mut out)?;
             out.flush()?;
             return Ok(ExitCode::SUCCESS);
         }
         Command::Diff { cached, json } => {
-            native::NativeRepo::discover(&cwd)?.diff(*cached, *json, &mut out)?;
+            native::NativeRepo::discover_workspace(&cwd, ws)?.diff(*cached, *json, &mut out)?;
             out.flush()?;
             return Ok(ExitCode::SUCCESS);
         }
         Command::Merge { branch, json } => {
-            let conflicts = native::NativeRepo::discover(&cwd)?.merge(branch, *json, &mut out)?;
+            let conflicts =
+                native::NativeRepo::discover_workspace(&cwd, ws)?.merge(branch, *json, &mut out)?;
             out.flush()?;
             // git exits 1 when a merge stops in conflict
             return Ok(if conflicts {
@@ -227,7 +261,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             });
         }
         Command::Flow { op, json } => {
-            let mut repo = native::NativeRepo::discover(&cwd)?;
+            let mut repo = native::NativeRepo::discover_workspace(&cwd, ws)?;
             match op {
                 FlowOp::Init => repo.flow_init(*json, &mut out)?,
                 FlowOp::Feature {
@@ -241,7 +275,19 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             return Ok(ExitCode::SUCCESS);
         }
         Command::Undo { json } => {
-            native::NativeRepo::discover(&cwd)?.undo(*json, &mut out)?;
+            native::NativeRepo::discover_workspace(&cwd, ws)?.undo(*json, &mut out)?;
+            out.flush()?;
+            return Ok(ExitCode::SUCCESS);
+        }
+        Command::Workspace { op, json } => {
+            let mut repo = native::NativeRepo::discover(&cwd)?;
+            match op {
+                WorkspaceOp::Add { name, path, branch } => {
+                    repo.workspace_add(name, path, branch.as_deref(), *json, &mut out)?
+                }
+                WorkspaceOp::List => repo.workspace_list(*json, &mut out)?,
+                WorkspaceOp::Remove { name } => repo.workspace_remove(name, *json, &mut out)?,
+            }
             out.flush()?;
             return Ok(ExitCode::SUCCESS);
         }
@@ -321,7 +367,8 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         | Command::Diff { .. }
         | Command::Merge { .. }
         | Command::Flow { .. }
-        | Command::Undo { .. } => {
+        | Command::Undo { .. }
+        | Command::Workspace { .. } => {
             unreachable!("native commands are dispatched before git discovery")
         }
     }
