@@ -1,6 +1,7 @@
 //! Single integration-test binary for alt-cli.
 mod branch_switch;
 mod capability_gate;
+mod clone;
 mod commit_loop;
 mod daemon_client;
 mod daemon_server;

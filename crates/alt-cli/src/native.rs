@@ -402,6 +402,147 @@ impl OpenRepo {
 }
 
 /// `alt init [dir]`: create an empty native repo with an unborn HEAD → main.
+/// `alt clone <url> [<dir>]`: init + remote add origin + fetch + switch
+/// to the server's HEAD branch (M6/W6). The destination directory defaults
+/// to the URL's last path segment with any `.git` suffix stripped — same
+/// convention as `git clone`.
+///
+/// The composition lives at the top level (not on [`NativeRepo`]) because
+/// clone starts before any repository exists: it creates the working
+/// directory, runs init, then opens the repo to drive fetch/switch
+/// in-process.
+pub fn clone(
+    url: &str,
+    dir: Option<&Path>,
+    json: bool,
+    cwd: &Path,
+    id: Identity,
+    out: &mut impl Write,
+) -> Res<()> {
+    let target = match dir {
+        Some(d) => d.to_owned(),
+        None => {
+            let derived = derive_clone_dir(url)
+                .ok_or_else(|| format!("cannot derive clone dir from URL '{url}'"))?;
+            cwd.join(derived)
+        }
+    };
+    let alt_dir = target.join(".alt");
+    if alt_dir.exists() {
+        return Err(format!("{} already exists", alt_dir.display()).into());
+    }
+    if target.exists() {
+        let empty = std::fs::read_dir(&target)?.next().is_none();
+        if !empty {
+            return Err(format!("'{}' exists and is not empty", target.display()).into());
+        }
+    } else {
+        std::fs::create_dir_all(&target)?;
+    }
+
+    // init: same control-dir layout as `alt init`, so subsequent commands
+    // can discover this clone like any local repo
+    init(Some(target.clone()), out)?;
+
+    // everything from here on routes through NativeRepo against the
+    // freshly-created store
+    let mut open = OpenRepo::discover(&target, None, id)?;
+    let mut repo = open.repo();
+    repo.remote_add("origin", url, /*json=*/ false, out)?;
+    repo.fetch("origin", &[], /*json=*/ false, out)?;
+
+    // pick the local branch to materialise: prefer the remote's HEAD
+    // symref target (mirrored as `refs/remotes/origin/HEAD` during fetch),
+    // falling back to `main` / `master` / the first remote-tracking head
+    let pick = pick_clone_branch(&repo)?;
+    if let Some((branch, oid)) = pick {
+        let local_ref = format!("refs/heads/{branch}");
+        if repo.store_refs_get(&local_ref).is_none() {
+            repo.create_branch_at(&local_ref, oid)?;
+        }
+        // init pointed HEAD at refs/heads/main symbolically; if the
+        // remote's default isn't 'main' we need to retarget HEAD too
+        let head_target = format!("refs/heads/{branch}");
+        let current_head = repo.store_refs_get("HEAD");
+        if !matches!(&current_head, Some(RefTarget::Symbolic(s)) if s == &head_target) {
+            repo.point_head_at(&head_target)?;
+        }
+        repo.materialise_head()?;
+        if json {
+            use crate::json::Json;
+            crate::json::emit(
+                out,
+                vec![
+                    ("url", Json::str(url)),
+                    ("dir", Json::str(target.display().to_string())),
+                    ("branch", Json::str(&branch)),
+                    ("head", Json::str(oid.to_string())),
+                ],
+            )?;
+        } else {
+            writeln!(
+                out,
+                "Cloned '{url}' into {} (HEAD → refs/heads/{branch})",
+                target.display()
+            )?;
+        }
+    } else if json {
+        use crate::json::Json;
+        crate::json::emit(
+            out,
+            vec![
+                ("url", Json::str(url)),
+                ("dir, no branches", Json::str(target.display().to_string())),
+                ("branch", Json::Null),
+            ],
+        )?;
+    } else {
+        writeln!(
+            out,
+            "Cloned '{url}' into {} (remote has no branches — HEAD unset)",
+            target.display()
+        )?;
+    }
+    Ok(())
+}
+
+fn derive_clone_dir(url: &str) -> Option<String> {
+    let last = url.trim_end_matches('/').rsplit('/').next()?;
+    let stripped = last.strip_suffix(".git").unwrap_or(last);
+    if stripped.is_empty() {
+        None
+    } else {
+        Some(stripped.to_owned())
+    }
+}
+
+fn pick_clone_branch(repo: &NativeRepo) -> Res<Option<(String, ObjectId)>> {
+    // (1) `refs/remotes/origin/HEAD` symref written by our fetch path
+    if let Some(RefTarget::Symbolic(target)) = repo.store_refs_get("refs/remotes/origin/HEAD")
+        && let Some(branch) = target.strip_prefix("refs/remotes/origin/")
+        && let Some(RefTarget::Oid(oid)) = repo.store_refs_get(&target)
+    {
+        return Ok(Some((branch.to_owned(), oid)));
+    }
+    // (2) common defaults
+    for cand in ["main", "master"] {
+        let r = format!("refs/remotes/origin/{cand}");
+        if let Some(RefTarget::Oid(oid)) = repo.store_refs_get(&r) {
+            return Ok(Some((cand.to_owned(), oid)));
+        }
+    }
+    // (3) first remote-tracking branch in name order
+    for (name, target) in repo.store_refs_iter() {
+        if let Some(branch) = name.strip_prefix("refs/remotes/origin/")
+            && branch != "HEAD"
+            && let RefTarget::Oid(oid) = target
+        {
+            return Ok(Some((branch.to_owned(), oid)));
+        }
+    }
+    Ok(None)
+}
+
 pub fn init(dir: Option<PathBuf>, out: &mut impl Write) -> Res<()> {
     let root = dir.unwrap_or_else(|| PathBuf::from("."));
     let alt_dir = root.join(".alt");
@@ -1288,6 +1429,72 @@ impl<'a> NativeRepo<'a> {
             .get(&oid)?
             .ok_or("object missing from store")?
             .data)
+    }
+
+    /// Look up a ref by full name — pass-through to the shared refs store
+    /// (`store_refs_get` is the public, no-mut alias for callers like the
+    /// free-standing `clone` helper).
+    pub fn store_refs_get(&self, name: &str) -> Option<RefTarget> {
+        self.store.refs.get(name).cloned()
+    }
+
+    /// Iterate ref `(name, target)` pairs — owned, so the iterator doesn't
+    /// borrow the repo for its full lifetime (matters for clone's
+    /// drive-multiple-methods flow).
+    pub fn store_refs_iter(&self) -> Vec<(String, RefTarget)> {
+        self.store
+            .refs
+            .iter()
+            .map(|(n, t)| (n.to_owned(), t.clone()))
+            .collect()
+    }
+
+    /// Create a local branch at a given oid, one ref tx, no HEAD change —
+    /// used by clone to seed `refs/heads/<branch>` from a fetched
+    /// remote-tracking tip before switching to it.
+    pub fn create_branch_at(&mut self, full_name: &str, oid: ObjectId) -> Res<()> {
+        self.commit_refs_unkeyed(
+            "branch",
+            &[RefChange {
+                name: full_name.to_owned(),
+                old: None,
+                new: Some(RefTarget::Oid(oid)),
+            }],
+        )?;
+        Ok(())
+    }
+
+    /// Retarget HEAD to a symbolic ref (e.g. `refs/heads/develop`) — one
+    /// ref tx, no working-tree touch. Used by clone when the remote's
+    /// default branch isn't the init-default `main`.
+    pub fn point_head_at(&mut self, target: &str) -> Res<()> {
+        let head_ref = self.head_ref.clone();
+        let old = self.store.refs.get(&head_ref).cloned();
+        self.commit_refs_unkeyed(
+            "switch",
+            &[RefChange {
+                name: head_ref,
+                old,
+                new: Some(RefTarget::Symbolic(target.to_owned())),
+            }],
+        )?;
+        Ok(())
+    }
+
+    /// Materialise HEAD's tree into the working directory, replacing any
+    /// existing tracked files. Used by clone after wiring HEAD to a newly
+    /// created branch — `switch`'s "already on this branch" short-circuit
+    /// would otherwise skip the checkout. Errors if HEAD doesn't resolve
+    /// to a commit (a fresh init with no commits).
+    pub fn materialise_head(&mut self) -> Res<()> {
+        let target = self.head_entries()?;
+        if target.is_empty() {
+            return Ok(());
+        }
+        // start from an empty old work-tree state — clone's target dir is
+        // empty by construction, so there's nothing to remove
+        self.checkout(&[], &target)?;
+        Ok(())
     }
 
     fn head_branch(&self) -> Res<String> {
@@ -2183,6 +2390,17 @@ impl<'a> NativeRepo<'a> {
         // refspec match: server refs → local destinations + wants
         let mut updates: Vec<RefUpdate> = Vec::new();
         let mut wants: Vec<ObjectId> = Vec::new();
+        // capture the server's HEAD symref target so we can mirror it as
+        // `refs/remotes/<name>/HEAD` (what git clones do — a clone needs
+        // it to know which branch to check out)
+        let server_head_target: Option<String> = server_refs.iter().find_map(|r| {
+            if r.name == "HEAD" {
+                r.symref_target.clone()
+            } else {
+                None
+            }
+        });
+
         for sref in &server_refs {
             if sref.name == "HEAD" {
                 continue; // tracked via symref-target on the matched branch
@@ -2285,8 +2503,9 @@ impl<'a> NativeRepo<'a> {
             self.store.odb.flush()?;
         }
 
-        // ref transaction: one tx for all the remote-tracking refs
-        let changes: Vec<RefChange> = updates
+        // ref transaction: one tx for all the remote-tracking refs (plus
+        // the mirrored remote HEAD when the server advertised a symref)
+        let mut changes: Vec<RefChange> = updates
             .iter()
             .filter(|u| u.old != Some(u.new))
             .map(|u| RefChange {
@@ -2295,6 +2514,28 @@ impl<'a> NativeRepo<'a> {
                 new: Some(RefTarget::Oid(u.new)),
             })
             .collect();
+        if let Some(target) = &server_head_target {
+            // map `refs/heads/main` → `refs/remotes/<name>/main`, using the
+            // first matching spec; skip when the server's HEAD points at a
+            // branch our refspec wouldn't have fetched
+            let local_target = specs.iter().find_map(|s| s.map(target));
+            if let Some(local_target) = local_target {
+                let remote_head_name = format!("refs/remotes/{remote_name}/HEAD");
+                let current = match self.store.refs.get(&remote_head_name) {
+                    Some(RefTarget::Symbolic(s)) => Some(RefTarget::Symbolic(s.clone())),
+                    Some(RefTarget::Oid(o)) => Some(RefTarget::Oid(*o)),
+                    None => None,
+                };
+                let new_target = RefTarget::Symbolic(local_target);
+                if current.as_ref() != Some(&new_target) {
+                    changes.push(RefChange {
+                        name: remote_head_name,
+                        old: current,
+                        new: Some(new_target),
+                    });
+                }
+            }
+        }
         if !changes.is_empty() {
             self.commit_refs("fetch", &changes)?;
         }
@@ -3575,6 +3816,32 @@ mod tests {
         assert!(RefSpec::parse("refs/heads/main").is_err());
         assert!(RefSpec::parse("refs/heads/*:refs/remotes/origin/main").is_err());
         assert!(RefSpec::parse("refs/heads/main:refs/remotes/origin/*").is_err());
+    }
+
+    /// `alt clone` derives the target directory from the URL's last path
+    /// segment, mirroring git's behaviour: strip `.git`, strip trailing
+    /// slashes. Empty / unusable URLs → `None` (caller errors out).
+    #[test]
+    fn derive_clone_dir_strips_git_suffix_and_slashes() {
+        assert_eq!(
+            derive_clone_dir("https://github.com/user/repo.git").as_deref(),
+            Some("repo")
+        );
+        assert_eq!(
+            derive_clone_dir("https://github.com/user/repo.git/").as_deref(),
+            Some("repo")
+        );
+        assert_eq!(
+            derive_clone_dir("https://example.com/myproj").as_deref(),
+            Some("myproj")
+        );
+        // ssh-like form: the part after the last `/`
+        assert_eq!(
+            derive_clone_dir("git@github.com:user/repo.git").as_deref(),
+            Some("repo")
+        );
+        // empty URL has no segment to derive from
+        assert_eq!(derive_clone_dir(""), None);
     }
 
     /// A named workspace gets its own HEAD, index, and working tree, while the

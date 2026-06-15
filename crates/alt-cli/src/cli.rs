@@ -150,6 +150,17 @@ pub enum Command {
         #[arg(long, global = true)]
         json: bool,
     },
+    /// Clone a remote repository: init + remote add origin + fetch + checkout
+    Clone {
+        /// Remote URL (e.g. `https://github.com/user/repo.git`)
+        url: String,
+        /// Destination directory (defaults to the URL's last path
+        /// segment with any `.git` suffix stripped)
+        dir: Option<std::path::PathBuf>,
+        /// Emit a structured JSON result instead of the human view
+        #[arg(long)]
+        json: bool,
+    },
     /// Fetch refs + objects from a configured remote (M6/W4 — git smart-http v2)
     Fetch {
         /// Remote name (defaults to `origin`)
