@@ -284,6 +284,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "alt-wire"
+version = "0.0.0"
+dependencies = [
+ "alt-git-codec",
+ "thiserror",
+]
+
+[[package]]
 name = "alt-worktree"
 version = "0.0.0"
 dependencies = [

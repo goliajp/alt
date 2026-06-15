@@ -28,6 +28,7 @@ alt-prism-store = { path = "crates/alt-prism-store" }
 alt-refs = { path = "crates/alt-refs" }
 alt-repo = { path = "crates/alt-repo" }
 alt-treediff = { path = "crates/alt-treediff" }
+alt-wire = { path = "crates/alt-wire" }
 alt-worktree = { path = "crates/alt-worktree" }
 alt-testutil = { path = "crates/alt-testutil" }
 

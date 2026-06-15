@@ -1,0 +1,10 @@
+[package]
+name = "alt-wire"
+description = "git smart-http protocol v2: pkt-line, capability advertisement, ls-refs / fetch / push framing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+alt-git-codec.workspace = true
+thiserror.workspace = true
