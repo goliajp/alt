@@ -1136,6 +1136,16 @@ impl<'a> NativeRepo<'a> {
                     .map(hunk_json)
                     .collect()
             };
+            // A8 B1 (E2): binary files get a structured chunk-diff summary so
+            // an agent can answer "how much of this binary is genuinely
+            // shared" via the same `--json` surface it uses for text — without
+            // the dump-the-bytes blow-up. Text files leave the field null;
+            // adding (not replacing) keeps the v1 schema backward-compatible.
+            let chunk_diff_field = if binary {
+                binary_chunk_diff_json(&old_bytes, &new_bytes)
+            } else {
+                Json::Null
+            };
             let oid = |w: Option<&WorkEntry>| match w {
                 Some(w) => Json::str(w.oid.to_string()),
                 None => Json::Null,
@@ -1153,6 +1163,7 @@ impl<'a> NativeRepo<'a> {
                 ("new_mode", mode(ch.new)),
                 ("binary", Json::Bool(binary)),
                 ("hunks", Json::Array(hunks)),
+                ("chunk_diff", chunk_diff_field),
             ]));
         }
         let doc = Json::Object(vec![
@@ -1202,8 +1213,24 @@ impl<'a> NativeRepo<'a> {
         buf.extend_from_slice(format!("index {o7}..{n7}\n").as_bytes());
 
         if alt_diff::is_binary(&old_bytes) || alt_diff::is_binary(&new_bytes) {
+            // git-compat line first (existing tests + muscle memory key off
+            // this exact wording); then an A8 B1 chunk-diff summary so the
+            // human view answers "how much is genuinely shared" too.
             buf.extend_from_slice(
                 format!("Binary files a/{path} and b/{path} differ\n").as_bytes(),
+            );
+            let cd = alt_diff::binary::chunk_diff(
+                &old_bytes,
+                &new_bytes,
+                alt_diff::binary::DEFAULT_PARAMS,
+            );
+            let pct = (cd.byte_shared_ratio() * 100.0).round() as u32;
+            buf.extend_from_slice(
+                format!(
+                    "chunks: {} shared, {} added, {} removed ({pct}% bytes shared)\n",
+                    cd.shared_chunks, cd.added_chunks, cd.removed_chunks,
+                )
+                .as_bytes(),
             );
             return Ok(());
         }
@@ -2196,6 +2223,31 @@ fn render_status_json(
     doc.write(out)?;
     out.write_all(b"\n")?;
     Ok(())
+}
+
+/// JSON shape for an A8 B1 binary chunk diff:
+/// `{kind:"binary_chunk_diff", shared_chunks, added_chunks, removed_chunks,
+/// old_chunks, new_chunks, old_bytes, new_bytes, byte_shared_ratio}`. The
+/// `kind` discriminator leaves room for B2 (part-aware) under the same
+/// `chunk_diff` field without a v1 schema bump.
+fn binary_chunk_diff_json(old: &[u8], new: &[u8]) -> crate::json::Json {
+    use crate::json::Json;
+    let cd = alt_diff::binary::chunk_diff(old, new, alt_diff::binary::DEFAULT_PARAMS);
+    // Round to four decimals — enough resolution for an agent's "is this
+    // mostly the same" check without surfacing FP-noise tails in stable
+    // schemas (the same `--full` mode that adds chunk OIDs can dial it up).
+    let ratio = (cd.byte_shared_ratio() * 10000.0).round() / 10000.0;
+    Json::Object(vec![
+        ("kind", Json::str("binary_chunk_diff")),
+        ("shared_chunks", Json::Num(cd.shared_chunks as i64)),
+        ("added_chunks", Json::Num(cd.added_chunks as i64)),
+        ("removed_chunks", Json::Num(cd.removed_chunks as i64)),
+        ("old_chunks", Json::Num(cd.old_chunks as i64)),
+        ("new_chunks", Json::Num(cd.new_chunks as i64)),
+        ("old_bytes", Json::Num(cd.old_bytes as i64)),
+        ("new_bytes", Json::Num(cd.new_bytes as i64)),
+        ("byte_shared_ratio", Json::Float(ratio)),
+    ])
 }
 
 /// JSON shape for an A5a principal: `{kind: "human"|"agent", id, session}`

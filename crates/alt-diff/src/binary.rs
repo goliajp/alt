@@ -34,7 +34,7 @@
 
 use std::collections::HashMap;
 
-use alt_cdc::Params;
+pub use alt_cdc::{DEFAULT_PARAMS, Params};
 
 /// A coarse-grained, machine-first chunk diff of two byte streams. All
 /// counts are over the CDC chunking under the supplied [`Params`]; sums and

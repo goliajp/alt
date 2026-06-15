@@ -94,6 +94,39 @@ fn diff_json_flags_binary_files() {
     assert!(json.contains("\"binary\":true"), "{json}");
     // binary files carry no hunks
     assert!(json.contains("\"hunks\":[]"), "{json}");
+    // E2: binary files now carry an A8 B1 chunk-diff summary in the JSON
+    // surface — `kind: "binary_chunk_diff"` plus the counts/ratio. Text
+    // files still report `chunk_diff: null` (negative space below).
+    assert!(
+        json.contains("\"chunk_diff\":{\"kind\":\"binary_chunk_diff\""),
+        "binary chunk_diff missing: {json}"
+    );
+    assert!(
+        json.contains("\"byte_shared_ratio\""),
+        "byte_shared_ratio missing: {json}"
+    );
+}
+
+/// E2: text-file entries leave the new `chunk_diff` field as `null` — keeps
+/// the v1 schema additive (adding a field, never repurposing one) and gives
+/// agents a clean negative-space check.
+#[test]
+fn diff_json_chunk_diff_is_null_for_text_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("a.txt"), "v1\n").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "base"]));
+    std::fs::write(root.join("a.txt"), "v2\n").unwrap();
+
+    let json = ok(alt(root, &["diff", "--json"]));
+    assert_valid_json(&json);
+    assert!(json.contains("\"binary\":false"), "{json}");
+    assert!(
+        json.contains("\"chunk_diff\":null"),
+        "text file chunk_diff should be null: {json}"
+    );
 }
 
 #[test]

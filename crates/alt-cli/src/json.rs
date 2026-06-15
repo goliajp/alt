@@ -13,6 +13,10 @@ pub enum Json {
     Null,
     Bool(bool),
     Num(i64),
+    /// A finite floating-point number. NaN/Infinity collapse to 0.0 on
+    /// serialization (JSON has no representation for them), so values that
+    /// could ever be non-finite must be sanitized at construction.
+    Float(f64),
     Str(Vec<u8>),
     Array(Vec<Json>),
     Object(Vec<(&'static str, Json)>),
@@ -30,6 +34,17 @@ impl Json {
             Json::Null => out.write_all(b"null"),
             Json::Bool(b) => out.write_all(if *b { b"true" } else { b"false" }),
             Json::Num(n) => write!(out, "{n}"),
+            Json::Float(f) => {
+                if !f.is_finite() {
+                    out.write_all(b"0")
+                } else if *f == f.trunc() && f.abs() < 1e15 {
+                    // integer-valued: print without trailing `.0` so e.g.
+                    // `0.0` and `1.0` stay compact and obviously bounded
+                    write!(out, "{}", *f as i64)
+                } else {
+                    write!(out, "{f}")
+                }
+            }
             Json::Str(bytes) => write_json_string(out, bytes),
             Json::Array(items) => {
                 out.write_all(b"[")?;

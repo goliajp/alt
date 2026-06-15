@@ -113,4 +113,11 @@ fn diff_unstaged_and_cached_match_git_hunks() {
         bin.contains("Binary files a/b.bin and b/b.bin differ"),
         "{bin}"
     );
+    // E2: human view also gets an A8 B1 chunk-diff summary line — counts and
+    // a percentage so the reader knows whether this is a tiny change or a
+    // full rewrite without opening the bytes.
+    assert!(
+        bin.contains("chunks: ") && bin.contains("bytes shared)"),
+        "missing chunk-diff summary line: {bin}"
+    );
 }
