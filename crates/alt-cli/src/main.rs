@@ -13,13 +13,48 @@ use alt_repo::Repository;
 use clap::Parser;
 
 fn main() -> ExitCode {
+    // Cheap pre-parse so a parse / config error before clap runs is still
+    // reported in the right shape; clap's own errors stay structured by clap.
+    let json_mode = std::env::args().any(|a| a == "--json");
     match run() {
         Ok(code) => ExitCode::from(code),
         Err(e) => {
-            eprintln!("fatal: {e}");
-            ExitCode::from(128)
+            let msg = format!("{e}");
+            // C4: A6 gate denials surface as JSON on stderr when the command
+            // was invoked with `--json`, so an agent driving alt never has to
+            // parse the human "fatal: …" string to know it was denied.
+            if json_mode && let Some(rest) = msg.strip_prefix("capability denied: ") {
+                eprintln!(
+                    "{{\"schema_version\":1,\"error\":{{\"kind\":\"capability_denied\",\"message\":{}}}}}",
+                    json_str(rest)
+                );
+                ExitCode::from(1)
+            } else {
+                eprintln!("fatal: {msg}");
+                ExitCode::from(128)
+            }
         }
     }
+}
+
+/// Compact JSON-string-literal encoder for the one error message field above;
+/// keeps `main` from pulling in a JSON helper just to render an error.
+fn json_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for b in s.bytes() {
+        match b {
+            b'"' => out.push_str("\\\""),
+            b'\\' => out.push_str("\\\\"),
+            b'\n' => out.push_str("\\n"),
+            b'\r' => out.push_str("\\r"),
+            b'\t' => out.push_str("\\t"),
+            0x00..=0x1f => out.push_str(&format!("\\u{b:04x}")),
+            _ => out.push(b as char),
+        }
+    }
+    out.push('"');
+    out
 }
 
 fn run() -> Result<u8, Box<dyn std::error::Error>> {

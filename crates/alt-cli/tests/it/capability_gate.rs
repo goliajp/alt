@@ -208,6 +208,36 @@ fn missing_policy_is_a_full_capabilities_default() {
     ok(alt_as(repo, &["branch", "-d", "main-rewrite"], "claude"));
 }
 
+/// C4: a denied write with `--json` reports a structured JSON error on
+/// stderr (kind = "capability_denied") so an agent can detect the denial
+/// without parsing the human "fatal: …" string. Exit code is non-zero.
+#[test]
+fn json_invocation_surfaces_capability_denied_as_structured_error() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = fixture(&tmp);
+    write_policy(repo, "agent:* -> read-only\n");
+
+    let out = alt_as(repo, &["branch", "feat", "--json"], "rover");
+    assert!(!out.status.success(), "expected denial");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("\"kind\":\"capability_denied\""),
+        "structured error kind missing: {stderr}"
+    );
+    assert!(
+        stderr.contains("\"schema_version\":1"),
+        "structured error schema_version missing: {stderr}"
+    );
+    // and the human path is unchanged: same command without --json prints the
+    // free-form "fatal: …" line that the rest of the CLI uses.
+    let plain = alt_as(repo, &["branch", "feat"], "rover");
+    let plain_err = String::from_utf8_lossy(&plain.stderr);
+    assert!(
+        plain_err.contains("fatal: capability denied"),
+        "human error path changed: {plain_err}"
+    );
+}
+
 /// First-match-wins: a specific allow rule above a broad deny must shadow it.
 /// `agent:claude` gets its own ref namespace, while `agent:*` is read-only.
 /// This exercises the lookup ordering end-to-end (it has unit tests, but a

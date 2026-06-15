@@ -67,6 +67,45 @@ fn clean_tree_reports_clean_with_empty_sections() {
     assert!(json.contains("\"unstaged\":[]"), "{json}");
     assert!(json.contains("\"untracked\":[]"), "{json}");
     assert!(json.contains("\"unmerged\":[]"), "{json}");
+    // C4: principal surfaced — an agent can ask "who am I to this repo"
+    // through the same machine-first surface it uses for status itself.
+    assert!(
+        json.contains("\"principal\":{\"kind\":\"human\"") && json.contains("\"session\":null"),
+        "principal field missing: {json}"
+    );
+}
+
+/// `status --json` reports the structured A5a principal when the caller
+/// drives the new env vars — kind, id, and the optional session correlator.
+#[test]
+fn agent_principal_surfaces_via_status_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("f.txt"), "x\n").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "base"]));
+
+    let out = Command::new(env!("CARGO_BIN_EXE_alt"))
+        .current_dir(root)
+        .env("ALT_NO_DAEMON", "1")
+        .env("GIT_AUTHOR_NAME", "claude")
+        .env("GIT_AUTHOR_EMAIL", "c@e")
+        .env("USER", "operator")
+        .env("ALT_PRINCIPAL_KIND", "agent")
+        .env("ALT_PRINCIPAL_ID", "claude-opus-4-8")
+        .env("ALT_SESSION_ID", "01J7XYZ")
+        .args(["status", "--json"])
+        .output()
+        .unwrap();
+    let json = ok(out);
+    assert_valid_json(&json);
+    assert!(
+        json.contains(
+            "\"principal\":{\"kind\":\"agent\",\"id\":\"claude-opus-4-8\",\"session\":\"01J7XYZ\"}"
+        ),
+        "expected agent principal in status: {json}"
+    );
 }
 
 #[test]

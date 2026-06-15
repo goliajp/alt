@@ -769,3 +769,53 @@ fn daemon_commit_throughput() {
         println!("daemon commit throughput: concurrency={concurrency:>2}  {rate:>8.1} commits/s");
     }
 }
+
+/// C4: the daemon enforces the same A6 gate the direct CLI does — a
+/// restricted agent's write is denied at the daemon socket, the response
+/// reports it as a daemon-level error, and nothing lands in the op log
+/// (the gate fires before any oplog/idempotency state is touched).
+#[test]
+fn daemon_enforces_capability_policy_for_restricted_agent() {
+    use alt_oplog::OpLog;
+
+    let repo = tempfile::tempdir().unwrap();
+    let root = repo.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("f.txt"), "base\n").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "base"]));
+
+    std::fs::write(root.join(".alt/policy"), "agent:rover -> read-only\n").unwrap();
+
+    let d = Daemon::start(&root.join(".alt"));
+    let oplen_before = OpLog::open(&root.join(".alt/oplog")).unwrap().ops().len();
+
+    // restricted agent's write goes through the daemon socket — denied
+    let env = vec![
+        ("GIT_AUTHOR_NAME".into(), "rover".into()),
+        ("GIT_AUTHOR_EMAIL".into(), "rover@e".into()),
+        ("USER".into(), "operator".into()),
+        ("ALT_PRINCIPAL_KIND".into(), "agent".into()),
+        ("ALT_PRINCIPAL_ID".into(), "rover".into()),
+    ];
+    let resp = run_with_env(&d.sock, root, &["branch", "rover-feat"], env.clone());
+    assert_ne!(resp.exit_code, 0, "expected daemon to refuse the write");
+    let stderr = err_str(&resp);
+    assert!(
+        stderr.contains("capability denied"),
+        "daemon should surface the denial reason: {stderr}"
+    );
+
+    // the same agent's read still goes through the daemon (the policy is
+    // write-only by intent, gate is silent on reads)
+    let read = run_with_env(&d.sock, root, &["status"], env);
+    assert_eq!(read.exit_code, 0, "reads stay allowed: {}", err_str(&read));
+
+    // the rejected write left no op log entry — zero on-disk side effect
+    drop(d);
+    let oplen_after = OpLog::open(&root.join(".alt/oplog")).unwrap().ops().len();
+    assert_eq!(
+        oplen_after, oplen_before,
+        "denied write must not append any op"
+    );
+}

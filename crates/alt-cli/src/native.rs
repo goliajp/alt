@@ -1002,7 +1002,7 @@ impl<'a> NativeRepo<'a> {
 
         let short = branch.strip_prefix("refs/heads/").unwrap_or(&branch);
         if json {
-            return render_status_json(out, short, &st, &unmerged);
+            return render_status_json(out, short, &self.id.principal, &st, &unmerged);
         }
         writeln!(out, "On branch {short}")?;
         let mark = |k: ChangeKind| match k {
@@ -2148,13 +2148,15 @@ impl<'a> NativeRepo<'a> {
 }
 
 /// Renders `status` as the stable JSON schema (version 1):
-/// `{schema_version, branch, staged:[{path,change}], unstaged:[...],
-/// untracked:[path...], unmerged:[path...], clean:bool}`. `change` is one of
-/// `added`/`modified`/`deleted`; the human view is a parallel rendering of the
-/// same facts.
+/// `{schema_version, branch, principal:{kind,id,session?}, staged:[…],
+/// unstaged:[…], untracked:[…], unmerged:[…], clean}`. `change` ∈
+/// `added`/`modified`/`deleted`; `principal` is the A5a actor — added at C4
+/// so an agent can self-check "who am I to this repo" via the same
+/// machine-first surface it uses for everything else.
 fn render_status_json(
     out: &mut impl Write,
     branch: &str,
+    principal: &Principal,
     st: &alt_worktree::Status,
     unmerged: &std::collections::BTreeSet<BString>,
 ) -> Res<()> {
@@ -2184,6 +2186,7 @@ fn render_status_json(
     let doc = Json::Object(vec![
         ("schema_version", Json::Num(1)),
         ("branch", Json::str(branch)),
+        ("principal", principal_json(principal)),
         ("staged", entries(&st.staged)),
         ("unstaged", entries(&st.unstaged)),
         ("untracked", paths(&mut st.untracked.iter())),
@@ -2193,6 +2196,28 @@ fn render_status_json(
     doc.write(out)?;
     out.write_all(b"\n")?;
     Ok(())
+}
+
+/// JSON shape for an A5a principal: `{kind: "human"|"agent", id, session}`
+/// (session is `null` when unset). Re-used wherever an actor is surfaced
+/// — currently `status --json`; a later op-log viewer will reuse it.
+fn principal_json(p: &Principal) -> crate::json::Json {
+    use crate::json::Json;
+    let kind = match p.kind {
+        PrincipalKind::Human => "human",
+        PrincipalKind::Agent => "agent",
+    };
+    Json::Object(vec![
+        ("kind", Json::str(kind)),
+        ("id", Json::str(&p.id)),
+        (
+            "session",
+            match &p.session {
+                Some(s) => Json::str(s),
+                None => Json::Null,
+            },
+        ),
+    ])
 }
 
 /// One diff hunk as JSON: the `@@` coordinates plus tagged lines, where each
