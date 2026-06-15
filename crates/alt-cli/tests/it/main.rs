@@ -9,6 +9,7 @@ mod flow;
 mod merge;
 mod op_log;
 mod read_json;
+mod remote;
 mod status_json;
 mod workspace;
 mod write_json;

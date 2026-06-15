@@ -142,6 +142,14 @@ pub enum Command {
         #[arg(long, global = true)]
         json: bool,
     },
+    /// Manage git remotes (M6/W3: persisted as `<alt-dir>/remotes/<name>`)
+    Remote {
+        #[command(subcommand)]
+        op: RemoteOp,
+        /// Emit a structured JSON result instead of the human view
+        #[arg(long, global = true)]
+        json: bool,
+    },
     /// Audit-view the op log: who did what, in order, with the parsed A5a
     /// principal and any ref changes carried in each op's payload.
     #[command(name = "op-log")]
@@ -171,6 +179,24 @@ pub enum WorkspaceOp {
     /// Remove a workspace (its HEAD ref and control dir; files are kept)
     Remove {
         /// Workspace name
+        name: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum RemoteOp {
+    /// Register a git remote — typically `https://host/user/repo.git`
+    Add {
+        /// Remote name (e.g. `origin`)
+        name: String,
+        /// Remote URL
+        url: String,
+    },
+    /// List configured remotes
+    List,
+    /// Drop a configured remote (refs/remotes/<name> are not touched)
+    Remove {
+        /// Remote name
         name: String,
     },
 }
@@ -223,6 +249,7 @@ pub fn is_native(cmd: &Command) -> bool {
             | Command::Flow { .. }
             | Command::Undo { .. }
             | Command::Workspace { .. }
+            | Command::Remote { .. }
             | Command::OpLog { .. }
     )
 }
@@ -267,6 +294,11 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
             }
             WorkspaceOp::List => repo.workspace_list(*json, out)?,
             WorkspaceOp::Remove { name } => repo.workspace_remove(name, *json, out)?,
+        },
+        Command::Remote { op, json } => match op {
+            RemoteOp::Add { name, url } => repo.remote_add(name, url, *json, out)?,
+            RemoteOp::List => repo.remote_list(*json, out)?,
+            RemoteOp::Remove { name } => repo.remote_remove(name, *json, out)?,
         },
         Command::OpLog { max_count, json } => repo.op_log(*max_count, *json, out)?,
         _ => return Err("not a native command".into()),

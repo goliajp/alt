@@ -2000,6 +2000,124 @@ impl<'a> NativeRepo<'a> {
         Ok(())
     }
 
+    /// `alt remote add <name> <url>`: register a git remote. Writes
+    /// `<alt-dir>/remotes/<name>` as a tiny `key=value` text file
+    /// (zero-serde, human-editable; same调性 as `.alt/policy`). Duplicate
+    /// names are rejected so `alt remote add origin <new-url>` doesn't
+    /// silently rewire an existing remote.
+    pub fn remote_add(
+        &mut self,
+        name: &str,
+        url: &str,
+        json: bool,
+        out: &mut impl Write,
+    ) -> Res<()> {
+        check_remote_name(name)?;
+        let path = self.remote_path(name);
+        if path.exists() {
+            return Err(format!("remote '{name}' already exists").into());
+        }
+        std::fs::create_dir_all(path.parent().unwrap())?;
+        let fetch = default_fetch_refspec(name);
+        let body = format!("url={url}\nfetch={fetch}\n");
+        std::fs::write(&path, body)?;
+        if json {
+            use crate::json::Json;
+            crate::json::emit(
+                out,
+                vec![
+                    ("name", Json::str(name)),
+                    ("url", Json::str(url)),
+                    ("fetch", Json::str(&fetch)),
+                ],
+            )?;
+        } else {
+            writeln!(out, "added remote '{name}' → {url}")?;
+        }
+        Ok(())
+    }
+
+    /// `alt remote list`: emit configured remotes (alphabetical). Empty
+    /// when no `remotes/` dir exists — a fresh repo has no remotes.
+    pub fn remote_list(&self, json: bool, out: &mut impl Write) -> Res<()> {
+        let remotes = self.read_remotes()?;
+        if json {
+            use crate::json::Json;
+            let arr = remotes
+                .iter()
+                .map(|r| {
+                    Json::Object(vec![
+                        ("name", Json::str(&r.name)),
+                        ("url", Json::str(&r.url)),
+                        ("fetch", Json::str(&r.fetch)),
+                    ])
+                })
+                .collect();
+            crate::json::emit(out, vec![("remotes", Json::Array(arr))])?;
+        } else {
+            for r in &remotes {
+                writeln!(out, "{}\t{}", r.name, r.url)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// `alt remote remove <name>`: drop a configured remote. The
+    /// `refs/remotes/<name>/*` refs are *not* touched — removing the
+    /// remote config doesn't pretend the ingested history never happened.
+    pub fn remote_remove(&mut self, name: &str, json: bool, out: &mut impl Write) -> Res<()> {
+        let path = self.remote_path(name);
+        if !path.exists() {
+            return Err(format!("no such remote '{name}'").into());
+        }
+        std::fs::remove_file(&path)?;
+        if json {
+            use crate::json::Json;
+            crate::json::emit(out, vec![("removed", Json::str(name))])?;
+        } else {
+            writeln!(out, "removed remote '{name}'")?;
+        }
+        Ok(())
+    }
+
+    fn remote_path(&self, name: &str) -> PathBuf {
+        self.store.alt_dir.join("remotes").join(name)
+    }
+
+    fn read_remotes(&self) -> Res<Vec<Remote>> {
+        let dir = self.store.alt_dir.join("remotes");
+        let mut out = Vec::new();
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
+            Err(e) => return Err(e.into()),
+        };
+        let mut paths: Vec<_> = entries.filter_map(|e| e.ok().map(|e| e.path())).collect();
+        paths.sort();
+        for p in paths {
+            let name = p
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(str::to_owned)
+                .ok_or("non-utf8 remote name")?;
+            let body = std::fs::read_to_string(&p)?;
+            let mut url = String::new();
+            let mut fetch = default_fetch_refspec(&name);
+            for line in body.lines() {
+                let Some((k, v)) = line.split_once('=') else {
+                    continue;
+                };
+                match k.trim() {
+                    "url" => url = v.trim().to_owned(),
+                    "fetch" => fetch = v.trim().to_owned(),
+                    _ => {} // forward-compat: unknown keys ignored
+                }
+            }
+            out.push(Remote { name, url, fetch });
+        }
+        Ok(out)
+    }
+
     /// `alt op-log`: audit-view the op log, newest first. Each entry surfaces
     /// the A5a structured principal (parsed from the actor string) and, for
     /// ref-transaction payloads, the list of ref changes that op made. Other
@@ -2665,6 +2783,36 @@ fn parse_workspace_marker(path: &Path) -> Res<(PathBuf, String)> {
     let repo_root = lines.next().ok_or("malformed .alt workspace marker")?;
     let name = lines.next().ok_or("malformed .alt workspace marker")?;
     Ok((PathBuf::from(repo_root), name.to_owned()))
+}
+
+/// One configured git remote (parsed from `<alt-dir>/remotes/<name>`).
+struct Remote {
+    name: String,
+    url: String,
+    fetch: String,
+}
+
+/// A remote name: a single path segment (it becomes a file name). Same
+/// shape rules as a workspace name, minus the workspace-specific reserved
+/// default — so `origin`, `upstream`, `my-fork` are fine.
+fn check_remote_name(name: &str) -> Res<()> {
+    let bad = name.is_empty()
+        || name.starts_with('.')
+        || name.contains('/')
+        || name.contains(['\\', ' ', '~', '^', ':', '?', '*', '[', '.'])
+        || name.bytes().any(|b| b < 0x20 || b == 0x7f);
+    if bad {
+        return Err(format!("'{name}' is not a valid remote name").into());
+    }
+    Ok(())
+}
+
+/// The default fetch refspec for a new remote: every branch on the
+/// remote lands under `refs/remotes/<name>/*` locally. The `+` marker
+/// allows non-fast-forward updates of the remote-tracking ref (matching
+/// git's default behavior).
+fn default_fetch_refspec(name: &str) -> String {
+    format!("+refs/heads/*:refs/remotes/{name}/*")
 }
 
 /// A workspace name: a single path segment (it becomes part of the ref name
