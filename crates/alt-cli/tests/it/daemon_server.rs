@@ -195,6 +195,22 @@ fn run_as(sock: &Path, cwd: &Path, args: &[&str], author: &str) -> Response {
     run_keyed(sock, cwd, args, author, None)
 }
 
+/// Like [`run_as`] but with the full env vector explicit — so a test can also
+/// carry A5a `ALT_PRINCIPAL_*` vars per request.
+fn run_with_env(sock: &Path, cwd: &Path, args: &[&str], env: Vec<(String, String)>) -> Response {
+    let req = Request {
+        args: args.iter().map(|s| s.to_string()).collect(),
+        cwd: cwd.to_path_buf(),
+        env,
+        id: None,
+    };
+    let mut stream = UnixStream::connect(sock).unwrap();
+    daemon::write_frame(&mut stream, &req.encode()).unwrap();
+    let mut buf = Vec::new();
+    let len = read_one_frame(&mut stream, &mut buf);
+    Response::decode(&buf[..len]).unwrap()
+}
+
 /// Like [`run_as`] but carries an explicit idempotency `id` (the D5c
 /// exactly-once token) so a test can replay the same request.
 fn run_keyed(
@@ -385,6 +401,91 @@ fn daemon_serves_concurrent_requests_without_identity_bleed() {
             "b{w} HEAD has wrong author (identity bleed?): {log}"
         );
     }
+}
+
+/// C1 (A5a): each daemon thread carries its own structured `Principal` end-to-end
+/// — distinct `ALT_PRINCIPAL_*` env per request reaches the op-log `actor`
+/// field unmixed, even when threads commit concurrently. Cross-checks the
+/// architectural argument with bytes on disk: parse the op log and confirm
+/// exactly one `Agent` op per declared principal id.
+#[test]
+fn daemon_routes_structured_principal_to_oplog_per_request() {
+    use alt_cli::native::{Principal, PrincipalKind};
+    use alt_oplog::OpLog;
+
+    let repo = tempfile::tempdir().unwrap();
+    let trees = tempfile::tempdir().unwrap();
+    let root = repo.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("f.txt"), "base\n").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "base"]));
+
+    const N: usize = 6;
+    let mut work = Vec::new();
+    for w in 0..N {
+        let br = format!("b{w}");
+        ok(alt(root, &["branch", &br]));
+        let tree = trees.path().join(format!("w{w}"));
+        let ws = format!("ws{w}");
+        ok(alt(
+            root,
+            &["workspace", "add", &ws, tree.to_str().unwrap(), &br],
+        ));
+        work.push((br, tree));
+    }
+
+    let d = Daemon::start(&root.join(".alt"));
+
+    let handles: Vec<_> = work
+        .iter()
+        .enumerate()
+        .map(|(w, (_br, tree))| {
+            let sock = d.sock.clone();
+            let tree = tree.clone();
+            std::thread::spawn(move || {
+                let agent_id = format!("agent-{w}");
+                let session = format!("s-{w}");
+                std::fs::write(tree.join("f.txt"), format!("from {agent_id}\n")).unwrap();
+                let env = vec![
+                    ("GIT_AUTHOR_NAME".into(), agent_id.clone()),
+                    ("GIT_AUTHOR_EMAIL".into(), format!("{agent_id}@e")),
+                    ("USER".into(), "tester".into()),
+                    ("ALT_PRINCIPAL_KIND".into(), "agent".into()),
+                    ("ALT_PRINCIPAL_ID".into(), agent_id.clone()),
+                    ("ALT_SESSION_ID".into(), session),
+                ];
+                let add = run_with_env(&sock, &tree, &["add", "."], env.clone());
+                assert_eq!(add.exit_code, 0, "add: {}", err_str(&add));
+                let c = run_with_env(&sock, &tree, &["commit", "-m", "p"], env);
+                assert_eq!(c.exit_code, 0, "commit: {}", err_str(&c));
+            })
+        })
+        .collect();
+    for h in handles {
+        h.join().unwrap();
+    }
+
+    // Drop the daemon so its OpLog handle releases before we open our own (the
+    // store coordinates writers via flock; reads are fine concurrently, but
+    // closing first keeps the test obvious about who's reading what).
+    drop(d);
+
+    let log = OpLog::open(&root.join(".alt/oplog")).unwrap();
+    let mut seen: Vec<String> = Vec::new();
+    for op in log.ops() {
+        let (p, _verb) = Principal::parse_actor(&op.actor);
+        if p.kind == PrincipalKind::Agent {
+            seen.push(p.id);
+        }
+    }
+    seen.sort();
+    let mut want: Vec<String> = (0..N).map(|w| format!("agent-{w}")).collect();
+    want.sort();
+    assert_eq!(
+        seen, want,
+        "each agent id appears exactly once in the op log — no bleed and no loss"
+    );
 }
 
 /// The daemon is just another participant on the store: it serves reads while

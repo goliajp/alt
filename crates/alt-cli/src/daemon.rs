@@ -17,6 +17,11 @@ pub const FORWARDED_ENV: &[&str] = &[
     "GIT_AUTHOR_NAME",
     "GIT_AUTHOR_EMAIL",
     "USER",
+    // A5a structured principal: kind/id distinguish agent runs from human
+    // logins, session correlates a multi-step agent run in the op log.
+    "ALT_PRINCIPAL_KIND",
+    "ALT_PRINCIPAL_ID",
+    "ALT_SESSION_ID",
     "ALT_RELAXED_DURABILITY",
 ];
 

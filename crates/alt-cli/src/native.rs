@@ -25,12 +25,119 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// Who is acting: the actor suffix for op-log entries and the author identity
-/// for commits. Built per request from the caller's environment, not from
-/// process globals — so the daemon can serve concurrent callers with distinct
-/// identities without racing on `std::env`.
+/// What kind of principal is acting: a human user (default) or an automated
+/// agent. The op-log records this with the principal's id so a multi-agent
+/// workspace can answer "who did this" without losing the human/automation
+/// distinction. (A5a; A6 will key capabilities off this.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrincipalKind {
+    Human,
+    Agent,
+}
+
+impl PrincipalKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Human => "human",
+            Self::Agent => "agent",
+        }
+    }
+    fn parse(s: &str) -> Option<Self> {
+        match s {
+            "human" => Some(Self::Human),
+            "agent" => Some(Self::Agent),
+            _ => None,
+        }
+    }
+}
+
+/// The structured operator identity for an op-log entry: kind, stable id, and
+/// an optional session correlation token. Encoded into the existing free-form
+/// `actor` field on `Op` (stone unchanged); see [`Principal::actor_string`] and
+/// [`Principal::parse_actor`] for the wire format and legacy compatibility.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Principal {
+    pub kind: PrincipalKind,
+    pub id: String,
+    pub session: Option<String>,
+}
+
+impl Principal {
+    /// Encode this principal + a verb into the op-log `actor` string. Format:
+    /// `<kind>:<id>;session:<s>;user:<u>;verb:<v>`, with `session` omitted when
+    /// `None`. `:` and `;` in any value are sanitized to `_` so the grammar is
+    /// trivial to re-parse (the only A5 audit consumer right now). The `user`
+    /// field is carried for debuggability when `id != user` (agent runs as a
+    /// human login); [`parse_actor`] keeps it for display only.
+    pub fn actor_string(&self, user: &str, verb: &str) -> String {
+        let san = |s: &str| s.replace([';', ':'], "_");
+        let mut out = format!("{}:{}", self.kind.as_str(), san(&self.id));
+        if let Some(s) = &self.session {
+            out.push_str(";session:");
+            out.push_str(&san(s));
+        }
+        out.push_str(";user:");
+        out.push_str(&san(user));
+        out.push_str(";verb:");
+        out.push_str(&san(verb));
+        out
+    }
+
+    /// Inverse of [`actor_string`], plus a compatibility path for the legacy
+    /// `cli/<verb>@<user>` form written before A5a — those parse as a Human
+    /// principal with `id = user`, no session. Returns `(principal, verb)`;
+    /// the verb is the empty string when the input has none.
+    pub fn parse_actor(s: &str) -> (Principal, String) {
+        if let Some(rest) = s.strip_prefix("cli/")
+            && let Some(at) = rest.find('@')
+        {
+            let verb = rest[..at].to_owned();
+            let user = rest[at + 1..].to_owned();
+            return (
+                Principal {
+                    kind: PrincipalKind::Human,
+                    id: user,
+                    session: None,
+                },
+                verb,
+            );
+        }
+        let mut parts = s.split(';');
+        let head = parts.next().unwrap_or("");
+        let (kind_str, id) = head
+            .find(':')
+            .map(|i| (&head[..i], &head[i + 1..]))
+            .unwrap_or(("human", head));
+        let mut p = Principal {
+            kind: PrincipalKind::parse(kind_str).unwrap_or(PrincipalKind::Human),
+            id: id.to_owned(),
+            session: None,
+        };
+        let mut verb = String::new();
+        for kv in parts {
+            let Some(colon) = kv.find(':') else { continue };
+            let (k, v) = (&kv[..colon], &kv[colon + 1..]);
+            match k {
+                "session" => p.session = Some(v.to_owned()),
+                "verb" => verb = v.to_owned(),
+                _ => {} // `user:` is informational; future keys parse forward
+            }
+        }
+        (p, verb)
+    }
+}
+
+/// Who is acting: the structured principal that names the op-log actor and the
+/// (separate) author identity for git commits. Built per request from the
+/// caller's environment, not from process globals — so the daemon can serve
+/// concurrent callers with distinct identities without racing on `std::env`.
+///
+/// Agent vs human is recorded via [`Principal`] in the op log; commit
+/// `author`/`committer` stay human-shaped (`Name <email>`) so export→.git is
+/// idiomatic git and external git tools don't see "agent" in author lines.
 #[derive(Clone)]
 pub struct Identity {
+    principal: Principal,
     user: String,
     author_name: String,
     author_email: String,
@@ -53,21 +160,29 @@ impl Identity {
 
     fn from_lookup(get: impl Fn(&str) -> Option<String>) -> Self {
         let user = get("USER").unwrap_or_else(|| "unknown".to_owned());
+        let kind = get("ALT_PRINCIPAL_KIND")
+            .and_then(|s| PrincipalKind::parse(&s))
+            .unwrap_or(PrincipalKind::Human);
+        let id = get("ALT_PRINCIPAL_ID").unwrap_or_else(|| user.clone());
+        let session = get("ALT_SESSION_ID");
         let author_name = get("GIT_AUTHOR_NAME")
             .or_else(|| get("USER"))
             .unwrap_or_else(|| "alt".to_owned());
         let author_email =
             get("GIT_AUTHOR_EMAIL").unwrap_or_else(|| format!("{author_name}@localhost"));
         Self {
+            principal: Principal { kind, id, session },
             user,
             author_name,
             author_email,
         }
     }
 
-    /// The op-log actor string for a verb, e.g. `cli/commit@alice`.
+    /// The op-log actor string for a verb. New structured form via
+    /// [`Principal::actor_string`]; the parse side accepts the legacy
+    /// `cli/<verb>@<user>` form for ops written before A5a.
     fn actor(&self, verb: &str) -> String {
-        format!("cli/{verb}@{}", self.user)
+        self.principal.actor_string(&self.user, verb)
     }
 
     /// The commit author/committer identity (name, email).
@@ -2279,5 +2394,86 @@ mod tests {
         assert!(repo.create_workspace("with/slash", &wt, "main").is_err());
         assert!(repo.create_workspace("default", &wt, "main").is_err());
         assert!(repo.create_workspace("ok", &wt, "no-such-branch").is_err());
+    }
+
+    /// `actor_string` and `parse_actor` are mutual inverses for the structured
+    /// A5a form — same principal+verb survive an encode/decode round-trip,
+    /// including the optional `session` correlator.
+    #[test]
+    fn principal_actor_roundtrip() {
+        for case in [
+            Principal {
+                kind: PrincipalKind::Agent,
+                id: "claude-opus-4-8".into(),
+                session: Some("01J7XYZ".into()),
+            },
+            Principal {
+                kind: PrincipalKind::Human,
+                id: "alice".into(),
+                session: None,
+            },
+        ] {
+            for verb in ["commit", "flow", "switch"] {
+                let s = case.actor_string("doracawl", verb);
+                let (decoded, dverb) = Principal::parse_actor(&s);
+                assert_eq!(decoded, case, "round-trip principal mismatch ({s})");
+                assert_eq!(dverb, verb, "round-trip verb mismatch ({s})");
+            }
+        }
+    }
+
+    /// Op-log entries written by alt before A5a use `cli/<verb>@<user>` (the
+    /// pre-structured form). They must still parse as a Human principal with
+    /// `id == user`, so importing/reading older repositories is lossless.
+    #[test]
+    fn principal_actor_legacy_compat() {
+        let (p, verb) = Principal::parse_actor("cli/commit@alice");
+        assert_eq!(p.kind, PrincipalKind::Human);
+        assert_eq!(p.id, "alice");
+        assert_eq!(p.session, None);
+        assert_eq!(verb, "commit");
+
+        let (p, verb) = Principal::parse_actor("cli/flow@bob");
+        assert_eq!(p.kind, PrincipalKind::Human);
+        assert_eq!(p.id, "bob");
+        assert_eq!(verb, "flow");
+    }
+
+    /// `Identity::from_lookup` reads the new A5a env vars when present and
+    /// degrades to a Human principal anchored on `USER` when they are not —
+    /// so pre-A5a callers see exactly the old behaviour (defaults preserved).
+    #[test]
+    fn identity_reads_alt_principal_env_with_defaults() {
+        let id = Identity::from_lookup(|k| match k {
+            "USER" => Some("alice".into()),
+            _ => None,
+        });
+        assert_eq!(id.principal.kind, PrincipalKind::Human);
+        assert_eq!(id.principal.id, "alice");
+        assert_eq!(id.principal.session, None);
+        assert_eq!(id.actor("commit"), "human:alice;user:alice;verb:commit");
+
+        let id = Identity::from_lookup(|k| match k {
+            "USER" => Some("alice".into()),
+            "ALT_PRINCIPAL_KIND" => Some("agent".into()),
+            "ALT_PRINCIPAL_ID" => Some("claude-opus-4-8".into()),
+            "ALT_SESSION_ID" => Some("01J7".into()),
+            _ => None,
+        });
+        assert_eq!(id.principal.kind, PrincipalKind::Agent);
+        assert_eq!(id.principal.id, "claude-opus-4-8");
+        assert_eq!(id.principal.session.as_deref(), Some("01J7"));
+        let (p, verb) = Principal::parse_actor(&id.actor("commit"));
+        assert_eq!(p, id.principal, "actor round-trips back to principal");
+        assert_eq!(verb, "commit");
+
+        // Unknown kind value falls back to Human (defensive: env mis-set
+        // should not invent an Agent identity the caller did not declare).
+        let id = Identity::from_lookup(|k| match k {
+            "USER" => Some("alice".into()),
+            "ALT_PRINCIPAL_KIND" => Some("robot".into()),
+            _ => None,
+        });
+        assert_eq!(id.principal.kind, PrincipalKind::Human);
     }
 }

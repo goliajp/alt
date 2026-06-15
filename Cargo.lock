@@ -36,6 +36,7 @@ dependencies = [
  "alt-import",
  "alt-merge",
  "alt-odb",
+ "alt-oplog",
  "alt-refs",
  "alt-repo",
  "alt-testutil",
