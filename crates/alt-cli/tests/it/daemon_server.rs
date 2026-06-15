@@ -770,6 +770,48 @@ fn daemon_commit_throughput() {
     }
 }
 
+/// Closing the CP-IC "done-but-unverified" item: when the operator edits
+/// `.alt/policy` while the daemon is running, the *next* request picks up
+/// the new rule. Tests the per-request `Store::refresh` re-read end-to-end
+/// — same daemon process, same socket, just policy bytes changing.
+#[test]
+fn daemon_picks_up_policy_edits_on_the_next_request() {
+    let repo = tempfile::tempdir().unwrap();
+    let root = repo.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("f.txt"), "base\n").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "base"]));
+
+    let d = Daemon::start(&root.join(".alt"));
+
+    // step 1: no policy → write through the daemon goes through
+    let env = vec![
+        ("GIT_AUTHOR_NAME".into(), "rover".into()),
+        ("GIT_AUTHOR_EMAIL".into(), "rover@e".into()),
+        ("USER".into(), "operator".into()),
+        ("ALT_PRINCIPAL_KIND".into(), "agent".into()),
+        ("ALT_PRINCIPAL_ID".into(), "rover".into()),
+    ];
+    let pre = run_with_env(&d.sock, root, &["branch", "before-policy"], env.clone());
+    assert_eq!(pre.exit_code, 0, "pre-policy write: {}", err_str(&pre));
+
+    // step 2: operator drops in a restricting policy *while the daemon runs*
+    std::fs::write(root.join(".alt/policy"), "agent:rover -> read-only\n").unwrap();
+
+    // step 3: the very next request sees the new policy — no daemon restart
+    let post = run_with_env(&d.sock, root, &["branch", "after-policy"], env);
+    assert_ne!(
+        post.exit_code, 0,
+        "edited policy must take effect immediately"
+    );
+    assert!(
+        err_str(&post).contains("capability denied"),
+        "expected denial reason in stderr: {}",
+        err_str(&post)
+    );
+}
+
 /// C4: the daemon enforces the same A6 gate the direct CLI does — a
 /// restricted agent's write is denied at the daemon socket, the response
 /// reports it as a daemon-level error, and nothing lands in the op log
