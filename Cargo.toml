@@ -29,6 +29,7 @@ alt-refs = { path = "crates/alt-refs" }
 alt-repo = { path = "crates/alt-repo" }
 alt-treediff = { path = "crates/alt-treediff" }
 alt-wire = { path = "crates/alt-wire" }
+alt-wire-http = { path = "crates/alt-wire-http" }
 alt-worktree = { path = "crates/alt-worktree" }
 alt-testutil = { path = "crates/alt-testutil" }
 
@@ -45,6 +46,7 @@ sha1 = "0.10"
 sha2 = "0.10"
 syn = { version = "2", features = ["full", "extra-traits"] }
 proc-macro2 = "1"
+ureq = { version = "2", default-features = false, features = ["tls"] }
 tempfile = "3"
 thiserror = "2"
 zstd = "0.13"

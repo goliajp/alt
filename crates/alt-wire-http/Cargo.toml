@@ -1,0 +1,11 @@
+[package]
+name = "alt-wire-http"
+description = "HTTPS transport for git smart-http protocol v2 (alt-wire's I/O sibling)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+alt-wire.workspace = true
+thiserror.workspace = true
+ureq.workspace = true
