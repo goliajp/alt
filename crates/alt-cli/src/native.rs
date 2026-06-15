@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
 use alt_git_index::{Index, IndexEntry};
 use alt_odb::NativeOdb;
-use alt_refs::{IdemKey, OpId, RefChange, RefStore, RefTarget};
+use alt_refs::{IdemKey, OpId, RefChange, RefPolicy, RefStore, RefTarget};
+
+use crate::policy::{Capabilities, Policy};
 use alt_worktree::{
     ChangeKind, Sig, WorkEntry, flatten_tree, index_entries, scan_worktree, status, write_commit,
     write_tree,
@@ -200,6 +202,11 @@ pub struct Store {
     odb: NativeOdb,
     refs: RefStore,
     algo: HashAlgo,
+    /// The repository's A6 policy, loaded from `<alt-dir>/policy`. A missing
+    /// file → [`Policy::empty`] (every principal gets [`Capabilities::full`]),
+    /// the zero-regression default. Daemon re-reads in [`refresh`](Self::refresh)
+    /// so an operator edit is picked up on the next request.
+    policy: Policy,
 }
 
 impl Store {
@@ -208,6 +215,7 @@ impl Store {
         Ok(Self {
             odb: NativeOdb::open(&alt_dir)?,
             refs: RefStore::open(&alt_dir)?,
+            policy: Policy::load(&alt_dir)?,
             alt_dir,
             algo: HashAlgo::Sha1,
         })
@@ -221,10 +229,18 @@ impl Store {
     /// Read-path catch-up: bring the odb and ref state up to date with writes
     /// committed by other processes since the last refresh. The daemon calls
     /// this at the start of every request so a served read is never stale.
+    /// Also re-loads the A6 policy so a `.alt/policy` edit takes effect on
+    /// the next request without restarting the daemon.
     pub fn refresh(&mut self) -> Res<()> {
         self.odb.refresh()?;
         self.refs.refresh()?;
+        self.policy = Policy::load(&self.alt_dir)?;
         Ok(())
+    }
+
+    /// The capability gate this principal sees for the current policy.
+    pub fn capabilities_for(&self, principal: &Principal) -> Capabilities {
+        self.policy.lookup(principal)
     }
 
     /// The op that applied a keyed write, if one is in the durable idempotency
@@ -435,6 +451,11 @@ pub struct NativeRepo<'a> {
     index_path: PathBuf,
     /// The caller acting through this view.
     id: Identity,
+    /// The A6 capability gate for this caller's [`Principal`], derived from
+    /// the store's policy at [`attach`](Self::attach). Force / path gates are
+    /// applied here in `NativeRepo`; ref-namespace / read-only gates are
+    /// applied inside [`RefStore::commit_idempotent`] via [`RefPolicy`].
+    caps: Capabilities,
     /// The idempotency key stamped on this command's terminal ref transaction
     /// (D5c). `Some` only on the daemon's exactly-once write path; `None` for
     /// reads and the direct CLI (where `commit_idempotent` is a plain commit).
@@ -451,6 +472,7 @@ impl<'a> NativeRepo<'a> {
         id: Identity,
         idem_key: Option<IdemKey>,
     ) -> Self {
+        let caps = store.capabilities_for(&id.principal);
         Self {
             store,
             root: coord.root,
@@ -458,8 +480,137 @@ impl<'a> NativeRepo<'a> {
             head_ref: coord.head_ref,
             index_path: coord.index_path,
             id,
+            caps,
             idem_key,
         }
+    }
+
+    /// Reject the operation when the caller's policy forbids any write. Called
+    /// at the top of every mutating command — covers `add` (which only writes
+    /// the index, not refs) as well as the ref-producing commands.
+    fn ensure_writable(&self, verb: &str) -> Res<()> {
+        if self.caps.read_only {
+            return Err(format!("capability denied: principal cannot {verb} (read-only)").into());
+        }
+        Ok(())
+    }
+
+    /// Reject staging/committing a path that the policy's `path_allow` does
+    /// not match. Empty allow-list = no constraint.
+    fn ensure_path_allowed(&self, path: &str) -> Res<()> {
+        if !self.caps.allows_path_name(path) {
+            return Err(format!("capability denied: path '{path}' is not in path_allow").into());
+        }
+        Ok(())
+    }
+
+    /// Reject a ref change that would be a non-fast-forward (or branch
+    /// deletion) when the policy sets `forbid_force`. A new ref pointing at a
+    /// commit that is *not* a descendant of the old one (or `new = None` for
+    /// deletion) is force. Creations (`old = None`) and symref moves are
+    /// allowed: nothing of value is being overwritten.
+    fn ensure_no_force(&self, changes: &[RefChange]) -> Res<()> {
+        if !self.caps.forbid_force {
+            return Ok(());
+        }
+        for c in changes {
+            let force = match (&c.old, &c.new) {
+                // deletion is the canonical force op
+                (Some(_), None) => true,
+                // creation cannot rewrite history
+                (None, _) => false,
+                // symref move: the source/destination are names, not commits;
+                // no commit graph is being overwritten
+                (Some(RefTarget::Symbolic(_)), _) | (_, Some(RefTarget::Symbolic(_))) => false,
+                (Some(RefTarget::Oid(old)), Some(RefTarget::Oid(new))) => {
+                    !self.is_ancestor(*old, *new)?
+                }
+            };
+            if force {
+                return Err(format!(
+                    "capability denied: forbid_force is set and {} would not be a fast-forward",
+                    c.name
+                )
+                .into());
+            }
+        }
+        Ok(())
+    }
+
+    /// The single gate every CLI ref-changing op must go through: enforces
+    /// read-only and force/non-FF *before* entering the ref store, then asks
+    /// the store to do the atomic CAS-append with the namespace gate folded
+    /// in (via [`RefPolicy`]). A denial — at any axis — costs no on-disk
+    /// state. Uses [`self.idem_key`](Self::idem_key) so daemon-keyed writes
+    /// flow through unchanged (D5c). Use [`commit_refs_unkeyed`] for the
+    /// *non-terminal* tx of a multi-tx command (e.g. switch-with-create).
+    fn commit_refs(&mut self, verb: &str, changes: &[RefChange]) -> Res<OpId> {
+        self.commit_refs_with(verb, changes, self.idem_key)
+    }
+
+    /// Like [`commit_refs`] but always with `idem_key = None` — for the
+    /// non-terminal ref tx of a command that produces several (switch-with-
+    /// create's create-branch, workspace add's HEAD wire-up). The terminal
+    /// tx of the same command goes through [`commit_refs`] so D5c's
+    /// exactly-once retry still works.
+    fn commit_refs_unkeyed(&mut self, verb: &str, changes: &[RefChange]) -> Res<OpId> {
+        self.commit_refs_with(verb, changes, None)
+    }
+
+    fn commit_refs_with(
+        &mut self,
+        verb: &str,
+        changes: &[RefChange],
+        key: Option<IdemKey>,
+    ) -> Res<OpId> {
+        self.ensure_writable(verb)?;
+        self.ensure_no_force(changes)?;
+        let allow = self.caps.branch_allow.clone();
+        let read_only = self.caps.read_only;
+        let has_allow = !allow.is_empty();
+        let is_branch_allowed = move |name: &str| allow.iter().any(|g| g.matches(name));
+        let policy = RefPolicy {
+            read_only,
+            is_branch_allowed: if has_allow {
+                Some(&is_branch_allowed)
+            } else {
+                None
+            },
+        };
+        let actor = self.id.actor(verb);
+        let id =
+            self.store
+                .refs
+                .commit_idempotent(&actor, now_ms(), changes, key, Some(&policy))?;
+        Ok(id)
+    }
+
+    /// Walks `new`'s ancestor chain to see whether `old` appears (using the
+    /// repository's git object graph via the open `Repository`). Used by
+    /// [`ensure_no_force`] for the non-fast-forward check.
+    fn is_ancestor(&self, old: ObjectId, new: ObjectId) -> Res<bool> {
+        if old == new {
+            return Ok(true);
+        }
+        let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
+        let mut seen = std::collections::HashSet::new();
+        let mut stack = vec![new];
+        while let Some(c) = stack.pop() {
+            if !seen.insert(c) {
+                continue;
+            }
+            if c == old {
+                return Ok(true);
+            }
+            let obj = repo
+                .read_object(&c)?
+                .ok_or_else(|| format!("missing commit {c}"))?;
+            let commit = alt_git_codec::Commit::parse(&obj.data)?;
+            for p in commit.parents() {
+                stack.push(p);
+            }
+        }
+        Ok(false)
     }
 
     /// `alt workspace add <name> <path>`: create a parallel workspace whose
@@ -507,9 +658,8 @@ impl<'a> NativeRepo<'a> {
         )?;
 
         // point this workspace's HEAD at the branch (one ref transaction)
-        self.store.refs.commit(
-            &self.id.actor("workspace"),
-            now_ms(),
+        self.commit_refs_unkeyed(
+            "workspace",
             &[RefChange {
                 name: head_ref.clone(),
                 old: None,
@@ -546,9 +696,8 @@ impl<'a> NativeRepo<'a> {
             .get(&head_ref)
             .cloned()
             .ok_or_else(|| format!("no such workspace '{name}'"))?;
-        self.store.refs.commit(
-            &self.id.actor("workspace"),
-            now_ms(),
+        self.commit_refs_unkeyed(
+            "workspace",
             &[RefChange {
                 name: head_ref,
                 old: Some(old),
@@ -683,6 +832,7 @@ impl<'a> NativeRepo<'a> {
     /// `alt add <paths>`: stage the given paths (or everything for `.`),
     /// updating the index to match the working tree.
     pub fn add(&mut self, paths: &[String], json: bool, out: &mut impl Write) -> Res<()> {
+        self.ensure_writable("add")?;
         let scan = scan_worktree(&self.root, self.store.algo)?;
         let staging_all = paths.iter().any(|p| p == ".");
 
@@ -706,6 +856,12 @@ impl<'a> NativeRepo<'a> {
         for rel in &targets {
             entries.retain(|e| &e.path != rel);
             if let Some(w) = scan.iter().find(|w| &w.path == rel) {
+                // A6 path gate: deny staging any path the policy excludes,
+                // *before* writing the blob into the odb — so a denial costs
+                // no on-disk side effect (the odb put would otherwise persist
+                // before the index is even written).
+                let path_str = w.path.to_str().unwrap_or("");
+                self.ensure_path_allowed(path_str)?;
                 self.store
                     .odb
                     .put(w.oid, ObjectKind::Blob, &self.read_for(w)?)?;
@@ -756,11 +912,17 @@ impl<'a> NativeRepo<'a> {
     /// `alt commit -m <msg>`: write a tree + commit from the index, advance
     /// the current branch in one ref transaction.
     pub fn commit(&mut self, message: &str, json: bool, out: &mut impl Write) -> Res<()> {
+        self.ensure_writable("commit")?;
         let index = self.index()?;
         let staged = index_entries(&index);
         if staged.is_empty() {
             return Err("nothing to commit (empty index)".into());
         }
+        // Path gate is `add`-only on purpose: the restricted principal's
+        // *choice* of what to stage is what the policy constrains. Pre-existing
+        // index entries inherited from another principal (e.g. operator's
+        // baseline) ride through to the commit unchallenged — penalising the
+        // agent for paths it never touched is unhelpful.
         let tree = write_tree(&mut self.store.odb, &staged, self.store.algo)?;
 
         let branch = self.head_branch()?;
@@ -791,15 +953,13 @@ impl<'a> NativeRepo<'a> {
         )?;
         self.store.odb.flush()?;
 
-        self.store.refs.commit_idempotent(
-            &self.id.actor("commit"),
-            now_ms(),
+        self.commit_refs(
+            "commit",
             &[RefChange {
                 name: branch.clone(),
                 old: parent.map(RefTarget::Oid),
                 new: Some(RefTarget::Oid(commit)),
             }],
-            self.idem_key,
         )?;
         let short = branch.strip_prefix("refs/heads/").unwrap_or(&branch);
         if json {
@@ -1147,15 +1307,13 @@ impl<'a> NativeRepo<'a> {
             .refs
             .resolve(&self.head_branch()?)?
             .ok_or("cannot create a branch before the first commit")?;
-        self.store.refs.commit_idempotent(
-            &self.id.actor("branch"),
-            now_ms(),
+        self.commit_refs(
+            "branch",
             &[RefChange {
                 name: full,
                 old: None,
                 new: Some(RefTarget::Oid(commit)),
             }],
-            self.idem_key,
         )?;
         writeln!(out, "branch '{name}' created at {commit}")?;
         Ok(())
@@ -1172,15 +1330,13 @@ impl<'a> NativeRepo<'a> {
             .get(&full)
             .cloned()
             .ok_or_else(|| format!("branch '{name}' not found"))?;
-        self.store.refs.commit_idempotent(
-            &self.id.actor("branch"),
-            now_ms(),
+        self.commit_refs(
+            "branch",
             &[RefChange {
                 name: full,
                 old: Some(old),
                 new: None,
             }],
-            self.idem_key,
         )?;
         writeln!(out, "deleted branch '{name}'")?;
         Ok(())
@@ -1222,9 +1378,10 @@ impl<'a> NativeRepo<'a> {
             // a new branch starts at the current commit (if any); the working
             // tree and index carry over unchanged, so no checkout is needed.
             if let Some(commit) = self.store.refs.resolve(&current)? {
-                self.store.refs.commit(
-                    &self.id.actor("branch"),
-                    now_ms(),
+                // non-terminal tx of switch-with-create: the move_head below
+                // is the one that carries this command's idempotency key.
+                self.commit_refs_unkeyed(
+                    "branch",
                     &[RefChange {
                         name: full.clone(),
                         old: None,
@@ -1361,15 +1518,14 @@ impl<'a> NativeRepo<'a> {
     /// Moves HEAD's symbolic target from `from` to `to` in one ref op.
     fn move_head(&mut self, from: &str, to: &str) -> Res<()> {
         let old = self.store.refs.get(&self.head_ref).cloned();
-        self.store.refs.commit_idempotent(
-            &self.id.actor("switch"),
-            now_ms(),
+        let head_ref = self.head_ref.clone();
+        self.commit_refs(
+            "switch",
             &[RefChange {
-                name: self.head_ref.clone(),
+                name: head_ref,
                 old: old.or_else(|| Some(RefTarget::Symbolic(from.to_owned()))),
                 new: Some(RefTarget::Symbolic(to.to_owned())),
             }],
-            self.idem_key,
         )?;
         Ok(())
     }
@@ -1573,9 +1729,9 @@ impl<'a> NativeRepo<'a> {
                 .ok_or("create an initial commit before 'alt flow init'")?,
         };
         let head_old = self.store.refs.get(&self.head_ref).cloned();
-        self.store.refs.commit_idempotent(
-            &self.id.actor("flow"),
-            now_ms(),
+        let head_ref = self.head_ref.clone();
+        self.commit_refs(
+            "flow",
             &[
                 RefChange {
                     name: dev_ref.clone(),
@@ -1583,12 +1739,11 @@ impl<'a> NativeRepo<'a> {
                     new: Some(RefTarget::Oid(start)),
                 },
                 RefChange {
-                    name: self.head_ref.clone(),
+                    name: head_ref,
                     old: head_old,
                     new: Some(RefTarget::Symbolic(dev_ref.clone())),
                 },
             ],
-            self.idem_key,
         )?;
         if json {
             crate::json::emit(
@@ -1632,9 +1787,9 @@ impl<'a> NativeRepo<'a> {
         self.checkout(&old, &target)?;
 
         let head_old = self.store.refs.get(&self.head_ref).cloned();
-        self.store.refs.commit_idempotent(
-            &self.id.actor("flow"),
-            now_ms(),
+        let head_ref = self.head_ref.clone();
+        self.commit_refs(
+            "flow",
             &[
                 RefChange {
                     name: feat_ref.clone(),
@@ -1642,12 +1797,11 @@ impl<'a> NativeRepo<'a> {
                     new: Some(RefTarget::Oid(base)),
                 },
                 RefChange {
-                    name: self.head_ref.clone(),
+                    name: head_ref,
                     old: head_old,
                     new: Some(RefTarget::Symbolic(feat_ref.clone())),
                 },
             ],
-            self.idem_key,
         )?;
         if json {
             use crate::json::Json;
@@ -1702,9 +1856,9 @@ impl<'a> NativeRepo<'a> {
 
         // one atomic op: advance develop, delete the feature, move HEAD
         let head_old = self.store.refs.get(&self.head_ref).cloned();
-        self.store.refs.commit_idempotent(
-            &self.id.actor("flow"),
-            now_ms(),
+        let head_ref = self.head_ref.clone();
+        self.commit_refs(
+            "flow",
             &[
                 RefChange {
                     name: dev_ref.clone(),
@@ -1717,12 +1871,11 @@ impl<'a> NativeRepo<'a> {
                     new: None,
                 },
                 RefChange {
-                    name: self.head_ref.clone(),
+                    name: head_ref,
                     old: head_old,
                     new: Some(RefTarget::Symbolic(dev_ref.clone())),
                 },
             ],
-            self.idem_key,
         )?;
 
         // bring the working tree to the merged develop
@@ -1769,12 +1922,7 @@ impl<'a> NativeRepo<'a> {
                 new: c.old.clone(),
             })
             .collect();
-        self.store.refs.commit_idempotent(
-            &self.id.actor("undo"),
-            now_ms(),
-            &inverse,
-            self.idem_key,
-        )?;
+        self.commit_refs("undo", &inverse)?;
 
         let target = self.head_entries()?;
         self.checkout(&old, &target)?;
@@ -1793,15 +1941,13 @@ impl<'a> NativeRepo<'a> {
 
     /// Advances `branch` from `old` to `new` in one ref transaction.
     fn advance_branch(&mut self, branch: &str, old: ObjectId, new: ObjectId) -> Res<()> {
-        self.store.refs.commit_idempotent(
-            &self.id.actor("merge"),
-            now_ms(),
+        self.commit_refs(
+            "merge",
             &[RefChange {
                 name: branch.to_owned(),
                 old: Some(RefTarget::Oid(old)),
                 new: Some(RefTarget::Oid(new)),
             }],
-            self.idem_key,
         )?;
         Ok(())
     }

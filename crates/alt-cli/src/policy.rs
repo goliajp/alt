@@ -81,6 +81,13 @@ impl Capabilities {
         if self.read_only {
             return false;
         }
+        self.allows_branch_name(name)
+    }
+
+    /// Namespace-only check (ignores `read_only`). Used by the ref-store gate,
+    /// which reports the read-only deny separately from the namespace deny so
+    /// the error message can name *which* constraint fired.
+    pub fn allows_branch_name(&self, name: &str) -> bool {
         if self.branch_allow.is_empty() {
             return true;
         }
@@ -93,6 +100,12 @@ impl Capabilities {
         if self.read_only {
             return false;
         }
+        self.allows_path_name(path)
+    }
+
+    /// Path-only check (ignores `read_only`). See [`allows_branch_name`] for
+    /// why the read-only axis is separated out.
+    pub fn allows_path_name(&self, path: &str) -> bool {
         if self.path_allow.is_empty() {
             return true;
         }

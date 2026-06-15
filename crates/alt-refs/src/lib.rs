@@ -37,6 +37,63 @@ pub enum RefError {
     SymrefDepth(String),
     #[error("payload kind {0} is reserved for ref transactions")]
     ReservedPayload(u8),
+    /// A6 capability gate denied this transaction. The string names the ref
+    /// (or `<read-only>` for a blanket deny) so the operator can act on the
+    /// audit message.
+    #[error("capability denied: {0}")]
+    CapabilityDenied(String),
+}
+
+/// Per-call capability gate for ref-affecting transactions. The store invokes
+/// it inside the append lock, after the CAS catch-up and before the actual
+/// validate, so a denial aborts the transaction with zero on-disk side effect
+/// — no oplog write, no idempotency-index update.
+///
+/// Layered intentionally as a thin callback type so `alt-refs` stays oblivious
+/// to where the policy comes from (alt-cli has its own glob / [`Capabilities`]
+/// model). A6 design §6 puts the *ref-shaped* gates here (read-only + branch
+/// namespace); force and path gates live in [`NativeRepo`] where ancestry and
+/// working-tree paths are already in scope.
+///
+/// [`Capabilities`]: ../alt_cli/policy/struct.Capabilities.html
+/// [`NativeRepo`]: ../alt_cli/native/struct.NativeRepo.html
+pub struct RefPolicy<'a> {
+    /// If `true`, every ref change is denied.
+    pub read_only: bool,
+    /// `Some(f)` constrains writable ref names to those `f` accepts. `None`
+    /// (the common case: no policy file, or no rule matched) is "any name OK".
+    pub is_branch_allowed: Option<&'a dyn Fn(&str) -> bool>,
+}
+
+impl RefPolicy<'_> {
+    /// The unconstrained policy: any ref, any direction. Pass this (or simply
+    /// `None` to [`commit_idempotent`]) when the caller has no policy to apply
+    /// — tests, imports, the legacy `commit` shim.
+    pub fn full() -> RefPolicy<'static> {
+        RefPolicy {
+            read_only: false,
+            is_branch_allowed: None,
+        }
+    }
+
+    fn check(&self, changes: &[RefChange]) -> Result<(), RefError> {
+        if self.read_only && !changes.is_empty() {
+            return Err(RefError::CapabilityDenied(
+                "<read-only>: principal cannot write any ref".into(),
+            ));
+        }
+        if let Some(allow) = self.is_branch_allowed {
+            for c in changes {
+                if !allow(&c.name) {
+                    return Err(RefError::CapabilityDenied(format!(
+                        "{}: principal cannot write this ref",
+                        c.name
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// What a ref points at.
@@ -123,19 +180,27 @@ impl RefStore {
         timestamp_ms: u64,
         changes: &[RefChange],
     ) -> Result<OpId, RefError> {
-        self.commit_idempotent(actor, timestamp_ms, changes, None)
+        self.commit_idempotent(actor, timestamp_ms, changes, None, None)
     }
 
     /// Like [`commit`](Self::commit) but stamps the transaction with a client
     /// idempotency `key`, recorded durably with the op. A later write carrying
     /// the same key is detected via [`applied_request`](Self::applied_request)
     /// and not applied again — the basis of the daemon's exactly-once retry.
+    ///
+    /// An optional [`RefPolicy`] gate runs **inside** the append lock, after
+    /// the CAS catch-up but before validation — a denied transaction aborts
+    /// with zero on-disk side effect (no oplog write, no idempotency entry).
+    /// `policy = None` is the unconstrained path used by tests, imports, and
+    /// the legacy [`commit`](Self::commit) shim; production CLI callers pass
+    /// `Some(&policy)` so the chokepoint enforces A6 (design §6 decision 4).
     pub fn commit_idempotent(
         &mut self,
         actor: &str,
         timestamp_ms: u64,
         changes: &[RefChange],
         key: Option<IdemKey>,
+        policy: Option<&RefPolicy<'_>>,
     ) -> Result<OpId, RefError> {
         // The validate → append must be atomic against other writers: inside
         // the append lock, fold in any ops they committed since (so `refs` is
@@ -148,6 +213,12 @@ impl RefStore {
             self.oplog
                 .append_checked(actor, timestamp_ms, |ops| -> Result<Vec<u8>, RefError> {
                     fold_new(refs, applied, by_key, ops)?;
+                    // Policy gate first: a CapabilityDenied here aborts the
+                    // append (no oplog row, no idempotency update) — denial
+                    // costs nothing observable.
+                    if let Some(p) = policy {
+                        p.check(changes)?;
+                    }
                     apply_changes(&mut refs.clone(), changes, false)?;
                     Ok(tx::encode_tx(changes, key))
                 })?;
@@ -448,7 +519,13 @@ mod tests {
             assert_eq!(store.applied_request(&key), None);
             // a keyed commit is found by its key, and only its key
             let op = store
-                .commit_idempotent("a", 2, &[set("refs/heads/feat", None, oid(2))], Some(key))
+                .commit_idempotent(
+                    "a",
+                    2,
+                    &[set("refs/heads/feat", None, oid(2))],
+                    Some(key),
+                    None,
+                )
                 .unwrap();
             assert_eq!(store.applied_request(&key), Some(op));
             assert_eq!(store.applied_request(&other), None);
