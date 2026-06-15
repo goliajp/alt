@@ -60,6 +60,7 @@ mod imp {
                 | Cmd::Branch { .. }
                 | Cmd::Diff { .. }
                 | Cmd::Log(_)
+                | Cmd::OpLog { .. }
                 | Cmd::Add { .. }
                 | Cmd::Commit { .. }
                 | Cmd::Switch { .. }
@@ -80,6 +81,7 @@ mod imp {
             Cmd::Status { .. }
                 | Cmd::Diff { .. }
                 | Cmd::Log(_)
+                | Cmd::OpLog { .. }
                 | Cmd::Branch {
                     name: None,
                     delete: None,

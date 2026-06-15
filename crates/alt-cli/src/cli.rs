@@ -142,6 +142,17 @@ pub enum Command {
         #[arg(long, global = true)]
         json: bool,
     },
+    /// Audit-view the op log: who did what, in order, with the parsed A5a
+    /// principal and any ref changes carried in each op's payload.
+    #[command(name = "op-log")]
+    OpLog {
+        /// Limit the number of entries shown (newest first; default = all)
+        #[arg(short = 'n')]
+        max_count: Option<usize>,
+        /// Emit a structured JSON list instead of the human view
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -212,6 +223,7 @@ pub fn is_native(cmd: &Command) -> bool {
             | Command::Flow { .. }
             | Command::Undo { .. }
             | Command::Workspace { .. }
+            | Command::OpLog { .. }
     )
 }
 
@@ -256,6 +268,7 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
             WorkspaceOp::List => repo.workspace_list(*json, out)?,
             WorkspaceOp::Remove { name } => repo.workspace_remove(name, *json, out)?,
         },
+        Command::OpLog { max_count, json } => repo.op_log(*max_count, *json, out)?,
         _ => return Err("not a native command".into()),
     }
     Ok(0)

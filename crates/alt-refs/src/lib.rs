@@ -21,7 +21,7 @@ use alt_git_codec::ObjectId;
 use alt_oplog::{OpLog, OpLogError};
 
 pub use alt_oplog::OpId;
-pub use tx::{IdemKey, PAYLOAD_REF_TX, RefChange};
+pub use tx::{IdemKey, PAYLOAD_REF_TX, ParsedTx, RefChange, parse_tx};
 
 #[derive(Debug, thiserror::Error)]
 pub enum RefError {

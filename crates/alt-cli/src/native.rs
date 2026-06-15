@@ -2000,6 +2000,54 @@ impl<'a> NativeRepo<'a> {
         Ok(())
     }
 
+    /// `alt op-log`: audit-view the op log, newest first. Each entry surfaces
+    /// the A5a structured principal (parsed from the actor string) and, for
+    /// ref-transaction payloads, the list of ref changes that op made. Other
+    /// payload kinds (e.g. import) appear with `ref_changes = null` so the
+    /// audit trail is complete even for non-ref ops.
+    ///
+    /// Reads the on-disk op log directly — no refresh / no lock — so it stays
+    /// idempotent and routes through the daemon harmlessly (cf. `log`). A
+    /// concurrent writer might add an op between two reads; the audit
+    /// snapshot is just truncated, never inconsistent.
+    pub fn op_log(&self, max_count: Option<usize>, json: bool, out: &mut impl Write) -> Res<()> {
+        let oplog = alt_oplog::OpLog::open(&self.store.alt_dir.join("oplog"))?;
+        let limit = max_count.unwrap_or(usize::MAX);
+        // newest first matches `alt log` and what an auditor naturally wants
+        let entries: Vec<&alt_oplog::Op> = oplog.ops().iter().rev().take(limit).collect();
+
+        if json {
+            return render_op_log_json(out, &entries);
+        }
+        for op in &entries {
+            let (principal, verb) = Principal::parse_actor(&op.actor);
+            let kind_str = match principal.kind {
+                PrincipalKind::Human => "human",
+                PrincipalKind::Agent => "agent",
+            };
+            let session = principal.session.as_deref().unwrap_or("-");
+            writeln!(
+                out,
+                "{ts} {kind_str}:{id} session={sess} verb={verb}",
+                ts = op.timestamp_ms,
+                id = principal.id,
+                sess = session,
+            )?;
+            if let Some(tx) = parse_ref_tx_or_none(&op.payload)? {
+                for c in &tx.changes {
+                    writeln!(
+                        out,
+                        "  ref {name}: {old} -> {new}",
+                        name = c.name,
+                        old = render_target(&c.old),
+                        new = render_target(&c.new),
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Advances `branch` from `old` to `new` in one ref transaction.
     fn advance_branch(&mut self, branch: &str, old: ObjectId, new: ObjectId) -> Res<()> {
         self.commit_refs(
@@ -2352,6 +2400,79 @@ fn write_ast_diff_summary(buf: &mut Vec<u8>, ast: &alt_treediff::AstDiff) {
     section(buf, "items added", &added);
     section(buf, "items removed", &removed);
     section(buf, "format-only", &fmt_only);
+}
+
+/// `alt op-log --json` doc:
+/// `{schema_version:1, ops:[{id, timestamp_ms, principal:{…}, verb,
+/// ref_changes:[{name, old, new}] | null}]}`. `old`/`new` are `null` for
+/// absent, `<oid>` for object targets, `@<name>` for symbolic targets.
+fn render_op_log_json(out: &mut impl Write, ops: &[&alt_oplog::Op]) -> Res<()> {
+    use crate::json::Json;
+    let mut entries = Vec::with_capacity(ops.len());
+    for op in ops {
+        let (principal, verb) = Principal::parse_actor(&op.actor);
+        let ref_changes = match parse_ref_tx_or_none(&op.payload)? {
+            Some(tx) => Json::Array(
+                tx.changes
+                    .iter()
+                    .map(|c| {
+                        Json::Object(vec![
+                            ("name", Json::str(&c.name)),
+                            ("old", target_json(&c.old)),
+                            ("new", target_json(&c.new)),
+                        ])
+                    })
+                    .collect(),
+            ),
+            None => Json::Null,
+        };
+        entries.push(Json::Object(vec![
+            ("id", Json::str(hex32(&op.id.0))),
+            ("timestamp_ms", Json::Num(op.timestamp_ms as i64)),
+            ("principal", principal_json(&principal)),
+            ("verb", Json::str(&verb)),
+            ("ref_changes", ref_changes),
+        ]));
+    }
+    let doc = Json::Object(vec![
+        ("schema_version", Json::Num(1)),
+        ("ops", Json::Array(entries)),
+    ]);
+    doc.write(out)?;
+    out.write_all(b"\n")?;
+    Ok(())
+}
+
+/// Try to parse `payload` as a ref-transaction. Wraps `alt_refs::parse_tx`
+/// so the caller doesn't import the parser; `None` means "this payload is
+/// not a ref tx" (import, future op kinds), not an error.
+fn parse_ref_tx_or_none(payload: &[u8]) -> Res<Option<alt_refs::ParsedTx>> {
+    Ok(alt_refs::parse_tx(payload)?)
+}
+
+fn render_target(t: &Option<RefTarget>) -> String {
+    match t {
+        None => "null".to_string(),
+        Some(RefTarget::Oid(oid)) => oid.to_string(),
+        Some(RefTarget::Symbolic(name)) => format!("@{name}"),
+    }
+}
+
+fn target_json(t: &Option<RefTarget>) -> crate::json::Json {
+    use crate::json::Json;
+    match t {
+        None => Json::Null,
+        Some(RefTarget::Oid(oid)) => Json::str(oid.to_string()),
+        Some(RefTarget::Symbolic(name)) => Json::str(format!("@{name}")),
+    }
+}
+
+fn hex32(b: &[u8; 32]) -> String {
+    let mut s = String::with_capacity(64);
+    for byte in b {
+        s.push_str(&format!("{byte:02x}"));
+    }
+    s
 }
 
 /// JSON shape for an A5a principal: `{kind: "human"|"agent", id, session}`

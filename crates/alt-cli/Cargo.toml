@@ -26,6 +26,7 @@ alt-flow.workspace = true
 alt-import.workspace = true
 alt-merge.workspace = true
 alt-odb.workspace = true
+alt-oplog.workspace = true
 alt-refs.workspace = true
 alt-repo.workspace = true
 alt-treediff.workspace = true
@@ -38,7 +39,6 @@ encoding_rs.workspace = true
 libc.workspace = true
 
 [dev-dependencies]
-alt-oplog.workspace = true
 alt-testutil.workspace = true
 criterion.workspace = true
 tempfile.workspace = true

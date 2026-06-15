@@ -7,6 +7,7 @@ mod daemon_server;
 mod diff;
 mod flow;
 mod merge;
+mod op_log;
 mod read_json;
 mod status_json;
 mod workspace;
