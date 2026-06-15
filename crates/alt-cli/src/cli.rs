@@ -106,6 +106,11 @@ pub enum Command {
         /// Emit a structured JSON diff instead of unified text
         #[arg(long)]
         json: bool,
+        /// Show an AST-level diff per supported language (A8b): item-level
+        /// logical vs format-only changes for `.rs` files; line/binary diff
+        /// for files without a parser.
+        #[arg(long)]
+        semantic: bool,
     },
     /// Join another branch into the current one
     Merge {
@@ -221,7 +226,11 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
             repo.branch(name.clone(), delete.clone(), *json, out)?
         }
         Command::Switch { name, create, json } => repo.switch(name, *create, *json, out)?,
-        Command::Diff { cached, json } => repo.diff(*cached, *json, out)?,
+        Command::Diff {
+            cached,
+            json,
+            semantic,
+        } => repo.diff(*cached, *json, *semantic, out)?,
         Command::Merge { branch, json } => {
             // git exits 1 when a merge stops in conflict
             return Ok(if repo.merge(branch, *json, out)? {

@@ -1067,8 +1067,11 @@ impl<'a> NativeRepo<'a> {
 
     /// `alt diff` (index → working tree) or `alt diff --cached` (HEAD →
     /// index): a git-style unified diff of the tracked changes. With `json`,
-    /// emits the structured per-file/per-hunk schema (VISION §4 A1).
-    pub fn diff(&self, cached: bool, json: bool, out: &mut impl Write) -> Res<()> {
+    /// emits the structured per-file/per-hunk schema (VISION §4 A1). With
+    /// `semantic`, item-level AST diff (A8b) replaces the unified diff for
+    /// files in a language we have a parser for (`.rs` today); other files
+    /// fall back to the same line/binary output as without `--semantic`.
+    pub fn diff(&self, cached: bool, json: bool, semantic: bool, out: &mut impl Write) -> Res<()> {
         // old side is always read from the object store; the new side is the
         // index (cached) or the live working tree (default).
         let (old, new, new_on_disk, show_added) = if cached {
@@ -1091,11 +1094,11 @@ impl<'a> NativeRepo<'a> {
             .collect();
 
         if json {
-            return self.diff_json(&changes, new_on_disk, out);
+            return self.diff_json(&changes, new_on_disk, semantic, out);
         }
         let mut buf = Vec::new();
         for ch in &changes {
-            self.emit_file_diff(&mut buf, ch, new_on_disk)?;
+            self.emit_file_diff(&mut buf, ch, new_on_disk, semantic)?;
         }
         out.write_all(&buf)?;
         Ok(())
@@ -1103,11 +1106,14 @@ impl<'a> NativeRepo<'a> {
 
     /// Builds the `diff --json` document: `{schema_version, files:[…]}`, one
     /// entry per changed file with its oids/modes, a `binary` flag, and the
-    /// structured hunks (empty for binary files).
+    /// structured hunks (empty for binary files). When `semantic` is set,
+    /// each file gains an `ast_diff` object for languages we have a parser
+    /// for; the field is `null` otherwise (including non-`--semantic` runs).
     fn diff_json(
         &self,
         changes: &[alt_worktree::Change],
         new_on_disk: bool,
+        semantic: bool,
         out: &mut impl Write,
     ) -> Res<()> {
         use crate::json::Json;
@@ -1146,6 +1152,11 @@ impl<'a> NativeRepo<'a> {
             } else {
                 Json::Null
             };
+            let ast_diff_field = if semantic && !binary {
+                ast_diff_json(ch.path.as_bytes(), &old_bytes, &new_bytes)
+            } else {
+                Json::Null
+            };
             let oid = |w: Option<&WorkEntry>| match w {
                 Some(w) => Json::str(w.oid.to_string()),
                 None => Json::Null,
@@ -1164,6 +1175,7 @@ impl<'a> NativeRepo<'a> {
                 ("binary", Json::Bool(binary)),
                 ("hunks", Json::Array(hunks)),
                 ("chunk_diff", chunk_diff_field),
+                ("ast_diff", ast_diff_field),
             ]));
         }
         let doc = Json::Object(vec![
@@ -1176,12 +1188,15 @@ impl<'a> NativeRepo<'a> {
     }
 
     /// Writes one file's `diff --git` stanza (header + hunks, or a binary
-    /// notice) to `buf`.
+    /// notice) to `buf`. When `semantic` is set and the path has a parser,
+    /// the body is replaced by an A8b AST-diff summary instead of the
+    /// unified hunks.
     fn emit_file_diff(
         &self,
         buf: &mut Vec<u8>,
         ch: &alt_worktree::Change,
         new_on_disk: bool,
+        semantic: bool,
     ) -> Res<()> {
         let path = ch.path;
         let old_bytes = match ch.old {
@@ -1211,6 +1226,25 @@ impl<'a> NativeRepo<'a> {
         let o7 = abbrev(ch.old.map(|w| w.oid));
         let n7 = abbrev(ch.new.map(|w| w.oid));
         buf.extend_from_slice(format!("index {o7}..{n7}\n").as_bytes());
+
+        // A8b: when --semantic is set and we have a parser for this path,
+        // render the AST-level summary in place of the unified hunks. A
+        // parse error or unsupported language falls through to the regular
+        // diff body — the caller never loses signal, only sometimes the
+        // semantic resolution.
+        if semantic
+            && !alt_diff::is_binary(&old_bytes)
+            && !alt_diff::is_binary(&new_bytes)
+            && let Some(lang) = lang_for(path.as_bytes())
+            && let (Ok(old_s), Ok(new_s)) = (
+                std::str::from_utf8(&old_bytes),
+                std::str::from_utf8(&new_bytes),
+            )
+            && let Ok(ast) = alt_treediff::tree_diff(old_s, new_s, lang)
+        {
+            write_ast_diff_summary(buf, &ast);
+            return Ok(());
+        }
 
         if alt_diff::is_binary(&old_bytes) || alt_diff::is_binary(&new_bytes) {
             // git-compat line first (existing tests + muscle memory key off
@@ -2248,6 +2282,76 @@ fn binary_chunk_diff_json(old: &[u8], new: &[u8]) -> crate::json::Json {
         ("new_bytes", Json::Num(cd.new_bytes as i64)),
         ("byte_shared_ratio", Json::Float(ratio)),
     ])
+}
+
+/// Map a tracked path to the AST-diff language we have a parser for, or
+/// `None` for paths we don't (the caller falls back to line/binary diff).
+fn lang_for(path: &[u8]) -> Option<alt_treediff::Lang> {
+    let p = std::str::from_utf8(path).ok()?;
+    if p.ends_with(".rs") {
+        Some(alt_treediff::Lang::Rust)
+    } else {
+        None
+    }
+}
+
+/// JSON shape for an A8b AST diff:
+/// `{kind:"ast_diff", logical_changes:[…], format_only_changes:[…],
+/// items_added:[…], items_removed:[…], is_format_only}`. Returns `Null` if
+/// the path has no parser, or if parsing failed on either side (the caller
+/// then falls through to the line-diff `hunks` field on the same entry,
+/// preserving signal — semantic resolution is a refinement, not a contract).
+fn ast_diff_json(path: &[u8], old: &[u8], new: &[u8]) -> crate::json::Json {
+    use crate::json::Json;
+    let Some(lang) = lang_for(path) else {
+        return Json::Null;
+    };
+    let (Ok(old_s), Ok(new_s)) = (std::str::from_utf8(old), std::str::from_utf8(new)) else {
+        return Json::Null;
+    };
+    let Ok(ast) = alt_treediff::tree_diff(old_s, new_s, lang) else {
+        return Json::Null;
+    };
+    let keys = |v: &[alt_treediff::ItemPresence]| {
+        Json::Array(v.iter().map(|p| Json::str(&p.key)).collect())
+    };
+    let changes =
+        |v: &[alt_treediff::ItemChange]| Json::Array(v.iter().map(|c| Json::str(&c.key)).collect());
+    Json::Object(vec![
+        ("kind", Json::str("ast_diff")),
+        ("logical_changes", changes(&ast.logical_changes)),
+        ("format_only_changes", changes(&ast.format_only_changes)),
+        ("items_added", keys(&ast.items_added)),
+        ("items_removed", keys(&ast.items_removed)),
+        ("is_format_only", Json::Bool(ast.is_format_only())),
+    ])
+}
+
+/// Human render for an AST diff: one section per kind, key per line.
+/// Silent (no output) for an empty diff so an unchanged file produces no
+/// stanza body — same shape as the line-diff path.
+fn write_ast_diff_summary(buf: &mut Vec<u8>, ast: &alt_treediff::AstDiff) {
+    let section = |buf: &mut Vec<u8>, label: &str, items: &[&str]| {
+        if items.is_empty() {
+            return;
+        }
+        buf.extend_from_slice(format!("{label}:\n").as_bytes());
+        for k in items {
+            buf.extend_from_slice(format!("  {k}\n").as_bytes());
+        }
+    };
+    let logical: Vec<&str> = ast.logical_changes.iter().map(|c| c.key.as_str()).collect();
+    let fmt_only: Vec<&str> = ast
+        .format_only_changes
+        .iter()
+        .map(|c| c.key.as_str())
+        .collect();
+    let added: Vec<&str> = ast.items_added.iter().map(|p| p.key.as_str()).collect();
+    let removed: Vec<&str> = ast.items_removed.iter().map(|p| p.key.as_str()).collect();
+    section(buf, "logical changes", &logical);
+    section(buf, "items added", &added);
+    section(buf, "items removed", &removed);
+    section(buf, "format-only", &fmt_only);
 }
 
 /// JSON shape for an A5a principal: `{kind: "human"|"agent", id, session}`

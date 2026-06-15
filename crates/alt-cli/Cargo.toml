@@ -28,6 +28,7 @@ alt-merge.workspace = true
 alt-odb.workspace = true
 alt-refs.workspace = true
 alt-repo.workspace = true
+alt-treediff.workspace = true
 alt-worktree.workspace = true
 bstr.workspace = true
 clap.workspace = true

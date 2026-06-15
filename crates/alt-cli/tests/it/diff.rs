@@ -121,3 +121,85 @@ fn diff_unstaged_and_cached_match_git_hunks() {
         "missing chunk-diff summary line: {bin}"
     );
 }
+
+/// E3b (A8b): `alt diff --semantic` for a `.rs` file replaces the unified
+/// hunks with an item-level AST summary — a single logical change keyed on
+/// the function whose body moved, other items silent.
+#[test]
+fn semantic_diff_for_rust_shows_one_logical_change_per_item() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("lib.rs"), "fn keep() {}\nfn touch() { 1 }\n").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "base"]));
+    std::fs::write(root.join("lib.rs"), "fn keep() {}\nfn touch() { 2 }\n").unwrap();
+
+    let out = ok(alt(root, &["diff", "--semantic"]));
+    assert!(out.contains("diff --git a/lib.rs b/lib.rs"), "{out}");
+    assert!(out.contains("logical changes:"), "{out}");
+    assert!(out.contains("  fn:touch"), "{out}");
+    assert!(!out.contains("  fn:keep"), "keep should be silent: {out}");
+    // unified-diff hunks should NOT appear under --semantic (the summary
+    // replaces them)
+    assert!(
+        !out.contains("@@"),
+        "no unified hunks under --semantic: {out}"
+    );
+}
+
+/// `--semantic` on a non-Rust path falls through to the regular line diff,
+/// so a mixed-language commit still shows everything (semantic resolution
+/// is a refinement, not a contract — signal is never lost).
+#[test]
+fn semantic_diff_falls_back_to_line_diff_for_unsupported_languages() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("notes.txt"), "v1\n").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "base"]));
+    std::fs::write(root.join("notes.txt"), "v2\n").unwrap();
+
+    let out = ok(alt(root, &["diff", "--semantic"]));
+    assert!(out.contains("@@"), "txt fallback to line diff: {out}");
+    assert!(out.contains("-v1"), "{out}");
+    assert!(out.contains("+v2"), "{out}");
+    assert!(!out.contains("logical changes:"), "no AST surface: {out}");
+}
+
+/// E3b JSON: each file entry gains an `ast_diff` field under `--semantic`
+/// for languages with a parser; un-`--semantic` runs leave it null even
+/// for `.rs` files (the field is additive, not always-on).
+#[test]
+fn semantic_diff_json_carries_ast_diff_field() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("a.rs"), "fn keep() {}\nfn touch() { 1 }\n").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "base"]));
+    std::fs::write(root.join("a.rs"), "fn keep() {}\nfn touch() { 2 }\n").unwrap();
+
+    // without --semantic: ast_diff is null even for a Rust file
+    let plain = ok(alt(root, &["diff", "--json"]));
+    assert!(
+        plain.contains("\"ast_diff\":null"),
+        "without --semantic, ast_diff stays null: {plain}"
+    );
+
+    // with --semantic: kind=ast_diff, fn:touch is logical, no false positives
+    let json = ok(alt(root, &["diff", "--json", "--semantic"]));
+    assert!(
+        json.contains("\"ast_diff\":{\"kind\":\"ast_diff\""),
+        "ast_diff payload missing: {json}"
+    );
+    assert!(
+        json.contains("\"logical_changes\":[\"fn:touch\"]"),
+        "logical_changes mismatch: {json}"
+    );
+    assert!(
+        json.contains("\"is_format_only\":false"),
+        "is_format_only mismatch: {json}"
+    );
+}
