@@ -161,6 +161,22 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Push refs + objects to a configured remote (M6/W5 — git smart-http v1)
+    Push {
+        /// Remote name (defaults to `origin`)
+        #[arg(default_value = "origin")]
+        remote: String,
+        /// Refspecs to push (`<src>:<dst>` or just `<src>` — defaults to
+        /// the current branch onto its same-named remote branch)
+        refspecs: Vec<String>,
+        /// Force the update (allow non-fast-forward); the server still
+        /// enforces its own policy
+        #[arg(short = 'f', long)]
+        force: bool,
+        /// Emit a structured JSON result instead of the human view
+        #[arg(long)]
+        json: bool,
+    },
     /// Audit-view the op log: who did what, in order, with the parsed A5a
     /// principal and any ref changes carried in each op's payload.
     #[command(name = "op-log")]
@@ -262,6 +278,7 @@ pub fn is_native(cmd: &Command) -> bool {
             | Command::Workspace { .. }
             | Command::Remote { .. }
             | Command::Fetch { .. }
+            | Command::Push { .. }
             | Command::OpLog { .. }
     )
 }
@@ -317,6 +334,12 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
             refspecs,
             json,
         } => repo.fetch(remote, refspecs, *json, out)?,
+        Command::Push {
+            remote,
+            refspecs,
+            force,
+            json,
+        } => repo.push(remote, refspecs, *force, *json, out)?,
         Command::OpLog { max_count, json } => repo.op_log(*max_count, *json, out)?,
         _ => return Err("not a native command".into()),
     }

@@ -9,9 +9,11 @@ mod fetch;
 mod flow;
 mod merge;
 mod op_log;
+mod push;
 mod read_json;
 mod remote;
 mod status_json;
+mod wire_test_server;
 mod workspace;
 mod write_json;
 

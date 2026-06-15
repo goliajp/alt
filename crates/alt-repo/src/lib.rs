@@ -11,7 +11,7 @@ mod revwalk;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use alt_git_codec::{Commit, HashAlgo, LooseStore, ObjectId, ObjectKind, RawObject, Tag};
+use alt_git_codec::{Commit, HashAlgo, LooseStore, ObjectId, ObjectKind, RawObject, Tag, Tree};
 use alt_git_config::{Config, IncludeContext};
 use alt_git_pack::IndexedPack;
 use alt_git_refs::{RefStore, RefTarget};
@@ -320,6 +320,110 @@ impl Repository {
         let (oid, _) = self.peel(start)?;
         RevWalk::new(self, oid)
     }
+
+    /// Enumerate every object (commit, tree, blob, tag) reachable from
+    /// `roots`, excluding everything reachable from `excludes`. The result
+    /// is the set of objects that need to ship in a push: `roots` are the
+    /// tips the client wants to update to, `excludes` are tips the server
+    /// already has (so the closure under `excludes` is what the server can
+    /// reconstruct deltas against).
+    ///
+    /// The returned vector lists each object exactly once with its kind so
+    /// a downstream pack writer can stream them without re-reading. Order
+    /// is unspecified — `PackWriter` handles plain entries in any order.
+    pub fn reachable_objects(
+        &self,
+        roots: &[ObjectId],
+        excludes: &[ObjectId],
+    ) -> Result<Vec<(ObjectId, ObjectKind)>, RepoError> {
+        use std::collections::HashSet;
+        let mut uninteresting: HashSet<ObjectId> = HashSet::new();
+        let mut stack: Vec<ObjectId> = excludes.to_vec();
+        while let Some(oid) = stack.pop() {
+            if !uninteresting.insert(oid) {
+                continue;
+            }
+            self.expand_into(oid, &mut stack)?;
+        }
+
+        let mut seen: HashSet<ObjectId> = HashSet::new();
+        let mut out: Vec<(ObjectId, ObjectKind)> = Vec::new();
+        let mut work: Vec<ObjectId> = roots
+            .iter()
+            .filter(|o| !uninteresting.contains(o))
+            .copied()
+            .collect();
+        while let Some(oid) = work.pop() {
+            if uninteresting.contains(&oid) || !seen.insert(oid) {
+                continue;
+            }
+            let Some(obj) = self.read_object(&oid)? else {
+                // a root pointing at a missing object is the caller's bug
+                // (push wants must be present locally); skip rather than
+                // crash so the caller can surface a precise error
+                continue;
+            };
+            out.push((oid, obj.kind));
+            for child in object_children(oid, &obj, self.algo)? {
+                if !uninteresting.contains(&child) {
+                    work.push(child);
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Push every child oid of `oid` onto `stack` so that the exclude walk
+    /// covers the whole closure under the `excludes` set.
+    fn expand_into(&self, oid: ObjectId, stack: &mut Vec<ObjectId>) -> Result<(), RepoError> {
+        let Some(obj) = self.read_object(&oid)? else {
+            return Ok(());
+        };
+        for child in object_children(oid, &obj, self.algo)? {
+            stack.push(child);
+        }
+        Ok(())
+    }
+}
+
+fn object_children(
+    oid: ObjectId,
+    obj: &RawObject,
+    algo: HashAlgo,
+) -> Result<Vec<ObjectId>, RepoError> {
+    let mut out = Vec::new();
+    match obj.kind {
+        ObjectKind::Commit => {
+            let commit = Commit::parse(&obj.data)?;
+            if let Some(t) = commit.tree() {
+                out.push(t);
+            }
+            for p in commit.parents() {
+                out.push(p);
+            }
+        }
+        ObjectKind::Tree => {
+            let tree = Tree::parse(&obj.data, algo)?;
+            for entry in &tree.entries {
+                // gitlink (mode 160000) points at a foreign commit — we
+                // don't ship it (it's a submodule reference, not in our
+                // odb).
+                if entry.mode.is_gitlink() {
+                    continue;
+                }
+                out.push(entry.oid);
+            }
+        }
+        ObjectKind::Tag => {
+            let tag = Tag::parse(&obj.data)?;
+            if let Some(t) = tag.object() {
+                out.push(t);
+            }
+        }
+        ObjectKind::Blob => {}
+    }
+    let _ = oid; // reserved for diagnostics if a future variant needs it
+    Ok(out)
 }
 
 #[derive(Debug, thiserror::Error)]

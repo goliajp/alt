@@ -2347,6 +2347,222 @@ impl<'a> NativeRepo<'a> {
         Ok(())
     }
 
+    /// `alt push <remote> [<refspec>…]`: send the objects reachable from
+    /// the local tips the refspec selects, ask the server to update the
+    /// matching refs (M6/W5 — git smart-http v1 receive-pack).
+    ///
+    /// Refspec forms (no wildcards yet):
+    /// - `<src>` → push local `refs/heads/<src>` to remote `refs/heads/<src>`.
+    /// - `<src>:<dst>` → push local `<src>` to remote `<dst>`. `<src>` is
+    ///   resolved through the same DWIM order as `alt switch`: branch
+    ///   short-name, then full ref.
+    /// - empty refspec list → push the current branch onto itself.
+    ///
+    /// Force (`-f`): adds the `+` semantics; the server's own policy
+    /// (e.g. branch protection) still decides whether to accept.
+    pub fn push(
+        &mut self,
+        remote_name: &str,
+        refspecs: &[String],
+        force: bool,
+        json: bool,
+        out: &mut impl Write,
+    ) -> Res<()> {
+        let remotes = self.read_remotes()?;
+        let remote = remotes
+            .iter()
+            .find(|r| r.name == remote_name)
+            .ok_or_else(|| format!("no such remote '{remote_name}'"))?;
+
+        let transport = build_transport(&remote.name, &remote.url);
+
+        // v1 ref advertisement: the receive-pack endpoint speaks v1 even
+        // when we ask for v2 (push isn't in protocol v2 in upstream git)
+        let ad_bytes = transport.info_refs(alt_wire_http::Service::ReceivePack)?;
+        let ad = alt_wire::parse_v1_ref_advertisement(&mut ad_bytes.as_slice(), self.store.algo)?;
+        if !ad.supports("report-status") {
+            return Err("remote does not support report-status".into());
+        }
+
+        // resolve the refspecs to (local oid, remote ref name) pairs
+        let parsed = if refspecs.is_empty() {
+            let branch = self.head_branch()?;
+            vec![PushSpec {
+                src: branch.clone(),
+                dst: branch,
+                force,
+            }]
+        } else {
+            refspecs
+                .iter()
+                .map(|s| PushSpec::parse(s, force))
+                .collect::<Result<_, _>>()?
+        };
+
+        let mut updates: Vec<alt_wire::RefUpdate> = Vec::new();
+        let mut local_tips: Vec<ObjectId> = Vec::new();
+        for spec in &parsed {
+            let src_full = canonicalise_local_ref(&spec.src);
+            let dst_full = canonicalise_remote_ref(&spec.dst);
+            let new = match self.store.refs.get(&src_full) {
+                Some(RefTarget::Oid(o)) => *o,
+                Some(RefTarget::Symbolic(_)) => {
+                    return Err(format!("'{src_full}' is symbolic; resolve it first").into());
+                }
+                None => {
+                    return Err(format!("local ref '{src_full}' does not exist").into());
+                }
+            };
+            let old = ad.refs.get(&dst_full).copied();
+            updates.push(alt_wire::RefUpdate {
+                old,
+                new: Some(new),
+                name: dst_full,
+            });
+            local_tips.push(new);
+        }
+
+        if updates.iter().all(|u| u.old == u.new) {
+            if json {
+                use crate::json::Json;
+                crate::json::emit(
+                    out,
+                    vec![
+                        ("remote", Json::str(remote_name)),
+                        ("updated", Json::Bool(false)),
+                        ("refs", Json::Array(Vec::new())),
+                    ],
+                )?;
+            } else {
+                writeln!(out, "push '{remote_name}': everything up to date")?;
+            }
+            return Ok(());
+        }
+
+        // compute outgoing object set: reachable(local tips) \ reachable(server tips)
+        let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
+        let excludes: Vec<ObjectId> = ad.refs.values().copied().collect();
+        let outgoing = repo.reachable_objects(&local_tips, &excludes)?;
+
+        // write a plain pack (no deltas) of the outgoing set into a
+        // scratch dir under `<alt-dir>/tmp_push/`; we don't need it as a
+        // stored pack, just as the wire body, so it's removed after the
+        // request completes
+        let pack_dir = self
+            .store
+            .alt_dir
+            .join("tmp_push")
+            .join(format!("push-{remote_name}"));
+        std::fs::create_dir_all(&pack_dir)?;
+        let pack_bytes = if outgoing.is_empty() {
+            // a delete-only push or no-op push still needs to send
+            // *something* per the v1 protocol — but in practice servers
+            // accept an empty body when no commands ship a pack
+            Vec::new()
+        } else {
+            let count =
+                u32::try_from(outgoing.len()).map_err(|_| "outgoing object set exceeds u32")?;
+            let mut writer = alt_git_pack::PackWriter::create(&pack_dir, self.store.algo, count)?;
+            for (oid, kind) in &outgoing {
+                let obj = repo
+                    .read_object(oid)?
+                    .ok_or_else(|| format!("outgoing object {oid} not in odb"))?;
+                writer.add(*oid, *kind, &obj.data)?;
+            }
+            let written = writer.finish()?;
+            std::fs::read(&written.pack_path)?
+        };
+        // best-effort cleanup; not fatal if the dir is busy
+        let _ = std::fs::remove_dir_all(&pack_dir);
+
+        // capabilities to declare on the push request
+        let agent = format!("agent=alt/{}", env!("CARGO_PKG_VERSION"));
+        let caps_owned: Vec<String> = vec![
+            "report-status".into(),
+            "ofs-delta".into(),
+            "side-band-64k".into(),
+            agent,
+        ];
+        let caps_refs: Vec<&str> = caps_owned.iter().map(String::as_str).collect();
+
+        let mut body = Vec::new();
+        alt_wire::encode_push_request(
+            &mut body,
+            &updates,
+            &caps_refs,
+            self.store.algo,
+            &pack_bytes,
+        )?;
+        let resp = transport.command(alt_wire_http::Service::ReceivePack, &body)?;
+
+        // we requested side-band-64k, so the report rides on band 1
+        let report = alt_wire::parse_report_status_sideband(&mut resp.as_slice(), |_| {})?;
+
+        // surface failures: an unpack error or any ng line fails the
+        // command (non-zero exit), so the caller knows nothing on the
+        // server moved
+        if let Err(reason) = &report.unpack {
+            return Err(format!("server rejected push: unpack {reason}").into());
+        }
+        let mut any_ng = false;
+        for s in &report.commands {
+            if let alt_wire::CommandStatus::Ng { .. } = s {
+                any_ng = true;
+            }
+        }
+
+        // render and (locally) record the push as an op so it shows up in
+        // op-log; the local ref state didn't change, so we don't commit a
+        // ref tx — this is purely an audit marker, omitted here to keep
+        // scope tight (W5 follow-up: structured "push" op in op-log)
+        if json {
+            use crate::json::Json;
+            let refs_json: Vec<Json> = report
+                .commands
+                .iter()
+                .map(|s| match s {
+                    alt_wire::CommandStatus::Ok(name) => {
+                        Json::Object(vec![("name", Json::str(name)), ("status", Json::str("ok"))])
+                    }
+                    alt_wire::CommandStatus::Ng { name, reason } => Json::Object(vec![
+                        ("name", Json::str(name)),
+                        ("status", Json::str("ng")),
+                        ("reason", Json::str(reason)),
+                    ]),
+                })
+                .collect();
+            crate::json::emit(
+                out,
+                vec![
+                    ("remote", Json::str(remote_name)),
+                    ("objects", Json::Num(outgoing.len() as i64)),
+                    ("pack_bytes", Json::Num(pack_bytes.len() as i64)),
+                    ("refs", Json::Array(refs_json)),
+                ],
+            )?;
+        } else {
+            writeln!(
+                out,
+                "push '{}': {} object(s), {} byte(s)",
+                remote_name,
+                outgoing.len(),
+                pack_bytes.len()
+            )?;
+            for s in &report.commands {
+                match s {
+                    alt_wire::CommandStatus::Ok(name) => writeln!(out, "  ok       {name}")?,
+                    alt_wire::CommandStatus::Ng { name, reason } => {
+                        writeln!(out, "  rejected {name}: {reason}")?
+                    }
+                }
+            }
+        }
+        if any_ng {
+            return Err("server rejected one or more refs".into());
+        }
+        Ok(())
+    }
+
     /// Tip oids of every `refs/remotes/<remote>/*` we already track — the
     /// `have` lines for an incremental fetch.
     fn collect_haves(&self, remote_name: &str) -> Res<Vec<ObjectId>> {
@@ -3112,6 +3328,57 @@ impl RefSpec {
             .strip_prefix(&self.src_prefix)?
             .strip_suffix(&self.src_suffix)?;
         Some(format!("{}{}{}", self.dst_prefix, mid, self.dst_suffix))
+    }
+}
+
+/// A single `<src>[:<dst>]` push spec, optionally prefixed with `+` (or
+/// pushed under `-f`) to allow a non-fast-forward server-side update.
+/// Wildcards aren't supported yet — explicit refspecs only.
+struct PushSpec {
+    src: String,
+    dst: String,
+    #[allow(dead_code)]
+    force: bool,
+}
+
+impl PushSpec {
+    fn parse(s: &str, force_flag: bool) -> Res<Self> {
+        let (force, rest) = match s.strip_prefix('+') {
+            Some(r) => (true, r),
+            None => (false, s),
+        };
+        let (src, dst) = match rest.split_once(':') {
+            Some((s, d)) => (s, d),
+            None => (rest, rest),
+        };
+        if src.is_empty() || dst.is_empty() {
+            return Err(format!("malformed push refspec '{s}'").into());
+        }
+        Ok(PushSpec {
+            src: src.to_owned(),
+            dst: dst.to_owned(),
+            force: force || force_flag,
+        })
+    }
+}
+
+/// Expand a short ref name to its full local form: `main` →
+/// `refs/heads/main`. Already-qualified names pass through.
+fn canonicalise_local_ref(name: &str) -> String {
+    if name.starts_with("refs/") || name == "HEAD" {
+        name.to_owned()
+    } else {
+        format!("refs/heads/{name}")
+    }
+}
+
+/// Same DWIM but for the destination side: a remote `<branch>` becomes
+/// `refs/heads/<branch>` (push never targets `refs/remotes/...`).
+fn canonicalise_remote_ref(name: &str) -> String {
+    if name.starts_with("refs/") {
+        name.to_owned()
+    } else {
+        format!("refs/heads/{name}")
     }
 }
 

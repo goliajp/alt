@@ -24,14 +24,13 @@
 //!    `.alt` odb (proves the streamed pack + our `index_pack` resolved
 //!    all deltas to the right oids).
 
-use std::io::{BufRead, BufReader, Read, Write};
-use std::net::TcpListener;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
-use std::thread;
+use std::path::Path;
+use std::process::{Command, Output};
 
 use alt_git_codec::ObjectId;
 use alt_odb::NativeOdb;
+
+use crate::wire_test_server;
 
 fn alt(repo: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_alt"))
@@ -66,125 +65,6 @@ fn git(repo: &Path, args: &[&str]) -> String {
         String::from_utf8_lossy(&out.stderr)
     );
     String::from_utf8_lossy(&out.stdout).into_owned()
-}
-
-/// Spawn a tiny HTTP server in a background thread that proxies to
-/// `git upload-pack` for the given repo. Returns the bound URL; the
-/// listener thread runs until the test process exits.
-fn spawn_git_http_server(repo_dir: PathBuf) -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let url = format!("http://127.0.0.1:{port}");
-    thread::spawn(move || {
-        for stream in listener.incoming() {
-            let Ok(stream) = stream else {
-                continue;
-            };
-            let repo_dir = repo_dir.clone();
-            thread::spawn(move || {
-                let _ = handle_one(stream, &repo_dir);
-            });
-        }
-    });
-    url
-}
-
-fn handle_one(mut stream: std::net::TcpStream, repo: &Path) -> std::io::Result<()> {
-    let mut reader = BufReader::new(stream.try_clone()?);
-
-    // request line: METHOD path HTTP/1.x\r\n
-    let mut line = String::new();
-    reader.read_line(&mut line)?;
-    let parts: Vec<&str> = line.trim_end().split(' ').collect();
-    if parts.len() < 3 {
-        return Ok(());
-    }
-    let method = parts[0].to_owned();
-    let url = parts[1].to_owned();
-
-    // headers until blank line
-    let mut content_length: usize = 0;
-    let mut git_protocol: Option<String> = None;
-    loop {
-        let mut header = String::new();
-        reader.read_line(&mut header)?;
-        let trimmed = header.trim_end_matches(['\r', '\n']);
-        if trimmed.is_empty() {
-            break;
-        }
-        let lower = trimmed.to_ascii_lowercase();
-        if let Some(v) = lower.strip_prefix("content-length:") {
-            content_length = v.trim().parse().unwrap_or(0);
-        }
-        // header names are case-insensitive; ureq emits "Git-Protocol"
-        if let Some(v) = lower.strip_prefix("git-protocol:") {
-            git_protocol = Some(v.trim().to_string());
-        }
-    }
-
-    // request body (Content-Length-framed; ureq's `send_bytes` always
-    // uses Content-Length, so we don't need chunked decoding here)
-    let mut body = vec![0u8; content_length];
-    reader.read_exact(&mut body)?;
-
-    let (status, payload, ct) = if method == "GET" && url.starts_with("/info/refs") {
-        let mut cmd = Command::new("git");
-        cmd.args(["upload-pack", "--http-backend-info-refs"]);
-        cmd.arg(repo);
-        if let Some(p) = &git_protocol {
-            cmd.env("GIT_PROTOCOL", p);
-        }
-        let out = cmd.output()?;
-        assert!(out.status.success(), "upload-pack info-refs failed");
-        // smart-http envelope: `# service=git-upload-pack\n` pkt + flush,
-        // then upload-pack's own pkt-line stream
-        let mut body_out = Vec::new();
-        write_pkt(&mut body_out, b"# service=git-upload-pack\n");
-        body_out.extend_from_slice(b"0000");
-        body_out.extend_from_slice(&out.stdout);
-        (
-            "200 OK",
-            body_out,
-            "application/x-git-upload-pack-advertisement",
-        )
-    } else if method == "POST" && url == "/git-upload-pack" {
-        let mut cmd = Command::new("git");
-        cmd.args(["upload-pack", "--stateless-rpc"]);
-        cmd.arg(repo);
-        if let Some(p) = &git_protocol {
-            cmd.env("GIT_PROTOCOL", p);
-        }
-        cmd.stdin(Stdio::piped());
-        cmd.stdout(Stdio::piped());
-        cmd.stderr(Stdio::piped());
-        let mut child = cmd.spawn()?;
-        child.stdin.as_mut().unwrap().write_all(&body)?;
-        drop(child.stdin.take()); // close stdin so upload-pack exits
-        let out = child.wait_with_output()?;
-        assert!(
-            out.status.success(),
-            "upload-pack stateless-rpc failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        ("200 OK", out.stdout, "application/x-git-upload-pack-result")
-    } else {
-        ("404 Not Found", Vec::new(), "text/plain")
-    };
-
-    let resp_head = format!(
-        "HTTP/1.0 {status}\r\nContent-Type: {ct}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        payload.len()
-    );
-    stream.write_all(resp_head.as_bytes())?;
-    stream.write_all(&payload)?;
-    stream.flush()?;
-    Ok(())
-}
-
-fn write_pkt(out: &mut Vec<u8>, payload: &[u8]) {
-    let total = payload.len() + 4;
-    out.extend_from_slice(format!("{total:04x}").as_bytes());
-    out.extend_from_slice(payload);
 }
 
 /// Build a small server repo: two commits on `main`, one on `feat`, plus
@@ -242,7 +122,7 @@ fn branch_reachable_oids(repo: &Path) -> Vec<ObjectId> {
 #[ignore = "requires system git; run with --include-ignored locally"]
 fn alt_fetch_round_trips_against_git_upload_pack() {
     let server_repo = build_server_repo();
-    let url = spawn_git_http_server(server_repo.path().to_owned());
+    let url = wire_test_server::spawn(server_repo.path().to_owned());
 
     let alt_root = tempfile::tempdir().unwrap();
     let root = alt_root.path();
@@ -296,7 +176,7 @@ fn alt_fetch_round_trips_against_git_upload_pack() {
 #[ignore = "requires system git; run with --include-ignored locally"]
 fn alt_fetch_is_idempotent_when_remote_is_unchanged() {
     let server_repo = build_server_repo();
-    let url = spawn_git_http_server(server_repo.path().to_owned());
+    let url = wire_test_server::spawn(server_repo.path().to_owned());
 
     let alt_root = tempfile::tempdir().unwrap();
     let root = alt_root.path();
