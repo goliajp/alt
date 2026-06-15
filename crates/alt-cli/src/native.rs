@@ -2118,6 +2118,251 @@ impl<'a> NativeRepo<'a> {
         Ok(out)
     }
 
+    /// `alt fetch <remote> [refspecs…]`: ls-refs the remote, request the
+    /// objects reachable from each matched server ref, ingest the streamed
+    /// packfile into the native odb, and update `refs/remotes/<remote>/*`
+    /// in one ref transaction (M6/W4).
+    ///
+    /// The fetch is a self-contained round-trip — `done\n` short-circuits
+    /// negotiation, so the server sends acknowledgments-free and we always
+    /// receive a full (non-thin) pack. Incremental fetch (real haves) and
+    /// thin-pack ingest are follow-up steps once they buy real dogfood.
+    ///
+    /// Auth: per-remote env vars `ALT_HTTP_USER_<NAME>` +
+    /// `ALT_HTTP_TOKEN_<NAME>` (uppercased, hyphen→underscore). Falls back
+    /// to anonymous (public read).
+    pub fn fetch(
+        &mut self,
+        remote_name: &str,
+        refspecs: &[String],
+        json: bool,
+        out: &mut impl Write,
+    ) -> Res<()> {
+        let remotes = self.read_remotes()?;
+        let remote = remotes
+            .iter()
+            .find(|r| r.name == remote_name)
+            .ok_or_else(|| format!("no such remote '{remote_name}'"))?;
+
+        let specs: Vec<RefSpec> = if refspecs.is_empty() {
+            vec![RefSpec::parse(&remote.fetch)?]
+        } else {
+            refspecs
+                .iter()
+                .map(|s| RefSpec::parse(s))
+                .collect::<Result<_, _>>()?
+        };
+
+        let transport = build_transport(&remote.name, &remote.url);
+
+        // capability advertisement — surfaces the protocol version and the
+        // server's offered commands; we only need to know v2 is supported
+        let ad_bytes = transport.info_refs(alt_wire_http::Service::UploadPack)?;
+        let ad =
+            alt_wire::parse_capability_advertisement(&mut ad_bytes.as_slice(), "git-upload-pack")?;
+        if ad.version != 2 {
+            return Err(format!("server speaks protocol v{}, want v2", ad.version).into());
+        }
+        let object_format = ad.object_format.as_deref();
+        let algo = parse_object_format(object_format)?;
+
+        // ls-refs: get the server's full ref list (heads + tags + HEAD)
+        let mut ls_body = Vec::new();
+        alt_wire::encode_ls_refs_request(
+            &mut ls_body,
+            &alt_wire::LsRefsRequest {
+                symrefs: true,
+                peel: true,
+                ref_prefixes: vec!["refs/heads/".into(), "refs/tags/".into(), "HEAD".into()],
+            },
+            object_format,
+        )?;
+        let ls_resp = transport.command(alt_wire_http::Service::UploadPack, &ls_body)?;
+        let server_refs = alt_wire::parse_ls_refs_response(&mut ls_resp.as_slice(), algo)?;
+
+        // refspec match: server refs → local destinations + wants
+        let mut updates: Vec<RefUpdate> = Vec::new();
+        let mut wants: Vec<ObjectId> = Vec::new();
+        for sref in &server_refs {
+            if sref.name == "HEAD" {
+                continue; // tracked via symref-target on the matched branch
+            }
+            for spec in &specs {
+                let Some(local_name) = spec.map(&sref.name) else {
+                    continue;
+                };
+                let old = match self.store.refs.get(&local_name) {
+                    Some(RefTarget::Oid(o)) => Some(*o),
+                    _ => None,
+                };
+                updates.push(RefUpdate {
+                    server_name: sref.name.clone(),
+                    local_name,
+                    new: sref.oid,
+                    old,
+                });
+                wants.push(sref.oid);
+                break;
+            }
+        }
+        // dedup wants (same oid may back several refs)
+        wants.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
+        wants.dedup();
+
+        if wants.is_empty() {
+            if json {
+                use crate::json::Json;
+                crate::json::emit(
+                    out,
+                    vec![
+                        ("remote", Json::str(remote_name)),
+                        ("objects", Json::Num(0)),
+                        ("refs", Json::Array(Vec::new())),
+                    ],
+                )?;
+            } else {
+                writeln!(
+                    out,
+                    "fetch '{remote_name}': nothing to do (no matching refs)"
+                )?;
+            }
+            return Ok(());
+        }
+
+        // haves: tips of every ref we already track for this remote. The
+        // server uses these to bound the pack it sends; with `done\n` it
+        // skips the negotiation round-trip but still trims unreachable
+        // objects from the pack.
+        let haves = self.collect_haves(remote_name)?;
+
+        let mut fetch_body = Vec::new();
+        alt_wire::encode_fetch_request(
+            &mut fetch_body,
+            &alt_wire::FetchRequest {
+                wants: wants.clone(),
+                haves,
+                done: true,
+                ofs_delta: true,
+                no_progress: true,
+                ..Default::default()
+            },
+            object_format,
+        )?;
+        let fetch_resp = transport.command(alt_wire_http::Service::UploadPack, &fetch_body)?;
+
+        // drain preamble + sideband-wrapped pack stream into a temp .pack
+        let pack_dir = self.store.alt_dir.join("pack");
+        std::fs::create_dir_all(&pack_dir)?;
+        let tmp_pack = pack_dir.join(format!("fetch-{}-incoming.pack", remote_name));
+        let mut reader = fetch_resp.as_slice();
+        let preamble = alt_wire::read_fetch_preamble(&mut reader, algo)?;
+        if preamble.packfile_missing {
+            return Err("server returned no packfile (negotiation incomplete)".into());
+        }
+        let bytes_written = {
+            let mut sink = std::fs::File::create(&tmp_pack)?;
+            let n = alt_wire::drain_packfile(&mut reader, &mut sink, |_| {})?;
+            sink.sync_all()?;
+            n
+        };
+        if bytes_written == 0 {
+            // server said "nothing new" — drop the empty file, skip indexing
+            let _ = std::fs::remove_file(&tmp_pack);
+        } else {
+            // index the pack and ingest its objects into the native odb
+            let indexed = alt_git_pack::index_pack(&tmp_pack, algo, true)
+                .map_err(|e| format!("index-pack failed: {e}"))?;
+            let ip = alt_git_pack::IndexedPack::open(&indexed.pack_path, algo)?;
+            let idx = ip.idx();
+            let mut order: Vec<(u64, u32)> = (0..idx.len())
+                .map(|i| (idx.offset_at(i).expect("idx in range"), i))
+                .collect();
+            order.sort_unstable();
+            for (offset, i) in order {
+                let obj = ip.read_at(offset)?;
+                self.store.odb.put(idx.oid_at(i), obj.kind, &obj.data)?;
+            }
+            self.store.odb.flush()?;
+        }
+
+        // ref transaction: one tx for all the remote-tracking refs
+        let changes: Vec<RefChange> = updates
+            .iter()
+            .filter(|u| u.old != Some(u.new))
+            .map(|u| RefChange {
+                name: u.local_name.clone(),
+                old: u.old.map(RefTarget::Oid),
+                new: Some(RefTarget::Oid(u.new)),
+            })
+            .collect();
+        if !changes.is_empty() {
+            self.commit_refs("fetch", &changes)?;
+        }
+
+        if json {
+            use crate::json::Json;
+            let refs_json: Vec<Json> = updates
+                .iter()
+                .map(|u| {
+                    Json::Object(vec![
+                        ("server", Json::str(&u.server_name)),
+                        ("local", Json::str(&u.local_name)),
+                        ("oid", Json::str(u.new.to_string())),
+                        (
+                            "old",
+                            match u.old {
+                                Some(o) => Json::str(o.to_string()),
+                                None => Json::Null,
+                            },
+                        ),
+                    ])
+                })
+                .collect();
+            crate::json::emit(
+                out,
+                vec![
+                    ("remote", Json::str(remote_name)),
+                    ("objects", Json::Num(wants.len() as i64)),
+                    ("pack_bytes", Json::Num(bytes_written as i64)),
+                    ("refs", Json::Array(refs_json)),
+                ],
+            )?;
+        } else {
+            writeln!(
+                out,
+                "fetch '{}': {} ref(s), {} byte(s) of packfile",
+                remote_name,
+                updates.len(),
+                bytes_written
+            )?;
+            for u in &updates {
+                let status = match u.old {
+                    None => "new",
+                    Some(o) if o == u.new => "up-to-date",
+                    Some(_) => "updated",
+                };
+                writeln!(out, "  {status:>10}  {} -> {}", u.server_name, u.local_name)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Tip oids of every `refs/remotes/<remote>/*` we already track — the
+    /// `have` lines for an incremental fetch.
+    fn collect_haves(&self, remote_name: &str) -> Res<Vec<ObjectId>> {
+        let prefix = format!("refs/remotes/{remote_name}/");
+        let mut out = Vec::new();
+        for (name, target) in self.store.refs.iter() {
+            if !name.starts_with(&prefix) {
+                continue;
+            }
+            if let RefTarget::Oid(o) = target {
+                out.push(*o);
+            }
+        }
+        Ok(out)
+    }
+
     /// `alt op-log`: audit-view the op log, newest first. Each entry surfaces
     /// the A5a structured principal (parsed from the actor string) and, for
     /// ref-transaction payloads, the list of ref changes that op made. Other
@@ -2792,6 +3037,122 @@ struct Remote {
     fetch: String,
 }
 
+/// One server-ref → local-ref mapping that the fetch will write.
+struct RefUpdate {
+    /// The ref name on the remote (e.g. `refs/heads/main`).
+    server_name: String,
+    /// The destination ref locally (e.g. `refs/remotes/origin/main`).
+    local_name: String,
+    /// New oid from the remote.
+    new: ObjectId,
+    /// Currently-tracked oid, or `None` if this ref is new locally.
+    old: Option<ObjectId>,
+}
+
+/// A parsed refspec: `[+]<src>:<dst>` with optional `*` wildcard segments.
+/// Only the wildcard form `<prefix>*<suffix>:<prefix>*<suffix>` and exact
+/// forms are supported — enough for the canonical default
+/// `+refs/heads/*:refs/remotes/<name>/*` plus user-provided exact pairs.
+struct RefSpec {
+    /// `+` allows non-fast-forward (mirrored from git; the local
+    /// `commit_refs` force gate still applies for branches the policy
+    /// covers).
+    #[allow(dead_code)]
+    force: bool,
+    src_prefix: String,
+    src_suffix: String,
+    dst_prefix: String,
+    dst_suffix: String,
+    /// `true` iff this is a wildcard refspec (`*` appears in both sides).
+    wildcard: bool,
+}
+
+impl RefSpec {
+    fn parse(s: &str) -> Res<Self> {
+        let (force, rest) = match s.strip_prefix('+') {
+            Some(r) => (true, r),
+            None => (false, s),
+        };
+        let (src, dst) = rest
+            .split_once(':')
+            .ok_or_else(|| format!("malformed refspec '{s}': missing ':'"))?;
+        let src_star = src.find('*');
+        let dst_star = dst.find('*');
+        match (src_star, dst_star) {
+            (Some(si), Some(di)) => Ok(RefSpec {
+                force,
+                src_prefix: src[..si].to_owned(),
+                src_suffix: src[si + 1..].to_owned(),
+                dst_prefix: dst[..di].to_owned(),
+                dst_suffix: dst[di + 1..].to_owned(),
+                wildcard: true,
+            }),
+            (None, None) => Ok(RefSpec {
+                force,
+                src_prefix: src.to_owned(),
+                src_suffix: String::new(),
+                dst_prefix: dst.to_owned(),
+                dst_suffix: String::new(),
+                wildcard: false,
+            }),
+            _ => Err(format!("malformed refspec '{s}': wildcard must be on both sides").into()),
+        }
+    }
+
+    /// Map a server ref name to its local destination, or `None` if the
+    /// ref doesn't match this spec.
+    fn map(&self, server_ref: &str) -> Option<String> {
+        if !self.wildcard {
+            if server_ref == self.src_prefix {
+                return Some(self.dst_prefix.clone());
+            }
+            return None;
+        }
+        let mid = server_ref
+            .strip_prefix(&self.src_prefix)?
+            .strip_suffix(&self.src_suffix)?;
+        Some(format!("{}{}{}", self.dst_prefix, mid, self.dst_suffix))
+    }
+}
+
+/// Build an [`alt_wire_http::GitTransport`] for `url`, attaching Basic
+/// auth from env vars `ALT_HTTP_USER_<NAME>` + `ALT_HTTP_TOKEN_<NAME>` if
+/// both are set. Public repos work anonymously; private repos point a
+/// user at the env-var convention via a clear error path (auth failures
+/// come back as HTTP 401 from the transport).
+fn build_transport(remote_name: &str, url: &str) -> alt_wire_http::GitTransport {
+    let env_key = remote_name
+        .chars()
+        .map(|c| {
+            if c == '-' {
+                '_'
+            } else {
+                c.to_ascii_uppercase()
+            }
+        })
+        .collect::<String>();
+    let user = std::env::var(format!("ALT_HTTP_USER_{env_key}")).ok();
+    let token = std::env::var(format!("ALT_HTTP_TOKEN_{env_key}")).ok();
+    let mut t = alt_wire_http::GitTransport::new(url);
+    if let (Some(user), Some(token)) = (user, token) {
+        t = t.with_auth(alt_wire_http::BasicAuth {
+            username: user,
+            token,
+        });
+    }
+    t
+}
+
+/// Map the server-advertised `object-format=<algo>` to a [`HashAlgo`].
+/// Default (server didn't advertise) is sha-1, matching git.
+fn parse_object_format(advertised: Option<&str>) -> Res<HashAlgo> {
+    match advertised {
+        None | Some("sha1") => Ok(HashAlgo::Sha1),
+        Some("sha256") => Ok(HashAlgo::Sha256),
+        Some(other) => Err(format!("unsupported object-format '{other}'").into()),
+    }
+}
+
 /// A remote name: a single path segment (it becomes a file name). Same
 /// shape rules as a workspace name, minus the workspace-specific reserved
 /// default — so `origin`, `upstream`, `my-fork` are fine.
@@ -2905,6 +3266,48 @@ mod tests {
     /// Opens an owning handle on `root`'s default (or named) workspace.
     fn open(root: &Path, ws: Option<&str>) -> OpenRepo {
         OpenRepo::discover(root, ws, Identity::from_env()).unwrap()
+    }
+
+    /// The canonical wildcard refspec maps `refs/heads/<X>` →
+    /// `refs/remotes/<remote>/<X>` for any branch name `<X>`.
+    #[test]
+    fn refspec_wildcard_maps_heads_to_remote_tracking() {
+        let spec = RefSpec::parse("+refs/heads/*:refs/remotes/origin/*").unwrap();
+        assert!(spec.wildcard);
+        assert_eq!(
+            spec.map("refs/heads/main").as_deref(),
+            Some("refs/remotes/origin/main")
+        );
+        assert_eq!(
+            spec.map("refs/heads/feature/x").as_deref(),
+            Some("refs/remotes/origin/feature/x")
+        );
+        // out of scope: tags don't match a heads-only spec
+        assert_eq!(spec.map("refs/tags/v1"), None);
+        // out of scope: a ref that doesn't share the prefix
+        assert_eq!(spec.map("HEAD"), None);
+    }
+
+    /// An exact (non-wildcard) refspec maps exactly one ref name; anything
+    /// else returns `None`.
+    #[test]
+    fn refspec_exact_match_is_one_to_one() {
+        let spec = RefSpec::parse("refs/heads/main:refs/remotes/origin/main").unwrap();
+        assert!(!spec.wildcard);
+        assert_eq!(
+            spec.map("refs/heads/main").as_deref(),
+            Some("refs/remotes/origin/main")
+        );
+        assert_eq!(spec.map("refs/heads/dev"), None);
+    }
+
+    /// A malformed refspec (missing `:` or one-sided wildcard) is a typed
+    /// error, not a silent miss.
+    #[test]
+    fn refspec_malformed_input_is_rejected() {
+        assert!(RefSpec::parse("refs/heads/main").is_err());
+        assert!(RefSpec::parse("refs/heads/*:refs/remotes/origin/main").is_err());
+        assert!(RefSpec::parse("refs/heads/main:refs/remotes/origin/*").is_err());
     }
 
     /// A named workspace gets its own HEAD, index, and working tree, while the

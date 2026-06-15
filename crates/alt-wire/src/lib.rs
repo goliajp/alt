@@ -2,7 +2,7 @@
 //! the wire. Pure logic — bytes in, structured frames out; structured
 //! commands in, bytes out. Transport (HTTPS) is in a sibling crate.
 //!
-//! ## Scope (W1)
+//! ## Scope (W1 + W4)
 //!
 //! - **pkt-line** framing: every git protocol byte stream is a sequence of
 //!   `pkt::Frame`s — `Data(bytes)`, `Flush`, `Delim`, `ResponseEnd` — with a
@@ -11,10 +11,12 @@
 //!   response): protocol version + per-command capability map.
 //! - **ls-refs** command: structured request encoding + response parsing
 //!   (a list of `RefRecord { name, oid, peeled, symref_target }`).
+//! - **fetch** command (W4): request encoding (wants / haves / done / flags)
+//!   plus a section-aware preamble parser and a sideband demuxer for the
+//!   packfile stream — pack bytes tee out to a caller-supplied indexer.
 //!
-//! Fetch / push request bodies and pack-stream parsing live in follow-up
-//! steps (W4 / W5); this crate just speaks the *protocol framing* so the
-//! HTTP transport (W2) is a transparent byte mover.
+//! Push request bodies live in W5; this crate still has no I/O — the HTTP
+//! transport (W2) is a transparent byte mover.
 //!
 //! ## Why hand-written
 //!
@@ -34,10 +36,15 @@
 //! of any structured request round-trips through decode.
 
 pub mod caps;
+pub mod fetch;
 pub mod ls_refs;
 pub mod pkt;
 
 pub use caps::{CapabilityAd, parse_capability_advertisement};
+pub use fetch::{
+    FetchAck, FetchError, FetchPreamble, FetchRequest, ShallowInfo, WantedRef, drain_packfile,
+    encode_fetch_request, read_fetch_preamble,
+};
 pub use ls_refs::{LsRefsRequest, RefRecord, encode_ls_refs_request, parse_ls_refs_response};
 pub use pkt::{
     Frame, PktError, read_frame, write_data, write_delim, write_flush, write_response_end,

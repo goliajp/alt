@@ -150,6 +150,17 @@ pub enum Command {
         #[arg(long, global = true)]
         json: bool,
     },
+    /// Fetch refs + objects from a configured remote (M6/W4 — git smart-http v2)
+    Fetch {
+        /// Remote name (defaults to `origin`)
+        #[arg(default_value = "origin")]
+        remote: String,
+        /// Refspecs to fetch (defaults to the remote's configured refspec)
+        refspecs: Vec<String>,
+        /// Emit a structured JSON result instead of the human view
+        #[arg(long)]
+        json: bool,
+    },
     /// Audit-view the op log: who did what, in order, with the parsed A5a
     /// principal and any ref changes carried in each op's payload.
     #[command(name = "op-log")]
@@ -250,6 +261,7 @@ pub fn is_native(cmd: &Command) -> bool {
             | Command::Undo { .. }
             | Command::Workspace { .. }
             | Command::Remote { .. }
+            | Command::Fetch { .. }
             | Command::OpLog { .. }
     )
 }
@@ -300,6 +312,11 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
             RemoteOp::List => repo.remote_list(*json, out)?,
             RemoteOp::Remove { name } => repo.remote_remove(name, *json, out)?,
         },
+        Command::Fetch {
+            remote,
+            refspecs,
+            json,
+        } => repo.fetch(remote, refspecs, *json, out)?,
         Command::OpLog { max_count, json } => repo.op_log(*max_count, *json, out)?,
         _ => return Err("not a native command".into()),
     }

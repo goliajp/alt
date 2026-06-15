@@ -5,6 +5,7 @@ mod commit_loop;
 mod daemon_client;
 mod daemon_server;
 mod diff;
+mod fetch;
 mod flow;
 mod merge;
 mod op_log;
