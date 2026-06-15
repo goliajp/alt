@@ -9,4 +9,5 @@ pub mod daemon;
 pub mod json;
 pub mod log_cmd;
 pub mod native;
+pub mod policy;
 pub mod quote;
