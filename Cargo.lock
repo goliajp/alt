@@ -265,6 +265,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "alt-treediff"
+version = "0.0.0"
+dependencies = [
+ "proc-macro2",
+ "syn",
+ "thiserror",
+]
+
+[[package]]
 name = "alt-verify"
 version = "0.0.0"
 dependencies = [
