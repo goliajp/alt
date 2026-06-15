@@ -52,6 +52,9 @@ dependencies = [
 [[package]]
 name = "alt-diff"
 version = "0.0.0"
+dependencies = [
+ "alt-cdc",
+]
 
 [[package]]
 name = "alt-export"

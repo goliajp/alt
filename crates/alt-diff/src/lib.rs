@@ -7,6 +7,7 @@
 //! text out. Correctness invariant (fuzzed): applying the returned edits to
 //! `old` reproduces `new`, for any input.
 
+pub mod binary;
 mod histogram;
 
 use std::ops::Range;
