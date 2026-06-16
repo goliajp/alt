@@ -188,6 +188,14 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Manage local identities + trusted public keys (M6/W7 — A5b)
+    Identity {
+        #[command(subcommand)]
+        op: IdentityOp,
+        /// Emit a structured JSON result instead of the human view
+        #[arg(long, global = true)]
+        json: bool,
+    },
     /// Audit-view the op log: who did what, in order, with the parsed A5a
     /// principal and any ref changes carried in each op's payload.
     #[command(name = "op-log")]
@@ -198,6 +206,11 @@ pub enum Command {
         /// Emit a structured JSON list instead of the human view
         #[arg(long)]
         json: bool,
+        /// Check each op against the A5b signature sidecar + trust store
+        /// (M6/W7); rows tagged `signed-ok` / `unsigned` / `bad-sig` /
+        /// `untrusted`
+        #[arg(long)]
+        verify: bool,
     },
 }
 
@@ -218,6 +231,24 @@ pub enum WorkspaceOp {
     Remove {
         /// Workspace name
         name: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum IdentityOp {
+    /// Generate a new Ed25519 keypair under `<alt-dir>/identity/<principal>.{pub,sec}`
+    Init {
+        /// Principal id (defaults to `$ALT_PRINCIPAL_ID` or `$USER`)
+        principal: Option<String>,
+    },
+    /// List installed identities (no secret material; only `.pub` rows)
+    List,
+    /// Add a public key to the trust store (`<alt-dir>/trust/<principal>.pub`)
+    Trust {
+        /// Principal id
+        principal: String,
+        /// Path to a `.pub` file produced by `alt identity init`
+        pub_file: std::path::PathBuf,
     },
 }
 
@@ -290,6 +321,7 @@ pub fn is_native(cmd: &Command) -> bool {
             | Command::Remote { .. }
             | Command::Fetch { .. }
             | Command::Push { .. }
+            | Command::Identity { .. }
             | Command::OpLog { .. }
     )
 }
@@ -351,7 +383,21 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
             force,
             json,
         } => repo.push(remote, refspecs, *force, *json, out)?,
-        Command::OpLog { max_count, json } => repo.op_log(*max_count, *json, out)?,
+        Command::Identity { op, json } => match op {
+            IdentityOp::Init { principal } => {
+                repo.identity_init(principal.as_deref(), *json, out)?
+            }
+            IdentityOp::List => repo.identity_list(*json, out)?,
+            IdentityOp::Trust {
+                principal,
+                pub_file,
+            } => repo.identity_trust(principal, pub_file, *json, out)?,
+        },
+        Command::OpLog {
+            max_count,
+            json,
+            verify,
+        } => repo.op_log(*max_count, *json, *verify, out)?,
         _ => return Err("not a native command".into()),
     }
     Ok(0)

@@ -30,6 +30,7 @@ alt-odb.workspace = true
 alt-oplog.workspace = true
 alt-refs.workspace = true
 alt-repo.workspace = true
+alt-sign.workspace = true
 alt-treediff.workspace = true
 alt-wire.workspace = true
 alt-wire-http.workspace = true

@@ -8,6 +8,7 @@ mod daemon_server;
 mod diff;
 mod fetch;
 mod flow;
+mod identity;
 mod merge;
 mod op_log;
 mod push;

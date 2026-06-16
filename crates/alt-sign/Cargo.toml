@@ -1,0 +1,14 @@
+[package]
+name = "alt-sign"
+description = "Ed25519 keygen / sign / verify for alt operation signatures (A5b)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ed25519-dalek.workspace = true
+rand_core.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

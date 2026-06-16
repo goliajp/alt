@@ -723,7 +723,51 @@ impl<'a> NativeRepo<'a> {
             self.store
                 .refs
                 .commit_idempotent(&actor, now_ms(), changes, key, Some(&policy))?;
+        // A5b: opt-in op-level signing. Best-effort — a missing sec key
+        // logs nothing and is not fatal (signing is a per-repo capability,
+        // not a hard requirement). Verification at read time tells the
+        // auditor which ops are signed and which aren't.
+        self.maybe_sign_op(id)?;
         Ok(id)
+    }
+
+    /// Look up the active signing policy and, when enabled and the
+    /// caller has a sec key on disk, append a sidecar signature record
+    /// for `op_id` to `<alt-dir>/oplog/sigs.log`. Returns Ok even when
+    /// policy is off — signing is opt-in.
+    fn maybe_sign_op(&self, op_id: OpId) -> Res<()> {
+        let policy = SignPolicy::load(&self.store.alt_dir)?;
+        if !policy.enabled {
+            return Ok(());
+        }
+        let principal = policy
+            .principal
+            .unwrap_or_else(|| self.id.principal.id.clone());
+        let sec_path = self
+            .store
+            .alt_dir
+            .join("identity")
+            .join(format!("{principal}.sec"));
+        let sec_text = match std::fs::read_to_string(&sec_path) {
+            Ok(t) => t,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(e.into()),
+        };
+        let sec = alt_sign::SecretKey::from_text(&sec_text)
+            .map_err(|e| format!("malformed sec key at {}: {e}", sec_path.display()))?;
+        let sig = sec.sign(&op_id.0);
+        let line = format!("{op_id} {principal} {}", sig.to_text());
+        // sigs.log is append-only, line-oriented; one open per write is
+        // simpler than holding a handle and matches op-log's own cadence
+        // (write transactions are infrequent compared to reads)
+        let sigs_path = self.store.alt_dir.join("oplog").join("sigs.log");
+        std::fs::create_dir_all(sigs_path.parent().unwrap())?;
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(&sigs_path)?;
+        f.write_all(line.as_bytes())?;
+        Ok(())
     }
 
     /// Walks `new`'s ancestor chain to see whether `old` appears (using the
@@ -2291,6 +2335,131 @@ impl<'a> NativeRepo<'a> {
         self.store.alt_dir.join("remotes").join(name)
     }
 
+    /// `alt identity init [<principal>]`: generate a fresh Ed25519
+    /// keypair under `<alt-dir>/identity/<principal>.{pub,sec}`. The
+    /// secret file is created with mode 0600; the public file is 0644
+    /// (it's safe to share). Refuses to overwrite an existing pair so a
+    /// rerun never silently swaps a principal's key.
+    pub fn identity_init(
+        &self,
+        principal: Option<&str>,
+        json: bool,
+        out: &mut impl Write,
+    ) -> Res<()> {
+        let principal = match principal {
+            Some(p) => p.to_owned(),
+            None => self.id.principal.id.clone(),
+        };
+        check_principal_id(&principal)?;
+        let dir = self.store.alt_dir.join("identity");
+        std::fs::create_dir_all(&dir)?;
+        let pub_path = dir.join(format!("{principal}.pub"));
+        let sec_path = dir.join(format!("{principal}.sec"));
+        if pub_path.exists() || sec_path.exists() {
+            return Err(
+                format!("identity '{principal}' already exists; refuse to overwrite").into(),
+            );
+        }
+        let (sec, pub_) = alt_sign::SecretKey::generate();
+        std::fs::write(&pub_path, pub_.to_text())?;
+        write_secret_file(&sec_path, sec.to_text().as_bytes())?;
+        if json {
+            use crate::json::Json;
+            crate::json::emit(
+                out,
+                vec![
+                    ("principal", Json::str(&principal)),
+                    ("pub_path", Json::str(pub_path.display().to_string())),
+                    ("sec_path", Json::str(sec_path.display().to_string())),
+                ],
+            )?;
+        } else {
+            writeln!(
+                out,
+                "Generated Ed25519 identity '{principal}':\n  {}\n  {}",
+                pub_path.display(),
+                sec_path.display(),
+            )?;
+        }
+        Ok(())
+    }
+
+    /// `alt identity list`: emit installed identities (public-side rows
+    /// only; secrets are never displayed). Each row shows the principal
+    /// id and a short fingerprint (first 16 hex chars of the pubkey).
+    pub fn identity_list(&self, json: bool, out: &mut impl Write) -> Res<()> {
+        let dir = self.store.alt_dir.join("identity");
+        let trust_dir = self.store.alt_dir.join("trust");
+        let mut rows = read_pubkey_dir(&dir)?;
+        rows.sort_by(|a, b| a.0.cmp(&b.0));
+        let trust: Vec<(String, alt_sign::PublicKey)> = read_pubkey_dir(&trust_dir)?;
+        if json {
+            use crate::json::Json;
+            let identities: Vec<Json> = rows
+                .iter()
+                .map(|(name, key)| {
+                    let trusted = trust
+                        .iter()
+                        .any(|(n, k)| n == name && k.as_bytes() == key.as_bytes());
+                    Json::Object(vec![
+                        ("principal", Json::str(name)),
+                        ("fingerprint", Json::str(fingerprint(key))),
+                        ("trusted", Json::Bool(trusted)),
+                    ])
+                })
+                .collect();
+            crate::json::emit(out, vec![("identities", Json::Array(identities))])?;
+        } else {
+            for (name, key) in &rows {
+                let trusted = trust
+                    .iter()
+                    .any(|(n, k)| n == name && k.as_bytes() == key.as_bytes());
+                let trust_tag = if trusted { " trusted" } else { "" };
+                writeln!(out, "{name}\t{}{trust_tag}", fingerprint(key))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// `alt identity trust <principal> <pub-file>`: install a public key
+    /// into `<alt-dir>/trust/<principal>.pub`. The op verifies the
+    /// pub-file parses as an `alt-pubkey-ed25519:` key — a typo in the
+    /// path fails loudly here, not at signature-verify time.
+    pub fn identity_trust(
+        &self,
+        principal: &str,
+        pub_file: &Path,
+        json: bool,
+        out: &mut impl Write,
+    ) -> Res<()> {
+        check_principal_id(principal)?;
+        let text = std::fs::read_to_string(pub_file)?;
+        let key = alt_sign::PublicKey::from_text(&text)
+            .map_err(|e| format!("not a valid alt pubkey at '{}': {e}", pub_file.display()))?;
+        let dir = self.store.alt_dir.join("trust");
+        std::fs::create_dir_all(&dir)?;
+        let dst = dir.join(format!("{principal}.pub"));
+        std::fs::write(&dst, key.to_text())?;
+        if json {
+            use crate::json::Json;
+            crate::json::emit(
+                out,
+                vec![
+                    ("principal", Json::str(principal)),
+                    ("fingerprint", Json::str(fingerprint(&key))),
+                    ("trust_path", Json::str(dst.display().to_string())),
+                ],
+            )?;
+        } else {
+            writeln!(
+                out,
+                "Trusted '{principal}' (fingerprint {})",
+                fingerprint(&key)
+            )?;
+        }
+        Ok(())
+    }
+
     fn read_remotes(&self) -> Res<Vec<Remote>> {
         let dir = self.store.alt_dir.join("remotes");
         let mut out = Vec::new();
@@ -2830,14 +2999,28 @@ impl<'a> NativeRepo<'a> {
     /// idempotent and routes through the daemon harmlessly (cf. `log`). A
     /// concurrent writer might add an op between two reads; the audit
     /// snapshot is just truncated, never inconsistent.
-    pub fn op_log(&self, max_count: Option<usize>, json: bool, out: &mut impl Write) -> Res<()> {
+    pub fn op_log(
+        &self,
+        max_count: Option<usize>,
+        json: bool,
+        verify: bool,
+        out: &mut impl Write,
+    ) -> Res<()> {
         let oplog = alt_oplog::OpLog::open(&self.store.alt_dir.join("oplog"))?;
         let limit = max_count.unwrap_or(usize::MAX);
         // newest first matches `alt log` and what an auditor naturally wants
         let entries: Vec<&alt_oplog::Op> = oplog.ops().iter().rev().take(limit).collect();
 
+        // when --verify is asked, pre-compute the verdict for each op id
+        // up front so the per-op rendering doesn't pay an N×M cost
+        let verdicts = if verify {
+            verify_oplog_signatures(&self.store.alt_dir, &entries)?
+        } else {
+            std::collections::HashMap::new()
+        };
+
         if json {
-            return render_op_log_json(out, &entries);
+            return render_op_log_json(out, &entries, &verdicts);
         }
         for op in &entries {
             let (principal, verb) = Principal::parse_actor(&op.actor);
@@ -2846,9 +3029,18 @@ impl<'a> NativeRepo<'a> {
                 PrincipalKind::Agent => "agent",
             };
             let session = principal.session.as_deref().unwrap_or("-");
+            let sig_tag = match verdicts.get(&op.id) {
+                Some(SigVerdict::Ok { principal }) => format!(" sig=signed-ok:{principal}"),
+                Some(SigVerdict::Unsigned) => " sig=unsigned".to_owned(),
+                Some(SigVerdict::Bad { principal }) => format!(" sig=bad-sig:{principal}"),
+                Some(SigVerdict::Untrusted { principal }) => {
+                    format!(" sig=untrusted:{principal}")
+                }
+                None => String::new(),
+            };
             writeln!(
                 out,
-                "{ts} {kind_str}:{id} session={sess} verb={verb}",
+                "{ts} {kind_str}:{id} session={sess} verb={verb}{sig_tag}",
                 ts = op.timestamp_ms,
                 id = principal.id,
                 sess = session,
@@ -3226,7 +3418,11 @@ fn write_ast_diff_summary(buf: &mut Vec<u8>, ast: &alt_treediff::AstDiff) {
 /// `{schema_version:1, ops:[{id, timestamp_ms, principal:{…}, verb,
 /// ref_changes:[{name, old, new}] | null}]}`. `old`/`new` are `null` for
 /// absent, `<oid>` for object targets, `@<name>` for symbolic targets.
-fn render_op_log_json(out: &mut impl Write, ops: &[&alt_oplog::Op]) -> Res<()> {
+fn render_op_log_json(
+    out: &mut impl Write,
+    ops: &[&alt_oplog::Op],
+    verdicts: &std::collections::HashMap<OpId, SigVerdict>,
+) -> Res<()> {
     use crate::json::Json;
     let mut entries = Vec::with_capacity(ops.len());
     for op in ops {
@@ -3246,13 +3442,35 @@ fn render_op_log_json(out: &mut impl Write, ops: &[&alt_oplog::Op]) -> Res<()> {
             ),
             None => Json::Null,
         };
-        entries.push(Json::Object(vec![
+        let mut fields = vec![
             ("id", Json::str(hex32(&op.id.0))),
             ("timestamp_ms", Json::Num(op.timestamp_ms as i64)),
             ("principal", principal_json(&principal)),
             ("verb", Json::str(&verb)),
             ("ref_changes", ref_changes),
-        ]));
+        ];
+        if let Some(v) = verdicts.get(&op.id) {
+            let (status, signer): (&'static str, Option<&str>) = match v {
+                SigVerdict::Ok { principal } => ("signed-ok", Some(principal.as_str())),
+                SigVerdict::Unsigned => ("unsigned", None),
+                SigVerdict::Bad { principal } => ("bad-sig", Some(principal.as_str())),
+                SigVerdict::Untrusted { principal } => ("untrusted", Some(principal.as_str())),
+            };
+            fields.push((
+                "sig",
+                Json::Object(vec![
+                    ("status", Json::str(status)),
+                    (
+                        "principal",
+                        match signer {
+                            Some(s) => Json::str(s),
+                            None => Json::Null,
+                        },
+                    ),
+                ]),
+            ));
+        }
+        entries.push(Json::Object(fields));
     }
     let doc = Json::Object(vec![
         ("schema_version", Json::Num(1)),
@@ -3659,6 +3877,260 @@ fn parse_object_format(advertised: Option<&str>) -> Res<HashAlgo> {
         Some("sha256") => Ok(HashAlgo::Sha256),
         Some(other) => Err(format!("unsupported object-format '{other}'").into()),
     }
+}
+
+/// A5b op-level signing policy, read from `<alt-dir>/sign-policy`. The
+/// file is a tiny `key=value` text shape (same convention as remotes /
+/// policy elsewhere in alt):
+///
+/// ```text
+/// enabled = true
+/// principal = alice           # optional; defaults to the caller's id
+/// ```
+///
+/// Missing file = signing disabled. `enabled` is the only required key;
+/// `principal` lets a repo pin signing to a fixed identity even when
+/// multiple agents share the working tree.
+struct SignPolicy {
+    enabled: bool,
+    principal: Option<String>,
+}
+
+impl SignPolicy {
+    fn load(alt_dir: &Path) -> Res<Self> {
+        let path = alt_dir.join("sign-policy");
+        let body = match std::fs::read_to_string(&path) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(SignPolicy {
+                    enabled: false,
+                    principal: None,
+                });
+            }
+            Err(e) => return Err(e.into()),
+        };
+        let mut enabled = false;
+        let mut principal = None;
+        for line in body.lines() {
+            let Some((k, v)) = line.split_once('=') else {
+                continue;
+            };
+            match k.trim() {
+                "enabled" => enabled = v.trim() == "true",
+                "principal" => principal = Some(v.trim().to_owned()),
+                _ => {} // forward-compat
+            }
+        }
+        Ok(SignPolicy { enabled, principal })
+    }
+}
+
+/// One parsed signature row from `<alt-dir>/oplog/sigs.log`. Each row is
+/// `<op-id-hex> <principal> alt-sig-ed25519:<base64url>\n`.
+#[derive(Debug, Clone)]
+struct SigRow {
+    op_id: OpId,
+    principal: String,
+    sig: alt_sign::Sig,
+}
+
+fn read_sig_rows(alt_dir: &Path) -> Res<Vec<SigRow>> {
+    let path = alt_dir.join("oplog").join("sigs.log");
+    let body = match std::fs::read_to_string(&path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e.into()),
+    };
+    let mut rows = Vec::new();
+    for line in body.lines() {
+        let mut parts = line.splitn(3, ' ');
+        let Some(op_hex) = parts.next() else { continue };
+        let Some(principal) = parts.next() else {
+            continue;
+        };
+        let Some(sig_text) = parts.next() else {
+            continue;
+        };
+        let mut op_bytes = [0u8; 32];
+        if op_hex.len() != 64 {
+            continue;
+        }
+        let mut ok = true;
+        for (i, b) in op_bytes.iter_mut().enumerate() {
+            let hi = nibble(op_hex.as_bytes()[i * 2]);
+            let lo = nibble(op_hex.as_bytes()[i * 2 + 1]);
+            match (hi, lo) {
+                (Some(h), Some(l)) => *b = (h << 4) | l,
+                _ => {
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        if !ok {
+            continue;
+        }
+        let Ok(sig) = alt_sign::Sig::from_text(sig_text) else {
+            continue;
+        };
+        rows.push(SigRow {
+            op_id: OpId(op_bytes),
+            principal: principal.to_owned(),
+            sig,
+        });
+    }
+    Ok(rows)
+}
+
+fn nibble(c: u8) -> Option<u8> {
+    match c {
+        b'0'..=b'9' => Some(c - b'0'),
+        b'a'..=b'f' => Some(c - b'a' + 10),
+        b'A'..=b'F' => Some(c - b'A' + 10),
+        _ => None,
+    }
+}
+
+/// The four possible outcomes of `alt op-log --verify` for one op.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SigVerdict {
+    /// Signature matched a trusted principal — auditor can rely on this op.
+    Ok { principal: String },
+    /// No signature row exists for this op (signing was off when the op
+    /// was written, or a different principal performed it).
+    Unsigned,
+    /// Signature row exists but Ed25519 verification failed against the
+    /// claimed principal's pubkey — tampering, key swap, or corruption.
+    Bad { principal: String },
+    /// Signature row exists and parses, but no matching pubkey lives in
+    /// `<alt-dir>/trust/<principal>.pub` — auditor can't decide.
+    Untrusted { principal: String },
+}
+
+/// Walk the sig sidecar + trust store; for each requested op id, decide
+/// which [`SigVerdict`] applies. Stops short of fetching pubkeys lazily —
+/// for an op-log of a few hundred entries, loading all trust pubkeys
+/// up-front is cheaper than `O(N×M)` re-reads.
+fn verify_oplog_signatures(
+    alt_dir: &Path,
+    entries: &[&alt_oplog::Op],
+) -> Res<std::collections::HashMap<OpId, SigVerdict>> {
+    let rows = read_sig_rows(alt_dir)?;
+    let trust = read_pubkey_dir(&alt_dir.join("trust"))?;
+    let trust_map: std::collections::BTreeMap<String, alt_sign::PublicKey> =
+        trust.into_iter().collect();
+    let by_id: std::collections::HashMap<OpId, &SigRow> =
+        rows.iter().map(|r| (r.op_id, r)).collect();
+
+    let mut out = std::collections::HashMap::new();
+    for op in entries {
+        let verdict = match by_id.get(&op.id) {
+            None => SigVerdict::Unsigned,
+            Some(row) => match trust_map.get(&row.principal) {
+                None => SigVerdict::Untrusted {
+                    principal: row.principal.clone(),
+                },
+                Some(pubkey) => match pubkey.verify(&op.id.0, &row.sig) {
+                    Ok(()) => SigVerdict::Ok {
+                        principal: row.principal.clone(),
+                    },
+                    Err(_) => SigVerdict::Bad {
+                        principal: row.principal.clone(),
+                    },
+                },
+            },
+        };
+        out.insert(op.id, verdict);
+    }
+    Ok(out)
+}
+
+/// A principal id is the same shape as a remote name: a single path
+/// segment with no separators or special chars (it becomes part of a
+/// file name under `<alt-dir>/identity/<id>.pub`).
+fn check_principal_id(name: &str) -> Res<()> {
+    let bad = name.is_empty()
+        || name.starts_with('.')
+        || name.contains('/')
+        || name.contains(['\\', ' ', '~', '^', ':', '?', '*', '[', '.'])
+        || name.bytes().any(|b| b < 0x20 || b == 0x7f);
+    if bad {
+        return Err(format!("'{name}' is not a valid principal id").into());
+    }
+    Ok(())
+}
+
+/// Write a secret-bearing file with restrictive permissions (0600 on
+/// Unix; default on other platforms — alt's primary targets are
+/// macOS/Linux). Uses an atomic temp+rename so a crashed write doesn't
+/// leave a half-written secret in place.
+fn write_secret_file(path: &Path, body: &[u8]) -> Res<()> {
+    let tmp = path.with_extension("tmp");
+    {
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
+        f.write_all(body)?;
+        f.sync_all()?;
+    }
+    set_secret_perms(&tmp)?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_secret_perms(path: &Path) -> Res<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_secret_perms(_path: &Path) -> Res<()> {
+    Ok(())
+}
+
+/// Scan a directory for `*.pub` files, parse each as an
+/// `alt-pubkey-ed25519:` key. Files that don't parse are silently
+/// skipped — they may be stray files; loud parsing happens at `trust`
+/// time, not at `list` time.
+fn read_pubkey_dir(dir: &Path) -> Res<Vec<(String, alt_sign::PublicKey)>> {
+    let mut out = Vec::new();
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
+        Err(e) => return Err(e.into()),
+    };
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("pub") {
+            continue;
+        }
+        let name = match path.file_stem().and_then(|s| s.to_str()) {
+            Some(n) => n.to_owned(),
+            None => continue,
+        };
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        if let Ok(key) = alt_sign::PublicKey::from_text(&text) {
+            out.push((name, key));
+        }
+    }
+    Ok(out)
+}
+
+/// First 16 hex chars of the raw 32-byte public key — short enough to
+/// fit a list row, unique enough in practice for human identification.
+fn fingerprint(key: &alt_sign::PublicKey) -> String {
+    let bytes = key.as_bytes();
+    let mut out = String::with_capacity(16);
+    for b in &bytes[..8] {
+        out.push_str(&format!("{b:02x}"));
+    }
+    out
 }
 
 /// A remote name: a single path segment (it becomes a file name). Same
