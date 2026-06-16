@@ -91,12 +91,6 @@ pub fn run(
     }
 
     let mut first = true;
-    // Flattened-tree cache shared across the walk. rev_walk visits N, N-1,
-    // N-2, … — so each commit's parent tree (just flattened as "old") shows
-    // up next iteration as the current commit's "new". Caching by commit
-    // oid drops the flatten count from ≈2·N to N+1 on a linear history.
-    let mut tree_cache: std::collections::HashMap<ObjectId, std::rc::Rc<Vec<TreeFile>>> =
-        std::collections::HashMap::new();
     for item in repo.rev_walk(start)?.take(limit) {
         let (oid, _) = item?;
         let obj = repo.read_object(&oid)?.expect("walked oid exists");
@@ -107,136 +101,237 @@ pub fn run(
             other => return Err(format!("unsupported --pretty={other} (M1: raw, oneline)").into()),
         }
         if args.patch {
-            emit_patch_for_commit(out, repo, &oid, &mut tree_cache)?;
+            emit_patch_for_commit(out, repo, &oid)?;
         }
     }
     Ok(())
 }
 
-/// One file in a flattened tree, identified by its full path. Built only
-/// for the patch path — keep it self-contained so log_cmd doesn't depend on
-/// alt-worktree's working-tree types.
+/// One file in a tree as seen by the patch path: its oid and mode. The
+/// path is threaded separately (as a borrowed slice into the prefix
+/// buffer) because `tree_diff` already has it on hand and stashing a
+/// fresh `BString` per leaf would dominate the cost of a small patch.
 struct TreeFile {
-    path: BString,
     oid: ObjectId,
     mode: u32,
 }
 
-/// Recursive walk of a tree object into path-sorted file entries. Gitlinks
-/// are kept (so the patch surfaces a submodule oid change) but are treated
-/// as opaque — never read as blob content. Subtrees recurse; anything else
-/// is a leaf.
-fn flatten_tree(
+// Pre-A3b history: `flatten_tree` + `entries_for` walked both trees and
+// merged. tree_diff (below) supersedes them with a lockstep equal-oid
+// prune that touches O(changed leaves × depth) trees instead of the
+// whole tree. The flatten implementation was removed with the A3b
+// refactor; if a future caller needs a full flattened tree view, lift
+// the helper from `alt-worktree::flatten_tree` (which takes a NativeOdb).
+
+/// Recursively diffs two trees, emitting only the changed leaves. Equal
+/// (same-oid) subtrees are skipped wholesale — that's the whole point: a
+/// commit that touched 1-3 files in a 50k-file monorepo shares every
+/// subtree but a single deep path with its parent, and we descend only
+/// into the differing branches. O(changes × depth) tree reads instead of
+/// O(whole-tree) flatten-both-then-merge.
+type TreeEmit<'a> = dyn FnMut(&[u8], Option<TreeFile>, Option<TreeFile>) -> Result<(), Box<dyn std::error::Error>>
+    + 'a;
+
+fn tree_diff(
     repo: &Repository,
-    tree_oid: ObjectId,
+    old: Option<ObjectId>,
+    new: Option<ObjectId>,
     prefix: &mut Vec<u8>,
-    out: &mut Vec<TreeFile>,
+    emit: &mut TreeEmit<'_>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let obj = repo
-        .read_object(&tree_oid)?
-        .ok_or_else(|| format!("tree {tree_oid} missing"))?;
-    if obj.kind != ObjectKind::Tree {
-        return Err(format!("{tree_oid} is not a tree").into());
+    if old == new {
+        return Ok(()); // identical subtree (or both absent) — nothing to emit
     }
-    let tree = Tree::parse(&obj.data, repo.algo())?;
-    for e in tree.entries {
-        let mark = prefix.len();
-        if !prefix.is_empty() {
-            prefix.push(b'/');
+    let read_tree =
+        |oid: ObjectId| -> Result<Vec<alt_git_codec::TreeEntry>, Box<dyn std::error::Error>> {
+            let obj = repo
+                .read_object(&oid)?
+                .ok_or_else(|| format!("tree {oid} missing"))?;
+            if obj.kind != ObjectKind::Tree {
+                return Err(format!("{oid} is not a tree").into());
+            }
+            Ok(Tree::parse(&obj.data, repo.algo())?.entries)
+        };
+
+    let old_entries = match old {
+        Some(o) => read_tree(o)?,
+        None => Vec::new(),
+    };
+    let new_entries = match new {
+        Some(n) => read_tree(n)?,
+        None => Vec::new(),
+    };
+
+    let (mut i, mut j) = (0, 0);
+    while i < old_entries.len() || j < new_entries.len() {
+        let cmp = match (old_entries.get(i), new_entries.get(j)) {
+            (Some(o), Some(n)) => o.name.cmp(&n.name),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => break,
+        };
+        type PushBody<'a> = dyn FnMut(&mut Vec<u8>) -> Result<(), Box<dyn std::error::Error>> + 'a;
+        let push = |prefix: &mut Vec<u8>,
+                    name: &[u8],
+                    f: &mut PushBody<'_>|
+         -> Result<(), Box<dyn std::error::Error>> {
+            let mark = prefix.len();
+            if !prefix.is_empty() {
+                prefix.push(b'/');
+            }
+            prefix.extend_from_slice(name);
+            let r = f(prefix);
+            prefix.truncate(mark);
+            r
+        };
+        match cmp {
+            std::cmp::Ordering::Less => {
+                let o = old_entries[i].clone();
+                push(prefix, o.name.as_slice(), &mut |p| {
+                    handle_side(repo, p, &o, true, emit)
+                })?;
+                i += 1;
+            }
+            std::cmp::Ordering::Greater => {
+                let n = new_entries[j].clone();
+                push(prefix, n.name.as_slice(), &mut |p| {
+                    handle_side(repo, p, &n, false, emit)
+                })?;
+                j += 1;
+            }
+            std::cmp::Ordering::Equal => {
+                let o = old_entries[i].clone();
+                let n = new_entries[j].clone();
+                if o.oid == n.oid && o.mode == n.mode {
+                    i += 1;
+                    j += 1;
+                    continue;
+                }
+                push(prefix, n.name.as_slice(), &mut |p| {
+                    let o_tree = o.mode.object_kind() == ObjectKind::Tree;
+                    let n_tree = n.mode.object_kind() == ObjectKind::Tree;
+                    if o_tree && n_tree {
+                        tree_diff(repo, Some(o.oid), Some(n.oid), p, emit)
+                    } else if o_tree {
+                        // tree became something else: emit old's leaves + new leaf
+                        tree_diff(repo, Some(o.oid), None, p, emit)?;
+                        emit(
+                            p,
+                            None,
+                            Some(TreeFile {
+                                oid: n.oid,
+                                mode: n.mode.value(),
+                            }),
+                        )
+                    } else if n_tree {
+                        emit(
+                            p,
+                            Some(TreeFile {
+                                oid: o.oid,
+                                mode: o.mode.value(),
+                            }),
+                            None,
+                        )?;
+                        tree_diff(repo, None, Some(n.oid), p, emit)
+                    } else {
+                        emit(
+                            p,
+                            Some(TreeFile {
+                                oid: o.oid,
+                                mode: o.mode.value(),
+                            }),
+                            Some(TreeFile {
+                                oid: n.oid,
+                                mode: n.mode.value(),
+                            }),
+                        )
+                    }
+                })?;
+                i += 1;
+                j += 1;
+            }
         }
-        prefix.extend_from_slice(e.name.as_bytes());
-        if e.mode.object_kind() == ObjectKind::Tree {
-            flatten_tree(repo, e.oid, prefix, out)?;
-        } else {
-            out.push(TreeFile {
-                path: BString::from(prefix.clone()),
-                oid: e.oid,
-                mode: e.mode.value(),
-            });
-        }
-        prefix.truncate(mark);
     }
     Ok(())
 }
 
-/// Flattens a commit's full file set. The first parent (or an empty tree
-/// for a root commit) is what we diff against; merges show the first-parent
-/// patch only — matches git's `log -p` default. Cached: a commit oid is
-/// flattened at most once per `log -p` run (the caller passes a shared
-/// `HashMap`).
-fn entries_for(
+/// For an entry that exists on only one side (pure add or pure delete),
+/// emit its leaves: if it's a tree, recurse into it with the other side
+/// absent; otherwise emit the single leaf.
+fn handle_side(
     repo: &Repository,
-    commit: &ObjectId,
-    cache: &mut std::collections::HashMap<ObjectId, std::rc::Rc<Vec<TreeFile>>>,
-) -> Result<std::rc::Rc<Vec<TreeFile>>, Box<dyn std::error::Error>> {
-    if let Some(hit) = cache.get(commit) {
-        return Ok(hit.clone());
+    prefix: &mut Vec<u8>,
+    entry: &alt_git_codec::TreeEntry,
+    deleted: bool,
+    emit: &mut TreeEmit<'_>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if entry.mode.object_kind() == ObjectKind::Tree {
+        let (old, new) = if deleted {
+            (Some(entry.oid), None)
+        } else {
+            (None, Some(entry.oid))
+        };
+        return tree_diff(repo, old, new, prefix, emit);
     }
-    let obj = repo
-        .read_object(commit)?
-        .ok_or_else(|| format!("commit {commit} missing"))?;
-    let parsed = Commit::parse(&obj.data)?;
-    let tree = parsed
-        .tree()
-        .ok_or_else(|| format!("commit {commit} has no tree header"))?;
-    let mut out = Vec::new();
-    flatten_tree(repo, tree, &mut Vec::new(), &mut out)?;
-    out.sort_by(|a, b| a.path.cmp(&b.path));
-    let rc = std::rc::Rc::new(out);
-    cache.insert(*commit, rc.clone());
-    Ok(rc)
+    let leaf = TreeFile {
+        oid: entry.oid,
+        mode: entry.mode.value(),
+    };
+    if deleted {
+        emit(prefix, Some(leaf), None)
+    } else {
+        emit(prefix, None, Some(leaf))
+    }
 }
 
 /// Walks one commit + its first parent and writes the differences as a
 /// stream of `diff --git` stanzas. Binary blobs land as a compact
 /// chunk + perceptual summary so a single 100 MiB image doesn't paste a
 /// megabyte of header noise (or worse, the bytes) into the terminal.
+///
+/// Tree walk is lockstep (`tree_diff`): equal-oid subtrees are pruned
+/// at every level, so a commit that touched 1-3 files in a 50k-file
+/// monorepo reads ~10 trees, not 20 000.
 fn emit_patch_for_commit(
     out: &mut impl Write,
     repo: &Repository,
     commit: &ObjectId,
-    cache: &mut std::collections::HashMap<ObjectId, std::rc::Rc<Vec<TreeFile>>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let obj = repo
         .read_object(commit)?
         .ok_or_else(|| format!("commit {commit} missing"))?;
     let parsed = Commit::parse(&obj.data)?;
-    let new_files = entries_for(repo, commit, cache)?;
-    let empty_parent: std::rc::Rc<Vec<TreeFile>> = std::rc::Rc::new(Vec::new());
-    let old_files = match parsed.parents().next() {
-        Some(p) => entries_for(repo, &p, cache)?,
-        None => empty_parent,
+    let new_tree = parsed
+        .tree()
+        .ok_or_else(|| format!("commit {commit} has no tree header"))?;
+    let old_tree = match parsed.parents().next() {
+        Some(p) => {
+            let p_obj = repo
+                .read_object(&p)?
+                .ok_or_else(|| format!("commit {p} missing"))?;
+            Commit::parse(&p_obj.data)?.tree()
+        }
+        None => None,
     };
 
-    let (mut i, mut j) = (0, 0);
-    while i < old_files.len() || j < new_files.len() {
-        let cmp = match (old_files.get(i), new_files.get(j)) {
-            (Some(o), Some(n)) => o.path.cmp(&n.path),
-            (Some(_), None) => std::cmp::Ordering::Less,
-            (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => break,
+    // Collect diffs from tree_diff into a Vec so we can emit stanzas with
+    // the same borrow shape as before. The intermediate is tiny: O(changed
+    // leaves), not O(whole tree).
+    let mut changes: Vec<(BString, Option<TreeFile>, Option<TreeFile>)> = Vec::new();
+    {
+        let mut prefix = Vec::new();
+        let mut emit_fn = |path: &[u8],
+                           o: Option<TreeFile>,
+                           n: Option<TreeFile>|
+         -> Result<(), Box<dyn std::error::Error>> {
+            changes.push((BString::from(path.to_vec()), o, n));
+            Ok(())
         };
-        match cmp {
-            std::cmp::Ordering::Less => {
-                let o = &old_files[i];
-                emit_file_stanza(out, repo, &o.path, Some(o), None)?;
-                i += 1;
-            }
-            std::cmp::Ordering::Greater => {
-                let n = &new_files[j];
-                emit_file_stanza(out, repo, &n.path, None, Some(n))?;
-                j += 1;
-            }
-            std::cmp::Ordering::Equal => {
-                let o = &old_files[i];
-                let n = &new_files[j];
-                if o.oid != n.oid || o.mode != n.mode {
-                    emit_file_stanza(out, repo, &n.path, Some(o), Some(n))?;
-                }
-                i += 1;
-                j += 1;
-            }
-        }
+        tree_diff(repo, old_tree, Some(new_tree), &mut prefix, &mut emit_fn)?;
+    }
+    changes.sort_by(|a, b| a.0.cmp(&b.0));
+    for (path, old, new) in &changes {
+        emit_file_stanza(out, repo, path, old.as_ref(), new.as_ref())?;
     }
     Ok(())
 }
