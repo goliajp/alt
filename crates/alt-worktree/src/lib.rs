@@ -550,7 +550,10 @@ mod tests {
         let wt: Vec<WorkEntry> = vec![];
         let s = status(&head, &index, &wt);
         assert!(s.staged.is_empty(), "no staged changes expected");
-        assert!(s.unstaged.is_empty(), "uninit submodule must not show as deleted");
+        assert!(
+            s.unstaged.is_empty(),
+            "uninit submodule must not show as deleted"
+        );
         assert!(s.untracked.is_empty());
     }
 

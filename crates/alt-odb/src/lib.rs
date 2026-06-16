@@ -16,14 +16,33 @@
 //! inherit the blob layer's BLAKE3 verification.
 
 mod map;
+mod tier1;
 
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 
 use alt_git_codec::{ObjectId, ObjectKind, RawObject};
+use alt_prism::Registry;
 use alt_store::{BlobId, BlobOptions, BlobStore, CompactReport, StoreError};
 
 pub use map::{MapEntry, ObjectMap};
+use tier1::Tier1Map;
+
+/// The production prism set, registered into every freshly opened
+/// [`NativeOdb`]. Centralised here so a reader and a writer always agree on
+/// which prisms a stored Tier 1 record might invoke — adding a prism to
+/// production is a single edit, and stores opened by any tool recompose the
+/// same blobs.
+///
+/// Order is priority (`Registry::register` is hot-first). [`alt_prism_deflate::DeflatePrism`]
+/// is currently the only entry: the "universal key" of `design/prisms.md`
+/// §4, since most binary asset containers wrap deflate streams that defeat
+/// CDC dedup otherwise.
+pub fn default_registry() -> Registry {
+    let mut r = Registry::new();
+    r.register(Box::new(alt_prism_deflate::DeflatePrism));
+    r
+}
 
 /// Takes an exclusive advisory lock on the odb write-lock file for the duration
 /// of one write batch. `flock` is per-open-file-description and auto-releases on
@@ -86,6 +105,12 @@ pub enum OdbError {
     HashMismatch { claimed: ObjectId, actual: ObjectId },
     #[error("object {0} maps to {1} bytes but the store returned a different length")]
     SizeMismatch(ObjectId, u64),
+    #[error("tier1 record for {0} is malformed: {1}")]
+    Tier1Record(BlobId, tier1::RecordError),
+    #[error("tier1 recompose failed for {0}")]
+    Tier1Recompose(BlobId),
+    #[error("tier1 recomposed bytes do not hash to {0}")]
+    Tier1HashMismatch(BlobId),
 }
 
 /// The native object database: blob store + git-identity map.
@@ -98,6 +123,16 @@ pub enum OdbError {
 pub struct NativeOdb {
     blobs: BlobStore,
     map: ObjectMap,
+    /// Tier 1 (prismatic) bookkeeping. Always present; empty when no prism
+    /// fires (which is the case when the registry is empty, the default).
+    tier1: Tier1Map,
+    /// Prism pipeline: a `put` whose data round-trips through one of these
+    /// is recorded in `tier1` and stored as deduplicated parts; everything
+    /// else falls through to Tier 0 ([`alt_prism::Registry::decompose_verified`]
+    /// enforces the byte-exact iron law). Default open() leaves it empty so
+    /// behaviour matches the pre-A2 store; consumers (alt-import, alt-cli)
+    /// register the production set explicitly.
+    registry: Registry,
     /// The advisory write lock; `held` tracks whether this batch owns it.
     lock: File,
     held: bool,
@@ -169,13 +204,14 @@ impl NativeOdb {
         // another process's exclusive append. Without this, an open scanning a
         // writer's half-written record truncates it and corrupts the store.
         lock_shared(&lock)?;
-        let opened = (|| -> Result<(BlobStore, ObjectMap), OdbError> {
+        let opened = (|| -> Result<(BlobStore, ObjectMap, Tier1Map), OdbError> {
             let blobs = BlobStore::open_with(alt_dir.join("store"), opts)?;
             let map = ObjectMap::open(&alt_dir.join("map.alt"))?;
-            Ok((blobs, map))
+            let tier1 = Tier1Map::open(&alt_dir)?;
+            Ok((blobs, map, tier1))
         })();
         let _ = unlock(&lock);
-        let (blobs, map) = opened?;
+        let (blobs, map, tier1) = opened?;
         let sync_lock = OpenOptions::new()
             .create(true)
             .truncate(false)
@@ -184,6 +220,8 @@ impl NativeOdb {
         Ok(Self {
             blobs,
             map,
+            tier1,
+            registry: default_registry(),
             lock,
             held: false,
             sync_lock,
@@ -191,6 +229,14 @@ impl NativeOdb {
             defer: false,
             write_count: 0,
         })
+    }
+
+    /// Append an extra prism on top of the default-registered set. Useful
+    /// in tests; production code relies on [`default_registry`] capturing
+    /// the canonical set so every reader can recompose what any writer
+    /// stored.
+    pub fn register_prism(&mut self, prism: Box<dyn alt_prism::Prism + Send + Sync>) {
+        self.registry.register(prism);
     }
 
     /// Acquires the write lock for this batch (if not already held) and brings
@@ -227,7 +273,10 @@ impl NativeOdb {
 
     /// Stores one git object's canonical payload and records its identity
     /// bridge. The payload is re-hashed against `oid` — a wrong claimed id
-    /// is rejected here rather than discovered at export. Idempotent.
+    /// is rejected here rather than discovered at export. When the prism
+    /// registry accepts the payload (byte-exact round trip), the parts are
+    /// stored decomposed (Tier 1); otherwise verbatim (Tier 0). Either way
+    /// the returned blob id is `BLAKE3(data)`. Idempotent.
     pub fn put(
         &mut self,
         oid: ObjectId,
@@ -247,7 +296,7 @@ impl NativeOdb {
                 actual,
             });
         }
-        let alt = self.blobs.put(data)?;
+        let alt = self.put_blob(data)?;
         self.map.append(MapEntry {
             git: oid,
             alt,
@@ -257,12 +306,37 @@ impl NativeOdb {
         Ok(alt)
     }
 
+    /// Routes a blob through the prism pipeline before falling back to
+    /// verbatim chunk-store insertion. Shared by `put` (after the git-oid
+    /// re-hash) and by any future writer that already trusts the blob id.
+    fn put_blob(&mut self, data: &[u8]) -> Result<BlobId, OdbError> {
+        let id = BlobId::of(data);
+        if self.tier1.contains(id) || self.blobs.contains(id) {
+            return Ok(id); // already stored, either tier
+        }
+        if let Some(t1) = self.registry.decompose_verified(data) {
+            let mut part_ids = Vec::with_capacity(t1.decomposition.parts.len());
+            for part in &t1.decomposition.parts {
+                part_ids.push(self.blobs.put(part)?);
+            }
+            let record = tier1::encode_record(t1.prism, &t1.decomposition.recipe, &part_ids);
+            let record_id = self.blobs.put(&record)?;
+            self.tier1.append(id, record_id)?;
+            Ok(id)
+        } else {
+            Ok(self.blobs.put(data)?)
+        }
+    }
+
     /// Reads an object back by git id, materializing its canonical payload.
+    /// A Tier 1 blob is recomposed from its parts and the recomposed bytes
+    /// are re-hashed against the recorded blob id — the integrity boundary
+    /// so a corrupt part or recipe surfaces, never wrong bytes.
     pub fn get(&self, oid: &ObjectId) -> Result<Option<RawObject>, OdbError> {
         let Some(entry) = self.map.by_git(oid) else {
             return Ok(None);
         };
-        let data = self.blobs.get(entry.alt)?;
+        let data = self.fetch_blob(entry.alt)?;
         if data.len() as u64 != entry.size {
             return Err(OdbError::SizeMismatch(*oid, entry.size));
         }
@@ -270,6 +344,31 @@ impl NativeOdb {
             kind: entry.kind,
             data,
         }))
+    }
+
+    /// Materialises a stored blob, recomposing through the prism registry
+    /// when it lives in Tier 1. The recomposed bytes' BLAKE3 is checked
+    /// against `alt` so a corrupted recipe or part surfaces here.
+    fn fetch_blob(&self, alt: BlobId) -> Result<Vec<u8>, OdbError> {
+        let Some(record_id) = self.tier1.get(alt) else {
+            return Ok(self.blobs.get(alt)?);
+        };
+        let record = self.blobs.get(record_id)?;
+        let (prism, recipe, part_ids) =
+            tier1::decode_record(&record).map_err(|e| OdbError::Tier1Record(alt, e))?;
+        let parts: Vec<Vec<u8>> = part_ids
+            .iter()
+            .map(|p| self.blobs.get_unverified(*p))
+            .collect::<Result<_, _>>()?;
+        let part_refs: Vec<&[u8]> = parts.iter().map(Vec::as_slice).collect();
+        let data = self
+            .registry
+            .recompose(prism, &recipe, &part_refs)
+            .ok_or(OdbError::Tier1Recompose(alt))?;
+        if BlobId::of(&data) != alt {
+            return Err(OdbError::Tier1HashMismatch(alt));
+        }
+        Ok(data)
     }
 
     /// Identity/kind/size lookup without materializing the payload
@@ -391,19 +490,25 @@ impl NativeOdb {
         self.write_count
     }
 
-    /// An independent fsync handle (chunks → blobmap → `map.alt`) for the
-    /// daemon's off-write-path group commit.
+    /// An independent fsync handle (chunks → blobmap → tier1 → `map.alt`)
+    /// for the daemon's off-write-path group commit.
     pub fn sink(&self) -> Result<OdbSink, OdbError> {
         Ok(OdbSink {
             blobs: self.blobs.sink()?,
+            tier1: self.tier1.sync_handle()?,
             map: self.map.sync_handle()?,
         })
     }
 
     /// The fsync-coalescing core (blob store first — chunks before blobmap —
-    /// then `map.alt`, so a crash never leaves a durable identity record
-    /// pointing at lost content). One fsync covers my appends and any
-    /// concurrent ones; the marker then lets the others skip theirs.
+    /// then `tier1` (so the records are durable before any map.alt entry
+    /// references their Tier 1 blob ids), then `map.alt`, so a crash never
+    /// leaves a durable identity record pointing at lost content). One
+    /// fsync covers my appends and any concurrent ones; the marker then
+    /// lets the others skip theirs. The 3-tuple marker stays the same —
+    /// tier1 isn't tracked in it because it's a small, append-only file
+    /// with cheap fsync and unconditionally syncing it preserves backward
+    /// compatibility with stores written before A2.
     fn sync_to(&mut self, target: [u64; 3]) -> Result<(), OdbError> {
         // fast path: another writer already fsynced past my appends
         if covers(read_durable(&self.durable_path), target) {
@@ -417,7 +522,8 @@ impl NativeOdb {
             let (pf, bf) = self.blobs.file_lens()?;
             let eofs = [pf, bf, self.map.file_len()?];
             self.blobs.fsync()?; // chunks then blobmap, in order
-            self.map.fsync()?; // then map.alt
+            self.tier1.sync()?; // then tier1 (references blob ids above)
+            self.map.fsync()?; // then map.alt (may reference tier1 ids)
             write_durable(&self.durable_path, eofs)?;
             Ok(())
         })();
@@ -432,12 +538,14 @@ impl NativeOdb {
 /// daemon fsyncs without `&mut NativeOdb` and appends overlap the fsync.
 pub struct OdbSink {
     blobs: alt_store::BlobSink,
+    tier1: std::fs::File,
     map: std::fs::File,
 }
 
 impl OdbSink {
     pub fn fsync(&self) -> Result<(), OdbError> {
         self.blobs.fsync()?;
+        self.tier1.sync_all()?;
         self.map.sync_all()?;
         Ok(())
     }
@@ -454,6 +562,7 @@ impl Drop for NativeOdb {
 mod tests {
     use super::*;
     use alt_git_codec::HashAlgo;
+    use alt_prism::Prism;
 
     fn put_one(
         odb: &mut NativeOdb,
@@ -625,6 +734,55 @@ mod tests {
             WRITERS * UNIQUE + SHARED,
             "shared content stored once; no duplicate map records"
         );
+    }
+
+    #[test]
+    fn deflate_blob_round_trips_through_tier1_after_reopen() {
+        // A blob whose bytes happen to be a real libz-deflated stream
+        // (e.g. a `.png` IDAT payload, a zip member, a raw git loose
+        // object) must round-trip through the prism: put → decompose →
+        // store parts + record → reopen → get → recompose → byte-equal.
+        // Uses the deflate prism's own recompose to synthesise the
+        // libz-shaped stream without a libz dev-dep.
+        let dir = tempfile::tempdir().unwrap();
+        // a payload long enough to survive deflate's overhead; non-trivial
+        // content so dedup is meaningful for follow-on assets
+        let payload = b"hello world, this is a binary asset wrapped in zlib".repeat(8);
+        let stream = alt_prism_deflate::DeflatePrism
+            .recompose(&[1], &[&payload])
+            .expect("synthesise level-1 libz stream");
+        assert_ne!(stream, payload, "stream must differ from inflated payload");
+        let oid = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, &stream);
+        let alt = {
+            let mut odb = NativeOdb::open(dir.path()).unwrap();
+            let id = odb.put(oid, ObjectKind::Blob, &stream).unwrap();
+            odb.flush().unwrap();
+            id
+        };
+        // reopen: tier1 file must have made the recipe durable; recompose
+        // returns the original stream bytes byte-for-byte.
+        let odb = NativeOdb::open(dir.path()).unwrap();
+        let back = odb.get(&oid).unwrap().expect("blob present after reopen");
+        assert_eq!(back.kind, ObjectKind::Blob);
+        assert_eq!(back.data, stream, "tier1 recompose must be byte-exact");
+        assert_eq!(odb.lookup(&oid).unwrap().alt, alt);
+    }
+
+    #[test]
+    fn non_prism_blob_falls_through_tier0_unchanged() {
+        // Anything that isn't a libz stream (text, random bytes) must
+        // fall through to Tier 0 unchanged — no spurious recipe entries.
+        let dir = tempfile::tempdir().unwrap();
+        let data = b"plain text, definitely not a zlib stream\n".repeat(4);
+        let oid = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, &data);
+        {
+            let mut odb = NativeOdb::open(dir.path()).unwrap();
+            odb.put(oid, ObjectKind::Blob, &data).unwrap();
+            odb.flush().unwrap();
+        }
+        let odb = NativeOdb::open(dir.path()).unwrap();
+        let back = odb.get(&oid).unwrap().expect("present");
+        assert_eq!(back.data, data);
     }
 
     #[test]

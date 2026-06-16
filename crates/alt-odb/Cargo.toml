@@ -7,6 +7,8 @@ license.workspace = true
 
 [dependencies]
 alt-git-codec.workspace = true
+alt-prism.workspace = true
+alt-prism-deflate.workspace = true
 alt-store.workspace = true
 blake3.workspace = true
 thiserror.workspace = true

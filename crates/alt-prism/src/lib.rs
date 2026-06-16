@@ -30,7 +30,12 @@ pub struct Decomposition {
 /// One encoding-aware decomposer. A prism is a business-agnostic stone:
 /// it must be independently fuzzable and bound its own resource use
 /// (decompression bombs); it must never panic on adversarial input.
-pub trait Prism {
+///
+/// `Send + Sync` is required so a [`Registry`] (and any store embedding
+/// one) can sit inside an `Arc<Mutex<…>>` — the daemon holds the odb that
+/// way. Stateless prisms satisfy this trivially; any prism holding interior
+/// state must keep it thread-safe.
+pub trait Prism: Send + Sync {
     /// This prism's stable identity.
     fn id(&self) -> PrismId;
 
@@ -51,7 +56,7 @@ pub trait Prism {
 /// per design/prisms.md §-1.5).
 #[derive(Default)]
 pub struct Registry {
-    prisms: Vec<Box<dyn Prism>>,
+    prisms: Vec<Box<dyn Prism + Send + Sync>>,
 }
 
 /// A Tier 1 acceptance: the prism that produced it and its verified
@@ -68,7 +73,7 @@ impl Registry {
     }
 
     /// Registers a prism. Order is priority: earlier prisms are tried first.
-    pub fn register(&mut self, prism: Box<dyn Prism>) {
+    pub fn register(&mut self, prism: Box<dyn Prism + Send + Sync>) {
         self.prisms.push(prism);
     }
 
