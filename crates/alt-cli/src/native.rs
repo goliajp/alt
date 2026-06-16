@@ -852,6 +852,40 @@ impl<'a> NativeRepo<'a> {
         Ok(())
     }
 
+    /// W9 — when signing is enabled, return `Some((principal, sig_text))`
+    /// for the canonical push payload over `updates`; the caller appends
+    /// the pair to the wire capability list. Returns `Ok(None)` when
+    /// signing is off or the sec key isn't present (a sign-policy file
+    /// pointing at an absent principal isn't fatal — push still goes
+    /// out, just unsigned, same fall-through as `maybe_sign_op`).
+    fn maybe_sign_push(&self, updates: &[alt_wire::RefUpdate]) -> Res<Option<(String, String)>> {
+        let policy = SignPolicy::load(&self.store.alt_dir)?;
+        if !policy.enabled {
+            return Ok(None);
+        }
+        let principal = policy
+            .principal
+            .unwrap_or_else(|| self.id.principal.id.clone());
+        let sec_path = self
+            .store
+            .alt_dir
+            .join("identity")
+            .join(format!("{principal}.sec"));
+        let sec_text = match std::fs::read_to_string(&sec_path) {
+            Ok(t) => t,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e.into()),
+        };
+        let sec = alt_sign::SecretKey::from_text(&sec_text)
+            .map_err(|e| format!("malformed sec key at {}: {e}", sec_path.display()))?;
+        let payload = alt_wire::canonical_push_payload(updates, self.store.algo);
+        let sig = sec.sign(&payload);
+        // .to_text() includes a trailing newline; the wire cap list can
+        // not carry one, so strip it before declaring the cap
+        let sig_text = sig.to_text().trim().to_owned();
+        Ok(Some((principal, sig_text)))
+    }
+
     /// Walks `new`'s ancestor chain to see whether `old` appears (using the
     /// repository's git object graph via the open `Repository`). Used by
     /// [`ensure_no_force`] for the non-fast-forward check.
@@ -2990,12 +3024,22 @@ impl<'a> NativeRepo<'a> {
 
         // capabilities to declare on the push request
         let agent = format!("agent=alt/{}", env!("CARGO_PKG_VERSION"));
-        let caps_owned: Vec<String> = vec![
+        let mut caps_owned: Vec<String> = vec![
             "report-status".into(),
             "ofs-delta".into(),
             "side-band-64k".into(),
             agent,
         ];
+        // W9 — alt-to-alt private extension: when local signing policy
+        // is enabled and we have a sec key on disk, sign the canonical
+        // push payload and attach `alt-principal=<id>` +
+        // `alt-sig=alt-sig-ed25519:<sig>` to the cap list. Git's
+        // receive-pack silently ignores unknown caps; an alt server (W10+)
+        // looks for the pair and verifies it against its trust store.
+        if let Some((principal, sig_text)) = self.maybe_sign_push(&updates)? {
+            caps_owned.push(format!("{}={principal}", alt_wire::CAP_ALT_PRINCIPAL));
+            caps_owned.push(format!("{}={sig_text}", alt_wire::CAP_ALT_SIG));
+        }
         let caps_refs: Vec<&str> = caps_owned.iter().map(String::as_str).collect();
 
         let mut body = Vec::new();

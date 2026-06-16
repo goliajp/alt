@@ -107,6 +107,53 @@ pub enum PushError {
     ServerError(String),
 }
 
+/// Capability name an alt client sends to declare which principal
+/// signed this push (M6/W9). Value is the principal id; a paired
+/// `alt-sig` capability carries the signature.
+///
+/// Git's receive-pack ignores capabilities it didn't itself advertise,
+/// so this extension is wire-safe against any git server. An alt server
+/// (W10+) looks for both names and verifies the pair against its trust
+/// store.
+pub const CAP_ALT_PRINCIPAL: &str = "alt-principal";
+
+/// Capability name carrying the `alt-sig-ed25519:<base64url>` signature
+/// over [`canonical_push_payload`] (M6/W9). Paired with
+/// [`CAP_ALT_PRINCIPAL`]; either both present or both absent.
+pub const CAP_ALT_SIG: &str = "alt-sig";
+
+/// The canonical byte string a push signature signs over: each update
+/// formatted as `"<old-hex> <new-hex> <ref-name>\n"`, sorted by ref name
+/// to be order-independent against the client's input. Zero-oids are
+/// rendered as `"0"*40` (sha-1) / `"0"*64` (sha-256), matching the wire
+/// shape and what an alt server will reconstruct from the decoded
+/// updates.
+///
+/// Decoupling the signed payload from the on-wire byte order means the
+/// client and a future alt server can reconstruct the exact same bytes
+/// without parsing pkt-lines back into a tuple list and worrying about
+/// upstream re-ordering.
+pub fn canonical_push_payload(updates: &[RefUpdate], algo: HashAlgo) -> Vec<u8> {
+    let zero = zero_oid(algo);
+    let mut lines: Vec<String> = updates
+        .iter()
+        .map(|u| {
+            format!(
+                "{old} {new} {name}\n",
+                old = u.old.unwrap_or(zero),
+                new = u.new.unwrap_or(zero),
+                name = u.name,
+            )
+        })
+        .collect();
+    lines.sort();
+    let mut out = Vec::with_capacity(lines.iter().map(|l| l.len()).sum());
+    for l in lines {
+        out.extend_from_slice(l.as_bytes());
+    }
+    out
+}
+
 /// Encode the v1 push request body: ref-update commands followed by the
 /// pack bytes. The caller writes this whole thing as the `POST
 /// /git-receive-pack` body.
@@ -514,6 +561,64 @@ mod tests {
             Err(msg) => assert_eq!(msg, "index-pack failed"),
             Ok(()) => panic!("expected unpack failure"),
         }
+    }
+
+    /// W9 — the canonical push payload is sorted by ref name and uses the
+    /// same `"<old> <new> <name>\n"` shape on both sides of the wire, so
+    /// a client signature lines up exactly with what an alt server will
+    /// reconstruct from the decoded updates.
+    #[test]
+    fn canonical_payload_is_sorted_and_format_stable() {
+        let h1 = sha1("0123456789abcdef0123456789abcdef01234567");
+        let h2 = sha1("89abcdef0123456789abcdef0123456789abcdef");
+        // intentionally reverse-ordered input — sort by ref name kicks in
+        let updates = vec![
+            RefUpdate {
+                old: Some(h1),
+                new: Some(h2),
+                name: "refs/heads/main".into(),
+            },
+            RefUpdate {
+                old: None,
+                new: Some(h2),
+                name: "refs/heads/dev".into(),
+            },
+        ];
+        let payload = canonical_push_payload(&updates, HashAlgo::Sha1);
+        let zero = "0".repeat(40);
+        let expected = format!("{zero} {h2} refs/heads/dev\n{h1} {h2} refs/heads/main\n");
+        assert_eq!(
+            String::from_utf8(payload).unwrap(),
+            expected,
+            "canonical payload should sort by name and emit literal lines"
+        );
+    }
+
+    /// Two clients submitting the same updates in different orders sign
+    /// the same bytes — the wire extension is order-independent against
+    /// caller input. This is the property an alt server's verifier relies
+    /// on.
+    #[test]
+    fn canonical_payload_is_order_independent() {
+        let h1 = sha1("0123456789abcdef0123456789abcdef01234567");
+        let h2 = sha1("89abcdef0123456789abcdef0123456789abcdef");
+        let a = vec![
+            RefUpdate {
+                old: Some(h1),
+                new: Some(h2),
+                name: "refs/heads/a".into(),
+            },
+            RefUpdate {
+                old: Some(h1),
+                new: Some(h2),
+                name: "refs/heads/b".into(),
+            },
+        ];
+        let mut b = a.clone();
+        b.reverse();
+        let pa = canonical_push_payload(&a, HashAlgo::Sha1);
+        let pb = canonical_push_payload(&b, HashAlgo::Sha1);
+        assert_eq!(pa, pb);
     }
 
     /// `side-band-64k`-wrapped report: band 1 carries the status pkts,

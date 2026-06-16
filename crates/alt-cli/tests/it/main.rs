@@ -13,6 +13,7 @@ mod merge;
 mod op_log;
 mod push;
 mod push_policy;
+mod push_wire_ext;
 mod read_json;
 mod remote;
 mod status_json;
