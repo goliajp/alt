@@ -1460,6 +1460,15 @@ impl<'a> NativeRepo<'a> {
             } else {
                 Json::Null
             };
+            // M7-B3: perceptual-style hint for recognised binary kinds
+            // (PNG today). Mirrors the human view's "perceptual diff: …"
+            // line; `null` for non-image / unknown / text. Additive — v1
+            // schema stays backward-compatible.
+            let perceptual_diff_field = if binary {
+                perceptual_diff_json(&old_bytes, &new_bytes)
+            } else {
+                Json::Null
+            };
             let ast_diff_field = if semantic && !binary {
                 ast_diff_json(ch.path.as_bytes(), &old_bytes, &new_bytes)
             } else {
@@ -1483,6 +1492,7 @@ impl<'a> NativeRepo<'a> {
                 ("binary", Json::Bool(binary)),
                 ("hunks", Json::Array(hunks)),
                 ("chunk_diff", chunk_diff_field),
+                ("perceptual_diff", perceptual_diff_field),
                 ("ast_diff", ast_diff_field),
             ]));
         }
@@ -1574,6 +1584,21 @@ impl<'a> NativeRepo<'a> {
                 )
                 .as_bytes(),
             );
+            // M7-B3: when both sides are a kind we have a fingerprint for
+            // (PNG today), surface the perceptual-style hint so a reader
+            // sees "is this a small tweak or a wholly different image"
+            // without an external image tool. Stays silent when either
+            // side isn't a recognised kind — the chunk-diff line already
+            // covers the generic-binary case.
+            let old_fp = alt_diff::perceptual::fingerprint(&old_bytes);
+            let new_fp = alt_diff::perceptual::fingerprint(&new_bytes);
+            if let Some(d) = alt_diff::perceptual::distance(old_fp, new_fp) {
+                let kind = old_fp.unwrap().kind.as_str();
+                let pct_off = (d * 100.0).round() as u32;
+                buf.extend_from_slice(
+                    format!("perceptual diff: {pct_off}% off (prism={kind})\n").as_bytes(),
+                );
+            }
             return Ok(());
         }
 
@@ -3495,6 +3520,28 @@ fn render_status_json(
     doc.write(out)?;
     out.write_all(b"\n")?;
     Ok(())
+}
+
+/// JSON shape for an M7-B3 perceptual hint:
+/// `{kind:"perceptual_diff", prism, distance}` where `prism` is the
+/// content kind (`"png"` today) and `distance` is the [0.0, 1.0]
+/// fraction of fingerprint bits that flipped. `Json::Null` when neither
+/// side is a recognised image kind. Additive — no v1 schema bump.
+fn perceptual_diff_json(old: &[u8], new: &[u8]) -> crate::json::Json {
+    use crate::json::Json;
+    let old_fp = alt_diff::perceptual::fingerprint(old);
+    let new_fp = alt_diff::perceptual::fingerprint(new);
+    let Some(d) = alt_diff::perceptual::distance(old_fp, new_fp) else {
+        return Json::Null;
+    };
+    let prism = old_fp.unwrap().kind.as_str();
+    // Four decimal places — matches the chunk_diff ratio resolution.
+    let distance = (d * 10000.0).round() / 10000.0;
+    Json::Object(vec![
+        ("kind", Json::str("perceptual_diff")),
+        ("prism", Json::str(prism)),
+        ("distance", Json::Float(distance)),
+    ])
 }
 
 /// JSON shape for an A8 B1 binary chunk diff:

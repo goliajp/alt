@@ -46,6 +46,7 @@ libc.workspace = true
 alt-sign.workspace = true
 alt-testutil.workspace = true
 criterion.workspace = true
+flate2.workspace = true
 tempfile.workspace = true
 
 [[bench]]

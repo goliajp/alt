@@ -168,6 +168,141 @@ fn semantic_diff_falls_back_to_line_diff_for_unsupported_languages() {
     assert!(!out.contains("logical changes:"), "no AST surface: {out}");
 }
 
+/// Build a minimal valid 8-bit grayscale PNG (single IDAT, filter byte 0
+/// per scanline). Good enough for the M7-B3 perceptual-diff path: it walks
+/// PNG chunks, takes the IDAT bytes, inflates and fingerprints — no CRC
+/// check, no IHDR parsing required.
+fn build_minimal_png(width: u32, height: u32, pixels: &[u8]) -> Vec<u8> {
+    use flate2::{Compression, write::ZlibEncoder};
+    use std::io::Write;
+    assert_eq!(pixels.len() as u32, width * height);
+
+    fn chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
+        out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+        out.extend_from_slice(kind);
+        out.extend_from_slice(data);
+        out.extend_from_slice(&[0; 4]); // placeholder CRC (alt's reader ignores it)
+    }
+
+    let mut out = Vec::new();
+    out.extend_from_slice(b"\x89PNG\r\n\x1a\n");
+
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&width.to_be_bytes());
+    ihdr.extend_from_slice(&height.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 0, 0, 0, 0]); // depth 8 / greyscale / std compression / no filter / no interlace
+    chunk(&mut out, b"IHDR", &ihdr);
+
+    let mut raw = Vec::with_capacity((width * height + height) as usize);
+    for row in 0..height as usize {
+        raw.push(0); // PNG filter type None
+        let start = row * width as usize;
+        raw.extend_from_slice(&pixels[start..start + width as usize]);
+    }
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::new(6));
+    encoder.write_all(&raw).unwrap();
+    chunk(&mut out, b"IDAT", &encoder.finish().unwrap());
+    chunk(&mut out, b"IEND", &[]);
+    out
+}
+
+/// M7-B3: `alt diff` on a PNG that was changed should land a perceptual
+/// diff hint alongside the chunk-diff summary — both in the human view
+/// ("perceptual diff: N% off (prism=png)") and the JSON
+/// (`perceptual_diff: {kind, prism, distance}`). A small change must
+/// produce a non-trivial distance (the bytes-shared chunk ratio alone
+/// would mislead a reader who hadn't seen the perceptual line: a tiny
+/// pixel-block tweak rewrites the entire zlib stream).
+#[test]
+fn diff_png_change_reports_perceptual_hint() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+
+    // 16x16 grayscale; the second image flips the top-left 8x8 quadrant
+    let mut base = vec![0u8; 16 * 16];
+    for y in 0..16 {
+        for x in 0..16 {
+            base[y * 16 + x] = if (x + y) & 1 == 0 { 0 } else { 255 };
+        }
+    }
+    let mut tweaked = base.clone();
+    for y in 0..8 {
+        for x in 0..8 {
+            tweaked[y * 16 + x] = 255 - tweaked[y * 16 + x];
+        }
+    }
+
+    std::fs::write(root.join("img.png"), build_minimal_png(16, 16, &base)).unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "initial png"]));
+
+    std::fs::write(root.join("img.png"), build_minimal_png(16, 16, &tweaked)).unwrap();
+    ok(alt(root, &["add", "."]));
+
+    let text = ok(alt(root, &["diff", "--cached"]));
+    assert!(
+        text.contains("Binary files a/img.png and b/img.png differ"),
+        "git-compat binary line missing: {text}"
+    );
+    assert!(
+        text.contains("chunks: "),
+        "chunk-diff summary missing: {text}"
+    );
+    assert!(
+        text.contains("perceptual diff:") && text.contains("(prism=png)"),
+        "perceptual hint missing: {text}"
+    );
+    // the second image differs from the first; a 0% off reading would
+    // mean the hash collapsed to identical and the metric carries no
+    // signal — that's a regression even if the line is present.
+    assert!(
+        !text.contains("perceptual diff: 0% off"),
+        "perceptual distance should be non-zero on a real pixel change: {text}"
+    );
+
+    let json = ok(alt(root, &["diff", "--cached", "--json"]));
+    assert!(
+        json.contains("\"perceptual_diff\":{\"kind\":\"perceptual_diff\""),
+        "perceptual_diff json object missing: {json}"
+    );
+    assert!(
+        json.contains("\"prism\":\"png\""),
+        "prism=png missing in json: {json}"
+    );
+    assert!(
+        json.contains("\"distance\":") && !json.contains("\"distance\":0.0"),
+        "distance should be present and non-zero: {json}"
+    );
+}
+
+/// Non-image binary content keeps the existing chunk-diff summary but
+/// the perceptual hint stays silent (text) / null (json) — additive, no
+/// false signal on generic binary blobs.
+#[test]
+fn diff_generic_binary_omits_perceptual_hint() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("a.bin"), b"\x00\x01\x02first\x00").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "base"]));
+    std::fs::write(root.join("a.bin"), b"\x00\x01\x02second\x00").unwrap();
+    ok(alt(root, &["add", "."]));
+
+    let text = ok(alt(root, &["diff", "--cached"]));
+    assert!(text.contains("chunks: "), "chunk summary expected: {text}");
+    assert!(
+        !text.contains("perceptual diff:"),
+        "no perceptual hint on generic binary: {text}"
+    );
+    let json = ok(alt(root, &["diff", "--cached", "--json"]));
+    assert!(
+        json.contains("\"perceptual_diff\":null"),
+        "perceptual_diff must be null for generic binary: {json}"
+    );
+}
+
 /// E3b JSON: each file entry gains an `ast_diff` field under `--semantic`
 /// for languages with a parser; un-`--semantic` runs leave it null even
 /// for `.rs` files (the field is additive, not always-on).

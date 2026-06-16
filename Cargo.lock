@@ -50,6 +50,7 @@ dependencies = [
  "clap",
  "criterion",
  "encoding_rs",
+ "flate2",
  "libc",
  "tempfile",
 ]
@@ -59,6 +60,7 @@ name = "alt-diff"
 version = "0.0.0"
 dependencies = [
  "alt-cdc",
+ "flate2",
 ]
 
 [[package]]
