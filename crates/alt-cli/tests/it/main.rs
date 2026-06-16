@@ -9,6 +9,7 @@ mod diff;
 mod fetch;
 mod flow;
 mod identity;
+mod log_patch;
 mod merge;
 mod op_log;
 mod push;

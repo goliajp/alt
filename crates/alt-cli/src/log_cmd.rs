@@ -1,9 +1,9 @@
 use std::borrow::Cow;
 use std::io::Write;
 
-use alt_git_codec::ObjectId;
+use alt_git_codec::{Commit, ObjectId, ObjectKind, Tree};
 use alt_repo::Repository;
-use bstr::ByteSlice;
+use bstr::{BString, ByteSlice};
 
 /// git's `logmsg_reencode` for the default UTF-8 output encoding: a commit
 /// with an `encoding` header is converted to UTF-8 (whole buffer) and the
@@ -66,6 +66,11 @@ pub struct LogArgs {
     /// emit the commit list as a stable JSON object
     #[arg(long)]
     json: bool,
+    /// show a per-commit patch (unified diff for text, compact chunk +
+    /// perceptual summary for binary so large-file history doesn't blow up
+    /// the terminal). Ignored with --json.
+    #[arg(short = 'p', long = "patch")]
+    patch: bool,
     /// start revision
     #[arg(default_value = "HEAD")]
     rev: String,
@@ -95,7 +100,221 @@ pub fn run(
             "oneline" => write_oneline(out, &oid, &payload)?,
             other => return Err(format!("unsupported --pretty={other} (M1: raw, oneline)").into()),
         }
+        if args.patch {
+            emit_patch_for_commit(out, repo, &oid)?;
+        }
     }
+    Ok(())
+}
+
+/// One file in a flattened tree, identified by its full path. Built only
+/// for the patch path — keep it self-contained so log_cmd doesn't depend on
+/// alt-worktree's working-tree types.
+struct TreeFile {
+    path: BString,
+    oid: ObjectId,
+    mode: u32,
+}
+
+/// Recursive walk of a tree object into path-sorted file entries. Gitlinks
+/// are kept (so the patch surfaces a submodule oid change) but are treated
+/// as opaque — never read as blob content. Subtrees recurse; anything else
+/// is a leaf.
+fn flatten_tree(
+    repo: &Repository,
+    tree_oid: ObjectId,
+    prefix: &mut Vec<u8>,
+    out: &mut Vec<TreeFile>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let obj = repo
+        .read_object(&tree_oid)?
+        .ok_or_else(|| format!("tree {tree_oid} missing"))?;
+    if obj.kind != ObjectKind::Tree {
+        return Err(format!("{tree_oid} is not a tree").into());
+    }
+    let tree = Tree::parse(&obj.data, repo.algo())?;
+    for e in tree.entries {
+        let mark = prefix.len();
+        if !prefix.is_empty() {
+            prefix.push(b'/');
+        }
+        prefix.extend_from_slice(e.name.as_bytes());
+        if e.mode.object_kind() == ObjectKind::Tree {
+            flatten_tree(repo, e.oid, prefix, out)?;
+        } else {
+            out.push(TreeFile {
+                path: BString::from(prefix.clone()),
+                oid: e.oid,
+                mode: e.mode.value(),
+            });
+        }
+        prefix.truncate(mark);
+    }
+    Ok(())
+}
+
+/// Flattens a commit's full file set. The first parent (or an empty tree
+/// for a root commit) is what we diff against; merges show the first-parent
+/// patch only — matches git's `log -p` default.
+fn entries_for(
+    repo: &Repository,
+    commit: &ObjectId,
+) -> Result<Vec<TreeFile>, Box<dyn std::error::Error>> {
+    let obj = repo
+        .read_object(commit)?
+        .ok_or_else(|| format!("commit {commit} missing"))?;
+    let parsed = Commit::parse(&obj.data)?;
+    let tree = parsed
+        .tree()
+        .ok_or_else(|| format!("commit {commit} has no tree header"))?;
+    let mut out = Vec::new();
+    flatten_tree(repo, tree, &mut Vec::new(), &mut out)?;
+    out.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(out)
+}
+
+/// Walks one commit + its first parent and writes the differences as a
+/// stream of `diff --git` stanzas. Binary blobs land as a compact
+/// chunk + perceptual summary so a single 100 MiB image doesn't paste a
+/// megabyte of header noise (or worse, the bytes) into the terminal.
+fn emit_patch_for_commit(
+    out: &mut impl Write,
+    repo: &Repository,
+    commit: &ObjectId,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let obj = repo
+        .read_object(commit)?
+        .ok_or_else(|| format!("commit {commit} missing"))?;
+    let parsed = Commit::parse(&obj.data)?;
+    let new_files = entries_for(repo, commit)?;
+    let old_files = match parsed.parents().next() {
+        Some(p) => entries_for(repo, &p)?,
+        None => Vec::new(),
+    };
+
+    let (mut i, mut j) = (0, 0);
+    while i < old_files.len() || j < new_files.len() {
+        let cmp = match (old_files.get(i), new_files.get(j)) {
+            (Some(o), Some(n)) => o.path.cmp(&n.path),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => break,
+        };
+        match cmp {
+            std::cmp::Ordering::Less => {
+                let o = &old_files[i];
+                emit_file_stanza(out, repo, &o.path, Some(o), None)?;
+                i += 1;
+            }
+            std::cmp::Ordering::Greater => {
+                let n = &new_files[j];
+                emit_file_stanza(out, repo, &n.path, None, Some(n))?;
+                j += 1;
+            }
+            std::cmp::Ordering::Equal => {
+                let o = &old_files[i];
+                let n = &new_files[j];
+                if o.oid != n.oid || o.mode != n.mode {
+                    emit_file_stanza(out, repo, &n.path, Some(o), Some(n))?;
+                }
+                i += 1;
+                j += 1;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn read_blob_bytes(
+    repo: &Repository,
+    oid: &ObjectId,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let obj = repo
+        .read_object(oid)?
+        .ok_or_else(|| format!("blob {oid} missing"))?;
+    Ok(obj.data)
+}
+
+fn emit_file_stanza(
+    out: &mut impl Write,
+    repo: &Repository,
+    path: &BString,
+    old: Option<&TreeFile>,
+    new: Option<&TreeFile>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let path_str = path.to_str_lossy();
+    writeln!(out, "diff --git a/{path_str} b/{path_str}")?;
+    match (old, new) {
+        (None, Some(n)) => writeln!(out, "new file mode {:06o}", n.mode)?,
+        (Some(o), None) => writeln!(out, "deleted file mode {:06o}", o.mode)?,
+        (Some(o), Some(n)) if o.mode != n.mode => {
+            writeln!(out, "old mode {:06o}", o.mode)?;
+            writeln!(out, "new mode {:06o}", n.mode)?;
+        }
+        _ => {}
+    }
+    let abbrev = |oid: Option<&ObjectId>| match oid {
+        Some(o) => o.to_string().get(..7).unwrap_or("").to_owned(),
+        None => "0000000".into(),
+    };
+    writeln!(
+        out,
+        "index {}..{}",
+        abbrev(old.map(|o| &o.oid)),
+        abbrev(new.map(|n| &n.oid)),
+    )?;
+
+    // Gitlinks: never read as a blob (the oid is a submodule commit that
+    // lives in another repo); show the oid change line and move on.
+    if old.is_some_and(|o| o.mode == 0o160000) || new.is_some_and(|n| n.mode == 0o160000) {
+        writeln!(out, "Subproject commit change")?;
+        return Ok(());
+    }
+
+    let old_bytes = match old {
+        Some(o) => read_blob_bytes(repo, &o.oid)?,
+        None => Vec::new(),
+    };
+    let new_bytes = match new {
+        Some(n) => read_blob_bytes(repo, &n.oid)?,
+        None => Vec::new(),
+    };
+
+    if alt_diff::is_binary(&old_bytes) || alt_diff::is_binary(&new_bytes) {
+        // Compact summary: chunk-level dedup ratio + a perceptual hint
+        // when the content is a recognised image kind. Never dump raw
+        // bytes — `alt log -p` on a binary-asset history would otherwise
+        // be unusable.
+        writeln!(out, "Binary files a/{path_str} and b/{path_str} differ")?;
+        let cd =
+            alt_diff::binary::chunk_diff(&old_bytes, &new_bytes, alt_diff::binary::DEFAULT_PARAMS);
+        let pct = (cd.byte_shared_ratio() * 100.0).round() as u32;
+        writeln!(
+            out,
+            "chunks: {} shared, {} added, {} removed ({pct}% bytes shared)",
+            cd.shared_chunks, cd.added_chunks, cd.removed_chunks,
+        )?;
+        let old_fp = alt_diff::perceptual::fingerprint(&old_bytes);
+        let new_fp = alt_diff::perceptual::fingerprint(&new_bytes);
+        if let Some(d) = alt_diff::perceptual::distance(old_fp, new_fp) {
+            let kind = old_fp.unwrap().kind.as_str();
+            let pct_off = (d * 100.0).round() as u32;
+            writeln!(out, "perceptual diff: {pct_off}% off (prism={kind})")?;
+        }
+        return Ok(());
+    }
+
+    match old {
+        Some(_) => writeln!(out, "--- a/{path_str}")?,
+        None => writeln!(out, "--- /dev/null")?,
+    }
+    match new {
+        Some(_) => writeln!(out, "+++ b/{path_str}")?,
+        None => writeln!(out, "+++ /dev/null")?,
+    }
+    let mut buf = Vec::new();
+    alt_diff::write_unified(&mut buf, &old_bytes, &new_bytes, 3);
+    out.write_all(&buf)?;
     Ok(())
 }
 
