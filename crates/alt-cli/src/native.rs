@@ -13,8 +13,8 @@ use alt_refs::{IdemKey, OpId, RefChange, RefPolicy, RefStore, RefTarget};
 
 use crate::policy::{Capabilities, Policy};
 use alt_worktree::{
-    ChangeKind, Sig, WorkEntry, flatten_tree, index_entries, scan_worktree, status, write_commit,
-    write_tree,
+    ChangeKind, Sig, WorkEntry, flatten_tree, index_entries, scan_worktree,
+    scan_worktree_with_index, status, write_commit, write_tree,
 };
 use bstr::{BString, ByteSlice};
 
@@ -1134,6 +1134,10 @@ impl<'a> NativeRepo<'a> {
     /// updating the index to match the working tree.
     pub fn add(&mut self, paths: &[String], json: bool, out: &mut impl Write) -> Res<()> {
         self.ensure_writable("add")?;
+        // add re-reads + re-puts every staged path anyway; the stat-cache
+        // fast path would save the scan-time hash but lose to read_for +
+        // odb.put on the next line. Wins for a smarter add are tracked
+        // separately (the same-oid short-circuit in odb.put helps a bit).
         let scan = scan_worktree(&self.root, self.store.algo)?;
         let staging_all = paths.iter().any(|p| p == ".");
 
@@ -1300,7 +1304,11 @@ impl<'a> NativeRepo<'a> {
             .map(|e| e.path.clone())
             .collect();
         let index = index_entries(&raw);
-        let worktree = scan_worktree(&self.root, self.store.algo)?;
+        // Stat cache fast path: skip the read+hash on any file whose
+        // mtime/ctime/size/dev/ino/mode still matches the index entry —
+        // git's classic optimisation; on a 50k-file monorepo clean run
+        // this drops `alt status` from seconds to milliseconds.
+        let worktree = scan_worktree_with_index(&self.root, &raw, self.store.algo)?;
         let mut st = status(&head, &index, &worktree);
         // unmerged paths are reported in their own section, not as
         // staged/unstaged/untracked noise driven by the missing stage-0 entry
@@ -1390,8 +1398,12 @@ impl<'a> NativeRepo<'a> {
                 true,
             )
         } else {
-            let index = index_entries(&self.index()?);
-            let work = scan_worktree(&self.root, self.store.algo)?;
+            let raw = self.index()?;
+            // Stat cache (M8/A3 #2): skip read+hash for files whose stat
+            // still matches the index — diff of a clean monorepo collapses
+            // from seconds of unconditional file reads to ~ms.
+            let work = scan_worktree_with_index(&self.root, &raw, self.store.algo)?;
+            let index = index_entries(&raw);
             (index, work, true, false)
         };
 
@@ -1879,8 +1891,9 @@ impl<'a> NativeRepo<'a> {
     /// a tree-rewriting operation never clobbers uncommitted work.
     fn ensure_clean(&self, action: &str) -> Res<()> {
         let head = self.head_entries()?;
-        let index = index_entries(&self.index()?);
-        let worktree = scan_worktree(&self.root, self.store.algo)?;
+        let raw = self.index()?;
+        let index = index_entries(&raw);
+        let worktree = scan_worktree_with_index(&self.root, &raw, self.store.algo)?;
         let st = status(&head, &index, &worktree);
         if !st.staged.is_empty() || !st.unstaged.is_empty() {
             return Err(format!(

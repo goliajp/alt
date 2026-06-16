@@ -91,6 +91,12 @@ pub fn run(
     }
 
     let mut first = true;
+    // Flattened-tree cache shared across the walk. rev_walk visits N, N-1,
+    // N-2, … — so each commit's parent tree (just flattened as "old") shows
+    // up next iteration as the current commit's "new". Caching by commit
+    // oid drops the flatten count from ≈2·N to N+1 on a linear history.
+    let mut tree_cache: std::collections::HashMap<ObjectId, std::rc::Rc<Vec<TreeFile>>> =
+        std::collections::HashMap::new();
     for item in repo.rev_walk(start)?.take(limit) {
         let (oid, _) = item?;
         let obj = repo.read_object(&oid)?.expect("walked oid exists");
@@ -101,7 +107,7 @@ pub fn run(
             other => return Err(format!("unsupported --pretty={other} (M1: raw, oneline)").into()),
         }
         if args.patch {
-            emit_patch_for_commit(out, repo, &oid)?;
+            emit_patch_for_commit(out, repo, &oid, &mut tree_cache)?;
         }
     }
     Ok(())
@@ -155,11 +161,17 @@ fn flatten_tree(
 
 /// Flattens a commit's full file set. The first parent (or an empty tree
 /// for a root commit) is what we diff against; merges show the first-parent
-/// patch only — matches git's `log -p` default.
+/// patch only — matches git's `log -p` default. Cached: a commit oid is
+/// flattened at most once per `log -p` run (the caller passes a shared
+/// `HashMap`).
 fn entries_for(
     repo: &Repository,
     commit: &ObjectId,
-) -> Result<Vec<TreeFile>, Box<dyn std::error::Error>> {
+    cache: &mut std::collections::HashMap<ObjectId, std::rc::Rc<Vec<TreeFile>>>,
+) -> Result<std::rc::Rc<Vec<TreeFile>>, Box<dyn std::error::Error>> {
+    if let Some(hit) = cache.get(commit) {
+        return Ok(hit.clone());
+    }
     let obj = repo
         .read_object(commit)?
         .ok_or_else(|| format!("commit {commit} missing"))?;
@@ -170,7 +182,9 @@ fn entries_for(
     let mut out = Vec::new();
     flatten_tree(repo, tree, &mut Vec::new(), &mut out)?;
     out.sort_by(|a, b| a.path.cmp(&b.path));
-    Ok(out)
+    let rc = std::rc::Rc::new(out);
+    cache.insert(*commit, rc.clone());
+    Ok(rc)
 }
 
 /// Walks one commit + its first parent and writes the differences as a
@@ -181,15 +195,17 @@ fn emit_patch_for_commit(
     out: &mut impl Write,
     repo: &Repository,
     commit: &ObjectId,
+    cache: &mut std::collections::HashMap<ObjectId, std::rc::Rc<Vec<TreeFile>>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let obj = repo
         .read_object(commit)?
         .ok_or_else(|| format!("commit {commit} missing"))?;
     let parsed = Commit::parse(&obj.data)?;
-    let new_files = entries_for(repo, commit)?;
+    let new_files = entries_for(repo, commit, cache)?;
+    let empty_parent: std::rc::Rc<Vec<TreeFile>> = std::rc::Rc::new(Vec::new());
     let old_files = match parsed.parents().next() {
-        Some(p) => entries_for(repo, &p)?,
-        None => Vec::new(),
+        Some(p) => entries_for(repo, &p, cache)?,
+        None => empty_parent,
     };
 
     let (mut i, mut j) = (0, 0);

@@ -53,18 +53,55 @@ pub struct Status {
 /// Reads every tracked file in the working tree under `root` (skipping the
 /// `.alt`/`.git` control dirs), hashing each to its blob id. Symlinks are
 /// hashed by their target text (mode 120000), executables get mode 100755.
-/// Returns entries sorted by path.
+/// Returns entries sorted by path. **For status / diff on a real
+/// monorepo, prefer [`scan_worktree_with_index`]** — it skips the read+hash
+/// when the file's stat matches the index entry (git's classic stat
+/// cache), turning a 50k-file scan from seconds into milliseconds when
+/// nothing changed.
 pub fn scan_worktree(root: &Path, algo: HashAlgo) -> Result<Vec<WorkEntry>, WorktreeError> {
     let mut out = Vec::new();
-    scan_dir(root, root, algo, &mut out)?;
+    scan_dir(root, root, algo, None, &mut out)?;
     out.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(out)
 }
+
+/// Same as [`scan_worktree`] but consults `index` to short-circuit the
+/// read+hash on files whose `(mtime, ctime, size, dev, ino, mode)`
+/// reproduce the recorded stat — the matching index entry's oid + mode
+/// are reused verbatim. A status sweep over an unchanged monorepo then
+/// touches each file's inode once (the `symlink_metadata` syscall) and
+/// reads nothing.
+///
+/// The fast path is byte-identical to the slow path when the stat
+/// matches: the index stores the oid the working tree produced last time,
+/// so reusing it preserves the structural-fidelity invariant. A mismatch
+/// (the file was edited) falls through to the read+hash, so a stale stat
+/// can never report wrong content.
+pub fn scan_worktree_with_index(
+    root: &Path,
+    index: &Index,
+    algo: HashAlgo,
+) -> Result<Vec<WorkEntry>, WorktreeError> {
+    let mut by_path: std::collections::HashMap<&BString, &alt_git_index::IndexEntry> =
+        std::collections::HashMap::with_capacity(index.entries.len());
+    for e in &index.entries {
+        if e.stage() == 0 {
+            by_path.insert(&e.path, e);
+        }
+    }
+    let mut out = Vec::new();
+    scan_dir(root, root, algo, Some(&by_path), &mut out)?;
+    out.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(out)
+}
+
+type StatCache<'a> = std::collections::HashMap<&'a BString, &'a alt_git_index::IndexEntry>;
 
 fn scan_dir(
     root: &Path,
     dir: &Path,
     algo: HashAlgo,
+    cache: Option<&StatCache<'_>>,
     out: &mut Vec<WorkEntry>,
 ) -> Result<(), WorktreeError> {
     for entry in std::fs::read_dir(dir)? {
@@ -85,24 +122,80 @@ fn scan_dir(
             if is_submodule_dir(&path) {
                 continue;
             }
-            scan_dir(root, &path, algo, out)?;
+            scan_dir(root, &path, algo, cache, out)?;
             continue;
         }
-        let (mode, content) = if meta.is_symlink() {
-            let target = std::fs::read_link(&path)?;
-            (0o120000, target.as_os_str().as_encoded_bytes().to_vec())
-        } else {
-            let content = std::fs::read(&path)?;
-            (file_mode(&meta), content)
-        };
         let rel = path.strip_prefix(root).unwrap();
+        let rel_b = rel_path(rel);
+        let mode = if meta.is_symlink() {
+            0o120000
+        } else {
+            file_mode(&meta)
+        };
+
+        // Fast path: index has this path, and the recorded stat matches
+        // what the kernel just told us — trust the recorded oid + mode
+        // and don't read the file.
+        if let Some(map) = cache
+            && let Some(idx) = map.get(&rel_b)
+            && stat_matches(idx, &meta, mode)
+        {
+            out.push(WorkEntry {
+                path: rel_b,
+                oid: idx.oid,
+                mode: idx.mode,
+            });
+            continue;
+        }
+
+        let content = if meta.is_symlink() {
+            std::fs::read_link(&path)?
+                .as_os_str()
+                .as_encoded_bytes()
+                .to_vec()
+        } else {
+            std::fs::read(&path)?
+        };
         out.push(WorkEntry {
-            path: rel_path(rel),
+            path: rel_b,
             oid: ObjectId::hash_object(algo, ObjectKind::Blob, &content),
             mode,
         });
     }
     Ok(())
+}
+
+/// Git's stat-cache check (a tightened form): the working-tree file
+/// reproduces the index entry's mode, size, mtime, ctime, dev, ino. Any
+/// mismatch demotes the entry to the read+hash slow path.
+#[cfg(unix)]
+fn stat_matches(idx: &alt_git_index::IndexEntry, meta: &std::fs::Metadata, wt_mode: u32) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    if idx.mode != wt_mode {
+        return false;
+    }
+    if idx.size as u64 != meta.size() {
+        return false;
+    }
+    // mtime / ctime: index stores sec + nsec; meta gives both
+    if idx.mtime.0 as i64 != meta.mtime() || idx.mtime.1 as i64 != meta.mtime_nsec() {
+        return false;
+    }
+    if idx.ctime.0 as i64 != meta.ctime() || idx.ctime.1 as i64 != meta.ctime_nsec() {
+        return false;
+    }
+    if idx.dev != meta.dev() as u32 || idx.ino != meta.ino() as u32 {
+        return false;
+    }
+    true
+}
+
+#[cfg(not(unix))]
+fn stat_matches(idx: &alt_git_index::IndexEntry, meta: &std::fs::Metadata, wt_mode: u32) -> bool {
+    // No fine-grained stat on non-unix; fall through to the read+hash slow
+    // path. The same restriction applies to git on non-unix.
+    let _ = (idx, meta, wt_mode);
+    false
 }
 
 /// True when `dir` looks like a submodule worktree: it holds a `.git` entry

@@ -52,7 +52,10 @@ mod imp {
     }
 
     /// Whether the daemon serves this command at all: the reads it amortizes via
-    /// the held `Store`/`Repository`, plus the native writes (D4).
+    /// the held `Store`/`Repository`, plus the native writes (D4). cat-file and
+    /// rev-parse are pure reads that an agent often runs hundreds of times per
+    /// session — routing them through the daemon trades ~140 ms cold open per
+    /// invocation for a ~2 ms warm hit (M8/A3 attack point #1).
     pub fn routes_through_daemon(cmd: &Cmd) -> bool {
         matches!(
             cmd,
@@ -67,6 +70,8 @@ mod imp {
                 | Cmd::Merge { .. }
                 | Cmd::Flow { .. }
                 | Cmd::Undo { .. }
+                | Cmd::CatFile(_)
+                | Cmd::RevParse { .. }
         )
     }
 
@@ -82,6 +87,8 @@ mod imp {
                 | Cmd::Diff { .. }
                 | Cmd::Log(_)
                 | Cmd::OpLog { .. }
+                | Cmd::CatFile(_)
+                | Cmd::RevParse { .. }
                 | Cmd::Branch {
                     name: None,
                     delete: None,
