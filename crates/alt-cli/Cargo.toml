@@ -38,6 +38,7 @@ alt-sign.workspace = true
 alt-treediff.workspace = true
 alt-wire.workspace = true
 alt-wire-http.workspace = true
+tempfile.workspace = true
 tiny_http.workspace = true
 alt-worktree.workspace = true
 bstr.workspace = true

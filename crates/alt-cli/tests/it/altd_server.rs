@@ -126,6 +126,70 @@ fn altd_server_info_refs_serves_what_git_ls_remote_expects() {
 }
 
 #[test]
+fn altd_server_serves_git_clone_end_to_end() {
+    // M9/W10b: with the upload-pack POST wired, a real `git clone http://…/`
+    // should walk the server, pull the packfile, and reconstruct the
+    // working tree byte-exact against what the alt store holds.
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("a.txt"), "alpha\n").unwrap();
+    std::fs::write(root.join("b.txt"), "beta\n").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "first"]));
+    std::fs::write(root.join("a.txt"), "alpha\ngamma\n").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "second"]));
+
+    let server = spawn_server(root);
+    let url = format!("http://{}/", server.addr);
+
+    let clone_root = tempfile::tempdir().unwrap();
+    let target = clone_root.path().join("clone-target");
+    let out = Command::new("git")
+        .args(["clone", &url, target.to_str().unwrap()])
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_PROTOCOL", "version=2")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git clone failed: stderr={} stdout={}",
+        String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    // working tree files reconstructed byte-exact
+    assert_eq!(
+        std::fs::read(target.join("a.txt")).unwrap(),
+        b"alpha\ngamma\n",
+        "a.txt content after clone"
+    );
+    assert_eq!(
+        std::fs::read(target.join("b.txt")).unwrap(),
+        b"beta\n",
+        "b.txt content after clone"
+    );
+
+    // git log on the clone matches alt's history: two commits both visible
+    let log = Command::new("git")
+        .arg("-C")
+        .arg(&target)
+        .args(["log", "--pretty=oneline"])
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .unwrap();
+    assert!(log.status.success());
+    let log = String::from_utf8_lossy(&log.stdout);
+    assert!(
+        log.contains("first") && log.contains("second"),
+        "clone history must hold both commits: {log}"
+    );
+}
+
+#[test]
 fn altd_server_rejects_unknown_service() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();

@@ -105,23 +105,38 @@ fn dispatch(
     Ok(())
 }
 
-/// POST /git-upload-pack. Dispatch on the first `command=…` line in the
-/// pkt-line request body. W10a wires `ls-refs` end-to-end; `fetch` and
-/// the rest land in W10b.
+/// POST /git-upload-pack. v2 dispatch on the first `command=…` line:
+/// `ls-refs` (W10a) and `fetch` (W10b) both land here. The request body
+/// header is identical (`command=<x>\n` + optional `object-format=…`),
+/// only the args section differs — sniff the first frame to route.
 fn handle_upload_pack(
     repo: &Repository,
     mut req: tiny_http::Request,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut body = Vec::new();
     std::io::copy(req.as_reader(), &mut body)?;
-    // The request is one or more v2 commands. For ls-remote git issues
-    // exactly one ls-refs command — parse it, look up refs, encode the
-    // response.
-    let (lsr_req, _object_format) =
-        alt_wire::ls_refs::parse_ls_refs_request(&mut Cursor::new(&body))?;
-    let refs = read_refs(repo, &lsr_req)?;
+    let cmd = sniff_command(&body)?;
+
     let mut out = Vec::new();
-    alt_wire::ls_refs::encode_ls_refs_response(&mut out, &refs)?;
+    match cmd.as_str() {
+        "ls-refs" => {
+            let (lsr_req, _fmt) =
+                alt_wire::ls_refs::parse_ls_refs_request(&mut Cursor::new(&body))?;
+            let refs = read_refs(repo, &lsr_req)?;
+            alt_wire::ls_refs::encode_ls_refs_response(&mut out, &refs)?;
+        }
+        "fetch" => {
+            let (fetch_req, _fmt) = alt_wire::fetch::parse_fetch_request(&mut Cursor::new(&body))?;
+            let pack_bytes = build_pack_for_fetch(repo, &fetch_req)?;
+            alt_wire::fetch::encode_fetch_response_packfile(&mut out, &pack_bytes)?;
+        }
+        other => {
+            let r = Response::from_string(format!("unknown command={other}"))
+                .with_status_code(StatusCode(400));
+            req.respond(r)?;
+            return Ok(());
+        }
+    }
 
     let mut resp = Response::from_data(out);
     resp.add_header(header(
@@ -131,6 +146,66 @@ fn handle_upload_pack(
     resp.add_header(header("Cache-Control", "no-cache"));
     req.respond(resp)?;
     Ok(())
+}
+
+/// Find the leading `command=<name>` line of a v2 request body so the
+/// dispatch can pick its parser. The body is a stream of pkt-lines; the
+/// first data frame after the optional `# service=…` is the command.
+fn sniff_command(body: &[u8]) -> Result<String, Box<dyn std::error::Error>> {
+    let mut r = Cursor::new(body);
+    let mut scratch = Vec::new();
+    loop {
+        match alt_wire::pkt::read_frame(&mut r, &mut scratch)? {
+            alt_wire::pkt::Frame::Data(d) => {
+                let trimmed = trim_newline(d);
+                let s = std::str::from_utf8(trimmed)?;
+                if let Some(name) = s.strip_prefix("command=") {
+                    return Ok(name.to_owned());
+                }
+                // skip non-command headers
+            }
+            alt_wire::pkt::Frame::Delim
+            | alt_wire::pkt::Frame::Flush
+            | alt_wire::pkt::Frame::ResponseEnd => {
+                return Err("v2 request missing command= header".into());
+            }
+        }
+    }
+}
+
+fn trim_newline(b: &[u8]) -> &[u8] {
+    let mut end = b.len();
+    while end > 0 && (b[end - 1] == b'\n' || b[end - 1] == b'\r') {
+        end -= 1;
+    }
+    &b[..end]
+}
+
+/// Resolve the fetch request's want/have closure against the served
+/// repo's objects, then stream them through a plain `PackWriter` into a
+/// tempdir — the bytes are the wire payload, we don't keep the pack as
+/// stored state. Mirrors the existing push-side pack build in
+/// `alt-cli::native`.
+fn build_pack_for_fetch(
+    repo: &Repository,
+    req: &alt_wire::fetch::FetchRequest,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let outgoing = repo.reachable_objects(&req.wants, &req.haves)?;
+    if outgoing.is_empty() {
+        return Ok(Vec::new());
+    }
+    let dir = tempfile::tempdir()?;
+    let count = u32::try_from(outgoing.len())
+        .map_err(|_| "outgoing object set exceeds u32 (server-side)")?;
+    let mut writer = alt_git_pack::PackWriter::create(dir.path(), repo.algo(), count)?;
+    for (oid, kind) in &outgoing {
+        let obj = repo
+            .read_object(oid)?
+            .ok_or_else(|| format!("outgoing object {oid} missing from server odb"))?;
+        writer.add(*oid, *kind, &obj.data)?;
+    }
+    let written = writer.finish()?;
+    Ok(std::fs::read(&written.pack_path)?)
 }
 
 fn handle_info_refs(
