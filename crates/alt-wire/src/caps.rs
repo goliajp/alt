@@ -198,6 +198,76 @@ fn trim_newline(b: &[u8]) -> &[u8] {
     &b[..end]
 }
 
+/// Encode a smart-http v2 capability advertisement for `service` (e.g.
+/// `git-upload-pack`). M9/W10a — the server's first response on
+/// `GET <repo>/info/refs?service=…`. The body is exactly the bytes a
+/// client's [`parse_capability_advertisement`] reads.
+///
+/// Layout (per gitprotocol-v2.txt §1.1):
+///
+///   pkt: "# service=<svc>\n"
+///   flush
+///   pkt: "version 2\n"
+///   pkt: "agent=<agent>\n"
+///   pkt: "object-format=<fmt>\n"   (when provided)
+///   pkt: each command name with optional sub-features
+///   flush
+pub fn encode_capability_advertisement<W: std::io::Write>(
+    w: &mut W,
+    service: &str,
+    agent: &str,
+    object_format: Option<&str>,
+    commands: &[(&str, Option<&str>)],
+) -> std::io::Result<()> {
+    pkt::write_data(w, format!("# service={service}\n").as_bytes())?;
+    pkt::write_flush(w)?;
+    pkt::write_data(w, b"version 2\n")?;
+    pkt::write_data(w, format!("agent={agent}\n").as_bytes())?;
+    if let Some(fmt) = object_format {
+        pkt::write_data(w, format!("object-format={fmt}\n").as_bytes())?;
+    }
+    for (cmd, features) in commands {
+        match features {
+            Some(f) if !f.is_empty() => pkt::write_data(w, format!("{cmd}={f}\n").as_bytes())?,
+            _ => pkt::write_data(w, format!("{cmd}\n").as_bytes())?,
+        }
+    }
+    pkt::write_flush(w)
+}
+
+#[cfg(test)]
+mod server_tests {
+    use super::*;
+
+    #[test]
+    fn server_advert_round_trips_through_parse_capability_advertisement() {
+        let mut bytes = Vec::new();
+        encode_capability_advertisement(
+            &mut bytes,
+            "git-upload-pack",
+            "alt-server/0.0.0",
+            Some("sha1"),
+            &[
+                ("ls-refs", Some("unborn")),
+                ("fetch", Some("shallow wait-for-done")),
+            ],
+        )
+        .unwrap();
+        let ad =
+            parse_capability_advertisement(&mut std::io::Cursor::new(&bytes), "git-upload-pack")
+                .unwrap();
+        assert_eq!(ad.version, 2);
+        assert_eq!(ad.agent.as_deref(), Some("alt-server/0.0.0"));
+        assert_eq!(ad.object_format.as_deref(), Some("sha1"));
+        assert!(ad.supports("ls-refs"));
+        assert_eq!(ad.sub_features("ls-refs").unwrap(), vec!["unborn"]);
+        assert_eq!(
+            ad.sub_features("fetch").unwrap(),
+            vec!["shallow", "wait-for-done"]
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

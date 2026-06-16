@@ -239,6 +239,45 @@ impl Repository {
         }
     }
 
+    /// List every ref the repo holds as `(name, resolved oid, symref target
+    /// or None)`. Resolution follows symrefs (HEAD → refs/heads/main). The
+    /// alt-side returns owned strings so the caller doesn't borrow from
+    /// the backend across the iteration; ref counts are typically small
+    /// enough that this is fine. M9/W10a: the wire server uses it to
+    /// answer `ls-refs`.
+    pub fn list_refs(&self) -> Result<Vec<(String, ObjectId, Option<String>)>, RepoError> {
+        let mut out = Vec::new();
+        match &self.backend {
+            Backend::Git { refs, .. } => {
+                for r in refs.iter_refs()? {
+                    let name = r.name.to_string();
+                    let Some(oid) = refs.resolve(&name)? else {
+                        continue;
+                    };
+                    let symref_target = match &r.target {
+                        alt_git_refs::RefTarget::Symbolic(b) => Some(b.to_string()),
+                        alt_git_refs::RefTarget::Direct(_) => None,
+                    };
+                    out.push((name, oid, symref_target));
+                }
+            }
+            Backend::Alt(alt) => {
+                for (name, target) in alt.refs.iter() {
+                    let Some(oid) = alt.refs.resolve(name)? else {
+                        continue;
+                    };
+                    let symref_target = match target {
+                        alt_refs::RefTarget::Symbolic(s) => Some(s.clone()),
+                        alt_refs::RefTarget::Oid(_) => None,
+                    };
+                    out.push((name.to_owned(), oid, symref_target));
+                }
+            }
+        }
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(out)
+    }
+
     /// Resolves a ref name (following symrefs) on either backend.
     pub fn resolve_ref(&self, name: &str) -> Result<Option<ObjectId>, RepoError> {
         match &self.backend {

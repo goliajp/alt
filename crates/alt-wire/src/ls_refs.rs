@@ -178,6 +178,108 @@ fn trim_newline(b: &[u8]) -> &[u8] {
     &b[..end]
 }
 
+/// Server side of ls-refs (M9/W10a): parse the request the client sent.
+/// Layout (per gitprotocol-v2.txt):
+///
+///   pkt: "command=ls-refs\n"
+///   pkt: "object-format=<fmt>\n"   (optional)
+///   delim
+///   pkt: "peel\n"                  (optional, in any order)
+///   pkt: "symrefs\n"               (optional)
+///   pkt: "ref-prefix <p>\n"        (zero or more)
+///   flush
+///
+/// Returns the request struct plus the object-format string the client
+/// asked for (defaulting to None — server should treat as sha1).
+pub fn parse_ls_refs_request<R: std::io::Read>(
+    r: &mut R,
+) -> Result<(LsRefsRequest, Option<String>), LsRefsError> {
+    let mut req = LsRefsRequest::default();
+    let mut object_format = None;
+    let mut scratch = Vec::new();
+    // Pre-delim header: command + optional object-format.
+    loop {
+        let f = pkt::read_frame(r, &mut scratch)?;
+        match f {
+            Frame::Delim => break,
+            Frame::Flush => return Ok((req, object_format)),
+            Frame::ResponseEnd => return Ok((req, object_format)),
+            Frame::Data(line) => {
+                let line = trim_newline(line);
+                let s = std::str::from_utf8(line)
+                    .map_err(|_| LsRefsError::BadRefLine(line.to_vec()))?;
+                if s == "command=ls-refs" {
+                    continue;
+                }
+                if let Some(v) = s.strip_prefix("object-format=") {
+                    object_format = Some(v.trim().to_owned());
+                }
+                // unknown header lines: ignore — forward compatibility
+            }
+        }
+    }
+    // Post-delim args: peel / symrefs / ref-prefix.
+    loop {
+        let f = pkt::read_frame(r, &mut scratch)?;
+        match f {
+            Frame::Flush => break,
+            Frame::Delim | Frame::ResponseEnd => break,
+            Frame::Data(line) => {
+                let line = trim_newline(line);
+                let s = std::str::from_utf8(line)
+                    .map_err(|_| LsRefsError::BadRefLine(line.to_vec()))?;
+                match s {
+                    "peel" => req.peel = true,
+                    "symrefs" => req.symrefs = true,
+                    _ => {
+                        if let Some(p) = s.strip_prefix("ref-prefix ") {
+                            req.ref_prefixes.push(p.to_owned());
+                        }
+                        // unknown args: ignore
+                    }
+                }
+            }
+        }
+    }
+    Ok((req, object_format))
+}
+
+/// Server side of ls-refs (M9/W10a): encode the response — one pkt-line
+/// per ref then a flush — for a list of [`RefRecord`]s the server
+/// computed from its store. Matches [`parse_ls_refs_response`] byte-for-
+/// byte: a server's encoded refs round-trip through the client's parser.
+pub fn encode_ls_refs_response<W: std::io::Write>(
+    w: &mut W,
+    refs: &[RefRecord],
+) -> std::io::Result<()> {
+    let mut line = Vec::new();
+    for r in refs {
+        line.clear();
+        line.extend_from_slice(r.oid.to_string().as_bytes());
+        line.push(b' ');
+        line.extend_from_slice(r.name.as_bytes());
+        if let Some(t) = &r.symref_target {
+            line.extend_from_slice(b" symref-target:");
+            line.extend_from_slice(t.as_bytes());
+        }
+        if let Some(p) = &r.peeled {
+            line.extend_from_slice(b" peeled:");
+            line.extend_from_slice(p.to_string().as_bytes());
+        }
+        for (k, v) in &r.other {
+            line.push(b' ');
+            line.extend_from_slice(k.as_bytes());
+            if !v.is_empty() {
+                line.push(b':');
+                line.extend_from_slice(v.as_bytes());
+            }
+        }
+        line.push(b'\n');
+        pkt::write_data(w, &line)?;
+    }
+    pkt::write_flush(w)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

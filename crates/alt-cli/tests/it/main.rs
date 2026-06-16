@@ -1,4 +1,5 @@
 //! Single integration-test binary for alt-cli.
+mod altd_server;
 mod branch_switch;
 mod capability_gate;
 mod clone;

@@ -17,6 +17,10 @@ path = "src/main.rs"
 name = "altd"
 path = "src/bin/altd.rs"
 
+[[bin]]
+name = "altd-server"
+path = "src/bin/altd_server.rs"
+
 [dependencies]
 alt-diff.workspace = true
 alt-git-codec.workspace = true
@@ -34,6 +38,7 @@ alt-sign.workspace = true
 alt-treediff.workspace = true
 alt-wire.workspace = true
 alt-wire-http.workspace = true
+tiny_http.workspace = true
 alt-worktree.workspace = true
 bstr.workspace = true
 clap.workspace = true
