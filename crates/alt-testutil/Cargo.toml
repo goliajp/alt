@@ -13,3 +13,7 @@ flate2.workspace = true
 [[bin]]
 name = "build-large-corpus"
 path = "src/bin/build_large_corpus.rs"
+
+[[bin]]
+name = "build-monorepo-corpus"
+path = "src/bin/build_monorepo_corpus.rs"
