@@ -11,6 +11,7 @@ mod flow;
 mod identity;
 mod log_patch;
 mod merge;
+mod monorepo_bench;
 mod op_log;
 mod push;
 mod push_policy;
