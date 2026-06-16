@@ -629,6 +629,88 @@ impl<'a> NativeRepo<'a> {
     /// Reject the operation when the caller's policy forbids any write. Called
     /// at the top of every mutating command — covers `add` (which only writes
     /// the index, not refs) as well as the ref-producing commands.
+    /// W8 — local A6 branch_allow check for a push. `branch_allow` is a
+    /// list of glob patterns; if non-empty, every remote ref a push would
+    /// touch must match at least one pattern. The check uses the *short*
+    /// branch name (the part after `refs/heads/`) so a pattern like
+    /// `feature/*` lines up with how A6 patterns are written for local
+    /// commit gating.
+    fn ensure_push_branch_allowed(&self, changes: &[RefChange]) -> Res<()> {
+        let allow = &self.caps.branch_allow;
+        if allow.is_empty() {
+            return Ok(());
+        }
+        for c in changes {
+            let short = match c.name.strip_prefix("refs/heads/") {
+                Some(s) => s,
+                // non-branch updates (tag pushes, etc.) fall outside the
+                // branch_allow gate — those would land in a separate
+                // ref_allow when we grow one
+                None => continue,
+            };
+            if !allow.iter().any(|g| g.matches(short)) {
+                return Err(format!(
+                    "capability denied: push to '{}' is not in branch_allow",
+                    c.name
+                )
+                .into());
+            }
+        }
+        Ok(())
+    }
+
+    /// W8 — git-default "non-fast-forward needs `-f`" gate, independent
+    /// of A6. Force (`-f`) skips this; A6's `forbid_force` is the deeper
+    /// gate that even `-f` cannot bypass (handled separately by
+    /// [`ensure_no_force`]).
+    fn ensure_fast_forward(&self, changes: &[RefChange]) -> Res<()> {
+        for c in changes {
+            let nff = match (&c.old, &c.new) {
+                // delete a ref that exists on the remote
+                (Some(_), None) => true,
+                // create / symref — nothing on the remote to overwrite
+                (None, _) => false,
+                (Some(RefTarget::Symbolic(_)), _) | (_, Some(RefTarget::Symbolic(_))) => false,
+                (Some(RefTarget::Oid(old)), Some(RefTarget::Oid(new))) => {
+                    // The remote-side `old` must be present locally for an
+                    // ancestor check; if it isn't, the user needs to fetch
+                    // first — surface that as a clear precondition error.
+                    match self.try_is_ancestor(*old, *new)? {
+                        Some(is_anc) => !is_anc,
+                        None => {
+                            return Err(format!(
+                                "remote ref '{}' is at {old} which is not in the local odb; \
+                                 run `alt fetch <remote>` and re-try",
+                                c.name
+                            )
+                            .into());
+                        }
+                    }
+                }
+            };
+            if nff {
+                return Err(
+                    format!("non-fast-forward push to '{}'; pass -f to override", c.name).into(),
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Like [`is_ancestor`] but `Ok(None)` when one of the commits is
+    /// missing from the local odb instead of erroring — lets the caller
+    /// surface a precise "fetch first" message for the push pre-check.
+    fn try_is_ancestor(&self, old: ObjectId, new: ObjectId) -> Res<Option<bool>> {
+        if old == new {
+            return Ok(Some(true));
+        }
+        let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
+        if repo.read_object(&old)?.is_none() || repo.read_object(&new)?.is_none() {
+            return Ok(None);
+        }
+        Ok(Some(self.is_ancestor(old, new)?))
+    }
+
     fn ensure_writable(&self, verb: &str) -> Res<()> {
         if self.caps.read_only {
             return Err(format!("capability denied: principal cannot {verb} (read-only)").into());
@@ -2847,6 +2929,27 @@ impl<'a> NativeRepo<'a> {
                 writeln!(out, "push '{remote_name}': everything up to date")?;
             }
             return Ok(());
+        }
+
+        // M6/W8 — cross-party A6 pre-check: run the local capability
+        // policy against the would-be ref changes BEFORE going to the
+        // wire. The server enforces its own A6 (which we can't always
+        // know up-front), but the local gate stops a forbidden push from
+        // leaking the pack body onto the network at all.
+        let pseudo_changes: Vec<RefChange> = updates
+            .iter()
+            .filter(|u| u.old != u.new)
+            .map(|u| RefChange {
+                name: u.name.clone(),
+                old: u.old.map(RefTarget::Oid),
+                new: u.new.map(RefTarget::Oid),
+            })
+            .collect();
+        self.ensure_writable("push")?;
+        self.ensure_no_force(&pseudo_changes)?;
+        self.ensure_push_branch_allowed(&pseudo_changes)?;
+        if !force {
+            self.ensure_fast_forward(&pseudo_changes)?;
         }
 
         // compute outgoing object set: reachable(local tips) \ reachable(server tips)
