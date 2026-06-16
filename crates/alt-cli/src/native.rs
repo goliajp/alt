@@ -1203,6 +1203,13 @@ impl<'a> NativeRepo<'a> {
     }
 
     fn make_entry(&self, w: &WorkEntry) -> Res<IndexEntry> {
+        // Gitlinks (submodules) have no on-disk file at the path — only an
+        // empty placeholder directory (or nothing, when the submodule has
+        // not been initialised). Git encodes their index entry with zero
+        // stat fields; do the same so the index round-trips cleanly.
+        if w.mode == 0o160000 {
+            return Ok(gitlink_entry(w));
+        }
         let abs = self
             .root
             .join(w.path.to_path().map_err(|_| "non-utf8 path")?);
@@ -1867,8 +1874,13 @@ impl<'a> NativeRepo<'a> {
         let target_paths: HashSet<&BString> = target.iter().map(|e| &e.path).collect();
 
         // validate first: an untracked file in the way of a target file is a
-        // collision — refuse before touching anything.
+        // collision — refuse before touching anything. Gitlinks expect a
+        // directory (the submodule placeholder), so an existing dir there is
+        // not a collision; let materialize() decide.
         for t in target {
+            if t.mode == 0o160000 {
+                continue;
+            }
             if !old_paths.contains(&t.path) && self.abs(&t.path)?.symlink_metadata().is_ok() {
                 return Err(format!(
                     "untracked working tree file '{}' would be overwritten by switch",
@@ -1880,6 +1892,13 @@ impl<'a> NativeRepo<'a> {
 
         for o in old {
             if !target_paths.contains(&o.path) {
+                // Gitlinks point at a submodule directory we never managed
+                // on-disk; leaving the placeholder alone matches git's
+                // `git switch` behaviour (it only removes regular tracked
+                // files, not submodule directories).
+                if o.mode == 0o160000 {
+                    continue;
+                }
                 let abs = self.abs(&o.path)?;
                 if abs.symlink_metadata().is_ok() {
                     std::fs::remove_file(&abs)?;
@@ -1906,8 +1925,20 @@ impl<'a> NativeRepo<'a> {
 
     /// Writes one tree entry to the working tree (regular file, executable,
     /// or symlink), creating parent dirs and replacing whatever was there.
+    /// Gitlink entries (mode 160000) point at a submodule commit that lives
+    /// in another repo — there is nothing to write at our odb's level. Match
+    /// git's plain `clone` (no `--recurse-submodules`) by ensuring the
+    /// placeholder directory exists and stopping there. M7 will grow real
+    /// submodule fetch/checkout; A1 only removes the materialise crash.
     fn materialize(&self, w: &WorkEntry) -> Res<()> {
         let abs = self.abs(&w.path)?;
+        if w.mode == 0o160000 {
+            if abs.symlink_metadata().is_ok_and(|m| !m.is_dir()) {
+                std::fs::remove_file(&abs)?;
+            }
+            std::fs::create_dir_all(&abs)?;
+            return Ok(());
+        }
         if let Some(parent) = abs.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -4370,6 +4401,26 @@ fn stat_entry(meta: &std::fs::Metadata, w: &WorkEntry) -> IndexEntry {
 
 #[cfg(not(unix))]
 fn stat_entry(_meta: &std::fs::Metadata, w: &WorkEntry) -> IndexEntry {
+    IndexEntry {
+        ctime: (0, 0),
+        mtime: (0, 0),
+        dev: 0,
+        ino: 0,
+        mode: w.mode,
+        uid: 0,
+        gid: 0,
+        size: 0,
+        oid: w.oid,
+        flags: (w.path.len().min(0x0FFF)) as u16,
+        extended_flags: None,
+        path: w.path.clone(),
+    }
+}
+
+/// Zero-stat index entry for a gitlink (mode 160000). Git emits the same
+/// shape: there is no on-disk file to stat, only the recorded submodule
+/// commit oid. Keeps the index byte-comparable across alt and git.
+fn gitlink_entry(w: &WorkEntry) -> IndexEntry {
     IndexEntry {
         ctime: (0, 0),
         mtime: (0, 0),

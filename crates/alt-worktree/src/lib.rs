@@ -76,6 +76,15 @@ fn scan_dir(
         let path = entry.path();
         let meta = std::fs::symlink_metadata(&path)?;
         if meta.is_dir() {
+            // A submodule directory carries its own git layout (a `.git`
+            // file pointing at the gitdir, or a real `.git` dir). It's a
+            // separate repo, not working-tree content of this one — don't
+            // recurse, and don't synthesize a worktree entry for it: the
+            // submodule's HEAD oid is owned by the submodule, not us.
+            // status() filters spurious Deleted reports against the index.
+            if is_submodule_dir(&path) {
+                continue;
+            }
             scan_dir(root, &path, algo, out)?;
             continue;
         }
@@ -94,6 +103,13 @@ fn scan_dir(
         });
     }
     Ok(())
+}
+
+/// True when `dir` looks like a submodule worktree: it holds a `.git` entry
+/// (either a directory, for a freestanding clone, or a gitfile pointing at
+/// the parent's `.git/modules/...`).
+fn is_submodule_dir(dir: &Path) -> bool {
+    std::fs::symlink_metadata(dir.join(".git")).is_ok()
 }
 
 #[cfg(unix)]
@@ -363,9 +379,19 @@ pub fn changes<'a>(old: &'a [WorkEntry], new: &'a [WorkEntry]) -> Vec<Change<'a>
 pub fn status(head: &[WorkEntry], index: &[WorkEntry], worktree: &[WorkEntry]) -> Status {
     let mut s = Status::default();
     diff(head, index, |path, kind| s.staged.push((path, kind)));
+    // Gitlink paths in the index point at submodules: the worktree side
+    // (scan_worktree) deliberately emits no entry for them, so a naive diff
+    // would report them as Deleted on every status. Git treats an
+    // uninitialised submodule directory as clean; mirror that by filtering
+    // gitlink-tagged Deleted reports.
+    let gitlinks: std::collections::HashSet<&BString> = index
+        .iter()
+        .filter(|e| e.mode == 0o160000)
+        .map(|e| &e.path)
+        .collect();
     diff(index, worktree, |path, kind| match kind {
-        // a worktree file with no index entry is untracked, not "added"
         ChangeKind::Added => s.untracked.push(path),
+        ChangeKind::Deleted if gitlinks.contains(&path) => {}
         other => s.unstaged.push((path, other)),
     });
     s
@@ -488,6 +514,44 @@ mod tests {
                 "symlink hashes its target"
             );
         }
+    }
+
+    #[test]
+    fn scan_treats_submodule_dir_as_opaque() {
+        // a submodule worktree carries a .git entry (file or dir); scan
+        // must not descend into it — the inner files belong to another
+        // repo, not the parent's worktree.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("top.txt"), b"hi").unwrap();
+        let sub = root.join("submod");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::create_dir(sub.join(".git")).unwrap();
+        std::fs::write(sub.join(".git").join("HEAD"), b"ref: refs/heads/x\n").unwrap();
+        std::fs::write(sub.join("inner.txt"), b"should be invisible").unwrap();
+
+        let scan = scan_worktree(root, HashAlgo::Sha1).unwrap();
+        let paths: Vec<_> = scan.iter().map(|e| e.path.to_string()).collect();
+        assert_eq!(paths, vec!["top.txt".to_owned()]);
+    }
+
+    #[test]
+    fn status_treats_index_gitlink_as_clean_when_worktree_lacks_path() {
+        // A submodule that's recorded in the index but not initialised on
+        // disk should not be reported as "deleted" by status — git's
+        // baseline behaviour for an uninitialised submodule is clean.
+        let gitlink = WorkEntry {
+            path: "shFlags".into(),
+            oid: oid(0xAA),
+            mode: 0o160000,
+        };
+        let head = vec![gitlink.clone()];
+        let index = vec![gitlink];
+        let wt: Vec<WorkEntry> = vec![];
+        let s = status(&head, &index, &wt);
+        assert!(s.staged.is_empty(), "no staged changes expected");
+        assert!(s.unstaged.is_empty(), "uninit submodule must not show as deleted");
+        assert!(s.untracked.is_empty());
     }
 
     #[test]

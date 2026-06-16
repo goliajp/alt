@@ -200,17 +200,6 @@ fn alt_clone_materialises_corpus_repos() {
             if err.contains("no matching refs") || err.contains("remote has no branches") {
                 continue;
             }
-            // submodule corpus repos (gitflow-mirror) trip an existing
-            // alt-worktree limitation: gitlink entries get treated as
-            // blobs at materialise time. Out of scope for the wire
-            // dogfood — note + skip.
-            if err.contains("blob missing from store") {
-                eprintln!(
-                    "skip {}: clone hit gitlink materialise limitation",
-                    repo.display()
-                );
-                continue;
-            }
             panic!(
                 "{}: alt clone failed: {err}\nstdout: {}",
                 repo.display(),
@@ -235,6 +224,19 @@ fn alt_clone_materialises_corpus_repos() {
             head_resolved,
             "{}: alt HEAD must equal server HEAD",
             repo.display()
+        );
+
+        // M7-A1: status on a freshly cloned repo must be empty even when
+        // the source carries gitlink entries (gitflow-mirror's shFlags
+        // submodule). Anything in stdout is a regression — submodule
+        // paths must not surface as bogus deleted/untracked.
+        let status_out = ok("alt status", alt(&clone_dir, &["status"]));
+        assert!(
+            status_out.trim().is_empty()
+                || status_out.contains("nothing to commit")
+                || status_out.contains("clean"),
+            "{}: alt status after clone should be clean, got: {status_out:?}",
+            repo.display(),
         );
         swept += 1;
     }
