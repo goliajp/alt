@@ -279,13 +279,24 @@ pub enum FlowOp {
         #[command(subcommand)]
         op: FlowTopicOp,
     },
+    /// Release-branch operations
+    Release {
+        #[command(subcommand)]
+        op: FlowTopicOp,
+    },
+    /// Hotfix-branch operations
+    Hotfix {
+        #[command(subcommand)]
+        op: FlowTopicOp,
+    },
 }
 
 #[derive(Subcommand)]
 pub enum FlowTopicOp {
-    /// Branch `feature/<name>` off develop and switch to it
+    /// Branch the topic off its base and switch to it
     Start { name: String },
-    /// Merge `feature/<name>` back into develop and delete it
+    /// Merge the topic back into its target(s) and delete it (atomic
+    /// ref transaction + single op-log entry, like every other flow op)
     Finish { name: String },
 }
 
@@ -358,6 +369,18 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
             FlowOp::Feature {
                 op: FlowTopicOp::Finish { name },
             } => repo.flow_feature_finish(name, *json, out)?,
+            FlowOp::Release {
+                op: FlowTopicOp::Start { name },
+            } => repo.flow_release_start(name, *json, out)?,
+            FlowOp::Release {
+                op: FlowTopicOp::Finish { name },
+            } => repo.flow_release_finish(name, *json, out)?,
+            FlowOp::Hotfix {
+                op: FlowTopicOp::Start { name },
+            } => repo.flow_hotfix_start(name, *json, out)?,
+            FlowOp::Hotfix {
+                op: FlowTopicOp::Finish { name },
+            } => repo.flow_hotfix_finish(name, *json, out)?,
         },
         Command::Undo { json } => repo.undo(*json, out)?,
         Command::Workspace { op, json } => match op {

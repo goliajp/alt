@@ -146,6 +146,83 @@ fn killed_flow_feature_recovers_and_converges() {
     );
 }
 
+/// Same kill harness but for the M8/C1 release flow: spawn a child
+/// looping release start → commit → finish, SIGKILL, and verify the
+/// store stays atomic just like the feature variant. Release finish
+/// does *two* merges in one ref-tx (main, then back-merge into
+/// develop) — a real test that the C1 helper kept the single-op-log
+/// contract.
+#[test]
+#[ignore = "spawns a child workload; cousin of killed_flow_feature_recovers"]
+fn killed_flow_release_recovers_and_converges() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("seed.txt"), "seed\n").unwrap();
+    ok(alt(root, &["add", "seed.txt"]));
+    ok(alt(root, &["commit", "-m", "seed"]));
+    ok(alt(root, &["flow", "init"]));
+
+    let mut child = Command::new(std::env::current_exe().unwrap())
+        .args(["--ignored", "--exact", "flow_kill::release_child_workload"])
+        .env("ALT_FLOW_KILL_REPO", root)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(250));
+    child.kill().unwrap();
+    child.wait().unwrap();
+
+    for args in [
+        &["log", "--pretty=oneline", "-n", "1"][..],
+        &["status"][..],
+        &["branch"][..],
+    ] {
+        let out = alt(root, args);
+        assert!(
+            out.status.success(),
+            "post-kill alt {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr),
+        );
+    }
+
+    // a fresh release cycle completes against the post-kill store
+    ok(alt(root, &["flow", "release", "start", "post-kill"]));
+    std::fs::write(root.join("after.txt"), "after\n").unwrap();
+    ok(alt(root, &["add", "after.txt"]));
+    ok(alt(root, &["commit", "-m", "after"]));
+    ok(alt(root, &["flow", "release", "finish", "post-kill"]));
+    let log = ok(alt(root, &["log", "--pretty=oneline"]));
+    assert!(
+        log.contains("after"),
+        "post-kill release flow must complete: {log}"
+    );
+}
+
+#[test]
+#[ignore = "helper child workload, spawned by killed_flow_release_recovers"]
+fn release_child_workload() {
+    let Ok(repo) = std::env::var("ALT_FLOW_KILL_REPO") else {
+        return;
+    };
+    let repo = Path::new(&repo);
+    let mut k = 0u32;
+    loop {
+        let name = format!("r{k:04}");
+        let out = alt(repo, &["flow", "release", "start", &name]);
+        if !out.status.success() {
+            k = k.wrapping_add(1);
+            continue;
+        }
+        std::fs::write(repo.join(format!("{name}.txt")), "release\n").ok();
+        let _ = alt(repo, &["add", &format!("{name}.txt")]);
+        let _ = alt(repo, &["commit", "-m", &name]);
+        let _ = alt(repo, &["flow", "release", "finish", &name]);
+        k = k.wrapping_add(1);
+    }
+}
+
 /// Tighter race: hammer many short kills, asserting the store stays
 /// recoverable every time. Smoke-only — bounded to 5 iterations so the
 /// test still runs in a few seconds on a slow CI.

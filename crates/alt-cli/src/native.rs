@@ -2445,6 +2445,235 @@ impl<'a> NativeRepo<'a> {
         Ok(())
     }
 
+    /// `alt flow release start <name>`: branch `release/<name>` off
+    /// `develop` and switch to it — same atomic-ref-tx structure as
+    /// feature start, just with a different base + branch prefix.
+    pub fn flow_release_start(&mut self, name: &str, json: bool, out: &mut impl Write) -> Res<()> {
+        let flow = alt_flow::BranchModel::default().release(name)?;
+        self.flow_topic_start(&flow, json, out)
+    }
+
+    /// `alt flow release finish <name>`: merge `release/<name>` into
+    /// `main` *and* back-merge `main` into `develop`, delete the release
+    /// branch, move HEAD to `develop` — all in one ref-tx + one op-log
+    /// entry. A conflict on either merge aborts the whole flow (atomicity
+    /// keeps the prior state untouched). M8/C1 reuses the SIGKILL harness.
+    pub fn flow_release_finish(&mut self, name: &str, json: bool, out: &mut impl Write) -> Res<()> {
+        let flow = alt_flow::BranchModel::default().release(name)?;
+        let dev_ref = format!("refs/heads/{}", "develop");
+        self.flow_topic_finish_dual(&flow, &dev_ref, "release", json, out)
+    }
+
+    /// `alt flow hotfix start <name>`: branch `hotfix/<name>` off `main`
+    /// and switch to it.
+    pub fn flow_hotfix_start(&mut self, name: &str, json: bool, out: &mut impl Write) -> Res<()> {
+        let flow = alt_flow::BranchModel::default().hotfix(name)?;
+        self.flow_topic_start(&flow, json, out)
+    }
+
+    /// `alt flow hotfix finish <name>`: merge `hotfix/<name>` into `main`
+    /// and back-merge into `develop`, delete the hotfix branch, move HEAD
+    /// to `develop`. Same atomic shape as release finish.
+    pub fn flow_hotfix_finish(&mut self, name: &str, json: bool, out: &mut impl Write) -> Res<()> {
+        let flow = alt_flow::BranchModel::default().hotfix(name)?;
+        let dev_ref = format!("refs/heads/{}", "develop");
+        self.flow_topic_finish_dual(&flow, &dev_ref, "hotfix", json, out)
+    }
+
+    /// Shared start path for any flow whose start = "branch <topic> off
+    /// <base>, switch HEAD to topic". Single ref-tx, one op-log entry.
+    fn flow_topic_start(
+        &mut self,
+        flow: &alt_flow::Flow,
+        json: bool,
+        out: &mut impl Write,
+    ) -> Res<()> {
+        let topic_ref = format!("refs/heads/{}", flow.branch);
+        let base_ref = format!("refs/heads/{}", flow.base);
+        if self.store.refs.get(&topic_ref).is_some() {
+            return Err(format!("a branch named '{}' already exists", flow.branch).into());
+        }
+        let base = self.store.refs.resolve(&base_ref)?.ok_or_else(|| {
+            format!(
+                "base branch '{}' missing; run 'alt flow init' first",
+                flow.base
+            )
+        })?;
+        self.ensure_clean("flow start")?;
+
+        let target = self.commit_entries(base)?;
+        let old = index_entries(&self.index()?);
+        self.checkout(&old, &target)?;
+
+        let head_old = self.store.refs.get(&self.head_ref).cloned();
+        let head_ref = self.head_ref.clone();
+        self.commit_refs(
+            "flow",
+            &[
+                RefChange {
+                    name: topic_ref.clone(),
+                    old: None,
+                    new: Some(RefTarget::Oid(base)),
+                },
+                RefChange {
+                    name: head_ref,
+                    old: head_old,
+                    new: Some(RefTarget::Symbolic(topic_ref.clone())),
+                },
+            ],
+        )?;
+        if json {
+            use crate::json::Json;
+            crate::json::emit(
+                out,
+                vec![
+                    ("branch", Json::str(&flow.branch)),
+                    ("base", Json::str(&flow.base)),
+                    ("commit", Json::str(base.to_string())),
+                ],
+            )?;
+        } else {
+            writeln!(out, "Switched to a new branch '{}'", flow.branch)?;
+        }
+        Ok(())
+    }
+
+    /// Shared dual-target finish: merge `flow.branch` into `flow.target`
+    /// AND back-merge `flow.target` into `back_ref` (develop, by
+    /// convention), delete the topic, move HEAD to `back_ref`. All in
+    /// one ref-tx. A conflict on either merge aborts.
+    fn flow_topic_finish_dual(
+        &mut self,
+        flow: &alt_flow::Flow,
+        back_ref: &str,
+        verb: &str,
+        json: bool,
+        out: &mut impl Write,
+    ) -> Res<()> {
+        let topic_ref = format!("refs/heads/{}", flow.branch);
+        let target_ref = format!("refs/heads/{}", flow.target);
+        let topic_oid = self
+            .store
+            .refs
+            .resolve(&topic_ref)?
+            .ok_or_else(|| format!("no such {verb} branch '{}'", flow.branch))?;
+        let target_oid = self
+            .store
+            .refs
+            .resolve(&target_ref)?
+            .ok_or_else(|| format!("{} branch missing", flow.target))?;
+        let back_oid = self
+            .store
+            .refs
+            .resolve(back_ref)?
+            .ok_or_else(|| format!("{back_ref} missing; run 'alt flow init' first"))?;
+        self.ensure_clean("flow finish")?;
+
+        // Step 1: merge the topic into its target (main, typically). A
+        // conflict here aborts without touching any ref.
+        let (new_target, target_entries) =
+            match self.compute_merge(target_oid, topic_oid, &flow.branch)? {
+                MergeOutcome::UpToDate => (target_oid, self.commit_entries(target_oid)?),
+                MergeOutcome::FastForward(c) => (c, self.commit_entries(c)?),
+                MergeOutcome::Merged { commit, entries } => (commit, entries),
+                MergeOutcome::Conflicted(_) => {
+                    return Err(format!(
+                        "merge of '{}' into '{}' has conflicts; \
+                     resolve manually before retrying the {verb} finish",
+                        flow.branch, flow.target
+                    )
+                    .into());
+                }
+            };
+
+        // Step 2: back-merge the (just-advanced) target into develop, so
+        // hotfixes/releases land on both main and develop. Conflict here
+        // aborts the whole flow — the prior state is untouched until the
+        // single ref-tx below commits.
+        let (new_back, back_entries) = if new_target == back_oid {
+            // back already points at the same commit (rare but possible
+            // when develop == main): no second merge to compute
+            (back_oid, target_entries.clone())
+        } else {
+            match self.compute_merge(back_oid, new_target, &flow.target)? {
+                MergeOutcome::UpToDate => (back_oid, self.commit_entries(back_oid)?),
+                MergeOutcome::FastForward(c) => (c, self.commit_entries(c)?),
+                MergeOutcome::Merged { commit, entries } => (commit, entries),
+                MergeOutcome::Conflicted(_) => {
+                    return Err(format!(
+                        "back-merge of '{}' into '{back_ref}' has conflicts; \
+                         resolve manually before retrying the {verb} finish",
+                        flow.target
+                    )
+                    .into());
+                }
+            }
+        };
+
+        // Step 3: one atomic ref-tx — advance target + advance back-ref +
+        // delete topic + move HEAD to back-ref. SIGKILL anywhere splits
+        // into pre/post only (M8/C0 fixture verifies this for the whole
+        // flow family).
+        let head_old = self.store.refs.get(&self.head_ref).cloned();
+        let head_ref = self.head_ref.clone();
+        let mut changes = vec![
+            RefChange {
+                name: target_ref.clone(),
+                old: Some(RefTarget::Oid(target_oid)),
+                new: Some(RefTarget::Oid(new_target)),
+            },
+            RefChange {
+                name: topic_ref.clone(),
+                old: Some(RefTarget::Oid(topic_oid)),
+                new: None,
+            },
+            RefChange {
+                name: head_ref,
+                old: head_old,
+                new: Some(RefTarget::Symbolic(back_ref.to_owned())),
+            },
+        ];
+        // Only include the back-ref change when it actually moved — a
+        // RefChange with old == new is a no-op the refs layer would
+        // reject as a "no actual change".
+        if new_back != back_oid {
+            changes.push(RefChange {
+                name: back_ref.to_owned(),
+                old: Some(RefTarget::Oid(back_oid)),
+                new: Some(RefTarget::Oid(new_back)),
+            });
+        }
+        self.commit_refs("flow", &changes)?;
+
+        // bring the working tree onto the back-ref (develop)'s tree
+        let old = index_entries(&self.index()?);
+        self.checkout(&old, &back_entries)?;
+        if json {
+            use crate::json::Json;
+            crate::json::emit(
+                out,
+                vec![
+                    ("kind", Json::str(verb)),
+                    ("target", Json::str(&flow.target)),
+                    ("target_commit", Json::str(new_target.to_string())),
+                    (
+                        "back",
+                        Json::str(back_ref.trim_start_matches("refs/heads/")),
+                    ),
+                    ("back_commit", Json::str(new_back.to_string())),
+                    ("deleted", Json::str(&flow.branch)),
+                ],
+            )?;
+        } else {
+            writeln!(
+                out,
+                "Merged '{}' into '{}' and back-merged into '{back_ref}', deleted '{}'",
+                flow.branch, flow.target, flow.branch
+            )?;
+        }
+        Ok(())
+    }
+
     /// `alt undo`: invert the most recent ref transaction (restoring the prior
     /// branch/HEAD state) and re-materialize HEAD's tree. The inverse is
     /// itself recorded as an op, so undo is append-only and re-undoable.

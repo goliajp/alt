@@ -9,6 +9,7 @@ mod diff;
 mod fetch;
 mod flow;
 mod flow_kill;
+mod flow_release_hotfix;
 mod identity;
 mod log_patch;
 mod merge;
