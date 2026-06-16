@@ -8,3 +8,8 @@ license.workspace = true
 
 [dependencies]
 alt-git-codec.workspace = true
+flate2.workspace = true
+
+[[bin]]
+name = "build-large-corpus"
+path = "src/bin/build_large_corpus.rs"

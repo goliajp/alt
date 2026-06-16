@@ -279,6 +279,7 @@ name = "alt-testutil"
 version = "0.0.0"
 dependencies = [
  "alt-git-codec",
+ "flate2",
 ]
 
 [[package]]
