@@ -194,21 +194,19 @@ fn op_log_verify_round_trips_signing_and_detects_tampering() {
         "human verify rows: {human}"
     );
 
-    // tamper with the sig file: flip a base64 char inside the last
-    // signature, which should make verify return `bad-sig`
-    let mut tampered = sigs_body.clone();
-    if let Some(pos) = tampered.find("alt-sig-ed25519:") {
-        let body_start = pos + "alt-sig-ed25519:".len();
-        // flip the first body byte: 'A' <-> 'B', or in general bump it
-        // to the next alphabet letter
-        let bytes = unsafe { tampered.as_bytes_mut() };
-        bytes[body_start] = match bytes[body_start] {
-            b'A' => b'B',
-            b'B' => b'A',
-            other if other.is_ascii_alphabetic() => b'A',
-            other => other,
-        };
-    }
+    // tamper: replace the recorded sig with one produced by a freshly
+    // generated key signing the same op-id bytes. That guarantees a
+    // well-formed base64 body (parses cleanly) that fails Ed25519 verify
+    // against alice's pubkey — exactly the bad-sig path we want to hit.
+    let pos = sigs_body.find("alt-sig-ed25519:").unwrap();
+    let nl = sigs_body[pos..]
+        .find('\n')
+        .map(|i| pos + i)
+        .unwrap_or(sigs_body.len());
+    let (rogue_sec, _) = alt_sign::SecretKey::generate();
+    let rogue_sig_text = rogue_sec.sign(b"a different message").to_text();
+    let rogue_sig_text = rogue_sig_text.trim();
+    let tampered = format!("{}{rogue_sig_text}{}", &sigs_body[..pos], &sigs_body[nl..]);
     std::fs::write(&sigs_path, &tampered).unwrap();
     let json2 = ok(alt(root, &["op-log", "--verify", "--json"]));
     assert!(
