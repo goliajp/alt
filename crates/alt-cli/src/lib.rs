@@ -6,6 +6,7 @@
 pub mod cli;
 pub mod client;
 pub mod daemon;
+pub mod index_tx;
 pub mod json;
 pub mod log_cmd;
 pub mod native;

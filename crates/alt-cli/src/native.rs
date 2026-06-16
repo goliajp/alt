@@ -1141,15 +1141,19 @@ impl<'a> NativeRepo<'a> {
         let scan = scan_worktree(&self.root, self.store.algo)?;
         let staging_all = paths.iter().any(|p| p == ".");
 
-        // start from the current stage-0 entries (or empty when restaging all)
+        // snapshot the prior stage-0 entries — both the starting point for
+        // the new index and the "old" side of every IndexChange we'll
+        // record in the op log so `alt undo` can roll a stray `add` back.
+        let prior_stage_zero: Vec<IndexEntry> = self
+            .index()?
+            .entries
+            .into_iter()
+            .filter(|e| e.stage() == 0)
+            .collect();
         let mut entries: Vec<IndexEntry> = if staging_all {
             Vec::new()
         } else {
-            self.index()?
-                .entries
-                .into_iter()
-                .filter(|e| e.stage() == 0)
-                .collect()
+            prior_stage_zero.clone()
         };
 
         let mut staged = 0;
@@ -1157,6 +1161,20 @@ impl<'a> NativeRepo<'a> {
             scan.iter().map(|w| w.path.clone()).collect()
         } else {
             paths.iter().map(|p| BString::from(p.as_str())).collect()
+        };
+        // Touched paths are the union of "what changed in `entries`" — for
+        // staging_all it's the whole prior + everything in scan; for the
+        // explicit path form it's just the listed targets. We compute the
+        // change list after the index is rewritten so old/new come from
+        // the actual entries the index will hold.
+        let touched_paths: std::collections::BTreeSet<BString> = if staging_all {
+            prior_stage_zero
+                .iter()
+                .map(|e| e.path.clone())
+                .chain(scan.iter().map(|w| w.path.clone()))
+                .collect()
+        } else {
+            targets.iter().cloned().collect()
         };
         for rel in &targets {
             entries.retain(|e| &e.path != rel);
@@ -1180,10 +1198,36 @@ impl<'a> NativeRepo<'a> {
             &self.index_path,
             &Index {
                 version: 2,
-                entries,
+                entries: entries.clone(),
                 extensions: Vec::new(),
             },
         )?;
+
+        // M8-B1: record the index delta so `alt undo` can roll an `add`
+        // back. Skip when the call was a true no-op (touched zero paths or
+        // every touched path's entry was unchanged) — keeps an empty add
+        // from polluting the op log and wasting an undo step.
+        let prior_by_path: std::collections::HashMap<&BString, &IndexEntry> =
+            prior_stage_zero.iter().map(|e| (&e.path, e)).collect();
+        let new_by_path: std::collections::HashMap<&BString, &IndexEntry> =
+            entries.iter().map(|e| (&e.path, e)).collect();
+        let mut changes = Vec::new();
+        for p in &touched_paths {
+            let old = prior_by_path.get(p).map(|e| (e.oid, e.mode));
+            let new = new_by_path.get(p).map(|e| (e.oid, e.mode));
+            if old != new {
+                changes.push(crate::index_tx::IndexChange {
+                    path: p.clone(),
+                    old,
+                    new,
+                });
+            }
+        }
+        if !changes.is_empty() {
+            let payload = crate::index_tx::encode(&changes, self.store.algo);
+            let actor = self.id.actor("add");
+            self.store.refs.record_op(&actor, now_ms(), &payload)?;
+        }
         if json {
             crate::json::emit(out, vec![("staged", crate::json::Json::Num(staged as i64))])?;
         } else {
@@ -2405,6 +2449,20 @@ impl<'a> NativeRepo<'a> {
     /// branch/HEAD state) and re-materialize HEAD's tree. The inverse is
     /// itself recorded as an op, so undo is append-only and re-undoable.
     pub fn undo(&mut self, json: bool, out: &mut impl Write) -> Res<()> {
+        // M8-B1: dispatch on the very last op's payload kind. Ref-tx ops
+        // invert their ref changes (the M4 path); index-tx ops restore
+        // the prior stage-0 entries for each touched path — A2's "any
+        // state-changing op is reversible" extended beyond refs.
+        let last = self.store.refs.last_op().ok_or("nothing to undo")?.clone();
+        match last.payload.first().copied() {
+            Some(alt_refs::PAYLOAD_REF_TX) => self.undo_ref_tx(json, out),
+            Some(crate::index_tx::PAYLOAD_INDEX_TX) => self.undo_index_tx(&last.payload, json, out),
+            Some(other) => Err(format!("unknown op kind {other:#04x} — nothing to undo").into()),
+            None => Err("nothing to undo".into()),
+        }
+    }
+
+    fn undo_ref_tx(&mut self, json: bool, out: &mut impl Write) -> Res<()> {
         let changes = self
             .store
             .refs
@@ -2435,6 +2493,76 @@ impl<'a> NativeRepo<'a> {
             )?;
         } else {
             writeln!(out, "Undid the last operation")?;
+        }
+        Ok(())
+    }
+
+    fn undo_index_tx(&mut self, payload: &[u8], json: bool, out: &mut impl Write) -> Res<()> {
+        let changes = crate::index_tx::decode(payload).map_err(|e| e.to_string())?;
+        // Read current stage-0 entries, then rewrite each touched path
+        // back to its `old` side (None = drop the entry, Some = re-create
+        // with a zero-stat baseline; the next status walk re-stamps).
+        let mut entries: Vec<IndexEntry> = self
+            .index()?
+            .entries
+            .into_iter()
+            .filter(|e| e.stage() == 0)
+            .collect();
+        for ch in &changes {
+            entries.retain(|e| e.path != ch.path);
+            if let Some((oid, mode)) = ch.old {
+                entries.push(IndexEntry {
+                    ctime: (0, 0),
+                    mtime: (0, 0),
+                    dev: 0,
+                    ino: 0,
+                    mode,
+                    uid: 0,
+                    gid: 0,
+                    size: 0,
+                    oid,
+                    flags: (ch.path.len().min(0x0FFF)) as u16,
+                    extended_flags: None,
+                    path: ch.path.clone(),
+                });
+            }
+        }
+        entries.sort_by(|a, b| a.path.cmp(&b.path));
+        save_index(
+            &self.index_path,
+            &Index {
+                version: 2,
+                entries,
+                extensions: Vec::new(),
+            },
+        )?;
+        // Record the undo itself so a redo can find it. We use the inverse
+        // change list (swap old/new) so chaining undos behaves intuitively
+        // (undo of undo = the original state).
+        let inverse: Vec<crate::index_tx::IndexChange> = changes
+            .iter()
+            .map(|c| crate::index_tx::IndexChange {
+                path: c.path.clone(),
+                old: c.new,
+                new: c.old,
+            })
+            .collect();
+        let inv_payload = crate::index_tx::encode(&inverse, self.store.algo);
+        let actor = self.id.actor("undo");
+        self.store.refs.record_op(&actor, now_ms(), &inv_payload)?;
+
+        if json {
+            use crate::json::Json;
+            let paths = changes
+                .iter()
+                .map(|c| Json::str(c.path.to_str_lossy().to_string()))
+                .collect();
+            crate::json::emit(
+                out,
+                vec![("undone", Json::Bool(true)), ("paths", Json::Array(paths))],
+            )?;
+        } else {
+            writeln!(out, "Undid the last operation ({} path(s))", changes.len())?;
         }
         Ok(())
     }

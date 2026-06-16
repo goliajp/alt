@@ -365,8 +365,9 @@ impl RefStore {
     }
 
     /// The most recent ref transaction in the log (skipping non-ref ops like
-    /// import), as its list of changes — the unit `undo` inverts. `None` when
-    /// no ref transaction has ever been recorded.
+    /// import), as its list of changes — the unit `undo` inverts when the
+    /// last op is a ref tx. `None` when no ref transaction has ever been
+    /// recorded.
     pub fn last_transaction(&self) -> Result<Option<Vec<RefChange>>, RefError> {
         for op in self.oplog.ops().iter().rev() {
             if let Some(tx) = tx::parse_tx(&op.payload)? {
@@ -374,6 +375,15 @@ impl RefStore {
             }
         }
         Ok(None)
+    }
+
+    /// The very last op recorded, regardless of payload kind — the surface
+    /// `alt undo` dispatches on (ref-tx → invert ref changes; index-tx →
+    /// restore index entries; anything else → refuse). Distinct from
+    /// `last_transaction`, which scans past non-ref ops; this is whatever
+    /// happened most recently.
+    pub fn last_op(&self) -> Option<&alt_oplog::Op> {
+        self.oplog.ops().last()
     }
 }
 

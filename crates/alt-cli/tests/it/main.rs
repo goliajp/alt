@@ -19,6 +19,7 @@ mod push_wire_ext;
 mod read_json;
 mod remote;
 mod status_json;
+mod undo_add;
 mod wire_corpus;
 mod wire_test_server;
 mod workspace;

@@ -480,11 +480,16 @@ fn daemon_routes_structured_principal_to_oplog_per_request() {
         }
     }
     seen.sort();
+    // M8-B1: each agent now writes TWO ops per worker (`add` records its
+    // own index-tx, then `commit` records the ref tx). The invariant the
+    // test cares about is "no bleed and no loss": every agent id is in
+    // the set, and nothing else is — dedup before comparing.
+    seen.dedup();
     let mut want: Vec<String> = (0..N).map(|w| format!("agent-{w}")).collect();
     want.sort();
     assert_eq!(
         seen, want,
-        "each agent id appears exactly once in the op log — no bleed and no loss"
+        "each agent id appears at least once in the op log — no bleed and no loss"
     );
 }
 
