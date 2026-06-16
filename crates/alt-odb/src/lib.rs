@@ -398,8 +398,12 @@ impl NativeOdb {
     /// Single-chunk objects (the lineage-delta'd ones) go through the chunk
     /// store's decode-once forest, so a base shared by many versions is
     /// decoded just once; multi-chunk blobs (not delta'd) are assembled
-    /// normally. Integrity belongs to the output boundary (export →
-    /// `git fsck`), not to each read.
+    /// normally; Tier 1 (prism-decomposed) blobs come back through
+    /// `fetch_blob`, which already recomposes through the registry and
+    /// re-hashes the result against the recorded blob id (the prism
+    /// integrity boundary — without it a corrupt part could yield wrong
+    /// bytes silently). Tier 0 integrity still belongs to the output
+    /// boundary (export → `git fsck`), not to each read.
     pub fn for_each_object_unverified(
         &self,
         mut f: impl FnMut(&MapEntry, &[u8]),
@@ -407,12 +411,20 @@ impl NativeOdb {
         self.blobs
             .chunk_store()
             .for_each_decoded(|chunk_id, bytes| {
+                // Skip chunks that aren't a top-level git object: this includes
+                // prism parts and recipe-record blobs, which are stored
+                // alongside but have no MapEntry of their own.
                 for entry in self.map.by_alt(BlobId(chunk_id.0)) {
                     f(entry, bytes);
                 }
             })?;
         for entry in self.map.iter() {
-            if self.blobs.is_multi_chunk(entry.alt) {
+            if self.tier1.contains(entry.alt) {
+                // Tier 1: recompose through the registry; fetch_blob does the
+                // recompose+rehash so we never emit silently-wrong bytes.
+                let bytes = self.fetch_blob(entry.alt)?;
+                f(entry, &bytes);
+            } else if self.blobs.is_multi_chunk(entry.alt) {
                 let bytes = self.blobs.get_unverified(entry.alt)?;
                 f(entry, &bytes);
             }
@@ -766,6 +778,45 @@ mod tests {
         assert_eq!(back.kind, ObjectKind::Blob);
         assert_eq!(back.data, stream, "tier1 recompose must be byte-exact");
         assert_eq!(odb.lookup(&oid).unwrap().alt, alt);
+    }
+
+    #[test]
+    fn for_each_object_emits_tier1_blobs_recomposed() {
+        // The export / full-clone bulk read goes through
+        // for_each_object_unverified; it must emit Tier 1 blobs (whose
+        // `alt` id is not actually stored in the chunk store) too, or the
+        // exported pack ends up with fewer objects than its declared
+        // header count.
+        let dir = tempfile::tempdir().unwrap();
+        let payload = b"asset bytes wrapped in libz".repeat(6);
+        let stream = alt_prism_deflate::DeflatePrism
+            .recompose(&[1], &[&payload])
+            .unwrap();
+        let plain = b"plain text, not a prism candidate\n".to_vec();
+
+        let (oid_stream, oid_plain) = {
+            let mut odb = NativeOdb::open(dir.path()).unwrap();
+            let s = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, &stream);
+            let p = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, &plain);
+            odb.put(s, ObjectKind::Blob, &stream).unwrap();
+            odb.put(p, ObjectKind::Blob, &plain).unwrap();
+            odb.flush().unwrap();
+            (s, p)
+        };
+
+        let odb = NativeOdb::open(dir.path()).unwrap();
+        let mut seen: Vec<(ObjectId, Vec<u8>)> = Vec::new();
+        odb.for_each_object_unverified(|entry, bytes| {
+            seen.push((entry.git, bytes.to_vec()));
+        })
+        .unwrap();
+        seen.sort_by_key(|(id, _)| *id);
+        let mut expected = vec![(oid_stream, stream.clone()), (oid_plain, plain.clone())];
+        expected.sort_by_key(|(id, _)| *id);
+        assert_eq!(
+            seen, expected,
+            "Tier 1 + Tier 0 both flow through bulk read"
+        );
     }
 
     #[test]
