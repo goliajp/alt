@@ -61,6 +61,11 @@ pub struct Capabilities {
     pub path_allow: Vec<Glob>,
     /// Deny non-fast-forward updates and branch deletion.
     pub forbid_force: bool,
+    /// M10/W14 (A5b): when set, the wire receive-pack path rejects any
+    /// push that doesn't carry a valid Ed25519 signature over the
+    /// canonical push payload. Only enforced on the wire — local CLI
+    /// writes don't traverse the signature path.
+    pub require_signed: bool,
 }
 
 impl Capabilities {
@@ -72,6 +77,7 @@ impl Capabilities {
             branch_allow: Vec::new(),
             path_allow: Vec::new(),
             forbid_force: false,
+            require_signed: false,
         }
     }
 
@@ -197,6 +203,8 @@ fn parse_caps(spec: &str, line: usize) -> Result<Capabilities, PolicyError> {
             caps.read_only = true;
         } else if tok == "forbid-force" {
             caps.forbid_force = true;
+        } else if tok == "require-signed" {
+            caps.require_signed = true;
         } else if let Some(v) = tok.strip_prefix("branch=") {
             caps.branch_allow.push(Glob::new(v));
         } else if let Some(v) = tok.strip_prefix("path=") {
@@ -389,6 +397,21 @@ mod tests {
             id: id.into(),
             session: None,
         }
+    }
+
+    #[test]
+    fn require_signed_token_lifts_into_capabilities() {
+        let p = Policy::parse("human:anonymous -> require-signed").unwrap();
+        let caps = p.lookup(&principal(PrincipalKind::Human, "anonymous"));
+        assert!(
+            caps.require_signed,
+            "require-signed token must set the flag"
+        );
+        let other = p.lookup(&principal(PrincipalKind::Human, "alice"));
+        assert!(
+            !other.require_signed,
+            "non-matching principal must fall through to default"
+        );
     }
 
     #[test]

@@ -35,6 +35,25 @@ fn ok(o: Output) -> String {
 struct Server {
     child: Child,
     addr: String,
+    stderr: Option<BufReader<std::process::ChildStderr>>,
+}
+
+impl Server {
+    /// Kill the server, then drain everything it wrote to stderr since
+    /// the bind line. Reading must happen *after* kill since the child's
+    /// stderr fd stays open until the process exits, and a blocking
+    /// `read_to_string` would otherwise deadlock waiting for EOF.
+    #[allow(dead_code)]
+    fn drain_stderr(&mut self) -> String {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        let mut out = String::new();
+        if let Some(mut reader) = self.stderr.take() {
+            use std::io::Read;
+            let _ = reader.get_mut().read_to_string(&mut out);
+        }
+        out
+    }
 }
 
 impl Drop for Server {
@@ -77,7 +96,11 @@ fn spawn_server_with_env(env: &[(&str, &str)]) -> Server {
             panic!("altd-server never logged its listening address");
         }
     };
-    Server { child, addr }
+    Server {
+        child,
+        addr,
+        stderr: Some(reader),
+    }
 }
 
 #[test]
@@ -872,5 +895,232 @@ fn altd_server_alt_to_alt_clone_push_clone_round_trip() {
     assert!(
         clog.contains(&b_head_oid) && clog.contains(&seed_oid),
         "C clone must hold both seed and B-pushed commits: {clog}"
+    );
+}
+
+/// Generate an Ed25519 keypair, write the sec key to
+/// `<client>/.alt/identity/<principal>.sec`, the pub key to
+/// `<server>/.alt/trust/<principal>.pub`, and turn on signing in
+/// `<client>/.alt/sign-policy`. After this returns, an `alt push` from
+/// `client` carries `alt-principal=<principal>` + `alt-sig=<ed25519>`
+/// caps the server can verify against `<principal>.pub`.
+fn enable_signed_push(client: &Path, server: &Path, principal: &str) {
+    use alt_sign::SecretKey;
+    let (sec, pubkey) = SecretKey::generate();
+
+    let client_alt = client.join(".alt");
+    std::fs::create_dir_all(client_alt.join("identity")).unwrap();
+    std::fs::write(
+        client_alt.join("identity").join(format!("{principal}.sec")),
+        sec.to_text(),
+    )
+    .unwrap();
+    std::fs::write(
+        client_alt.join("sign-policy"),
+        format!("enabled = true\nprincipal = {principal}\n"),
+    )
+    .unwrap();
+
+    let server_alt = server.join(".alt");
+    std::fs::create_dir_all(server_alt.join("trust")).unwrap();
+    std::fs::write(
+        server_alt.join("trust").join(format!("{principal}.pub")),
+        pubkey.to_text(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn altd_server_verifies_signed_push_and_accepts_it() {
+    // M10/W14: a client configured for A5b signing (sign-policy + sec
+    // key) attaches `alt-principal=<id>` + `alt-sig=<ed25519>` to the
+    // push caps. The server verifies the signature against its
+    // `.alt/trust/<id>.pub` and the ref-update goes through. With the
+    // pubkey present we expect a clean accept; the negative-path tests
+    // below cover the rejections.
+    let origin_dir = tempfile::tempdir().unwrap();
+    let origin = origin_dir.path();
+    ok(alt(origin, &["init", "."]));
+    std::fs::write(origin.join("seed.txt"), "seed\n").unwrap();
+    ok(alt(origin, &["add", "."]));
+    ok(alt(origin, &["commit", "-m", "seed"]));
+
+    let server = spawn_server(origin);
+    let url = format!("http://{}/", server.addr);
+
+    // alt clone → make a signing client out of the clone
+    let cdir = tempfile::tempdir().unwrap();
+    let client = cdir.path().join("B");
+    ok(alt(cdir.path(), &["clone", &url, client.to_str().unwrap()]));
+    enable_signed_push(&client, origin, "alice");
+
+    // new commit, signed push
+    std::fs::write(client.join("from-alice.txt"), "from-alice\n").unwrap();
+    ok(alt(&client, &["add", "."]));
+    ok(alt(&client, &["commit", "-m", "alice-commit"]));
+    let r = alt(
+        &client,
+        &["push", "origin", "refs/heads/main:refs/heads/main"],
+    );
+    assert!(
+        r.status.success(),
+        "signed push must succeed: stdout={}; stderr={}",
+        String::from_utf8_lossy(&r.stdout),
+        String::from_utf8_lossy(&r.stderr)
+    );
+
+    // origin's main now holds alice's commit message
+    let log = ok(alt(origin, &["log", "--pretty=oneline", "refs/heads/main"]));
+    assert!(
+        log.contains("alice-commit"),
+        "origin main must advance to the signed push: {log}"
+    );
+}
+
+#[test]
+fn altd_server_rejects_unsigned_push_when_policy_requires_signing() {
+    // M10/W14: `.alt/policy` carries `human:anonymous -> require-signed`
+    // (single-repo mode has no Basic auth, so the wire path falls
+    // through to the `anonymous` principal). A plain git push with no
+    // `alt-sig` cap must be refused before objects land in odb.
+    let origin_dir = tempfile::tempdir().unwrap();
+    let origin = origin_dir.path();
+    ok(alt(origin, &["init", "."]));
+    std::fs::write(origin.join("seed.txt"), "seed\n").unwrap();
+    ok(alt(origin, &["add", "."]));
+    ok(alt(origin, &["commit", "-m", "seed"]));
+    std::fs::write(
+        origin.join(".alt").join("policy"),
+        "human:anonymous -> require-signed\n",
+    )
+    .unwrap();
+    let server = spawn_server(origin);
+    let url = format!("http://{}/", server.addr);
+
+    let src_dir = tempfile::tempdir().unwrap();
+    let src = src_dir.path();
+    let st = std::process::Command::new("git")
+        .args(["init", "-q", "-b", "main", src.to_str().unwrap()])
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .unwrap();
+    assert!(st.status.success());
+    std::fs::write(src.join("f.txt"), "unsigned\n").unwrap();
+    for args in [
+        &["-C", src.to_str().unwrap(), "add", "."][..],
+        &[
+            "-C",
+            src.to_str().unwrap(),
+            "-c",
+            "user.name=tester",
+            "-c",
+            "user.email=t@e",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "-m",
+            "unsigned",
+        ][..],
+    ] {
+        let o = std::process::Command::new("git")
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            o.status.success(),
+            "git: {}",
+            String::from_utf8_lossy(&o.stderr)
+        );
+    }
+
+    let push = std::process::Command::new("git")
+        .args([
+            "-C",
+            src.to_str().unwrap(),
+            "push",
+            &url,
+            "HEAD:refs/heads/main",
+        ])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .unwrap();
+    assert!(
+        !push.status.success(),
+        "unsigned push under require-signed must be refused: stdout={}",
+        String::from_utf8_lossy(&push.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&push.stderr);
+    assert!(
+        stderr.contains("signature required") || stderr.contains("rejected"),
+        "rejection should cite the missing signature: {stderr}"
+    );
+    drop(server);
+}
+
+#[test]
+fn altd_server_rejects_signed_push_from_unknown_principal() {
+    // M10/W14: client attaches a valid Ed25519 signature, but the
+    // server's `.alt/trust/` doesn't list the principal — the gate
+    // returns `principal '<id>' not in trust store`.
+    let origin_dir = tempfile::tempdir().unwrap();
+    let origin = origin_dir.path();
+    ok(alt(origin, &["init", "."]));
+    std::fs::write(origin.join("seed.txt"), "seed\n").unwrap();
+    ok(alt(origin, &["add", "."]));
+    ok(alt(origin, &["commit", "-m", "seed"]));
+    // require-signed: forces the signature gate to fire even for an
+    // unverified principal. Without a Basic-auth user the wire path
+    // falls through to the `anonymous` principal, so that's what the
+    // rule must target.
+    std::fs::write(
+        origin.join(".alt").join("policy"),
+        "human:anonymous -> require-signed\n",
+    )
+    .unwrap();
+
+    let server = spawn_server(origin);
+    let url = format!("http://{}/", server.addr);
+
+    // configure signing on the client, but *don't* publish the pubkey to
+    // the server's trust dir
+    let cdir = tempfile::tempdir().unwrap();
+    let client = cdir.path().join("B");
+    ok(alt(cdir.path(), &["clone", &url, client.to_str().unwrap()]));
+
+    use alt_sign::SecretKey;
+    let (sec, _pub) = SecretKey::generate();
+    let client_alt = client.join(".alt");
+    std::fs::create_dir_all(client_alt.join("identity")).unwrap();
+    std::fs::write(client_alt.join("identity").join("alice.sec"), sec.to_text()).unwrap();
+    std::fs::write(
+        client_alt.join("sign-policy"),
+        "enabled = true\nprincipal = alice\n",
+    )
+    .unwrap();
+
+    std::fs::write(client.join("nope.txt"), "no-trust\n").unwrap();
+    ok(alt(&client, &["add", "."]));
+    ok(alt(&client, &["commit", "-m", "no-trust"]));
+    let r = alt(
+        &client,
+        &["push", "origin", "refs/heads/main:refs/heads/main"],
+    );
+    // ensure ng surface drained before the server is dropped, so the
+    // assertion message can include the server-side trace if it fires
+    let mut server = server;
+    let server_log = server.drain_stderr();
+    assert!(
+        !r.status.success(),
+        "push signed by an untrusted principal must be refused: stdout={}; server_log={server_log}",
+        String::from_utf8_lossy(&r.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&r.stderr);
+    assert!(
+        stderr.contains("not in trust store")
+            || stderr.contains("signature required")
+            || stderr.contains("rejected"),
+        "rejection must surface to the client: client_stderr={stderr}\nserver_log={server_log}"
     );
 }

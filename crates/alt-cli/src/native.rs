@@ -257,6 +257,14 @@ impl Store {
         self.policy.lookup(principal)
     }
 
+    /// The principals this store trusts for A5b push signature checks
+    /// (M10/W14). Reads `<alt-dir>/trust/<principal>.pub` files via the
+    /// same scanner the local sig-verify command uses, so wire and local
+    /// trust roots can't diverge.
+    pub fn trust_keys(&self) -> Res<Vec<(String, alt_sign::PublicKey)>> {
+        read_pubkey_dir(&self.alt_dir.join("trust"))
+    }
+
     /// The op that applied a keyed write, if one is in the durable idempotency
     /// index — i.e. a request carrying `key` already took effect. The daemon
     /// checks this (after [`refresh`](Self::refresh)) before running a keyed

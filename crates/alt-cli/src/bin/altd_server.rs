@@ -29,7 +29,7 @@ use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use alt_cli::native::Store;
+use alt_cli::native::{Principal, PrincipalKind, Store};
 use alt_git_codec::{HashAlgo, ObjectId};
 use alt_refs::{RefChange, RefTarget};
 use alt_repo::Repository;
@@ -508,9 +508,28 @@ fn handle_receive_pack(
     std::io::copy(req.as_reader(), &mut body)?;
     let pushed = alt_wire::push::parse_push_request(&mut Cursor::new(&body), HashAlgo::Sha1)?;
 
+    // M10/W14 (A5b): pre-commit verify of the wire signature. The client
+    // may attach `alt-principal=<id>` + `alt-sig=<ed25519>` to the push
+    // capability list; we verify against the store's `<alt-dir>/trust/`
+    // public-key dir and either upgrade the actor (verified) or fall
+    // back to the Basic-auth user — unless `require-signed` is set, in
+    // which case unverified pushes are blocked before objects land.
+    let sig_outcome = verify_push_signature(store, &pushed)?;
+    let (effective_principal, sig_label) = pick_principal(&sig_outcome, auth_user);
+    let require_signed = require_signed_for(store, &effective_principal);
+    let sig_block: Option<String> = match (&sig_outcome, require_signed) {
+        (SigOutcome::Verified { .. }, _) => None,
+        (other, true) => Some(format!("signature required: {}", describe_sig(other))),
+        (_, false) => None,
+    };
+
     // Unpack the trailing pack into the store's odb. Empty pack = a
-    // pure-delete push, no objects to index.
-    let unpack_result: Result<(), String> = if pushed.pack.is_empty() {
+    // pure-delete push, no objects to index. A blocked signature short-
+    // circuits ingest — we never want a rejected push to litter odb.
+    let unpack_result: Result<(), String> = if sig_block.is_some() || pushed.pack.is_empty() {
+        // Either the signature gate already decided to reject (so we
+        // skip ingest entirely and let the commands fall through to
+        // `ng` below) or this is a pure-delete push with no objects.
         Ok(())
     } else {
         match ingest_pack(store, &pushed.pack) {
@@ -519,11 +538,19 @@ fn handle_receive_pack(
         }
     };
 
-    // Apply ref changes only if the pack unpacked cleanly; otherwise
-    // mark every command `ng` so the client sees a coherent reason.
+    // Apply ref changes only if the pack unpacked cleanly *and* the
+    // signature gate passed; otherwise mark every command `ng` so the
+    // client sees a coherent reason.
     let mut command_status: Vec<CommandStatus> = Vec::new();
-    if unpack_result.is_ok() {
-        match commit_ref_updates(store, &pushed.updates, auth_user) {
+    if let Some(reason) = &sig_block {
+        for u in &pushed.updates {
+            command_status.push(CommandStatus::Ng {
+                name: u.name.clone(),
+                reason: reason.clone(),
+            });
+        }
+    } else if unpack_result.is_ok() {
+        match commit_ref_updates(store, &pushed.updates, &effective_principal, sig_label) {
             Ok(()) => {
                 for u in &pushed.updates {
                     command_status.push(CommandStatus::Ok(u.name.clone()));
@@ -605,10 +632,101 @@ fn ingest_pack(store: &Mutex<Store>, pack: &[u8]) -> Result<(), Box<dyn std::err
 /// Policy; the resulting Capabilities feed a RefPolicy gate inside
 /// `commit_idempotent`, so a server-side ref-write rule is enforced
 /// before any state changes (a denied push leaves no op-log entry).
+/// M10/W14 (A5b): result of verifying the `alt-principal=<id>` +
+/// `alt-sig=<ed25519>` capabilities the client may have attached to a
+/// push. `NoSignature` is the empty-attribution baseline; the rest are
+/// failure modes the policy gate can act on.
+#[derive(Debug)]
+enum SigOutcome {
+    Verified { principal_id: String },
+    NoSignature,
+    BadSignature(String),
+    UnknownPrincipal(String),
+}
+
+fn describe_sig(o: &SigOutcome) -> String {
+    match o {
+        SigOutcome::Verified { .. } => "verified".into(),
+        SigOutcome::NoSignature => "no signature attached".into(),
+        SigOutcome::BadSignature(e) => format!("signature did not verify ({e})"),
+        SigOutcome::UnknownPrincipal(id) => format!("principal '{id}' not in trust store"),
+    }
+}
+
+/// Run the signature check against `<alt-dir>/trust/`. Returns
+/// `NoSignature` when the client didn't attach the pair (the common
+/// path on git-native clients).
+fn verify_push_signature(
+    store: &Mutex<Store>,
+    pushed: &alt_wire::push::PushRequest,
+) -> Result<SigOutcome, Box<dyn std::error::Error>> {
+    let principal_id = pushed
+        .capabilities
+        .iter()
+        .find_map(|c| c.strip_prefix(&format!("{}=", alt_wire::CAP_ALT_PRINCIPAL)));
+    let sig_text = pushed
+        .capabilities
+        .iter()
+        .find_map(|c| c.strip_prefix(&format!("{}=", alt_wire::CAP_ALT_SIG)));
+    let (principal_id, sig_text) = match (principal_id, sig_text) {
+        (Some(p), Some(s)) => (p.to_owned(), s.to_owned()),
+        _ => return Ok(SigOutcome::NoSignature),
+    };
+    let trust = {
+        let guard = store.lock().unwrap();
+        guard.trust_keys()?
+    };
+    let Some((_, pubkey)) = trust.iter().find(|(id, _)| id == &principal_id) else {
+        return Ok(SigOutcome::UnknownPrincipal(principal_id));
+    };
+    let sig = match alt_sign::Sig::from_text(&sig_text) {
+        Ok(s) => s,
+        Err(e) => return Ok(SigOutcome::BadSignature(format!("{e}"))),
+    };
+    let payload = alt_wire::canonical_push_payload(&pushed.updates, HashAlgo::Sha1);
+    match pubkey.verify(&payload, &sig) {
+        Ok(()) => Ok(SigOutcome::Verified { principal_id }),
+        Err(e) => Ok(SigOutcome::BadSignature(format!("{e}"))),
+    }
+}
+
+/// Pick the effective principal + signature label for the op-log actor
+/// string. A verified signature wins over Basic-auth (it's a stronger
+/// claim of identity); otherwise we fall back to the Basic-auth user
+/// (or "anonymous") and the label records *why* it isn't verified.
+fn pick_principal(outcome: &SigOutcome, auth_user: Option<&str>) -> (Principal, &'static str) {
+    let (id, label) = match outcome {
+        SigOutcome::Verified { principal_id } => (principal_id.clone(), "ed25519"),
+        SigOutcome::NoSignature => (auth_user.unwrap_or("anonymous").to_owned(), "none"),
+        SigOutcome::BadSignature(_) => (auth_user.unwrap_or("anonymous").to_owned(), "bad"),
+        SigOutcome::UnknownPrincipal(_) => (
+            auth_user.unwrap_or("anonymous").to_owned(),
+            "unknown-principal",
+        ),
+    };
+    (
+        Principal {
+            kind: PrincipalKind::Human,
+            id,
+            session: None,
+        },
+        label,
+    )
+}
+
+/// Does this principal's policy require a verified signature on every
+/// push? If so, an unverified push is short-circuited with `ng
+/// signature required` before any objects land.
+fn require_signed_for(store: &Mutex<Store>, principal: &Principal) -> bool {
+    let guard = store.lock().unwrap();
+    guard.capabilities_for(principal).require_signed
+}
+
 fn commit_ref_updates(
     store: &Mutex<Store>,
     updates: &[RefUpdate],
-    auth_user: Option<&str>,
+    principal: &alt_cli::native::Principal,
+    sig_label: &str,
 ) -> Result<(), String> {
     if updates.is_empty() {
         return Ok(());
@@ -622,19 +740,15 @@ fn commit_ref_updates(
             new: u.new.map(RefTarget::Oid),
         });
     }
-    let principal = alt_cli::native::Principal {
-        kind: alt_cli::native::PrincipalKind::Human,
-        id: auth_user.unwrap_or("anonymous").to_owned(),
-        session: None,
-    };
-    let caps = store_guard.capabilities_for(&principal);
+    let caps = store_guard.capabilities_for(principal);
     let actor = format!(
-        "{kind}:{id};verb:wire/receive-pack",
+        "{kind}:{id};verb:wire/receive-pack;sig:{sig}",
         kind = match principal.kind {
             alt_cli::native::PrincipalKind::Human => "human",
             alt_cli::native::PrincipalKind::Agent => "agent",
         },
         id = principal.id,
+        sig = sig_label,
     );
     // Build the RefPolicy that mirrors local `commit_refs_with`: a closure
     // over the caps' branch_allow drives the per-ref check inside the
