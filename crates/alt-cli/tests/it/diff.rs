@@ -368,3 +368,111 @@ fn semantic_diff_json_carries_ast_diff_field() {
         "is_format_only mismatch: {json}"
     );
 }
+
+/// Build a minimal valid (structurally-correct) ZIP archive with the
+/// given `(name, crc32, compressed_size)` entries. We don't write
+/// real compressed bytes — the central directory is all the
+/// alt-diff::part_aware ZIP path reads, so a placeholder body is
+/// enough to exercise the full alt diff binary path.
+fn build_minimal_zip(entries: &[(&str, u32, u32)]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut cd = Vec::new();
+    for (name, crc, csize) in entries {
+        let lfh_off = out.len() as u32;
+        out.extend_from_slice(b"PK\x03\x04");
+        out.extend_from_slice(&[20, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        out.extend_from_slice(&crc.to_le_bytes());
+        out.extend_from_slice(&csize.to_le_bytes());
+        out.extend_from_slice(&csize.to_le_bytes());
+        out.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(name.as_bytes());
+        out.extend(std::iter::repeat_n(0u8, *csize as usize));
+
+        cd.extend_from_slice(b"PK\x01\x02");
+        cd.extend_from_slice(&[20, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        cd.extend_from_slice(&crc.to_le_bytes());
+        cd.extend_from_slice(&csize.to_le_bytes());
+        cd.extend_from_slice(&csize.to_le_bytes());
+        cd.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        cd.extend_from_slice(&0u16.to_le_bytes());
+        cd.extend_from_slice(&0u16.to_le_bytes());
+        cd.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0]);
+        cd.extend_from_slice(&lfh_off.to_le_bytes());
+        cd.extend_from_slice(name.as_bytes());
+    }
+
+    let cd_off = out.len() as u32;
+    let cd_size = cd.len() as u32;
+    out.extend_from_slice(&cd);
+
+    out.extend_from_slice(b"PK\x05\x06");
+    out.extend_from_slice(&[0, 0, 0, 0]);
+    out.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+    out.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+    out.extend_from_slice(&cd_size.to_le_bytes());
+    out.extend_from_slice(&cd_off.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out
+}
+
+/// M12/W32 (B2 ZIP): `alt diff` on a ZIP-shaped binary file (docx
+/// stand-in) should land a part-aware line that surfaces which
+/// archive entry changed, not just "% bytes shared". This is the
+/// dogfood-driven path: when an agent edits a `.docx`, the reviewer
+/// sees "word/document.xml changed | [Content_Types].xml same"
+/// instead of an opaque chunk-diff ratio.
+#[test]
+fn diff_zip_change_reports_part_aware_summary() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+
+    let v1 = build_minimal_zip(&[
+        ("[Content_Types].xml", 0x1111_1111, 64),
+        ("word/document.xml", 0x2222_2222, 1024),
+    ]);
+    let v2 = build_minimal_zip(&[
+        ("[Content_Types].xml", 0x1111_1111, 64),
+        ("word/document.xml", 0x3333_3333, 1100),
+    ]);
+
+    std::fs::write(root.join("doc.docx"), &v1).unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "initial docx"]));
+
+    std::fs::write(root.join("doc.docx"), &v2).unwrap();
+    ok(alt(root, &["add", "."]));
+
+    let text = ok(alt(root, &["diff", "--cached"]));
+    assert!(
+        text.contains("Binary files a/doc.docx and b/doc.docx differ"),
+        "git-compat binary line missing: {text}"
+    );
+    assert!(
+        text.contains("zip: ") && text.contains("word/document.xml"),
+        "part-aware zip line must surface the changed entry: {text}"
+    );
+    assert!(
+        !text.contains("[Content_Types].xml"),
+        "byte-identical entries must be dropped from the line: {text}"
+    );
+
+    let json = ok(alt(root, &["diff", "--cached", "--json"]));
+    assert!(
+        json.contains("\"part_diff\":{\"kind\":\"part_diff\""),
+        "part_diff JSON object missing: {json}"
+    );
+    assert!(
+        json.contains("\"prism\":\"zip\""),
+        "prism=zip must appear in JSON: {json}"
+    );
+    assert!(
+        json.contains("\"name\":\"word/document.xml\",\"status\":\"changed\""),
+        "word/document.xml must be reported as changed: {json}"
+    );
+    assert!(
+        json.contains("\"name\":\"[Content_Types].xml\",\"status\":\"same\""),
+        "[Content_Types].xml must be reported as same: {json}"
+    );
+}
