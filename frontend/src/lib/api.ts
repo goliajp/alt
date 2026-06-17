@@ -103,6 +103,9 @@ export interface DiffPartAware {
   old_bytes: number;
   new_bytes: number;
   perceptual_distance: number | null;
+  /** Old / new 64-bit perceptual fingerprint hashes (hex). PNG only. */
+  perceptual_hash_old: string | null;
+  perceptual_hash_new: string | null;
   parts: PartChange[];
 }
 

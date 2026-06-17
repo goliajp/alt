@@ -8,6 +8,8 @@ import type {
 import { formatBytes } from "../lib/format";
 import { DiffView } from "./DiffView";
 import { ImageDiffView } from "./ImageDiffView";
+import { AltOnlyInsights } from "./AltOnlyInsights";
+import { FingerprintGrid } from "./FingerprintGrid";
 
 interface CommonProps {
   repo: string;
@@ -27,7 +29,8 @@ export function StructuredDiff({
   }
   return (
     <div className="font-mono text-[13px] leading-relaxed">
-      <div className="px-4 py-2 text-fg-muted bg-canvas-inset/40 border-b border-border-muted text-xs uppercase tracking-[0.18em]">
+      <AltOnlyInsights file={file} />
+      <div className="px-4 py-2 text-fg-muted bg-canvas-inset/20 border-b border-border-muted text-xs uppercase tracking-[0.18em]">
         {file.format} · {file.paths.length} change
         {file.paths.length === 1 ? "" : "s"}
       </div>
@@ -74,9 +77,22 @@ export function PartAwareDiff({
   file,
 }: CommonProps & { file: DiffPartAware }) {
   const sideBySide = file.format === "png" && file.old_oid && file.new_oid;
+  const showFingerprint =
+    file.format === "png" &&
+    file.perceptual_hash_old &&
+    file.perceptual_hash_new;
   return (
     <div className="font-mono text-[13px] leading-relaxed">
-      <div className="px-4 py-2 text-fg-muted bg-canvas-inset/40 border-b border-border-muted text-xs uppercase tracking-[0.18em] flex items-center gap-3 flex-wrap">
+      <AltOnlyInsights file={file} />
+
+      {showFingerprint ? (
+        <FingerprintGrid
+          oldHash={file.perceptual_hash_old!}
+          newHash={file.perceptual_hash_new!}
+        />
+      ) : null}
+
+      <div className="px-4 py-2 text-fg-muted bg-canvas-inset/20 border-b border-border-muted text-xs uppercase tracking-[0.18em] flex items-center gap-3 flex-wrap">
         <span>{file.format}</span>
         <span className="text-fg-subtle">·</span>
         <span>

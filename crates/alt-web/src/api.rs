@@ -547,13 +547,17 @@ fn build_file_diff(
             alt_diff::part_aware::PartKind::Png => "png",
             alt_diff::part_aware::PartKind::Zip => "zip",
         };
-        let perceptual_distance = if matches!(summary.kind, alt_diff::part_aware::PartKind::Png) {
-            let old_fp = alt_diff::perceptual::fingerprint(old_bytes);
-            let new_fp = alt_diff::perceptual::fingerprint(new_bytes);
-            alt_diff::perceptual::distance(old_fp, new_fp)
-        } else {
-            None
-        };
+        let (perceptual_distance, hash_old, hash_new) =
+            if matches!(summary.kind, alt_diff::part_aware::PartKind::Png) {
+                let old_fp = alt_diff::perceptual::fingerprint(old_bytes);
+                let new_fp = alt_diff::perceptual::fingerprint(new_bytes);
+                let d = alt_diff::perceptual::distance(old_fp, new_fp);
+                let ho = old_fp.map(|f| format!("{:016x}", f.hash));
+                let hn = new_fp.map(|f| format!("{:016x}", f.hash));
+                (d, ho, hn)
+            } else {
+                (None, None, None)
+            };
         let parts = enrich_parts_with_text_patches(
             &summary.kind,
             summary.parts,
@@ -569,6 +573,8 @@ fn build_file_diff(
             new_bytes: new_bytes.len(),
             parts,
             perceptual_distance,
+            perceptual_hash_old: hash_old,
+            perceptual_hash_new: hash_new,
         };
     }
     if alt_diff::is_binary(old_bytes) || alt_diff::is_binary(new_bytes) {
@@ -748,6 +754,10 @@ pub(crate) enum FileDiff {
         /// Perceptual fingerprint distance for PNG (0..=1). `None` when
         /// the kind isn't PNG or fingerprint couldn't be computed.
         perceptual_distance: Option<f64>,
+        /// Old / new perceptual fingerprint hashes as hex strings.
+        /// These are alt-only — git has no perceptual layer.
+        perceptual_hash_old: Option<String>,
+        perceptual_hash_new: Option<String>,
     },
     Binary {
         path: String,
@@ -821,6 +831,8 @@ impl FileDiff {
                 new_bytes,
                 parts,
                 perceptual_distance,
+                perceptual_hash_old,
+                perceptual_hash_new,
             } => {
                 let items: Vec<String> = parts
                     .iter()
@@ -863,8 +875,16 @@ impl FileDiff {
                     Some(d) => format!("{d}"),
                     None => "null".to_string(),
                 };
+                let hash_old = match perceptual_hash_old {
+                    Some(h) => json_string(h),
+                    None => "null".to_string(),
+                };
+                let hash_new = match perceptual_hash_new {
+                    Some(h) => json_string(h),
+                    None => "null".to_string(),
+                };
                 format!(
-                    "{{\"kind\":\"part_aware\",\"path\":{},\"format\":\"{}\",\"old_oid\":{},\"new_oid\":{},\"old_bytes\":{},\"new_bytes\":{},\"perceptual_distance\":{},\"parts\":[{}]}}",
+                    "{{\"kind\":\"part_aware\",\"path\":{},\"format\":\"{}\",\"old_oid\":{},\"new_oid\":{},\"old_bytes\":{},\"new_bytes\":{},\"perceptual_distance\":{},\"perceptual_hash_old\":{},\"perceptual_hash_new\":{},\"parts\":[{}]}}",
                     json_string(path),
                     format,
                     json_string(old_oid),
@@ -872,6 +892,8 @@ impl FileDiff {
                     old_bytes,
                     new_bytes,
                     pd,
+                    hash_old,
+                    hash_new,
                     items.join(","),
                 )
             }
@@ -948,14 +970,17 @@ fn diff_trees(
                 alt_diff::part_aware::PartKind::Png => "png",
                 alt_diff::part_aware::PartKind::Zip => "zip",
             };
-            let perceptual_distance = if matches!(summary.kind, alt_diff::part_aware::PartKind::Png)
-            {
-                let old_fp = alt_diff::perceptual::fingerprint(&old_bytes);
-                let new_fp = alt_diff::perceptual::fingerprint(&new_bytes);
-                alt_diff::perceptual::distance(old_fp, new_fp)
-            } else {
-                None
-            };
+            let (perceptual_distance, hash_old, hash_new) =
+                if matches!(summary.kind, alt_diff::part_aware::PartKind::Png) {
+                    let old_fp = alt_diff::perceptual::fingerprint(&old_bytes);
+                    let new_fp = alt_diff::perceptual::fingerprint(&new_bytes);
+                    let d = alt_diff::perceptual::distance(old_fp, new_fp);
+                    let ho = old_fp.map(|f| format!("{:016x}", f.hash));
+                    let hn = new_fp.map(|f| format!("{:016x}", f.hash));
+                    (d, ho, hn)
+                } else {
+                    (None, None, None)
+                };
 
             // For ZIP / OOXML, decode every member's inflated body on
             // both sides, then attach a unified-diff patch to each
@@ -979,6 +1004,8 @@ fn diff_trees(
                 new_bytes: new_bytes.len(),
                 parts,
                 perceptual_distance,
+                perceptual_hash_old: hash_old,
+                perceptual_hash_new: hash_new,
             });
             continue;
         }
