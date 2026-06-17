@@ -35,6 +35,41 @@ fn ok(o: Output) -> String {
     String::from_utf8(o.stdout).unwrap()
 }
 
+/// Drain any staged-but-uncommitted state the killed child left behind.
+/// The race window is `alt add fN.txt` → SIGKILL → before `alt commit`:
+/// from alt's POV this is a coherent state (the index sits where it
+/// sat after the explicit `add`), but `flow feature start` correctly
+/// refuses to overwrite it. The recovery test isn't about that
+/// refusal — commit whatever's pending (a benign no-op when nothing
+/// is staged) so the subsequent fresh round can use the standard
+/// clean-tree path.
+fn settle_post_kill_dirty_state(root: &Path) {
+    let status_json = alt(root, &["status", "--json"]);
+    if !status_json.status.success() {
+        return;
+    }
+    let body = String::from_utf8_lossy(&status_json.stdout);
+    // Heuristic — the schema carries `"staged":[...]` and
+    // `"unstaged":[...]`. A non-empty array means there's something to
+    // settle. We don't try to match JSON precisely; checking for the
+    // closing-bracket-after-bracket form `"staged":[]` / `"unstaged":[]`
+    // is enough to skip the no-op case fast.
+    if body.contains("\"staged\":[]") && body.contains("\"unstaged\":[]") {
+        return;
+    }
+    // Commit whatever the loop staged. The unstaged path needs an
+    // explicit add first so its files reach the index.
+    let _ = alt(root, &["add", "."]);
+    let _ = alt(
+        root,
+        &[
+            "commit",
+            "-m",
+            "settle-post-kill-dirty-state (test fixture)",
+        ],
+    );
+}
+
 /// Loop running `alt flow feature start fK` then `finish fK` for K = 0..,
 /// driven by env vars so the parent test below can spawn it via
 /// `current_exe()`. A no-op (instant return) when the env vars aren't
@@ -131,6 +166,15 @@ fn killed_flow_feature_recovers_and_converges() {
     // 4. Sanity: pick a fresh feature name and run a full start → commit
     // → finish cycle. If atomicity was broken, this round usually trips
     // on a stale ref or a corrupt op log.
+    //
+    // First clear any leftover dirty state from the killed child: if the
+    // kill landed between the loop's `alt add fN.txt` and the
+    // subsequent `alt commit -m fN`, the index is staged but the
+    // working tree isn't reset — a coherent state from alt's POV, but
+    // one that `flow feature start` correctly refuses to overwrite.
+    // The test isn't about that refusal; commit-or-reset whatever's
+    // pending so the fresh round runs on a clean slate.
+    settle_post_kill_dirty_state(root);
     let fresh = "post-kill-feature";
     ok(alt(root, &["flow", "feature", "start", fresh]));
     std::fs::write(root.join("post.txt"), "post\n").unwrap();
@@ -187,6 +231,10 @@ fn killed_flow_release_recovers_and_converges() {
         );
     }
 
+    // Clean any post-kill staged/unstaged state so the fresh round
+    // runs on a clean slate — same rationale as the feature variant
+    // above.
+    settle_post_kill_dirty_state(root);
     // a fresh release cycle completes against the post-kill store
     ok(alt(root, &["flow", "release", "start", "post-kill"]));
     std::fs::write(root.join("after.txt"), "after\n").unwrap();
