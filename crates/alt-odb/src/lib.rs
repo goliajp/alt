@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 
 use alt_git_codec::{ObjectId, ObjectKind, RawObject};
 use alt_prism::Registry;
-use alt_store::{BlobId, BlobOptions, BlobStore, CompactReport, StoreError};
+use alt_store::{BlobId, BlobOptions, BlobStore, CompactReport, StoreCheckpoint, StoreError};
 
 pub use map::{MapEntry, ObjectMap};
 use tier1::Tier1Map;
@@ -111,6 +111,18 @@ pub enum OdbError {
     Tier1Recompose(BlobId),
     #[error("tier1 recomposed bytes do not hash to {0}")]
     Tier1HashMismatch(BlobId),
+}
+
+/// A point-in-time write cursor of a [`NativeOdb`] for [`NativeOdb::rewind`]:
+/// snapshots each append file's current length (chunks pack, blobmap, tier1,
+/// map.alt) so a failed receive-pack ingest can roll back every newly written
+/// object without leaving orphans. Take it under the odb write lock and pass
+/// the same value back to `rewind` under the same lock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OdbCheckpoint {
+    blobs: StoreCheckpoint,
+    tier1_len: u64,
+    map_len: u64,
 }
 
 /// The native object database: blob store + git-identity map.
@@ -487,6 +499,57 @@ impl NativeOdb {
             return Ok(());
         }
         self.sync_to(target)
+    }
+
+    /// Snapshots the write cursor across all three append files (chunks pack,
+    /// blobmap, map.alt) plus tier1, so a later [`Self::rewind`] can roll back
+    /// every object written after it. Acquires the odb write lock + reconciles
+    /// in-memory state with disk, captures the cursor, then releases the lock
+    /// the same way [`Self::refresh`] does — keeping the file lock symmetric
+    /// across request boundaries so a checkpoint at the start of a batch does
+    /// not bleed into a long-held flock that blocks other readers/writers.
+    pub fn checkpoint(&mut self) -> Result<OdbCheckpoint, OdbError> {
+        self.acquire()?;
+        let snapshot = self.cursor();
+        self.release();
+        Ok(snapshot)
+    }
+
+    /// Cheap cursor snapshot of the in-memory write offsets, without touching
+    /// the file lock or reconciling against the disk. Safe only when the
+    /// caller already holds a write barrier (in-process: the store [`Mutex`];
+    /// cross-process: the active flock from a prior [`Self::checkpoint`]) and
+    /// just wants a post-batch snapshot to compare against the pre-batch one
+    /// — i.e. "did the bytes I just wrote stay put, or did someone else's
+    /// commit slip in?". Two extra syscalls saved per receive-pack request,
+    /// which is what keeps the W44 group-commit coalescing test still green
+    /// after W46 added its rewind window.
+    pub fn cursor(&self) -> OdbCheckpoint {
+        OdbCheckpoint {
+            blobs: self.blobs.checkpoint(),
+            tier1_len: self.tier1.appended_len(),
+            map_len: self.map.appended_len(),
+        }
+    }
+
+    /// Rolls every odb write since `ckpt` back: truncates each append file to
+    /// its captured length, drops the affected in-memory indices, fsyncs the
+    /// new lengths, and resets the durable marker so a fresh crash recovery
+    /// won't claim a longer durable extent than now exists. Held under the odb
+    /// write lock — call it with the same lock that produced `ckpt`. Used by
+    /// the server's receive-pack path to undo a pack ingest when the signature
+    /// / policy / ref-tx gate downstream rejects the push: no orphan objects
+    /// are left in the store.
+    pub fn rewind(&mut self, ckpt: OdbCheckpoint) -> Result<(), OdbError> {
+        self.blobs.rewind(ckpt.blobs)?;
+        self.tier1.rewind(ckpt.tier1_len)?;
+        self.map.rewind(ckpt.map_len)?;
+        // marker reflects what is durable; after truncations + fsyncs, that's
+        // exactly the rewound EOFs. Without this, a subsequent flush could
+        // covers()-skip its fsync against a stale-larger marker.
+        let (pack, blobmap) = self.blobs.appended_lens();
+        write_durable(&self.durable_path, [pack, blobmap, self.map.appended_len()])?;
+        Ok(())
     }
 
     /// Turns deferred durability on or off (the daemon turns it on so its
@@ -904,5 +967,73 @@ mod tests {
             }
         }
         assert_eq!(odb.len(), WRITERS * PER);
+    }
+
+    #[test]
+    fn checkpoint_then_rewind_restores_pre_batch_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut odb = NativeOdb::open(dir.path()).unwrap();
+        let (a_oid, _) = put_one(&mut odb, HashAlgo::Sha1, ObjectKind::Blob, b"alpha");
+        let (b_oid, _) = put_one(&mut odb, HashAlgo::Sha256, ObjectKind::Commit, b"beta");
+        odb.flush().unwrap();
+        let pre_len = odb.len();
+        let ckpt = odb.checkpoint().unwrap();
+        let (c_oid, _) = put_one(&mut odb, HashAlgo::Sha1, ObjectKind::Blob, b"gamma");
+        let (d_oid, _) = put_one(&mut odb, HashAlgo::Sha1, ObjectKind::Tree, b"delta");
+        assert!(odb.contains(&c_oid));
+        assert!(odb.contains(&d_oid));
+        assert_eq!(odb.len(), pre_len + 2);
+        odb.rewind(ckpt).unwrap();
+        assert!(odb.contains(&a_oid), "pre-checkpoint object survives");
+        assert!(odb.contains(&b_oid), "pre-checkpoint object survives");
+        assert!(!odb.contains(&c_oid), "post-checkpoint object is gone");
+        assert!(!odb.contains(&d_oid), "post-checkpoint object is gone");
+        assert_eq!(odb.len(), pre_len);
+        // close + re-open: on-disk state matches the rewound view
+        drop(odb);
+        let odb = NativeOdb::open(dir.path()).unwrap();
+        assert!(odb.contains(&a_oid));
+        assert!(odb.contains(&b_oid));
+        assert!(!odb.contains(&c_oid));
+        assert!(!odb.contains(&d_oid));
+        assert_eq!(odb.len(), pre_len);
+    }
+
+    #[test]
+    fn rewind_to_fresh_checkpoint_empties_the_odb() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut odb = NativeOdb::open(dir.path()).unwrap();
+        let ckpt = odb.checkpoint().unwrap();
+        let (oid, _) = put_one(&mut odb, HashAlgo::Sha1, ObjectKind::Blob, b"orphan");
+        assert!(odb.contains(&oid));
+        odb.rewind(ckpt).unwrap();
+        assert!(!odb.contains(&oid));
+        assert_eq!(odb.len(), 0);
+        drop(odb);
+        let odb = NativeOdb::open(dir.path()).unwrap();
+        assert!(!odb.contains(&oid));
+        assert_eq!(odb.len(), 0);
+    }
+
+    #[test]
+    fn rewind_preserves_alt_aliases_for_kept_entries() {
+        // an alt blob can back several git oids (same content, different kind).
+        // rewinding past one alias must leave the surviving alias intact.
+        let dir = tempfile::tempdir().unwrap();
+        let mut odb = NativeOdb::open(dir.path()).unwrap();
+        let data = b"";
+        let (blob_oid, alt) = put_one(&mut odb, HashAlgo::Sha1, ObjectKind::Blob, data);
+        let ckpt = odb.checkpoint().unwrap();
+        let (tree_oid, alt2) = put_one(&mut odb, HashAlgo::Sha1, ObjectKind::Tree, data);
+        assert_eq!(alt, alt2);
+        assert_eq!(odb.lookup_by_alt(alt).count(), 2);
+        odb.rewind(ckpt).unwrap();
+        assert!(odb.contains(&blob_oid));
+        assert!(!odb.contains(&tree_oid));
+        assert_eq!(
+            odb.lookup_by_alt(alt).count(),
+            1,
+            "the surviving alias is still indexed by alt"
+        );
     }
 }

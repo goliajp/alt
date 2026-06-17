@@ -27,7 +27,7 @@ pub mod delta;
 mod idx;
 mod pack;
 
-pub use blob::{BlobOptions, BlobSink, BlobStore};
+pub use blob::{BlobOptions, BlobSink, BlobStore, StoreCheckpoint};
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
@@ -259,6 +259,12 @@ impl DeltaCache {
         self.map.get(id).cloned()
     }
 
+    fn clear(&mut self) {
+        self.map.clear();
+        self.order.clear();
+        self.bytes = 0;
+    }
+
     fn put(&mut self, id: ChunkId, data: Arc<Vec<u8>>) {
         if self.map.contains_key(&id) {
             return;
@@ -275,6 +281,16 @@ impl DeltaCache {
             }
         }
     }
+}
+
+/// A point-in-time write cursor of a [`ChunkStore`], taken at the start of a
+/// write batch so a later [`ChunkStore::rewind`] can roll back every record
+/// appended after it. Captures the active pack's seq + appended length;
+/// rewinding across a seal/roll is refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChunkCheckpoint {
+    pack_seq: u32,
+    pack_len: u64,
 }
 
 /// Content-addressed chunk storage over a directory of altpack files.
@@ -1108,6 +1124,49 @@ impl ChunkStore {
     /// The active pack's true on-disk size (includes other writers' appends).
     pub fn pack_file_len(&self) -> Result<u64, StoreError> {
         Ok(std::fs::metadata(pack_path(&self.dir, self.active.seq))?.len())
+    }
+
+    /// Snapshots the current write cursor (active pack seq + appended bytes)
+    /// so a later [`Self::rewind`] can drop everything appended after it.
+    /// Held across one writer batch under the odb write lock.
+    pub fn checkpoint(&self) -> ChunkCheckpoint {
+        ChunkCheckpoint {
+            pack_seq: self.active.seq,
+            pack_len: self.active.len,
+        }
+    }
+
+    /// Drops every record appended to the active pack after `ckpt` was taken:
+    /// the active pack is truncated to `ckpt.pack_len` (with the trailing fsync
+    /// that makes the new length durable), then the in-memory state is reloaded
+    /// from disk via [`load`] — that rebuilds the index correctly even when the
+    /// popped region's ids also existed in a sealed pack (`put` overwrote the
+    /// sealed pointer with the active one). The delta cache is cleared because
+    /// it may hold arc-cloned bytes that no longer have an on-disk source.
+    /// Refuses if the active pack rolled between checkpoint and rewind (sealed
+    /// packs are immutable, so a rolled-out region can't be safely undone here).
+    pub fn rewind(&mut self, ckpt: ChunkCheckpoint) -> Result<(), StoreError> {
+        if ckpt.pack_seq != self.active.seq {
+            return Err(StoreError::Format(
+                "chunk store rolled between checkpoint and rewind",
+            ));
+        }
+        if ckpt.pack_len > self.active.len {
+            return Err(StoreError::Format(
+                "chunk rewind target above active cursor",
+            ));
+        }
+        if ckpt.pack_len < pack::HEADER_LEN as u64 {
+            return Err(StoreError::Format("chunk rewind target below header"));
+        }
+        self.active.write.set_len(ckpt.pack_len)?;
+        self.active.write.sync_all()?;
+        let (sealed, active, index) = load(&self.dir)?;
+        self.sealed = sealed;
+        self.active = active;
+        self.index = index;
+        self.cache.lock().unwrap().clear();
+        Ok(())
     }
 
     fn read_header(&self, id: ChunkId, loc: Location) -> Result<RecordHeader, StoreError> {

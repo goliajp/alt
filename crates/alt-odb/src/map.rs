@@ -277,6 +277,41 @@ impl ObjectMap {
         self.len
     }
 
+    /// Truncates the map back to `target_len` (a previous `appended_len`),
+    /// dropping every entry appended past that point from the in-memory
+    /// indices. `target_len` must be at a record boundary and not below the
+    /// file header. Fsyncs the truncation so it's durable on recovery.
+    pub fn rewind(&mut self, target_len: u64) -> Result<(), OdbError> {
+        if target_len > self.len {
+            return Err(OdbError::Format("map.alt rewind target above cursor"));
+        }
+        if target_len < HEADER_LEN as u64 {
+            return Err(OdbError::Format("map.alt rewind target below header"));
+        }
+        let drop_bytes = self.len - target_len;
+        if !drop_bytes.is_multiple_of(REC_LEN as u64) {
+            return Err(OdbError::Format("map.alt rewind target mid-record"));
+        }
+        let pop_count = (drop_bytes / REC_LEN as u64) as usize;
+        let keep = self.entries.len() - pop_count;
+        let dropped: Vec<MapEntry> = self.entries.drain(keep..).collect();
+        let kept_at = keep as u32;
+        for entry in dropped {
+            self.by_git.remove(&entry.git);
+            if let Some(slots) = self.by_alt.get_mut(&entry.alt) {
+                slots.retain(|&at| at < kept_at);
+                if slots.is_empty() {
+                    self.by_alt.remove(&entry.alt);
+                }
+            }
+        }
+        self.file.set_len(target_len)?;
+        self.file.sync_all()?;
+        self.file.seek(SeekFrom::Start(target_len))?;
+        self.len = target_len;
+        Ok(())
+    }
+
     /// The map's true on-disk size.
     pub fn file_len(&self) -> Result<u64, OdbError> {
         Ok(self.file.metadata()?.len())

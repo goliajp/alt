@@ -1164,7 +1164,9 @@ fn handle_receive_pack(
     // already re-read per request inside `check_auth`; `trust` keys
     // are re-read per request inside `verify_push_signature`. policy
     // is the last cached piece, and `Store::refresh()` is the same
-    // entry the daemon (M5) uses to catch up its read view.
+    // entry the daemon (M5) uses to catch up its read view. Must
+    // happen *before* the sig_block decision below so the next
+    // signing policy is seen on this request, not a request later.
     if let Err(e) = store.lock().unwrap().refresh() {
         eprintln!("altd-server: store refresh failed (continuing with stale policy): {e}");
     }
@@ -1190,16 +1192,57 @@ fn handle_receive_pack(
         return Ok(());
     }
 
-    let unpack_result: Result<(), String> = if sig_block.is_some() || pack_bytes_streamed == 0 {
-        Ok(())
+    // M14/W46 — checkpoint + apply + post-ingest snapshot run under a
+    // single store guard so other writers cannot advance the odb cursor
+    // between them. That makes the rewind below atomic against
+    // concurrent pushes without serialising the receive-pack flow as a
+    // whole: ingest is briefly serial via `store.lock()` (already true
+    // pre-W46), but commit + `await_durable` still overlap with other
+    // pushes — W44 group-commit fsync coalescing is preserved. The
+    // post-ingest snapshot lets the rewind site detect (and skip) a
+    // rollback that would otherwise trample a concurrent push's
+    // writes appended after ours.
+    let prepared = if sig_block.is_some() || pack_bytes_streamed == 0 {
+        None
     } else {
-        match ingest_pack_from_path(store, &pack_tmp_path) {
-            Ok(commits) => {
-                new_commits = commits;
-                Ok(())
-            }
-            Err(e) => Err(format!("index-pack: {e}")),
-        }
+        // Failure here is surfaced as unpack_result error below; we drop
+        // the Err and let the match arm in the locked block turn it into
+        // the right `index-pack: failed to prepare pack` reason.
+        prepare_pack_for_ingest(&pack_tmp_path).ok()
+    };
+    let (ingest_ckpt, post_ingest_ckpt, unpack_result): (
+        alt_odb::OdbCheckpoint,
+        alt_odb::OdbCheckpoint,
+        Result<(), String>,
+    ) = {
+        let mut g = store.lock().unwrap();
+        // Cheap pre-snapshot: just read in-memory `appended_lens` (no
+        // flock, no sync_from_disk). Safe because the server is the only
+        // writer to this store — no other *process* can be appending,
+        // and the in-process store mutex above serialises threads. The
+        // first `put()` in apply still does its own acquire+sync, so
+        // the actual write happens against a freshly reconciled state.
+        // Skipping the sync here was W44 group-commit critical: pushes
+        // need to pile up at await_durable in a tight enough window to
+        // coalesce, and even a few hundred µs of extra syscalls per
+        // push spread them past the leader's fsync.
+        let pre = g.odb().cursor();
+        let result: Result<(), String> = match (&prepared, sig_block.is_some(), pack_bytes_streamed)
+        {
+            (None, true, _) => Ok(()),
+            (None, false, 0) => Ok(()),
+            (None, false, _) => Err("index-pack: failed to prepare pack".into()),
+            (Some((ip, order)), _, _) => match apply_pack_into_store(&mut g, ip, order) {
+                Ok(commits) => {
+                    new_commits = commits;
+                    Ok(())
+                }
+                Err(e) => Err(format!("index-pack: {e}")),
+            },
+        };
+        // Same cheap snapshot for the post-ingest cursor.
+        let post = g.odb().cursor();
+        (pre, post, result)
     };
 
     // M10/W15: if the policy requires every commit to carry a verified
@@ -1217,6 +1260,13 @@ fn handle_receive_pack(
     // the client sees a coherent reason.
     let mut command_status: Vec<CommandStatus> = Vec::new();
     let any_block = sig_block.clone().or(commit_block);
+    // M14/W46 — flips to true the moment commit_ref_updates returns Ok.
+    // While this is still false at the rewind site below, the new
+    // append-only writes are rolled back to `ingest_ckpt` so the odb is
+    // bit-identical to its pre-push state. A successful commit makes
+    // those bytes part of the history we serve; flipping the flag
+    // short-circuits the rewind so a *durable* push isn't undone.
+    let mut committed = false;
     if let Some(reason) = &any_block {
         for u in &head.updates {
             command_status.push(CommandStatus::Ng {
@@ -1227,6 +1277,7 @@ fn handle_receive_pack(
     } else if unpack_result.is_ok() {
         match commit_ref_updates(writer, &head.updates, &effective_principal, sig_label) {
             Ok(ticket) => {
+                committed = true;
                 // M14/W44: wait for the group-commit leader's fsync to
                 // cover us — this is the only place we touch disk
                 // durability on the receive-pack path. Other concurrent
@@ -1268,6 +1319,29 @@ fn handle_receive_pack(
         }
     }
 
+    // M14/W46 — if we ingested objects but never reached a durable
+    // commit (signature / commit-signing gate rejected, ref-tx returned
+    // Err, or the pack itself failed mid-ingest), roll the odb back to
+    // the pre-ingest checkpoint. Rewind is skipped (orphans left for a
+    // future GC stone) when another push committed in the same window
+    // — detected by comparing the live cursor to our post-ingest
+    // snapshot. push_lock is intentionally NOT held here: holding it
+    // through commit would serialize fsyncs and break the W44 group
+    // commit coalescing that makes high-concurrency pushes cheap. The
+    // race trades a rare orphan leak for steady-state throughput.
+    if !committed {
+        let mut g = store.lock().unwrap();
+        if g.odb_mut().checkpoint()? == post_ingest_ckpt {
+            if let Err(e) = g.odb_mut().rewind(ingest_ckpt) {
+                eprintln!("altd-server: rewind after rejected push failed: {e}");
+            }
+        } else {
+            eprintln!(
+                "altd-server: skipping rewind after rejected push (another writer interleaved)"
+            );
+        }
+    }
+
     let mut out = Vec::new();
     let want_sideband = head.capabilities.iter().any(|c| c == "side-band-64k");
     if want_sideband {
@@ -1294,19 +1368,19 @@ fn handle_receive_pack(
     Ok(())
 }
 
-/// Write the pushed pack into a tempfile, index it, and put every
-/// object into the server odb. Mirrors the fetch ingest path in
-/// `alt-cli::native`.
-/// Index the pack already on disk at `path` and ingest its objects
-/// into the server odb. M13/W36 streaming path: the caller streamed
-/// the receive-pack body into `path` (a NamedTempFile) instead of
-/// buffering the entire pack in memory, so `index_pack` reads straight
-/// off the file we already wrote — no Vec<u8> copy of the pack bytes
-/// ever lives in process RAM.
-fn ingest_pack_from_path(
-    store: &Mutex<Store>,
+/// A pack indexed and ready to replay (file-system reads done, lock not
+/// yet taken). The second tuple element is the order of `(offset, idx)`
+/// pairs so the put loop visits records in file order.
+type PreparedPack = (alt_git_pack::IndexedPack, Vec<(u64, u32)>);
+
+/// Index the pack already on disk at `path` (no store lock needed —
+/// `index_pack` walks the file and builds the .idx, a CPU + disk task
+/// orthogonal to in-process odb state). The returned (`IndexedPack`,
+/// offset order) is paired with [`apply_pack_into_store`] which takes
+/// the store lock and replays the puts.
+fn prepare_pack_for_ingest(
     path: &std::path::Path,
-) -> Result<Vec<ObjectId>, Box<dyn std::error::Error>> {
+) -> Result<PreparedPack, Box<dyn std::error::Error>> {
     let indexed = alt_git_pack::index_pack(path, HashAlgo::Sha1, true)?;
     let ip = alt_git_pack::IndexedPack::open(&indexed.pack_path, HashAlgo::Sha1)?;
     let idx = ip.idx();
@@ -1314,17 +1388,32 @@ fn ingest_pack_from_path(
         .map(|i| (idx.offset_at(i).expect("idx in range"), i))
         .collect();
     order.sort_unstable();
-    let mut store_guard = store.lock().unwrap();
+    Ok((ip, order))
+}
+
+/// Apply a prepared pack into the server odb under an already-held
+/// store guard, returning the list of new commit oids. Holding the
+/// guard across the whole put loop is what makes the W46 checkpoint /
+/// rewind window indivisible against concurrent receive-pack flows:
+/// no other writer can advance `appended_lens` between the surrounding
+/// `checkpoint()` calls, so a downstream rewind is guaranteed to drop
+/// exactly this push's bytes (and only this push's).
+fn apply_pack_into_store(
+    store: &mut Store,
+    ip: &alt_git_pack::IndexedPack,
+    order: &[(u64, u32)],
+) -> Result<Vec<ObjectId>, Box<dyn std::error::Error>> {
+    let idx = ip.idx();
     let mut new_commits = Vec::new();
-    for (offset, i) in order {
+    for &(offset, i) in order {
         let obj = ip.read_at(offset)?;
         let oid = idx.oid_at(i);
         if obj.kind == alt_git_codec::ObjectKind::Commit {
             new_commits.push(oid);
         }
-        store_guard.odb_mut().put(oid, obj.kind, &obj.data)?;
+        store.odb_mut().put(oid, obj.kind, &obj.data)?;
     }
-    store_guard.odb_mut().flush()?;
+    store.odb_mut().flush()?;
     Ok(new_commits)
 }
 

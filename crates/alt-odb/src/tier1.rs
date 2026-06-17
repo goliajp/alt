@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::io::{Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use alt_prism::PrismId;
@@ -141,13 +141,42 @@ impl Tier1Map {
         self.map.contains_key(&blob)
     }
 
-    #[allow(dead_code)] // exposed for future tier1 inclusion in the durable marker
     pub fn appended_len(&self) -> u64 {
         self.appended_len
     }
 
     pub fn sync(&mut self) -> Result<(), StoreError> {
         self.file.sync_all()?;
+        Ok(())
+    }
+
+    /// Truncates the tier1 record back to `target_len`, removing every blob
+    /// → record mapping appended past that point. Used by [`super::NativeOdb::rewind`]
+    /// to roll back a failed write batch.
+    pub fn rewind(&mut self, target_len: u64) -> Result<(), StoreError> {
+        if target_len > self.appended_len {
+            return Err(StoreError::Format("tier1 rewind target above cursor"));
+        }
+        if target_len < HEADER_LEN as u64 {
+            return Err(StoreError::Format("tier1 rewind target below header"));
+        }
+        let drop_bytes = self.appended_len - target_len;
+        if !drop_bytes.is_multiple_of(REC_LEN as u64) {
+            return Err(StoreError::Format("tier1 rewind target mid-record"));
+        }
+        if drop_bytes > 0 {
+            let mut tail = vec![0u8; drop_bytes as usize];
+            self.file.seek(SeekFrom::Start(target_len))?;
+            self.file.read_exact(&mut tail)?;
+            for rec in tail.chunks_exact(REC_LEN) {
+                let blob = BlobId(rec[..32].try_into().unwrap());
+                self.map.remove(&blob);
+            }
+        }
+        self.file.set_len(target_len)?;
+        self.file.sync_all()?;
+        self.file.seek(SeekFrom::Start(target_len))?;
+        self.appended_len = target_len;
         Ok(())
     }
 

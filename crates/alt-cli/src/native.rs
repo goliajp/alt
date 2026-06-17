@@ -233,6 +233,13 @@ impl Store {
         &mut self.odb
     }
 
+    /// Read-only handle for cheap state checks (e.g. the W46 post-ingest
+    /// cursor snapshot in altd-server, which only needs to compare two
+    /// `OdbCheckpoint`s and never writes).
+    pub fn odb(&self) -> &NativeOdb {
+        &self.odb
+    }
+
     /// Read-only odb fetch. M10/W15: the wire's commit-signature pass
     /// re-reads each newly-ingested commit through this so verification
     /// shares the same `NativeOdb` everyone else writes against (no

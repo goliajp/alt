@@ -198,6 +198,39 @@ impl BlobMap {
         Ok(self.file.metadata()?.len())
     }
 
+    /// Truncates the blobmap back to `target_len` (a previous `appended_len`),
+    /// removing every record appended past that point from the in-memory map.
+    /// The target must lie at a record boundary and not below the file header.
+    /// Followed by an fsync so the truncation is durable: callers (the odb
+    /// rewind path) rely on this to be torn-tail-free on recovery.
+    pub fn rewind(&mut self, target_len: u64) -> Result<(), StoreError> {
+        if target_len > self.len {
+            return Err(StoreError::Format("blobmap rewind target above cursor"));
+        }
+        if target_len < HEADER_LEN as u64 {
+            return Err(StoreError::Format("blobmap rewind target below header"));
+        }
+        let drop_bytes = self.len - target_len;
+        if !drop_bytes.is_multiple_of(REC_LEN as u64) {
+            return Err(StoreError::Format("blobmap rewind target mid-record"));
+        }
+        if drop_bytes > 0 {
+            let mut tail = vec![0u8; drop_bytes as usize];
+            self.file.seek(SeekFrom::Start(target_len))?;
+            self.file.read_exact(&mut tail)?;
+            for rec in tail.chunks_exact(REC_LEN) {
+                let mut blob = [0u8; 32];
+                blob.copy_from_slice(&rec[..32]);
+                self.map.remove(&BlobId(blob));
+            }
+        }
+        self.file.set_len(target_len)?;
+        self.file.sync_all()?;
+        self.file.seek(SeekFrom::Start(target_len))?;
+        self.len = target_len;
+        Ok(())
+    }
+
     /// An independent fd to the (stable, never-rolled) blobmap file, for the
     /// daemon's off-write-path fsync. `fsync` flushes the inode regardless of
     /// which fd it is called on, so this dup is enough.

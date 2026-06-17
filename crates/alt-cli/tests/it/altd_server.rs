@@ -2907,3 +2907,130 @@ fn altd_server_advertises_alt_nonce_and_signed_push_consumes_it() {
     let log = ok(alt(origin, &["log", "--pretty=oneline", "refs/heads/main"]));
     assert!(log.contains("alice-delta"), "signed push landed: {log}");
 }
+
+#[test]
+fn altd_server_rejected_push_does_not_leave_orphan_objects() {
+    // M14/W46: when a receive-pack ingest+verify+commit chain rejects a
+    // push (here: `require-signed-commits` and the client sends an
+    // unsigned commit), the server must rewind every odb append that
+    // the failed push made. We compare the origin's odb object count
+    // (NativeOdb::len) and on-disk append-file sizes before vs. after
+    // a rejected push: both must be byte-for-byte identical.
+    let origin_dir = tempfile::tempdir().unwrap();
+    let origin = origin_dir.path();
+    ok(alt(origin, &["init", "."]));
+    std::fs::write(origin.join("seed.txt"), "seed\n").unwrap();
+    ok(alt(origin, &["add", "."]));
+    ok(alt(origin, &["commit", "-m", "seed"]));
+    std::fs::write(
+        origin.join(".alt").join("policy"),
+        "human:anonymous -> require-signed-commits\n",
+    )
+    .unwrap();
+
+    let baseline_count = {
+        let odb = alt_odb::NativeOdb::open(origin.join(".alt")).unwrap();
+        odb.len()
+    };
+    let baseline_map_size = std::fs::metadata(origin.join(".alt").join("map.alt"))
+        .unwrap()
+        .len();
+    let pack_glob = || -> Vec<u64> {
+        let mut sizes: Vec<(String, u64)> = std::fs::read_dir(origin.join(".alt"))
+            .unwrap()
+            .filter_map(|e| {
+                let e = e.ok()?;
+                let name = e.file_name().into_string().ok()?;
+                if name.starts_with("pack-") && name.ends_with(".altpack") {
+                    Some((name, e.metadata().ok()?.len()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        sizes.sort();
+        sizes.into_iter().map(|(_, s)| s).collect()
+    };
+    let baseline_pack_sizes = pack_glob();
+
+    let server = spawn_server(origin);
+    let url = format!("http://{}/", server.addr);
+
+    // Build a git source with an unsigned commit and try to push.
+    let src_dir = tempfile::tempdir().unwrap();
+    let src = src_dir.path();
+    let st = std::process::Command::new("git")
+        .args(["init", "-q", "-b", "main", src.to_str().unwrap()])
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .unwrap();
+    assert!(st.status.success());
+    std::fs::write(src.join("orphan-bait.txt"), "this-must-not-stick\n").unwrap();
+    for args in [
+        &["-C", src.to_str().unwrap(), "add", "."][..],
+        &[
+            "-C",
+            src.to_str().unwrap(),
+            "-c",
+            "user.name=tester",
+            "-c",
+            "user.email=t@e",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "-m",
+            "unsigned-orphan-bait",
+        ][..],
+    ] {
+        let o = std::process::Command::new("git")
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            o.status.success(),
+            "git: {}",
+            String::from_utf8_lossy(&o.stderr)
+        );
+    }
+    let push = std::process::Command::new("git")
+        .args([
+            "-C",
+            src.to_str().unwrap(),
+            "push",
+            &url,
+            "HEAD:refs/heads/main",
+        ])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .unwrap();
+    assert!(
+        !push.status.success(),
+        "push must be refused by require-signed-commits policy"
+    );
+
+    drop(server);
+
+    let after_count = {
+        let odb = alt_odb::NativeOdb::open(origin.join(".alt")).unwrap();
+        odb.len()
+    };
+    let after_map_size = std::fs::metadata(origin.join(".alt").join("map.alt"))
+        .unwrap()
+        .len();
+    let after_pack_sizes = pack_glob();
+
+    assert_eq!(
+        after_count, baseline_count,
+        "rejected push must leave no orphan map entries (baseline {baseline_count}, after {after_count})",
+    );
+    assert_eq!(
+        after_map_size, baseline_map_size,
+        "rejected push must leave map.alt at its pre-push length"
+    );
+    assert_eq!(
+        after_pack_sizes, baseline_pack_sizes,
+        "rejected push must leave every pack-*.altpack at its pre-push length"
+    );
+}

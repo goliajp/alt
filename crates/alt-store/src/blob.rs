@@ -15,7 +15,9 @@
 use std::path::PathBuf;
 
 use crate::blobmap::BlobMap;
-use crate::{BlobId, ChunkId, ChunkStore, CompactReport, Counters, Options, StoreError};
+use crate::{
+    BlobId, ChunkCheckpoint, ChunkId, ChunkStore, CompactReport, Counters, Options, StoreError,
+};
 
 /// How the blob assembler reads each chunk.
 #[derive(Clone, Copy)]
@@ -101,6 +103,15 @@ impl Default for BlobOptions {
             fanout: 4096,
         }
     }
+}
+
+/// A point-in-time write cursor of a [`BlobStore`] for [`BlobStore::rewind`]:
+/// the underlying chunk store's [`ChunkCheckpoint`] plus the blobmap's
+/// appended length. Held across one writer batch under the odb write lock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StoreCheckpoint {
+    chunks: ChunkCheckpoint,
+    blobmap_len: u64,
 }
 
 /// Content-addressed byte-stream storage: CDC chunking + manifest trees
@@ -337,6 +348,27 @@ impl BlobStore {
         Ok((self.chunks.pack_file_len()?, self.map.file_len()?))
     }
 
+    /// Snapshots the write cursor (chunks + blobmap) so [`Self::rewind`] can
+    /// later drop everything appended after it. Taken under the odb write lock
+    /// at the start of a batch.
+    pub fn checkpoint(&self) -> StoreCheckpoint {
+        StoreCheckpoint {
+            chunks: self.chunks.checkpoint(),
+            blobmap_len: self.map.appended_len(),
+        }
+    }
+
+    /// Drops every chunk + blobmap record appended after `ckpt` was taken.
+    /// Chunks first (they're referenced by the blobmap records) — the inverse
+    /// of the flush order. Each layer truncates + fsyncs internally so the
+    /// rollback is durable; the caller (the odb rewind) is responsible for
+    /// re-writing the odb durable marker afterwards.
+    pub fn rewind(&mut self, ckpt: StoreCheckpoint) -> Result<(), StoreError> {
+        self.chunks.rewind(ckpt.chunks)?;
+        self.map.rewind(ckpt.blobmap_len)?;
+        Ok(())
+    }
+
     /// An independent fsync handle (chunks + blobmap) for the daemon's
     /// off-write-path group commit.
     pub fn sink(&self) -> Result<BlobSink, StoreError> {
@@ -447,6 +479,55 @@ mod tests {
         let b = store.put(&data).unwrap();
         assert_eq!(a, b);
         assert_eq!(store.counters().bytes_written, written);
+    }
+
+    #[test]
+    fn checkpoint_then_rewind_undoes_appended_blobs() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = BlobStore::open(dir.path()).unwrap();
+        let before = b"before checkpoint".to_vec();
+        let multi = random_bytes(2 << 20, 11); // multi-chunk: writes blobmap too
+        let id_before = store.put(&before).unwrap();
+        let id_multi = store.put(&multi).unwrap();
+        let ckpt = store.checkpoint();
+        let after = b"appended after checkpoint".to_vec();
+        let after_multi = random_bytes(2 << 20, 12);
+        let id_after = store.put(&after).unwrap();
+        let id_after_multi = store.put(&after_multi).unwrap();
+        assert!(store.contains(id_after));
+        assert!(store.contains(id_after_multi));
+        store.rewind(ckpt).unwrap();
+        assert!(store.contains(id_before), "pre-checkpoint blob survives");
+        assert!(store.contains(id_multi), "pre-checkpoint multi survives");
+        assert_eq!(&store.get(id_before).unwrap(), &before);
+        assert_eq!(&store.get(id_multi).unwrap(), &multi);
+        assert!(!store.contains(id_after), "post-checkpoint blob gone");
+        assert!(
+            !store.contains(id_after_multi),
+            "post-checkpoint multi gone"
+        );
+        // re-open from disk: state matches the rewound view
+        drop(store);
+        let store = BlobStore::open(dir.path()).unwrap();
+        assert!(store.contains(id_before));
+        assert!(store.contains(id_multi));
+        assert!(!store.contains(id_after));
+        assert!(!store.contains(id_after_multi));
+    }
+
+    #[test]
+    fn rewind_to_empty_checkpoint_yields_empty_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = BlobStore::open(dir.path()).unwrap();
+        let ckpt = store.checkpoint();
+        let data = random_bytes(1 << 20, 13);
+        let id = store.put(&data).unwrap();
+        assert!(store.contains(id));
+        store.rewind(ckpt).unwrap();
+        assert!(!store.contains(id));
+        drop(store);
+        let store = BlobStore::open(dir.path()).unwrap();
+        assert!(!store.contains(id));
     }
 
     #[test]
