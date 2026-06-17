@@ -3,9 +3,8 @@
 //! [`altd-server`]. A handful of workers is enough for a marketing
 //! domain.
 //!
-//! The router is intentionally tiny: there are three endpoints and one
-//! catch-all fallback. Adding a new endpoint means adding a branch
-//! below; the matcher does no regex or path-template work.
+//! Path matching is hand-written: small, regex-free, no path-template
+//! work. Endpoints are organised into a route table inside [`dispatch`].
 
 use std::sync::Arc;
 use std::thread;
@@ -13,15 +12,12 @@ use std::thread;
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 
 use crate::api;
-use crate::{ApiError, Source};
+use crate::{ApiError, MultiRepo};
 
 /// Mount the API on `bind` and serve it. Blocks the calling thread; a
 /// SIGINT / SIGTERM landing on the process kills the [`Server`] handle
 /// and the call returns.
-///
-/// `workers` is the number of dispatcher threads sharing the incoming
-/// request queue.
-pub fn serve(bind: &str, source: Source, workers: usize) -> std::io::Result<()> {
+pub fn serve(bind: &str, mr: MultiRepo, workers: usize) -> std::io::Result<()> {
     let server = Server::http(bind).map_err(|e| {
         std::io::Error::new(
             std::io::ErrorKind::AddrInUse,
@@ -29,19 +25,19 @@ pub fn serve(bind: &str, source: Source, workers: usize) -> std::io::Result<()> 
         )
     })?;
     eprintln!(
-        "alt-web: listening on {bind} (workers={workers}, .alt={})",
-        source.alt_dir().display()
+        "alt-web: listening on {bind} (workers={workers}, root={})",
+        mr.root().display()
     );
     let server = Arc::new(server);
-    let source = Arc::new(source);
+    let mr = Arc::new(mr);
 
     let mut handles = Vec::with_capacity(workers);
     for _ in 0..workers {
         let server = Arc::clone(&server);
-        let source = Arc::clone(&source);
+        let mr = Arc::clone(&mr);
         handles.push(thread::spawn(move || {
             while let Ok(req) = server.recv() {
-                dispatch(&source, req);
+                dispatch(&mr, req);
             }
         }));
     }
@@ -51,10 +47,7 @@ pub fn serve(bind: &str, source: Source, workers: usize) -> std::io::Result<()> 
     Ok(())
 }
 
-/// Match the request against the four endpoints; everything else is a
-/// 404. Each handler returns owned bytes + status; the dispatcher
-/// attaches headers and the response body.
-fn dispatch(source: &Source, req: Request) {
+fn dispatch(mr: &MultiRepo, req: Request) {
     if req.method() != &Method::Get {
         respond_json(req, 405, b"{\"error\":\"method not allowed\"}");
         return;
@@ -64,42 +57,130 @@ fn dispatch(source: &Source, req: Request) {
         None => (req.url(), ""),
     };
 
-    let (status, body) = if path == "/api/version" {
-        api::handle_version()
-    } else if path == "/api/stats" {
-        match api::handle_stats(source) {
-            Ok(v) => v,
-            Err(e) => error_response(&e),
-        }
-    } else if path == "/api/changelog" {
-        let n = parse_n_query(query).unwrap_or(10);
-        match api::handle_changelog(source, n) {
-            Ok(v) => v,
-            Err(e) => error_response(&e),
-        }
-    } else if path == "/" {
-        (
-            200,
-            b"alt.golia.jp \xe2\x80\x94 pure-Rust VCS. /api/version, /api/stats, /api/changelog. Source: https://github.com/goliajp/alt\n".to_vec(),
-        )
-    } else {
-        (404, b"{\"error\":\"not found\"}".to_vec())
-    };
-
+    let (status, body) = route(mr, path, query);
     respond_json(req, status, &body);
 }
 
-/// Read `?n=<usize>` out of the query string; clamps invalid input to
-/// `None` so the caller falls back to a default.
-fn parse_n_query(query: &str) -> Option<usize> {
+fn route(mr: &MultiRepo, path: &str, query: &str) -> (u16, Vec<u8>) {
+    // /api/version (no repo)
+    if path == "/api/version" {
+        return api::handle_version();
+    }
+    // /api/repos
+    if path == "/api/repos" {
+        return collapse(api::handle_repos(mr));
+    }
+
+    // /api/repos/{name}[/...]
+    if let Some(rest) = path.strip_prefix("/api/repos/") {
+        let (name, tail) = match rest.find('/') {
+            Some(i) => (&rest[..i], &rest[i + 1..]),
+            None => (rest, ""),
+        };
+        return route_repo(mr, name, tail, query);
+    }
+
+    if path == "/" {
+        return (
+            200,
+            b"alt.golia.jp \xe2\x80\x94 pure-Rust VCS. API at /api/. Source: https://github.com/goliajp/alt\n"
+                .to_vec(),
+        );
+    }
+    (404, b"{\"error\":\"not found\"}".to_vec())
+}
+
+fn route_repo(mr: &MultiRepo, name: &str, tail: &str, query: &str) -> (u16, Vec<u8>) {
+    if tail.is_empty() {
+        return collapse(api::handle_repo(mr, name));
+    }
+    if tail == "refs" {
+        return collapse(api::handle_refs(mr, name));
+    }
+    if tail == "log" {
+        let n = parse_query(query, "n")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(20);
+        let ref_name = parse_query(query, "ref");
+        let before = parse_query(query, "before");
+        return collapse(api::handle_log(
+            mr,
+            name,
+            ref_name.as_deref(),
+            n,
+            before.as_deref(),
+        ));
+    }
+
+    // /api/repos/{name}/commits/{oid}[/diff]
+    if let Some(rest) = tail.strip_prefix("commits/") {
+        let (oid, action) = match rest.find('/') {
+            Some(i) => (&rest[..i], &rest[i + 1..]),
+            None => (rest, ""),
+        };
+        if action.is_empty() {
+            return collapse(api::handle_commit(mr, name, oid));
+        }
+        if action == "diff" {
+            return collapse(api::handle_commit_diff(mr, name, oid));
+        }
+    }
+
+    // /api/repos/{name}/tree/{spec}
+    if let Some(spec) = tail.strip_prefix("tree/") {
+        return collapse(api::handle_tree(mr, name, spec));
+    }
+
+    // /api/repos/{name}/blob/{oid}
+    if let Some(oid) = tail.strip_prefix("blob/") {
+        return collapse(api::handle_blob(mr, name, oid));
+    }
+    (404, b"{\"error\":\"not found\"}".to_vec())
+}
+
+fn parse_query(query: &str, key: &str) -> Option<String> {
+    let needle = format!("{key}=");
     for pair in query.split('&') {
-        if let Some(v) = pair.strip_prefix("n=")
-            && let Ok(n) = v.parse::<usize>()
-        {
-            return Some(n);
+        if let Some(v) = pair.strip_prefix(&needle) {
+            return Some(url_decode(v));
         }
     }
     None
+}
+
+/// Minimal URL decoder — handles `%xx` hex and `+` → space, enough for
+/// the ref names + oids we accept in query strings.
+fn url_decode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'+' {
+            out.push(' ');
+            i += 1;
+        } else if b == b'%' && i + 2 < bytes.len() {
+            let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("");
+            if let Ok(v) = u8::from_str_radix(hex, 16) {
+                out.push(v as char);
+                i += 3;
+            } else {
+                out.push(b as char);
+                i += 1;
+            }
+        } else {
+            out.push(b as char);
+            i += 1;
+        }
+    }
+    out
+}
+
+fn collapse(result: Result<(u16, Vec<u8>), ApiError>) -> (u16, Vec<u8>) {
+    match result {
+        Ok(v) => v,
+        Err(e) => error_response(&e),
+    }
 }
 
 fn error_response(err: &ApiError) -> (u16, Vec<u8>) {
@@ -122,6 +203,10 @@ fn respond_json(req: Request, status: u16, body: &[u8]) {
     if let Ok(h) = Header::from_bytes(&b"Cache-Control"[..], &b"no-cache"[..]) {
         resp.add_header(h);
     }
+    // CORS: read-only API, no auth, public domain — let any origin hit it.
+    if let Ok(h) = Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]) {
+        resp.add_header(h);
+    }
     let _ = req.respond(resp);
 }
 
@@ -130,12 +215,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_n_query_picks_first_n() {
-        assert_eq!(parse_n_query("n=5"), Some(5));
-        assert_eq!(parse_n_query("foo=bar&n=12&baz=qux"), Some(12));
-        assert_eq!(parse_n_query("foo=bar"), None);
-        assert_eq!(parse_n_query(""), None);
-        assert_eq!(parse_n_query("n=not-a-number"), None);
+    fn parse_query_picks_first_match() {
+        assert_eq!(parse_query("n=5", "n"), Some("5".to_string()));
+        assert_eq!(parse_query("foo=bar&n=12", "n"), Some("12".to_string()));
+        assert_eq!(parse_query("foo=bar", "n"), None);
+        assert_eq!(parse_query("", "n"), None);
+    }
+
+    #[test]
+    fn url_decode_handles_hex_and_plus() {
+        assert_eq!(url_decode("a+b"), "a b");
+        assert_eq!(url_decode("a%20b"), "a b");
+        assert_eq!(url_decode("refs%2Fheads%2Fmain"), "refs/heads/main");
+        assert_eq!(url_decode("no-encoding"), "no-encoding");
     }
 
     #[test]

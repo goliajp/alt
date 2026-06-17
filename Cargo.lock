@@ -308,6 +308,9 @@ dependencies = [
 name = "alt-web"
 version = "0.0.0"
 dependencies = [
+ "alt-diff",
+ "alt-git-codec",
+ "alt-import",
  "alt-repo",
  "tempfile",
  "tiny_http",

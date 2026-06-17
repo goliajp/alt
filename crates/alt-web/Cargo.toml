@@ -6,8 +6,11 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+alt-diff.workspace = true
+alt-git-codec.workspace = true
 alt-repo.workspace = true
 tiny_http.workspace = true
 
 [dev-dependencies]
+alt-import.workspace = true
 tempfile.workspace = true

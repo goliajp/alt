@@ -1,19 +1,20 @@
-//! Endpoint handlers — pure logic over a [`Source`], returns owned bytes
-//! plus a status code so [`router`](crate::router) doesn't need to know
-//! anything about JSON.
+//! Endpoint handlers — pure logic over [`MultiRepo`] / [`Repository`],
+//! returning owned bytes + status so [`router`](crate::router) doesn't
+//! need to know anything about JSON.
 //!
 //! All payloads are hand-written JSON: the project does not pull
-//! `serde_json` for a handful of stable shapes, and the static-marketing
-//! API surface is small enough that escape logic stays local. Each
-//! handler is independently unit-testable without booting a server.
+//! `serde_json` for a handful of stable shapes, and the surface is small
+//! enough that escape logic stays local. Each handler is independently
+//! unit-testable without booting a server.
 
+use alt_git_codec::{ObjectId, ObjectKind, Tree};
 use alt_repo::Repository;
 
-use crate::{ApiError, Source};
+use crate::{ApiError, MultiRepo};
 
 /// `GET /api/version` — fixed compile-time identifiers for the build.
 ///
-/// Stable shape: `{"schema_version": 1, "version": "...", "build": "..."}`.
+/// Stable shape: `{"schema_version":1, "version":"...", "build":"..."}`.
 /// `version` mirrors `CARGO_PKG_VERSION`; `build` is a free-form tag the
 /// deploy can override via `ALT_WEB_BUILD` at runtime, falling back to
 /// the literal `"dev"`.
@@ -28,71 +29,488 @@ pub fn handle_version() -> (u16, Vec<u8>) {
     (200, body.into_bytes())
 }
 
-/// `GET /api/stats` — repo-level counts the landing page surfaces.
-/// Currently returns the count of refs as a single integer. Walks of
-/// commit history live in the changelog endpoint; this one stays cheap.
-pub fn handle_stats(src: &Source) -> Result<(u16, Vec<u8>), ApiError> {
-    let repo = src.open()?;
-    let refs = repo
-        .list_refs()
-        .map_err(|e| ApiError::Internal(format!("list_refs: {e}")))?;
-    let head_oid = repo
-        .rev_parse("HEAD")
-        .map_err(|e| ApiError::Internal(format!("rev_parse HEAD: {e}")))?
-        .map(|o| o.to_string())
-        .unwrap_or_else(|| String::from("unknown"));
-
-    let body = format!(
-        "{{\"schema_version\":1,\"refs\":{},\"head\":{}}}",
-        refs.len(),
-        json_string(&head_oid)
-    );
+/// `GET /api/repos` — list every repo under the multi-repo root, with
+/// the HEAD oid and current branch (best-effort) of each.
+pub fn handle_repos(mr: &MultiRepo) -> Result<(u16, Vec<u8>), ApiError> {
+    let names = mr.list()?;
+    let mut items: Vec<String> = Vec::with_capacity(names.len());
+    for name in names {
+        let summary = match repo_summary(mr, &name) {
+            Ok(s) => s,
+            Err(e) => format!(
+                "{{\"name\":{},\"error\":{}}}",
+                json_string(&name),
+                json_string(e.message())
+            ),
+        };
+        items.push(summary);
+    }
+    let body = format!("{{\"schema_version\":1,\"repos\":[{}]}}", items.join(","));
     Ok((200, body.into_bytes()))
 }
 
-/// `GET /api/changelog` — the most recent N commits on HEAD as
-/// `{"schema_version":1, "commits":[{oid, subject}, ...]}`.
-///
-/// `n` is capped at 50 so the endpoint can never become a denial-of-service
-/// foothold: a 500-deep commit walk is still microseconds, but capping
-/// makes the response size predictable and the contract obvious.
-pub fn handle_changelog(src: &Source, n: usize) -> Result<(u16, Vec<u8>), ApiError> {
-    const MAX: usize = 50;
-    let n = n.min(MAX);
-    let repo = src.open()?;
-    let head = match repo
-        .rev_parse("HEAD")
-        .map_err(|e| ApiError::Internal(format!("rev_parse HEAD: {e}")))?
-    {
-        Some(o) => o,
-        None => {
-            // No HEAD yet — empty list is the honest answer.
-            return Ok((200, b"{\"schema_version\":1,\"commits\":[]}".to_vec()));
-        }
-    };
+/// `GET /api/repos/{name}` — single repo summary (HEAD oid, ref count,
+/// current branch).
+pub fn handle_repo(mr: &MultiRepo, name: &str) -> Result<(u16, Vec<u8>), ApiError> {
+    let body = repo_summary(mr, name)?;
+    Ok((
+        200,
+        format!("{{\"schema_version\":1,\"repo\":{body}}}").into_bytes(),
+    ))
+}
 
-    let walked: Vec<_> = repo
-        .rev_walk(head)
-        .map_err(|e| ApiError::Internal(format!("rev_walk: {e}")))?
-        .take(n)
-        .collect::<Result<_, _>>()
-        .map_err(|e| ApiError::Internal(format!("rev_walk: {e}")))?;
-    let mut commits: Vec<String> = Vec::with_capacity(walked.len());
-    for (oid, commit) in walked {
-        // BString → utf-8 lossy String; subjects are git's first line.
-        let raw = String::from_utf8_lossy(commit.message().as_slice()).into_owned();
-        let subject = subject_of(&raw);
-        commits.push(format!(
-            "{{\"oid\":\"{}\",\"subject\":{}}}",
+fn repo_summary(mr: &MultiRepo, name: &str) -> Result<String, ApiError> {
+    let repo = mr.open(name)?;
+    let head = repo
+        .rev_parse("HEAD")
+        .map_err(|e| ApiError::Internal(format!("rev_parse HEAD: {e}")))?;
+    let refs = repo
+        .list_refs()
+        .map_err(|e| ApiError::Internal(format!("list_refs: {e}")))?;
+    let head_branch = current_branch(&repo).ok().flatten().unwrap_or_default();
+    let head_str = head.map(|o| o.to_string()).unwrap_or_default();
+    Ok(format!(
+        "{{\"name\":{},\"head\":{},\"head_branch\":{},\"refs\":{}}}",
+        json_string(name),
+        json_string(&head_str),
+        json_string(&head_branch),
+        refs.len()
+    ))
+}
+
+/// `GET /api/repos/{name}/refs` — every branch + tag, each with its
+/// resolved commit oid.
+pub fn handle_refs(mr: &MultiRepo, name: &str) -> Result<(u16, Vec<u8>), ApiError> {
+    let repo = mr.open(name)?;
+    let refs = repo
+        .list_refs()
+        .map_err(|e| ApiError::Internal(format!("list_refs: {e}")))?;
+    let mut items: Vec<String> = Vec::with_capacity(refs.len());
+    for (full_name, oid, target) in refs {
+        let target_str = target.unwrap_or_default();
+        items.push(format!(
+            "{{\"name\":{},\"oid\":\"{}\",\"target\":{}}}",
+            json_string(&full_name),
             oid,
-            json_string(subject)
+            json_string(&target_str)
         ));
+    }
+    let body = format!("{{\"schema_version\":1,\"refs\":[{}]}}", items.join(","));
+    Ok((200, body.into_bytes()))
+}
+
+/// `GET /api/repos/{name}/log?ref=<ref>&n=<n>&before=<oid>` — commit
+/// list walked from `ref` (or HEAD), newest-first.
+/// `before` skips until the named oid is seen (so the next page picks
+/// up where the last one stopped).
+pub fn handle_log(
+    mr: &MultiRepo,
+    name: &str,
+    ref_name: Option<&str>,
+    n: usize,
+    before: Option<&str>,
+) -> Result<(u16, Vec<u8>), ApiError> {
+    const MAX: usize = 200;
+    let n = n.clamp(1, MAX);
+    let repo = mr.open(name)?;
+    let start_oid = match ref_name {
+        Some(r) => repo
+            .rev_parse(r)
+            .map_err(|e| ApiError::Internal(format!("rev_parse {r}: {e}")))?
+            .ok_or_else(|| ApiError::NotFound(format!("ref {r}")))?,
+        None => repo
+            .rev_parse("HEAD")
+            .map_err(|e| ApiError::Internal(format!("rev_parse HEAD: {e}")))?
+            .ok_or_else(|| ApiError::NotFound("HEAD".to_string()))?,
+    };
+    let mut walker = repo
+        .rev_walk(start_oid)
+        .map_err(|e| ApiError::Internal(format!("rev_walk: {e}")))?;
+    if let Some(b) = before {
+        for item in walker.by_ref() {
+            let (oid, _) = item.map_err(|e| ApiError::Internal(format!("walk: {e}")))?;
+            if oid.to_string() == b {
+                break;
+            }
+        }
+    }
+    let mut commits: Vec<String> = Vec::with_capacity(n);
+    for item in walker.take(n) {
+        let (oid, commit) = item.map_err(|e| ApiError::Internal(format!("walk: {e}")))?;
+        commits.push(commit_summary(&oid, &commit));
     }
     let body = format!(
         "{{\"schema_version\":1,\"commits\":[{}]}}",
         commits.join(",")
     );
     Ok((200, body.into_bytes()))
+}
+
+/// `GET /api/repos/{name}/commits/{oid}` — full commit detail: oid,
+/// tree, parents, author + committer (parsed from ident), message.
+pub fn handle_commit(
+    mr: &MultiRepo,
+    name: &str,
+    oid_str: &str,
+) -> Result<(u16, Vec<u8>), ApiError> {
+    let repo = mr.open(name)?;
+    let oid = parse_oid(oid_str)?;
+    let commit = repo
+        .read_commit(&oid)
+        .map_err(|e| ApiError::Internal(format!("read_commit {oid}: {e}")))?;
+    let raw = String::from_utf8_lossy(commit.message().as_slice()).into_owned();
+    let subject = subject_of(&raw);
+    let body_part = match raw.find('\n') {
+        Some(p) => raw[p + 1..].trim_start_matches('\n').to_string(),
+        None => String::new(),
+    };
+    let tree = commit.tree().map(|o| o.to_string()).unwrap_or_default();
+    let parents: Vec<String> = commit.parents().map(|p| format!("\"{p}\"")).collect();
+    let (a_name, a_email, a_when) = author_parts(&commit);
+    let (c_name, c_email, c_when) = committer_parts(&commit);
+    let body = format!(
+        "{{\"schema_version\":1,\"commit\":{{\
+            \"oid\":\"{oid}\",\
+            \"tree\":{},\
+            \"parents\":[{}],\
+            \"subject\":{},\
+            \"body\":{},\
+            \"author\":{{\"name\":{},\"email\":{},\"when\":{}}},\
+            \"committer\":{{\"name\":{},\"email\":{},\"when\":{}}}\
+        }}}}",
+        json_string(&tree),
+        parents.join(","),
+        json_string(subject),
+        json_string(&body_part),
+        json_string(&a_name),
+        json_string(&a_email),
+        a_when,
+        json_string(&c_name),
+        json_string(&c_email),
+        c_when,
+    );
+    Ok((200, body.into_bytes()))
+}
+
+/// `GET /api/repos/{name}/commits/{oid}/diff` — unified diff between
+/// the commit's tree and its first parent's tree. For the root commit,
+/// every file is shown as added.
+pub fn handle_commit_diff(
+    mr: &MultiRepo,
+    name: &str,
+    oid_str: &str,
+) -> Result<(u16, Vec<u8>), ApiError> {
+    let repo = mr.open(name)?;
+    let oid = parse_oid(oid_str)?;
+    let commit = repo
+        .read_commit(&oid)
+        .map_err(|e| ApiError::Internal(format!("read_commit {oid}: {e}")))?;
+    let new_tree = commit
+        .tree()
+        .ok_or_else(|| ApiError::Internal(format!("commit {oid} has no tree")))?;
+    let old_tree = commit.parents().next();
+
+    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+    let new_entries = flatten_tree(&repo, &new_tree)?;
+    let old_entries = match &old_tree {
+        Some(p) => {
+            let parent_commit = repo
+                .read_commit(p)
+                .map_err(|e| ApiError::Internal(format!("read_commit {p}: {e}")))?;
+            let parent_tree = parent_commit
+                .tree()
+                .ok_or_else(|| ApiError::Internal(format!("parent {p} has no tree")))?;
+            flatten_tree(&repo, &parent_tree)?
+        }
+        None => Vec::new(),
+    };
+    diff_trees(&repo, &old_entries, &new_entries, &mut files)?;
+
+    let mut entries: Vec<String> = Vec::with_capacity(files.len());
+    for (path, patch) in files {
+        let patch_str = String::from_utf8_lossy(&patch).into_owned();
+        entries.push(format!(
+            "{{\"path\":{},\"patch\":{}}}",
+            json_string(&path),
+            json_string(&patch_str)
+        ));
+    }
+    let body = format!(
+        "{{\"schema_version\":1,\"oid\":\"{oid}\",\"files\":[{}]}}",
+        entries.join(",")
+    );
+    Ok((200, body.into_bytes()))
+}
+
+/// `GET /api/repos/{name}/tree/{oid}` — list one tree level (mode, name,
+/// oid, kind = "blob"/"tree"/"commit"). `oid` can be a commit ref-or-oid,
+/// in which case the commit's root tree is listed.
+pub fn handle_tree(mr: &MultiRepo, name: &str, spec: &str) -> Result<(u16, Vec<u8>), ApiError> {
+    let repo = mr.open(name)?;
+    let tree_oid = resolve_tree(&repo, spec)?;
+    let tree = read_tree(&repo, &tree_oid)?;
+    let mut items: Vec<String> = Vec::with_capacity(tree.entries.len());
+    for entry in &tree.entries {
+        let kind = match entry.mode.value() {
+            0o040000 => "tree",
+            0o160000 => "commit",
+            _ => "blob",
+        };
+        items.push(format!(
+            "{{\"mode\":\"{}\",\"name\":{},\"oid\":\"{}\",\"kind\":\"{}\"}}",
+            entry.mode.as_str(),
+            json_string(&String::from_utf8_lossy(entry.name.as_slice())),
+            entry.oid,
+            kind,
+        ));
+    }
+    let body = format!(
+        "{{\"schema_version\":1,\"oid\":\"{tree_oid}\",\"entries\":[{}]}}",
+        items.join(",")
+    );
+    Ok((200, body.into_bytes()))
+}
+
+/// `GET /api/repos/{name}/blob/{oid}` — blob content with size + binary
+/// flag. Text blobs return UTF-8 (lossy); binary blobs return only the
+/// size, leaving the content out so the JSON stays small.
+pub fn handle_blob(mr: &MultiRepo, name: &str, oid_str: &str) -> Result<(u16, Vec<u8>), ApiError> {
+    let repo = mr.open(name)?;
+    let oid = parse_oid(oid_str)?;
+    let raw = repo
+        .read_object(&oid)
+        .map_err(|e| ApiError::Internal(format!("read_object {oid}: {e}")))?
+        .ok_or_else(|| ApiError::NotFound(format!("blob {oid}")))?;
+    if raw.kind != ObjectKind::Blob {
+        return Err(ApiError::NotFound(format!(
+            "object {oid} is {:?}, not a blob",
+            raw.kind
+        )));
+    }
+    let size = raw.data.len();
+    let binary = alt_diff::is_binary(&raw.data);
+    let body = if binary {
+        format!(
+            "{{\"schema_version\":1,\"oid\":\"{oid}\",\"size\":{size},\"binary\":true,\"content\":null}}"
+        )
+    } else {
+        let text = String::from_utf8_lossy(&raw.data).into_owned();
+        format!(
+            "{{\"schema_version\":1,\"oid\":\"{oid}\",\"size\":{size},\"binary\":false,\"content\":{}}}",
+            json_string(&text)
+        )
+    };
+    Ok((200, body.into_bytes()))
+}
+
+fn parse_oid(s: &str) -> Result<ObjectId, ApiError> {
+    ObjectId::from_hex(s.as_bytes())
+        .map_err(|_| ApiError::NotFound(format!("invalid object id: {s}")))
+}
+
+fn resolve_tree(repo: &Repository, spec: &str) -> Result<ObjectId, ApiError> {
+    // Try parsing as a tree oid directly; if it's not a tree, fall back
+    // to resolving as a commit / ref → root tree.
+    if let Ok(oid) = ObjectId::from_hex(spec.as_bytes())
+        && let Ok(Some(obj)) = repo.read_object(&oid)
+    {
+        match obj.kind {
+            ObjectKind::Tree => return Ok(oid),
+            ObjectKind::Commit => {
+                let commit = repo
+                    .read_commit(&oid)
+                    .map_err(|e| ApiError::Internal(format!("read_commit {oid}: {e}")))?;
+                return commit
+                    .tree()
+                    .ok_or_else(|| ApiError::Internal(format!("commit {oid} has no tree")));
+            }
+            _ => {}
+        }
+    }
+    let resolved = repo
+        .rev_parse(spec)
+        .map_err(|e| ApiError::Internal(format!("rev_parse {spec}: {e}")))?
+        .ok_or_else(|| ApiError::NotFound(format!("ref {spec}")))?;
+    let commit = repo
+        .read_commit(&resolved)
+        .map_err(|e| ApiError::Internal(format!("read_commit {resolved}: {e}")))?;
+    commit
+        .tree()
+        .ok_or_else(|| ApiError::Internal(format!("commit {resolved} has no tree")))
+}
+
+fn read_tree(repo: &Repository, oid: &ObjectId) -> Result<Tree, ApiError> {
+    let raw = repo
+        .read_object(oid)
+        .map_err(|e| ApiError::Internal(format!("read_object {oid}: {e}")))?
+        .ok_or_else(|| ApiError::NotFound(format!("tree {oid}")))?;
+    if raw.kind != ObjectKind::Tree {
+        return Err(ApiError::NotFound(format!(
+            "object {oid} is {:?}, not a tree",
+            raw.kind
+        )));
+    }
+    Tree::parse(&raw.data, repo.algo()).map_err(|e| ApiError::Internal(format!("tree {oid}: {e}")))
+}
+
+/// Flatten a tree to `(path, blob_oid)` pairs by walking subtrees,
+/// joining names with `/`. Used by [`diff_trees`].
+fn flatten_tree(
+    repo: &Repository,
+    tree_oid: &ObjectId,
+) -> Result<Vec<(String, ObjectId)>, ApiError> {
+    let mut out = Vec::new();
+    walk(repo, tree_oid, "", &mut out)?;
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(out)
+}
+
+fn walk(
+    repo: &Repository,
+    tree_oid: &ObjectId,
+    prefix: &str,
+    out: &mut Vec<(String, ObjectId)>,
+) -> Result<(), ApiError> {
+    let tree = read_tree(repo, tree_oid)?;
+    for entry in tree.entries {
+        let name = String::from_utf8_lossy(entry.name.as_slice()).into_owned();
+        let path = if prefix.is_empty() {
+            name
+        } else {
+            format!("{prefix}/{name}")
+        };
+        match entry.mode.value() {
+            0o040000 => walk(repo, &entry.oid, &path, out)?,
+            0o160000 => {} // submodule — skip in diff for now
+            _ => out.push((path, entry.oid)),
+        }
+    }
+    Ok(())
+}
+
+fn diff_trees(
+    repo: &Repository,
+    old: &[(String, ObjectId)],
+    new: &[(String, ObjectId)],
+    out: &mut Vec<(String, Vec<u8>)>,
+) -> Result<(), ApiError> {
+    use std::collections::BTreeMap;
+    let old_map: BTreeMap<&str, &ObjectId> = old.iter().map(|(p, o)| (p.as_str(), o)).collect();
+    let new_map: BTreeMap<&str, &ObjectId> = new.iter().map(|(p, o)| (p.as_str(), o)).collect();
+    let mut all: Vec<&str> = old_map.keys().chain(new_map.keys()).copied().collect();
+    all.sort();
+    all.dedup();
+    for path in all {
+        let o_oid = old_map.get(path);
+        let n_oid = new_map.get(path);
+        match (o_oid, n_oid) {
+            (Some(a), Some(b)) if a == b => continue,
+            _ => {}
+        }
+        let old_bytes = match o_oid {
+            Some(o) => read_blob(repo, o)?,
+            None => Vec::new(),
+        };
+        let new_bytes = match n_oid {
+            Some(o) => read_blob(repo, o)?,
+            None => Vec::new(),
+        };
+        let mut patch = Vec::new();
+        write_unified_with_headers(&mut patch, path, &old_bytes, &new_bytes);
+        out.push((path.to_string(), patch));
+    }
+    Ok(())
+}
+
+fn read_blob(repo: &Repository, oid: &ObjectId) -> Result<Vec<u8>, ApiError> {
+    let raw = repo
+        .read_object(oid)
+        .map_err(|e| ApiError::Internal(format!("read_object {oid}: {e}")))?
+        .ok_or_else(|| ApiError::NotFound(format!("blob {oid}")))?;
+    if raw.kind != ObjectKind::Blob {
+        return Err(ApiError::Internal(format!(
+            "object {oid} expected blob, got {:?}",
+            raw.kind
+        )));
+    }
+    Ok(raw.data)
+}
+
+fn write_unified_with_headers(out: &mut Vec<u8>, path: &str, old: &[u8], new: &[u8]) {
+    use std::io::Write;
+    let _ = writeln!(out, "--- a/{path}");
+    let _ = writeln!(out, "+++ b/{path}");
+    if alt_diff::is_binary(old) || alt_diff::is_binary(new) {
+        let _ = writeln!(out, "Binary files differ");
+        return;
+    }
+    alt_diff::write_unified(out, old, new, 3);
+}
+
+fn committer_parts(commit: &alt_git_codec::Commit) -> (String, String, i64) {
+    let Some(ident) = commit.committer() else {
+        return (String::new(), String::new(), 0);
+    };
+    parse_ident(&String::from_utf8_lossy(ident))
+}
+
+fn parse_ident(s: &str) -> (String, String, i64) {
+    let (name, rest) = match s.find('<') {
+        Some(p) => (s[..p].trim_end().to_string(), &s[p + 1..]),
+        None => return (s.to_string(), String::new(), 0),
+    };
+    let (email, after) = match rest.find('>') {
+        Some(p) => (rest[..p].to_string(), rest[p + 1..].trim()),
+        None => (rest.to_string(), ""),
+    };
+    let when = after
+        .split_whitespace()
+        .next()
+        .and_then(|t| t.parse::<i64>().ok())
+        .unwrap_or(0);
+    (name, email, when)
+}
+
+fn current_branch(repo: &Repository) -> Result<Option<String>, ApiError> {
+    let refs = repo
+        .list_refs()
+        .map_err(|e| ApiError::Internal(format!("list_refs: {e}")))?;
+    let head = repo
+        .rev_parse("HEAD")
+        .map_err(|e| ApiError::Internal(format!("rev_parse HEAD: {e}")))?;
+    let Some(head) = head else {
+        return Ok(None);
+    };
+    for (name, oid, _) in &refs {
+        if oid == &head && name.starts_with("refs/heads/") {
+            return Ok(Some(name.trim_start_matches("refs/heads/").to_string()));
+        }
+    }
+    Ok(None)
+}
+
+fn commit_summary(oid: &alt_git_codec::ObjectId, commit: &alt_git_codec::Commit) -> String {
+    let raw = String::from_utf8_lossy(commit.message().as_slice()).into_owned();
+    let subject = subject_of(&raw);
+    let (name, email, when) = author_parts(commit);
+    format!(
+        "{{\"oid\":\"{}\",\"subject\":{},\"author\":{{\"name\":{},\"email\":{},\"when\":{}}}}}",
+        oid,
+        json_string(subject),
+        json_string(&name),
+        json_string(&email),
+        when,
+    )
+}
+
+/// Parse a git ident line (`Name <email> 1234567890 +0900`) into
+/// `(name, email, epoch_seconds)`. Missing fields fall back to empty
+/// string / 0 so a malformed commit doesn't trip the response.
+fn author_parts(commit: &alt_git_codec::Commit) -> (String, String, i64) {
+    let Some(ident) = commit.author() else {
+        return (String::new(), String::new(), 0);
+    };
+    parse_ident(&String::from_utf8_lossy(ident))
 }
 
 /// First line of a commit message; subjects are the only line a landing
@@ -127,12 +545,6 @@ pub(crate) fn json_string(s: &str) -> String {
     }
     out.push('"');
     out
-}
-
-/// Helper for tests + internal callers: peek the alt store via [`Repository`].
-#[doc(hidden)]
-pub fn open_for_test(src: &Source) -> Result<Repository, ApiError> {
-    src.open()
 }
 
 #[cfg(test)]

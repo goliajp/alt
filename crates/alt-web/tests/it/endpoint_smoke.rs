@@ -1,16 +1,16 @@
-//! Spin up the daemon against a tiny `.git` fixture, hit each endpoint
-//! over the loopback, and check the JSON shape. End-to-end coverage that
-//! the dispatcher → handler → repo path actually returns useful bytes
-//! for the marketing API.
+//! Spin up the daemon against a tiny multi-repo root (one fixture `.alt`
+//! imported from a fresh `.git`), hit each endpoint over the loopback,
+//! and check the JSON shape.
 
 use std::io::Read;
 use std::net::{TcpListener, TcpStream};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use alt_web::Source;
+use alt_repo::Repository;
+use alt_web::MultiRepo;
 
 fn run_git(dir: &Path, args: &[&str]) {
     let out = Command::new("git")
@@ -32,14 +32,23 @@ fn run_git(dir: &Path, args: &[&str]) {
     );
 }
 
-fn build_fixture_repo(dir: &Path) {
-    run_git(dir, &["init", "-q", "-b", "main"]);
-    std::fs::write(dir.join("README.md"), "hi\n").unwrap();
-    run_git(dir, &["add", "README.md"]);
-    run_git(dir, &["commit", "-q", "-m", "first"]);
-    std::fs::write(dir.join("README.md"), "hi again\n").unwrap();
-    run_git(dir, &["add", "README.md"]);
-    run_git(dir, &["commit", "-q", "-m", "second commit\n\nbody\n"]);
+fn build_fixture_alt(root: &Path, name: &str) -> PathBuf {
+    let repo_dir = root.join(name);
+    std::fs::create_dir_all(&repo_dir).unwrap();
+    // We need a git source, then alt-import that into <repo_dir>/.alt.
+    let git_src = root.join(format!(".{name}-src"));
+    std::fs::create_dir_all(&git_src).unwrap();
+    run_git(&git_src, &["init", "-q", "-b", "main"]);
+    std::fs::write(git_src.join("README.md"), "hi\n").unwrap();
+    run_git(&git_src, &["add", "README.md"]);
+    run_git(&git_src, &["commit", "-q", "-m", "first"]);
+    std::fs::write(git_src.join("README.md"), "hi again\n").unwrap();
+    run_git(&git_src, &["add", "README.md"]);
+    run_git(&git_src, &["commit", "-q", "-m", "second commit\n\nbody\n"]);
+
+    let repo = Repository::discover(&git_src).unwrap();
+    alt_import::import_git(&repo, &repo_dir.join(".alt"), "test/web-endpoints", 1).unwrap();
+    repo_dir
 }
 
 fn pick_free_port() -> u16 {
@@ -82,69 +91,100 @@ fn http_get(addr: &str, path: &str) -> (u16, String) {
 }
 
 #[test]
-fn endpoints_serve_version_stats_changelog() {
-    let dir = tempfile::tempdir().unwrap();
-    build_fixture_repo(dir.path());
+fn endpoints_serve_version_repos_refs_log() {
+    let tmp = tempfile::tempdir().unwrap();
+    build_fixture_alt(tmp.path(), "alt");
+    build_fixture_alt(tmp.path(), "playground");
 
     let port = pick_free_port();
     let addr = format!("127.0.0.1:{port}");
-    let source = Source::new(dir.path().to_path_buf());
+    let mr = MultiRepo::new(tmp.path().to_path_buf());
     let addr_clone = addr.clone();
     let _handle = thread::spawn(move || {
-        // serve blocks until the server handle is dropped at process exit;
-        // we let the test process tear it down.
-        let _ = alt_web::router::serve(&addr_clone, source, 1);
+        let _ = alt_web::router::serve(&addr_clone, mr, 1);
     });
     wait_until_listening(&addr, Duration::from_secs(5));
 
     // /api/version
     let (status, body) = http_get(&addr, "/api/version");
-    assert_eq!(status, 200, "version body: {body}");
-    assert!(body.contains("\"schema_version\":1"), "version: {body}");
-    assert!(body.contains("\"version\":\""), "version: {body}");
-
-    // /api/stats
-    let (status, body) = http_get(&addr, "/api/stats");
-    assert_eq!(status, 200, "stats body: {body}");
-    assert!(body.contains("\"head\":\""), "stats: {body}");
-    assert!(body.contains("\"refs\":"), "stats: {body}");
-
-    // /api/changelog?n=10 — two commits in the fixture
-    let (status, body) = http_get(&addr, "/api/changelog?n=10");
-    assert_eq!(status, 200, "changelog body: {body}");
-    assert!(body.contains("\"commits\":["), "changelog: {body}");
-    assert!(body.contains("\"second commit\""), "changelog: {body}");
-    assert!(body.contains("\"first\""), "changelog: {body}");
-
-    // /api/changelog with no ?n falls back to default
-    let (status, body) = http_get(&addr, "/api/changelog");
     assert_eq!(status, 200);
-    assert!(body.contains("\"commits\":["), "changelog: {body}");
+    assert!(body.contains("\"schema_version\":1"), "{body}");
 
-    // unknown path 404
+    // /api/repos
+    let (status, body) = http_get(&addr, "/api/repos");
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains("\"name\":\"alt\""), "{body}");
+    assert!(body.contains("\"name\":\"playground\""), "{body}");
+    assert!(body.contains("\"head\":\""), "{body}");
+
+    // /api/repos/alt
+    let (status, body) = http_get(&addr, "/api/repos/alt");
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains("\"repo\":{"), "{body}");
+    assert!(body.contains("\"head_branch\":\"main\""), "{body}");
+
+    // /api/repos/alt/refs
+    let (status, body) = http_get(&addr, "/api/repos/alt/refs");
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains("\"refs/heads/main\""), "{body}");
+
+    // /api/repos/alt/log
+    let (status, body) = http_get(&addr, "/api/repos/alt/log");
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains("\"second commit\""), "{body}");
+    assert!(body.contains("\"first\""), "{body}");
+
+    // /api/repos/alt/log?n=1
+    let (status, body) = http_get(&addr, "/api/repos/alt/log?n=1");
+    assert_eq!(status, 200);
+    assert!(body.contains("\"second commit\""), "{body}");
+    assert!(!body.contains("\"first\""), "{body}");
+
+    // unknown repo
+    let (status, _) = http_get(&addr, "/api/repos/nope");
+    assert_eq!(status, 404);
+
+    // unknown path
     let (status, _) = http_get(&addr, "/no-such-route");
     assert_eq!(status, 404);
+
+    // /api/repos/alt/commits/{HEAD}/diff — fetch HEAD oid from log
+    let (_, log_body) = http_get(&addr, "/api/repos/alt/log?n=1");
+    let head_oid = extract_str(&log_body, "\"oid\":\"");
+    let (status, body) = http_get(&addr, &format!("/api/repos/alt/commits/{head_oid}"));
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains("\"tree\":\""), "commit detail: {body}");
+    assert!(body.contains("\"parents\":["), "commit detail: {body}");
+    assert!(body.contains("\"committer\":{"), "commit detail: {body}");
+
+    let (status, body) = http_get(&addr, &format!("/api/repos/alt/commits/{head_oid}/diff"));
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains("\"path\":\"README.md\""), "diff: {body}");
+    assert!(body.contains("--- a/README.md"), "diff: {body}");
+
+    // /api/repos/alt/tree/main — list root tree of HEAD branch
+    let (status, body) = http_get(&addr, "/api/repos/alt/tree/main");
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains("\"name\":\"README.md\""), "tree: {body}");
+
+    // /api/repos/alt/blob/{oid} — pick README.md blob oid from tree
+    let tree_oid = extract_str(&body, "\"oid\":\"");
+    let blob_oid = extract_str(&body, "\"name\":\"README.md\",\"oid\":\"");
+    assert!(!blob_oid.is_empty(), "blob oid: {body}");
+    let _ = tree_oid;
+    let (status, body) = http_get(&addr, &format!("/api/repos/alt/blob/{blob_oid}"));
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains("\"binary\":false"), "{body}");
+    assert!(body.contains("hi again"), "{body}");
 }
 
-#[test]
-fn missing_alt_repo_surfaces_repo_unavailable_503() {
-    let bad_dir = std::env::temp_dir().join("does-not-exist-alt-web-fixture");
-    let _ = std::fs::remove_dir_all(&bad_dir);
-    let port = pick_free_port();
-    let addr = format!("127.0.0.1:{port}");
-    let source = Source::new(bad_dir);
-    let addr_clone = addr.clone();
-    let _handle = thread::spawn(move || {
-        let _ = alt_web::router::serve(&addr_clone, source, 1);
-    });
-    wait_until_listening(&addr, Duration::from_secs(5));
-
-    // version is independent of the repo — still 200
-    let (status, _) = http_get(&addr, "/api/version");
-    assert_eq!(status, 200);
-
-    // stats needs the repo — 503
-    let (status, body) = http_get(&addr, "/api/stats");
-    assert_eq!(status, 503, "stats body: {body}");
-    assert!(body.contains("\"kind\":\"repo_unavailable\""), "{body}");
+fn extract_str(s: &str, before: &str) -> String {
+    let p = s
+        .find(before)
+        .unwrap_or_else(|| panic!("missing {before} in {s}"));
+    let after = &s[p + before.len()..];
+    let q = after
+        .find('"')
+        .unwrap_or_else(|| panic!("unterminated string after {before}"));
+    after[..q].to_string()
 }
