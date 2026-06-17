@@ -26,11 +26,15 @@
 
 use std::io::Cursor;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
+use alt_cli::native::Store;
+use alt_git_codec::{HashAlgo, ObjectId};
+use alt_refs::{RefChange, RefTarget};
 use alt_repo::Repository;
 use alt_wire::caps;
 use alt_wire::ls_refs::RefRecord;
+use alt_wire::push::{CommandStatus, RefUpdate};
 use tiny_http::{Header, Method, Response, Server, StatusCode};
 
 const AGENT: &str = concat!("alt-server/", env!("CARGO_PKG_VERSION"));
@@ -65,6 +69,21 @@ fn main() {
         Repository::discover(&PathBuf::from(&repo_path))
             .unwrap_or_else(|e| die(&format!("opening repo: {e}"))),
     );
+    // The write store: receive-pack mutates this (odb + refs). Reads
+    // (ls-refs, fetch) still go through Repository so they don't fight
+    // for the write lock. Both opens are on the same .alt dir; alt-odb's
+    // flock serialises writers safely.
+    let alt_dir = PathBuf::from(&repo_path).join(".alt");
+    let store: Option<Arc<Mutex<Store>>> = if alt_dir.is_dir() {
+        Some(Arc::new(Mutex::new(Store::open(alt_dir).unwrap_or_else(
+            |e| die(&format!("opening write store: {e}")),
+        ))))
+    } else {
+        eprintln!(
+            "altd-server: no .alt under {repo_path}; receive-pack will be refused (read-only mode)"
+        );
+        None
+    };
 
     let server = Server::http(&bind).unwrap_or_else(|e| die(&format!("bind {bind}: {e}")));
     eprintln!(
@@ -76,7 +95,7 @@ fn main() {
     for req in server.incoming_requests() {
         let url = req.url().to_owned();
         let method = req.method().clone();
-        if let Err(e) = dispatch(&repo, method, &url, req) {
+        if let Err(e) = dispatch(&repo, store.as_deref(), method, &url, req) {
             eprintln!("altd-server: handler error: {e}");
         }
     }
@@ -84,6 +103,7 @@ fn main() {
 
 fn dispatch(
     repo: &Repository,
+    store: Option<&Mutex<Store>>,
     method: Method,
     url: &str,
     req: tiny_http::Request,
@@ -99,7 +119,15 @@ fn dispatch(
     if method == Method::Post && path.ends_with("/git-upload-pack") {
         return handle_upload_pack(repo, req);
     }
-    // POST git-receive-pack lands in W10c.
+    if method == Method::Post && path.ends_with("/git-receive-pack") {
+        let Some(store) = store else {
+            let r = Response::from_string("repo is read-only (no .alt write store)")
+                .with_status_code(StatusCode(403));
+            req.respond(r)?;
+            return Ok(());
+        };
+        return handle_receive_pack(repo, store, req);
+    }
     let r = Response::from_string("not found").with_status_code(StatusCode(404));
     req.respond(r)?;
     Ok(())
@@ -213,38 +241,189 @@ fn handle_info_refs(
     query: &str,
     req: tiny_http::Request,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Required: service=git-upload-pack | git-receive-pack
     let service = parse_query(query, "service")
         .ok_or("info/refs missing ?service= query parameter")?
         .to_owned();
-    if service != "git-upload-pack" && service != "git-receive-pack" {
-        let r = Response::from_string("unknown service").with_status_code(StatusCode(400));
-        req.respond(r)?;
-        return Ok(());
-    }
-
-    let mut body = Vec::new();
-    // smart-http capability advertisement: advertise v2, agent,
-    // object-format and the commands we serve. ls-refs is the only one
-    // W10a actually handles end-to-end; fetch/push land in W10b/c.
-    caps::encode_capability_advertisement(
-        &mut body,
-        &service,
-        AGENT,
-        Some("sha1"),
-        &[
-            ("ls-refs", Some("unborn")),
-            ("fetch", Some("shallow wait-for-done")),
-        ],
-    )?;
-
+    let body = match service.as_str() {
+        // Fetch (read): v2 capability advert. Client posts ls-refs / fetch
+        // next over POST /git-upload-pack.
+        "git-upload-pack" => {
+            let mut body = Vec::new();
+            caps::encode_capability_advertisement(
+                &mut body,
+                &service,
+                AGENT,
+                Some("sha1"),
+                &[
+                    ("ls-refs", Some("unborn")),
+                    ("fetch", Some("shallow wait-for-done")),
+                ],
+            )?;
+            body
+        }
+        // Push (write): receive-pack is still v0/v1 in git. The advert
+        // carries the actual ref list inline so the client can compute
+        // what to push.
+        "git-receive-pack" => {
+            let mut body = Vec::new();
+            let refs: Vec<(String, ObjectId)> = repo
+                .list_refs()?
+                .into_iter()
+                .filter(|(name, _, _)| name != "HEAD")
+                .map(|(name, oid, _)| (name, oid))
+                .collect();
+            let caps_list = [
+                "report-status",
+                "delete-refs",
+                "ofs-delta",
+                concat!("agent=", "alt-server/", env!("CARGO_PKG_VERSION")),
+            ];
+            alt_wire::push::encode_v1_ref_advertisement(
+                &mut body,
+                &refs,
+                &caps_list,
+                HashAlgo::Sha1,
+            )?;
+            body
+        }
+        _ => {
+            let r = Response::from_string("unknown service").with_status_code(StatusCode(400));
+            req.respond(r)?;
+            return Ok(());
+        }
+    };
     let content_type = format!("application/x-{service}-advertisement");
     let mut resp = Response::from_data(body);
     resp.add_header(header("Content-Type", &content_type));
     resp.add_header(header("Cache-Control", "no-cache"));
     req.respond(resp)?;
-    let _ = repo; // keep the borrow alive across the response (repo is read on POST)
     Ok(())
+}
+
+/// POST /git-receive-pack (M9/W10c): parse the client's ref-update list
+/// and raw pack, ingest objects into the alt odb, then commit the ref
+/// changes through `RefStore::commit` so the whole push lands as one
+/// atomic op-log entry (mirrors the local-commit path). Reply with a
+/// `report-status` body.
+fn handle_receive_pack(
+    repo: &Repository,
+    store: &Mutex<Store>,
+    mut req: tiny_http::Request,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut body = Vec::new();
+    std::io::copy(req.as_reader(), &mut body)?;
+    let pushed = alt_wire::push::parse_push_request(&mut Cursor::new(&body), HashAlgo::Sha1)?;
+
+    // Unpack the trailing pack into the store's odb. Empty pack = a
+    // pure-delete push, no objects to index.
+    let unpack_result: Result<(), String> = if pushed.pack.is_empty() {
+        Ok(())
+    } else {
+        match ingest_pack(store, &pushed.pack) {
+            Ok(()) => Ok(()),
+            Err(e) => Err(format!("index-pack: {e}")),
+        }
+    };
+
+    // Apply ref changes only if the pack unpacked cleanly; otherwise
+    // mark every command `ng` so the client sees a coherent reason.
+    let mut command_status: Vec<CommandStatus> = Vec::new();
+    if unpack_result.is_ok() {
+        match commit_ref_updates(store, &pushed.updates) {
+            Ok(()) => {
+                for u in &pushed.updates {
+                    command_status.push(CommandStatus::Ok(u.name.clone()));
+                }
+            }
+            Err(reason) => {
+                for u in &pushed.updates {
+                    command_status.push(CommandStatus::Ng {
+                        name: u.name.clone(),
+                        reason: reason.clone(),
+                    });
+                }
+            }
+        }
+    } else {
+        for u in &pushed.updates {
+            command_status.push(CommandStatus::Ng {
+                name: u.name.clone(),
+                reason: "pack unpack failed".into(),
+            });
+        }
+    }
+
+    let mut out = Vec::new();
+    alt_wire::push::encode_report_status(
+        &mut out,
+        unpack_result.as_ref().map(|_| ()).map_err(|s| s.as_str()),
+        &command_status,
+    )?;
+    let mut resp = Response::from_data(out);
+    resp.add_header(header(
+        "Content-Type",
+        "application/x-git-receive-pack-result",
+    ));
+    resp.add_header(header("Cache-Control", "no-cache"));
+    req.respond(resp)?;
+    let _ = repo; // borrow keepalive across response
+    Ok(())
+}
+
+/// Write the pushed pack into a tempfile, index it, and put every
+/// object into the server odb. Mirrors the fetch ingest path in
+/// `alt-cli::native`.
+fn ingest_pack(store: &Mutex<Store>, pack: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    let dir = tempfile::tempdir()?;
+    let tmp_pack = dir.path().join("incoming.pack");
+    std::fs::write(&tmp_pack, pack)?;
+    let indexed = alt_git_pack::index_pack(&tmp_pack, HashAlgo::Sha1, true)?;
+    let ip = alt_git_pack::IndexedPack::open(&indexed.pack_path, HashAlgo::Sha1)?;
+    let idx = ip.idx();
+    let mut order: Vec<(u64, u32)> = (0..idx.len())
+        .map(|i| (idx.offset_at(i).expect("idx in range"), i))
+        .collect();
+    order.sort_unstable();
+    let mut store_guard = store.lock().unwrap();
+    for (offset, i) in order {
+        let obj = ip.read_at(offset)?;
+        let _: ObjectId = idx.oid_at(i);
+        let oid = idx.oid_at(i);
+        store_guard.odb_mut().put(oid, obj.kind, &obj.data)?;
+    }
+    store_guard.odb_mut().flush()?;
+    Ok(())
+}
+
+/// Apply the client's ref updates as a single ref transaction so the
+/// server records the push as one op-log entry — same atomicity story
+/// as a local `alt commit`.
+fn commit_ref_updates(store: &Mutex<Store>, updates: &[RefUpdate]) -> Result<(), String> {
+    if updates.is_empty() {
+        return Ok(());
+    }
+    let mut store_guard = store.lock().unwrap();
+    let mut changes = Vec::with_capacity(updates.len());
+    for u in updates {
+        changes.push(RefChange {
+            name: u.name.clone(),
+            old: u.old.map(RefTarget::Oid),
+            new: u.new.map(RefTarget::Oid),
+        });
+    }
+    let actor = "wire/receive-pack@altd-server";
+    store_guard
+        .refs_mut()
+        .commit(actor, now_ms(), &changes)
+        .map_err(|e| format!("ref tx: {e}"))?;
+    Ok(())
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 /// Read the repo's refs into the ls-refs `RefRecord` shape the wire

@@ -190,6 +190,114 @@ fn altd_server_serves_git_clone_end_to_end() {
 }
 
 #[test]
+fn altd_server_accepts_git_push_end_to_end() {
+    // M9/W10c: a `git push http://altd-server/ HEAD:refs/heads/from-git`
+    // round-trips fully — server ingests the pack into its odb,
+    // commits the ref update as one tx, and the alt-side ref appears
+    // afterwards. We build the source as a git repo (since `git push`
+    // is what we're testing) and serve an alt-backed receiver.
+    let receiver_root_dir = tempfile::tempdir().unwrap();
+    let receiver_root = receiver_root_dir.path();
+    ok(alt(receiver_root, &["init", "."]));
+    std::fs::write(receiver_root.join("seed.txt"), "seed\n").unwrap();
+    ok(alt(receiver_root, &["add", "seed.txt"]));
+    ok(alt(receiver_root, &["commit", "-m", "seed"]));
+
+    let server = spawn_server(receiver_root);
+    let url = format!("http://{}/", server.addr);
+
+    // build a git source repo with the commit we'll push
+    let src_dir = tempfile::tempdir().unwrap();
+    let src = src_dir.path();
+    let git_init = Command::new("git")
+        .args(["init", "-q", "-b", "main", src.to_str().unwrap()])
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .unwrap();
+    assert!(git_init.status.success(), "git init: {git_init:?}");
+    std::fs::write(src.join("pushed.txt"), "from-git\n").unwrap();
+    for args in [
+        &["-C", src.to_str().unwrap(), "add", "."][..],
+        &[
+            "-C",
+            src.to_str().unwrap(),
+            "-c",
+            "user.name=tester",
+            "-c",
+            "user.email=t@e",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "-m",
+            "from-git",
+        ][..],
+    ] {
+        let o = Command::new("git")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            o.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&o.stderr)
+        );
+    }
+    let head_oid = String::from_utf8_lossy(
+        &Command::new("git")
+            .args(["-C", src.to_str().unwrap(), "rev-parse", "HEAD"])
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .trim()
+    .to_owned();
+
+    let push = Command::new("git")
+        .args([
+            "-C",
+            src.to_str().unwrap(),
+            "push",
+            &url,
+            "HEAD:refs/heads/from-git",
+        ])
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .unwrap();
+    assert!(
+        push.status.success(),
+        "git push failed: stderr={} stdout={}",
+        String::from_utf8_lossy(&push.stderr),
+        String::from_utf8_lossy(&push.stdout)
+    );
+
+    // Drop the server so its locks release before we open the same store
+    // from `alt log` below. The Drop impl on Server kills + waits.
+    drop(server);
+
+    // The pushed ref shows up in the alt store: `alt log` from refs/heads/from-git
+    // sees the from-git commit. Use rev-parse to assert exact oid match.
+    let alt_oid = ok(alt(
+        receiver_root,
+        &["log", "--pretty=oneline", "-n", "1", "refs/heads/from-git"],
+    ))
+    .split_whitespace()
+    .next()
+    .unwrap()
+    .to_owned();
+    assert_eq!(
+        alt_oid, head_oid,
+        "alt-side ref must resolve to the pushed commit"
+    );
+}
+
+#[test]
 fn altd_server_rejects_unknown_service() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();

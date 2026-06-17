@@ -226,6 +226,20 @@ impl Store {
         &self.alt_dir
     }
 
+    /// Mutable access to the odb. M9/W10c: `altd-server` puts incoming
+    /// pack objects through here directly, since it doesn't own a
+    /// NativeRepo (no working tree / index in the wire path).
+    pub fn odb_mut(&mut self) -> &mut NativeOdb {
+        &mut self.odb
+    }
+
+    /// Mutable access to the refs store, for the same reason as
+    /// [`odb_mut`] — receive-pack commits the pushed ref-update list as
+    /// a single transaction through this handle.
+    pub fn refs_mut(&mut self) -> &mut RefStore {
+        &mut self.refs
+    }
+
     /// Read-path catch-up: bring the odb and ref state up to date with writes
     /// committed by other processes since the last refresh. The daemon calls
     /// this at the start of every request so a served read is never stale.

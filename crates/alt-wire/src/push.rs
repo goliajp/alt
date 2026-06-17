@@ -105,6 +105,10 @@ pub enum PushError {
     /// Sideband band 3 (fatal error from server).
     #[error("server error (sideband band 3): {0}")]
     ServerError(String),
+    /// IO error draining the pack trailer or sideband body — surfaces
+    /// when the server can't keep reading after the command flush.
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 /// Capability name an alt client sends to declare which principal
@@ -395,6 +399,159 @@ fn zero_oid(algo: HashAlgo) -> ObjectId {
     ObjectId::from_bytes(algo, &zeros).expect("zero oid is valid length")
 }
 
+/// Server-side encode of a v1 ref advertisement (M9/W10c). Mirror of
+/// [`parse_v1_ref_advertisement`]: caller passes the ordered refs and
+/// the capability list to advertise. Empty repos still send a pseudo
+/// ref `capabilities^{}` so the caps section has somewhere to ride.
+///
+/// Layout:
+///
+///   pkt: "# service=git-receive-pack\n"
+///   flush
+///   pkt: "<oid> <name>\0<caps>\n"   # first ref carries caps after NUL
+///   pkt: "<oid> <name>\n"           # subsequent refs (caps already sent)
+///   …
+///   flush
+pub fn encode_v1_ref_advertisement<W: Write>(
+    w: &mut W,
+    refs: &[(String, ObjectId)],
+    capabilities: &[&str],
+    algo: HashAlgo,
+) -> std::io::Result<()> {
+    pkt::write_data(w, b"# service=git-receive-pack\n")?;
+    pkt::write_flush(w)?;
+    let caps_blob = capabilities.join(" ");
+    if refs.is_empty() {
+        // Empty repo: pseudo-ref `capabilities^{}` carries the cap list.
+        let zero = zero_oid(algo);
+        let mut line = format!("{zero} capabilities^{{}}").into_bytes();
+        line.push(0);
+        line.extend_from_slice(caps_blob.as_bytes());
+        line.push(b'\n');
+        pkt::write_data(w, &line)?;
+    } else {
+        for (i, (name, oid)) in refs.iter().enumerate() {
+            let mut line = format!("{oid} {name}").into_bytes();
+            if i == 0 {
+                line.push(0);
+                line.extend_from_slice(caps_blob.as_bytes());
+            }
+            line.push(b'\n');
+            pkt::write_data(w, &line)?;
+        }
+    }
+    pkt::write_flush(w)
+}
+
+/// What a server saw after parsing a `git-receive-pack` request body.
+#[derive(Debug, Clone)]
+pub struct PushRequest {
+    /// One entry per command line the client sent.
+    pub updates: Vec<RefUpdate>,
+    /// The capability list the client attached to the first command line
+    /// (NUL-separated). One token per entry, in arrival order.
+    pub capabilities: Vec<String>,
+    /// Raw pack stream — bytes between the command flush and EOF. Empty
+    /// when the client sent only deletions.
+    pub pack: Vec<u8>,
+}
+
+/// Server-side parse of a `git-receive-pack` POST body (M9/W10c).
+/// Mirror of [`encode_push_request`]: reads the ref-update lines + the
+/// (optional, NUL-attached) capability list, then drains everything
+/// after the trailing flush as the raw pack stream.
+pub fn parse_push_request<R: Read>(r: &mut R, algo: HashAlgo) -> Result<PushRequest, PushError> {
+    let mut updates: Vec<RefUpdate> = Vec::new();
+    let mut capabilities: Vec<String> = Vec::new();
+    let mut scratch = Vec::new();
+    let zero = zero_oid(algo);
+    loop {
+        let f = pkt::read_frame(r, &mut scratch)?;
+        match f {
+            Frame::Flush => break,
+            Frame::Delim | Frame::ResponseEnd => break,
+            Frame::Data(line) => {
+                let trimmed = trim_newline(line);
+                let (head, caps_part) = match trimmed.iter().position(|&b| b == 0) {
+                    Some(i) => (&trimmed[..i], Some(&trimmed[i + 1..])),
+                    None => (trimmed, None),
+                };
+                let s =
+                    std::str::from_utf8(head).map_err(|_| PushError::BadRefLine(head.to_vec()))?;
+                let mut parts = s.splitn(3, ' ');
+                let old_s = parts
+                    .next()
+                    .ok_or_else(|| PushError::BadRefLine(head.to_vec()))?;
+                let new_s = parts
+                    .next()
+                    .ok_or_else(|| PushError::BadRefLine(head.to_vec()))?;
+                let name = parts
+                    .next()
+                    .ok_or_else(|| PushError::BadRefLine(head.to_vec()))?;
+                let old_oid = old_s
+                    .parse::<ObjectId>()
+                    .ok()
+                    .filter(|o| o.algo() == algo)
+                    .ok_or_else(|| PushError::BadRefLine(head.to_vec()))?;
+                let new_oid = new_s
+                    .parse::<ObjectId>()
+                    .ok()
+                    .filter(|o| o.algo() == algo)
+                    .ok_or_else(|| PushError::BadRefLine(head.to_vec()))?;
+                updates.push(RefUpdate {
+                    name: name.to_owned(),
+                    old: if old_oid == zero { None } else { Some(old_oid) },
+                    new: if new_oid == zero { None } else { Some(new_oid) },
+                });
+                if let Some(caps) = caps_part {
+                    let caps_s = std::str::from_utf8(caps)
+                        .map_err(|_| PushError::BadRefLine(caps.to_vec()))?;
+                    for c in caps_s.split_whitespace() {
+                        capabilities.push(c.to_owned());
+                    }
+                }
+            }
+        }
+    }
+    // remaining bytes = raw pack
+    let mut pack = Vec::new();
+    r.read_to_end(&mut pack)?;
+    Ok(PushRequest {
+        updates,
+        capabilities,
+        pack,
+    })
+}
+
+/// Server-side encode of `report-status` (M9/W10c). Plain pkt-lines —
+/// no sideband — because the client only switches to sideband if the
+/// server advertised `side-band-64k`; W10c doesn't yet, so we keep the
+/// reply simple.
+///
+///   pkt: "unpack ok\n"                              (or "unpack <reason>\n")
+///   pkt: "ok <ref>\n"                               (per applied update)
+///   pkt: "ng <ref> <reason>\n"                      (per refused update)
+///   flush
+pub fn encode_report_status<W: Write>(
+    w: &mut W,
+    unpack: Result<(), &str>,
+    commands: &[CommandStatus],
+) -> std::io::Result<()> {
+    let unpack_line = match unpack {
+        Ok(()) => "unpack ok\n".to_owned(),
+        Err(reason) => format!("unpack {reason}\n"),
+    };
+    pkt::write_data(w, unpack_line.as_bytes())?;
+    for c in commands {
+        let line = match c {
+            CommandStatus::Ok(name) => format!("ok {name}\n"),
+            CommandStatus::Ng { name, reason } => format!("ng {name} {reason}\n"),
+        };
+        pkt::write_data(w, line.as_bytes())?;
+    }
+    pkt::write_flush(w)
+}
+
 fn trim_newline(b: &[u8]) -> &[u8] {
     let mut end = b.len();
     while end > 0 && (b[end - 1] == b'\n' || b[end - 1] == b'\r') {
@@ -460,6 +617,115 @@ mod tests {
         assert_eq!(ad.refs.get("refs/heads/dev"), Some(&h2));
         assert!(ad.supports("report-status"));
         assert!(ad.supports("ofs-delta"));
+    }
+
+    /// M9/W10c: the v1 ref ad encoder mirrors the parser. An empty
+    /// store gets a `capabilities^{}` pseudo-ref; a populated store
+    /// gets one pkt per real ref with caps attached only to the first.
+    #[test]
+    fn server_v1_ref_ad_round_trips() {
+        let oid_a = sha1("0011223344556677889900112233445566778899");
+        let oid_b = sha1("aabbccddeeff0011223344aabbccddeeff001122");
+        let refs = vec![
+            ("refs/heads/main".to_owned(), oid_a),
+            ("refs/heads/feature".to_owned(), oid_b),
+        ];
+        let mut buf = Vec::new();
+        encode_v1_ref_advertisement(
+            &mut buf,
+            &refs,
+            &["report-status", "ofs-delta", "agent=alt-server/0"],
+            HashAlgo::Sha1,
+        )
+        .unwrap();
+
+        let ad = parse_v1_ref_advertisement(&mut Cursor::new(&buf), HashAlgo::Sha1).unwrap();
+        assert_eq!(ad.refs.len(), 2);
+        assert_eq!(ad.refs.get("refs/heads/main").copied(), Some(oid_a));
+        assert_eq!(ad.refs.get("refs/heads/feature").copied(), Some(oid_b));
+        assert!(ad.supports("report-status"));
+        assert!(ad.supports("ofs-delta"));
+    }
+
+    #[test]
+    fn server_v1_ref_ad_empty_repo_emits_pseudo_ref() {
+        let mut buf = Vec::new();
+        encode_v1_ref_advertisement(
+            &mut buf,
+            &[],
+            &["report-status", "ofs-delta"],
+            HashAlgo::Sha1,
+        )
+        .unwrap();
+        let ad = parse_v1_ref_advertisement(&mut Cursor::new(&buf), HashAlgo::Sha1).unwrap();
+        assert!(ad.refs.is_empty(), "empty repo carries no real refs");
+        assert!(ad.supports("report-status"));
+    }
+
+    /// Push request round-trip: client encoder + server parser
+    /// agree on commands, caps, and the trailing raw pack bytes.
+    #[test]
+    fn server_parses_what_client_pushed() {
+        let oid_a = sha1("0011223344556677889900112233445566778899");
+        let oid_b = sha1("aabbccddeeff0011223344aabbccddeeff001122");
+        let updates = vec![
+            RefUpdate {
+                old: Some(oid_a),
+                new: Some(oid_b),
+                name: "refs/heads/main".into(),
+            },
+            RefUpdate {
+                old: None,
+                new: Some(oid_b),
+                name: "refs/heads/new".into(),
+            },
+        ];
+        let pack = b"PACKv2BODY-arbitrary-bytes-after-the-flush".to_vec();
+        let mut buf = Vec::new();
+        encode_push_request(
+            &mut buf,
+            &updates,
+            &["report-status", "ofs-delta"],
+            HashAlgo::Sha1,
+            &pack,
+        )
+        .unwrap();
+        let parsed = parse_push_request(&mut Cursor::new(&buf), HashAlgo::Sha1).unwrap();
+        assert_eq!(parsed.updates, updates);
+        assert!(parsed.capabilities.contains(&"report-status".to_owned()));
+        assert!(parsed.capabilities.contains(&"ofs-delta".to_owned()));
+        assert_eq!(parsed.pack, pack);
+    }
+
+    /// `report-status` server encoder + client parser round-trip across
+    /// the unpack outcome and per-ref ok/ng outcomes.
+    #[test]
+    fn server_report_status_round_trips() {
+        let mut buf = Vec::new();
+        encode_report_status(
+            &mut buf,
+            Ok(()),
+            &[
+                CommandStatus::Ok("refs/heads/main".into()),
+                CommandStatus::Ng {
+                    name: "refs/heads/locked".into(),
+                    reason: "protected branch".into(),
+                },
+            ],
+        )
+        .unwrap();
+        let parsed = parse_report_status(&mut Cursor::new(&buf)).unwrap();
+        assert!(parsed.unpack.is_ok());
+        assert_eq!(
+            parsed.commands,
+            vec![
+                CommandStatus::Ok("refs/heads/main".into()),
+                CommandStatus::Ng {
+                    name: "refs/heads/locked".into(),
+                    reason: "protected branch".into(),
+                },
+            ]
+        );
     }
 
     /// A push request: each update is a pkt-line, the first carries the
