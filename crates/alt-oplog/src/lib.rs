@@ -19,8 +19,8 @@
 //! truncated on open; a bad record anywhere else is corruption and is
 //! reported, never silently skipped.
 //!
-//! Business-agnostic stone: payloads are opaque bytes; what an op *means*
-//! (ref updates, imports, …) is the caller's encoding.
+//! Pure-logic crate, business-agnostic: payloads are opaque bytes; what an
+//! op *means* (ref updates, imports, …) is the caller's encoding.
 
 use std::collections::HashMap;
 use std::fmt;

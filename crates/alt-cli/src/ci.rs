@@ -1,9 +1,9 @@
 //! alt-CI workflow.toml: schema-tier types + parser + linter.
 //!
-//! Stone module: zero business state, zero I/O — bytes in, diagnostics
-//! and a `Workflow` struct out. Reused by `alt ci validate` (the M15
-//! starting point) and by every future segment that takes a workflow
-//! tree (runner, scheduler, result cache).
+//! Pure logic: zero business state, zero I/O — bytes in, diagnostics and a
+//! `Workflow` struct out. Reused by `alt ci validate` (the M15 starting
+//! point) and by every future segment that takes a workflow tree (runner,
+//! scheduler, result cache).
 //!
 //! ## Scope (M15/W47, design/ci.md §2.1)
 //!

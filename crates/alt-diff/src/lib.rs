@@ -3,7 +3,7 @@
 //! cleaner hunks than Myers. Plus unified-diff (`@@ … @@`) formatting and
 //! binary detection.
 //!
-//! Stone: no business types, no I/O. Bytes in, structured edits / unified
+//! Pure logic: no business types, no I/O. Bytes in, structured edits / unified
 //! text out. Correctness invariant (fuzzed): applying the returned edits to
 //! `old` reproduces `new`, for any input.
 

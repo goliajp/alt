@@ -1,5 +1,5 @@
-//! Tier 1 storage: a steel layer over the (Tier 0) blob store that applies
-//! the prism pipeline at write time. The alt-store stone stays pure — it
+//! Tier 1 storage: a domain layer over the (Tier 0) blob store that applies
+//! the prism pipeline at write time. The alt-store crate stays pure — it
 //! knows nothing about prisms; this layer owns the registry and the Tier 1
 //! bookkeeping.
 //!

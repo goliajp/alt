@@ -1,8 +1,8 @@
 //! alt chunk store: append-only altpack files holding BLAKE3-addressed,
 //! zstd-compressed chunks.
 //!
-//! Business-agnostic stone: knows the altpack/altidx on-disk formats and
-//! nothing about blobs, manifests, or git.
+//! Pure-logic crate, business-agnostic: knows the altpack/altidx on-disk
+//! formats and nothing about blobs, manifests, or git.
 //!
 //! On-disk layout (all integers little-endian):
 //!
@@ -21,7 +21,7 @@
 
 mod blob;
 mod blobmap;
-/// Lineage delta codec (zstd ref-prefix / patch-from). Public as a stone
+/// Lineage delta codec (zstd ref-prefix / patch-from). Public as a
 /// primitive — reused by the store's encode/decode and benched directly.
 pub mod delta;
 mod idx;

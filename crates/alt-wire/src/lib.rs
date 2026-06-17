@@ -1,4 +1,4 @@
-//! git smart-http protocol v2: the byte-level encoding/decoding stone for
+//! git smart-http protocol v2: the byte-level encoding/decoding layer for
 //! the wire. Pure logic — bytes in, structured frames out; structured
 //! commands in, bytes out. Transport (HTTPS) is in a sibling crate.
 //!
@@ -27,7 +27,7 @@
 //! already does the heavy lifting for pack streams. Keeping wire in-house
 //! preserves the project's minimal-dep / zero-C stance.
 //!
-//! ## Stone
+//! ## Discipline
 //!
 //! No I/O, no business types. Frames in / frames out. Errors are typed so
 //! transport callers can react (e.g. "this stream truncated mid-pkt" is a

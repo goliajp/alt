@@ -1,6 +1,6 @@
 //! Git reference storage reading: the files backend (loose refs +
 //! `packed-refs`) and the reftable backend, with symref resolution.
-//! Business-agnostic stone.
+//! Pure-logic crate, business-agnostic.
 
 mod packed;
 mod reftable;

@@ -10,8 +10,8 @@
 //! else falls back to Tier 0 (store the original verbatim). A buggy or
 //! adversarial prism can at worst waste the attempt, never corrupt data.
 //!
-//! This crate is the registry + pipeline (the steel). Individual prisms
-//! (deflate strip, zip, png, …) are stones that implement [`Prism`].
+//! This crate is the registry + pipeline. Individual prisms (deflate strip,
+//! zip, png, …) are pluggable implementations of [`Prism`].
 
 /// Identifies which prism produced a decomposition, so recomposition uses
 /// the matching one. Stable across versions — never reuse a retired id.
@@ -27,9 +27,9 @@ pub struct Decomposition {
     pub parts: Vec<Vec<u8>>,
 }
 
-/// One encoding-aware decomposer. A prism is a business-agnostic stone:
-/// it must be independently fuzzable and bound its own resource use
-/// (decompression bombs); it must never panic on adversarial input.
+/// One encoding-aware decomposer. A prism is business-agnostic: it must be
+/// independently fuzzable and bound its own resource use (decompression
+/// bombs); it must never panic on adversarial input.
 ///
 /// `Send + Sync` is required so a [`Registry`] (and any store embedding
 /// one) can sit inside an `Arc<Mutex<…>>` — the daemon holds the odb that

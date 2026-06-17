@@ -7,7 +7,7 @@
 //! same base lines to different content. A region changed by one side only is
 //! taken cleanly.
 //!
-//! Stone: bytes in, bytes out, no business types or I/O.
+//! Pure logic: bytes in, bytes out, no business types or I/O.
 
 use alt_diff::split_lines;
 

@@ -1,6 +1,6 @@
 //! Git config reading: full file syntax, git's value semantics
 //! (bool/int conversions, last-one-wins), and `include`/`includeIf`
-//! resolution. Business-agnostic stone.
+//! resolution. Pure-logic crate, business-agnostic.
 
 mod include;
 mod parse;

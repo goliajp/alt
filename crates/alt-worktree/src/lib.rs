@@ -3,8 +3,8 @@
 //! produce staged, unstaged, and untracked changes — the data behind
 //! `alt status` and the basis `alt add` / `alt commit` build on.
 //!
-//! Steel: domain-aware (it knows git object kinds and the index) but bound
-//! to no specific command.
+//! Domain-aware (it knows git object kinds and the index) but bound to no
+//! specific command.
 
 use std::path::Path;
 

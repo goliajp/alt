@@ -1,6 +1,6 @@
 //! Git index (dircache) reading: versions 2–4. Entries are parsed fully;
 //! extensions are preserved raw (signature + payload) so nothing is lost.
-//! Business-agnostic stone.
+//! Pure-logic crate, business-agnostic.
 
 use std::path::Path;
 

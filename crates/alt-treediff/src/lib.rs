@@ -27,7 +27,7 @@
 //! lives behind its own opt-in path when added. Rust via `syn` is pure
 //! Rust, fast to compile, no C linkage.
 //!
-//! ## Stone
+//! ## Discipline
 //!
 //! No I/O, no business types. Strings in, structured diff out. Parse
 //! errors are surfaced as a [`TreeDiffError`] so a caller can fall back to

@@ -55,7 +55,7 @@ impl PrincipalKind {
 
 /// The structured operator identity for an op-log entry: kind, stable id, and
 /// an optional session correlation token. Encoded into the existing free-form
-/// `actor` field on `Op` (stone unchanged); see [`Principal::actor_string`] and
+/// `actor` field on `Op` (wire format unchanged); see [`Principal::actor_string`] and
 /// [`Principal::parse_actor`] for the wire format and legacy compatibility.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Principal {
@@ -5394,7 +5394,7 @@ mod tests {
         for case in [
             Principal {
                 kind: PrincipalKind::Agent,
-                id: "claude-opus-4-8".into(),
+                id: "bot-1".into(),
                 session: Some("01J7XYZ".into()),
             },
             Principal {
@@ -5446,12 +5446,12 @@ mod tests {
         let id = Identity::from_lookup(|k| match k {
             "USER" => Some("alice".into()),
             "ALT_PRINCIPAL_KIND" => Some("agent".into()),
-            "ALT_PRINCIPAL_ID" => Some("claude-opus-4-8".into()),
+            "ALT_PRINCIPAL_ID" => Some("bot-1".into()),
             "ALT_SESSION_ID" => Some("01J7".into()),
             _ => None,
         });
         assert_eq!(id.principal.kind, PrincipalKind::Agent);
-        assert_eq!(id.principal.id, "claude-opus-4-8");
+        assert_eq!(id.principal.id, "bot-1");
         assert_eq!(id.principal.session.as_deref(), Some("01J7"));
         let (p, verb) = Principal::parse_actor(&id.actor("commit"));
         assert_eq!(p, id.principal, "actor round-trips back to principal");

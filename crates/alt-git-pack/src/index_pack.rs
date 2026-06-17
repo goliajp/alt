@@ -1,7 +1,7 @@
 //! `git index-pack` equivalent: given a `.pack` file on disk, produce the
 //! sibling `.idx` so [`IndexedPack`](crate::IndexedPack) can open it.
 //!
-//! ## Why this stone
+//! ## Why this module
 //!
 //! Packs received from a smart-http fetch arrive as a *stream*: the wire
 //! sends bytes, we save them to disk, and now we have a pack with no idx.

@@ -3,7 +3,7 @@
 //! laxer one after, so chunk sizes cluster around the average while cut
 //! points stay content-defined (shift-resistant).
 //!
-//! Business-agnostic stone. The gear table derives from a fixed seed and is
+//! Pure-logic crate, business-agnostic. The gear table derives from a fixed seed and is
 //! part of the on-disk chunking contract: changing it never breaks
 //! correctness (addressing is content-based) but loses cross-version dedup,
 //! so it is frozen.

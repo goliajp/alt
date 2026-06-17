@@ -1,6 +1,6 @@
 //! Repository facade.
 //!
-//! Domain layer between the storage stones (codec, pack, refs, config,
+//! Domain layer between the storage crates (codec, pack, refs, config,
 //! index, native store) and the CLI. Read-only access to repositories —
 //! discovery, object reads, rev-parse, revision walking — over either
 //! backend: a `.git` directory (M1) or a native `.alt` store (M2).

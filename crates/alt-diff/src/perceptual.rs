@@ -13,7 +13,7 @@
 //! `.png` does (a one-pixel tweak reshuffles the whole zlib stream → zero
 //! shared bytes pre-inflation), which is the entire reason this exists.
 //!
-//! Stone discipline: never panics on adversarial input, bounded
+//! Discipline: never panics on adversarial input, bounded
 //! decompression (inherits the deflate prism's ceiling). Returns `None`
 //! when the input isn't a format we recognise.
 

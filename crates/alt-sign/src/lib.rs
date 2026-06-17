@@ -2,11 +2,10 @@
 //!
 //! ## Scope
 //!
-//! Pure-logic stone: keygen, sign, verify, plus a compact text
-//! serialization for the on-disk key and signature files (`<alt-dir>/
-//! identity/<principal>.{pub,sec}` and the op-log sidecar). No file I/O
-//! — callers do that; the stone hands them `[u8]` to write and parses the
-//! `[u8]` they read back.
+//! Pure logic: keygen, sign, verify, plus a compact text serialization for
+//! the on-disk key and signature files (`<alt-dir>/identity/<principal>.{pub,sec}`
+//! and the op-log sidecar). No file I/O — callers do that; this crate hands
+//! them `[u8]` to write and parses the `[u8]` they read back.
 //!
 //! ## Key + signature wire formats
 //!

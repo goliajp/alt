@@ -13,7 +13,7 @@
 //! tiny parameter byte; if none in the tried grid match, it declines
 //! (Tier 0) rather than ever diffing against a foreign encoder.
 //!
-//! Stone discipline: bounds its inflate output (decompression bomb) and
+//! Discipline: bounds its inflate output (decompression bomb) and
 //! never panics on adversarial input.
 
 use std::io::Read;

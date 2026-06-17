@@ -1,7 +1,7 @@
 //! Git packfile reading: idx lookup, entry decoding, delta resolution.
 //!
-//! Business-agnostic stone: knows the on-disk pack/idx formats and nothing
-//! about alt.
+//! Pure-logic crate, business-agnostic: knows the on-disk pack/idx formats
+//! and nothing about alt.
 
 mod cache;
 pub mod delta;

@@ -3,7 +3,7 @@
 //! `hotfix/`), and the source/target rules each flow obeys — a feature starts
 //! off `develop` and finishes back into it, and so on.
 //!
-//! Steel: it knows the git-flow domain but performs no I/O and touches no
+//! This crate knows the git-flow domain but performs no I/O and touches no
 //! store. It hands the executing layer short branch names and which branch a
 //! flow integrates into; the caller turns those into ref transactions.
 

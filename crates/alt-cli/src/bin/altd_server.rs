@@ -1323,7 +1323,7 @@ fn handle_receive_pack(
     // commit (signature / commit-signing gate rejected, ref-tx returned
     // Err, or the pack itself failed mid-ingest), roll the odb back to
     // the pre-ingest checkpoint. Rewind is skipped (orphans left for a
-    // future GC stone) when another push committed in the same window
+    // future GC pass) when another push committed in the same window
     // — detected by comparing the live cursor to our post-ingest
     // snapshot. push_lock is intentionally NOT held here: holding it
     // through commit would serialize fsyncs and break the W44 group
