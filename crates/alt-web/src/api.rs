@@ -718,12 +718,13 @@ pub(crate) struct PartRow {
     pub text_patch: Option<String>,
 }
 
-/// Reviewer-friendly content diff for OOXML files.
-pub(crate) struct DocumentDiff {
-    /// "docx" or "xlsx" — the kind of unit `entries` enumerate
-    /// (paragraphs vs cells).
-    pub kind: &'static str,
-    pub entries: Vec<DocumentEntry>,
+/// Reviewer-friendly content diff for OOXML files. Each variant is the
+/// *natural shape* of that format: a paragraph stream for Word, a grid
+/// of cells per sheet for Excel. Each gets a frontend renderer
+/// designed for that shape, not a one-size-fits-all line list.
+pub(crate) enum DocumentDiff {
+    Docx { entries: Vec<DocumentEntry> },
+    Xlsx { sheets: Vec<SheetGrid> },
 }
 
 pub(crate) struct DocumentEntry {
@@ -732,6 +733,33 @@ pub(crate) struct DocumentEntry {
     /// adjacent rows visually if it wants to.
     pub change: &'static str,
     pub text: String,
+}
+
+/// One worksheet rendered as the cells that ever appeared on either
+/// side. Each cell carries the change kind and both sides' values so
+/// the grid renderer can show "before → after" in place.
+pub(crate) struct SheetGrid {
+    pub name: String,
+    /// Inclusive max column letter ("A", "B", … "AA") across either
+    /// side. Used by the renderer to size the table.
+    pub max_col: String,
+    /// Inclusive max row number across either side.
+    pub max_row: u32,
+    pub cells: Vec<SheetCell>,
+    /// True iff at least one cell on this sheet changed/added/removed.
+    pub has_changes: bool,
+}
+
+pub(crate) struct SheetCell {
+    /// "A1" / "AB12" etc.
+    pub cell_ref: String,
+    pub col: String,
+    pub row: u32,
+    pub change: &'static str,
+    /// `Some` on the old side; `None` if the cell didn't exist there.
+    pub old: Option<String>,
+    /// `Some` on the new side; `None` if the cell didn't exist there.
+    pub new: Option<String>,
 }
 
 /// One file's diff in the response. The renderer picks shape by `kind`.
@@ -902,9 +930,8 @@ impl FileDiff {
                     None => "null".to_string(),
                 };
                 let doc_json = match document {
-                    Some(d) => {
-                        let entries: Vec<String> = d
-                            .entries
+                    Some(DocumentDiff::Docx { entries }) => {
+                        let items: Vec<String> = entries
                             .iter()
                             .map(|e| {
                                 format!(
@@ -915,9 +942,50 @@ impl FileDiff {
                             })
                             .collect();
                         format!(
-                            "{{\"kind\":\"{}\",\"entries\":[{}]}}",
-                            d.kind,
-                            entries.join(","),
+                            "{{\"kind\":\"docx\",\"entries\":[{}]}}",
+                            items.join(","),
+                        )
+                    }
+                    Some(DocumentDiff::Xlsx { sheets }) => {
+                        let sheet_jsons: Vec<String> = sheets
+                            .iter()
+                            .map(|s| {
+                                let cell_jsons: Vec<String> = s
+                                    .cells
+                                    .iter()
+                                    .map(|c| {
+                                        let old = match &c.old {
+                                            Some(v) => json_string(v),
+                                            None => "null".to_string(),
+                                        };
+                                        let new = match &c.new {
+                                            Some(v) => json_string(v),
+                                            None => "null".to_string(),
+                                        };
+                                        format!(
+                                            "{{\"ref\":{},\"col\":{},\"row\":{},\"change\":\"{}\",\"old\":{},\"new\":{}}}",
+                                            json_string(&c.cell_ref),
+                                            json_string(&c.col),
+                                            c.row,
+                                            c.change,
+                                            old,
+                                            new,
+                                        )
+                                    })
+                                    .collect();
+                                format!(
+                                    "{{\"name\":{},\"max_col\":{},\"max_row\":{},\"has_changes\":{},\"cells\":[{}]}}",
+                                    json_string(&s.name),
+                                    json_string(&s.max_col),
+                                    s.max_row,
+                                    s.has_changes,
+                                    cell_jsons.join(","),
+                                )
+                            })
+                            .collect();
+                        format!(
+                            "{{\"kind\":\"xlsx\",\"sheets\":[{}]}}",
+                            sheet_jsons.join(","),
                         )
                     }
                     None => "null".to_string(),
@@ -1101,49 +1169,184 @@ fn build_document_diff(path: &str, old_bytes: &[u8], new_bytes: &[u8]) -> Option
             if entries.is_empty() {
                 None
             } else {
-                Some(DocumentDiff {
-                    kind: "docx",
-                    entries,
-                })
+                Some(DocumentDiff::Docx { entries })
             }
         }
         "xlsx" | "xlsm" | "xltx" | "xltm" => {
-            let collect_sheets = |members: &std::collections::BTreeMap<String, Option<Vec<u8>>>| {
-                members
-                    .iter()
-                    .filter(|(k, _)| k.starts_with("xl/worksheets/sheet"))
-                    .filter_map(|(k, v)| v.as_ref().map(|b| (k.clone(), b.clone())))
-                    .collect::<std::collections::BTreeMap<_, _>>()
-            };
-            let old_sheets = collect_sheets(&old_members);
-            let new_sheets = collect_sheets(&new_members);
-            let old_shared = old_members
-                .get("xl/sharedStrings.xml")
-                .and_then(|v| v.as_ref().map(|b| b.as_slice()));
-            let new_shared = new_members
-                .get("xl/sharedStrings.xml")
-                .and_then(|v| v.as_ref().map(|b| b.as_slice()));
-            let old_workbook = old_members
-                .get("xl/workbook.xml")
-                .and_then(|v| v.as_ref().map(|b| b.as_slice()));
-            let new_workbook = new_members
-                .get("xl/workbook.xml")
-                .and_then(|v| v.as_ref().map(|b| b.as_slice()));
-            let old_cells = crate::ooxml::xlsx_cells(&old_sheets, old_shared, old_workbook);
-            let new_cells = crate::ooxml::xlsx_cells(&new_sheets, new_shared, new_workbook);
-            let old_lines: Vec<String> = old_cells.iter().map(|c| c.render()).collect();
-            let new_lines: Vec<String> = new_cells.iter().map(|c| c.render()).collect();
-            let entries = diff_lists(&old_lines, &new_lines);
-            if entries.is_empty() {
+            let sheets = build_xlsx_sheet_grids(&old_members, &new_members);
+            if sheets.iter().all(|s| !s.has_changes) {
                 None
             } else {
-                Some(DocumentDiff {
-                    kind: "xlsx",
-                    entries,
-                })
+                Some(DocumentDiff::Xlsx { sheets })
             }
         }
         _ => None,
+    }
+}
+
+fn build_xlsx_sheet_grids(
+    old_members: &std::collections::BTreeMap<String, Option<Vec<u8>>>,
+    new_members: &std::collections::BTreeMap<String, Option<Vec<u8>>>,
+) -> Vec<SheetGrid> {
+    let collect_sheets =
+        |members: &std::collections::BTreeMap<String, Option<Vec<u8>>>| {
+            members
+                .iter()
+                .filter(|(k, _)| k.starts_with("xl/worksheets/sheet"))
+                .filter_map(|(k, v)| v.as_ref().map(|b| (k.clone(), b.clone())))
+                .collect::<std::collections::BTreeMap<_, _>>()
+        };
+    let old_sheets = collect_sheets(old_members);
+    let new_sheets = collect_sheets(new_members);
+    let old_shared = old_members
+        .get("xl/sharedStrings.xml")
+        .and_then(|v| v.as_ref().map(|b| b.as_slice()));
+    let new_shared = new_members
+        .get("xl/sharedStrings.xml")
+        .and_then(|v| v.as_ref().map(|b| b.as_slice()));
+    let old_workbook = old_members
+        .get("xl/workbook.xml")
+        .and_then(|v| v.as_ref().map(|b| b.as_slice()));
+    let new_workbook = new_members
+        .get("xl/workbook.xml")
+        .and_then(|v| v.as_ref().map(|b| b.as_slice()));
+    let old_cells = crate::ooxml::xlsx_cells(&old_sheets, old_shared, old_workbook);
+    let new_cells = crate::ooxml::xlsx_cells(&new_sheets, new_shared, new_workbook);
+
+    let mut old_by_sheet: std::collections::BTreeMap<
+        String,
+        std::collections::BTreeMap<String, String>,
+    > = std::collections::BTreeMap::new();
+    for c in &old_cells {
+        old_by_sheet
+            .entry(c.sheet.clone())
+            .or_default()
+            .insert(c.cell_ref.clone(), c.value.clone());
+    }
+    let mut new_by_sheet: std::collections::BTreeMap<
+        String,
+        std::collections::BTreeMap<String, String>,
+    > = std::collections::BTreeMap::new();
+    for c in &new_cells {
+        new_by_sheet
+            .entry(c.sheet.clone())
+            .or_default()
+            .insert(c.cell_ref.clone(), c.value.clone());
+    }
+
+    let mut sheet_names: Vec<String> = old_by_sheet
+        .keys()
+        .chain(new_by_sheet.keys())
+        .cloned()
+        .collect();
+    sheet_names.sort();
+    sheet_names.dedup();
+
+    sheet_names
+        .into_iter()
+        .map(|name| {
+            let old_grid = old_by_sheet.get(&name).cloned().unwrap_or_default();
+            let new_grid = new_by_sheet.get(&name).cloned().unwrap_or_default();
+            build_one_sheet_grid(name, &old_grid, &new_grid)
+        })
+        .collect()
+}
+
+fn build_one_sheet_grid(
+    name: String,
+    old: &std::collections::BTreeMap<String, String>,
+    new: &std::collections::BTreeMap<String, String>,
+) -> SheetGrid {
+    let mut refs: Vec<String> = old.keys().chain(new.keys()).cloned().collect();
+    refs.sort_by(|a, b| {
+        let (ac, ar) = parse_ref(a);
+        let (bc, br) = parse_ref(b);
+        ar.cmp(&br).then_with(|| ac.cmp(&bc))
+    });
+    refs.dedup();
+
+    let mut cells = Vec::with_capacity(refs.len());
+    let mut max_col_num = 0u32;
+    let mut max_row = 0u32;
+    let mut has_changes = false;
+    for r in refs {
+        let (col, row) = parse_ref(&r);
+        max_col_num = max_col_num.max(col_letter_to_num(&col));
+        max_row = max_row.max(row);
+        let o = old.get(&r).cloned();
+        let n = new.get(&r).cloned();
+        let change = match (&o, &n) {
+            (Some(a), Some(b)) if a == b => "same",
+            (Some(_), Some(_)) => {
+                has_changes = true;
+                "changed"
+            }
+            (None, Some(_)) => {
+                has_changes = true;
+                "added"
+            }
+            (Some(_), None) => {
+                has_changes = true;
+                "removed"
+            }
+            (None, None) => continue,
+        };
+        cells.push(SheetCell {
+            cell_ref: r.clone(),
+            col,
+            row,
+            change,
+            old: o,
+            new: n,
+        });
+    }
+    let max_col = if max_col_num > 0 {
+        col_num_to_letter(max_col_num)
+    } else {
+        "A".to_string()
+    };
+    SheetGrid {
+        name,
+        max_col,
+        max_row,
+        cells,
+        has_changes,
+    }
+}
+
+fn parse_ref(s: &str) -> (String, u32) {
+    let mut col = String::new();
+    let mut row = String::new();
+    for ch in s.chars() {
+        if ch.is_ascii_alphabetic() {
+            col.push(ch.to_ascii_uppercase());
+        } else if ch.is_ascii_digit() {
+            row.push(ch);
+        }
+    }
+    let row_n = row.parse::<u32>().unwrap_or(0);
+    (col, row_n)
+}
+
+fn col_letter_to_num(col: &str) -> u32 {
+    let mut n: u32 = 0;
+    for ch in col.chars() {
+        n = n * 26 + (ch as u32 - 'A' as u32 + 1);
+    }
+    n
+}
+
+fn col_num_to_letter(mut n: u32) -> String {
+    let mut s = String::new();
+    while n > 0 {
+        let rem = (n - 1) % 26;
+        s.insert(0, char::from(b'A' + rem as u8));
+        n = (n - 1) / 26;
+    }
+    if s.is_empty() {
+        "A".to_string()
+    } else {
+        s
     }
 }
 

@@ -1,25 +1,29 @@
 import { useState } from "react";
 import type { DocumentDiff as DocumentDiffData } from "../lib/api";
+import { XlsxGridDiff } from "./XlsxGridDiff";
 
-/** Reviewer-friendly content diff for OOXML files. Shows one row per
- *  paragraph (.docx) or per cell (.xlsx), with added/removed marked
- *  inline like a GitHub PR review — the reader can answer "what changed
- *  for someone opening this file in Word/Excel" without ever seeing the
- *  underlying XML.
- *
- *  Defaults to "review" view: skip same-paragraph context rows that
- *  aren't adjacent to a change. A toggle drops back to showing every
- *  row so the reviewer can verify position. */
+/** Format-native content diff for OOXML files. Each variant gets its
+ *  own renderer designed for how a human actually reads that format:
+ *  paragraphs for .docx, an Excel-style grid for .xlsx. */
 export function DocumentDiff({ data }: { data: DocumentDiffData }) {
+  if (data.kind === "docx") {
+    return <DocxDiff entries={data.entries} />;
+  }
+  return <XlsxGridDiff sheets={data.sheets} />;
+}
+
+function DocxDiff({
+  entries,
+}: {
+  entries: { change: string; text: string }[];
+}) {
   const [showContext, setShowContext] = useState(false);
-  const added = data.entries.filter((e) => e.change === "added").length;
-  const removed = data.entries.filter((e) => e.change === "removed").length;
-  const unit = data.kind === "docx" ? "paragraph" : "cell";
-  const plural = (n: number) => (n === 1 ? unit : `${unit}s`);
+  const added = entries.filter((e) => e.change === "added").length;
+  const removed = entries.filter((e) => e.change === "removed").length;
 
-  const view = showContext ? data.entries : trimContext(data.entries, 1);
+  const view = showContext ? entries : trimContext(entries, 1);
 
-  if (data.entries.length === 0 || (added === 0 && removed === 0)) {
+  if (entries.length === 0 || (added === 0 && removed === 0)) {
     return null;
   }
 
@@ -28,20 +32,20 @@ export function DocumentDiff({ data }: { data: DocumentDiffData }) {
       <div className="px-4 py-2.5 bg-canvas-inset/40 border-b border-border-muted flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3 text-sm">
           <span className="text-[10px] uppercase tracking-[0.22em] font-mono text-warm">
-            {data.kind === "docx" ? "document" : "spreadsheet"}
+            document
           </span>
           <span className="text-fg-default">
             {added > 0 ? (
               <>
                 <span className="text-diff-add-fg font-medium">+{added}</span>{" "}
-                {plural(added)}
+                paragraph{added === 1 ? "" : "s"}
                 {removed > 0 ? ", " : " "}
               </>
             ) : null}
             {removed > 0 ? (
               <>
                 <span className="text-diff-del-fg font-medium">−{removed}</span>{" "}
-                {plural(removed)}
+                paragraph{removed === 1 ? "" : "s"}
               </>
             ) : null}
           </span>
@@ -58,20 +62,14 @@ export function DocumentDiff({ data }: { data: DocumentDiffData }) {
       </div>
       <ol className="divide-y divide-border-muted">
         {view.map((entry, i) => (
-          <DocRow key={i} entry={entry} kind={data.kind} />
+          <DocxRow key={i} entry={entry} />
         ))}
       </ol>
     </div>
   );
 }
 
-function DocRow({
-  entry,
-  kind,
-}: {
-  entry: { change: string; text: string };
-  kind: "docx" | "xlsx";
-}) {
+function DocxRow({ entry }: { entry: { change: string; text: string } }) {
   if (entry.change === "ellipsis") {
     return (
       <li className="px-4 py-1.5 text-fg-subtle font-mono text-xs text-center bg-canvas-inset/30">
@@ -100,42 +98,15 @@ function DocRow({
       >
         {marker}
       </span>
-      {kind === "xlsx" ? (
-        <CellRow text={entry.text} />
-      ) : (
-        <span className="flex-1 min-w-0 text-fg-default whitespace-pre-wrap break-words leading-relaxed">
-          {entry.text || (
-            <span className="text-fg-subtle italic">(empty paragraph)</span>
-          )}
-        </span>
-      )}
+      <span className="flex-1 min-w-0 text-fg-default whitespace-pre-wrap break-words leading-relaxed">
+        {entry.text || (
+          <span className="text-fg-subtle italic">(empty paragraph)</span>
+        )}
+      </span>
     </li>
   );
 }
 
-/** xlsx rows come in as `Sheet!Ref: value`; render the prefix in a
- *  subdued tone so the actual value stands out. */
-function CellRow({ text }: { text: string }) {
-  const sep = text.indexOf(": ");
-  if (sep === -1) {
-    return (
-      <span className="flex-1 min-w-0 text-fg-default font-mono break-words">
-        {text}
-      </span>
-    );
-  }
-  return (
-    <span className="flex-1 min-w-0 break-words leading-relaxed">
-      <span className="font-mono text-fg-muted">{text.slice(0, sep)}</span>
-      <span className="text-fg-muted">: </span>
-      <span className="text-fg-default">{text.slice(sep + 2)}</span>
-    </span>
-  );
-}
-
-/** Keep only same-rows that are within `radius` of a change, replacing
- *  longer same-runs with one ellipsis row so the reviewer doesn't have
- *  to scroll past unchanged paragraphs. */
 function trimContext(
   entries: { change: string; text: string }[],
   radius: number,

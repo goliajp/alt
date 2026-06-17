@@ -99,12 +99,26 @@ export interface DocumentEntry {
   text: string;
 }
 
-export interface DocumentDiff {
-  /** "docx" → entries are paragraphs; "xlsx" → entries are
-   *  `Sheet!Ref: value` cell rows. */
-  kind: "docx" | "xlsx";
-  entries: DocumentEntry[];
+export interface SheetCell {
+  ref: string;
+  col: string;
+  row: number;
+  change: "same" | "added" | "removed" | "changed";
+  old: string | null;
+  new: string | null;
 }
+
+export interface SheetGrid {
+  name: string;
+  max_col: string;
+  max_row: number;
+  cells: SheetCell[];
+  has_changes: boolean;
+}
+
+export type DocumentDiff =
+  | { kind: "docx"; entries: DocumentEntry[] }
+  | { kind: "xlsx"; sheets: SheetGrid[] };
 
 export interface DiffPartAware {
   kind: "part_aware";

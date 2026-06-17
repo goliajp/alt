@@ -82,7 +82,11 @@ export function PartAwareDiff({
     file.format === "png" &&
     file.perceptual_hash_old &&
     file.perceptual_hash_new;
-  const hasDocument = !!file.document && file.document.entries.length > 0;
+  const hasDocument =
+    !!file.document &&
+    (file.document.kind === "docx"
+      ? file.document.entries.length > 0
+      : file.document.sheets.length > 0);
 
   return (
     <div className="font-mono text-[13px] leading-relaxed">
