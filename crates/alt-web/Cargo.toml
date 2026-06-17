@@ -1,0 +1,13 @@
+[package]
+name = "alt-web"
+description = "Static informational HTTP API behind alt.golia.jp — version, stats, changelog. Same tiny_http stance as altd-server (sync, no async runtime), separate binary."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+alt-repo.workspace = true
+tiny_http.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
