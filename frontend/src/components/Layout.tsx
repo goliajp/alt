@@ -10,7 +10,7 @@ export function Layout() {
   return (
     <div className="min-h-screen flex flex-col">
       <header className="sticky top-0 z-30 bg-canvas/85 backdrop-blur-md border-b border-border-default">
-        <div className="max-w-7xl mx-auto px-6 h-14 flex items-center gap-6">
+        <div className="px-6 h-14 flex items-center gap-6">
           <Link to="/" className="flex items-baseline gap-2 group">
             <span className="font-mono text-2xl font-bold tracking-tight text-fg-default group-hover:text-warm transition-colors">
               alt
@@ -72,7 +72,7 @@ export function Layout() {
       </main>
 
       <footer className="border-t border-border-default mt-24">
-        <div className="max-w-7xl mx-auto px-6 py-8 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between text-xs">
+        <div className="px-6 py-8 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between text-xs">
           <div className="flex items-center gap-3 font-mono text-fg-muted">
             <span className="text-fg-default font-semibold">alt</span>
             <span className="text-fg-subtle">·</span>

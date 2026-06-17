@@ -11,7 +11,7 @@ export function RepoHome() {
   const log = useLog(name, { n: 10 });
 
   return (
-    <div className="max-w-7xl mx-auto px-6 py-10">
+    <div className="px-6 py-10">
       {/* Header */}
       <header className="border-b border-border-default pb-6">
         <div className="flex items-center gap-2 text-sm mb-3">

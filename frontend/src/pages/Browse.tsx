@@ -2,6 +2,8 @@ import { Link, useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { api, type Blob, type TreeEntry, type TreeEntryKind } from "../lib/api";
 import { formatBytes } from "../lib/format";
+import { detectLang } from "../lib/lang";
+import { SyntaxBlock } from "../components/SyntaxBlock";
 
 type Result =
   | { kind: "tree"; tree: { oid: string; entries: TreeEntry[] }; trail: Crumb[] }
@@ -49,7 +51,7 @@ export function Browse() {
   const browse = useBrowsePath(name, spec, path);
 
   return (
-    <div className="max-w-7xl mx-auto px-6 py-10">
+    <div className="px-6 py-10">
       <header className="border-b border-border-default pb-5 mb-6">
         <div className="flex items-center gap-2 flex-wrap text-sm">
           <Link to="/" className="text-fg-muted hover:text-fg-default">
@@ -94,7 +96,7 @@ export function Browse() {
           {(browse.error as Error).message}
         </div>
       ) : browse.data?.kind === "blob" ? (
-        <BlobView blob={browse.data.blob} />
+        <BlobView blob={browse.data.blob} path={path[path.length - 1] ?? ""} />
       ) : browse.data?.kind === "tree" ? (
         <TreeView
           name={name}
@@ -190,7 +192,8 @@ function TreeView({
   );
 }
 
-function BlobView({ blob }: { blob: Blob }) {
+function BlobView({ blob, path }: { blob: Blob; path: string }) {
+  const lang = detectLang(path);
   return (
     <div className="bg-canvas-subtle border border-border-default rounded-lg overflow-hidden">
       <div className="flex items-center justify-between gap-3 border-b border-border-default px-4 py-2.5 bg-canvas-inset/40">
@@ -198,6 +201,12 @@ function BlobView({ blob }: { blob: Blob }) {
           <span>{blob.oid.slice(0, 12)}</span>
           <span>·</span>
           <span>{formatBytes(blob.size)}</span>
+          {lang ? (
+            <>
+              <span>·</span>
+              <span className="text-fg-default">{lang}</span>
+            </>
+          ) : null}
           {blob.binary ? (
             <>
               <span>·</span>
@@ -211,9 +220,7 @@ function BlobView({ blob }: { blob: Blob }) {
           Binary file — preview not available.
         </div>
       ) : (
-        <pre className="font-mono text-[13px] leading-relaxed p-4 overflow-x-auto whitespace-pre">
-          {blob.content}
-        </pre>
+        <SyntaxBlock code={blob.content} lang={lang} lineNumbers />
       )}
     </div>
   );

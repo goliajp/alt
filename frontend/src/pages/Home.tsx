@@ -8,8 +8,8 @@ export function Home() {
   return (
     <div className="hero-bg">
       {/* HERO */}
-      <section className="max-w-7xl mx-auto px-6 pt-24 pb-28 relative">
-        <div className="rise max-w-3xl relative">
+      <section className="px-6 pt-24 pb-28 relative">
+        <div className="rise relative">
           <div className="inline-flex items-center gap-2 text-[11px] font-mono uppercase tracking-[0.22em] text-fg-muted border border-border-default bg-canvas-subtle/60 rounded-full px-3 py-1 mb-9">
             <span className="w-1.5 h-1.5 rounded-full bg-warm pulse-soft"></span>
             pre-1.0 · dogfood
@@ -19,11 +19,11 @@ export function Home() {
             <span className="cursor-blink">alt</span>
           </h1>
 
-          <p className="text-2xl sm:text-[28px] leading-snug text-fg-default font-medium mb-5 max-w-2xl tracking-tight">
+          <p className="text-2xl sm:text-[28px] leading-snug text-fg-default font-medium mb-5 tracking-tight">
             A version control system{" "}
             <span className="text-warm">rebuilt in pure Rust.</span>
           </p>
-          <p className="text-base sm:text-lg text-fg-muted leading-relaxed mb-10 max-w-2xl">
+          <p className="text-base sm:text-lg text-fg-muted leading-relaxed mb-10">
             Native large- and binary-file handling. Byte-exact import and
             export of git repositories. A built-in git smart-http v2 server.
             One static binary, no system C dependencies, and the same wire as
@@ -64,7 +64,7 @@ cargo install --path crates/alt-cli \\
 
       {/* FEATURES */}
       <section className="border-y border-border-default bg-canvas-subtle/70">
-        <div className="max-w-7xl mx-auto px-6 py-16 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-14 gap-y-10">
+        <div className="px-6 py-16 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-14 gap-y-10">
           <Feature
             tag="01"
             title="One static binary"
@@ -99,7 +99,7 @@ cargo install --path crates/alt-cli \\
       </section>
 
       {/* REPOS */}
-      <section className="max-w-7xl mx-auto px-6 py-20">
+      <section className="px-6 py-20">
         <div className="flex items-end justify-between mb-7 border-b border-border-default pb-4">
           <div>
             <div className="text-[11px] font-mono uppercase tracking-[0.22em] text-fg-subtle mb-1">

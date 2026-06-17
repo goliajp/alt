@@ -16,7 +16,7 @@ export function Log() {
     commits.length === PAGE ? commits[commits.length - 1].oid : undefined;
 
   return (
-    <div className="max-w-7xl mx-auto px-6 py-10">
+    <div className="px-6 py-10">
       <header className="border-b border-border-default pb-6 mb-7">
         <div className="flex items-center gap-2 mb-2 text-sm">
           <Link to="/" className="text-fg-muted hover:text-fg-default">

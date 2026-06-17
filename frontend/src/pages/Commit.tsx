@@ -9,7 +9,7 @@ export function Commit() {
   const diff = useCommitDiff(name, oid);
 
   return (
-    <div className="max-w-7xl mx-auto px-6 py-10">
+    <div className="px-6 py-10">
       <header className="border-b border-border-default pb-7 mb-8">
         <div className="flex items-center gap-2 mb-4 text-sm flex-wrap">
           <Link to="/" className="text-fg-muted hover:text-fg-default">
@@ -39,7 +39,7 @@ export function Commit() {
               {commit.data.commit.subject || "(no subject)"}
             </h1>
             {commit.data.commit.body ? (
-              <pre className="font-sans whitespace-pre-wrap text-sm text-fg-muted leading-relaxed mb-7 max-w-4xl">
+              <pre className="font-sans whitespace-pre-wrap text-sm text-fg-muted leading-relaxed mb-7">
                 {commit.data.commit.body.trim()}
               </pre>
             ) : (
@@ -122,7 +122,7 @@ export function Commit() {
                   {file.path}
                 </span>
               </div>
-              <DiffView patch={file.patch} />
+              <DiffView patch={file.patch} path={file.path} />
             </div>
           ))
         )}
