@@ -23,6 +23,7 @@ mod read_json;
 mod remote;
 mod status_json;
 mod undo_add;
+mod verify_commit;
 mod wire_corpus;
 mod wire_test_server;
 mod workspace;

@@ -212,6 +212,21 @@ pub enum Command {
         #[arg(long)]
         verify: bool,
     },
+    /// Verify the `alt-sig` header on one or more commit objects (M10/W15).
+    /// With no args, walks the current branch's commit chain back to root
+    /// (newest first). Each row is one of:
+    /// `signed-ok:<principal>` / `unsigned` / `bad-sig:<principal>` /
+    /// `untrusted:<principal>`.
+    Verify {
+        /// Commit oids to check (hex). Empty = walk HEAD.
+        commits: Vec<String>,
+        /// Limit when walking HEAD (default 50; ignored when oids given)
+        #[arg(short = 'n', long = "max-count")]
+        max_count: Option<usize>,
+        /// Emit a structured JSON list instead of the human view
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -334,6 +349,7 @@ pub fn is_native(cmd: &Command) -> bool {
             | Command::Push { .. }
             | Command::Identity { .. }
             | Command::OpLog { .. }
+            | Command::Verify { .. }
     )
 }
 
@@ -421,6 +437,11 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
             json,
             verify,
         } => repo.op_log(*max_count, *json, *verify, out)?,
+        Command::Verify {
+            commits,
+            max_count,
+            json,
+        } => repo.verify_commits(commits, *max_count, *json, out)?,
         _ => return Err("not a native command".into()),
     }
     Ok(0)

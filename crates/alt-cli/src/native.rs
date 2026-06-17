@@ -3702,6 +3702,100 @@ impl<'a> NativeRepo<'a> {
         Ok(())
     }
 
+    /// `alt verify` — M10/W16. For each `commits` oid (or each commit
+    /// reachable from HEAD up to `max_count` when the list is empty),
+    /// read the commit object, parse its `alt-sig` header, and verify
+    /// against the repo's trust store. Renders one row per commit:
+    ///
+    ///   <oid> signed-ok:<principal>
+    ///   <oid> unsigned
+    ///   <oid> bad-sig:<principal>
+    ///   <oid> untrusted:<principal>
+    ///
+    /// With `--json`, emits the same data as a structured list so
+    /// scripts don't have to parse the human view.
+    pub fn verify_commits(
+        &mut self,
+        commits: &[String],
+        max_count: Option<usize>,
+        json: bool,
+        out: &mut impl Write,
+    ) -> Res<()> {
+        // Resolve the set of commit oids to check
+        let oids: Vec<ObjectId> = if commits.is_empty() {
+            self.head_commit_chain(max_count.unwrap_or(50))?
+        } else {
+            commits
+                .iter()
+                .map(|s| {
+                    ObjectId::from_hex(s.as_bytes())
+                        .map_err(|e| format!("bad commit oid {s:?}: {e}").into())
+                })
+                .collect::<Result<_, Box<dyn std::error::Error>>>()?
+        };
+
+        let trust = self.store.trust_keys()?;
+        let verdicts: Vec<(ObjectId, CommitSigVerdict)> = oids
+            .into_iter()
+            .map(|oid| {
+                let verdict = match self.store.odb_get(&oid)? {
+                    Some(obj) if obj.kind == ObjectKind::Commit => {
+                        verdict_for_commit(&obj.data, &trust)
+                    }
+                    Some(_) => CommitSigVerdict::NotACommit,
+                    None => CommitSigVerdict::Missing,
+                };
+                Ok((oid, verdict))
+            })
+            .collect::<Res<Vec<_>>>()?;
+
+        if json {
+            use crate::json::Json;
+            let rows: Vec<Json> = verdicts
+                .iter()
+                .map(|(oid, v)| {
+                    Json::Object(vec![
+                        ("commit", Json::str(oid.to_string())),
+                        ("verdict", Json::str(v.tag())),
+                        match v.principal() {
+                            Some(p) => ("principal", Json::str(p)),
+                            None => ("principal", Json::Null),
+                        },
+                    ])
+                })
+                .collect();
+            crate::json::emit(out, vec![("commits", Json::Array(rows))])?;
+        } else {
+            for (oid, v) in &verdicts {
+                writeln!(out, "{oid} {}", v.render())?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Walk parents from HEAD back to root, breadth-first first-parent,
+    /// capped at `limit`. Used by `alt verify` when no oids are given.
+    fn head_commit_chain(&self, limit: usize) -> Res<Vec<ObjectId>> {
+        let branch = self.head_branch()?;
+        let Some(mut current) = self.store.refs.resolve(&branch)? else {
+            return Ok(Vec::new());
+        };
+        let mut out = Vec::new();
+        for _ in 0..limit {
+            out.push(current);
+            let raw = match self.store.odb.get(&current)? {
+                Some(r) if r.kind == ObjectKind::Commit => r,
+                _ => break,
+            };
+            let commit = alt_git_codec::Commit::parse(&raw.data)?;
+            match commit.parents().next() {
+                Some(p) => current = p,
+                None => break,
+            }
+        }
+        Ok(out)
+    }
+
     /// Advances `branch` from `old` to `new` in one ref transaction.
     fn advance_branch(&mut self, branch: &str, old: ObjectId, new: ObjectId) -> Res<()> {
         self.commit_refs(
@@ -4652,6 +4746,87 @@ fn nibble(c: u8) -> Option<u8> {
         b'a'..=b'f' => Some(c - b'a' + 10),
         b'A'..=b'F' => Some(c - b'A' + 10),
         _ => None,
+    }
+}
+
+/// The verdict shape used by `alt verify` (M10/W16) for one commit. The
+/// taxonomy mirrors [`SigVerdict`] used by `op-log --verify` so an
+/// auditor sees the same vocabulary across the two surfaces.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CommitSigVerdict {
+    Ok {
+        principal: String,
+    },
+    Unsigned,
+    Bad {
+        principal: String,
+    },
+    Untrusted {
+        principal: String,
+    },
+    /// The supplied oid resolves to a non-commit object — caller bug.
+    NotACommit,
+    /// The supplied oid doesn't resolve in the repo's odb at all.
+    Missing,
+}
+
+impl CommitSigVerdict {
+    fn tag(&self) -> &'static str {
+        match self {
+            Self::Ok { .. } => "signed-ok",
+            Self::Unsigned => "unsigned",
+            Self::Bad { .. } => "bad-sig",
+            Self::Untrusted { .. } => "untrusted",
+            Self::NotACommit => "not-a-commit",
+            Self::Missing => "missing",
+        }
+    }
+
+    fn principal(&self) -> Option<&str> {
+        match self {
+            Self::Ok { principal } | Self::Bad { principal } | Self::Untrusted { principal } => {
+                Some(principal.as_str())
+            }
+            _ => None,
+        }
+    }
+
+    fn render(&self) -> String {
+        match self {
+            Self::Ok { principal } => format!("signed-ok:{principal}"),
+            Self::Unsigned => "unsigned".to_owned(),
+            Self::Bad { principal } => format!("bad-sig:{principal}"),
+            Self::Untrusted { principal } => format!("untrusted:{principal}"),
+            Self::NotACommit => "not-a-commit".to_owned(),
+            Self::Missing => "missing".to_owned(),
+        }
+    }
+}
+
+/// Parse `bytes` (a commit object) for its `alt-sig` header, look the
+/// principal up in `trust`, and decide one of the four sig verdicts. A
+/// commit with no `alt-sig` is `Unsigned`. A commit with a malformed
+/// `alt-sig` is `Bad` (no principal to attribute the failure to, so we
+/// surface an empty-string principal).
+fn verdict_for_commit(bytes: &[u8], trust: &[(String, alt_sign::PublicKey)]) -> CommitSigVerdict {
+    match crate::commit_sign::extract_alt_sig(bytes) {
+        Ok(None) => CommitSigVerdict::Unsigned,
+        Ok(Some(parsed)) => match trust.iter().find(|(id, _)| id == &parsed.principal) {
+            None => CommitSigVerdict::Untrusted {
+                principal: parsed.principal,
+            },
+            Some((_, key)) => match key.verify(&parsed.canonical, &parsed.sig) {
+                Ok(()) => CommitSigVerdict::Ok {
+                    principal: parsed.principal,
+                },
+                Err(_) => CommitSigVerdict::Bad {
+                    principal: parsed.principal,
+                },
+            },
+        },
+        Err(_) => CommitSigVerdict::Bad {
+            principal: String::new(),
+        },
     }
 }
 
