@@ -1,6 +1,6 @@
 # alt fuzz targets
 
-Adversarial-input fuzzing for the parser stones. A standalone crate (its own
+Adversarial-input fuzzing for the parser modules. A standalone crate (its own
 `[workspace]`) so the stable `cargo build --workspace` never tries to build it
 — it needs nightly + libFuzzer.
 
