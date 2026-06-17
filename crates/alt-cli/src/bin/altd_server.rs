@@ -133,9 +133,10 @@ fn main() {
                 eprintln!(
                     "usage: altd-server [--bind 127.0.0.1:PORT]\n\n\
                      env:\n  \
-                     ALT_SERVER_REPO     path to a single alt repo to serve (legacy mode)\n  \
-                     ALT_SERVER_ROOT     path to a multi-repo root; URLs map /<name>/… → <root>/<name>\n  \
-                     ALT_SERVER_WORKERS  parallel request handler threads (default 4)"
+                     ALT_SERVER_REPO          single alt repo to serve (legacy mode)\n  \
+                     ALT_SERVER_ROOT          multi-repo root; URLs map /<name>/… → <root>/<name>\n  \
+                     ALT_SERVER_WORKERS       parallel request handler threads (default 4)\n  \
+                     ALT_SERVER_REQUIRE_AUTH  set to 1 to refuse start when <root>/users is absent (fail-open auth guard)"
                 );
                 return;
             }
@@ -410,6 +411,22 @@ impl ServeMode {
                 "ALT_SERVER_ROOT={} does not exist or isn't a directory",
                 root.display()
             ));
+        }
+        // M14/W40: fail-open auth guard. When `ALT_SERVER_REQUIRE_AUTH=1`
+        // an absent or unreadable `users` file is a hard error at
+        // startup — the operator who set the env explicitly opted into
+        // "no auth = no serve". Without the env we keep the previous
+        // permissive behaviour (no users file = no auth check), which
+        // is the right default for `--bind 127.0.0.1` dev loops.
+        if std::env::var("ALT_SERVER_REQUIRE_AUTH").as_deref() == Ok("1") {
+            let users_path = root.join("users");
+            if !users_path.is_file() {
+                die(&format!(
+                    "ALT_SERVER_REQUIRE_AUTH=1 but {} is missing or unreadable; \
+                     refusing to start (fail-open auth disabled)",
+                    users_path.display()
+                ));
+            }
         }
         ServeMode::Multi {
             root,
@@ -1487,10 +1504,7 @@ fn check_auth(req: &tiny_http::Request, users_path: &Path) -> AuthOutcome {
     let Some(entry) = table.get(user) else {
         return AuthOutcome::Reject("unknown user".into());
     };
-    if !constant_time_eq_ignore_ascii_case(
-        entry.token_hash.as_bytes(),
-        token_hex.as_bytes(),
-    ) {
+    if !constant_time_eq_ignore_ascii_case(entry.token_hash.as_bytes(), token_hex.as_bytes()) {
         return AuthOutcome::Reject("bad token".into());
     }
     // M9/W11c — a 2-column users line (no ACL) is the "trusted user"

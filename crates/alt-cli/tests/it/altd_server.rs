@@ -2528,3 +2528,66 @@ fn altd_server_shutdown_deadline_force_exits_when_workers_stuck() {
         "expected either timeout line or clean-exit line in stderr; got:\n{log}"
     );
 }
+
+#[test]
+fn altd_server_require_auth_refuses_to_start_without_users_file() {
+    // M14/W40: when the operator opts into `ALT_SERVER_REQUIRE_AUTH=1`,
+    // an absent or unreadable `users` file is a hard startup error.
+    // This catches the common ops slip — `mv users users.bak` quietly
+    // turning every repo into a no-auth surface.
+    let root_dir = tempfile::tempdir().unwrap();
+    let root = root_dir.path();
+
+    let bin = env!("CARGO_BIN_EXE_altd-server");
+    let out = Command::new(bin)
+        .args(["--bind", "127.0.0.1:0"])
+        .env("ALT_SERVER_ROOT", root.to_str().unwrap())
+        .env("ALT_SERVER_REQUIRE_AUTH", "1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+
+    assert!(
+        !out.status.success(),
+        "REQUIRE_AUTH=1 + no users file must refuse to start; stdout={}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("ALT_SERVER_REQUIRE_AUTH") && stderr.contains("users"),
+        "stderr should cite REQUIRE_AUTH + users file path: {stderr}"
+    );
+
+    // With the users file in place, startup must proceed (we only
+    // check the bind line — we kill the child before serving).
+    std::fs::write(root.join("users"), "alice\t0\n").unwrap();
+    let mut child = Command::new(bin)
+        .args(["--bind", "127.0.0.1:0"])
+        .env("ALT_SERVER_ROOT", root.to_str().unwrap())
+        .env("ALT_SERVER_REQUIRE_AUTH", "1")
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stderr = child.stderr.take().expect("stderr");
+    let mut reader = std::io::BufReader::new(stderr);
+    let mut line = String::new();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let started = loop {
+        line.clear();
+        reader.read_line(&mut line).unwrap();
+        if line.contains("listening on ") {
+            break true;
+        }
+        if Instant::now() > deadline {
+            break false;
+        }
+    };
+    let _ = child.kill();
+    let _ = child.wait();
+    assert!(
+        started,
+        "REQUIRE_AUTH=1 with users file present must start; tail of stderr line={line}"
+    );
+}
