@@ -46,16 +46,21 @@ impl Drop for Server {
 
 /// Spawn `altd-server` on a kernel-chosen port and wait until it logs
 /// the bind address — that's the handshake telling the test the server
-/// is actually ready to accept the next request.
+/// is actually ready to accept the next request. Single-repo mode.
 fn spawn_server(repo_dir: &Path) -> Server {
+    spawn_server_with_env(&[("ALT_SERVER_REPO", repo_dir.to_str().unwrap())])
+}
+
+fn spawn_server_with_env(env: &[(&str, &str)]) -> Server {
     let bin = env!("CARGO_BIN_EXE_altd-server");
-    let mut child = Command::new(bin)
-        .env("ALT_SERVER_REPO", repo_dir)
-        .args(["--bind", "127.0.0.1:0"])
+    let mut cmd = Command::new(bin);
+    cmd.args(["--bind", "127.0.0.1:0"])
         .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn altd-server");
+        .stderr(Stdio::piped());
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    let mut child = cmd.spawn().expect("spawn altd-server");
     let stderr = child.stderr.take().expect("server stderr");
     let mut reader = BufReader::new(stderr);
     let mut line = String::new();
@@ -317,5 +322,110 @@ fn altd_server_rejects_unknown_service() {
     assert_eq!(
         code, "400",
         "unknown service must surface as HTTP 400: got {code}"
+    );
+}
+
+#[test]
+fn altd_server_multi_repo_routes_url_to_named_repo() {
+    // M9/W11a: under ALT_SERVER_ROOT=<dir>, URL `/<name>/...` picks
+    // <dir>/<name> as the alt repo. Two side-by-side repos should
+    // serve distinct histories without contamination.
+    let root_dir = tempfile::tempdir().unwrap();
+    let root = root_dir.path();
+    let alpha = root.join("alpha");
+    let beta = root.join("beta");
+    std::fs::create_dir(&alpha).unwrap();
+    std::fs::create_dir(&beta).unwrap();
+
+    // alpha: "A" content
+    ok(alt(&alpha, &["init", "."]));
+    std::fs::write(alpha.join("a.txt"), "alpha-only\n").unwrap();
+    ok(alt(&alpha, &["add", "."]));
+    ok(alt(&alpha, &["commit", "-m", "alpha-commit"]));
+
+    // beta: "B" content (distinct repo, distinct ref/oid)
+    ok(alt(&beta, &["init", "."]));
+    std::fs::write(beta.join("b.txt"), "beta-only\n").unwrap();
+    ok(alt(&beta, &["add", "."]));
+    ok(alt(&beta, &["commit", "-m", "beta-commit"]));
+
+    let server = spawn_server_with_env(&[("ALT_SERVER_ROOT", root.to_str().unwrap())]);
+
+    for (name, expected_file, expected_content, expected_msg) in [
+        ("alpha", "a.txt", "alpha-only\n", "alpha-commit"),
+        ("beta", "b.txt", "beta-only\n", "beta-commit"),
+    ] {
+        let url = format!("http://{}/{name}", server.addr);
+        let clone_root = tempfile::tempdir().unwrap();
+        let target = clone_root.path().join(format!("clone-{name}"));
+        let out = Command::new("git")
+            .args(["clone", &url, target.to_str().unwrap()])
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_PROTOCOL", "version=2")
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git clone {url}: stderr={} stdout={}",
+            String::from_utf8_lossy(&out.stderr),
+            String::from_utf8_lossy(&out.stdout)
+        );
+        assert_eq!(
+            std::fs::read(target.join(expected_file)).unwrap(),
+            expected_content.as_bytes(),
+            "cloned content from /{name}"
+        );
+        // and a non-target file should NOT exist (no cross-repo bleed)
+        let other = if expected_file == "a.txt" {
+            "b.txt"
+        } else {
+            "a.txt"
+        };
+        assert!(
+            !target.join(other).exists(),
+            "/{name} clone leaked {other} from the other repo"
+        );
+        let log = Command::new("git")
+            .arg("-C")
+            .arg(&target)
+            .args(["log", "--pretty=oneline"])
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .unwrap();
+        assert!(log.status.success());
+        let log_s = String::from_utf8_lossy(&log.stdout);
+        assert!(
+            log_s.contains(expected_msg),
+            "/{name} clone log missing its own commit: {log_s}"
+        );
+    }
+}
+
+#[test]
+fn altd_server_multi_repo_returns_404_for_unknown_name() {
+    let root_dir = tempfile::tempdir().unwrap();
+    let root = root_dir.path();
+    let alpha = root.join("alpha");
+    std::fs::create_dir(&alpha).unwrap();
+    ok(alt(&alpha, &["init", "."]));
+    std::fs::write(alpha.join("a.txt"), "alpha\n").unwrap();
+    ok(alt(&alpha, &["add", "."]));
+    ok(alt(&alpha, &["commit", "-m", "seed"]));
+
+    let server = spawn_server_with_env(&[("ALT_SERVER_ROOT", root.to_str().unwrap())]);
+    let url = format!(
+        "http://{}/nope/info/refs?service=git-upload-pack",
+        server.addr
+    );
+    let out = Command::new("curl")
+        .args(["-sS", "-w", "%{http_code}", "-o", "/dev/null", &url])
+        .output()
+        .unwrap();
+    let code = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        code, "404",
+        "unknown repo must surface as HTTP 404: got {code}"
     );
 }

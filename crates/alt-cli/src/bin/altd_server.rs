@@ -24,8 +24,9 @@
 //! reverse-proxy-style TLS termination so the server itself can stay
 //! ureq-style plain-HTTP and minimal.
 
+use std::collections::HashMap;
 use std::io::Cursor;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use alt_cli::native::Store;
@@ -54,7 +55,10 @@ fn main() {
             }
             "-h" | "--help" => {
                 eprintln!(
-                    "usage: altd-server [--bind 127.0.0.1:PORT]\n\nenv:\n  ALT_SERVER_REPO  path to the alt repo to serve"
+                    "usage: altd-server [--bind 127.0.0.1:PORT]\n\n\
+                     env:\n  \
+                     ALT_SERVER_REPO  path to a single alt repo to serve (legacy mode)\n  \
+                     ALT_SERVER_ROOT  path to a multi-repo root; URLs map /<name>/… → <root>/<name>"
                 );
                 return;
             }
@@ -62,71 +66,199 @@ fn main() {
         }
         i += 1;
     }
-    let repo_path = std::env::var("ALT_SERVER_REPO")
-        .unwrap_or_else(|_| die("ALT_SERVER_REPO not set; point it at the repo to serve"));
 
-    let repo = Arc::new(
-        Repository::discover(&PathBuf::from(&repo_path))
-            .unwrap_or_else(|e| die(&format!("opening repo: {e}"))),
-    );
-    // The write store: receive-pack mutates this (odb + refs). Reads
-    // (ls-refs, fetch) still go through Repository so they don't fight
-    // for the write lock. Both opens are on the same .alt dir; alt-odb's
-    // flock serialises writers safely.
-    let alt_dir = PathBuf::from(&repo_path).join(".alt");
-    let store: Option<Arc<Mutex<Store>>> = if alt_dir.is_dir() {
-        Some(Arc::new(Mutex::new(Store::open(alt_dir).unwrap_or_else(
-            |e| die(&format!("opening write store: {e}")),
-        ))))
-    } else {
-        eprintln!(
-            "altd-server: no .alt under {repo_path}; receive-pack will be refused (read-only mode)"
-        );
-        None
+    let mode = match (
+        std::env::var("ALT_SERVER_REPO").ok(),
+        std::env::var("ALT_SERVER_ROOT").ok(),
+    ) {
+        (Some(_), Some(_)) => die("set either ALT_SERVER_REPO or ALT_SERVER_ROOT, not both"),
+        (None, None) => {
+            die("either ALT_SERVER_REPO (single repo) or ALT_SERVER_ROOT (multi-repo) must be set")
+        }
+        (Some(p), None) => ServeMode::single(PathBuf::from(p)),
+        (None, Some(p)) => ServeMode::multi(PathBuf::from(p)),
     };
 
     let server = Server::http(&bind).unwrap_or_else(|e| die(&format!("bind {bind}: {e}")));
     eprintln!(
-        "altd-server: listening on {} (repo {})",
+        "altd-server: listening on {} ({})",
         server.server_addr(),
-        repo_path
+        mode.describe()
     );
 
     for req in server.incoming_requests() {
         let url = req.url().to_owned();
         let method = req.method().clone();
-        if let Err(e) = dispatch(&repo, store.as_deref(), method, &url, req) {
+        if let Err(e) = dispatch(&mode, method, &url, req) {
             eprintln!("altd-server: handler error: {e}");
         }
     }
 }
 
+/// Single-repo (ALT_SERVER_REPO) or multi-repo (ALT_SERVER_ROOT) serve.
+/// Single keeps W10's old shape — info/refs lives at the URL root.
+/// Multi parses the first path segment as a repo name and resolves it
+/// under the configured root.
+enum ServeMode {
+    Single {
+        repo_path: PathBuf,
+        repo: Arc<Repository>,
+        store: Option<Arc<Mutex<Store>>>,
+    },
+    Multi {
+        root: PathBuf,
+        cache: Mutex<HashMap<String, RepoHandle>>,
+    },
+}
+
+struct RepoHandle {
+    repo: Arc<Repository>,
+    store: Option<Arc<Mutex<Store>>>,
+}
+
+impl ServeMode {
+    fn single(repo_path: PathBuf) -> Self {
+        let repo = Arc::new(
+            Repository::discover(&repo_path).unwrap_or_else(|e| die(&format!("opening repo: {e}"))),
+        );
+        let alt_dir = repo_path.join(".alt");
+        let store: Option<Arc<Mutex<Store>>> = if alt_dir.is_dir() {
+            Some(Arc::new(Mutex::new(Store::open(alt_dir).unwrap_or_else(
+                |e| die(&format!("opening write store: {e}")),
+            ))))
+        } else {
+            eprintln!(
+                "altd-server: no .alt under {p}; receive-pack will be refused (read-only mode)",
+                p = repo_path.display()
+            );
+            None
+        };
+        ServeMode::Single {
+            repo_path,
+            repo,
+            store,
+        }
+    }
+
+    fn multi(root: PathBuf) -> Self {
+        if !root.is_dir() {
+            die(&format!(
+                "ALT_SERVER_ROOT={} does not exist or isn't a directory",
+                root.display()
+            ));
+        }
+        ServeMode::Multi {
+            root,
+            cache: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn describe(&self) -> String {
+        match self {
+            ServeMode::Single { repo_path, .. } => format!("single repo {}", repo_path.display()),
+            ServeMode::Multi { root, .. } => format!("multi-repo under {}", root.display()),
+        }
+    }
+}
+
+/// Resolve the repo the request is targeting + return the remainder of
+/// the URL path so the dispatcher can match on `/info/refs` etc. For the
+/// single mode, the whole `path` is the suffix and there's no repo name
+/// (just hand back the held handle). For multi, the first non-empty
+/// segment of `path` is the repo name; the suffix is what follows it.
+fn resolve_repo(
+    mode: &ServeMode,
+    path: &str,
+) -> Result<(RepoHandle, String), Box<dyn std::error::Error>> {
+    match mode {
+        ServeMode::Single { repo, store, .. } => Ok((
+            RepoHandle {
+                repo: repo.clone(),
+                store: store.clone(),
+            },
+            path.to_owned(),
+        )),
+        ServeMode::Multi { root, cache } => {
+            let trimmed = path.trim_start_matches('/');
+            let (name, rest) = match trimmed.find('/') {
+                Some(i) => (&trimmed[..i], &trimmed[i..]),
+                None => (trimmed, ""),
+            };
+            if name.is_empty() || name.contains("..") || name.contains('\\') {
+                return Err("invalid repo name in URL".into());
+            }
+            let mut cache_g = cache.lock().unwrap();
+            if let Some(h) = cache_g.get(name) {
+                return Ok((
+                    RepoHandle {
+                        repo: h.repo.clone(),
+                        store: h.store.clone(),
+                    },
+                    rest.to_owned(),
+                ));
+            }
+            let repo_path = root.join(name);
+            if !repo_path.is_dir() {
+                return Err(format!("repo '{name}' not found under server root").into());
+            }
+            let repo = Arc::new(Repository::discover(&repo_path)?);
+            let alt_dir = repo_path.join(".alt");
+            let store: Option<Arc<Mutex<Store>>> = if alt_dir.is_dir() {
+                Some(Arc::new(Mutex::new(Store::open(alt_dir)?)))
+            } else {
+                None
+            };
+            let handle = RepoHandle {
+                repo: repo.clone(),
+                store: store.clone(),
+            };
+            cache_g.insert(name.to_owned(), handle);
+            Ok((RepoHandle { repo, store }, rest.to_owned()))
+        }
+    }
+}
+
+// silence the unused import — `Path` is reserved for future path-trim
+// helpers; pulling it in alongside `PathBuf` matches the codebase style
+const _: fn(&Path) = |_| {};
+
 fn dispatch(
-    repo: &Repository,
-    store: Option<&Mutex<Store>>,
+    mode: &ServeMode,
     method: Method,
     url: &str,
     req: tiny_http::Request,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Path + query split. tiny_http hands us the raw `?…` tail.
     let (path, query) = match url.split_once('?') {
         Some((p, q)) => (p, q),
         None => (url, ""),
     };
-    if method == Method::Get && path.ends_with("/info/refs") {
-        return handle_info_refs(repo, query, req);
+    // Multi-repo mode peels the first path segment as the repo name and
+    // hands back the remaining suffix; single-repo mode keeps the path
+    // intact. After resolve_repo, the suffix always ends in one of the
+    // smart-http endpoints if the URL was well-formed.
+    let (handle, suffix) = match resolve_repo(mode, path) {
+        Ok(v) => v,
+        Err(e) => {
+            let r = Response::from_string(e.to_string()).with_status_code(StatusCode(404));
+            req.respond(r)?;
+            return Ok(());
+        }
+    };
+
+    if method == Method::Get && suffix.ends_with("/info/refs") {
+        return handle_info_refs(&handle.repo, query, req);
     }
-    if method == Method::Post && path.ends_with("/git-upload-pack") {
-        return handle_upload_pack(repo, req);
+    if method == Method::Post && suffix.ends_with("/git-upload-pack") {
+        return handle_upload_pack(&handle.repo, req);
     }
-    if method == Method::Post && path.ends_with("/git-receive-pack") {
-        let Some(store) = store else {
+    if method == Method::Post && suffix.ends_with("/git-receive-pack") {
+        let Some(store) = handle.store else {
             let r = Response::from_string("repo is read-only (no .alt write store)")
                 .with_status_code(StatusCode(403));
             req.respond(r)?;
             return Ok(());
         };
-        return handle_receive_pack(repo, store, req);
+        return handle_receive_pack(&handle.repo, &store, req);
     }
     let r = Response::from_string("not found").with_status_code(StatusCode(404));
     req.respond(r)?;
