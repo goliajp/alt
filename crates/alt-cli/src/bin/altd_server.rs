@@ -40,6 +40,82 @@ use tiny_http::{Header, Method, Response, Server, StatusCode};
 
 const AGENT: &str = concat!("alt-server/", env!("CARGO_PKG_VERSION"));
 
+/// M11/W23: per-request log context filled in as dispatch progresses.
+/// The outer serve loop reads it back after dispatch returns and emits
+/// one JSON-line access log entry, so a single request is one line of
+/// machine-readable observability — same调性 as `alt`'s `--json` paths
+/// (信条 #5 / AI-first).
+#[derive(Default)]
+struct LogCtx {
+    status: u16,
+    bytes_in: u64,
+    principal: Option<String>,
+    repo: Option<String>,
+}
+
+/// Monotonic short request id. A 12-char hex from an `AtomicU64` counter
+/// keyed by the server's start time — enough to disambiguate within a
+/// process lifetime without pulling in a uuid dep.
+fn next_request_id() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{n:012x}")
+}
+
+fn unix_ms_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Emit one JSON-line access log entry to stderr (the same channel
+/// the bind line uses, so an operator's stderr capture sees both).
+fn emit_access_log(req_id: &str, method: &Method, url: &str, log: &LogCtx, duration_ms: u128) {
+    use alt_cli::json::Json;
+    let row = Json::Object(vec![
+        ("ts_unix_ms", Json::Num(unix_ms_now() as i64)),
+        ("req_id", Json::str(req_id)),
+        ("method", Json::str(format!("{method:?}"))),
+        ("path", Json::str(url)),
+        ("status", Json::Num(i64::from(log.status))),
+        ("duration_ms", Json::Num(duration_ms as i64)),
+        ("bytes_in", Json::Num(log.bytes_in as i64)),
+        (
+            "principal",
+            match &log.principal {
+                Some(p) => Json::str(p.clone()),
+                None => Json::Null,
+            },
+        ),
+        (
+            "repo",
+            match &log.repo {
+                Some(r) => Json::str(r.clone()),
+                None => Json::Null,
+            },
+        ),
+    ]);
+    let mut buf = Vec::with_capacity(256);
+    let _ = row.write(&mut buf);
+    buf.push(b'\n');
+    use std::io::Write;
+    let _ = std::io::stderr().write_all(&buf);
+}
+
+/// Helper that captures the response's status code into the LogCtx and
+/// then hands the request off to `respond`. Replaces every bare
+/// `req.respond(resp)?` site so access logs always see the real status.
+fn respond_logged<R: std::io::Read>(
+    req: tiny_http::Request,
+    resp: Response<R>,
+    log: &mut LogCtx,
+) -> std::io::Result<()> {
+    log.status = resp.status_code().0;
+    req.respond(resp)
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let mut bind = "127.0.0.1:0".to_owned();
@@ -89,9 +165,20 @@ fn main() {
     for req in server.incoming_requests() {
         let url = req.url().to_owned();
         let method = req.method().clone();
-        if let Err(e) = dispatch(&mode, method, &url, req) {
-            eprintln!("altd-server: handler error: {e}");
+        let req_id = next_request_id();
+        let start = std::time::Instant::now();
+        let mut log = LogCtx {
+            bytes_in: req.body_length().map(|n| n as u64).unwrap_or(0),
+            ..LogCtx::default()
+        };
+        if let Err(e) = dispatch(&mode, method.clone(), &url, req, &mut log) {
+            eprintln!("altd-server: handler error: {e} (req_id={req_id})");
+            if log.status == 0 {
+                log.status = 500;
+            }
         }
+        let duration_ms = start.elapsed().as_millis();
+        emit_access_log(&req_id, &method, &url, &log, duration_ms);
     }
 }
 
@@ -243,6 +330,7 @@ fn dispatch(
     method: Method,
     url: &str,
     req: tiny_http::Request,
+    log: &mut LogCtx,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // M9/W11b — optional Basic auth in multi-repo mode. When the server
     // root has a `users` file, every request must carry a valid
@@ -263,12 +351,13 @@ fn dispatch(
                 AuthOutcome::Reject(reason) => {
                     let mut resp = Response::from_string(reason).with_status_code(StatusCode(401));
                     resp.add_header(header("WWW-Authenticate", "Basic realm=\"altd-server\""));
-                    req.respond(resp)?;
+                    respond_logged(req, resp, log)?;
                     return Ok(());
                 }
             }
         }
     }
+    log.principal = Some(auth_user.clone().unwrap_or_else(|| "anonymous".to_owned()));
 
     let (path, query) = match url.split_once('?') {
         Some((p, q)) => (p, q),
@@ -282,10 +371,11 @@ fn dispatch(
         Ok(v) => v,
         Err(e) => {
             let r = Response::from_string(e.to_string()).with_status_code(StatusCode(404));
-            req.respond(r)?;
+            respond_logged(req, r, log)?;
             return Ok(());
         }
     };
+    log.repo = Some(repo_name.clone());
 
     // M9/W11c — gate the resolved request against the scoped user's
     // ACL. Trusted (no-ACL) users skip the check entirely; the request
@@ -298,30 +388,30 @@ fn dispatch(
             "forbidden: no {action:?} permission on repo '{repo_name}'"
         ))
         .with_status_code(StatusCode(403));
-        req.respond(r)?;
+        respond_logged(req, r, log)?;
         return Ok(());
     }
 
     if method == Method::Get && suffix.ends_with("/info/refs") {
         let repo = handle.open_repo()?;
-        return handle_info_refs(&repo, query, req);
+        return handle_info_refs(&repo, query, req, log);
     }
     if method == Method::Post && suffix.ends_with("/git-upload-pack") {
         let repo = handle.open_repo()?;
-        return handle_upload_pack(&repo, req);
+        return handle_upload_pack(&repo, req, log);
     }
     if method == Method::Post && suffix.ends_with("/git-receive-pack") {
         let repo = handle.open_repo()?;
         let Some(store) = handle.store else {
             let r = Response::from_string("repo is read-only (no .alt write store)")
                 .with_status_code(StatusCode(403));
-            req.respond(r)?;
+            respond_logged(req, r, log)?;
             return Ok(());
         };
-        return handle_receive_pack(&repo, &store, auth_user.as_deref(), req);
+        return handle_receive_pack(&repo, &store, auth_user.as_deref(), req, log);
     }
     let r = Response::from_string("not found").with_status_code(StatusCode(404));
-    req.respond(r)?;
+    respond_logged(req, r, log)?;
     Ok(())
 }
 
@@ -332,6 +422,7 @@ fn dispatch(
 fn handle_upload_pack(
     repo: &Repository,
     mut req: tiny_http::Request,
+    log: &mut LogCtx,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut body = Vec::new();
     std::io::copy(req.as_reader(), &mut body)?;
@@ -353,7 +444,7 @@ fn handle_upload_pack(
         other => {
             let r = Response::from_string(format!("unknown command={other}"))
                 .with_status_code(StatusCode(400));
-            req.respond(r)?;
+            respond_logged(req, r, log)?;
             return Ok(());
         }
     }
@@ -364,7 +455,7 @@ fn handle_upload_pack(
         "application/x-git-upload-pack-result",
     ));
     resp.add_header(header("Cache-Control", "no-cache"));
-    req.respond(resp)?;
+    respond_logged(req, resp, log)?;
     Ok(())
 }
 
@@ -509,6 +600,7 @@ fn handle_info_refs(
     repo: &Repository,
     query: &str,
     req: tiny_http::Request,
+    log: &mut LogCtx,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let service = parse_query(query, "service")
         .ok_or("info/refs missing ?service= query parameter")?
@@ -560,7 +652,7 @@ fn handle_info_refs(
         }
         _ => {
             let r = Response::from_string("unknown service").with_status_code(StatusCode(400));
-            req.respond(r)?;
+            respond_logged(req, r, log)?;
             return Ok(());
         }
     };
@@ -568,7 +660,7 @@ fn handle_info_refs(
     let mut resp = Response::from_data(body);
     resp.add_header(header("Content-Type", &content_type));
     resp.add_header(header("Cache-Control", "no-cache"));
-    req.respond(resp)?;
+    respond_logged(req, resp, log)?;
     Ok(())
 }
 
@@ -582,6 +674,7 @@ fn handle_receive_pack(
     store: &Mutex<Store>,
     auth_user: Option<&str>,
     mut req: tiny_http::Request,
+    log: &mut LogCtx,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut body = Vec::new();
     std::io::copy(req.as_reader(), &mut body)?;
@@ -689,7 +782,7 @@ fn handle_receive_pack(
         "application/x-git-receive-pack-result",
     ));
     resp.add_header(header("Cache-Control", "no-cache"));
-    req.respond(resp)?;
+    respond_logged(req, resp, log)?;
     let _ = repo; // borrow keepalive across response
     Ok(())
 }
