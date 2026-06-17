@@ -775,3 +775,102 @@ fn altd_server_a6_policy_denies_push_to_protected_ref() {
     ));
     assert!(log.contains('x'), "feature/x must carry the pushed commit");
 }
+
+#[test]
+fn altd_server_alt_to_alt_clone_push_clone_round_trip() {
+    // M9/W13: CP-9 exit gate — alt → altd-server → alt round-trip.
+    //
+    // Three actors:
+    //   A = origin repo, seeded with one commit, served by altd-server
+    //   B = alt clone of A; B makes a new commit and pushes back
+    //   C = a second alt clone, taken AFTER B's push, to prove B's
+    //       changes reached the server's object/ref store
+    //
+    // Everything client-side is the `alt` CLI driving alt-wire-http;
+    // server-side is altd-server driving the same alt-wire codecs.
+    // Byte-exact == log oneline matches commit-for-commit AND the
+    // checked-out file contents survive the trip.
+
+    let origin_dir = tempfile::tempdir().unwrap();
+    let origin = origin_dir.path();
+    ok(alt(origin, &["init", "."]));
+    std::fs::write(origin.join("a.txt"), "alpha\n").unwrap();
+    std::fs::write(origin.join("b.txt"), "beta\n").unwrap();
+    ok(alt(origin, &["add", "."]));
+    ok(alt(origin, &["commit", "-m", "seed"]));
+    let seed_log = ok(alt(origin, &["log", "--pretty=oneline"]));
+    let seed_oid = seed_log.split_whitespace().next().unwrap_or("").to_owned();
+    assert!(!seed_oid.is_empty(), "origin must have a seed commit");
+
+    let server = spawn_server(origin);
+    let url = format!("http://{}/", server.addr);
+
+    // ---- B: alt clone http://altd-server/ B ----
+    let bc = tempfile::tempdir().unwrap();
+    let bdir = bc.path().join("B");
+    let r = alt(bc.path(), &["clone", url.as_str(), bdir.to_str().unwrap()]);
+    assert!(
+        r.status.success(),
+        "B clone failed: stdout={}; stderr={}",
+        String::from_utf8_lossy(&r.stdout),
+        String::from_utf8_lossy(&r.stderr)
+    );
+    // checkout content survived byte-exact
+    assert_eq!(std::fs::read(bdir.join("a.txt")).unwrap(), b"alpha\n");
+    assert_eq!(std::fs::read(bdir.join("b.txt")).unwrap(), b"beta\n");
+    let blog = ok(alt(&bdir, &["log", "--pretty=oneline"]));
+    assert!(
+        blog.contains(&seed_oid),
+        "B clone must hold origin's seed commit oid {seed_oid}: {blog}"
+    );
+
+    // ---- B makes a commit and pushes it back ----
+    std::fs::write(bdir.join("c.txt"), "gamma\n").unwrap();
+    ok(alt(&bdir, &["add", "."]));
+    ok(alt(&bdir, &["commit", "-m", "from-B"]));
+    let b_after = ok(alt(&bdir, &["log", "--pretty=oneline"]));
+    let b_head_oid = b_after.split_whitespace().next().unwrap_or("").to_owned();
+    assert!(b_head_oid != seed_oid, "B HEAD must advance after commit");
+    let r = alt(
+        &bdir,
+        &["push", "origin", "refs/heads/main:refs/heads/main"],
+    );
+    assert!(
+        r.status.success(),
+        "B push failed: stdout={}; stderr={}",
+        String::from_utf8_lossy(&r.stdout),
+        String::from_utf8_lossy(&r.stderr)
+    );
+
+    // server-side ref must now point at B's head oid (proves the
+    // alt-side push round-tripped the receive-pack path)
+    let origin_log = ok(alt(origin, &["log", "--pretty=oneline", "refs/heads/main"]));
+    assert!(
+        origin_log.contains(&b_head_oid),
+        "origin's refs/heads/main must advance to B's push oid {b_head_oid}: {origin_log}"
+    );
+    // and the pushed commit message must be readable on origin (proves
+    // B's commit object actually landed in origin's odb, not just the
+    // ref pointer)
+    assert!(
+        origin_log.contains("from-B"),
+        "origin must hold the pushed commit message: {origin_log}"
+    );
+
+    // ---- C: clone again, must see B's commit ----
+    let cc = tempfile::tempdir().unwrap();
+    let cdir = cc.path().join("C");
+    let r = alt(cc.path(), &["clone", url.as_str(), cdir.to_str().unwrap()]);
+    assert!(
+        r.status.success(),
+        "C clone failed: stdout={}; stderr={}",
+        String::from_utf8_lossy(&r.stdout),
+        String::from_utf8_lossy(&r.stderr)
+    );
+    assert_eq!(std::fs::read(cdir.join("c.txt")).unwrap(), b"gamma\n");
+    let clog = ok(alt(&cdir, &["log", "--pretty=oneline"]));
+    assert!(
+        clog.contains(&b_head_oid) && clog.contains(&seed_oid),
+        "C clone must hold both seed and B-pushed commits: {clog}"
+    );
+}

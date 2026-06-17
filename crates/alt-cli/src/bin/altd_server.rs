@@ -102,7 +102,6 @@ fn main() {
 enum ServeMode {
     Single {
         repo_path: PathBuf,
-        repo: Arc<Repository>,
         store: Option<Arc<Mutex<Store>>>,
     },
     Multi {
@@ -111,16 +110,28 @@ enum ServeMode {
     },
 }
 
+/// A resolved repo binding for one request. `repo_path` is reopened on
+/// every read so the Repository's RefStore + odb always reflect any
+/// receive-pack write that just completed (no stale-cache window between
+/// push → fetch on the same connection). The mutable `Store` is shared
+/// across requests for write serialisation.
 struct RepoHandle {
-    repo: Arc<Repository>,
+    repo_path: PathBuf,
     store: Option<Arc<Mutex<Store>>>,
+}
+
+impl RepoHandle {
+    fn open_repo(&self) -> Result<Repository, Box<dyn std::error::Error>> {
+        Ok(Repository::discover(&self.repo_path)?)
+    }
 }
 
 impl ServeMode {
     fn single(repo_path: PathBuf) -> Self {
-        let repo = Arc::new(
-            Repository::discover(&repo_path).unwrap_or_else(|e| die(&format!("opening repo: {e}"))),
-        );
+        // Fail-fast: probe the repo once at boot so a misconfigured
+        // ALT_SERVER_REPO surfaces immediately rather than on the first
+        // request. We drop the handle; per-request opens are cheap.
+        Repository::discover(&repo_path).unwrap_or_else(|e| die(&format!("opening repo: {e}")));
         let alt_dir = repo_path.join(".alt");
         let store: Option<Arc<Mutex<Store>>> = if alt_dir.is_dir() {
             Some(Arc::new(Mutex::new(Store::open(alt_dir).unwrap_or_else(
@@ -133,11 +144,7 @@ impl ServeMode {
             );
             None
         };
-        ServeMode::Single {
-            repo_path,
-            repo,
-            store,
-        }
+        ServeMode::Single { repo_path, store }
     }
 
     fn multi(root: PathBuf) -> Self {
@@ -172,9 +179,9 @@ fn resolve_repo(
     path: &str,
 ) -> Result<(RepoHandle, String, String), Box<dyn std::error::Error>> {
     match mode {
-        ServeMode::Single { repo, store, .. } => Ok((
+        ServeMode::Single { repo_path, store } => Ok((
             RepoHandle {
-                repo: repo.clone(),
+                repo_path: repo_path.clone(),
                 store: store.clone(),
             },
             path.to_owned(),
@@ -193,7 +200,7 @@ fn resolve_repo(
             if let Some(h) = cache_g.get(name) {
                 return Ok((
                     RepoHandle {
-                        repo: h.repo.clone(),
+                        repo_path: h.repo_path.clone(),
                         store: h.store.clone(),
                     },
                     rest.to_owned(),
@@ -204,7 +211,9 @@ fn resolve_repo(
             if !repo_path.is_dir() {
                 return Err(format!("repo '{name}' not found under server root").into());
             }
-            let repo = Arc::new(Repository::discover(&repo_path)?);
+            // Probe once: surfaces "not a repo" errors right at cache
+            // insertion rather than on every request.
+            Repository::discover(&repo_path)?;
             let alt_dir = repo_path.join(".alt");
             let store: Option<Arc<Mutex<Store>>> = if alt_dir.is_dir() {
                 Some(Arc::new(Mutex::new(Store::open(alt_dir)?)))
@@ -212,11 +221,15 @@ fn resolve_repo(
                 None
             };
             let handle = RepoHandle {
-                repo: repo.clone(),
+                repo_path: repo_path.clone(),
                 store: store.clone(),
             };
             cache_g.insert(name.to_owned(), handle);
-            Ok((RepoHandle { repo, store }, rest.to_owned(), name.to_owned()))
+            Ok((
+                RepoHandle { repo_path, store },
+                rest.to_owned(),
+                name.to_owned(),
+            ))
         }
     }
 }
@@ -290,19 +303,22 @@ fn dispatch(
     }
 
     if method == Method::Get && suffix.ends_with("/info/refs") {
-        return handle_info_refs(&handle.repo, query, req);
+        let repo = handle.open_repo()?;
+        return handle_info_refs(&repo, query, req);
     }
     if method == Method::Post && suffix.ends_with("/git-upload-pack") {
-        return handle_upload_pack(&handle.repo, req);
+        let repo = handle.open_repo()?;
+        return handle_upload_pack(&repo, req);
     }
     if method == Method::Post && suffix.ends_with("/git-receive-pack") {
+        let repo = handle.open_repo()?;
         let Some(store) = handle.store else {
             let r = Response::from_string("repo is read-only (no .alt write store)")
                 .with_status_code(StatusCode(403));
             req.respond(r)?;
             return Ok(());
         };
-        return handle_receive_pack(&handle.repo, &store, auth_user.as_deref(), req);
+        return handle_receive_pack(&repo, &store, auth_user.as_deref(), req);
     }
     let r = Response::from_string("not found").with_status_code(StatusCode(404));
     req.respond(r)?;
@@ -452,6 +468,7 @@ fn handle_info_refs(
                 "report-status",
                 "delete-refs",
                 "ofs-delta",
+                "side-band-64k",
                 concat!("agent=", "alt-server/", env!("CARGO_PKG_VERSION")),
             ];
             alt_wire::push::encode_v1_ref_advertisement(
@@ -531,11 +548,20 @@ fn handle_receive_pack(
     }
 
     let mut out = Vec::new();
-    alt_wire::push::encode_report_status(
-        &mut out,
-        unpack_result.as_ref().map(|_| ()).map_err(|s| s.as_str()),
-        &command_status,
-    )?;
+    let want_sideband = pushed.capabilities.iter().any(|c| c == "side-band-64k");
+    if want_sideband {
+        alt_wire::push::encode_report_status_sideband(
+            &mut out,
+            unpack_result.as_ref().map(|_| ()).map_err(|s| s.as_str()),
+            &command_status,
+        )?;
+    } else {
+        alt_wire::push::encode_report_status(
+            &mut out,
+            unpack_result.as_ref().map(|_| ()).map_err(|s| s.as_str()),
+            &command_status,
+        )?;
+    }
     let mut resp = Response::from_data(out);
     resp.add_header(header(
         "Content-Type",

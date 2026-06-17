@@ -552,6 +552,28 @@ pub fn encode_report_status<W: Write>(
     pkt::write_flush(w)
 }
 
+/// Server-side encode of `report-status` wrapped in `side-band-64k`
+/// framing (M9/W13). Use this when the client advertised `side-band-64k`
+/// in the push request — git CLI does this when the server advertised
+/// the cap in the v1 ref ad. The plain pkt-line body is the same as
+/// [`encode_report_status`] but each pkt-line rides band 1.
+pub fn encode_report_status_sideband<W: Write>(
+    w: &mut W,
+    unpack: Result<(), &str>,
+    commands: &[CommandStatus],
+) -> std::io::Result<()> {
+    let mut inner = Vec::new();
+    encode_report_status(&mut inner, unpack, commands)?;
+    const SIDEBAND_CHUNK: usize = crate::pkt::MAX_LINE_LEN - 5;
+    for chunk in inner.chunks(SIDEBAND_CHUNK) {
+        let mut framed = Vec::with_capacity(chunk.len() + 1);
+        framed.push(0x01);
+        framed.extend_from_slice(chunk);
+        pkt::write_data(w, &framed)?;
+    }
+    pkt::write_flush(w)
+}
+
 fn trim_newline(b: &[u8]) -> &[u8] {
     let mut end = b.len();
     while end > 0 && (b[end - 1] == b'\n' || b[end - 1] == b'\r') {
