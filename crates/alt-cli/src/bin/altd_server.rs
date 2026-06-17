@@ -226,6 +226,49 @@ fn main() {
 /// drive `Server::unblock()` and graceful worker drain.
 static SHUTDOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// M11/W26: hard cap on POST request bodies (push pack + upload-pack
+/// command bodies). Bound by `ALT_SERVER_MAX_PUSH_BYTES`; default
+/// 1 GiB matches what a healthy alt push against the dogfood corpus
+/// fits inside, and stops a malicious or buggy client from streaming
+/// gigabytes into memory through `std::io::copy(req.as_reader(), …)`.
+fn max_body_bytes() -> u64 {
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<u64> = OnceLock::new();
+    *CACHE.get_or_init(|| {
+        std::env::var("ALT_SERVER_MAX_PUSH_BYTES")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .filter(|n| *n > 0)
+            .unwrap_or(1024 * 1024 * 1024)
+    })
+}
+
+/// Read at most `max_body_bytes()` from `req.as_reader()` into `body`.
+/// Returns `Err` when the client streamed past the cap — handler maps
+/// that into a 413 ng response, never an OOM. We don't trust
+/// `body_length()` alone (a malicious client can send a small
+/// Content-Length header and then keep writing); the `.take()` is the
+/// real enforcement.
+fn read_body_capped(
+    req: &mut tiny_http::Request,
+    body: &mut Vec<u8>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Read;
+    let max = max_body_bytes();
+    // Read one byte past the cap so we can detect overflow. The `take`
+    // wrapper hard-stops at `max + 1`, so even a lying Content-Length
+    // can't cause unbounded allocation.
+    let mut limited = req.as_reader().take(max + 1);
+    limited.read_to_end(body)?;
+    if body.len() as u64 > max {
+        return Err(format!(
+            "request body exceeds ALT_SERVER_MAX_PUSH_BYTES={max} (cap is per-request)"
+        )
+        .into());
+    }
+    Ok(())
+}
+
 #[cfg(unix)]
 extern "C" fn shutdown_handler(_sig: libc::c_int) {
     // Async-signal-safe: relaxed atomic store is the only thing we do
@@ -482,6 +525,22 @@ fn dispatch(
         return Ok(());
     }
 
+    // M11/W26: fail-fast 413 when the client *advertised* a body
+    // larger than the cap. Lying Content-Length headers are caught
+    // at read time inside the handlers via `read_body_capped`.
+    if method == Method::Post
+        && let Some(advertised) = req.body_length()
+        && advertised as u64 > max_body_bytes()
+    {
+        let max = max_body_bytes();
+        let r = Response::from_string(format!(
+            "payload too large: Content-Length={advertised} exceeds cap {max}"
+        ))
+        .with_status_code(StatusCode(413));
+        respond_logged(req, r, log)?;
+        return Ok(());
+    }
+
     if method == Method::Get && suffix.ends_with("/info/refs") {
         let repo = handle.open_repo()?;
         return handle_info_refs(&repo, query, req, log);
@@ -515,7 +574,11 @@ fn handle_upload_pack(
     log: &mut LogCtx,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut body = Vec::new();
-    std::io::copy(req.as_reader(), &mut body)?;
+    if let Err(e) = read_body_capped(&mut req, &mut body) {
+        let r = Response::from_string(format!("{e}")).with_status_code(StatusCode(413));
+        respond_logged(req, r, log)?;
+        return Ok(());
+    }
     let cmd = sniff_command(&body)?;
 
     let mut out = Vec::new();
@@ -767,7 +830,11 @@ fn handle_receive_pack(
     log: &mut LogCtx,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut body = Vec::new();
-    std::io::copy(req.as_reader(), &mut body)?;
+    if let Err(e) = read_body_capped(&mut req, &mut body) {
+        let r = Response::from_string(format!("{e}")).with_status_code(StatusCode(413));
+        respond_logged(req, r, log)?;
+        return Ok(());
+    }
     let pushed = alt_wire::push::parse_push_request(&mut Cursor::new(&body), HashAlgo::Sha1)?;
 
     // M10/W14 (A5b): pre-commit verify of the wire signature. The client

@@ -1697,3 +1697,90 @@ fn altd_server_drains_cleanly_on_sigterm() {
         "shutdown-signal line must precede the exit line:\n{log}"
     );
 }
+
+#[test]
+fn altd_server_rejects_push_exceeding_max_body_size() {
+    // M11/W26: a server started with ALT_SERVER_MAX_PUSH_BYTES=100
+    // must refuse any real push (which carries at least a small pack
+    // body, easily over 100 B) with HTTP 413 — before reading more
+    // than `max + 1` bytes. We assert the rejection via the git
+    // client surfacing the upstream error, plus the access log row
+    // recording status=413 in the server's stderr.
+    let origin_dir = tempfile::tempdir().unwrap();
+    let origin = origin_dir.path();
+    ok(alt(origin, &["init", "."]));
+    std::fs::write(origin.join("seed.txt"), "seed\n").unwrap();
+    ok(alt(origin, &["add", "."]));
+    ok(alt(origin, &["commit", "-m", "seed"]));
+
+    let mut server = spawn_server_with_env(&[
+        ("ALT_SERVER_REPO", origin.to_str().unwrap()),
+        ("ALT_SERVER_MAX_PUSH_BYTES", "100"),
+    ]);
+    let url = format!("http://{}/", server.addr);
+
+    // Build a git source repo and try to push — even an empty-tree
+    // commit pushes a pack body that easily clears 100 B.
+    let src_dir = tempfile::tempdir().unwrap();
+    let src = src_dir.path();
+    let st = std::process::Command::new("git")
+        .args(["init", "-q", "-b", "main", src.to_str().unwrap()])
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .unwrap();
+    assert!(st.status.success());
+    std::fs::write(src.join("f.txt"), "body\n").unwrap();
+    for args in [
+        &["-C", src.to_str().unwrap(), "add", "."][..],
+        &[
+            "-C",
+            src.to_str().unwrap(),
+            "-c",
+            "user.name=tester",
+            "-c",
+            "user.email=t@e",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "-m",
+            "x",
+        ][..],
+    ] {
+        let o = std::process::Command::new("git")
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            o.status.success(),
+            "git: {}",
+            String::from_utf8_lossy(&o.stderr)
+        );
+    }
+    // Push to a brand-new branch so we don't tangle with main's
+    // non-fast-forward refusal — the only signal we want here is
+    // the 413 body-size cap.
+    let push = std::process::Command::new("git")
+        .args([
+            "-C",
+            src.to_str().unwrap(),
+            "push",
+            &url,
+            "HEAD:refs/heads/from-git",
+        ])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .unwrap();
+    assert!(
+        !push.status.success(),
+        "oversize push must be refused: stdout={}",
+        String::from_utf8_lossy(&push.stdout)
+    );
+
+    let server_log = server.drain_stderr();
+    assert!(
+        server_log.contains("\"status\":413"),
+        "access log must record the 413 row: {server_log}"
+    );
+}
