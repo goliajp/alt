@@ -531,3 +531,129 @@ fn altd_server_basic_auth_blocks_unauthenticated_and_allows_correct_token() {
         "clone behind auth still serves the right content"
     );
 }
+
+#[test]
+fn altd_server_acl_scopes_user_to_listed_repos_and_actions() {
+    // M9/W11c: a 3-column users line scopes the user to listed
+    // `repo:perm` rules. alice has `alpha:rw beta:r` → can do anything
+    // on alpha, read-only on beta, no access to anything else.
+    let root_dir = tempfile::tempdir().unwrap();
+    let root = root_dir.path();
+    for name in ["alpha", "beta", "gamma"] {
+        let dir = root.join(name);
+        std::fs::create_dir(&dir).unwrap();
+        ok(alt(&dir, &["init", "."]));
+        std::fs::write(dir.join("file.txt"), format!("{name}\n")).unwrap();
+        ok(alt(&dir, &["add", "."]));
+        ok(alt(&dir, &["commit", "-m", &format!("seed {name}")]));
+    }
+
+    let token = "alice-w11c-token";
+    let hash = blake3::hash(token.as_bytes()).to_hex().to_ascii_lowercase();
+    std::fs::write(
+        root.join("users"),
+        format!("alice\t{hash}\talpha:rw beta:r\n"),
+    )
+    .unwrap();
+
+    let server = spawn_server_with_env(&[("ALT_SERVER_ROOT", root.to_str().unwrap())]);
+
+    // 1. alpha read (clone) — allowed
+    let url = format!("http://alice:{token}@{}/alpha", server.addr);
+    let target = tempfile::tempdir().unwrap();
+    let dst = target.path().join("alpha-clone");
+    let out = Command::new("git")
+        .args(["clone", &url, dst.to_str().unwrap()])
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_PROTOCOL", "version=2")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "alice should clone alpha (rw): stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // 2. beta read (info/refs) — allowed
+    let info = format!(
+        "http://alice:{token}@{}/beta/info/refs?service=git-upload-pack",
+        server.addr
+    );
+    let out = Command::new("curl")
+        .args(["-sS", "-w", "%{http_code}", "-o", "/dev/null", &info])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "200",
+        "alice can read beta (r)"
+    );
+
+    // 3. beta write (receive-pack info/refs) — denied
+    let info = format!(
+        "http://alice:{token}@{}/beta/info/refs?service=git-receive-pack",
+        server.addr
+    );
+    let out = Command::new("curl")
+        .args(["-sS", "-w", "%{http_code}", "-o", "/dev/null", &info])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "403",
+        "alice must not push to beta (read-only): {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // 4. gamma read — denied (no rule)
+    let info = format!(
+        "http://alice:{token}@{}/gamma/info/refs?service=git-upload-pack",
+        server.addr
+    );
+    let out = Command::new("curl")
+        .args(["-sS", "-w", "%{http_code}", "-o", "/dev/null", &info])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "403",
+        "alice must not see gamma (no rule)"
+    );
+}
+
+#[test]
+fn altd_server_acl_wildcard_grants_all_repos() {
+    // operator with `*:rw` → every repo, every action.
+    let root_dir = tempfile::tempdir().unwrap();
+    let root = root_dir.path();
+    for name in ["one", "two"] {
+        let dir = root.join(name);
+        std::fs::create_dir(&dir).unwrap();
+        ok(alt(&dir, &["init", "."]));
+        std::fs::write(dir.join("f.txt"), format!("{name}\n")).unwrap();
+        ok(alt(&dir, &["add", "."]));
+        ok(alt(&dir, &["commit", "-m", "seed"]));
+    }
+    let token = "ops-token";
+    let hash = blake3::hash(token.as_bytes()).to_hex().to_ascii_lowercase();
+    std::fs::write(root.join("users"), format!("ops\t{hash}\t*:rw\n")).unwrap();
+
+    let server = spawn_server_with_env(&[("ALT_SERVER_ROOT", root.to_str().unwrap())]);
+    for name in ["one", "two"] {
+        let url = format!(
+            "http://ops:{token}@{}/{name}/info/refs?service=git-upload-pack",
+            server.addr
+        );
+        let out = Command::new("curl")
+            .args(["-sS", "-w", "%{http_code}", "-o", "/dev/null", &url])
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout),
+            "200",
+            "ops with *:rw should read {name}"
+        );
+    }
+}

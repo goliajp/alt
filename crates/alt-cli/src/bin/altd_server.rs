@@ -162,14 +162,15 @@ impl ServeMode {
 }
 
 /// Resolve the repo the request is targeting + return the remainder of
-/// the URL path so the dispatcher can match on `/info/refs` etc. For the
-/// single mode, the whole `path` is the suffix and there's no repo name
-/// (just hand back the held handle). For multi, the first non-empty
-/// segment of `path` is the repo name; the suffix is what follows it.
+/// the URL path (so the dispatcher can match on `/info/refs` etc.) plus
+/// the repo *name* under multi-repo mode. Single-repo mode has no
+/// extractable name; we substitute the synthetic `*` so an ACL rule
+/// matching every repo still applies, though scoped ACLs only fire in
+/// multi mode anyway.
 fn resolve_repo(
     mode: &ServeMode,
     path: &str,
-) -> Result<(RepoHandle, String), Box<dyn std::error::Error>> {
+) -> Result<(RepoHandle, String, String), Box<dyn std::error::Error>> {
     match mode {
         ServeMode::Single { repo, store, .. } => Ok((
             RepoHandle {
@@ -177,6 +178,7 @@ fn resolve_repo(
                 store: store.clone(),
             },
             path.to_owned(),
+            "*".to_owned(),
         )),
         ServeMode::Multi { root, cache } => {
             let trimmed = path.trim_start_matches('/');
@@ -195,6 +197,7 @@ fn resolve_repo(
                         store: h.store.clone(),
                     },
                     rest.to_owned(),
+                    name.to_owned(),
                 ));
             }
             let repo_path = root.join(name);
@@ -213,7 +216,7 @@ fn resolve_repo(
                 store: store.clone(),
             };
             cache_g.insert(name.to_owned(), handle);
-            Ok((RepoHandle { repo, store }, rest.to_owned()))
+            Ok((RepoHandle { repo, store }, rest.to_owned(), name.to_owned()))
         }
     }
 }
@@ -232,11 +235,15 @@ fn dispatch(
     // root has a `users` file, every request must carry a valid
     // Authorization header; absence / mismatch returns HTTP 401 with a
     // WWW-Authenticate prompt so a real git client retries with creds.
+    // M9/W11c — a scoped user (3-column line) hands back an ACL the
+    // dispatcher checks against the resolved repo + action below.
+    let mut scoped_acl: Option<Vec<AclRule>> = None;
     if let ServeMode::Multi { root, .. } = mode {
         let users_path = root.join("users");
         if users_path.is_file() {
             match check_auth(&req, &users_path) {
                 AuthOutcome::Ok => {}
+                AuthOutcome::OkScoped { acl, .. } => scoped_acl = Some(acl),
                 AuthOutcome::Reject(reason) => {
                     let mut resp = Response::from_string(reason).with_status_code(StatusCode(401));
                     resp.add_header(header("WWW-Authenticate", "Basic realm=\"altd-server\""));
@@ -255,7 +262,7 @@ fn dispatch(
     // hands back the remaining suffix; single-repo mode keeps the path
     // intact. After resolve_repo, the suffix always ends in one of the
     // smart-http endpoints if the URL was well-formed.
-    let (handle, suffix) = match resolve_repo(mode, path) {
+    let (handle, suffix, repo_name) = match resolve_repo(mode, path) {
         Ok(v) => v,
         Err(e) => {
             let r = Response::from_string(e.to_string()).with_status_code(StatusCode(404));
@@ -263,6 +270,21 @@ fn dispatch(
             return Ok(());
         }
     };
+
+    // M9/W11c — gate the resolved request against the scoped user's
+    // ACL. Trusted (no-ACL) users skip the check entirely; the request
+    // proceeds as in W11b.
+    if let Some(acl) = &scoped_acl
+        && let Some(action) = action_from_request(&method, &suffix, query)
+        && !acl_allows(acl, &repo_name, action)
+    {
+        let r = Response::from_string(format!(
+            "forbidden: no {action:?} permission on repo '{repo_name}'"
+        ))
+        .with_status_code(StatusCode(403));
+        req.respond(r)?;
+        return Ok(());
+    }
 
     if method == Method::Get && suffix.ends_with("/info/refs") {
         return handle_info_refs(&handle.repo, query, req);
@@ -629,9 +651,95 @@ fn _phantom_keep_imports(_c: Cursor<Vec<u8>>) {}
 /// What `check_auth` decided about a request. `Reject` carries the
 /// short string the body gets so a human running curl sees something
 /// meaningful (a real git client just retries with the credential).
+/// `OkScoped` means authentication succeeded *and* the user has an ACL
+/// the dispatcher then checks against the resolved repo + action.
 enum AuthOutcome {
     Ok,
+    OkScoped {
+        #[allow(dead_code)]
+        user: String,
+        acl: Vec<AclRule>,
+    },
     Reject(String),
+}
+
+/// One entry in a user's per-repo permission table. `repo == "*"` is the
+/// wildcard meaning "every repo this user can see"; `perm` says whether
+/// they can read, write, or both.
+#[derive(Debug, Clone)]
+struct AclRule {
+    repo: String,
+    can_read: bool,
+    can_write: bool,
+}
+
+/// What kind of access the current HTTP request needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Action {
+    Read,
+    Write,
+}
+
+fn action_from_request(method: &Method, path: &str, query: &str) -> Option<Action> {
+    if method == &Method::Get && path.ends_with("/info/refs") {
+        if query.contains("service=git-upload-pack") {
+            return Some(Action::Read);
+        }
+        if query.contains("service=git-receive-pack") {
+            return Some(Action::Write);
+        }
+        return None;
+    }
+    if method == &Method::Post && path.ends_with("/git-upload-pack") {
+        return Some(Action::Read);
+    }
+    if method == &Method::Post && path.ends_with("/git-receive-pack") {
+        return Some(Action::Write);
+    }
+    None
+}
+
+fn acl_allows(acl: &[AclRule], repo: &str, action: Action) -> bool {
+    for rule in acl {
+        if rule.repo != "*" && rule.repo != repo {
+            continue;
+        }
+        match action {
+            Action::Read => {
+                if rule.can_read {
+                    return true;
+                }
+            }
+            Action::Write => {
+                if rule.can_write {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+fn parse_acl(field: &str) -> Vec<AclRule> {
+    let mut out = Vec::new();
+    for token in field.split_whitespace() {
+        let Some((repo, perm)) = token.split_once(':') else {
+            continue;
+        };
+        let (can_read, can_write) = match perm {
+            "r" => (true, false),
+            "w" => (false, true),
+            "rw" | "wr" => (true, true),
+            "n" | "" => (false, false),
+            _ => continue,
+        };
+        out.push(AclRule {
+            repo: repo.to_owned(),
+            can_read,
+            can_write,
+        });
+    }
+    out
 }
 
 /// Validate an HTTP Basic `Authorization` header against the users file
@@ -672,17 +780,33 @@ fn check_auth(req: &tiny_http::Request, users_path: &Path) -> AuthOutcome {
         Ok(t) => t,
         Err(e) => return AuthOutcome::Reject(format!("server users file unreadable: {e}")),
     };
-    let Some(expected) = table.get(user) else {
+    let Some(entry) = table.get(user) else {
         return AuthOutcome::Reject("unknown user".into());
     };
-    if expected.eq_ignore_ascii_case(token_hex.as_str()) {
-        AuthOutcome::Ok
-    } else {
-        AuthOutcome::Reject("bad token".into())
+    if !entry.token_hash.eq_ignore_ascii_case(token_hex.as_str()) {
+        return AuthOutcome::Reject("bad token".into());
+    }
+    // M9/W11c — a 2-column users line (no ACL) is the "trusted user"
+    // shape: every repo + every action allowed. A 3-column line scopes
+    // the user, and the dispatcher then asks `acl_allows` per request.
+    match &entry.acl {
+        None => AuthOutcome::Ok,
+        Some(rules) => AuthOutcome::OkScoped {
+            user: user.to_owned(),
+            acl: rules.clone(),
+        },
     }
 }
 
-fn read_users(path: &Path) -> std::io::Result<HashMap<String, String>> {
+#[derive(Debug, Clone)]
+struct UserEntry {
+    token_hash: String,
+    /// `None` = trusted user, every repo + every action allowed.
+    /// `Some(rules)` = scoped user, only the listed rules apply.
+    acl: Option<Vec<AclRule>>,
+}
+
+fn read_users(path: &Path) -> std::io::Result<HashMap<String, UserEntry>> {
     let text = std::fs::read_to_string(path)?;
     let mut out = HashMap::new();
     for line in text.lines() {
@@ -690,10 +814,17 @@ fn read_users(path: &Path) -> std::io::Result<HashMap<String, String>> {
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
-        let mut parts = trimmed.splitn(2, '\t');
+        let mut parts = trimmed.splitn(3, '\t');
         let Some(user) = parts.next() else { continue };
         let Some(hash) = parts.next() else { continue };
-        out.insert(user.trim().to_owned(), hash.trim().to_owned());
+        let acl = parts.next().map(parse_acl);
+        out.insert(
+            user.trim().to_owned(),
+            UserEntry {
+                token_hash: hash.trim().to_owned(),
+                acl,
+            },
+        );
     }
     Ok(out)
 }
