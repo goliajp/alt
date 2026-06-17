@@ -10,6 +10,7 @@ import { DiffView } from "./DiffView";
 import { ImageDiffView } from "./ImageDiffView";
 import { AltOnlyInsights } from "./AltOnlyInsights";
 import { FingerprintGrid } from "./FingerprintGrid";
+import { DocumentDiff } from "./DocumentDiff";
 
 interface CommonProps {
   repo: string;
@@ -81,33 +82,17 @@ export function PartAwareDiff({
     file.format === "png" &&
     file.perceptual_hash_old &&
     file.perceptual_hash_new;
+  const hasDocument = !!file.document && file.document.entries.length > 0;
+
   return (
     <div className="font-mono text-[13px] leading-relaxed">
-      <AltOnlyInsights file={file} />
+      {/* Document content diff: the single most reviewer-useful view
+          for .docx / .xlsx. Goes first so the reader's eye lands on it. */}
+      {hasDocument ? <DocumentDiff data={file.document!} /> : null}
 
-      {showFingerprint ? (
-        <FingerprintGrid
-          oldHash={file.perceptual_hash_old!}
-          newHash={file.perceptual_hash_new!}
-        />
-      ) : null}
-
-      <div className="px-4 py-2 text-fg-muted bg-canvas-inset/20 border-b border-border-muted text-xs uppercase tracking-[0.18em] flex items-center gap-3 flex-wrap">
-        <span>{file.format}</span>
-        <span className="text-fg-subtle">·</span>
-        <span>
-          {formatBytes(file.old_bytes)} → {formatBytes(file.new_bytes)}
-        </span>
-        {file.perceptual_distance != null ? (
-          <>
-            <span className="text-fg-subtle">·</span>
-            <span title="dHash hamming distance / 64; 0 = identical, 1 = unrelated">
-              perceptual Δ {file.perceptual_distance.toFixed(3)}
-            </span>
-          </>
-        ) : null}
-      </div>
-
+      {/* Image content diff: the visual swipe/onion/pixel-Δ tools. Goes
+          right after the document diff (or first, for PNG which has no
+          document section). */}
       {sideBySide ? (
         <ImageDiffView
           oldSrc={`/api/repos/${repo}/blob/${file.old_oid}/raw`}
@@ -117,11 +102,71 @@ export function PartAwareDiff({
         />
       ) : null}
 
-      <div>
-        {file.parts.map((part, i) => (
-          <PartRow key={i} part={part} />
-        ))}
-      </div>
+      {/* Technical detail — collapsed by default once the human-friendly
+          view above carries the review. Click to open the alt-only
+          container insights (parts, fingerprint, "what git would show"). */}
+      <DetailsFooter
+        file={file}
+        showFingerprint={!!showFingerprint}
+      />
+    </div>
+  );
+}
+
+function DetailsFooter({
+  file,
+  showFingerprint,
+}: {
+  file: DiffPartAware;
+  showFingerprint: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full px-4 py-2 text-left bg-canvas-inset/30 border-t border-border-muted hover:bg-canvas-inset/50 transition-colors flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] font-mono text-fg-subtle"
+      >
+        <span
+          className={`transition-transform ${open ? "rotate-90 text-warm" : ""}`}
+        >
+          ▸
+        </span>
+        Container internals · {file.parts.length} parts
+        {showFingerprint ? " · perceptual fingerprint" : ""}
+      </button>
+      {open ? (
+        <>
+          <AltOnlyInsights file={file} />
+          {showFingerprint ? (
+            <FingerprintGrid
+              oldHash={file.perceptual_hash_old!}
+              newHash={file.perceptual_hash_new!}
+            />
+          ) : null}
+          <div className="px-4 py-2 text-fg-muted bg-canvas-inset/20 border-b border-border-muted text-xs uppercase tracking-[0.18em] flex items-center gap-3 flex-wrap">
+            <span>{file.format}</span>
+            <span className="text-fg-subtle">·</span>
+            <span>
+              {formatBytes(file.old_bytes)} → {formatBytes(file.new_bytes)}
+            </span>
+            {file.perceptual_distance != null ? (
+              <>
+                <span className="text-fg-subtle">·</span>
+                <span title="dHash hamming distance / 64; 0 = identical, 1 = unrelated">
+                  perceptual Δ {file.perceptual_distance.toFixed(3)}
+                </span>
+              </>
+            ) : null}
+          </div>
+          <div>
+            {file.parts.map((part, i) => (
+              <PartRow key={i} part={part} />
+            ))}
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }

@@ -94,6 +94,18 @@ export interface FileHistoryEntry {
   diff: DiffFile;
 }
 
+export interface DocumentEntry {
+  change: "added" | "removed" | "same";
+  text: string;
+}
+
+export interface DocumentDiff {
+  /** "docx" → entries are paragraphs; "xlsx" → entries are
+   *  `Sheet!Ref: value` cell rows. */
+  kind: "docx" | "xlsx";
+  entries: DocumentEntry[];
+}
+
 export interface DiffPartAware {
   kind: "part_aware";
   path: string;
@@ -107,6 +119,8 @@ export interface DiffPartAware {
   perceptual_hash_old: string | null;
   perceptual_hash_new: string | null;
   parts: PartChange[];
+  /** OOXML semantic content diff. `null` for any non-OOXML zip. */
+  document: DocumentDiff | null;
 }
 
 export interface DiffBinary {

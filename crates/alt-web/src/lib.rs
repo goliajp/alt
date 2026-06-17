@@ -22,6 +22,7 @@ use std::path::{Path, PathBuf};
 use alt_repo::Repository;
 
 pub mod api;
+pub mod ooxml;
 pub mod router;
 
 /// Root of the multi-repo layout. Each top-level subdirectory under

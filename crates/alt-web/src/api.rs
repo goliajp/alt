@@ -391,15 +391,8 @@ pub fn handle_file_history(
                 continue;
             }
             (None, Some(t)) => {
-                let entry = file_history_entry(
-                    &repo,
-                    &commit_oid,
-                    &commit,
-                    "added",
-                    None,
-                    Some(&t),
-                    path,
-                )?;
+                let entry =
+                    file_history_entry(&repo, &commit_oid, &commit, "added", None, Some(&t), path)?;
                 last_oid = Some(t);
                 entry
             }
@@ -558,12 +551,13 @@ fn build_file_diff(
             } else {
                 (None, None, None)
             };
-        let parts = enrich_parts_with_text_patches(
-            &summary.kind,
-            summary.parts,
-            old_bytes,
-            new_bytes,
-        );
+        let parts =
+            enrich_parts_with_text_patches(&summary.kind, summary.parts, old_bytes, new_bytes);
+        let document = if matches!(summary.kind, alt_diff::part_aware::PartKind::Zip) {
+            build_document_diff(path, old_bytes, new_bytes)
+        } else {
+            None
+        };
         return FileDiff::PartAware {
             path: path.to_string(),
             format,
@@ -575,6 +569,7 @@ fn build_file_diff(
             perceptual_distance,
             perceptual_hash_old: hash_old,
             perceptual_hash_new: hash_new,
+            document,
         };
     }
     if alt_diff::is_binary(old_bytes) || alt_diff::is_binary(new_bytes) {
@@ -723,6 +718,22 @@ pub(crate) struct PartRow {
     pub text_patch: Option<String>,
 }
 
+/// Reviewer-friendly content diff for OOXML files.
+pub(crate) struct DocumentDiff {
+    /// "docx" or "xlsx" — the kind of unit `entries` enumerate
+    /// (paragraphs vs cells).
+    pub kind: &'static str,
+    pub entries: Vec<DocumentEntry>,
+}
+
+pub(crate) struct DocumentEntry {
+    /// `added` / `removed` / `same`. We don't try to detect "modified"
+    /// — the line diff returns adds+removes and the renderer can pair
+    /// adjacent rows visually if it wants to.
+    pub change: &'static str,
+    pub text: String,
+}
+
 /// One file's diff in the response. The renderer picks shape by `kind`.
 pub(crate) enum FileDiff {
     Text {
@@ -758,6 +769,12 @@ pub(crate) enum FileDiff {
         /// These are alt-only — git has no perceptual layer.
         perceptual_hash_old: Option<String>,
         perceptual_hash_new: Option<String>,
+        /// Reviewer-friendly document content diff for OOXML files:
+        /// paragraph-level for `.docx`, cell-level for `.xlsx`. Surfaces
+        /// "what changed for a human reading the document," not "which
+        /// internal XML part has different bytes." `None` when the file
+        /// isn't OOXML or the extractor declined.
+        document: Option<DocumentDiff>,
     },
     Binary {
         path: String,
@@ -833,6 +850,7 @@ impl FileDiff {
                 perceptual_distance,
                 perceptual_hash_old,
                 perceptual_hash_new,
+                document,
             } => {
                 let items: Vec<String> = parts
                     .iter()
@@ -883,8 +901,29 @@ impl FileDiff {
                     Some(h) => json_string(h),
                     None => "null".to_string(),
                 };
+                let doc_json = match document {
+                    Some(d) => {
+                        let entries: Vec<String> = d
+                            .entries
+                            .iter()
+                            .map(|e| {
+                                format!(
+                                    "{{\"change\":\"{}\",\"text\":{}}}",
+                                    e.change,
+                                    json_string(&e.text),
+                                )
+                            })
+                            .collect();
+                        format!(
+                            "{{\"kind\":\"{}\",\"entries\":[{}]}}",
+                            d.kind,
+                            entries.join(","),
+                        )
+                    }
+                    None => "null".to_string(),
+                };
                 format!(
-                    "{{\"kind\":\"part_aware\",\"path\":{},\"format\":\"{}\",\"old_oid\":{},\"new_oid\":{},\"old_bytes\":{},\"new_bytes\":{},\"perceptual_distance\":{},\"perceptual_hash_old\":{},\"perceptual_hash_new\":{},\"parts\":[{}]}}",
+                    "{{\"kind\":\"part_aware\",\"path\":{},\"format\":\"{}\",\"old_oid\":{},\"new_oid\":{},\"old_bytes\":{},\"new_bytes\":{},\"perceptual_distance\":{},\"perceptual_hash_old\":{},\"perceptual_hash_new\":{},\"document\":{},\"parts\":[{}]}}",
                     json_string(path),
                     format,
                     json_string(old_oid),
@@ -894,6 +933,7 @@ impl FileDiff {
                     pd,
                     hash_old,
                     hash_new,
+                    doc_json,
                     items.join(","),
                 )
             }
@@ -994,6 +1034,11 @@ fn diff_trees(
                 &old_bytes,
                 &new_bytes,
             );
+            let document = if matches!(summary.kind, alt_diff::part_aware::PartKind::Zip) {
+                build_document_diff(path, &old_bytes, &new_bytes)
+            } else {
+                None
+            };
 
             out.push(FileDiff::PartAware {
                 path: path.to_string(),
@@ -1006,6 +1051,7 @@ fn diff_trees(
                 perceptual_distance,
                 perceptual_hash_old: hash_old,
                 perceptual_hash_new: hash_new,
+                document,
             });
             continue;
         }
@@ -1029,6 +1075,144 @@ fn diff_trees(
         });
     }
     Ok(out)
+}
+
+/// Cap on the number of OOXML document entries the response carries.
+/// A docx with thousands of paragraphs would otherwise dominate the
+/// JSON payload; reviewers don't need every single line back.
+const MAX_DOC_ENTRIES: usize = 2000;
+
+fn build_document_diff(path: &str, old_bytes: &[u8], new_bytes: &[u8]) -> Option<DocumentDiff> {
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_ascii_lowercase())?;
+
+    let old_members = alt_diff::part_aware::zip_member_bodies(old_bytes, MAX_PART_BODY)?;
+    let new_members = alt_diff::part_aware::zip_member_bodies(new_bytes, MAX_PART_BODY)?;
+
+    match ext.as_str() {
+        "docx" | "docm" | "dotx" | "dotm" => {
+            let old_xml = old_members.get("word/document.xml")?.as_ref()?;
+            let new_xml = new_members.get("word/document.xml")?.as_ref()?;
+            let old_paragraphs = crate::ooxml::docx_paragraphs(old_xml);
+            let new_paragraphs = crate::ooxml::docx_paragraphs(new_xml);
+            let entries = diff_lists(&old_paragraphs, &new_paragraphs);
+            if entries.is_empty() {
+                None
+            } else {
+                Some(DocumentDiff {
+                    kind: "docx",
+                    entries,
+                })
+            }
+        }
+        "xlsx" | "xlsm" | "xltx" | "xltm" => {
+            let collect_sheets = |members: &std::collections::BTreeMap<String, Option<Vec<u8>>>| {
+                members
+                    .iter()
+                    .filter(|(k, _)| k.starts_with("xl/worksheets/sheet"))
+                    .filter_map(|(k, v)| v.as_ref().map(|b| (k.clone(), b.clone())))
+                    .collect::<std::collections::BTreeMap<_, _>>()
+            };
+            let old_sheets = collect_sheets(&old_members);
+            let new_sheets = collect_sheets(&new_members);
+            let old_shared = old_members
+                .get("xl/sharedStrings.xml")
+                .and_then(|v| v.as_ref().map(|b| b.as_slice()));
+            let new_shared = new_members
+                .get("xl/sharedStrings.xml")
+                .and_then(|v| v.as_ref().map(|b| b.as_slice()));
+            let old_workbook = old_members
+                .get("xl/workbook.xml")
+                .and_then(|v| v.as_ref().map(|b| b.as_slice()));
+            let new_workbook = new_members
+                .get("xl/workbook.xml")
+                .and_then(|v| v.as_ref().map(|b| b.as_slice()));
+            let old_cells = crate::ooxml::xlsx_cells(&old_sheets, old_shared, old_workbook);
+            let new_cells = crate::ooxml::xlsx_cells(&new_sheets, new_shared, new_workbook);
+            let old_lines: Vec<String> = old_cells.iter().map(|c| c.render()).collect();
+            let new_lines: Vec<String> = new_cells.iter().map(|c| c.render()).collect();
+            let entries = diff_lists(&old_lines, &new_lines);
+            if entries.is_empty() {
+                None
+            } else {
+                Some(DocumentDiff {
+                    kind: "xlsx",
+                    entries,
+                })
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Linear diff over two ordered lists of strings: emit one entry per
+/// item, marked added/removed/same. The Myers `diff_lines` output is a
+/// list of change-region `Edit` ranges (one with empty `old` is an
+/// insert, empty `new` is a delete, both populated is a paired replace);
+/// we walk it together with the matching `Same` runs (the gaps between
+/// successive `Edit`s) to produce a flat reviewer-friendly stream.
+fn diff_lists(old: &[String], new: &[String]) -> Vec<DocumentEntry> {
+    let joined_old = old.join("\n");
+    let joined_new = new.join("\n");
+    let old_lines = alt_diff::split_lines(joined_old.as_bytes());
+    let new_lines = alt_diff::split_lines(joined_new.as_bytes());
+    let edits = alt_diff::diff_lines(&old_lines, &new_lines);
+
+    let mut out: Vec<DocumentEntry> = Vec::new();
+    let mut cursor_old = 0;
+    let mut cursor_new = 0;
+    let push = |out: &mut Vec<DocumentEntry>, change: &'static str, bytes: &[u8]| -> bool {
+        if out.len() >= MAX_DOC_ENTRIES {
+            return false;
+        }
+        let text = trim_trailing_nl(&String::from_utf8_lossy(bytes));
+        out.push(DocumentEntry { change, text });
+        true
+    };
+
+    for edit in &edits {
+        // Same lines between the previous edit and this one stay in
+        // context — useful for reviewing what's around the change.
+        while cursor_old < edit.old.start && cursor_new < edit.new.start {
+            if !push(&mut out, "same", old_lines[cursor_old]) {
+                return out;
+            }
+            cursor_old += 1;
+            cursor_new += 1;
+        }
+        for i in edit.old.clone() {
+            if !push(&mut out, "removed", old_lines[i]) {
+                return out;
+            }
+        }
+        for i in edit.new.clone() {
+            if !push(&mut out, "added", new_lines[i]) {
+                return out;
+            }
+        }
+        cursor_old = edit.old.end;
+        cursor_new = edit.new.end;
+    }
+    while cursor_old < old_lines.len() && cursor_new < new_lines.len() {
+        if !push(&mut out, "same", old_lines[cursor_old]) {
+            return out;
+        }
+        cursor_old += 1;
+        cursor_new += 1;
+    }
+    out
+}
+
+fn trim_trailing_nl(s: &str) -> String {
+    if let Some(stripped) = s.strip_suffix("\r\n") {
+        stripped.to_string()
+    } else if let Some(stripped) = s.strip_suffix('\n') {
+        stripped.to_string()
+    } else {
+        s.to_string()
+    }
 }
 
 /// Cap on a single ZIP member's inflated size for inner-diff purposes.
