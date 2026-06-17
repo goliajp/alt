@@ -448,6 +448,22 @@ pub fn write_commit(
     message: &str,
     algo: HashAlgo,
 ) -> Result<ObjectId, WorktreeError> {
+    let bytes = build_commit_bytes(tree, parents, author, committer, message);
+    let id = ObjectId::hash_object(algo, ObjectKind::Commit, &bytes);
+    odb.put(id, ObjectKind::Commit, &bytes)?;
+    Ok(id)
+}
+
+/// Just the byte assembly half of [`write_commit`] — useful for callers
+/// (M10/W15 commit-signing path) that want to mutate the bytes before
+/// hashing + storing. The caller is responsible for the put + hash.
+pub fn build_commit_bytes(
+    tree: ObjectId,
+    parents: &[ObjectId],
+    author: &Sig,
+    committer: &Sig,
+    message: &str,
+) -> Vec<u8> {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(format!("tree {tree}\n").as_bytes());
     for p in parents {
@@ -458,9 +474,7 @@ pub fn write_commit(
     bytes.extend_from_slice(format!("committer {}\n", line(committer)).as_bytes());
     bytes.push(b'\n');
     bytes.extend_from_slice(message.as_bytes());
-    let id = ObjectId::hash_object(algo, ObjectKind::Commit, &bytes);
-    odb.put(id, ObjectKind::Commit, &bytes)?;
-    Ok(id)
+    bytes
 }
 
 /// The index's tracked entries (stage 0 only) as `WorkEntry`s.

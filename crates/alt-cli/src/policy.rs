@@ -66,6 +66,12 @@ pub struct Capabilities {
     /// canonical push payload. Only enforced on the wire — local CLI
     /// writes don't traverse the signature path.
     pub require_signed: bool,
+    /// M10/W15 (A5b): when set, the wire receive-pack path walks every
+    /// newly-pushed commit and rejects the push if any of them lacks a
+    /// valid `alt-sig` header from a trusted principal. Composes with
+    /// [`require_signed`] (the per-push gate above); both can be on,
+    /// either alone, or neither.
+    pub require_signed_commits: bool,
 }
 
 impl Capabilities {
@@ -78,6 +84,7 @@ impl Capabilities {
             path_allow: Vec::new(),
             forbid_force: false,
             require_signed: false,
+            require_signed_commits: false,
         }
     }
 
@@ -205,6 +212,8 @@ fn parse_caps(spec: &str, line: usize) -> Result<Capabilities, PolicyError> {
             caps.forbid_force = true;
         } else if tok == "require-signed" {
             caps.require_signed = true;
+        } else if tok == "require-signed-commits" {
+            caps.require_signed_commits = true;
         } else if let Some(v) = tok.strip_prefix("branch=") {
             caps.branch_allow.push(Glob::new(v));
         } else if let Some(v) = tok.strip_prefix("path=") {

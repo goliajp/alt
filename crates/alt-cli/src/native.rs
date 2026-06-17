@@ -13,8 +13,8 @@ use alt_refs::{IdemKey, OpId, RefChange, RefPolicy, RefStore, RefTarget};
 
 use crate::policy::{Capabilities, Policy};
 use alt_worktree::{
-    ChangeKind, Sig, WorkEntry, flatten_tree, index_entries, scan_indexed_paths, scan_worktree,
-    scan_worktree_with_index, status, write_commit, write_tree,
+    ChangeKind, Sig, WorkEntry, build_commit_bytes, flatten_tree, index_entries,
+    scan_indexed_paths, scan_worktree, scan_worktree_with_index, status, write_commit, write_tree,
 };
 use bstr::{BString, ByteSlice};
 
@@ -231,6 +231,17 @@ impl Store {
     /// NativeRepo (no working tree / index in the wire path).
     pub fn odb_mut(&mut self) -> &mut NativeOdb {
         &mut self.odb
+    }
+
+    /// Read-only odb fetch. M10/W15: the wire's commit-signature pass
+    /// re-reads each newly-ingested commit through this so verification
+    /// shares the same `NativeOdb` everyone else writes against (no
+    /// risk of a separate handle pinning a stale view).
+    pub fn odb_get(
+        &self,
+        oid: &ObjectId,
+    ) -> Result<Option<alt_git_codec::RawObject>, alt_odb::OdbError> {
+        self.odb.get(oid)
     }
 
     /// Mutable access to the refs store, for the same reason as
@@ -908,6 +919,38 @@ impl<'a> NativeRepo<'a> {
         Ok(Some((principal, sig_text)))
     }
 
+    /// M10/W15 — when sign-policy is on and a sec key is on disk,
+    /// produce the *signed* form of `unsigned_bytes` (an `alt-sig`
+    /// header line spliced into the commit's header block). The caller
+    /// rehashes and puts to the odb. `Ok(None)` means "leave the commit
+    /// unsigned" — same fall-through as [`maybe_sign_push`].
+    fn maybe_sign_commit_bytes(&self, unsigned_bytes: &[u8]) -> Res<Option<Vec<u8>>> {
+        let policy = SignPolicy::load(&self.store.alt_dir)?;
+        if !policy.enabled {
+            return Ok(None);
+        }
+        let principal = policy
+            .principal
+            .unwrap_or_else(|| self.id.principal.id.clone());
+        let sec_path = self
+            .store
+            .alt_dir
+            .join("identity")
+            .join(format!("{principal}.sec"));
+        let sec_text = match std::fs::read_to_string(&sec_path) {
+            Ok(t) => t,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e.into()),
+        };
+        let sec = alt_sign::SecretKey::from_text(&sec_text)
+            .map_err(|e| format!("malformed sec key at {}: {e}", sec_path.display()))?;
+        let sig = sec.sign(unsigned_bytes);
+        let line = crate::commit_sign::alt_sig_line(&principal, &sig);
+        let signed = crate::commit_sign::embed_alt_sig(unsigned_bytes, &line)
+            .ok_or("commit bytes have no header/body separator")?;
+        Ok(Some(signed))
+    }
+
     /// Walks `new`'s ancestor chain to see whether `old` appears (using the
     /// repository's git object graph via the open `Repository`). Used by
     /// [`ensure_no_force`] for the non-fast-forward check.
@@ -1320,15 +1363,16 @@ impl<'a> NativeRepo<'a> {
         } else {
             format!("{message}\n")
         };
-        let commit = write_commit(
-            &mut self.store.odb,
-            tree,
-            &parents,
-            &sig,
-            &sig,
-            &msg,
-            self.store.algo,
-        )?;
+        let mut bytes = build_commit_bytes(tree, &parents, &sig, &sig, &msg);
+        // M10/W15: when sign-policy is on and a sec key is on disk for
+        // the principal, splice an `alt-sig` header into the commit and
+        // rehash. The signed commit is the canonical commit from the
+        // store's POV — there is no second "unsigned" stored.
+        if let Some(signed) = self.maybe_sign_commit_bytes(&bytes)? {
+            bytes = signed;
+        }
+        let commit = ObjectId::hash_object(self.store.algo, ObjectKind::Commit, &bytes);
+        self.store.odb.put(commit, ObjectKind::Commit, &bytes)?;
         self.store.odb.flush()?;
 
         self.commit_refs(

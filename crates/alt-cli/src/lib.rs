@@ -5,6 +5,7 @@
 
 pub mod cli;
 pub mod client;
+pub mod commit_sign;
 pub mod daemon;
 pub mod index_tx;
 pub mod json;

@@ -526,6 +526,7 @@ fn handle_receive_pack(
     // Unpack the trailing pack into the store's odb. Empty pack = a
     // pure-delete push, no objects to index. A blocked signature short-
     // circuits ingest — we never want a rejected push to litter odb.
+    let mut new_commits: Vec<ObjectId> = Vec::new();
     let unpack_result: Result<(), String> = if sig_block.is_some() || pushed.pack.is_empty() {
         // Either the signature gate already decided to reject (so we
         // skip ingest entirely and let the commands fall through to
@@ -533,16 +534,30 @@ fn handle_receive_pack(
         Ok(())
     } else {
         match ingest_pack(store, &pushed.pack) {
-            Ok(()) => Ok(()),
+            Ok(commits) => {
+                new_commits = commits;
+                Ok(())
+            }
             Err(e) => Err(format!("index-pack: {e}")),
         }
     };
 
+    // M10/W15: if the policy requires every commit to carry a verified
+    // alt-sig header, scan the new commits *after* ingest and decide
+    // before touching any refs. A failure here flips into a per-command
+    // ng identical in shape to the push-level signature gate above.
+    let commit_block: Option<String> = if sig_block.is_none() && unpack_result.is_ok() {
+        require_signed_commits_block(store, &effective_principal, &new_commits)?
+    } else {
+        None
+    };
+
     // Apply ref changes only if the pack unpacked cleanly *and* the
-    // signature gate passed; otherwise mark every command `ng` so the
-    // client sees a coherent reason.
+    // signature gate(s) passed; otherwise mark every command `ng` so
+    // the client sees a coherent reason.
     let mut command_status: Vec<CommandStatus> = Vec::new();
-    if let Some(reason) = &sig_block {
+    let any_block = sig_block.clone().or(commit_block);
+    if let Some(reason) = &any_block {
         for u in &pushed.updates {
             command_status.push(CommandStatus::Ng {
                 name: u.name.clone(),
@@ -603,7 +618,10 @@ fn handle_receive_pack(
 /// Write the pushed pack into a tempfile, index it, and put every
 /// object into the server odb. Mirrors the fetch ingest path in
 /// `alt-cli::native`.
-fn ingest_pack(store: &Mutex<Store>, pack: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+fn ingest_pack(
+    store: &Mutex<Store>,
+    pack: &[u8],
+) -> Result<Vec<ObjectId>, Box<dyn std::error::Error>> {
     let dir = tempfile::tempdir()?;
     let tmp_pack = dir.path().join("incoming.pack");
     std::fs::write(&tmp_pack, pack)?;
@@ -615,14 +633,17 @@ fn ingest_pack(store: &Mutex<Store>, pack: &[u8]) -> Result<(), Box<dyn std::err
         .collect();
     order.sort_unstable();
     let mut store_guard = store.lock().unwrap();
+    let mut new_commits = Vec::new();
     for (offset, i) in order {
         let obj = ip.read_at(offset)?;
-        let _: ObjectId = idx.oid_at(i);
         let oid = idx.oid_at(i);
+        if obj.kind == alt_git_codec::ObjectKind::Commit {
+            new_commits.push(oid);
+        }
         store_guard.odb_mut().put(oid, obj.kind, &obj.data)?;
     }
     store_guard.odb_mut().flush()?;
-    Ok(())
+    Ok(new_commits)
 }
 
 /// Apply the client's ref updates as a single ref transaction so the
@@ -720,6 +741,61 @@ fn pick_principal(outcome: &SigOutcome, auth_user: Option<&str>) -> (Principal, 
 fn require_signed_for(store: &Mutex<Store>, principal: &Principal) -> bool {
     let guard = store.lock().unwrap();
     guard.capabilities_for(principal).require_signed
+}
+
+/// M10/W15: walk the newly-pushed commits and verify each carries a
+/// valid `alt-sig` header from a trusted principal. Returns `Some(reason)`
+/// for the first commit that fails the check (the caller turns it into
+/// per-command `ng` so the entire push is rejected atomically). Returns
+/// `Ok(None)` when either the policy doesn't require commit signatures
+/// or every new commit passes.
+fn require_signed_commits_block(
+    store: &Mutex<Store>,
+    principal: &Principal,
+    new_commits: &[ObjectId],
+) -> Result<Option<String>, Box<dyn std::error::Error>> {
+    let (require, trust) = {
+        let guard = store.lock().unwrap();
+        let caps = guard.capabilities_for(principal);
+        if !caps.require_signed_commits {
+            return Ok(None);
+        }
+        (caps.require_signed_commits, guard.trust_keys()?)
+    };
+    if !require {
+        return Ok(None);
+    }
+    for oid in new_commits {
+        let bytes = {
+            let guard = store.lock().unwrap();
+            let Some(raw) = guard.odb_get(oid)? else {
+                return Ok(Some(format!("commit {oid} missing from odb after ingest")));
+            };
+            raw.data
+        };
+        match alt_cli::commit_sign::extract_alt_sig(&bytes)? {
+            None => {
+                return Ok(Some(format!(
+                    "commit {oid} missing alt-sig (require-signed-commits)"
+                )));
+            }
+            Some(parsed) => {
+                let Some((_, pubkey)) = trust.iter().find(|(id, _)| id == &parsed.principal) else {
+                    return Ok(Some(format!(
+                        "commit {oid} signed by '{}' not in trust store",
+                        parsed.principal
+                    )));
+                };
+                if pubkey.verify(&parsed.canonical, &parsed.sig).is_err() {
+                    return Ok(Some(format!(
+                        "commit {oid} alt-sig did not verify against trust['{}']",
+                        parsed.principal
+                    )));
+                }
+            }
+        }
+    }
+    Ok(None)
 }
 
 fn commit_ref_updates(

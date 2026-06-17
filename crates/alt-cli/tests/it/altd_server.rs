@@ -1124,3 +1124,154 @@ fn altd_server_rejects_signed_push_from_unknown_principal() {
         "rejection must surface to the client: client_stderr={stderr}\nserver_log={server_log}"
     );
 }
+
+#[test]
+fn altd_server_round_trips_signed_commit_through_push() {
+    // M10/W15: when sign-policy is on at the client, `alt commit`
+    // splices an `alt-sig` header into the commit object. We push the
+    // signed commit through altd-server and verify that:
+    //  (a) push succeeds end-to-end,
+    //  (b) the alt-sig header is byte-preserved on the server,
+    //  (c) a fresh clone receives the same signed bytes (so the
+    //      signature stays verifiable on the third hop).
+    let origin_dir = tempfile::tempdir().unwrap();
+    let origin = origin_dir.path();
+    ok(alt(origin, &["init", "."]));
+    std::fs::write(origin.join("seed.txt"), "seed\n").unwrap();
+    ok(alt(origin, &["add", "."]));
+    ok(alt(origin, &["commit", "-m", "seed"]));
+
+    let server = spawn_server(origin);
+    let url = format!("http://{}/", server.addr);
+
+    let cdir = tempfile::tempdir().unwrap();
+    let client = cdir.path().join("B");
+    ok(alt(cdir.path(), &["clone", &url, client.to_str().unwrap()]));
+    enable_signed_push(&client, origin, "alice");
+
+    std::fs::write(client.join("signed.txt"), "signed-body\n").unwrap();
+    ok(alt(&client, &["add", "."]));
+    ok(alt(&client, &["commit", "-m", "alice signed this"]));
+    let alice_head = ok(alt(&client, &["log", "-n", "1", "--pretty=oneline"]));
+    let alice_oid = alice_head
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_owned();
+
+    let r = alt(
+        &client,
+        &["push", "origin", "refs/heads/main:refs/heads/main"],
+    );
+    assert!(
+        r.status.success(),
+        "signed-commit push must succeed end-to-end: {}",
+        String::from_utf8_lossy(&r.stderr)
+    );
+
+    // The commit's raw object on the server still carries the alt-sig
+    // header (proves wire transport preserved the signed bytes).
+    let dump = ok(alt(origin, &["cat-file", "-p", &alice_oid]));
+    assert!(
+        dump.contains("alt-sig alice "),
+        "origin's commit object must still carry the alt-sig header: {dump}"
+    );
+
+    // A subsequent clone fetches the same signed bytes.
+    let cdir2 = tempfile::tempdir().unwrap();
+    let downstream = cdir2.path().join("C");
+    ok(alt(
+        cdir2.path(),
+        &["clone", &url, downstream.to_str().unwrap()],
+    ));
+    let dump2 = ok(alt(&downstream, &["cat-file", "-p", &alice_oid]));
+    assert!(
+        dump2.contains("alt-sig alice "),
+        "downstream clone must preserve the alt-sig header: {dump2}"
+    );
+}
+
+#[test]
+fn altd_server_rejects_unsigned_commit_when_policy_requires_signed_commits() {
+    // M10/W15: `.alt/policy` carries `human:anonymous ->
+    // require-signed-commits`. A git push that brings in an unsigned
+    // commit must be rejected by the new commit-level gate, even
+    // though the push itself is allowed (no `require-signed` flag).
+    let origin_dir = tempfile::tempdir().unwrap();
+    let origin = origin_dir.path();
+    ok(alt(origin, &["init", "."]));
+    std::fs::write(origin.join("seed.txt"), "seed\n").unwrap();
+    ok(alt(origin, &["add", "."]));
+    ok(alt(origin, &["commit", "-m", "seed"]));
+    std::fs::write(
+        origin.join(".alt").join("policy"),
+        "human:anonymous -> require-signed-commits\n",
+    )
+    .unwrap();
+
+    let server = spawn_server(origin);
+    let url = format!("http://{}/", server.addr);
+
+    let src_dir = tempfile::tempdir().unwrap();
+    let src = src_dir.path();
+    let st = std::process::Command::new("git")
+        .args(["init", "-q", "-b", "main", src.to_str().unwrap()])
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .unwrap();
+    assert!(st.status.success());
+    std::fs::write(src.join("f.txt"), "no-sign\n").unwrap();
+    for args in [
+        &["-C", src.to_str().unwrap(), "add", "."][..],
+        &[
+            "-C",
+            src.to_str().unwrap(),
+            "-c",
+            "user.name=tester",
+            "-c",
+            "user.email=t@e",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "-m",
+            "unsigned-commit",
+        ][..],
+    ] {
+        let o = std::process::Command::new("git")
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            o.status.success(),
+            "git: {}",
+            String::from_utf8_lossy(&o.stderr)
+        );
+    }
+
+    let push = std::process::Command::new("git")
+        .args([
+            "-C",
+            src.to_str().unwrap(),
+            "push",
+            &url,
+            "HEAD:refs/heads/main",
+        ])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .unwrap();
+    assert!(
+        !push.status.success(),
+        "push of unsigned commit under require-signed-commits must be refused: stdout={}",
+        String::from_utf8_lossy(&push.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&push.stderr);
+    assert!(
+        stderr.contains("missing alt-sig")
+            || stderr.contains("require-signed-commits")
+            || stderr.contains("rejected"),
+        "rejection must cite the missing commit signature: {stderr}"
+    );
+    drop(server);
+}
