@@ -216,6 +216,24 @@ fn main() {
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
+
+    // M13/W38: a stuck worker (long ingest_pack, a malicious slow
+    // client, a deadlocked Mutex<Store>) must not pin the process
+    // forever. Spawn a watchdog that hard-exits after the deadline if
+    // `handles.join()` hasn't returned by then. systemd / k8s see
+    // exit 0 either way — graceful was the goal, the deadline is the
+    // hard limit, both paths are an acceptable shutdown.
+    let deadline_ms: u64 = std::env::var("ALT_SERVER_SHUTDOWN_DEADLINE_MS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .filter(|n: &u64| *n > 0)
+        .unwrap_or(30_000);
+    let _watchdog = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(deadline_ms));
+        eprintln!("altd-server: graceful shutdown timed out after {deadline_ms} ms; force-exiting");
+        std::process::exit(0);
+    });
+
     for h in handles {
         let _ = h.join();
     }

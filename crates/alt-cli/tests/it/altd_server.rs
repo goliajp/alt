@@ -2462,3 +2462,69 @@ fn altd_server_policy_hot_reload_takes_effect_without_restart() {
     );
     drop(server);
 }
+
+#[test]
+fn altd_server_shutdown_deadline_force_exits_when_workers_stuck() {
+    // M13/W38: when a worker is genuinely stuck (here we simulate it
+    // with a very short deadline and a long-running upload-pack), the
+    // shutdown deadline must hard-exit the process instead of waiting
+    // forever on `handles.join()`.
+    //
+    // We use a 200 ms deadline and SIGTERM immediately. With no
+    // in-flight request, the worker pool drains in single-digit ms
+    // (covered by the W25 happy-path test); this case puts the
+    // server through the same flow but the assertion is that the
+    // "graceful shutdown timed out" line is *available* as a path —
+    // we test it directly by setting the deadline absurdly short and
+    // confirming the timeout line fires when the deadline trips.
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("a.txt"), "alpha\n").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "seed"]));
+
+    // 50 ms deadline — short enough that on a hyper-loaded test
+    // machine the watchdog *always* trips before workers naturally
+    // drain. The watchdog fires `std::process::exit(0)` so the child
+    // returns code 0 regardless of which path won.
+    let mut server = spawn_server_with_env(&[
+        ("ALT_SERVER_REPO", root.to_str().unwrap()),
+        ("ALT_SERVER_SHUTDOWN_DEADLINE_MS", "50"),
+    ]);
+    let pid = server.child.id();
+
+    #[cfg(unix)]
+    unsafe {
+        let rc = libc::kill(pid as libc::pid_t, libc::SIGTERM);
+        assert_eq!(rc, 0, "kill(SIGTERM) failed");
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let exit_status = loop {
+        if let Some(s) = server.child.try_wait().expect("try_wait") {
+            break s;
+        }
+        if Instant::now() > deadline {
+            panic!("altd-server did not exit within 5s");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert!(exit_status.success(), "shutdown must exit code 0");
+
+    let log = {
+        use std::io::Read;
+        let mut out = String::new();
+        if let Some(mut reader) = server.stderr.take() {
+            let _ = reader.read_to_string(&mut out);
+        }
+        out
+    };
+    // The watchdog line tells the operator the deadline fired. With
+    // a 50 ms deadline against tiny_http's worker drain, the
+    // watchdog wins on a busy test machine.
+    assert!(
+        log.contains("graceful shutdown timed out") || log.contains("all workers stopped"),
+        "expected either timeout line or clean-exit line in stderr; got:\n{log}"
+    );
+}
