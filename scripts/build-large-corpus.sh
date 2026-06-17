@@ -1,10 +1,10 @@
 #!/bin/sh
 # Build the M7-B1 large-files fixture corpus at $1 (default:
-# .claude/corpus/large-files). Reproducible: same script run → same bytes.
+# .dev/corpus/large-files). Reproducible: same script run → same bytes.
 # See the builder source for the corpus shape and commit history.
 set -eu
 cd "$(dirname "$0")/.."
-target="${1:-.claude/corpus/large-files}"
+target="${1:-.dev/corpus/large-files}"
 if [ -d "$target/.git" ]; then
     echo "$target already exists — rm -rf it first to rebuild" >&2
     exit 2

@@ -8,12 +8,12 @@
 //! hundreds of MBs of real history (cargo, git, libgit2 source trees)
 //! with non-trivial delta chains and multi-pack layouts. If `alt clone`
 //! and the pack-indexing path resolves every delta correctly here, the
-//! W4-W6 stones scale to actual workloads — and not just to the toy
+//! W4-W6 modules scale to actual workloads — and not just to the toy
 //! repos the synthetic tests build inline.
 //!
 //! Gated on `ALT_CORPUS` like the other corpus tests. `scripts/gate.sh
 //! corpus` sets it; locally, run via
-//! `ALT_CORPUS=.claude/corpus cargo test -p alt-cli --test it --
+//! `ALT_CORPUS=.dev/corpus cargo test -p alt-cli --test it --
 //! --ignored wire_corpus::`.
 
 use std::path::{Path, PathBuf};
@@ -114,7 +114,7 @@ fn try_head(repo: &Path) -> Option<String> {
 /// Clone every corpus repo through the wire shim; assert every object
 /// the server reports reachable from its heads is also in alt's odb
 /// after fetch. Catches regressions in pack-index delta resolution at
-/// repo scale (cargo ~1.5M objects in `.claude/corpus/cargo`, etc).
+/// repo scale (cargo ~1.5M objects in `.dev/corpus/cargo`, etc).
 #[test]
 #[ignore = "needs $ALT_CORPUS pointing at a directory of git repos"]
 fn alt_fetch_resolves_corpus_packs_byte_exact() {

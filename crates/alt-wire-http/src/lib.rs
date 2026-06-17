@@ -7,7 +7,7 @@
 //! ## Why a separate crate
 //!
 //! `ureq` (with `rustls`) is alt's first HTTP/TLS dependency. Keeping it
-//! out of [`alt-wire`] preserves that crate as a pure-logic stone (fuzzable
+//! out of [`alt-wire`] preserves that crate as pure logic (fuzzable
 //! without booting a runtime) and gives downstreams a no-network path —
 //! the protocol parser is useful in tests / replays without any TLS in the
 //! build (same nerve as alt-treediff isolating `syn`).
@@ -30,10 +30,8 @@
 //! Synchronous, blocking, one request at a time — same model as the rest
 //! of alt (no async runtime). HTTP/2 is off (protocol v2 stateless POSTs
 //! don't benefit; HTTP/1.1 keep-alive is enough). No credential helper
-//! protocol — auth comes from caller-supplied env / config (see M6
-//! [design][design] §3.6). SSH transport is a later step.
-//!
-//! [design]: ../../../.claude/docs/design/collaboration.md
+//! protocol — auth comes from caller-supplied env / config. SSH transport
+//! is a later step.
 
 use std::io::{self, Read};
 use std::time::Duration;

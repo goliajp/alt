@@ -6,7 +6,7 @@
 //!
 //! Gated on `ALT_BENCH=1` plus `--ignored`, like the source-corpus bench,
 //! so timing belongs to release builds run by hand, not the debug gate.
-//! Defaults to `.claude/corpus/large-files`; override with
+//! Defaults to `.dev/corpus/large-files`; override with
 //! `ALT_LARGE_FILES_CORPUS=<dir>` (the `scripts/build-large-corpus.sh`
 //! builder writes to the default path).
 
@@ -62,7 +62,7 @@ fn large_files_bench_volume_and_throughput() {
     }
     let corpus = std::env::var("ALT_LARGE_FILES_CORPUS")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(".claude/corpus/large-files"));
+        .unwrap_or_else(|_| PathBuf::from(".dev/corpus/large-files"));
     if !corpus.join(".git").is_dir() {
         panic!(
             "{} does not look like a git repo — run scripts/build-large-corpus.sh first",

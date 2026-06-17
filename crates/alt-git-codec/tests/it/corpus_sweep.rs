@@ -2,7 +2,7 @@
 //! and re-hash every loose object. Run explicitly:
 //!
 //! ```sh
-//! ALT_CORPUS=.claude/corpus cargo test -p alt-git-codec --test it -- --ignored
+//! ALT_CORPUS=.dev/corpus cargo test -p alt-git-codec --test it -- --ignored
 //! ```
 
 use std::path::Path;

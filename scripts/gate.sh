@@ -5,7 +5,7 @@
 #   lint   fmt --check + clippy -D warnings       before every commit
 #   unit   per-crate library tests (--lib)        after every change
 #   it     integration test binaries              before finishing a feature
-#   corpus ignored corpus sweeps (.claude/corpus) at checkpoint exits
+#   corpus ignored corpus sweeps (.dev/corpus)    at checkpoint exits
 #   all    everything above                       at checkpoint exits
 #
 # Fast tier = default (non-ignored). Full tier adds the corpus class.
@@ -31,7 +31,7 @@ run_it() {
 run_corpus() {
     # absolute path: cargo test sets the package dir, not the workspace
     # root, as the tests' working directory
-    ALT_CORPUS="${ALT_CORPUS:-$PWD/.claude/corpus}" \
+    ALT_CORPUS="${ALT_CORPUS:-$PWD/.dev/corpus}" \
         cargo test --workspace --tests -- --ignored
 }
 

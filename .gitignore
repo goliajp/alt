@@ -1,4 +1,5 @@
 /.claude/
+/.dev/
 /target/
 /fuzz/target/
 /fuzz/corpus/

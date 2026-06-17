@@ -10,7 +10,7 @@
 //! Reproducible (same seed → same bytes), so a corpus rebuild diff is a
 //! tooling regression. Invoked via `cargo run -p alt-testutil --bin
 //! build-monorepo-corpus -- <dir>` or `scripts/build-monorepo-corpus.sh`
-//! that defaults to `.claude/corpus/monorepo`.
+//! that defaults to `.dev/corpus/monorepo`.
 //!
 //! Sizes are tunable via env vars (handy when iterating on the bench
 //! shape): `ALT_MONOREPO_PACKAGES` (default 200), `ALT_MONOREPO_FILES_PER_PKG`
@@ -36,7 +36,7 @@ fn main() {
     let dir = std::env::args()
         .nth(1)
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(".claude/corpus/monorepo"));
+        .unwrap_or_else(|| PathBuf::from(".dev/corpus/monorepo"));
     if dir.join(".git").is_dir() {
         eprintln!(
             "{}/.git exists — remove the directory first to rebuild",

@@ -9,7 +9,7 @@
 //! to be honest about whatever the current numbers are.
 //!
 //! Gated like the other bench: `ALT_BENCH=1` on top of `--ignored`.
-//! Defaults to `.claude/corpus/monorepo`; override via
+//! Defaults to `.dev/corpus/monorepo`; override via
 //! `ALT_MONOREPO_CORPUS=<dir>`. Skip cleanly with a helpful note if the
 //! corpus isn't built — `scripts/build-monorepo-corpus.sh` provisions it.
 
@@ -160,7 +160,7 @@ fn monorepo_bench_core_commands() {
     }
     let corpus = std::env::var("ALT_MONOREPO_CORPUS")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(".claude/corpus/monorepo"));
+        .unwrap_or_else(|_| PathBuf::from(".dev/corpus/monorepo"));
     if !corpus.join(".git").is_dir() {
         eprintln!(
             "monorepo_bench: {} does not look like a git repo — run \

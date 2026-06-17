@@ -18,7 +18,7 @@
 //! tooling regression, not a fixture drift. Invoked via
 //! `cargo run -p alt-testutil --bin build-large-corpus -- <dir>` or the
 //! `scripts/build-large-corpus.sh` wrapper that defaults to
-//! `.claude/corpus/large-files`.
+//! `.dev/corpus/large-files`.
 
 use std::fs;
 use std::io::Write;
@@ -37,7 +37,7 @@ fn main() {
     let dir = std::env::args()
         .nth(1)
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(".claude/corpus/large-files"));
+        .unwrap_or_else(|| PathBuf::from(".dev/corpus/large-files"));
 
     if dir.join(".git").is_dir() {
         eprintln!(
