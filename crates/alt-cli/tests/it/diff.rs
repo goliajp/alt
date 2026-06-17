@@ -476,3 +476,101 @@ fn diff_zip_change_reports_part_aware_summary() {
         "[Content_Types].xml must be reported as same: {json}"
     );
 }
+
+/// M12/W34: `alt diff --semantic foo.json` collapses formatting-only
+/// noise (re-indented JSON, reordered whitespace, 1 vs 1.0) and
+/// reports only true semantic changes — the dogfood case for agent
+/// config edits. Without the semantic flag the regular line diff
+/// still runs (W34 doesn't change the default path).
+#[test]
+fn diff_semantic_json_reports_path_level_changes_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+
+    std::fs::write(
+        root.join("config.json"),
+        r#"{
+  "server": {
+    "port": 8080,
+    "host": "localhost"
+  },
+  "log_level": "info"
+}
+"#,
+    )
+    .unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "initial config"]));
+
+    // Re-format the whole file (compact + whitespace shuffled) AND
+    // change one key value: port 8080 → 9090. A line-based diff would
+    // surface every line as touched; semantic should report only the
+    // port change.
+    std::fs::write(
+        root.join("config.json"),
+        r#"{"server":{"port":9090,"host":"localhost"},"log_level":"info"}
+"#,
+    )
+    .unwrap();
+    ok(alt(root, &["add", "."]));
+
+    let text = ok(alt(root, &["diff", "--cached", "--semantic"]));
+    assert!(
+        text.contains("json: ") && text.contains("$.server.port"),
+        "JSON semantic line missing port path: {text}"
+    );
+    assert!(
+        text.contains("8080") && text.contains("9090"),
+        "old → new value missing: {text}"
+    );
+    assert!(
+        !text.contains("$.server.host"),
+        "unchanged key must not appear: {text}"
+    );
+    assert!(
+        !text.contains("$.log_level"),
+        "unchanged key log_level must not appear: {text}"
+    );
+}
+
+/// A reformat-only edit (zero semantic change, every line reshuffled)
+/// must collapse to "semantically unchanged" — proving the parser
+/// canonicalises whitespace away from the diff.
+#[test]
+fn diff_semantic_json_collapses_pure_reformat_to_no_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+
+    std::fs::write(
+        root.join("flags.json"),
+        r#"{"a":1,"b":"hi","c":[1,2,3]}
+"#,
+    )
+    .unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "compact form"]));
+
+    std::fs::write(
+        root.join("flags.json"),
+        r#"{
+  "a": 1,
+  "b": "hi",
+  "c": [
+    1,
+    2,
+    3
+  ]
+}
+"#,
+    )
+    .unwrap();
+    ok(alt(root, &["add", "."]));
+
+    let text = ok(alt(root, &["diff", "--cached", "--semantic"]));
+    assert!(
+        text.contains("semantically unchanged"),
+        "pure reformat must collapse to no-change: {text}"
+    );
+}

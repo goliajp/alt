@@ -1714,6 +1714,21 @@ impl<'a> NativeRepo<'a> {
             return Ok(());
         }
 
+        // M12/W34: structured-data semantic diff for JSON. Same
+        // `--semantic` gate as the tree-sitter path above: when the
+        // caller asked for it and we recognise the file shape, the
+        // structured summary replaces the unified hunks. JSON parse
+        // failures fall through to line diff — no signal loss.
+        if semantic
+            && !alt_diff::is_binary(&old_bytes)
+            && !alt_diff::is_binary(&new_bytes)
+            && path.ends_with(b".json")
+            && let Some(structured) = alt_diff::structured::summary(&old_bytes, &new_bytes)
+        {
+            buf.extend_from_slice(format!("{}\n", structured.render()).as_bytes());
+            return Ok(());
+        }
+
         if alt_diff::is_binary(&old_bytes) || alt_diff::is_binary(&new_bytes) {
             // git-compat line first (existing tests + muscle memory key off
             // this exact wording); then an A8 B1 chunk-diff summary so the

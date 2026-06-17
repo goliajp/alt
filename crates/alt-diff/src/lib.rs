@@ -11,6 +11,7 @@ pub mod binary;
 mod histogram;
 pub mod part_aware;
 pub mod perceptual;
+pub mod structured;
 
 use std::ops::Range;
 
