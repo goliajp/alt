@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type {
   DiffBinary,
   DiffPartAware,
@@ -5,6 +6,7 @@ import type {
   PartChange as PartChangeRecord,
 } from "../lib/api";
 import { formatBytes } from "../lib/format";
+import { DiffView } from "./DiffView";
 
 interface CommonProps {
   repo: string;
@@ -106,24 +108,57 @@ export function PartAwareDiff({
 
       <div>
         {file.parts.map((part, i) => (
-          <div
-            key={i}
-            className="grid grid-cols-[auto_minmax(0,1fr)_auto] gap-x-4 px-4 py-1.5 border-b border-border-muted last:border-b-0 items-baseline"
-          >
-            <PartMarker change={part.change} />
-            <span className="text-fg-default truncate">{part.name}</span>
-            <span className="text-fg-muted text-xs">
-              {part.change === "changed"
-                ? `${formatBytes(part.old_bytes ?? 0)} → ${formatBytes(part.new_bytes ?? 0)}`
-                : part.change === "added"
-                  ? `+${formatBytes(part.new_bytes ?? 0)}`
-                  : part.change === "removed"
-                    ? `−${formatBytes(part.old_bytes ?? 0)}`
-                    : ""}
-            </span>
-          </div>
+          <PartRow key={i} part={part} />
         ))}
       </div>
+    </div>
+  );
+}
+
+function PartRow({ part }: { part: PartChangeRecord }) {
+  const [open, setOpen] = useState(false);
+  const expandable = part.change === "changed" && !!part.text_patch;
+  const bytesNote =
+    part.change === "changed"
+      ? `${formatBytes(part.old_bytes ?? 0)} → ${formatBytes(part.new_bytes ?? 0)}`
+      : part.change === "added"
+        ? `+${formatBytes(part.new_bytes ?? 0)}`
+        : part.change === "removed"
+          ? `−${formatBytes(part.old_bytes ?? 0)}`
+          : "";
+
+  return (
+    <div className="border-b border-border-muted last:border-b-0">
+      <button
+        type="button"
+        disabled={!expandable}
+        onClick={() => expandable && setOpen((v) => !v)}
+        className={`w-full grid grid-cols-[auto_minmax(0,1fr)_auto_auto] gap-x-4 px-4 py-1.5 items-baseline text-left ${
+          expandable
+            ? "hover:bg-canvas-inset/40 cursor-pointer"
+            : "cursor-default"
+        }`}
+      >
+        <PartMarker change={part.change} />
+        <span className="text-fg-default truncate">{part.name}</span>
+        <span className="text-fg-muted text-xs">{bytesNote}</span>
+        {expandable ? (
+          <span
+            className={`text-xs font-mono transition-transform ${
+              open ? "rotate-90 text-warm" : "text-fg-subtle"
+            }`}
+          >
+            ▸
+          </span>
+        ) : (
+          <span />
+        )}
+      </button>
+      {expandable && open ? (
+        <div className="border-t border-border-muted bg-canvas-inset/20">
+          <DiffView patch={part.text_patch!} path={part.name} />
+        </div>
+      ) : null}
     </div>
   );
 }

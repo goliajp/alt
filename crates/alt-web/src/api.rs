@@ -324,6 +324,159 @@ pub fn handle_tree(mr: &MultiRepo, name: &str, spec: &str) -> Result<(u16, Vec<u
     Ok((200, body.into_bytes()))
 }
 
+/// `GET /api/repos/{name}/file_history?path=<path>&ref=<ref>&n=<n>`
+/// — every commit that changed `path`, newest-first, walking from
+/// `ref` (or HEAD). Each entry carries the per-commit change kind
+/// (added / changed / removed / renamed-into) plus the blob oids on
+/// both sides so the frontend can deep-link to the diff or the blob.
+///
+/// Algorithm: walk commits; for each compare the blob oid at `path` in
+/// the commit's tree vs the parent's tree. Different oids → changed
+/// (or added if old=None, removed if new=None).
+pub fn handle_file_history(
+    mr: &MultiRepo,
+    name: &str,
+    ref_name: Option<&str>,
+    path: &str,
+    n: usize,
+) -> Result<(u16, Vec<u8>), ApiError> {
+    const MAX: usize = 200;
+    let n = n.clamp(1, MAX);
+    let repo = mr.open(name)?;
+    if path.is_empty() {
+        return Err(ApiError::NotFound("missing ?path=".to_string()));
+    }
+    let start_oid = match ref_name {
+        Some(r) => repo
+            .rev_parse(r)
+            .map_err(|e| ApiError::Internal(format!("rev_parse {r}: {e}")))?
+            .ok_or_else(|| ApiError::NotFound(format!("ref {r}")))?,
+        None => repo
+            .rev_parse("HEAD")
+            .map_err(|e| ApiError::Internal(format!("rev_parse HEAD: {e}")))?
+            .ok_or_else(|| ApiError::NotFound("HEAD".to_string()))?,
+    };
+
+    let walker = repo
+        .rev_walk(start_oid)
+        .map_err(|e| ApiError::Internal(format!("rev_walk: {e}")))?;
+
+    let mut entries: Vec<String> = Vec::with_capacity(n);
+    let mut last_oid: Option<ObjectId> = None;
+    for item in walker {
+        let (commit_oid, commit) = item.map_err(|e| ApiError::Internal(format!("walk: {e}")))?;
+
+        let this = resolve_path_oid(&repo, &commit, path)?;
+        // Parent state: if no parent, treat as None (this commit
+        // introduced everything). For a merge we look at the first
+        // parent only, matching `alt log -p`'s behaviour.
+        let parent_oid_opt = commit.parents().next();
+        let parent = match parent_oid_opt {
+            Some(p) => {
+                let parent_commit = repo
+                    .read_commit(&p)
+                    .map_err(|e| ApiError::Internal(format!("read_commit {p}: {e}")))?;
+                resolve_path_oid(&repo, &parent_commit, path)?
+            }
+            None => None,
+        };
+
+        let change = match (parent, this) {
+            (None, None) => {
+                last_oid = None;
+                continue;
+            }
+            (Some(p), Some(t)) if p == t => {
+                last_oid = Some(t);
+                continue;
+            }
+            (None, Some(t)) => {
+                let entry = file_history_entry(&commit_oid, &commit, "added", None, Some(&t));
+                last_oid = Some(t);
+                entry
+            }
+            (Some(p), None) => {
+                let entry = file_history_entry(&commit_oid, &commit, "removed", Some(&p), None);
+                last_oid = None;
+                entry
+            }
+            (Some(p), Some(t)) => {
+                let entry = file_history_entry(&commit_oid, &commit, "changed", Some(&p), Some(&t));
+                last_oid = Some(t);
+                entry
+            }
+        };
+        entries.push(change);
+        if entries.len() >= n {
+            break;
+        }
+    }
+    let _ = last_oid;
+
+    let body = format!(
+        "{{\"schema_version\":1,\"path\":{},\"commits\":[{}]}}",
+        json_string(path),
+        entries.join(",")
+    );
+    Ok((200, body.into_bytes()))
+}
+
+fn resolve_path_oid(
+    repo: &Repository,
+    commit: &alt_git_codec::Commit,
+    path: &str,
+) -> Result<Option<ObjectId>, ApiError> {
+    let Some(tree_oid) = commit.tree() else {
+        return Ok(None);
+    };
+    let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    let mut current = tree_oid;
+    for (i, seg) in segments.iter().enumerate() {
+        let tree = read_tree(repo, &current)?;
+        let Some(entry) = tree
+            .entries
+            .iter()
+            .find(|e| String::from_utf8_lossy(e.name.as_slice()) == **seg)
+        else {
+            return Ok(None);
+        };
+        // last segment is the blob/tree we want
+        if i == segments.len() - 1 {
+            return Ok(Some(entry.oid));
+        }
+        // non-leaf must be a subtree to continue
+        if entry.mode.value() != 0o040000 {
+            return Ok(None);
+        }
+        current = entry.oid;
+    }
+    Ok(Some(current))
+}
+
+fn file_history_entry(
+    commit_oid: &ObjectId,
+    commit: &alt_git_codec::Commit,
+    change: &str,
+    old_oid: Option<&ObjectId>,
+    new_oid: Option<&ObjectId>,
+) -> String {
+    let raw = String::from_utf8_lossy(commit.message().as_slice()).into_owned();
+    let subject = subject_of(&raw);
+    let (a_name, a_email, a_when) = author_parts(commit);
+    let old_str = old_oid.map(|o| o.to_string()).unwrap_or_default();
+    let new_str = new_oid.map(|o| o.to_string()).unwrap_or_default();
+    format!(
+        "{{\"oid\":\"{commit_oid}\",\"subject\":{},\"author\":{{\"name\":{},\"email\":{},\"when\":{}}},\
+         \"change\":\"{change}\",\"old_oid\":{},\"new_oid\":{}}}",
+        json_string(subject),
+        json_string(&a_name),
+        json_string(&a_email),
+        a_when,
+        json_string(&old_str),
+        json_string(&new_str),
+    )
+}
+
 /// `GET /api/repos/{name}/blob/{oid}` — blob content with size + binary
 /// flag. Text blobs return UTF-8 (lossy); binary blobs return only the
 /// size, leaving the content out so the JSON stays small.
@@ -441,6 +594,16 @@ fn walk(
     Ok(())
 }
 
+/// One ZIP/OOXML member, after the part-aware summary has classified it.
+/// Carries an optional inner unified-diff patch so the SPA can expand a
+/// `changed` text member (e.g. `word/document.xml`) into a real per-line
+/// diff instead of stopping at "changed, 726 → 845 bytes".
+pub(crate) struct PartRow {
+    pub name: String,
+    pub change: alt_diff::part_aware::PartChange,
+    pub text_patch: Option<String>,
+}
+
 /// One file's diff in the response. The renderer picks shape by `kind`.
 pub(crate) enum FileDiff {
     Text {
@@ -463,7 +626,12 @@ pub(crate) enum FileDiff {
         new_oid: String,
         old_bytes: usize,
         new_bytes: usize,
-        parts: Vec<(String, alt_diff::part_aware::PartChange)>,
+        /// One row per stable part name; `change` is the part-aware
+        /// classification, `text_patch` is a unified diff of the
+        /// member's *inflated* body when both sides are text (only
+        /// emitted for `Changed` parts that survived the binary check
+        /// + fit within the size cap).
+        parts: Vec<PartRow>,
         /// Perceptual fingerprint distance for PNG (0..=1). `None` when
         /// the kind isn't PNG or fingerprint couldn't be computed.
         perceptual_distance: Option<f64>,
@@ -543,30 +711,39 @@ impl FileDiff {
             } => {
                 let items: Vec<String> = parts
                     .iter()
-                    .map(|(name, change)| match change {
-                        alt_diff::part_aware::PartChange::Same => format!(
-                            "{{\"name\":{},\"change\":\"same\"}}",
-                            json_string(name)
-                        ),
-                        alt_diff::part_aware::PartChange::Changed {
-                            old_bytes: ob,
-                            new_bytes: nb,
-                        } => format!(
-                            "{{\"name\":{},\"change\":\"changed\",\"old_bytes\":{},\"new_bytes\":{}}}",
-                            json_string(name),
-                            ob,
-                            nb,
-                        ),
-                        alt_diff::part_aware::PartChange::Added { new_bytes: nb } => format!(
-                            "{{\"name\":{},\"change\":\"added\",\"new_bytes\":{}}}",
-                            json_string(name),
-                            nb,
-                        ),
-                        alt_diff::part_aware::PartChange::Removed { old_bytes: ob } => format!(
-                            "{{\"name\":{},\"change\":\"removed\",\"old_bytes\":{}}}",
-                            json_string(name),
-                            ob,
-                        ),
+                    .map(|row| {
+                        let head = match &row.change {
+                            alt_diff::part_aware::PartChange::Same => format!(
+                                "{{\"name\":{},\"change\":\"same\"",
+                                json_string(&row.name)
+                            ),
+                            alt_diff::part_aware::PartChange::Changed {
+                                old_bytes: ob,
+                                new_bytes: nb,
+                            } => format!(
+                                "{{\"name\":{},\"change\":\"changed\",\"old_bytes\":{},\"new_bytes\":{}",
+                                json_string(&row.name),
+                                ob,
+                                nb,
+                            ),
+                            alt_diff::part_aware::PartChange::Added { new_bytes: nb } => format!(
+                                "{{\"name\":{},\"change\":\"added\",\"new_bytes\":{}",
+                                json_string(&row.name),
+                                nb,
+                            ),
+                            alt_diff::part_aware::PartChange::Removed { old_bytes: ob } => format!(
+                                "{{\"name\":{},\"change\":\"removed\",\"old_bytes\":{}",
+                                json_string(&row.name),
+                                ob,
+                            ),
+                        };
+                        match &row.text_patch {
+                            Some(patch) => format!(
+                                "{head},\"text_patch\":{}}}",
+                                json_string(patch)
+                            ),
+                            None => format!("{head}}}"),
+                        }
                     })
                     .collect();
                 let pd = match perceptual_distance {
@@ -666,6 +843,20 @@ fn diff_trees(
             } else {
                 None
             };
+
+            // For ZIP / OOXML, decode every member's inflated body on
+            // both sides, then attach a unified-diff patch to each
+            // `changed` member whose bodies are both text-shaped. This
+            // is where alt's binary-aware diff stops being just
+            // "something changed in word/document.xml" and becomes
+            // "here are the lines that changed in word/document.xml".
+            let parts = enrich_parts_with_text_patches(
+                &summary.kind,
+                summary.parts,
+                &old_bytes,
+                &new_bytes,
+            );
+
             out.push(FileDiff::PartAware {
                 path: path.to_string(),
                 format,
@@ -673,7 +864,7 @@ fn diff_trees(
                 new_oid: new_oid_str,
                 old_bytes: old_bytes.len(),
                 new_bytes: new_bytes.len(),
-                parts: summary.parts,
+                parts,
                 perceptual_distance,
             });
             continue;
@@ -698,6 +889,74 @@ fn diff_trees(
         });
     }
     Ok(out)
+}
+
+/// Cap on a single ZIP member's inflated size for inner-diff purposes.
+/// Above this we drop `text_patch` and let the part-aware summary stand
+/// alone — protects the JSON response from blowing up on a 50 MB XML
+/// inside an OOXML.
+const MAX_PART_BODY: usize = 1 << 20;
+
+/// Cap on the generated unified diff text per file. A single text patch
+/// is usually a few KB; anything past this is almost certainly a tree
+/// rewrite that's better explored member-by-member than inlined.
+const MAX_PATCH: usize = 128 * 1024;
+
+fn enrich_parts_with_text_patches(
+    kind: &alt_diff::part_aware::PartKind,
+    parts: Vec<(String, alt_diff::part_aware::PartChange)>,
+    old_bytes: &[u8],
+    new_bytes: &[u8],
+) -> Vec<PartRow> {
+    // Only the ZIP family carries member bodies worth inflating. PNGs
+    // are dense byte streams — no per-chunk text patch makes sense.
+    let bodies = match kind {
+        alt_diff::part_aware::PartKind::Zip => {
+            let old = alt_diff::part_aware::zip_member_bodies(old_bytes, MAX_PART_BODY);
+            let new = alt_diff::part_aware::zip_member_bodies(new_bytes, MAX_PART_BODY);
+            Some((old, new))
+        }
+        alt_diff::part_aware::PartKind::Png => None,
+    };
+
+    parts
+        .into_iter()
+        .map(|(name, change)| {
+            let text_patch = match (&change, &bodies) {
+                (
+                    alt_diff::part_aware::PartChange::Changed { .. },
+                    Some((Some(old_map), Some(new_map))),
+                ) => {
+                    let old_body = old_map.get(&name).and_then(|b| b.as_ref());
+                    let new_body = new_map.get(&name).and_then(|b| b.as_ref());
+                    match (old_body, new_body) {
+                        (Some(o), Some(n))
+                            if !alt_diff::is_binary(o) && !alt_diff::is_binary(n) =>
+                        {
+                            let mut buf = Vec::new();
+                            let _ = std::io::Write::write_fmt(
+                                &mut buf,
+                                format_args!("--- a/{name}\n+++ b/{name}\n"),
+                            );
+                            alt_diff::write_unified(&mut buf, o, n, 3);
+                            if buf.len() > MAX_PATCH {
+                                None
+                            } else {
+                                Some(String::from_utf8_lossy(&buf).into_owned())
+                            }
+                        }
+                        _ => None,
+                    }
+                }
+                _ => None,
+            };
+            PartRow {
+                name,
+                change,
+                text_patch,
+            }
+        })
+        .collect()
 }
 
 fn read_blob(repo: &Repository, oid: &ObjectId) -> Result<Vec<u8>, ApiError> {

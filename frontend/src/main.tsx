@@ -9,6 +9,7 @@ import { RepoHome } from "./pages/RepoHome";
 import { Log } from "./pages/Log";
 import { Commit } from "./pages/Commit";
 import { Browse } from "./pages/Browse";
+import { FileHistory } from "./pages/FileHistory";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -32,6 +33,7 @@ createRoot(document.getElementById("root")!).render(
             <Route path="r/:name/commits/:oid" element={<Commit />} />
             <Route path="r/:name/tree/:spec/*" element={<Browse />} />
             <Route path="r/:name/tree/:spec" element={<Browse />} />
+            <Route path="r/:name/history" element={<FileHistory />} />
           </Route>
         </Routes>
       </BrowserRouter>

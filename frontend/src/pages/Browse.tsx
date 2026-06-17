@@ -96,7 +96,11 @@ export function Browse() {
           {(browse.error as Error).message}
         </div>
       ) : browse.data?.kind === "blob" ? (
-        <BlobView blob={browse.data.blob} path={path[path.length - 1] ?? ""} />
+        <BlobView
+          blob={browse.data.blob}
+          path={path[path.length - 1] ?? ""}
+          historyHref={`/r/${name}/history?path=${encodeURIComponent(path.join("/"))}&ref=${encodeURIComponent(spec)}`}
+        />
       ) : browse.data?.kind === "tree" ? (
         <TreeView
           name={name}
@@ -192,7 +196,15 @@ function TreeView({
   );
 }
 
-function BlobView({ blob, path }: { blob: Blob; path: string }) {
+function BlobView({
+  blob,
+  path,
+  historyHref,
+}: {
+  blob: Blob;
+  path: string;
+  historyHref: string;
+}) {
   const lang = detectLang(path);
   return (
     <div className="bg-canvas-subtle border border-border-default rounded-lg overflow-hidden">
@@ -214,6 +226,12 @@ function BlobView({ blob, path }: { blob: Blob; path: string }) {
             </>
           ) : null}
         </div>
+        <Link
+          to={historyHref}
+          className="text-xs font-mono text-accent hover:underline"
+        >
+          History →
+        </Link>
       </div>
       {blob.binary || blob.content == null ? (
         <div className="p-12 text-center font-mono text-sm text-fg-muted">

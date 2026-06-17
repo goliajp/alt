@@ -77,6 +77,18 @@ export interface PartChange {
   change: "same" | "changed" | "added" | "removed";
   old_bytes?: number;
   new_bytes?: number;
+  /** Unified diff over the member's *inflated* body, when both sides
+   *  are text-shaped. Only set on `changed` parts. */
+  text_patch?: string;
+}
+
+export interface FileHistoryEntry {
+  oid: string;
+  subject: string;
+  author: Author;
+  change: "added" | "changed" | "removed";
+  old_oid: string;
+  new_oid: string;
 }
 
 export interface DiffPartAware {
@@ -177,4 +189,16 @@ export const api = {
 
   blob: (name: string, oid: string) =>
     getJSON<Blob>(`/api/repos/${encodeURIComponent(name)}/blob/${oid}`),
+
+  fileHistory: (
+    name: string,
+    opts: { path: string; ref?: string; n?: number },
+  ) => {
+    const qs = new URLSearchParams({ path: opts.path });
+    if (opts.ref) qs.set("ref", opts.ref);
+    if (opts.n != null) qs.set("n", String(opts.n));
+    return getJSON<{ path: string; commits: FileHistoryEntry[] }>(
+      `/api/repos/${encodeURIComponent(name)}/file_history?${qs.toString()}`,
+    );
+  },
 };

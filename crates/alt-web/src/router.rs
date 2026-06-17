@@ -136,6 +136,21 @@ fn route_repo(mr: &MultiRepo, name: &str, tail: &str, query: &str) -> RouteResp 
         ))
         .into();
     }
+    if tail == "file_history" {
+        let n = parse_query(query, "n")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(50);
+        let ref_name = parse_query(query, "ref");
+        let path = parse_query(query, "path").unwrap_or_default();
+        return collapse(api::handle_file_history(
+            mr,
+            name,
+            ref_name.as_deref(),
+            &path,
+            n,
+        ))
+        .into();
+    }
 
     // /api/repos/{name}/commits/{oid}[/diff]
     if let Some(rest) = tail.strip_prefix("commits/") {

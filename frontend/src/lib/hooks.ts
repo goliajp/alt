@@ -65,3 +65,13 @@ export const useBlob = (name: string, oid: string) =>
     queryFn: () => api.blob(name, oid),
     enabled: !!name && !!oid,
   });
+
+export const useFileHistory = (
+  name: string,
+  opts: { path: string; ref?: string; n?: number },
+) =>
+  useQuery({
+    queryKey: ["fileHistory", name, opts] as const,
+    queryFn: () => api.fileHistory(name, opts),
+    enabled: !!name && !!opts.path,
+  });

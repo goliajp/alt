@@ -142,6 +142,105 @@ fn zip_summary(old: &[u8], new: &[u8]) -> Option<Summary> {
     Some(part_summary(PartKind::Zip, &old_entries, &new_entries))
 }
 
+/// Extract every ZIP member's *uncompressed* body, keyed by file name.
+/// Covers `stored` (method 0) and `deflate` (method 8) — the two methods
+/// every real-world ZIP / OOXML uses; other methods produce `None` for
+/// that member, callers should treat as opaque.
+///
+/// Bomb-bounded: any single member that inflates past `max_member`
+/// bytes, or whose decompressor errors, is skipped (the member's value
+/// is `None` so the caller can fall back to its part-aware summary
+/// alone). `None` at the top level means the archive itself is malformed.
+///
+/// Order of work: walk the central directory to harvest
+/// `(name, local_header_offset)`, then jump to each local file header
+/// to read the actual compression method + stream bytes. This is the
+/// shape every `zip` library implementation does, and avoids relying
+/// on local-header sizes (which can legitimately be zero when a data
+/// descriptor follows the body).
+pub fn zip_member_bodies(
+    data: &[u8],
+    max_member: usize,
+) -> Option<BTreeMap<String, Option<Vec<u8>>>> {
+    let eocd = find_eocd(data)?;
+    if eocd + 22 > data.len() {
+        return None;
+    }
+    let cd_size = u32::from_le_bytes(data[eocd + 12..eocd + 16].try_into().ok()?) as usize;
+    let cd_off = u32::from_le_bytes(data[eocd + 16..eocd + 20].try_into().ok()?) as usize;
+    if cd_off.checked_add(cd_size)? > data.len() {
+        return None;
+    }
+    let cd = &data[cd_off..cd_off + cd_size];
+
+    let mut at = 0;
+    let mut out: BTreeMap<String, Option<Vec<u8>>> = BTreeMap::new();
+    while at + 46 <= cd.len() {
+        if &cd[at..at + 4] != ZIP_CD_SIGNATURE {
+            break;
+        }
+        let name_len = u16::from_le_bytes(cd[at + 28..at + 30].try_into().ok()?) as usize;
+        let extra_len = u16::from_le_bytes(cd[at + 30..at + 32].try_into().ok()?) as usize;
+        let comment_len = u16::from_le_bytes(cd[at + 32..at + 34].try_into().ok()?) as usize;
+        let lfh_off = u32::from_le_bytes(cd[at + 42..at + 46].try_into().ok()?) as usize;
+        let name_start = at + 46;
+        let name_end = name_start.checked_add(name_len)?;
+        if name_end > cd.len() {
+            return None;
+        }
+        let name = String::from_utf8_lossy(&cd[name_start..name_end]).into_owned();
+        at = name_end + extra_len + comment_len;
+
+        // Directory entries end with `/` and carry no body.
+        if name.ends_with('/') {
+            continue;
+        }
+
+        let body = extract_lfh(data, lfh_off, max_member);
+        out.insert(name, body);
+    }
+    if out.is_empty() { None } else { Some(out) }
+}
+
+fn extract_lfh(data: &[u8], off: usize, max_member: usize) -> Option<Vec<u8>> {
+    use std::io::Read as _;
+    if off + 30 > data.len() {
+        return None;
+    }
+    if &data[off..off + 4] != ZIP_LFH_SIGNATURE {
+        return None;
+    }
+    let method = u16::from_le_bytes(data[off + 8..off + 10].try_into().ok()?);
+    let comp_size = u32::from_le_bytes(data[off + 18..off + 22].try_into().ok()?) as usize;
+    let uncomp_size = u32::from_le_bytes(data[off + 22..off + 26].try_into().ok()?) as usize;
+    let name_len = u16::from_le_bytes(data[off + 26..off + 28].try_into().ok()?) as usize;
+    let extra_len = u16::from_le_bytes(data[off + 28..off + 30].try_into().ok()?) as usize;
+    let body_start = off
+        .checked_add(30)?
+        .checked_add(name_len)?
+        .checked_add(extra_len)?;
+    if body_start.checked_add(comp_size)? > data.len() {
+        return None;
+    }
+    if uncomp_size > max_member {
+        return None;
+    }
+    let stream = &data[body_start..body_start + comp_size];
+    match method {
+        0 => Some(stream.to_vec()),
+        8 => {
+            let mut decoder = flate2::read::DeflateDecoder::new(stream).take(max_member as u64 + 1);
+            let mut out = Vec::with_capacity(uncomp_size.min(max_member));
+            decoder.read_to_end(&mut out).ok()?;
+            if out.len() > max_member {
+                return None;
+            }
+            Some(out)
+        }
+        _ => None,
+    }
+}
+
 /// Parse ZIP central directory and bucket each entry by file name.
 /// The `body` field of each `ChunkAccum` is filled with the entry's
 /// `(crc32, compressed_size)` 8-byte tuple — two ZIP entries with the
