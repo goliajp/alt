@@ -908,12 +908,20 @@ fn commit_ref_updates(
     // Build the RefPolicy that mirrors local `commit_refs_with`: a closure
     // over the caps' branch_allow drives the per-ref check inside the
     // commit lock.
+    // M10/W22: combine branch_allow + branch_deny (deny wins) into a
+    // single closure that mirrors the local CLI path.
     let allow = caps.branch_allow.clone();
-    let has_allow = !allow.is_empty();
-    let is_branch_allowed = move |name: &str| allow.iter().any(|g| g.matches(name));
+    let deny = caps.branch_deny.clone();
+    let has_constraint = !allow.is_empty() || !deny.is_empty();
+    let is_branch_allowed = move |name: &str| {
+        if deny.iter().any(|g| g.matches(name)) {
+            return false;
+        }
+        allow.is_empty() || allow.iter().any(|g| g.matches(name))
+    };
     let policy = alt_refs::RefPolicy {
         read_only: caps.read_only,
-        is_branch_allowed: if has_allow {
+        is_branch_allowed: if has_constraint {
             Some(&is_branch_allowed)
         } else {
             None

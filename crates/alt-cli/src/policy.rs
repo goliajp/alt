@@ -57,6 +57,12 @@ pub struct Capabilities {
     pub read_only: bool,
     /// Allow-list for ref names; empty = any ref allowed.
     pub branch_allow: Vec<Glob>,
+    /// Deny-list for ref names; takes precedence over allow. M10/W22:
+    /// the practical reason this matters even when an allow-list could
+    /// theoretically cover the same ground is the "protect main" shape:
+    /// `branch=refs/heads/* branch_deny=refs/heads/main` is more
+    /// readable than enumerating every other branch. Empty = no deny.
+    pub branch_deny: Vec<Glob>,
     /// Allow-list for working-tree paths under `add`/`commit`; empty = any.
     pub path_allow: Vec<Glob>,
     /// Deny non-fast-forward updates and branch deletion.
@@ -81,6 +87,7 @@ impl Capabilities {
         Self {
             read_only: false,
             branch_allow: Vec::new(),
+            branch_deny: Vec::new(),
             path_allow: Vec::new(),
             forbid_force: false,
             require_signed: false,
@@ -99,12 +106,17 @@ impl Capabilities {
 
     /// Namespace-only check (ignores `read_only`). Used by the ref-store gate,
     /// which reports the read-only deny separately from the namespace deny so
-    /// the error message can name *which* constraint fired.
+    /// the error message can name *which* constraint fired. M10/W22:
+    /// `branch_deny` glob list runs *after* the allow check — a name on the
+    /// deny list is refused even when an allow glob accepted it (deny wins).
     pub fn allows_branch_name(&self, name: &str) -> bool {
-        if self.branch_allow.is_empty() {
-            return true;
+        if !self.branch_allow.is_empty() && !self.branch_allow.iter().any(|g| g.matches(name)) {
+            return false;
         }
-        self.branch_allow.iter().any(|g| g.matches(name))
+        if self.branch_deny.iter().any(|g| g.matches(name)) {
+            return false;
+        }
+        true
     }
 
     /// `true` iff a working-tree path may be staged/committed. Empty
@@ -216,6 +228,8 @@ fn parse_caps(spec: &str, line: usize) -> Result<Capabilities, PolicyError> {
             caps.require_signed_commits = true;
         } else if let Some(v) = tok.strip_prefix("branch=") {
             caps.branch_allow.push(Glob::new(v));
+        } else if let Some(v) = tok.strip_prefix("branch_deny=") {
+            caps.branch_deny.push(Glob::new(v));
         } else if let Some(v) = tok.strip_prefix("path=") {
             caps.path_allow.push(Glob::new(v));
         } else {
@@ -406,6 +420,29 @@ mod tests {
             id: id.into(),
             session: None,
         }
+    }
+
+    #[test]
+    fn branch_deny_takes_precedence_over_branch_allow() {
+        // protect refs/heads/main while allowing every other branch
+        let p = Policy::parse("human:alice -> branch=refs/heads/* branch_deny=refs/heads/main")
+            .unwrap();
+        let caps = p.lookup(&principal(PrincipalKind::Human, "alice"));
+        assert!(caps.allows_branch_name("refs/heads/feature-x"));
+        assert!(
+            !caps.allows_branch_name("refs/heads/main"),
+            "deny must win over allow even when allow matches"
+        );
+    }
+
+    #[test]
+    fn branch_deny_without_allow_blocks_only_listed_globs() {
+        // no allow-list: every branch is allowed *except* the deny ones
+        let p = Policy::parse("human:* -> branch_deny=refs/heads/main").unwrap();
+        let caps = p.lookup(&principal(PrincipalKind::Human, "alice"));
+        assert!(caps.allows_branch_name("refs/heads/feature-x"));
+        assert!(caps.allows_branch_name("refs/heads/release/1.0"));
+        assert!(!caps.allows_branch_name("refs/heads/main"));
     }
 
     #[test]

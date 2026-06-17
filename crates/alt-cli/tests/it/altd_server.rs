@@ -1386,3 +1386,115 @@ fn altd_server_honors_git_clone_filter_blob_none() {
         "tree {tree_oid} must still be present (blob:none filters blobs only)"
     );
 }
+
+#[test]
+fn altd_server_branch_deny_protects_main_while_allowing_features() {
+    // M10/W22: `.alt/policy` carries
+    //   `human:alice -> branch=refs/heads/* branch_deny=refs/heads/main`
+    // Alice may push to any feature branch, but a push to main is
+    // blocked by the deny gate even though the allow glob matches it.
+    let origin_dir = tempfile::tempdir().unwrap();
+    let origin = origin_dir.path();
+    ok(alt(origin, &["init", "."]));
+    std::fs::write(origin.join("seed.txt"), "seed\n").unwrap();
+    ok(alt(origin, &["add", "."]));
+    ok(alt(origin, &["commit", "-m", "seed"]));
+    std::fs::write(
+        origin.join(".alt").join("policy"),
+        "human:anonymous -> branch=refs/heads/** branch_deny=refs/heads/main\n",
+    )
+    .unwrap();
+    let server = spawn_server(origin);
+    let url = format!("http://{}/", server.addr);
+
+    // build a git source repo with one commit; push it twice — once
+    // at refs/heads/main (must be refused), once at refs/heads/feature/x
+    // (must succeed).
+    let src_dir = tempfile::tempdir().unwrap();
+    let src = src_dir.path();
+    let st = std::process::Command::new("git")
+        .args(["init", "-q", "-b", "main", src.to_str().unwrap()])
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .unwrap();
+    assert!(st.status.success());
+    std::fs::write(src.join("f.txt"), "body\n").unwrap();
+    for args in [
+        &["-C", src.to_str().unwrap(), "add", "."][..],
+        &[
+            "-C",
+            src.to_str().unwrap(),
+            "-c",
+            "user.name=tester",
+            "-c",
+            "user.email=t@e",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "-m",
+            "x",
+        ][..],
+    ] {
+        let o = std::process::Command::new("git")
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            o.status.success(),
+            "git: {}",
+            String::from_utf8_lossy(&o.stderr)
+        );
+    }
+
+    // 1) push to main → denied
+    let push_main = std::process::Command::new("git")
+        .args([
+            "-C",
+            src.to_str().unwrap(),
+            "push",
+            &url,
+            "HEAD:refs/heads/main",
+        ])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .unwrap();
+    assert!(
+        !push_main.status.success(),
+        "push to main must be denied by branch_deny: stdout={}",
+        String::from_utf8_lossy(&push_main.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&push_main.stderr);
+    assert!(
+        stderr.contains("branch_deny") || stderr.contains("rejected"),
+        "rejection should cite the deny gate: {stderr}"
+    );
+
+    // 2) push to feature/x → allowed
+    let push_feature = std::process::Command::new("git")
+        .args([
+            "-C",
+            src.to_str().unwrap(),
+            "push",
+            &url,
+            "HEAD:refs/heads/feature/x",
+        ])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .unwrap();
+    assert!(
+        push_feature.status.success(),
+        "push to feature/x must succeed (allow matches, deny does not): stderr={}",
+        String::from_utf8_lossy(&push_feature.stderr)
+    );
+    drop(server);
+    let log = ok(alt(
+        origin,
+        &["log", "--pretty=oneline", "refs/heads/feature/x"],
+    ));
+    assert!(
+        log.contains('x'),
+        "feature/x ref must carry the pushed commit: {log}"
+    );
+}

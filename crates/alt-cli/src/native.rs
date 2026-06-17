@@ -670,7 +670,8 @@ impl<'a> NativeRepo<'a> {
     /// commit gating.
     fn ensure_push_branch_allowed(&self, changes: &[RefChange]) -> Res<()> {
         let allow = &self.caps.branch_allow;
-        if allow.is_empty() {
+        let deny = &self.caps.branch_deny;
+        if allow.is_empty() && deny.is_empty() {
             return Ok(());
         }
         for c in changes {
@@ -681,7 +682,14 @@ impl<'a> NativeRepo<'a> {
                 // ref_allow when we grow one
                 None => continue,
             };
-            if !allow.iter().any(|g| g.matches(short)) {
+            if deny.iter().any(|g| g.matches(short)) {
+                return Err(format!(
+                    "capability denied: push to '{}' is blocked by branch_deny",
+                    c.name
+                )
+                .into());
+            }
+            if !allow.is_empty() && !allow.iter().any(|g| g.matches(short)) {
                 return Err(format!(
                     "capability denied: push to '{}' is not in branch_allow",
                     c.name
@@ -822,12 +830,19 @@ impl<'a> NativeRepo<'a> {
         self.ensure_writable(verb)?;
         self.ensure_no_force(changes)?;
         let allow = self.caps.branch_allow.clone();
+        let deny = self.caps.branch_deny.clone();
         let read_only = self.caps.read_only;
-        let has_allow = !allow.is_empty();
-        let is_branch_allowed = move |name: &str| allow.iter().any(|g| g.matches(name));
+        let has_constraint = !allow.is_empty() || !deny.is_empty();
+        let is_branch_allowed = move |name: &str| {
+            // M10/W22: deny wins over allow.
+            if deny.iter().any(|g| g.matches(name)) {
+                return false;
+            }
+            allow.is_empty() || allow.iter().any(|g| g.matches(name))
+        };
         let policy = RefPolicy {
             read_only,
-            is_branch_allowed: if has_allow {
+            is_branch_allowed: if has_constraint {
                 Some(&is_branch_allowed)
             } else {
                 None
