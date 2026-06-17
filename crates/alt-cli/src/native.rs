@@ -1609,6 +1609,15 @@ impl<'a> NativeRepo<'a> {
             } else {
                 Json::Null
             };
+            // M10/W20 (B2): structured part-aware breakdown so an
+            // agent answers "which named chunk changed" without
+            // re-parsing the binary. `null` when neither side is a
+            // recognised kind (PNG today).
+            let part_diff_field = if binary {
+                part_aware_diff_json(&old_bytes, &new_bytes)
+            } else {
+                Json::Null
+            };
             let ast_diff_field = if semantic && !binary {
                 ast_diff_json(ch.path.as_bytes(), &old_bytes, &new_bytes)
             } else {
@@ -1633,6 +1642,7 @@ impl<'a> NativeRepo<'a> {
                 ("hunks", Json::Array(hunks)),
                 ("chunk_diff", chunk_diff_field),
                 ("perceptual_diff", perceptual_diff_field),
+                ("part_diff", part_diff_field),
                 ("ast_diff", ast_diff_field),
             ]));
         }
@@ -1724,6 +1734,15 @@ impl<'a> NativeRepo<'a> {
                 )
                 .as_bytes(),
             );
+            // M10/W20 (B2): when both sides decompose under a known
+            // format (PNG today), surface the part-aware line so a
+            // reviewer reads "IDAT changed but IHDR didn't" rather
+            // than "47% bytes shared". Silent when either side isn't
+            // a recognised kind — the chunk-diff line above already
+            // covers the generic case.
+            if let Some(ps) = alt_diff::part_aware::summary(&old_bytes, &new_bytes) {
+                buf.extend_from_slice(format!("{}\n", ps.render()).as_bytes());
+            }
             // M7-B3: when both sides are a kind we have a fingerprint for
             // (PNG today), surface the perceptual-style hint so a reader
             // sees "is this a small tweak or a wholly different image"
@@ -4089,6 +4108,53 @@ fn perceptual_diff_json(old: &[u8], new: &[u8]) -> crate::json::Json {
         ("kind", Json::str("perceptual_diff")),
         ("prism", Json::str(prism)),
         ("distance", Json::Float(distance)),
+    ])
+}
+
+/// JSON shape for an M10/W20 B2 part-aware diff:
+/// `{kind:"part_diff", prism, all_same, parts:[{name, status, old_bytes?,
+/// new_bytes?}]}`. `null` when neither side is a recognised kind so the
+/// caller falls back to the chunk_diff field above.
+fn part_aware_diff_json(old: &[u8], new: &[u8]) -> crate::json::Json {
+    use crate::json::Json;
+    let Some(s) = alt_diff::part_aware::summary(old, new) else {
+        return Json::Null;
+    };
+    let parts: Vec<Json> = s
+        .parts
+        .iter()
+        .map(|(name, change)| {
+            use alt_diff::part_aware::PartChange;
+            let (status, old_bytes, new_bytes) = match change {
+                PartChange::Same => ("same", Json::Null, Json::Null),
+                PartChange::Changed {
+                    old_bytes,
+                    new_bytes,
+                } => (
+                    "changed",
+                    Json::Num(*old_bytes as i64),
+                    Json::Num(*new_bytes as i64),
+                ),
+                PartChange::Added { new_bytes } => {
+                    ("added", Json::Null, Json::Num(*new_bytes as i64))
+                }
+                PartChange::Removed { old_bytes } => {
+                    ("removed", Json::Num(*old_bytes as i64), Json::Null)
+                }
+            };
+            Json::Object(vec![
+                ("name", Json::str(name)),
+                ("status", Json::str(status)),
+                ("old_bytes", old_bytes),
+                ("new_bytes", new_bytes),
+            ])
+        })
+        .collect();
+    Json::Object(vec![
+        ("kind", Json::str("part_diff")),
+        ("prism", Json::str(s.kind.as_str())),
+        ("all_same", Json::Bool(s.all_same())),
+        ("parts", Json::Array(parts)),
     ])
 }
 

@@ -253,6 +253,18 @@ fn diff_png_change_reports_perceptual_hint() {
         text.contains("perceptual diff:") && text.contains("(prism=png)"),
         "perceptual hint missing: {text}"
     );
+    // M10/W20 (B2): the part-aware line surfaces *which* PNG chunk
+    // changed; IHDR is byte-identical (same dimensions / colour type
+    // on both sides) so it must NOT appear in the line, while IDAT
+    // (the pixel stream) must.
+    assert!(
+        text.contains("png: ") && text.contains("IDAT"),
+        "part-aware PNG line missing: {text}"
+    );
+    assert!(
+        !text.contains("IHDR"),
+        "IHDR is unchanged here and must be dropped from the line: {text}"
+    );
     // the second image differs from the first; a 0% off reading would
     // mean the hash collapsed to identical and the metric carries no
     // signal — that's a regression even if the line is present.
@@ -273,6 +285,24 @@ fn diff_png_change_reports_perceptual_hint() {
     assert!(
         json.contains("\"distance\":") && !json.contains("\"distance\":0.0"),
         "distance should be present and non-zero: {json}"
+    );
+    // M10/W20 (B2): structured part-aware breakdown rides under
+    // `part_diff`. all_same=false because IDAT changed.
+    assert!(
+        json.contains("\"part_diff\":{\"kind\":\"part_diff\""),
+        "part_diff json object missing: {json}"
+    );
+    assert!(
+        json.contains("\"all_same\":false"),
+        "part_diff must report all_same=false: {json}"
+    );
+    assert!(
+        json.contains("\"name\":\"IDAT\",\"status\":\"changed\""),
+        "IDAT must be reported as changed: {json}"
+    );
+    assert!(
+        json.contains("\"name\":\"IHDR\",\"status\":\"same\""),
+        "IHDR is byte-equal and must be reported as same: {json}"
     );
 }
 
