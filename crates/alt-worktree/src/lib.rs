@@ -6,6 +6,8 @@
 //! Domain-aware (it knows git object kinds and the index) but bound to no
 //! specific command.
 
+mod ignore;
+
 use std::path::Path;
 
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind, Tree};
@@ -60,7 +62,8 @@ pub struct Status {
 /// nothing changed.
 pub fn scan_worktree(root: &Path, algo: HashAlgo) -> Result<Vec<WorkEntry>, WorktreeError> {
     let mut out = Vec::new();
-    scan_dir(root, root, algo, None, &mut out)?;
+    let mut stack = ignore::IgnoreStack::new();
+    scan_dir(root, root, algo, None, &mut stack, &mut out)?;
     out.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(out)
 }
@@ -90,7 +93,8 @@ pub fn scan_worktree_with_index(
         }
     }
     let mut out = Vec::new();
-    scan_dir(root, root, algo, Some(&by_path), &mut out)?;
+    let mut stack = ignore::IgnoreStack::new();
+    scan_dir(root, root, algo, Some(&by_path), &mut stack, &mut out)?;
     out.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(out)
 }
@@ -178,8 +182,21 @@ fn scan_dir(
     dir: &Path,
     algo: HashAlgo,
     cache: Option<&StatCache<'_>>,
+    ignore_stack: &mut ignore::IgnoreStack,
     out: &mut Vec<WorkEntry>,
 ) -> Result<(), WorktreeError> {
+    // Load `<dir>/.gitignore` if present and push a layer for the duration
+    // of this directory. Layer base is `dir`'s path relative to the root.
+    let pushed = match std::fs::read(dir.join(".gitignore")) {
+        Ok(bytes) => {
+            let base = rel_path(dir.strip_prefix(root).unwrap());
+            ignore_stack.push(ignore::parse_layer(&bytes, base.as_slice()));
+            true
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(e) => return Err(e.into()),
+    };
+
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let name = entry.file_name();
@@ -188,7 +205,13 @@ fn scan_dir(
         }
         let path = entry.path();
         let meta = std::fs::symlink_metadata(&path)?;
-        if meta.is_dir() {
+        let rel = path.strip_prefix(root).unwrap();
+        let rel_b = rel_path(rel);
+        let is_dir = meta.is_dir();
+        if ignore_stack.is_ignored(rel_b.as_slice(), is_dir) {
+            continue; // a `.gitignore` rule in scope masks this entry
+        }
+        if is_dir {
             // A submodule directory carries its own git layout (a `.git`
             // file pointing at the gitdir, or a real `.git` dir). It's a
             // separate repo, not working-tree content of this one — don't
@@ -198,11 +221,9 @@ fn scan_dir(
             if is_submodule_dir(&path) {
                 continue;
             }
-            scan_dir(root, &path, algo, cache, out)?;
+            scan_dir(root, &path, algo, cache, ignore_stack, out)?;
             continue;
         }
-        let rel = path.strip_prefix(root).unwrap();
-        let rel_b = rel_path(rel);
         let mode = if meta.is_symlink() {
             0o120000
         } else {
@@ -237,6 +258,10 @@ fn scan_dir(
             oid: ObjectId::hash_object(algo, ObjectKind::Blob, &content),
             mode,
         });
+    }
+
+    if pushed {
+        ignore_stack.pop();
     }
     Ok(())
 }
