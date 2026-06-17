@@ -1,27 +1,24 @@
 #!/bin/sh
-# Build a richer fixture git repository at $1 (default
-# /tmp/alt-demo-binaries-src) that exists to show alt's diff capabilities
-# the public product page wants to demonstrate.
+# Build the public demo-binaries fixture repo for alt.golia.jp.
 #
-# Two axes:
+# Eight commits stage one differentiator per commit so the SPA can walk
+# a tour of alt's diff renderers without having to hunt:
 #
-#   - Binary-aware (the real differentiation): PNG chunks + perceptual
-#     fingerprint, ZIP/OOXML members, real .docx and .xlsx walks. git
-#     reports these as `Binary files differ`; alt reports each member's
-#     change.
+#   C1  initial site skeleton (every fixture shape)
+#   C2  banner micro-edit       — PNG, perceptual-close
+#   C3  banner re-layout + logo — PNG perceptual-far + SVG structural
+#   C4  swap the landing photo  — PNG, very different scene
+#   C5  edit press.docx + pricing.xlsx — OOXML member walk
+#   C6  restructure bundle.zip + drop a dashboard PNG + rework SVG
+#   C7  JSON + TOML semantic refactor
+#   C8  release-day combo (docs, sheets, icon, SVG mark, CSS bundle)
 #
-#   - Semantic over text (alt's upgrade of git's line diff): JSON + TOML
-#     by jq-path rather than line, so a re-indented file is `(no
-#     semantic changes)` and a key bump shows `$.foo.bar 1 → 2` instead
-#     of two opaque line diffs.
+# The fixtures are deliberately richer than a toy: PNGs carry headlines,
+# tagline rows, icon strips, gradients; the SVG logo evolves from a
+# single circle to a full wordmark over the course of the history.
 #
-# The repo is a tiny website project (homepage assets, content config,
-# docs, archive) that evolves over multiple commits — each commit
-# touches a different facet so every renderer has at least one real
-# example to point at.
-#
-# Requires a python3 venv with python-docx + openpyxl + pillow.  See
-# `/tmp/alt-demo-venv` for the one this script creates / reuses.
+# Requires a python3 venv with python-docx + openpyxl + pillow at
+# $ALT_DEMO_VENV (default /tmp/alt-demo-venv).
 set -eu
 DIR="${1:-/tmp/alt-demo-binaries-src}"
 VENV="${ALT_DEMO_VENV:-/tmp/alt-demo-venv}"
@@ -42,21 +39,21 @@ git config user.name "alt-demo"
 git config user.email "alt-demo@golia.jp"
 git config commit.gpgsign false
 
-# Shared helpers exported as one file so each commit step can re-import.
 cat > /tmp/alt-demo-helpers.py <<'HELPERS'
-import io, json, random, zipfile
+import io, json, math, random, zipfile
 from pathlib import Path
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from docx import Document
-from docx.shared import Pt, RGBColor, Inches
+from docx.shared import Pt, RGBColor
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 
 def font(size: int = 20):
     for cand in (
         "/System/Library/Fonts/Supplemental/Verdana.ttf",
+        "/System/Library/Fonts/Supplemental/Verdana Bold.ttf",
         "/System/Library/Fonts/Helvetica.ttc",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     ):
         try:
             return ImageFont.truetype(cand, size)
@@ -64,46 +61,227 @@ def font(size: int = 20):
             continue
     return ImageFont.load_default()
 
-def banner(path: Path, *, bg, fg_block, text, secondary=None):
-    img = Image.new("RGB", (480, 240), bg)
+def lerp(a, b, t):
+    return tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
+
+def vertical_gradient(size, top, bottom):
+    img = Image.new("RGB", size, top)
+    px = img.load()
+    w, h = size
+    for y in range(h):
+        c = lerp(top, bottom, y / max(h - 1, 1))
+        for x in range(w):
+            px[x, y] = c
+    return img
+
+def horizontal_gradient(size, left, right):
+    img = Image.new("RGB", size, left)
+    px = img.load()
+    w, h = size
+    for x in range(w):
+        c = lerp(left, right, x / max(w - 1, 1))
+        for y in range(h):
+            px[x, y] = c
+    return img
+
+# ── banners ────────────────────────────────────────────────────────
+def banner_v1(path):
+    """Initial hero: cool blue, single block, simple wordmark."""
+    img = vertical_gradient((720, 320), (10, 14, 22), (22, 28, 44))
     d = ImageDraw.Draw(img)
-    d.rectangle([(30, 30), (450, 210)], fill=fg_block)
-    d.text((45, 60), text, fill=bg, font=font(36))
-    if secondary:
-        d.text((45, 130), secondary, fill=bg, font=font(20))
+    # accent block
+    d.rectangle([(60, 80), (660, 240)], fill=(90, 160, 250))
+    d.rectangle([(60, 80), (660, 90)], fill=(140, 190, 255))  # top highlight
+    d.text((90, 110), "alt", fill=(10, 14, 22), font=font(72))
+    d.text((92, 200), "pure-Rust VCS", fill=(10, 14, 22), font=font(22))
     img.save(path, "PNG", optimize=True)
 
-def icon(path: Path, *, bg, fg):
-    img = Image.new("RGB", (96, 96), bg)
+def banner_v2(path):
+    """C2 micro-edit: identical layout, slightly warmer accent."""
+    img = vertical_gradient((720, 320), (10, 14, 22), (22, 28, 44))
     d = ImageDraw.Draw(img)
-    d.ellipse([(12, 12), (84, 84)], fill=fg)
-    d.text((34, 28), "α", fill=bg, font=font(40))
+    d.rectangle([(60, 80), (660, 240)], fill=(120, 175, 245))
+    d.rectangle([(60, 80), (660, 90)], fill=(170, 205, 255))
+    d.text((90, 110), "alt", fill=(10, 14, 22), font=font(72))
+    d.text((92, 200), "pure-Rust VCS", fill=(10, 14, 22), font=font(22))
     img.save(path, "PNG", optimize=True)
 
-def landscape(path: Path, seed: int, *, palette):
+def banner_v3(path):
+    """C3 rebrand: copper palette, new layout — sidebar + icon strip."""
+    img = horizontal_gradient((720, 320), (16, 22, 32), (28, 22, 16))
+    d = ImageDraw.Draw(img)
+    # left vertical accent
+    d.rectangle([(0, 0), (160, 320)], fill=(232, 168, 124))
+    # right column: wordmark + tagline
+    d.text((200, 60), "alt", fill=(232, 168, 124), font=font(90))
+    d.text((200, 170), "format-aware diff", fill=(220, 220, 230), font=font(26))
+    d.text((200, 210), "PNG · OOXML · JSON · TOML", fill=(160, 175, 200), font=font(18))
+    # icon strip (four squares)
+    palette = [(95, 175, 250), (109, 200, 159), (232, 168, 124), (245, 159, 159)]
+    for i, c in enumerate(palette):
+        x = 200 + i * 56
+        d.rectangle([(x, 260), (x + 40, 290)], fill=c)
+        d.rectangle([(x + 6, 266), (x + 34, 284)], fill=(16, 22, 32))
+    # diagonal corner stripes
+    for off in range(0, 160, 12):
+        d.line([(0, off), (off, 0)], fill=(255, 220, 180), width=1)
+    img.save(path, "PNG", optimize=True)
+
+def banner_v4(path):
+    """C8 final: re-coloured + extra microcopy + sparkline."""
+    img = horizontal_gradient((720, 320), (13, 17, 23), (32, 20, 14))
+    d = ImageDraw.Draw(img)
+    d.rectangle([(0, 0), (160, 320)], fill=(232, 168, 124))
+    d.text((200, 50), "alt", fill=(232, 168, 124), font=font(90))
+    d.text((200, 160), "format-aware diff", fill=(220, 220, 230), font=font(26))
+    d.text((200, 200), "PNG · OOXML · JSON · TOML · ZIP", fill=(160, 175, 200), font=font(18))
+    d.text((200, 230), "alt.golia.jp", fill=(120, 135, 160), font=font(16))
+    # sparkline: trend through the icon strip
+    pts = [(200 + i * 6, 290 - int(20 * math.sin(i / 4))) for i in range(80)]
+    for a, b in zip(pts, pts[1:]):
+        d.line([a, b], fill=(232, 168, 124), width=2)
+    # corner stripes
+    for off in range(0, 160, 10):
+        d.line([(0, off), (off, 0)], fill=(255, 220, 180), width=1)
+    img.save(path, "PNG", optimize=True)
+
+# ── icon (a small companion mark) ──────────────────────────────────
+def icon_v1(path):
+    img = vertical_gradient((128, 128), (10, 14, 22), (22, 28, 44))
+    d = ImageDraw.Draw(img)
+    d.ellipse([(20, 20), (108, 108)], fill=(90, 160, 250))
+    d.text((44, 36), "α", fill=(10, 14, 22), font=font(54))
+    img.save(path, "PNG", optimize=True)
+
+def icon_v2(path):
+    """Copper version with inner ring."""
+    img = vertical_gradient((128, 128), (10, 14, 22), (22, 28, 44))
+    d = ImageDraw.Draw(img)
+    d.ellipse([(16, 16), (112, 112)], fill=(232, 168, 124))
+    d.ellipse([(36, 36), (92, 92)], fill=(10, 14, 22))
+    d.text((46, 50), "α", fill=(232, 168, 124), font=font(40))
+    img.save(path, "PNG", optimize=True)
+
+def icon_v3(path):
+    """Final mark: notched ring + small accent."""
+    img = vertical_gradient((128, 128), (13, 17, 23), (32, 20, 14))
+    d = ImageDraw.Draw(img)
+    d.ellipse([(12, 12), (116, 116)], fill=(232, 168, 124))
+    d.ellipse([(28, 28), (100, 100)], fill=(13, 17, 23))
+    d.text((44, 38), "α", fill=(232, 168, 124), font=font(54))
+    # bottom-right notch dot
+    d.ellipse([(94, 94), (118, 118)], fill=(120, 175, 245))
+    img.save(path, "PNG", optimize=True)
+
+# ── landscape (the editorial photograph) ──────────────────────────
+def landscape(path, *, seed, palette):
     rng = random.Random(seed)
-    img = Image.new("RGB", (640, 360), palette["sky"])
+    img = vertical_gradient((800, 420), palette["sky_top"], palette["sky_bottom"])
     d = ImageDraw.Draw(img)
-    # sun
-    d.ellipse([(420, 50), (560, 190)], fill=palette["sun"])
+    # sun / moon
+    d.ellipse([(520, 60), (700, 240)], fill=palette["sun"])
     # rolling hills
-    horizon = 220
+    horizon = 250
     for i, hue in enumerate(palette["hills"]):
-        offset = horizon + i * 25
+        offset = horizon + i * 30
         pts = [(0, offset)]
-        for x in range(0, 641, 80):
-            jitter = rng.randint(-12, 12)
+        for x in range(0, 801, 60):
+            jitter = rng.randint(-14, 14)
             pts.append((x, offset + jitter))
-        pts.append((640, 360))
-        pts.append((0, 360))
+        pts.append((800, 420))
+        pts.append((0, 420))
         d.polygon(pts, fill=hue)
-    # scattered "stars" (texture)
-    for _ in range(rng.randint(20, 60)):
-        x, y = rng.randint(0, 639), rng.randint(0, 200)
-        d.point((x, y), fill=palette["star"])
+    # foreground trees
+    for x in range(40, 800, 120):
+        h = rng.randint(40, 90)
+        d.polygon(
+            [(x - 8, 420), (x + 8, 420), (x, 420 - h)],
+            fill=palette["tree"],
+        )
+    # stars / fireflies
+    for _ in range(rng.randint(30, 70)):
+        x, y = rng.randint(0, 799), rng.randint(0, 200)
+        d.point((x, y), fill=palette["spark"])
+    img = img.filter(ImageFilter.SMOOTH)
     img.save(path, "PNG", optimize=True)
 
-def docx_doc(path: Path, *, title, sections):
+# ── dashboard (introduced in C6, evolved in C8) ───────────────────
+def dashboard_v1(path):
+    img = Image.new("RGB", (720, 440), (13, 17, 23))
+    d = ImageDraw.Draw(img)
+    d.rectangle([(0, 0), (720, 48)], fill=(22, 28, 38))
+    d.text((20, 14), "alt — dashboard", fill=(232, 168, 124), font=font(20))
+    d.text((560, 16), "live · v0.3", fill=(125, 135, 155), font=font(14))
+    cards = [
+        ("repos hosted",  "12",  (90, 160, 250)),
+        ("commits today", "284", (109, 200, 159)),
+        ("pushes / hr",   "47",  (232, 168, 124)),
+    ]
+    for i, (label, val, accent) in enumerate(cards):
+        x = 20 + i * 230
+        d.rectangle([(x, 70), (x + 210, 170)], fill=(22, 28, 38))
+        d.rectangle([(x, 70), (x + 6, 170)], fill=accent)
+        d.text((x + 20, 86), label.upper(), fill=(125, 135, 155), font=font(12))
+        d.text((x + 20, 110), val, fill=(230, 235, 245), font=font(38))
+    d.rectangle([(20, 200), (700, 420)], fill=(22, 28, 38))
+    d.text((30, 212), "pushes by hour", fill=(232, 168, 124), font=font(14))
+    bars = [12, 19, 24, 31, 28, 33, 41, 38, 30, 22, 18, 24]
+    for i, h in enumerate(bars):
+        x = 40 + i * 54
+        bar_h = h * 4
+        d.rectangle(
+            [(x, 400 - bar_h), (x + 36, 400)],
+            fill=(90, 160, 250) if i % 3 else (232, 168, 124),
+        )
+        d.text((x + 6, 405), f"{i:02d}", fill=(125, 135, 155), font=font(11))
+    img.save(path, "PNG", optimize=True)
+
+def dashboard_v2(path):
+    """Refresh: bigger numbers (org tier launched), reshuffled card
+    accents, replaced the bar chart with a line+area sparkline of a
+    different metric. Same dimensions so the comparison reads cleanly."""
+    img = Image.new("RGB", (720, 440), (13, 17, 23))
+    d = ImageDraw.Draw(img)
+    d.rectangle([(0, 0), (720, 48)], fill=(22, 28, 38))
+    d.text((20, 14), "alt — dashboard", fill=(232, 168, 124), font=font(20))
+    d.text((550, 16), "live · v1.0", fill=(109, 200, 159), font=font(14))
+    cards = [
+        ("repos hosted",   "248", (232, 168, 124)),
+        ("commits / day",  "3.1k", (90, 160, 250)),
+        ("pushes / hr",    "412",  (109, 200, 159)),
+    ]
+    for i, (label, val, accent) in enumerate(cards):
+        x = 20 + i * 230
+        d.rectangle([(x, 70), (x + 210, 170)], fill=(22, 28, 38))
+        d.rectangle([(x, 70), (x + 6, 170)], fill=accent)
+        d.text((x + 20, 86), label.upper(), fill=(125, 135, 155), font=font(12))
+        d.text((x + 20, 110), val, fill=(230, 235, 245), font=font(38))
+    # area + line chart (replaces the bar chart)
+    d.rectangle([(20, 200), (700, 420)], fill=(22, 28, 38))
+    d.text((30, 212), "concurrent connections", fill=(232, 168, 124), font=font(14))
+    series = [
+        38, 42, 51, 60, 72, 85, 96, 108, 121, 132,
+        142, 150, 156, 161, 165, 168, 169, 168, 165, 162,
+        158, 153, 146, 138,
+    ]
+    pts = []
+    for i, v in enumerate(series):
+        x = 40 + i * 27
+        y = 410 - int(v * 1.15)
+        pts.append((x, y))
+    # filled area
+    area = pts + [(pts[-1][0], 415), (pts[0][0], 415)]
+    d.polygon(area, fill=(28, 38, 60))
+    # line
+    for a, b in zip(pts, pts[1:]):
+        d.line([a, b], fill=(90, 160, 250), width=2)
+    # markers
+    for (x, y) in pts:
+        d.ellipse([(x - 2, y - 2), (x + 2, y + 2)], fill=(232, 168, 124))
+    img.save(path, "PNG", optimize=True)
+
+# ── OOXML helpers ─────────────────────────────────────────────────
+def docx_doc(path, *, title, sections):
     doc = Document()
     h = doc.add_heading(title, level=0)
     h.runs[0].font.color.rgb = RGBColor(0x1F, 0x4E, 0xD8)
@@ -114,7 +292,7 @@ def docx_doc(path: Path, *, title, sections):
             run.font.size = Pt(11)
     doc.save(path)
 
-def xlsx_book(path: Path, *, sheets):
+def xlsx_book(path, *, sheets):
     wb = Workbook()
     wb.remove(wb.active)
     for name, header, rows in sheets:
@@ -128,27 +306,69 @@ def xlsx_book(path: Path, *, sheets):
                 ws.cell(row=r, column=c, value=value)
     wb.save(path)
 
-def zip_bundle(path: Path, members):
+# ── zip ───────────────────────────────────────────────────────────
+def zip_bundle(path, members):
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         for name, data in members.items():
             z.writestr(name, data if isinstance(data, (bytes, bytearray)) else data.encode())
     path.write_bytes(buf.getvalue())
+
+# ── SVG (kept as plain text so git / alt's text diff renders it,
+#         but the layout deliberately changes structurally between
+#         versions so the diff carries real value). ──────────────
+SVG_V1 = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <rect width="128" height="128" fill="#0d1117"/>
+  <circle cx="64" cy="64" r="44" fill="#5aa0fa"/>
+  <text x="64" y="78" text-anchor="middle"
+        font-family="JetBrains Mono, monospace" font-size="48" fill="#0d1117">α</text>
+</svg>
+"""
+
+SVG_V2 = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#e8a87c"/>
+      <stop offset="100%" stop-color="#d68953"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" fill="#0d1117"/>
+  <circle cx="64" cy="64" r="48" fill="url(#g)"/>
+  <circle cx="64" cy="64" r="30" fill="#0d1117"/>
+  <text x="64" y="78" text-anchor="middle"
+        font-family="JetBrains Mono, monospace" font-size="40" fill="#e8a87c">α</text>
+</svg>
+"""
+
+SVG_V3 = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 224 96" width="224" height="96">
+  <defs>
+    <linearGradient id="copper" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#e8a87c"/>
+      <stop offset="100%" stop-color="#d68953"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#f3c79a"/>
+      <stop offset="100%" stop-color="#b8723a"/>
+    </linearGradient>
+  </defs>
+  <rect width="224" height="96" rx="16" fill="#0d1117"/>
+  <g transform="translate(48, 48)">
+    <circle r="32" fill="url(#copper)"/>
+    <circle r="22" fill="#0d1117"/>
+    <circle r="22" fill="none" stroke="url(#ring)" stroke-width="2"/>
+    <text x="0" y="8" text-anchor="middle"
+          font-family="JetBrains Mono, monospace" font-size="28"
+          fill="#e8a87c" font-weight="700">α</text>
+  </g>
+  <g transform="translate(96, 36)" font-family="Inter, sans-serif" fill="#e6edf3">
+    <text x="0" y="0" font-size="32" font-weight="700">alt</text>
+    <text x="0" y="22" font-size="12" fill="#7d8590" letter-spacing="1.5">PURE-RUST VCS</text>
+    <text x="0" y="38" font-size="11" fill="#5aa0fa">PNG · OOXML · JSON · TOML</text>
+  </g>
+</svg>
+"""
 HELPERS
 
-run_python() {
-    "$PYTHON" - "$DIR" "$1" <<EOF
-import sys
-sys.path.insert(0, "/tmp")
-from alt_demo_helpers import *  # noqa
-from pathlib import Path
-ROOT = Path(sys.argv[1])
-STEP = int(sys.argv[2])
-EOF
-}
-
-# We embed each step's body in a separate heredoc so it can use the
-# helpers via `exec(open('/tmp/alt-demo-helpers.py').read())`.
 step_python() {
     LABEL="$1"
     BODY="$2"
@@ -163,20 +383,25 @@ EOF
     git commit -q -m "$LABEL"
 }
 
+mkdir -p assets/img assets/docs assets/vector config archive
+
 # ─── C1: skeleton ───────────────────────────────────────────────────
-mkdir -p assets/img assets/docs config archive site
 step_python "demo: c1 — initial site skeleton
 
-PNG banner + icon, a Word press release, an Excel pricing book, a JSON
-config, a TOML manifest, a zip bundle. Sets up the four binary shapes
-alt's diff renderer can speak about, plus the two text shapes the
-semantic renderer handles." "
-banner(ROOT/'assets/img/banner.png', bg=(15,20,30), fg_block=(90,160,250), text='alt v1', secondary='pure-Rust VCS')
-icon(ROOT/'assets/img/icon.png', bg=(15,20,30), fg=(90,160,250))
-landscape(ROOT/'assets/img/landing.png', seed=1, palette={
-    'sky':(28, 36, 60), 'sun':(220, 200, 120),
-    'hills':[(80,90,140),(60,70,110),(40,50,80)],
-    'star':(220,210,150)})
+Every fixture shape is in place: a hero PNG with a gradient + wordmark,
+a companion PNG icon, an editorial landscape photo, a press release
+.docx, a pricing .xlsx, a JSON config, a TOML manifest, an SVG logo
+mark and a ZIP bundle. Subsequent commits each touch one facet so the
+product page can point at a specific diff renderer per commit." "
+banner_v1(ROOT/'assets/img/banner.png')
+icon_v1(ROOT/'assets/img/icon.png')
+landscape(ROOT/'assets/img/landing.png', seed=11, palette={
+    'sky_top': (24, 32, 60), 'sky_bottom': (60, 70, 110),
+    'sun': (220, 200, 120),
+    'hills': [(80,90,140),(60,70,110),(40,50,80)],
+    'tree': (24, 32, 48), 'spark': (220, 210, 150),
+})
+(ROOT/'assets/vector/logo.svg').write_text(SVG_V1)
 
 docx_doc(ROOT/'assets/docs/press.docx',
     title='alt — pure-Rust VCS',
@@ -208,7 +433,7 @@ xlsx_book(ROOT/'assets/docs/pricing.xlsx',
     'features': {'signing': True, 'diff': True, 'search': False},
     'endpoints': ['wire', 'api'],
     'metadata': {'created_at': '2026-06-01', 'license': 'MIT OR Apache-2.0'},
-}, indent=2) + '\n')
+}, indent=2) + '\\n')
 
 (ROOT/'config/Cargo.toml').write_text('''[package]
 name = \"alt-demo\"
@@ -231,59 +456,57 @@ zip_bundle(ROOT/'archive/bundle.zip', {
 })
 "
 
-# ─── C2: small visual tweak (PNG perceptual close) ────────────────
-step_python "demo: c2 — re-tone the banner (perceptual-close edit)
+# ─── C2: banner micro-edit (perceptual-close) ─────────────────────
+step_python "demo: c2 — banner micro-edit (perceptual-close PNG)
 
-Same composition, slightly warmer accent. PNG chunk-level diff shows
-IDAT changed; perceptual fingerprint distance is tiny because the image
-is structurally the same." "
-banner(ROOT/'assets/img/banner.png', bg=(15,20,30),
-       fg_block=(120,170,240), text='alt v1', secondary='pure-Rust VCS')
+Same composition; the accent block is one shade brighter and the top
+highlight strip warms by 30%. The PNG chunk diff sees IDAT change but
+the perceptual fingerprint distance stays near zero because the image
+is structurally identical." "
+banner_v2(ROOT/'assets/img/banner.png')
 "
 
-# ─── C3: big visual swap + new icon (perceptual-far) ──────────────
-step_python "demo: c3 — copper rebrand (perceptual-far PNG change)
+# ─── C3: copper rebrand — full layout change + new SVG ────────────
+step_python "demo: c3 — copper rebrand (perceptual-far PNG + SVG redesign)
 
-Hero banner re-laid-out in the copper accent that ships on alt.golia.jp:
-the colour block moves, a new bottom stripe is added, the text shifts.
-A structural change so the PNG perceptual fingerprint distance is much
-larger than C2's. Icon repainted to match." "
-from PIL import Image, ImageDraw
-def banner_v2(path, *, bg, fg, accent, text, secondary):
-    img = Image.new('RGB', (480, 240), bg)
-    d = ImageDraw.Draw(img)
-    # offset block
-    d.rectangle([(160, 20), (460, 150)], fill=fg)
-    # bottom stripe
-    d.rectangle([(0, 180), (480, 240)], fill=accent)
-    d.text((176, 50), text, fill=bg, font=font(38))
-    d.text((176, 110), secondary, fill=bg, font=font(18))
-    d.text((20, 198), '⌘ alt.golia.jp', fill=bg, font=font(16))
-    img.save(path, 'PNG', optimize=True)
-banner_v2(ROOT/'assets/img/banner.png',
-          bg=(15,20,30), fg=(232,168,124),
-          accent=(220, 140, 90),
-          text='alt v2', secondary='binary-aware diff')
-icon(ROOT/'assets/img/icon.png', bg=(15,20,30), fg=(232,168,124))
+Banner re-laid-out: gradient flipped horizontal, a left vertical
+accent stripe, the wordmark moved right of centre, a four-square icon
+strip and diagonal corner stripes added — the PNG perceptual
+fingerprint distance jumps because the silhouette is genuinely
+different. The SVG logo gains a gradient definition + an inner cut-out
+circle to match." "
+banner_v3(ROOT/'assets/img/banner.png')
+icon_v2(ROOT/'assets/img/icon.png')
+(ROOT/'assets/vector/logo.svg').write_text(SVG_V2)
 "
 
-# ─── C4: replace the photo (different scene) ──────────────────────
+# ─── C4: swap the landing photograph + new svg accent ─────────────
 step_python "demo: c4 — swap the landing photograph
 
-Brand-new landscape (warm desert palette instead of cool dusk). PNG
-chunks IHDR + IDAT both change; perceptual distance jumps near 1." "
-landscape(ROOT/'assets/img/landing.png', seed=2, palette={
-    'sky':(96, 60, 50), 'sun':(255, 220, 140),
-    'hills':[(200,120,80),(160,90,70),(110,60,50)],
-    'star':(255,240,200)})
+Brand-new editorial photo (warm desert palette in place of the cool
+dusk), and the SVG mark picks up a stroke ring around the centre cut.
+Both PNG fingerprints and SVG text diff carry real change here." "
+landscape(ROOT/'assets/img/landing.png', seed=22, palette={
+    'sky_top': (96, 60, 50), 'sky_bottom': (240, 180, 120),
+    'sun': (255, 220, 140),
+    'hills': [(200,120,80),(160,90,70),(110,60,50)],
+    'tree': (60, 30, 20), 'spark': (255, 240, 200),
+})
+# Tweak the SVG mark — add a faint stroke for the ring.
+svg = (ROOT/'assets/vector/logo.svg').read_text()
+svg = svg.replace('<circle cx=\"64\" cy=\"64\" r=\"30\" fill=\"#0d1117\"/>',
+                  '<circle cx=\"64\" cy=\"64\" r=\"30\" fill=\"#0d1117\" stroke=\"#e8a87c\" stroke-width=\"2\"/>')
+(ROOT/'assets/vector/logo.svg').write_text(svg)
 "
 
-# ─── C5: doc + ooxml edits ─────────────────────────────────────────
+# ─── C5: docx + xlsx walks ─────────────────────────────────────────
 step_python "demo: c5 — expand the press doc + update pricing sheet
 
-Adds a Differentiation section to the press release (.docx walks Word
-parts), and bumps the Org tier price plus toggles a few feature flags
-in the pricing workbook (.xlsx walks the Excel parts)." "
+Adds a Differentiation section to the .docx press release; bumps the
+Org pricing tier and adds two feature rows to the .xlsx workbook. The
+OOXML walk reports per-internal-part changes: only word/document.xml
+on the .docx side, two sheet xmls on the .xlsx side. git would show
+both files as opaque binary." "
 docx_doc(ROOT/'assets/docs/press.docx',
     title='alt — pure-Rust VCS',
     sections=[
@@ -314,12 +537,22 @@ xlsx_book(ROOT/'assets/docs/pricing.xlsx',
     ])
 "
 
-# ─── C6: zip restructure ───────────────────────────────────────────
-step_python "demo: c6 — restructure the bundle archive
+# ─── C6: bundle reshape + dashboard PNG + SVG wordmark ────────────
+step_python "demo: c6 — bundle reshape + dashboard mockup + SVG wordmark
 
-Adds a nested layout (assets/img + assets/style), drops the
-manifest.json, rewrites the changelog. ZIP member-level diff shows
-adds, removes, and renames across a non-trivial tree." "
+Three things happen at once so each renderer has work to do:
+
+1. archive/bundle.zip is rewritten into a real site layout (nested
+   docs / assets / styles), drops the loose manifest.json, adds a CSS
+   stylesheet and an SVG logo.
+2. assets/img/dashboard.png lands as a complex PNG (gradient title
+   bar, three accent-rail KPI cards, a 12-bar chart) — the first time
+   PNG content carries a meaningful amount of structure.
+3. assets/vector/logo.svg is redesigned end-to-end into a horizontal
+   wordmark with two gradient defs + multi-line text. The SVG text
+   diff now spans both the structure and the content." "
+dashboard_v1(ROOT/'assets/img/dashboard.png')
+(ROOT/'assets/vector/logo.svg').write_text(SVG_V3)
 zip_bundle(ROOT/'archive/bundle.zip', {
     'docs/README.md': 'alt — pure-Rust VCS demo bundle\\n',
     'docs/CHANGELOG.md': 'v0.2: copper rebrand, larger bundle, OOXML diff demos.\\n',
@@ -329,13 +562,13 @@ zip_bundle(ROOT/'archive/bundle.zip', {
 })
 "
 
-# ─── C7: semantic refactor — JSON + TOML ──────────────────────────
+# ─── C7: semantic refactor (JSON + TOML) ──────────────────────────
 step_python "demo: c7 — semantic refactor: JSON config + Cargo manifest
 
-JSON: max_size 1024 → 4096, search false → true, add 'sync', drop
-endpoints array. TOML: bump version, add toml + sha2 deps, drop one,
-flip an inline table field. The semantic renderer reports per-jq-path
-changes rather than the raw text diff." "
+JSON: max_size 1024 → 4096, search false → true, add 'sync', drop the
+endpoints array, add metadata.updated_at. TOML: bump version, add toml
++ sha2 deps, set lto + codegen-units, list authors. The semantic
+renderer reports per-jq-path changes; git would just show line diffs." "
 import json
 (ROOT/'config/settings.json').write_text(json.dumps({
     'name': 'alt-demo',
@@ -364,13 +597,17 @@ codegen-units = 1
 ''')
 "
 
-# ─── C8: combo commit — visual + content together ─────────────────
-step_python "demo: c8 — release-day combo: new section, new icon, new sheet tab
+# ─── C8: release-day combo ────────────────────────────────────────
+step_python "demo: c8 — release-day combo
 
-A realistic landing commit: the press release gains a Roadmap section,
-the icon picks up a tighter ring, the pricing book gets a new Limits
-sheet, and the bundle archive ships the matching style sheet." "
-icon(ROOT/'assets/img/icon.png', bg=(13,17,23), fg=(232,168,124))
+A realistic landing-day commit: banner picks up a sparkline trend +
+URL footer, icon gains a final notch dot, press release grows a
+Roadmap section, pricing book adds a Limits sheet, the SVG mark gets
+the gradient stroke ring, and the CSS bundle gains a print stylesheet.
+Every renderer has at least one row to show." "
+banner_v4(ROOT/'assets/img/banner.png')
+icon_v3(ROOT/'assets/img/icon.png')
+dashboard_v2(ROOT/'assets/img/dashboard.png')
 
 docx_doc(ROOT/'assets/docs/press.docx',
     title='alt — pure-Rust VCS',
@@ -409,6 +646,13 @@ xlsx_book(ROOT/'assets/docs/pricing.xlsx',
             ('Org', 1000, 256, 1_000_000),
         ]),
     ])
+
+# tighten the SVG mark — solid stroke ring with a brand-specific colour stop
+svg = (ROOT/'assets/vector/logo.svg').read_text()
+svg = svg.replace('stroke-width=\"2\"', 'stroke-width=\"3\"')
+svg = svg.replace('PNG · OOXML · JSON · TOML',
+                  'PNG · OOXML · JSON · TOML · ZIP')
+(ROOT/'assets/vector/logo.svg').write_text(svg)
 
 zip_bundle(ROOT/'archive/bundle.zip', {
     'docs/README.md': 'alt — pure-Rust VCS demo bundle\\n',
