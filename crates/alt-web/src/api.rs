@@ -192,9 +192,21 @@ pub fn handle_commit(
     Ok((200, body.into_bytes()))
 }
 
-/// `GET /api/repos/{name}/commits/{oid}/diff` — unified diff between
-/// the commit's tree and its first parent's tree. For the root commit,
-/// every file is shown as added.
+/// `GET /api/repos/{name}/commits/{oid}/diff` — per-file diff between
+/// the commit's tree and its first parent's tree. Each file picks the
+/// richest available `kind`:
+///
+/// - `structured` — JSON / TOML, semantic key-level changes via
+///   [`alt_diff::structured`].
+/// - `part_aware` — PNG (chunk-level) or ZIP/OOXML (member-level)
+///   summaries via [`alt_diff::part_aware`]. PNGs also carry the
+///   perceptual fingerprint distance from [`alt_diff::perceptual`] for
+///   "how visually different is this image".
+/// - `text` — fall-through line diff (unified patch text).
+/// - `binary` — neither side parseable; just `old_bytes` / `new_bytes`.
+///
+/// All kinds carry `old_oid` / `new_oid` (empty for add/delete sides) so
+/// the frontend can request raw blobs to render images, etc.
 pub fn handle_commit_diff(
     mr: &MultiRepo,
     name: &str,
@@ -210,7 +222,6 @@ pub fn handle_commit_diff(
         .ok_or_else(|| ApiError::Internal(format!("commit {oid} has no tree")))?;
     let old_tree = commit.parents().next();
 
-    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
     let new_entries = flatten_tree(&repo, &new_tree)?;
     let old_entries = match &old_tree {
         Some(p) => {
@@ -224,22 +235,64 @@ pub fn handle_commit_diff(
         }
         None => Vec::new(),
     };
-    diff_trees(&repo, &old_entries, &new_entries, &mut files)?;
+    let files = diff_trees(&repo, &old_entries, &new_entries)?;
 
     let mut entries: Vec<String> = Vec::with_capacity(files.len());
-    for (path, patch) in files {
-        let patch_str = String::from_utf8_lossy(&patch).into_owned();
-        entries.push(format!(
-            "{{\"path\":{},\"patch\":{}}}",
-            json_string(&path),
-            json_string(&patch_str)
-        ));
+    for file in &files {
+        entries.push(file.to_json());
     }
     let body = format!(
         "{{\"schema_version\":1,\"oid\":\"{oid}\",\"files\":[{}]}}",
         entries.join(",")
     );
     Ok((200, body.into_bytes()))
+}
+
+/// `GET /api/repos/{name}/blob/{oid}/raw` — raw blob bytes, with a
+/// best-effort Content-Type based on a magic-byte sniff. Used by the
+/// frontend to embed PNGs from the diff view as `<img>` elements.
+pub fn handle_blob_raw(
+    mr: &MultiRepo,
+    name: &str,
+    oid_str: &str,
+) -> Result<(u16, Vec<u8>, &'static str), ApiError> {
+    let repo = mr.open(name)?;
+    let oid = parse_oid(oid_str)?;
+    let raw = repo
+        .read_object(&oid)
+        .map_err(|e| ApiError::Internal(format!("read_object {oid}: {e}")))?
+        .ok_or_else(|| ApiError::NotFound(format!("blob {oid}")))?;
+    if raw.kind != ObjectKind::Blob {
+        return Err(ApiError::NotFound(format!(
+            "object {oid} is {:?}, not a blob",
+            raw.kind
+        )));
+    }
+    let mime = sniff_mime(&raw.data);
+    Ok((200, raw.data, mime))
+}
+
+fn sniff_mime(data: &[u8]) -> &'static str {
+    if data.starts_with(&[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) {
+        return "image/png";
+    }
+    if data.starts_with(&[0xff, 0xd8, 0xff]) {
+        return "image/jpeg";
+    }
+    if data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a") {
+        return "image/gif";
+    }
+    if data.starts_with(b"RIFF") && data.len() > 11 && &data[8..12] == b"WEBP" {
+        return "image/webp";
+    }
+    if data.starts_with(b"PK\x03\x04") || data.starts_with(b"PK\x05\x06") {
+        return "application/zip";
+    }
+    if alt_diff::is_binary(data) {
+        "application/octet-stream"
+    } else {
+        "text/plain; charset=utf-8"
+    }
 }
 
 /// `GET /api/repos/{name}/tree/{oid}` — list one tree level (mode, name,
@@ -388,24 +441,188 @@ fn walk(
     Ok(())
 }
 
+/// One file's diff in the response. The renderer picks shape by `kind`.
+pub(crate) enum FileDiff {
+    Text {
+        path: String,
+        old_oid: String,
+        new_oid: String,
+        patch: String,
+    },
+    Structured {
+        path: String,
+        format: &'static str,
+        old_oid: String,
+        new_oid: String,
+        paths: Vec<(String, alt_diff::structured::PathChange)>,
+    },
+    PartAware {
+        path: String,
+        format: &'static str,
+        old_oid: String,
+        new_oid: String,
+        old_bytes: usize,
+        new_bytes: usize,
+        parts: Vec<(String, alt_diff::part_aware::PartChange)>,
+        /// Perceptual fingerprint distance for PNG (0..=1). `None` when
+        /// the kind isn't PNG or fingerprint couldn't be computed.
+        perceptual_distance: Option<f64>,
+    },
+    Binary {
+        path: String,
+        old_oid: String,
+        new_oid: String,
+        old_bytes: usize,
+        new_bytes: usize,
+    },
+}
+
+impl FileDiff {
+    fn to_json(&self) -> String {
+        match self {
+            FileDiff::Text {
+                path,
+                old_oid,
+                new_oid,
+                patch,
+            } => format!(
+                "{{\"kind\":\"text\",\"path\":{},\"old_oid\":{},\"new_oid\":{},\"patch\":{}}}",
+                json_string(path),
+                json_string(old_oid),
+                json_string(new_oid),
+                json_string(patch),
+            ),
+            FileDiff::Structured {
+                path,
+                format,
+                old_oid,
+                new_oid,
+                paths,
+            } => {
+                let items: Vec<String> = paths
+                    .iter()
+                    .map(|(p, change)| match change {
+                        alt_diff::structured::PathChange::Changed { old_repr, new_repr } => {
+                            format!(
+                                "{{\"path\":{},\"change\":\"changed\",\"old\":{},\"new\":{}}}",
+                                json_string(p),
+                                json_string(old_repr),
+                                json_string(new_repr),
+                            )
+                        }
+                        alt_diff::structured::PathChange::Added { new_repr } => format!(
+                            "{{\"path\":{},\"change\":\"added\",\"new\":{}}}",
+                            json_string(p),
+                            json_string(new_repr),
+                        ),
+                        alt_diff::structured::PathChange::Removed { old_repr } => format!(
+                            "{{\"path\":{},\"change\":\"removed\",\"old\":{}}}",
+                            json_string(p),
+                            json_string(old_repr),
+                        ),
+                    })
+                    .collect();
+                format!(
+                    "{{\"kind\":\"structured\",\"path\":{},\"format\":\"{}\",\"old_oid\":{},\"new_oid\":{},\"paths\":[{}]}}",
+                    json_string(path),
+                    format,
+                    json_string(old_oid),
+                    json_string(new_oid),
+                    items.join(","),
+                )
+            }
+            FileDiff::PartAware {
+                path,
+                format,
+                old_oid,
+                new_oid,
+                old_bytes,
+                new_bytes,
+                parts,
+                perceptual_distance,
+            } => {
+                let items: Vec<String> = parts
+                    .iter()
+                    .map(|(name, change)| match change {
+                        alt_diff::part_aware::PartChange::Same => format!(
+                            "{{\"name\":{},\"change\":\"same\"}}",
+                            json_string(name)
+                        ),
+                        alt_diff::part_aware::PartChange::Changed {
+                            old_bytes: ob,
+                            new_bytes: nb,
+                        } => format!(
+                            "{{\"name\":{},\"change\":\"changed\",\"old_bytes\":{},\"new_bytes\":{}}}",
+                            json_string(name),
+                            ob,
+                            nb,
+                        ),
+                        alt_diff::part_aware::PartChange::Added { new_bytes: nb } => format!(
+                            "{{\"name\":{},\"change\":\"added\",\"new_bytes\":{}}}",
+                            json_string(name),
+                            nb,
+                        ),
+                        alt_diff::part_aware::PartChange::Removed { old_bytes: ob } => format!(
+                            "{{\"name\":{},\"change\":\"removed\",\"old_bytes\":{}}}",
+                            json_string(name),
+                            ob,
+                        ),
+                    })
+                    .collect();
+                let pd = match perceptual_distance {
+                    Some(d) => format!("{d}"),
+                    None => "null".to_string(),
+                };
+                format!(
+                    "{{\"kind\":\"part_aware\",\"path\":{},\"format\":\"{}\",\"old_oid\":{},\"new_oid\":{},\"old_bytes\":{},\"new_bytes\":{},\"perceptual_distance\":{},\"parts\":[{}]}}",
+                    json_string(path),
+                    format,
+                    json_string(old_oid),
+                    json_string(new_oid),
+                    old_bytes,
+                    new_bytes,
+                    pd,
+                    items.join(","),
+                )
+            }
+            FileDiff::Binary {
+                path,
+                old_oid,
+                new_oid,
+                old_bytes,
+                new_bytes,
+            } => format!(
+                "{{\"kind\":\"binary\",\"path\":{},\"old_oid\":{},\"new_oid\":{},\"old_bytes\":{},\"new_bytes\":{}}}",
+                json_string(path),
+                json_string(old_oid),
+                json_string(new_oid),
+                old_bytes,
+                new_bytes,
+            ),
+        }
+    }
+}
+
 fn diff_trees(
     repo: &Repository,
     old: &[(String, ObjectId)],
     new: &[(String, ObjectId)],
-    out: &mut Vec<(String, Vec<u8>)>,
-) -> Result<(), ApiError> {
+) -> Result<Vec<FileDiff>, ApiError> {
     use std::collections::BTreeMap;
     let old_map: BTreeMap<&str, &ObjectId> = old.iter().map(|(p, o)| (p.as_str(), o)).collect();
     let new_map: BTreeMap<&str, &ObjectId> = new.iter().map(|(p, o)| (p.as_str(), o)).collect();
     let mut all: Vec<&str> = old_map.keys().chain(new_map.keys()).copied().collect();
     all.sort();
     all.dedup();
+
+    let mut out = Vec::new();
     for path in all {
         let o_oid = old_map.get(path);
         let n_oid = new_map.get(path);
-        match (o_oid, n_oid) {
-            (Some(a), Some(b)) if a == b => continue,
-            _ => {}
+        if let (Some(a), Some(b)) = (o_oid, n_oid)
+            && a == b
+        {
+            continue;
         }
         let old_bytes = match o_oid {
             Some(o) => read_blob(repo, o)?,
@@ -415,11 +632,72 @@ fn diff_trees(
             Some(o) => read_blob(repo, o)?,
             None => Vec::new(),
         };
+        let old_oid_str = o_oid.map(|o| o.to_string()).unwrap_or_default();
+        let new_oid_str = n_oid.map(|o| o.to_string()).unwrap_or_default();
+
+        // Pick the richest diff kind we can produce. Order: structured
+        // (semantic JSON/TOML) → part-aware (PNG chunk / ZIP / OOXML) →
+        // text unified → opaque binary.
+        if let Some(summary) = alt_diff::structured::summary_for_path(path, &old_bytes, &new_bytes)
+        {
+            let format = match summary.kind {
+                alt_diff::structured::StructKind::Json => "json",
+                alt_diff::structured::StructKind::Toml => "toml",
+            };
+            out.push(FileDiff::Structured {
+                path: path.to_string(),
+                format,
+                old_oid: old_oid_str,
+                new_oid: new_oid_str,
+                paths: summary.paths,
+            });
+            continue;
+        }
+        if let Some(summary) = alt_diff::part_aware::summary(&old_bytes, &new_bytes) {
+            let format = match summary.kind {
+                alt_diff::part_aware::PartKind::Png => "png",
+                alt_diff::part_aware::PartKind::Zip => "zip",
+            };
+            let perceptual_distance = if matches!(summary.kind, alt_diff::part_aware::PartKind::Png)
+            {
+                let old_fp = alt_diff::perceptual::fingerprint(&old_bytes);
+                let new_fp = alt_diff::perceptual::fingerprint(&new_bytes);
+                alt_diff::perceptual::distance(old_fp, new_fp)
+            } else {
+                None
+            };
+            out.push(FileDiff::PartAware {
+                path: path.to_string(),
+                format,
+                old_oid: old_oid_str,
+                new_oid: new_oid_str,
+                old_bytes: old_bytes.len(),
+                new_bytes: new_bytes.len(),
+                parts: summary.parts,
+                perceptual_distance,
+            });
+            continue;
+        }
+        if alt_diff::is_binary(&old_bytes) || alt_diff::is_binary(&new_bytes) {
+            out.push(FileDiff::Binary {
+                path: path.to_string(),
+                old_oid: old_oid_str,
+                new_oid: new_oid_str,
+                old_bytes: old_bytes.len(),
+                new_bytes: new_bytes.len(),
+            });
+            continue;
+        }
         let mut patch = Vec::new();
         write_unified_with_headers(&mut patch, path, &old_bytes, &new_bytes);
-        out.push((path.to_string(), patch));
+        out.push(FileDiff::Text {
+            path: path.to_string(),
+            old_oid: old_oid_str,
+            new_oid: new_oid_str,
+            patch: String::from_utf8_lossy(&patch).into_owned(),
+        });
     }
-    Ok(())
+    Ok(out)
 }
 
 fn read_blob(repo: &Repository, oid: &ObjectId) -> Result<Vec<u8>, ApiError> {

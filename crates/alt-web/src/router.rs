@@ -47,6 +47,27 @@ pub fn serve(bind: &str, mr: MultiRepo, workers: usize) -> std::io::Result<()> {
     Ok(())
 }
 
+/// One handled request's response shape. Most endpoints return JSON;
+/// `/api/repos/{name}/blob/{oid}/raw` returns binary with a sniffed
+/// MIME so the frontend can embed images.
+enum RouteResp {
+    Json {
+        status: u16,
+        body: Vec<u8>,
+    },
+    Raw {
+        status: u16,
+        body: Vec<u8>,
+        mime: &'static str,
+    },
+}
+
+impl From<(u16, Vec<u8>)> for RouteResp {
+    fn from((status, body): (u16, Vec<u8>)) -> Self {
+        RouteResp::Json { status, body }
+    }
+}
+
 fn dispatch(mr: &MultiRepo, req: Request) {
     if req.method() != &Method::Get {
         respond_json(req, 405, b"{\"error\":\"method not allowed\"}");
@@ -57,18 +78,20 @@ fn dispatch(mr: &MultiRepo, req: Request) {
         None => (req.url(), ""),
     };
 
-    let (status, body) = route(mr, path, query);
-    respond_json(req, status, &body);
+    match route(mr, path, query) {
+        RouteResp::Json { status, body } => respond_json(req, status, &body),
+        RouteResp::Raw { status, body, mime } => respond_raw(req, status, body, mime),
+    }
 }
 
-fn route(mr: &MultiRepo, path: &str, query: &str) -> (u16, Vec<u8>) {
+fn route(mr: &MultiRepo, path: &str, query: &str) -> RouteResp {
     // /api/version (no repo)
     if path == "/api/version" {
-        return api::handle_version();
+        return api::handle_version().into();
     }
     // /api/repos
     if path == "/api/repos" {
-        return collapse(api::handle_repos(mr));
+        return collapse(api::handle_repos(mr)).into();
     }
 
     // /api/repos/{name}[/...]
@@ -85,17 +108,18 @@ fn route(mr: &MultiRepo, path: &str, query: &str) -> (u16, Vec<u8>) {
             200,
             b"alt.golia.jp \xe2\x80\x94 pure-Rust VCS. API at /api/. Source: https://github.com/goliajp/alt\n"
                 .to_vec(),
-        );
+        )
+            .into();
     }
-    (404, b"{\"error\":\"not found\"}".to_vec())
+    (404u16, b"{\"error\":\"not found\"}".to_vec()).into()
 }
 
-fn route_repo(mr: &MultiRepo, name: &str, tail: &str, query: &str) -> (u16, Vec<u8>) {
+fn route_repo(mr: &MultiRepo, name: &str, tail: &str, query: &str) -> RouteResp {
     if tail.is_empty() {
-        return collapse(api::handle_repo(mr, name));
+        return collapse(api::handle_repo(mr, name)).into();
     }
     if tail == "refs" {
-        return collapse(api::handle_refs(mr, name));
+        return collapse(api::handle_refs(mr, name)).into();
     }
     if tail == "log" {
         let n = parse_query(query, "n")
@@ -109,7 +133,8 @@ fn route_repo(mr: &MultiRepo, name: &str, tail: &str, query: &str) -> (u16, Vec<
             ref_name.as_deref(),
             n,
             before.as_deref(),
-        ));
+        ))
+        .into();
     }
 
     // /api/repos/{name}/commits/{oid}[/diff]
@@ -119,23 +144,35 @@ fn route_repo(mr: &MultiRepo, name: &str, tail: &str, query: &str) -> (u16, Vec<
             None => (rest, ""),
         };
         if action.is_empty() {
-            return collapse(api::handle_commit(mr, name, oid));
+            return collapse(api::handle_commit(mr, name, oid)).into();
         }
         if action == "diff" {
-            return collapse(api::handle_commit_diff(mr, name, oid));
+            return collapse(api::handle_commit_diff(mr, name, oid)).into();
         }
     }
 
     // /api/repos/{name}/tree/{spec}
     if let Some(spec) = tail.strip_prefix("tree/") {
-        return collapse(api::handle_tree(mr, name, spec));
+        return collapse(api::handle_tree(mr, name, spec)).into();
     }
 
-    // /api/repos/{name}/blob/{oid}
-    if let Some(oid) = tail.strip_prefix("blob/") {
-        return collapse(api::handle_blob(mr, name, oid));
+    // /api/repos/{name}/blob/{oid}[/raw]
+    if let Some(rest) = tail.strip_prefix("blob/") {
+        let (oid, action) = match rest.find('/') {
+            Some(i) => (&rest[..i], &rest[i + 1..]),
+            None => (rest, ""),
+        };
+        if action.is_empty() {
+            return collapse(api::handle_blob(mr, name, oid)).into();
+        }
+        if action == "raw" {
+            return match api::handle_blob_raw(mr, name, oid) {
+                Ok((status, body, mime)) => RouteResp::Raw { status, body, mime },
+                Err(e) => error_response(&e).into(),
+            };
+        }
     }
-    (404, b"{\"error\":\"not found\"}".to_vec())
+    (404u16, b"{\"error\":\"not found\"}".to_vec()).into()
 }
 
 fn parse_query(query: &str, key: &str) -> Option<String> {
@@ -204,6 +241,24 @@ fn respond_json(req: Request, status: u16, body: &[u8]) {
         resp.add_header(h);
     }
     // CORS: read-only API, no auth, public domain — let any origin hit it.
+    if let Ok(h) = Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]) {
+        resp.add_header(h);
+    }
+    let _ = req.respond(resp);
+}
+
+fn respond_raw(req: Request, status: u16, body: Vec<u8>, mime: &'static str) {
+    let mut resp = Response::from_data(body).with_status_code(StatusCode(status));
+    if let Ok(h) = Header::from_bytes(b"Content-Type", mime.as_bytes()) {
+        resp.add_header(h);
+    }
+    // Raw blobs are content-addressed (oid in URL) — cache aggressively.
+    if let Ok(h) = Header::from_bytes(
+        &b"Cache-Control"[..],
+        &b"public, max-age=31536000, immutable"[..],
+    ) {
+        resp.add_header(h);
+    }
     if let Ok(h) = Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]) {
         resp.add_header(h);
     }

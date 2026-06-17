@@ -1,6 +1,11 @@
 import { Link, useParams } from "react-router";
 import { useCommit, useCommitDiff } from "../lib/hooks";
 import { DiffView } from "../components/DiffView";
+import {
+  BinaryDiffSummary,
+  PartAwareDiff,
+  StructuredDiff,
+} from "../components/BinaryDiff";
 import { formatRelative } from "../lib/format";
 
 export function Commit() {
@@ -113,16 +118,29 @@ export function Commit() {
         ) : (
           diff.data?.files.map((file) => (
             <div
-              key={file.path}
+              key={file.path + file.kind}
               className="bg-canvas-subtle border border-border-default rounded-lg overflow-hidden"
             >
               <div className="flex items-center gap-3 border-b border-border-default px-4 py-3 bg-canvas-inset/40">
                 <span className="font-mono text-warm">●</span>
-                <span className="font-mono text-sm text-fg-default">
+                <span className="font-mono text-sm text-fg-default flex-1">
                   {file.path}
                 </span>
+                <span className="text-[10px] uppercase tracking-[0.22em] font-mono text-fg-subtle border border-border-muted rounded px-1.5 py-0.5">
+                  {file.kind === "part_aware" || file.kind === "structured"
+                    ? file.format
+                    : file.kind}
+                </span>
               </div>
-              <DiffView patch={file.patch} path={file.path} />
+              {file.kind === "text" ? (
+                <DiffView patch={file.patch} path={file.path} />
+              ) : file.kind === "structured" ? (
+                <StructuredDiff repo={name} file={file} />
+              ) : file.kind === "part_aware" ? (
+                <PartAwareDiff repo={name} file={file} />
+              ) : (
+                <BinaryDiffSummary file={file} />
+              )}
             </div>
           ))
         )}

@@ -42,9 +42,62 @@ export interface CommitDetail {
   committer: Author;
 }
 
-export interface DiffFile {
+export type DiffFile =
+  | DiffText
+  | DiffStructured
+  | DiffPartAware
+  | DiffBinary;
+
+export interface DiffText {
+  kind: "text";
   path: string;
+  old_oid: string;
+  new_oid: string;
   patch: string;
+}
+
+export interface StructuredPath {
+  path: string;
+  change: "changed" | "added" | "removed";
+  old?: string;
+  new?: string;
+}
+
+export interface DiffStructured {
+  kind: "structured";
+  path: string;
+  format: "json" | "toml";
+  old_oid: string;
+  new_oid: string;
+  paths: StructuredPath[];
+}
+
+export interface PartChange {
+  name: string;
+  change: "same" | "changed" | "added" | "removed";
+  old_bytes?: number;
+  new_bytes?: number;
+}
+
+export interface DiffPartAware {
+  kind: "part_aware";
+  path: string;
+  format: "png" | "zip";
+  old_oid: string;
+  new_oid: string;
+  old_bytes: number;
+  new_bytes: number;
+  perceptual_distance: number | null;
+  parts: PartChange[];
+}
+
+export interface DiffBinary {
+  kind: "binary";
+  path: string;
+  old_oid: string;
+  new_oid: string;
+  old_bytes: number;
+  new_bytes: number;
 }
 
 export type TreeEntryKind = "blob" | "tree" | "commit";
