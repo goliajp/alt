@@ -1,9 +1,12 @@
 import { Link, useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { api, type Blob, type TreeEntry, type TreeEntryKind } from "../lib/api";
-import { formatBytes } from "../lib/format";
+import { useFileHistory } from "../lib/hooks";
+import { formatBytes, formatRelative } from "../lib/format";
 import { detectLang } from "../lib/lang";
 import { SyntaxBlock } from "../components/SyntaxBlock";
+import { ImagePreview } from "../components/ImagePreview";
+import { isImagePath, isRasterImagePath } from "../lib/image";
 
 type Result =
   | { kind: "tree"; tree: { oid: string; entries: TreeEntry[] }; trail: Crumb[] }
@@ -97,8 +100,11 @@ export function Browse() {
         </div>
       ) : browse.data?.kind === "blob" ? (
         <BlobView
+          repo={name}
           blob={browse.data.blob}
-          path={path[path.length - 1] ?? ""}
+          fullPath={path.join("/")}
+          fileName={path[path.length - 1] ?? ""}
+          spec={spec}
           historyHref={`/r/${name}/history?path=${encodeURIComponent(path.join("/"))}&ref=${encodeURIComponent(spec)}`}
         />
       ) : browse.data?.kind === "tree" ? (
@@ -197,49 +203,146 @@ function TreeView({
 }
 
 function BlobView({
+  repo,
   blob,
-  path,
+  fileName,
+  fullPath,
+  spec,
   historyHref,
 }: {
+  repo: string;
   blob: Blob;
-  path: string;
+  fileName: string;
+  fullPath: string;
+  spec: string;
   historyHref: string;
 }) {
-  const lang = detectLang(path);
+  const lang = detectLang(fileName);
+  const showImage = isImagePath(fileName);
+  const rawSrc = `/api/repos/${encodeURIComponent(repo)}/blob/${blob.oid}/raw`;
+
   return (
-    <div className="bg-canvas-subtle border border-border-default rounded-lg overflow-hidden">
-      <div className="flex items-center justify-between gap-3 border-b border-border-default px-4 py-2.5 bg-canvas-inset/40">
-        <div className="flex items-center gap-3 text-xs font-mono text-fg-muted">
-          <span>{blob.oid.slice(0, 12)}</span>
-          <span>·</span>
-          <span>{formatBytes(blob.size)}</span>
-          {lang ? (
-            <>
-              <span>·</span>
-              <span className="text-fg-default">{lang}</span>
-            </>
-          ) : null}
-          {blob.binary ? (
-            <>
-              <span>·</span>
-              <span className="text-attention">binary</span>
-            </>
-          ) : null}
+    <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-6">
+      <div className="bg-canvas-subtle border border-border-default rounded-lg overflow-hidden">
+        <div className="flex items-center justify-between gap-3 border-b border-border-default px-4 py-2.5 bg-canvas-inset/40">
+          <div className="flex items-center gap-3 text-xs font-mono text-fg-muted flex-wrap">
+            <span>{blob.oid.slice(0, 12)}</span>
+            <span>·</span>
+            <span>{formatBytes(blob.size)}</span>
+            {lang ? (
+              <>
+                <span>·</span>
+                <span className="text-fg-default">{lang}</span>
+              </>
+            ) : null}
+            {blob.binary && !showImage ? (
+              <>
+                <span>·</span>
+                <span className="text-attention">binary</span>
+              </>
+            ) : null}
+            <span>·</span>
+            <a
+              href={rawSrc}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="text-accent hover:underline"
+            >
+              raw
+            </a>
+          </div>
+          <Link
+            to={historyHref}
+            className="text-xs font-mono text-accent hover:underline shrink-0"
+          >
+            History →
+          </Link>
         </div>
-        <Link
-          to={historyHref}
-          className="text-xs font-mono text-accent hover:underline"
-        >
-          History →
-        </Link>
+        {showImage ? (
+          <ImagePreview src={rawSrc} alt={fileName} />
+        ) : blob.binary || blob.content == null ? (
+          <div className="p-12 text-center font-mono text-sm text-fg-muted">
+            Binary file — preview not available.
+          </div>
+        ) : (
+          <SyntaxBlock code={blob.content} lang={lang} lineNumbers />
+        )}
       </div>
-      {blob.binary || blob.content == null ? (
-        <div className="p-12 text-center font-mono text-sm text-fg-muted">
-          Binary file — preview not available.
+
+      {fullPath ? (
+        <FileVersionRail repo={repo} path={fullPath} spec={spec} fileName={fileName} />
+      ) : null}
+    </div>
+  );
+}
+
+function FileVersionRail({
+  repo,
+  path,
+  spec,
+  fileName,
+}: {
+  repo: string;
+  path: string;
+  spec: string;
+  fileName: string;
+}) {
+  const history = useFileHistory(repo, { path, ref: spec, n: 20 });
+  const isRaster = isRasterImagePath(fileName);
+
+  return (
+    <aside className="bg-canvas-subtle border border-border-default rounded-lg overflow-hidden h-fit lg:sticky lg:top-20">
+      <div className="px-4 py-2.5 border-b border-border-default bg-canvas-inset/40 text-[11px] uppercase tracking-[0.22em] font-mono text-fg-muted">
+        Versions
+      </div>
+      {history.isLoading ? (
+        <div className="p-4 font-mono text-xs text-fg-muted">loading…</div>
+      ) : history.isError ? (
+        <div className="p-4 font-mono text-xs text-danger">
+          {(history.error as Error).message}
+        </div>
+      ) : history.data?.commits.length === 0 ? (
+        <div className="p-4 font-mono text-xs text-fg-muted">
+          no history for this path
         </div>
       ) : (
-        <SyntaxBlock code={blob.content} lang={lang} lineNumbers />
+        <ol className="divide-y divide-border-muted">
+          {history.data?.commits.map((c) => {
+            const thumbOid = c.change === "removed" ? c.old_oid : c.new_oid;
+            return (
+              <li key={c.oid + c.change} className="hover:bg-canvas-inset/40 transition-colors">
+                <Link
+                  to={`/r/${repo}/commits/${c.oid}`}
+                  className="flex gap-3 px-4 py-3 group items-start"
+                >
+                  {isRaster && thumbOid ? (
+                    <img
+                      src={`/api/repos/${encodeURIComponent(repo)}/blob/${thumbOid}/raw`}
+                      alt={`${fileName} @ ${c.oid.slice(0, 7)}`}
+                      loading="lazy"
+                      className="w-12 h-12 object-contain rounded bg-canvas-inset border border-border-muted shrink-0"
+                    />
+                  ) : (
+                    <span className="w-6 h-6 mt-1 rounded font-mono text-xs flex items-center justify-center bg-canvas-inset text-warm shrink-0">
+                      {c.change === "added" ? "+" : c.change === "removed" ? "−" : "~"}
+                    </span>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs text-fg-default group-hover:text-warm line-clamp-2">
+                      {c.subject || "(no subject)"}
+                    </div>
+                    <div className="mt-1 flex items-center gap-1.5 text-[10px] font-mono text-fg-subtle">
+                      <span>{c.oid.slice(0, 7)}</span>
+                      <span>·</span>
+                      <span>{formatRelative(c.author.when)}</span>
+                    </div>
+                  </div>
+                </Link>
+              </li>
+            );
+          })}
+        </ol>
       )}
-    </div>
+    </aside>
   );
 }

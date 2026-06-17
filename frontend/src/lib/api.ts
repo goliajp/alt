@@ -89,6 +89,9 @@ export interface FileHistoryEntry {
   change: "added" | "changed" | "removed";
   old_oid: string;
   new_oid: string;
+  /** Same FileDiff shape as the commit diff endpoint, scoped to this
+   *  one path. */
+  diff: DiffFile;
 }
 
 export interface DiffPartAware {

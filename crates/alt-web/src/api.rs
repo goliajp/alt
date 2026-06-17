@@ -391,17 +391,41 @@ pub fn handle_file_history(
                 continue;
             }
             (None, Some(t)) => {
-                let entry = file_history_entry(&commit_oid, &commit, "added", None, Some(&t));
+                let entry = file_history_entry(
+                    &repo,
+                    &commit_oid,
+                    &commit,
+                    "added",
+                    None,
+                    Some(&t),
+                    path,
+                )?;
                 last_oid = Some(t);
                 entry
             }
             (Some(p), None) => {
-                let entry = file_history_entry(&commit_oid, &commit, "removed", Some(&p), None);
+                let entry = file_history_entry(
+                    &repo,
+                    &commit_oid,
+                    &commit,
+                    "removed",
+                    Some(&p),
+                    None,
+                    path,
+                )?;
                 last_oid = None;
                 entry
             }
             (Some(p), Some(t)) => {
-                let entry = file_history_entry(&commit_oid, &commit, "changed", Some(&p), Some(&t));
+                let entry = file_history_entry(
+                    &repo,
+                    &commit_oid,
+                    &commit,
+                    "changed",
+                    Some(&p),
+                    Some(&t),
+                    path,
+                )?;
                 last_oid = Some(t);
                 entry
             }
@@ -454,27 +478,116 @@ fn resolve_path_oid(
 }
 
 fn file_history_entry(
+    repo: &Repository,
     commit_oid: &ObjectId,
     commit: &alt_git_codec::Commit,
     change: &str,
     old_oid: Option<&ObjectId>,
     new_oid: Option<&ObjectId>,
-) -> String {
+    path: &str,
+) -> Result<String, ApiError> {
     let raw = String::from_utf8_lossy(commit.message().as_slice()).into_owned();
     let subject = subject_of(&raw);
     let (a_name, a_email, a_when) = author_parts(commit);
     let old_str = old_oid.map(|o| o.to_string()).unwrap_or_default();
     let new_str = new_oid.map(|o| o.to_string()).unwrap_or_default();
-    format!(
+
+    // Produce the per-file diff for the same path the history entry
+    // is about — same renderer surface as the full commit diff API,
+    // but scoped to this one file. The frontend timeline inlines it.
+    let old_bytes = match old_oid {
+        Some(o) => read_blob(repo, o).unwrap_or_default(),
+        None => Vec::new(),
+    };
+    let new_bytes = match new_oid {
+        Some(o) => read_blob(repo, o).unwrap_or_default(),
+        None => Vec::new(),
+    };
+    let file_diff = build_file_diff(path, &old_str, &new_str, &old_bytes, &new_bytes);
+    Ok(format!(
         "{{\"oid\":\"{commit_oid}\",\"subject\":{},\"author\":{{\"name\":{},\"email\":{},\"when\":{}}},\
-         \"change\":\"{change}\",\"old_oid\":{},\"new_oid\":{}}}",
+         \"change\":\"{change}\",\"old_oid\":{},\"new_oid\":{},\"diff\":{}}}",
         json_string(subject),
         json_string(&a_name),
         json_string(&a_email),
         a_when,
         json_string(&old_str),
         json_string(&new_str),
-    )
+        file_diff.to_json(),
+    ))
+}
+
+/// Same per-file diff selection as `diff_trees` — extracted so the
+/// file-history endpoint can produce one entry's diff without rerunning
+/// the whole tree walk.
+fn build_file_diff(
+    path: &str,
+    old_oid: &str,
+    new_oid: &str,
+    old_bytes: &[u8],
+    new_bytes: &[u8],
+) -> FileDiff {
+    let old_owned = old_oid.to_string();
+    let new_owned = new_oid.to_string();
+    if let Some(summary) = alt_diff::structured::summary_for_path(path, old_bytes, new_bytes) {
+        let format = match summary.kind {
+            alt_diff::structured::StructKind::Json => "json",
+            alt_diff::structured::StructKind::Toml => "toml",
+        };
+        return FileDiff::Structured {
+            path: path.to_string(),
+            format,
+            old_oid: old_owned,
+            new_oid: new_owned,
+            paths: summary.paths,
+        };
+    }
+    if let Some(summary) = alt_diff::part_aware::summary(old_bytes, new_bytes) {
+        let format = match summary.kind {
+            alt_diff::part_aware::PartKind::Png => "png",
+            alt_diff::part_aware::PartKind::Zip => "zip",
+        };
+        let perceptual_distance = if matches!(summary.kind, alt_diff::part_aware::PartKind::Png) {
+            let old_fp = alt_diff::perceptual::fingerprint(old_bytes);
+            let new_fp = alt_diff::perceptual::fingerprint(new_bytes);
+            alt_diff::perceptual::distance(old_fp, new_fp)
+        } else {
+            None
+        };
+        let parts = enrich_parts_with_text_patches(
+            &summary.kind,
+            summary.parts,
+            old_bytes,
+            new_bytes,
+        );
+        return FileDiff::PartAware {
+            path: path.to_string(),
+            format,
+            old_oid: old_owned,
+            new_oid: new_owned,
+            old_bytes: old_bytes.len(),
+            new_bytes: new_bytes.len(),
+            parts,
+            perceptual_distance,
+        };
+    }
+    if alt_diff::is_binary(old_bytes) || alt_diff::is_binary(new_bytes) {
+        return FileDiff::Binary {
+            path: path.to_string(),
+            old_oid: old_owned,
+            new_oid: new_owned,
+            old_bytes: old_bytes.len(),
+            new_bytes: new_bytes.len(),
+        };
+    }
+    let mut patch = Vec::new();
+    write_unified_with_headers(&mut patch, path, old_bytes, new_bytes);
+    FileDiff::Text {
+        path: path.to_string(),
+        old_oid: old_owned,
+        new_oid: new_owned,
+        patch: String::from_utf8_lossy(&patch).into_owned(),
+    }
 }
 
 /// `GET /api/repos/{name}/blob/{oid}` — blob content with size + binary
