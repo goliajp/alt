@@ -1,5 +1,6 @@
 /.claude/
 /.dev/
+/.alt/
 /target/
 /fuzz/target/
 /fuzz/corpus/
