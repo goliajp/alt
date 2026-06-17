@@ -595,27 +595,86 @@ fn dispatch(
         return Ok(());
     }
 
-    if method == Method::Get && suffix.ends_with("/info/refs") {
-        let repo = handle.open_repo()?;
-        return handle_info_refs(&repo, query, req, log);
+    // M14/W41 (G+H): figure out which (allowed methods, endpoint)
+    // the suffix matches first, then check method. A path match with
+    // the wrong method returns 405 + Allow header; a real OPTIONS
+    // request returns 204 + Allow + (optionally) CORS preflight
+    // headers. This replaces the previous blanket-404 path that ate
+    // both signals.
+    let endpoint_allow: Option<&'static str> = if suffix.ends_with("/info/refs") {
+        Some("GET, OPTIONS")
+    } else if suffix.ends_with("/git-upload-pack") || suffix.ends_with("/git-receive-pack") {
+        Some("POST, OPTIONS")
+    } else {
+        None
+    };
+
+    if method == Method::Options {
+        let resp = build_options_response(endpoint_allow);
+        respond_logged(req, resp, log)?;
+        return Ok(());
     }
-    if method == Method::Post && suffix.ends_with("/git-upload-pack") {
-        let repo = handle.open_repo()?;
-        return handle_upload_pack(&repo, req, log);
+
+    if let Some(allow) = endpoint_allow {
+        if method == Method::Get && suffix.ends_with("/info/refs") {
+            let repo = handle.open_repo()?;
+            return handle_info_refs(&repo, query, req, log);
+        }
+        if method == Method::Post && suffix.ends_with("/git-upload-pack") {
+            let repo = handle.open_repo()?;
+            return handle_upload_pack(&repo, req, log);
+        }
+        if method == Method::Post && suffix.ends_with("/git-receive-pack") {
+            let repo = handle.open_repo()?;
+            let Some(store) = handle.store else {
+                let r = Response::from_string("repo is read-only (no .alt write store)")
+                    .with_status_code(StatusCode(403));
+                respond_logged(req, r, log)?;
+                return Ok(());
+            };
+            return handle_receive_pack(&repo, &store, auth_user.as_deref(), req, log);
+        }
+        // Path matched but method didn't — 405 Method Not Allowed.
+        let mut r = Response::from_string(format!("method not allowed; allow={allow}"))
+            .with_status_code(StatusCode(405));
+        r.add_header(header("Allow", allow));
+        respond_logged(req, r, log)?;
+        return Ok(());
     }
-    if method == Method::Post && suffix.ends_with("/git-receive-pack") {
-        let repo = handle.open_repo()?;
-        let Some(store) = handle.store else {
-            let r = Response::from_string("repo is read-only (no .alt write store)")
-                .with_status_code(StatusCode(403));
-            respond_logged(req, r, log)?;
-            return Ok(());
-        };
-        return handle_receive_pack(&repo, &store, auth_user.as_deref(), req, log);
-    }
+
     let r = Response::from_string("not found").with_status_code(StatusCode(404));
     respond_logged(req, r, log)?;
     Ok(())
+}
+
+/// M14/W41 — preflight + bare OPTIONS responder.
+///
+/// Returns 204 + `Allow:` listing the methods the matched endpoint
+/// supports (or `GET, POST, OPTIONS` when the OPTIONS hit doesn't
+/// resolve to a known endpoint — closer to "what the server speaks"
+/// than spec-strict but useful as a probe response).
+///
+/// CORS: opt-in via `ALT_SERVER_CORS_ALLOW_ORIGIN`. Defaults to no
+/// `Access-Control-*` headers, which keeps a default-config server
+/// off the open-CORS attack surface. Operators who want web UI
+/// access set the env to the exact origin (`https://ui.example.com`)
+/// or `*` for fully-open dev mode.
+fn build_options_response(endpoint_allow: Option<&'static str>) -> Response<Cursor<Vec<u8>>> {
+    let allow = endpoint_allow.unwrap_or("GET, POST, OPTIONS");
+    let mut resp = Response::from_data(Vec::<u8>::new()).with_status_code(StatusCode(204));
+    resp.add_header(header("Allow", allow));
+    if let Ok(origin) = std::env::var("ALT_SERVER_CORS_ALLOW_ORIGIN")
+        && !origin.is_empty()
+    {
+        resp.add_header(header("Access-Control-Allow-Origin", &origin));
+        resp.add_header(header("Access-Control-Allow-Methods", allow));
+        resp.add_header(header(
+            "Access-Control-Allow-Headers",
+            "Content-Type, Authorization, Git-Protocol, Content-Encoding",
+        ));
+        resp.add_header(header("Access-Control-Max-Age", "86400"));
+    }
+    resp
 }
 
 /// POST /git-upload-pack. v2 dispatch on the first `command=…` line:

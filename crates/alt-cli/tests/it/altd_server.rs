@@ -2591,3 +2591,118 @@ fn altd_server_require_auth_refuses_to_start_without_users_file() {
         "REQUIRE_AUTH=1 with users file present must start; tail of stderr line={line}"
     );
 }
+
+/// M14/W41 (G): wrong method on a known endpoint returns 405 +
+/// `Allow:` listing what we do speak — not 404, which would tell the
+/// client "no such route" and erase the real signal.
+#[test]
+fn altd_server_returns_405_with_allow_header_on_wrong_method() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("a.txt"), "alpha\n").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "seed"]));
+
+    let server = spawn_server(root);
+
+    // PUT to /info/refs — GET is the only allowed method.
+    let mut conn = std::net::TcpStream::connect(&server.addr).unwrap();
+    use std::io::{Read, Write};
+    conn.write_all(b"PUT /info/refs?service=git-upload-pack HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Length: 0\r\n\r\n").unwrap();
+    let mut buf = Vec::new();
+    conn.read_to_end(&mut buf).unwrap();
+    let resp = String::from_utf8_lossy(&buf);
+    assert!(
+        resp.starts_with("HTTP/1.1 405"),
+        "expected 405, got: {resp}"
+    );
+    assert!(
+        resp.contains("Allow: GET, OPTIONS"),
+        "expected Allow header naming GET: {resp}"
+    );
+}
+
+/// M14/W41 (G+H): an OPTIONS request to a known endpoint returns 204
+/// plus the Allow header. Without `ALT_SERVER_CORS_ALLOW_ORIGIN` set
+/// the response carries no `Access-Control-*` headers, so the default
+/// config stays off the open-CORS attack surface.
+#[test]
+fn altd_server_options_returns_204_with_allow_and_no_cors_by_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("a.txt"), "alpha\n").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "seed"]));
+
+    let server = spawn_server(root);
+
+    let mut conn = std::net::TcpStream::connect(&server.addr).unwrap();
+    use std::io::{Read, Write};
+    conn.write_all(b"OPTIONS /git-receive-pack HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Length: 0\r\n\r\n").unwrap();
+    let mut buf = Vec::new();
+    conn.read_to_end(&mut buf).unwrap();
+    let resp = String::from_utf8_lossy(&buf);
+    assert!(
+        resp.starts_with("HTTP/1.1 204"),
+        "expected 204, got: {resp}"
+    );
+    assert!(
+        resp.contains("Allow: POST, OPTIONS"),
+        "expected Allow header naming POST: {resp}"
+    );
+    assert!(
+        !resp
+            .to_ascii_lowercase()
+            .contains("access-control-allow-origin"),
+        "default config must not emit CORS headers: {resp}"
+    );
+}
+
+/// M14/W41 (H): when `ALT_SERVER_CORS_ALLOW_ORIGIN` is set, OPTIONS
+/// preflights carry the standard four CORS response headers.
+#[test]
+fn altd_server_options_emits_cors_headers_when_env_set() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("a.txt"), "alpha\n").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "seed"]));
+
+    let server = spawn_server_with_env(&[
+        ("ALT_SERVER_REPO", root.to_str().unwrap()),
+        ("ALT_SERVER_CORS_ALLOW_ORIGIN", "https://ui.example.com"),
+    ]);
+
+    let mut conn = std::net::TcpStream::connect(&server.addr).unwrap();
+    use std::io::{Read, Write};
+    conn.write_all(
+        b"OPTIONS /info/refs HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
+    )
+    .unwrap();
+    let mut buf = Vec::new();
+    conn.read_to_end(&mut buf).unwrap();
+    let resp = String::from_utf8_lossy(&buf);
+    assert!(
+        resp.starts_with("HTTP/1.1 204"),
+        "expected 204, got: {resp}"
+    );
+    assert!(
+        resp.contains("Access-Control-Allow-Origin: https://ui.example.com"),
+        "expected ACAO with explicit origin: {resp}"
+    );
+    assert!(
+        resp.contains("Access-Control-Allow-Methods:"),
+        "expected ACAM: {resp}"
+    );
+    assert!(
+        resp.contains("Access-Control-Allow-Headers:"),
+        "expected ACAH: {resp}"
+    );
+    assert!(
+        resp.contains("Access-Control-Max-Age:"),
+        "expected ACMA: {resp}"
+    );
+}
