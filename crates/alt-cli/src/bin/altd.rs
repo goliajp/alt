@@ -45,10 +45,11 @@ mod unix {
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::{Arc, Condvar, Mutex};
+    use std::sync::{Arc, Mutex};
 
     use alt_cli::cli::{self, Cli};
     use alt_cli::daemon::{self, Request, Response};
+    use alt_cli::group_commit::GroupCommit;
     use alt_cli::native::{Identity, Store, StoreSink};
     use alt_repo::Repository;
     use clap::Parser;
@@ -63,115 +64,6 @@ mod unix {
     /// Exit when no request arrives within this window (overridable via
     /// `ALT_DAEMON_IDLE_MS`, mainly for tests).
     const DEFAULT_IDLE_MS: i32 = 10 * 60 * 1000;
-
-    /// In-process group commit (D5b). A write appends under the store `Mutex`
-    /// but defers its fsync; the actual fsync is the slow part and, if every
-    /// request fsynced inline under the store `Mutex`, commits would be fully
-    /// serialized (one fsync each) and concurrency would buy nothing. Instead a
-    /// committer assigns itself a `ticket` (a monotonic seq, handed out while it
-    /// holds the store `Mutex` right after appending) and then, in a separate
-    /// step, waits for *some* committer to perform one fsync that covers it.
-    ///
-    /// One fsync covers everyone: [`StoreSink::fsync_all`] flushes to the true
-    /// on-disk EOF, so a single fsync makes durable every append already on
-    /// disk. The leader snapshots `covered = next_ticket`, fsyncs off the store
-    /// `Mutex` (so appends overlap it), and publishes `durable = covered`;
-    /// because a ticket's bytes are on disk before its ticket is handed out,
-    /// every ticket `<= covered` is now durable. Followers whose ticket
-    /// `<= durable` are done without fsyncing. So N concurrent commits coalesce
-    /// onto ~1 fsync, the lever that lifts throughput past the
-    /// one-fsync-per-commit ceiling.
-    struct GroupCommit {
-        inner: Mutex<GroupInner>,
-        cv: Condvar,
-    }
-
-    struct GroupInner {
-        /// Highest ticket handed out (each commit takes `next_ticket += 1`).
-        next_ticket: u64,
-        /// Highest ticket made durable by a completed fsync.
-        durable: u64,
-        /// A leader is currently fsyncing; others wait rather than pile on.
-        syncing: bool,
-        /// Error from the most recent fsync (clears on the next success), so a
-        /// committer whose own flush failed reports it instead of looping.
-        last_error: Option<String>,
-    }
-
-    impl GroupCommit {
-        fn new() -> Self {
-            GroupCommit {
-                inner: Mutex::new(GroupInner {
-                    next_ticket: 0,
-                    durable: 0,
-                    syncing: false,
-                    last_error: None,
-                }),
-                cv: Condvar::new(),
-            }
-        }
-
-        /// Hands out the next ticket. Called by a committer while it holds the
-        /// store `Mutex` (right after appending), so tickets are in commit order
-        /// and a ticket's bytes are already on disk.
-        fn assign(&self) -> u64 {
-            let mut g = self.inner.lock().expect("group mutex poisoned");
-            g.next_ticket += 1;
-            g.next_ticket
-        }
-
-        /// Blocks until `ticket` is durable, performing the fsync itself (via
-        /// the off-write-path `sink`) if no other committer is. Leads at most
-        /// once: if its own flush fails, it returns the error rather than
-        /// spinning on a dead disk.
-        ///
-        /// The fsync runs **without** the store `Mutex`, so other requests keep
-        /// appending while it runs — that overlap is what lets a single fsync
-        /// cover many commits. A ticket's bytes are on disk before its ticket is
-        /// handed out (both happen under the store `Mutex`), so a fsync that
-        /// reads the inode after `covered = next_ticket` flushes every ticket
-        /// `<= covered`.
-        fn await_durable(&self, sink: &StoreSink, ticket: u64) -> Result<(), String> {
-            let mut g = self.inner.lock().expect("group mutex poisoned");
-            let mut led = false;
-            loop {
-                if g.durable >= ticket {
-                    return Ok(());
-                }
-                if g.syncing {
-                    g = self.cv.wait(g).expect("group mutex poisoned");
-                    continue;
-                }
-                if led {
-                    // we already fsynced once and are still uncovered → our
-                    // flush failed; surface it rather than retry a dead disk
-                    return Err(g
-                        .last_error
-                        .clone()
-                        .unwrap_or_else(|| "durability failed".to_owned()));
-                }
-                // become the leader for this batch
-                g.syncing = true;
-                led = true;
-                let covered = g.next_ticket;
-                drop(g);
-                let outcome = sink
-                    .fsync_all()
-                    .map(|()| covered)
-                    .map_err(|e| e.to_string());
-                g = self.inner.lock().expect("group mutex poisoned");
-                g.syncing = false;
-                match outcome {
-                    Ok(covered) => {
-                        g.durable = g.durable.max(covered);
-                        g.last_error = None;
-                    }
-                    Err(e) => g.last_error = Some(e),
-                }
-                self.cv.notify_all();
-            }
-        }
-    }
 
     pub fn run() -> Res<()> {
         let alt_dir = std::env::args_os()

@@ -56,6 +56,13 @@ struct LogCtx {
     /// chunked / streamed without a Content-Length, which we render
     /// as JSON `null` in the access log.
     bytes_out: Option<u64>,
+    /// M14/W44: total fsync count from the process-wide
+    /// `WriteCoordinator.group.fsync_count()` snapshot at response
+    /// time. Set only on receive-pack responses (the path that
+    /// actually contends for durability). When N concurrent pushes
+    /// share a single group fsync, their access-log entries carry
+    /// the same `fsync_seq` value — the coalescing signal.
+    fsync_seq: Option<u64>,
     principal: Option<String>,
     repo: Option<String>,
 }
@@ -92,6 +99,13 @@ fn emit_access_log(req_id: &str, method: &Method, url: &str, log: &LogCtx, durat
         (
             "bytes_out",
             match log.bytes_out {
+                Some(n) => Json::Num(n as i64),
+                None => Json::Null,
+            },
+        ),
+        (
+            "fsync_seq",
+            match log.fsync_seq {
                 Some(n) => Json::Num(n as i64),
                 None => Json::Null,
             },
@@ -375,7 +389,7 @@ fn serve_one(mode: &ServeMode, req: tiny_http::Request) {
 enum ServeMode {
     Single {
         repo_path: PathBuf,
-        store: Option<Arc<Mutex<Store>>>,
+        writer: Option<Arc<WriteCoordinator>>,
     },
     Multi {
         root: PathBuf,
@@ -383,20 +397,51 @@ enum ServeMode {
     },
 }
 
+/// M14/W44 — three-piece write coordinator for one repo. `store` is
+/// the existing serialised write port (Mutex held only across append).
+/// `sink` is an independent fsync handle (own fds) that the leader
+/// committer calls outside the store lock — overlap is what makes
+/// group commit pay off. `group` hands out tickets + makes followers
+/// wait for the leader's flush, so N concurrent receive-pack pushes
+/// share ~1 fsync instead of paying N fsyncs each. Shared across
+/// requests via `Arc`.
+struct WriteCoordinator {
+    store: Mutex<Store>,
+    sink: alt_cli::native::StoreSink,
+    group: alt_cli::group_commit::GroupCommit,
+}
+
 /// A resolved repo binding for one request. `repo_path` is reopened on
 /// every read so the Repository's RefStore + odb always reflect any
 /// receive-pack write that just completed (no stale-cache window between
-/// push → fetch on the same connection). The mutable `Store` is shared
-/// across requests for write serialisation.
+/// push → fetch on the same connection). The `WriteCoordinator` is
+/// shared across requests for write serialisation + group fsync.
 struct RepoHandle {
     repo_path: PathBuf,
-    store: Option<Arc<Mutex<Store>>>,
+    writer: Option<Arc<WriteCoordinator>>,
 }
 
 impl RepoHandle {
     fn open_repo(&self) -> Result<Repository, Box<dyn std::error::Error>> {
         Ok(Repository::discover(&self.repo_path)?)
     }
+}
+
+/// Open the write store and build the W44 coordinator: turn on deferred
+/// durability so each commit appends-without-fsync, create the off-write
+/// `sink` so the fsync uses independent fds, instantiate the
+/// `GroupCommit` that coalesces concurrent flushes.
+fn open_write_coordinator(
+    alt_dir: std::path::PathBuf,
+) -> Result<Arc<WriteCoordinator>, Box<dyn std::error::Error>> {
+    let mut store = Store::open(alt_dir)?;
+    store.set_defer_durability(true);
+    let sink = store.sink()?;
+    Ok(Arc::new(WriteCoordinator {
+        store: Mutex::new(store),
+        sink,
+        group: alt_cli::group_commit::GroupCommit::new(),
+    }))
 }
 
 impl ServeMode {
@@ -406,10 +451,11 @@ impl ServeMode {
         // request. We drop the handle; per-request opens are cheap.
         Repository::discover(&repo_path).unwrap_or_else(|e| die(&format!("opening repo: {e}")));
         let alt_dir = repo_path.join(".alt");
-        let store: Option<Arc<Mutex<Store>>> = if alt_dir.is_dir() {
-            Some(Arc::new(Mutex::new(Store::open(alt_dir).unwrap_or_else(
-                |e| die(&format!("opening write store: {e}")),
-            ))))
+        let writer: Option<Arc<WriteCoordinator>> = if alt_dir.is_dir() {
+            Some(
+                open_write_coordinator(alt_dir)
+                    .unwrap_or_else(|e| die(&format!("opening write coordinator: {e}"))),
+            )
         } else {
             eprintln!(
                 "altd-server: no .alt under {p}; receive-pack will be refused (read-only mode)",
@@ -417,7 +463,7 @@ impl ServeMode {
             );
             None
         };
-        ServeMode::Single { repo_path, store }
+        ServeMode::Single { repo_path, writer }
     }
 
     fn multi(root: PathBuf) -> Self {
@@ -468,10 +514,10 @@ fn resolve_repo(
     path: &str,
 ) -> Result<(RepoHandle, String, String), Box<dyn std::error::Error>> {
     match mode {
-        ServeMode::Single { repo_path, store } => Ok((
+        ServeMode::Single { repo_path, writer } => Ok((
             RepoHandle {
                 repo_path: repo_path.clone(),
-                store: store.clone(),
+                writer: writer.clone(),
             },
             path.to_owned(),
             "*".to_owned(),
@@ -490,7 +536,7 @@ fn resolve_repo(
                 return Ok((
                     RepoHandle {
                         repo_path: h.repo_path.clone(),
-                        store: h.store.clone(),
+                        writer: h.writer.clone(),
                     },
                     rest.to_owned(),
                     name.to_owned(),
@@ -504,18 +550,18 @@ fn resolve_repo(
             // insertion rather than on every request.
             Repository::discover(&repo_path)?;
             let alt_dir = repo_path.join(".alt");
-            let store: Option<Arc<Mutex<Store>>> = if alt_dir.is_dir() {
-                Some(Arc::new(Mutex::new(Store::open(alt_dir)?)))
+            let writer: Option<Arc<WriteCoordinator>> = if alt_dir.is_dir() {
+                Some(open_write_coordinator(alt_dir)?)
             } else {
                 None
             };
             let handle = RepoHandle {
                 repo_path: repo_path.clone(),
-                store: store.clone(),
+                writer: writer.clone(),
             };
             cache_g.insert(name.to_owned(), handle);
             Ok((
-                RepoHandle { repo_path, store },
+                RepoHandle { repo_path, writer },
                 rest.to_owned(),
                 name.to_owned(),
             ))
@@ -641,13 +687,13 @@ fn dispatch(
         }
         if method == Method::Post && suffix.ends_with("/git-receive-pack") {
             let repo = handle.open_repo()?;
-            let Some(store) = handle.store else {
+            let Some(writer) = handle.writer else {
                 let r = Response::from_string("repo is read-only (no .alt write store)")
                     .with_status_code(StatusCode(403));
                 respond_logged(req, r, log)?;
                 return Ok(());
             };
-            return handle_receive_pack(&repo, &store, auth_user.as_deref(), req, log);
+            return handle_receive_pack(&repo, &writer, auth_user.as_deref(), req, log);
         }
         // Path matched but method didn't — 405 Method Not Allowed.
         let mut r = Response::from_string(format!("method not allowed; allow={allow}"))
@@ -952,11 +998,12 @@ fn handle_info_refs(
 /// `report-status` body.
 fn handle_receive_pack(
     repo: &Repository,
-    store: &Mutex<Store>,
+    writer: &WriteCoordinator,
     auth_user: Option<&str>,
     mut req: tiny_http::Request,
     log: &mut LogCtx,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let store = &writer.store;
     use std::io::Read;
     // M13/W36 streaming path. The push body is parsed in two halves:
     //   1. Head (updates + capabilities + flush) — parsed straight off
@@ -1073,10 +1120,29 @@ fn handle_receive_pack(
             });
         }
     } else if unpack_result.is_ok() {
-        match commit_ref_updates(store, &head.updates, &effective_principal, sig_label) {
-            Ok(()) => {
-                for u in &head.updates {
-                    command_status.push(CommandStatus::Ok(u.name.clone()));
+        match commit_ref_updates(writer, &head.updates, &effective_principal, sig_label) {
+            Ok(ticket) => {
+                // M14/W44: wait for the group-commit leader's fsync to
+                // cover us — this is the only place we touch disk
+                // durability on the receive-pack path. Other concurrent
+                // pushes coalesce into the same flush, so 4-way
+                // concurrent traffic pays ~1 fsync instead of 4.
+                let durable: Result<(), String> = match ticket {
+                    Some(t) => writer.group.await_durable(&writer.sink, t),
+                    None => Ok(()),
+                };
+                log.fsync_seq = Some(writer.group.fsync_count());
+                if let Err(e) = durable {
+                    for u in &head.updates {
+                        command_status.push(CommandStatus::Ng {
+                            name: u.name.clone(),
+                            reason: format!("durability: {e}"),
+                        });
+                    }
+                } else {
+                    for u in &head.updates {
+                        command_status.push(CommandStatus::Ok(u.name.clone()));
+                    }
                 }
             }
             Err(reason) => {
@@ -1309,16 +1375,25 @@ fn require_signed_commits_block(
     Ok(None)
 }
 
+/// Commit the ref tx under the store mutex, then assign a group-commit
+/// ticket *still under that same mutex* so the appended bytes are
+/// visibly-ordered before the ticket is observable. The returned
+/// ticket should be passed to `writer.group.await_durable(&writer.sink, ticket)`
+/// **after** the store mutex is released — that's the overlap which
+/// lets N concurrent pushes coalesce onto ~1 fsync (M14/W44).
+///
+/// Returns `Ok(None)` for an empty-updates push (no append happened,
+/// no durability needed).
 fn commit_ref_updates(
-    store: &Mutex<Store>,
+    writer: &WriteCoordinator,
     updates: &[RefUpdate],
     principal: &alt_cli::native::Principal,
     sig_label: &str,
-) -> Result<(), String> {
+) -> Result<Option<u64>, String> {
     if updates.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
-    let mut store_guard = store.lock().unwrap();
+    let mut store_guard = writer.store.lock().unwrap();
     let mut changes = Vec::with_capacity(updates.len());
     for u in updates {
         changes.push(RefChange {
@@ -1337,9 +1412,6 @@ fn commit_ref_updates(
         id = principal.id,
         sig = sig_label,
     );
-    // Build the RefPolicy that mirrors local `commit_refs_with`: a closure
-    // over the caps' branch_allow drives the per-ref check inside the
-    // commit lock.
     // M10/W22: combine branch_allow + branch_deny (deny wins) into a
     // single closure that mirrors the local CLI path.
     let allow = caps.branch_allow.clone();
@@ -1363,7 +1435,11 @@ fn commit_ref_updates(
         .refs_mut()
         .commit_idempotent(&actor, now_ms(), &changes, None, Some(&policy))
         .map_err(|e| format!("ref tx: {e}"))?;
-    Ok(())
+    // Under the same lock: hand out the durability ticket. The bytes
+    // for this commit are on disk before the ticket is observable
+    // from outside the lock — that's the W44 invariant.
+    let ticket = writer.group.assign();
+    Ok(Some(ticket))
 }
 
 fn now_ms() -> u64 {

@@ -2714,3 +2714,127 @@ fn altd_server_options_emits_cors_headers_when_env_set() {
         "expected ACMA: {resp}"
     );
 }
+
+#[test]
+fn altd_server_group_commit_coalesces_concurrent_push_fsyncs() {
+    // M14/W44: N concurrent pushes hitting the receive-pack path
+    // share group-commit fsyncs instead of paying one fsync each.
+    // The access log carries the group's `fsync_count()` snapshot at
+    // response time per receive-pack request, so if the coalescer
+    // works the set of distinct fsync_seq values across N pushes is
+    // strictly less than N — that's the win.
+    let origin_dir = tempfile::tempdir().unwrap();
+    let origin = origin_dir.path();
+    ok(alt(origin, &["init", "."]));
+    std::fs::write(origin.join("seed.txt"), "seed\n").unwrap();
+    ok(alt(origin, &["add", "."]));
+    ok(alt(origin, &["commit", "-m", "seed"]));
+
+    let mut server = spawn_server(origin);
+    let url = format!("http://{}/", server.addr);
+
+    fn build_src(label: &str, base: &Path) -> std::path::PathBuf {
+        let src = base.join(format!("src-{label}"));
+        std::fs::create_dir(&src).unwrap();
+        let st = std::process::Command::new("git")
+            .args(["init", "-q", "-b", "main", src.to_str().unwrap()])
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .unwrap();
+        assert!(st.status.success());
+        std::fs::write(src.join("f.txt"), format!("body-{label}\n")).unwrap();
+        for args in [
+            &["-C", src.to_str().unwrap(), "add", "."][..],
+            &[
+                "-C",
+                src.to_str().unwrap(),
+                "-c",
+                "user.name=tester",
+                "-c",
+                "user.email=t@e",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-q",
+                "-m",
+                label,
+            ][..],
+        ] {
+            let o = std::process::Command::new("git")
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                o.status.success(),
+                "git: {}",
+                String::from_utf8_lossy(&o.stderr)
+            );
+        }
+        src
+    }
+
+    const N: usize = 8;
+    let src_root = tempfile::tempdir().unwrap();
+    let mut srcs = Vec::with_capacity(N);
+    for i in 0..N {
+        srcs.push(build_src(&format!("c{i}"), src_root.path()));
+    }
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(N));
+    let mut handles = Vec::with_capacity(N);
+    for (i, src) in srcs.into_iter().enumerate() {
+        let url = url.clone();
+        let barrier = std::sync::Arc::clone(&barrier);
+        handles.push(std::thread::spawn(move || {
+            barrier.wait();
+            std::process::Command::new("git")
+                .args([
+                    "-C",
+                    src.to_str().unwrap(),
+                    "push",
+                    &url,
+                    &format!("HEAD:refs/heads/race-{i}"),
+                ])
+                .env("GIT_TERMINAL_PROMPT", "0")
+                .output()
+                .unwrap()
+        }));
+    }
+    for (i, h) in handles.into_iter().enumerate() {
+        let out = h.join().unwrap();
+        assert!(
+            out.status.success(),
+            "push {i} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    // Drain stderr and extract `fsync_seq` from every receive-pack
+    // access-log line. Coalescing manifests as < N distinct values.
+    let log = server.drain_stderr();
+    let mut seen: std::collections::BTreeSet<u64> = Default::default();
+    let mut receive_lines = 0;
+    for line in log.lines() {
+        if !line.starts_with('{') || !line.contains("\"path\":\"/git-receive-pack\"") {
+            continue;
+        }
+        receive_lines += 1;
+        // Find `"fsync_seq":<n>` — n is a small integer.
+        if let Some(pos) = line.find("\"fsync_seq\":") {
+            let tail = &line[pos + "\"fsync_seq\":".len()..];
+            let n: String = tail.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if let Ok(v) = n.parse::<u64>() {
+                seen.insert(v);
+            }
+        }
+    }
+    assert_eq!(
+        receive_lines, N,
+        "expected one receive-pack access line per push: log =\n{log}"
+    );
+    assert!(
+        seen.len() < N,
+        "group commit must coalesce: {N} pushes produced {} distinct fsync_seq values (need < {N}); seen={seen:?}",
+        seen.len()
+    );
+}
