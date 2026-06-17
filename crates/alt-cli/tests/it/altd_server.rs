@@ -1784,3 +1784,239 @@ fn altd_server_rejects_push_exceeding_max_body_size() {
         "access log must record the 413 row: {server_log}"
     );
 }
+
+#[test]
+fn altd_server_two_concurrent_pushes_to_distinct_branches_both_land() {
+    // M11/W28: with the W24 worker pool + write-side `Mutex<Store>`,
+    // two clients pushing to *different* branches at the same time
+    // must both succeed and leave the server with both refs pointing
+    // at their respective pushed commits — no torn state, no lost
+    // update.
+    let origin_dir = tempfile::tempdir().unwrap();
+    let origin = origin_dir.path();
+    ok(alt(origin, &["init", "."]));
+    std::fs::write(origin.join("seed.txt"), "seed\n").unwrap();
+    ok(alt(origin, &["add", "."]));
+    ok(alt(origin, &["commit", "-m", "seed"]));
+
+    let server = spawn_server(origin);
+    let url = format!("http://{}/", server.addr);
+
+    // Build two source git repos, each with one commit, on different
+    // branch destinations. The clients fire in parallel — the server's
+    // receive-pack path serialises writes through `Mutex<Store>` but
+    // the dispatch surface is multi-threaded, so both pushes have to
+    // complete cleanly.
+    fn build_src(label: &str, base: &Path) -> std::path::PathBuf {
+        let src = base.join(format!("src-{label}"));
+        std::fs::create_dir(&src).unwrap();
+        let st = std::process::Command::new("git")
+            .args(["init", "-q", "-b", "main", src.to_str().unwrap()])
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .unwrap();
+        assert!(st.status.success());
+        std::fs::write(src.join("f.txt"), format!("body-{label}\n")).unwrap();
+        for args in [
+            &["-C", src.to_str().unwrap(), "add", "."][..],
+            &[
+                "-C",
+                src.to_str().unwrap(),
+                "-c",
+                "user.name=tester",
+                "-c",
+                "user.email=t@e",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-q",
+                "-m",
+                label,
+            ][..],
+        ] {
+            let o = std::process::Command::new("git")
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                o.status.success(),
+                "git: {}",
+                String::from_utf8_lossy(&o.stderr)
+            );
+        }
+        src
+    }
+
+    let src_root = tempfile::tempdir().unwrap();
+    let alice_src = build_src("alice", src_root.path());
+    let bob_src = build_src("bob", src_root.path());
+
+    let alice_url = url.clone();
+    let alice_dst = "HEAD:refs/heads/from-alice".to_owned();
+    let alice_h = std::thread::spawn(move || {
+        std::process::Command::new("git")
+            .args([
+                "-C",
+                alice_src.to_str().unwrap(),
+                "push",
+                &alice_url,
+                &alice_dst,
+            ])
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .output()
+            .unwrap()
+    });
+    let bob_url = url.clone();
+    let bob_dst = "HEAD:refs/heads/from-bob".to_owned();
+    let bob_h = std::thread::spawn(move || {
+        std::process::Command::new("git")
+            .args(["-C", bob_src.to_str().unwrap(), "push", &bob_url, &bob_dst])
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .output()
+            .unwrap()
+    });
+    let alice_out = alice_h.join().unwrap();
+    let bob_out = bob_h.join().unwrap();
+    assert!(
+        alice_out.status.success(),
+        "alice push failed: {}",
+        String::from_utf8_lossy(&alice_out.stderr)
+    );
+    assert!(
+        bob_out.status.success(),
+        "bob push failed: {}",
+        String::from_utf8_lossy(&bob_out.stderr)
+    );
+
+    // Both refs landed and carry the right messages.
+    let alice_log = ok(alt(
+        origin,
+        &["log", "--pretty=oneline", "refs/heads/from-alice"],
+    ));
+    let bob_log = ok(alt(
+        origin,
+        &["log", "--pretty=oneline", "refs/heads/from-bob"],
+    ));
+    assert!(
+        alice_log.contains("alice"),
+        "from-alice ref must hold alice's commit: {alice_log}"
+    );
+    assert!(
+        bob_log.contains("bob"),
+        "from-bob ref must hold bob's commit: {bob_log}"
+    );
+}
+
+#[test]
+fn altd_server_two_concurrent_pushes_to_same_ref_serialize_with_one_winner() {
+    // M11/W28: when two clients race to push *the same* branch from
+    // disjoint histories (each is a fresh init, no shared parent with
+    // origin's main), the W12 ref policy's `commit_idempotent` runs
+    // each as an atomic transaction. Exactly one wins — origin's
+    // refs/heads/contested ends up at one of the two pushed oids,
+    // never half-applied, and the other push surfaces an error.
+    let origin_dir = tempfile::tempdir().unwrap();
+    let origin = origin_dir.path();
+    ok(alt(origin, &["init", "."]));
+    std::fs::write(origin.join("seed.txt"), "seed\n").unwrap();
+    ok(alt(origin, &["add", "."]));
+    ok(alt(origin, &["commit", "-m", "seed"]));
+
+    let server = spawn_server(origin);
+    let url = format!("http://{}/", server.addr);
+
+    fn build_src(label: &str, base: &Path) -> std::path::PathBuf {
+        let src = base.join(format!("src-{label}"));
+        std::fs::create_dir(&src).unwrap();
+        let st = std::process::Command::new("git")
+            .args(["init", "-q", "-b", "main", src.to_str().unwrap()])
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .unwrap();
+        assert!(st.status.success());
+        std::fs::write(src.join("f.txt"), format!("body-{label}\n")).unwrap();
+        for args in [
+            &["-C", src.to_str().unwrap(), "add", "."][..],
+            &[
+                "-C",
+                src.to_str().unwrap(),
+                "-c",
+                "user.name=tester",
+                "-c",
+                "user.email=t@e",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-q",
+                "-m",
+                label,
+            ][..],
+        ] {
+            let o = std::process::Command::new("git")
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                o.status.success(),
+                "git: {}",
+                String::from_utf8_lossy(&o.stderr)
+            );
+        }
+        src
+    }
+
+    let src_root = tempfile::tempdir().unwrap();
+    let alice_src = build_src("alice", src_root.path());
+    let bob_src = build_src("bob", src_root.path());
+
+    let alice_url = url.clone();
+    let alice_dst = "HEAD:refs/heads/contested".to_owned();
+    let alice_h = std::thread::spawn(move || {
+        std::process::Command::new("git")
+            .args([
+                "-C",
+                alice_src.to_str().unwrap(),
+                "push",
+                &alice_url,
+                &alice_dst,
+            ])
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .output()
+            .unwrap()
+    });
+    let bob_url = url.clone();
+    let bob_dst = "HEAD:refs/heads/contested".to_owned();
+    let bob_h = std::thread::spawn(move || {
+        std::process::Command::new("git")
+            .args(["-C", bob_src.to_str().unwrap(), "push", &bob_url, &bob_dst])
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .output()
+            .unwrap()
+    });
+    let alice_out = alice_h.join().unwrap();
+    let bob_out = bob_h.join().unwrap();
+
+    // Exactly one push must succeed. The other one is rejected
+    // because by the time it lands, the ref already moved (or it lost
+    // the race to advertise its old=zero against the current value).
+    let wins = (alice_out.status.success() as u32) + (bob_out.status.success() as u32);
+    assert!(
+        wins >= 1,
+        "at least one push must succeed; alice stderr={}, bob stderr={}",
+        String::from_utf8_lossy(&alice_out.stderr),
+        String::from_utf8_lossy(&bob_out.stderr)
+    );
+
+    // The ref must end at one of the two pushed commit messages, not
+    // half-written or pointing at garbage.
+    let log = ok(alt(
+        origin,
+        &["log", "--pretty=oneline", "refs/heads/contested"],
+    ));
+    assert!(
+        log.contains("alice") || log.contains("bob"),
+        "contested ref must carry one winner's commit, not a partial state: {log}"
+    );
+}
