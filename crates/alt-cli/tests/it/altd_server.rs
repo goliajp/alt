@@ -1562,6 +1562,7 @@ fn altd_server_emits_jsonl_access_log_per_request() {
         "\"status\":",
         "\"duration_ms\":",
         "\"bytes_in\":",
+        "\"bytes_out\":",
         "\"principal\":",
         "\"repo\":",
     ] {
@@ -1575,6 +1576,13 @@ fn altd_server_emits_jsonl_access_log_per_request() {
     assert!(
         first.contains("\"status\":200"),
         "expected status 200 on successful info/refs: {first}"
+    );
+    // M14/W42: bytes_out is a positive integer (the caps + ls-refs
+    // body), not `null` — info/refs encoders hand tiny_http a finished
+    // Vec<u8> so the Content-Length path is always taken.
+    assert!(
+        !first.contains("\"bytes_out\":null") && !first.contains("\"bytes_out\":0"),
+        "expected non-zero bytes_out for a successful info/refs hit: {first}"
     );
     assert!(
         first.contains("\"principal\":\"anonymous\""),

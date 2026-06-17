@@ -49,6 +49,13 @@ const AGENT: &str = concat!("alt-server/", env!("CARGO_PKG_VERSION"));
 struct LogCtx {
     status: u16,
     bytes_in: u64,
+    /// M14/W42: response body byte count when the encoder knows the
+    /// length up front (the common path — `Response::from_data`,
+    /// `from_string`, and the pack/sideband encoders all hand
+    /// tiny_http a finished `Vec<u8>`). `None` when the response is
+    /// chunked / streamed without a Content-Length, which we render
+    /// as JSON `null` in the access log.
+    bytes_out: Option<u64>,
     principal: Option<String>,
     repo: Option<String>,
 }
@@ -83,6 +90,13 @@ fn emit_access_log(req_id: &str, method: &Method, url: &str, log: &LogCtx, durat
         ("duration_ms", Json::Num(duration_ms as i64)),
         ("bytes_in", Json::Num(log.bytes_in as i64)),
         (
+            "bytes_out",
+            match log.bytes_out {
+                Some(n) => Json::Num(n as i64),
+                None => Json::Null,
+            },
+        ),
+        (
             "principal",
             match &log.principal {
                 Some(p) => Json::str(p.clone()),
@@ -113,6 +127,7 @@ fn respond_logged<R: std::io::Read>(
     log: &mut LogCtx,
 ) -> std::io::Result<()> {
     log.status = resp.status_code().0;
+    log.bytes_out = resp.data_length().map(|n| n as u64);
     req.respond(resp)
 }
 
