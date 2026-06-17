@@ -126,11 +126,7 @@ export function Commit() {
                 <span className="font-mono text-sm text-fg-default flex-1">
                   {file.path}
                 </span>
-                <span className="text-[10px] uppercase tracking-[0.22em] font-mono text-fg-subtle border border-border-muted rounded px-1.5 py-0.5">
-                  {file.kind === "part_aware" || file.kind === "structured"
-                    ? file.format
-                    : file.kind}
-                </span>
+                <DiffKindChip file={file} />
               </div>
               {file.kind === "text" ? (
                 <DiffView patch={file.patch} path={file.path} />
@@ -146,6 +142,40 @@ export function Commit() {
         )}
       </section>
     </div>
+  );
+}
+
+function DiffKindChip({ file }: { file: import("../lib/api").DiffFile }) {
+  let label = "";
+  let tone = "text-fg-subtle border-border-muted";
+  switch (file.kind) {
+    case "text":
+      label = "text";
+      break;
+    case "structured":
+      label = `semantic ${file.format}`;
+      tone = "text-accent/90 border-accent/40";
+      break;
+    case "part_aware": {
+      const ext = (file.path.split(".").pop() ?? "").toLowerCase();
+      if (file.format === "png") label = "binary png";
+      else if (["docx", "xlsx", "pptx"].includes(ext))
+        label = `binary ooxml/${ext}`;
+      else label = "binary zip";
+      tone = "text-warm/95 border-warm/40";
+      break;
+    }
+    case "binary":
+      label = "opaque binary";
+      tone = "text-attention/95 border-attention/40";
+      break;
+  }
+  return (
+    <span
+      className={`text-[10px] uppercase tracking-[0.22em] font-mono rounded px-1.5 py-0.5 border ${tone}`}
+    >
+      {label}
+    </span>
   );
 }
 
