@@ -409,6 +409,92 @@ struct WriteCoordinator {
     store: Mutex<Store>,
     sink: alt_cli::native::StoreSink,
     group: alt_cli::group_commit::GroupCommit,
+    /// M14/W45 — single-use nonces issued during receive-pack info/refs
+    /// and consumed during the matching `git-receive-pack` POST. Bounds
+    /// the replay window to "between info/refs advert and EOL of the
+    /// LRU table". A captured signed push payload can only be replayed
+    /// against this server if its nonce hasn't yet been consumed and
+    /// hasn't aged out of the table.
+    nonces: NonceTable,
+}
+
+/// In-memory single-use nonce table. Cap at 1024 active entries; on
+/// overflow the oldest is dropped (LRU FIFO). This is a tradeoff:
+/// under burst load an honest client whose info/refs nonce ages out
+/// before they POST receive-pack gets refused, but the bound makes
+/// the table O(1) memory regardless of traffic.
+struct NonceTable {
+    inner: Mutex<NonceInner>,
+}
+
+struct NonceInner {
+    queue: std::collections::VecDeque<String>,
+    set: std::collections::HashSet<String>,
+}
+
+impl NonceTable {
+    fn new() -> Self {
+        NonceTable {
+            inner: Mutex::new(NonceInner {
+                queue: std::collections::VecDeque::with_capacity(1024),
+                set: std::collections::HashSet::with_capacity(1024),
+            }),
+        }
+    }
+
+    /// Issue a fresh 32-char-hex nonce (128 bits — collision negligible
+    /// against any realistic traffic + 1024-entry table). Inserts it
+    /// into the table; on overflow the oldest entry is evicted.
+    fn issue(&self) -> String {
+        let nonce = {
+            // 16 bytes from the OS entropy pool via /dev/urandom; we
+            // avoid a `rand` dep by reading directly. Failure to read
+            // is essentially "running on Mars" — fall back to a
+            // timestamp-derived value so the path doesn't crash.
+            let mut buf = [0u8; 16];
+            match std::fs::File::open("/dev/urandom") {
+                Ok(mut f) => {
+                    use std::io::Read;
+                    let _ = f.read_exact(&mut buf);
+                }
+                Err(_) => {
+                    let ms = unix_ms_now().to_le_bytes();
+                    buf[..ms.len()].copy_from_slice(&ms);
+                }
+            }
+            let mut hex = String::with_capacity(32);
+            for b in buf {
+                hex.push_str(&format!("{b:02x}"));
+            }
+            hex
+        };
+        let mut g = self.inner.lock().unwrap();
+        if g.queue.len() >= 1024
+            && let Some(old) = g.queue.pop_front()
+        {
+            g.set.remove(&old);
+        }
+        g.queue.push_back(nonce.clone());
+        g.set.insert(nonce.clone());
+        nonce
+    }
+
+    /// Atomically check + consume a nonce. Returns true iff it was in
+    /// the table at the time of call; subsequent calls return false.
+    fn consume(&self, nonce: &str) -> bool {
+        let mut g = self.inner.lock().unwrap();
+        if g.set.remove(nonce) {
+            // also drop it from the queue so the LRU bookkeeping stays
+            // accurate; we accept the O(N) here because consumes are
+            // rare relative to issues.
+            if let Some(pos) = g.queue.iter().position(|s| s == nonce) {
+                g.queue.remove(pos);
+            }
+            true
+        } else {
+            false
+        }
+    }
 }
 
 /// A resolved repo binding for one request. `repo_path` is reopened on
@@ -441,6 +527,7 @@ fn open_write_coordinator(
         store: Mutex::new(store),
         sink,
         group: alt_cli::group_commit::GroupCommit::new(),
+        nonces: NonceTable::new(),
     }))
 }
 
@@ -679,7 +766,7 @@ fn dispatch(
     if let Some(allow) = endpoint_allow {
         if method == Method::Get && suffix.ends_with("/info/refs") {
             let repo = handle.open_repo()?;
-            return handle_info_refs(&repo, query, req, log);
+            return handle_info_refs(&repo, handle.writer.as_deref(), query, req, log);
         }
         if method == Method::Post && suffix.ends_with("/git-upload-pack") {
             let repo = handle.open_repo()?;
@@ -925,6 +1012,7 @@ fn parse_filter_spec(raw: Option<&str>) -> FilterSpec {
 
 fn handle_info_refs(
     repo: &Repository,
+    writer: Option<&WriteCoordinator>,
     query: &str,
     req: tiny_http::Request,
     log: &mut LogCtx,
@@ -962,13 +1050,30 @@ fn handle_info_refs(
                 .filter(|(name, _, _)| name != "HEAD")
                 .map(|(name, oid, _)| (name, oid))
                 .collect();
-            let caps_list = [
+            // M14/W45: issue a single-use nonce per advert and attach
+            // it as the `alt-nonce=<hex>` capability. A signing alt
+            // client will sign `nonce <hex>\n` + canonical payload and
+            // echo the same `alt-nonce=<hex>` capability back on its
+            // push, so the server can look the nonce up, verify the
+            // signature, and consume it. Anyone replaying the same
+            // captured push body gets refused on the second attempt.
+            //
+            // Read-only mode (no writer) doesn't issue nonces; pushes
+            // are refused before they ever get verified anyway.
+            let nonce_cap: Option<String> = writer.map(|w| {
+                let n = w.nonces.issue();
+                format!("{}={n}", alt_wire::CAP_ALT_NONCE)
+            });
+            let mut caps_list: Vec<&str> = vec![
                 "report-status",
                 "delete-refs",
                 "ofs-delta",
                 "side-band-64k",
                 concat!("agent=", "alt-server/", env!("CARGO_PKG_VERSION")),
             ];
+            if let Some(s) = nonce_cap.as_deref() {
+                caps_list.push(s);
+            }
             alt_wire::push::encode_v1_ref_advertisement(
                 &mut body,
                 &refs,
@@ -1068,7 +1173,7 @@ fn handle_receive_pack(
     // signature is computed over the canonical push payload (head's
     // updates + algo); pack bytes don't participate, so we can decide
     // sig_block before reading them.
-    let sig_outcome = verify_push_signature(store, &head)?;
+    let sig_outcome = verify_push_signature(writer, &head)?;
     let (effective_principal, sig_label) = pick_principal(&sig_outcome, auth_user);
     let require_signed = require_signed_for(store, &effective_principal);
     let sig_block: Option<String> = match (&sig_outcome, require_signed) {
@@ -1255,7 +1360,7 @@ fn describe_sig(o: &SigOutcome) -> String {
 /// `NoSignature` when the client didn't attach the pair (the common
 /// path on git-native clients).
 fn verify_push_signature(
-    store: &Mutex<Store>,
+    writer: &WriteCoordinator,
     head: &alt_wire::push::PushHead,
 ) -> Result<SigOutcome, Box<dyn std::error::Error>> {
     let principal_id = head
@@ -1271,7 +1376,7 @@ fn verify_push_signature(
         _ => return Ok(SigOutcome::NoSignature),
     };
     let trust = {
-        let guard = store.lock().unwrap();
+        let guard = writer.store.lock().unwrap();
         guard.trust_keys()?
     };
     let Some((_, pubkey)) = trust.iter().find(|(id, _)| id == &principal_id) else {
@@ -1281,10 +1386,35 @@ fn verify_push_signature(
         Ok(s) => s,
         Err(e) => return Ok(SigOutcome::BadSignature(format!("{e}"))),
     };
-    let payload = alt_wire::canonical_push_payload(&head.updates, HashAlgo::Sha1);
-    match pubkey.verify(&payload, &sig) {
-        Ok(()) => Ok(SigOutcome::Verified { principal_id }),
-        Err(e) => Ok(SigOutcome::BadSignature(format!("{e}"))),
+    // M14/W45: if the client echoed back an `alt-nonce=<hex>` cap, the
+    // signature is over `nonce <hex>\n` + canonical_payload. We must
+    // consume the nonce (single-use, anti-replay) and verify against
+    // the nonce-prefixed payload. No nonce echo = legacy W14 payload,
+    // verified against the no-nonce form for backwards-compat with
+    // pre-W45 clients (the `require_nonce_on_sig` policy axis turns
+    // that compat off).
+    let echoed_nonce = head
+        .capabilities
+        .iter()
+        .find_map(|c| c.strip_prefix(&format!("{}=", alt_wire::CAP_ALT_NONCE)));
+    if let Some(nonce) = echoed_nonce {
+        if !writer.nonces.consume(nonce) {
+            return Ok(SigOutcome::BadSignature(
+                "alt-nonce echoed in push not active on this server (replay or expired)".into(),
+            ));
+        }
+        let payload =
+            alt_wire::canonical_push_payload_with_nonce(&head.updates, Some(nonce), HashAlgo::Sha1);
+        match pubkey.verify(&payload, &sig) {
+            Ok(()) => Ok(SigOutcome::Verified { principal_id }),
+            Err(e) => Ok(SigOutcome::BadSignature(format!("{e}"))),
+        }
+    } else {
+        let payload = alt_wire::canonical_push_payload(&head.updates, HashAlgo::Sha1);
+        match pubkey.verify(&payload, &sig) {
+            Ok(()) => Ok(SigOutcome::Verified { principal_id }),
+            Err(e) => Ok(SigOutcome::BadSignature(format!("{e}"))),
+        }
     }
 }
 
@@ -1796,5 +1926,49 @@ mod tests {
         assert!(!constant_time_eq_ignore_ascii_case(stored, mid_diff));
         // And the identical-input path returns true.
         assert!(constant_time_eq_ignore_ascii_case(stored, stored));
+    }
+
+    /// M14/W45 — the table issues a nonce that consumes exactly once;
+    /// the second consume on the same value returns false. That's
+    /// the single-use anti-replay primitive.
+    #[test]
+    fn nonce_table_consume_is_single_use() {
+        let t = NonceTable::new();
+        let n = t.issue();
+        assert_eq!(n.len(), 32, "issued nonce should be 32 hex chars");
+        assert!(t.consume(&n), "first consume must succeed");
+        assert!(!t.consume(&n), "second consume on the same nonce must fail");
+    }
+
+    /// A nonce that was never issued can't be consumed. Stops a
+    /// confused-deputy that tries to pass off a guessed value as
+    /// if it had been negotiated.
+    #[test]
+    fn nonce_table_rejects_never_issued_value() {
+        let t = NonceTable::new();
+        assert!(
+            !t.consume("00000000000000000000000000000000"),
+            "consuming a never-issued nonce must fail"
+        );
+    }
+
+    /// At cap (1024 entries), issuing one more evicts the oldest;
+    /// after eviction the evicted value can't be consumed. This
+    /// bounds memory regardless of traffic at the cost of refusing
+    /// an honest client whose info/refs nonce aged out before they
+    /// posted receive-pack.
+    #[test]
+    fn nonce_table_evicts_oldest_when_full() {
+        let t = NonceTable::new();
+        let first = t.issue();
+        for _ in 1..1024 {
+            let _ = t.issue();
+        }
+        // table is full now; one more issue must evict `first`.
+        let _last = t.issue();
+        assert!(
+            !t.consume(&first),
+            "the evicted (oldest) nonce must no longer be consumable"
+        );
     }
 }

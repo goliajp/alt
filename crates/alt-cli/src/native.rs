@@ -906,7 +906,11 @@ impl<'a> NativeRepo<'a> {
     /// signing is off or the sec key isn't present (a sign-policy file
     /// pointing at an absent principal isn't fatal — push still goes
     /// out, just unsigned, same fall-through as `maybe_sign_op`).
-    fn maybe_sign_push(&self, updates: &[alt_wire::RefUpdate]) -> Res<Option<(String, String)>> {
+    fn maybe_sign_push(
+        &self,
+        updates: &[alt_wire::RefUpdate],
+        server_nonce: Option<&str>,
+    ) -> Res<Option<(String, String)>> {
         let policy = SignPolicy::load(&self.store.alt_dir)?;
         if !policy.enabled {
             return Ok(None);
@@ -926,7 +930,15 @@ impl<'a> NativeRepo<'a> {
         };
         let sec = alt_sign::SecretKey::from_text(&sec_text)
             .map_err(|e| format!("malformed sec key at {}: {e}", sec_path.display()))?;
-        let payload = alt_wire::canonical_push_payload(updates, self.store.algo);
+        // M14/W45: when the server advertised a single-use nonce in its
+        // info/refs caps, sign over `nonce <hex>\n` + canonical payload
+        // and echo the nonce back as a cap on the push. The server
+        // looks the nonce up and consumes it; a replay of the same
+        // captured push bytes hits a consumed/absent nonce and fails.
+        // Servers that didn't advertise a nonce (pre-W45) get the
+        // legacy payload — backward-compat.
+        let payload =
+            alt_wire::canonical_push_payload_with_nonce(updates, server_nonce, self.store.algo);
         let sig = sec.sign(&payload);
         // .to_text() includes a trailing newline; the wire cap list can
         // not carry one, so strip it before declaring the cap
@@ -3453,6 +3465,12 @@ impl<'a> NativeRepo<'a> {
         if !ad.supports("report-status") {
             return Err("remote does not support report-status".into());
         }
+        // M14/W45: pick up the server-issued single-use nonce if it
+        // advertised one. `maybe_sign_push` will then sign over
+        // `nonce <hex>\n` + canonical payload, and we echo the same
+        // value back as `alt-nonce=<hex>` on the push capability list
+        // so the server can look it up.
+        let server_nonce: Option<String> = ad.cap_value(alt_wire::CAP_ALT_NONCE).map(str::to_owned);
 
         // resolve the refspecs to (local oid, remote ref name) pairs
         let parsed = if refspecs.is_empty() {
@@ -3580,9 +3598,14 @@ impl<'a> NativeRepo<'a> {
         // `alt-sig=alt-sig-ed25519:<sig>` to the cap list. Git's
         // receive-pack silently ignores unknown caps; an alt server (W10+)
         // looks for the pair and verifies it against its trust store.
-        if let Some((principal, sig_text)) = self.maybe_sign_push(&updates)? {
+        if let Some((principal, sig_text)) =
+            self.maybe_sign_push(&updates, server_nonce.as_deref())?
+        {
             caps_owned.push(format!("{}={principal}", alt_wire::CAP_ALT_PRINCIPAL));
             caps_owned.push(format!("{}={sig_text}", alt_wire::CAP_ALT_SIG));
+            if let Some(n) = &server_nonce {
+                caps_owned.push(format!("{}={n}", alt_wire::CAP_ALT_NONCE));
+            }
         }
         let caps_refs: Vec<&str> = caps_owned.iter().map(String::as_str).collect();
 

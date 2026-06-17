@@ -126,6 +126,16 @@ pub const CAP_ALT_PRINCIPAL: &str = "alt-principal";
 /// [`CAP_ALT_PRINCIPAL`]; either both present or both absent.
 pub const CAP_ALT_SIG: &str = "alt-sig";
 
+/// Capability name carrying a server-issued single-use nonce (M14/W45
+/// anti-replay). The server advertises it in the v1 receive-pack ref
+/// advertisement; the client signs `nonce <hex>\n` prepended to the
+/// usual canonical payload, and echoes the same `alt-nonce=<hex>` cap
+/// on the push so the server can look the nonce up and consume it.
+///
+/// Pushes that re-use a consumed nonce are rejected: the same captured
+/// payload + signature can't be replayed against the same server.
+pub const CAP_ALT_NONCE: &str = "alt-nonce";
+
 /// The canonical byte string a push signature signs over: each update
 /// formatted as `"<old-hex> <new-hex> <ref-name>\n"`, sorted by ref name
 /// to be order-independent against the client's input. Zero-oids are
@@ -138,6 +148,25 @@ pub const CAP_ALT_SIG: &str = "alt-sig";
 /// without parsing pkt-lines back into a tuple list and worrying about
 /// upstream re-ordering.
 pub fn canonical_push_payload(updates: &[RefUpdate], algo: HashAlgo) -> Vec<u8> {
+    canonical_push_payload_with_nonce(updates, None, algo)
+}
+
+/// M14/W45 — canonical payload with an optional server-issued nonce.
+///
+/// When `nonce` is `Some(hex)`, the payload begins with a literal
+/// `nonce <hex>\n` line followed by the same sorted ref-update lines
+/// the no-nonce form emits. This is exactly the byte sequence the
+/// server expects to reconstruct from `(echoed alt-nonce cap,
+/// pushed updates)` when it verifies a signed push that participated
+/// in anti-replay negotiation.
+///
+/// When `nonce` is `None`, the output is identical to the no-nonce
+/// path so existing W14 signed pushes keep verifying without change.
+pub fn canonical_push_payload_with_nonce(
+    updates: &[RefUpdate],
+    nonce: Option<&str>,
+    algo: HashAlgo,
+) -> Vec<u8> {
     let zero = zero_oid(algo);
     let mut lines: Vec<String> = updates
         .iter()
@@ -151,7 +180,14 @@ pub fn canonical_push_payload(updates: &[RefUpdate], algo: HashAlgo) -> Vec<u8> 
         })
         .collect();
     lines.sort();
-    let mut out = Vec::with_capacity(lines.iter().map(|l| l.len()).sum());
+    let mut out = Vec::with_capacity(
+        nonce.map(|n| 7 + n.len()).unwrap_or(0) + lines.iter().map(|l| l.len()).sum::<usize>(),
+    );
+    if let Some(n) = nonce {
+        out.extend_from_slice(b"nonce ");
+        out.extend_from_slice(n.as_bytes());
+        out.push(b'\n');
+    }
     for l in lines {
         out.extend_from_slice(l.as_bytes());
     }

@@ -51,7 +51,8 @@ pub use pkt::{
     Frame, PktError, read_frame, write_data, write_delim, write_flush, write_response_end,
 };
 pub use push::{
-    CAP_ALT_PRINCIPAL, CAP_ALT_SIG, CommandStatus, PushError, RefUpdate, ReportStatus,
-    V1RefAdvertisement, canonical_push_payload, encode_push_request, parse_report_status,
-    parse_report_status_sideband, parse_v1_ref_advertisement,
+    CAP_ALT_NONCE, CAP_ALT_PRINCIPAL, CAP_ALT_SIG, CommandStatus, PushError, RefUpdate,
+    ReportStatus, V1RefAdvertisement, canonical_push_payload, canonical_push_payload_with_nonce,
+    encode_push_request, parse_report_status, parse_report_status_sideband,
+    parse_v1_ref_advertisement,
 };
