@@ -175,6 +175,13 @@ fn main() {
         mode.describe()
     );
 
+    // M11/W25: install signal handlers so SIGINT (Ctrl-C) and SIGTERM
+    // (`systemctl stop`, `docker stop`, k8s preStop) tip the shutdown
+    // flag. The handler must stay async-signal-safe, so it only does an
+    // atomic store; the main thread polls it and drives the actual
+    // shutdown sequence.
+    install_signal_handlers();
+
     let mode = Arc::new(mode);
     let mut handles = Vec::with_capacity(workers);
     for _ in 0..workers {
@@ -184,18 +191,62 @@ fn main() {
             loop {
                 let req = match server.recv() {
                     Ok(r) => r,
-                    Err(_) => break, // server shut down or socket dead
+                    Err(_) => break, // unblocked or socket dead
                 };
                 serve_one(&mode, req);
             }
         }));
     }
-    // Main thread waits forever — tiny_http's `Server` is dropped only
-    // when its Arc count hits zero, which won't happen while workers
-    // hold it. SIGTERM/SIGINT lands in W25.
+
+    // Poll the shutdown flag on the main thread. Once SIGTERM/SIGINT
+    // fires, unblock all worker `recv()` calls (tiny_http: pending
+    // recv → Err, in-flight responses keep going) and join. The poll
+    // is cheap (100 ms) and only the main thread runs it, so the
+    // worker pool stays untouched.
+    loop {
+        if SHUTDOWN.load(std::sync::atomic::Ordering::Relaxed) {
+            eprintln!("altd-server: shutdown signal received, unblocking workers");
+            // tiny_http: `unblock()` frees only ONE blocked recv() per
+            // call (https://docs.rs/tiny_http/0.12.0/tiny_http/struct.Server.html#method.unblock),
+            // so call it once per worker to drain the pool.
+            for _ in 0..workers {
+                server.unblock();
+            }
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
     for h in handles {
         let _ = h.join();
     }
+    eprintln!("altd-server: all workers stopped, exiting cleanly");
+}
+
+/// Set when SIGINT or SIGTERM arrives. Read by the main thread to
+/// drive `Server::unblock()` and graceful worker drain.
+static SHUTDOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(unix)]
+extern "C" fn shutdown_handler(_sig: libc::c_int) {
+    // Async-signal-safe: relaxed atomic store is the only thing we do
+    // inside the handler. The main thread does the actual work.
+    SHUTDOWN.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+#[cfg(unix)]
+fn install_signal_handlers() {
+    let handler = shutdown_handler as *const () as libc::sighandler_t;
+    unsafe {
+        libc::signal(libc::SIGINT, handler);
+        libc::signal(libc::SIGTERM, handler);
+    }
+}
+
+#[cfg(not(unix))]
+fn install_signal_handlers() {
+    // Non-unix targets: no handler. The shutdown loop still runs but
+    // `SHUTDOWN` is never set externally, so the process exits when
+    // an operator hard-kills it.
 }
 
 /// One request through dispatch + access-log emission. Pulled out of

@@ -1632,3 +1632,68 @@ fn altd_server_handles_concurrent_clones_in_parallel() {
         );
     }
 }
+
+#[test]
+fn altd_server_drains_cleanly_on_sigterm() {
+    // M11/W25: send SIGTERM to the running server and assert it
+    // (a) prints the "shutdown signal received" line within a sane
+    //     deadline (proves the handler ran + the main thread polled
+    //     the flag), and
+    // (b) prints the final "all workers stopped" line and exits with
+    //     code 0 (proves graceful join, not SIGKILL).
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("a.txt"), "alpha\n").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "seed"]));
+
+    let mut server = spawn_server(root);
+    let pid = server.child.id();
+
+    // Send SIGTERM via libc (Stdlib doesn't expose it portably). On
+    // unix this is the same path systemd / docker stop use.
+    #[cfg(unix)]
+    unsafe {
+        let rc = libc::kill(pid as libc::pid_t, libc::SIGTERM);
+        assert_eq!(rc, 0, "kill(SIGTERM) failed");
+    }
+
+    // Wait for the server to exit on its own — should take well under
+    // a second since no in-flight requests are holding workers.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let exit_status = loop {
+        if let Some(s) = server.child.try_wait().expect("try_wait") {
+            break s;
+        }
+        if Instant::now() > deadline {
+            panic!("altd-server did not exit within 5s of SIGTERM");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert!(
+        exit_status.success(),
+        "graceful shutdown should exit code 0; got {exit_status:?}"
+    );
+
+    // Drain stderr: should contain both the shutdown-signal line and
+    // the post-join exit line, in that order.
+    let log = {
+        use std::io::Read;
+        let mut out = String::new();
+        if let Some(mut reader) = server.stderr.take() {
+            let _ = reader.read_to_string(&mut out);
+        }
+        out
+    };
+    let sig_idx = log
+        .find("shutdown signal received")
+        .unwrap_or_else(|| panic!("missing shutdown-signal line:\n{log}"));
+    let exit_idx = log
+        .find("all workers stopped")
+        .unwrap_or_else(|| panic!("missing post-join exit line:\n{log}"));
+    assert!(
+        sig_idx < exit_idx,
+        "shutdown-signal line must precede the exit line:\n{log}"
+    );
+}
