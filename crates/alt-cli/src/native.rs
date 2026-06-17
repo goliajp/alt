@@ -1714,16 +1714,16 @@ impl<'a> NativeRepo<'a> {
             return Ok(());
         }
 
-        // M12/W34: structured-data semantic diff for JSON. Same
-        // `--semantic` gate as the tree-sitter path above: when the
-        // caller asked for it and we recognise the file shape, the
-        // structured summary replaces the unified hunks. JSON parse
-        // failures fall through to line diff — no signal loss.
+        // M12/W34 + W34b: structured-data semantic diff. `--semantic`
+        // gate as above; dispatch routes by file extension via
+        // `summary_for_path` (.json content-detect + .toml explicit).
+        // Parse failures fall through to the line diff — no signal loss.
         if semantic
             && !alt_diff::is_binary(&old_bytes)
             && !alt_diff::is_binary(&new_bytes)
-            && path.ends_with(b".json")
-            && let Some(structured) = alt_diff::structured::summary(&old_bytes, &new_bytes)
+            && let Ok(path_str) = std::str::from_utf8(path.as_bytes())
+            && let Some(structured) =
+                alt_diff::structured::summary_for_path(path_str, &old_bytes, &new_bytes)
         {
             buf.extend_from_slice(format!("{}\n", structured.render()).as_bytes());
             return Ok(());

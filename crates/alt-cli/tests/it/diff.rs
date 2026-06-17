@@ -574,3 +574,63 @@ fn diff_semantic_json_collapses_pure_reformat_to_no_change() {
         "pure reformat must collapse to no-change: {text}"
     );
 }
+
+/// M12/W34b: `alt diff --semantic Cargo.toml` reports the dotted /
+/// section-aware path that changed, not the line-based shrapnel. The
+/// dogfood path for `cargo` config edits.
+#[test]
+fn diff_semantic_toml_reports_section_path_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+
+    std::fs::write(
+        root.join("Cargo.toml"),
+        r#"[package]
+name = "alt"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+serde = "1"
+clap = "4"
+"#,
+    )
+    .unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "initial Cargo.toml"]));
+
+    std::fs::write(
+        root.join("Cargo.toml"),
+        r#"# bumped version + added comment style
+[package]
+name = "alt"
+version = "0.2.0"
+edition = "2024"
+
+[dependencies]
+serde = "1"
+clap = "4"
+"#,
+    )
+    .unwrap();
+    ok(alt(root, &["add", "."]));
+
+    let text = ok(alt(root, &["diff", "--cached", "--semantic"]));
+    assert!(
+        text.contains("toml: ") && text.contains("$.package.version"),
+        "toml semantic line missing version path: {text}"
+    );
+    assert!(
+        text.contains("0.1.0") && text.contains("0.2.0"),
+        "old → new value missing: {text}"
+    );
+    assert!(
+        !text.contains("$.package.name"),
+        "unchanged name must not appear: {text}"
+    );
+    assert!(
+        !text.contains("$.dependencies"),
+        "unchanged dependencies must not appear: {text}"
+    );
+}

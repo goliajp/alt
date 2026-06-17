@@ -30,12 +30,16 @@ use std::fmt::Write;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StructKind {
     Json,
+    /// TOML — Cargo.toml / pyproject.toml / rustfmt.toml / config.toml.
+    /// M12/W34b.
+    Toml,
 }
 
 impl StructKind {
     pub fn as_str(&self) -> &'static str {
         match self {
             StructKind::Json => "json",
+            StructKind::Toml => "toml",
         }
     }
 }
@@ -87,8 +91,28 @@ impl Summary {
 /// Top-level: try every structured prism. Returns `None` when neither
 /// input parses (the caller stays on the line-based path) or when the
 /// recognition heuristic doesn't fire on both sides.
+///
+/// Uses content-detection only — TOML can start with anything (a
+/// comment, a key, a section header) so it doesn't fit the heuristic;
+/// callers that know the file extension should use
+/// [`summary_for_path`].
 pub fn summary(old: &[u8], new: &[u8]) -> Option<Summary> {
     if looks_like_json(old) && looks_like_json(new) {
+        return json_summary(old, new);
+    }
+    None
+}
+
+/// Path-aware dispatcher. Routes on the file extension so TOML
+/// (`*.toml`) gets the TOML parser even though TOML's first line can
+/// be anything. JSON stays content-detected so a `.txt` file that
+/// happens to be JSON still gets the semantic treatment.
+pub fn summary_for_path(path: &str, old: &[u8], new: &[u8]) -> Option<Summary> {
+    let lower = path.to_ascii_lowercase();
+    if lower.ends_with(".toml") {
+        return toml_summary(old, new);
+    }
+    if lower.ends_with(".json") || (looks_like_json(old) && looks_like_json(new)) {
         return json_summary(old, new);
     }
     None
@@ -439,6 +463,435 @@ impl<'a> Parser<'a> {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────
+//  TOML (M12/W34b)
+// ─────────────────────────────────────────────────────────────────────
+
+/// TOML semantic diff. Parses a subset wide enough to cover real
+/// Cargo.toml / pyproject.toml / rustfmt.toml shapes:
+///
+/// - bare keys, dotted keys, quoted keys
+/// - `[section]` headers and `[[array_of_tables]]`
+/// - basic `"..."` strings (with escapes) + literal `'...'` strings
+/// - integers, floats (incl. `_` digit separators), bools
+/// - homogeneous arrays
+/// - line comments (`# …`)
+///
+/// Anything outside that subset (multi-line strings, dates, inline
+/// tables) makes the parser return `None` so the caller falls back to
+/// the line diff — same fallback policy as the JSON path.
+fn toml_summary(old: &[u8], new: &[u8]) -> Option<Summary> {
+    let old_val = parse_toml(old)?;
+    let new_val = parse_toml(new)?;
+    let mut paths = Vec::new();
+    diff_values("$", &old_val, &new_val, &mut paths);
+    Some(Summary {
+        kind: StructKind::Toml,
+        paths,
+    })
+}
+
+fn parse_toml(data: &[u8]) -> Option<Value> {
+    let text = std::str::from_utf8(data).ok()?;
+    let mut p = TomlParser { text, at: 0 };
+    let mut root: Vec<(String, Value)> = Vec::new();
+    // The current table the parser is writing into. We track it as a
+    // path so we can navigate by key descent each time we land on a
+    // `[a.b.c]` header; the root vector grows as we go.
+    let mut current_path: Vec<String> = Vec::new();
+    loop {
+        p.skip_blanks_and_comments();
+        if p.at >= p.text.len() {
+            break;
+        }
+        if p.peek_char()? == '[' {
+            // Section header: either `[a.b.c]` (replace path) or
+            // `[[a.b.c]]` (append to the array at that path).
+            p.at += 1; // skip '['
+            let is_array_of_tables = p.peek_char() == Some('[');
+            if is_array_of_tables {
+                p.at += 1;
+            }
+            let key_path = p.parse_dotted_key()?;
+            // expect closing bracket(s)
+            p.skip_inline_whitespace();
+            if p.peek_char()? != ']' {
+                return None;
+            }
+            p.at += 1;
+            if is_array_of_tables {
+                if p.peek_char()? != ']' {
+                    return None;
+                }
+                p.at += 1;
+            }
+            p.skip_until_newline_or_comment();
+            if is_array_of_tables {
+                // Ensure the array exists, append an empty table.
+                ensure_array_of_tables(&mut root, &key_path);
+                current_path = key_path.clone();
+            } else {
+                ensure_table(&mut root, &key_path);
+                current_path = key_path;
+            }
+            continue;
+        }
+
+        // Plain `key = value` line.
+        let key_path = p.parse_dotted_key()?;
+        p.skip_inline_whitespace();
+        if p.peek_char()? != '=' {
+            return None;
+        }
+        p.at += 1;
+        p.skip_inline_whitespace();
+        let value = p.parse_value()?;
+        p.skip_until_newline_or_comment();
+
+        let mut full_path = current_path.clone();
+        full_path.extend(key_path);
+        insert_into(&mut root, &full_path, value)?;
+    }
+    Some(Value::Object(root))
+}
+
+fn ensure_table(root: &mut Vec<(String, Value)>, path: &[String]) {
+    // Walk down, creating object nodes as needed. The last segment
+    // must end up as an Object.
+    let mut cur: &mut Vec<(String, Value)> = root;
+    for (i, key) in path.iter().enumerate() {
+        let last = i == path.len() - 1;
+        let idx = match cur.iter().position(|(k, _)| k == key) {
+            Some(j) => j,
+            None => {
+                cur.push((key.clone(), Value::Object(Vec::new())));
+                cur.len() - 1
+            }
+        };
+        match &mut cur[idx].1 {
+            Value::Object(inner) => {
+                if last {
+                    return;
+                }
+                cur = inner;
+            }
+            Value::Array(items) => {
+                // `[a]` followed by `[a.b]` walks into the *last*
+                // array-of-tables entry — that matches TOML semantics.
+                let last_idx = items.len().saturating_sub(1);
+                if let Some(Value::Object(inner)) = items.get_mut(last_idx) {
+                    if last {
+                        return;
+                    }
+                    cur = inner;
+                } else {
+                    return;
+                }
+            }
+            _ => return,
+        }
+    }
+}
+
+fn ensure_array_of_tables(root: &mut Vec<(String, Value)>, path: &[String]) {
+    // Walk to the parent object, find/create the array at the last
+    // segment, then append a fresh empty table to it.
+    if path.is_empty() {
+        return;
+    }
+    let parent = &path[..path.len() - 1];
+    let leaf = &path[path.len() - 1];
+    ensure_table(root, parent);
+    let cur: &mut Vec<(String, Value)> = walk_to(root, parent);
+    let idx = match cur.iter().position(|(k, _)| k == leaf) {
+        Some(j) => j,
+        None => {
+            cur.push((leaf.clone(), Value::Array(Vec::new())));
+            cur.len() - 1
+        }
+    };
+    if let Value::Array(items) = &mut cur[idx].1 {
+        items.push(Value::Object(Vec::new()));
+    }
+}
+
+fn walk_to<'a>(
+    root: &'a mut Vec<(String, Value)>,
+    path: &[String],
+) -> &'a mut Vec<(String, Value)> {
+    let mut cur: &'a mut Vec<(String, Value)> = root;
+    for key in path {
+        let idx = cur
+            .iter()
+            .position(|(k, _)| k == key)
+            .expect("path created");
+        match &mut cur[idx].1 {
+            Value::Object(inner) => cur = inner,
+            Value::Array(items) => {
+                let last_idx = items.len() - 1;
+                if let Value::Object(inner) = &mut items[last_idx] {
+                    cur = inner;
+                } else {
+                    panic!("walk_to: array entry not a table");
+                }
+            }
+            _ => panic!("walk_to: non-container at {key}"),
+        }
+    }
+    cur
+}
+
+fn insert_into(root: &mut Vec<(String, Value)>, path: &[String], value: Value) -> Option<()> {
+    if path.is_empty() {
+        return None;
+    }
+    let parent = &path[..path.len() - 1];
+    let leaf = &path[path.len() - 1];
+    ensure_table(root, parent);
+    let cur = walk_to(root, parent);
+    // Replace or append the leaf entry.
+    if let Some(slot) = cur.iter_mut().find(|(k, _)| k == leaf) {
+        slot.1 = value;
+    } else {
+        cur.push((leaf.clone(), value));
+    }
+    Some(())
+}
+
+struct TomlParser<'a> {
+    text: &'a str,
+    at: usize,
+}
+
+impl<'a> TomlParser<'a> {
+    fn peek_char(&self) -> Option<char> {
+        self.text[self.at..].chars().next()
+    }
+
+    fn skip_blanks_and_comments(&mut self) {
+        loop {
+            // skip whitespace
+            while let Some(c) = self.peek_char() {
+                if c.is_whitespace() {
+                    self.at += c.len_utf8();
+                } else {
+                    break;
+                }
+            }
+            // line comment?
+            if self.peek_char() == Some('#') {
+                while let Some(c) = self.peek_char() {
+                    self.at += c.len_utf8();
+                    if c == '\n' {
+                        break;
+                    }
+                }
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn skip_inline_whitespace(&mut self) {
+        while let Some(c) = self.peek_char() {
+            if c == ' ' || c == '\t' {
+                self.at += 1;
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn skip_until_newline_or_comment(&mut self) {
+        self.skip_inline_whitespace();
+        if self.peek_char() == Some('#') {
+            while let Some(c) = self.peek_char() {
+                self.at += c.len_utf8();
+                if c == '\n' {
+                    return;
+                }
+            }
+        }
+        // skip a single newline (multi-line value would have already
+        // consumed its internal newlines)
+        if self.peek_char() == Some('\n') {
+            self.at += 1;
+        } else if self.peek_char() == Some('\r') {
+            self.at += 1;
+            if self.peek_char() == Some('\n') {
+                self.at += 1;
+            }
+        }
+    }
+
+    fn parse_dotted_key(&mut self) -> Option<Vec<String>> {
+        let mut out = Vec::new();
+        loop {
+            self.skip_inline_whitespace();
+            let part = self.parse_key_segment()?;
+            out.push(part);
+            self.skip_inline_whitespace();
+            if self.peek_char() == Some('.') {
+                self.at += 1;
+            } else {
+                break;
+            }
+        }
+        Some(out)
+    }
+
+    fn parse_key_segment(&mut self) -> Option<String> {
+        match self.peek_char()? {
+            '"' => self.parse_basic_string(),
+            '\'' => self.parse_literal_string(),
+            c if is_bare_key_char(c) => {
+                let start = self.at;
+                while let Some(c) = self.peek_char() {
+                    if is_bare_key_char(c) {
+                        self.at += c.len_utf8();
+                    } else {
+                        break;
+                    }
+                }
+                Some(self.text[start..self.at].to_owned())
+            }
+            _ => None,
+        }
+    }
+
+    fn parse_value(&mut self) -> Option<Value> {
+        self.skip_inline_whitespace();
+        match self.peek_char()? {
+            '"' => Some(Value::String(self.parse_basic_string()?)),
+            '\'' => Some(Value::String(self.parse_literal_string()?)),
+            '[' => self.parse_array(),
+            't' | 'f' => self.parse_bool(),
+            '-' | '+' | '0'..='9' => self.parse_number(),
+            _ => None,
+        }
+    }
+
+    fn parse_basic_string(&mut self) -> Option<String> {
+        // `"..."` with the usual JSON-ish escapes. Multi-line `"""`
+        // strings are out of W34b scope.
+        self.at += 1; // opening "
+        let mut out = String::new();
+        loop {
+            let c = self.peek_char()?;
+            match c {
+                '"' => {
+                    self.at += 1;
+                    return Some(out);
+                }
+                '\\' => {
+                    self.at += 1;
+                    let esc = self.peek_char()?;
+                    self.at += esc.len_utf8();
+                    match esc {
+                        '"' => out.push('"'),
+                        '\\' => out.push('\\'),
+                        'n' => out.push('\n'),
+                        't' => out.push('\t'),
+                        'r' => out.push('\r'),
+                        _ => return None,
+                    }
+                }
+                '\n' => return None, // single-line strings only
+                _ => {
+                    out.push(c);
+                    self.at += c.len_utf8();
+                }
+            }
+        }
+    }
+
+    fn parse_literal_string(&mut self) -> Option<String> {
+        // `'...'`: no escapes, content is taken literally.
+        self.at += 1;
+        let start = self.at;
+        loop {
+            let c = self.peek_char()?;
+            if c == '\'' {
+                let body = self.text[start..self.at].to_owned();
+                self.at += 1;
+                return Some(body);
+            }
+            if c == '\n' {
+                return None;
+            }
+            self.at += c.len_utf8();
+        }
+    }
+
+    fn parse_bool(&mut self) -> Option<Value> {
+        if self.text[self.at..].starts_with("true") {
+            self.at += 4;
+            return Some(Value::Bool(true));
+        }
+        if self.text[self.at..].starts_with("false") {
+            self.at += 5;
+            return Some(Value::Bool(false));
+        }
+        None
+    }
+
+    fn parse_number(&mut self) -> Option<Value> {
+        let start = self.at;
+        if matches!(self.peek_char(), Some('+' | '-')) {
+            self.at += 1;
+        }
+        while let Some(c) = self.peek_char() {
+            match c {
+                '0'..='9' | '.' | 'e' | 'E' | '+' | '-' | '_' => self.at += 1,
+                _ => break,
+            }
+        }
+        // Strip TOML digit separators before letting Rust parse.
+        let raw: String = self.text[start..self.at]
+            .chars()
+            .filter(|c| *c != '_')
+            .collect();
+        let parsed: f64 = raw.parse().ok()?;
+        // Canonicalise: keep an integer form when value is integral
+        // (matches JSON path's `1` vs `1.0` collapse).
+        let canonical = if parsed.fract() == 0.0 && parsed.abs() < 1e16 {
+            format!("{}", parsed as i64)
+        } else {
+            format!("{parsed}")
+        };
+        Some(Value::Number(canonical))
+    }
+
+    fn parse_array(&mut self) -> Option<Value> {
+        self.at += 1; // skip [
+        let mut items = Vec::new();
+        loop {
+            self.skip_blanks_and_comments();
+            if self.peek_char() == Some(']') {
+                self.at += 1;
+                return Some(Value::Array(items));
+            }
+            let v = self.parse_value()?;
+            items.push(v);
+            self.skip_blanks_and_comments();
+            match self.peek_char()? {
+                ',' => {
+                    self.at += 1;
+                }
+                ']' => {
+                    self.at += 1;
+                    return Some(Value::Array(items));
+                }
+                _ => return None,
+            }
+        }
+    }
+}
+
+fn is_bare_key_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_' || c == '-'
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -559,5 +1012,133 @@ mod tests {
         let b = br#"{"msg":"hello\nworld"}"#;
         let s = summary(a, b).unwrap();
         assert!(s.semantically_unchanged());
+    }
+
+    // ── TOML (M12/W34b) ──────────────────────────────────────────
+
+    #[test]
+    fn toml_summary_routes_through_summary_for_path() {
+        let a = br#"
+[package]
+name = "alt"
+version = "0.1.0"
+"#
+        .to_vec();
+        let b = br#"
+[package]
+name = "alt"
+version = "0.2.0"
+"#
+        .to_vec();
+        let s = summary_for_path("Cargo.toml", &a, &b).unwrap();
+        assert_eq!(s.kind, StructKind::Toml);
+        let r = s.render();
+        assert!(r.contains("$.package.version"), "version path missing: {r}");
+        assert!(r.contains("0.1.0") && r.contains("0.2.0"), "old → new: {r}");
+        assert!(!r.contains("name"), "unchanged key must not appear: {r}");
+    }
+
+    #[test]
+    fn toml_dotted_key_change_renders_path() {
+        let a = b"server.port = 8080\nserver.host = \"localhost\"\n";
+        let b = b"server.port = 9090\nserver.host = \"localhost\"\n";
+        let s = summary_for_path("config.toml", a, b).unwrap();
+        let r = s.render();
+        assert!(r.contains("$.server.port"), "dotted path missing: {r}");
+        assert!(!r.contains("$.server.host"), "unchanged dotted key: {r}");
+    }
+
+    #[test]
+    fn toml_section_header_and_comments_are_ignored() {
+        let a = br#"
+# top comment
+[package]
+name = "alt"  # inline comment
+version = "0.1.0"
+"#;
+        let b = br#"
+[package]
+# differently placed comment
+name = "alt"
+version = "0.1.0"
+# trailing comment
+"#;
+        let s = summary_for_path("Cargo.toml", a, b).unwrap();
+        assert!(
+            s.semantically_unchanged(),
+            "comments + whitespace shouldn't flag: {:?}",
+            s.paths
+        );
+    }
+
+    #[test]
+    fn toml_array_change_uses_index_path() {
+        let a = b"features = [\"a\", \"b\", \"c\"]\n";
+        let b = b"features = [\"a\", \"x\", \"c\"]\n";
+        let s = summary_for_path("Cargo.toml", a, b).unwrap();
+        let r = s.render();
+        assert!(r.contains("$.features[1]"), "indexed path missing: {r}");
+        assert!(r.contains("\"b\""), "old value missing: {r}");
+        assert!(r.contains("\"x\""), "new value missing: {r}");
+    }
+
+    #[test]
+    fn toml_array_of_tables_walks_correctly() {
+        let a = br#"
+[[dependencies]]
+name = "serde"
+version = "1"
+
+[[dependencies]]
+name = "clap"
+version = "4"
+"#;
+        let b = br#"
+[[dependencies]]
+name = "serde"
+version = "1"
+
+[[dependencies]]
+name = "clap"
+version = "5"
+"#;
+        let s = summary_for_path("Cargo.toml", a, b).unwrap();
+        let r = s.render();
+        assert!(
+            r.contains("$.dependencies[1].version"),
+            "array-of-tables path missing: {r}"
+        );
+    }
+
+    #[test]
+    fn toml_number_canonicalisation() {
+        // `1`, `1.0`, and `1_000` (with separator) trip the same
+        // canonical form (1, 1, 1000).
+        let a = b"a = 1\nb = 1_000\nc = 3.14\n";
+        let b = b"a = 1.0\nb = 1000\nc = 3.14\n";
+        let s = summary_for_path("Cargo.toml", a, b).unwrap();
+        assert!(
+            s.semantically_unchanged(),
+            "1/1.0 and 1_000/1000 should compare equal: {:?}",
+            s.paths
+        );
+    }
+
+    #[test]
+    fn toml_literal_vs_basic_string_compare_by_value() {
+        let a = br#"name = "alt""#;
+        let b = br#"name = 'alt'"#;
+        let s = summary_for_path("Cargo.toml", a, b).unwrap();
+        assert!(
+            s.semantically_unchanged(),
+            "string quote style is not semantic: {:?}",
+            s.paths
+        );
+    }
+
+    #[test]
+    fn toml_invalid_input_returns_none() {
+        let a = b"not = toml = wrong\n";
+        assert!(summary_for_path("x.toml", a, a).is_none());
     }
 }
