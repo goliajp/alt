@@ -45,12 +45,24 @@ impl Server {
     /// `read_to_string` would otherwise deadlock waiting for EOF.
     #[allow(dead_code)]
     fn drain_stderr(&mut self) -> String {
+        // tiny_http writes the response back from a worker thread; the
+        // access-log JSON line is emitted right after, but the OS may
+        // schedule the parent's drain in between the response and the
+        // log write. A short settle window lets the worker finish its
+        // stderr write before the SIGKILL closes the pipe.
+        std::thread::sleep(Duration::from_millis(100));
         let _ = self.child.kill();
         let _ = self.child.wait();
         let mut out = String::new();
         if let Some(mut reader) = self.stderr.take() {
             use std::io::Read;
-            let _ = reader.get_mut().read_to_string(&mut out);
+            // Read from the BufReader, not the inner ChildStderr:
+            // the bind-line `read_line` may have buffered additional
+            // bytes (BufReader fills its 8 KiB buffer on the first
+            // syscall), and reading the inner stream directly would
+            // skip past whatever access-log JSON-lines landed in the
+            // same syscall as the bind line.
+            let _ = reader.read_to_string(&mut out);
         }
         out
     }
@@ -1568,4 +1580,55 @@ fn altd_server_emits_jsonl_access_log_per_request() {
         first.contains("\"principal\":\"anonymous\""),
         "single-repo / no-auth requests log principal=anonymous: {first}"
     );
+}
+
+#[test]
+fn altd_server_handles_concurrent_clones_in_parallel() {
+    // M11/W24: with multi-threaded dispatch, N concurrent clones must
+    // all succeed without queueing artifacts. We start the server,
+    // fire 4 `git clone` commands in parallel against it, and assert
+    // every one completed cleanly. With the W23-W24 worker pool sized
+    // at 4 by default, none of these requests should be waiting on
+    // one another's response.
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("a.txt"), "alpha\n").unwrap();
+    std::fs::write(root.join("b.txt"), "beta\n").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "seed"]));
+
+    let server = spawn_server(root);
+    let url = format!("http://{}/", server.addr);
+
+    let clone_root = tempfile::tempdir().unwrap();
+    let n_clones = 4;
+    let mut handles = Vec::with_capacity(n_clones);
+    for i in 0..n_clones {
+        let url = url.clone();
+        let target = clone_root.path().join(format!("c{i}"));
+        handles.push(std::thread::spawn(move || {
+            std::process::Command::new("git")
+                .args(["clone", &url, target.to_str().unwrap()])
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_PROTOCOL", "version=2")
+                .output()
+                .unwrap()
+        }));
+    }
+    for (i, h) in handles.into_iter().enumerate() {
+        let out = h.join().unwrap();
+        assert!(
+            out.status.success(),
+            "concurrent clone {i} failed: stderr={}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let target = clone_root.path().join(format!("c{i}"));
+        assert_eq!(
+            std::fs::read(target.join("a.txt")).unwrap(),
+            b"alpha\n",
+            "clone {i} a.txt"
+        );
+    }
 }

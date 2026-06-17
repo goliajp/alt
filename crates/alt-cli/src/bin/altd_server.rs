@@ -133,8 +133,9 @@ fn main() {
                 eprintln!(
                     "usage: altd-server [--bind 127.0.0.1:PORT]\n\n\
                      env:\n  \
-                     ALT_SERVER_REPO  path to a single alt repo to serve (legacy mode)\n  \
-                     ALT_SERVER_ROOT  path to a multi-repo root; URLs map /<name>/… → <root>/<name>"
+                     ALT_SERVER_REPO     path to a single alt repo to serve (legacy mode)\n  \
+                     ALT_SERVER_ROOT     path to a multi-repo root; URLs map /<name>/… → <root>/<name>\n  \
+                     ALT_SERVER_WORKERS  parallel request handler threads (default 4)"
                 );
                 return;
             }
@@ -155,31 +156,69 @@ fn main() {
         (None, Some(p)) => ServeMode::multi(PathBuf::from(p)),
     };
 
-    let server = Server::http(&bind).unwrap_or_else(|e| die(&format!("bind {bind}: {e}")));
+    // M11/W24: parallel request dispatch via a worker pool. tiny_http
+    // is already thread-safe (Server: Send + Sync); previously the outer
+    // `for req in incoming_requests()` deserialized everything onto the
+    // main thread. With N workers each calling `server.recv()` in a
+    // loop, concurrent clients no longer queue behind a slow push.
+    let workers: usize = std::env::var("ALT_SERVER_WORKERS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .filter(|n: &usize| *n > 0)
+        .unwrap_or(4);
+
+    let server =
+        Arc::new(Server::http(&bind).unwrap_or_else(|e| die(&format!("bind {bind}: {e}"))));
     eprintln!(
-        "altd-server: listening on {} ({})",
+        "altd-server: listening on {} ({}, workers={workers})",
         server.server_addr(),
         mode.describe()
     );
 
-    for req in server.incoming_requests() {
-        let url = req.url().to_owned();
-        let method = req.method().clone();
-        let req_id = next_request_id();
-        let start = std::time::Instant::now();
-        let mut log = LogCtx {
-            bytes_in: req.body_length().map(|n| n as u64).unwrap_or(0),
-            ..LogCtx::default()
-        };
-        if let Err(e) = dispatch(&mode, method.clone(), &url, req, &mut log) {
-            eprintln!("altd-server: handler error: {e} (req_id={req_id})");
-            if log.status == 0 {
-                log.status = 500;
+    let mode = Arc::new(mode);
+    let mut handles = Vec::with_capacity(workers);
+    for _ in 0..workers {
+        let server = Arc::clone(&server);
+        let mode = Arc::clone(&mode);
+        handles.push(std::thread::spawn(move || {
+            loop {
+                let req = match server.recv() {
+                    Ok(r) => r,
+                    Err(_) => break, // server shut down or socket dead
+                };
+                serve_one(&mode, req);
             }
-        }
-        let duration_ms = start.elapsed().as_millis();
-        emit_access_log(&req_id, &method, &url, &log, duration_ms);
+        }));
     }
+    // Main thread waits forever — tiny_http's `Server` is dropped only
+    // when its Arc count hits zero, which won't happen while workers
+    // hold it. SIGTERM/SIGINT lands in W25.
+    for h in handles {
+        let _ = h.join();
+    }
+}
+
+/// One request through dispatch + access-log emission. Pulled out of
+/// the main loop so each worker thread runs the same path with no
+/// shared mutable state across workers (everything per-request is
+/// stack-local).
+fn serve_one(mode: &ServeMode, req: tiny_http::Request) {
+    let url = req.url().to_owned();
+    let method = req.method().clone();
+    let req_id = next_request_id();
+    let start = std::time::Instant::now();
+    let mut log = LogCtx {
+        bytes_in: req.body_length().map(|n| n as u64).unwrap_or(0),
+        ..LogCtx::default()
+    };
+    if let Err(e) = dispatch(mode, method.clone(), &url, req, &mut log) {
+        eprintln!("altd-server: handler error: {e} (req_id={req_id})");
+        if log.status == 0 {
+            log.status = 500;
+        }
+    }
+    let duration_ms = start.elapsed().as_millis();
+    emit_access_log(&req_id, &method, &url, &log, duration_ms);
 }
 
 /// Single-repo (ALT_SERVER_REPO) or multi-repo (ALT_SERVER_ROOT) serve.
