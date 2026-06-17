@@ -414,18 +414,95 @@ fn build_pack_for_fetch(
     if outgoing.is_empty() {
         return Ok(Vec::new());
     }
+    // M10/W17: drop objects that the client's filter excludes. The
+    // first cut handles `blob:none` / `blob:limit=<n>` / `tree:0` —
+    // git's three common partial-clone filters.
+    let filter = parse_filter_spec(req.filter.as_deref());
     let dir = tempfile::tempdir()?;
-    let count = u32::try_from(outgoing.len())
-        .map_err(|_| "outgoing object set exceeds u32 (server-side)")?;
-    let mut writer = alt_git_pack::PackWriter::create(dir.path(), repo.algo(), count)?;
+    // Two-pass: first decide which objects survive the filter (needs
+    // `read_object` for the `blob:limit` size check), then write them.
+    let mut surviving: Vec<(
+        ObjectId,
+        alt_git_codec::ObjectKind,
+        alt_git_codec::RawObject,
+    )> = Vec::with_capacity(outgoing.len());
     for (oid, kind) in &outgoing {
         let obj = repo
             .read_object(oid)?
             .ok_or_else(|| format!("outgoing object {oid} missing from server odb"))?;
+        if filter.excludes(*kind, &obj.data) {
+            continue;
+        }
+        surviving.push((*oid, *kind, obj));
+    }
+    if surviving.is_empty() {
+        return Ok(Vec::new());
+    }
+    let count = u32::try_from(surviving.len())
+        .map_err(|_| "outgoing object set exceeds u32 (server-side)")?;
+    let mut writer = alt_git_pack::PackWriter::create(dir.path(), repo.algo(), count)?;
+    for (oid, kind, obj) in &surviving {
         writer.add(*oid, *kind, &obj.data)?;
     }
     let written = writer.finish()?;
     Ok(std::fs::read(&written.pack_path)?)
+}
+
+/// The partial-clone filter shapes [`build_pack_for_fetch`] currently
+/// honours. Everything else parses as `None` (no filter) for
+/// forward-compatibility — unknown filters degrade to a full pack
+/// rather than rejecting the fetch, since the wire spec lets the
+/// server be permissive.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct FilterSpec {
+    omit_blobs: bool,
+    blob_limit: Option<usize>,
+    omit_trees: bool,
+}
+
+impl FilterSpec {
+    fn excludes(&self, kind: alt_git_codec::ObjectKind, data: &[u8]) -> bool {
+        match kind {
+            alt_git_codec::ObjectKind::Blob => {
+                if self.omit_blobs || self.omit_trees {
+                    return true;
+                }
+                if let Some(limit) = self.blob_limit
+                    && data.len() >= limit
+                {
+                    return true;
+                }
+                false
+            }
+            alt_git_codec::ObjectKind::Tree => self.omit_trees,
+            _ => false,
+        }
+    }
+}
+
+fn parse_filter_spec(raw: Option<&str>) -> FilterSpec {
+    let mut out = FilterSpec::default();
+    let Some(spec) = raw else {
+        return out;
+    };
+    let spec = spec.trim();
+    match spec {
+        "blob:none" => out.omit_blobs = true,
+        "tree:0" => {
+            out.omit_trees = true;
+            out.omit_blobs = true; // tree:0 implies blob:none semantically
+        }
+        _ => {
+            if let Some(n) = spec.strip_prefix("blob:limit=")
+                && let Ok(limit) = n.parse::<usize>()
+            {
+                out.blob_limit = Some(limit);
+            }
+            // unknown / unsupported filters silently degrade to "send
+            // everything" — git's spec lets the server be permissive.
+        }
+    }
+    out
 }
 
 fn handle_info_refs(
@@ -448,7 +525,9 @@ fn handle_info_refs(
                 Some("sha1"),
                 &[
                     ("ls-refs", Some("unborn")),
-                    ("fetch", Some("shallow wait-for-done")),
+                    // M10/W17: advertise `filter` so git's partial-clone
+                    // path (`--filter=blob:none` etc) negotiates against us
+                    ("fetch", Some("shallow wait-for-done filter")),
                 ],
             )?;
             body

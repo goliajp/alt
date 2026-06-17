@@ -70,6 +70,11 @@ pub struct FetchRequest {
     pub ofs_delta: bool,
     /// `include-tag\n` — also send annotated tags reachable from `wants`.
     pub include_tag: bool,
+    /// `filter <spec>\n` — partial-clone filter (M10/W17).
+    /// Recognised shapes: `blob:none` (omit blobs), `blob:limit=<n>`
+    /// (omit blobs at or above n bytes), `tree:0` (omit trees + blobs;
+    /// only commits go on the pack). `None` = full clone.
+    pub filter: Option<String>,
 }
 
 /// Encode a `fetch` request body. Caller wraps this in the HTTP
@@ -99,6 +104,9 @@ pub fn encode_fetch_request<W: Write>(
     }
     if req.ofs_delta {
         pkt::write_data(w, b"ofs-delta\n")?;
+    }
+    if let Some(spec) = &req.filter {
+        pkt::write_data(w, format!("filter {spec}\n").as_bytes())?;
     }
     for oid in &req.wants {
         pkt::write_data(w, format!("want {oid}\n").as_bytes())?;
@@ -459,6 +467,8 @@ pub fn parse_fetch_request<R: Read>(
                         } else if let Some(hex) = s.strip_prefix("have ") {
                             let oid = parse_oid_str(hex.trim(), algo, line)?;
                             req.haves.push(oid);
+                        } else if let Some(spec) = s.strip_prefix("filter ") {
+                            req.filter = Some(spec.trim().to_owned());
                         }
                         // unknown arg lines: ignore (forward compat)
                     }
@@ -516,6 +526,29 @@ mod tests {
         hex.parse().expect("test oid is valid sha1")
     }
 
+    /// M10/W17: `filter <spec>` survives the encode/parse round-trip
+    /// so partial-clone negotiation is byte-exact in both directions.
+    #[test]
+    fn filter_spec_round_trips() {
+        let req = FetchRequest {
+            wants: vec![sha1("0011223344556677889900112233445566778899")],
+            done: true,
+            filter: Some("blob:none".into()),
+            ..FetchRequest::default()
+        };
+        let mut buf = Vec::new();
+        encode_fetch_request(&mut buf, &req, Some("sha1")).unwrap();
+        // The line literally appears on the wire so a wireshark dump
+        // could be matched against the spec.
+        assert!(
+            buf.windows(b"filter blob:none".len())
+                .any(|w| w == b"filter blob:none"),
+            "filter line must show up in the encoded body"
+        );
+        let (parsed, _) = parse_fetch_request(&mut Cursor::new(&buf)).unwrap();
+        assert_eq!(parsed.filter.as_deref(), Some("blob:none"));
+    }
+
     /// Minimal request with one `want` and `done` round-trips through the
     /// pkt-line decoder in spec order.
     #[test]
@@ -530,6 +563,7 @@ mod tests {
             thin_pack: true,
             ofs_delta: true,
             include_tag: true,
+            filter: None,
         };
         let mut buf = Vec::new();
         encode_fetch_request(&mut buf, &req, Some("sha1")).unwrap();

@@ -1275,3 +1275,114 @@ fn altd_server_rejects_unsigned_commit_when_policy_requires_signed_commits() {
     );
     drop(server);
 }
+
+#[test]
+fn altd_server_honors_git_clone_filter_blob_none() {
+    // M10/W17: `git clone --filter=blob:none http://altd-server/` must
+    // succeed and the resulting partial clone must hold every commit
+    // and tree but no blobs. We assert by:
+    //   (a) clone succeeds
+    //   (b) `git rev-list --objects --filter=blob:none --filter-print-omitted`
+    //       reports a non-zero number of omitted blob oids that match
+    //       what's in the alt origin (so the omission is real, not a
+    //       silent server-sent full pack)
+    //   (c) `git cat-file -e <blob>` returns failure for one of those
+    //       blobs in the partial clone
+    let origin_dir = tempfile::tempdir().unwrap();
+    let origin = origin_dir.path();
+    ok(alt(origin, &["init", "."]));
+    std::fs::write(origin.join("a.txt"), "alpha\n").unwrap();
+    std::fs::write(origin.join("b.txt"), "beta\n").unwrap();
+    ok(alt(origin, &["add", "."]));
+    ok(alt(origin, &["commit", "-m", "first"]));
+    std::fs::write(origin.join("a.txt"), "alpha\ngamma\n").unwrap();
+    ok(alt(origin, &["add", "."]));
+    ok(alt(origin, &["commit", "-m", "second"]));
+
+    let server = spawn_server(origin);
+    let url = format!("http://{}/", server.addr);
+
+    // Resolve at least one blob oid we expect on the origin so we can
+    // probe for its absence on the filtered clone.
+    let head = ok(alt(origin, &["log", "-n", "1", "--pretty=oneline"]));
+    let head_oid = head.split_whitespace().next().unwrap().to_owned();
+    let tree_dump = ok(alt(origin, &["cat-file", "-p", &head_oid]));
+    // The `tree <oid>` line tells us the root tree; we then list the
+    // tree to find a blob oid. Doing it via `alt` instead of `git`
+    // avoids needing an installed git just for the inventory step.
+    let tree_oid = tree_dump
+        .lines()
+        .find_map(|l| l.strip_prefix("tree "))
+        .unwrap()
+        .to_owned();
+    let tree_listing = ok(alt(origin, &["cat-file", "-p", &tree_oid]));
+    // Format is `<mode> <kind> <oid>\t<name>`; pick the first blob row.
+    let blob_oid = tree_listing
+        .lines()
+        .find_map(|l| {
+            let mut parts = l.split_whitespace();
+            let _mode = parts.next()?;
+            let kind = parts.next()?;
+            let oid = parts.next()?;
+            if kind == "blob" {
+                Some(oid.to_owned())
+            } else {
+                None
+            }
+        })
+        .expect("at least one blob in the origin's head tree");
+
+    // git clone --filter=blob:none against altd-server
+    let clone_root = tempfile::tempdir().unwrap();
+    let target = clone_root.path().join("partial");
+    let out = std::process::Command::new("git")
+        .args([
+            "clone",
+            "--filter=blob:none",
+            "--no-checkout",
+            &url,
+            target.to_str().unwrap(),
+        ])
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_PROTOCOL", "version=2")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git clone --filter=blob:none failed: stderr={} stdout={}",
+        String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    // The known blob oid must NOT be present on the partial clone — if
+    // the server ignored the filter and sent a full pack, this check
+    // would falsely pass `git cat-file -e`.
+    let exists = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&target)
+        .args(["cat-file", "-e", &blob_oid])
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .unwrap();
+    assert!(
+        !exists.status.success(),
+        "blob {blob_oid} must be absent from the partial clone (server ignored --filter=blob:none?)"
+    );
+
+    // Sanity: the head commit's tree object IS present (only blobs
+    // were filtered).
+    let tree_exists = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&target)
+        .args(["cat-file", "-e", &tree_oid])
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .unwrap();
+    assert!(
+        tree_exists.status.success(),
+        "tree {tree_oid} must still be present (blob:none filters blobs only)"
+    );
+}
