@@ -8,6 +8,7 @@ import {
   StructuredDiff,
 } from "../components/BinaryDiff";
 import { ImagePreview } from "../components/ImagePreview";
+import { ImageDiffView } from "../components/ImageDiffView";
 import { isRasterImagePath } from "../lib/image";
 import type { FileHistoryEntry } from "../lib/api";
 
@@ -153,18 +154,12 @@ function EntryDiff({
     return (
       <>
         {isRaster && diff.format === "png" && entry.change === "changed" ? (
-          <div className="grid grid-cols-2 gap-px bg-border-muted">
-            <ImageThumb
-              label="before"
-              src={`/api/repos/${encodeURIComponent(repo)}/blob/${entry.old_oid}/raw`}
-              oid={entry.old_oid}
-            />
-            <ImageThumb
-              label="after"
-              src={`/api/repos/${encodeURIComponent(repo)}/blob/${entry.new_oid}/raw`}
-              oid={entry.new_oid}
-            />
-          </div>
+          <ImageDiffView
+            oldSrc={`/api/repos/${encodeURIComponent(repo)}/blob/${entry.old_oid}/raw`}
+            newSrc={`/api/repos/${encodeURIComponent(repo)}/blob/${entry.new_oid}/raw`}
+            oldLabel={`before · ${entry.old_oid.slice(0, 7)}`}
+            newLabel={`after · ${entry.new_oid.slice(0, 7)}`}
+          />
         ) : null}
         <PartAwareDiff repo={repo} file={diff} />
       </>

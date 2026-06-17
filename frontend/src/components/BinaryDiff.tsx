@@ -7,6 +7,7 @@ import type {
 } from "../lib/api";
 import { formatBytes } from "../lib/format";
 import { DiffView } from "./DiffView";
+import { ImageDiffView } from "./ImageDiffView";
 
 interface CommonProps {
   repo: string;
@@ -92,18 +93,12 @@ export function PartAwareDiff({
       </div>
 
       {sideBySide ? (
-        <div className="grid grid-cols-2 gap-px bg-border-muted">
-          <ImageBox
-            label="before"
-            src={`/api/repos/${repo}/blob/${file.old_oid}/raw`}
-            oid={file.old_oid}
-          />
-          <ImageBox
-            label="after"
-            src={`/api/repos/${repo}/blob/${file.new_oid}/raw`}
-            oid={file.new_oid}
-          />
-        </div>
+        <ImageDiffView
+          oldSrc={`/api/repos/${repo}/blob/${file.old_oid}/raw`}
+          newSrc={`/api/repos/${repo}/blob/${file.new_oid}/raw`}
+          oldLabel={`before · ${file.old_oid.slice(0, 7)}`}
+          newLabel={`after · ${file.new_oid.slice(0, 7)}`}
+        />
       ) : null}
 
       <div>
@@ -174,33 +169,6 @@ export function BinaryDiffSummary({
       <div>Binary files differ</div>
       <div className="text-xs">
         {formatBytes(file.old_bytes)} → {formatBytes(file.new_bytes)}
-      </div>
-    </div>
-  );
-}
-
-function ImageBox({
-  label,
-  src,
-  oid,
-}: {
-  label: string;
-  src: string;
-  oid: string;
-}) {
-  return (
-    <div className="bg-canvas-inset/60 p-4 flex flex-col gap-2 items-center">
-      <div className="text-[10px] uppercase tracking-[0.22em] font-mono text-fg-subtle flex items-center gap-2">
-        {label}
-        <span className="text-fg-default font-mono">{oid.slice(0, 7)}</span>
-      </div>
-      <div className="bg-canvas-inset border border-border-muted rounded p-2 max-w-full overflow-hidden">
-        <img
-          src={src}
-          alt={label}
-          loading="lazy"
-          className="max-w-full max-h-[480px] object-contain"
-        />
       </div>
     </div>
   );
