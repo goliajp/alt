@@ -429,3 +429,105 @@ fn altd_server_multi_repo_returns_404_for_unknown_name() {
         "unknown repo must surface as HTTP 404: got {code}"
     );
 }
+
+#[test]
+fn altd_server_basic_auth_blocks_unauthenticated_and_allows_correct_token() {
+    // M9/W11b: with a `users` file under ALT_SERVER_ROOT, every request
+    // must carry Basic auth. Without it → 401; with the correct user +
+    // token → the request flows as in single-repo mode.
+    let root_dir = tempfile::tempdir().unwrap();
+    let root = root_dir.path();
+    let alpha = root.join("alpha");
+    std::fs::create_dir(&alpha).unwrap();
+    ok(alt(&alpha, &["init", "."]));
+    std::fs::write(alpha.join("a.txt"), "alpha\n").unwrap();
+    ok(alt(&alpha, &["add", "."]));
+    ok(alt(&alpha, &["commit", "-m", "seed"]));
+
+    // users file: alice carries BLAKE3("alice-token-123")
+    let token = "alice-token-123";
+    let hash = blake3::hash(token.as_bytes()).to_hex().to_ascii_lowercase();
+    std::fs::write(root.join("users"), format!("alice\t{hash}\n")).unwrap();
+
+    let server = spawn_server_with_env(&[("ALT_SERVER_ROOT", root.to_str().unwrap())]);
+    let url = format!(
+        "http://{}/alpha/info/refs?service=git-upload-pack",
+        server.addr
+    );
+
+    // 1. no auth → 401 + WWW-Authenticate
+    let out = Command::new("curl")
+        .args([
+            "-sS",
+            "-w",
+            "%{http_code}\n%header{www-authenticate}",
+            "-o",
+            "/dev/null",
+            &url,
+        ])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let mut lines = stdout.lines();
+    let code = lines.next().unwrap_or("");
+    let www_auth = lines.next().unwrap_or("");
+    assert_eq!(code, "401", "unauthenticated must surface as 401: {stdout}");
+    assert!(
+        www_auth.to_lowercase().contains("basic"),
+        "401 missing Basic WWW-Authenticate prompt: {www_auth}"
+    );
+
+    // 2. wrong token → 401
+    let bad_url = format!(
+        "http://alice:wrong@{}/alpha/info/refs?service=git-upload-pack",
+        server.addr
+    );
+    let out = Command::new("curl")
+        .args(["-sS", "-w", "%{http_code}", "-o", "/dev/null", &bad_url])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "401",
+        "wrong token must 401"
+    );
+
+    // 3. correct token → 200 (server produces a capability advert body)
+    let good_url = format!(
+        "http://alice:{token}@{}/alpha/info/refs?service=git-upload-pack",
+        server.addr
+    );
+    let out = Command::new("curl")
+        .args(["-sS", "-w", "%{http_code}", "-o", "/dev/null", &good_url])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "200",
+        "correct token must reach the handler"
+    );
+
+    // 4. a real `git clone` with credentials embedded should walk
+    // through the same gate and produce the full working tree.
+    let target_root = tempfile::tempdir().unwrap();
+    let target = target_root.path().join("with-auth");
+    let clone_url = format!("http://alice:{token}@{}/alpha", server.addr);
+    let out = Command::new("git")
+        .args(["clone", &clone_url, target.to_str().unwrap()])
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_PROTOCOL", "version=2")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git clone with auth failed: stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        std::fs::read(target.join("a.txt")).unwrap(),
+        b"alpha\n",
+        "clone behind auth still serves the right content"
+    );
+}

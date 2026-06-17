@@ -46,6 +46,7 @@ dependencies = [
  "alt-wire",
  "alt-wire-http",
  "alt-worktree",
+ "blake3",
  "bstr",
  "clap",
  "criterion",
