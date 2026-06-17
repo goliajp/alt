@@ -27,8 +27,9 @@ echo "[sync] exporting .alt → $tmp" >&2
 alt export "$tmp"
 
 cd "$tmp"
-git remote add github "$REMOTE"
 echo "[sync] pushing $BRANCHES → $REMOTE" >&2
+# Push by URL — `alt export` carries the original git config (including
+# any pre-existing `github` remote), so a named-remote add would clash.
 # shellcheck disable=SC2086
-git push github $BRANCHES
+git push "$REMOTE" $BRANCHES
 echo "[sync] done" >&2
