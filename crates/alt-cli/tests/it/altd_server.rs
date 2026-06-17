@@ -2020,3 +2020,204 @@ fn altd_server_two_concurrent_pushes_to_same_ref_serialize_with_one_winner() {
         "contested ref must carry one winner's commit, not a partial state: {log}"
     );
 }
+
+#[test]
+fn altd_server_n_clients_m_iters_stress_harness() {
+    // M11/W31: end-to-end stress — N concurrent clients each running
+    // M iterations of a mixed read/write workload. Asserts:
+    //   - every ls-remote and clone succeeds (read invariant)
+    //   - every push to its dedicated branch succeeds (write
+    //     invariant: each thread has a unique ref namespace, so the
+    //     `Mutex<Store>` serialisation never produces a non-FF reject)
+    //   - the server never deadlocks (test completes inside its
+    //     normal cargo-test deadline)
+    //   - after the storm, every per-client ref points at a real
+    //     commit on origin (state-consistency invariant)
+    const N_CLIENTS: usize = 6;
+    const M_ITERS: usize = 4;
+
+    let origin_dir = tempfile::tempdir().unwrap();
+    let origin = origin_dir.path();
+    ok(alt(origin, &["init", "."]));
+    std::fs::write(origin.join("seed.txt"), "seed\n").unwrap();
+    ok(alt(origin, &["add", "."]));
+    ok(alt(origin, &["commit", "-m", "seed"]));
+
+    let server = spawn_server(origin);
+    let url = format!("http://{}/", server.addr);
+
+    // Each client gets its own throwaway git source for pushes and
+    // its own clone target. The barrier lines all threads up at the
+    // start so the first request from every client hits the server
+    // at roughly the same moment.
+    let work_root = tempfile::tempdir().unwrap();
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(N_CLIENTS));
+    let mut handles = Vec::with_capacity(N_CLIENTS);
+    for client in 0..N_CLIENTS {
+        let url = url.clone();
+        let work = work_root.path().join(format!("c{client}"));
+        std::fs::create_dir_all(&work).unwrap();
+        let barrier = std::sync::Arc::clone(&barrier);
+        handles.push(std::thread::spawn(move || -> Result<(), String> {
+            // Prepare a source git repo per client.
+            let src = work.join("src");
+            let st = std::process::Command::new("git")
+                .args(["init", "-q", "-b", "main", src.to_str().unwrap()])
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .output()
+                .map_err(|e| format!("git init: {e}"))?;
+            if !st.status.success() {
+                return Err("git init failed".into());
+            }
+            std::fs::write(src.join("f.txt"), format!("seed-{client}\n"))
+                .map_err(|e| format!("seed: {e}"))?;
+            for args in [
+                &["-C", src.to_str().unwrap(), "add", "."][..],
+                &[
+                    "-C",
+                    src.to_str().unwrap(),
+                    "-c",
+                    "user.name=tester",
+                    "-c",
+                    "user.email=t@e",
+                    "-c",
+                    "commit.gpgsign=false",
+                    "commit",
+                    "-q",
+                    "-m",
+                    "seed",
+                ][..],
+            ] {
+                let o = std::process::Command::new("git")
+                    .args(args)
+                    .output()
+                    .map_err(|e| format!("git: {e}"))?;
+                if !o.status.success() {
+                    return Err(format!("git: {}", String::from_utf8_lossy(&o.stderr)));
+                }
+            }
+
+            barrier.wait();
+
+            for iter in 0..M_ITERS {
+                // ls-remote (pure read)
+                let r = std::process::Command::new("git")
+                    .args(["ls-remote", &url])
+                    .env("GIT_CONFIG_NOSYSTEM", "1")
+                    .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                    .env("GIT_PROTOCOL", "version=2")
+                    .output()
+                    .map_err(|e| format!("ls-remote spawn: {e}"))?;
+                if !r.status.success() {
+                    return Err(format!(
+                        "client {client} iter {iter} ls-remote failed: {}",
+                        String::from_utf8_lossy(&r.stderr)
+                    ));
+                }
+
+                // clone into a throwaway dir (read + checkout)
+                let clone_target = work.join(format!("clone-{iter}"));
+                let r = std::process::Command::new("git")
+                    .args(["clone", "--quiet", &url, clone_target.to_str().unwrap()])
+                    .env("GIT_CONFIG_NOSYSTEM", "1")
+                    .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                    .env("GIT_PROTOCOL", "version=2")
+                    .output()
+                    .map_err(|e| format!("clone spawn: {e}"))?;
+                if !r.status.success() {
+                    return Err(format!(
+                        "client {client} iter {iter} clone failed: {}",
+                        String::from_utf8_lossy(&r.stderr)
+                    ));
+                }
+
+                // push to a per-client unique branch so writes never
+                // contend with each other on the ref level (W28
+                // already covered the contended-ref case).
+                std::fs::write(src.join("f.txt"), format!("c{client}-i{iter}\n"))
+                    .map_err(|e| format!("rewrite: {e}"))?;
+                let r = std::process::Command::new("git")
+                    .args([
+                        "-C",
+                        src.to_str().unwrap(),
+                        "-c",
+                        "user.name=tester",
+                        "-c",
+                        "user.email=t@e",
+                        "-c",
+                        "commit.gpgsign=false",
+                        "commit",
+                        "-aq",
+                        "-m",
+                        &format!("c{client}-i{iter}"),
+                    ])
+                    .output()
+                    .map_err(|e| format!("commit spawn: {e}"))?;
+                if !r.status.success() {
+                    return Err(format!(
+                        "client {client} iter {iter} commit failed: {}",
+                        String::from_utf8_lossy(&r.stderr)
+                    ));
+                }
+                let dst = format!("HEAD:refs/heads/stress/c{client}/i{iter}");
+                let r = std::process::Command::new("git")
+                    .args(["-C", src.to_str().unwrap(), "push", &url, &dst])
+                    .env("GIT_TERMINAL_PROMPT", "0")
+                    .output()
+                    .map_err(|e| format!("push spawn: {e}"))?;
+                if !r.status.success() {
+                    return Err(format!(
+                        "client {client} iter {iter} push failed: {}",
+                        String::from_utf8_lossy(&r.stderr)
+                    ));
+                }
+            }
+            Ok(())
+        }));
+    }
+
+    let mut errors = Vec::new();
+    for (i, h) in handles.into_iter().enumerate() {
+        match h.join() {
+            Ok(Ok(())) => {}
+            Ok(Err(msg)) => errors.push(format!("client {i}: {msg}")),
+            Err(panic) => errors.push(format!("client {i} panicked: {panic:?}")),
+        }
+    }
+    let mut server = server;
+    let server_log = server.drain_stderr();
+    let server_errs: Vec<&str> = server_log
+        .lines()
+        .filter(|l| l.contains("handler error") || l.contains("\"status\":5"))
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "stress run had errors:\n{}\n--- server-side errors ({}):\n{}",
+        errors.join("\n"),
+        server_errs.len(),
+        server_errs.join("\n")
+    );
+
+    // State invariant: every (client, iter) pair landed a ref on
+    // origin and the ref points at a commit whose message matches.
+    for client in 0..N_CLIENTS {
+        for iter in 0..M_ITERS {
+            let log = ok(alt(
+                origin,
+                &[
+                    "log",
+                    "--pretty=oneline",
+                    "-n",
+                    "1",
+                    &format!("refs/heads/stress/c{client}/i{iter}"),
+                ],
+            ));
+            let expected = format!("c{client}-i{iter}");
+            assert!(
+                log.contains(&expected),
+                "ref stress/c{client}/i{iter} missing commit '{expected}': {log}"
+            );
+        }
+    }
+}

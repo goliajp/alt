@@ -45,6 +45,7 @@ alt-worktree.workspace = true
 bstr.workspace = true
 clap.workspace = true
 encoding_rs.workspace = true
+flate2.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

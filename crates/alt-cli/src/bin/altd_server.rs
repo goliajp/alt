@@ -243,23 +243,42 @@ fn max_body_bytes() -> u64 {
     })
 }
 
-/// Read at most `max_body_bytes()` from `req.as_reader()` into `body`.
-/// Returns `Err` when the client streamed past the cap — handler maps
-/// that into a 413 ng response, never an OOM. We don't trust
+/// Read at most `max_body_bytes()` from `req.as_reader()` into `body`,
+/// transparently gunzip'ing when the client set `Content-Encoding:
+/// gzip`. Returns `Err` when the client streamed past the cap — the
+/// handler maps that into a 413, never an OOM. We don't trust
 /// `body_length()` alone (a malicious client can send a small
-/// Content-Length header and then keep writing); the `.take()` is the
-/// real enforcement.
+/// Content-Length header and then keep writing); the `.take()` is
+/// the real enforcement, and it bounds BOTH the on-wire (compressed)
+/// bytes and the decoded output.
+///
+/// M11/W31 background: git's smart-http client transparently sets
+/// `Content-Encoding: gzip` on POST bodies it expects to compress
+/// well (push pack payloads, repeated want/have lists). Without
+/// gunzip on the server, the alt-wire pkt-line parser sees the gzip
+/// magic `1f 8b 08 …` and bails with "length prefix is not valid
+/// hex" — which the stress harness deterministically hit at scale.
 fn read_body_capped(
     req: &mut tiny_http::Request,
     body: &mut Vec<u8>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use std::io::Read;
     let max = max_body_bytes();
-    // Read one byte past the cap so we can detect overflow. The `take`
-    // wrapper hard-stops at `max + 1`, so even a lying Content-Length
-    // can't cause unbounded allocation.
-    let mut limited = req.as_reader().take(max + 1);
-    limited.read_to_end(body)?;
+    let gzipped = req
+        .headers()
+        .iter()
+        .any(|h| h.field.equiv("Content-Encoding") && h.value.as_str().contains("gzip"));
+    let limited = req.as_reader().take(max + 1);
+    if gzipped {
+        // Decompress under the same cap so a 100 KiB gzip bomb that
+        // expands to 10 GiB still bounces.
+        let mut decoder = flate2::read::GzDecoder::new(limited);
+        let mut decoded_cap = (&mut decoder).take(max + 1);
+        decoded_cap.read_to_end(body)?;
+    } else {
+        let mut limited = limited;
+        limited.read_to_end(body)?;
+    }
     if body.len() as u64 > max {
         return Err(format!(
             "request body exceeds ALT_SERVER_MAX_PUSH_BYTES={max} (cap is per-request)"
