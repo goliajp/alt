@@ -897,6 +897,17 @@ fn handle_receive_pack(
         }
     };
 
+    // M13/W37: refresh the cached Store so an operator-edited
+    // `.alt/policy` (or fresh oplog ops from another writer) takes
+    // effect on the *next* request — no server restart. `users` is
+    // already re-read per request inside `check_auth`; `trust` keys
+    // are re-read per request inside `verify_push_signature`. policy
+    // is the last cached piece, and `Store::refresh()` is the same
+    // entry the daemon (M5) uses to catch up its read view.
+    if let Err(e) = store.lock().unwrap().refresh() {
+        eprintln!("altd-server: store refresh failed (continuing with stale policy): {e}");
+    }
+
     // M10/W14 (A5b): pre-commit verify of the wire signature. The
     // signature is computed over the canonical push payload (head's
     // updates + algo); pack bytes don't participate, so we can decide

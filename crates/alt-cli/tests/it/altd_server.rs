@@ -2355,3 +2355,110 @@ fn altd_server_streaming_push_keeps_rss_bounded() {
 
     drop(server);
 }
+
+#[test]
+fn altd_server_policy_hot_reload_takes_effect_without_restart() {
+    // M13/W37: editing `.alt/policy` while the server is running must
+    // apply on the very next request. We bring the server up *with*
+    // policy that allows everything, push successfully, then write a
+    // `require-signed` rule into the same policy file, push again
+    // without signing, and expect the second push to be refused — all
+    // against the same server process.
+    let origin_dir = tempfile::tempdir().unwrap();
+    let origin = origin_dir.path();
+    ok(alt(origin, &["init", "."]));
+    std::fs::write(origin.join("seed.txt"), "seed\n").unwrap();
+    ok(alt(origin, &["add", "."]));
+    ok(alt(origin, &["commit", "-m", "seed"]));
+
+    // start with a permissive policy: no rules at all
+    let policy_path = origin.join(".alt").join("policy");
+    std::fs::write(&policy_path, "").unwrap();
+
+    let server = spawn_server(origin);
+    let url = format!("http://{}/", server.addr);
+
+    // tiny helper: a git source repo with one new commit per call,
+    // pushing to its own ref name so neither half conflicts with main.
+    fn drive_push(target: &str, url: &str) -> std::process::Output {
+        let src = tempfile::tempdir().unwrap();
+        let src_path = src.path();
+        let st = std::process::Command::new("git")
+            .args(["init", "-q", "-b", "main", src_path.to_str().unwrap()])
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .unwrap();
+        assert!(st.status.success());
+        std::fs::write(src_path.join("f.txt"), target).unwrap();
+        for args in [
+            &["-C", src_path.to_str().unwrap(), "add", "."][..],
+            &[
+                "-C",
+                src_path.to_str().unwrap(),
+                "-c",
+                "user.name=tester",
+                "-c",
+                "user.email=t@e",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-q",
+                "-m",
+                target,
+            ][..],
+        ] {
+            let o = std::process::Command::new("git")
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                o.status.success(),
+                "git: {}",
+                String::from_utf8_lossy(&o.stderr)
+            );
+        }
+        // hold the tempdir alive for the duration of the push
+        let out = std::process::Command::new("git")
+            .args([
+                "-C",
+                src_path.to_str().unwrap(),
+                "push",
+                url,
+                &format!("HEAD:refs/heads/{target}"),
+            ])
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .output()
+            .unwrap();
+        drop(src);
+        out
+    }
+
+    // round 1: permissive policy → push goes through
+    let r1 = drive_push("before", &url);
+    assert!(
+        r1.status.success(),
+        "permissive policy push must succeed: stderr={}",
+        String::from_utf8_lossy(&r1.stderr)
+    );
+
+    // edit policy WITHOUT restarting the server. require-signed
+    // applies to anonymous (no auth in single-repo mode).
+    std::fs::write(&policy_path, "human:anonymous -> require-signed\n").unwrap();
+
+    // round 2: same server process, same socket — but the policy
+    // file changed. Hot reload kicks in at the next receive-pack
+    // dispatch via `Store::refresh()`, so this push must be refused.
+    let r2 = drive_push("after", &url);
+    assert!(
+        !r2.status.success(),
+        "policy hot-reload should refuse unsigned push: stdout={}",
+        String::from_utf8_lossy(&r2.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&r2.stderr);
+    assert!(
+        stderr.contains("signature required") || stderr.contains("rejected"),
+        "rejection should cite the new policy: {stderr}"
+    );
+    drop(server);
+}
