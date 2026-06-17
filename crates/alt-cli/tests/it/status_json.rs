@@ -89,11 +89,11 @@ fn agent_principal_surfaces_via_status_json() {
     let out = Command::new(env!("CARGO_BIN_EXE_alt"))
         .current_dir(root)
         .env("ALT_NO_DAEMON", "1")
-        .env("GIT_AUTHOR_NAME", "claude")
+        .env("GIT_AUTHOR_NAME", "bot")
         .env("GIT_AUTHOR_EMAIL", "c@e")
         .env("USER", "operator")
         .env("ALT_PRINCIPAL_KIND", "agent")
-        .env("ALT_PRINCIPAL_ID", "claude-opus-4-8")
+        .env("ALT_PRINCIPAL_ID", "bot-1")
         .env("ALT_SESSION_ID", "01J7XYZ")
         .args(["status", "--json"])
         .output()
@@ -102,7 +102,7 @@ fn agent_principal_surfaces_via_status_json() {
     assert_valid_json(&json);
     assert!(
         json.contains(
-            "\"principal\":{\"kind\":\"agent\",\"id\":\"claude-opus-4-8\",\"session\":\"01J7XYZ\"}"
+            "\"principal\":{\"kind\":\"agent\",\"id\":\"bot-1\",\"session\":\"01J7XYZ\"}"
         ),
         "expected agent principal in status: {json}"
     );

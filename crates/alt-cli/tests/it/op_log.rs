@@ -53,12 +53,7 @@ fn op_log_lists_recent_ops_newest_first_with_parsed_principal() {
     ok(alt(root, &["add", "."]));
     ok(alt(root, &["commit", "-m", "base"]));
     // a second op carrying an agent principal and a session correlator
-    ok(alt_as_agent(
-        root,
-        &["branch", "feat"],
-        "claude-opus",
-        "s-77",
-    ));
+    ok(alt_as_agent(root, &["branch", "feat"], "bot-1", "s-77"));
 
     let view = ok(alt(root, &["op-log"]));
     // newest first: the branch op should appear above the commit op
@@ -73,7 +68,7 @@ fn op_log_lists_recent_ops_newest_first_with_parsed_principal() {
         "branch should be newer than commit: {view}"
     );
     // parsed principal of the agent op carries id + session
-    assert!(view.contains("agent:claude-opus"), "{view}");
+    assert!(view.contains("agent:bot-1"), "{view}");
     assert!(view.contains("session=s-77"), "{view}");
     // the commit op is from the default Human principal (USER=alice)
     assert!(view.contains("human:alice"), "{view}");

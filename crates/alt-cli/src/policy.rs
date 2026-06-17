@@ -15,7 +15,7 @@
 //! ```
 //!
 //! The principal-glob matches the same canonical form the op log carries —
-//! `<kind>:<id>` (`agent:claude-opus-4-8`, `human:alice`) — so what you read
+//! `<kind>:<id>` (`agent:bot-1`, `human:alice`) — so what you read
 //! in the audit log is what you write in the policy. Globs use two tokens:
 //! `*` matches one segment (no `/`), `**` matches anything including `/`.
 //!
@@ -39,7 +39,7 @@
 //! Rules are tried top-to-bottom; the **first** matching principal-glob wins
 //! and its [`Capabilities`] are returned. No match → [`Capabilities::full`]
 //! (everything allowed). First-match-wins keeps the model simple and lets
-//! operators put specific rules (`agent:claude-*`) above broad ones (`agent:*`).
+//! operators put specific rules (`agent:bot-*`) above broad ones (`agent:*`).
 
 use std::fs;
 use std::io;
@@ -473,10 +473,10 @@ mod tests {
 
     #[test]
     fn glob_double_star_crosses_slashes() {
-        let g = Glob::new("refs/heads/feature/agent-claude/**");
-        assert!(g.matches("refs/heads/feature/agent-claude/x"));
-        assert!(g.matches("refs/heads/feature/agent-claude/nested/branch"));
-        assert!(g.matches("refs/heads/feature/agent-claude/"));
+        let g = Glob::new("refs/heads/feature/agent-bot/**");
+        assert!(g.matches("refs/heads/feature/agent-bot/x"));
+        assert!(g.matches("refs/heads/feature/agent-bot/nested/branch"));
+        assert!(g.matches("refs/heads/feature/agent-bot/"));
         assert!(!g.matches("refs/heads/feature/other/x"));
 
         // `**` between two literals — must still backtrack to find a match
@@ -513,43 +513,39 @@ mod tests {
 
     #[test]
     fn first_match_wins() {
-        // `agent:claude-*` is specific; `agent:*` is the broad catch-all
+        // `agent:bot-*` is specific; `agent:*` is the broad catch-all
         let p = Policy::parse(
-            "agent:claude-* -> branch=refs/heads/feature/claude/**\n\
+            "agent:bot-* -> branch=refs/heads/feature/bot/**\n\
              agent:*        -> read-only\n",
         )
         .unwrap();
-        let claude = principal(PrincipalKind::Agent, "claude-opus");
-        let caps = p.lookup(&claude);
+        let bot = principal(PrincipalKind::Agent, "bot-opus");
+        let caps = p.lookup(&bot);
         assert!(!caps.read_only, "specific rule wins, not the read-only one");
-        assert!(caps.allows_branch("refs/heads/feature/claude/x"));
+        assert!(caps.allows_branch("refs/heads/feature/bot/x"));
         assert!(!caps.allows_branch("refs/heads/main"));
 
         let other = principal(PrincipalKind::Agent, "rover");
-        assert!(
-            p.lookup(&other).read_only,
-            "catch-all applies to non-claude"
-        );
+        assert!(p.lookup(&other).read_only, "catch-all applies to non-bot");
 
         // Order swap: now the catch-all comes first and shadows the specific
         let p = Policy::parse(
             "agent:*        -> read-only\n\
-             agent:claude-* -> branch=refs/heads/feature/claude/**\n",
+             agent:bot-* -> branch=refs/heads/feature/bot/**\n",
         )
         .unwrap();
         assert!(
-            p.lookup(&claude).read_only,
+            p.lookup(&bot).read_only,
             "first match wins: catch-all above specific shadows it"
         );
     }
 
     #[test]
     fn cap_spec_accumulates_branch_and_path() {
-        let p = Policy::parse(
-            "agent:claude -> branch=refs/heads/feature/** path=src/** path=docs/**\n",
-        )
-        .unwrap();
-        let caps = p.lookup(&principal(PrincipalKind::Agent, "claude"));
+        let p =
+            Policy::parse("agent:bot -> branch=refs/heads/feature/** path=src/** path=docs/**\n")
+                .unwrap();
+        let caps = p.lookup(&principal(PrincipalKind::Agent, "bot"));
         assert_eq!(caps.branch_allow.len(), 1);
         assert_eq!(caps.path_allow.len(), 2);
         assert!(caps.allows_path("src/lib.rs"));

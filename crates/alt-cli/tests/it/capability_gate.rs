@@ -115,21 +115,14 @@ fn read_only_does_not_gate_reads() {
 fn branch_allow_denies_out_of_namespace() {
     let tmp = tempfile::tempdir().unwrap();
     let repo = fixture(&tmp);
-    write_policy(
-        repo,
-        "agent:* -> branch=refs/heads/feature/agent-claude/**\n",
-    );
+    write_policy(repo, "agent:* -> branch=refs/heads/feature/agent-bot/**\n");
 
-    // claude is restricted to its namespace…
+    // the bot agent is restricted to its namespace…
     fails_with(
-        alt_as(repo, &["branch", "main-rewrite"], "claude"),
+        alt_as(repo, &["branch", "main-rewrite"], "bot"),
         "capability denied",
     );
-    ok(alt_as(
-        repo,
-        &["branch", "feature/agent-claude/wip"],
-        "claude",
-    ));
+    ok(alt_as(repo, &["branch", "feature/agent-bot/wip"], "bot"));
 
     // …and the unrestricted operator (no rule matches `human:operator`)
     // still moves freely
@@ -150,11 +143,11 @@ fn forbid_force_blocks_delete_and_keeps_creations_free() {
 
     // delete = force op → denied
     fails_with(
-        alt_as(repo, &["branch", "-d", "scratch"], "claude"),
+        alt_as(repo, &["branch", "-d", "scratch"], "bot"),
         "capability denied",
     );
     // create = not force → allowed
-    ok(alt_as(repo, &["branch", "agent-fresh"], "claude"));
+    ok(alt_as(repo, &["branch", "agent-fresh"], "bot"));
 
     // the protected branch is still around
     let listing = ok(alt(repo, &["branch"]));
@@ -179,13 +172,13 @@ fn path_allow_denies_out_of_tree_paths() {
     write_policy(repo, "agent:* -> path=src/**\n");
 
     // restricted agent can stage src/ but not scripts/
-    ok(alt_as(repo, &["add", "src/lib.rs"], "claude"));
+    ok(alt_as(repo, &["add", "src/lib.rs"], "bot"));
     fails_with(
-        alt_as(repo, &["add", "scripts/run.sh"], "claude"),
+        alt_as(repo, &["add", "scripts/run.sh"], "bot"),
         "capability denied",
     );
     // commit of the already-staged src/ is fine
-    ok(alt_as(repo, &["commit", "-m", "add src"], "claude"));
+    ok(alt_as(repo, &["commit", "-m", "add src"], "bot"));
 }
 
 /// The zero-regression red line: a repo with no `.alt/policy` file behaves
@@ -201,11 +194,11 @@ fn missing_policy_is_a_full_capabilities_default() {
     );
 
     // every flavour of write a restricted policy could touch — none gated
-    ok(alt_as(repo, &["branch", "main-rewrite"], "claude"));
+    ok(alt_as(repo, &["branch", "main-rewrite"], "bot"));
     std::fs::write(repo.join("b.txt"), "more\n").unwrap();
-    ok(alt_as(repo, &["add", "."], "claude"));
-    ok(alt_as(repo, &["commit", "-m", "more"], "claude"));
-    ok(alt_as(repo, &["branch", "-d", "main-rewrite"], "claude"));
+    ok(alt_as(repo, &["add", "."], "bot"));
+    ok(alt_as(repo, &["commit", "-m", "more"], "bot"));
+    ok(alt_as(repo, &["branch", "-d", "main-rewrite"], "bot"));
 }
 
 /// C4: a denied write with `--json` reports a structured JSON error on
@@ -239,7 +232,7 @@ fn json_invocation_surfaces_capability_denied_as_structured_error() {
 }
 
 /// First-match-wins: a specific allow rule above a broad deny must shadow it.
-/// `agent:claude` gets its own ref namespace, while `agent:*` is read-only.
+/// `agent:bot` gets its own ref namespace, while `agent:*` is read-only.
 /// This exercises the lookup ordering end-to-end (it has unit tests, but a
 /// command-level test guarantees the chain — policy → caps → gate — is
 /// wired and lookup is per-request, not cached against a stale principal).
@@ -249,12 +242,12 @@ fn specific_rule_above_catch_all_wins_per_principal() {
     let repo = fixture(&tmp);
     write_policy(
         repo,
-        "agent:claude -> branch=refs/heads/feature/claude/**\n\
+        "agent:bot -> branch=refs/heads/feature/bot/**\n\
          agent:*      -> read-only\n",
     );
 
-    // claude lands her own branch under feature/claude/…
-    ok(alt_as(repo, &["branch", "feature/claude/wip"], "claude"));
+    // the bot lands its own branch under feature/bot/…
+    ok(alt_as(repo, &["branch", "feature/bot/wip"], "bot"));
     // …but the catch-all read-only rule does apply to every other agent
     fails_with(
         alt_as(repo, &["branch", "anywhere"], "rover"),
