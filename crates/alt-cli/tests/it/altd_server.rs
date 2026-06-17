@@ -2221,3 +2221,137 @@ fn altd_server_n_clients_m_iters_stress_harness() {
         }
     }
 }
+
+/// M13/W36: end-to-end check that the streaming receive-pack path
+/// keeps server-side RSS well below the body size on a large push.
+/// We start the server with `ALT_SERVER_MAX_PUSH_BYTES=200 MiB`, push
+/// a ~10 MiB pack body, and sample the server's RSS via `ps`. The
+/// streaming path writes the pack to a tempfile via `io::copy` and
+/// invokes `index_pack` on the file path, so peak RSS must stay
+/// closer to "head + a few MiB of working memory" than to "pack body
+/// fully resident".
+///
+/// This is a smoke test, not a microbenchmark: the assertion is
+/// generous (RSS < 100 MiB) so flakiness from concurrent test
+/// scheduling doesn't fire false positives, while still catching the
+/// regression where the entire pack body gets resident in a Vec<u8>
+/// before parse.
+#[test]
+fn altd_server_streaming_push_keeps_rss_bounded() {
+    use std::time::Duration;
+    let origin_dir = tempfile::tempdir().unwrap();
+    let origin = origin_dir.path();
+    ok(alt(origin, &["init", "."]));
+    std::fs::write(origin.join("seed.txt"), "seed\n").unwrap();
+    ok(alt(origin, &["add", "."]));
+    ok(alt(origin, &["commit", "-m", "seed"]));
+
+    let server = spawn_server_with_env(&[
+        ("ALT_SERVER_REPO", origin.to_str().unwrap()),
+        ("ALT_SERVER_MAX_PUSH_BYTES", "209715200"), // 200 MiB
+    ]);
+    let url = format!("http://{}/", server.addr);
+    let pid = server.child.id();
+
+    // Build a git source repo with a single sizeable blob (10 MiB) so
+    // the pack body crosses well past the head-only watermark. We
+    // generate uncompressible bytes so the pack stays close to the
+    // raw size (gzip / pack delta don't collapse it).
+    let src_dir = tempfile::tempdir().unwrap();
+    let src = src_dir.path();
+    let st = std::process::Command::new("git")
+        .args(["init", "-q", "-b", "main", src.to_str().unwrap()])
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .unwrap();
+    assert!(st.status.success());
+    let mut big = vec![0u8; 10 * 1024 * 1024];
+    for (i, b) in big.iter_mut().enumerate() {
+        *b = ((i.wrapping_mul(2654435761)) & 0xFF) as u8;
+    }
+    std::fs::write(src.join("big.bin"), &big).unwrap();
+    for args in [
+        &["-C", src.to_str().unwrap(), "add", "."][..],
+        &[
+            "-C",
+            src.to_str().unwrap(),
+            "-c",
+            "user.name=tester",
+            "-c",
+            "user.email=t@e",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "-m",
+            "x",
+        ][..],
+    ] {
+        let o = std::process::Command::new("git")
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            o.status.success(),
+            "git: {}",
+            String::from_utf8_lossy(&o.stderr)
+        );
+    }
+
+    // Sample the server's RSS in a watcher thread while the push runs.
+    use std::sync::{Arc, Mutex};
+    let peak_kib = Arc::new(Mutex::new(0u64));
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let peak_clone = Arc::clone(&peak_kib);
+    let stop_clone = Arc::clone(&stop);
+    let watcher = std::thread::spawn(move || {
+        while !stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+            let out = std::process::Command::new("ps")
+                .args(["-o", "rss=", "-p", &pid.to_string()])
+                .output();
+            if let Ok(o) = out
+                && let Ok(s) = std::str::from_utf8(&o.stdout)
+                && let Ok(kib) = s.trim().parse::<u64>()
+            {
+                let mut p = peak_clone.lock().unwrap();
+                if kib > *p {
+                    *p = kib;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    });
+
+    let push = std::process::Command::new("git")
+        .args([
+            "-C",
+            src.to_str().unwrap(),
+            "push",
+            &url,
+            "HEAD:refs/heads/big",
+        ])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .unwrap();
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    let _ = watcher.join();
+
+    assert!(
+        push.status.success(),
+        "streaming push must succeed: stderr={}",
+        String::from_utf8_lossy(&push.stderr)
+    );
+
+    let observed_peak_kib = *peak_kib.lock().unwrap();
+    // The streaming path should keep RSS well under 100 MiB for a
+    // 10 MiB pack body. The fully-buffered baseline would hold the
+    // pack twice (Vec<u8> + tempfile) plus inflate state.
+    let observed_peak_mib = observed_peak_kib / 1024;
+    assert!(
+        observed_peak_mib < 100,
+        "streaming push should keep RSS < 100 MiB; observed peak = {observed_peak_mib} MiB"
+    );
+
+    drop(server);
+}

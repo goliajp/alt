@@ -848,21 +848,60 @@ fn handle_receive_pack(
     mut req: tiny_http::Request,
     log: &mut LogCtx,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut body = Vec::new();
-    if let Err(e) = read_body_capped(&mut req, &mut body) {
-        let r = Response::from_string(format!("{e}")).with_status_code(StatusCode(413));
-        respond_logged(req, r, log)?;
-        return Ok(());
-    }
-    let pushed = alt_wire::push::parse_push_request(&mut Cursor::new(&body), HashAlgo::Sha1)?;
+    use std::io::Read;
+    // M13/W36 streaming path. The push body is parsed in two halves:
+    //   1. Head (updates + capabilities + flush) — parsed straight off
+    //      the connection. Only the small head bytes ever live in RAM.
+    //   2. Pack bytes — `io::copy`'d into a tempfile so a 1 GiB push
+    //      never costs us a 1 GiB Vec<u8> allocation. `index_pack`
+    //      reads straight off the file path we just wrote.
+    //
+    // The signature gate (W14) runs after step 1 and *before* step 2,
+    // so a require-signed push that misses the cap is rejected without
+    // ever reading the pack body — saving the bandwidth + RAM.
+    let max = max_body_bytes();
+    let gzipped = req
+        .headers()
+        .iter()
+        .any(|h| h.field.equiv("Content-Encoding") && h.value.as_str().contains("gzip"));
+    // Stream-and-parse in one scope so the reader's borrow on `req`
+    // ends *before* the response is sent. The outcome carries
+    // everything downstream needs (head + tempfile path + on-wire
+    // bytes streamed) so the response phase is owned-only.
+    let pack_tmp_dir = tempfile::tempdir()?;
+    let pack_tmp_path = pack_tmp_dir.path().join("incoming.pack");
+    let parse_outcome: Result<(alt_wire::push::PushHead, u64), String> = {
+        let mut reader: Box<dyn Read> = if gzipped {
+            Box::new(flate2::read::GzDecoder::new(req.as_reader().take(max + 1)))
+        } else {
+            Box::new(req.as_reader().take(max + 1))
+        };
+        match alt_wire::push::parse_push_request_head(&mut reader, HashAlgo::Sha1) {
+            Ok(head) => {
+                let mut tmp =
+                    std::fs::File::create(&pack_tmp_path).map_err(|e| format!("tempfile: {e}"))?;
+                let n = std::io::copy(&mut reader, &mut tmp)
+                    .map_err(|e| format!("stream pack: {e}"))?;
+                tmp.sync_all().map_err(|e| format!("fsync: {e}"))?;
+                Ok((head, n))
+            }
+            Err(e) => Err(format!("{e}")),
+        }
+    };
+    let (head, pack_bytes_streamed) = match parse_outcome {
+        Ok(t) => t,
+        Err(reason) => {
+            let r = Response::from_string(reason).with_status_code(StatusCode(400));
+            respond_logged(req, r, log)?;
+            return Ok(());
+        }
+    };
 
-    // M10/W14 (A5b): pre-commit verify of the wire signature. The client
-    // may attach `alt-principal=<id>` + `alt-sig=<ed25519>` to the push
-    // capability list; we verify against the store's `<alt-dir>/trust/`
-    // public-key dir and either upgrade the actor (verified) or fall
-    // back to the Basic-auth user — unless `require-signed` is set, in
-    // which case unverified pushes are blocked before objects land.
-    let sig_outcome = verify_push_signature(store, &pushed)?;
+    // M10/W14 (A5b): pre-commit verify of the wire signature. The
+    // signature is computed over the canonical push payload (head's
+    // updates + algo); pack bytes don't participate, so we can decide
+    // sig_block before reading them.
+    let sig_outcome = verify_push_signature(store, &head)?;
     let (effective_principal, sig_label) = pick_principal(&sig_outcome, auth_user);
     let require_signed = require_signed_for(store, &effective_principal);
     let sig_block: Option<String> = match (&sig_outcome, require_signed) {
@@ -871,17 +910,18 @@ fn handle_receive_pack(
         (_, false) => None,
     };
 
-    // Unpack the trailing pack into the store's odb. Empty pack = a
-    // pure-delete push, no objects to index. A blocked signature short-
-    // circuits ingest — we never want a rejected push to litter odb.
     let mut new_commits: Vec<ObjectId> = Vec::new();
-    let unpack_result: Result<(), String> = if sig_block.is_some() || pushed.pack.is_empty() {
-        // Either the signature gate already decided to reject (so we
-        // skip ingest entirely and let the commands fall through to
-        // `ng` below) or this is a pure-delete push with no objects.
+    if pack_bytes_streamed > max {
+        let r = Response::from_string(format!("payload too large: pack body exceeds cap {max}"))
+            .with_status_code(StatusCode(413));
+        respond_logged(req, r, log)?;
+        return Ok(());
+    }
+
+    let unpack_result: Result<(), String> = if sig_block.is_some() || pack_bytes_streamed == 0 {
         Ok(())
     } else {
-        match ingest_pack(store, &pushed.pack) {
+        match ingest_pack_from_path(store, &pack_tmp_path) {
             Ok(commits) => {
                 new_commits = commits;
                 Ok(())
@@ -906,21 +946,21 @@ fn handle_receive_pack(
     let mut command_status: Vec<CommandStatus> = Vec::new();
     let any_block = sig_block.clone().or(commit_block);
     if let Some(reason) = &any_block {
-        for u in &pushed.updates {
+        for u in &head.updates {
             command_status.push(CommandStatus::Ng {
                 name: u.name.clone(),
                 reason: reason.clone(),
             });
         }
     } else if unpack_result.is_ok() {
-        match commit_ref_updates(store, &pushed.updates, &effective_principal, sig_label) {
+        match commit_ref_updates(store, &head.updates, &effective_principal, sig_label) {
             Ok(()) => {
-                for u in &pushed.updates {
+                for u in &head.updates {
                     command_status.push(CommandStatus::Ok(u.name.clone()));
                 }
             }
             Err(reason) => {
-                for u in &pushed.updates {
+                for u in &head.updates {
                     command_status.push(CommandStatus::Ng {
                         name: u.name.clone(),
                         reason: reason.clone(),
@@ -929,7 +969,7 @@ fn handle_receive_pack(
             }
         }
     } else {
-        for u in &pushed.updates {
+        for u in &head.updates {
             command_status.push(CommandStatus::Ng {
                 name: u.name.clone(),
                 reason: "pack unpack failed".into(),
@@ -938,7 +978,7 @@ fn handle_receive_pack(
     }
 
     let mut out = Vec::new();
-    let want_sideband = pushed.capabilities.iter().any(|c| c == "side-band-64k");
+    let want_sideband = head.capabilities.iter().any(|c| c == "side-band-64k");
     if want_sideband {
         alt_wire::push::encode_report_status_sideband(
             &mut out,
@@ -966,14 +1006,17 @@ fn handle_receive_pack(
 /// Write the pushed pack into a tempfile, index it, and put every
 /// object into the server odb. Mirrors the fetch ingest path in
 /// `alt-cli::native`.
-fn ingest_pack(
+/// Index the pack already on disk at `path` and ingest its objects
+/// into the server odb. M13/W36 streaming path: the caller streamed
+/// the receive-pack body into `path` (a NamedTempFile) instead of
+/// buffering the entire pack in memory, so `index_pack` reads straight
+/// off the file we already wrote — no Vec<u8> copy of the pack bytes
+/// ever lives in process RAM.
+fn ingest_pack_from_path(
     store: &Mutex<Store>,
-    pack: &[u8],
+    path: &std::path::Path,
 ) -> Result<Vec<ObjectId>, Box<dyn std::error::Error>> {
-    let dir = tempfile::tempdir()?;
-    let tmp_pack = dir.path().join("incoming.pack");
-    std::fs::write(&tmp_pack, pack)?;
-    let indexed = alt_git_pack::index_pack(&tmp_pack, HashAlgo::Sha1, true)?;
+    let indexed = alt_git_pack::index_pack(path, HashAlgo::Sha1, true)?;
     let ip = alt_git_pack::IndexedPack::open(&indexed.pack_path, HashAlgo::Sha1)?;
     let idx = ip.idx();
     let mut order: Vec<(u64, u32)> = (0..idx.len())
@@ -1027,13 +1070,13 @@ fn describe_sig(o: &SigOutcome) -> String {
 /// path on git-native clients).
 fn verify_push_signature(
     store: &Mutex<Store>,
-    pushed: &alt_wire::push::PushRequest,
+    head: &alt_wire::push::PushHead,
 ) -> Result<SigOutcome, Box<dyn std::error::Error>> {
-    let principal_id = pushed
+    let principal_id = head
         .capabilities
         .iter()
         .find_map(|c| c.strip_prefix(&format!("{}=", alt_wire::CAP_ALT_PRINCIPAL)));
-    let sig_text = pushed
+    let sig_text = head
         .capabilities
         .iter()
         .find_map(|c| c.strip_prefix(&format!("{}=", alt_wire::CAP_ALT_SIG)));
@@ -1052,7 +1095,7 @@ fn verify_push_signature(
         Ok(s) => s,
         Err(e) => return Ok(SigOutcome::BadSignature(format!("{e}"))),
     };
-    let payload = alt_wire::canonical_push_payload(&pushed.updates, HashAlgo::Sha1);
+    let payload = alt_wire::canonical_push_payload(&head.updates, HashAlgo::Sha1);
     match pubkey.verify(&payload, &sig) {
         Ok(()) => Ok(SigOutcome::Verified { principal_id }),
         Err(e) => Ok(SigOutcome::BadSignature(format!("{e}"))),

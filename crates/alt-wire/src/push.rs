@@ -456,11 +456,22 @@ pub struct PushRequest {
     pub pack: Vec<u8>,
 }
 
-/// Server-side parse of a `git-receive-pack` POST body (M9/W10c).
-/// Mirror of [`encode_push_request`]: reads the ref-update lines + the
-/// (optional, NUL-attached) capability list, then drains everything
-/// after the trailing flush as the raw pack stream.
-pub fn parse_push_request<R: Read>(r: &mut R, algo: HashAlgo) -> Result<PushRequest, PushError> {
+/// The metadata half of a `git-receive-pack` POST body: ref updates +
+/// capability list. Sits in front of the raw pack stream on the wire.
+/// M13/W36 split [`parse_push_request`] into this head + a separate
+/// pack drain so the server can stream the pack to a tempfile instead
+/// of buffering the entire push body in RAM.
+#[derive(Debug, Clone)]
+pub struct PushHead {
+    pub updates: Vec<RefUpdate>,
+    pub capabilities: Vec<String>,
+}
+
+/// Parse just the ref-update + capability section of a
+/// `git-receive-pack` POST body. Stops at the trailing flush; the
+/// caller is responsible for the pack stream that follows (which may
+/// be many gigabytes — see M13/W36 streaming path).
+pub fn parse_push_request_head<R: Read>(r: &mut R, algo: HashAlgo) -> Result<PushHead, PushError> {
     let mut updates: Vec<RefUpdate> = Vec::new();
     let mut capabilities: Vec<String> = Vec::new();
     let mut scratch = Vec::new();
@@ -513,12 +524,28 @@ pub fn parse_push_request<R: Read>(r: &mut R, algo: HashAlgo) -> Result<PushRequ
             }
         }
     }
-    // remaining bytes = raw pack
+    Ok(PushHead {
+        updates,
+        capabilities,
+    })
+}
+
+/// Server-side parse of a `git-receive-pack` POST body (M9/W10c).
+/// Mirror of [`encode_push_request`]: reads the ref-update lines + the
+/// (optional, NUL-attached) capability list, then drains everything
+/// after the trailing flush as the raw pack stream.
+///
+/// M13/W36 note: prefer [`parse_push_request_head`] + a direct read
+/// from `r` into a tempfile for production paths; this function
+/// buffers the pack in memory and exists for tests + tools that want
+/// the convenient `PushRequest` shape.
+pub fn parse_push_request<R: Read>(r: &mut R, algo: HashAlgo) -> Result<PushRequest, PushError> {
+    let head = parse_push_request_head(r, algo)?;
     let mut pack = Vec::new();
     r.read_to_end(&mut pack)?;
     Ok(PushRequest {
-        updates,
-        capabilities,
+        updates: head.updates,
+        capabilities: head.capabilities,
         pack,
     })
 }
@@ -942,6 +969,44 @@ mod tests {
                 .windows(b"updating remote".len())
                 .any(|w| w == b"updating remote"),
             "progress should contain band-2 text: {progress:?}",
+        );
+    }
+
+    /// M13/W36: `parse_push_request_head` must stop exactly at the
+    /// flush that terminates the command section — the pack bytes
+    /// that follow must remain in the reader for the caller to
+    /// stream into a tempfile. Without this guarantee the streaming
+    /// path on altd-server would consume the pack into the parser's
+    /// scratch and then have nothing to drain.
+    #[test]
+    fn parse_push_request_head_leaves_pack_bytes_in_reader() {
+        let oid = sha1("0011223344556677889900112233445566778899");
+        let updates = vec![RefUpdate {
+            name: "refs/heads/main".into(),
+            old: None,
+            new: Some(oid),
+        }];
+        let mut body = Vec::new();
+        // PUSH wire: encode the head, then append raw pack bytes.
+        encode_push_request(
+            &mut body,
+            &updates,
+            &["report-status"],
+            HashAlgo::Sha1,
+            b"PACKDUMMY1234567",
+        )
+        .unwrap();
+        let mut cur = std::io::Cursor::new(&body);
+        let head = parse_push_request_head(&mut cur, HashAlgo::Sha1).unwrap();
+        assert_eq!(head.updates.len(), 1);
+        assert_eq!(head.capabilities, vec!["report-status".to_string()]);
+        // The reader's cursor must now sit at the start of the pack
+        // payload — meaning we can stream the rest off it byte-exact.
+        let mut tail = Vec::new();
+        cur.read_to_end(&mut tail).unwrap();
+        assert_eq!(
+            tail, b"PACKDUMMY1234567",
+            "pack bytes must remain in the reader for the streaming path"
         );
     }
 }
