@@ -657,3 +657,121 @@ fn altd_server_acl_wildcard_grants_all_repos() {
         );
     }
 }
+
+#[test]
+fn altd_server_a6_policy_denies_push_to_protected_ref() {
+    // M9/W12: the repo's `.alt/policy` runs inside commit_idempotent.
+    // We seed alice's principal with `branch_allow: refs/heads/feature/*`
+    // and assert that a `git push` to refs/heads/main fails (server
+    // returns `ng` for that ref) while a push to refs/heads/feature/x
+    // is accepted.
+    let root_dir = tempfile::tempdir().unwrap();
+    let root = root_dir.path();
+    let alpha = root.join("alpha");
+    std::fs::create_dir(&alpha).unwrap();
+    ok(alt(&alpha, &["init", "."]));
+    std::fs::write(alpha.join("seed.txt"), "seed\n").unwrap();
+    ok(alt(&alpha, &["add", "."]));
+    ok(alt(&alpha, &["commit", "-m", "seed"]));
+
+    // policy: alice may only write to refs/heads/feature/*
+    std::fs::write(
+        alpha.join(".alt").join("policy"),
+        "human:alice -> branch=refs/heads/feature/*\n",
+    )
+    .unwrap();
+
+    // users file: alice is trusted (2 columns) so she can reach the
+    // server; W12 then runs her through the per-repo policy.
+    let token = "alice-w12-token";
+    let hash = blake3::hash(token.as_bytes()).to_hex().to_ascii_lowercase();
+    std::fs::write(root.join("users"), format!("alice\t{hash}\n")).unwrap();
+
+    let server = spawn_server_with_env(&[("ALT_SERVER_ROOT", root.to_str().unwrap())]);
+
+    // build a tiny git source repo with a commit to push.
+    let src_dir = tempfile::tempdir().unwrap();
+    let src = src_dir.path();
+    let st = Command::new("git")
+        .args(["init", "-q", "-b", "main", src.to_str().unwrap()])
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .unwrap();
+    assert!(st.status.success());
+    std::fs::write(src.join("f.txt"), "from-git\n").unwrap();
+    for args in [
+        &["-C", src.to_str().unwrap(), "add", "."][..],
+        &[
+            "-C",
+            src.to_str().unwrap(),
+            "-c",
+            "user.name=tester",
+            "-c",
+            "user.email=t@e",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "-m",
+            "x",
+        ][..],
+    ] {
+        let o = Command::new("git").args(args).output().unwrap();
+        assert!(
+            o.status.success(),
+            "git: {}",
+            String::from_utf8_lossy(&o.stderr)
+        );
+    }
+
+    let base = format!("http://alice:{token}@{}/alpha", server.addr);
+
+    // 1. push to refs/heads/main → denied by policy (no rule allows it)
+    let push = Command::new("git")
+        .args([
+            "-C",
+            src.to_str().unwrap(),
+            "push",
+            &base,
+            "HEAD:refs/heads/main",
+        ])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .unwrap();
+    assert!(
+        !push.status.success(),
+        "push to refs/heads/main should be rejected by policy: {}",
+        String::from_utf8_lossy(&push.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&push.stderr);
+    assert!(
+        stderr.contains("refs/heads/main") || stderr.contains("rejected"),
+        "rejection should name the ref or say rejected: {stderr}"
+    );
+
+    // 2. push to refs/heads/feature/x → allowed (matches allow glob)
+    let push = Command::new("git")
+        .args([
+            "-C",
+            src.to_str().unwrap(),
+            "push",
+            &base,
+            "HEAD:refs/heads/feature/x",
+        ])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .unwrap();
+    assert!(
+        push.status.success(),
+        "push to refs/heads/feature/x must be allowed: stderr={}",
+        String::from_utf8_lossy(&push.stderr)
+    );
+    drop(server);
+    // server-side ref now exists at the pushed oid
+    let log = ok(alt(
+        &alpha,
+        &["log", "--pretty=oneline", "-n", "1", "refs/heads/feature/x"],
+    ));
+    assert!(log.contains('x'), "feature/x must carry the pushed commit");
+}

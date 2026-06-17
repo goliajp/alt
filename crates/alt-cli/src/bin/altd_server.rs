@@ -237,13 +237,16 @@ fn dispatch(
     // WWW-Authenticate prompt so a real git client retries with creds.
     // M9/W11c — a scoped user (3-column line) hands back an ACL the
     // dispatcher checks against the resolved repo + action below.
+    let mut auth_user: Option<String> = None;
     let mut scoped_acl: Option<Vec<AclRule>> = None;
     if let ServeMode::Multi { root, .. } = mode {
         let users_path = root.join("users");
         if users_path.is_file() {
             match check_auth(&req, &users_path) {
-                AuthOutcome::Ok => {}
-                AuthOutcome::OkScoped { acl, .. } => scoped_acl = Some(acl),
+                AuthOutcome::Allow { user, acl } => {
+                    auth_user = user;
+                    scoped_acl = acl;
+                }
                 AuthOutcome::Reject(reason) => {
                     let mut resp = Response::from_string(reason).with_status_code(StatusCode(401));
                     resp.add_header(header("WWW-Authenticate", "Basic realm=\"altd-server\""));
@@ -299,7 +302,7 @@ fn dispatch(
             req.respond(r)?;
             return Ok(());
         };
-        return handle_receive_pack(&handle.repo, &store, req);
+        return handle_receive_pack(&handle.repo, &store, auth_user.as_deref(), req);
     }
     let r = Response::from_string("not found").with_status_code(StatusCode(404));
     req.respond(r)?;
@@ -481,6 +484,7 @@ fn handle_info_refs(
 fn handle_receive_pack(
     repo: &Repository,
     store: &Mutex<Store>,
+    auth_user: Option<&str>,
     mut req: tiny_http::Request,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut body = Vec::new();
@@ -502,7 +506,7 @@ fn handle_receive_pack(
     // mark every command `ng` so the client sees a coherent reason.
     let mut command_status: Vec<CommandStatus> = Vec::new();
     if unpack_result.is_ok() {
-        match commit_ref_updates(store, &pushed.updates) {
+        match commit_ref_updates(store, &pushed.updates, auth_user) {
             Ok(()) => {
                 for u in &pushed.updates {
                     command_status.push(CommandStatus::Ok(u.name.clone()));
@@ -570,8 +574,16 @@ fn ingest_pack(store: &Mutex<Store>, pack: &[u8]) -> Result<(), Box<dyn std::err
 
 /// Apply the client's ref updates as a single ref transaction so the
 /// server records the push as one op-log entry — same atomicity story
-/// as a local `alt commit`.
-fn commit_ref_updates(store: &Mutex<Store>, updates: &[RefUpdate]) -> Result<(), String> {
+/// as a local `alt commit`. M9/W12 — the authenticated user (when
+/// present) becomes the Principal looked up against the repo's A6
+/// Policy; the resulting Capabilities feed a RefPolicy gate inside
+/// `commit_idempotent`, so a server-side ref-write rule is enforced
+/// before any state changes (a denied push leaves no op-log entry).
+fn commit_ref_updates(
+    store: &Mutex<Store>,
+    updates: &[RefUpdate],
+    auth_user: Option<&str>,
+) -> Result<(), String> {
     if updates.is_empty() {
         return Ok(());
     }
@@ -584,10 +596,37 @@ fn commit_ref_updates(store: &Mutex<Store>, updates: &[RefUpdate]) -> Result<(),
             new: u.new.map(RefTarget::Oid),
         });
     }
-    let actor = "wire/receive-pack@altd-server";
+    let principal = alt_cli::native::Principal {
+        kind: alt_cli::native::PrincipalKind::Human,
+        id: auth_user.unwrap_or("anonymous").to_owned(),
+        session: None,
+    };
+    let caps = store_guard.capabilities_for(&principal);
+    let actor = format!(
+        "{kind}:{id};verb:wire/receive-pack",
+        kind = match principal.kind {
+            alt_cli::native::PrincipalKind::Human => "human",
+            alt_cli::native::PrincipalKind::Agent => "agent",
+        },
+        id = principal.id,
+    );
+    // Build the RefPolicy that mirrors local `commit_refs_with`: a closure
+    // over the caps' branch_allow drives the per-ref check inside the
+    // commit lock.
+    let allow = caps.branch_allow.clone();
+    let has_allow = !allow.is_empty();
+    let is_branch_allowed = move |name: &str| allow.iter().any(|g| g.matches(name));
+    let policy = alt_refs::RefPolicy {
+        read_only: caps.read_only,
+        is_branch_allowed: if has_allow {
+            Some(&is_branch_allowed)
+        } else {
+            None
+        },
+    };
     store_guard
         .refs_mut()
-        .commit(actor, now_ms(), &changes)
+        .commit_idempotent(&actor, now_ms(), &changes, None, Some(&policy))
         .map_err(|e| format!("ref tx: {e}"))?;
     Ok(())
 }
@@ -651,14 +690,13 @@ fn _phantom_keep_imports(_c: Cursor<Vec<u8>>) {}
 /// What `check_auth` decided about a request. `Reject` carries the
 /// short string the body gets so a human running curl sees something
 /// meaningful (a real git client just retries with the credential).
-/// `OkScoped` means authentication succeeded *and* the user has an ACL
-/// the dispatcher then checks against the resolved repo + action.
+/// `Allow` returns the authenticated user (None when no users file was
+/// in play, so the request is anonymous) and the user's ACL when they
+/// were scoped (None = trusted user, every repo + every action).
 enum AuthOutcome {
-    Ok,
-    OkScoped {
-        #[allow(dead_code)]
-        user: String,
-        acl: Vec<AclRule>,
+    Allow {
+        user: Option<String>,
+        acl: Option<Vec<AclRule>>,
     },
     Reject(String),
 }
@@ -789,12 +827,9 @@ fn check_auth(req: &tiny_http::Request, users_path: &Path) -> AuthOutcome {
     // M9/W11c — a 2-column users line (no ACL) is the "trusted user"
     // shape: every repo + every action allowed. A 3-column line scopes
     // the user, and the dispatcher then asks `acl_allows` per request.
-    match &entry.acl {
-        None => AuthOutcome::Ok,
-        Some(rules) => AuthOutcome::OkScoped {
-            user: user.to_owned(),
-            acl: rules.clone(),
-        },
+    AuthOutcome::Allow {
+        user: Some(user.to_owned()),
+        acl: entry.acl.clone(),
     }
 }
 
