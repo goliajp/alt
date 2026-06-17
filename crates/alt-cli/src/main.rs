@@ -117,6 +117,11 @@ fn run() -> Result<u8, Box<dyn std::error::Error>> {
             native::clone(url, dir.as_deref(), *json, &cwd, id, &mut out)?;
             0
         }
+        Command::Ci { op, json } => match op {
+            alt_cli::cli::CiOp::Validate { paths } => {
+                alt_cli::cli::ci_validate(&cwd, paths, *json, &mut out)?
+            }
+        },
         c if cli::is_native(c) => {
             let mut open = OpenRepo::discover(&cwd, cli.workspace.as_deref(), id)?;
             cli::run_native(&mut open.repo(), c, &mut out)?

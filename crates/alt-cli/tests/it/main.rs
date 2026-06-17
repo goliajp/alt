@@ -2,6 +2,7 @@
 mod altd_server;
 mod branch_switch;
 mod capability_gate;
+mod ci_validate;
 mod clone;
 mod commit_loop;
 mod daemon_client;
