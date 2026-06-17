@@ -11,7 +11,11 @@
 # fork or test target; default is the public alt mirror.
 set -eu
 REMOTE="${ALT_GITHUB_REMOTE:-git@github.com:goliajp/alt.git}"
-BRANCHES="${ALT_GITHUB_BRANCHES:-develop master}"
+# develop only by default — master moves with release/hotfix flows and
+# is pushed deliberately by those; sweeping it in here would let `alt`'s
+# own git-flow init point `master` at whatever develop tip was current
+# at the time, masking the "no releases yet" baseline.
+BRANCHES="${ALT_GITHUB_BRANCHES:-develop}"
 
 cd "$(dirname "$0")/.."
 
