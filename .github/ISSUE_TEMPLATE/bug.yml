@@ -1,0 +1,43 @@
+name: Bug report
+description: Report something that doesn't work as documented
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: alt version
+      description: Output of `alt --version` (or commit hash if built from source).
+      placeholder: e.g. 0.0.0 (commit 6ebe326)
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: |
+        Exact commands. The smaller the repro, the faster a fix.
+      placeholder: |
+        $ alt init demo
+        $ cd demo
+        $ alt add ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual
+      description: What did you expect to happen, and what happened instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: |
+        OS + arch + Rust version (`rustc --version`). For wire / server issues,
+        also note the git server you were pushing to / fetching from.
+    validations:
+      required: false
