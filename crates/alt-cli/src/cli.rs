@@ -98,6 +98,14 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Show a commit: header + per-file unified diff against its first parent
+    Show {
+        /// Revision to show (default `HEAD`). Accepts any spec `rev-parse` resolves.
+        rev: Option<String>,
+        /// Emit a structured JSON diff instead of unified text
+        #[arg(long)]
+        json: bool,
+    },
     /// Show changes between the index and the working tree (or HEAD)
     Diff {
         /// Show staged changes (HEAD vs index) instead of unstaged
@@ -585,6 +593,11 @@ pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, out: &mut W) -> Res<(
             }
         }
         Command::Log(args) => log_cmd::run(out, repo, args.clone())?,
+        Command::Show { rev, json } => {
+            let spec = rev.clone().unwrap_or_else(|| "HEAD".to_string());
+            let args = crate::log_cmd::LogArgs::for_show(spec, *json);
+            crate::log_cmd::run(out, repo, args)?;
+        }
         Command::Export { target } => {
             if !repo.is_native() {
                 return Err("export needs a .alt store; run inside one (see 'alt import')".into());

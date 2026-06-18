@@ -76,6 +76,22 @@ pub struct LogArgs {
     rev: String,
 }
 
+impl LogArgs {
+    /// Helper for `alt show <rev>`: walk one commit, raw header, always
+    /// emit the patch. `json` follows the user's flag; the json shape is
+    /// the same as `alt log --json -n 1` so downstream tools can rely on
+    /// a single schema.
+    pub fn for_show(rev: String, json: bool) -> Self {
+        Self {
+            pretty: "raw".to_string(),
+            max_count: Some(1),
+            json,
+            patch: !json,
+            rev,
+        }
+    }
+}
+
 pub fn run(
     out: &mut impl Write,
     repo: &Repository,

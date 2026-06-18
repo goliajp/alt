@@ -15,6 +15,7 @@ mod flow_kill;
 mod flow_release_hotfix;
 mod identity;
 mod log_patch;
+mod show;
 mod merge;
 mod monorepo_bench;
 mod op_log;
