@@ -164,6 +164,9 @@ fn route_repo(mr: &MultiRepo, name: &str, tail: &str, query: &str) -> RouteResp 
         if action == "diff" {
             return collapse(api::handle_commit_diff(mr, name, oid)).into();
         }
+        if let Some(oid) = rest.strip_suffix("/footprint") {
+            return collapse(api::handle_commit_footprint(mr, name, oid)).into();
+        }
     }
 
     // /api/repos/{name}/tree/{spec}

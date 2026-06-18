@@ -245,7 +245,37 @@ export const api = {
     getJSON<StorageStats>(
       `/api/repos/${encodeURIComponent(name)}/storage_stats`,
     ),
+
+  commitFootprint: (name: string, oid: string) =>
+    getJSON<CommitFootprintData>(
+      `/api/repos/${encodeURIComponent(name)}/commits/${oid}/footprint`,
+    ),
 };
+
+export interface CommitFootprintFile {
+  path: string;
+  change: "added" | "removed" | "changed";
+  old_blob: string;
+  new_blob: string;
+  old_chunks: number;
+  new_chunks: number;
+  net_new_chunks: number;
+  shared_chunks: number;
+  net_new_bytes: number;
+  shared_bytes: number;
+}
+
+export interface CommitFootprintData {
+  oid: string;
+  parent: string;
+  totals: {
+    net_new_chunks: number;
+    shared_chunks: number;
+    net_new_bytes: number;
+    shared_bytes: number;
+  };
+  files: CommitFootprintFile[];
+}
 
 export interface StorageStats {
   objects: {

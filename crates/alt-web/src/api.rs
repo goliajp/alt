@@ -248,6 +248,156 @@ pub fn handle_commit_diff(
     Ok((200, body.into_bytes()))
 }
 
+/// `GET /api/repos/{name}/commits/{oid}/footprint` — per-commit
+/// "how much did alt grow because of this commit." Walks every file in
+/// the commit's tree vs its first parent's tree, and for each path
+/// whose blob oid changed computes the set of leaf chunks on each
+/// side. Bytes split into:
+///
+/// - **net new** — chunks present in the new blob's storage view that
+///   the old blob's storage view didn't share. This is what alt
+///   actually had to write to disk for this commit, file by file.
+/// - **shared with parent** — chunks present in both. Bytes alt got
+///   for free thanks to CDC + prism dedup.
+///
+/// First-parent only (matches commit diff). For a root commit (no
+/// parent) everything counts as net new.
+pub fn handle_commit_footprint(
+    mr: &MultiRepo,
+    name: &str,
+    oid_str: &str,
+) -> Result<(u16, Vec<u8>), ApiError> {
+    let repo = mr.open(name)?;
+    let oid = parse_oid(oid_str)?;
+    let commit = repo
+        .read_commit(&oid)
+        .map_err(|e| ApiError::Internal(format!("read_commit {oid}: {e}")))?;
+    let new_tree = commit
+        .tree()
+        .ok_or_else(|| ApiError::Internal(format!("commit {oid} has no tree")))?;
+    let parent_oid = commit.parents().next();
+    let old_files: Vec<(String, ObjectId)> = match parent_oid {
+        Some(p) => {
+            let parent = repo
+                .read_commit(&p)
+                .map_err(|e| ApiError::Internal(format!("read_commit parent {p}: {e}")))?;
+            match parent.tree() {
+                Some(t) => flatten_tree(&repo, &t)?,
+                None => Vec::new(),
+            }
+        }
+        None => Vec::new(),
+    };
+    let new_files = flatten_tree(&repo, &new_tree)?;
+
+    use std::collections::BTreeMap;
+    let old_map: BTreeMap<&str, &ObjectId> =
+        old_files.iter().map(|(p, o)| (p.as_str(), o)).collect();
+    let new_map: BTreeMap<&str, &ObjectId> =
+        new_files.iter().map(|(p, o)| (p.as_str(), o)).collect();
+
+    let mut paths: Vec<&str> = old_map.keys().chain(new_map.keys()).copied().collect();
+    paths.sort();
+    paths.dedup();
+
+    let mut file_jsons: Vec<String> = Vec::new();
+    let mut tot_net_new_chunks = 0u64;
+    let mut tot_shared_chunks = 0u64;
+    let mut tot_net_new_bytes = 0u64;
+    let mut tot_shared_bytes = 0u64;
+
+    for path in paths {
+        let old_o = old_map.get(path).copied();
+        let new_o = new_map.get(path).copied();
+        if old_o == new_o {
+            // identical blob — file didn't move, no footprint to report
+            continue;
+        }
+
+        let (old_chunks, _old_logical) = chunks_for(&repo, old_o)?;
+        let (new_chunks, _new_logical) = chunks_for(&repo, new_o)?;
+
+        use std::collections::HashMap;
+        let old_set: HashMap<_, _> = old_chunks
+            .iter()
+            .map(|c| (c.chunk_id, c.stored_len as u64))
+            .collect();
+        let mut net_new = 0u64;
+        let mut net_new_bytes = 0u64;
+        let mut shared = 0u64;
+        let mut shared_bytes = 0u64;
+        for c in &new_chunks {
+            if old_set.contains_key(&c.chunk_id) {
+                shared += 1;
+                shared_bytes += c.stored_len as u64;
+            } else {
+                net_new += 1;
+                net_new_bytes += c.stored_len as u64;
+            }
+        }
+
+        let kind = match (old_o, new_o) {
+            (None, Some(_)) => "added",
+            (Some(_), None) => "removed",
+            _ => "changed",
+        };
+
+        tot_net_new_chunks += net_new;
+        tot_shared_chunks += shared;
+        tot_net_new_bytes += net_new_bytes;
+        tot_shared_bytes += shared_bytes;
+
+        file_jsons.push(format!(
+            "{{\"path\":{},\"change\":\"{kind}\",\"old_blob\":{},\"new_blob\":{},\
+             \"old_chunks\":{},\"new_chunks\":{},\
+             \"net_new_chunks\":{},\"shared_chunks\":{},\
+             \"net_new_bytes\":{},\"shared_bytes\":{}}}",
+            json_string(path),
+            json_string(&old_o.map(|o| o.to_string()).unwrap_or_default()),
+            json_string(&new_o.map(|o| o.to_string()).unwrap_or_default()),
+            old_chunks.len(),
+            new_chunks.len(),
+            net_new,
+            shared,
+            net_new_bytes,
+            shared_bytes,
+        ));
+    }
+
+    let parent_str = parent_oid.map(|p| p.to_string()).unwrap_or_default();
+    let body = format!(
+        "{{\"schema_version\":1,\"oid\":\"{oid}\",\"parent\":{},\
+         \"totals\":{{\
+            \"net_new_chunks\":{},\"shared_chunks\":{},\
+            \"net_new_bytes\":{},\"shared_bytes\":{}\
+         }},\
+         \"files\":[{}]}}",
+        json_string(&parent_str),
+        tot_net_new_chunks,
+        tot_shared_chunks,
+        tot_net_new_bytes,
+        tot_shared_bytes,
+        file_jsons.join(","),
+    );
+    Ok((200, body.into_bytes()))
+}
+
+fn chunks_for(
+    repo: &Repository,
+    oid: Option<&ObjectId>,
+) -> Result<(Vec<alt_odb::ChunkInfo>, u64), ApiError> {
+    let Some(o) = oid else {
+        return Ok((Vec::new(), 0));
+    };
+    let view = repo
+        .storage_view(o)
+        .map_err(|e| ApiError::Internal(format!("storage_view {o}: {e}")))?;
+    let Some(view) = view else {
+        return Ok((Vec::new(), 0));
+    };
+    Ok((view.chunks.chunks, view.logical_size))
+}
+
 /// `GET /api/repos/{name}/storage_stats` — repo-wide aggregate
 /// storage report: total logical bytes alt is responsible for, total
 /// on-disk bytes, tier 0 vs tier 1 blob split, chunk encoding

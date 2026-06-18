@@ -89,3 +89,10 @@ export const useStorageStats = (name: string) =>
     queryFn: () => api.storageStats(name),
     enabled: !!name,
   });
+
+export const useCommitFootprint = (name: string, oid: string) =>
+  useQuery({
+    queryKey: ["commitFootprint", name, oid] as const,
+    queryFn: () => api.commitFootprint(name, oid),
+    enabled: !!name && !!oid,
+  });

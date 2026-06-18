@@ -2,6 +2,7 @@ import { Link, useParams } from "react-router";
 import { useCommit, useCommitDiff } from "../lib/hooks";
 import { DiffView } from "../components/DiffView";
 import { StoragePanel } from "../components/StoragePanel";
+import { CommitFootprint } from "../components/CommitFootprint";
 import {
   BinaryDiffSummary,
   PartAwareDiff,
@@ -104,6 +105,10 @@ export function Commit() {
           </div>
         ) : null}
       </header>
+
+      <div className="mb-7">
+        <CommitFootprint repo={name} oid={oid} />
+      </div>
 
       <section className="space-y-7">
         {diff.isLoading ? (
