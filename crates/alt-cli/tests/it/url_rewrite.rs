@@ -63,6 +63,69 @@ fn rewrites_apply_during_fetch_when_url_starts_with_insteadof_trigger() {
 }
 
 #[test]
+fn builtin_ssh_to_https_rewrites_well_known_hosts() {
+    // No insteadOf rule configured — the built-in fallback should
+    // still rewrite `git@github.com:foo/bar.git` to HTTPS.
+    let tmp = tempfile::tempdir().unwrap();
+    ok(alt(tmp.path(), &["init"]));
+    ok(alt(
+        tmp.path(),
+        &[
+            "remote",
+            "add",
+            "origin",
+            "git@github.com:nope/nonexistent.git",
+        ],
+    ));
+
+    let out = alt(tmp.path(), &["fetch", "origin"]);
+    // The fetch can't actually succeed (private/empty repo), but the
+    // error must show alt tried HTTPS — not a "Bad URL" rejection
+    // from the SSH form.
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !err.contains("Bad URL"),
+        "SSH URL should be auto-rewritten: {err}",
+    );
+    assert!(
+        err.contains("github.com") || err.contains("http"),
+        "expected to hit github over HTTPS: {err}",
+    );
+}
+
+#[test]
+fn explicit_insteadof_wins_over_builtin_fallback() {
+    // When the user writes their own insteadOf, the built-in
+    // SSH→HTTPS mapping must not override it.
+    let tmp = tempfile::tempdir().unwrap();
+    ok(alt(tmp.path(), &["init"]));
+    let cfg_dir = tmp.path().join(".alt").join("git-import");
+    fs::create_dir_all(&cfg_dir).unwrap();
+    fs::write(
+        cfg_dir.join("config"),
+        "[url \"http://my-mirror/\"]\n\tinsteadOf = git@github.com:\n",
+    )
+    .unwrap();
+    ok(alt(
+        tmp.path(),
+        &["remote", "add", "origin", "git@github.com:user/repo.git"],
+    ));
+
+    let out = alt(tmp.path(), &["fetch", "origin"]);
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("my-mirror"),
+        "expected explicit insteadOf to win, got: {err}",
+    );
+    assert!(
+        !err.contains("github.com"),
+        "built-in fallback should not also fire: {err}",
+    );
+}
+
+#[test]
 fn longest_matching_insteadof_wins() {
     // Two insteadOf rules pointing at different replacements; the
     // more specific one (`git@github.com:`) is longer than the
