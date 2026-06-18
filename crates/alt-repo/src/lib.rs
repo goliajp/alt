@@ -452,7 +452,41 @@ impl Repository {
                 return Ok(Some(oid));
             }
         }
+        // Short hex prefix as the final DWIM step: ≥ 4 hex chars, less
+        // than the full hex length (the full-hex case is already handled
+        // above), and unique within the odb. Returns
+        // AmbiguousShortOid when multiple objects match, so the caller
+        // surfaces a clear message instead of a silent miss.
+        if spec.len() >= 4
+            && spec.len() < self.algo.hex_len()
+            && spec.chars().all(|c| c.is_ascii_hexdigit())
+            && let Some(oid) = self.resolve_short_oid(spec)?
+        {
+            return Ok(Some(oid));
+        }
         Ok(None)
+    }
+
+    fn resolve_short_oid(&self, prefix: &str) -> Result<Option<ObjectId>, RepoError> {
+        match &self.backend {
+            Backend::Alt(alt) => {
+                let matches = alt.odb.lookup_by_prefix(prefix, 4);
+                if matches.is_empty() {
+                    Ok(None)
+                } else if matches.len() == 1 {
+                    Ok(Some(matches[0].git))
+                } else {
+                    Err(RepoError::AmbiguousShortOid {
+                        prefix: prefix.to_owned(),
+                        matches: matches.iter().map(|m| m.git).collect(),
+                    })
+                }
+            }
+            // Git backend short-oid lookup needs a pack-index walk +
+            // a loose-objects directory scan; not wired yet so we return
+            // None (the caller falls through to "unknown revision").
+            Backend::Git { .. } => Ok(None),
+        }
     }
 
     /// Date-ordered history walk from `start` (commit or peelable tag).
@@ -576,6 +610,14 @@ pub enum RepoError {
     Unsupported(&'static str),
     #[error("repository format: {0}")]
     Format(&'static str),
+    /// A short oid prefix matched more than one object — the caller has
+    /// to commit to a longer prefix to disambiguate. Carries up to four
+    /// example matches so the error message can list them.
+    #[error("short oid '{prefix}' is ambiguous: matches {} objects", matches.len())]
+    AmbiguousShortOid {
+        prefix: String,
+        matches: Vec<ObjectId>,
+    },
     #[error("io")]
     Io(#[from] std::io::Error),
     #[error(transparent)]

@@ -110,6 +110,41 @@ fn rev_parse_tilde_past_root_returns_error() {
 }
 
 #[test]
+fn rev_parse_resolves_short_oid_prefix() {
+    let tmp = tempfile::tempdir().unwrap();
+    setup(tmp.path());
+    let head = ok(alt(tmp.path(), &["rev-parse", "HEAD"]))
+        .trim()
+        .to_string();
+    // 7-char prefix — the same length git's default short oid uses.
+    let short = &head[..7];
+    let resolved = ok(alt(tmp.path(), &["rev-parse", short]))
+        .trim()
+        .to_string();
+    assert_eq!(resolved, head);
+
+    // Show through a short prefix also works (uses the same DWIM path).
+    let out = ok(alt(tmp.path(), &["show", short]));
+    assert!(out.contains(&head), "show <short> resolves: {out}");
+}
+
+#[test]
+fn rev_parse_short_oid_below_four_chars_is_unknown() {
+    let tmp = tempfile::tempdir().unwrap();
+    setup(tmp.path());
+    let head = ok(alt(tmp.path(), &["rev-parse", "HEAD"]))
+        .trim()
+        .to_string();
+    let too_short = &head[..3];
+    let out = alt(tmp.path(), &["rev-parse", too_short]);
+    assert!(
+        !out.status.success(),
+        "expected failure for 3-char prefix, got: {:?}",
+        String::from_utf8_lossy(&out.stdout),
+    );
+}
+
+#[test]
 fn show_json_returns_a_single_commit_object() {
     let tmp = tempfile::tempdir().unwrap();
     setup(tmp.path());

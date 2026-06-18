@@ -611,6 +611,34 @@ impl NativeOdb {
         self.map.by_alt(id)
     }
 
+    /// Resolve a short hex prefix (≥ 4 hex chars) to the unique git oid
+    /// it matches. Returns up to `cap` matches so callers can detect
+    /// ambiguity without paying for a full scan; cap-saturated results
+    /// are treated as "ambiguous" by callers.
+    ///
+    /// Empty / too-short prefixes return an empty list. Prefix must be
+    /// lowercase hex (the canonical form alt prints); the comparison is
+    /// against `entry.git.to_string()` so non-hex chars yield no match.
+    pub fn lookup_by_prefix(&self, prefix: &str, cap: usize) -> Vec<&MapEntry> {
+        if prefix.len() < 4 || prefix.len() >= 64 {
+            return Vec::new();
+        }
+        if !prefix.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Vec::new();
+        }
+        let lower: String = prefix.chars().map(|c| c.to_ascii_lowercase()).collect();
+        let mut out = Vec::new();
+        for entry in self.map.iter() {
+            if entry.git.to_string().starts_with(&lower) {
+                out.push(entry);
+                if out.len() >= cap {
+                    break;
+                }
+            }
+        }
+        out
+    }
+
     pub fn contains(&self, oid: &ObjectId) -> bool {
         self.map.by_git(oid).is_some()
     }
