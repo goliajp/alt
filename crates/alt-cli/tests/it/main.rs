@@ -9,6 +9,7 @@ mod ci_validate;
 mod clone;
 mod commit_loop;
 mod config;
+mod credential_helper;
 mod daemon_client;
 mod daemon_server;
 mod diff;
