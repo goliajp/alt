@@ -4,6 +4,7 @@ mod altd_server;
 mod blame;
 mod branch_switch;
 mod capability_gate;
+mod cherry_pick;
 mod ci_validate;
 mod clone;
 mod commit_loop;

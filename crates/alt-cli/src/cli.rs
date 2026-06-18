@@ -113,6 +113,14 @@ pub enum Command {
         /// Revision to start the walk from (default `HEAD`).
         rev: Option<String>,
     },
+    /// Apply the changes from a commit on top of the current branch
+    CherryPick {
+        /// Revision of the commit to apply
+        rev: String,
+        /// Emit a structured JSON result instead of human lines.
+        #[arg(long)]
+        json: bool,
+    },
     /// Read or update git-style config keys (`user.name`, …)
     Config {
         /// Dotted key (e.g. `user.name`). Omit when `--list` or
@@ -506,6 +514,7 @@ pub fn is_native(cmd: &Command) -> bool {
             | Command::Status { .. }
             | Command::Branch { .. }
             | Command::Tag { .. }
+            | Command::CherryPick { .. }
             | Command::Switch { .. }
             | Command::Diff { .. }
             | Command::Merge { .. }
@@ -553,6 +562,14 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
             json,
             semantic,
         } => repo.diff(*cached, *json, *semantic, out)?,
+        Command::CherryPick { rev, json } => {
+            // git exits 1 when a cherry-pick stops in conflict
+            return Ok(if repo.cherry_pick(rev, *json, out)? {
+                1
+            } else {
+                0
+            });
+        }
         Command::Merge { branch, json } => {
             // git exits 1 when a merge stops in conflict
             return Ok(if repo.merge(branch, *json, out)? {
