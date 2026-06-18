@@ -113,14 +113,21 @@ pub enum Command {
         /// Revision to start the walk from (default `HEAD`).
         rev: Option<String>,
     },
-    /// Inspect git-style config keys (`user.name`, `remote.origin.url`, …)
+    /// Read or update git-style config keys (`user.name`, …)
     Config {
-        /// Dotted key (e.g. `user.name`). Omit when `--list` is set.
+        /// Dotted key (e.g. `user.name`). Omit when `--list` or
+        /// `--unset` is set.
         key: Option<String>,
+        /// New value. When supplied, the key is set (overwriting any
+        /// existing value); when omitted, the key is read.
+        value: Option<String>,
         /// List every entry as `section.key=value` (git's default
         /// `--list` shape).
         #[arg(long)]
         list: bool,
+        /// Remove a key from the config file.
+        #[arg(long)]
+        unset: Option<String>,
     },
     /// List, create (lightweight or annotated), or delete tags
     Tag {
@@ -670,8 +677,20 @@ pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, out: &mut W) -> Res<(
             let spec = rev.as_deref().unwrap_or("HEAD");
             crate::blame::run(out, repo, path, spec)?;
         }
-        Command::Config { key, list } => {
-            crate::config_cmd::run(repo, key.as_deref(), *list, out)?;
+        Command::Config {
+            key,
+            value,
+            list,
+            unset,
+        } => {
+            crate::config_cmd::run(
+                repo,
+                key.as_deref(),
+                value.as_deref(),
+                *list,
+                unset.as_deref(),
+                out,
+            )?;
         }
         Command::Export { target } => {
             if !repo.is_native() {

@@ -74,6 +74,57 @@ fn config_list_emits_every_entry() {
 }
 
 #[test]
+fn config_set_then_read_round_trips() {
+    let tmp = tempfile::tempdir().unwrap();
+    setup(tmp.path());
+    ok(alt(tmp.path(), &["config", "user.name", "Alice"]));
+    let read = ok(alt(tmp.path(), &["config", "user.name"]));
+    assert_eq!(read.trim(), "Alice");
+}
+
+#[test]
+fn config_set_overwrites_existing_value() {
+    let tmp = tempfile::tempdir().unwrap();
+    setup(tmp.path());
+    // setup() writes user.name = Tester
+    ok(alt(tmp.path(), &["config", "user.name", "Bob"]));
+    let read = ok(alt(tmp.path(), &["config", "user.name"]));
+    assert_eq!(read.trim(), "Bob");
+}
+
+#[test]
+fn config_unset_removes_the_key() {
+    let tmp = tempfile::tempdir().unwrap();
+    setup(tmp.path());
+    ok(alt(tmp.path(), &["config", "--unset", "user.name"]));
+    let out = alt(tmp.path(), &["config", "user.name"]);
+    assert!(!out.status.success());
+}
+
+#[test]
+fn config_unset_missing_key_fails() {
+    let tmp = tempfile::tempdir().unwrap();
+    setup(tmp.path());
+    let out = alt(tmp.path(), &["config", "--unset", "nope.key"]);
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("not set"), "got: {err}");
+}
+
+#[test]
+fn config_set_creates_file_if_missing() {
+    let tmp = tempfile::tempdir().unwrap();
+    ok(alt(tmp.path(), &["init"]));
+    // No git-import/config has been written by setup() here.
+    ok(alt(
+        tmp.path(),
+        &["config", "user.email", "alice@example.com"],
+    ));
+    let read = ok(alt(tmp.path(), &["config", "user.email"]));
+    assert_eq!(read.trim(), "alice@example.com");
+}
+
+#[test]
 fn config_rejects_malformed_dotted_key() {
     let tmp = tempfile::tempdir().unwrap();
     setup(tmp.path());
