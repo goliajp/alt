@@ -203,7 +203,27 @@ mod imp {
     /// Connects to `sock`; if nothing is listening, spawns `altd` and polls for
     /// it to come up (the daemon binds before it accepts). `None` if the daemon
     /// can't be reached — the caller then runs directly.
+    ///
+    /// Before connecting, we check whether the running daemon is the
+    /// same `altd` binary we're about to invoke (via the metadata file
+    /// the daemon drops next to its socket). On mismatch — the M17
+    /// dogfood case where `cargo install` replaced the binary while
+    /// the old daemon was idle-running — SIGTERM the stale daemon,
+    /// wait for its socket to disappear, then proceed to spawn fresh.
     fn connect_or_spawn(alt_dir: &Path, sock: &Path) -> Option<UnixStream> {
+        if let Some(stale_pid) = stale_daemon_pid(alt_dir) {
+            unsafe {
+                libc::kill(stale_pid as i32, libc::SIGTERM);
+            }
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while Instant::now() < deadline {
+                if !sock.exists() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+
         if let Ok(s) = UnixStream::connect(sock) {
             return Some(s);
         }
@@ -217,6 +237,34 @@ mod imp {
                 }
                 Err(_) => return None,
             }
+        }
+    }
+
+    /// Returns `Some(pid)` when `daemon.meta` records an `altd` whose
+    /// identity (path + mtime + size) differs from the one we'd
+    /// spawn — i.e. the daemon is running an outdated build. `None`
+    /// when meta is missing, unreadable, or matches the current binary.
+    fn stale_daemon_pid(alt_dir: &Path) -> Option<u32> {
+        let altd = std::env::current_exe().ok()?.with_file_name("altd");
+        let meta = std::fs::metadata(&altd).ok()?;
+        let mtime = meta
+            .modified()
+            .ok()?
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?
+            .as_nanos();
+        let size = meta.len();
+        let content = std::fs::read_to_string(alt_dir.join("daemon.meta")).ok()?;
+        let mut lines = content.lines();
+        let pid: u32 = lines.next()?.parse().ok()?;
+        let daemon_path = lines.next()?;
+        let daemon_mtime: u128 = lines.next()?.parse().ok()?;
+        let daemon_size: u64 = lines.next()?.parse().ok()?;
+        let current_path = altd.display().to_string();
+        if daemon_path == current_path && daemon_mtime == mtime && daemon_size == size {
+            None
+        } else {
+            Some(pid)
         }
     }
 
