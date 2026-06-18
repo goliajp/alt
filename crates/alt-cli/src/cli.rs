@@ -649,6 +649,20 @@ pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, out: &mut W) -> Res<(
         Command::Log(args) => log_cmd::run(out, repo, args.clone())?,
         Command::Show { rev, json } => {
             let spec = rev.clone().unwrap_or_else(|| "HEAD".to_string());
+            // `<rev>:<path>` selects a blob at `path` as of commit
+            // `rev`, matching git show's revision-blob form. The
+            // commit + diff path stays for everything else.
+            if let Some((rev_part, path_part)) = spec.split_once(':') {
+                if *json {
+                    return Err("--json is not supported with <rev>:<path>".into());
+                }
+                let commit_oid = repo
+                    .rev_parse(rev_part)?
+                    .ok_or_else(|| format!("bad revision '{rev_part}'"))?;
+                let blob = show_resolve_blob(repo, commit_oid, path_part)?;
+                out.write_all(&blob)?;
+                return Ok(());
+            }
             let args = crate::log_cmd::LogArgs::for_show(spec, *json);
             crate::log_cmd::run(out, repo, args)?;
         }
@@ -735,6 +749,54 @@ pub fn run_on_store<W: Write>(
             Ok(0)
         }
     }
+}
+
+/// Resolve `<commit>:<path>` to a blob's bytes. Walks the commit's
+/// tree segment-by-segment, refusing to descend past a non-tree entry
+/// and refusing the final entry if it's a tree (use `alt cat-file -p`
+/// for tree dumps).
+fn show_resolve_blob(
+    repo: &Repository,
+    commit_oid: ObjectId,
+    path: &str,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    use alt_git_codec::{ObjectKind, Tree};
+    let commit = repo.read_commit(&commit_oid)?;
+    let mut current = commit
+        .tree()
+        .ok_or_else(|| format!("commit {commit_oid} has no tree"))?;
+    let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    if segments.is_empty() {
+        return Err("empty path".into());
+    }
+    for (i, seg) in segments.iter().enumerate() {
+        let obj = repo
+            .read_object(&current)?
+            .ok_or_else(|| format!("tree {current} missing"))?;
+        if obj.kind != ObjectKind::Tree {
+            return Err(format!("{current} is not a tree").into());
+        }
+        let tree = Tree::parse(&obj.data, repo.algo())?;
+        let entry = tree
+            .entries
+            .iter()
+            .find(|e| String::from_utf8_lossy(e.name.as_slice()) == **seg)
+            .ok_or_else(|| format!("path '{path}' not found at {commit_oid}"))?;
+        if i == segments.len() - 1 {
+            if entry.mode.value() == 0o040000 {
+                return Err(format!("'{path}' is a tree, not a blob").into());
+            }
+            let blob_obj = repo
+                .read_object(&entry.oid)?
+                .ok_or_else(|| format!("blob {} missing", entry.oid))?;
+            return Ok(blob_obj.data);
+        }
+        if entry.mode.value() != 0o040000 {
+            return Err(format!("'{seg}' is not a directory in path '{path}'").into());
+        }
+        current = entry.oid;
+    }
+    Err("unreachable".into())
 }
 
 fn resolve(repo: &Repository, spec: &str) -> Result<ObjectId, String> {

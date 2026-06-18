@@ -145,6 +145,55 @@ fn rev_parse_short_oid_below_four_chars_is_unknown() {
 }
 
 #[test]
+fn show_rev_colon_path_prints_blob_at_that_revision() {
+    let tmp = tempfile::tempdir().unwrap();
+    setup(tmp.path());
+    // After setup, HEAD is the second commit and readme.txt is "second\n".
+    let out = ok(alt(tmp.path(), &["show", "HEAD:readme.txt"]));
+    assert_eq!(out, "second\n", "got: {out}");
+
+    // HEAD~ has the file at its first version.
+    let parent = ok(alt(tmp.path(), &["show", "HEAD~:readme.txt"]));
+    assert_eq!(parent, "first\n", "got: {parent}");
+}
+
+#[test]
+fn show_rev_colon_path_handles_subdirs() {
+    let tmp = tempfile::tempdir().unwrap();
+    ok(alt(tmp.path(), &["init"]));
+    std::fs::create_dir_all(tmp.path().join("sub/dir")).unwrap();
+    std::fs::write(tmp.path().join("sub/dir/leaf"), "buried\n").unwrap();
+    ok(alt(tmp.path(), &["add", "sub/dir/leaf"]));
+    ok(alt(tmp.path(), &["commit", "-m", "buried"]));
+    let body = ok(alt(tmp.path(), &["show", "HEAD:sub/dir/leaf"]));
+    assert_eq!(body, "buried\n");
+}
+
+#[test]
+fn show_rev_colon_path_unknown_fails_clearly() {
+    let tmp = tempfile::tempdir().unwrap();
+    setup(tmp.path());
+    let out = alt(tmp.path(), &["show", "HEAD:no/such/file"]);
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("not found"), "got: {err}");
+}
+
+#[test]
+fn show_rev_colon_tree_path_rejected() {
+    let tmp = tempfile::tempdir().unwrap();
+    ok(alt(tmp.path(), &["init"]));
+    std::fs::create_dir_all(tmp.path().join("d")).unwrap();
+    std::fs::write(tmp.path().join("d/x"), "x\n").unwrap();
+    ok(alt(tmp.path(), &["add", "d/x"]));
+    ok(alt(tmp.path(), &["commit", "-m", "tree"]));
+    let out = alt(tmp.path(), &["show", "HEAD:d"]);
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("is a tree"), "got: {err}");
+}
+
+#[test]
 fn show_json_returns_a_single_commit_object() {
     let tmp = tempfile::tempdir().unwrap();
     setup(tmp.path());
