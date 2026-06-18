@@ -2002,17 +2002,30 @@ impl<'a> NativeRepo<'a> {
     /// the ref points to instead; that path is out of scope for the
     /// first M17 dogfood pass and would land as a follow-up `-a /
     /// -m` arg pair.
+    #[allow(clippy::too_many_arguments)]
     pub fn tag(
         &mut self,
         name: Option<String>,
         rev: Option<String>,
         delete: Option<String>,
+        annotate: bool,
+        message: Option<String>,
         json: bool,
         out: &mut impl Write,
     ) -> Res<()> {
         match (name, delete) {
             (_, Some(target)) => self.delete_tag(&target, out),
-            (Some(new), None) => self.create_tag(&new, rev.as_deref(), out),
+            (Some(new), None) => {
+                if annotate {
+                    let msg = message.ok_or("annotated tag (-a) needs a message (-m \"…\")")?;
+                    self.create_annotated_tag(&new, rev.as_deref(), &msg, out)
+                } else if let Some(msg) = message {
+                    // git treats `-m` without `-a` as implicit `-a`.
+                    self.create_annotated_tag(&new, rev.as_deref(), &msg, out)
+                } else {
+                    self.create_tag(&new, rev.as_deref(), out)
+                }
+            }
             (None, None) => self.list_tags(json, out),
         }
     }
@@ -2104,6 +2117,85 @@ impl<'a> NativeRepo<'a> {
             }],
         )?;
         writeln!(out, "deleted tag '{name}'")?;
+        Ok(())
+    }
+
+    /// `alt tag -a <name> -m <msg> [<rev>]`. Creates an annotated tag:
+    /// builds a git-canonical tag object (`object` + `type` + `tag` +
+    /// `tagger` + message), stores it under its sha1, and points
+    /// `refs/tags/<name>` at the tag object's oid (not the underlying
+    /// commit's). Unlike a lightweight tag, the ref target is a tag
+    /// object reachable via `cat-file -p`.
+    fn create_annotated_tag(
+        &mut self,
+        name: &str,
+        rev: Option<&str>,
+        message: &str,
+        out: &mut impl Write,
+    ) -> Res<()> {
+        check_tag_name(name)?;
+        let full = format!("refs/tags/{name}");
+        if self.store.refs.get(&full).is_some() {
+            return Err(format!("tag '{name}' already exists").into());
+        }
+        let target = match rev {
+            Some(spec) => {
+                let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
+                repo.rev_parse(spec)?
+                    .ok_or_else(|| format!("bad revision '{spec}'"))?
+            }
+            None => self
+                .store
+                .refs
+                .resolve(&self.head_branch()?)?
+                .ok_or("cannot tag before the first commit")?,
+        };
+        // The kind of the target — we accept commits today (the common
+        // case). Annotated tags of trees / blobs / other tags exist in
+        // git, but no first-pass dogfood scenario asks for them.
+        let target_kind = self
+            .store
+            .odb
+            .lookup(&target)
+            .map(|e| e.kind)
+            .ok_or_else(|| format!("target {target} not in the object store"))?;
+        let type_str = match target_kind {
+            ObjectKind::Commit => "commit",
+            ObjectKind::Tree => "tree",
+            ObjectKind::Blob => "blob",
+            ObjectKind::Tag => "tag",
+        };
+
+        let when = (now_ms() / 1000) as i64;
+        let (tagger_name, tagger_email) = self.id.sig();
+        let msg = if message.ends_with('\n') {
+            message.to_owned()
+        } else {
+            format!("{message}\n")
+        };
+        let bytes = build_tag_bytes(
+            target,
+            type_str,
+            name,
+            tagger_name,
+            tagger_email,
+            when,
+            "+0000",
+            &msg,
+        );
+        let tag_oid = ObjectId::hash_object(self.store.algo, ObjectKind::Tag, &bytes);
+        self.store.odb.put(tag_oid, ObjectKind::Tag, &bytes)?;
+        self.store.odb.flush()?;
+
+        self.commit_refs(
+            "tag",
+            &[RefChange {
+                name: full,
+                old: None,
+                new: Some(RefTarget::Oid(tag_oid)),
+            }],
+        )?;
+        writeln!(out, "created annotated tag '{name}' ({tag_oid}) → {target}")?;
         Ok(())
     }
 
@@ -4679,6 +4771,32 @@ fn set_exec(_path: &Path, _exec: bool) -> Res<()> {
 /// validator since the constraints overlap exactly.
 fn check_tag_name(name: &str) -> Res<()> {
     check_branch_name(name)
+}
+
+/// Build the canonical git-object bytes for an annotated tag. The
+/// hashing wrapper (`<size>\0<bytes>`) is applied separately by
+/// `ObjectId::hash_object`.
+#[allow(clippy::too_many_arguments)]
+fn build_tag_bytes(
+    object: ObjectId,
+    obj_type: &str,
+    tag_name: &str,
+    tagger_name: &str,
+    tagger_email: &str,
+    when: i64,
+    tz: &str,
+    message: &str,
+) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(format!("object {object}\n").as_bytes());
+    bytes.extend_from_slice(format!("type {obj_type}\n").as_bytes());
+    bytes.extend_from_slice(format!("tag {tag_name}\n").as_bytes());
+    bytes.extend_from_slice(
+        format!("tagger {tagger_name} <{tagger_email}> {when} {tz}\n").as_bytes(),
+    );
+    bytes.push(b'\n');
+    bytes.extend_from_slice(message.as_bytes());
+    bytes
 }
 
 fn check_branch_name(name: &str) -> Res<()> {

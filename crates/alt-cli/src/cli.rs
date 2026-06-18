@@ -122,7 +122,7 @@ pub enum Command {
         #[arg(long)]
         list: bool,
     },
-    /// List, create (lightweight), or delete tags
+    /// List, create (lightweight or annotated), or delete tags
     Tag {
         /// Tag name to create. Omit (and omit `-d`) to list all tags.
         name: Option<String>,
@@ -132,6 +132,13 @@ pub enum Command {
         /// Delete a tag by name. Mutually exclusive with `name`.
         #[arg(short = 'd', long)]
         delete: Option<String>,
+        /// Create an *annotated* tag (writes a tag object carrying the
+        /// message + tagger ident, instead of a bare ref).
+        #[arg(short = 'a', long)]
+        annotate: bool,
+        /// Annotated-tag message. Required when `-a` is set.
+        #[arg(short = 'm', long)]
+        message: Option<String>,
         /// JSON output for list mode (ignored otherwise).
         #[arg(long)]
         json: bool,
@@ -521,8 +528,18 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
             name,
             rev,
             delete,
+            annotate,
+            message,
             json,
-        } => repo.tag(name.clone(), rev.clone(), delete.clone(), *json, out)?,
+        } => repo.tag(
+            name.clone(),
+            rev.clone(),
+            delete.clone(),
+            *annotate,
+            message.clone(),
+            *json,
+            out,
+        )?,
         Command::Switch { name, create, json } => repo.switch(name, *create, *json, out)?,
         Command::Diff {
             cached,

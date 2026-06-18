@@ -96,6 +96,55 @@ fn tag_duplicate_create_fails() {
 }
 
 #[test]
+fn annotated_tag_writes_a_tag_object_pointing_at_the_commit() {
+    let tmp = tempfile::tempdir().unwrap();
+    let head = setup(tmp.path());
+
+    let out = ok(alt(tmp.path(), &["tag", "-a", "v1.0", "-m", "release one"]));
+    assert!(out.contains("annotated tag 'v1.0'"), "got: {out}",);
+
+    // rev-parse should resolve to the tag-object oid, NOT the commit oid.
+    let tag_oid = ok(alt(tmp.path(), &["rev-parse", "v1.0"]))
+        .trim()
+        .to_string();
+    assert_ne!(tag_oid, head, "annotated tag oid must differ from commit");
+
+    // The tag object holds the expected headers (object, type, tag, tagger).
+    let body = ok(alt(tmp.path(), &["cat-file", "-p", &tag_oid]));
+    assert!(body.contains(&format!("object {head}")), "got: {body}");
+    assert!(body.contains("type commit"), "got: {body}");
+    assert!(body.contains("tag v1.0"), "got: {body}");
+    assert!(body.contains("tagger tester <t@e>"), "got: {body}");
+    assert!(body.contains("release one"), "got: {body}");
+}
+
+#[test]
+fn annotated_tag_short_m_without_a_still_creates_an_annotated_tag() {
+    // git accepts `-m` without `-a` and treats it as implicit `-a`.
+    let tmp = tempfile::tempdir().unwrap();
+    let head = setup(tmp.path());
+
+    ok(alt(tmp.path(), &["tag", "v0.2", "-m", "short"]));
+    let tag_oid = ok(alt(tmp.path(), &["rev-parse", "v0.2"]))
+        .trim()
+        .to_string();
+    assert_ne!(tag_oid, head);
+    let body = ok(alt(tmp.path(), &["cat-file", "-p", &tag_oid]));
+    assert!(body.contains("type commit"));
+    assert!(body.contains("short"));
+}
+
+#[test]
+fn annotated_tag_dash_a_without_message_fails() {
+    let tmp = tempfile::tempdir().unwrap();
+    setup(tmp.path());
+    let out = alt(tmp.path(), &["tag", "-a", "v1.0"]);
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("needs a message"), "got: {err}");
+}
+
+#[test]
 fn tag_list_json_emits_sorted_array() {
     let tmp = tempfile::tempdir().unwrap();
     setup(tmp.path());
