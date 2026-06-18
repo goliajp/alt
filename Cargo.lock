@@ -32,6 +32,7 @@ dependencies = [
  "alt-export",
  "alt-flow",
  "alt-git-codec",
+ "alt-git-config",
  "alt-git-index",
  "alt-git-pack",
  "alt-import",

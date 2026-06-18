@@ -7,6 +7,7 @@ mod capability_gate;
 mod ci_validate;
 mod clone;
 mod commit_loop;
+mod config;
 mod daemon_client;
 mod daemon_server;
 mod diff;

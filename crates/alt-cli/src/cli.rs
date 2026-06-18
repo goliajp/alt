@@ -113,6 +113,15 @@ pub enum Command {
         /// Revision to start the walk from (default `HEAD`).
         rev: Option<String>,
     },
+    /// Inspect git-style config keys (`user.name`, `remote.origin.url`, …)
+    Config {
+        /// Dotted key (e.g. `user.name`). Omit when `--list` is set.
+        key: Option<String>,
+        /// List every entry as `section.key=value` (git's default
+        /// `--list` shape).
+        #[arg(long)]
+        list: bool,
+    },
     /// List, create (lightweight), or delete tags
     Tag {
         /// Tag name to create. Omit (and omit `-d`) to list all tags.
@@ -629,6 +638,9 @@ pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, out: &mut W) -> Res<(
         Command::Blame { path, rev } => {
             let spec = rev.as_deref().unwrap_or("HEAD");
             crate::blame::run(out, repo, path, spec)?;
+        }
+        Command::Config { key, list } => {
+            crate::config_cmd::run(repo, key.as_deref(), *list, out)?;
         }
         Command::Export { target } => {
             if !repo.is_native() {

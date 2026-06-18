@@ -24,6 +24,7 @@ path = "src/bin/altd_server.rs"
 [dependencies]
 alt-diff.workspace = true
 alt-git-codec.workspace = true
+alt-git-config.workspace = true
 alt-git-index.workspace = true
 alt-export.workspace = true
 alt-flow.workspace = true

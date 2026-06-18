@@ -8,6 +8,7 @@ pub mod ci;
 pub mod cli;
 pub mod client;
 pub mod commit_sign;
+pub mod config_cmd;
 pub mod daemon;
 pub mod group_commit;
 pub mod index_tx;
