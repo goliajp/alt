@@ -117,6 +117,11 @@ fn run() -> Result<u8, Box<dyn std::error::Error>> {
             native::clone(url, dir.as_deref(), *json, &cwd, id, &mut out)?;
             0
         }
+        Command::Import { target } => {
+            let repo = Repository::discover(&cwd)?;
+            native::import(&repo, target, &cwd, id, &mut out)?;
+            0
+        }
         Command::Ci { op, json } => match op {
             alt_cli::cli::CiOp::Validate { paths } => {
                 alt_cli::cli::ci_validate(&cwd, paths, *json, &mut out)?

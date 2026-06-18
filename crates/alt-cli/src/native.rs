@@ -451,6 +451,122 @@ impl OpenRepo {
 /// clone starts before any repository exists: it creates the working
 /// directory, runs init, then opens the repo to drive fetch/switch
 /// in-process.
+/// `alt import <target>`: ingest the git repo discovered at `cwd` into
+/// `<target>/.alt`, then materialize HEAD's tree into `<target>` so
+/// the work tree matches `alt status` (clean instead of "everything
+/// deleted"). Pre-M17 callers had to follow `alt import` with
+/// `alt switch <branch>` manually to get a usable work tree.
+///
+/// When `<target>` is the same path the import was discovered in,
+/// alt would be checking out into the directory that already holds
+/// the source files — we leave that case alone (skip checkout) so we
+/// never clobber the user's existing working copy.
+pub fn import(
+    repo: &alt_repo::Repository,
+    target: &Path,
+    cwd: &Path,
+    id: Identity,
+    out: &mut impl Write,
+) -> Res<()> {
+    let alt_dir = target.join(".alt");
+    let timestamp_ms = now_ms();
+    let actor = format!(
+        "cli/import@{}",
+        std::env::var("USER").as_deref().unwrap_or("unknown")
+    );
+    let report = alt_import::import_git(repo, &alt_dir, &actor, timestamp_ms)?;
+    writeln!(
+        out,
+        "imported {} objects ({} new), {} refs ({} changed), \
+         {} lineage deltas into {}",
+        report.objects_seen,
+        report.objects_new,
+        report.refs_seen,
+        report.refs_changed,
+        report.lineage_deltas,
+        alt_dir.display()
+    )?;
+    match report.op {
+        Some(op) => writeln!(out, "op {op}")?,
+        None => writeln!(out, "already up to date, no op recorded")?,
+    }
+
+    // Decide whether to materialize. We only do it when the work tree
+    // is empty (a fresh import-into-blank-dir). If `target` is the
+    // *same* dir we discovered the source git in — i.e. the user is
+    // converting `.git` → `.alt` in place — the work tree already
+    // matches HEAD, and any "switch" pass would be a no-op at best,
+    // a clobber at worst.
+    let target_canon = std::fs::canonicalize(target).unwrap_or_else(|_| target.to_owned());
+    let same_dir = repo
+        .work_tree()
+        .map(|w| {
+            let wt = std::fs::canonicalize(w).unwrap_or_else(|_| w.to_owned());
+            wt == target_canon
+        })
+        .unwrap_or(false);
+    if same_dir {
+        return Ok(());
+    }
+    if !work_tree_is_empty(target) {
+        return Ok(());
+    }
+
+    // Attach the freshly-written .alt and materialize HEAD. Errors here
+    // are reported but don't fail the whole import — the .alt store is
+    // already on disk and useful.
+    let mut open = match OpenRepo::discover(target, None, id) {
+        Ok(o) => o,
+        Err(e) => {
+            writeln!(
+                out,
+                "warning: cannot open imported store to materialize: {e}"
+            )?;
+            return Ok(());
+        }
+    };
+    let mut native = open.repo();
+    if let Err(e) = native.materialise_head() {
+        writeln!(
+            out,
+            "warning: import succeeded but work-tree materialize failed: {e}"
+        )?;
+    } else {
+        let branch = native.head_branch().unwrap_or_else(|_| "HEAD".to_string());
+        let short = branch
+            .strip_prefix("refs/heads/")
+            .unwrap_or(&branch)
+            .to_string();
+        writeln!(out, "materialized {short} into {}", target.display())?;
+    }
+    let _ = cwd; // suppress unused-var when same_dir short-circuits
+    Ok(())
+}
+
+/// True when `target` either doesn't exist yet or holds only the
+/// freshly-created `.alt` directory (the import we just performed).
+/// Used to decide whether to clobber a work tree — if the user
+/// pointed at a dir that already has tracked files in it, we leave
+/// it alone.
+fn work_tree_is_empty(target: &Path) -> bool {
+    let Ok(rd) = std::fs::read_dir(target) else {
+        return true;
+    };
+    for entry in rd.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name == ".alt" {
+            continue;
+        }
+        if name.starts_with('.') {
+            // dot-files like .DS_Store don't count as "tracked work tree"
+            continue;
+        }
+        return false;
+    }
+    true
+}
+
 pub fn clone(
     url: &str,
     dir: Option<&Path>,

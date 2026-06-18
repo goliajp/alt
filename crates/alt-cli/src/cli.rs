@@ -729,33 +729,6 @@ pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, out: &mut W) -> Res<(
                 target.join(".git").display()
             )?;
         }
-        Command::Import { target } => {
-            let alt_dir = target.join(".alt");
-            let timestamp_ms = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0);
-            let actor = format!(
-                "cli/import@{}",
-                std::env::var("USER").as_deref().unwrap_or("unknown")
-            );
-            let report = alt_import::import_git(repo, &alt_dir, &actor, timestamp_ms)?;
-            writeln!(
-                out,
-                "imported {} objects ({} new), {} refs ({} changed), \
-                 {} lineage deltas into {}",
-                report.objects_seen,
-                report.objects_new,
-                report.refs_seen,
-                report.refs_changed,
-                report.lineage_deltas,
-                alt_dir.display()
-            )?;
-            match report.op {
-                Some(op) => writeln!(out, "op {op}")?,
-                None => writeln!(out, "already up to date, no op recorded")?,
-            }
-        }
         _ => return Err("not a git-layer command".into()),
     }
     Ok(())
