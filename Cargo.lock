@@ -180,6 +180,7 @@ dependencies = [
  "alt-git-pack",
  "alt-prism",
  "alt-prism-deflate",
+ "alt-prism-png",
  "alt-prism-zip",
  "alt-store",
  "alt-testutil",
@@ -205,6 +206,15 @@ version = "0.0.0"
 
 [[package]]
 name = "alt-prism-deflate"
+version = "0.0.0"
+dependencies = [
+ "alt-prism",
+ "flate2",
+ "libz-sys",
+]
+
+[[package]]
+name = "alt-prism-png"
 version = "0.0.0"
 dependencies = [
  "alt-prism",

@@ -40,12 +40,11 @@ use tier1::Tier1Map;
 /// CDC dedup otherwise.
 pub fn default_registry() -> Registry {
     let mut r = Registry::new();
-    // Hot-first: zip prism splits OOXML / jar / epub / apk into
-    // envelope + inflated members, the single most impactful tier on
-    // real-world repos. Deflate prism remains the catch-all for the
-    // raw zlib streams that aren't inside a zip (git loose objects,
-    // bare png IDAT, …).
+    // Hot-first registration order. Signatures are disjoint (PK / 89PNG
+    // / zlib magic), so any order works for correctness; this one
+    // mirrors design/prisms.md §2 hot/cold list.
     r.register(Box::new(alt_prism_zip::ZipPrism));
+    r.register(Box::new(alt_prism_png::PngPrism));
     r.register(Box::new(alt_prism_deflate::DeflatePrism));
     r
 }
@@ -336,7 +335,11 @@ impl NativeOdb {
 
     fn tier1_chunk_layout(&self, tier1: &Tier1Layout) -> Result<ChunkLayout, OdbError> {
         let mut all = Vec::new();
-        all.extend(self.blobs.leaf_chunks(tier1.record_blob).map_err(OdbError::Store)?);
+        all.extend(
+            self.blobs
+                .leaf_chunks(tier1.record_blob)
+                .map_err(OdbError::Store)?,
+        );
         for part in &tier1.parts {
             all.extend(self.blobs.leaf_chunks(*part).map_err(OdbError::Store)?);
         }

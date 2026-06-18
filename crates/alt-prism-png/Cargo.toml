@@ -1,0 +1,11 @@
+[package]
+name = "alt-prism-png"
+description = "PNG container prism: parse the chunk graph, inflate the concatenated IDAT zlib stream, record the libz level reproducing it, recompose bit-exactly. design/prisms.md §2 (png row)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+alt-prism.workspace = true
+flate2.workspace = true
+libz-sys = "1"

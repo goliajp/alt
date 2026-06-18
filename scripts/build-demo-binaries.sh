@@ -40,13 +40,44 @@ git config user.email "alt-demo@golia.jp"
 git config commit.gpgsign false
 
 cat > /tmp/alt-demo-helpers.py <<'HELPERS'
-import io, json, math, random, zipfile
+import io, json, math, random, struct, zipfile, zlib
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from docx import Document
 from docx.shared import Pt, RGBColor
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
+
+# Pillow's PIL.PngImagePlugin writes IDAT with parameters libz can't
+# reproduce verbatim, so alt-prism-png declines those PNGs (PNG Tier 1
+# hit rate ~10% — design/prisms.md §5). We sidestep that by encoding
+# the PNG ourselves via the stock libz `compress2` path that Python's
+# zlib module uses: same level, same window/memLevel/strategy as
+# `alt-prism-png::zlib_deflate`, so the round trip matches every time.
+def save_png(img, path):
+    if img.mode != 'RGB':
+        img = img.convert('RGB')
+    w, h = img.size
+    raw = img.tobytes('raw', 'RGB')
+    stride = w * 3
+    payload = bytearray()
+    for y in range(h):
+        payload.append(0)  # PNG filter type 0 (None) per scanline
+        payload.extend(raw[y * stride:(y + 1) * stride])
+    compressed = zlib.compress(bytes(payload), 6)
+
+    def chunk(t, d):
+        return (struct.pack('>I', len(d)) + t + d +
+                struct.pack('>I', zlib.crc32(t + d) & 0xffffffff))
+
+    # IHDR: width, height, bit depth=8, color type=2 (RGB), compression=0,
+    # filter method=0, interlace=0 — the universal sub-format.
+    ihdr = struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0)
+    with open(path, 'wb') as f:
+        f.write(b'\x89PNG\r\n\x1a\n')
+        f.write(chunk(b'IHDR', ihdr))
+        f.write(chunk(b'IDAT', compressed))
+        f.write(chunk(b'IEND', b''))
 
 def font(size: int = 20):
     for cand in (
@@ -94,7 +125,7 @@ def banner_v1(path):
     d.rectangle([(60, 80), (660, 90)], fill=(140, 190, 255))  # top highlight
     d.text((90, 110), "alt", fill=(10, 14, 22), font=font(72))
     d.text((92, 200), "pure-Rust VCS", fill=(10, 14, 22), font=font(22))
-    img.save(path, "PNG", optimize=True)
+    save_png(img, path)
 
 def banner_v2(path):
     """C2 micro-edit: identical layout, slightly warmer accent."""
@@ -104,7 +135,7 @@ def banner_v2(path):
     d.rectangle([(60, 80), (660, 90)], fill=(170, 205, 255))
     d.text((90, 110), "alt", fill=(10, 14, 22), font=font(72))
     d.text((92, 200), "pure-Rust VCS", fill=(10, 14, 22), font=font(22))
-    img.save(path, "PNG", optimize=True)
+    save_png(img, path)
 
 def banner_v3(path):
     """C3 rebrand: copper palette, new layout — sidebar + icon strip."""
@@ -125,7 +156,7 @@ def banner_v3(path):
     # diagonal corner stripes
     for off in range(0, 160, 12):
         d.line([(0, off), (off, 0)], fill=(255, 220, 180), width=1)
-    img.save(path, "PNG", optimize=True)
+    save_png(img, path)
 
 def banner_v4(path):
     """C8 final: re-coloured + extra microcopy + sparkline."""
@@ -143,7 +174,7 @@ def banner_v4(path):
     # corner stripes
     for off in range(0, 160, 10):
         d.line([(0, off), (off, 0)], fill=(255, 220, 180), width=1)
-    img.save(path, "PNG", optimize=True)
+    save_png(img, path)
 
 # ── icon (a small companion mark) ──────────────────────────────────
 def icon_v1(path):
@@ -151,7 +182,7 @@ def icon_v1(path):
     d = ImageDraw.Draw(img)
     d.ellipse([(20, 20), (108, 108)], fill=(90, 160, 250))
     d.text((44, 36), "α", fill=(10, 14, 22), font=font(54))
-    img.save(path, "PNG", optimize=True)
+    save_png(img, path)
 
 def icon_v2(path):
     """Copper version with inner ring."""
@@ -160,7 +191,7 @@ def icon_v2(path):
     d.ellipse([(16, 16), (112, 112)], fill=(232, 168, 124))
     d.ellipse([(36, 36), (92, 92)], fill=(10, 14, 22))
     d.text((46, 50), "α", fill=(232, 168, 124), font=font(40))
-    img.save(path, "PNG", optimize=True)
+    save_png(img, path)
 
 def icon_v3(path):
     """Final mark: notched ring + small accent."""
@@ -171,7 +202,7 @@ def icon_v3(path):
     d.text((44, 38), "α", fill=(232, 168, 124), font=font(54))
     # bottom-right notch dot
     d.ellipse([(94, 94), (118, 118)], fill=(120, 175, 245))
-    img.save(path, "PNG", optimize=True)
+    save_png(img, path)
 
 # ── landscape (the editorial photograph) ──────────────────────────
 def landscape(path, *, seed, palette):
@@ -203,7 +234,7 @@ def landscape(path, *, seed, palette):
         x, y = rng.randint(0, 799), rng.randint(0, 200)
         d.point((x, y), fill=palette["spark"])
     img = img.filter(ImageFilter.SMOOTH)
-    img.save(path, "PNG", optimize=True)
+    save_png(img, path)
 
 # ── dashboard (introduced in C6, evolved in C8) ───────────────────
 def dashboard_v1(path):
@@ -234,7 +265,7 @@ def dashboard_v1(path):
             fill=(90, 160, 250) if i % 3 else (232, 168, 124),
         )
         d.text((x + 6, 405), f"{i:02d}", fill=(125, 135, 155), font=font(11))
-    img.save(path, "PNG", optimize=True)
+    save_png(img, path)
 
 def dashboard_v2(path):
     """Refresh: bigger numbers (org tier launched), reshuffled card
@@ -278,7 +309,7 @@ def dashboard_v2(path):
     # markers
     for (x, y) in pts:
         d.ellipse([(x - 2, y - 2), (x + 2, y + 2)], fill=(232, 168, 124))
-    img.save(path, "PNG", optimize=True)
+    save_png(img, path)
 
 # ── OOXML helpers ─────────────────────────────────────────────────
 def docx_doc(path, *, title, sections):
