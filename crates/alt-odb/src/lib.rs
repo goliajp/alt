@@ -294,7 +294,23 @@ impl NativeOdb {
             None
         };
 
-        let chunk_layout = self.blob_chunk_layout(blob_id)?;
+        // Chunk view: which blobs to walk depends on the tier.
+        //
+        // Tier 0 — the original blob lives in the chunk store; walk its
+        // leaf chunks directly.
+        //
+        // Tier 1 — the original blob is *not* in the chunk store. Its
+        // bytes are reconstructible only from the prism record + parts.
+        // Report all of those: the record's leaf chunks (the recipe's
+        // storage cost) plus each part blob's leaf chunks (the
+        // member-level dedup surface). This is exactly what makes
+        // "stored bytes" meaningful for a Tier 1 blob — the recipe is
+        // tiny and parts dedup across files.
+        let chunk_layout = match &tier1 {
+            None => self.blob_chunk_layout(blob_id)?,
+            Some(t1) => self.tier1_chunk_layout(t1)?,
+        };
+
         Ok(Some(StorageView {
             git_oid: *oid,
             blob_id,
@@ -308,6 +324,23 @@ impl NativeOdb {
     fn blob_chunk_layout(&self, blob_id: alt_store::BlobId) -> Result<ChunkLayout, OdbError> {
         let leaves = self.blobs.leaf_chunks(blob_id).map_err(OdbError::Store)?;
         let chunks = self.chunk_layouts(&leaves)?;
+        let stored_total: u64 = chunks.iter().map(|c| c.stored_len as u64).sum();
+        let logical_total: u64 = chunks.iter().map(|c| c.orig_len as u64).sum();
+        Ok(ChunkLayout {
+            leaf_count: chunks.len(),
+            stored_total,
+            logical_total,
+            chunks,
+        })
+    }
+
+    fn tier1_chunk_layout(&self, tier1: &Tier1Layout) -> Result<ChunkLayout, OdbError> {
+        let mut all = Vec::new();
+        all.extend(self.blobs.leaf_chunks(tier1.record_blob).map_err(OdbError::Store)?);
+        for part in &tier1.parts {
+            all.extend(self.blobs.leaf_chunks(*part).map_err(OdbError::Store)?);
+        }
+        let chunks = self.chunk_layouts(&all)?;
         let stored_total: u64 = chunks.iter().map(|c| c.stored_len as u64).sum();
         let logical_total: u64 = chunks.iter().map(|c| c.orig_len as u64).sum();
         Ok(ChunkLayout {
