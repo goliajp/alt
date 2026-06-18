@@ -882,6 +882,73 @@ impl<'a> NativeRepo<'a> {
         Ok(())
     }
 
+    /// Refuse `verb` on a protected branch (`main` / `develop` from the
+    /// flow model). Topic branches (`feature/<x>`, `release/<x>`,
+    /// `hotfix/<x>`) pass through; so does an unborn HEAD (the very
+    /// first commit before any flow exists, or a brand-new init that
+    /// hasn't run `alt flow init` yet).
+    ///
+    /// This is the central piece of alt's "one collaboration model"
+    /// stance — AI agents and humans both should never have to choose
+    /// between competing workflows. `git-flow` is *the* model: code
+    /// goes through topic branches, never directly into `main` or
+    /// `develop`. The escape hatch is `ALT_PROTECTED_OVERRIDE=1` for
+    /// the few legitimate emergencies (recovery, in-tree tooling
+    /// work, etc.); the env var is deliberately not a CLI flag so it
+    /// doesn't end up in a help-page menu that AIs might be tempted
+    /// to wander into.
+    fn ensure_topic_branch_or_unborn(&self, verb: &str) -> Res<()> {
+        if std::env::var_os("ALT_PROTECTED_OVERRIDE").is_some() {
+            return Ok(());
+        }
+        let model = alt_flow::BranchModel::default();
+        let head_ref = self.head_branch()?;
+        let short = match head_ref.strip_prefix("refs/heads/") {
+            Some(s) => s,
+            None => return Ok(()), // detached / non-branch HEAD: let the lower layers complain
+        };
+        let protected = short == model.main || short == model.develop;
+        if !protected {
+            return Ok(());
+        }
+        // Only enforce once flow has been initialised — gauged by the
+        // presence of `refs/heads/develop`. A fresh `alt init` repo
+        // with just `main` is pre-flow territory; the user might be
+        // doing the initial setup commits before deciding on a
+        // workflow. Once `alt flow init` lands, both branches become
+        // protected and the topic-branch contract kicks in.
+        let develop_ref = format!("refs/heads/{}", model.develop);
+        if self.store.refs.resolve(&develop_ref)?.is_none() {
+            return Ok(());
+        }
+        // The branch we're on must also exist as a ref — an unborn
+        // protected branch (rare; would mean flow init ran but
+        // pointed HEAD elsewhere) stays accessible for the first
+        // commit.
+        if self.store.refs.resolve(&head_ref)?.is_none() {
+            return Ok(());
+        }
+        let (prefix, flow_kind) = if short == model.main {
+            (&model.hotfix_prefix, "hotfix")
+        } else {
+            (&model.feature_prefix, "feature")
+        };
+        Err(format!(
+            "refusing to {verb} directly on protected branch '{short}'.\n\
+             alt's collaboration model is git-flow; topic branches are how work merges \
+             back. To carry your staged changes onto a topic branch right now:\n\
+             \n\
+             \x20 alt switch -c {prefix}<name>\n\
+             \n\
+             Or formally via flow (requires a clean index first):\n\
+             \x20 alt flow {flow_kind} start <name>\n\
+             \n\
+             (override with ALT_PROTECTED_OVERRIDE=1 only for emergency recovery — \
+             not for normal work.)"
+        )
+        .into())
+    }
+
     /// Reject staging/committing a path that the policy's `path_allow` does
     /// not match. Empty allow-list = no constraint.
     fn ensure_path_allowed(&self, path: &str) -> Res<()> {
@@ -1484,6 +1551,7 @@ impl<'a> NativeRepo<'a> {
     /// the current branch in one ref transaction.
     pub fn commit(&mut self, message: &str, json: bool, out: &mut impl Write) -> Res<()> {
         self.ensure_writable("commit")?;
+        self.ensure_topic_branch_or_unborn("commit")?;
         let index = self.index()?;
         let staged = index_entries(&index);
         if staged.is_empty() {
@@ -2540,6 +2608,7 @@ impl<'a> NativeRepo<'a> {
     /// `(cherry picked from commit <oid>)`. Returns `Ok(true)` when the
     /// 3-way merge stops in conflict (caller maps to exit code 1).
     pub fn cherry_pick(&mut self, rev: &str, json: bool, out: &mut impl Write) -> Res<bool> {
+        self.ensure_topic_branch_or_unborn("cherry-pick")?;
         let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
         let target_oid = repo
             .rev_parse(rev)?
@@ -2672,6 +2741,7 @@ impl<'a> NativeRepo<'a> {
     }
 
     pub fn merge(&mut self, branch_name: &str, json: bool, out: &mut impl Write) -> Res<bool> {
+        self.ensure_topic_branch_or_unborn("merge")?;
         let their_ref = format!("refs/heads/{branch_name}");
         let theirs = self
             .store

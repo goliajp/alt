@@ -106,11 +106,25 @@ fn finish_with_diverged_develop_makes_a_merge_commit() {
     ok(alt(root, &["add", "."]));
     ok(alt(root, &["commit", "-m", "feature file"]));
 
-    // develop independently changes another file -> histories diverge
+    // develop independently changes another file -> histories diverge.
+    // The protected-branch guard refuses commits on `develop` by
+    // design (alt-only-flow stance); we override here because this
+    // test deliberately models the "diverged develop" scenario alt
+    // must still merge cleanly when it inherits one from a git mirror
+    // or a recovery operation.
     ok(alt(root, &["switch", "develop"]));
     std::fs::write(root.join("fd.txt"), "develop\n").unwrap();
     ok(alt(root, &["add", "."]));
-    ok(alt(root, &["commit", "-m", "develop file"]));
+    let out = Command::new(env!("CARGO_BIN_EXE_alt"))
+        .current_dir(root)
+        .env("ALT_NO_DAEMON", "1")
+        .env("GIT_AUTHOR_NAME", "tester")
+        .env("GIT_AUTHOR_EMAIL", "t@e")
+        .env("ALT_PROTECTED_OVERRIDE", "1")
+        .args(["commit", "-m", "develop file"])
+        .output()
+        .unwrap();
+    ok(out);
 
     // finishing now needs a real three-way merge commit
     let fin = ok(alt(root, &["flow", "feature", "finish", "a"]));

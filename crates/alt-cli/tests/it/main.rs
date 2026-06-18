@@ -15,6 +15,7 @@ mod daemon_server;
 mod diff;
 mod fetch;
 mod flow;
+mod flow_enforce;
 mod flow_kill;
 mod flow_release_hotfix;
 mod identity;
