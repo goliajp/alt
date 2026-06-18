@@ -40,6 +40,12 @@ use tier1::Tier1Map;
 /// CDC dedup otherwise.
 pub fn default_registry() -> Registry {
     let mut r = Registry::new();
+    // Hot-first: zip prism splits OOXML / jar / epub / apk into
+    // envelope + inflated members, the single most impactful tier on
+    // real-world repos. Deflate prism remains the catch-all for the
+    // raw zlib streams that aren't inside a zip (git loose objects,
+    // bare png IDAT, …).
+    r.register(Box::new(alt_prism_zip::ZipPrism));
     r.register(Box::new(alt_prism_deflate::DeflatePrism));
     r
 }

@@ -180,6 +180,7 @@ dependencies = [
  "alt-git-pack",
  "alt-prism",
  "alt-prism-deflate",
+ "alt-prism-zip",
  "alt-store",
  "alt-testutil",
  "blake3",
@@ -222,6 +223,16 @@ dependencies = [
  "libz-sys",
  "tempfile",
  "thiserror",
+]
+
+[[package]]
+name = "alt-prism-zip"
+version = "0.0.0"
+dependencies = [
+ "alt-prism",
+ "flate2",
+ "libc",
+ "libz-sys",
 ]
 
 [[package]]

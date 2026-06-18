@@ -25,6 +25,7 @@ alt-oplog = { path = "crates/alt-oplog" }
 alt-prism = { path = "crates/alt-prism" }
 alt-prism-deflate = { path = "crates/alt-prism-deflate" }
 alt-prism-store = { path = "crates/alt-prism-store" }
+alt-prism-zip = { path = "crates/alt-prism-zip" }
 alt-refs = { path = "crates/alt-refs" }
 alt-repo = { path = "crates/alt-repo" }
 alt-sign = { path = "crates/alt-sign" }
