@@ -8,7 +8,9 @@ license.workspace = true
 [dependencies]
 alt-diff.workspace = true
 alt-git-codec.workspace = true
+alt-odb.workspace = true
 alt-repo.workspace = true
+alt-store.workspace = true
 tiny_http.workspace = true
 
 [dev-dependencies]

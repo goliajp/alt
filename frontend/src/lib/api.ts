@@ -235,4 +235,36 @@ export const api = {
       `/api/repos/${encodeURIComponent(name)}/file_history?${qs.toString()}`,
     );
   },
+
+  storage: (name: string, oid: string) =>
+    getJSON<StorageView>(
+      `/api/repos/${encodeURIComponent(name)}/storage/${oid}`,
+    ),
 };
+
+export interface StorageView {
+  git_oid: string;
+  blob_id: string;
+  kind: "blob" | "tree" | "commit" | "tag";
+  logical_size: number;
+  tier: 0 | 1;
+  tier1: {
+    prism: number;
+    recipe_len: number;
+    record_blob: string;
+    parts: string[];
+  } | null;
+  chunks: {
+    leaf_count: number;
+    logical_total: number;
+    stored_total: number;
+    entries: StorageChunk[];
+  };
+}
+
+export interface StorageChunk {
+  chunk_id: string;
+  encoding: "raw" | "zstd" | "delta";
+  orig_len: number;
+  stored_len: number;
+}

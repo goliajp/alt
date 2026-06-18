@@ -305,6 +305,17 @@ impl Repository {
         }
     }
 
+    /// Physical storage layout for `oid` — `Ok(None)` when the object
+    /// is unknown to this repo or when the repo is git-backed (the
+    /// view only exists for native alt stores). Native repos
+    /// always return `Some` for any known oid.
+    pub fn storage_view(&self, oid: &ObjectId) -> Result<Option<alt_odb::StorageView>, RepoError> {
+        match &self.backend {
+            Backend::Git { .. } => Ok(None),
+            Backend::Alt(alt) => Ok(alt.odb.storage_view(oid)?),
+        }
+    }
+
     pub fn read_commit(&self, oid: &ObjectId) -> Result<Commit, RepoError> {
         let obj = self
             .read_object(oid)?

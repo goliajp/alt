@@ -75,3 +75,10 @@ export const useFileHistory = (
     queryFn: () => api.fileHistory(name, opts),
     enabled: !!name && !!opts.path,
   });
+
+export const useStorage = (name: string, oid: string) =>
+  useQuery({
+    queryKey: ["storage", name, oid] as const,
+    queryFn: () => api.storage(name, oid),
+    enabled: !!name && !!oid,
+  });

@@ -1,6 +1,7 @@
 import { Link, useParams } from "react-router";
 import { useCommit, useCommitDiff } from "../lib/hooks";
 import { DiffView } from "../components/DiffView";
+import { StoragePanel } from "../components/StoragePanel";
 import {
   BinaryDiffSummary,
   PartAwareDiff,
@@ -137,6 +138,11 @@ export function Commit() {
               ) : (
                 <BinaryDiffSummary file={file} />
               )}
+              {"new_oid" in file && file.new_oid ? (
+                <div className="border-t border-border-default p-3 bg-canvas-inset/20">
+                  <StoragePanel repo={name} oid={file.new_oid} />
+                </div>
+              ) : null}
             </div>
           ))
         )}

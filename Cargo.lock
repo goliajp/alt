@@ -311,7 +311,9 @@ dependencies = [
  "alt-diff",
  "alt-git-codec",
  "alt-import",
+ "alt-odb",
  "alt-repo",
+ "alt-store",
  "tempfile",
  "tiny_http",
 ]

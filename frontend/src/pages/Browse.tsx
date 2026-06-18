@@ -7,6 +7,7 @@ import { detectLang } from "../lib/lang";
 import { SyntaxBlock } from "../components/SyntaxBlock";
 import { ImagePreview } from "../components/ImagePreview";
 import { isImagePath, isRasterImagePath } from "../lib/image";
+import { StoragePanel } from "../components/StoragePanel";
 
 type Result =
   | { kind: "tree"; tree: { oid: string; entries: TreeEntry[] }; trail: Crumb[] }
@@ -270,7 +271,15 @@ function BlobView({
       </div>
 
       {fullPath ? (
-        <FileVersionRail repo={repo} path={fullPath} spec={spec} fileName={fileName} />
+        <div className="space-y-4">
+          <FileVersionRail
+            repo={repo}
+            path={fullPath}
+            spec={spec}
+            fileName={fileName}
+          />
+          <StoragePanel repo={repo} oid={blob.oid} />
+        </div>
       ) : null}
     </div>
   );

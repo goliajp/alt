@@ -241,6 +241,44 @@ impl BlobStore {
         Ok(out)
     }
 
+    /// Enumerate this blob's leaf chunk ids in stream order. For a
+    /// single-chunk blob the result is `[ChunkId(blob.0)]`; for a
+    /// multi-chunk blob it walks the manifest tree and yields every
+    /// leaf entry's chunk id. Pairs with [`ChunkStore::stat`] to
+    /// describe how the blob is physically stored — the data the
+    /// storage-view endpoint needs to surface tier / encoding /
+    /// physical bytes per chunk.
+    pub fn leaf_chunks(&self, id: BlobId) -> Result<Vec<ChunkId>, StoreError> {
+        let Some((root, _total_len)) = self.map.get(id) else {
+            // single-chunk blob: chunk id coincides with blob id
+            return Ok(vec![ChunkId(id.0)]);
+        };
+        let mut out = Vec::new();
+        self.collect_leaves(root, None, &mut out)?;
+        Ok(out)
+    }
+
+    fn collect_leaves(
+        &self,
+        node_id: ChunkId,
+        expect_level: Option<u8>,
+        out: &mut Vec<ChunkId>,
+    ) -> Result<(), StoreError> {
+        let bytes = self.chunks.read_unverified(node_id)?;
+        let (level, entries) = parse_node(&bytes)?;
+        if expect_level.is_some_and(|expect| level != expect) {
+            return Err(StoreError::Format("manifest level mismatch"));
+        }
+        for entry in entries {
+            if level == 0 {
+                out.push(entry.id);
+            } else {
+                self.collect_leaves(entry.id, Some(level - 1), out)?;
+            }
+        }
+        Ok(())
+    }
+
     fn walk(
         &self,
         node_id: ChunkId,

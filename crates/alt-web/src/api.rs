@@ -248,6 +248,106 @@ pub fn handle_commit_diff(
     Ok((200, body.into_bytes()))
 }
 
+/// `GET /api/repos/{name}/storage/{oid}` — alt's physical storage
+/// layout for `oid`: tier (0 = verbatim CDC, 1 = prism-decomposed),
+/// prism id + parts when Tier 1, and one record per leaf chunk
+/// (encoding Raw/Zstd/Delta, orig vs stored bytes). This is the
+/// reader-facing answer to "what does alt actually store as the
+/// delta" — git would have no equivalent.
+pub fn handle_storage(
+    mr: &MultiRepo,
+    name: &str,
+    oid_str: &str,
+) -> Result<(u16, Vec<u8>), ApiError> {
+    let repo = mr.open(name)?;
+    let oid = parse_oid(oid_str)?;
+    let view = repo
+        .storage_view(&oid)
+        .map_err(|e| ApiError::Internal(format!("storage_view {oid}: {e}")))?
+        .ok_or_else(|| {
+            ApiError::NotFound(format!(
+                "no storage layout for {oid} (object unknown, or repo is git-backed)"
+            ))
+        })?;
+
+    let chunks_json: Vec<String> = view
+        .chunks
+        .chunks
+        .iter()
+        .map(|c| {
+            let enc = match c.encoding {
+                alt_store::Encoding::Raw => "raw",
+                alt_store::Encoding::Zstd => "zstd",
+                alt_store::Encoding::Delta => "delta",
+            };
+            format!(
+                "{{\"chunk_id\":{},\"encoding\":\"{}\",\"orig_len\":{},\"stored_len\":{}}}",
+                json_string(&hex32(&c.chunk_id.0)),
+                enc,
+                c.orig_len,
+                c.stored_len,
+            )
+        })
+        .collect();
+
+    let tier1_json = match &view.tier1 {
+        Some(t1) => {
+            let parts: Vec<String> = t1.parts.iter().map(|p| json_string(&hex32(&p.0))).collect();
+            format!(
+                "{{\"prism\":{},\"recipe_len\":{},\"record_blob\":{},\"parts\":[{}]}}",
+                t1.prism.0,
+                t1.recipe_len,
+                json_string(&hex32(&t1.record_blob.0)),
+                parts.join(","),
+            )
+        }
+        None => "null".to_string(),
+    };
+
+    let kind = match view.kind {
+        alt_git_codec::ObjectKind::Blob => "blob",
+        alt_git_codec::ObjectKind::Tree => "tree",
+        alt_git_codec::ObjectKind::Commit => "commit",
+        alt_git_codec::ObjectKind::Tag => "tag",
+    };
+
+    let body = format!(
+        "{{\"schema_version\":1,\
+         \"git_oid\":\"{}\",\
+         \"blob_id\":{},\
+         \"kind\":\"{}\",\
+         \"logical_size\":{},\
+         \"tier\":{},\
+         \"tier1\":{},\
+         \"chunks\":{{\
+             \"leaf_count\":{},\
+             \"logical_total\":{},\
+             \"stored_total\":{},\
+             \"entries\":[{}]\
+         }}\
+        }}",
+        view.git_oid,
+        json_string(&hex32(&view.blob_id.0)),
+        kind,
+        view.logical_size,
+        if view.tier1.is_some() { 1 } else { 0 },
+        tier1_json,
+        view.chunks.leaf_count,
+        view.chunks.logical_total,
+        view.chunks.stored_total,
+        chunks_json.join(","),
+    );
+    Ok((200, body.into_bytes()))
+}
+
+fn hex32(b: &[u8; 32]) -> String {
+    let mut s = String::with_capacity(64);
+    for byte in b {
+        s.push_str(&format!("{:02x}", byte));
+    }
+    s
+}
+
 /// `GET /api/repos/{name}/blob/{oid}/raw` — raw blob bytes, with a
 /// best-effort Content-Type based on a magic-byte sniff. Used by the
 /// frontend to embed PNGs from the diff view as `<img>` elements.
@@ -941,10 +1041,7 @@ impl FileDiff {
                                 )
                             })
                             .collect();
-                        format!(
-                            "{{\"kind\":\"docx\",\"entries\":[{}]}}",
-                            items.join(","),
-                        )
+                        format!("{{\"kind\":\"docx\",\"entries\":[{}]}}", items.join(","),)
                     }
                     Some(DocumentDiff::Xlsx { sheets }) => {
                         let sheet_jsons: Vec<String> = sheets
@@ -1188,14 +1285,13 @@ fn build_xlsx_sheet_grids(
     old_members: &std::collections::BTreeMap<String, Option<Vec<u8>>>,
     new_members: &std::collections::BTreeMap<String, Option<Vec<u8>>>,
 ) -> Vec<SheetGrid> {
-    let collect_sheets =
-        |members: &std::collections::BTreeMap<String, Option<Vec<u8>>>| {
-            members
-                .iter()
-                .filter(|(k, _)| k.starts_with("xl/worksheets/sheet"))
-                .filter_map(|(k, v)| v.as_ref().map(|b| (k.clone(), b.clone())))
-                .collect::<std::collections::BTreeMap<_, _>>()
-        };
+    let collect_sheets = |members: &std::collections::BTreeMap<String, Option<Vec<u8>>>| {
+        members
+            .iter()
+            .filter(|(k, _)| k.starts_with("xl/worksheets/sheet"))
+            .filter_map(|(k, v)| v.as_ref().map(|b| (k.clone(), b.clone())))
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
     let old_sheets = collect_sheets(old_members);
     let new_sheets = collect_sheets(new_members);
     let old_shared = old_members
@@ -1343,11 +1439,7 @@ fn col_num_to_letter(mut n: u32) -> String {
         s.insert(0, char::from(b'A' + rem as u8));
         n = (n - 1) / 26;
     }
-    if s.is_empty() {
-        "A".to_string()
-    } else {
-        s
-    }
+    if s.is_empty() { "A".to_string() } else { s }
 }
 
 /// Linear diff over two ordered lists of strings: emit one entry per

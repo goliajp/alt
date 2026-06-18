@@ -251,6 +251,82 @@ impl NativeOdb {
         self.registry.register(prism);
     }
 
+    /// Inspect this blob's physical storage layout for a viewer / audit
+    /// tool: tier (0 = verbatim CDC, 1 = prism-decomposed), the prism
+    /// id and parts blob list when Tier 1, and a per-leaf-chunk
+    /// breakdown showing the chunk store's encoding choice
+    /// (Raw / Zstd / Delta-against-base) plus logical vs stored bytes.
+    ///
+    /// This is the read-side surface for the "what does alt actually
+    /// store as the delta" question — alt-web's storage panel calls it
+    /// to render the visible answer to `git: 'Binary files differ' /
+    /// alt: <here's the physical layout>`.
+    pub fn storage_view(&self, oid: &ObjectId) -> Result<Option<StorageView>, OdbError> {
+        let Some(entry) = self.map.by_git(oid) else {
+            return Ok(None);
+        };
+        let blob_id = entry.alt;
+        let kind = entry.kind;
+        let size = entry.size;
+
+        // Tier 1: prism record present in tier1 map.
+        let tier1 = if let Some(record_id) = self.tier1.get(blob_id) {
+            let record_bytes = self
+                .blobs
+                .get_unverified(record_id)
+                .map_err(OdbError::Store)?;
+            match tier1::decode_record(&record_bytes) {
+                Ok((prism_id, recipe, parts)) => Some(Tier1Layout {
+                    prism: prism_id,
+                    recipe_len: recipe.len(),
+                    parts,
+                    record_blob: record_id,
+                }),
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+
+        let chunk_layout = self.blob_chunk_layout(blob_id)?;
+        Ok(Some(StorageView {
+            git_oid: *oid,
+            blob_id,
+            kind,
+            logical_size: size,
+            tier1,
+            chunks: chunk_layout,
+        }))
+    }
+
+    fn blob_chunk_layout(&self, blob_id: alt_store::BlobId) -> Result<ChunkLayout, OdbError> {
+        let leaves = self.blobs.leaf_chunks(blob_id).map_err(OdbError::Store)?;
+        let chunks = self.chunk_layouts(&leaves)?;
+        let stored_total: u64 = chunks.iter().map(|c| c.stored_len as u64).sum();
+        let logical_total: u64 = chunks.iter().map(|c| c.orig_len as u64).sum();
+        Ok(ChunkLayout {
+            leaf_count: chunks.len(),
+            stored_total,
+            logical_total,
+            chunks,
+        })
+    }
+
+    fn chunk_layouts(&self, chunks: &[alt_store::ChunkId]) -> Result<Vec<ChunkInfo>, OdbError> {
+        let store = self.blobs.chunk_store();
+        let mut out = Vec::with_capacity(chunks.len());
+        for &cid in chunks {
+            let stat = store.stat(cid).map_err(OdbError::Store)?;
+            out.push(ChunkInfo {
+                chunk_id: cid,
+                encoding: stat.encoding,
+                orig_len: stat.orig_len,
+                stored_len: stat.stored_len,
+            });
+        }
+        Ok(out)
+    }
+
     /// Acquires the write lock for this batch (if not already held) and brings
     /// the in-memory state up to date with concurrent writers.
     fn acquire(&mut self) -> Result<(), OdbError> {
@@ -611,6 +687,56 @@ impl NativeOdb {
 /// blobmap) then `map.alt`, the durability order so a crash never leaves a
 /// durable identity record pointing at lost content. Holds its own fds, so the
 /// daemon fsyncs without `&mut NativeOdb` and appends overlap the fsync.
+/// What [`NativeOdb::storage_view`] returns: the physical-layer facts
+/// behind one git object. Audit-ready: the chunk encoding choice and
+/// stored vs logical bytes per leaf are the actual answer to "what
+/// does alt store as the delta," and are what the storage panel in
+/// alt-web surfaces.
+#[derive(Debug, Clone)]
+pub struct StorageView {
+    pub git_oid: ObjectId,
+    pub blob_id: alt_store::BlobId,
+    pub kind: alt_git_codec::ObjectKind,
+    pub logical_size: u64,
+    /// `Some` iff a prism accepted this blob at ingest and the bytes
+    /// are stored as parts + recipe. `None` means Tier 0 (verbatim
+    /// CDC + zstd).
+    pub tier1: Option<Tier1Layout>,
+    pub chunks: ChunkLayout,
+}
+
+#[derive(Debug, Clone)]
+pub struct Tier1Layout {
+    pub prism: alt_prism::PrismId,
+    pub recipe_len: usize,
+    /// Each part is stored as its own blob — the prism layer is what
+    /// makes CDC dedup across files actually fire on deflate-wrapped
+    /// payloads.
+    pub parts: Vec<alt_store::BlobId>,
+    /// The blob that holds the prism record itself (recipe + parts
+    /// listing). Recoverable from `Tier1Map::get(blob_id)`.
+    pub record_blob: alt_store::BlobId,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChunkLayout {
+    pub leaf_count: usize,
+    /// Sum of `orig_len` across leaves — should equal `logical_size`
+    /// for a Tier 0 blob; for Tier 1 it's the size of the recipe blob
+    /// the chunk view is describing, not the original file.
+    pub logical_total: u64,
+    pub stored_total: u64,
+    pub chunks: Vec<ChunkInfo>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChunkInfo {
+    pub chunk_id: alt_store::ChunkId,
+    pub encoding: alt_store::Encoding,
+    pub orig_len: u32,
+    pub stored_len: u32,
+}
+
 pub struct OdbSink {
     blobs: alt_store::BlobSink,
     tier1: std::fs::File,
