@@ -31,6 +31,7 @@ mod show;
 mod status_json;
 mod tag;
 mod undo_add;
+mod url_rewrite;
 mod verify_commit;
 mod wire_corpus;
 mod wire_test_server;

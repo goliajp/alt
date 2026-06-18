@@ -3666,7 +3666,15 @@ impl<'a> NativeRepo<'a> {
                 .collect::<Result<_, _>>()?
         };
 
-        let transport = build_transport(&remote.name, &remote.url);
+        // Apply `[url "X"] insteadOf = Y` rewrites from the repo's git
+        // config before handing the URL to the transport. The most
+        // common payoff is rewriting SSH-style URLs to HTTPS so alt's
+        // git-smart-http transport can take them.
+        let rewritten_url = {
+            let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
+            repo.rewrite_url(&remote.url)
+        };
+        let transport = build_transport(&remote.name, &rewritten_url);
 
         // capability advertisement — surfaces the protocol version and the
         // server's offered commands; we only need to know v2 is supported
@@ -3921,7 +3929,15 @@ impl<'a> NativeRepo<'a> {
             .find(|r| r.name == remote_name)
             .ok_or_else(|| format!("no such remote '{remote_name}'"))?;
 
-        let transport = build_transport(&remote.name, &remote.url);
+        // Apply `[url "X"] insteadOf = Y` rewrites from the repo's git
+        // config before handing the URL to the transport. The most
+        // common payoff is rewriting SSH-style URLs to HTTPS so alt's
+        // git-smart-http transport can take them.
+        let rewritten_url = {
+            let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
+            repo.rewrite_url(&remote.url)
+        };
+        let transport = build_transport(&remote.name, &rewritten_url);
 
         // v1 ref advertisement: the receive-pack endpoint speaks v1 even
         // when we ask for v2 (push isn't in protocol v2 in upstream git)

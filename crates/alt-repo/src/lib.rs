@@ -205,6 +205,49 @@ impl Repository {
         self.algo
     }
 
+    /// Apply git's `[url "X"] insteadOf = Y` rewrite rules to `url`.
+    /// Longest matching `insteadOf` prefix wins (same precedence rule
+    /// git uses). When nothing matches, `url` comes back unchanged.
+    ///
+    /// This is how alt accepts the SSH-style URLs (`git@github.com:…`)
+    /// that alt-wire-http itself can't parse: configure
+    ///
+    ///     [url "https://github.com/"]
+    ///         insteadOf = git@github.com:
+    ///
+    /// in the repo's git config (or `~/.gitconfig`) and the SSH URL
+    /// is rewritten to HTTPS before the transport ever sees it.
+    pub fn rewrite_url(&self, url: &str) -> String {
+        let mut best: Option<(usize, String, String)> = None;
+        for entry in &self.config.entries {
+            if entry.section != "url" {
+                continue;
+            }
+            if entry.key != "insteadof" {
+                continue;
+            }
+            let Some(sub) = &entry.subsection else {
+                continue;
+            };
+            let Some(value) = &entry.value else {
+                continue;
+            };
+            let trigger = String::from_utf8_lossy(value.as_ref()).into_owned();
+            if !url.starts_with(&trigger) {
+                continue;
+            }
+            let replacement = String::from_utf8_lossy(sub.as_ref()).into_owned();
+            let len = trigger.len();
+            if best.as_ref().map(|(l, _, _)| len > *l).unwrap_or(true) {
+                best = Some((len, trigger, replacement));
+            }
+        }
+        match best {
+            Some((tlen, _trigger, replacement)) => format!("{replacement}{}", &url[tlen..]),
+            None => url.to_owned(),
+        }
+    }
+
     pub fn config(&self) -> &Config {
         &self.config
     }
