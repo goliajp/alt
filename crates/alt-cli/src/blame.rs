@@ -43,13 +43,25 @@ struct BlameLine {
     text: Vec<u8>,
 }
 
-/// `alt blame <path> [<rev>]`. Writes one row per line to `out`:
+/// `alt blame <path> [<rev>] [-M]`. Writes one row per line to `out`:
 /// `<short-oid> (<author-name> <YYYY-MM-DD> <line-no>) <line content>`
-pub fn run(out: &mut impl Write, repo: &Repository, path: &str, rev: &str) -> Res<()> {
+///
+/// When `follow` is true, follow file renames: at each commit-step the
+/// walker checks whether the tracked path still exists in the parent
+/// commit and, if not, searches the parent's tree for the most
+/// similar blob (≥80% line overlap with the current content) and
+/// continues blaming under that name.
+pub fn run(
+    out: &mut impl Write,
+    repo: &Repository,
+    path: &str,
+    rev: &str,
+    follow: bool,
+) -> Res<()> {
     let start_commit = repo
         .rev_parse(rev)?
         .ok_or_else(|| format!("bad revision '{rev}'"))?;
-    let blamed = blame_file(repo, start_commit, path)?;
+    let blamed = blame_file(repo, start_commit, path, follow)?;
     let mut author_cache: HashMap<ObjectId, (String, String)> = HashMap::new();
 
     let pad_oid = 8;
@@ -81,17 +93,22 @@ pub fn run(out: &mut impl Write, repo: &Repository, path: &str, rev: &str) -> Re
     Ok(())
 }
 
-fn blame_file(repo: &Repository, start: ObjectId, path: &str) -> Res<Vec<BlameLine>> {
-    let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-    if segments.is_empty() {
+fn blame_file(repo: &Repository, start: ObjectId, path: &str, follow: bool) -> Res<Vec<BlameLine>> {
+    let mut current_segments: Vec<String> = path
+        .split('/')
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .collect();
+    if current_segments.is_empty() {
         return Err("empty path".into());
     }
 
     let mut current_commit = start;
-    let mut current_blob = match resolve_path_blob(repo, current_commit, &segments)? {
-        Some(o) => o,
-        None => return Err(format!("path '{path}' not found in {start}").into()),
-    };
+    let mut current_blob =
+        match resolve_path_blob(repo, current_commit, &segments_as_str(&current_segments))? {
+            Some(o) => o,
+            None => return Err(format!("path '{path}' not found in {start}").into()),
+        };
     let mut current_content = read_blob_bytes(repo, current_blob)?;
     let mut blame_lines: Vec<BlameLine> = split_lines(&current_content)
         .iter()
@@ -111,10 +128,27 @@ fn blame_file(repo: &Repository, start: ObjectId, path: &str) -> Res<Vec<BlameLi
         let Some(parent_commit) = commit.parents().next() else {
             break;
         };
-        let Some(parent_blob) = resolve_path_blob(repo, parent_commit, &segments)? else {
-            // file was introduced at current_commit; remaining lines
-            // stay attributed there
-            break;
+        let parent_blob_opt =
+            resolve_path_blob(repo, parent_commit, &segments_as_str(&current_segments))?;
+        let parent_blob = match parent_blob_opt {
+            Some(o) => o,
+            None => {
+                if follow {
+                    // Try to find a rename source: a blob in the
+                    // parent's tree that's ≥80% similar to the current
+                    // content.
+                    if let Some((new_segments, src_blob)) =
+                        find_rename_source(repo, parent_commit, &current_content)?
+                    {
+                        current_segments = new_segments;
+                        src_blob
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
         };
         if parent_blob == current_blob {
             // No content change → just rebase to parent.
@@ -169,6 +203,71 @@ fn blame_file(repo: &Repository, start: ObjectId, path: &str) -> Res<Vec<BlameLi
     }
 
     Ok(blame_lines)
+}
+
+fn segments_as_str(segments: &[String]) -> Vec<&str> {
+    segments.iter().map(String::as_str).collect()
+}
+
+/// Search `parent_commit`'s tree for a blob whose content is at least
+/// 80% line-overlap with `current_content`. Returns the path to it +
+/// the blob oid. Walks every file in the parent's tree, so it's O(N)
+/// in the parent's file count — fine for typical histories, would
+/// need a smarter index on a megarepo.
+fn find_rename_source(
+    repo: &Repository,
+    parent_commit: ObjectId,
+    current_content: &[u8],
+) -> Res<Option<(Vec<String>, ObjectId)>> {
+    const THRESHOLD_PERCENT: usize = 80;
+    let current_lines = alt_diff::split_lines(current_content);
+    if current_lines.is_empty() {
+        return Ok(None);
+    }
+    let current_set: std::collections::HashSet<&[u8]> = current_lines.iter().copied().collect();
+    let total = current_lines.len();
+
+    let commit = repo.read_commit(&parent_commit)?;
+    let Some(root_tree) = commit.tree() else {
+        return Ok(None);
+    };
+
+    let mut best: Option<(usize, Vec<String>, ObjectId)> = None;
+    let mut stack: Vec<(Vec<String>, ObjectId)> = vec![(Vec::new(), root_tree)];
+    while let Some((prefix, tree_oid)) = stack.pop() {
+        let tree = read_tree(repo, tree_oid)?;
+        for entry in tree.entries {
+            let mut path = prefix.clone();
+            path.push(String::from_utf8_lossy(entry.name.as_slice()).into_owned());
+            let is_tree = entry.mode.value() == 0o040000;
+            if is_tree {
+                stack.push((path, entry.oid));
+                continue;
+            }
+            let bytes = match read_blob_bytes(repo, entry.oid) {
+                Ok(b) => b,
+                Err(_) => continue,
+            };
+            let parent_lines = alt_diff::split_lines(&bytes);
+            if parent_lines.is_empty() {
+                continue;
+            }
+            let mut shared = 0usize;
+            for line in &parent_lines {
+                if current_set.contains(line) {
+                    shared += 1;
+                }
+            }
+            if shared * 100 / total < THRESHOLD_PERCENT {
+                continue;
+            }
+            let score = shared;
+            if best.as_ref().map(|(s, _, _)| score > *s).unwrap_or(true) {
+                best = Some((score, path, entry.oid));
+            }
+        }
+    }
+    Ok(best.map(|(_, p, o)| (p, o)))
 }
 
 fn resolve_path_blob(
