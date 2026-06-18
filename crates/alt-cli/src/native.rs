@@ -1995,6 +1995,118 @@ impl<'a> NativeRepo<'a> {
         Ok(())
     }
 
+    /// `alt tag [-d <name>] [<name> [<rev>]] [--json]`. Lightweight tags
+    /// only: each tag is a ref under `refs/tags/<name>` pointing
+    /// directly at the named commit (or HEAD when `rev` is omitted).
+    /// Annotated tags (`git tag -a`) write a tag *object* whose oid
+    /// the ref points to instead; that path is out of scope for the
+    /// first M17 dogfood pass and would land as a follow-up `-a /
+    /// -m` arg pair.
+    pub fn tag(
+        &mut self,
+        name: Option<String>,
+        rev: Option<String>,
+        delete: Option<String>,
+        json: bool,
+        out: &mut impl Write,
+    ) -> Res<()> {
+        match (name, delete) {
+            (_, Some(target)) => self.delete_tag(&target, out),
+            (Some(new), None) => self.create_tag(&new, rev.as_deref(), out),
+            (None, None) => self.list_tags(json, out),
+        }
+    }
+
+    fn list_tags(&self, json: bool, out: &mut impl Write) -> Res<()> {
+        let mut tags: Vec<(String, Option<String>)> = Vec::new();
+        for (name, _) in self.store.refs.iter() {
+            if let Some(short) = name.strip_prefix("refs/tags/") {
+                let oid = self.store.refs.resolve(name)?.map(|o| o.to_string());
+                tags.push((short.to_string(), oid));
+            }
+        }
+        tags.sort_by(|a, b| a.0.cmp(&b.0));
+        if json {
+            use crate::json::Json;
+            let arr: Vec<Json> = tags
+                .iter()
+                .map(|(name, oid)| {
+                    Json::Object(vec![
+                        ("name", Json::str(name)),
+                        (
+                            "oid",
+                            match oid {
+                                Some(o) => Json::str(o),
+                                None => Json::Null,
+                            },
+                        ),
+                    ])
+                })
+                .collect();
+            let doc = Json::Object(vec![
+                ("schema_version", Json::Num(1)),
+                ("tags", Json::Array(arr)),
+            ]);
+            doc.write(out)?;
+            out.write_all(b"\n")?;
+            return Ok(());
+        }
+        for (name, _) in &tags {
+            writeln!(out, "{name}")?;
+        }
+        Ok(())
+    }
+
+    fn create_tag(&mut self, name: &str, rev: Option<&str>, out: &mut impl Write) -> Res<()> {
+        check_tag_name(name)?;
+        let full = format!("refs/tags/{name}");
+        if self.store.refs.get(&full).is_some() {
+            return Err(format!("tag '{name}' already exists").into());
+        }
+        let target = match rev {
+            Some(spec) => {
+                let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
+                repo.rev_parse(spec)?
+                    .ok_or_else(|| format!("bad revision '{spec}'"))?
+            }
+            None => self
+                .store
+                .refs
+                .resolve(&self.head_branch()?)?
+                .ok_or("cannot tag before the first commit")?,
+        };
+        self.commit_refs(
+            "tag",
+            &[RefChange {
+                name: full,
+                old: None,
+                new: Some(RefTarget::Oid(target)),
+            }],
+        )?;
+        writeln!(out, "created tag '{name}' at {target}")?;
+        Ok(())
+    }
+
+    fn delete_tag(&mut self, name: &str, out: &mut impl Write) -> Res<()> {
+        let full = format!("refs/tags/{name}");
+        let old = self
+            .store
+            .refs
+            .get(&full)
+            .cloned()
+            .ok_or_else(|| format!("tag '{name}' not found"))?;
+        self.commit_refs(
+            "tag",
+            &[RefChange {
+                name: full,
+                old: Some(old),
+                new: None,
+            }],
+        )?;
+        writeln!(out, "deleted tag '{name}'")?;
+        Ok(())
+    }
+
     /// `alt switch <name>`: point HEAD at branch `name` and materialize its
     /// tree into the working tree. `-c` creates the branch first. Switching
     /// to an existing branch requires a clean tree (no staged/unstaged
@@ -4561,6 +4673,14 @@ fn set_exec(_path: &Path, _exec: bool) -> Res<()> {
 
 /// Minimal git check-ref-format: no empty/space/control chars, no `..`,
 /// no leading/trailing slash, no segment starting with a dot.
+/// Validate `<name>` is acceptable as a `refs/tags/<name>` path. Same
+/// rules as branch names — git rejects `..`, leading `/`, embedded
+/// control bytes, and a few special chars; we delegate to the branch
+/// validator since the constraints overlap exactly.
+fn check_tag_name(name: &str) -> Res<()> {
+    check_branch_name(name)
+}
+
 fn check_branch_name(name: &str) -> Res<()> {
     let bad = name.is_empty()
         || name.starts_with('/')

@@ -26,6 +26,7 @@ mod read_json;
 mod remote;
 mod show;
 mod status_json;
+mod tag;
 mod undo_add;
 mod verify_commit;
 mod wire_corpus;

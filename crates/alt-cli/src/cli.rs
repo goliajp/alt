@@ -113,6 +113,20 @@ pub enum Command {
         /// Revision to start the walk from (default `HEAD`).
         rev: Option<String>,
     },
+    /// List, create (lightweight), or delete tags
+    Tag {
+        /// Tag name to create. Omit (and omit `-d`) to list all tags.
+        name: Option<String>,
+        /// Revision the new tag should point to (default HEAD). Only
+        /// honoured when creating a tag.
+        rev: Option<String>,
+        /// Delete a tag by name. Mutually exclusive with `name`.
+        #[arg(short = 'd', long)]
+        delete: Option<String>,
+        /// JSON output for list mode (ignored otherwise).
+        #[arg(long)]
+        json: bool,
+    },
     /// Show changes between the index and the working tree (or HEAD)
     Diff {
         /// Show staged changes (HEAD vs index) instead of unstaged
@@ -468,6 +482,7 @@ pub fn is_native(cmd: &Command) -> bool {
             | Command::Commit { .. }
             | Command::Status { .. }
             | Command::Branch { .. }
+            | Command::Tag { .. }
             | Command::Switch { .. }
             | Command::Diff { .. }
             | Command::Merge { .. }
@@ -493,6 +508,12 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
         Command::Branch { name, delete, json } => {
             repo.branch(name.clone(), delete.clone(), *json, out)?
         }
+        Command::Tag {
+            name,
+            rev,
+            delete,
+            json,
+        } => repo.tag(name.clone(), rev.clone(), delete.clone(), *json, out)?,
         Command::Switch { name, create, json } => repo.switch(name, *create, *json, out)?,
         Command::Diff {
             cached,
