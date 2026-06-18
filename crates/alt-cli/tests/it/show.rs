@@ -73,6 +73,43 @@ fn show_emits_a_single_commit() {
 }
 
 #[test]
+fn show_resolves_tilde_ancestor() {
+    let tmp = tempfile::tempdir().unwrap();
+    setup(tmp.path());
+    let head = ok(alt(tmp.path(), &["rev-parse", "HEAD"]));
+    let parent = ok(alt(tmp.path(), &["rev-parse", "HEAD~"]));
+    assert_ne!(head.trim(), parent.trim(), "HEAD~ != HEAD");
+    let show_parent = ok(alt(tmp.path(), &["show", "HEAD~"]));
+    assert!(
+        show_parent.contains(parent.trim()),
+        "expected parent oid in show output\nparent={parent}\nshow={show_parent}",
+    );
+    assert!(show_parent.contains("first commit"));
+}
+
+#[test]
+fn rev_parse_supports_tilde_and_caret() {
+    let tmp = tempfile::tempdir().unwrap();
+    setup(tmp.path());
+    let by_tilde = ok(alt(tmp.path(), &["rev-parse", "HEAD~1"]));
+    let by_caret = ok(alt(tmp.path(), &["rev-parse", "HEAD^"]));
+    assert_eq!(by_tilde.trim(), by_caret.trim(), "HEAD~1 == HEAD^");
+}
+
+#[test]
+fn rev_parse_tilde_past_root_returns_error() {
+    let tmp = tempfile::tempdir().unwrap();
+    setup(tmp.path());
+    // Two commits; HEAD~3 walks past the root.
+    let out = alt(tmp.path(), &["rev-parse", "HEAD~3"]);
+    assert!(
+        !out.status.success(),
+        "expected failure when stepping past the root, got: {:?}",
+        String::from_utf8_lossy(&out.stdout),
+    );
+}
+
+#[test]
 fn show_json_returns_a_single_commit_object() {
     let tmp = tempfile::tempdir().unwrap();
     setup(tmp.path());

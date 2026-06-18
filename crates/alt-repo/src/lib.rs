@@ -352,8 +352,89 @@ impl Repository {
     }
 
     /// Resolves a revision spec: full hex, or a ref name through git's
-    /// DWIM lookup order.
+    /// DWIM lookup order, optionally followed by ancestor operators
+    /// `~N` / `^N` (git rev-parse §SPECIFYING REVISIONS).
+    ///
+    /// Ancestor operators applied left-to-right against the base oid:
+    /// - `<rev>~`     == one first-parent step
+    /// - `<rev>~N`    == N first-parent steps (N=0 is a no-op)
+    /// - `<rev>^`     == first parent (= `<rev>^1`)
+    /// - `<rev>^N`    == N-th parent (`^2` picks the merge's second parent)
+    /// - `<rev>^0`    == the commit itself, after peeling any tag
+    ///
+    /// They compose: `HEAD~2^^~3` walks first parent twice, then takes
+    /// first parent twice, then first parent three more times.
     pub fn rev_parse(&self, spec: &str) -> Result<Option<ObjectId>, RepoError> {
+        let split = spec.find(|c: char| c == '~' || c == '^');
+        let (base, suffix) = match split {
+            None => (spec, ""),
+            Some(i) => (&spec[..i], &spec[i..]),
+        };
+        let Some(mut oid) = self.resolve_base(base)? else {
+            return Ok(None);
+        };
+
+        let bytes = suffix.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            let op = bytes[i];
+            i += 1;
+            // Optional numeric count attached to the operator.
+            let mut n: usize = 0;
+            let mut had_digit = false;
+            while i < bytes.len() && bytes[i].is_ascii_digit() {
+                let Some(next) = n
+                    .checked_mul(10)
+                    .and_then(|v| v.checked_add((bytes[i] - b'0') as usize))
+                else {
+                    return Ok(None);
+                };
+                n = next;
+                i += 1;
+                had_digit = true;
+            }
+            let n = if had_digit { n } else { 1 };
+
+            // Peel tags before reading the commit; ancestor operators
+            // are commit-relative even when the user named a tag.
+            let (peeled, _) = self.peel(oid)?;
+            let commit = self.read_commit(&peeled)?;
+            oid = match op {
+                b'~' => {
+                    let mut cur = peeled;
+                    let mut cur_commit = commit;
+                    for _ in 0..n {
+                        let Some(p) = cur_commit.parents().next() else {
+                            return Ok(None);
+                        };
+                        cur = p;
+                        cur_commit = self.read_commit(&cur)?;
+                    }
+                    cur
+                }
+                b'^' => {
+                    if n == 0 {
+                        peeled
+                    } else {
+                        let Some(p) = commit.parents().nth(n - 1) else {
+                            return Ok(None);
+                        };
+                        p
+                    }
+                }
+                _ => return Ok(None),
+            };
+        }
+        Ok(Some(oid))
+    }
+
+    /// The non-suffix portion of `rev_parse`: full hex, or a ref name
+    /// through git's DWIM lookup order. Pulled out so the suffix walker
+    /// can recurse on the base independently of operator parsing.
+    fn resolve_base(&self, spec: &str) -> Result<Option<ObjectId>, RepoError> {
+        if spec.is_empty() {
+            return Ok(None);
+        }
         if spec.len() == self.algo.hex_len()
             && let Ok(oid) = ObjectId::from_hex(spec.as_bytes())
         {
