@@ -365,7 +365,7 @@ impl Repository {
     /// They compose: `HEAD~2^^~3` walks first parent twice, then takes
     /// first parent twice, then first parent three more times.
     pub fn rev_parse(&self, spec: &str) -> Result<Option<ObjectId>, RepoError> {
-        let split = spec.find(|c: char| c == '~' || c == '^');
+        let split = spec.find(['~', '^']);
         let (base, suffix) = match split {
             None => (spec, ""),
             Some(i) => (&spec[..i], &spec[i..]),
