@@ -1,20 +1,23 @@
 #!/bin/sh
-# Mirror local .alt store to github.com/goliajp/alt over plain git smart-http.
+# Push the alt repo's local develop tip to github.com/goliajp/alt over
+# alt's own git-smart-http transport.
 #
-# Local development uses `alt commit`; the GitHub mirror exists for outside
-# readers. We export the current .alt state to a fresh temp dir as a
-# normal .git repository and push that. Object IDs are byte-exact across
-# the export, so this is a fast-forward push under normal conditions —
-# no --force-with-lease needed.
+# Until M17 this script used `alt export <tmp> && git push <url>` as a
+# fallback. That path is gone now: alt has been speaking the git wire
+# directly since M6/W5, so the script just calls `alt push`. The github
+# remote should be registered in this .alt store as the plain HTTPS URL
+# (no embedded token) — credentials come from environment variables so
+# the on-disk remote stays clean. The script fishes a personal-access
+# token out of `gh auth token` (the GitHub CLI's keyring-backed cache)
+# and hands it to alt via ALT_HTTP_USER_<NAME> / ALT_HTTP_TOKEN_<NAME>.
 #
-# Override the remote URL via $ALT_GITHUB_REMOTE if you need to push to a
-# fork or test target; default is the public alt mirror.
+# Overrides
+#   $ALT_GITHUB_REMOTE   alt-side remote name to push (default: github)
+#   $ALT_GITHUB_BRANCHES space-separated branches (default: develop)
+#   $GITHUB_TOKEN        explicit token (overrides `gh auth token`)
 set -eu
-REMOTE="${ALT_GITHUB_REMOTE:-git@github.com:goliajp/alt.git}"
-# develop only by default — master moves with release/hotfix flows and
-# is pushed deliberately by those; sweeping it in here would let `alt`'s
-# own git-flow init point `master` at whatever develop tip was current
-# at the time, masking the "no releases yet" baseline.
+
+REMOTE_NAME="${ALT_GITHUB_REMOTE:-github}"
 BRANCHES="${ALT_GITHUB_BRANCHES:-develop}"
 
 cd "$(dirname "$0")/.."
@@ -24,16 +27,31 @@ if [ ! -d .alt ]; then
     exit 2
 fi
 
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
+if ! alt remote list | grep -q "^${REMOTE_NAME}	"; then
+    echo "sync-github.sh: remote '${REMOTE_NAME}' not in 'alt remote list'." >&2
+    echo "  alt remote add ${REMOTE_NAME} https://github.com/goliajp/alt.git" >&2
+    exit 3
+fi
 
-echo "[sync] exporting .alt → $tmp" >&2
-alt export "$tmp"
+if [ -z "${GITHUB_TOKEN:-}" ]; then
+    if ! command -v gh >/dev/null 2>&1; then
+        echo "sync-github.sh: neither \$GITHUB_TOKEN nor 'gh' is available" >&2
+        exit 4
+    fi
+    GITHUB_TOKEN="$(gh auth token 2>/dev/null || true)"
+    if [ -z "$GITHUB_TOKEN" ]; then
+        echo "sync-github.sh: 'gh auth token' returned empty; run 'gh auth login'" >&2
+        exit 5
+    fi
+fi
 
-cd "$tmp"
-echo "[sync] pushing $BRANCHES → $REMOTE" >&2
-# Push by URL — `alt export` carries the original git config (including
-# any pre-existing `github` remote), so a named-remote add would clash.
+# alt's env-var convention: uppercase the remote name, replace '-' with '_'.
+env_key=$(printf '%s' "$REMOTE_NAME" | tr 'a-z-' 'A-Z_')
+
+echo "[sync] alt push ${BRANCHES} → ${REMOTE_NAME}" >&2
 # shellcheck disable=SC2086
-git push "$REMOTE" $BRANCHES
+env \
+    ALT_HTTP_USER_${env_key}="x-access-token" \
+    ALT_HTTP_TOKEN_${env_key}="$GITHUB_TOKEN" \
+    alt push "$REMOTE_NAME" $BRANCHES
 echo "[sync] done" >&2
