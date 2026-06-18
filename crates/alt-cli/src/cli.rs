@@ -106,6 +106,13 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Line-by-line origin attribution for one file (`git blame`-style)
+    Blame {
+        /// Path to the file to blame (relative to the work tree root).
+        path: String,
+        /// Revision to start the walk from (default `HEAD`).
+        rev: Option<String>,
+    },
     /// Show changes between the index and the working tree (or HEAD)
     Diff {
         /// Show staged changes (HEAD vs index) instead of unstaged
@@ -597,6 +604,10 @@ pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, out: &mut W) -> Res<(
             let spec = rev.clone().unwrap_or_else(|| "HEAD".to_string());
             let args = crate::log_cmd::LogArgs::for_show(spec, *json);
             crate::log_cmd::run(out, repo, args)?;
+        }
+        Command::Blame { path, rev } => {
+            let spec = rev.as_deref().unwrap_or("HEAD");
+            crate::blame::run(out, repo, path, spec)?;
         }
         Command::Export { target } => {
             if !repo.is_native() {
