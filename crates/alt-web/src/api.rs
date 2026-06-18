@@ -248,6 +248,95 @@ pub fn handle_commit_diff(
     Ok((200, body.into_bytes()))
 }
 
+/// `GET /api/repos/{name}/storage_stats` — repo-wide aggregate
+/// storage report: total logical bytes alt is responsible for, total
+/// on-disk bytes, tier 0 vs tier 1 blob split, chunk encoding
+/// distribution (raw / zstd / delta), and per-prism hit counts. This
+/// surfaces the "alt is X% the size of logical content" headline
+/// number for the repo home page.
+pub fn handle_storage_stats(mr: &MultiRepo, name: &str) -> Result<(u16, Vec<u8>), ApiError> {
+    let repo = mr.open(name)?;
+    let stats = repo
+        .storage_stats()
+        .map_err(|e| ApiError::Internal(format!("storage_stats: {e}")))?
+        .ok_or_else(|| {
+            ApiError::NotFound("repo is git-backed; storage stats are alt-only".to_string())
+        })?;
+
+    let alt_dir = mr.root().join(name).join(".alt");
+    let disk_bytes = dir_size(&alt_dir);
+
+    let prisms_json: Vec<String> = stats
+        .prisms
+        .iter()
+        .map(|(prism_id, ps)| {
+            let label = match prism_id {
+                1 => "deflate",
+                2 => "zip",
+                3 => "png",
+                _ => "other",
+            };
+            format!(
+                "{{\"id\":{},\"label\":\"{}\",\"blobs\":{},\"parts\":{}}}",
+                prism_id, label, ps.blobs, ps.parts
+            )
+        })
+        .collect();
+
+    let body = format!(
+        "{{\"schema_version\":1,\
+         \"objects\":{{\"total\":{},\"blobs\":{},\"trees\":{},\"commits\":{},\"tags\":{}}},\
+         \"logical_total\":{},\
+         \"stored_total\":{},\
+         \"disk_total\":{},\
+         \"chunks\":{{\"total\":{},\"logical_total\":{}}},\
+         \"tier\":{{\"verbatim\":{},\"prismatic\":{}}},\
+         \"encoding\":{{\
+            \"raw\":{{\"chunks\":{},\"stored\":{}}},\
+            \"zstd\":{{\"chunks\":{},\"stored\":{}}},\
+            \"delta\":{{\"chunks\":{},\"stored\":{}}}\
+         }},\
+         \"prisms\":[{}]\
+        }}",
+        stats.object_count,
+        stats.blobs,
+        stats.trees,
+        stats.commits,
+        stats.tags,
+        stats.logical_total,
+        stats.stored_total,
+        disk_bytes,
+        stats.chunks_total,
+        stats.chunk_logical_total,
+        stats.tier0_count,
+        stats.tier1_count,
+        stats.raw_chunks,
+        stats.raw_stored,
+        stats.zstd_chunks,
+        stats.zstd_stored,
+        stats.delta_chunks,
+        stats.delta_stored,
+        prisms_json.join(","),
+    );
+    Ok((200, body.into_bytes()))
+}
+
+fn dir_size(p: &std::path::Path) -> u64 {
+    let mut total = 0u64;
+    let Ok(entries) = std::fs::read_dir(p) else {
+        return 0;
+    };
+    for e in entries.flatten() {
+        let Ok(meta) = e.metadata() else { continue };
+        if meta.is_dir() {
+            total = total.saturating_add(dir_size(&e.path()));
+        } else if meta.is_file() {
+            total = total.saturating_add(meta.len());
+        }
+    }
+    total
+}
+
 /// `GET /api/repos/{name}/storage/{oid}` — alt's physical storage
 /// layout for `oid`: tier (0 = verbatim CDC, 1 = prism-decomposed),
 /// prism id + parts when Tier 1, and one record per leaf chunk

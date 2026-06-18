@@ -82,3 +82,10 @@ export const useStorage = (name: string, oid: string) =>
     queryFn: () => api.storage(name, oid),
     enabled: !!name && !!oid,
   });
+
+export const useStorageStats = (name: string) =>
+  useQuery({
+    queryKey: ["storageStats", name] as const,
+    queryFn: () => api.storageStats(name),
+    enabled: !!name,
+  });

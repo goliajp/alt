@@ -240,7 +240,39 @@ export const api = {
     getJSON<StorageView>(
       `/api/repos/${encodeURIComponent(name)}/storage/${oid}`,
     ),
+
+  storageStats: (name: string) =>
+    getJSON<StorageStats>(
+      `/api/repos/${encodeURIComponent(name)}/storage_stats`,
+    ),
 };
+
+export interface StorageStats {
+  objects: {
+    total: number;
+    blobs: number;
+    trees: number;
+    commits: number;
+    tags: number;
+  };
+  /** Sum of every git object's logical (canonical) size — what git
+   *  would have to store before its pack compression. */
+  logical_total: number;
+  /** Sum of `stored_len` over every deduped leaf chunk — alt's real
+   *  byte cost (excluding the indexes / maps). */
+  stored_total: number;
+  /** `du -s` size of the entire `.alt` directory (packs + maps +
+   *  tier1 record file etc.). The honest total disk cost. */
+  disk_total: number;
+  chunks: { total: number; logical_total: number };
+  tier: { verbatim: number; prismatic: number };
+  encoding: {
+    raw: { chunks: number; stored: number };
+    zstd: { chunks: number; stored: number };
+    delta: { chunks: number; stored: number };
+  };
+  prisms: { id: number; label: string; blobs: number; parts: number }[];
+}
 
 export interface StorageView {
   git_oid: string;

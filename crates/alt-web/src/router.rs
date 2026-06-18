@@ -171,6 +171,11 @@ fn route_repo(mr: &MultiRepo, name: &str, tail: &str, query: &str) -> RouteResp 
         return collapse(api::handle_tree(mr, name, spec)).into();
     }
 
+    // /api/repos/{name}/storage_stats
+    if tail == "storage_stats" {
+        return collapse(api::handle_storage_stats(mr, name)).into();
+    }
+
     // /api/repos/{name}/storage/{oid}
     if let Some(oid) = tail.strip_prefix("storage/") {
         return collapse(api::handle_storage(mr, name, oid)).into();

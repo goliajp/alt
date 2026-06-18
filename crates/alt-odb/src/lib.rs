@@ -333,6 +333,104 @@ impl NativeOdb {
         })
     }
 
+    /// Aggregate storage facts over every object in this odb. Surfaces
+    /// the visible answer to "how much smaller is alt than the
+    /// logical content," broken down by tier (verbatim vs prismatic),
+    /// by chunk encoding (raw / zstd / delta), and by prism id. One
+    /// pass over the object map; pricey but bounded by the repo size.
+    pub fn storage_stats(&self) -> Result<StorageStats, OdbError> {
+        let mut stats = StorageStats::default();
+        // Dedup at the chunk level — if two blobs share a chunk we
+        // mustn't count its stored bytes twice. The bookkeeping is
+        // per-chunk-id, populated as we see leaves.
+        let mut seen_chunks: std::collections::HashSet<alt_store::ChunkId> =
+            std::collections::HashSet::new();
+        let store = self.blobs.chunk_store();
+
+        // Likewise dedup blobs: two git objects can map to the same
+        // alt blob id (rare for unique payloads, possible for empty
+        // / repeated objects). We count logical content per git oid
+        // (that's the question users actually have), but chunk facts
+        // per blob to avoid double-counting parts.
+        let mut seen_blobs: std::collections::HashSet<alt_store::BlobId> =
+            std::collections::HashSet::new();
+
+        for entry in self.entries() {
+            stats.object_count += 1;
+            stats.logical_total += entry.size;
+            match entry.kind {
+                ObjectKind::Blob => stats.blobs += 1,
+                ObjectKind::Tree => stats.trees += 1,
+                ObjectKind::Commit => stats.commits += 1,
+                ObjectKind::Tag => stats.tags += 1,
+            }
+
+            let blob_id = entry.alt;
+            if !seen_blobs.insert(blob_id) {
+                continue;
+            }
+
+            let tier1_record_id = self.tier1.get(blob_id);
+            if let Some(record_id) = tier1_record_id {
+                stats.tier1_count += 1;
+                let record_bytes = self
+                    .blobs
+                    .get_unverified(record_id)
+                    .map_err(OdbError::Store)?;
+                if let Ok((prism_id, _recipe, parts)) = tier1::decode_record(&record_bytes) {
+                    let entry = stats.prisms.entry(prism_id.0).or_default();
+                    entry.blobs += 1;
+                    entry.parts += parts.len() as u64;
+                    // Walk record + part leaves for chunk accounting.
+                    self.accumulate_chunks(record_id, &mut seen_chunks, &mut stats, store)?;
+                    for p in &parts {
+                        if seen_blobs.insert(*p) {
+                            self.accumulate_chunks(*p, &mut seen_chunks, &mut stats, store)?;
+                        }
+                    }
+                }
+            } else {
+                stats.tier0_count += 1;
+                self.accumulate_chunks(blob_id, &mut seen_chunks, &mut stats, store)?;
+            }
+        }
+        Ok(stats)
+    }
+
+    fn accumulate_chunks(
+        &self,
+        blob: alt_store::BlobId,
+        seen: &mut std::collections::HashSet<alt_store::ChunkId>,
+        stats: &mut StorageStats,
+        store: &alt_store::ChunkStore,
+    ) -> Result<(), OdbError> {
+        let leaves = self.blobs.leaf_chunks(blob).map_err(OdbError::Store)?;
+        for cid in leaves {
+            if !seen.insert(cid) {
+                continue;
+            }
+            let stat = store.stat(cid).map_err(OdbError::Store)?;
+            stats.chunks_total += 1;
+            stats.stored_total += stat.stored_len as u64;
+            stats.chunk_logical_total += stat.orig_len as u64;
+            match stat.encoding {
+                alt_store::Encoding::Raw => {
+                    stats.raw_chunks += 1;
+                    stats.raw_stored += stat.stored_len as u64;
+                }
+                alt_store::Encoding::Zstd => {
+                    stats.zstd_chunks += 1;
+                    stats.zstd_stored += stat.stored_len as u64;
+                }
+                alt_store::Encoding::Delta => {
+                    stats.delta_chunks += 1;
+                    stats.delta_stored += stat.stored_len as u64;
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn tier1_chunk_layout(&self, tier1: &Tier1Layout) -> Result<ChunkLayout, OdbError> {
         let mut all = Vec::new();
         all.extend(
@@ -777,6 +875,48 @@ pub struct ChunkInfo {
     pub encoding: alt_store::Encoding,
     pub orig_len: u32,
     pub stored_len: u32,
+}
+
+/// Aggregate "how does alt physically store this repo" report.
+/// All chunk-level counters are deduplicated by chunk id, so a chunk
+/// shared by two blobs (the whole point of CDC + prism dedup) is
+/// counted once — `stored_total` is the real disk-resident byte budget,
+/// not a sum of per-blob views.
+#[derive(Debug, Clone, Default)]
+pub struct StorageStats {
+    pub object_count: u64,
+    pub blobs: u64,
+    pub trees: u64,
+    pub commits: u64,
+    pub tags: u64,
+    /// Sum of every git object's logical size (the bytes git would have
+    /// to keep in its loose / pack form, ignoring git's own
+    /// compression). The "X% of logical" headline ratio is
+    /// `stored_total / logical_total`.
+    pub logical_total: u64,
+    pub tier0_count: u64,
+    pub tier1_count: u64,
+    pub prisms: std::collections::BTreeMap<u16, PrismStats>,
+    pub chunks_total: u64,
+    /// Sum of `orig_len` over every leaf chunk we walked — useful as a
+    /// sanity vs `logical_total` (for Tier 1 they differ: the chunk
+    /// view sees recipe + part bytes, not the recomposed original).
+    pub chunk_logical_total: u64,
+    pub stored_total: u64,
+    pub raw_chunks: u64,
+    pub raw_stored: u64,
+    pub zstd_chunks: u64,
+    pub zstd_stored: u64,
+    pub delta_chunks: u64,
+    pub delta_stored: u64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PrismStats {
+    /// How many blobs this prism accepted at ingest.
+    pub blobs: u64,
+    /// Total parts produced across those blobs (a docx → 17, etc.).
+    pub parts: u64,
 }
 
 pub struct OdbSink {

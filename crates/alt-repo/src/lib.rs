@@ -316,6 +316,15 @@ impl Repository {
         }
     }
 
+    /// Aggregate storage report over every object alt holds for this
+    /// repo. `Ok(None)` for git-backed repos.
+    pub fn storage_stats(&self) -> Result<Option<alt_odb::StorageStats>, RepoError> {
+        match &self.backend {
+            Backend::Git { .. } => Ok(None),
+            Backend::Alt(alt) => Ok(Some(alt.odb.storage_stats()?)),
+        }
+    }
+
     pub fn read_commit(&self, oid: &ObjectId) -> Result<Commit, RepoError> {
         let obj = self
             .read_object(oid)?

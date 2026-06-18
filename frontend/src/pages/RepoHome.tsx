@@ -1,6 +1,7 @@
 import { Link, useParams } from "react-router";
 import { useLog, useRepo, useTree } from "../lib/hooks";
 import { CodeBlock } from "../components/CodeBlock";
+import { StorageFootprint } from "../components/StorageFootprint";
 import { formatRelative } from "../lib/format";
 
 export function RepoHome() {
@@ -49,6 +50,10 @@ export function RepoHome() {
           </div>
         )}
       </header>
+
+      <div className="mt-8">
+        <StorageFootprint repo={name} />
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mt-8">
         {/* Tree */}
