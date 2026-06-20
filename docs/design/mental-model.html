@@ -7710,6 +7710,99 @@ Closes #123"</span></span>
     全部是 alt-as-platform 长大需要的基建,M20-M22 长尾。
   </div>
 
+  <!-- ═══════ Dogfood 现状对照 · alt 仓自己今天怎么跑 ═══════ -->
+  <div class="aside" style="margin-top: 80px; padding: 30px 36px; border-left: 2px solid var(--blue); background: linear-gradient(90deg, rgba(90, 160, 250, 0.05) 0%, rgba(90, 160, 250, 0.01) 50%, transparent 100%);">
+    <span class="tag" style="color: var(--blue); letter-spacing: 0.26em;">DOGFOOD · alt 仓自己今天怎么跑</span>
+    <h3 style="font-family: var(--font-display); font-weight: 300; font-size: 1.4rem; color: var(--fg-strong); margin: 12px 0 18px; letter-spacing: 0.01em;">实测对照 · 哪些 align · 哪些是 gap</h3>
+
+    <p style="font-size: 0.92rem; line-height: 1.85; color: var(--fg); margin-bottom: 16px;">
+      alt 仓 (本仓 · <code>/Users/doracawl/workspace/goliajp/alt</code>) 自己用
+      alt 开发 alt — 是<em>真实 dogfood 现场</em>。今天 (2026-06-19) 的配置和命令:
+    </p>
+
+    <table style="width: 100%; border-collapse: collapse; font-size: 0.86rem; margin-bottom: 18px;">
+      <thead>
+        <tr>
+          <th style="text-align: left; padding: 8px 14px; border-bottom: 1px solid var(--border-soft); color: var(--blue); font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.22em; font-weight: 500;">维度</th>
+          <th style="text-align: left; padding: 8px 14px; border-bottom: 1px solid var(--border-soft); color: var(--blue); font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.22em; font-weight: 500;">实际</th>
+          <th style="text-align: left; padding: 8px 14px; border-bottom: 1px solid var(--border-soft); color: var(--blue); font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.22em; font-weight: 500;">对应场景</th>
+        </tr>
+      </thead>
+      <tbody style="color: var(--fg);">
+        <tr>
+          <td style="padding: 8px 14px; border-bottom: 1px solid var(--border-soft);">preset</td>
+          <td style="padding: 8px 14px; border-bottom: 1px solid var(--border-soft);">avh-flow (main + develop + feature/release/hotfix)</td>
+          <td style="padding: 8px 14px; border-bottom: 1px solid var(--border-soft);">场景 5 + 6(不是场景 1 的 github-flow demo)</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 14px; border-bottom: 1px solid var(--border-soft);">workspace</td>
+          <td style="padding: 8px 14px; border-bottom: 1px solid var(--border-soft);">1 个 default · owner 单人 + 我 (Claude agent) 共用</td>
+          <td style="padding: 8px 14px; border-bottom: 1px solid var(--border-soft);">场景 1 case 1(case 1 描述就是这场)</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 14px; border-bottom: 1px solid var(--border-soft);">identity</td>
+          <td style="padding: 8px 14px; border-bottom: 1px solid var(--border-soft);">单 identity · 自动签名(invariant 1 已 ship)</td>
+          <td style="padding: 8px 14px; border-bottom: 1px solid var(--border-soft);">场景 1 + invariant 1</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 14px; border-bottom: 1px solid var(--border-soft);">remote</td>
+          <td style="padding: 8px 14px; border-bottom: 1px solid var(--border-soft);">双 remote: <code>github</code>(github.com/goliajp/alt) + <code>alt-golia</code>(alt.golia.jp/alt)</td>
+          <td style="padding: 8px 14px; border-bottom: 1px solid var(--border-soft);">场景 3(完全 align)</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 14px; border-bottom: 1px solid var(--border-soft);">sync</td>
+          <td style="padding: 8px 14px; border-bottom: 1px solid var(--border-soft);">3 个 shell · <code>sync-github.sh</code> + <code>sync-alt-golia.sh</code> + <code>sync-mini.sh</code>(cargo install)</td>
+          <td style="padding: 8px 14px; border-bottom: 1px solid var(--border-soft);">场景 3 last step</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 14px; border-bottom: 1px solid var(--border-soft);">visibility</td>
+          <td style="padding: 8px 14px; border-bottom: 1px solid var(--border-soft);">手动 .gitignore <code>.claude/</code> · 没有真 visibility filter</td>
+          <td style="padding: 8px 14px; border-bottom: 1px solid var(--border-soft);"><strong class="cop">场景 84 期望</strong>(今天 workaround)</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 14px; border-bottom: 1px solid var(--border-soft);">commit msg</td>
+          <td style="padding: 8px 14px; border-bottom: 1px solid var(--border-soft);">conventional commits free text · 手写 · 没 schema 验证</td>
+          <td style="padding: 8px 14px; border-bottom: 1px solid var(--border-soft);"><strong class="cop">场景 85 期望</strong>(今天 free text)</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 14px; border-bottom: 1px solid var(--border-soft);">LLM 隔离</td>
+          <td style="padding: 8px 14px; border-bottom: 1px solid var(--border-soft);">✅ alt-cli crate 0 LLM 依赖 · grep 验证(我 (Claude agent) 也只通过 Bash 调 alt CLI)</td>
+          <td style="padding: 8px 14px; border-bottom: 1px solid var(--border-soft;">场景 86 已暗合</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 14px;">pre-commit AI safety</td>
+          <td style="padding: 8px 14px;">手动 <code>scripts/gate.sh lint</code> + cargo test · 没自动 secret-scan</td>
+          <td style="padding: 8px 14px;"><strong class="cop">场景 31 期望</strong>(今天 manual)</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p style="font-size: 0.92rem; line-height: 1.85; color: var(--fg); margin-bottom: 12px;">
+      <strong>今天我 (Claude agent) 跑 commit 的实际命令序列</strong>(case 1 dogfood):
+    </p>
+    <pre style="font-family: var(--font-mono); font-size: 0.78rem; line-height: 1.85; color: var(--fg); background: var(--bg-inset); padding: 16px 20px; border: 1px solid var(--border-soft); overflow-x: auto; margin-bottom: 16px;">$ alt flow feature start &lt;name&gt;          # 起 topic branch (场景 5 step 2)
+$ vim &lt;file&gt;
+$ alt add &lt;path&gt;                          # 显式路径 · 不 add . (场景 1 step 4)
+$ alt commit -m "&lt;conventional&gt;"          # 手写 message (场景 85 期望未来 schema)
+$ scripts/gate.sh lint                    # 手动 lint (场景 31 期望未来内置)
+$ cargo test -p alt-cli --test it         # 手动测
+$ alt flow feature finish &lt;name&gt;          # 合 develop (场景 5 step 5)
+$ scripts/sync-github.sh                  # 推 github (场景 3)
+$ scripts/sync-alt-golia.sh               # 推 alt-golia (场景 3)
+$ scripts/sync-mini.sh                    # 重装 alt binary (dogfood 关键)</pre>
+
+    <p style="font-size: 0.94rem; line-height: 1.85; color: var(--fg);">
+      <strong>关键 gap</strong>(dogfood 暴露的 design 差距):
+    </p>
+    <ul style="margin: 8px 0; padding-left: 24px; font-size: 0.9em; line-height: 1.85; color: var(--fg);">
+      <li><strong>visibility</strong>(场景 84)— 今天 <code>.claude/</code> 整个 gitignore · <em>失去 alt 内部版本管理</em>。M19 ship visibility filter 后 · <code>.claude/</code> 改成 <code>alt-only</code> · alt 仓内可见有历史 · git mirror 不见。<em>这个 design 文档之前就在 .claude/ 下,改成 docs/design/ 后才能 commit</em>——刚才正在解决的事。</li>
+      <li><strong>commit msg schema</strong>(场景 85)— 今天 commit message 是 free text · 我 (AI agent) 经常写 too verbose 或漏 scope · M18-M19 ship 后 schema 自动填 + validate · 我会更准。</li>
+      <li><strong>amend</strong>(场景 17)— 今天 commit 错了我必须 <code>alt undo</code> + recommit · 多步 · AI 友好度低。M18 必补。</li>
+      <li><strong>pre-commit AI safety</strong>(场景 31)— 今天靠手动 <code>scripts/gate.sh lint</code> · 没自动 secret-scan / cap-scope。我 (agent) 可能误把 secret commit · alt 不会拦。M18 第一刀。</li>
+      <li><strong>LFS</strong>(场景 28)— alt 仓今天没大文件需求 · 但 alt 商业化第一战在这里 · 不 dogfood = 优先级不直观。</li>
+    </ul>
+  </div>
+
   <!-- ═══════ 最终总账 · 全 86 场景 ═══════ -->
   <div class="aside" style="margin-top: 80px; padding: 36px 40px; border-left: 3px solid var(--copper); background: linear-gradient(90deg, rgba(232, 168, 124, 0.08) 0%, rgba(232, 168, 124, 0.02) 50%, transparent 100%);">
     <span class="tag" style="color: var(--copper); letter-spacing: 0.32em; font-size: 0.78rem;">最终总账 · 全 86 场景</span>
