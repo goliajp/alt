@@ -6128,25 +6128,9 @@ Closes #123"</span></span>
 
   <div class="aside" style="margin-top: 56px;">
     <span class="tag">§ 6 段总账</span>
-    10 个 format prism scenarios:
-    <strong>✅ 已 ship 底层</strong>:deflate · png mode A · zip · store(M16);
-    <strong>🟡 prism 有但格式 UX 没</strong>:xlsx · png (mode B + diff/render);
-    <strong>❌ prism 完全没</strong>:markdown · json/yaml/toml · csv · svg · protobuf;
-    <strong>🔮 W52 后续段</strong>:pdf · safetensors · pptx/key/figma。<br>
-    <br>
-    <strong>战略排序</strong>(owner: "最重要的事"):
-    <ol style="margin: 8px 0; padding-left: 24px; font-size: 0.94em; line-height: 1.7;">
-      <li><strong>markdown prism</strong> — ROI 最高(docs 仓都受益),最简单(~500 行),M18 第一个。</li>
-      <li><strong>json/yaml/toml prism</strong> — package.json conflict 是行业痛点,~300 行,M18 第二个。</li>
-      <li><strong>safetensors prism + LFS migrate (场景 28)</strong> — ML 客户 day-1 hook,绑定 chunk store,M18-M19。</li>
-      <li><strong>xlsx prism (撬动整个 office 系列)</strong> — 财务 / 销售 / 任何 Excel 用户,M19。</li>
-      <li><strong>png mode B + diff/render</strong> — 设计客户 hook,M19-M20。</li>
-      <li><strong>csv prism</strong> — data engineer / 科学计算,M19-M20。</li>
-      <li><strong>pdf / svg / pptx / proto</strong> — 后续 polish,M20+。</li>
-    </ol>
-    <strong>核心洞察</strong>:这 10 个 prism 加起来覆盖 90%+ 工作仓里的"难 review 格式"。
-    <em>git 不可能补这层</em>(blob 模型 + 分布式 hash chain 是它的世界观,改这层是另起灶台),
-    所以这是 alt <strong>永久护城河</strong>。
+    10 个 format prism · 分布 ✅ 4(底层 deflate/png-A/zip/store M16)· 🟡 2(xlsx 后端 / png mode B)· ❌ 5(markdown / json/yaml/toml / csv / svg / protobuf)· 🔮 3(pdf / safetensors / pptx)。
+    <em>战略排序 + 工程量估算见<strong>最终总账</strong>。</em>
+    <strong>这是 alt 永久护城河</strong>—— git blob 模型补不了。
   </div>
 </section>
 
