@@ -6730,21 +6730,10 @@ Closes #123"</span></span>
 
   <div class="aside" style="margin-top: 56px;">
     <span class="tag">§ 7 段总账 · 含原则</span>
-    7 个 AI 时代场景:
-    <strong>✅ 完全能跑</strong>:0;
-    <strong>🟡 部分能跑</strong>:56 batch · 57 rollback · 59 judge;
-    <strong>🔮 设计中</strong>:58 auto-message · 60 conflict · 61 cap upgrade · <strong class="cop">86 LLM 隔离原则(owner 核心 · invariant 7 候选)</strong>。<br>
-    <br>
-    <strong>核心洞察</strong>:AI 时代 6 个增强场景全部需要 alt invariants 才能立——
-    <em>op log + session marker + signed op + cap + identity multi-sig</em>。
-    git 任何 extension 都接不上 · 因为它的 invariants 太薄。
-    <br><br>
-    <strong class="cop">owner 第七原则</strong>:
-    <em>"core 0 LLM · 增强 well-defined"</em> —— 这条架构边界让 alt
-    从 M18 起就<em>不会失控</em>地引入 LLM 依赖。
-    所有上述 6 个 augmentation point 都按此原则架构:provider 可换 · 可关 · 受 schema validate · 不绕 invariants。
-    这层是 alt 比 jujutsu / sapling 也走得远的位置(它们也没 cap / session / 多 sig 设计)。
-    <strong>M19-M20 是 AI 时代 alt 的差异化窗口期</strong>。
+    7 个 AI 时代场景 · 分布 ✅ 0 · 🟡 3(56/57/59)· 🔮 4(58/60/61/86)。
+    <em>战略 + 跟 jj/sapling 对比见<strong>最终总账</strong>。</em>
+    <strong class="cop">本段核心 = owner 第七原则</strong> · 场景 86 详述:
+    "core 0 LLM · 增强 well-defined" · invariant 7 候选 · 架构边界让 alt 不会失控引入 LLM 依赖。
   </div>
 </section>
 
