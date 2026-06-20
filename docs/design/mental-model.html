@@ -7891,6 +7891,120 @@ Closes #123"</span></span>
     <p class="figcap">atom 全生命周期 · 4 个阶段 · 每阶段触达的 invariant 在底部对应列。MUTATE 跟 DEPRECATE 都是 signed op · 跟 op log + immutable history 完全一体。</p>
   </div>
 
+  <!-- ═════ View B · atom kinds × CLI 命令矩阵 ═════ -->
+  <div class="full" style="margin-top: 56px;">
+    <p style="font-family: var(--font-mono); font-size: 0.72rem; color: var(--copper); letter-spacing: 0.26em; text-transform: uppercase; margin: 0 0 18px;">
+      view B · atom kinds × CLI 命令矩阵
+    </p>
+    <p style="font-size: 0.94rem; line-height: 1.85; color: var(--fg); margin-bottom: 18px;">
+      每行一种 atom kind · 每列一种<em>行为</em>(declare / resolve / mutate / verify / render / export)·
+      格子里写 <em>谁实现 + 怎么实现</em>。这是 atom 在 alt 里的<strong>能力矩阵</strong>。
+    </p>
+    <table style="width: 100%; border-collapse: collapse; font-size: 0.82rem; background: var(--bg-raised); border: 1px solid var(--border-soft);">
+      <thead>
+        <tr>
+          <th style="text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--border); color: var(--copper); font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 500;">atom kind</th>
+          <th style="text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--border); color: var(--copper); font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 500;">declare</th>
+          <th style="text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--border); color: var(--copper); font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 500;">resolve</th>
+          <th style="text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--border); color: var(--copper); font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 500;">mutate</th>
+          <th style="text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--border); color: var(--copper); font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 500;">verify</th>
+          <th style="text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--border); color: var(--copper); font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 500;">render</th>
+          <th style="text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--border); color: var(--copper); font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 500;">export(visibility)</th>
+        </tr>
+      </thead>
+      <tbody style="color: var(--fg);">
+        <tr>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--copper);">scenario</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">manual yaml<br><code style="font-size: 0.86em;">scenarios.yaml</code></td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">id + alias chain<br><code style="font-size: 0.86em;">alt atom show</code></td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;"><code style="font-size: 0.86em;">alt atom rename</code><br><code style="font-size: 0.86em;">alt atom deprecate</code></td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">out_refs resolve<br>cross-SoT 唯一性</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">HTML &lt;a&gt; · title tooltip · 视觉序号 (ordering)</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;"><span class="grn">public</span>(默认)</td>
+        </tr>
+        <tr>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--copper);">invariant</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">manual yaml<br><code style="font-size: 0.86em;">invariants.yaml</code></td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">id + alias</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">rare · owner-only<br>(invariant 增删是项目级 event)</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">status=shipped 必有对应 crate</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">hyperlink · candidate vs shipped 视觉区分</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;"><span class="grn">public</span></td>
+        </tr>
+        <tr>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--copper);">cmd</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;"><strong class="cop">auto-derived</strong><br>from alt-cli enum<br><code style="font-size: 0.86em;">alt atom rebuild cmd</code></td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">id only(no aliases)</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">regenerate<br>(改 enum 时 cmd atom 跟随)</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">SoT 跟 enum byte-match<br>CI gate</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">code tag · arg/flag sub-path</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;"><span class="grn">public</span></td>
+        </tr>
+        <tr>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--copper);">prism</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;"><strong class="cop">auto-derived</strong><br>from alt-prism-* crates</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">id only</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">regenerate when new prism ships</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">crate exists · trait impl 完整</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">hyperlink · trait sub-path</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;"><span class="grn">public</span></td>
+        </tr>
+        <tr>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--copper);">path</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">on first <code>alt add</code><br>(UUID 分配)</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">uuid backing + display path</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;"><code style="font-size: 0.86em;">alt mv</code> 自动 redirect<br>跟<code style="font-size: 0.86em;">alt://scenario/blame-M</code> 一体</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">文件实际存在<br>跨 commit uuid 稳定</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">hyperlink · line/function sub-path</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">查 <code>alt://axis/visibility</code><br><span class="grn">public</span> / <span class="cop">alt-only</span></td>
+        </tr>
+        <tr>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--copper);">commit</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">on <code>alt commit</code><br>(oid 自然 atom-id)</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">oid · 短 oid 也接受</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;"><strong class="red">不可</strong> (跟 invariant 6 一体)<br>但 message 走 overlay · 见<code style="font-size: 0.86em;">alt://scenario/commit-msg-schema</code></td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">git compat byte-exact</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">short oid · hover 完整<br>file/msg sub-path</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">superset-oid ↔ subset-oid 映射<br>(跟<code style="font-size: 0.86em;">alt://axis/visibility</code> 一体)</td>
+        </tr>
+        <tr>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--copper);">op</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">every alt op auto<br>(invariant 2)</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">op-id (_op_NNNN)</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;"><strong class="red">不可</strong> 永远</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">signed · 不可篡</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">op log line</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;"><strong class="cop">alt-only</strong>(默认<br>不出 git mirror)</td>
+        </tr>
+        <tr>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--copper);">issue<br>(external)</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">external tracker<br>(github/linear/jira)</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">tracker:id<br>via plugin backend</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">external · alt 不动</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">周期 reconcile · tracker API · 死链 → STALE_REF</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">hyperlink to tracker UI</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;"><span class="grn">public</span></td>
+        </tr>
+        <tr>
+          <td style="padding: 12px 14px; font-family: var(--font-mono); color: var(--copper);">principle<br>axis<br>section<br>concept<br>dimension</td>
+          <td style="padding: 12px 14px; font-size: 0.78rem;">manual yaml<br>(对应 SoT 文件)</td>
+          <td style="padding: 12px 14px; font-size: 0.78rem;">id + alias</td>
+          <td style="padding: 12px 14px; font-size: 0.78rem;">rare · 项目级 event</td>
+          <td style="padding: 12px 14px; font-size: 0.78rem;">out_refs 内部一致<br>不引用未来 atom</td>
+          <td style="padding: 12px 14px; font-size: 0.78rem;">hyperlink · 在 mental-model.html 内跳转</td>
+          <td style="padding: 12px 14px; font-size: 0.78rem;"><span class="grn">public</span></td>
+        </tr>
+      </tbody>
+    </table>
+    <p style="font-size: 0.86rem; color: var(--fg-muted); line-height: 1.75; margin-top: 16px;">
+      <strong>读法</strong>:横向看一种 atom kind 的<em>全行为面</em>,纵向看每个行为<em>在不同 kind 上的实现差异</em>。
+      <strong>关键模式</strong>:<em>auto-derived</em> kinds(cmd / prism)消除"docs vs code drift"(本来是 gate 1 audit 的高频问题);
+      <em>commit / op</em> kinds 跟 invariant 6 immutable 直接绑定 · 不能 mutate · 只能 overlay;
+      <em>external</em> kinds 走 plugin backend(跟<code><a href="alt://scenario/issue-cross-tracker" style="color: var(--copper);">alt://scenario/issue-cross-tracker</a></code>一体);
+      <em>op</em> 是唯一默认 alt-only kind(op log 不进 git mirror)。
+    </p>
+  </div>
+
   <div class="aside" style="margin-top: 56px;">
     <span class="tag">§ 12 段总账</span>
     1 个原则 atom · 5 处 dogfood typed ref · 0 实现(phase 0 仅架构落地)。
