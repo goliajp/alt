@@ -7725,10 +7725,12 @@ Closes #123"</span></span>
     </p>
 
     <ol style="margin: 12px 0; padding-left: 24px; font-size: 0.92em; line-height: 1.85;">
-      <li><strong>M18 · 第一刀(基础完整性 + AI 安全)</strong>:
+      <li><strong>M18 · 第一刀(基础完整性 + AI 安全 + 架构原则)</strong>:
         <ul style="margin: 6px 0; padding-left: 22px;">
+          <li><strong class="cop">86 LLM 隔离原则</strong>(invariant 7 候选 · 架构 baseline · CI grep gate)</li>
           <li>31 pre-commit AI safety validator(secret-scan / cap-scope / large-file-guard)</li>
           <li>28 LFS migrate(chunk store user-facing CLI · 商业化第一战)</li>
+          <li><strong class="cop">85 commit-msg schema + audit</strong>(跟 31 共用 validator infra)</li>
           <li>46 markdown prism + 47 json/yaml/toml prism(format-native 起步)</li>
           <li>17 amend + 16 revert + 7+8 rebase + 11 bisect(git 用户肌肉记忆)</li>
         </ul>
