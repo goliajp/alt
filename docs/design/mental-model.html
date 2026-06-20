@@ -7672,8 +7672,93 @@ Closes #123"</span></span>
     7 个生态场景:✅ 0 · 🟡 2(79 CI · 82 monorepo)· ❌ 0 · 🔮 5。
     全部是 alt-as-platform 长大需要的基建,M20-M22 长尾。
   </div>
+</section>
 
-  <!-- ═══════ Dogfood 现状对照 · alt 仓自己今天怎么跑 ═══════ -->
+
+<!-- ──────────────────────────── § 12 anti-rot · 元层 ──────────────────────────── -->
+<section class="section">
+  <header class="section-header">
+    <p class="section-num">§ 12 ─ anti-rot · 元层</p>
+    <h2 class="section-title">所有 reference 都是 typed pointer · <strong>system 持续 verify · drift 立刻 catch</strong>。</h2>
+    <p class="section-subtitle">invariants 的免疫系统 · alt ⊇ git 第四轴候选</p>
+  </header>
+
+  <div class="cols">
+    <p>
+      <em>owner 原话:</em><strong>"加一个核心话题,anti-rat 或者说 single source multi pointers,结构化关联,自查自纠。"</strong>
+    </p>
+
+    <p>
+      这一节是 <code><a href="alt://principle/anti-rot" style="color: var(--copper);">alt://principle/anti-rot</a></code>
+      的入口 · 完整架构决策见
+      <code><a href="docs/design/anti-rot-protocol.md" style="color: var(--copper);">docs/design/anti-rot-protocol.md</a></code>
+      ADR。
+    </p>
+
+    <p>
+      <strong>原子层(atom)</strong>:alt 内每个 typed 概念
+      <em>(scenario / invariant / cmd / prism / commit / path / issue …)</em>
+      都是一个 atom。每个 atom 有三层身份:semantic kebab(URL 槽 · 人类用)+ uuid v7(internal stable · rename 时 ref 不破)+ content_hash(verification · 跟
+      <code><a href="alt://invariant/immutable" style="color: var(--copper);">alt://invariant/immutable</a></code>
+      一体)。
+    </p>
+
+    <p>
+      <strong>typed URL</strong>:<code>alt://&lt;kind&gt;/&lt;id&gt;[@pin][/sub]</code>。
+      这条文档以前写 "见场景 17 amend"——free text · gate 1 audit 每改场景号都漏 update。
+      转 typed 后写
+      <code><a href="alt://scenario/amend" style="color: var(--copper);">alt://scenario/amend</a></code>
+      · 改号自动 alias chain redirect · 再不漏。
+    </p>
+
+    <div class="full">
+      <div class="callout">
+        <p class="punchline">
+          <span class="cop">anti-rot 是 meta · 不是 invariant 8</span>。<br>
+          它不锁 state · 它锁 <strong>reference structure</strong>。<br>
+          没有它 · invariants 1–7 都会随时间退化。
+        </p>
+        <p class="sub">
+          <strong>位置</strong>:在
+          <code><a href="alt://principle/three-axes" style="color: var(--copper);">alt://principle/three-axes</a></code>
+          (format-native + visibility + structured commit msg)之上 · 是<em>第四轴候选</em>。
+          但它是 *meta* · 不算 alt ⊇ git 的延展维度 · 是让前三轴自己不腐烂的免疫层。<br>
+          <strong>跟 gate 1+2 的关系</strong>:gate 1+2 是 human-mode 手动 audit · anti-rot 把它做成 system-mode 自动持续 verify。
+          gate 1 找到的 5 个问题(数字 83/86 · M18 priority · 最深洞察 · § 0 surface · dogfood)<em>本来就是 typed ref 系统能 catch 的</em>。
+        </p>
+      </div>
+    </div>
+
+    <p>
+      <strong>5 个 dogfood typed ref</strong>(本节正文里就用了 4 个 + 上面 callout 1 个)——
+      Phase 0 的<em>架构落地 proof</em>。完整 ref 系统 + verifier 在
+      <code><a href="alt://principle/anti-rot" style="color: var(--copper);">alt://principle/anti-rot</a></code>
+      的 phase 1/2/3 实现(M18-M20 · stones 优先:
+      <code>alt-atom</code> · <code>alt-xref</code> · <code>alt-sot</code>)。
+    </p>
+
+    <p>
+      <strong>对 AI 时代意义</strong>:gate 1 audit 找到的所有 5 个问题都是 AI agent 在持续编辑中*极容易引入*的 reference drift。
+      没 anti-rot · AI 改 doc / 改 commit msg / 改 SoT 时<em>system 看不见</em>它在制造死链。
+      场景
+      <code><a href="alt://scenario/pre-commit" style="color: var(--copper);">alt://scenario/pre-commit</a></code>
+      + 场景
+      <code><a href="alt://scenario/commit-msg-schema" style="color: var(--copper);">alt://scenario/commit-msg-schema</a></code>
+      + 场景
+      <code><a href="alt://principle/llm-isolation" style="color: var(--copper);">alt://principle/llm-isolation</a></code>
+      + anti-rot **四件一起** = 企业敢放 AI 自由跑 alt 的*最后一道闸*。
+    </p>
+  </div>
+
+  <div class="aside" style="margin-top: 56px;">
+    <span class="tag">§ 12 段总账</span>
+    1 个原则 atom · 5 处 dogfood typed ref · 0 实现(phase 0 仅架构落地)。
+    <em>完整 spec + phasing 见 ADR <code>docs/design/anti-rot-protocol.md</code></em>。
+  </div>
+</section>
+
+
+  <!-- ═══════ Dogfood 现状对照 · alt 仓自己今天怎么跑 (page-level) ═══════ -->
   <div class="aside" style="margin-top: 80px; padding: 30px 36px; border-left: 2px solid var(--blue); background: linear-gradient(90deg, rgba(90, 160, 250, 0.05) 0%, rgba(90, 160, 250, 0.01) 50%, transparent 100%);">
     <span class="tag" style="color: var(--blue); letter-spacing: 0.26em;">DOGFOOD · alt 仓自己今天怎么跑</span>
     <h3 style="font-family: var(--font-display); font-weight: 300; font-size: 1.4rem; color: var(--fg-strong); margin: 12px 0 18px; letter-spacing: 0.01em;">实测对照 · 哪些 align · 哪些是 gap</h3>
@@ -7862,8 +7947,6 @@ $ scripts/sync-mini.sh                    # 重装 alt binary (dogfood 关键)</
       下一步 · owner 拍板 M18 第一刀做哪几件,我开 plan 文档。
     </p>
   </div>
-</section>
-
 
 
 
