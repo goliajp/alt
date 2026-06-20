@@ -1065,7 +1065,10 @@ code, .mono {
         <p class="sub">
           这样既不像 git 那样让用户自己拼到漂移,也不像我 v1 提的 task
           model 把所有人锁死——alt 像 Postgres 一样硬 invariants、像
-          ESLint 一样可换 preset、像 vim 一样可适配多种风格。
+          ESLint 一样可换 preset、像 vim 一样可适配多种风格。<br><br>
+          <em>另外两条架构原则同样不可妥协:</em>
+          <strong class="cop">alt ⊇ git 三轴</strong>(format-native § 6 · visibility 场景 84 · structured commit msg 场景 85 — alt 仓比 git mirror 多三层信息)
+          + <strong class="cop">LLM 隔离</strong>(场景 86 · core 0 LLM · 增强 well-defined · invariant 7 候选)。
         </p>
       </div>
     </div>
