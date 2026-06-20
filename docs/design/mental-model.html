@@ -7991,16 +7991,36 @@ $ scripts/sync-mini.sh                    # 重装 alt binary (dogfood 关键)</
 </section>
 
 <!-- ──────────────────────────── 落款 ──────────────────────────── -->
+<!-- maintenance log -->
+<div style="margin-top: 80px; padding: 28px 32px; border-top: 1px solid var(--border); font-family: var(--font-mono); font-size: 0.72rem; line-height: 1.85; color: var(--fg-muted);">
+  <div style="color: var(--copper); letter-spacing: 0.22em; text-transform: uppercase; font-size: 0.66rem; margin-bottom: 14px;">Maintenance protocol</div>
+  <p style="margin: 0 0 12px;">
+    Per <code style="background: rgba(232, 168, 124, 0.08); padding: 1px 6px; color: var(--copper); border-radius: 3px;">.claude/CLAUDE.md · Design doc maintenance gates</code>,
+    every change to this file passes <strong style="color: var(--copper);">two gates</strong> before commit:
+  </p>
+  <ol style="margin: 0 0 16px; padding-left: 22px; font-size: 0.72rem;">
+    <li><strong style="color: var(--copper);">audit · anti-rot consistency</strong> — counts / commands / badges / cross-refs / priorities align across whole doc</li>
+    <li><strong style="color: var(--copper);">redundancy · delete duplicates</strong> — 3+ repetitions of the same fact get one canonical home + `see § X` elsewhere</li>
+  </ol>
+  <p style="margin: 0 0 6px;">Each semantic change = one commit (no batching unrelated edits).</p>
+  <p style="margin: 0; color: var(--fg-faint);">
+    Maintenance log (most recent at top):
+  </p>
+  <ul style="margin: 8px 0 0; padding-left: 22px; color: var(--fg-faint); font-size: 0.7rem;">
+    <li>2026-06-19 · gate 1+2 setup + first pass — relocated from <code style="background:none;color:var(--fg-faint);">.claude/docs/design/</code> to <code style="background:none;color:var(--fg-faint);">docs/design/</code>(tracked) · 5 audit commits(83→86 count · M18 priority + 85+86 · 4 deepest insights · § 0 三轴 + LLM 隔离 surface · dogfood section)· gate 2 found 4 redundancy candidates, R1-R3 kept(per-scenario standalone), R4(sub-section 总账)pending owner call</li>
+  </ul>
+</div>
+
 <footer class="colophon">
   <div>
     <span class="mark">¶</span> v2 草稿 · 替换 v1 的"一个固定 task model"思路 <span class="mark">·</span>
-    不进 <code class="mono" style="background:none;border:none;color:#6e7681;padding:0">.claude/docs/ROADMAP.md</code>,直到 owner 拍板。<br>
-    <span class="mark">¶</span> 任意覆盖 · 这是写生簿,不是规范。
+    讨论稿 · 不是规范。<br>
+    <span class="mark">¶</span> 现在 git-tracked 在 <code class="mono" style="background:none;border:none;color:#6e7681;padding:0">docs/design/mental-model.html</code> · 每语义改动一个 commit · 两个 gate 通过。
   </div>
   <div class="right">
     alt<br>
     mental model<br>
-    v2 · draft
+    v2 · tracked
   </div>
 </footer>
 
