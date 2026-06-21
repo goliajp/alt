@@ -4656,6 +4656,44 @@ invariant 6 (immutable history) 仅在 B 被破 · A 在 import 边界算不上�
             <span class="deeper-label">owner 强调"非常重要" · M18 第一刀</span>排在 amend / revert 之前 · 没这层 alt 的"AI-first 稳定" sell 就破产。
           </div>
         </div>
+
+        <div class="step">
+          <h4 class="step-title">defense-in-depth · pre-commit secret-scan vs § 13 push hard gate</h4>
+          <div class="deeper" style="border-left: 2px solid var(--blue);">
+            <span class="deeper-label">secret 防漏 = 两道闸 · 并不冗余</span>
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.84rem; margin: 6px 0 0;">
+              <thead>
+                <tr>
+                  <th style="text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border-soft); color: var(--blue); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.2em; text-transform: uppercase; font-weight: 500; width: 24%;">闸</th>
+                  <th style="text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border-soft); color: var(--blue); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.2em; text-transform: uppercase; font-weight: 500;">作用位置</th>
+                  <th style="text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border-soft); color: var(--blue); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.2em; text-transform: uppercase; font-weight: 500;">拦下来怎样</th>
+                </tr>
+              </thead>
+              <tbody style="color: var(--fg);">
+                <tr>
+                  <td style="padding: 10px; border-bottom: 1px solid var(--border-soft); vertical-align: top;"><strong>层 1 · pre-commit secret-scan</strong><br>(本场景)</td>
+                  <td style="padding: 10px; border-bottom: 1px solid var(--border-soft); vertical-align: top;"><em>commit 之前</em> · invariant 6 immutable 之前 · 文件还在 working tree</td>
+                  <td style="padding: 10px; border-bottom: 1px solid var(--border-soft); vertical-align: top;"><span class="grn">最便宜</span> · 文件可改 / 路径可重归类 / commit 还没发生 · 0 历史污染</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px; vertical-align: top;"><strong>层 2 · push hard gate</strong><br>(§ 13 编辑学职责 #7)</td>
+                  <td style="padding: 10px; vertical-align: top;"><em>push/export 出口</em> · invariant 6 immutable 之后 · 已 commit 多次后</td>
+                  <td style="padding: 10px; vertical-align: top;"><span class="red">最贵</span> · 要走场景 22 path B emergency scrub 才能清 · friction 高 · 故意如此</td>
+                </tr>
+              </tbody>
+            </table>
+            <p style="margin: 12px 0 0;">
+              <strong>关系</strong>:层 2 是<em>底线</em> · 即使 owner 关了层 1(<code>--no-verify</code>)或 pre-commit 规则不覆盖某 pattern · 层 2 仍会拦下。
+              <strong>不冗余</strong>:层 1 早拦让 commit 干净 · 层 2 兜底防 "已经 commit 到 alt 才发现"。
+              <em>设计哲学</em>:层 1 友好(指明哪行 / 建议改法)· 层 2 严厉(直接 push reject + 走 emergency · 高 friction)— 故意让<em>越晚发现成本越高</em>,鼓励早拦。
+            </p>
+            <p style="margin: 10px 0 0; font-size: 0.84rem; color: var(--fg-muted);">
+              <strong>同样的两层模式适用于</strong>:cap-scope check(层 1 拦越权 commit · 层 2 在 push 前最终验签)· large-file guard(层 1 提示走 chunk store · 层 2 强制 LFS conversion)。
+              这是 alt 安全设计的<em>统一两层模式</em> — 不是 secret 专属。
+            </p>
+          </div>
+        </div>
+
       </div>
     </article>
 
