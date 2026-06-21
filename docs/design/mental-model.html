@@ -6665,11 +6665,54 @@ Closes #123"</span></span>
 
   </div>
 
+  <!-- VISION 信条 6 fallback-then-enrich + A1 + A8 兑现 -->
+  <div class="aside" style="margin-top: 56px; padding: 26px 32px; border-left: 2px solid var(--copper); background: linear-gradient(90deg, rgba(232, 168, 124, 0.05) 0%, rgba(232, 168, 124, 0.01) 60%, transparent 100%);">
+    <p style="font-family: var(--font-mono); font-size: 0.7rem; color: var(--copper); letter-spacing: 0.24em; text-transform: uppercase; margin: 0 0 14px;">format-native = VISION 信条 6 fallback-then-enrich + A8 语义 diff + A1 token 预算的<em>三位一体</em></p>
+
+    <p style="font-size: 0.92rem; line-height: 1.78; color: var(--fg); margin: 0 0 14px;">
+      § 6 不只是"alt 看懂 N 种格式"· 而是 VISION 三条核心要求的<em>统一兑现位置</em>:
+    </p>
+
+    <ol style="font-size: 0.88rem; line-height: 1.85; color: var(--fg); margin: 0 0 14px; padding-left: 22px;">
+      <li>
+        <strong class="cop">信条 6 fallback-then-enrich</strong>(VISION § 1.5):
+        每种 format 有<em>hot/cold 两层</em>:
+        <em>hot</em> = 当前 prism 能解析的语义层(JSON tree / Markdown AST / PSD layer tree / PDF page)·
+        <em>cold</em> = raw byte 兜底(Tier 0 · 任何 format 至少能 raw blob 走 · invariant 5 git compat 兜底)。
+        老数据 repack 升级:旧仓在新 alt 版本下,无需迁移 · prism 跑增量解析升级到 hot · cold 兜底永远成立。
+        <em>不支持 = 原样兜底</em>,不假装解析。
+      </li>
+      <li>
+        <strong class="cop">A8 语义 / 二进制 diff</strong>(VISION § 4):
+        每个 prism 必须暴露 3 个 trait method —
+        <code>diff(old, new) → semantic_diff</code>(类型感知)·
+        <code>summary() → fixed_byte_budget</code>(LLM 预算化摘要 · 默认 2KB / 可配 8KB)·
+        <code>find_refs() → atom URLs</code>(axis 1 + § 12 anti-rot)。
+        二进制走分块级 diff(VISION § 2.1 大文件 + chunk store)。
+      </li>
+      <li>
+        <strong class="cop">A1 机器优先 I/O</strong>(VISION § 4):
+        prism diff 输出第一公民是 <em>稳定 JSON schema</em>(per-prism 定义,版本化) ·
+        人类美化视图(<code>alt diff</code> CLI 渲染)只是其上一层。
+        agent 调 <code>alt diff --json</code> 拿稳定 schema · 不解析人类美化输出 ·
+        <em>token 预算</em>:agent 可要求 <code>--summary 2KB</code> / <code>--full</code> 两档,prism 自动裁剪。
+      </li>
+    </ol>
+
+    <p style="font-size: 0.86rem; color: var(--fg-muted); line-height: 1.78; margin: 0;">
+      <strong>统一接口</strong>:
+      <code>trait Prism { fn diff() · fn summary() · fn find_refs() · fn json_schema() · fn fallback() }</code> ·
+      这是 § 6 + axis 1 + § 12 anti-rot + VISION 信条 6 + A1 + A8 五个角度看同一个 trait。
+      新 prism 实现这 5 个 method 就同时兑现 5 个 vision 要求 — alt 架构 cleanness 的体现。
+    </p>
+  </div>
+
   <div class="aside" style="margin-top: 56px;">
     <span class="tag">§ 6 段总账</span>
     10 个 format prism · 分布 ✅ 4(底层 deflate/png-A/zip/store M16)· 🟡 2(xlsx 后端 / png mode B)· ❌ 5(markdown / json/yaml/toml / csv / svg / protobuf)· 🔮 3(pdf / safetensors / pptx)。
     <em>战略排序 + 工程量估算见<strong>最终总账</strong>。</em>
     <strong>这是 alt 永久护城河</strong>—— git blob 模型补不了。
+    <em>跟 VISION 信条 6 + A1 + A8 三位一体见上方 callout</em>。
   </div>
 </section>
 
