@@ -7338,6 +7338,70 @@ Closes #123"</span></span>
 
   </div>
 
+  <!-- A1-A8 ↔ invariants 对照表 · VISION § 4 显式锚定 -->
+  <div class="aside" style="margin-top: 56px; padding: 28px 34px; border: 1px solid var(--blue); background: linear-gradient(135deg, rgba(90, 160, 250, 0.05) 0%, rgba(90, 160, 250, 0.01) 60%, transparent 100%);">
+    <p style="font-family: var(--font-mono); font-size: 0.72rem; color: var(--blue); letter-spacing: 0.26em; text-transform: uppercase; margin: 0 0 14px;">VISION § 4 AI-first A1-A8 ↔ invariants / 实现位置</p>
+    <p style="font-size: 0.92rem; line-height: 1.78; color: var(--fg); margin: 0 0 18px;">
+      VISION § 4 列了 8 条 AI-first 设计原则(顺畅 A1-A4 · 安全 A5-A6 · 高效 A7-A8)。每条对应 invariant + 实现位置:
+    </p>
+    <table style="width: 100%; border-collapse: collapse; font-size: 0.82rem; background: var(--bg-raised); border: 1px solid var(--border-soft);">
+      <thead>
+        <tr>
+          <th style="text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); color: var(--blue); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.2em; text-transform: uppercase; font-weight: 500; width: 5%;">A#</th>
+          <th style="text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); color: var(--blue); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.2em; text-transform: uppercase; font-weight: 500; width: 30%;">VISION 原则</th>
+          <th style="text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); color: var(--blue); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.2em; text-transform: uppercase; font-weight: 500;">invariant / 实现位置</th>
+        </tr>
+      </thead>
+      <tbody style="color: var(--fg);">
+        <tr>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft); color: var(--blue); font-family: var(--font-mono);">A1</td>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft);"><strong>机器优先 I/O</strong> · 稳定 JSON schema · token 预算意识</td>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft);">M5 D 系列 daemon protocol(structured RPC)+ 场景 71 watch/notify subscribe · <em>缺 invariant 编号</em> · 候选 invariant 8 "structured I/O first"(M19+ 提案)</td>
+        </tr>
+        <tr>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft); color: var(--blue); font-family: var(--font-mono);">A2</td>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft);"><strong>操作日志与全局撤销</strong> · O(1) 确定性 undo</td>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft);"><strong class="cop">invariant 2 op log</strong>(✅ M5 ship)+ <code>alt undo</code>(场景 12 时光机)+ § 60 conflict resolver</td>
+        </tr>
+        <tr>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft); color: var(--blue); font-family: var(--font-mono);">A3</td>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft);"><strong>并行 workspace</strong> · 无全局锁 · 无 index 损坏窗口</td>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft);"><strong class="cop">invariant 4 workspace</strong>(✅ M5 D 系列)+ § 26 multi-agent + daemon at-most-once 路由</td>
+        </tr>
+        <tr>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft); color: var(--blue); font-family: var(--font-mono);">A4</td>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft);"><strong>复合操作原子化</strong> · git-flow start/finish/release 是仓库内核事务</td>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft);">alt flow 命令体系(场景 1/5/6 + 4/5 release/hotfix)+ <code>alt undo</code> 反演任意复合 op + 钢筋层"分支模型引擎"</td>
+        </tr>
+        <tr>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft); color: var(--blue); font-family: var(--font-mono);">A5</td>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft);"><strong>身份与溯源</strong> · 人/agent/session 是元数据 · 可签可审计</td>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft);"><strong class="cop">invariant 1 signed op</strong> + § 25 三类型 identity + § 80 transparency log + § 85 commit-msg schema agent_vendor/model/session 字段</td>
+        </tr>
+        <tr>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft); color: var(--blue); font-family: var(--font-mono);">A6</td>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft);"><strong>能力边界</strong> · agent 受路径/分支/操作限制 · 仓库强制非约定</td>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft);">场景 61 cap upgrade + 场景 31 pre-commit AI safety + invariant 7 LLM 隔离 + § 13 secret hard gate(cap-scope 同两层 defense)</td>
+        </tr>
+        <tr>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft); color: var(--blue); font-family: var(--font-mono);">A7</td>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft);"><strong>毫秒级核心操作</strong> · status/commit/branch/diff 大仓也毫秒级</td>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft);">VISION 信条 8 "性能是功能" + <code>.claude/rules/perf-alt-context.md</code> 9 endpoint P0/P1/P2 决战清单 + monorepo 性能是设计输入(信条 8)· <em>缺 invariant 编号</em></td>
+        </tr>
+        <tr>
+          <td style="padding: 9px 12px; color: var(--blue); font-family: var(--font-mono);">A8</td>
+          <td style="padding: 9px 12px;"><strong>语义与二进制 diff</strong> · 类型感知 · LLM 预算化摘要 · 分块 diff</td>
+          <td style="padding: 9px 12px;"><strong class="cop">axis 1 format-native(§ 6)</strong>· 10 prism · format_summary 字段(§ 85)· VISION § 2.1 大文件 / § 2.0 可审查性总论的兑现</td>
+        </tr>
+      </tbody>
+    </table>
+    <p style="font-size: 0.84rem; color: var(--fg-muted); line-height: 1.75; margin: 14px 0 0;">
+      <strong>A1 / A7 缺 invariant 编号</strong> 是<em>待决</em>:VISION § 8.3 说 "A1-A8 逐条确认与优先序(M4/M5 细化时)"。
+      A1(机器优先 I/O)候选 invariant 8 "structured I/O first" 是 M19+ 提案,需要 owner 拍板。
+      A7(毫秒级)是<em>跨切面要求</em>(信条 8 "性能是功能" 在产品层兑现)· 可能不需要单独 invariant · 用 perf-decomposition 工作流兑现即可。
+    </p>
+  </div>
+
   <div class="aside" style="margin-top: 56px;">
     <span class="tag">§ 7 段总账 · 含原则</span>
     7 个 AI 时代场景 · 分布 ✅ 0 · 🟡 3(56/57/59)· 🔮 4(58/60/61/86)。
