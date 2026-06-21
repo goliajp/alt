@@ -4185,11 +4185,19 @@ invariant 6 (immutable history) 仅在 B 被破 · A 在 import 边界算不上�
 <span class="ln"><span class="p">owner $</span> <span class="cmd">alt workspace init</span> <span class="arg">agent-B</span> --path ../alt-B</span>
 
 <span class="ln spacer"></span>
+<span class="ln cm"># identity 必须 type=ai-agent + controlling 见 § 25:</span>
+<span class="ln"><span class="p">owner $</span> <span class="cmd">alt identity add</span> <span class="arg">claude-a@local</span> --type=ai-agent \
+<span class="ln">              --controlling=<span class="arg">owner@</span> --vendor=anthropic</span>
+<span class="ln"><span class="p">owner $</span> <span class="cmd">alt identity add</span> <span class="arg">claude-b@local</span> --type=ai-agent \
+<span class="ln">              --controlling=<span class="arg">owner@</span> --vendor=anthropic</span>
+
+<span class="ln spacer"></span>
 <span class="ln"><span class="p">agent-A $</span> <span class="cmd">cd</span> ../alt-A</span>
-<span class="ln"><span class="p">agent-A $</span> <span class="cmd">alt identity use</span> <span class="arg">claude-a@</span></span>
+<span class="ln"><span class="p">agent-A $</span> <span class="cmd">alt identity use</span> <span class="arg">claude-a@local</span></span>
 <span class="ln"><span class="p">agent-A $</span> <span class="cmd">alt flow feature start</span> task-β</span>
 <span class="ln"><span class="p">agent-A $</span> <span class="cmd">alt commit</span> -m <span class="str">"feat(β): ..."</span></span>
-<span class="ln cm"># 自动 attribute claude-a</span>
+<span class="ln cm"># alt 内 author=claude-a@local · controlling=owner@</span>
+<span class="ln cm"># push 到 git mirror 时 author 聚合成 owner@ (§ 25 step 3)</span>
               </div>
             </div>
             <div class="cmp-side git-side">
@@ -4205,11 +4213,14 @@ invariant 6 (immutable history) 仅在 B 被破 · A 在 import 边界算不上�
             <ul>
               <li>workspace 后端 ✅ M5 ship(隔离 working tree + daemon 协调避免 lock)</li>
               <li>daemon at-most-once op(M5 D 系列)防止 3 agent 同时改 main 死锁</li>
+              <li>identity type=ai-agent + controlling 强制(§ 25 三类型 · invariant 7 LLM 隔离)· bot 同样规则</li>
+              <li>agent 的 commit 在 alt 内 author=agent · 在 git 出口 author=controlling human(§ 25 step 3 + § 85 出口降级)</li>
               <li><em>但 agent-facing observability 不够</em> · A 不知道 B 在干嘛 · 没 watch / notify</li>
             </ul>
           </div>
           <div class="deeper">
-            <span class="deeper-label">M19+ 必补</span>watch / notify 接口 · identity use 命令 · agent-friendly UX。
+            <span class="deeper-label">M19+ 必补</span>watch / notify 接口(场景 71 一体)· agent-friendly UX · multi-agent conflict resolver(场景 60)。
+            <em>identity type 体系本身 M18+ ship · 见 § 25</em>。
           </div>
         </div>
       </div>
