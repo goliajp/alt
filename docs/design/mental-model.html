@@ -8182,6 +8182,190 @@ Closes #123"</span></span>
 </section>
 
 
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       § 13 · alt 替 git 兜脏乱差 · 出口永远 polished
+       这是 alt ⊇ git 真正的动机 framing。不是"alt 多出来",而是
+       "alt 替 git 兜住所有脏乱差"。AI 时代这一点是决定性的。
+       ═══════════════════════════════════════════════════════════════════════ -->
+<section>
+  <p class="sec-mark">§ 13</p>
+  <h2 class="sec-title">alt 替你兜脏乱差 · 给 git 出口永远 polished</h2>
+
+  <p class="lede" style="font-size: 1.04rem; line-height: 1.8; color: var(--fg); margin: 18px 0 28px;">
+    这是 alt ⊇ git 真正的<em>动机</em>,不是"alt 多出来",而是 —
+    <strong class="cop">alt 替你兜住 AI 时代所有的脏乱差,给 git 出口永远是 polished 的最终交付。</strong>
+  </p>
+
+  <div class="aside" style="background: linear-gradient(90deg, rgba(232, 168, 124, 0.07) 0%, rgba(232, 168, 124, 0.01) 60%, transparent 100%); border-left: 2px solid var(--copper); padding: 26px 32px; margin-bottom: 36px;">
+    <p style="font-family: var(--font-display); font-size: 1.14rem; font-weight: 300; color: var(--fg-strong); line-height: 1.7; margin: 0; letter-spacing: 0.01em;">
+      AI agent 在 alt 里<em>狂奔</em>(N 次试错 / 反复 undo / 大量探索性 commit / 内部 prompt 痕迹) · git mirror 上看到的依然是<em>干净的 conventional commit</em>。
+    </p>
+    <p style="font-size: 0.86rem; color: var(--fg-muted); line-height: 1.7; margin: 14px 0 0;">
+      git 这一侧的<em>干净</em>不是 agent 自律的结果,是 alt 的<em>编辑学</em>保证。agent 不需要节制,alt 替它出口。
+    </p>
+  </div>
+
+  <p style="font-size: 0.96rem; line-height: 1.85; color: var(--fg); margin-bottom: 22px;">
+    具体什么<em>留在 alt</em>、什么<em>给 git</em>:
+  </p>
+
+  <table style="width: 100%; border-collapse: collapse; font-size: 0.86rem; margin-bottom: 32px; background: var(--bg-raised); border: 1px solid var(--border-soft);">
+    <thead>
+      <tr>
+        <th style="text-align: left; padding: 14px 18px; border-bottom: 1px solid var(--border); color: var(--fg-muted); font-family: var(--font-mono); font-size: 0.64rem; letter-spacing: 0.24em; text-transform: uppercase; font-weight: 500; width: 22%;">维度</th>
+        <th style="text-align: left; padding: 14px 18px; border-bottom: 1px solid var(--border); color: var(--copper); font-family: var(--font-mono); font-size: 0.64rem; letter-spacing: 0.24em; text-transform: uppercase; font-weight: 500; width: 39%;">留在 alt · 脏乱差</th>
+        <th style="text-align: left; padding: 14px 18px; border-bottom: 1px solid var(--border); color: var(--grn); font-family: var(--font-mono); font-size: 0.64rem; letter-spacing: 0.24em; text-transform: uppercase; font-weight: 500; width: 39%;">出口 git · polished</th>
+      </tr>
+    </thead>
+    <tbody style="color: var(--fg);">
+      <tr>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--fg-muted); font-size: 0.78rem;">commit 颗粒</td>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft);">AI agent 一个 feature 写出 30+ 个微 commit · 包括 try/undo/retry</td>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft);">finish 时 squash 成 1-3 个 conventional commit · git log 干净</td>
+      </tr>
+      <tr>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--fg-muted); font-size: 0.78rem;">commit 信息</td>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft);">结构化 schema · AI 痕迹 / fix.suggest / token cost / 决策链(<code>alt://scenario/commit-msg-schema</code>)</td>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft);">导出 git 时降级成纯文本 · 只留 title + body + closes/refs · AI 元数据不出</td>
+      </tr>
+      <tr>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--fg-muted); font-size: 0.78rem;">op log</td>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft);">每一次 add/commit/rebase/undo 进 signed op log(invariant 2)· 永久</td>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft);"><strong class="red">不出</strong> · git 仓 0 痕迹</td>
+      </tr>
+      <tr>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--fg-muted); font-size: 0.78rem;">弃用分支 / 失败 task</td>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft);">失败的 task 可保留 · alt task abandon 标记 + 历史可查 · 用于 AI 回溯</td>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft);">不进 git · git 只看到成功的分支 · 没有 <code>wip-*</code> / <code>tmp-*</code> 残留</td>
+      </tr>
+      <tr>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--fg-muted); font-size: 0.78rem;">workspace 中间态</td>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft);">每个 AI agent / 每个 owner 独立 workspace · 互相看不见</td>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft);">git mirror 只见 develop / main / 已 finish 的 feature/* · 别人不知道你内部多少 workspace</td>
+      </tr>
+      <tr>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--fg-muted); font-size: 0.78rem;">内部文件</td>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft);"><code>.claude/</code> / AI prompt / 内部 design notes / dev 文档 / 实验 prism config</td>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft);"><strong class="cop">alt-only path</strong>(axis 2 visibility)· git 仓不出现 · 既"进 alt 仓"又"不进 git 出口"</td>
+      </tr>
+      <tr>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--fg-muted); font-size: 0.78rem;">prism 中间态</td>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft);">每种 binary format 的语义 diff 缓存 · 半透明历史 · per-prism 自定义视图</td>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft);">git 出口只是 raw blob · git diff 还是 "Binary files differ"</td>
+      </tr>
+      <tr>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--fg-muted); font-size: 0.78rem;">AI 签名 / verifier</td>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft);">每个 op 带 AI agent identity + verifier 0 LLM 校验记录(<code>alt://principle/llm-isolation</code>)</td>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft);">git author = 人类 owner · AI agent 身份在 git 出口被<em>聚合</em>掉 · 对外协作看不到</td>
+      </tr>
+      <tr>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--fg-muted); font-size: 0.78rem;">undo 链</td>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft);">每个 op 可 undo · alt undo 是用户日常工具 · 不破坏历史</td>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft);">git 只看到最终态 · 没有 reflog 噪音 · undo 痕迹封在 alt</td>
+      </tr>
+      <tr>
+        <td style="padding: 14px 18px; font-family: var(--font-mono); color: var(--fg-muted); font-size: 0.78rem;">大文件 / chunk store</td>
+        <td style="padding: 14px 18px;">CDC chunk store · 内容寻址 · 跨 commit 去重 · 局部 fetch</td>
+        <td style="padding: 14px 18px;">git mirror 推 LFS pointer · 大文件实体留 alt 服务器 · git 那边走 LFS 协议</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-bottom: 36px;">
+    <div class="aside" style="border-left: 2px solid var(--copper); padding: 20px 24px;">
+      <p style="font-family: var(--font-mono); font-size: 0.66rem; color: var(--copper); letter-spacing: 0.22em; text-transform: uppercase; margin: 0 0 10px;">关键论点 · agent 视角</p>
+      <p style="font-size: 0.92rem; line-height: 1.78; color: var(--fg); margin: 0;">
+        AI agent 不需要"<em>写得节制</em>"才能产出干净的 git 历史。<strong class="cop">agent 在 alt 里完全自由地反复迭代</strong>,
+        finish 时 alt 替它做编辑学:squash · 重写 message · 抹 AI 元数据 · 聚合 author。
+      </p>
+      <p style="font-size: 0.82rem; color: var(--fg-muted); line-height: 1.7; margin: 12px 0 0;">
+        git 那一侧拿到的永远是<em>人类提交的干净 conventional commit</em>。
+        协作者 / open source 社区看不到 agent 怎么"挣扎着写出来"的过程。
+      </p>
+    </div>
+
+    <div class="aside" style="border-left: 2px solid var(--blue); padding: 20px 24px;">
+      <p style="font-family: var(--font-mono); font-size: 0.66rem; color: var(--blue); letter-spacing: 0.22em; text-transform: uppercase; margin: 0 0 10px;">关键论点 · 人类协作者视角</p>
+      <p style="font-size: 0.92rem; line-height: 1.78; color: var(--fg); margin: 0;">
+        owner 内部用 alt 时享有所有 AI 时代的便利(workspace 隔离 / op log 回溯 / 结构化 commit msg / format-native diff)·
+        但<strong class="cop">交付给 git 协作者的</strong>永远是一份<em>标准 git 仓</em>。
+      </p>
+      <p style="font-size: 0.82rem; color: var(--fg-muted); line-height: 1.7; margin: 12px 0 0;">
+        github 社区贡献者 / 不用 alt 的同事打开 git 仓看到的就是<em>标准 conventional 提交</em>,
+        感觉不出来 alt 在背后兜了多少脏。
+      </p>
+    </div>
+  </div>
+
+  <p style="font-size: 0.94rem; line-height: 1.85; color: var(--fg); margin-bottom: 22px;">
+    <strong>alt 的编辑学职责(curation responsibility)</strong> 在<code>alt push --to git</code> 这一步集中行使,具体做这 6 件事:
+  </p>
+
+  <ul style="font-size: 0.9rem; line-height: 1.95; color: var(--fg); list-style: none; padding: 0; margin: 0 0 32px;">
+    <li style="padding: 10px 14px; border-left: 2px solid var(--copper); margin-bottom: 10px; background: rgba(232, 168, 124, 0.04);">
+      <strong class="cop">1 · squash 策略</strong> — feature 分支按 owner 配置的策略(per-task / per-day / per-author)squash 成 N 个 git commit,N 通常 ≤ 3。原始微 commit 链保留在 alt op log。
+    </li>
+    <li style="padding: 10px 14px; border-left: 2px solid var(--copper); margin-bottom: 10px; background: rgba(232, 168, 124, 0.04);">
+      <strong class="cop">2 · message 降级</strong> — 结构化 commit msg schema 抽出 title / body / closes 三段,降级成纯文本 conventional 格式。AI 元数据 / fix.suggest / token cost 全部丢弃(只留 alt 内部)。
+    </li>
+    <li style="padding: 10px 14px; border-left: 2px solid var(--copper); margin-bottom: 10px; background: rgba(232, 168, 124, 0.04);">
+      <strong class="cop">3 · path filter</strong> — visibility=alt-only 的文件/目录(<code>.claude/</code> 等)在 git mirror tree 里直接不存在。同一 commit 在 alt 和 git 两侧 oid 不同(superset-oid ↔ subset-oid 映射,axis 2)。
+    </li>
+    <li style="padding: 10px 14px; border-left: 2px solid var(--copper); margin-bottom: 10px; background: rgba(232, 168, 124, 0.04);">
+      <strong class="cop">4 · author 聚合</strong> — alt 里 author 可能是 <code>claude-agent-001</code> / <code>cursor-agent-002</code> · git author 统一聚合成人类 owner(committer 可选保留 alt agent id 作为审计痕迹)。
+    </li>
+    <li style="padding: 10px 14px; border-left: 2px solid var(--copper); margin-bottom: 10px; background: rgba(232, 168, 124, 0.04);">
+      <strong class="cop">5 · branch filter</strong> — alt 的 <code>wip/*</code> / <code>tmp/*</code> / abandoned task 分支不推 git。git 只看到 <code>main</code> / <code>develop</code> / <code>release/*</code> / <code>hotfix/*</code> + 已 finish 的 feature。
+    </li>
+    <li style="padding: 10px 14px; border-left: 2px solid var(--copper); margin-bottom: 10px; background: rgba(232, 168, 124, 0.04);">
+      <strong class="cop">6 · LFS conversion</strong> — alt 的 CDC chunk store 实体不推 git · 转成 LFS pointer · 大文件实际数据走 alt 服务器或独立 LFS server。
+    </li>
+  </ul>
+
+  <div class="aside" style="background: var(--bg-raised); border: 1px solid var(--border-soft); padding: 24px 30px; margin-bottom: 32px;">
+    <p style="font-family: var(--font-mono); font-size: 0.7rem; color: var(--fg-muted); letter-spacing: 0.22em; text-transform: uppercase; margin: 0 0 14px;">跟 alt ⊇ git 三轴的关系</p>
+    <p style="font-size: 0.9rem; line-height: 1.85; color: var(--fg); margin: 0;">
+      本节<em>不是</em>第 4 个 axis · 是<strong class="cop">把 3 个 axes 统一在一个动机下</strong>:
+    </p>
+    <ul style="font-size: 0.86rem; line-height: 1.85; color: var(--fg); margin: 12px 0 0; padding-left: 22px;">
+      <li><code>alt://axis/format-native</code>(axis 1) — alt 看懂 PDF/PSD/safetensors 的语义 diff · git 出口还是 binary blob · 是脏(binary)/净(text) 的"读"维度</li>
+      <li><code>alt://axis/visibility</code>(axis 2) — alt 装下 <code>.claude/</code> 和内部 dev 文档 · git 出口看不见 · 是脏(全收)/净(过滤) 的"路径"维度</li>
+      <li><code>alt://axis/commit-msg-schema</code>(axis 3) — alt 装下结构化 AI 元数据 · git 出口纯文本 · 是脏(结构化)/净(降级) 的"信息"维度</li>
+      <li>本节 · <strong>delivery polish</strong> — 三轴合起来的<em>编辑学总职责</em>,不是新轴,是<em>动机说明</em></li>
+    </ul>
+  </div>
+
+  <div class="aside" style="border-left: 2px solid var(--red); padding: 20px 26px; background: rgba(248, 81, 73, 0.04); margin-bottom: 32px;">
+    <p style="font-family: var(--font-mono); font-size: 0.66rem; color: var(--red); letter-spacing: 0.22em; text-transform: uppercase; margin: 0 0 10px;">反 framing · 避免误读</p>
+    <p style="font-size: 0.9rem; line-height: 1.78; color: var(--fg); margin: 0;">
+      alt 不是<em>git 的 lint 工具</em> · 不是<em>commit msg formatter</em> · 不是<em>squash 脚本</em>。
+      这些工具假设 agent 写完之后人类手动跑一遍清理 — <strong class="cop">alt 反过来</strong>:
+      agent 自由产出,alt 在 push 边界<em>替它出口干净</em>,人类不需要手动跑任何清理。
+    </p>
+    <p style="font-size: 0.82rem; color: var(--fg-muted); line-height: 1.72; margin: 10px 0 0;">
+      也不是<em>git 的简化包装</em>。git 本身没改 · alt 是<em>另一个 VCS</em>,只是 git 在 alt 的<em>出口形式</em>之一(可能还有 hg/jj/sapling 出口,或者 alt-native server-only 不出口)。
+    </p>
+  </div>
+
+  <p style="font-size: 0.96rem; line-height: 1.85; color: var(--fg); margin-bottom: 14px;">
+    <strong>为什么 AI 时代这一点是决定性的</strong>:
+  </p>
+  <p style="font-size: 0.9rem; line-height: 1.82; color: var(--fg); margin-bottom: 32px;">
+    pre-AI 时代,人类自然就写得"干净"(commit 颗粒合适 · 不留 wip 分支 · 不写 AI 元数据),git 不需要 alt 兜底。
+    AI 时代,agent 的<em>自然产物</em>是<strong class="red">大量微 commit + 反复 undo + AI 元数据丰富的 message + 失败 task 分支</strong>。
+    如果 git 直接吃这些 · git 仓很快变成<em>不可读</em>。
+    git 历史的可读性<strong class="cop">本质上跟 AI 产出力是冲突的</strong> · 必须有一层<em>编辑学缓冲</em>。
+    alt 就是这层缓冲 · 这是它跟 git 共存而不是替代的<em>根本理由</em>。
+  </p>
+
+  <div class="aside" style="margin-top: 56px;">
+    <span class="tag">§ 13 段总账</span>
+    1 个原则 atom(<code>alt://principle/delivery-polish</code>)· 10 维映射表(脏/净对照)· 6 件 alt 在 push 边界做的编辑学职责 · 跟 axes 1/2/3 是<em>动机统一</em>关系不是新增。
+    <em>实现层面</em>:axis 2 visibility 已 partial(<code>.claude/</code> 过滤可工作)· axis 3 commit-msg-schema design 已落地(scenario 85)· 其余编辑学职责(squash / author 聚合 / branch filter / LFS conversion)是 M19+ 的工作。
+  </div>
+</section>
+
+
   <!-- ═══════ Dogfood 现状对照 · alt 仓自己今天怎么跑 (page-level) ═══════ -->
   <div class="aside" style="margin-top: 80px; padding: 30px 36px; border-left: 2px solid var(--blue); background: linear-gradient(90deg, rgba(90, 160, 250, 0.05) 0%, rgba(90, 160, 250, 0.01) 50%, transparent 100%);">
     <span class="tag" style="color: var(--blue); letter-spacing: 0.26em;">DOGFOOD · alt 仓自己今天怎么跑</span>
