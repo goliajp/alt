@@ -4073,14 +4073,14 @@ invariant 6 (immutable history) 仅在 B 被破 · A 在 import 边界算不上�
 <span class="ln spacer"></span>
 <span class="ln cm"># 加 AI agent identity · 必须挂在某个 human 之下</span>
 <span class="ln"><span class="p">$</span> <span class="cmd">alt identity add</span> <span class="arg">claude-a@local</span> --type=ai-agent \
-<span class="ln">      --controlled-by=<span class="arg">work@company.com</span> --vendor=anthropic</span>
+<span class="ln">      --controlling=<span class="arg">work@company.com</span> --vendor=anthropic</span>
 <span class="ln"><span class="p">$</span> <span class="cmd">alt identity add</span> <span class="arg">cursor-b@local</span> --type=ai-agent \
-<span class="ln">      --controlled-by=<span class="arg">work@company.com</span> --vendor=cursor</span>
+<span class="ln">      --controlling=<span class="arg">work@company.com</span> --vendor=cursor</span>
 
 <span class="ln spacer"></span>
 <span class="ln cm"># 加 bot identity(CI / review bot)</span>
 <span class="ln"><span class="p">$</span> <span class="cmd">alt identity add</span> <span class="arg">ci-bot@local</span> --type=bot \
-<span class="ln">      --controlled-by=<span class="arg">work@company.com</span></span>
+<span class="ln">      --controlling=<span class="arg">work@company.com</span></span>
 
 <span class="ln spacer"></span>
 <span class="ln cm"># 自动 rule</span>
@@ -4105,7 +4105,7 @@ invariant 6 (immutable history) 仅在 B 被破 · A 在 import 边界算不上�
             <span class="silent-label">alt 静默做了 · 三类 identity</span>
             <ul>
               <li><strong>human</strong>:可以独立 commit / push · 跟 invariant 1 signed op 一体</li>
-              <li><strong>ai-agent</strong>:<em>必须</em>声明 <code>--controlled-by=&lt;human&gt;</code> · 它做的所有 op 由 controlling human 共同担责(invariant 7 LLM 隔离)</li>
+              <li><strong>ai-agent</strong>:<em>必须</em>声明 <code>--controlling=&lt;human&gt;</code> · 它做的所有 op 由 controlling human 共同担责(invariant 7 LLM 隔离)</li>
               <li><strong>bot</strong>:CI / review 等自动化 · 同样必须挂 controlling human</li>
               <li>identity 自己也是 alt-only kind atom(<code>alt://kind/identity</code>)· 不进 git mirror</li>
             </ul>
@@ -9239,7 +9239,7 @@ $ scripts/sync-mini.sh                    # 重装 alt binary (dogfood 关键)</
     <li>2026-06-21 · coherence audit pass(self-directed · owner directive "你先自己设计把所有事补全 · 完全自治自洽 · 概念设计必须要逻辑完备 · 架构 clean")— 8 atomic commits closing all gaps § 13 opened:
       <strong>(AC1)</strong> § 84 visibility 三档化(both / alt-only / alt-only-secret · 第三档自动加密 + push hard-gate)·
       <strong>(AC2)</strong> § 22 删敏感重定位三路径(A legacy import scrub · B native 仓 emergency 唯一会破 invariant 6 · C 非 secret retroactive visibility,不破 immutable)·
-      <strong>(AC3)</strong> § 25 multi-identity 三类型(human / ai-agent / bot · agent 必须 controlled-by human)+ git 出口 author 聚合规则(从三条原则共同推出)·
+      <strong>(AC3)</strong> § 25 multi-identity 三类型(human / ai-agent / bot · agent 必须 controlling=human)+ git 出口 author 聚合规则(从三条原则共同推出)·
       <strong>(AC4)</strong> § 85 commit-msg schema 加 author_type / controlling / agent_vendor / agent_model / session_id / tokens_* / decisions / fix_suggest 字段 + 显式 git 出口 5 步降级规则 ·
       <strong>(AC5)</strong> view B 加 colspan footer 列 9 个 principle atom typed refs(canonical inventory)·
       <strong>(AC6)</strong> § 13 加 secret op log schema(5 op types · 永远不记 token value/hash/plaintext)+ 跟 invariants 1/2/6/7 的精确合约表(谁签 / 谁能看 / immutable 如何不破 / LLM 隔离三道闸)·
