@@ -5484,46 +5484,67 @@ Co-Authored-By: alice &lt;alice@x&gt;"</span></span>
 <span class="ln out">  Performance: 3% faster on bench.</span>
 
 <span class="ln spacer"></span>
-<span class="ln out cm"># attribution:</span>
-<span class="ln out">author:        owner@golia.jp</span>
-<span class="ln out">agent:         claude@anthropic</span>
-<span class="ln out">human_review:  owner (approved)</span>
+<span class="ln out cm"># attribution (跟场景 25 multi-identity 一体):</span>
+<span class="ln out">author:           claude-a@local        <span class="cm"># alt 内真实 identity</span></span>
+<span class="ln out">author_type:      ai-agent              <span class="cm"># human / ai-agent / bot</span></span>
+<span class="ln out">controlling:      work@company.com      <span class="cm"># agent 必须挂 human</span></span>
+<span class="ln out">agent_vendor:     anthropic             <span class="cm"># 哪家 LLM</span></span>
+<span class="ln out">agent_model:      claude-opus-4-7       <span class="cm"># 精确模型 id</span></span>
+<span class="ln out">human_review:     owner (approved)      <span class="cm"># controlling 是否过目</span></span>
+<span class="ln out">co_signed:        false                 <span class="cm"># 多 sig commit (场景 41)</span></span>
+
+<span class="ln spacer"></span>
+<span class="ln out cm"># AI session 痕迹 (跟场景 56/57 session marker 一体 · alt-only 字段):</span>
+<span class="ln out">session_id:       _sess_a3f             <span class="cm"># 哪个 session</span></span>
+<span class="ln out">session_turn:     14/23                 <span class="cm"># session 第几轮</span></span>
+<span class="ln out">tokens_input:     12480                 <span class="cm"># 这步 input token</span></span>
+<span class="ln out">tokens_output:    3210                  <span class="cm"># 这步 output token</span></span>
+<span class="ln out">decisions: |                            <span class="cm"># 关键判断链 (verifier 0 LLM)</span></span>
+<span class="ln out">  - chose Result&lt;T,E&gt; over Option per existing parser style</span>
+<span class="ln out">  - did NOT touch lexer (out of scope)</span>
+<span class="ln out">fix_suggest:      []                    <span class="cm"># anti-rot fix 提示 (§ 12)</span></span>
 
 <span class="ln spacer"></span>
 <span class="ln out cm"># 关联:</span>
-<span class="ln out">closes:        ["#123", "linear:ALT-456"]</span>
-<span class="ln out">references:    []</span>
+<span class="ln out">closes:           ["alt://issue/123", "linear:ALT-456"]</span>
+<span class="ln out">references:       []</span>
 <span class="ln out">cherry_picked_from: null</span>
-<span class="ln out">reverts:       null</span>
-<span class="ln out">session_id:    _sess_a3f</span>
+<span class="ln out">reverts:          null</span>
 
 <span class="ln spacer"></span>
 <span class="ln out cm"># 自动 derived (alt 算的 · 不需手填):</span>
-<span class="ln out">touched_paths: [src/parser/, src/lexer/]</span>
-<span class="ln out">touched_chunks: 0</span>
+<span class="ln out">touched_paths:    [src/parser/, src/lexer/]</span>
+<span class="ln out">touched_chunks:   0</span>
 <span class="ln out">format_summary:</span>
 <span class="ln out">  - "src/parser.rs: +47 -12 lines"</span>
 <span class="ln out">  - "Cargo.toml: bumped version 0.1 → 0.2"</span>
-<span class="ln out">breaking:      false</span>
+<span class="ln out">breaking:         false</span>
 
 <span class="ln spacer"></span>
-<span class="ln out cm"># visibility:</span>
-<span class="ln out">visibility:    public</span>
-<span class="ln out">git_export:    conventional</span>
+<span class="ln out cm"># visibility & 出口配置:</span>
+<span class="ln out">visibility:       public                <span class="cm"># public / alt-only / alt-only-secret</span></span>
+<span class="ln out">git_export:       conventional          <span class="cm"># 出口降级风格</span></span>
               </div>
             </div>
             <div class="cmp-side git-side">
-              <div class="cmp-header"><span>git</span><span class="tag-note">free text · 1 字段</span></div>
+              <div class="cmp-header"><span>git</span><span class="tag-note">出口降级 · 见 § 13 #2</span></div>
               <div class="sh">
-<span class="ln cm"># git commit message:</span>
+<span class="ln cm"># git commit message (alt 自动降级后):</span>
 <span class="ln out">feat(parser): handle Result types</span>
 <span class="ln out"></span>
 <span class="ln out">Extract Result wrappers to module.</span>
 <span class="ln out">Performance: 3% faster on bench.</span>
 <span class="ln out"></span>
 <span class="ln out">Closes #123</span>
-<span class="ln out">Co-Authored-By: claude@anthropic</span>
-<span class="ln cm"># 都是文本 · parse 靠 convention · 散乱</span>
+
+<span class="ln spacer"></span>
+<span class="ln cm"># 降级规则 (§ 13 编辑学职责 #2):</span>
+<span class="ln cm"># · author 字段 = controlling human (work@company.com)</span>
+<span class="ln cm"># · ai-agent + agent_vendor + agent_model: 丢</span>
+<span class="ln cm"># · session_id / tokens / decisions / fix_suggest: 丢</span>
+<span class="ln cm"># · closes 的 alt://issue/123 解成 #123 (跟 § 10 issue 抽象)</span>
+<span class="ln cm"># · Co-Authored-By: 跟 § 25 step 3 一体 (可选保留 agent 痕迹)</span>
+<span class="ln cm"># · alt-only-secret kind 在任何字段 → push reject (§ 13 #7)</span>
               </div>
             </div>
           </div>
@@ -5534,12 +5555,26 @@ Co-Authored-By: alice &lt;alice@x&gt;"</span></span>
               <li><strong>touched_chunks</strong>:chunk store 涉及多少 chunk · LFS migrate (场景 28) 跟踪</li>
               <li><strong>format_summary</strong>:每个 prism 自动给一行语义摘要(<em>这就是 § 6 format-native 真用上</em>:markdown prism 说"3 section renamed"· json prism 说"+react ^19 -test")</li>
               <li><strong>breaking</strong>:从 conventional commits "!" 标 + protobuf prism(场景 55)schema 兼容性自动判</li>
-              <li><strong>session_id</strong>:如果 commit 在一个 AI session 里(场景 56)· 自动 attach</li>
+              <li><strong>author_type / controlling / agent_vendor / agent_model</strong>:从当前 active identity(场景 25)自动 attach</li>
+              <li><strong>session_id / session_turn / tokens_input/output</strong>:从 session marker(场景 56)+ LLM client API 自动 attach</li>
+              <li><strong>decisions</strong>:在 alt commit hook 内 prompt agent 写 1-3 句关键判断 · 用于<em>事后审计 + verifier 0 LLM 检查</em>(场景 86 LLM 隔离)</li>
             </ul>
           </div>
           <div class="deeper">
             <span class="deeper-label">AI 不冗余的关键</span>
-            agent 写 commit 时只需提供 <code>summary</code>(可选 body 1-2 句)· 其他字段 alt 自动算。AI verbose / 长篇大论 / 重复 diff 的问题被结构 schema 约束:summary 上限 72 字 · body 可选 · 自动字段不让 AI 填(避免 hallucinate)。
+            agent 写 commit 时只需提供 <code>summary</code>(可选 body 1-2 句 + 1-3 句 decisions)· 其他字段 alt 自动算。AI verbose / 长篇大论 / 重复 diff 的问题被结构 schema 约束:summary 上限 72 字 · body 可选 · 自动字段<em>不让 AI 填</em>(避免 hallucinate)· decisions 字段是 agent 唯一被允许填的<em>判断性</em>字段 · 后续被 verifier 0 LLM 工具校验。
+          </div>
+          <div class="deeper" style="border-left: 2px solid var(--cop);">
+            <span class="deeper-label">git 出口降级规则 · 跟 § 13 编辑学职责 #2 一体</span>
+            <p style="margin: 0;">
+              alt 仓内 schema 字段丰富 · push --to git 时<strong>降级</strong>:
+              <em>(1)</em> author 字段从 <code>claude-a@local</code> 映射成 controlling human(<code>work@company.com</code>) ·
+              <em>(2)</em> AI 元数据(<code>agent_vendor</code> / <code>agent_model</code> / <code>session_id</code> / <code>tokens_*</code> / <code>decisions</code> / <code>fix_suggest</code>)<em>全部丢</em> ·
+              <em>(3)</em> <code>closes</code> 的 <code>alt://issue/123</code> 解成 <code>#123</code>(对接现有 git issue 链接惯例) ·
+              <em>(4)</em> 可选 <code>Co-Authored-By: claude@anthropic</code> 保留<em>有 AI 协作</em>这件事的对外信号(可关 · per-repo policy) ·
+              <em>(5)</em> 任何字段含 <code>alt-only-secret</code> 内容 → push reject(§ 13 #7 secret hard gate)。
+              <em>降级方向单向:从结构化降到 free text,从 alt 多 identity 降到 git 单 author</em>。
+            </p>
           </div>
         </div>
 
