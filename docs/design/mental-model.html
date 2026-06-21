@@ -4266,6 +4266,35 @@ invariant 6 (immutable history) 仅在 B 被破 · A 在 import 边界算不上�
 
       <div class="steps">
 
+        <div class="step">
+          <h4 class="step-title">两个 LFS 方向 · 先分清</h4>
+          <div class="deeper" style="border-left: 2px solid var(--copper); padding-left: 18px;">
+            <span class="deeper-label">本场景 vs § 13 #6 是<em>反向</em>两件事</span>
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.84rem; margin: 6px 0 0;">
+              <tr>
+                <td style="padding: 8px 12px; border: 1px solid var(--border-soft); width: 50%; vertical-align: top;">
+                  <strong class="cop">本场景 28</strong> · <em>LFS → chunk store</em> (入口方向)<br>
+                  <span style="font-size: 0.82rem; color: var(--fg-muted);">
+                    legacy git+LFS 仓 import 进 alt · LFS pointer <em>解析</em>后实际 blob 进 alt chunk store · alt 仓自给自足不再依赖 LFS endpoint。
+                    商业战略:让 LFS 用户切到 alt 后省掉 LFS 服务费。
+                  </span>
+                </td>
+                <td style="padding: 8px 12px; border: 1px solid var(--border-soft); vertical-align: top;">
+                  <strong class="cop">§ 13 编辑学职责 #6</strong> · <em>chunk store → LFS pointer</em> (出口方向)<br>
+                  <span style="font-size: 0.82rem; color: var(--fg-muted);">
+                    alt-native 仓 push --to git mirror 时 · alt chunk 实体留 alt 服务器 · 推 git 那边的 LFS pointer 让<em>不用 alt 的</em> git 用户也能正常 clone。
+                    跟"出口 polish"一体(§ 13 编辑学职责)。
+                  </span>
+                </td>
+              </tr>
+            </table>
+            <p style="margin: 12px 0 0;">
+              两个方向<em>共用</em>同一套 LFS 协议 client(stones-cement-steel · LFS 协议是石头 · 双向 wrap 是钢筋)·
+              但触发场景<em>不一样</em>:本场景是<em>一次性 migrate</em>,§ 13 #6 是<em>每次 push 持续</em>。
+            </p>
+          </div>
+        </div>
+
         <!-- step 1 -->
         <div class="step">
           <h4 class="step-title">先 clone · 看清楚问题</h4>
