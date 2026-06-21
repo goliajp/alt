@@ -3432,6 +3432,45 @@ code, .mono {
             <ul><li>match threshold 80%(跟 git 默认 -M50 一致)</li></ul>
           </div>
         </div>
+
+        <div class="step">
+          <h4 class="step-title">identity 展示规则 · alt 内 vs git 出口</h4>
+          <span class="step-input-label"><span class="cop">▼</span> 同一行 · 在两侧看会看到不一样的 author</span>
+          <div class="cmp">
+            <div class="cmp-side alt-side">
+              <div class="cmp-header"><span>alt blame</span><span class="tag-note">真实 + controlling 注释</span></div>
+              <div class="sh">
+<span class="ln"><span class="p">$</span> <span class="cmd">alt blame</span> src/parser.rs</span>
+<span class="ln out">a1b2c3 (claude-a@local [→ owner@] 2026-06-21)  42| Result::Ok(parsed)</span>
+<span class="ln out">d4e5f6 (owner@                       2026-06-15)  43|     .map_err(…)</span>
+<span class="ln cm"># ai-agent identity 显示 + [→ controlling] 注释</span>
+              </div>
+            </div>
+            <div class="cmp-side git-side">
+              <div class="cmp-header"><span>git blame (push 后 mirror 仓)</span><span class="tag-note">仅 controlling · § 25 step 3 聚合</span></div>
+              <div class="sh">
+<span class="ln"><span class="p">$</span> <span class="cmd">git blame</span> src/parser.rs</span>
+<span class="ln out">b7c8d9 (owner@ 2026-06-21)  42| Result::Ok(parsed)</span>
+<span class="ln out">e0f1a2 (owner@ 2026-06-15)  43|     .map_err(…)</span>
+<span class="ln cm"># oid 不同 (out-side superset-oid) · author 单一</span>
+              </div>
+            </div>
+          </div>
+          <div class="silent">
+            <span class="silent-label">展示规则 · 三档</span>
+            <ul>
+              <li><strong>默认</strong>:alt blame 显示真实 identity + <code>[→ controlling]</code> 注释 · 跟 git blame 在 mirror 里 author 聚合一致(§ 25 step 3 + § 85 出口降级 #1)</li>
+              <li><code>--show-controlling-only</code>:owner 想模拟"对外视角"看 commit · 强制聚合显示</li>
+              <li><code>--show-agent-detail</code>:显示 vendor / model / session id(从 commit-msg schema 解出)· debug AI 行为时用</li>
+            </ul>
+          </div>
+          <div class="deeper">
+            <span class="deeper-label">这是什么的兑现</span>
+            blame 在 alt 内是<em>真实工作态</em>(看得到 claude-a 做了什么)· 在 git mirror 里是<em>对外责任态</em>(owner 担责)· 同一份 history 的两个视图 ·
+            跟 § 13 "alt 兜脏 · git polished" 的具体落地 · 跟 § 85 commit-msg schema 出口降级一体。
+          </div>
+        </div>
+
       </div>
     </article>
 
@@ -3469,6 +3508,45 @@ code, .mono {
             <ul><li>pickaxe(<code>-S</code>)是 git log 最有用的 feature 之一 · 定位"某代码什么时候加进来"</li></ul>
           </div>
         </div>
+
+        <div class="step">
+          <h4 class="step-title">identity-type filter · "查 ai 改过的所有 commit"</h4>
+          <span class="step-input-label"><span class="cop">▼</span> 你要打的(alt-only · git 没等价)</span>
+          <div class="cmp">
+            <div class="cmp-side alt-side unavail">
+              <div class="cmp-header"><span>alt</span><span class="tag-note">期望 · M18+(跟 § 25 一起 ship)</span></div>
+              <div class="sh">
+<span class="ln cm"># 看所有 ai-agent 类型 author 改的:</span>
+<span class="ln"><span class="p">$</span> <span class="cmd">alt log</span> --identity-type=ai-agent</span>
+
+<span class="ln spacer"></span>
+<span class="ln cm"># 看 owner@ controlling 的所有 commit(含 owner 手敲 + owner 控制的 agent):</span>
+<span class="ln"><span class="p">$</span> <span class="cmd">alt log</span> --controlling=<span class="arg">owner@</span></span>
+
+<span class="ln spacer"></span>
+<span class="ln cm"># 只看 vendor=anthropic 的 agent 改过的 src/auth:</span>
+<span class="ln"><span class="p">$</span> <span class="cmd">alt log</span> --agent-vendor=<span class="arg">anthropic</span> -- src/auth/</span>
+
+<span class="ln spacer"></span>
+<span class="ln cm"># 同 session 内的所有 commit:</span>
+<span class="ln"><span class="p">$</span> <span class="cmd">alt log</span> --session=<span class="arg">_sess_a3f</span></span>
+              </div>
+            </div>
+            <div class="cmp-side git-side">
+              <div class="cmp-header"><span>git</span><span class="tag-note">不可能 · author 已聚合</span></div>
+              <div class="sh">
+<span class="ln cm"># git mirror 里所有 ai-agent commit 的 author 已聚合到 controlling human</span>
+<span class="ln cm"># 无法反向区分 · 这是 § 13 编辑学职责 #4 的预期效果(对外不暴露 ai 分工)</span>
+              </div>
+            </div>
+          </div>
+          <div class="deeper">
+            <span class="deeper-label">为什么这是 ai 时代必备</span>
+            owner 想知道 "上周 ai agent 改过哪些文件" / "session-X 的所有产出" / "anthropic 模型改的代码 review" — alt-only 信息,git 里聚合后查不到。
+            <em>跟场景 13 alt-side blame 一体</em> — log 是横向看 commit,blame 是纵向看一行,两个都暴露 alt 的真实 identity 信息。
+          </div>
+        </div>
+
       </div>
     </article>
 
