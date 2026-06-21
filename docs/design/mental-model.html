@@ -8654,8 +8654,41 @@ Closes #123"</span></span>
     </div>
   </div>
 
+  <!-- 命令边界 · push vs export -->
+  <div class="aside" style="background: var(--bg-raised); border: 1px solid var(--border-soft); padding: 22px 28px; margin-bottom: 28px;">
+    <p style="font-family: var(--font-mono); font-size: 0.7rem; color: var(--fg-muted); letter-spacing: 0.22em; text-transform: uppercase; margin: 0 0 12px;">两个出口命令 · 编辑学职责发生在哪</p>
+    <table style="width: 100%; border-collapse: collapse; font-size: 0.84rem; margin: 0;">
+      <thead>
+        <tr>
+          <th style="text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.2em; text-transform: uppercase; font-weight: 500; width: 24%;">命令</th>
+          <th style="text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.2em; text-transform: uppercase; font-weight: 500;">用途</th>
+          <th style="text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.2em; text-transform: uppercase; font-weight: 500;">编辑学职责 7 件</th>
+        </tr>
+      </thead>
+      <tbody style="color: var(--fg);">
+        <tr>
+          <td style="padding: 10px 12px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--cop); font-size: 0.78rem; vertical-align: top;"><code>alt export &lt;dir&gt;</code></td>
+          <td style="padding: 10px 12px; border-bottom: 1px solid var(--border-soft); vertical-align: top;">单次<em>快照</em>导出 — 把当前 alt 仓状态写成一个新的 git 仓目录。一次性、本地、无 remote。</td>
+          <td style="padding: 10px 12px; border-bottom: 1px solid var(--border-soft); vertical-align: top;"><strong>3·path filter</strong> / <strong>4·author 聚合</strong> / <strong>5·branch filter</strong> / <strong>7·secret hard gate</strong> 全部应用。<strong>1·squash</strong> / <strong>2·message 降级</strong> 应用(可配)。<strong>6·LFS conversion</strong> 应用(若启用 LFS profile)。</td>
+        </tr>
+        <tr>
+          <td style="padding: 10px 12px; font-family: var(--font-mono); color: var(--cop); font-size: 0.78rem; vertical-align: top;"><code>alt push &lt;remote&gt;</code></td>
+          <td style="padding: 10px 12px; vertical-align: top;">持续<em>同步</em>到已注册的 git remote(场景 3 双 remote 一体)。增量,每次 push 应用同一套编辑学职责。</td>
+          <td style="padding: 10px 12px; vertical-align: top;">跟 <code>alt export</code> 同 7 件 · <em>额外</em> 维护 <strong>superset-oid ↔ subset-oid 映射</strong>(让下次 push 是增量;让 <code>alt fetch</code> 反向时能复用),并向 remote 端推 LFS pointer(若 6 启用)。<em>secret hard gate fail → push reject</em>(7)。</td>
+        </tr>
+      </tbody>
+    </table>
+    <p style="font-size: 0.84rem; color: var(--fg-muted); line-height: 1.78; margin: 14px 0 0;">
+      <strong>关键判断</strong>:7 件编辑学职责<em>不在 commit 时发生</em> · 也不在<em>alt 仓内部 sync 时发生</em> ·
+      <strong>只在 push/export 出口边界发生</strong>。alt 仓内日常用所有职责都<em>不动</em> —
+      agent 自由产出 · owner 自由 commit · multi-identity 自由切换 · secret 自由 inject —
+      所有这些"脏乱差"留在 alt 仓内部完整 · 只在<em>跨出口</em>时统一过滤。
+      这是 alt 跟 git 共存而非替代的关键架构选择(§ 0 framing + § 13 motivation 的兑现位置)。
+    </p>
+  </div>
+
   <p style="font-size: 0.94rem; line-height: 1.85; color: var(--fg); margin-bottom: 22px;">
-    <strong>alt 的编辑学职责(curation responsibility)</strong> 在<code>alt push --to git</code> 这一步集中行使,具体做这 7 件事:
+    <strong>alt 的编辑学职责(curation responsibility)</strong> 在 <code>alt push &lt;remote&gt;</code> / <code>alt export &lt;dir&gt;</code> 这两个出口命令中集中行使,具体做这 7 件事:
   </p>
 
   <ul style="font-size: 0.9rem; line-height: 1.95; color: var(--fg); list-style: none; padding: 0; margin: 0 0 32px;">
