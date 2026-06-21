@@ -7102,6 +7102,51 @@ Closes #123"</span></span>
               <li>M18 起 ship 0 augmentation · 让架构 baseline 立住 · augmentation 按场景 50/58/59/60/61/85 顺序 ship</li>
             </ul>
           </div>
+
+          <div class="deeper" style="border-left: 2px solid var(--copper);">
+            <span class="deeper-label">core 边界精确划定 · alt daemon 跑不跑 LLM</span>
+            <p style="margin: 0 0 10px;">
+              "core 0 LLM" 是粗描述 · 精确边界:<strong>alt-cli + alt-daemon + 所有 stones + alt-server 这 4 个进程类型,任何一个都 0 LLM client 引用</strong>。
+              这才是 invariant 7 的机械检验面(M18 CI grep gate)。
+            </p>
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.82rem; margin: 0;">
+              <thead>
+                <tr>
+                  <th style="text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 500; width: 22%;">component</th>
+                  <th style="text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 500;">LLM 边界</th>
+                </tr>
+              </thead>
+              <tbody style="color: var(--fg);">
+                <tr>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--cop); font-size: 0.78rem;">alt-cli</td>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft);"><strong class="grn">0 LLM</strong> · 任何 augmentation 走 plugin / shell out / external bridge</td>
+                </tr>
+                <tr>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--cop); font-size: 0.78rem;">alt-daemon</td>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft);"><strong class="grn">0 LLM</strong> · daemon 只做 op coordination + secret 注入 + at-most-once 路由 · 完全决定性逻辑 · 无 LLM</td>
+                </tr>
+                <tr>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--cop); font-size: 0.78rem;">stones(alt-atom / prism / chunk / wire / ...)</td>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft);"><strong class="grn">0 LLM</strong> · format-native 全部 deterministic parser · 不靠 LLM 猜语义(prism 是规则,不是模型)</td>
+                </tr>
+                <tr>
+                  <td style="padding: 9px 10px; font-family: var(--font-mono); color: var(--cop); font-size: 0.78rem;">alt-server</td>
+                  <td style="padding: 9px 10px;"><strong class="grn">0 LLM</strong> · 远端只是 storage + ACL + wire protocol</td>
+                </tr>
+              </tbody>
+            </table>
+            <p style="margin: 12px 0 0;">
+              <strong>secret 注入跟 LLM 隔离的精确合约</strong>(回答 § 13 加的具体问题):
+              alt-daemon 签名 secret op + 注入 env · daemon <em>自己</em> 0 LLM(deterministic 流程 · 拿 keychain item → 注入子进程 env → 等待结束清零)·
+              <em>子进程</em>(npm publish / docker push / agent 跑的命令)可能是 LLM 或不是 LLM · alt 不管。
+              换句话说:<strong class="cop">注入决策 = 0 LLM · 注入目标可以是任何 process · 不歧视</strong>。
+              这就是 invariant 7 的<em>反向兑现</em> — alt 自己不跑 LLM,但不阻止你的 process 跑 LLM。
+            </p>
+            <p style="margin: 10px 0 0; font-size: 0.84rem; color: var(--fg-muted);">
+              <strong>什么不在 core 边界内</strong>:augmentation points(场景 50/58/59/60/61/85)是<em>显式 opt-in 的 LLM bridge</em> · 走<code>alt-llm-bridge</code> plugin · 独立 crate · 可全 disable · 独立 audit。
+              <em>用户/agent 自己跑的命令</em>(<code>alt commit -m "..."</code> 那个 commit msg 是不是 agent 写的)也不属于 alt-core · 那是 user surface。
+            </p>
+          </div>
         </div>
 
       </div>
