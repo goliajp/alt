@@ -8233,6 +8233,15 @@ Closes #123"</span></span>
           <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">op log line</td>
           <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;"><strong class="cop">alt-only</strong>(默认<br>不出 git mirror)</td>
         </tr>
+        <tr>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--copper);">identity</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;"><code>alt identity add</code><br>--type=<em>human/ai-agent/bot</em><br>(必带 type · ai-agent 必带 controlling)</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">id + alias · semantic = email/handle</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;"><code>alt identity use</code> 切换 active<br>display name 可改 · controlling 可改 · 进 op log</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">ai-agent / bot 必有 controlling=&lt;human&gt;(invariant 7)· key 真实可签</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;">name + type + vendor + 签名 fingerprint</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;"><strong class="cop">alt-only</strong>(git 仅见<em>聚合后</em>的 controlling human · 见 § 25 step 3)</td>
+        </tr>
         <tr style="background: rgba(248, 81, 73, 0.04);">
           <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--red);">secret</td>
           <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 0.78rem;"><code>alt creds add</code><br>or auto-promote<br>(filename match)</td>
@@ -8283,6 +8292,7 @@ Closes #123"</span></span>
       <em>commit / op</em> kinds 跟 invariant 6 immutable 直接绑定 · 不能 mutate · 只能 overlay;
       <em>external</em> kinds 走 plugin backend(跟<code><a href="alt://scenario/issue-cross-tracker" style="color: var(--copper);">alt://scenario/issue-cross-tracker</a></code>一体);
       <em>op</em> 是默认 alt-only kind(op log 不进 git mirror);
+      <em>identity</em> kind 同样 alt-only · 但 export 时<em>聚合</em>(ai-agent / bot 的 author 字段映射成 controlling human · 见 § 25 step 3 + § 85 出口降级);
       <em class="red">secret</em> kind 是<strong>更严格的 alt-only-secret</strong> · 后端实例 = OS keychain · 行为面有 push hard-gate 而不只是 filter — 见 § 13。
     </p>
   </div>
