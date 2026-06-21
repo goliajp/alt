@@ -8264,12 +8264,78 @@ Closes #123"</span></span>
         <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft);">git 只看到最终态 · 没有 reflog 噪音 · undo 痕迹封在 alt</td>
       </tr>
       <tr>
-        <td style="padding: 14px 18px; font-family: var(--font-mono); color: var(--fg-muted); font-size: 0.78rem;">大文件 / chunk store</td>
-        <td style="padding: 14px 18px;">CDC chunk store · 内容寻址 · 跨 commit 去重 · 局部 fetch</td>
-        <td style="padding: 14px 18px;">git mirror 推 LFS pointer · 大文件实体留 alt 服务器 · git 那边走 LFS 协议</td>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--fg-muted); font-size: 0.78rem;">大文件 / chunk store</td>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft);">CDC chunk store · 内容寻址 · 跨 commit 去重 · 局部 fetch</td>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft);">git mirror 推 LFS pointer · 大文件实体留 alt 服务器 · git 那边走 LFS 协议</td>
+      </tr>
+      <tr style="background: rgba(248, 81, 73, 0.04);">
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--red); font-size: 0.78rem;">secrets / 凭据</td>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft);"><code>.env</code> · API keys · DB password · cloud token · TLS cert · per-format prism license — agent <em>真的需要看到</em> 才能 debug / 跑起来 · alt 仓<em>装得下而且安全</em></td>
+        <td style="padding: 14px 18px; border-bottom: 1px solid var(--border-soft);"><strong class="red">硬过滤</strong> · push --to git 强制拦截 · 漏一份 CI fail / push reject · 永远不可能漏出</td>
+      </tr>
+      <tr style="background: rgba(248, 81, 73, 0.04);">
+        <td style="padding: 14px 18px; font-family: var(--font-mono); color: var(--red); font-size: 0.78rem;">权限 / ACL / 名单</td>
+        <td style="padding: 14px 18px;">内部成员邮箱 · 角色矩阵 · 审批链 · 内部讨论 · review 投票记录 — 这些都进 alt 仓 · 跨 workspace 可查</td>
+        <td style="padding: 14px 18px;">不出 git · git 出口看不到任何"谁批准了谁 review 了"<em>内部治理痕迹</em></td>
       </tr>
     </tbody>
   </table>
+
+  <!-- secrets · 安全语义专门 callout -->
+  <div class="aside" style="border-left: 2px solid var(--red); padding: 24px 30px; background: rgba(248, 81, 73, 0.05); margin-bottom: 32px;">
+    <p style="font-family: var(--font-mono); font-size: 0.68rem; color: var(--red); letter-spacing: 0.24em; text-transform: uppercase; margin: 0 0 14px;">secrets · 权限 · alt 仓的安全语义</p>
+    <p style="font-size: 1rem; line-height: 1.78; color: var(--fg-strong); font-family: var(--font-display); font-weight: 300; margin: 0 0 16px;">
+      owner 的核心 framing — <strong class="cop">不用考虑那么多 · 尽情维护真实开发状态 · 我们只在交付层上做好</strong>。
+    </p>
+    <p style="font-size: 0.9rem; line-height: 1.82; color: var(--fg); margin: 0 0 18px;">
+      意思是:
+      <strong>alt 仓 = 真实开发环境</strong>(secrets / .env / API keys / 内部讨论 / 权限矩阵 / 全部该进就进)·
+      <strong>git mirror = 公开交付</strong>(只见 polished 标准 git 仓)。
+      agent 在 alt 里直接看到真实凭据 / 真实权限,debug / 跑起来不打折;
+      git 那一侧 0 泄露,公开仓库 scanner 跑不出任何 token。
+    </p>
+    <p style="font-size: 0.88rem; line-height: 1.82; color: var(--fg); margin: 0 0 14px;">
+      <strong>具体怎么实现"alt 仓装得下而且安全"</strong> — 四层防御:
+    </p>
+    <ol style="font-size: 0.88rem; line-height: 1.95; color: var(--fg); padding-left: 22px; margin: 0 0 18px;">
+      <li>
+        <strong class="cop">第 1 层 · alt-only path 分类</strong> — 跟 <code>.claude/</code> 同机制 · 把 secret 类 path(<code>.env*</code> / <code>secrets/</code> / <code>*.pem</code> / 任何带 <code>password</code>/<code>token</code>/<code>key</code> 关键字的文件)<em>默认</em>标 <code>visibility=alt-only-secret</code>。push --to git 时 path filter 切掉。
+      </li>
+      <li>
+        <strong class="cop">第 2 层 · 仓内加密存储</strong> — secret 类 atom 在 alt 仓本地也是加密(age / sops 兼容的内置后端),只有 owner 当前 identity 解锁。AI agent 跑 task 时 alt 临时 unlock 注入 env · 流程结束自动 lock 回去 · agent 看不到密钥实体。
+      </li>
+      <li>
+        <strong class="cop">第 3 层 · server-side ACL</strong> — <code>.altserver</code> 远端仓本身按 identity 受 ACL(成员名单是 alt-only kind atom)· github 仓全开但 alt 仓限内部。一份 source · 两套可见性。
+      </li>
+      <li>
+        <strong class="cop">第 4 层 · push hard gate</strong> — push --to git 必跑 secret scan(基于内置规则 + alt-only-secret 分类)。检出任何 secret material 在 commit / message / branch name 中 → push 直接 reject + 详细报错 + 提示哪条转 alt-only。CI 同步跑 mirror 端 scan 兜底。
+      </li>
+    </ol>
+    <p style="font-size: 0.86rem; color: var(--fg-muted); line-height: 1.78; margin: 0;">
+      <strong>关键</strong>:secret 是 alt 仓里的<em>一等 atom</em>(<code>alt://kind/secret</code>)· 有自己的 lifecycle(rotate / expire / revoke)· 进 op log · 可 undo · 可审计<em>谁什么时候用过哪个 key</em>。
+      git 那一侧<strong class="red">永远</strong>不会看到 secret 任何残影 — 即使 alt 内部加密被破 · git mirror 上根本不存在 secret commit,attacker 没有 surface。
+    </p>
+  </div>
+
+  <!-- 反 framing 补充:为什么这是 alt 区别于 "secrets manager" 的地方 -->
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 36px;">
+    <div class="aside" style="border-left: 2px solid var(--copper); padding: 18px 22px;">
+      <p style="font-family: var(--font-mono); font-size: 0.64rem; color: var(--copper); letter-spacing: 0.22em; text-transform: uppercase; margin: 0 0 10px;">跟 vault / secrets-manager 的区别</p>
+      <p style="font-size: 0.86rem; line-height: 1.78; color: var(--fg); margin: 0;">
+        vault / 1password / AWS Secrets Manager 是<em>独立服务</em> · 跟代码仓分离 · agent 要专门去拉 ·
+        每个环境 (dev/staging/prod) 单独配置。<strong class="cop">alt</strong> 把 secret 当成<em>仓的一部分</em> ·
+        跟代码同 ref / 同 commit / 同 history · agent <code>alt checkout</code> 一份就齐全。
+      </p>
+    </div>
+
+    <div class="aside" style="border-left: 2px solid var(--blue); padding: 18px 22px;">
+      <p style="font-family: var(--font-mono); font-size: 0.64rem; color: var(--blue); letter-spacing: 0.22em; text-transform: uppercase; margin: 0 0 10px;">跟 git-crypt / git-secret 的区别</p>
+      <p style="font-size: 0.86rem; line-height: 1.78; color: var(--fg); margin: 0;">
+        git-crypt / git-secret 在 git 仓里存<em>加密 blob</em> · 一旦 push 到 github · attacker 拿到密文可以离线 brute · 一次密钥泄露全历史可解。
+        <strong class="cop">alt</strong> 走<em>不同路</em>:secret 永远不进 git mirror · attacker 在 github 上<em>根本看不到加密 blob 存在</em> · 0 surface。
+      </p>
+    </div>
+  </div>
 
   <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-bottom: 36px;">
     <div class="aside" style="border-left: 2px solid var(--copper); padding: 20px 24px;">
@@ -8298,7 +8364,7 @@ Closes #123"</span></span>
   </div>
 
   <p style="font-size: 0.94rem; line-height: 1.85; color: var(--fg); margin-bottom: 22px;">
-    <strong>alt 的编辑学职责(curation responsibility)</strong> 在<code>alt push --to git</code> 这一步集中行使,具体做这 6 件事:
+    <strong>alt 的编辑学职责(curation responsibility)</strong> 在<code>alt push --to git</code> 这一步集中行使,具体做这 7 件事:
   </p>
 
   <ul style="font-size: 0.9rem; line-height: 1.95; color: var(--fg); list-style: none; padding: 0; margin: 0 0 32px;">
@@ -8320,7 +8386,88 @@ Closes #123"</span></span>
     <li style="padding: 10px 14px; border-left: 2px solid var(--copper); margin-bottom: 10px; background: rgba(232, 168, 124, 0.04);">
       <strong class="cop">6 · LFS conversion</strong> — alt 的 CDC chunk store 实体不推 git · 转成 LFS pointer · 大文件实际数据走 alt 服务器或独立 LFS server。
     </li>
+    <li style="padding: 10px 14px; border-left: 2px solid var(--red); margin-bottom: 10px; background: rgba(248, 81, 73, 0.06);">
+      <strong class="red">7 · secret hard gate</strong> — 跟 path filter 不同 · 这是<em>reject</em> 不是<em>filter</em>。push --to git 强制跑 secret scan(<code>alt://kind/secret</code> 分类 + 内置 entropy 规则)· 检出任何 secret material 在 commit / message / branch name 中 → push 直接拒绝。CI 同步跑 mirror 端 scan 兜底。<em>这是唯一会让 push 失败的编辑学职责</em>。
+    </li>
   </ul>
+
+  <!-- active keychain & toolchain integration -->
+  <div class="aside" style="border-left: 2px solid var(--copper); padding: 26px 32px; background: linear-gradient(135deg, rgba(232, 168, 124, 0.06) 0%, rgba(232, 168, 124, 0.01) 60%, transparent 100%); margin-bottom: 36px;">
+    <p style="font-family: var(--font-mono); font-size: 0.7rem; color: var(--copper); letter-spacing: 0.24em; text-transform: uppercase; margin: 0 0 14px;">alt 不只是<em>存</em> secret · 主动接管 keychain + 工具链访问</p>
+    <p style="font-size: 1rem; line-height: 1.78; color: var(--fg-strong); font-family: var(--font-display); font-weight: 300; margin: 0 0 18px; letter-spacing: 0.005em;">
+      <strong class="cop">alt 在 local 帮 owner 把 keychain 和主要工具链访问管起来 · 不回避密钥这件事 · 反过来正面把它做好</strong>。
+    </p>
+    <p style="font-size: 0.9rem; line-height: 1.82; color: var(--fg); margin: 0 0 18px;">
+      平台原生 keychain 是<em>真实开发的事实地基</em> —
+      OS 已经帮人类把"哪个 token 属于哪个 app / 怎么解锁 / 怎么轮换"这些事走通了。
+      alt 不另起炉灶,直接把<em>OS-native keychain</em> 当成 secret atom 的<em>权威后端</em>:
+    </p>
+    <ul style="font-size: 0.86rem; line-height: 1.9; color: var(--fg); list-style: none; padding: 0; margin: 0 0 20px;">
+      <li style="padding: 8px 12px; border-left: 1.5px solid var(--copper); margin-bottom: 8px;">
+        <strong class="cop">macOS</strong> — Keychain Services(<code>security</code> API) · biometric unlock · per-item ACL
+      </li>
+      <li style="padding: 8px 12px; border-left: 1.5px solid var(--copper); margin-bottom: 8px;">
+        <strong class="cop">Linux</strong> — Secret Service / libsecret(gnome-keyring / kwallet) · D-Bus 集成
+      </li>
+      <li style="padding: 8px 12px; border-left: 1.5px solid var(--copper); margin-bottom: 8px;">
+        <strong class="cop">Windows</strong> — Credential Manager(wincred API) · DPAPI 加密 · per-user vault
+      </li>
+    </ul>
+    <p style="font-size: 0.9rem; line-height: 1.82; color: var(--fg); margin: 0 0 18px;">
+      具体把<em>哪些工具链</em>接进来 — 所有 owner 日常用、agent 跑 task 时需要的访问:
+    </p>
+    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; font-size: 0.82rem; margin-bottom: 18px;">
+      <div style="padding: 12px 14px; background: var(--bg-raised); border: 1px solid var(--border-soft);">
+        <p style="font-family: var(--font-mono); font-size: 0.66rem; color: var(--copper); margin: 0 0 6px; letter-spacing: 0.16em; text-transform: uppercase;">package mgr</p>
+        npm · pypi · cargo · gem · maven · go mod · brew tap token
+      </div>
+      <div style="padding: 12px 14px; background: var(--bg-raised); border: 1px solid var(--border-soft);">
+        <p style="font-family: var(--font-mono); font-size: 0.66rem; color: var(--copper); margin: 0 0 6px; letter-spacing: 0.16em; text-transform: uppercase;">cloud / infra</p>
+        aws · gcloud · az · kubectl · terraform · docker registry · gh · gl
+      </div>
+      <div style="padding: 12px 14px; background: var(--bg-raised); border: 1px solid var(--border-soft);">
+        <p style="font-family: var(--font-mono); font-size: 0.66rem; color: var(--copper); margin: 0 0 6px; letter-spacing: 0.16em; text-transform: uppercase;">vcs / collab</p>
+        github / gitlab / bitbucket · linear · jira · slack · figma · notion API
+      </div>
+      <div style="padding: 12px 14px; background: var(--bg-raised); border: 1px solid var(--border-soft);">
+        <p style="font-family: var(--font-mono); font-size: 0.66rem; color: var(--copper); margin: 0 0 6px; letter-spacing: 0.16em; text-transform: uppercase;">ssh / signing</p>
+        ssh-agent · gpg-agent · code signing cert · TLS cert · ssh known_hosts
+      </div>
+      <div style="padding: 12px 14px; background: var(--bg-raised); border: 1px solid var(--border-soft);">
+        <p style="font-family: var(--font-mono); font-size: 0.66rem; color: var(--copper); margin: 0 0 6px; letter-spacing: 0.16em; text-transform: uppercase;">db / data</p>
+        postgres · mysql · redis · mongo · clickhouse · S3 / GCS · BigQuery key
+      </div>
+      <div style="padding: 12px 14px; background: var(--bg-raised); border: 1px solid var(--border-soft);">
+        <p style="font-family: var(--font-mono); font-size: 0.66rem; color: var(--copper); margin: 0 0 6px; letter-spacing: 0.16em; text-transform: uppercase;">AI / LLM</p>
+        anthropic / openai / google / openrouter / replicate · MCP server creds
+      </div>
+    </div>
+    <p style="font-size: 0.88rem; line-height: 1.82; color: var(--fg); margin: 0 0 14px;">
+      <strong>具体怎么"接管"</strong>:
+    </p>
+    <ol style="font-size: 0.86rem; line-height: 1.95; color: var(--fg); padding-left: 22px; margin: 0 0 18px;">
+      <li>
+        <strong class="cop">alt creds add &lt;tool&gt;</strong> — 一次性引导:从 OS keychain 读已有 token / 或交互式登录 / 或粘 token。所有 tool 走<em>同一个</em> alt 命令面,owner 不用记每个工具自己的 login 命令(<code>npm login</code> / <code>aws configure</code> / <code>gh auth login</code> 各家语法散乱)。
+      </li>
+      <li>
+        <strong class="cop">alt creds list</strong> — 列出当前 workspace 装了哪些工具凭据 · 过期时间 · 上次使用 · 来源(keychain / 仓内加密 / 环境变量)。
+      </li>
+      <li>
+        <strong class="cop">agent 自动注入</strong> — agent 跑 <code>npm publish</code> / <code>docker push</code> / <code>aws s3 cp</code> / <code>gh pr create</code> 等命令时 · alt 拦截 · 从 keychain 取 token · 临时注入到子进程环境 · 进程结束自动清理。agent 不需要自己处理 token,也<em>看不到</em> token 实体(除非 explicit unlock)。
+      </li>
+      <li>
+        <strong class="cop">alt creds rotate &lt;tool&gt;</strong> — 一键轮换:调对应服务的 API 旋转 token / 更新 keychain 条目 / 撤销旧 token / 进 op log。轮换是<em>仓的一等 op</em> · 可 audit · 可 undo(在 grace window 内)。
+      </li>
+      <li>
+        <strong class="cop">alt creds revoke &lt;tool&gt;</strong> — 紧急撤销:任何 token 怀疑泄露 · 调对应服务 API · 撤销 + 删 keychain · 通知所有 active workspace。是 invariant 1 signed op 一等公民。
+      </li>
+    </ol>
+    <p style="font-size: 0.86rem; color: var(--fg-muted); line-height: 1.8; margin: 0;">
+      <strong>跟 secret atom 的关系</strong>:keychain item 就是<code>alt://kind/secret</code> 的<em>权威后端实例</em> ·
+      reference 在 alt 仓里 · 真实材料留在 OS keychain。<em>仓搬到新机器</em>时 · alt 提示哪些 secret 需要在新 keychain 上重新提供 · 不会出现"clone 完没法跑"的卡点(只是<em>提示哪些要补</em>,不会傻傻全部要求重输)。
+      <strong>git 出口永远 0 secret</strong>: 即使 alt 仓里 secret 是<em>权威 keychain reference + 仓内加密缓存</em>,push --to git 永远只看 path filter + hard gate · 双重保险。
+    </p>
+  </div>
 
   <div class="aside" style="background: var(--bg-raised); border: 1px solid var(--border-soft); padding: 24px 30px; margin-bottom: 32px;">
     <p style="font-family: var(--font-mono); font-size: 0.7rem; color: var(--fg-muted); letter-spacing: 0.22em; text-transform: uppercase; margin: 0 0 14px;">跟 alt ⊇ git 三轴的关系</p>
@@ -8360,8 +8507,13 @@ Closes #123"</span></span>
 
   <div class="aside" style="margin-top: 56px;">
     <span class="tag">§ 13 段总账</span>
-    1 个原则 atom(<code>alt://principle/delivery-polish</code>)· 10 维映射表(脏/净对照)· 6 件 alt 在 push 边界做的编辑学职责 · 跟 axes 1/2/3 是<em>动机统一</em>关系不是新增。
-    <em>实现层面</em>:axis 2 visibility 已 partial(<code>.claude/</code> 过滤可工作)· axis 3 commit-msg-schema design 已落地(scenario 85)· 其余编辑学职责(squash / author 聚合 / branch filter / LFS conversion)是 M19+ 的工作。
+    2 个原则 atom(<code>alt://principle/delivery-polish</code> + <code>alt://principle/secret-active-stewardship</code>)·
+    12 维映射表(脏/净对照 · 含 secrets + 权限/ACL 两个新维)·
+    4 层 secret 安全语义(alt-only 分类 / 仓内加密 / server ACL / push hard gate)·
+    7 件 alt 在 push 边界做的编辑学职责(+ secret hard gate 是唯一会 reject push 的)·
+    跨平台 keychain 接管(macOS Keychain / Linux Secret Service / Windows Credential Manager)+ 6 类工具链覆盖(package mgr / cloud / vcs / ssh-signing / db / AI) ·
+    跟 axes 1/2/3 是<em>动机统一</em>关系不是新增。
+    <em>实现层面</em>:axis 2 visibility 已 partial · axis 3 commit-msg-schema design 已落地 · secret/keychain 接管 + squash + author 聚合 + branch filter + LFS conversion 是 M19+ 工作。
   </div>
 </section>
 
