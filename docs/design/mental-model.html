@@ -4054,40 +4054,116 @@ invariant 6 (immutable history) 仅在 B 被破 · A 在 import 边界算不上�
     <!-- ═══════ 场景 25: multi-identity (v3) ═══════ -->
     <article class="scenario">
       <p class="scenario-tag">scenario 25 · v3</p>
-      <h3 class="scenario-name">multi-identity · 公司 + 个人邮箱按目录切换 <span class="status-badge future">🔮 设计中</span></h3>
-      <p class="scenario-goal"><strong>目标:</strong> <code>~/work/</code> 项目自动用 work · <code>~/personal/</code> 用 personal。</p>
+      <h3 class="scenario-name">multi-identity · 人 / agent / 多邮箱身份 + git 出口聚合 <span class="status-badge future">🔮 设计闭环 · M18+</span></h3>
+      <p class="scenario-goal"><strong>目标:</strong> alt 仓内多 identity(公司邮箱 / 个人邮箱 / Claude-A / Cursor-B / 自动 review bot)按规则自动切换 · git 出口按 § 13 编辑学职责 #4 聚合成<em>人类</em> author。</p>
 
       <div class="steps">
+
         <div class="step">
-          <h4 class="step-title">期望 + workaround</h4>
+          <h4 class="step-title">step 1 · 多种 identity 类型 · alt 仓内</h4>
           <span class="step-input-label"><span class="cop">▼</span> 你要打的</span>
           <div class="cmp">
             <div class="cmp-side alt-side unavail">
-              <div class="cmp-header"><span>alt</span><span class="tag-note">rule engine 未 ship</span></div>
+              <div class="cmp-header"><span>alt</span><span class="tag-note">期望 · M18+</span></div>
               <div class="sh">
-<span class="ln cm"># 期望:</span>
-<span class="ln"><span class="p">$</span> <span class="cmd">alt identity add</span> <span class="arg">work@company.com</span></span>
-<span class="ln"><span class="p">$</span> <span class="cmd">alt identity add</span> <span class="arg">me@personal.com</span></span>
-<span class="ln"><span class="p">$</span> <span class="cmd">alt identity rule add</span> <span class="arg">~/work/* → work@company.com</span></span>
+<span class="ln cm"># 加人类 identity</span>
+<span class="ln"><span class="p">$</span> <span class="cmd">alt identity add</span> <span class="arg">work@company.com</span> --type=human</span>
+<span class="ln"><span class="p">$</span> <span class="cmd">alt identity add</span> <span class="arg">me@personal.com</span> --type=human</span>
 
 <span class="ln spacer"></span>
-<span class="ln cm"># workaround · env var per shell:</span>
-<span class="ln"><span class="p">$</span> <span class="cmd">export</span> ALT_IDENTITY=<span class="arg">work@company.com</span></span>
+<span class="ln cm"># 加 AI agent identity · 必须挂在某个 human 之下</span>
+<span class="ln"><span class="p">$</span> <span class="cmd">alt identity add</span> <span class="arg">claude-a@local</span> --type=ai-agent \
+<span class="ln">      --controlled-by=<span class="arg">work@company.com</span> --vendor=anthropic</span>
+<span class="ln"><span class="p">$</span> <span class="cmd">alt identity add</span> <span class="arg">cursor-b@local</span> --type=ai-agent \
+<span class="ln">      --controlled-by=<span class="arg">work@company.com</span> --vendor=cursor</span>
+
+<span class="ln spacer"></span>
+<span class="ln cm"># 加 bot identity(CI / review bot)</span>
+<span class="ln"><span class="p">$</span> <span class="cmd">alt identity add</span> <span class="arg">ci-bot@local</span> --type=bot \
+<span class="ln">      --controlled-by=<span class="arg">work@company.com</span></span>
+
+<span class="ln spacer"></span>
+<span class="ln cm"># 自动 rule</span>
+<span class="ln"><span class="p">$</span> <span class="cmd">alt identity rule add</span> <span class="arg">'~/work/* → work@company.com'</span></span>
+<span class="ln"><span class="p">$</span> <span class="cmd">alt identity rule add</span> <span class="arg">'~/personal/* → me@personal.com'</span></span>
               </div>
             </div>
             <div class="cmp-side git-side">
-              <div class="cmp-header"><span>git</span><span class="tag-note">includeIf 按目录</span></div>
+              <div class="cmp-header"><span>git</span><span class="tag-note">仅人类 · 无类型</span></div>
               <div class="sh">
 <span class="ln out cm"># ~/.gitconfig:</span>
 <span class="ln out">[includeIf "gitdir:~/work/"]</span>
 <span class="ln out">  path = .gitconfig-work</span>
+
+<span class="ln spacer"></span>
+<span class="ln cm"># git 没 identity type · 没"agent 挂 human"概念</span>
+<span class="ln cm"># AI 跑的 commit 跟人手敲的 commit author 字段完全分不开</span>
               </div>
             </div>
           </div>
-          <div class="deeper">
-            <span class="deeper-label">M18+</span>identity rule engine ~几十行实现 · polish 范围。
+          <div class="silent">
+            <span class="silent-label">alt 静默做了 · 三类 identity</span>
+            <ul>
+              <li><strong>human</strong>:可以独立 commit / push · 跟 invariant 1 signed op 一体</li>
+              <li><strong>ai-agent</strong>:<em>必须</em>声明 <code>--controlled-by=&lt;human&gt;</code> · 它做的所有 op 由 controlling human 共同担责(invariant 7 LLM 隔离)</li>
+              <li><strong>bot</strong>:CI / review 等自动化 · 同样必须挂 controlling human</li>
+              <li>identity 自己也是 alt-only kind atom(<code>alt://kind/identity</code>)· 不进 git mirror</li>
+            </ul>
           </div>
         </div>
+
+        <div class="step">
+          <h4 class="step-title">step 2 · 日常 commit · identity 自动切换</h4>
+          <span class="step-input-label"><span class="cop">▼</span> 你要打的</span>
+          <div class="cmp">
+            <div class="cmp-side alt-side unavail">
+              <div class="cmp-header"><span>alt</span><span class="tag-note">期望 · M18+</span></div>
+              <div class="sh">
+<span class="ln cm"># owner 在 ~/work/myproj 打:</span>
+<span class="ln"><span class="p">owner $</span> <span class="cmd">alt commit</span> -m <span class="str">"feat: x"</span></span>
+<span class="ln out cm"># author = work@company.com (按 rule)</span>
+
+<span class="ln spacer"></span>
+<span class="ln cm"># Claude agent 在 workspace alt-A 打:</span>
+<span class="ln"><span class="p">claude-A $</span> <span class="cmd">alt identity use</span> <span class="arg">claude-a@local</span></span>
+<span class="ln"><span class="p">claude-A $</span> <span class="cmd">alt commit</span> -m <span class="str">"refactor: y"</span></span>
+<span class="ln out cm"># author = claude-a@local · controlling = work@company.com</span>
+<span class="ln out cm"># 进 op log 都记 · 进 commit object 也记 (alt-side)</span>
+              </div>
+            </div>
+            <div class="cmp-side git-side">
+              <div class="cmp-header"><span>git</span><span class="tag-note">没法分人 vs agent</span></div>
+              <div class="sh">
+<span class="ln cm"># Claude 跑的 git commit 跟人手敲完全一样 · 没法 audit 区分</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="step">
+          <h4 class="step-title">step 3 · git 出口 · author 聚合(§ 13 编辑学职责 #4)</h4>
+          <div class="silent">
+            <span class="silent-label">alt 静默做了 · 推 git 时 author 自动聚合</span>
+            <ul>
+              <li>alt 仓内 commit author 是 <code>claude-a@local</code> / <code>cursor-b@local</code> / <code>ci-bot@local</code> 等 ai-agent / bot · git mirror 看不到这些<em>非人类</em> identity</li>
+              <li>聚合规则:<strong>ai-agent / bot 的 commit · git author = controlling human</strong>(<code>work@company.com</code>)· git committer 可选保留 alt agent id 作为审计痕迹(可关)</li>
+              <li>多个 ai-agent commit 被 squash 进 1 个 git commit 时 · co-authored-by 全部列上(可选)</li>
+              <li>alt op log 保留<em>真实 identity 链</em>(谁起 task · 谁实际跑 commit · 谁批 finish)· git 仓只展示<em>对外</em>责任人</li>
+              <li>对外 git 仓的 "Verified" 签名落到 controlling human 的 GPG / SSH key · agent 不签 git 对外 commit</li>
+            </ul>
+          </div>
+          <div class="deeper">
+            <span class="deeper-label">为什么这么设计 · 三条原则共同推出</span>
+            <p style="margin: 0;">
+              这一聚合规则不是 ad-hoc:
+              <strong>(1)</strong> § 13 编辑学职责 — 对外 git 仓<em>不暴露</em> AI 内部协作细节;
+              <strong>(2)</strong> invariant 1 signed op — 对外签名必须有<em>可问责人类</em>站后面,agent 不能独立签;
+              <strong>(3)</strong> invariant 7 LLM 隔离 — agent 的所有动作必须挂 controlling human · 这就是这个挂载的对外兑现。
+              <em>三条原则共同推出:agent 自由产出 · controlling human 承担对外责任</em>。
+            </p>
+          </div>
+        </div>
+
       </div>
     </article>
 
