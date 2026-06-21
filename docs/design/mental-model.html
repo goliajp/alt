@@ -3721,6 +3721,42 @@ code, .mono {
           </div>
         </div>
 
+        <div class="step">
+          <h4 class="step-title">amend 跟 § 85 message overlay 的边界 · 什么走 overlay,什么 amend 新 oid</h4>
+          <div class="deeper" style="border-left: 2px solid var(--copper);">
+            <span class="deeper-label">两条路 · 各自适用范围 · 不重叠</span>
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.82rem; margin: 0;">
+              <thead>
+                <tr>
+                  <th style="text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 500; width: 18%;">路径</th>
+                  <th style="text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 500; width: 32%;">改的是什么</th>
+                  <th style="text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 500;">oid + 邀机制</th>
+                </tr>
+              </thead>
+              <tbody style="color: var(--fg);">
+                <tr>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft); vertical-align: top;"><strong class="cop">message overlay</strong><br>(§ 85)</td>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft); vertical-align: top;">只改 commit-msg schema 字段(summary / body / type / scope / closes / decisions / 等)· 不动 tree</td>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft); vertical-align: top;"><strong>alt oid 不变</strong>(invariant 6 immutable)· 改动以 overlay 层存 · 进 op log MSG_OVERLAY · audit 链可查 · git mirror 端 oid 会变(因为 message 是 git oid 一部分),superset-oid ↔ subset-oid 映射记新映射</td>
+                </tr>
+                <tr>
+                  <td style="padding: 9px 10px; vertical-align: top;"><strong class="cop">amend</strong><br>(本场景)</td>
+                  <td style="padding: 9px 10px; vertical-align: top;">改 tree(加文件 / 删文件 / 改内容)· 可能<em>同时</em>改 message · 不能只通过 overlay 解</td>
+                  <td style="padding: 9px 10px; vertical-align: top;"><strong>新 oid</strong>(因为 tree 变 · 必然不同 oid)· 旧 oid 在 op log 永久 · ref 指向新 oid · git mirror 同步更新</td>
+                </tr>
+              </tbody>
+            </table>
+            <p style="margin: 12px 0 0;">
+              <strong>判断规则</strong>:<em>纯改 message 用 overlay 不动 oid 不破 immutable</em> · <em>改 tree 必须 amend 新 oid</em>。
+              这就是为什么 § 85 message 改是<em>"日常"</em>(commit-msg 改一字 ai-agent 可能想做无数次)而 amend 是<em>"少数事故"</em>(改 tree 应该尽量 rebase / 新 commit · amend 主要救"忘加文件"这一种)。
+            </p>
+            <p style="margin: 10px 0 0; font-size: 0.84rem; color: var(--fg-muted);">
+              <em>跟场景 41 multi-sig 一体</em>:overlay 改 message 时若 commit 已 cosign · overlay 不破原签名(原签名签的是<em>tree+author+ts</em>不是 message overlay 层)· git 端 mirror 重新 sign(用 controlling human 的 key)。
+              amend 改 tree 则<em>必须重新 cosign</em> · 原签名失效。
+            </p>
+          </div>
+        </div>
+
       </div>
     </article>
 
