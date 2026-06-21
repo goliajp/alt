@@ -7564,6 +7564,51 @@ Closes #123"</span></span>
             <span class="deeper-label">M19-M20</span>~5000 行(Rust + axum + 轻量前端)· localhost 优先(jupyter 风格)· auth 信任本机用户 · 不跟 GitHub 直接竞争。
           </div>
         </div>
+
+        <div class="step">
+          <h4 class="step-title">alt-web 在 alt 一侧 · visibility 三档展示规则</h4>
+          <div class="deeper" style="border-left: 2px solid var(--copper);">
+            <span class="deeper-label">Web UI 是<em>本地工具</em> · 不是对外发布</span>
+            <p style="margin: 0 0 10px;">
+              alt-web 是 alt 仓的<em>本地 review 工具</em> · 跟 <code>alt blame</code>/<code>alt log</code> 一样在 alt 一侧运行 ·
+              <strong>所有 alt 见的它都见</strong>。三档 visibility 在 Web UI 的展示:
+            </p>
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.82rem; margin: 0;">
+              <thead>
+                <tr>
+                  <th style="text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 500; width: 22%;">档</th>
+                  <th style="text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 500;">Web UI 显示</th>
+                </tr>
+              </thead>
+              <tbody style="color: var(--fg);">
+                <tr>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft);"><strong class="grn">both</strong></td>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft);">正常显示 · 无 badge</td>
+                </tr>
+                <tr>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft);"><strong class="cop">alt-only</strong></td>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft);">正常显示 · 路径前一个铜色 <code>[alt-only]</code> badge 提示"这不会推 git"</td>
+                </tr>
+                <tr>
+                  <td style="padding: 9px 10px;"><strong class="red">alt-only-secret</strong></td>
+                  <td style="padding: 9px 10px;"><em>不展开实体</em> · 显示 <code>[secret]</code> badge + semantic_id + 后端 keychain ref · 实体永远不渲染明文 · 跟 § 13 op log "永不记 token value" 同规则</td>
+                </tr>
+              </tbody>
+            </table>
+            <p style="margin: 12px 0 0;">
+              <strong>simulate-external 模式</strong>:Web UI 提供 <code>View as: alt-side / git-side</code> 切换 ·
+              git-side 模式下 alt-only 路径整体不出现 · ai-agent author 聚合 · commit-msg AI 元数据丢 ·
+              owner 用这个模式预览"我 push 之后协作者会看到什么"。
+            </p>
+            <p style="margin: 10px 0 0; font-size: 0.84rem; color: var(--fg-muted);">
+              <strong>关于 alt.golia.jp(场景 72)的边界</strong>:
+              alt-web 是<em>本地</em>工具 · 看 alt 仓全部内容 ·
+              alt.golia.jp 是<em>远端 multi-tenant</em>(场景 72)· 走<em>同一</em> editorial-boundary 规则(等同于"client 那侧推 git mirror 后看 git-side")· alt-only 不出 · alt-only-secret 永远拒 push · 所以远端从来看不见 secret 实体。
+              <em>同一份代码 · 本地全见 · 远端见 polished subset</em>。
+            </p>
+          </div>
+        </div>
+
       </div>
     </article>
 
