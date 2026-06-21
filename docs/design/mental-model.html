@@ -7362,6 +7362,56 @@ Closes #123"</span></span>
             <span class="deeper-label">M20+ 设计</span>op log 跨机器 sync 是 multi-machine AI workflow 必面对的 · 方案:op log 作为 sync 一等公民 ref-namespace · 跟 branch 一样 push/fetch。
           </div>
         </div>
+
+        <div class="step">
+          <h4 class="step-title">op-type-aware sync · 不同 op 不同 sync 策略</h4>
+          <div class="deeper" style="border-left: 2px solid var(--copper);">
+            <span class="deeper-label">不是所有 op 都 sync · 按 op type 分 4 档</span>
+            <p style="margin: 0 0 10px;">
+              op log 跨机器 sync <strong>不是</strong> 全量 push:某些 op 含<em>设备本地敏感</em>元数据 · 默认<em>不跨机</em>。按 4 档策略:
+            </p>
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.82rem; margin: 0;">
+              <thead>
+                <tr>
+                  <th style="text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 500; width: 22%;">档</th>
+                  <th style="text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 500; width: 32%;">op type</th>
+                  <th style="text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 500;">sync 行为</th>
+                </tr>
+              </thead>
+              <tbody style="color: var(--fg);">
+                <tr>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft);"><strong class="grn">A · 全量 sync</strong></td>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft);">commit / branch / merge / cherry-pick / undo 这一类<em>状态机</em> op</td>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft);">完整 sync · 这是 multi-machine 协作骨架</td>
+                </tr>
+                <tr>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft);"><strong class="cop">B · sync · 但脱设备元数据</strong></td>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft);">SECRET_INJECT(注入事件 · 含 agent id / vendor / 子进程 cmd)</td>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft);">sync 但 pid / 子进程 cmd 全名 / env var 实际值 这些<em>本机执行细节</em>被 redact · 只保留 secret semantic_id + signing identity + ts</td>
+                </tr>
+                <tr>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft);"><strong class="cop">C · device-local-only</strong></td>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft);">SCAN_FAIL(push 被 hard gate 拦)+ failed lint hook + 本地 debug op</td>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft);">默认不 sync · 留本机审计 · owner 可选 <code>alt sync op-log --include-local</code> 强制</td>
+                </tr>
+                <tr>
+                  <td style="padding: 9px 10px;"><strong class="red">D · 永远不 sync(除非显式 attest)</strong></td>
+                  <td style="padding: 9px 10px;">SECRET_ADD / SECRET_ROTATE / SECRET_REVOKE(keychain item 的存在性本身敏感)</td>
+                  <td style="padding: 9px 10px;">默认不 sync · 别的机器要看 secret 历史必须 <code>alt creds attest --remote &lt;X&gt;</code> 显式发起 · 类似 GPG cross-sign 流程</td>
+                </tr>
+              </tbody>
+            </table>
+            <p style="margin: 12px 0 0;">
+              <strong>关键不变量</strong>:无论哪档 · op log entry <em>从不含</em>secret material 实体 / 私钥(跟 § 13 op log schema 一致)。
+              4 档 sync 政策只决定<em>元数据可见性</em> · 不打开新泄露面。
+            </p>
+            <p style="margin: 10px 0 0; font-size: 0.84rem; color: var(--fg-muted);">
+              <em>跟 § 13 op log schema 的关系</em>:同一份 op log · sync 时分档过滤 · 接收方看到的是本机 schema 的<em>子集</em>。
+              <em>跟场景 80 transparency log 的关系</em>:transparency log 是 op log 的对外公开子集(8 类 event)· sync 是<em>对内多机</em>子集(4 档)· 两个子集独立定义。
+            </p>
+          </div>
+        </div>
+
       </div>
     </article>
 
