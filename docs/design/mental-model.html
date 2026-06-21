@@ -8754,6 +8754,95 @@ Closes #123"</span></span>
     </p>
   </div>
 
+  <!-- secret op log schema -->
+  <div class="aside" style="border-left: 2px solid var(--blue); padding: 24px 30px; background: rgba(90, 160, 250, 0.04); margin-bottom: 32px;">
+    <p style="font-family: var(--font-mono); font-size: 0.7rem; color: var(--blue); letter-spacing: 0.24em; text-transform: uppercase; margin: 0 0 14px;">secret op log schema · 永远<em>不</em>记 token 内容</p>
+    <p style="font-size: 0.92rem; line-height: 1.78; color: var(--fg); margin: 0 0 14px;">
+      每次跟 secret 相关的动作进 op log,但<strong class="cop">永远不记 token 实体</strong>。op log 自己就是 invariant 2 · signed · append-only · alt-only。
+    </p>
+    <pre style="font-size: 0.78rem; line-height: 1.55; color: var(--fg); background: var(--bg-raised); border: 1px solid var(--border-soft); padding: 16px 20px; margin: 0 0 14px; overflow-x: auto;">
+{
+  op_id:        _op_3a8f
+  type:        SECRET_INJECT        # ADD / ROTATE / REVOKE / INJECT / SCAN_FAIL
+  ts:          2026-06-21T03:14:17Z
+  signed_by:   work@company.com     # 人类 identity (invariant 1) · 不可省
+  triggered_by: claude-a@local      # 触发的 agent / human / bot
+  controlling: work@company.com     # invariant 7 强制 (agent 必有 controlling)
+
+  secret:
+    semantic_id:  github-publish-token       # alt://kind/secret/github-publish-token
+    uuid:         01931a8f-7c9f-7000-…       # invariant 4 isolation
+    backend:      macos-keychain             # OS keychain ref
+    scope_hint:   "service=github.com"       # 哪个服务 · 不含 token
+
+  context:
+    cmd:        "npm publish"               # 哪条命令触发注入
+    pid:        48211                        # 子进程
+    env_vars_injected: ["NPM_TOKEN"]         # 注入了哪些 env (字段名 · 非值)
+    duration_ms: 2841                        # 注入持续多久 (子进程生命期)
+
+  # 显式声明 · 永远不会出现的字段:
+  # token_value       — 永远不进 op log
+  # token_hash        — 不存储 (避免 offline brute)
+  # plaintext         — 任何形式都不允许
+}</pre>
+    <p style="font-size: 0.84rem; color: var(--fg-muted); line-height: 1.8; margin: 0;">
+      <strong>覆盖审计场景</strong>:<em>(1)</em> "上周哪个 agent 用过 github 的 publish token?" · <em>(2)</em> "这个 token 上次 rotate 是什么时候?" · <em>(3)</em> "是否有 secret 在某次 commit 时被 inject 但<em>命令本身</em>没声明需要?"(异常注入告警) · <em>(4)</em> "scan_fail event · 哪次 push 被 hard gate 拦下了?"。
+      <em>不覆盖</em>"token 当时具体值是什么" — alt 设计上拒绝回答这个问题。
+    </p>
+  </div>
+
+  <!-- invariant 1/2/7 协议 -->
+  <div class="aside" style="border-left: 2px solid var(--copper); padding: 24px 30px; margin-bottom: 32px;">
+    <p style="font-family: var(--font-mono); font-size: 0.7rem; color: var(--copper); letter-spacing: 0.24em; text-transform: uppercase; margin: 0 0 14px;">secret 跟 invariants 1 / 2 / 6 / 7 的协议 · 谁签 · 谁能看</p>
+    <p style="font-size: 0.92rem; line-height: 1.78; color: var(--fg); margin: 0 0 16px;">
+      secret 操作触及四条 invariant · 各自的精确合约:
+    </p>
+    <table style="width: 100%; border-collapse: collapse; font-size: 0.84rem; margin: 0;">
+      <thead>
+        <tr>
+          <th style="text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.22em; text-transform: uppercase; font-weight: 500; width: 26%;">invariant</th>
+          <th style="text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.22em; text-transform: uppercase; font-weight: 500;">合约 (secret 操作如何兑现)</th>
+        </tr>
+      </thead>
+      <tbody style="color: var(--fg);">
+        <tr>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--cop);">1 · signed op</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft);">
+            secret 操作的 op log 行 <strong>必须由 controlling human</strong> 签名 · agent identity 不能独立签 secret op(invariant 7 要求)。
+            agent 触发的 inject 由 alt daemon 用 controlling human 的 key 自动签 · daemon 启动时一次性 unlock(biometric / passphrase)。
+          </td>
+        </tr>
+        <tr>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--cop);">2 · op log</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft);">
+            5 类 secret op 都入 log:<code>ADD</code> / <code>ROTATE</code> / <code>REVOKE</code> / <code>INJECT</code> / <code>SCAN_FAIL</code>。
+            schema 见上 · 永远不记 token value / hash / plaintext。
+            op log 自己 <strong>不出 git mirror</strong>(默认 alt-only kind)· 即使 attacker 拿到 git 仓也看不到 secret 操作历史。
+          </td>
+        </tr>
+        <tr>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--cop);">6 · immutable history</td>
+          <td style="padding: 12px 14px; border-bottom: 1px solid var(--border-soft);">
+            secret atom 的 <code>ROTATE</code> 走 <em>alias chain</em>(§ 12 atom mutate 同机制)· 不删旧 entry · 加新 alias · 标 deprecated。
+            "secret 历史"永远查得到("github-publish-token v3 → v4 at T, rotated by …, reason: …")。
+            真正<em>泄露</em>时走的不是 immutable 破坏 · 是<code>REVOKE</code>(service API 撤销 + alt 仓 tombstone) — 仓 history 仍完整。
+          </td>
+        </tr>
+        <tr>
+          <td style="padding: 12px 14px; font-family: var(--font-mono); color: var(--cop);">7 · LLM 隔离</td>
+          <td style="padding: 12px 14px;">
+            agent 永远<strong>看不到 secret 实体</strong> · 三道闸:
+            <em>(a)</em> alt 通过<em>子进程 env</em> 注入 token · agent 在 alt 进程内拿不到;
+            <em>(b)</em> 子进程结束后 env 清零;
+            <em>(c)</em> agent 试图直接读 <code>$ALT_KEYCHAIN_*</code> 等 → alt daemon 拦截 · 进 SCAN_FAIL op log · 通知 controlling human。
+            <em>例外</em>:human 显式 <code>alt creds reveal &lt;id&gt;</code> 可以看 · 但这命令本身必须人工 unlock keychain · agent 跑不通(daemon 拒)。
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
   <div class="aside" style="background: var(--bg-raised); border: 1px solid var(--border-soft); padding: 24px 30px; margin-bottom: 32px;">
     <p style="font-family: var(--font-mono); font-size: 0.7rem; color: var(--fg-muted); letter-spacing: 0.22em; text-transform: uppercase; margin: 0 0 14px;">跟 alt ⊇ git 三轴的关系</p>
     <p style="font-size: 0.9rem; line-height: 1.85; color: var(--fg); margin: 0;">
