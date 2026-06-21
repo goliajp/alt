@@ -9672,8 +9672,32 @@ $ scripts/sync-mini.sh                    # 重装 alt binary (dogfood 关键)</
     </p>
 
     <p style="font-size: 0.94rem; line-height: 1.85; color: var(--fg); margin-top: 18px;">
-      <strong>3 段战略</strong>(吸收 owner 所有反馈):
+      <strong>3 段战略</strong>(吸收 owner 所有反馈 · M18+ 是 VISION § 7 M1-M6 落地后的<em>细化里程碑</em>):
     </p>
+
+    <div class="aside" style="margin: 12px 0 14px; padding: 16px 22px; background: var(--bg-raised); border: 1px solid var(--border-soft); font-size: 0.86rem; line-height: 1.78;">
+      <p style="font-family: var(--font-mono); font-size: 0.66rem; color: var(--copper); letter-spacing: 0.22em; text-transform: uppercase; margin: 0 0 10px;">VISION § 7 ↔ ROADMAP M# 锚点</p>
+      <table style="width: 100%; border-collapse: collapse; font-size: 0.82rem;">
+        <thead>
+          <tr>
+            <th style="text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono); font-size: 0.6rem; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 500; width: 18%;">VISION § 7</th>
+            <th style="text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono); font-size: 0.6rem; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 500; width: 30%;">vision 描述</th>
+            <th style="text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono); font-size: 0.6rem; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 500;">ROADMAP 当前节点</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td style="padding: 6px 10px; color: var(--cop); font-family: var(--font-mono);">M1</td><td style="padding: 6px 10px;">读懂 git(只读 import 前半程)</td><td style="padding: 6px 10px;"><span class="grn">✅ shipped</span></td></tr>
+          <tr><td style="padding: 6px 10px; color: var(--cop); font-family: var(--font-mono);">M2</td><td style="padding: 6px 10px;">alt 原生存储(双层 X + chunk store + BLAKE3 + op log + 原生 refs)</td><td style="padding: 6px 10px;"><span class="grn">✅ shipped</span></td></tr>
+          <tr><td style="padding: 6px 10px; color: var(--cop); font-family: var(--font-mono);">M3</td><td style="padding: 6px 10px;">双向 import + export · L1 往返保真</td><td style="padding: 6px 10px;"><span class="grn">✅ shipped</span></td></tr>
+          <tr><td style="padding: 6px 10px; color: var(--cop); font-family: var(--font-mono);">M4</td><td style="padding: 6px 10px;">CLI 兼容面 + 工作流引擎(alt flow 系列)</td><td style="padding: 6px 10px;"><span class="grn">✅ shipped(M16-M17 完成 cli polish)</span></td></tr>
+          <tr><td style="padding: 6px 10px; color: var(--cop); font-family: var(--font-mono);">M5</td><td style="padding: 6px 10px;">AI-first 纵深(并行 workspace · 能力边界 · 结构化 I/O · 语义 diff)</td><td style="padding: 6px 10px;"><span class="cop">🟡 部分(D1-D5 完成 · A1 候选 invariant 8 待拍)</span></td></tr>
+          <tr><td style="padding: 6px 10px; color: var(--cop); font-family: var(--font-mono);">M6</td><td style="padding: 6px 10px;">协作链路(wire protocol 互通 + alt 自有服务端)</td><td style="padding: 6px 10px;"><span class="cop">🟡 部分(段 A/B 完成 + dogfood OK · 段 C 等真协作触发)</span></td></tr>
+        </tbody>
+      </table>
+      <p style="margin: 12px 0 0; color: var(--fg-muted); font-size: 0.8rem;">
+        M18-M22 是<strong>M5/M6 内部细化</strong>(M5 AI-first 纵深 + M6 协作链路 · VISION § 7 末段说 "M5/M6 的内部顺序与 M4 有交叠空间,届时再排" 的兑现)· 不是新加 VISION 之外的里程碑。
+      </p>
+    </div>
 
     <ol style="margin: 12px 0; padding-left: 24px; font-size: 0.92em; line-height: 1.85;">
       <li><strong>M18 · 第一刀(基础完整性 + AI 安全 + 架构原则)</strong>:
