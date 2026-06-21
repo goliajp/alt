@@ -3813,42 +3813,164 @@ code, .mono {
     <!-- ═══════ 场景 22: 删敏感 (v3) ═══════ -->
     <article class="scenario">
       <p class="scenario-tag">scenario 22 · v3</p>
-      <h3 class="scenario-name">误 push 敏感信息 · 从历史删 password.txt <span class="status-badge notimpl">❌ 跟 immutable 矛盾</span></h3>
-      <p class="scenario-goal"><strong>目标:</strong> 不小心 commit + push 了 <code>password.txt</code> · 从所有历史 commit 彻底删除。</p>
+      <h3 class="scenario-name">误 push 敏感信息 · 历史删除 <span class="status-badge designed">🔮 设计已闭环 · M19+</span></h3>
+      <p class="scenario-goal"><strong>目标:</strong> 历史 commit 已含 <code>password.txt</code> / API key / 其它敏感材料 · 从所有 commit 彻底清除。<br>
+      <em>但请先看下面"前提分类"再决定走哪条路</em>。</p>
 
       <div class="steps">
+
         <div class="step">
-          <h4 class="step-title">期望 + workaround</h4>
+          <h4 class="step-title">前提分类 · 三种触发场景</h4>
+          <div class="deeper" style="border-left: 2px solid var(--copper); padding-left: 18px;">
+            <span class="deeper-label">在新 alt 仓里 · 这个场景<em>本质上不应该发生</em></span>
+            <p style="margin: 0 0 10px;">
+              § 13 secret atom + push hard gate 让 secret 永远<strong>到不了 git mirror</strong>:
+              <code>.env</code> / API keys / TLS cert 在仓内是 <code>alt-only-secret</code>(场景 84 三档之一)·
+              push --to git 时 entropy scan + 分类检查 + 显式 reject。
+              所以"误 push 敏感"在 alt-native 仓<em>是事故,不是日常</em> — 触发要素只可能是这三类:
+            </p>
+            <ul style="margin: 0; padding-left: 22px;">
+              <li><strong class="cop">A · legacy git 仓 import</strong> — 从已存在 git 历史 import 进 alt(场景 2)· 老历史里就有 secret · 需要在 import 时清。这是<em>最常见</em>触发。</li>
+              <li><strong class="red">B · alt push hard gate 漏检</strong> — 内置规则没覆盖某个新 secret pattern,误放过。alt 设计上<em>不应发生</em>;一旦发生,gate 规则要补,clean-up 用本场景。</li>
+              <li><strong class="cop">C · 非 secret 敏感物</strong> — 某 commit 漏放了不该公开的 design 文档 / 内部讨论(不是 secret,push hard gate 不拦)。其实属于 alt-only path 的<em>追溯调整</em>,跟"删 secret"不同性质。</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="step">
+          <h4 class="step-title">场景 A · legacy 仓 import 时一并清</h4>
           <span class="step-input-label"><span class="cop">▼</span> 你要打的</span>
           <div class="cmp">
             <div class="cmp-side alt-side unavail">
-              <div class="cmp-header"><span>alt</span><span class="tag-note">没命令 · 跟 invariant 6 撞</span></div>
+              <div class="cmp-header"><span>alt</span><span class="tag-note">期望 · M19 ship</span></div>
               <div class="sh">
-<span class="ln"><span class="p">$</span> <span class="cmd">alt filter-history</span> --remove password.txt</span>
-<span class="ln out"><span class="err">error:</span> no such command</span>
+<span class="ln cm"># import 时声明 secret 类 path · alt 进 atom 时归 alt-only-secret · 推 git 不出</span>
+<span class="ln"><span class="p">$</span> <span class="cmd">alt import</span> ../legacy.git \
+<span class="ln">    --scrub-history <span class="arg">'secrets/**'</span> \</span>
+<span class="ln">    --scrub-history <span class="arg">'**/*.pem'</span> \</span>
+<span class="ln">    --classify-as <span class="arg">'.env*=alt-only-secret'</span></span>
 
 <span class="ln spacer"></span>
-<span class="ln cm"># workaround · 走 git filter-repo:</span>
-<span class="ln"><span class="p">$</span> <span class="cmd">alt export</span> ../myproj-git</span>
-<span class="ln"><span class="p">$</span> <span class="cmd">cd</span> ../myproj-git</span>
-<span class="ln"><span class="p">$</span> <span class="cmd">git filter-repo</span> --path password.txt --invert-paths</span>
-<span class="ln"><span class="p">$</span> <span class="cmd">rm -rf</span> ../myproj/.alt</span>
-<span class="ln"><span class="p">$</span> <span class="cmd">alt import</span> ../myproj-git</span>
-<span class="ln cm"># 整个 op log 清零 · 新仓</span>
+<span class="ln cm"># import 后:legacy 历史 secret 已从 commit tree 移除</span>
+<span class="ln cm"># 但 alt 仓<em>op log</em> 记录 "这次 import 清理了 X 类 path · 共 N 次出现"</span>
+<span class="ln cm"># git mirror 推出去 = 干净;alt 仓内有<em>清理痕迹</em>可审计</span>
               </div>
             </div>
             <div class="cmp-side git-side">
-              <div class="cmp-header"><span>git</span><span class="tag-note">filter-repo 一条命令</span></div>
+              <div class="cmp-header"><span>git</span><span class="tag-note">filter-repo 单独跑一次</span></div>
               <div class="sh">
-<span class="ln"><span class="p">$</span> <span class="cmd">git filter-repo</span> --path password.txt --invert-paths</span>
-<span class="ln cm"># 改写历史 · oid 全变 · push --force</span>
+<span class="ln cm"># 标准做法 · alt 也走同样底层</span>
+<span class="ln"><span class="p">$</span> <span class="cmd">git filter-repo</span> --path-glob secrets/ --invert-paths</span>
+<span class="ln cm"># 然后再 import 进 alt</span>
+              </div>
+            </div>
+          </div>
+          <div class="silent">
+            <span class="silent-label">alt 静默做了</span>
+            <ul>
+              <li><code>--scrub-history</code> 走的就是 git filter-repo 同等算法 · 在 import 边界<em>一次性</em>清完</li>
+              <li>清理记录进 alt op log(<em>不是</em>清理被清理的历史 · 是清理这个动作本身) · 可审计</li>
+              <li><code>--classify-as</code> 把后续 import 进来的 <code>.env</code> 直接归 alt-only-secret · 后续 push 自动 hard-gate</li>
+              <li>因为这是 import 时 · invariant 6 immutable 还没生效(没正式进 alt 仓 op chain)· 不撞</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="step">
+          <h4 class="step-title">场景 B · 已 native 仓的事故 escape</h4>
+          <span class="step-input-label"><span class="cop">▼</span> 你要打的</span>
+          <div class="cmp">
+            <div class="cmp-side alt-side unavail">
+              <div class="cmp-header"><span>alt</span><span class="tag-note">M20+ · 显式紧急口</span></div>
+              <div class="sh">
+<span class="ln cm"># 紧急路径 · 显式申请 + 双重确认</span>
+<span class="ln"><span class="p">$</span> <span class="cmd">alt history scrub</span> --emergency \
+<span class="ln">    --path <span class="arg">'.env.production'</span> \</span>
+<span class="ln">    --reason <span class="arg">'API token leaked in commit abc123'</span> \</span>
+<span class="ln">    --confirm-with <span class="arg">'<key passphrase>'</span></span>
+
+<span class="ln spacer"></span>
+<span class="ln out">⚠ EMERGENCY HISTORY SCRUB · breaks invariant 6 (immutable history)</span>
+<span class="ln out">  affected commits: 3</span>
+<span class="ln out">  oids will be re-hashed: yes</span>
+<span class="ln out">  irreversible: yes (alt undo 不可恢复)</span>
+<span class="ln out">  this op enters audit log as TYPE=EMERGENCY_SCRUB</span>
+<span class="ln out">  proceed? [yes/no]</span>
+              </div>
+            </div>
+            <div class="cmp-side git-side">
+              <div class="cmp-header"><span>git</span><span class="tag-note">filter-repo + push --force</span></div>
+              <div class="sh">
+<span class="ln"><span class="p">$</span> <span class="cmd">git filter-repo</span> --path .env.production --invert-paths</span>
+<span class="ln"><span class="p">$</span> <span class="cmd">git push --force</span></span>
+<span class="ln cm"># 协作者 git reset --hard origin/branch</span>
               </div>
             </div>
           </div>
           <div class="deeper">
-            <span class="deeper-label">设计 question</span>三个方案等 owner 拍 · 跟场景 28 LFS migrate · 84 visibility 一起解 immutable history escape 门: (a) <code>alt filter-history --emergency</code> 显式 break invariant 6 + admin token · (b) 不动 invariants · 用 export-filter-import 笨重 · (c) capability pre-commit-scan 拦截 secret 不让进。
+            <span class="deeper-label">紧急口 = 显式破 invariant 6 · 唯一合法用例</span>
+            <p style="margin: 0;">
+              <code>history scrub --emergency</code> 是 alt 设计中<em>唯一</em>会 break invariant 6 的命令 ·
+              理由必须是<strong>已泄露的真实 secret 材料</strong>(不是 "我后悔 commit 的 design 文档")。
+              非 secret 的"想从历史拿掉" — 走场景 C(visibility 追溯 · 不破 immutable)。
+              此命令进 op log 标 <code>TYPE=EMERGENCY_SCRUB</code> · 永久审计痕迹 · transparency log(场景 80)对外可见。
+              <strong>不允许走"我后悔了"的低门槛路径</strong> — 这是 § 13 编辑学职责的边界:secret 是<em>事故</em>不是日常,逃生口 friction 应该高。
+            </p>
           </div>
         </div>
+
+        <div class="step">
+          <h4 class="step-title">场景 C · 非 secret · visibility 追溯调整</h4>
+          <span class="step-input-label"><span class="cop">▼</span> 你要打的</span>
+          <div class="cmp">
+            <div class="cmp-side alt-side unavail">
+              <div class="cmp-header"><span>alt</span><span class="tag-note">期望 · M19 跟 84 一体 ship</span></div>
+              <div class="sh">
+<span class="ln cm"># 追溯改 visibility · 不破 immutable</span>
+<span class="ln"><span class="p">$</span> <span class="cmd">alt visibility set</span> <span class="arg">'docs/internal/strategy.md'</span> alt-only --retro</span>
+
+<span class="ln spacer"></span>
+<span class="ln out">✓ visibility updated · effect:</span>
+<span class="ln out">  · alt 仓内所有 commit 仍含此 path(invariant 6 不破)</span>
+<span class="ln out">  · 下次 push --to git 时此 path 从 mirror 历史<em>整体</em>过滤</span>
+<span class="ln out">  · git mirror 推出去 = 此文件从未存在</span>
+<span class="ln out">  · 已推出的 git 仓需走"strategy.md 移除"PR · 或重新 mirror</span>
+              </div>
+            </div>
+            <div class="cmp-side git-side">
+              <div class="cmp-header"><span>git</span><span class="tag-note">没有等价 · 只能 filter-repo</span></div>
+              <div class="sh">
+<span class="ln cm"># git 没有 visibility 概念</span>
+<span class="ln cm"># 只能像场景 A 那样硬改写历史</span>
+              </div>
+            </div>
+          </div>
+          <div class="silent">
+            <span class="silent-label">alt 静默做了</span>
+            <ul>
+              <li>alt 仓本身 commit tree 不变 · invariant 6 保持</li>
+              <li>visibility filter 是<em>映射层</em>:同一 commit · alt-oid 不变 · git-mirror-oid 变(superset-oid ↔ subset-oid 映射,跟场景 84 / 85 同机制)</li>
+              <li>已有的 git mirror 仓需要重 mirror · alt 给一个 manifest 列哪些 oid 变了</li>
+              <li>这条路径<em>不需要紧急口</em>,因为不是 secret · 只是"该不公开的不公开" — 跟编辑学常规职责一体</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="step">
+          <h4 class="step-title">三场景 · 一张图</h4>
+          <div class="deeper" style="border-left: 2px solid var(--blue);">
+            <pre style="font-size: 0.85rem; line-height: 1.6; color: var(--fg); margin: 0;">
+触发 → 选路径
+
+A · legacy import 含 secret    →  alt import --scrub-history --classify-as       (M19)
+B · native 仓真泄漏 secret     →  alt history scrub --emergency (高门槛)         (M20+)
+C · 非 secret · 追溯改可见性   →  alt visibility set --retro                     (M19)
+
+invariant 6 (immutable history) 仅在 B 被破 · A 在 import 边界算不上破 · C 走 mirror 映射不破。
+            </pre>
+          </div>
+        </div>
+
       </div>
     </article>
 
