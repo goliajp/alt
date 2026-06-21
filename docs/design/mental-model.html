@@ -6706,6 +6706,32 @@ Closes #123"</span></span>
             <span class="deeper-label">M20+ 实验</span>alt 不内置 LLM · shell out 到 user's claude/openai key · invariant 1 让 AI 建议可 attribute · human review 后才落地。
           </div>
         </div>
+
+        <div class="step">
+          <h4 class="step-title">multi-agent conflict · 谁担责 + 谁拍板</h4>
+          <div class="deeper" style="border-left: 2px solid var(--copper);">
+            <span class="deeper-label">conflict 涉及多个 ai-agent identity 时的精确规则</span>
+            <p style="margin: 0 0 10px;">
+              场景 26 让多 agent 并发跑 task · 当 agent-A 跟 agent-B 都改了 <code>src/parser.rs:42</code> · merge 时 conflict。
+              三个角色:
+            </p>
+            <ul style="margin: 0; padding-left: 22px;">
+              <li><strong class="cop">提建议者</strong>:任一 ai-agent(用自己 identity 提建议 · 进 op log SUGGEST_RESOLVE)</li>
+              <li><strong class="cop">落地者</strong>:<em>必须</em>是 type=human 的 controlling 之一(<em>不能</em>是 ai-agent · invariant 7)· apply 时 signed by human</li>
+              <li><strong class="cop">担责者</strong>:apply 落地后 commit 的 author 是 <em>conflict-merging human</em> · 不是任一原 agent · 但 commit-msg schema 的 <code>references</code> 字段保留两边原 commit oids + 原 agent identities,作 audit 链</li>
+            </ul>
+            <p style="margin: 10px 0 0;">
+              <strong>边界规则</strong>:
+              <em>(1)</em> 如果两 agent 同一 controlling(都是 owner@ 的 claude-a / claude-b)· controlling 一次 sign 解决,git 出口看不到两 agent 分工 ·
+              <em>(2)</em> 如果两 agent 不同 controlling(claude-a controlled by owner-a / cursor-b controlled by owner-b)· conflict 必须<em>两个 controlling human cosign</em>(场景 41 multi-sig)· 进 transparency log IDENTITY_TYPE_CHANGE 不触发 · 但 commit author = 主 controlling · co-author = 另一 controlling ·
+              <em>(3)</em> alt 永远不让 ai-agent 自己拍板 conflict · 即使 <code>--ai</code> flag · 也是 SUGGEST 不 APPLY。
+            </p>
+            <p style="margin: 10px 0 0; font-size: 0.84rem; color: var(--fg-muted);">
+              <em>跟 § 25 step 3 一体</em>:agent 自由产出 · controlling human 担对外责任 · conflict 是这个原则最严格兑现的场景 — agent 给意见可以任意多次 / 任意 wrong · 最终落地必须有人类按下按钮 + 签字。
+            </p>
+          </div>
+        </div>
+
       </div>
     </article>
 
