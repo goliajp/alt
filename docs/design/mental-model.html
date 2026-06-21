@@ -4969,6 +4969,22 @@ Co-Authored-By: alice &lt;alice@x&gt;"</span></span>
               <li>没声明的路径 = "both" 默认(alt 和 git 都见)</li>
             </ul>
           </div>
+
+          <div class="deeper">
+            <span class="deeper-label">visibility 三档,不是两档</span>
+            <p style="margin: 0 0 10px;">
+              owner 反复强调"<em>secrets / 权限也安全装 alt 中,我们只在交付层做好</em>"(§ 13)·
+              单一个 <code>"alt-only"</code> 不够细 · visibility 是<strong>三档</strong>:
+            </p>
+            <ul style="margin: 0; padding-left: 22px;">
+              <li><code><span class="grn">"both"</span></code> · 默认 · alt 仓 + git mirror 都见。源码、文档、可发布 asset 全在这档。</li>
+              <li><code><span class="cop">"alt-only"</span></code> · alt 仓见 · git mirror <em>过滤</em>。dev 文档 / <code>.claude/</code> / 内部 design notes / AI prompt 这类 — 不公开但也不敏感。push --to git 时 <em>path filter</em> 切掉。</li>
+              <li><code><span class="red">"alt-only-secret"</span></code> · alt 仓见 + 仓内加密 · git mirror <em>硬过滤 + push reject</em>。.env / API keys / DB password / TLS cert 等 — 任何漏出都<em>是事故</em>。push --to git 跑 entropy scan + 显式分类检查 · 任何 secret material 出现在 commit/message/branch name 中 → push 直接<strong>拒绝</strong>(不是 filter · 是 reject)。</li>
+            </ul>
+            <p style="margin: 12px 0 0;">
+              三档的<em>差别在 export 行为</em>,不在仓内可见性 — alt 仓本地三档<strong>都可见</strong>(只是 secret 档自动加密 + 注入式访问)。详见 § 13 编辑学职责 #3(path filter)+ #7(secret hard gate)。
+            </p>
+          </div>
         </div>
 
         <!-- step 2 -->
