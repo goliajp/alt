@@ -5551,7 +5551,10 @@ Co-Authored-By: alice &lt;alice@x&gt;"</span></span>
 
 <span class="ln spacer"></span>
 <span class="ln out cm"># visibility & 出口配置:</span>
-<span class="ln out">visibility:       public                <span class="cm"># public / alt-only / alt-only-secret</span></span>
+<span class="ln out">visibility:       both                  <span class="cm"># commit-level · 见下面合并规则</span></span>
+<span class="ln out">paths_visibility:                       <span class="cm"># 自动 derive · 不手填</span></span>
+<span class="ln out">  - {path: src/parser.rs, level: both}</span>
+<span class="ln out">  - {path: Cargo.toml,    level: both}</span>
 <span class="ln out">git_export:       conventional          <span class="cm"># 出口降级风格</span></span>
               </div>
             </div>
@@ -5603,6 +5606,23 @@ Co-Authored-By: alice &lt;alice@x&gt;"</span></span>
               <em>(4)</em> 可选 <code>Co-Authored-By: claude@anthropic</code> 保留<em>有 AI 协作</em>这件事的对外信号(可关 · per-repo policy) ·
               <em>(5)</em> 任何字段含 <code>alt-only-secret</code> 内容 → push reject(§ 13 #7 secret hard gate)。
               <em>降级方向单向:从结构化降到 free text,从 alt 多 identity 降到 git 单 author</em>。
+            </p>
+          </div>
+
+          <div class="deeper" style="border-left: 2px solid var(--blue);">
+            <span class="deeper-label">commit-level visibility = paths-visibility 的<em>合并</em></span>
+            <p style="margin: 0 0 10px;">
+              <code>visibility:</code> 字段是<em>从 paths_visibility 自动 derive 的合并值</em> · 不是手填:
+            </p>
+            <ul style="margin: 0; padding-left: 22px;">
+              <li>所有 touched_paths 都是 <strong>both</strong> → commit visibility = <code>both</code> · push 时正常进 git mirror</li>
+              <li>含一个或多个 <strong>alt-only</strong>(无 secret) → commit visibility = <code>mixed</code> · 编辑学职责 #3 应用,git mirror 看到 commit 但 alt-only 路径在 tree 中被过滤,oid 重算</li>
+              <li>含一个或多个 <strong>alt-only-secret</strong> → commit visibility = <code>alt-only-secret</code> · 编辑学职责 #7 hard gate 直接拒 push · <em>这一刻 alt 仓本地没问题</em> · 不能推 git。owner 修正(把 path 重归类 / 或确认就要它进 git 触发显式 unlock)</li>
+              <li>全是 <strong>alt-only</strong>(无 secret · 无 both)→ commit visibility = <code>alt-only</code> · push 时<em>整个 commit 跳过</em> · git mirror history 不见此 commit · oid 映射记 "this alt-commit has no git counterpart"</li>
+            </ul>
+            <p style="margin: 12px 0 0;">
+              <em>跟 § 84 path-level visibility 的关系</em>:path-level 是<em>规则</em>(<code>.alt/visibility.toml</code>)· commit-level 是<em>推导出的当前 commit 实际触及哪些档</em>。
+              path-level 改一次,所有<em>未来</em>commit 自动按新规则 derive;<em>历史</em>commit 已 derived 的 paths_visibility 不动(invariant 6 immutable history)— 这是为什么场景 22 path-C 走 retroactive 而不是 emergency。
             </p>
           </div>
         </div>
