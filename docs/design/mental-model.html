@@ -9691,6 +9691,16 @@ $ scripts/sync-mini.sh                    # 重装 alt binary (dogfood 关键)</
     Maintenance log (most recent at top):
   </p>
   <ul style="margin: 8px 0 0; padding-left: 22px; color: var(--fg-faint); font-size: 0.7rem;">
+    <li>2026-06-21 · coherence audit pass 3(self-directed · owner directive "继续 audit pass 3")— 8 atomic commits closing depth-2 gaps:
+      <strong>(AT1)</strong> § 31 pre-commit secret-scan vs § 13 #7 push hard gate · defense-in-depth 两层(commit 前 vs push 出口 · 越晚发现成本越高的故意设计)· 同样模式 apply 到 cap-scope / large-file ·
+      <strong>(AT2)</strong> § 80 transparency log 加 8 类 event schema(COMMIT_SIGNED / EMERGENCY_SCRUB / SECRET_REVOKE / PUSH_HARD_GATE_FAIL / IDENTITY_TYPE_CHANGE / CAP_ELEVATION / ATOM_DEPRECATE / PRINCIPLE_CHANGE) · 严格"永远不含 secret material"不变量 · t-log = op-log 的<em>对外子集</em> ·
+      <strong>(AT3)</strong> § 60 multi-agent conflict 三角色(suggester / applier / accountable) · 三边界规则(同 controlling / 跨 controlling cosign / agent 永远不能 apply) · § 25 step 3 最严格兑现 ·
+      <strong>(AT4)</strong> § 86 LLM 隔离精确边界 4 component(alt-cli / alt-daemon / stones / alt-server 全 0 LLM) · 反向兑现:alt 自己不跑 LLM 但不阻止子进程跑 LLM(secret 注入决策 0 LLM 但目标可任) ·
+      <strong>(AT5)</strong> § 64 op log 跨机 sync 4 档(A 全 sync 状态机 op / B sync 但脱设备元数据 secret_inject / C device-local-only scan_fail / D 永不 sync 除非显式 attest secret_add/rotate/revoke) · 跟 t-log subset 关系(t-log 对外 · sync 对内多机) ·
+      <strong>(AT6)</strong> § 13 blame + § 14 log 加 identity 展示规则(alt-side: 真实 + [→controlling] 注释 · git-side: 仅 controlling 聚合) · log 加 alt-only filter flags(--identity-type / --controlling / --agent-vendor / --session) ·
+      <strong>(AT7)</strong> § 67 alt-web visibility 三档 display 规则 + simulate-external 模式 · alt.golia.jp(场景 72)走同 boundary 规则(本地全见 · 远端 polished subset) ·
+      <strong>(AT8)</strong> § 17 amend 跟 § 85 message overlay 边界(纯改 message → overlay 不动 oid · 改 tree → amend 新 oid) · 跟 § 41 multi-sig 关系(overlay 不破原签 · amend 必须 cosign) · 本条 audit log 收口。
+    </li>
     <li>2026-06-21 · coherence audit pass 2(self-directed · owner directive "继续 audit 还有什么概念漏洞")— 8 atomic commits closing residual gaps after pass 1:
       <strong>(AH1)</strong> § 13 op log schema 误用 "invariant 4 isolation" 修正(实际是 § 12 view A uuid 一等公民身份)·
       <strong>(AH2)</strong> § 13 加 alt push &lt;remote&gt; vs alt export &lt;dir&gt; 两命令对照表 + 7 件编辑学职责精确归属 + 关键架构判断("7 件不在 commit 时发生 · 只在 push/export 出口边界发生")·
