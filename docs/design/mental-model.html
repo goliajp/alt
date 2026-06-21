@@ -7915,6 +7915,73 @@ Closes #123"</span></span>
             <span class="deeper-label">合规场景必备</span>government / fintech / 关键基础设施 supply-chain 安全。
           </div>
         </div>
+
+        <div class="step">
+          <h4 class="step-title">事件分类 schema · transparency log 上来自哪些事件</h4>
+          <div class="deeper" style="border-left: 2px solid var(--copper);">
+            <span class="deeper-label">8 类 transparency-log event · 全 signed · append-only</span>
+            <p style="margin: 0 0 12px;">
+              transparency log 不只是 commit 签名。<em>所有破常规 / 高敏感 / 跨边界的事件</em>都上 transparency log,统一格式 · 外部 verifier(Rekor)可查:
+            </p>
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.82rem; margin: 0;">
+              <thead>
+                <tr>
+                  <th style="text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 500; width: 26%;">event type</th>
+                  <th style="text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 500;">触发位置</th>
+                  <th style="text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 500; width: 14%;">payload(脱敏后)</th>
+                </tr>
+              </thead>
+              <tbody style="color: var(--fg);">
+                <tr>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--cop); font-size: 0.78rem;">COMMIT_SIGNED</td>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft);">每次签名 commit(invariant 1 · 默认开)</td>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft);">oid + signer key fingerprint</td>
+                </tr>
+                <tr>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--cop); font-size: 0.78rem;">EMERGENCY_SCRUB</td>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft);">场景 22 path B · 唯一会破 invariant 6 的 op</td>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft);">affected oids + reason + signer</td>
+                </tr>
+                <tr>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--cop); font-size: 0.78rem;">SECRET_REVOKE</td>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft);"><code>alt creds revoke</code> · § 13 真泄漏路径</td>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft);">secret semantic_id + reason</td>
+                </tr>
+                <tr>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--cop); font-size: 0.78rem;">PUSH_HARD_GATE_FAIL</td>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft);">§ 13 #7 拦下来 · 同时进本地 SCAN_FAIL op log</td>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft);">repo id + commit oid + 触发规则</td>
+                </tr>
+                <tr>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--cop); font-size: 0.78rem;">IDENTITY_TYPE_CHANGE</td>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft);">identity controlling 改变 · 或 type 升级(rare)</td>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft);">identity id + old → new controlling</td>
+                </tr>
+                <tr>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--cop); font-size: 0.78rem;">CAP_ELEVATION</td>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft);">场景 61 · agent cap 升级 · 必须人工 approve</td>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft);">agent id + old → new cap + approver</td>
+                </tr>
+                <tr>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--cop); font-size: 0.78rem;">ATOM_DEPRECATE</td>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft);">§ 12 anti-rot atom deprecation · invariant 影响时上链</td>
+                  <td style="padding: 9px 10px; border-bottom: 1px solid var(--border-soft);">atom uuid + kind + reason</td>
+                </tr>
+                <tr>
+                  <td style="padding: 9px 10px; font-family: var(--font-mono); color: var(--cop); font-size: 0.78rem;">PRINCIPLE_CHANGE</td>
+                  <td style="padding: 9px 10px;">改 invariants / axes / principles 自身 · 项目级 event</td>
+                  <td style="padding: 9px 10px;">atom id + diff hash + approver</td>
+                </tr>
+              </tbody>
+            </table>
+            <p style="margin: 12px 0 0;">
+              <strong>关键不变量</strong>:transparency log entry <em>从来不含</em> secret material 实体 / 私钥 / 解密任何 alt-only-secret 字段。
+              这跟 § 13 op log 同规则(永远不记 token value/hash/plaintext) — transparency log 是 op log 的<em>对外公开子集</em>。
+              <em>什么不上 transparency log</em>:常规 op(add / commit / push 成功)· 个人 identity 详情 · 私有 repo 内部 ref 名 — 这些是隐私态,不公开。
+            </p>
+          </div>
+        </div>
+
       </div>
     </article>
 
