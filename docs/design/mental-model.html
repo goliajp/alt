@@ -1375,12 +1375,15 @@ code, .mono {
 
         <article class="inv">
           <p class="inv-num">v.</p>
-          <h3 class="inv-name">Git Compat</h3>
+          <h3 class="inv-name">Git Compat · L1 语义保真</h3>
           <p class="inv-desc">
-            byte-exact git 兼容。alt 仓和 git 仓可以无损往返。任何 git
-            工具都能读 alt 产出的 history。
+            <strong>L1 语义保真</strong>(VISION § 3 推论 + § 8.1 拍板):
+            所有 commit / tree / blob / tag 的 git hash 不变 · refs / HEAD / 用户 config 还原 ·
+            export 的 alt → git 在 git 视角下语义等价。
+            <em>L2 物理形态<strong>不</strong>追求</em>:packfile 布局 / ref 物理后端(reftable/files)/ loose↔packed 等是 git 内部自由度,export 写 files 后端并归一化即可。
           </p>
           <p class="inv-why"><span class="lbl">why</span>alt 的 north star。
+          L1 是结构性保证(canonical 字节保证 hash 计算可重现),不靠测试;corpus_roundtrip 自动化封缄。
           没这个 alt 就是另一个孤立 VCS,不能跟 GitHub / IDE 共生。</p>
         </article>
 
