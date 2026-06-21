@@ -9656,6 +9656,16 @@ $ scripts/sync-mini.sh                    # 重装 alt binary (dogfood 关键)</
       <li><strong>pre-commit AI safety</strong>(场景 31)— 今天靠手动 <code>scripts/gate.sh lint</code> · 没自动 secret-scan / cap-scope。我 (agent) 可能误把 secret commit · alt 不会拦。M18 第一刀。</li>
       <li><strong>LFS</strong>(场景 28)— alt 仓今天没大文件需求 · 但 alt 商业化第一战在这里 · 不 dogfood = 优先级不直观。</li>
     </ul>
+
+    <p style="font-size: 0.92rem; line-height: 1.85; color: var(--fg); margin-top: 22px; padding-top: 16px; border-top: 1px dashed var(--border-soft);">
+      <strong>仓结构 · VISION § 8.4 拍板兑现</strong>:
+    </p>
+    <ul style="margin: 8px 0; padding-left: 24px; font-size: 0.88rem; line-height: 1.85; color: var(--fg);">
+      <li><code>.alt/</code> 是 alt 原生存储目录(VISION § 8.4 拍板 · 跟 git 的 <code>.git/</code> 对位)· 当前 alt 仓的实际目录</li>
+      <li><strong>不并存原则</strong>(VISION § 8.4 2026-06-12 owner 拍板,推翻原 default):dogfood / 实验在 git 管理外的<em>干净目录</em>进行 · <code>.alt</code> 是该处<em>唯一</em>存储 · 同目录 <code>.git</code> + <code>.alt</code> 并存易混淆</li>
+      <li>对拍 git 行为的需求由显式 <code>alt export &lt;target&gt;</code> 到独立目标承担 · 不靠并存的 <code>.git</code></li>
+      <li>本仓今天的状态:<code>/Users/doracawl/workspace/goliajp/alt</code> 只有 <code>.alt/</code>(<code>scripts/sync-github.sh</code> 在<em>另一个</em>导出目录推 GitHub mirror)· 严格符合不并存原则</li>
+    </ul>
   </div>
 
   <!-- ═══════ 最终总账 · 全 86 场景 ═══════ -->
