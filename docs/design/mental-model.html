@@ -9054,6 +9054,51 @@ Closes #123"</span></span>
     </p>
   </div>
 
+  <!-- BLAKE3 ↔ sha 跨哈希 oid 映射 · VISION § 1.5 信条 3 + § 8.2 拍板兑现 -->
+  <div class="aside" style="margin-top: 56px; padding: 26px 32px; border-left: 2px solid var(--copper); background: linear-gradient(90deg, rgba(232, 168, 124, 0.06) 0%, rgba(232, 168, 124, 0.01) 60%, transparent 100%);">
+    <p style="font-family: var(--font-mono); font-size: 0.7rem; color: var(--copper); letter-spacing: 0.24em; text-transform: uppercase; margin: 0 0 14px;">oid 映射 = BLAKE3 ↔ sha 跨哈希身份 · 不是 oid 重命名</p>
+    <p style="font-size: 0.94rem; line-height: 1.78; color: var(--fg); margin: 0 0 14px;">
+      mental-model 反复出现 <em>superset-oid ↔ subset-oid 映射</em>(§ 22 / 84 / 85 / 13 / 17 amend / 25 等)。这映射的<em>本质</em>:
+      alt 跟 git 是<strong>两个不同哈希函数</strong>下的身份系统(VISION § 1.5 信条 3 "身份与编码解耦" + § 8.2 拍板)。
+    </p>
+    <table style="width: 100%; border-collapse: collapse; font-size: 0.84rem; background: var(--bg-raised); border: 1px solid var(--border-soft); margin: 0 0 14px;">
+      <thead>
+        <tr>
+          <th style="text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); color: var(--copper); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.2em; text-transform: uppercase; font-weight: 500; width: 22%;">侧</th>
+          <th style="text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); color: var(--copper); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.2em; text-transform: uppercase; font-weight: 500;">哈希函数</th>
+          <th style="text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); color: var(--copper); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.2em; text-transform: uppercase; font-weight: 500;">取值范围</th>
+        </tr>
+      </thead>
+      <tbody style="color: var(--fg);">
+        <tr>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); color: var(--cop);">alt-side(superset)</td>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft);"><strong class="cop">BLAKE3</strong>(256-bit)· VISION § 8.2 拍板</td>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft);">alt 原生对象的全集 — 包括 alt-only path / alt-only-secret / 含 AI 元数据的 commit 等</td>
+        </tr>
+        <tr>
+          <td style="padding: 9px 12px; font-family: var(--font-mono); color: var(--cop);">git-mirror(subset)</td>
+          <td style="padding: 9px 12px;"><strong>sha-1</strong>(legacy git)/ <strong>sha-256</strong>(modern git)· 按目标 remote 配置</td>
+          <td style="padding: 9px 12px;">7 件编辑学职责过滤后的子集 — alt-only 切掉 · author 聚合 · message 降级后的 git-compat 对象</td>
+        </tr>
+      </tbody>
+    </table>
+    <p style="font-size: 0.88rem; line-height: 1.8; color: var(--fg); margin: 0 0 10px;">
+      <strong>映射表怎么维护</strong>:
+    </p>
+    <ul style="font-size: 0.86rem; line-height: 1.8; color: var(--fg); margin: 0 0 12px; padding-left: 22px;">
+      <li>每次 <code>alt push &lt;remote&gt;</code> / <code>alt export &lt;dir&gt;</code> 在出口边界(§ 13 编辑学职责)产生 git-side 对象,对应的 sha 同步算出 · 映射表 append</li>
+      <li>映射表<em>自身是 alt-only 数据</em>(不进 git mirror)· alt-only kind atom(view B path 行的 export 行为)</li>
+      <li>映射表是 <code>alt fetch</code> 反向(git → alt)/ <code>alt blame</code> git-side 视图 / <code>alt verify-commit --transparency</code> 等命令的基础</li>
+      <li>同一 alt-oid 跨 push 多次 · 可能映射成<em>不同</em> sha(因为编辑学规则可能变化:visibility.toml 改 / squash 策略改 / author 聚合规则改)· 映射表都记录,带时间戳跟 push 事件</li>
+    </ul>
+    <p style="font-size: 0.86rem; color: var(--fg-muted); line-height: 1.8; margin: 0;">
+      <strong>这是 VISION 信条 3 "身份与编码解耦" 的具体兑现</strong>:BLAKE3 身份不动 ·
+      存储形态(canonical / packfile / delta / 拆解)可自由重编码 ·
+      git-side sha 是<em>"另一个编码"</em>(在 git 兼容契约下的 byte 投影)·
+      引用永不受扰 — 改 visibility / squash / message overlay 都不改 alt-side BLAKE3。
+    </p>
+  </div>
+
   <div class="aside" style="margin-top: 56px;">
     <span class="tag">§ 12 段总账</span>
     1 个原则 atom · 5 处 dogfood typed ref · 0 实现(phase 0 仅架构落地)。
