@@ -1081,7 +1081,74 @@ code, .mono {
       </div>
     </div>
 
-    <p>
+    <!-- VISION 锚点表 · 全文每个核心 framing 对应 vision 哪一条 -->
+    <div class="full" style="margin-top: 38px;">
+      <div class="aside" style="background: linear-gradient(135deg, rgba(232, 168, 124, 0.06) 0%, rgba(90, 160, 250, 0.03) 50%, transparent 100%); border: 1px solid var(--copper); padding: 28px 36px;">
+        <p style="font-family: var(--font-mono); font-size: 0.72rem; color: var(--copper); letter-spacing: 0.26em; text-transform: uppercase; margin: 0 0 14px;">vision 锚点表 · 8 信条 × mental-model 兑现</p>
+        <p style="font-size: 0.92rem; line-height: 1.78; color: var(--fg); margin: 0 0 18px;">
+          <code>.claude/docs/VISION.md</code> § 1.5 列了 8 条<em>产品信条</em>(贯彻始终 · 每个里程碑 / 每个架构决策对照自查)。
+          mental-model 全文的所有 invariants / axes / scenarios / § 12 anti-rot / § 13 delivery-polish 都是这 8 信条的<em>具体兑现</em>。
+        </p>
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.84rem; background: var(--bg-raised); border: 1px solid var(--border-soft);">
+          <thead>
+            <tr>
+              <th style="text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--copper); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.2em; text-transform: uppercase; font-weight: 500; width: 4%;">#</th>
+              <th style="text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--copper); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.2em; text-transform: uppercase; font-weight: 500; width: 26%;">vision 信条(原文)</th>
+              <th style="text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--copper); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.2em; text-transform: uppercase; font-weight: 500;">mental-model 兑现位置</th>
+            </tr>
+          </thead>
+          <tbody style="color: var(--fg);">
+            <tr>
+              <td style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono);">1</td>
+              <td style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft);"><strong>可审查性最大化</strong> · 一切内容拆代码/文档式 · diff 可见可审查 · 拆解到哪 review 推到哪</td>
+              <td style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft);">axis 1 format-native(§ 6 · 10 prism)+ § 67/68 alt-web 跨格式 review + § 60 conflict resolver</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono);">2</td>
+              <td style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft);"><strong>保真是结构性的</strong> · canonical 字节 + Tier 0 兜底 + faithful by default · 靠构造不靠测试</td>
+              <td style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft);">invariant 5 git compat(L1 语义)+ § 28 LFS migrate 双向 + corpus_roundtrip dogfood</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono);">3</td>
+              <td style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft);"><strong>身份与编码解耦</strong> · BLAKE3 身份之下,存储形态(全量/delta/拆解)自由重编码 · 引用永不受扰</td>
+              <td style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft);">§ 12 atom uuid v7 一等公民 + view A 生命周期(身份不动 · 内容可改 · 别名永久)+ superset-oid ↔ subset-oid 映射</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono);">4</td>
+              <td style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft);"><strong>记录事实,不靠现猜</strong> · 血缘/rename/change identity 在写入时记录为事实,不在读取时启发式重建</td>
+              <td style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft);">场景 30 cherry-pick + § 12 atom rename alias chain + 场景 13 blame -M(写入记 · 读取查)+ § 85 commit-msg schema decisions 字段</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono);">5</td>
+              <td style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft);"><strong>AI 是一等公民</strong> · 机器优先 I/O · 事务化可撤销 · 能力边界 · 毫秒级核心 · A1-A8 八条</td>
+              <td style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft);">invariants 1-7 全套(尤其 2 op log + 4 workspace + 7 LLM 隔离)+ § 25 三类型 identity + § 86 LLM 隔离 + 场景 31 pre-commit AI safety + 场景 61 cap upgrade</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono);">6</td>
+              <td style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft);"><strong>fallback-then-enrich</strong> · 格式 hot/cold 上限 · 不支持原样兜底 · 棱镜随版本丰富 · 老数据 repack 升级</td>
+              <td style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft);">§ 6 format-native 10 prism 体系 + Tier 0 raw-blob fallback + 棱镜升级 prism atom kind auto-derive(view B)</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono);">7</td>
+              <td style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft);"><strong>减负只在原生面</strong> · git 兼容面守契约 · 历史债只在 alt 原生面卸</td>
+              <td style="padding: 10px 14px; border-bottom: 1px solid var(--border-soft);"><strong class="cop">§ 13 整段(alt ⊇ git 编辑学职责)</strong> + axes 1/2/3(format-native / visibility / commit-msg-schema)— alt 多出来的全在原生面 · git 出口守契约</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px 14px; color: var(--copper); font-family: var(--font-mono);">8</td>
+              <td style="padding: 10px 14px;"><strong>性能是功能</strong> · ceiling-first · 每个设计断言以 bench 实测背书 · 对照基准首选 git 本体</td>
+              <td style="padding: 10px 14px;">§ 0 keynote ceiling-first + dogfood 段 + <code>.claude/rules/perf-alt-context.md</code>(corpus_roundtrip + perf-decomposition-vs-polish 工作流)</td>
+            </tr>
+          </tbody>
+        </table>
+        <p style="font-size: 0.84rem; color: var(--fg-muted); line-height: 1.75; margin: 16px 0 0;">
+          <strong>读法</strong>:从左往右 · vision 信条 → mental-model 兑现位置。
+          <strong>反向自查</strong>:如果新加一个 invariant / axis / scenario · 必须能填回这表至少一格(本表无对应 = 跟 vision 脱钩,abort)。
+          <em>每次 ROADMAP 推进或 CP 报告对照此表</em>(VISION § 1.5 原话:"每个里程碑、每个架构决策对照自查")。
+        </p>
+      </div>
+    </div>
+
+    <p style="margin-top: 38px;">
       <strong>prior art:</strong> 这种 "底强、上活" 的分层不是我创新——是
       所有通用工具的共同形态。alt 真要创新的位置不在分层本身,而在
       <em>invariants 的具体选择</em>。
