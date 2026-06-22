@@ -1081,6 +1081,103 @@ code, .mono {
       </div>
     </div>
 
+    <!-- alt 双轴 framing · 两个正交维度 + 4 象限 · owner 2026-06-22 拍板 -->
+    <div class="full" style="margin-top: 38px;">
+      <div class="aside" style="border: 2px solid var(--copper); padding: 32px 38px; background: linear-gradient(135deg, rgba(232, 168, 124, 0.08) 0%, rgba(90, 160, 250, 0.04) 50%, transparent 100%);">
+        <p style="font-family: var(--font-mono); font-size: 0.74rem; color: var(--copper); letter-spacing: 0.28em; text-transform: uppercase; margin: 0 0 14px;">alt 的两个正交维度 · 最高抽象</p>
+        <p style="font-size: 1.04rem; line-height: 1.78; color: var(--fg-strong); font-family: var(--font-display); font-weight: 300; margin: 0 0 20px; letter-spacing: 0.005em;">
+          <strong class="cop">alt 完全面向交付</strong>。交付的对象可能是别人(协作者 / GitHub / 客户 / 社区)· 也可能是<em>自己</em>(里程碑标记 / 阶段成果 / 复盘)— <strong>哪怕交付给自己,也是一次交付</strong>。
+        </p>
+        <p style="font-size: 0.94rem; line-height: 1.8; color: var(--fg); margin: 0 0 22px;">
+          但每一次交付前必有<em>工作室</em>。工作室里<strong>脏乱差是常态</strong>:真凭据 / .env / 反复试错 / 失败 task / 半成型讨论 / agent fix.suggest 痕迹 / 用过即丢的 prompt。
+          alt 替你把工作室<em>装得下</em>,只在<em>交付边界</em>做编辑学(§ 13)。
+          这跟 git 共存而非替代的根本理由 —— git 不允许工作室存在(它假设你已经"准备好交付"才 commit)· alt 反过来:工作室一等公民,交付是其上的<em>视图</em>。
+        </p>
+        <p style="font-size: 0.92rem; line-height: 1.78; color: var(--fg); margin: 0 0 16px;">
+          alt 双轴 framing — 两个<em>正交</em>维度,合起来 4 象限:
+        </p>
+
+        <!-- 4 象限矩阵图 -->
+        <div style="display: grid; grid-template-columns: 100px 1fr 1fr; gap: 2px; background: var(--border-soft); margin: 0 0 22px; border: 1px solid var(--border-soft);">
+          <!-- 左上空 -->
+          <div style="background: var(--bg-raised); padding: 12px;"></div>
+          <!-- studio 标头 -->
+          <div style="background: var(--bg-raised); padding: 14px 18px; text-align: center;">
+            <p style="font-family: var(--font-mono); font-size: 0.68rem; color: var(--copper); letter-spacing: 0.24em; text-transform: uppercase; margin: 0 0 4px;">studio</p>
+            <p style="font-size: 0.8rem; color: var(--fg-muted); margin: 0;">工作室 · 真实创作态 · 脏乱差</p>
+          </div>
+          <!-- delivery 标头 -->
+          <div style="background: var(--bg-raised); padding: 14px 18px; text-align: center;">
+            <p style="font-family: var(--font-mono); font-size: 0.68rem; color: var(--copper); letter-spacing: 0.24em; text-transform: uppercase; margin: 0 0 4px;">delivery</p>
+            <p style="font-size: 0.8rem; color: var(--fg-muted); margin: 0;">交付 · polished 阶段成果</p>
+          </div>
+
+          <!-- h 面 -->
+          <div style="background: var(--bg-raised); padding: 14px 12px; text-align: center;">
+            <p style="font-family: var(--font-mono); font-size: 0.68rem; color: var(--blue); letter-spacing: 0.22em; text-transform: uppercase; margin: 0 0 4px;">h 面</p>
+            <p style="font-size: 0.78rem; color: var(--fg-muted); margin: 0;">human · 给人看</p>
+          </div>
+          <!-- studio × h -->
+          <div style="background: rgba(232, 168, 124, 0.05); padding: 18px 20px;">
+            <p style="font-size: 0.84rem; line-height: 1.7; color: var(--fg); margin: 0;">
+              owner 自己的真实开发 · wip 分支 · stash · 跟自己 commit log 讨论 · .env 凭据 · 半成型笔记 · 内部 design 文档
+            </p>
+          </div>
+          <!-- delivery × h -->
+          <div style="background: rgba(90, 160, 250, 0.05); padding: 18px 20px;">
+            <p style="font-size: 0.84rem; line-height: 1.7; color: var(--fg); margin: 0;">
+              <strong>git mirror</strong>(协作者 / GitHub / 社区)+ 给客户的 release + 给自己的<em>里程碑标记</em> + alt verify-commit 签名公示 · 标准 conventional commit
+            </p>
+          </div>
+
+          <!-- a 面 -->
+          <div style="background: var(--bg-raised); padding: 14px 12px; text-align: center;">
+            <p style="font-family: var(--font-mono); font-size: 0.68rem; color: var(--blue); letter-spacing: 0.22em; text-transform: uppercase; margin: 0 0 4px;">a 面</p>
+            <p style="font-size: 0.78rem; color: var(--fg-muted); margin: 0;">AI · 给 AI 看</p>
+          </div>
+          <!-- studio × a -->
+          <div style="background: rgba(232, 168, 124, 0.05); padding: 18px 20px;">
+            <p style="font-size: 0.84rem; line-height: 1.7; color: var(--fg); margin: 0;">
+              agent 真实工作态 · 看真凭据(daemon 注入)· 反复 undo · 大量 micro commit · 写 decisions / fix.suggest · 失败 task abandoned 分支 · 完整 op log
+            </p>
+          </div>
+          <!-- delivery × a -->
+          <div style="background: rgba(90, 160, 250, 0.05); padding: 18px 20px;">
+            <p style="font-size: 0.84rem; line-height: 1.7; color: var(--fg); margin: 0;">
+              给下个 agent / 给 reviewer agent / structured audit chain / schema release notes / JSON token-budget summary(A1)· format-native semantic diff
+            </p>
+          </div>
+        </div>
+
+        <!-- 关键边界论 -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 22px;">
+          <div style="padding: 18px 22px; background: var(--bg-raised); border-left: 2px solid var(--copper);">
+            <p style="font-family: var(--font-mono); font-size: 0.64rem; color: var(--copper); letter-spacing: 0.22em; text-transform: uppercase; margin: 0 0 8px;">studio → delivery</p>
+            <p style="font-size: 0.86rem; line-height: 1.7; color: var(--fg); margin: 0;">
+              <strong>单向编辑学边界</strong>(§ 13 七件职责)· 在<em>出口命令</em>(<code>alt push &lt;remote&gt;</code> / <code>alt export &lt;dir&gt;</code>)发生 · squash / 降级 / 过滤 / 聚合 / hard gate。
+              所有"脏乱差"留在 studio · delivery 永远 polished。
+            </p>
+          </div>
+          <div style="padding: 18px 22px; background: var(--bg-raised); border-left: 2px solid var(--blue);">
+            <p style="font-family: var(--font-mono); font-size: 0.64rem; color: var(--blue); letter-spacing: 0.22em; text-transform: uppercase; margin: 0 0 8px;">h 面 ↔ a 面</p>
+            <p style="font-size: 0.86rem; line-height: 1.7; color: var(--fg); margin: 0;">
+              <strong>双向视图切换</strong>(axes 1/2/3 + atom layer + 双 oid 哈希 BLAKE3↔sha)· <code>alt log --json</code> / <code>alt blame --show-controlling-only</code> 等 flag 切换。
+              <em>同一份内容,h 面 / a 面看到不同 projection</em>。
+            </p>
+          </div>
+        </div>
+
+        <p style="font-size: 0.86rem; color: var(--fg-muted); line-height: 1.78; margin: 22px 0 0; padding-top: 18px; border-top: 1px solid var(--border-soft);">
+          <strong>对应关系一览</strong>:
+          <em>studio × h</em> = 个人开发态(owner 跟自己) ·
+          <em>delivery × h</em> = mental-model § 13 + axis 2 visibility + § 25 author 聚合的<em>主要落地</em>(git mirror 永远是 delivery × h) ·
+          <em>studio × a</em> = mental-model § 26 multi-agent + § 13 secret 注入 + invariant 2 op log AI 元数据 + § 31 pre-commit + § 85 schema 自动 derive ·
+          <em>delivery × a</em> = axis 1 format-native(prism JSON)+ A1 机器优先 I/O + § 85 schema 出口仅丢 controlling-human 维度 / 保留<em>给下个 agent</em> 维度。
+          全文 87 场景 + invariants 1-7 + axes 1-3 + § 12 anti-rot + § 13 编辑学职责 — 每一条都能填回这 4 象限<em>至少一个</em> · 否则跟 alt 核心抽象脱钩 = abort。
+        </p>
+      </div>
+    </div>
+
     <!-- VISION 锚点表 · 全文每个核心 framing 对应 vision 哪一条 -->
     <div class="full" style="margin-top: 38px;">
       <div class="aside" style="background: linear-gradient(135deg, rgba(232, 168, 124, 0.06) 0%, rgba(90, 160, 250, 0.03) 50%, transparent 100%); border: 1px solid var(--copper); padding: 28px 36px;">
