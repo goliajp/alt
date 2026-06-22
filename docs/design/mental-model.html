@@ -9951,7 +9951,7 @@ $ scripts/sync-mini.sh                    # 重装 alt binary (dogfood 关键)</
     </ol>
 
     <p style="font-size: 0.96rem; line-height: 1.85; color: var(--fg); margin-top: 24px; padding-top: 18px; border-top: 1px dashed var(--border-soft);">
-      <strong>最深 5 个洞察</strong>(吸收 owner 所有战略 + 三新概念 + § 13 delivery-polish framing):
+      <strong>最深 6 个洞察</strong>(吸收 owner 所有战略 + 三新概念 + § 13 delivery-polish framing + § 0 双轴四象限最高抽象):
     </p>
     <ol style="margin: 8px 0; padding-left: 24px; font-size: 0.92em; line-height: 1.85;">
       <li><strong class="cop">alt ⊇ git 三轴</strong>——这是 alt 跟 git 的关系本质,不只是 "better git":
@@ -9976,13 +9976,25 @@ $ scripts/sync-mini.sh                    # 重装 alt binary (dogfood 关键)</
         format-native review-component(§ 9 跨格式)+ issue tracker 统一抽象(§ 10)+ plugin marketplace(§ 11)
         让 alt 不只是 VCS · 是 GitHub 的认真挑战者。</li>
 
-      <li><strong class="cop">alt 替 git 兜脏乱差 · 出口永远 polished</strong>(§ 13)——
+      <li><strong class="cop">alt 替 studio 兜脏乱差 · delivery 永远 polished</strong>(§ 13)——
         这是上面三轴的<em>动机统一</em>,不是新增第四轴。
-        AI 时代 agent 的自然产物(大量微 commit · 反复 undo · 真实 secrets / .env / API keys · 失败 task 分支)<em>跟 git 历史可读性本质冲突</em>。
-        alt 仓 = 真实开发环境(尽情维护脏乱差),git mirror = 公开交付(永远 polished + 0 secret 泄露)。
-        alt 在 local 还主动接管 OS keychain + 6 类工具链访问(npm/aws/gh/docker/ssh/LLM api keys)·
-        不回避密钥这件事 · 正面把它做好。
+        AI 时代 studio 的自然产物(大量微 commit · 反复 undo · 真实 secrets / .env / API keys · 失败 task 分支)<em>跟交付物可读性本质冲突</em>。
+        alt 仓 = studio(尽情维护脏乱差),delivery = 公开交付(永远 polished + 0 secret 泄露)。
+        alt 在 local 还主动接管 OS keychain + 6 类工具链访问 · 不回避密钥这件事 · 正面把它做好。
         <em>这是 alt 跟 git 共存而非替代的根本理由</em>。</li>
+
+      <li><strong class="cop">alt 完全面向交付 · 两个正交维度 / 四象限</strong>(§ 0 最高抽象 · owner 2026-06-22 拍板)——
+        这是<em>所有</em>洞察 1-5 的上位 framing:
+        <ul style="margin: 4px 0; padding-left: 22px;">
+          <li><strong>状态维</strong>:<em>studio</em>(工作室 · 真实创作态)/ <em>delivery</em>(交付 · polished 阶段成果)。secret / .env / 反复试错<em>属 studio</em>,跟谁看无关</li>
+          <li><strong>观察者维</strong>:<em>h 面</em>(human · 给人看)/ <em>a 面</em>(AI · 给 AI 看)。三轴 / atom layer / schema commit-msg 等<em>属 a 面</em>扩展</li>
+          <li><strong>四象限正交</strong>:每个 invariant / axis / scenario / atom kind 都落在 1-2 个象限里 · 反向自查标尺</li>
+          <li><strong>边界双机制</strong>:studio→delivery 单向(§ 13 7 件编辑学职责)· h↔a 双向(axes 1/2/3 + 双 oid 哈希)</li>
+          <li><strong>交付的对象</strong>包含给自己:里程碑标记 / 复盘 / 阶段成果都是 delivery · 走<em>同一套</em> 7 件编辑学职责。
+            git mirror 只是 delivery × h 一个象限的<em>主要落地</em> · 不是 § 13 的全部</li>
+        </ul>
+        <strong>alt 完全面向交付</strong> · 哪怕交付给自己作为里程碑标记 · 也是交付。
+        这条 framing 比"alt ⊇ git"或"alt-first VCS"都更准:alt 不是<em>跟 git 比</em>什么 · alt 是<em>把工作室跟交付分开</em>这件事的具体实现。</li>
     </ol>
 
     <p style="font-size: 1rem; line-height: 1.7; color: var(--copper); margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--copper); font-weight: 500;">
@@ -10095,6 +10107,21 @@ $ scripts/sync-mini.sh                    # 重装 alt binary (dogfood 关键)</
     Maintenance log (most recent at top):
   </p>
   <ul style="margin: 8px 0 0; padding-left: 22px; color: var(--fg-faint); font-size: 0.7rem;">
+    <li>2026-06-22 · alt 双轴 framing(owner directive · 不是 audit · 是<em>新核心概念</em>):
+      <em>"把 git 和 alt 的 h 面留给人类 · 把 alt 的 a 面留给 AI"</em> +
+      <em>"secrets 这些是 studio 特性 · 是另一个维度的 · 工作室里脏乱差"</em> +
+      <em>"对应的是交付 · 哪怕交付给自己作为阶段成果也算交付 · alt 完全要面向交付"</em>。
+      3 atomic commits:
+      <strong>(1)</strong> § 0 加 alt 两个正交维度 + 4 象限最高抽象(状态维 studio/delivery · 观察者维 h/a)·
+      §视化 2×2 grid · studio×h / delivery×h / studio×a / delivery×a 四象限分别落地 ·
+      两个边界机制(studio→delivery 单向 § 13 七件 · h↔a 双向 axes + 双 oid)·
+      反向自查规则:全文每条 invariant/axis/scenario/atom 都必能填回 4 象限至少一格 · 否则 abort ·
+      <strong>(2)</strong> § 13 重命名 "alt 替你兜脏乱差 / 给 git 出口" → "studio → delivery 编辑学边界 · alt 完全面向交付" ·
+      lede 段重写为 § 0 状态维兑现 · 新加 delivery 5 类对象表(给协作者 / 客户 release / 自己里程碑 / 下个 agent / format-native schema release)· 关键 framing 升级:git mirror 只是 delivery × h 一个象限主要落地 · 给自己里程碑同样走 7 件编辑学职责 ·
+      <strong>(3)</strong> final summary 5 洞察 → 6 洞察 · 新加最深洞察 6 "alt 完全面向交付 · 两个正交维度 / 四象限"作上位 framing ·
+      洞察 5 措辞从 "alt → git" 升级到 "studio → delivery" 跟新 framing 一致 · maintenance log 收口。
+      <strong>这条 framing 比 "alt ⊇ git" 或 "alt-first VCS" 都更准</strong>:alt 不是跟 git 比什么 · alt 是把工作室跟交付分开这件事的具体实现。
+    </li>
     <li>2026-06-22 · coherence audit pass 4 · vision-anchoring(self-directed · owner directive "最后一轮了 · 要 html 整体紧靠 vision 自圆其说")— 7 atomic commits closing vision-decoupling gaps:
       <strong>(AV1)</strong> § 0 加 VISION § 1.5 八信条锚点表(可审查性 / 保真结构性 / 身份编码解耦 / 记录事实不现猜 / AI 一等公民 / fallback-enrich / 减负只在原生面 / 性能是功能 · 反向自查:新加任何 invariant/axis/scenario 必须能填回这表至少一格 · 否则 abort) ·
       <strong>(AV2)</strong> invariant 5 卡片改 "Git Compat · L1 语义保真" + 显式 L1 hash/refs/config 还原 + L2 packfile/ref 后端不还原 · 锚定 VISION § 8.1 拍板 ·
