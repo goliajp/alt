@@ -9248,30 +9248,81 @@ Closes #123"</span></span>
 
 
   <!-- ═══════════════════════════════════════════════════════════════════════
-       § 13 · alt 替 git 兜脏乱差 · 出口永远 polished
-       这是 alt ⊇ git 真正的动机 framing。不是"alt 多出来",而是
-       "alt 替 git 兜住所有脏乱差"。AI 时代这一点是决定性的。
+       § 13 · studio → delivery 编辑学边界
+       两个正交维度中的<em>状态</em>维(§ 0 双轴 framing)。
+       不是 "alt → git 边界",是<em>状态转换</em>:工作室真实创作态 → 交付 polished 阶段成果。
+       git mirror 只是 delivery × h 一个象限的<em>主要落地</em>;给自己里程碑 / 给下个 agent /
+       structured release notes 都同样属 delivery,共用本节 7 件编辑学职责。
        ═══════════════════════════════════════════════════════════════════════ -->
 <section>
   <p class="sec-mark">§ 13</p>
-  <h2 class="sec-title">alt 替你兜脏乱差 · 给 git 出口永远 polished</h2>
+  <h2 class="sec-title">studio → delivery 编辑学边界 · alt 完全面向交付</h2>
 
   <p class="lede" style="font-size: 1.04rem; line-height: 1.8; color: var(--fg); margin: 18px 0 28px;">
-    这是 alt ⊇ git 真正的<em>动机</em>,不是"alt 多出来",而是 —
-    <strong class="cop">alt 替你兜住 AI 时代所有的脏乱差,给 git 出口永远是 polished 的最终交付。</strong>
+    本节是 § 0 双轴 framing 中<em>状态维</em>的兑现 ·
+    <strong class="cop">studio 工作室真实创作态 → delivery 交付 polished 阶段成果</strong>的单向编辑学边界。
+    跟<em>谁看</em>(h 面 / a 面)<em>正交</em>:四象限里所有标 "delivery" 的都走这套规则。
   </p>
 
   <div class="aside" style="background: linear-gradient(90deg, rgba(232, 168, 124, 0.07) 0%, rgba(232, 168, 124, 0.01) 60%, transparent 100%); border-left: 2px solid var(--copper); padding: 26px 32px; margin-bottom: 36px;">
     <p style="font-family: var(--font-display); font-size: 1.14rem; font-weight: 300; color: var(--fg-strong); line-height: 1.7; margin: 0; letter-spacing: 0.01em;">
-      AI agent 在 alt 里<em>狂奔</em>(N 次试错 / 反复 undo / 大量探索性 commit / 内部 prompt 痕迹) · git mirror 上看到的依然是<em>干净的 conventional commit</em>。
+      studio 里<em>狂奔</em>(N 次试错 / 反复 undo / 大量探索性 commit / 真凭据 / 内部 prompt 痕迹 / 半成型讨论) · delivery 上看到的依然是<em>干净的阶段成果</em> — 无论交付给协作者 / 客户 / 社区 / 下个 agent / <em>自己作为里程碑</em>。
     </p>
     <p style="font-size: 0.86rem; color: var(--fg-muted); line-height: 1.7; margin: 14px 0 0;">
-      git 这一侧的<em>干净</em>不是 agent 自律的结果,是 alt 的<em>编辑学</em>保证。agent 不需要节制,alt 替它出口。
+      delivery 的<em>干净</em>不是创作者自律的结果,是 alt 的<em>编辑学</em>保证。owner 不需要节制 · agent 不需要节制 · alt 替你出口。
+    </p>
+  </div>
+
+  <!-- delivery 目标分类 -->
+  <div class="aside" style="background: var(--bg-raised); border: 1px solid var(--border-soft); padding: 22px 28px; margin-bottom: 36px;">
+    <p style="font-family: var(--font-mono); font-size: 0.7rem; color: var(--fg-muted); letter-spacing: 0.22em; text-transform: uppercase; margin: 0 0 12px;">"交付"的对象 · 不只是给别人 · 给自己也是</p>
+    <table style="width: 100%; border-collapse: collapse; font-size: 0.84rem; margin: 0;">
+      <thead>
+        <tr>
+          <th style="text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 500; width: 22%;">delivery 类</th>
+          <th style="text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 500; width: 18%;">象限</th>
+          <th style="text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border-soft); color: var(--copper); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 500;">命令面 / 触发</th>
+        </tr>
+      </thead>
+      <tbody style="color: var(--fg);">
+        <tr>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft);">协作者 / 社区 / GitHub mirror</td>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft); color: var(--blue);">delivery × h</td>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft);"><code>alt push &lt;remote&gt;</code> · 持续 mirror sync</td>
+        </tr>
+        <tr>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft);">客户 release / 阶段成果包</td>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft); color: var(--blue);">delivery × h</td>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft);"><code>alt export &lt;dir&gt;</code> · 单次快照</td>
+        </tr>
+        <tr>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft);"><strong class="cop">自己里程碑标记 / 复盘</strong></td>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft); color: var(--blue);">delivery × h</td>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft);"><code>alt tag</code> + <code>alt release</code>(M19+)· 同样跑 7 件编辑学职责 · 给<em>未来的自己</em>看 polished 历史</td>
+        </tr>
+        <tr>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft);">下个 agent / reviewer agent</td>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft); color: var(--blue);">delivery × a</td>
+          <td style="padding: 9px 12px; border-bottom: 1px solid var(--border-soft);"><code>alt log --json --schema</code> · structured audit chain · token-budget summary(A1)</td>
+        </tr>
+        <tr>
+          <td style="padding: 9px 12px;">format-native release(schema 化)</td>
+          <td style="padding: 9px 12px; color: var(--blue);">delivery × a</td>
+          <td style="padding: 9px 12px;">prism JSON schema 输出 · LLM 预算化摘要 · format-native semantic diff(VISION A8)</td>
+        </tr>
+      </tbody>
+    </table>
+    <p style="margin: 12px 0 0; font-size: 0.84rem; color: var(--fg-muted); line-height: 1.78;">
+      <strong>关键 framing 升级</strong>:
+      之前 framing 把 § 13 描述为 "alt → git 边界" · 这<em>不准</em>。
+      git mirror 只是 delivery × h 一个象限的<em>主要落地</em> ·
+      其余 delivery 都走<em>同一套</em> 7 件编辑学职责(本节末尾列)·
+      给自己 / 给下个 agent / 给结构化 release notes 都是 delivery · 都走 polished 出口。
     </p>
   </div>
 
   <p style="font-size: 0.96rem; line-height: 1.85; color: var(--fg); margin-bottom: 22px;">
-    具体什么<em>留在 alt</em>、什么<em>给 git</em>:
+    具体什么<em>留在 studio</em>、什么<em>给 delivery</em>:
   </p>
 
   <table style="width: 100%; border-collapse: collapse; font-size: 0.86rem; margin-bottom: 32px; background: var(--bg-raised); border: 1px solid var(--border-soft);">
