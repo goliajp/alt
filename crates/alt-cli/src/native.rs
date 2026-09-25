@@ -897,11 +897,19 @@ impl<'a> NativeRepo<'a> {
     /// work, etc.); the env var is deliberately not a CLI flag so it
     /// doesn't end up in a help-page menu that AIs might be tempted
     /// to wander into.
+    /// The git-flow model for this repository: its production branch is
+    /// whichever of `master` / `main` exists (see `BranchModel::for_repo`).
+    fn flow_model(&self) -> alt_flow::BranchModel {
+        alt_flow::BranchModel::for_repo(|b| {
+            self.store_refs_get(&format!("refs/heads/{b}")).is_some()
+        })
+    }
+
     fn ensure_topic_branch_or_unborn(&self, verb: &str) -> Res<()> {
         if std::env::var_os("ALT_PROTECTED_OVERRIDE").is_some() {
             return Ok(());
         }
-        let model = alt_flow::BranchModel::default();
+        let model = self.flow_model();
         let head_ref = self.head_branch()?;
         let short = match head_ref.strip_prefix("refs/heads/") {
             Some(s) => s,
@@ -2909,7 +2917,7 @@ impl<'a> NativeRepo<'a> {
     /// commit) and switch to it, in one ref transaction.
     pub fn flow_init(&mut self, json: bool, out: &mut impl Write) -> Res<()> {
         use crate::json::Json;
-        let model = alt_flow::BranchModel::default();
+        let model = self.flow_model();
         let dev_ref = format!("refs/heads/{}", model.develop);
         if self.store.refs.get(&dev_ref).is_some() {
             if json {
@@ -2973,7 +2981,7 @@ impl<'a> NativeRepo<'a> {
     /// `alt flow feature start <name>`: branch `feature/<name>` off `develop`
     /// and switch to it, atomically (one op log entry → O(1) undo).
     pub fn flow_feature_start(&mut self, name: &str, json: bool, out: &mut impl Write) -> Res<()> {
-        let flow = alt_flow::BranchModel::default().feature(name)?;
+        let flow = self.flow_model().feature(name)?;
         let feat_ref = format!("refs/heads/{}", flow.branch);
         let base_ref = format!("refs/heads/{}", flow.base);
         if self.store.refs.get(&feat_ref).is_some() {
@@ -3030,7 +3038,7 @@ impl<'a> NativeRepo<'a> {
     /// atomic ref transaction (one op log entry → O(1) undo). Aborts if the
     /// merge conflicts.
     pub fn flow_feature_finish(&mut self, name: &str, json: bool, out: &mut impl Write) -> Res<()> {
-        let flow = alt_flow::BranchModel::default().feature(name)?;
+        let flow = self.flow_model().feature(name)?;
         let feat_ref = format!("refs/heads/{}", flow.branch);
         let dev_ref = format!("refs/heads/{}", flow.target);
         let feat = self
@@ -3111,7 +3119,7 @@ impl<'a> NativeRepo<'a> {
     /// `develop` and switch to it — same atomic-ref-tx structure as
     /// feature start, just with a different base + branch prefix.
     pub fn flow_release_start(&mut self, name: &str, json: bool, out: &mut impl Write) -> Res<()> {
-        let flow = alt_flow::BranchModel::default().release(name)?;
+        let flow = self.flow_model().release(name)?;
         self.flow_topic_start(&flow, json, out)
     }
 
@@ -3121,7 +3129,7 @@ impl<'a> NativeRepo<'a> {
     /// entry. A conflict on either merge aborts the whole flow (atomicity
     /// keeps the prior state untouched). M8/C1 reuses the SIGKILL harness.
     pub fn flow_release_finish(&mut self, name: &str, json: bool, out: &mut impl Write) -> Res<()> {
-        let flow = alt_flow::BranchModel::default().release(name)?;
+        let flow = self.flow_model().release(name)?;
         let dev_ref = format!("refs/heads/{}", "develop");
         self.flow_topic_finish_dual(&flow, &dev_ref, "release", json, out)
     }
@@ -3129,7 +3137,7 @@ impl<'a> NativeRepo<'a> {
     /// `alt flow hotfix start <name>`: branch `hotfix/<name>` off `main`
     /// and switch to it.
     pub fn flow_hotfix_start(&mut self, name: &str, json: bool, out: &mut impl Write) -> Res<()> {
-        let flow = alt_flow::BranchModel::default().hotfix(name)?;
+        let flow = self.flow_model().hotfix(name)?;
         self.flow_topic_start(&flow, json, out)
     }
 
@@ -3137,7 +3145,7 @@ impl<'a> NativeRepo<'a> {
     /// and back-merge into `develop`, delete the hotfix branch, move HEAD
     /// to `develop`. Same atomic shape as release finish.
     pub fn flow_hotfix_finish(&mut self, name: &str, json: bool, out: &mut impl Write) -> Res<()> {
-        let flow = alt_flow::BranchModel::default().hotfix(name)?;
+        let flow = self.flow_model().hotfix(name)?;
         let dev_ref = format!("refs/heads/{}", "develop");
         self.flow_topic_finish_dual(&flow, &dev_ref, "hotfix", json, out)
     }

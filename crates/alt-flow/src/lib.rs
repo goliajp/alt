@@ -1,5 +1,5 @@
 //! The git-flow branch model as a domain object: the long-lived branch names
-//! (`main`, `develop`), the topic-branch prefixes (`feature/`, `release/`,
+//! (`master`, `develop`), the topic-branch prefixes (`feature/`, `release/`,
 //! `hotfix/`), and the source/target rules each flow obeys — a feature starts
 //! off `develop` and finishes back into it, and so on.
 //!
@@ -8,7 +8,7 @@
 //! flow integrates into; the caller turns those into ref transactions.
 
 /// The configurable git-flow branch model. `Default` is the conventional
-/// layout.
+/// layout, with `master` as the production branch (git-flow's own name for it).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BranchModel {
     pub main: String,
@@ -21,7 +21,7 @@ pub struct BranchModel {
 impl Default for BranchModel {
     fn default() -> Self {
         BranchModel {
-            main: "main".to_owned(),
+            main: "master".to_owned(),
             develop: "develop".to_owned(),
             feature_prefix: "feature/".to_owned(),
             release_prefix: "release/".to_owned(),
@@ -59,6 +59,18 @@ pub struct Flow {
 }
 
 impl BranchModel {
+    /// The model for a repository whose branches are known: the production
+    /// branch is `master` when it exists, else `main` when only that exists
+    /// (repositories created before `master` became the default), else the
+    /// default `master`. `has_branch` answers for a short branch name.
+    pub fn for_repo(has_branch: impl Fn(&str) -> bool) -> Self {
+        let mut model = BranchModel::default();
+        if !has_branch("master") && has_branch("main") {
+            model.main = "main".to_owned();
+        }
+        model
+    }
+
     /// A `feature/<name>` flow: starts from and finishes into `develop`.
     pub fn feature(&self, name: &str) -> Result<Flow, FlowError> {
         let name = check_name(name)?;
@@ -119,21 +131,31 @@ mod tests {
     }
 
     #[test]
-    fn release_starts_develop_targets_main() {
+    fn release_starts_develop_targets_master() {
         let m = BranchModel::default();
         let r = m.release("1.0").unwrap();
         assert_eq!(r.branch, "release/1.0");
         assert_eq!(r.base, "develop");
-        assert_eq!(r.target, "main");
+        assert_eq!(r.target, "master");
     }
 
     #[test]
-    fn hotfix_is_main_to_main() {
+    fn hotfix_is_master_to_master() {
         let m = BranchModel::default();
         let h = m.hotfix("urgent").unwrap();
         assert_eq!(h.branch, "hotfix/urgent");
-        assert_eq!(h.base, "main");
-        assert_eq!(h.target, "main");
+        assert_eq!(h.base, "master");
+        assert_eq!(h.target, "master");
+    }
+
+    #[test]
+    fn production_branch_follows_the_repository() {
+        let only_main = BranchModel::for_repo(|b| b == "main");
+        assert_eq!(only_main.release("1.0").unwrap().target, "main");
+        let both = BranchModel::for_repo(|b| b == "main" || b == "master");
+        assert_eq!(both.release("1.0").unwrap().target, "master");
+        let neither = BranchModel::for_repo(|_| false);
+        assert_eq!(neither.hotfix("x").unwrap().base, "master");
     }
 
     #[test]
