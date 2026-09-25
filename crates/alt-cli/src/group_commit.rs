@@ -84,6 +84,16 @@ impl GroupCommit {
     /// later callers wait on the condvar. A leader whose own flush
     /// fails surfaces the error rather than retry a dead disk.
     pub fn await_durable(&self, sink: &StoreSink, ticket: u64) -> Result<(), String> {
+        self.await_durable_with(ticket, || sink.fsync_all())
+    }
+
+    /// [`Self::await_durable`] with the flush supplied by the caller, so the
+    /// leader/follower protocol can be driven deterministically in tests.
+    fn await_durable_with<E: std::fmt::Display>(
+        &self,
+        ticket: u64,
+        mut flush: impl FnMut() -> Result<(), E>,
+    ) -> Result<(), String> {
         let mut g = self.inner.lock().expect("group mutex poisoned");
         let mut led = false;
         loop {
@@ -107,10 +117,7 @@ impl GroupCommit {
             led = true;
             let covered = g.next_ticket;
             drop(g);
-            let outcome = sink
-                .fsync_all()
-                .map(|()| covered)
-                .map_err(|e| e.to_string());
+            let outcome = flush().map(|()| covered).map_err(|e| e.to_string());
             g = self.inner.lock().expect("group mutex poisoned");
             g.syncing = false;
             g.fsync_count += 1;
@@ -123,5 +130,82 @@ impl GroupCommit {
             }
             self.cv.notify_all();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::mpsc;
+
+    /// Commits that arrive while a leader is flushing ride on the next single
+    /// fsync, however many of them there are: two fsyncs in total.
+    #[test]
+    fn commits_arriving_during_a_flush_share_the_next_one() {
+        const FOLLOWERS: u64 = 16;
+        let group = Arc::new(GroupCommit::new());
+        let flushes = Arc::new(AtomicU64::new(0));
+
+        let (started_tx, started_rx) = mpsc::channel::<()>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let leader_ticket = group.assign();
+        let leader = {
+            let group = Arc::clone(&group);
+            let flushes = Arc::clone(&flushes);
+            std::thread::spawn(move || {
+                group.await_durable_with(leader_ticket, || {
+                    flushes.fetch_add(1, Ordering::SeqCst);
+                    started_tx.send(()).expect("test channel open");
+                    release_rx.recv().expect("test channel open");
+                    Ok::<(), std::io::Error>(())
+                })
+            })
+        };
+        started_rx.recv().expect("leader started its flush");
+
+        // every follower holds a ticket before the leader's flush returns
+        let followers: Vec<_> = (0..FOLLOWERS)
+            .map(|_| {
+                let ticket = group.assign();
+                let group = Arc::clone(&group);
+                let flushes = Arc::clone(&flushes);
+                std::thread::spawn(move || {
+                    group.await_durable_with(ticket, || {
+                        flushes.fetch_add(1, Ordering::SeqCst);
+                        Ok::<(), std::io::Error>(())
+                    })
+                })
+            })
+            .collect();
+        release_tx.send(()).expect("leader waiting");
+
+        leader
+            .join()
+            .expect("leader thread")
+            .expect("leader durable");
+        for f in followers {
+            f.join()
+                .expect("follower thread")
+                .expect("follower durable");
+        }
+        assert_eq!(flushes.load(Ordering::SeqCst), 2);
+        assert_eq!(group.fsync_count(), 2);
+    }
+
+    #[test]
+    fn a_failed_flush_is_reported_not_retried() {
+        let group = GroupCommit::new();
+        let ticket = group.assign();
+        let mut calls = 0;
+        let err = group
+            .await_durable_with(ticket, || {
+                calls += 1;
+                Err(std::io::Error::other("disk gone"))
+            })
+            .unwrap_err();
+        assert!(err.contains("disk gone"), "{err}");
+        assert_eq!(calls, 1);
     }
 }
