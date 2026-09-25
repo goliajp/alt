@@ -866,3 +866,34 @@ fn daemon_enforces_capability_policy_for_restricted_agent() {
         "denied write must not append any op"
     );
 }
+
+/// Git-layer reads (`log`, `rev-parse`) served by the daemon resolve `HEAD`
+/// in the requesting workspace, not the daemon's default one.
+#[test]
+fn daemon_history_reads_follow_the_requesting_workspace() {
+    let repo = tempfile::tempdir().unwrap();
+    let trees = tempfile::tempdir().unwrap();
+    let root = repo.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("a.txt"), "main\n").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "on main"]));
+    ok(alt(root, &["branch", "feat"]));
+    let wt = trees.path().join("ws");
+    ok(alt(
+        root,
+        &["workspace", "add", "ws", wt.to_str().unwrap(), "feat"],
+    ));
+    std::fs::write(wt.join("a.txt"), "feat\n").unwrap();
+    ok(alt(&wt, &["add", "."]));
+    ok(alt(&wt, &["commit", "-m", "on feat"]));
+
+    let d = Daemon::start(&root.join(".alt"));
+    let r = d.run(&wt, &["log", "-n", "1"]);
+    assert_eq!(r.exit_code, 0, "{}", err_str(&r));
+    assert!(out_str(&r).contains("on feat"), "{}", out_str(&r));
+    let r = d.run(&wt, &["rev-parse", "HEAD"]);
+    assert_eq!(out_str(&r), ok(alt(root, &["rev-parse", "feat"])));
+    let r = d.run(root, &["log", "-n", "1"]);
+    assert!(out_str(&r).contains("on main"), "{}", out_str(&r));
+}

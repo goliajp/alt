@@ -354,6 +354,17 @@ pub struct Coord {
 }
 
 impl Coord {
+    /// The ref this workspace's HEAD lives in: `HEAD` for the default
+    /// workspace, `workspaces/<name>/HEAD` for a named one.
+    pub fn head_ref(&self) -> &str {
+        &self.head_ref
+    }
+
+    /// The workspace's working-tree root.
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
     /// The default workspace's coordinates for the repo rooted at `repo_root`
     /// (its HEAD stays the bare `HEAD` ref and its index `.alt/index`, so
     /// existing repos are unchanged).

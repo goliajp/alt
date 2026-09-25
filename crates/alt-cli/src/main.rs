@@ -132,8 +132,17 @@ fn run() -> Result<u8, Box<dyn std::error::Error>> {
             cli::run_native(&mut open.repo(), c, &mut out)?
         }
         c => {
-            let repo = Repository::discover(&cwd)?;
-            cli::run_git(&repo, c, &mut out)?;
+            // inside a named workspace the tree holds only a `.alt` marker, so
+            // open the repository it points at rather than discovering upward
+            let (repo, head) = match native::resolve_workspace(&cwd, cli.workspace.as_deref()) {
+                Ok((alt_dir, coord)) => (
+                    Repository::open_alt(alt_dir, Some(coord.root().to_owned()))?,
+                    coord.head_ref().to_owned(),
+                ),
+                Err(e) if cli.workspace.is_some() => return Err(e),
+                Err(_) => (Repository::discover(&cwd)?, "HEAD".to_owned()),
+            };
+            cli::run_git(&repo, c, &head, &mut out)?;
             0
         }
     };

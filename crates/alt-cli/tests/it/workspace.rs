@@ -264,3 +264,40 @@ fn two_workspaces_commit_concurrently_as_separate_processes() {
         "b2 advanced: {log}"
     );
 }
+
+#[test]
+fn history_commands_read_the_workspaces_own_head() {
+    // log / rev-parse / show are git-layer commands; inside a named workspace
+    // their HEAD must be that workspace's HEAD, not the default workspace's
+    let repo = tempfile::tempdir().unwrap();
+    let trees = tempfile::tempdir().unwrap();
+    let root = repo.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("a.txt"), "main\n").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "on main"]));
+    ok(alt(root, &["branch", "feat"]));
+    let wt = trees.path().join("ws");
+    ok(alt(
+        root,
+        &["workspace", "add", "ws", wt.to_str().unwrap(), "feat"],
+    ));
+    std::fs::write(wt.join("a.txt"), "feat\n").unwrap();
+    ok(alt(&wt, &["add", "."]));
+    ok(alt(&wt, &["commit", "-m", "on feat"]));
+
+    assert!(ok(alt(&wt, &["log", "-n", "1"])).contains("on feat"));
+    assert_eq!(ok(alt(&wt, &["show", "HEAD:a.txt"])), "feat\n");
+    let ws_head = ok(alt(&wt, &["rev-parse", "HEAD"]));
+    assert_eq!(ws_head, ok(alt(root, &["rev-parse", "feat"])));
+    assert_eq!(
+        ok(alt(&wt, &["rev-parse", "HEAD~1"])),
+        ok(alt(root, &["rev-parse", "main"]))
+    );
+
+    // the repository root is still the default workspace, on main
+    assert!(ok(alt(root, &["log", "-n", "1"])).contains("on main"));
+    assert_eq!(ok(alt(root, &["show", "HEAD:a.txt"])), "main\n");
+    // an explicit workspace name wins over the working directory
+    assert!(ok(alt(root, &["--workspace", "ws", "log", "-n", "1"])).contains("on feat"));
+}

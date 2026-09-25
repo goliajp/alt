@@ -92,6 +92,15 @@ impl LogArgs {
     }
 }
 
+impl LogArgs {
+    /// The same log, starting from `rev` rewritten by `map` (used to point a
+    /// bare `HEAD` at the current workspace's HEAD).
+    pub(crate) fn map_rev(mut self, map: impl Fn(&str) -> String) -> Self {
+        self.rev = map(&self.rev);
+        self
+    }
+}
+
 pub fn run(
     out: &mut impl Write,
     repo: &Repository,
