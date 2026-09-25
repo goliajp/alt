@@ -55,7 +55,7 @@ pub fn read(path: &Path) -> Result<Vec<(ChunkId, u64)>, StoreError> {
         return Err(StoreError::Format("altidx length mismatch"));
     }
     let mut entries = Vec::with_capacity(count);
-    for chunk in data[HEADER_LEN..].chunks_exact(ENTRY_LEN) {
+    for chunk in data[HEADER_LEN..].as_chunks::<ENTRY_LEN>().0 {
         let mut id = [0u8; 32];
         id.copy_from_slice(&chunk[..32]);
         let offset = u64::from_le_bytes(chunk[32..].try_into().unwrap());
