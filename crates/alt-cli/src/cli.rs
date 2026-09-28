@@ -149,6 +149,11 @@ pub enum Command {
         #[command(subcommand)]
         op: MetaOp,
     },
+    /// Git LFS: the large contents behind the pointer files LFS paths commit
+    Lfs {
+        #[command(subcommand)]
+        op: LfsOp,
+    },
     /// Find the commit that introduced a change by binary search
     Bisect {
         #[command(subcommand)]
@@ -419,6 +424,25 @@ fn parse_key_value(s: &str) -> Result<(String, String), String> {
         .ok_or_else(|| format!("expected key=value, got '{s}'"))
 }
 
+/// `alt lfs` operations.
+#[derive(Subcommand)]
+pub enum LfsOp {
+    /// Download the LFS contents HEAD needs from a remote's LFS server and
+    /// check them out
+    Fetch {
+        #[arg(default_value = "origin")]
+        remote: String,
+    },
+    /// Take the LFS contents HEAD needs from a git repository's local LFS
+    /// storage (as after `alt import` of a git-lfs repository)
+    Import {
+        /// The git directory (`.git`) holding `lfs/objects`
+        git_dir: std::path::PathBuf,
+    },
+    /// List HEAD's LFS files: `*` when the content is here, `-` when not
+    Ls,
+}
+
 /// `alt bisect` steps, as in git.
 #[derive(Subcommand)]
 pub enum BisectOp {
@@ -665,6 +689,7 @@ pub fn is_native(cmd: &Command) -> bool {
             | Command::Revert { .. }
             | Command::Rebase { .. }
             | Command::Bisect { .. }
+            | Command::Lfs { .. }
             | Command::Meta { .. }
             | Command::Switch { .. }
             | Command::Diff { .. }
@@ -750,6 +775,11 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
                 decisions,
                 extra,
             } => repo.meta_set(rev, message.as_deref(), decisions, extra, out)?,
+        },
+        Command::Lfs { op } => match op {
+            LfsOp::Fetch { remote } => repo.lfs_fetch(remote, out)?,
+            LfsOp::Import { git_dir } => repo.lfs_import(git_dir, out)?,
+            LfsOp::Ls => repo.lfs_ls(out)?,
         },
         Command::Bisect { op } => {
             match op {

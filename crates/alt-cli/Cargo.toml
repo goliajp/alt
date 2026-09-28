@@ -30,6 +30,7 @@ alt-export.workspace = true
 alt-flow.workspace = true
 alt-git-pack.workspace = true
 alt-import.workspace = true
+alt-lfs.workspace = true
 alt-merge.workspace = true
 alt-odb.workspace = true
 alt-oplog.workspace = true
@@ -59,6 +60,7 @@ libc.workspace = true
 alt-sign.workspace = true
 alt-testutil.workspace = true
 criterion.workspace = true
+serde_json.workspace = true
 flate2.workspace = true
 tempfile.workspace = true
 

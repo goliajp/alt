@@ -36,6 +36,7 @@ dependencies = [
  "alt-git-index",
  "alt-git-pack",
  "alt-import",
+ "alt-lfs",
  "alt-merge",
  "alt-odb",
  "alt-oplog",
@@ -55,6 +56,7 @@ dependencies = [
  "flate2",
  "libc",
  "regex",
+ "serde_json",
  "tempfile",
  "tiny_http",
 ]

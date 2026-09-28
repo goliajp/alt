@@ -14,16 +14,19 @@ use alt_refs::{IdemKey, OpId, RefChange, RefPolicy, RefStore, RefTarget};
 
 use crate::policy::{Capabilities, Policy};
 use alt_worktree::{
-    ChangeKind, Sig, WorkEntry, build_commit_bytes, flatten_tree, index_entries,
-    scan_indexed_paths, scan_worktree_with_index, status, write_commit, write_tree,
+    ChangeKind, Sig, WorkEntry, build_commit_bytes, flatten_tree, index_entries, status,
+    write_commit, write_tree,
 };
 use bstr::{BString, ByteSlice};
+use http_auth::{build_transport, http_auth};
 
 mod add;
 mod bisect;
 mod cherry_pick;
 pub mod commit;
+mod http_auth;
 mod identity;
+mod lfs;
 pub use identity::{Identity, Principal, PrincipalKind};
 mod merge;
 mod op_log;
@@ -342,27 +345,27 @@ pub fn import(
             wt == target_canon
         })
         .unwrap_or(false);
-    if same_dir {
-        return Ok(());
-    }
-    if !work_tree_is_empty(target) {
-        return Ok(());
-    }
+    let fresh = !same_dir && work_tree_is_empty(target);
 
-    // Attach the freshly-written .alt and materialize HEAD. Errors here
-    // are reported but don't fail the whole import — the .alt store is
+    // Attach the freshly-written .alt, take the LFS contents the source
+    // has, and materialize HEAD into a fresh tree. Errors here are
+    // reported but don't fail the whole import — the .alt store is
     // already on disk and useful.
     let mut open = match OpenRepo::discover(target, None, id) {
         Ok(o) => o,
         Err(e) => {
-            writeln!(
-                out,
-                "warning: cannot open imported store to materialize: {e}"
-            )?;
+            writeln!(out, "warning: cannot open imported store: {e}")?;
             return Ok(());
         }
     };
     let mut native = open.repo();
+    let taken = native.lfs_take(repo.git_dir())?;
+    if taken > 0 {
+        writeln!(out, "took {taken} LFS object(s)")?;
+    }
+    if !fresh {
+        return Ok(());
+    }
     if let Err(e) = native.materialise_head() {
         writeln!(
             out,
@@ -1103,7 +1106,7 @@ impl<'a> NativeRepo<'a> {
         // mtime/ctime/size/dev/ino/mode still matches the index entry —
         // git's classic optimisation; on a 50k-file monorepo clean run
         // this drops `alt status` from seconds to milliseconds.
-        let worktree = scan_worktree_with_index(&self.root, &raw, self.store.algo)?;
+        let worktree = self.scan_tree(&raw)?;
         let mut st = status(&head, &index, &worktree);
         // unmerged paths are reported in their own section, not as
         // staged/unstaged/untracked noise driven by the missing stage-0 entry
@@ -1200,7 +1203,7 @@ impl<'a> NativeRepo<'a> {
             // skipping the dir traversal is correct — same shape git diff
             // uses. Drops `alt diff` on a clean 50k-file monorepo from
             // seconds to ≤100 ms.
-            let work = scan_indexed_paths(&self.root, &raw, self.store.algo)?;
+            let work = self.scan_index_paths(&raw)?;
             let index = index_entries(&raw);
             (index, work, true, false)
         };
@@ -1928,7 +1931,7 @@ impl<'a> NativeRepo<'a> {
         let head = self.head_entries()?;
         let raw = self.index()?;
         let index = index_entries(&raw);
-        let worktree = scan_worktree_with_index(&self.root, &raw, self.store.algo)?;
+        let worktree = self.scan_tree(&raw)?;
         let st = status(&head, &index, &worktree);
         if !st.staged.is_empty() || !st.unstaged.is_empty() {
             return Err(format!(
@@ -2026,7 +2029,11 @@ impl<'a> NativeRepo<'a> {
         if w.mode == 0o120000 {
             symlink_to(&obj.data, &abs)?;
         } else {
-            std::fs::write(&abs, &obj.data)?;
+            let content = match alt_lfs::Pointer::parse(&obj.data) {
+                Some(p) => self.lfs_content(&p)?,
+                None => None,
+            };
+            std::fs::write(&abs, content.as_deref().unwrap_or(&obj.data))?;
             set_exec(&abs, w.mode == 0o100755)?;
         }
         Ok(())
@@ -4283,119 +4290,6 @@ fn canonicalise_remote_ref(name: &str) -> String {
     } else {
         format!("refs/heads/{name}")
     }
-}
-
-/// Build an [`alt_wire_http::GitTransport`] for `url`. Credential
-/// resolution order:
-///
-/// 1. Env vars: `ALT_HTTP_USER_<NAME>` + `ALT_HTTP_TOKEN_<NAME>` —
-///    explicit, scripted runs. Always win.
-/// 2. `git credential fill` — when alt finds a usable `git` on PATH it
-///    asks it to resolve the URL, then forwards whatever username /
-///    password the configured helper (osxkeychain, manager, store, …)
-///    returns. This is what makes alt push to GitHub Just Work for a
-///    user who's already done `gh auth login` or `git push` once
-///    before.
-/// 3. Nothing — anonymous request. Public repos work, private repos
-///    get HTTP 401 and a clear pointer at the auth options.
-fn build_transport(remote_name: &str, url: &str) -> alt_wire_http::GitTransport {
-    let env_key = remote_name
-        .chars()
-        .map(|c| {
-            if c == '-' {
-                '_'
-            } else {
-                c.to_ascii_uppercase()
-            }
-        })
-        .collect::<String>();
-    let user = std::env::var(format!("ALT_HTTP_USER_{env_key}")).ok();
-    let token = std::env::var(format!("ALT_HTTP_TOKEN_{env_key}")).ok();
-    let mut t = alt_wire_http::GitTransport::new(url);
-    if let (Some(user), Some(token)) = (user, token) {
-        t = t.with_auth(alt_wire_http::BasicAuth {
-            username: user,
-            token,
-        });
-        return t;
-    }
-    if let Some(auth) = git_credential_fill(url) {
-        t = t.with_auth(auth);
-    }
-    t
-}
-
-/// Ask `git credential fill` to resolve auth for `url`. Returns
-/// `None` when:
-/// - `git` isn't on PATH
-/// - the URL can't be split into a protocol + host (alt-wire's
-///   transport already rejects malformed URLs further down)
-/// - `git credential` exits non-zero (no helper configured, helper
-///   declined, …) — anonymous request is fine, public repos work
-///
-/// Successful invocations carry username/password back over stdout in
-/// the canonical key=value form; we forward them to alt-wire as Basic
-/// auth. The opt-out is `ALT_NO_CREDENTIAL_HELPER=1` for users who
-/// prefer to fail fast on misconfigured helpers.
-fn git_credential_fill(url: &str) -> Option<alt_wire_http::BasicAuth> {
-    if std::env::var_os("ALT_NO_CREDENTIAL_HELPER").is_some() {
-        return None;
-    }
-
-    // Split scheme://host[:port]/...
-    let scheme_split = url.find("://")?;
-    let scheme = &url[..scheme_split];
-    if scheme != "http" && scheme != "https" {
-        return None;
-    }
-    let after_scheme = &url[scheme_split + 3..];
-    let host_end = after_scheme.find('/').unwrap_or(after_scheme.len());
-    let host = &after_scheme[..host_end];
-    let path_part = if host_end < after_scheme.len() {
-        &after_scheme[host_end..]
-    } else {
-        "/"
-    };
-
-    // Prepare stdin: `protocol=…\nhost=…\npath=…\n\n`
-    let stdin_body = format!(
-        "protocol={scheme}\nhost={host}\npath={path}\n\n",
-        path = path_part.trim_start_matches('/'),
-    );
-
-    let mut child = std::process::Command::new("git")
-        .args(["credential", "fill"])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .ok()?;
-
-    {
-        use std::io::Write as _;
-        let mut stdin = child.stdin.take()?;
-        stdin.write_all(stdin_body.as_bytes()).ok()?;
-    }
-    let output = child.wait_with_output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let body = std::str::from_utf8(&output.stdout).ok()?;
-    let mut username: Option<String> = None;
-    let mut password: Option<String> = None;
-    for line in body.lines() {
-        if let Some(rest) = line.strip_prefix("username=") {
-            username = Some(rest.to_owned());
-        } else if let Some(rest) = line.strip_prefix("password=") {
-            password = Some(rest.to_owned());
-        }
-    }
-    let username = username.unwrap_or_default();
-    let password = password?;
-    Some(alt_wire_http::BasicAuth {
-        username,
-        token: password,
-    })
 }
 
 /// Map the server-advertised `object-format=<algo>` to a [`HashAlgo`].

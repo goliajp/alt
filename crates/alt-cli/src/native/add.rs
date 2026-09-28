@@ -12,7 +12,8 @@ impl NativeRepo<'_> {
         // odb.put on the next line. Wins for a smarter add are tracked
         // separately (the same-oid short-circuit in odb.put helps a bit).
         // the index decides which ignored paths are tracked and so still count
-        let scan = scan_worktree_with_index(&self.root, &self.index()?, self.store.algo)?;
+        let scan = self.scan_tree(&self.index()?)?;
+        let lfs = self.lfs_rules()?;
         let specs: Vec<&str> = paths.iter().map(|p| pathspec(p)).collect();
         let staging_all = specs.iter().any(|p| p.is_empty());
 
@@ -81,9 +82,8 @@ impl NativeRepo<'_> {
                 // before the index is even written).
                 let path_str = w.path.to_str().unwrap_or("");
                 self.ensure_path_allowed(path_str)?;
-                self.store
-                    .odb
-                    .put(w.oid, ObjectKind::Blob, &self.read_for(w)?)?;
+                let bytes = self.staged_bytes(w, lfs.as_ref())?;
+                self.store.odb.put(w.oid, ObjectKind::Blob, &bytes)?;
                 entries.push(self.make_entry(w)?);
                 staged += 1;
             } // a path that vanished from the tree is dropped (staged deletion)

@@ -81,7 +81,7 @@ fn a_missing_object_is_reported_by_oid() {
     let pa = Pointer::of(b"never uploaded");
     let endpoint = serve(HashMap::new(), None);
     let err = Client::new(endpoint, None)
-        .download(&[pa.clone()])
+        .download(std::slice::from_ref(&pa))
         .unwrap_err();
     match err {
         Error::Missing { oid, message } => {

@@ -69,6 +69,7 @@ pub fn scan_worktree(root: &Path, algo: HashAlgo) -> Result<Vec<WorkEntry>, Work
         algo,
         cache: None,
         tracked: &tracked,
+        clean: None,
     };
     scan_dir(&ctx, root, false, &mut stack, &mut out)?;
     out.sort_by(|a, b| a.path.cmp(&b.path));
@@ -91,6 +92,7 @@ pub fn scan_worktree_with_index(
     root: &Path,
     index: &Index,
     algo: HashAlgo,
+    clean: Option<Clean<'_>>,
 ) -> Result<Vec<WorkEntry>, WorktreeError> {
     let mut by_path: std::collections::HashMap<&BString, &alt_git_index::IndexEntry> =
         std::collections::HashMap::with_capacity(index.entries.len());
@@ -107,6 +109,7 @@ pub fn scan_worktree_with_index(
         algo,
         cache: Some(&by_path),
         tracked: &tracked,
+        clean,
     };
     scan_dir(&ctx, root, false, &mut stack, &mut out)?;
     out.sort_by(|a, b| a.path.cmp(&b.path));
@@ -132,6 +135,7 @@ pub fn scan_indexed_paths(
     root: &Path,
     index: &Index,
     algo: HashAlgo,
+    clean: Option<Clean<'_>>,
 ) -> Result<Vec<WorkEntry>, WorktreeError> {
     let mut out = Vec::with_capacity(index.entries.len());
     for idx in &index.entries {
@@ -179,7 +183,7 @@ pub fn scan_indexed_paths(
                 .as_encoded_bytes()
                 .to_vec()
         } else {
-            std::fs::read(&abs)?
+            cleaned(clean, &idx.path, std::fs::read(&abs)?)
         };
         out.push(WorkEntry {
             path: idx.path.clone(),
@@ -223,6 +227,34 @@ struct ScanCtx<'a> {
     algo: HashAlgo,
     cache: Option<&'a StatCache<'a>>,
     tracked: &'a Tracked,
+    clean: Option<Clean<'a>>,
+}
+
+/// A clean filter, as git's filter drivers have: given a path and the
+/// working-tree bytes, the bytes to store instead, or `None` to store the
+/// file as is. LFS uses it to stand a pointer in for a large file.
+pub type Clean<'a> = &'a dyn Fn(&[u8], &[u8]) -> Option<Vec<u8>>;
+
+fn cleaned(clean: Option<Clean<'_>>, path: &[u8], content: Vec<u8>) -> Vec<u8> {
+    clean.and_then(|f| f(path, &content)).unwrap_or(content)
+}
+
+/// Matches paths against gitignore-style patterns (as `.gitattributes`
+/// lines use), anchored at the working-tree root.
+pub struct PathMatcher(ignore::IgnoreStack);
+
+impl PathMatcher {
+    /// One pattern per entry, gitignore syntax.
+    pub fn new<'a>(patterns: impl IntoIterator<Item = &'a str>) -> PathMatcher {
+        let text: String = patterns.into_iter().map(|p| format!("{p}\n")).collect();
+        let mut stack = ignore::IgnoreStack::new();
+        stack.push(ignore::parse_layer(text.as_bytes(), b""));
+        PathMatcher(stack)
+    }
+
+    pub fn matches(&self, path: &[u8]) -> bool {
+        self.0.is_ignored(path, false)
+    }
 }
 
 /// Scans `dir` into `out`. Inside an ignored directory (`only_tracked`) just
@@ -307,7 +339,7 @@ fn scan_dir(
                 .as_encoded_bytes()
                 .to_vec()
         } else {
-            std::fs::read(&path)?
+            cleaned(ctx.clean, &rel_b, std::fs::read(&path)?)
         };
         out.push(WorkEntry {
             path: rel_b,

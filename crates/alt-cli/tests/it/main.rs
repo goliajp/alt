@@ -24,6 +24,7 @@ mod flow_kill;
 mod flow_release_hotfix;
 mod identity;
 mod import_materialize;
+mod lfs;
 mod log_patch;
 mod merge;
 mod merge_criss_cross;
