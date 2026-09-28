@@ -345,3 +345,35 @@ pub(super) fn check_workspace_name(name: &str) -> Res<()> {
     }
     Ok(())
 }
+
+/// Walks up from `start` to the nearest repository and, when it is an alt
+/// one (a `.alt` beside a `.git` counts as alt), resolves which
+/// workspace applies, and returns the control dir plus the coordinates. An
+/// explicit `workspace` name always wins. Otherwise the workspace is inferred:
+/// under a repo root (a `.alt` directory) → the default workspace; inside a
+/// named workspace's working tree (a `.alt` *file* pointing back at the repo,
+/// git-worktree style) → that workspace.
+pub fn resolve_workspace(start: &Path, workspace: Option<&str>) -> Res<(PathBuf, Coord)> {
+    let mut dir: &Path = start;
+    loop {
+        let marker = dir.join(".alt");
+        if marker.is_dir() {
+            let coord = Coord::for_name(&marker, workspace.unwrap_or(DEFAULT_WORKSPACE))?;
+            return Ok((marker, coord));
+        }
+        if marker.is_file() {
+            let (repo_root, name) = parse_workspace_marker(&marker)?;
+            let alt_dir = repo_root.join(".alt");
+            let coord = Coord::for_name(&alt_dir, workspace.unwrap_or(&name))?;
+            return Ok((alt_dir, coord));
+        }
+        // the nearest repository wins, as in git: a git repository nested
+        // in an alt working tree is its own, not part of the outer one
+        if dir.join(".git").exists() {
+            return Err("not an alt repository (inside a git repository)".into());
+        }
+        dir = dir
+            .parent()
+            .ok_or("not an alt repository (no .alt found)")?;
+    }
+}

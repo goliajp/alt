@@ -136,3 +136,57 @@ fn a_repository_gitignore_overrides_the_global_excludes() {
     let st = staged_after_add_dot(repo.path(), &[("XDG_CONFIG_HOME", config.path())], &[]);
     assert!(st.contains("trace.out"), "{st}");
 }
+
+fn git(repo: &Path, args: &[&str]) -> Output {
+    Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_AUTHOR_NAME", "tester")
+        .env("GIT_AUTHOR_EMAIL", "t@e")
+        .env("GIT_COMMITTER_NAME", "tester")
+        .env("GIT_COMMITTER_EMAIL", "t@e")
+        .args(args)
+        .output()
+        .unwrap()
+}
+
+/// Tracks `logs/keep.log`, then starts ignoring `*.log` and `logs/`; drops
+/// an untracked log beside it and edits `a.txt`.
+fn tracked_then_ignored(root: &Path, run: &dyn Fn(&[&str]) -> Output) {
+    std::fs::create_dir(root.join("logs")).unwrap();
+    std::fs::write(root.join("logs/keep.log"), "keep\n").unwrap();
+    std::fs::write(root.join("a.txt"), "a\n").unwrap();
+    ok(run(&["add", "."]));
+    ok(run(&["commit", "-m", "base"]));
+    std::fs::write(root.join(".gitignore"), "*.log\nlogs/\n").unwrap();
+    std::fs::write(root.join("logs/new.log"), "untracked\n").unwrap();
+    std::fs::write(root.join("a.txt"), "a2\n").unwrap();
+    ok(run(&["add", "."]));
+    ok(run(&["commit", "-m", "ignore logs"]));
+}
+
+#[test]
+fn ignore_rules_do_not_hide_tracked_files() {
+    let (a, g) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (a, g) = (a.path(), g.path());
+    ok(alt(a, &["init", "."]));
+    ok(git(g, &["init", "-q", "-b", "main"]));
+    tracked_then_ignored(a, &|args| alt(a, args));
+    tracked_then_ignored(g, &|args| git(g, args));
+
+    // `add .` kept the tracked log and left the untracked one out, as git did
+    let tree = |cat: String| cat.lines().next().unwrap().to_owned();
+    assert_eq!(
+        tree(ok(alt(a, &["cat-file", "-p", "main"]))),
+        tree(ok(git(g, &["cat-file", "-p", "HEAD"])))
+    );
+    assert!(ok(alt(a, &["status"])).contains("working tree clean"));
+
+    // and an edit to the tracked-but-ignored file still shows
+    std::fs::write(a.join("logs/keep.log"), "changed\n").unwrap();
+    let st = ok(alt(a, &["status"]));
+    assert!(st.contains("modified:   logs/keep.log"), "{st}");
+    assert!(!st.contains("new.log"), "{st}");
+}

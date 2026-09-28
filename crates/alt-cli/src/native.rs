@@ -15,7 +15,7 @@ use alt_refs::{IdemKey, OpId, RefChange, RefPolicy, RefStore, RefTarget};
 use crate::policy::{Capabilities, Policy};
 use alt_worktree::{
     ChangeKind, Sig, WorkEntry, build_commit_bytes, flatten_tree, index_entries,
-    scan_indexed_paths, scan_worktree, scan_worktree_with_index, status, write_commit, write_tree,
+    scan_indexed_paths, scan_worktree_with_index, status, write_commit, write_tree,
 };
 use bstr::{BString, ByteSlice};
 
@@ -29,7 +29,7 @@ mod rebase;
 mod revert;
 mod sequence_editor;
 mod workspace;
-use workspace::parse_workspace_marker;
+pub use workspace::resolve_workspace;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -408,32 +408,6 @@ impl Coord {
             head_ref: format!("workspaces/{name}/HEAD"),
             index_path: ws_dir.join("index"),
         })
-    }
-}
-
-/// Walks up from `start` for a directory holding `.alt`, resolving which
-/// workspace applies, and returns the control dir plus the coordinates. An
-/// explicit `workspace` name always wins. Otherwise the workspace is inferred:
-/// under a repo root (a `.alt` directory) → the default workspace; inside a
-/// named workspace's working tree (a `.alt` *file* pointing back at the repo,
-/// git-worktree style) → that workspace.
-pub fn resolve_workspace(start: &Path, workspace: Option<&str>) -> Res<(PathBuf, Coord)> {
-    let mut dir: &Path = start;
-    loop {
-        let marker = dir.join(".alt");
-        if marker.is_dir() {
-            let coord = Coord::for_name(&marker, workspace.unwrap_or(DEFAULT_WORKSPACE))?;
-            return Ok((marker, coord));
-        }
-        if marker.is_file() {
-            let (repo_root, name) = parse_workspace_marker(&marker)?;
-            let alt_dir = repo_root.join(".alt");
-            let coord = Coord::for_name(&alt_dir, workspace.unwrap_or(&name))?;
-            return Ok((alt_dir, coord));
-        }
-        dir = dir
-            .parent()
-            .ok_or("not an alt repository (no .alt found)")?;
     }
 }
 

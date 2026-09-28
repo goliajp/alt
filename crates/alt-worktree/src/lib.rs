@@ -63,7 +63,14 @@ pub struct Status {
 pub fn scan_worktree(root: &Path, algo: HashAlgo) -> Result<Vec<WorkEntry>, WorktreeError> {
     let mut out = Vec::new();
     let mut stack = ignore::IgnoreStack::with_global_excludes()?;
-    scan_dir(root, root, algo, None, &mut stack, &mut out)?;
+    let tracked = Tracked::default();
+    let ctx = ScanCtx {
+        root,
+        algo,
+        cache: None,
+        tracked: &tracked,
+    };
+    scan_dir(&ctx, root, false, &mut stack, &mut out)?;
     out.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(out)
 }
@@ -94,7 +101,14 @@ pub fn scan_worktree_with_index(
     }
     let mut out = Vec::new();
     let mut stack = ignore::IgnoreStack::with_global_excludes()?;
-    scan_dir(root, root, algo, Some(&by_path), &mut stack, &mut out)?;
+    let tracked = Tracked::of(index);
+    let ctx = ScanCtx {
+        root,
+        algo,
+        cache: Some(&by_path),
+        tracked: &tracked,
+    };
+    scan_dir(&ctx, root, false, &mut stack, &mut out)?;
     out.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(out)
 }
@@ -177,14 +191,50 @@ pub fn scan_indexed_paths(
     Ok(out)
 }
 
-fn scan_dir(
-    root: &Path,
-    dir: &Path,
+/// The index's paths and every directory above them. Ignore rules only
+/// hide untracked files, as in git: a tracked file stays in the scan even
+/// when a pattern matches it or a directory above it.
+#[derive(Default)]
+struct Tracked {
+    files: std::collections::HashSet<BString>,
+    dirs: std::collections::HashSet<BString>,
+}
+
+impl Tracked {
+    fn of(index: &Index) -> Tracked {
+        let mut t = Tracked::default();
+        for e in &index.entries {
+            let mut p = e.path.as_slice();
+            while let Some(i) = p.rfind_byte(b'/') {
+                p = &p[..i];
+                if !t.dirs.insert(BString::from(p)) {
+                    break;
+                }
+            }
+            t.files.insert(e.path.clone());
+        }
+        t
+    }
+}
+
+/// What stays the same for a whole scan.
+struct ScanCtx<'a> {
+    root: &'a Path,
     algo: HashAlgo,
-    cache: Option<&StatCache<'_>>,
+    cache: Option<&'a StatCache<'a>>,
+    tracked: &'a Tracked,
+}
+
+/// Scans `dir` into `out`. Inside an ignored directory (`only_tracked`) just
+/// the tracked files are picked up.
+fn scan_dir(
+    ctx: &ScanCtx<'_>,
+    dir: &Path,
+    only_tracked: bool,
     ignore_stack: &mut ignore::IgnoreStack,
     out: &mut Vec<WorkEntry>,
 ) -> Result<(), WorktreeError> {
+    let (root, algo, cache, tracked) = (ctx.root, ctx.algo, ctx.cache, ctx.tracked);
     // Load `<dir>/.gitignore` if present and push a layer for the duration
     // of this directory. Layer base is `dir`'s path relative to the root.
     let pushed = match std::fs::read(dir.join(".gitignore")) {
@@ -208,8 +258,14 @@ fn scan_dir(
         let rel = path.strip_prefix(root).unwrap();
         let rel_b = rel_path(rel);
         let is_dir = meta.is_dir();
-        if ignore_stack.is_ignored(rel_b.as_slice(), is_dir) {
-            continue; // a `.gitignore` rule in scope masks this entry
+        let hidden = only_tracked || ignore_stack.is_ignored(rel_b.as_slice(), is_dir);
+        let known = if is_dir {
+            &tracked.dirs
+        } else {
+            &tracked.files
+        };
+        if hidden && !known.contains(&rel_b) {
+            continue; // untracked and masked by an ignore rule in scope
         }
         if is_dir {
             // A submodule directory carries its own git layout (a `.git`
@@ -221,7 +277,7 @@ fn scan_dir(
             if is_submodule_dir(&path) {
                 continue;
             }
-            scan_dir(root, &path, algo, cache, ignore_stack, out)?;
+            scan_dir(ctx, &path, hidden, ignore_stack, out)?;
             continue;
         }
         let mode = if meta.is_symlink() {

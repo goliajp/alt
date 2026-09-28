@@ -11,7 +11,8 @@ impl NativeRepo<'_> {
         // fast path would save the scan-time hash but lose to read_for +
         // odb.put on the next line. Wins for a smarter add are tracked
         // separately (the same-oid short-circuit in odb.put helps a bit).
-        let scan = scan_worktree(&self.root, self.store.algo)?;
+        // the index decides which ignored paths are tracked and so still count
+        let scan = scan_worktree_with_index(&self.root, &self.index()?, self.store.algo)?;
         let specs: Vec<&str> = paths.iter().map(|p| pathspec(p)).collect();
         let staging_all = specs.iter().any(|p| p.is_empty());
 

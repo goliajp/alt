@@ -27,6 +27,7 @@ mod log_patch;
 mod merge;
 mod merge_criss_cross;
 mod monorepo_bench;
+mod nested_repo;
 mod op_log;
 mod push;
 mod push_policy;
