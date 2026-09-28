@@ -14,6 +14,7 @@
 set -eu
 HOST="${ALT_REPOS_HOST:-t01}"
 REMOTE_ROOT="${ALT_REPOS_DIR:-/apps/alt/repos}"
+OWNER="${ALT_REPOS_OWNER:-9000:9000}"
 
 cd "$(dirname "$0")/.."
 
@@ -37,7 +38,9 @@ rsync -av --delete \
 rsync -av --delete \
     "$WORK/demo-binaries/" "$HOST:$REMOTE_ROOT/demo-binaries/"
 
-# Make sure the daemon user inside the containers can read the trees.
-ssh "$HOST" "chmod -R a+rX $REMOTE_ROOT"
+# rsync -a carries the workstation's uid over; the containers run as
+# altd (uid 9000, see deploy/Dockerfile) and must own the trees because
+# opening a store writes the oplog `sync.lock` even for reads.
+ssh "$HOST" "chown -R $OWNER $REMOTE_ROOT && chmod -R a+rX $REMOTE_ROOT"
 
 echo "[deploy-repos] done — restart the stack with 'docker compose up -d' on $HOST" >&2
