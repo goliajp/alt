@@ -47,8 +47,8 @@ libc = "0.2"
 memmap2 = "0.9"
 rand_core = { version = "0.6", default-features = false, features = ["std", "getrandom"] }
 rayon = "1"
-sha1 = "0.10"
-sha2 = "0.10"
+sha1 = "0.11"
+sha2 = "0.11"
 syn = { version = "2", features = ["full", "extra-traits"] }
 proc-macro2 = "1"
 ureq = { version = "2", default-features = false, features = ["tls"] }
@@ -56,3 +56,8 @@ tempfile = "3"
 tiny_http = { version = "0.12", default-features = false }
 thiserror = "2"
 zstd = "0.13"
+
+[profile.dev]
+# line tables only: backtraces keep file and line, and full DWARF is most of
+# the size of target/debug
+debug = 1
