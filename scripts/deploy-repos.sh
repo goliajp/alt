@@ -9,8 +9,8 @@
 #                      alt's format-aware diff renderer.
 #
 # Runs locally on a workstation that has `alt` on PATH and SSH access
-# to the target. The compose stack on t01 bind-mounts /apps/alt/repos
-# read-only, so a deploy is just `rsync + docker compose up -d`.
+# to the target. The compose stack on t01 bind-mounts /apps/alt/repos,
+# so a deploy is just `rsync + docker compose up -d`.
 set -eu
 HOST="${ALT_REPOS_HOST:-t01}"
 REMOTE_ROOT="${ALT_REPOS_DIR:-/apps/alt/repos}"

@@ -1,0 +1,53 @@
+# alt — alt.golia.jp git smart-http v2 wire + browse JSON API
+# Live path on t01: /apps/alt/docker-compose.yml
+# Edge: t01 Caddy reverse_proxy /alt/* → 127.0.0.1:8090 (altd-server wire),
+#                                /api/* → 127.0.0.1:8091 (alt-web JSON)
+#
+# Repos are mounted read-only from the host. Both daemons share the
+# same root, so any subdirectory under /apps/alt/repos that contains a
+# `.alt` store becomes a browsable repository.
+
+services:
+  alt-server:
+    build: .
+    container_name: alt-server
+    restart: unless-stopped
+    ports:
+      # 8080 is taken by dadaya-server on t01 — bind 8090 on host instead.
+      - "127.0.0.1:8090:8080"
+    volumes:
+      # Read-write because altd-server / alt-web both need to write the
+      # oplog `sync.lock` on open even for read-only operations. The
+      # container user (altd, uid 9000) is the only writer either way.
+      - /apps/alt/repos:/var/lib/alt-repos
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "/usr/bin/wget", "-qO-", "http://127.0.0.1:8080/alt/info/refs?service=git-upload-pack"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  alt-web:
+    build: .
+    container_name: alt-web
+    restart: unless-stopped
+    entrypoint: ["/usr/local/bin/alt-web"]
+    environment:
+      ALT_WEB_BIND: "0.0.0.0:8091"
+    volumes:
+      # Read-write because altd-server / alt-web both need to write the
+      # oplog `sync.lock` on open even for read-only operations. The
+      # container user (altd, uid 9000) is the only writer either way.
+      - /apps/alt/repos:/var/lib/alt-repos
+    ports:
+      - "127.0.0.1:8091:8091"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "/usr/bin/wget", "-qO-", "http://127.0.0.1:8091/api/version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
