@@ -1,0 +1,19 @@
+schema: alt-meta/1
+type: feat
+summary: record commit metadata in git notes
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli.rs
+touched: crates/alt-cli/src/lib.rs
+touched: crates/alt-cli/src/log_cmd.rs
+touched: crates/alt-cli/src/meta.rs
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/bisect.rs
+touched: crates/alt-cli/src/native/commit.rs
+touched: crates/alt-cli/src/native/notes.rs
+touched: crates/alt-cli/src/native/op_log.rs
+touched: crates/alt-cli/src/native/rebase.rs
+touched: crates/alt-cli/src/native/revert.rs
+touched: crates/alt-cli/tests/it/commit_meta.rs
+touched: crates/alt-cli/tests/it/main.rs
+decision: notes keep commit ids unchanged, so git remotes never see a rewritten history
