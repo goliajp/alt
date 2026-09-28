@@ -8,7 +8,7 @@
 //! hundreds of MBs of real history (cargo, git, libgit2 source trees)
 //! with non-trivial delta chains and multi-pack layouts. If `alt clone`
 //! and the pack-indexing path resolves every delta correctly here, the
-//! W4-W6 modules scale to actual workloads — and not just to the toy
+//! fetch / clone modules scale to actual workloads — and not just to the toy
 //! repos the synthetic tests build inline.
 //!
 //! Gated on `ALT_CORPUS` like the other corpus tests. `scripts/gate.sh
@@ -171,7 +171,7 @@ fn alt_fetch_resolves_corpus_packs_byte_exact() {
 /// Larger guarantee: clone via the high-level `alt clone` against each
 /// corpus repo and assert the working tree materialised (at least one
 /// file exists, HEAD oid matches the server). This exercises the full
-/// W6 composite — init + remote add + fetch + branch create + checkout —
+/// clone composite — init + remote add + fetch + branch create + checkout —
 /// on real-shaped histories.
 #[test]
 #[ignore = "needs $ALT_CORPUS pointing at a directory of git repos"]
@@ -182,7 +182,7 @@ fn alt_clone_materialises_corpus_repos() {
     let mut swept = 0;
     for repo in repos {
         // skip fixtures with no HEAD — clone has nothing to check out
-        // and the test is about the W6 happy path on real repos
+        // and the test is about the clone happy path on real repos
         let Some(head_resolved) = try_head(&repo) else {
             eprintln!("skip {}: HEAD does not resolve", repo.display());
             continue;
@@ -226,7 +226,7 @@ fn alt_clone_materialises_corpus_repos() {
             repo.display()
         );
 
-        // M7-A1: status on a freshly cloned repo must be empty even when
+        // status on a freshly cloned repo must be empty even when
         // the source carries gitlink entries (gitflow-mirror's shFlags
         // submodule). Anything in stdout is a regression — submodule
         // paths must not surface as bogus deleted/untracked.

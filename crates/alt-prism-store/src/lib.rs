@@ -9,8 +9,7 @@
 //! files via CDC — the whole point), a small recipe record is stored as a
 //! blob too, and a fixed-size map records `original blob id → record blob
 //! id`. Declined: the bytes are stored Tier 0 verbatim. The blob id is
-//! always BLAKE3 of the original content, unchanged by the storage form
-//! (native-store §1 / VISION 信条 3).
+//! always BLAKE3 of the original content, unchanged by the storage form.
 //!
 //! `get` recomposes a Tier 1 blob from its parts and re-hashes the result
 //! against the requested id — the integrity boundary, so a corrupt part or

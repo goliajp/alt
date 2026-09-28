@@ -2,9 +2,9 @@
 # Push the alt repo's local develop tip to github.com/goliajp/alt over
 # alt's own git-smart-http transport.
 #
-# Until M17 this script used `alt export <tmp> && git push <url>` as a
+# This script used to use `alt export <tmp> && git push <url>` as a
 # fallback. That path is gone now: alt has been speaking the git wire
-# directly since M6/W5, so the script just calls `alt push`. The github
+# directly for a while, so the script just calls `alt push`. The github
 # remote should be registered in this .alt store as the plain HTTPS URL
 # (no embedded token) — credentials come from environment variables so
 # the on-disk remote stays clean. The script fishes a personal-access

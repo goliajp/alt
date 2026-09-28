@@ -1,6 +1,6 @@
 //! Re-hashes every object — loose and packed — of the given repositories,
 //! pairs every read with an export (parse → serialize must reproduce the
-//! bytes), and reports throughput. The M1 verification harness and bench
+//! bytes), and reports throughput. The verification harness and bench
 //! baseline.
 //!
 //! ```sh
@@ -40,7 +40,7 @@ fn main() {
 }
 
 fn verify_repo(repo: &Path) {
-    // corpus repos are SHA-1 until S9 wires config detection
+    // corpus repos are SHA-1 until config detection is wired
     let algo = HashAlgo::Sha1;
     let objects = repo.join(".git/objects");
     let bytes = AtomicU64::new(0);

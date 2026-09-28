@@ -70,7 +70,7 @@ pub struct FetchRequest {
     pub ofs_delta: bool,
     /// `include-tag\n` — also send annotated tags reachable from `wants`.
     pub include_tag: bool,
-    /// `filter <spec>\n` — partial-clone filter (M10/W17).
+    /// `filter <spec>\n` — partial-clone filter.
     /// Recognised shapes: `blob:none` (omit blobs), `blob:limit=<n>`
     /// (omit blobs at or above n bytes), `tree:0` (omit trees + blobs;
     /// only commits go on the pack). `None` = full clone.
@@ -404,7 +404,7 @@ fn trim_newline(b: &[u8]) -> &[u8] {
     &b[..end]
 }
 
-/// Server-side parse of a `fetch` request body (M9/W10b). Mirror image
+/// Server-side parse of a `fetch` request body. Mirror image
 /// of [`encode_fetch_request`]: reads `command=fetch` + optional
 /// `object-format=…`, the delim, the boolean args + want/have/done
 /// lines, then the trailing flush.
@@ -490,7 +490,7 @@ fn parse_oid_str(s: &str, algo: HashAlgo, line: &[u8]) -> Result<ObjectId, Fetch
 }
 
 /// Server-side encode of a `fetch` response that only carries a
-/// packfile section (M9/W10b first cut: client sends `done` so the
+/// packfile section (client sends `done` so the
 /// server skips the acknowledgments section and goes straight to the
 /// pack). Wraps `pack_bytes` in v2's sideband framing:
 ///
@@ -526,7 +526,7 @@ mod tests {
         hex.parse().expect("test oid is valid sha1")
     }
 
-    /// M10/W17: `filter <spec>` survives the encode/parse round-trip
+    /// `filter <spec>` survives the encode/parse round-trip
     /// so partial-clone negotiation is byte-exact in both directions.
     #[test]
     fn filter_spec_round_trips() {

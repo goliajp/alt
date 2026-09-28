@@ -3,7 +3,7 @@
 //! Domain layer between the storage crates (codec, pack, refs, config,
 //! index, native store) and the CLI. Read-only access to repositories —
 //! discovery, object reads, rev-parse, revision walking — over either
-//! backend: a `.git` directory (M1) or a native `.alt` store (M2).
+//! backend: a `.git` directory or a native `.alt` store.
 
 mod odb;
 mod revwalk;
@@ -334,7 +334,7 @@ impl Repository {
     /// or None)`. Resolution follows symrefs (HEAD → refs/heads/main). The
     /// alt-side returns owned strings so the caller doesn't borrow from
     /// the backend across the iteration; ref counts are typically small
-    /// enough that this is fine. M9/W10a: the wire server uses it to
+    /// enough that this is fine. The wire server uses it to
     /// answer `ls-refs`.
     pub fn list_refs(&self) -> Result<Vec<(String, ObjectId, Option<String>)>, RepoError> {
         let mut out = Vec::new();

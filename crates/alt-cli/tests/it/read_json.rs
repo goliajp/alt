@@ -1,4 +1,4 @@
-//! `--json` on the read commands `diff` / `branch` / `log` (VISION §4 A1).
+//! `--json` on the read commands `diff` / `branch` / `log`.
 //! Each emits a stable schema that round-trips through python's `json.load`;
 //! the assertions pin the fields agents rely on.
 
@@ -94,7 +94,7 @@ fn diff_json_flags_binary_files() {
     assert!(json.contains("\"binary\":true"), "{json}");
     // binary files carry no hunks
     assert!(json.contains("\"hunks\":[]"), "{json}");
-    // E2: binary files now carry an A8 B1 chunk-diff summary in the JSON
+    // binary files now carry a chunk-diff summary in the JSON
     // surface — `kind: "binary_chunk_diff"` plus the counts/ratio. Text
     // files still report `chunk_diff: null` (negative space below).
     assert!(
@@ -107,7 +107,7 @@ fn diff_json_flags_binary_files() {
     );
 }
 
-/// E2: text-file entries leave the new `chunk_diff` field as `null` — keeps
+/// Text-file entries leave the new `chunk_diff` field as `null` — keeps
 /// the v1 schema additive (adding a field, never repurposing one) and gives
 /// agents a clean negative-space check.
 #[test]

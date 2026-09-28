@@ -1,6 +1,6 @@
-//! M6/W8 — local A6 policy gate on `alt push` (cross-party pre-check).
+//! local capability policy gate on `alt push` (cross-party pre-check).
 //!
-//! Each test wires a local A6 policy and a real bare git server, then
+//! Each test wires a local capability policy and a real bare git server, then
 //! verifies the push side rejects (without going to the wire) when the
 //! policy says no, and accepts otherwise.
 
@@ -120,7 +120,7 @@ fn push_rejected_when_branch_allow_excludes_target() {
 }
 
 /// Non-fast-forward push without `-f` is refused (git-default behaviour),
-/// even without an A6 forbid_force capability. With `-f`, the same push
+/// even without a forbid_force capability. With `-f`, the same push
 /// is allowed.
 #[test]
 #[ignore = "requires system git; run with --include-ignored locally"]
@@ -190,7 +190,7 @@ fn push_non_fast_forward_requires_force_flag() {
 }
 
 /// `forbid-force` capability blocks a non-ff push even when `-f` was
-/// passed — A6 is the deeper gate.
+/// passed — the policy is the deeper gate.
 #[test]
 #[ignore = "requires system git; run with --include-ignored locally"]
 fn forbid_force_cap_blocks_push_even_with_force_flag() {

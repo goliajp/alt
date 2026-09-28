@@ -9,8 +9,7 @@
 //! Line-diff cannot distinguish a 500-line reformat from a 500-line rewrite
 //! — both look like 500 changed lines. AST diff collapses the reformat to
 //! one classification (`format_only`) and leaves the agent's token budget
-//! for the truly logical changes elsewhere in the file (A1/A8 design §6,
-//! prisms.md §3.5). For dogfood Rust this lets `cargo fmt` runs and pure
+//! for the truly logical changes elsewhere in the file. For dogfood Rust this lets `cargo fmt` runs and pure
 //! rename PRs read as one-line summaries instead of noise.
 //!
 //! ## Scope
@@ -23,7 +22,7 @@
 //!
 //! **Languages**: Rust via [`syn`] today. Other languages will arrive as
 //! their own [`Lang`] variant — JS/Python via `tree-sitter` is the obvious
-//! next step (A8 design §7 E3), but tree-sitter is a C dependency, so it
+//! next step, but tree-sitter is a C dependency, so it
 //! lives behind its own opt-in path when added. Rust via `syn` is pure
 //! Rust, fast to compile, no C linkage.
 //!

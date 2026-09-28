@@ -8,7 +8,7 @@ use alt_git_codec::ObjectKind;
 /// Delta chains in real packs share long prefixes; without a cache, reading
 /// N objects re-resolves the same bases O(N·depth) times. Budgeted like
 /// git's `core.deltaBaseCacheLimit` (96 MiB default). First version: exact
-/// LRU via a tick counter with linear-scan eviction — revisit in S6 bench.
+/// LRU via a tick counter with linear-scan eviction — revisit with a bench.
 pub(crate) struct DeltaBaseCache {
     map: HashMap<u64, Entry>,
     bytes: usize,

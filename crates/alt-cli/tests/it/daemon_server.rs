@@ -1,5 +1,5 @@
-//! `altd` (D2): the daemon holds one open store and serves commands over a Unix
-//! socket. These drive it directly over the wire (the CLI client is D3), and
+//! `altd`: the daemon holds one open store and serves commands over a Unix
+//! socket. These drive it directly over the wire (the CLI client is tested separately), and
 //! check the property that makes it correct: coherence with direct `alt`
 //! invocations — the daemon refreshes per request, so it never serves a stale
 //! read, and its own writes are visible to outside processes.
@@ -196,7 +196,7 @@ fn run_as(sock: &Path, cwd: &Path, args: &[&str], author: &str) -> Response {
 }
 
 /// Like [`run_as`] but with the full env vector explicit — so a test can also
-/// carry A5a `ALT_PRINCIPAL_*` vars per request.
+/// carry `ALT_PRINCIPAL_*` vars per request.
 fn run_with_env(sock: &Path, cwd: &Path, args: &[&str], env: Vec<(String, String)>) -> Response {
     let req = Request {
         args: args.iter().map(|s| s.to_string()).collect(),
@@ -211,7 +211,7 @@ fn run_with_env(sock: &Path, cwd: &Path, args: &[&str], env: Vec<(String, String
     Response::decode(&buf[..len]).unwrap()
 }
 
-/// Like [`run_as`] but carries an explicit idempotency `id` (the D5c
+/// Like [`run_as`] but carries an explicit idempotency `id` (the
 /// exactly-once token) so a test can replay the same request.
 fn run_keyed(
     sock: &Path,
@@ -245,7 +245,7 @@ fn stage_one(root: &Path) {
     ok(alt(root, &["add", "."]));
 }
 
-/// D5c: a keyed write sent twice to one daemon applies once. The second send
+/// A keyed write sent twice to one daemon applies once. The second send
 /// (same id) hits the in-memory idempotency index, so the daemon acks it without
 /// re-running — exactly one commit lands.
 #[test]
@@ -282,7 +282,7 @@ fn a_keyed_write_sent_twice_to_one_daemon_applies_once() {
     );
 }
 
-/// D5c (the crux): the dedup index is durable, so a retry with the same id after
+/// The crux: the dedup index is durable, so a retry with the same id after
 /// the daemon has *died and been replaced* still does not double-apply. This is
 /// what an in-memory LRU could not give (it dies with the daemon); the index is
 /// rebuilt by replay on open, so a fresh daemon sees the prior write as applied.
@@ -332,7 +332,7 @@ fn a_keyed_write_retried_after_the_daemon_dies_does_not_double_apply() {
     );
 }
 
-/// D5a: the daemon serves requests concurrently (a thread per connection) over
+/// The daemon serves requests concurrently (a thread per connection) over
 /// one shared store behind a Mutex. Several callers commit at the same time,
 /// each with its own identity into its own workspace/branch. The Mutex must
 /// serialize the store work without corruption, and the per-request identity
@@ -403,7 +403,7 @@ fn daemon_serves_concurrent_requests_without_identity_bleed() {
     }
 }
 
-/// C1 (A5a): each daemon thread carries its own structured `Principal` end-to-end
+/// Each daemon thread carries its own structured `Principal` end-to-end
 /// — distinct `ALT_PRINCIPAL_*` env per request reaches the op-log `actor`
 /// field unmixed, even when threads commit concurrently. Cross-checks the
 /// architectural argument with bytes on disk: parse the op log and confirm
@@ -480,7 +480,7 @@ fn daemon_routes_structured_principal_to_oplog_per_request() {
         }
     }
     seen.sort();
-    // M8-B1: each agent now writes TWO ops per worker (`add` records its
+    // each agent writes TWO ops per worker (`add` records its
     // own index-tx, then `commit` records the ref tx). The invariant the
     // test cares about is "no bleed and no loss": every agent id is in
     // the set, and nothing else is — dedup before comparing.
@@ -626,7 +626,7 @@ fn daemon_reads_stay_coherent_under_concurrent_external_writers() {
     }
 }
 
-/// D5b: under in-process group commit (concurrent commits coalesce their
+/// Under in-process group commit (concurrent commits coalesce their
 /// fsyncs), no commit is lost or corrupted. Several workspaces commit many
 /// rounds concurrently through the daemon; every branch must end with exactly
 /// base + ROUNDS commits, and the whole store must read back cleanly afterward.
@@ -693,7 +693,7 @@ fn daemon_group_commit_loses_no_concurrent_writes() {
     }
 }
 
-/// D5d bench (manual): concurrent-commit throughput through the daemon — the
+/// Bench (manual): concurrent-commit throughput through the daemon — the
 /// "beat git-default" judgment for the whole daemon line. Commits are
 /// fsync-bound; the daemon holds the store open (no per-command open) and its
 /// in-process group commit coalesces the fsyncs of commits that overlap in
@@ -817,7 +817,7 @@ fn daemon_picks_up_policy_edits_on_the_next_request() {
     );
 }
 
-/// C4: the daemon enforces the same A6 gate the direct CLI does — a
+/// The daemon enforces the same capability gate the direct CLI does — a
 /// restricted agent's write is denied at the daemon socket, the response
 /// reports it as a daemon-level error, and nothing lands in the op log
 /// (the gate fires before any oplog/idempotency state is touched).

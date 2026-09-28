@@ -8,7 +8,7 @@
 //! correctness (addressing is content-based) but loses cross-version dedup,
 //! so it is frozen.
 
-/// Chunking bounds. The defaults are the M2 starting point; the store
+/// Chunking bounds. The defaults are the starting point; the store
 /// records its parameters, so later tuning never breaks existing data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Params {

@@ -1,4 +1,4 @@
-//! kill -9 injection (git-debt #8 acceptance, CP2): a child process commits
+//! kill -9 injection: a child process commits
 //! ref transactions in a tight loop and is SIGKILLed at arbitrary points;
 //! after every kill the store must reopen cleanly with state equal to the
 //! last durable transaction — complete, or exactly the previous op, never

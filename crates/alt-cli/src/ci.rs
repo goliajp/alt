@@ -1,11 +1,10 @@
 //! alt-CI workflow.toml: schema-tier types + parser + linter.
 //!
 //! Pure logic: zero business state, zero I/O — bytes in, diagnostics and a
-//! `Workflow` struct out. Reused by `alt ci validate` (the M15 starting
-//! point) and by every future segment that takes a workflow tree (runner,
+//! `Workflow` struct out. Reused by `alt ci validate` and by every future segment that takes a workflow tree (runner,
 //! scheduler, result cache).
 //!
-//! ## Scope (M15/W47, design/ci.md §2.1)
+//! ## Scope
 //!
 //! A purpose-built TOML subset, not a general parser — only the shapes
 //! `[trigger]` / `[[step]]` / `[artifacts]` need: strings, string
@@ -22,12 +21,12 @@
 //! Every error carries the byte offset where it was detected; the
 //! caller resolves it to `(line, col)` against the source text via
 //! [`Position::resolve`]. Severity is `error` (schema break — exit
-//! non-zero) or `warning` (recognised but unimplemented in M15 — exit
+//! non-zero) or `warning` (recognised but unimplemented — exit
 //! 0 with the message printed). The `alt ci validate` CLI prints
 //! `<path>:<line>:<col>: <severity>: <message>` per diagnostic and
 //! also emits a JSON line per diag under `--json` (one record per
 //! line, no enclosing array — line-delimited, the same shape the
-//! W23 access log uses).
+//! `altd-server` access log uses).
 
 use std::collections::BTreeMap;
 
@@ -248,7 +247,7 @@ fn assemble(rows: Vec<TomlRow>, diags: &mut Vec<WfDiag>) -> Workflow {
                                     at,
                                     severity: Severity::Warning,
                                     message: format!(
-                                        "trigger.on event \"{it}\" not implemented in M15 (only \"push\" runs)"
+                                        "trigger.on event \"{it}\" not implemented yet (only \"push\" runs)"
                                     ),
                                 });
                             }
@@ -573,7 +572,7 @@ impl<'a> P<'a> {
         match self.peek() {
             Some(b'"') => self.read_quoted_string().map(TomlVal::Str),
             Some(b'[') => self.read_string_array().map(TomlVal::Arr),
-            Some(_) => Err("unsupported value (only strings and string arrays in M15)".to_owned()),
+            Some(_) => Err("unsupported value (only strings and string arrays)".to_owned()),
             None => Err("unexpected end of file in value".to_owned()),
         }
     }
@@ -606,7 +605,7 @@ impl<'a> P<'a> {
                     }
                     self.at += 1;
                 }
-                Some(b'\n') => return Err("multi-line strings not supported in M15".to_owned()),
+                Some(b'\n') => return Err("multi-line strings not supported".to_owned()),
                 Some(c) => {
                     out.push(char::from(c));
                     self.at += 1;
@@ -640,7 +639,7 @@ impl<'a> P<'a> {
                         }
                     }
                 }
-                _ => return Err("string-only arrays in M15".to_owned()),
+                _ => return Err("only string arrays are supported".to_owned()),
             }
         }
     }

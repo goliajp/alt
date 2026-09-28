@@ -1,13 +1,13 @@
-//! M10/W20 — B2 part-aware diff.
+//! Part-aware diff.
 //!
-//! Where [`crate::binary::chunk_diff`] (B1) tells you "47% of bytes are
+//! Where [`crate::binary::chunk_diff`] tells you "47% of bytes are
 //! shared" for any binary, this module gives you "IDAT chunks changed
 //! but IHDR didn't" when both sides decompose under a known format —
 //! the answer a reviewer actually asks of a binary diff.
 //!
-//! The detection set is intentionally narrow at W20: PNG only. The
+//! The detection set is intentionally narrow: PNG and ZIP. The
 //! shape ([`Summary`] / [`PartChange`]) is format-agnostic so adding
-//! ZIP / PDF / image kinds later is a `match` arm in [`summary`],
+//! PDF / other image kinds later is a `match` arm in [`summary`],
 //! never a redesign of the surface.
 //!
 //! Design parity with [`crate::perceptual`]: never panic on adversarial
@@ -30,7 +30,6 @@ pub enum PartKind {
     Png,
     /// ZIP container: covers .zip, .jar, .apk, .epub, and the entire
     /// OOXML family (.docx / .xlsx / .pptx) since OOXML files are ZIPs.
-    /// M12/W32.
     Zip,
 }
 
@@ -77,7 +76,7 @@ pub struct Summary {
 
 impl Summary {
     /// Render the summary as a single human line, in the same
-    /// information-dense style as the B1 chunk-diff line so they sit
+    /// information-dense style as the chunk-diff line so they sit
     /// nicely beside each other in `alt diff`. Parts that didn't
     /// change are dropped from the line so the signal-to-noise stays
     /// high — the absence of a part name in the output means it's
@@ -119,7 +118,7 @@ impl Summary {
 
 /// Top-level part-aware diff. Returns `None` when the two inputs aren't
 /// both a recognised, parseable kind — degrading gracefully to the
-/// caller's B1 chunk-diff line.
+/// caller's chunk-diff line.
 pub fn summary(old: &[u8], new: &[u8]) -> Option<Summary> {
     if old.starts_with(PNG_SIGNATURE) && new.starts_with(PNG_SIGNATURE) {
         return png_summary(old, new);
@@ -253,7 +252,7 @@ fn extract_lfh(data: &[u8], off: usize, max_member: usize) -> Option<Vec<u8>> {
 /// pass over the central directory only, so a 10K-entry archive
 /// still diffs in well under a millisecond.
 ///
-/// Returns `None` (fall back to B1) on any structural problem —
+/// Returns `None` (fall back to the chunk diff) on any structural problem —
 /// truncated EOCD, malformed CD entry, oversized name length — so a
 /// corrupt or encrypted-by-trick ZIP degrades gracefully instead of
 /// crashing the diff path.
@@ -417,7 +416,7 @@ mod tests {
     use super::*;
 
     /// Write one PNG chunk as `<len:4><type:4><body><crc:4 zero>`.
-    /// CRC is a placeholder — our chunk walker ignores it (B2 is a
+    /// CRC is a placeholder — our chunk walker ignores it (this is a
     /// diff helper, not a PNG validator).
     fn write_chunk(out: &mut Vec<u8>, kind: &[u8; 4], body: &[u8]) {
         out.extend_from_slice(&(body.len() as u32).to_be_bytes());
@@ -619,7 +618,7 @@ mod tests {
     #[test]
     fn corrupt_zip_falls_back_silently() {
         // Truncated EOCD = no comma-separated CD location to parse;
-        // zip_summary must return None so the caller drops to the B1
+        // zip_summary must return None so the caller drops to the
         // chunk-diff line instead of panicking.
         let mut z = synth_zip(&[("a.txt", 0x1, 4)]);
         z.truncate(z.len() - 10);

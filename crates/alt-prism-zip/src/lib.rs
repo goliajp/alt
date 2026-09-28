@@ -1,4 +1,4 @@
-//! ZIP container prism — design/prisms.md §2, hot/cold list step 2 after
+//! ZIP container prism, the step after
 //! the deflate-strip "universal key" (alt-prism-deflate). Most binary
 //! assets people actually review are ZIP-shaped containers (docx, xlsx,
 //! pptx, jar, apk, epub, …); cracking the container *and* its members

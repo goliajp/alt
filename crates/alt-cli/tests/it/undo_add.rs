@@ -1,8 +1,8 @@
-//! M8-B1: `alt undo` covers `alt add` too. The op log gets an
+//! `alt undo` covers `alt add` too. The op log gets an
 //! `PAYLOAD_INDEX_TX` entry per `add`; `undo` parses that kind, restores
 //! the index entries to their prior state, and records an inverse op so
-//! the second `undo` brings the staging back. Extends the M4 ref-tx undo
-//! into VISION A2's "any state-changing op is reversible".
+//! the second `undo` brings the staging back. Extends the ref-tx undo
+//! toward "any state-changing op is reversible".
 
 use std::path::Path;
 use std::process::{Command, Output};

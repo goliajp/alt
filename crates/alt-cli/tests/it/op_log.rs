@@ -1,5 +1,5 @@
-//! `alt op-log`: the A5a audit-view command. Closes the structured-identity
-//! story (C1 wrote identities into the op log; this reads them back out).
+//! `alt op-log`: the audit-view command. Identities are written into
+//! the op log; this reads them back out.
 
 use std::path::Path;
 use std::process::{Command, Output};

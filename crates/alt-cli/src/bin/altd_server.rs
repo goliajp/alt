@@ -1,15 +1,15 @@
-//! M9/W10a — alt's wire-protocol server (`altd-server`).
+//! alt's wire-protocol server (`altd-server`).
 //!
-//! Serves git protocol v2 over HTTP for a single alt repo (multi-repo
-//! routing arrives in W11). The contract is the smart-http v2 entry
+//! Serves git protocol v2 over HTTP for a single alt repo (`ALT_SERVER_REPO`) or a
+//! directory of repos (`ALT_SERVER_ROOT`). The contract is the smart-http v2 entry
 //! every git client recognises:
 //!
 //!   GET  /info/refs?service=git-upload-pack    → capability advert + ls-refs
 //!   GET  /info/refs?service=git-receive-pack   → capability advert + ls-refs
-//!   POST /git-upload-pack                      → command-dispatch (ls-refs, fetch — W10b)
-//!   POST /git-receive-pack                     → command-dispatch (W10c)
+//!   POST /git-upload-pack                      → command-dispatch (ls-refs, fetch)
+//!   POST /git-receive-pack                     → command-dispatch
 //!
-//! W10a delivers the `info/refs` handler end-to-end: server reads the
+//! The `info/refs` handler works end-to-end: server reads the
 //! repo's refs through `alt-repo::Repository`, encodes a capability
 //! advertisement (advertising only ls-refs for now), and follows it
 //! with the ls-refs response so a plain `git ls-remote http://…/` works.
@@ -40,23 +40,22 @@ use tiny_http::{Header, Method, Response, Server, StatusCode};
 
 const AGENT: &str = concat!("alt-server/", env!("CARGO_PKG_VERSION"));
 
-/// M11/W23: per-request log context filled in as dispatch progresses.
+/// per-request log context filled in as dispatch progresses.
 /// The outer serve loop reads it back after dispatch returns and emits
 /// one JSON-line access log entry, so a single request is one line of
-/// machine-readable observability — same调性 as `alt`'s `--json` paths
-/// (信条 #5 / AI-first).
+/// machine-readable observability — same style as `alt`'s `--json` paths.
 #[derive(Default)]
 struct LogCtx {
     status: u16,
     bytes_in: u64,
-    /// M14/W42: response body byte count when the encoder knows the
+    /// response body byte count when the encoder knows the
     /// length up front (the common path — `Response::from_data`,
     /// `from_string`, and the pack/sideband encoders all hand
     /// tiny_http a finished `Vec<u8>`). `None` when the response is
     /// chunked / streamed without a Content-Length, which we render
     /// as JSON `null` in the access log.
     bytes_out: Option<u64>,
-    /// M14/W44: total fsync count from the process-wide
+    /// total fsync count from the process-wide
     /// `WriteCoordinator.group.fsync_count()` snapshot at response
     /// time. Set only on receive-pack responses (the path that
     /// actually contends for durability). When N concurrent pushes
@@ -186,7 +185,7 @@ fn main() {
         (None, Some(p)) => ServeMode::multi(PathBuf::from(p)),
     };
 
-    // M11/W24: parallel request dispatch via a worker pool. tiny_http
+    // parallel request dispatch via a worker pool. tiny_http
     // is already thread-safe (Server: Send + Sync); previously the outer
     // `for req in incoming_requests()` deserialized everything onto the
     // main thread. With N workers each calling `server.recv()` in a
@@ -197,7 +196,7 @@ fn main() {
         .filter(|n: &usize| *n > 0)
         .unwrap_or(4);
 
-    // M11/W25: install signal handlers so SIGINT (Ctrl-C) and SIGTERM
+    // install signal handlers so SIGINT (Ctrl-C) and SIGTERM
     // (`systemctl stop`, `docker stop`, k8s preStop) tip the shutdown
     // flag. The handler must stay async-signal-safe, so it only does an
     // atomic store; the main thread polls it and drives the actual
@@ -249,7 +248,7 @@ fn main() {
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
 
-    // M13/W38: a stuck worker (long ingest_pack, a malicious slow
+    // a stuck worker (long ingest_pack, a malicious slow
     // client, a deadlocked Mutex<Store>) must not pin the process
     // forever. Spawn a watchdog that hard-exits after the deadline if
     // `handles.join()` hasn't returned by then. systemd / k8s see
@@ -276,7 +275,7 @@ fn main() {
 /// drive `Server::unblock()` and graceful worker drain.
 static SHUTDOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// M11/W26: hard cap on POST request bodies (push pack + upload-pack
+/// hard cap on POST request bodies (push pack + upload-pack
 /// command bodies). Bound by `ALT_SERVER_MAX_PUSH_BYTES`; default
 /// 1 GiB matches what a healthy alt push against the dogfood corpus
 /// fits inside, and stops a malicious or buggy client from streaming
@@ -302,7 +301,7 @@ fn max_body_bytes() -> u64 {
 /// the real enforcement, and it bounds BOTH the on-wire (compressed)
 /// bytes and the decoded output.
 ///
-/// M11/W31 background: git's smart-http client transparently sets
+/// Background: git's smart-http client transparently sets
 /// `Content-Encoding: gzip` on POST bodies it expects to compress
 /// well (push pack payloads, repeated want/have lists). Without
 /// gunzip on the server, the alt-wire pkt-line parser sees the gzip
@@ -385,7 +384,7 @@ fn serve_one(mode: &ServeMode, req: tiny_http::Request) {
 }
 
 /// Single-repo (ALT_SERVER_REPO) or multi-repo (ALT_SERVER_ROOT) serve.
-/// Single keeps W10's old shape — info/refs lives at the URL root.
+/// Single keeps the original shape — info/refs lives at the URL root.
 /// Multi parses the first path segment as a repo name and resolves it
 /// under the configured root.
 enum ServeMode {
@@ -399,7 +398,7 @@ enum ServeMode {
     },
 }
 
-/// M14/W44 — three-piece write coordinator for one repo. `store` is
+/// three-piece write coordinator for one repo. `store` is
 /// the existing serialised write port (Mutex held only across append).
 /// `sink` is an independent fsync handle (own fds) that the leader
 /// committer calls outside the store lock — overlap is what makes
@@ -411,7 +410,7 @@ struct WriteCoordinator {
     store: Mutex<Store>,
     sink: alt_cli::native::StoreSink,
     group: alt_cli::group_commit::GroupCommit,
-    /// M14/W45 — single-use nonces issued during receive-pack info/refs
+    /// single-use nonces issued during receive-pack info/refs
     /// and consumed during the matching `git-receive-pack` POST. Bounds
     /// the replay window to "between info/refs advert and EOL of the
     /// LRU table". A captured signed push payload can only be replayed
@@ -515,7 +514,7 @@ impl RepoHandle {
     }
 }
 
-/// Open the write store and build the W44 coordinator: turn on deferred
+/// Open the write store and build the write coordinator: turn on deferred
 /// durability so each commit appends-without-fsync, create the off-write
 /// `sink` so the fsync uses independent fds, instantiate the
 /// `GroupCommit` that coalesces concurrent flushes.
@@ -562,7 +561,7 @@ impl ServeMode {
                 root.display()
             ));
         }
-        // M14/W40: fail-open auth guard. When `ALT_SERVER_REQUIRE_AUTH=1`
+        // fail-open auth guard. When `ALT_SERVER_REQUIRE_AUTH=1`
         // an absent or unreadable `users` file is a hard error at
         // startup — the operator who set the env explicitly opted into
         // "no auth = no serve". Without the env we keep the previous
@@ -669,11 +668,11 @@ fn dispatch(
     req: tiny_http::Request,
     log: &mut LogCtx,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // M9/W11b — optional Basic auth in multi-repo mode. When the server
+    // optional Basic auth in multi-repo mode. When the server
     // root has a `users` file, every request must carry a valid
     // Authorization header; absence / mismatch returns HTTP 401 with a
     // WWW-Authenticate prompt so a real git client retries with creds.
-    // M9/W11c — a scoped user (3-column line) hands back an ACL the
+    // a scoped user (3-column line) hands back an ACL the
     // dispatcher checks against the resolved repo + action below.
     let mut auth_user: Option<String> = None;
     let mut scoped_acl: Option<Vec<AclRule>> = None;
@@ -714,9 +713,9 @@ fn dispatch(
     };
     log.repo = Some(repo_name.clone());
 
-    // M9/W11c — gate the resolved request against the scoped user's
+    // gate the resolved request against the scoped user's
     // ACL. Trusted (no-ACL) users skip the check entirely; the request
-    // proceeds as in W11b.
+    // proceeds unscoped.
     if let Some(acl) = &scoped_acl
         && let Some(action) = action_from_request(&method, &suffix, query)
         && !acl_allows(acl, &repo_name, action)
@@ -729,7 +728,7 @@ fn dispatch(
         return Ok(());
     }
 
-    // M11/W26: fail-fast 413 when the client *advertised* a body
+    // fail-fast 413 when the client *advertised* a body
     // larger than the cap. Lying Content-Length headers are caught
     // at read time inside the handlers via `read_body_capped`.
     if method == Method::Post
@@ -745,7 +744,7 @@ fn dispatch(
         return Ok(());
     }
 
-    // M14/W41 (G+H): figure out which (allowed methods, endpoint)
+    // figure out which (allowed methods, endpoint)
     // the suffix matches first, then check method. A path match with
     // the wrong method returns 405 + Allow header; a real OPTIONS
     // request returns 204 + Allow + (optionally) CORS preflight
@@ -797,7 +796,7 @@ fn dispatch(
     Ok(())
 }
 
-/// M14/W41 — preflight + bare OPTIONS responder.
+/// preflight + bare OPTIONS responder.
 ///
 /// Returns 204 + `Allow:` listing the methods the matched endpoint
 /// supports (or `GET, POST, OPTIONS` when the OPTIONS hit doesn't
@@ -828,7 +827,7 @@ fn build_options_response(endpoint_allow: Option<&'static str>) -> Response<Curs
 }
 
 /// POST /git-upload-pack. v2 dispatch on the first `command=…` line:
-/// `ls-refs` (W10a) and `fetch` (W10b) both land here. The request body
+/// `ls-refs` and `fetch` both land here. The request body
 /// header is identical (`command=<x>\n` + optional `object-format=…`),
 /// only the args section differs — sniff the first frame to route.
 fn handle_upload_pack(
@@ -921,7 +920,7 @@ fn build_pack_for_fetch(
     if outgoing.is_empty() {
         return Ok(Vec::new());
     }
-    // M10/W17: drop objects that the client's filter excludes. The
+    // drop objects that the client's filter excludes. The
     // first cut handles `blob:none` / `blob:limit=<n>` / `tree:0` —
     // git's three common partial-clone filters.
     let filter = parse_filter_spec(req.filter.as_deref());
@@ -1034,7 +1033,7 @@ fn handle_info_refs(
                 Some("sha1"),
                 &[
                     ("ls-refs", Some("unborn")),
-                    // M10/W17: advertise `filter` so git's partial-clone
+                    // advertise `filter` so git's partial-clone
                     // path (`--filter=blob:none` etc) negotiates against us
                     ("fetch", Some("shallow wait-for-done filter")),
                 ],
@@ -1052,7 +1051,7 @@ fn handle_info_refs(
                 .filter(|(name, _, _)| name != "HEAD")
                 .map(|(name, oid, _)| (name, oid))
                 .collect();
-            // M14/W45: issue a single-use nonce per advert and attach
+            // issue a single-use nonce per advert and attach
             // it as the `alt-nonce=<hex>` capability. A signing alt
             // client will sign `nonce <hex>\n` + canonical payload and
             // echo the same `alt-nonce=<hex>` capability back on its
@@ -1098,7 +1097,7 @@ fn handle_info_refs(
     Ok(())
 }
 
-/// POST /git-receive-pack (M9/W10c): parse the client's ref-update list
+/// POST /git-receive-pack: parse the client's ref-update list
 /// and raw pack, ingest objects into the alt odb, then commit the ref
 /// changes through `RefStore::commit` so the whole push lands as one
 /// atomic op-log entry (mirrors the local-commit path). Reply with a
@@ -1112,14 +1111,14 @@ fn handle_receive_pack(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let store = &writer.store;
     use std::io::Read;
-    // M13/W36 streaming path. The push body is parsed in two halves:
+    // Streaming path. The push body is parsed in two halves:
     //   1. Head (updates + capabilities + flush) — parsed straight off
     //      the connection. Only the small head bytes ever live in RAM.
     //   2. Pack bytes — `io::copy`'d into a tempfile so a 1 GiB push
     //      never costs us a 1 GiB Vec<u8> allocation. `index_pack`
     //      reads straight off the file path we just wrote.
     //
-    // The signature gate (W14) runs after step 1 and *before* step 2,
+    // The signature gate runs after step 1 and *before* step 2,
     // so a require-signed push that misses the cap is rejected without
     // ever reading the pack body — saving the bandwidth + RAM.
     let max = max_body_bytes();
@@ -1160,20 +1159,20 @@ fn handle_receive_pack(
         }
     };
 
-    // M13/W37: refresh the cached Store so an operator-edited
+    // refresh the cached Store so an operator-edited
     // `.alt/policy` (or fresh oplog ops from another writer) takes
     // effect on the *next* request — no server restart. `users` is
     // already re-read per request inside `check_auth`; `trust` keys
     // are re-read per request inside `verify_push_signature`. policy
     // is the last cached piece, and `Store::refresh()` is the same
-    // entry the daemon (M5) uses to catch up its read view. Must
+    // entry the daemon uses to catch up its read view. Must
     // happen *before* the sig_block decision below so the next
     // signing policy is seen on this request, not a request later.
     if let Err(e) = store.lock().unwrap().refresh() {
         eprintln!("altd-server: store refresh failed (continuing with stale policy): {e}");
     }
 
-    // M10/W14 (A5b): pre-commit verify of the wire signature. The
+    // pre-commit verify of the wire signature. The
     // signature is computed over the canonical push payload (head's
     // updates + algo); pack bytes don't participate, so we can decide
     // sig_block before reading them.
@@ -1194,13 +1193,13 @@ fn handle_receive_pack(
         return Ok(());
     }
 
-    // M14/W46 — checkpoint + apply + post-ingest snapshot run under a
+    // checkpoint + apply + post-ingest snapshot run under a
     // single store guard so other writers cannot advance the odb cursor
     // between them. That makes the rewind below atomic against
     // concurrent pushes without serialising the receive-pack flow as a
     // whole: ingest is briefly serial via `store.lock()` (already true
-    // pre-W46), but commit + `await_durable` still overlap with other
-    // pushes — W44 group-commit fsync coalescing is preserved. The
+    // before the rewind window existed), but commit + `await_durable` still overlap with other
+    // pushes — group-commit fsync coalescing is preserved. The
     // post-ingest snapshot lets the rewind site detect (and skip) a
     // rollback that would otherwise trample a concurrent push's
     // writes appended after ours.
@@ -1224,7 +1223,7 @@ fn handle_receive_pack(
         // and the in-process store mutex above serialises threads. The
         // first `put()` in apply still does its own acquire+sync, so
         // the actual write happens against a freshly reconciled state.
-        // Skipping the sync here was W44 group-commit critical: pushes
+        // Skipping the sync here was group-commit critical: pushes
         // need to pile up at await_durable in a tight enough window to
         // coalesce, and even a few hundred µs of extra syscalls per
         // push spread them past the leader's fsync.
@@ -1247,7 +1246,7 @@ fn handle_receive_pack(
         (pre, post, result)
     };
 
-    // M10/W15: if the policy requires every commit to carry a verified
+    // if the policy requires every commit to carry a verified
     // alt-sig header, scan the new commits *after* ingest and decide
     // before touching any refs. A failure here flips into a per-command
     // ng identical in shape to the push-level signature gate above.
@@ -1262,7 +1261,7 @@ fn handle_receive_pack(
     // the client sees a coherent reason.
     let mut command_status: Vec<CommandStatus> = Vec::new();
     let any_block = sig_block.clone().or(commit_block);
-    // M14/W46 — flips to true the moment commit_ref_updates returns Ok.
+    // flips to true the moment commit_ref_updates returns Ok.
     // While this is still false at the rewind site below, the new
     // append-only writes are rolled back to `ingest_ckpt` so the odb is
     // bit-identical to its pre-push state. A successful commit makes
@@ -1280,7 +1279,7 @@ fn handle_receive_pack(
         match commit_ref_updates(writer, &head.updates, &effective_principal, sig_label) {
             Ok(ticket) => {
                 committed = true;
-                // M14/W44: wait for the group-commit leader's fsync to
+                // wait for the group-commit leader's fsync to
                 // cover us — this is the only place we touch disk
                 // durability on the receive-pack path. Other concurrent
                 // pushes coalesce into the same flush, so 4-way
@@ -1321,14 +1320,14 @@ fn handle_receive_pack(
         }
     }
 
-    // M14/W46 — if we ingested objects but never reached a durable
+    // if we ingested objects but never reached a durable
     // commit (signature / commit-signing gate rejected, ref-tx returned
     // Err, or the pack itself failed mid-ingest), roll the odb back to
     // the pre-ingest checkpoint. Rewind is skipped (orphans left for a
     // future GC pass) when another push committed in the same window
     // — detected by comparing the live cursor to our post-ingest
     // snapshot. push_lock is intentionally NOT held here: holding it
-    // through commit would serialize fsyncs and break the W44 group
+    // through commit would serialize fsyncs and break the group
     // commit coalescing that makes high-concurrency pushes cheap. The
     // race trades a rare orphan leak for steady-state throughput.
     if !committed {
@@ -1395,7 +1394,7 @@ fn prepare_pack_for_ingest(
 
 /// Apply a prepared pack into the server odb under an already-held
 /// store guard, returning the list of new commit oids. Holding the
-/// guard across the whole put loop is what makes the W46 checkpoint /
+/// guard across the whole put loop is what makes the checkpoint /
 /// rewind window indivisible against concurrent receive-pack flows:
 /// no other writer can advance `appended_lens` between the surrounding
 /// `checkpoint()` calls, so a downstream rewind is guaranteed to drop
@@ -1421,12 +1420,12 @@ fn apply_pack_into_store(
 
 /// Apply the client's ref updates as a single ref transaction so the
 /// server records the push as one op-log entry — same atomicity story
-/// as a local `alt commit`. M9/W12 — the authenticated user (when
-/// present) becomes the Principal looked up against the repo's A6
+/// as a local `alt commit`. The authenticated user (when
+/// present) becomes the Principal looked up against the repo's
 /// Policy; the resulting Capabilities feed a RefPolicy gate inside
 /// `commit_idempotent`, so a server-side ref-write rule is enforced
 /// before any state changes (a denied push leaves no op-log entry).
-/// M10/W14 (A5b): result of verifying the `alt-principal=<id>` +
+/// result of verifying the `alt-principal=<id>` +
 /// `alt-sig=<ed25519>` capabilities the client may have attached to a
 /// push. `NoSignature` is the empty-attribution baseline; the rest are
 /// failure modes the policy gate can act on.
@@ -1477,12 +1476,12 @@ fn verify_push_signature(
         Ok(s) => s,
         Err(e) => return Ok(SigOutcome::BadSignature(format!("{e}"))),
     };
-    // M14/W45: if the client echoed back an `alt-nonce=<hex>` cap, the
+    // if the client echoed back an `alt-nonce=<hex>` cap, the
     // signature is over `nonce <hex>\n` + canonical_payload. We must
     // consume the nonce (single-use, anti-replay) and verify against
-    // the nonce-prefixed payload. No nonce echo = legacy W14 payload,
+    // the nonce-prefixed payload. No nonce echo = legacy payload,
     // verified against the no-nonce form for backwards-compat with
-    // pre-W45 clients (the `require_nonce_on_sig` policy axis turns
+    // pre-nonce clients (the `require_nonce_on_sig` policy axis turns
     // that compat off).
     let echoed_nonce = head
         .capabilities
@@ -1541,7 +1540,7 @@ fn require_signed_for(store: &Mutex<Store>, principal: &Principal) -> bool {
     guard.capabilities_for(principal).require_signed
 }
 
-/// M10/W15: walk the newly-pushed commits and verify each carries a
+/// walk the newly-pushed commits and verify each carries a
 /// valid `alt-sig` header from a trusted principal. Returns `Some(reason)`
 /// for the first commit that fails the check (the caller turns it into
 /// per-command `ng` so the entire push is rejected atomically). Returns
@@ -1601,7 +1600,7 @@ fn require_signed_commits_block(
 /// visibly-ordered before the ticket is observable. The returned
 /// ticket should be passed to `writer.group.await_durable(&writer.sink, ticket)`
 /// **after** the store mutex is released — that's the overlap which
-/// lets N concurrent pushes coalesce onto ~1 fsync (M14/W44).
+/// lets N concurrent pushes coalesce onto ~1 fsync.
 ///
 /// Returns `Ok(None)` for an empty-updates push (no append happened,
 /// no durability needed).
@@ -1633,7 +1632,7 @@ fn commit_ref_updates(
         id = principal.id,
         sig = sig_label,
     );
-    // M10/W22: combine branch_allow + branch_deny (deny wins) into a
+    // combine branch_allow + branch_deny (deny wins) into a
     // single closure that mirrors the local CLI path.
     let allow = caps.branch_allow.clone();
     let deny = caps.branch_deny.clone();
@@ -1658,7 +1657,7 @@ fn commit_ref_updates(
         .map_err(|e| format!("ref tx: {e}"))?;
     // Under the same lock: hand out the durability ticket. The bytes
     // for this commit are on disk before the ticket is observable
-    // from outside the lock — that's the W44 invariant.
+    // from outside the lock — that's the group-commit invariant.
     let ticket = writer.group.assign();
     Ok(Some(ticket))
 }
@@ -1715,7 +1714,7 @@ fn die(msg: &str) -> ! {
 }
 
 // Suppress an unused-import warning so this file remains tidy while
-// the W10b POST handler that reads request bodies lands later.
+// the POST handler that reads request bodies lands later.
 #[allow(dead_code)]
 fn _phantom_keep_imports(_c: Cursor<Vec<u8>>) {}
 
@@ -1812,7 +1811,7 @@ fn parse_acl(field: &str) -> Vec<AclRule> {
     out
 }
 
-/// M14/W39 — constant-time, ASCII-case-insensitive byte comparison.
+/// constant-time, ASCII-case-insensitive byte comparison.
 /// Short-circuit `==` / `eq_ignore_ascii_case` leaks bytes of the
 /// stored token hash through wall-clock timing differences: an
 /// attacker who can fire many auth requests reconstructs the hash
@@ -1878,7 +1877,7 @@ fn check_auth(req: &tiny_http::Request, users_path: &Path) -> AuthOutcome {
     if !constant_time_eq_ignore_ascii_case(entry.token_hash.as_bytes(), token_hex.as_bytes()) {
         return AuthOutcome::Reject("bad token".into());
     }
-    // M9/W11c — a 2-column users line (no ACL) is the "trusted user"
+    // a 2-column users line (no ACL) is the "trusted user"
     // shape: every repo + every action allowed. A 3-column line scopes
     // the user, and the dispatcher then asks `acl_allows` per request.
     AuthOutcome::Allow {
@@ -1971,7 +1970,7 @@ fn base64_decode(input: &str) -> Option<Vec<u8>> {
 mod tests {
     use super::*;
 
-    /// M14/W39 — constant-time compare basic correctness on the
+    /// constant-time compare basic correctness on the
     /// values it actually sees in production: 64-char BLAKE3 hex
     /// strings, plus a few edge cases.
     #[test]
@@ -2019,7 +2018,7 @@ mod tests {
         assert!(constant_time_eq_ignore_ascii_case(stored, stored));
     }
 
-    /// M14/W45 — the table issues a nonce that consumes exactly once;
+    /// the table issues a nonce that consumes exactly once;
     /// the second consume on the same value returns false. That's
     /// the single-use anti-replay primitive.
     #[test]

@@ -1,4 +1,4 @@
-//! M11/W30 — protocol parser fuzz harness.
+//! protocol parser fuzz harness.
 //!
 //! Property: every public parser in `alt-wire` must return a `Result`
 //! on any input, never panic / abort / overflow. The wire is the

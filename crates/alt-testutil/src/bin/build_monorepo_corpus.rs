@@ -1,10 +1,10 @@
-//! M8-A1 monorepo synth corpus generator.
+//! Monorepo synth corpus generator.
 //!
 //! Builds a deterministic typical-webdev-monorepo-shaped git repo at
 //! `<dir>`: 200 packages, each with a small manifest + README + ~250
 //! source files in nested directories (depth 1-5), then 8 000 commits
 //! that touch 1-3 files at random (90%) or fan out across 2-3 packages
-//! (10%) — the modify pattern A7 monorepo bench needs to stress
+//! (10%) — the modify pattern the monorepo bench needs to stress
 //! status / commit / diff / log on a realistic working tree.
 //!
 //! Reproducible (same seed → same bytes), so a corpus rebuild diff is a

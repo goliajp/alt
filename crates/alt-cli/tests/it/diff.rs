@@ -113,7 +113,7 @@ fn diff_unstaged_and_cached_match_git_hunks() {
         bin.contains("Binary files a/b.bin and b/b.bin differ"),
         "{bin}"
     );
-    // E2: human view also gets an A8 B1 chunk-diff summary line — counts and
+    // human view also gets a chunk-diff summary line — counts and
     // a percentage so the reader knows whether this is a tiny change or a
     // full rewrite without opening the bytes.
     assert!(
@@ -122,7 +122,7 @@ fn diff_unstaged_and_cached_match_git_hunks() {
     );
 }
 
-/// E3b (A8b): `alt diff --semantic` for a `.rs` file replaces the unified
+/// `alt diff --semantic` for a `.rs` file replaces the unified
 /// hunks with an item-level AST summary — a single logical change keyed on
 /// the function whose body moved, other items silent.
 #[test]
@@ -169,7 +169,7 @@ fn semantic_diff_falls_back_to_line_diff_for_unsupported_languages() {
 }
 
 /// Build a minimal valid 8-bit grayscale PNG (single IDAT, filter byte 0
-/// per scanline). Good enough for the M7-B3 perceptual-diff path: it walks
+/// per scanline). Good enough for the perceptual-diff path: it walks
 /// PNG chunks, takes the IDAT bytes, inflates and fingerprints — no CRC
 /// check, no IHDR parsing required.
 fn build_minimal_png(width: u32, height: u32, pixels: &[u8]) -> Vec<u8> {
@@ -206,7 +206,7 @@ fn build_minimal_png(width: u32, height: u32, pixels: &[u8]) -> Vec<u8> {
     out
 }
 
-/// M7-B3: `alt diff` on a PNG that was changed should land a perceptual
+/// `alt diff` on a PNG that was changed should land a perceptual
 /// diff hint alongside the chunk-diff summary — both in the human view
 /// ("perceptual diff: N% off (prism=png)") and the JSON
 /// (`perceptual_diff: {kind, prism, distance}`). A small change must
@@ -253,7 +253,7 @@ fn diff_png_change_reports_perceptual_hint() {
         text.contains("perceptual diff:") && text.contains("(prism=png)"),
         "perceptual hint missing: {text}"
     );
-    // M10/W20 (B2): the part-aware line surfaces *which* PNG chunk
+    // the part-aware line surfaces *which* PNG chunk
     // changed; IHDR is byte-identical (same dimensions / colour type
     // on both sides) so it must NOT appear in the line, while IDAT
     // (the pixel stream) must.
@@ -286,7 +286,7 @@ fn diff_png_change_reports_perceptual_hint() {
         json.contains("\"distance\":") && !json.contains("\"distance\":0.0"),
         "distance should be present and non-zero: {json}"
     );
-    // M10/W20 (B2): structured part-aware breakdown rides under
+    // structured part-aware breakdown rides under
     // `part_diff`. all_same=false because IDAT changed.
     assert!(
         json.contains("\"part_diff\":{\"kind\":\"part_diff\""),
@@ -333,7 +333,7 @@ fn diff_generic_binary_omits_perceptual_hint() {
     );
 }
 
-/// E3b JSON: each file entry gains an `ast_diff` field under `--semantic`
+/// JSON: each file entry gains an `ast_diff` field under `--semantic`
 /// for languages with a parser; un-`--semantic` runs leave it null even
 /// for `.rs` files (the field is additive, not always-on).
 #[test]
@@ -416,7 +416,7 @@ fn build_minimal_zip(entries: &[(&str, u32, u32)]) -> Vec<u8> {
     out
 }
 
-/// M12/W32 (B2 ZIP): `alt diff` on a ZIP-shaped binary file (docx
+/// `alt diff` on a ZIP-shaped binary file (docx
 /// stand-in) should land a part-aware line that surfaces which
 /// archive entry changed, not just "% bytes shared". This is the
 /// dogfood-driven path: when an agent edits a `.docx`, the reviewer
@@ -477,11 +477,11 @@ fn diff_zip_change_reports_part_aware_summary() {
     );
 }
 
-/// M12/W34: `alt diff --semantic foo.json` collapses formatting-only
+/// `alt diff --semantic foo.json` collapses formatting-only
 /// noise (re-indented JSON, reordered whitespace, 1 vs 1.0) and
 /// reports only true semantic changes — the dogfood case for agent
 /// config edits. Without the semantic flag the regular line diff
-/// still runs (W34 doesn't change the default path).
+/// still runs (the default path is unchanged).
 #[test]
 fn diff_semantic_json_reports_path_level_changes_only() {
     let dir = tempfile::tempdir().unwrap();
@@ -575,7 +575,7 @@ fn diff_semantic_json_collapses_pure_reformat_to_no_change() {
     );
 }
 
-/// M12/W34b: `alt diff --semantic Cargo.toml` reports the dotted /
+/// `alt diff --semantic Cargo.toml` reports the dotted /
 /// section-aware path that changed, not the line-based shrapnel. The
 /// dogfood path for `cargo` config edits.
 #[test]

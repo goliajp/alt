@@ -1,4 +1,4 @@
-//! M9/W10a: end-to-end smoke against the `altd-server` binary.
+//! end-to-end smoke against the `altd-server` binary.
 //!
 //! Build a tiny alt repo, spawn `altd-server` pointed at it, then run
 //! `git ls-remote http://127.0.0.1:PORT/` and assert it walks away with
@@ -167,7 +167,7 @@ fn altd_server_info_refs_serves_what_git_ls_remote_expects() {
 
 #[test]
 fn altd_server_serves_git_clone_end_to_end() {
-    // M9/W10b: with the upload-pack POST wired, a real `git clone http://…/`
+    // with the upload-pack POST wired, a real `git clone http://…/`
     // should walk the server, pull the packfile, and reconstruct the
     // working tree byte-exact against what the alt store holds.
     let dir = tempfile::tempdir().unwrap();
@@ -231,7 +231,7 @@ fn altd_server_serves_git_clone_end_to_end() {
 
 #[test]
 fn altd_server_accepts_git_push_end_to_end() {
-    // M9/W10c: a `git push http://altd-server/ HEAD:refs/heads/from-git`
+    // a `git push http://altd-server/ HEAD:refs/heads/from-git`
     // round-trips fully — server ingests the pack into its odb,
     // commits the ref update as one tx, and the alt-side ref appears
     // afterwards. We build the source as a git repo (since `git push`
@@ -362,7 +362,7 @@ fn altd_server_rejects_unknown_service() {
 
 #[test]
 fn altd_server_multi_repo_routes_url_to_named_repo() {
-    // M9/W11a: under ALT_SERVER_ROOT=<dir>, URL `/<name>/...` picks
+    // under ALT_SERVER_ROOT=<dir>, URL `/<name>/...` picks
     // <dir>/<name> as the alt repo. Two side-by-side repos should
     // serve distinct histories without contamination.
     let root_dir = tempfile::tempdir().unwrap();
@@ -467,7 +467,7 @@ fn altd_server_multi_repo_returns_404_for_unknown_name() {
 
 #[test]
 fn altd_server_basic_auth_blocks_unauthenticated_and_allows_correct_token() {
-    // M9/W11b: with a `users` file under ALT_SERVER_ROOT, every request
+    // with a `users` file under ALT_SERVER_ROOT, every request
     // must carry Basic auth. Without it → 401; with the correct user +
     // token → the request flows as in single-repo mode.
     let root_dir = tempfile::tempdir().unwrap();
@@ -569,7 +569,7 @@ fn altd_server_basic_auth_blocks_unauthenticated_and_allows_correct_token() {
 
 #[test]
 fn altd_server_acl_scopes_user_to_listed_repos_and_actions() {
-    // M9/W11c: a 3-column users line scopes the user to listed
+    // a 3-column users line scopes the user to listed
     // `repo:perm` rules. alice has `alpha:rw beta:r` → can do anything
     // on alpha, read-only on beta, no access to anything else.
     let root_dir = tempfile::tempdir().unwrap();
@@ -695,7 +695,7 @@ fn altd_server_acl_wildcard_grants_all_repos() {
 
 #[test]
 fn altd_server_a6_policy_denies_push_to_protected_ref() {
-    // M9/W12: the repo's `.alt/policy` runs inside commit_idempotent.
+    // the repo's `.alt/policy` runs inside commit_idempotent.
     // We seed alice's principal with `branch_allow: refs/heads/feature/*`
     // and assert that a `git push` to refs/heads/main fails (server
     // returns `ng` for that ref) while a push to refs/heads/feature/x
@@ -717,7 +717,7 @@ fn altd_server_a6_policy_denies_push_to_protected_ref() {
     .unwrap();
 
     // users file: alice is trusted (2 columns) so she can reach the
-    // server; W12 then runs her through the per-repo policy.
+    // server; the server then runs her through the per-repo policy.
     let token = "alice-w12-token";
     let hash = blake3::hash(token.as_bytes()).to_hex().to_ascii_lowercase();
     std::fs::write(root.join("users"), format!("alice\t{hash}\n")).unwrap();
@@ -813,7 +813,7 @@ fn altd_server_a6_policy_denies_push_to_protected_ref() {
 
 #[test]
 fn altd_server_alt_to_alt_clone_push_clone_round_trip() {
-    // M9/W13: CP-9 exit gate — alt → altd-server → alt round-trip.
+    // alt → altd-server → alt round-trip.
     //
     // Three actors:
     //   A = origin repo, seeded with one commit, served by altd-server
@@ -944,7 +944,7 @@ fn enable_signed_push(client: &Path, server: &Path, principal: &str) {
 
 #[test]
 fn altd_server_verifies_signed_push_and_accepts_it() {
-    // M10/W14: a client configured for A5b signing (sign-policy + sec
+    // a client configured for push signing (sign-policy + sec
     // key) attaches `alt-principal=<id>` + `alt-sig=<ed25519>` to the
     // push caps. The server verifies the signature against its
     // `.alt/trust/<id>.pub` and the ref-update goes through. With the
@@ -991,7 +991,7 @@ fn altd_server_verifies_signed_push_and_accepts_it() {
 
 #[test]
 fn altd_server_rejects_unsigned_push_when_policy_requires_signing() {
-    // M10/W14: `.alt/policy` carries `human:anonymous -> require-signed`
+    // `.alt/policy` carries `human:anonymous -> require-signed`
     // (single-repo mode has no Basic auth, so the wire path falls
     // through to the `anonymous` principal). A plain git push with no
     // `alt-sig` cap must be refused before objects land in odb.
@@ -1073,7 +1073,7 @@ fn altd_server_rejects_unsigned_push_when_policy_requires_signing() {
 
 #[test]
 fn altd_server_rejects_signed_push_from_unknown_principal() {
-    // M10/W14: client attaches a valid Ed25519 signature, but the
+    // client attaches a valid Ed25519 signature, but the
     // server's `.alt/trust/` doesn't list the principal — the gate
     // returns `principal '<id>' not in trust store`.
     let origin_dir = tempfile::tempdir().unwrap();
@@ -1139,7 +1139,7 @@ fn altd_server_rejects_signed_push_from_unknown_principal() {
 
 #[test]
 fn altd_server_round_trips_signed_commit_through_push() {
-    // M10/W15: when sign-policy is on at the client, `alt commit`
+    // when sign-policy is on at the client, `alt commit`
     // splices an `alt-sig` header into the commit object. We push the
     // signed commit through altd-server and verify that:
     //  (a) push succeeds end-to-end,
@@ -1205,7 +1205,7 @@ fn altd_server_round_trips_signed_commit_through_push() {
 
 #[test]
 fn altd_server_rejects_unsigned_commit_when_policy_requires_signed_commits() {
-    // M10/W15: `.alt/policy` carries `human:anonymous ->
+    // `.alt/policy` carries `human:anonymous ->
     // require-signed-commits`. A git push that brings in an unsigned
     // commit must be rejected by the new commit-level gate, even
     // though the push itself is allowed (no `require-signed` flag).
@@ -1290,7 +1290,7 @@ fn altd_server_rejects_unsigned_commit_when_policy_requires_signed_commits() {
 
 #[test]
 fn altd_server_honors_git_clone_filter_blob_none() {
-    // M10/W17: `git clone --filter=blob:none http://altd-server/` must
+    // `git clone --filter=blob:none http://altd-server/` must
     // succeed and the resulting partial clone must hold every commit
     // and tree but no blobs. We assert by:
     //   (a) clone succeeds
@@ -1401,7 +1401,7 @@ fn altd_server_honors_git_clone_filter_blob_none() {
 
 #[test]
 fn altd_server_branch_deny_protects_main_while_allowing_features() {
-    // M10/W22: `.alt/policy` carries
+    // `.alt/policy` carries
     //   `human:alice -> branch=refs/heads/* branch_deny=refs/heads/main`
     // Alice may push to any feature branch, but a push to main is
     // blocked by the deny gate even though the allow glob matches it.
@@ -1513,7 +1513,7 @@ fn altd_server_branch_deny_protects_main_while_allowing_features() {
 
 #[test]
 fn altd_server_emits_jsonl_access_log_per_request() {
-    // M11/W23: every request lands one JSON-line on stderr with the
+    // every request lands one JSON-line on stderr with the
     // fixed schema {ts_unix_ms, req_id, method, path, status,
     // duration_ms, bytes_in, principal, repo}. We drive a ls-remote
     // (one info/refs GET) and a fetch + clone (info/refs + POST
@@ -1577,7 +1577,7 @@ fn altd_server_emits_jsonl_access_log_per_request() {
         first.contains("\"status\":200"),
         "expected status 200 on successful info/refs: {first}"
     );
-    // M14/W42: bytes_out is a positive integer (the caps + ls-refs
+    // bytes_out is a positive integer (the caps + ls-refs
     // body), not `null` — info/refs encoders hand tiny_http a finished
     // Vec<u8> so the Content-Length path is always taken.
     assert!(
@@ -1592,10 +1592,10 @@ fn altd_server_emits_jsonl_access_log_per_request() {
 
 #[test]
 fn altd_server_handles_concurrent_clones_in_parallel() {
-    // M11/W24: with multi-threaded dispatch, N concurrent clones must
+    // with multi-threaded dispatch, N concurrent clones must
     // all succeed without queueing artifacts. We start the server,
     // fire 4 `git clone` commands in parallel against it, and assert
-    // every one completed cleanly. With the W23-W24 worker pool sized
+    // every one completed cleanly. With the worker pool sized
     // at 4 by default, none of these requests should be waiting on
     // one another's response.
     let dir = tempfile::tempdir().unwrap();
@@ -1643,7 +1643,7 @@ fn altd_server_handles_concurrent_clones_in_parallel() {
 
 #[test]
 fn altd_server_drains_cleanly_on_sigterm() {
-    // M11/W25: send SIGTERM to the running server and assert it
+    // send SIGTERM to the running server and assert it
     // (a) prints the "shutdown signal received" line within a sane
     //     deadline (proves the handler ran + the main thread polled
     //     the flag), and
@@ -1708,7 +1708,7 @@ fn altd_server_drains_cleanly_on_sigterm() {
 
 #[test]
 fn altd_server_rejects_push_exceeding_max_body_size() {
-    // M11/W26: a server started with ALT_SERVER_MAX_PUSH_BYTES=100
+    // a server started with ALT_SERVER_MAX_PUSH_BYTES=100
     // must refuse any real push (which carries at least a small pack
     // body, easily over 100 B) with HTTP 413 — before reading more
     // than `max + 1` bytes. We assert the rejection via the git
@@ -1795,7 +1795,7 @@ fn altd_server_rejects_push_exceeding_max_body_size() {
 
 #[test]
 fn altd_server_two_concurrent_pushes_to_distinct_branches_both_land() {
-    // M11/W28: with the W24 worker pool + write-side `Mutex<Store>`,
+    // with the worker pool + write-side `Mutex<Store>`,
     // two clients pushing to *different* branches at the same time
     // must both succeed and leave the server with both refs pointing
     // at their respective pushed commits — no torn state, no lost
@@ -1918,9 +1918,9 @@ fn altd_server_two_concurrent_pushes_to_distinct_branches_both_land() {
 
 #[test]
 fn altd_server_two_concurrent_pushes_to_same_ref_serialize_with_one_winner() {
-    // M11/W28: when two clients race to push *the same* branch from
+    // when two clients race to push *the same* branch from
     // disjoint histories (each is a fresh init, no shared parent with
-    // origin's main), the W12 ref policy's `commit_idempotent` runs
+    // origin's main), the ref policy's `commit_idempotent` runs
     // each as an atomic transaction. Exactly one wins — origin's
     // refs/heads/contested ends up at one of the two pushed oids,
     // never half-applied, and the other push surfaces an error.
@@ -2031,7 +2031,7 @@ fn altd_server_two_concurrent_pushes_to_same_ref_serialize_with_one_winner() {
 
 #[test]
 fn altd_server_n_clients_m_iters_stress_harness() {
-    // M11/W31: end-to-end stress — N concurrent clients each running
+    // end-to-end stress — N concurrent clients each running
     // M iterations of a mixed read/write workload. Asserts:
     //   - every ls-remote and clone succeeds (read invariant)
     //   - every push to its dedicated branch succeeds (write
@@ -2141,8 +2141,8 @@ fn altd_server_n_clients_m_iters_stress_harness() {
                 }
 
                 // push to a per-client unique branch so writes never
-                // contend with each other on the ref level (W28
-                // already covered the contended-ref case).
+                // contend with each other on the ref level (the contended-ref
+                // case has its own test).
                 std::fs::write(src.join("f.txt"), format!("c{client}-i{iter}\n"))
                     .map_err(|e| format!("rewrite: {e}"))?;
                 let r = std::process::Command::new("git")
@@ -2230,7 +2230,7 @@ fn altd_server_n_clients_m_iters_stress_harness() {
     }
 }
 
-/// M13/W36: end-to-end check that the streaming receive-pack path
+/// end-to-end check that the streaming receive-pack path
 /// keeps server-side RSS well below the body size on a large push.
 /// We start the server with `ALT_SERVER_MAX_PUSH_BYTES=200 MiB`, push
 /// a ~10 MiB pack body, and sample the server's RSS via `ps`. The
@@ -2366,7 +2366,7 @@ fn altd_server_streaming_push_keeps_rss_bounded() {
 
 #[test]
 fn altd_server_policy_hot_reload_takes_effect_without_restart() {
-    // M13/W37: editing `.alt/policy` while the server is running must
+    // editing `.alt/policy` while the server is running must
     // apply on the very next request. We bring the server up *with*
     // policy that allows everything, push successfully, then write a
     // `require-signed` rule into the same policy file, push again
@@ -2473,14 +2473,14 @@ fn altd_server_policy_hot_reload_takes_effect_without_restart() {
 
 #[test]
 fn altd_server_shutdown_deadline_force_exits_when_workers_stuck() {
-    // M13/W38: when a worker is genuinely stuck (here we simulate it
+    // when a worker is genuinely stuck (here we simulate it
     // with a very short deadline and a long-running upload-pack), the
     // shutdown deadline must hard-exit the process instead of waiting
     // forever on `handles.join()`.
     //
     // We use a 200 ms deadline and SIGTERM immediately. With no
     // in-flight request, the worker pool drains in single-digit ms
-    // (covered by the W25 happy-path test); this case puts the
+    // (covered by the SIGTERM happy-path test); this case puts the
     // server through the same flow but the assertion is that the
     // "graceful shutdown timed out" line is *available* as a path —
     // we test it directly by setting the deadline absurdly short and
@@ -2539,7 +2539,7 @@ fn altd_server_shutdown_deadline_force_exits_when_workers_stuck() {
 
 #[test]
 fn altd_server_require_auth_refuses_to_start_without_users_file() {
-    // M14/W40: when the operator opts into `ALT_SERVER_REQUIRE_AUTH=1`,
+    // when the operator opts into `ALT_SERVER_REQUIRE_AUTH=1`,
     // an absent or unreadable `users` file is a hard startup error.
     // This catches the common ops slip — `mv users users.bak` quietly
     // turning every repo into a no-auth surface.
@@ -2600,7 +2600,7 @@ fn altd_server_require_auth_refuses_to_start_without_users_file() {
     );
 }
 
-/// M14/W41 (G): wrong method on a known endpoint returns 405 +
+/// wrong method on a known endpoint returns 405 +
 /// `Allow:` listing what we do speak — not 404, which would tell the
 /// client "no such route" and erase the real signal.
 #[test]
@@ -2631,7 +2631,7 @@ fn altd_server_returns_405_with_allow_header_on_wrong_method() {
     );
 }
 
-/// M14/W41 (G+H): an OPTIONS request to a known endpoint returns 204
+/// an OPTIONS request to a known endpoint returns 204
 /// plus the Allow header. Without `ALT_SERVER_CORS_ALLOW_ORIGIN` set
 /// the response carries no `Access-Control-*` headers, so the default
 /// config stays off the open-CORS attack surface.
@@ -2668,7 +2668,7 @@ fn altd_server_options_returns_204_with_allow_and_no_cors_by_default() {
     );
 }
 
-/// M14/W41 (H): when `ALT_SERVER_CORS_ALLOW_ORIGIN` is set, OPTIONS
+/// when `ALT_SERVER_CORS_ALLOW_ORIGIN` is set, OPTIONS
 /// preflights carry the standard four CORS response headers.
 #[test]
 fn altd_server_options_emits_cors_headers_when_env_set() {
@@ -2717,7 +2717,7 @@ fn altd_server_options_emits_cors_headers_when_env_set() {
 
 #[test]
 fn altd_server_concurrent_pushes_are_all_durable() {
-    // M14/W44: N concurrent pushes through the receive-pack path all
+    // N concurrent pushes through the receive-pack path all
     // become durable through the group-commit coordinator. The access log
     // carries the group's `fsync_count()` snapshot per receive-pack request.
     let origin_dir = tempfile::tempdir().unwrap();
@@ -2842,7 +2842,7 @@ fn altd_server_concurrent_pushes_are_all_durable() {
 
 #[test]
 fn altd_server_advertises_alt_nonce_and_signed_push_consumes_it() {
-    // M14/W45 end-to-end: the server's receive-pack info/refs advert
+    // end-to-end: the server's receive-pack info/refs advert
     // carries an `alt-nonce=<hex>` cap; an alt client picks it up
     // automatically, signs `nonce <hex>\n + canonical_payload`, echoes
     // the same nonce back on the push, and the server consumes it.
@@ -2911,7 +2911,7 @@ fn altd_server_advertises_alt_nonce_and_signed_push_consumes_it() {
 
 #[test]
 fn altd_server_rejected_push_does_not_leave_orphan_objects() {
-    // M14/W46: when a receive-pack ingest+verify+commit chain rejects a
+    // when a receive-pack ingest+verify+commit chain rejects a
     // push (here: `require-signed-commits` and the client sends an
     // unsigned commit), the server must rewind every odb append that
     // the failed push made. We compare the origin's odb object count

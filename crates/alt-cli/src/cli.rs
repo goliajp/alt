@@ -172,7 +172,7 @@ pub enum Command {
         /// Emit a structured JSON diff instead of unified text
         #[arg(long)]
         json: bool,
-        /// Show an AST-level diff per supported language (A8b): item-level
+        /// Show an AST-level diff per supported language: item-level
         /// logical vs format-only changes for `.rs` files; line/binary diff
         /// for files without a parser.
         #[arg(long)]
@@ -208,7 +208,7 @@ pub enum Command {
         #[arg(long, global = true)]
         json: bool,
     },
-    /// Manage git remotes (M6/W3: persisted as `<alt-dir>/remotes/<name>`)
+    /// Manage git remotes (persisted as `<alt-dir>/remotes/<name>`)
     Remote {
         #[command(subcommand)]
         op: RemoteOp,
@@ -227,7 +227,7 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Fetch refs + objects from a configured remote (M6/W4 — git smart-http v2)
+    /// Fetch refs + objects from a configured remote (git smart-http v2)
     Fetch {
         /// Remote name (defaults to `origin`)
         #[arg(default_value = "origin")]
@@ -238,7 +238,7 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Push refs + objects to a configured remote (M6/W5 — git smart-http v1)
+    /// Push refs + objects to a configured remote (git smart-http v1)
     Push {
         /// Remote name (defaults to `origin`)
         #[arg(default_value = "origin")]
@@ -254,7 +254,7 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Manage local identities + trusted public keys (M6/W7 — A5b)
+    /// Manage local identities + trusted public keys
     Identity {
         #[command(subcommand)]
         op: IdentityOp,
@@ -262,7 +262,7 @@ pub enum Command {
         #[arg(long, global = true)]
         json: bool,
     },
-    /// Audit-view the op log: who did what, in order, with the parsed A5a
+    /// Audit-view the op log: who did what, in order, with the parsed
     /// principal and any ref changes carried in each op's payload.
     #[command(name = "op-log")]
     OpLog {
@@ -272,14 +272,14 @@ pub enum Command {
         /// Emit a structured JSON list instead of the human view
         #[arg(long)]
         json: bool,
-        /// Check each op against the A5b signature sidecar + trust store
-        /// (M6/W7); rows tagged `signed-ok` / `unsigned` / `bad-sig` /
+        /// Check each op against the signature sidecar + trust store;
+        /// rows tagged `signed-ok` / `unsigned` / `bad-sig` /
         /// `untrusted`
         #[arg(long)]
         verify: bool,
     },
-    /// alt-CI workflow inspection (M15 — design/ci.md). Subcommand
-    /// surface; `alt ci validate` runs the W47 schema-tier lint.
+    /// alt-CI workflow inspection. Subcommand
+    /// surface; `alt ci validate` runs the schema-tier lint.
     Ci {
         #[command(subcommand)]
         op: CiOp,
@@ -288,7 +288,7 @@ pub enum Command {
         #[arg(long, global = true)]
         json: bool,
     },
-    /// Verify the `alt-sig` header on one or more commit objects (M10/W15).
+    /// Verify the `alt-sig` header on one or more commit objects.
     /// With no args, walks the current branch's commit chain back to root
     /// (newest first). Each row is one of:
     /// `signed-ok:<principal>` / `unsigned` / `bad-sig:<principal>` /
@@ -305,7 +305,7 @@ pub enum Command {
     },
 }
 
-/// `alt ci` subcommand surface. M15 lights up `validate`; future
+/// `alt ci` subcommand surface. Only `validate` exists so far; future
 /// segments (runner / scheduler / cache) land here as new variants.
 #[derive(Subcommand)]
 pub enum CiOp {
@@ -419,7 +419,7 @@ pub struct CatFileArgs {
 }
 
 /// `alt ci validate` — load every requested workflow.toml (or scan
-/// `.alt/ci/*/workflow.toml` when `paths` is empty), run the M15/W47
+/// `.alt/ci/*/workflow.toml` when `paths` is empty), run the
 /// parser + linter, and print one diagnostic per line. Returns a
 /// non-zero exit code when any diagnostic is an error; warnings alone
 /// still exit 0. Repository-agnostic: this is a file-tier lint, not a

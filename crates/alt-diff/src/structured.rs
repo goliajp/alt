@@ -1,4 +1,4 @@
-//! M12/W34 — semantic diff for structured-data files (JSON today, YAML
+//! semantic diff for structured-data files (JSON today, YAML
 //! / TOML follow under the same surface).
 //!
 //! The dogfood thesis: an agent edits one key in a 500-line JSON config
@@ -31,7 +31,6 @@ use std::fmt::Write;
 pub enum StructKind {
     Json,
     /// TOML — Cargo.toml / pyproject.toml / rustfmt.toml / config.toml.
-    /// M12/W34b.
     Toml,
 }
 
@@ -63,7 +62,7 @@ pub struct Summary {
 }
 
 impl Summary {
-    /// Renders as a single line — the same调性 as
+    /// Renders as a single line — the same style as
     /// [`crate::part_aware::Summary::render`]. Each path becomes one
     /// `name: change` token, separated by `|`.
     pub fn render(&self) -> String {
@@ -464,7 +463,7 @@ impl<'a> Parser<'a> {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-//  TOML (M12/W34b)
+//  TOML
 // ─────────────────────────────────────────────────────────────────────
 
 /// TOML semantic diff. Parses a subset wide enough to cover real
@@ -773,7 +772,7 @@ impl<'a> TomlParser<'a> {
 
     fn parse_basic_string(&mut self) -> Option<String> {
         // `"..."` with the usual JSON-ish escapes. Multi-line `"""`
-        // strings are out of W34b scope.
+        // strings are out of scope.
         self.at += 1; // opening "
         let mut out = String::new();
         loop {
@@ -1014,7 +1013,7 @@ mod tests {
         assert!(s.semantically_unchanged());
     }
 
-    // ── TOML (M12/W34b) ──────────────────────────────────────────
+    // ── TOML ──────────────────────────────────────────
 
     #[test]
     fn toml_summary_routes_through_summary_for_path() {

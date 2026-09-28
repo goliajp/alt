@@ -1,8 +1,8 @@
 //! A tiny zero-dependency JSON writer for the `--json` output of native
 //! commands. The schemas are small and fixed, so building a `Json` value tree
 //! and serializing it compactly is enough — no serde, matching the project's
-//! zero-dependency-by-default stance. This is the structured-I/O foundation
-//! (VISION §4 A1): the JSON view is a first-class parallel to the human view.
+//! zero-dependency-by-default stance. This is the structured-I/O foundation:
+//! the JSON view is a first-class parallel to the human view.
 
 use std::io::Write;
 

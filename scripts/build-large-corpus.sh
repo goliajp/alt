@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build the M7-B1 large-files fixture corpus at $1 (default:
+# Build the large-files fixture corpus at $1 (default:
 # .dev/corpus/large-files). Reproducible: same script run → same bytes.
 # See the builder source for the corpus shape and commit history.
 set -eu

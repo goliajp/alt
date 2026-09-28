@@ -1,5 +1,5 @@
 //! `alt import <dir>` materialises HEAD's tree into `<dir>` so the
-//! work tree is immediately clean. Pre-M17 the user had to follow up
+//! work tree is immediately clean. Previously the user had to follow up
 //! with `alt switch <branch>` by hand.
 
 use std::fs;
@@ -68,7 +68,7 @@ fn import_into_fresh_dir_materialises_head_tree() {
     assert_eq!(fs::read_to_string(dst.join("a.txt")).unwrap(), "alpha\n");
     assert_eq!(fs::read_to_string(dst.join("b.txt")).unwrap(), "beta\n");
 
-    // status is clean — pre-M17 this said "deleted: a.txt … b.txt".
+    // status is clean — previously this said "deleted: a.txt … b.txt".
     let status = ok(alt(dst, &["status"]));
     assert!(
         status.contains("nothing to commit"),

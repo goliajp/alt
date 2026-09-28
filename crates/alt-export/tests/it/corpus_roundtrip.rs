@@ -9,7 +9,7 @@
 //!   ④ match the source git's own view — full history (`log`) and the
 //!      complete object inventory (`cat-file --batch-all-objects`).
 //!
-//! This is the resident automation that closes VISION §8.1 at the export
+//! This is the resident automation for round-trip fidelity at the export
 //! boundary; the fixture-scale version lives in `export_cycle.rs`.
 
 use std::collections::BTreeSet;

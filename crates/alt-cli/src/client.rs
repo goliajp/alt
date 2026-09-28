@@ -4,13 +4,13 @@
 //! is never a dependency.
 //!
 //! Routed commands: the reads (`status`/`branch`/`diff` against the held
-//! `Store`, `log` against the held `Repository`) and, since D4, the native
+//! `Store`, `log` against the held `Repository`) and the native
 //! writes (`add`/`commit`/`switch`/`merge`/`flow`/`undo`).
 //!
 //! Fallback for a read is **at-most-once**: a read is idempotent, so any failure
 //! falls through to running it directly.
 //!
-//! A write is **exactly-once** (D5c). It carries a client-chosen idempotency id;
+//! A write is **exactly-once**. It carries a client-chosen idempotency id;
 //! the daemon stamps it on the ref transaction and, on a same-id retry, detects
 //! the write as already applied and acks instead of re-running it (the index is
 //! durable, so this holds even across a daemon restart). So [`serve_write`]:
@@ -52,10 +52,10 @@ mod imp {
     }
 
     /// Whether the daemon serves this command at all: the reads it amortizes via
-    /// the held `Store`/`Repository`, plus the native writes (D4). cat-file and
+    /// the held `Store`/`Repository`, plus the native writes. cat-file and
     /// rev-parse are pure reads that an agent often runs hundreds of times per
     /// session — routing them through the daemon trades ~140 ms cold open per
-    /// invocation for a ~2 ms warm hit (M8/A3 attack point #1).
+    /// invocation for a ~2 ms warm hit.
     pub fn routes_through_daemon(cmd: &Cmd) -> bool {
         matches!(
             cmd,
@@ -206,8 +206,8 @@ mod imp {
     ///
     /// Before connecting, we check whether the running daemon is the
     /// same `altd` binary we're about to invoke (via the metadata file
-    /// the daemon drops next to its socket). On mismatch — the M17
-    /// dogfood case where `cargo install` replaced the binary while
+    /// the daemon drops next to its socket). On mismatch — the
+    /// case where `cargo install` replaced the binary while
     /// the old daemon was idle-running — SIGTERM the stale daemon,
     /// wait for its socket to disappear, then proceed to spawn fresh.
     fn connect_or_spawn(alt_dir: &Path, sock: &Path) -> Option<UnixStream> {

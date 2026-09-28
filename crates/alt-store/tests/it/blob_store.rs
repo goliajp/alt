@@ -143,7 +143,7 @@ fn flipped_data_chunk_surfaces_through_blob_get() {
 #[test]
 fn blob_ids_are_plain_blake3_of_content() {
     // the address must be exactly blake3(content) — the bridge map.alt
-    // (M2/S4) depends on this being stable and chunking-independent
+    // depends on this being stable and chunking-independent
     let data = random_bytes(300_000, 6);
     assert_eq!(BlobId::of(&data).0, blake3_reference(&data));
 }

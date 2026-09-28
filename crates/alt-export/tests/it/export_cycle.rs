@@ -53,7 +53,7 @@ fn cycle(source: &Path) {
         String::from_utf8_lossy(&fsck.stderr)
     );
 
-    // semantic equality, source vs exported (S2's deferred check included)
+    // semantic equality, source vs exported
     for args in [
         &["for-each-ref"][..],
         &["symbolic-ref", "HEAD"],

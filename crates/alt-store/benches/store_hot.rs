@@ -2,7 +2,7 @@
 //!
 //!   - BLAKE3 hashing — the read re-verification cost. Every read re-hashes
 //!     the bytes it returns; the default fast path will do this once at the
-//!     object boundary (M3.5 阶段 B), so this number is the read floor.
+//!     object boundary, so this number is the read floor.
 //!   - lineage delta codec (zstd ref-prefix) — encode runs per changed blob
 //!     at import, decode runs per delta layer at read.
 

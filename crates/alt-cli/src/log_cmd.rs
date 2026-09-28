@@ -123,7 +123,11 @@ pub fn run(
         match args.pretty.as_str() {
             "raw" => write_raw(out, &oid, &payload, &mut first)?,
             "oneline" => write_oneline(out, &oid, &payload)?,
-            other => return Err(format!("unsupported --pretty={other} (M1: raw, oneline)").into()),
+            other => {
+                return Err(
+                    format!("unsupported --pretty={other} (supported: raw, oneline)").into(),
+                );
+            }
         }
         if args.patch {
             emit_patch_for_commit(out, repo, &oid)?;
@@ -141,10 +145,10 @@ struct TreeFile {
     mode: u32,
 }
 
-// Pre-A3b history: `flatten_tree` + `entries_for` walked both trees and
+// History: `flatten_tree` + `entries_for` walked both trees and
 // merged. tree_diff (below) supersedes them with a lockstep equal-oid
 // prune that touches O(changed leaves × depth) trees instead of the
-// whole tree. The flatten implementation was removed with the A3b
+// whole tree. The flatten implementation was removed with the tree_diff
 // refactor; if a future caller needs a full flattened tree view, lift
 // the helper from `alt-worktree::flatten_tree` (which takes a NativeOdb).
 

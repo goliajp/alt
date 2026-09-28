@@ -3,7 +3,7 @@
 //! finer grain than the whole file (a container's members, a stream's
 //! inflated bytes, an image's layers).
 //!
-//! **Tier 1 iron law** (design/prisms.md §1): decomposition is a pure
+//! **Tier 1 iron law**: decomposition is a pure
 //! storage gain and fidelity *never* depends on a prism being correct. The
 //! pipeline here decomposes, immediately recomposes, and compares against
 //! the original bytes — only a byte-exact round trip is accepted; anything
@@ -52,8 +52,7 @@ pub trait Prism: Send + Sync {
     fn recompose(&self, recipe: &[u8], parts: &[&[u8]]) -> Option<Vec<u8>>;
 }
 
-/// The set of prisms tried at ingest, in priority order (hot formats first,
-/// per design/prisms.md §-1.5).
+/// The set of prisms tried at ingest, in priority order (hot formats first).
 #[derive(Default)]
 pub struct Registry {
     prisms: Vec<Box<dyn Prism + Send + Sync>>,

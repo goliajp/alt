@@ -1,4 +1,4 @@
-//! M8-C1: `alt flow release` and `alt flow hotfix` mirror the feature
+//! `alt flow release` and `alt flow hotfix` mirror the feature
 //! flow's atomic shape — single ref-tx + single op-log entry per
 //! start/finish. release finish also back-merges into develop;
 //! hotfix follows the same shape (start off main → merge into main +

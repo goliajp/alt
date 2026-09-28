@@ -1,4 +1,4 @@
-//! Reftable stack reading (ref records only; ref logs are outside M1 scope).
+//! Reftable stack reading (ref records only; ref logs are out of scope).
 //!
 //! Spec: git Documentation/technical/reftable. Key traps encoded here:
 //! the varint scheme is the chained `((v+1) << 7)` one (not LEB128), the

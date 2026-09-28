@@ -6,16 +6,16 @@
 //! store at the start of every request (the same concurrency machinery the
 //! direct CLI uses — the daemon is just another reader/writer).
 //!
-//! Concurrency (D5a): a multi-threaded accept loop. Each connection is served
+//! Concurrency: a multi-threaded accept loop. Each connection is served
 //! on its own thread, but the held `(Store, Repository)` is wrapped in one
 //! `Mutex`, so request *execution* is serialized while connection accept and
 //! response write-back run concurrently (a slow request never blocks accepting
 //! the next connection). The in-process `Mutex` is load-bearing: `flock` does
 //! not make threads of one process mutually exclusive (the lock lives on the
-//! shared open file description), so the daemon cannot lean on the S4–S10 file
+//! shared open file description), so the daemon cannot lean on the store's file
 //! locks to serialize its own threads — only across processes.
 //!
-//! Group commit (D5b): a write appends under the store `Mutex` but defers its
+//! Group commit: a write appends under the store `Mutex` but defers its
 //! fsync; the slow fsync is then performed *off* the `Mutex` by a [`GroupCommit`]
 //! coordinator (through independent fds, see [`StoreSink`]), so concurrent
 //! commits keep appending while one fsync runs and coalesce onto it. That lifts
@@ -144,7 +144,7 @@ mod unix {
     /// Records the running daemon's identity next to its socket: pid +
     /// `altd` path + the binary's mtime-nanos + size. Clients compare
     /// these against their own `altd` and kill+respawn on mismatch
-    /// (the M17 dogfood fix for "cargo install upgraded the binary but
+    /// (the fix for "cargo install upgraded the binary but
     /// the old daemon still answers"). Best-effort: any io failure
     /// disables auto-reload without affecting the daemon's lifecycle.
     fn write_meta(alt_dir: &Path) -> Option<()> {
@@ -279,7 +279,7 @@ mod unix {
         // request, so a served read is never stale
         store.refresh()?;
         repo.refresh()?;
-        // exactly-once (D5c): a keyed write whose key is already in the durable
+        // exactly-once: a keyed write whose key is already in the durable
         // idempotency index has taken effect — a retry after a lost response (or
         // even after this daemon was restarted, since the index is rebuilt on
         // open). Ack it without re-running, so the write lands exactly once. The

@@ -178,7 +178,7 @@ fn trim_newline(b: &[u8]) -> &[u8] {
     &b[..end]
 }
 
-/// Server side of ls-refs (M9/W10a): parse the request the client sent.
+/// Server side of ls-refs: parse the request the client sent.
 /// Layout (per gitprotocol-v2.txt):
 ///
 ///   pkt: "command=ls-refs\n"
@@ -244,7 +244,7 @@ pub fn parse_ls_refs_request<R: std::io::Read>(
     Ok((req, object_format))
 }
 
-/// Server side of ls-refs (M9/W10a): encode the response — one pkt-line
+/// Server side of ls-refs: encode the response — one pkt-line
 /// per ref then a flush — for a list of [`RefRecord`]s the server
 /// computed from its store. Matches [`parse_ls_refs_response`] byte-for-
 /// byte: a server's encoded refs round-trip through the client's parser.

@@ -1,4 +1,4 @@
-//! `alt ci validate`: the M15/W47 schema-tier lint over a fixture
+//! `alt ci validate`: the schema-tier lint over a fixture
 //! `.alt/ci/<name>/workflow.toml`. Three positive paths: well-formed
 //! workflow → exit 0 + no output; schema-broken workflow → exit 1 +
 //! diagnostic line citing the bad field; missing file → exit 0 +

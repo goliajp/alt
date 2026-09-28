@@ -185,7 +185,7 @@ impl BlobStore {
     /// Materializes a blob. The chunks are read without per-chunk hashing
     /// and the assembled result is re-hashed once against the blob id, using
     /// the parallel BLAKE3 path — any corrupt chunk or manifest node changes
-    /// the bytes, so one boundary hash still detects it (M3.5 §阶段 B). Deep
+    /// the bytes, so one boundary hash still detects it. Deep
     /// per-chunk verification is [`verify`].
     pub fn get(&self, id: BlobId) -> Result<Vec<u8>, StoreError> {
         self.materialize(id, ChunkRead::Fast, true)

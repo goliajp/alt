@@ -9,7 +9,7 @@ use alt_git_codec::{Commit, HashAlgo, ObjectId, ObjectKind, Tag, Tree};
 use alt_git_pack::{EntryKind, IndexedPack};
 
 fn sweep_pack(pack_path: &Path) -> (u32, u32) {
-    // corpus repos are SHA-1 until S9 wires config detection
+    // corpus repos are SHA-1 until config detection is wired
     let indexed = IndexedPack::open(pack_path, HashAlgo::Sha1).unwrap();
     let idx = indexed.idx();
 

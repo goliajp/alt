@@ -1,4 +1,4 @@
-//! `alt identity init/list/trust` (M6/W7) — the local-side key surface
+//! `alt identity init/list/trust` — the local-side key surface
 //! for op-level Ed25519 signing.
 
 use std::path::Path;
@@ -117,7 +117,7 @@ fn identity_trust_rejects_non_pubkey_file() {
     assert!(!root.join(".alt/trust/alice.pub").exists());
 }
 
-/// Full A5b cycle: with `sign-policy` enabled and a local identity, every
+/// Full signing cycle: with `sign-policy` enabled and a local identity, every
 /// ref tx writes a sidecar signature. `op-log --verify` reports
 /// `signed-ok` for ops signed by a trusted principal and `unsigned` for
 /// ops written before the policy was on. Tampering with a sig file flips
