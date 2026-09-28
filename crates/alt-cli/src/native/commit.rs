@@ -5,7 +5,13 @@ use super::*;
 impl NativeRepo<'_> {
     /// `alt commit -m <msg>`: write a tree + commit from the index, advance
     /// the current branch in one ref transaction.
-    pub fn commit(&mut self, message: &str, json: bool, out: &mut impl Write) -> Res<()> {
+    pub fn commit(
+        &mut self,
+        message: &str,
+        allow_empty: bool,
+        json: bool,
+        out: &mut impl Write,
+    ) -> Res<()> {
         self.ensure_writable("commit")?;
         self.ensure_topic_branch_or_unborn("commit")?;
         // Path gate is `add`-only on purpose: the restricted principal's
@@ -18,6 +24,19 @@ impl NativeRepo<'_> {
         let branch = self.head_branch()?;
         let parent = self.store.refs.resolve(&branch)?;
         let merging = self.merge_head()?;
+        // a commit that changes nothing is almost always a mistake (a
+        // forgotten `add`); git refuses it too, merges aside
+        if let Some(p) = parent
+            && merging.is_none()
+            && !allow_empty
+            && self.commit_tree(p)? == tree
+        {
+            return Err(
+                "nothing to commit: the index matches HEAD (use --allow-empty to \
+                        record an empty commit)"
+                    .into(),
+            );
+        }
         let parents: Vec<ObjectId> = parent.into_iter().chain(merging).collect();
 
         let id = self.id.clone();

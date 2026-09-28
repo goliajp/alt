@@ -74,6 +74,9 @@ pub enum Command {
         /// this is already the default without -m; accepted as in git)
         #[arg(long, requires = "amend")]
         no_edit: bool,
+        /// Record the commit even when it changes nothing
+        #[arg(long)]
+        allow_empty: bool,
         /// Emit the new commit/tree oids as a JSON object
         #[arg(long)]
         json: bool,
@@ -601,9 +604,17 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
             json,
             ..
         } => repo.amend(message.as_deref(), *json, out)?,
-        Command::Commit { message, json, .. } => {
-            repo.commit(message.as_deref().unwrap_or_default(), *json, out)?
-        }
+        Command::Commit {
+            message,
+            allow_empty,
+            json,
+            ..
+        } => repo.commit(
+            message.as_deref().unwrap_or_default(),
+            *allow_empty,
+            *json,
+            out,
+        )?,
         Command::Status { json } => repo.status(*json, out)?,
         Command::Branch { name, delete, json } => {
             repo.branch(name.clone(), delete.clone(), *json, out)?
