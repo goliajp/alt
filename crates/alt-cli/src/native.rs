@@ -15,7 +15,7 @@ use alt_refs::{IdemKey, OpId, RefChange, RefPolicy, RefStore, RefTarget};
 use crate::policy::{Capabilities, Policy};
 use alt_worktree::{
     ChangeKind, Sig, WorkEntry, build_commit_bytes, flatten_tree, index_entries,
-    scan_indexed_paths, scan_worktree, scan_worktree_with_index, status, write_commit, write_tree,
+    scan_indexed_paths, scan_worktree_with_index, status, write_commit, write_tree,
 };
 use bstr::{BString, ByteSlice};
 
