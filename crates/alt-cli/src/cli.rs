@@ -63,9 +63,17 @@ pub enum Command {
     },
     /// Record staged changes as a new commit
     Commit {
-        /// Commit message
-        #[arg(short = 'm')]
-        message: String,
+        /// Commit message (with --amend, defaults to the amended commit's)
+        #[arg(short = 'm', required_unless_present = "amend")]
+        message: Option<String>,
+        /// Replace the current branch tip with a new commit made from the
+        /// index, keeping its parents and author
+        #[arg(long)]
+        amend: bool,
+        /// Keep the amended commit's message (alt never opens an editor, so
+        /// this is already the default without -m; accepted as in git)
+        #[arg(long, requires = "amend")]
+        no_edit: bool,
         /// Emit the new commit/tree oids as a JSON object
         #[arg(long)]
         json: bool,
@@ -542,7 +550,15 @@ pub fn is_native(cmd: &Command) -> bool {
 pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> Res<u8> {
     match cmd {
         Command::Add { paths, json } => repo.add(paths, *json, out)?,
-        Command::Commit { message, json } => repo.commit(message, *json, out)?,
+        Command::Commit {
+            message,
+            amend: true,
+            json,
+            ..
+        } => repo.amend(message.as_deref(), *json, out)?,
+        Command::Commit { message, json, .. } => {
+            repo.commit(message.as_deref().unwrap_or_default(), *json, out)?
+        }
         Command::Status { json } => repo.status(*json, out)?,
         Command::Branch { name, delete, json } => {
             repo.branch(name.clone(), delete.clone(), *json, out)?

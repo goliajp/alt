@@ -19,6 +19,7 @@ use alt_worktree::{
 };
 use bstr::{BString, ByteSlice};
 
+mod commit;
 mod merge;
 mod workspace;
 
@@ -1367,81 +1368,6 @@ impl<'a> NativeRepo<'a> {
             .join(w.path.to_path().map_err(|_| "non-utf8 path")?);
         let meta = std::fs::symlink_metadata(&abs)?;
         Ok(stat_entry(&meta, w))
-    }
-
-    /// `alt commit -m <msg>`: write a tree + commit from the index, advance
-    /// the current branch in one ref transaction.
-    pub fn commit(&mut self, message: &str, json: bool, out: &mut impl Write) -> Res<()> {
-        self.ensure_writable("commit")?;
-        self.ensure_topic_branch_or_unborn("commit")?;
-        let index = self.index()?;
-        let staged = index_entries(&index);
-        if staged.is_empty() {
-            return Err("nothing to commit (empty index)".into());
-        }
-        // Path gate is `add`-only on purpose: the restricted principal's
-        // *choice* of what to stage is what the policy constrains. Pre-existing
-        // index entries inherited from another principal (e.g. operator's
-        // baseline) ride through to the commit unchallenged — penalising the
-        // agent for paths it never touched is unhelpful.
-        let tree = write_tree(&mut self.store.odb, &staged, self.store.algo)?;
-
-        let branch = self.head_branch()?;
-        let parent = self.store.refs.resolve(&branch)?;
-        let merging = self.merge_head()?;
-        let parents: Vec<ObjectId> = parent.into_iter().chain(merging).collect();
-
-        let when = (now_ms() / 1000) as i64;
-        let (name, email) = self.id.sig();
-        let sig = Sig {
-            name,
-            email,
-            when,
-            tz: "+0000",
-        };
-        let msg = if message.ends_with('\n') {
-            message.to_owned()
-        } else {
-            format!("{message}\n")
-        };
-        let mut bytes = build_commit_bytes(tree, &parents, &sig, &sig, &msg);
-        // when sign-policy is on and a sec key is on disk for
-        // the principal, splice an `alt-sig` header into the commit and
-        // rehash. The signed commit is the canonical commit from the
-        // store's POV — there is no second "unsigned" stored.
-        if let Some(signed) = self.maybe_sign_commit_bytes(&bytes)? {
-            bytes = signed;
-        }
-        let commit = ObjectId::hash_object(self.store.algo, ObjectKind::Commit, &bytes);
-        self.store.odb.put(commit, ObjectKind::Commit, &bytes)?;
-        self.store.odb.flush()?;
-
-        self.commit_refs(
-            "commit",
-            &[RefChange {
-                name: branch.clone(),
-                old: parent.map(RefTarget::Oid),
-                new: Some(RefTarget::Oid(commit)),
-            }],
-        )?;
-        if merging.is_some() {
-            self.finish_merge()?;
-        }
-        let short = branch.strip_prefix("refs/heads/").unwrap_or(&branch);
-        if json {
-            use crate::json::Json;
-            crate::json::emit(
-                out,
-                vec![
-                    ("branch", Json::str(short)),
-                    ("commit", Json::str(commit.to_string())),
-                    ("tree", Json::str(tree.to_string())),
-                ],
-            )?;
-        } else {
-            writeln!(out, "[{short}] {commit}")?;
-        }
-        Ok(())
     }
 
     /// `alt status`: staged / unstaged / untracked against HEAD and the index,
