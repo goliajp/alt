@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: catch the odb up before building on the notes tip
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/notes.rs
+touched: crates/alt-cli/tests/it/workspace.rs
