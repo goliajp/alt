@@ -1,8 +1,8 @@
-//! M7-B2 large-files bench: import volume + throughput on the binary-asset
+//! Large-files bench: import volume + throughput on the binary-asset
 //! fixture against git's own object store, then a "modify and re-import"
 //! pass to expose the incremental story (CDC chunk dedup + lineage delta
-//! on growing blobs). Numbers are reported, the plan doc records them —
-//! no ratio assertion here; the judgment lives in the plan's CP-7B note.
+//! on growing blobs). Numbers are reported only —
+//! no ratio assertion here.
 //!
 //! Gated on `ALT_BENCH=1` plus `--ignored`, like the source-corpus bench,
 //! so timing belongs to release builds run by hand, not the debug gate.
@@ -91,7 +91,7 @@ fn large_files_bench_volume_and_throughput() {
 
     let mib = |b: u64| b as f64 / (1 << 20) as f64;
     eprintln!();
-    eprintln!("M7-B2 large-files bench (initial import)");
+    eprintln!("large-files bench (initial import)");
     eprintln!("  working tree:    {:.1} MiB", mib(working_bytes));
     eprintln!("  .git/objects:    {:.1} MiB", mib(git_bytes_before),);
     eprintln!(
@@ -125,7 +125,7 @@ fn large_files_bench_volume_and_throughput() {
     assert!(cp.success(), "cp -R corpus failed");
     let target = work.join("data/dataset01.dat");
     let mut data = fs::read(&target).unwrap();
-    // append 512 KiB of fresh pseudo-random bytes — same pattern the B1
+    // append 512 KiB of fresh pseudo-random bytes — same pattern the corpus
     // builder uses, just with a different seed
     let mut s: u64 = 0xb2_b2_b2_b2_b2_b2_b2_b2u64;
     let start = data.len();
@@ -151,7 +151,7 @@ fn large_files_bench_volume_and_throughput() {
             "-q",
             "--allow-empty-message",
             "-m",
-            "B2 bench: append to dataset01",
+            "bench: append to dataset01",
         ],
     );
 
@@ -170,7 +170,7 @@ fn large_files_bench_volume_and_throughput() {
     let alt_delta = alt_bytes_after.saturating_sub(alt_bytes);
 
     eprintln!();
-    eprintln!("M7-B2 large-files bench (modify + re-import)");
+    eprintln!("large-files bench (modify + re-import)");
     eprintln!(
         "  new git objects: {:.2} MiB (Δ over baseline)",
         mib(git_delta),

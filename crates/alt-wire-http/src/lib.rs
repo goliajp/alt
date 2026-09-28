@@ -25,7 +25,7 @@
 //! - [`Service`] — `UploadPack` for fetch / clone reads,
 //!   `ReceivePack` for push writes.
 //!
-//! ## Scope (W2)
+//! ## Scope
 //!
 //! Synchronous, blocking, one request at a time — same model as the rest
 //! of alt (no async runtime). HTTP/2 is off (protocol v2 stateless POSTs

@@ -1,4 +1,4 @@
-//! M10/W16: `alt verify` CLI surface for commit-level alt-sig.
+//! `alt verify` CLI surface for commit-level alt-sig.
 
 use std::path::Path;
 use std::process::{Command, Output};

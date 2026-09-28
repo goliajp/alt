@@ -1,6 +1,6 @@
 //! `alt remote add/list/remove`: register git remotes in
 //! `<alt-dir>/remotes/<name>` as a minimal key=value text file. This is
-//! M6/W3 — the persistence + CLI surface that W4 (`alt fetch`) wires the
+//! the persistence + CLI surface that `alt fetch` wires the
 //! transport into.
 
 use std::path::Path;

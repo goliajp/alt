@@ -3,7 +3,7 @@
 //! kinds (imports, future workflow ops) share the same log.
 //!
 //! Each update carries the expected old target alongside the new one:
-//! replay re-verifies the whole history deterministically, and undo (A2)
+//! replay re-verifies the whole history deterministically, and undo
 //! can be computed from the record alone.
 
 use alt_git_codec::{HashAlgo, ObjectId};
@@ -13,7 +13,7 @@ use crate::{RefError, RefTarget};
 /// Payload kind byte for ref transactions.
 pub const PAYLOAD_REF_TX: u8 = 1;
 /// v2 appends an optional idempotency key after the changes; v1 (no key) still
-/// parses (key = None), so a store written before D5c reads back unchanged.
+/// parses (key = None), so a store written before idempotency keys reads back unchanged.
 const TX_VERSION: u8 = 2;
 
 /// A client idempotency token, persisted in the ref transaction so a retried

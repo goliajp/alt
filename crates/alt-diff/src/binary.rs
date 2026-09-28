@@ -1,4 +1,4 @@
-//! Chunk-level binary diff (A8 B1): given two byte streams that the text
+//! Chunk-level binary diff: given two byte streams that the text
 //! engine considers binary, report how many CDC chunks they share, how many
 //! are new on each side, and what fraction of the bytes are shared.
 //!
@@ -14,7 +14,7 @@
 //! Ordered edit ops (insert / delete / move at chunk granularity) are out
 //! of scope here — they require an LCS over the chunk-OID sequence, which
 //! costs O(N×M) in the chunk counts and only pays off when both sides have
-//! < a few thousand chunks. A8 design §3.1 makes this a `--full`-mode opt-in
+//! < a few thousand chunks. This is planned as a `--full`-mode opt-in
 //! when the engine grows it; the default summary stays multiset-only.
 //!
 //! ## Determinism

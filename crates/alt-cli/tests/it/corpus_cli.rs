@@ -1,8 +1,8 @@
 //! Corpus-scale byte-exactness: full-history `log --pretty=raw` (and
 //! friends) diffed against git on every real repository under
 //! `$ALT_CORPUS` that has a resolvable HEAD — first over the .git
-//! backend, then over a native .alt store imported from it (the M1
-//! matrix re-run on the M2 backend).
+//! backend, then over a native .alt store imported from it (the
+//! same matrix re-run on the native backend).
 
 use std::path::Path;
 use std::process::{Command, Output};
@@ -68,7 +68,7 @@ fn corpus_cli_matches_git() {
         sweep(&repo, &repo, head);
         println!("{}: full-history log byte-exact (.git)", repo.display());
 
-        // the M1 matrix re-run on the native backend
+        // the same matrix re-run on the native backend
         let alt_root = tempfile::tempdir().unwrap();
         let import = run(
             env!("CARGO_BIN_EXE_alt"),

@@ -1,5 +1,5 @@
 //! `alt fetch` end-to-end against a real `git upload-pack` over a
-//! hermetic local HTTP listener (M6/W4).
+//! hermetic local HTTP listener.
 //!
 //! The test server is a ~80-line shim that translates one HTTP request
 //! into one `git upload-pack` invocation:

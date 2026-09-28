@@ -1,11 +1,11 @@
-//! M8-A2 monorepo bench: side-by-side wall-time on the M8-A1 synth
+//! Monorepo bench: side-by-side wall-time on the synth
 //! corpus for the hot CLI commands an agent invokes on every interaction
 //! — status / commit / diff / log / log -p / branch / cat-file — through
 //! both the .alt store and the source .git, so the gap between alt and
 //! git native is visible per command without a third-party comparator.
 //!
-//! Numbers are reported, the plan doc records them; **no hard threshold
-//! assertions** here — A3 is the magnification step, and the bench needs
+//! Numbers are reported only; **no hard threshold
+//! assertions** here — the bench needs
 //! to be honest about whatever the current numbers are.
 //!
 //! Gated like the other bench: `ALT_BENCH=1` on top of `--ignored`.
@@ -171,7 +171,7 @@ fn monorepo_bench_core_commands() {
     }
 
     eprintln!();
-    eprintln!("M8-A2 monorepo bench (setup...)");
+    eprintln!("monorepo bench (setup...)");
     let t0 = Instant::now();
     let ws = setup(&corpus);
     eprintln!("  setup took {}", fmt_dur(t0.elapsed()));

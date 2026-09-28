@@ -1,4 +1,4 @@
-//! Deflate/zlib strip prism — the "universal key" (design/prisms.md §4):
+//! Deflate/zlib strip prism — the "universal key":
 //! most binary assets are structured containers wrapping transparently
 //! deflated streams (PNG IDAT, zip members, PDF streams, git loose
 //! objects), and that compression is CDC's enemy (a one-byte source change
@@ -6,7 +6,7 @@
 //! exposes the underlying bytes to dedup.
 //!
 //! The catch is bit-exact reproduction: recompressing must reproduce the
-//! original stream verbatim. Per the spike (design/prisms.md §5),
+//! original stream verbatim. Measured on real inputs,
 //! **the producer decides reproducibility** and the recompressor must be C
 //! libz (zlib-rs makes different choices). So this prism inflates, then
 //! finds the libz parameters that reproduce the input exactly, recording a
@@ -130,7 +130,7 @@ mod tests {
     fn reproduces_real_git_loose_streams() {
         let corpus = std::env::var("ALT_CORPUS").expect("set ALT_CORPUS");
         // gitflow-loose keeps every object loose — i.e. 1413 real git zlib
-        // streams (the spike's data; git writes level 1)
+        // streams (git writes level 1)
         let objects = std::path::Path::new(&corpus).join("gitflow-loose/.git/objects");
         let (mut total, mut decomposed) = (0u32, 0u32);
         for fanout in std::fs::read_dir(&objects).unwrap() {

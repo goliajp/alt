@@ -1,4 +1,4 @@
-//! M7-B1 large-files corpus generator.
+//! Large-files corpus generator.
 //!
 //! Builds a deterministic ~80 MB git repo of mixed binary assets at
 //! `<dir>`: a few "image"-shaped files (real libz-deflated streams,
@@ -6,7 +6,7 @@
 //! files (incompressible — the CDC stress case), one archive-shaped file
 //! that concatenates multiple deflate streams (real-world container
 //! shape), plus a tiny manifest. Five commits then exercise the modify
-//! patterns that B2 / B3 need to benchmark:
+//! patterns that the large-file bench and perceptual diff need:
 //!
 //!   C1: initial drop
 //!   C2: in-place pixel tweak on image01 (changes its zlib stream)
@@ -120,8 +120,8 @@ fn write_image(path: &Path, seed: u32, generation: u32) {
     // "Image": a deflate stream of seeded pseudo-pixel bytes, wrapped in
     // a fake PNG-shaped envelope so the produced file contains a real
     // zlib stream (the prism's primary trigger). Not a parser-valid PNG —
-    // B1's job is to exercise storage; B3 will add real PNG fixtures when
-    // perceptual diff lands.
+    // this corpus exercises storage; real PNG fixtures belong to the
+    // perceptual diff tests.
     let mut raw = vec![0u8; IMAGE_RAW_BYTES];
     fill_pixels(&mut raw, seed, generation);
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::new(1));
@@ -139,7 +139,7 @@ fn write_image(path: &Path, seed: u32, generation: u32) {
 
 fn fill_pixels(buf: &mut [u8], seed: u32, generation: u32) {
     // Gradient-with-noise pixels: highly structured so the deflate stream
-    // varies smoothly under generation change (B3's perceptual diff
+    // varies smoothly under generation change (perceptual diff
     // wants small bit-level diff for small visual diff). Lehmer LCG keeps
     // the generator deterministic without pulling in a crate.
     let mut s = seed.wrapping_add(generation.wrapping_mul(0xdead_beef));

@@ -1,4 +1,4 @@
-//! The cost the daemon amortizes (D3). Every direct `alt` command pays a full
+//! The cost the daemon amortizes. Every direct `alt` command pays a full
 //! [`Store::open`] — mmap the altpacks, read `map.alt`, replay the op log; a
 //! daemon holds the store open and instead pays only [`Store::refresh`] per
 //! request (a tail catch-up that reads nothing new when idle). This benchmarks

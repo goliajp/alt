@@ -1,4 +1,4 @@
-//! M7-B4: `alt log -p` emits per-commit patches. Text files get a unified
+//! `alt log -p` emits per-commit patches. Text files get a unified
 //! diff (cross-checked against git); binary files stay compact — a
 //! chunk-diff summary + a perceptual hint when the content is a kind we
 //! recognise — so a binary-asset history doesn't blow up the terminal.

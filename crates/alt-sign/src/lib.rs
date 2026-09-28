@@ -1,4 +1,4 @@
-//! Ed25519 keys + signatures for alt operation signing (A5b).
+//! Ed25519 keys + signatures for alt operation signing.
 //!
 //! ## Scope
 //!

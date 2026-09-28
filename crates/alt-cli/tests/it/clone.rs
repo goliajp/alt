@@ -1,5 +1,5 @@
 //! `alt clone` end-to-end: init + remote add + fetch + switch under one
-//! command (M6/W6). Closes 段 A of the wire milestone.
+//! command.
 
 use std::path::Path;
 use std::process::{Command, Output};

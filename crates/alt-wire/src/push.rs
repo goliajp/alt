@@ -21,7 +21,7 @@
 //! ## Why a separate module from `fetch`
 //!
 //! Push uses **v1** framing (NUL-separated caps, raw pack body after the
-//! commands, status report in plain pkt-lines or sideband). Fetch (W4)
+//! commands, status report in plain pkt-lines or sideband). Fetch
 //! uses **v2** framing (section-headed pkt-lines, sideband-wrapped pack).
 //! Sharing the pkt-line layer is enough — the higher-level command shape
 //! is genuinely different.
@@ -112,22 +112,22 @@ pub enum PushError {
 }
 
 /// Capability name an alt client sends to declare which principal
-/// signed this push (M6/W9). Value is the principal id; a paired
+/// signed this push. Value is the principal id; a paired
 /// `alt-sig` capability carries the signature.
 ///
 /// Git's receive-pack ignores capabilities it didn't itself advertise,
 /// so this extension is wire-safe against any git server. An alt server
-/// (W10+) looks for both names and verifies the pair against its trust
+/// looks for both names and verifies the pair against its trust
 /// store.
 pub const CAP_ALT_PRINCIPAL: &str = "alt-principal";
 
 /// Capability name carrying the `alt-sig-ed25519:<base64url>` signature
-/// over [`canonical_push_payload`] (M6/W9). Paired with
+/// over [`canonical_push_payload`]. Paired with
 /// [`CAP_ALT_PRINCIPAL`]; either both present or both absent.
 pub const CAP_ALT_SIG: &str = "alt-sig";
 
-/// Capability name carrying a server-issued single-use nonce (M14/W45
-/// anti-replay). The server advertises it in the v1 receive-pack ref
+/// Capability name carrying a server-issued single-use nonce
+/// (anti-replay). The server advertises it in the v1 receive-pack ref
 /// advertisement; the client signs `nonce <hex>\n` prepended to the
 /// usual canonical payload, and echoes the same `alt-nonce=<hex>` cap
 /// on the push so the server can look the nonce up and consume it.
@@ -151,7 +151,7 @@ pub fn canonical_push_payload(updates: &[RefUpdate], algo: HashAlgo) -> Vec<u8> 
     canonical_push_payload_with_nonce(updates, None, algo)
 }
 
-/// M14/W45 — canonical payload with an optional server-issued nonce.
+/// canonical payload with an optional server-issued nonce.
 ///
 /// When `nonce` is `Some(hex)`, the payload begins with a literal
 /// `nonce <hex>\n` line followed by the same sorted ref-update lines
@@ -161,7 +161,7 @@ pub fn canonical_push_payload(updates: &[RefUpdate], algo: HashAlgo) -> Vec<u8> 
 /// in anti-replay negotiation.
 ///
 /// When `nonce` is `None`, the output is identical to the no-nonce
-/// path so existing W14 signed pushes keep verifying without change.
+/// path so existing signed pushes keep verifying without change.
 pub fn canonical_push_payload_with_nonce(
     updates: &[RefUpdate],
     nonce: Option<&str>,
@@ -435,7 +435,7 @@ fn zero_oid(algo: HashAlgo) -> ObjectId {
     ObjectId::from_bytes(algo, &zeros).expect("zero oid is valid length")
 }
 
-/// Server-side encode of a v1 ref advertisement (M9/W10c). Mirror of
+/// Server-side encode of a v1 ref advertisement. Mirror of
 /// [`parse_v1_ref_advertisement`]: caller passes the ordered refs and
 /// the capability list to advertise. Empty repos still send a pseudo
 /// ref `capabilities^{}` so the caps section has somewhere to ride.
@@ -494,7 +494,7 @@ pub struct PushRequest {
 
 /// The metadata half of a `git-receive-pack` POST body: ref updates +
 /// capability list. Sits in front of the raw pack stream on the wire.
-/// M13/W36 split [`parse_push_request`] into this head + a separate
+/// Split from [`parse_push_request`] into this head + a separate
 /// pack drain so the server can stream the pack to a tempfile instead
 /// of buffering the entire push body in RAM.
 #[derive(Debug, Clone)]
@@ -506,7 +506,7 @@ pub struct PushHead {
 /// Parse just the ref-update + capability section of a
 /// `git-receive-pack` POST body. Stops at the trailing flush; the
 /// caller is responsible for the pack stream that follows (which may
-/// be many gigabytes — see M13/W36 streaming path).
+/// be many gigabytes — the server streams it).
 pub fn parse_push_request_head<R: Read>(r: &mut R, algo: HashAlgo) -> Result<PushHead, PushError> {
     let mut updates: Vec<RefUpdate> = Vec::new();
     let mut capabilities: Vec<String> = Vec::new();
@@ -566,12 +566,12 @@ pub fn parse_push_request_head<R: Read>(r: &mut R, algo: HashAlgo) -> Result<Pus
     })
 }
 
-/// Server-side parse of a `git-receive-pack` POST body (M9/W10c).
+/// Server-side parse of a `git-receive-pack` POST body.
 /// Mirror of [`encode_push_request`]: reads the ref-update lines + the
 /// (optional, NUL-attached) capability list, then drains everything
 /// after the trailing flush as the raw pack stream.
 ///
-/// M13/W36 note: prefer [`parse_push_request_head`] + a direct read
+/// Prefer [`parse_push_request_head`] + a direct read
 /// from `r` into a tempfile for production paths; this function
 /// buffers the pack in memory and exists for tests + tools that want
 /// the convenient `PushRequest` shape.
@@ -586,9 +586,9 @@ pub fn parse_push_request<R: Read>(r: &mut R, algo: HashAlgo) -> Result<PushRequ
     })
 }
 
-/// Server-side encode of `report-status` (M9/W10c). Plain pkt-lines —
+/// Server-side encode of `report-status`. Plain pkt-lines —
 /// no sideband — because the client only switches to sideband if the
-/// server advertised `side-band-64k`; W10c doesn't yet, so we keep the
+/// server advertised `side-band-64k`; this encoder doesn't, so we keep the
 /// reply simple.
 ///
 ///   pkt: "unpack ok\n"                              (or "unpack <reason>\n")
@@ -616,7 +616,7 @@ pub fn encode_report_status<W: Write>(
 }
 
 /// Server-side encode of `report-status` wrapped in `side-band-64k`
-/// framing (M9/W13). Use this when the client advertised `side-band-64k`
+/// framing. Use this when the client advertised `side-band-64k`
 /// in the push request — git CLI does this when the server advertised
 /// the cap in the v1 ref ad. The plain pkt-line body is the same as
 /// [`encode_report_status`] but each pkt-line rides band 1.
@@ -704,7 +704,7 @@ mod tests {
         assert!(ad.supports("ofs-delta"));
     }
 
-    /// M9/W10c: the v1 ref ad encoder mirrors the parser. An empty
+    /// the v1 ref ad encoder mirrors the parser. An empty
     /// store gets a `capabilities^{}` pseudo-ref; a populated store
     /// gets one pkt per real ref with caps attached only to the first.
     #[test]
@@ -914,7 +914,7 @@ mod tests {
         }
     }
 
-    /// W9 — the canonical push payload is sorted by ref name and uses the
+    /// the canonical push payload is sorted by ref name and uses the
     /// same `"<old> <new> <name>\n"` shape on both sides of the wire, so
     /// a client signature lines up exactly with what an alt server will
     /// reconstruct from the decoded updates.
@@ -1008,7 +1008,7 @@ mod tests {
         );
     }
 
-    /// M13/W36: `parse_push_request_head` must stop exactly at the
+    /// `parse_push_request_head` must stop exactly at the
     /// flush that terminates the command section — the pack bytes
     /// that follow must remain in the reader for the caller to
     /// stream into a tempfile. Without this guarantee the streaming

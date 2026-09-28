@@ -20,7 +20,7 @@ fn main() -> ExitCode {
         Ok(code) => ExitCode::from(code),
         Err(e) => {
             let msg = format!("{e}");
-            // C4: A6 gate denials surface as JSON on stderr when the command
+            // capability gate denials surface as JSON on stderr when the command
             // was invoked with `--json`, so an agent driving alt never has to
             // parse the human "fatal: …" string to know it was denied.
             if json_mode && let Some(rest) = msg.strip_prefix("capability denied: ") {

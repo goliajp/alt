@@ -18,8 +18,8 @@ pub const ENC_RAW: u8 = 0;
 pub const ENC_ZSTD: u8 = 1;
 /// Lineage delta: payload = base chunk id (32B) + zstd ref-prefix frame.
 pub const ENC_DELTA: u8 = 2;
-/// Encoding 3 stays reserved for prism parts (M3+); part of the frozen
-/// format so later milestones need no version bump.
+/// Encoding 3 stays reserved for prism parts; part of the frozen
+/// format so later additions need no version bump.
 pub const ENC_RESERVED_MAX: u8 = 3;
 
 pub fn file_header() -> [u8; HEADER_LEN] {

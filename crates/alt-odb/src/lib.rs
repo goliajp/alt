@@ -35,14 +35,13 @@ use tier1::Tier1Map;
 /// same blobs.
 ///
 /// Order is priority (`Registry::register` is hot-first). [`alt_prism_deflate::DeflatePrism`]
-/// is currently the only entry: the "universal key" of `design/prisms.md`
-/// §4, since most binary asset containers wrap deflate streams that defeat
+/// is currently the only entry: the "universal key", since most binary asset containers wrap deflate streams that defeat
 /// CDC dedup otherwise.
 pub fn default_registry() -> Registry {
     let mut r = Registry::new();
     // Hot-first registration order. Signatures are disjoint (PK / 89PNG
     // / zlib magic), so any order works for correctness; this one
-    // mirrors design/prisms.md §2 hot/cold list.
+    // is hot-first.
     r.register(Box::new(alt_prism_zip::ZipPrism));
     r.register(Box::new(alt_prism_png::PngPrism));
     r.register(Box::new(alt_prism_deflate::DeflatePrism));
@@ -147,7 +146,7 @@ pub struct NativeOdb {
     /// is recorded in `tier1` and stored as deduplicated parts; everything
     /// else falls through to Tier 0 ([`alt_prism::Registry::decompose_verified`]
     /// enforces the byte-exact iron law). Default open() leaves it empty so
-    /// behaviour matches the pre-A2 store; consumers (alt-import, alt-cli)
+    /// behaviour matches the pre-prism store; consumers (alt-import, alt-cli)
     /// register the production set explicitly.
     registry: Registry,
     /// The advisory write lock; `held` tracks whether this batch owns it.
@@ -766,8 +765,8 @@ impl NativeOdb {
     /// just wants a post-batch snapshot to compare against the pre-batch one
     /// — i.e. "did the bytes I just wrote stay put, or did someone else's
     /// commit slip in?". Two extra syscalls saved per receive-pack request,
-    /// which is what keeps the W44 group-commit coalescing test still green
-    /// after W46 added its rewind window.
+    /// which is what keeps the group-commit coalescing test still green
+    /// with the rewind window in place.
     pub fn cursor(&self) -> OdbCheckpoint {
         OdbCheckpoint {
             blobs: self.blobs.checkpoint(),
@@ -827,7 +826,7 @@ impl NativeOdb {
     /// lets the others skip theirs. The 3-tuple marker stays the same —
     /// tier1 isn't tracked in it because it's a small, append-only file
     /// with cheap fsync and unconditionally syncing it preserves backward
-    /// compatibility with stores written before A2.
+    /// compatibility with stores written before Tier 1 existed.
     fn sync_to(&mut self, target: [u64; 3]) -> Result<(), OdbError> {
         // fast path: another writer already fsynced past my appends
         if covers(read_durable(&self.durable_path), target) {

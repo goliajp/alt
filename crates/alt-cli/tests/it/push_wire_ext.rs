@@ -1,4 +1,4 @@
-//! M6/W9 — the alt-to-alt wire signing extension.
+//! the alt-to-alt wire signing extension.
 //!
 //! Verifies that when local signing is on, `alt push` declares the
 //! `alt-principal` + `alt-sig` capabilities in its receive-pack request

@@ -1,4 +1,4 @@
-//! `alt workspace` (A3): parallel workspaces with isolated HEAD/index/working
+//! `alt workspace`: parallel workspaces with isolated HEAD/index/working
 //! tree over a shared store, and two of them committing concurrently as
 //! separate processes — the real multi-agent scenario.
 

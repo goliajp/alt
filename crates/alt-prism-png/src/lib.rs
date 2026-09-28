@@ -1,4 +1,4 @@
-//! PNG container prism — design/prisms.md §2, hot/cold list "png" row.
+//! PNG container prism.
 //!
 //! A PNG is a signature + a chunk graph (IHDR, optional palette / colour
 //! / text / time chunks, one or more IDAT chunks carrying a single
@@ -23,8 +23,8 @@
 //!   bytes.
 //!
 //! Iron law per alt-prism: we accept the decomposition only when libz
-//! can reproduce the *exact* original concatenated IDAT body. design
-//! §5 measured this at 1/10 on real-world PNGs — optipng/zopfli output
+//! can reproduce the *exact* original concatenated IDAT body. Measured
+//! reproducibility is about 1/10 on real-world PNGs — optipng/zopfli output
 //! is not reproducible by any stock libz level. Those land at Tier 0
 //! (the file stores verbatim, like git would), and that's fine: the
 //! prism's value is the libz-produced PNG that ~every authoring tool

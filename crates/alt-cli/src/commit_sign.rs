@@ -1,4 +1,4 @@
-//! M10/W15 — commit-level Ed25519 signing on the wire.
+//! commit-level Ed25519 signing on the wire.
 //!
 //! A signed commit carries one extra header between `committer` and the
 //! blank message-separator:
@@ -137,7 +137,7 @@ impl std::error::Error for AltSigError {}
 /// the caller can slice the line out cleanly.
 fn locate_alt_sig_line(header_block: &[u8]) -> Option<std::ops::Range<usize>> {
     // Header block is `name SP value LF` lines. `alt-sig` is fixed-name
-    // single-line for now (M10/W15 doesn't define a continuation form),
+    // single-line for now (no continuation form is defined),
     // so a direct line scan finds it.
     let mut start = 0;
     while start < header_block.len() {

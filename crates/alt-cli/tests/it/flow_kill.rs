@@ -1,7 +1,7 @@
-//! M8-C0: SIGKILL recovery test for `alt flow` — the atomicity contract.
+//! SIGKILL recovery test for `alt flow` — the atomicity contract.
 //!
 //! Each `flow feature start` and `flow feature finish` runs in one
-//! ref-tx + one op-log entry (M4 design). A power-loss (SIGKILL) at any
+//! ref-tx + one op-log entry. A power-loss (SIGKILL) at any
 //! point should leave the store in either the pre- or post-state, never
 //! a half-finished hybrid. This test verifies that by spawning a child
 //! that hammers start/finish in a tight loop, killing it mid-flight,
@@ -190,11 +190,11 @@ fn killed_flow_feature_recovers_and_converges() {
     );
 }
 
-/// Same kill harness but for the M8/C1 release flow: spawn a child
+/// Same kill harness but for the release flow: spawn a child
 /// looping release start → commit → finish, SIGKILL, and verify the
 /// store stays atomic just like the feature variant. Release finish
 /// does *two* merges in one ref-tx (main, then back-merge into
-/// develop) — a real test that the C1 helper kept the single-op-log
+/// develop) — a real test that the release helper kept the single-op-log
 /// contract.
 #[test]
 #[ignore = "spawns a child workload; cousin of killed_flow_feature_recovers"]

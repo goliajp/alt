@@ -1,5 +1,5 @@
 //! `alt push` end-to-end against a real `git receive-pack` over the same
-//! shared HTTP shim used by the fetch test (M6/W5).
+//! shared HTTP shim used by the fetch test.
 //!
 //! Verifies the full v1 path: ref advertisement parse → reachability
 //! traversal → plain-pack write → POST receive-pack → report-status. The

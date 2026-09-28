@@ -1,6 +1,6 @@
 //! Tiny HTTP front-end that proxies to `git upload-pack` /
-//! `git receive-pack` against a local repo. Shared by the M6/W4 (fetch)
-//! and M6/W5 (push) integration tests so the wire-side coverage runs
+//! `git receive-pack` against a local repo. Shared by the fetch
+//! and push integration tests so the wire-side coverage runs
 //! against real git binaries without bringing in a full HTTP server crate.
 //!
 //! The shim is intentionally minimal — Content-Length-framed requests,

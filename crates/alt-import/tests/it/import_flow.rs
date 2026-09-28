@@ -182,13 +182,13 @@ fn import_delta_encodes_same_path_history() {
         report.lineage_deltas
     );
     // each of those commits also changed the root tree, so the predecessor
-    // trees delta too (M3.5 S5 — the main volume win)
+    // trees delta too (the main volume win)
     assert!(
         report.tree_lineage_deltas >= 3,
         "predecessor trees must delta, got {}",
         report.tree_lineage_deltas
     );
-    // and the parent commits delta against their children (M3.5 S6)
+    // and the parent commits delta against their children
     assert!(
         report.commit_lineage_deltas >= 3,
         "parent commits must delta, got {}",

@@ -199,7 +199,7 @@ fn trim_newline(b: &[u8]) -> &[u8] {
 }
 
 /// Encode a smart-http v2 capability advertisement for `service` (e.g.
-/// `git-upload-pack`). M9/W10a — the server's first response on
+/// `git-upload-pack`): the server's first response on
 /// `GET <repo>/info/refs?service=…`. The body is exactly the bytes a
 /// client's [`parse_capability_advertisement`] reads.
 ///

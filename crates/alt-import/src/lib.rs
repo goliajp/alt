@@ -59,9 +59,9 @@ pub struct ImportReport {
     pub refs_changed: usize,
     /// Same-path versions re-encoded as lineage deltas (blobs + trees).
     pub lineage_deltas: u64,
-    /// The subset of `lineage_deltas` that are tree objects (M3.5 S5).
+    /// The subset of `lineage_deltas` that are tree objects.
     pub tree_lineage_deltas: u64,
-    /// The subset of `lineage_deltas` that are commit objects (M3.5 S6).
+    /// The subset of `lineage_deltas` that are commit objects.
     pub commit_lineage_deltas: u64,
     /// The import op — None when state was already converged (rerun).
     pub op: Option<alt_refs::OpId>,
@@ -284,8 +284,8 @@ fn lineage_pass(
 /// Collects same-path lineage edges (old, new, is_tree) for objects whose
 /// content changed between two trees: the changed tree pair itself plus,
 /// recursively, every changed sub-tree and blob. Tree objects are highly
-/// similar across commits, so delta'ing them is the main volume win (M3.5
-/// S5). Order anomalies or shape changes just skip a pair — a missed edge
+/// similar across commits, so delta'ing them is the main volume win.
+/// Order anomalies or shape changes just skip a pair — a missed edge
 /// only costs compression, never correctness.
 fn diff_trees(
     odb: &NativeOdb,

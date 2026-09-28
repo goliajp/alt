@@ -1,4 +1,4 @@
-//! `alt status --json`: the structured view (VISION §4 A1). The output is
+//! `alt status --json`: the structured view. The output is
 //! valid JSON (round-tripped through python's `json.load`) and carries the
 //! stable schema — staged/unstaged/untracked/unmerged plus a `clean` flag.
 
@@ -67,7 +67,7 @@ fn clean_tree_reports_clean_with_empty_sections() {
     assert!(json.contains("\"unstaged\":[]"), "{json}");
     assert!(json.contains("\"untracked\":[]"), "{json}");
     assert!(json.contains("\"unmerged\":[]"), "{json}");
-    // C4: principal surfaced — an agent can ask "who am I to this repo"
+    // principal surfaced — an agent can ask "who am I to this repo"
     // through the same machine-first surface it uses for status itself.
     assert!(
         json.contains("\"principal\":{\"kind\":\"human\"") && json.contains("\"session\":null"),
@@ -75,7 +75,7 @@ fn clean_tree_reports_clean_with_empty_sections() {
     );
 }
 
-/// `status --json` reports the structured A5a principal when the caller
+/// `status --json` reports the structured principal when the caller
 /// drives the new env vars — kind, id, and the optional session correlator.
 #[test]
 fn agent_principal_surfaces_via_status_json() {

@@ -72,7 +72,7 @@ impl fmt::Debug for OpId {
 pub struct Op {
     pub id: OpId,
     pub parent: OpId,
-    /// Reserved for the change-identity model (A5); zeros until then.
+    /// Reserved for the change-identity model; zeros until then.
     pub change_id: [u8; 32],
     pub timestamp_ms: u64,
     /// Who performed the op — human or agent identity string.

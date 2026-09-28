@@ -2,7 +2,7 @@
 //! the wire. Pure logic — bytes in, structured frames out; structured
 //! commands in, bytes out. Transport (HTTPS) is in a sibling crate.
 //!
-//! ## Scope (W1 + W4)
+//! ## Scope
 //!
 //! - **pkt-line** framing: every git protocol byte stream is a sequence of
 //!   `pkt::Frame`s — `Data(bytes)`, `Flush`, `Delim`, `ResponseEnd` — with a
@@ -11,12 +11,12 @@
 //!   response): protocol version + per-command capability map.
 //! - **ls-refs** command: structured request encoding + response parsing
 //!   (a list of `RefRecord { name, oid, peeled, symref_target }`).
-//! - **fetch** command (W4): request encoding (wants / haves / done / flags)
+//! - **fetch** command: request encoding (wants / haves / done / flags)
 //!   plus a section-aware preamble parser and a sideband demuxer for the
 //!   packfile stream — pack bytes tee out to a caller-supplied indexer.
 //!
-//! Push request bodies live in W5; this crate still has no I/O — the HTTP
-//! transport (W2) is a transparent byte mover.
+//! Push request bodies live in [`push`]; this crate still has no I/O — the HTTP
+//! transport (`alt-wire-http`) is a transparent byte mover.
 //!
 //! ## Why hand-written
 //!

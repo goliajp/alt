@@ -1,11 +1,11 @@
-//! Repository capability policy (A6).
+//! Repository capability policy.
 //!
 //! A [`Policy`] is a list of `(principal-glob, [`Capabilities`])` rules loaded
-//! from `<alt-dir>/policy` (plain text, zero-dep parser — same调性 as
+//! from `<alt-dir>/policy` (plain text, zero-dep parser — same style as
 //! [`crate::json`]). On every write the repo asks `policy.lookup(&principal)`
-//! and the resulting [`Capabilities`] is what the gates in C3 will check
+//! and the resulting [`Capabilities`] is what the gates check
 //! against (ref namespace + read-only inside `RefStore`; force + path inside
-//! `NativeRepo`). C2 is the model + loader + lookup; the gates come in C3.
+//! `NativeRepo`).
 //!
 //! ## File format
 //!
@@ -49,7 +49,7 @@ use crate::native::Principal;
 
 /// What a principal may do at the repo level. The fields are *allow* axes —
 /// empty lists mean "no constraint on this axis". See the module docs for the
-/// surface semantics; the gates are C3 (ref namespace + read-only in
+/// surface semantics; the gates are (ref namespace + read-only in
 /// `RefStore`, force + path in `NativeRepo`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Capabilities {
@@ -57,8 +57,8 @@ pub struct Capabilities {
     pub read_only: bool,
     /// Allow-list for ref names; empty = any ref allowed.
     pub branch_allow: Vec<Glob>,
-    /// Deny-list for ref names; takes precedence over allow. M10/W22:
-    /// the practical reason this matters even when an allow-list could
+    /// Deny-list for ref names; takes precedence over allow.
+    /// The practical reason this matters even when an allow-list could
     /// theoretically cover the same ground is the "protect main" shape:
     /// `branch=refs/heads/* branch_deny=refs/heads/main` is more
     /// readable than enumerating every other branch. Empty = no deny.
@@ -67,12 +67,12 @@ pub struct Capabilities {
     pub path_allow: Vec<Glob>,
     /// Deny non-fast-forward updates and branch deletion.
     pub forbid_force: bool,
-    /// M10/W14 (A5b): when set, the wire receive-pack path rejects any
+    /// when set, the wire receive-pack path rejects any
     /// push that doesn't carry a valid Ed25519 signature over the
     /// canonical push payload. Only enforced on the wire — local CLI
     /// writes don't traverse the signature path.
     pub require_signed: bool,
-    /// M10/W15 (A5b): when set, the wire receive-pack path walks every
+    /// when set, the wire receive-pack path walks every
     /// newly-pushed commit and rejects the push if any of them lacks a
     /// valid `alt-sig` header from a trusted principal. Composes with
     /// [`require_signed`] (the per-push gate above); both can be on,
@@ -106,7 +106,7 @@ impl Capabilities {
 
     /// Namespace-only check (ignores `read_only`). Used by the ref-store gate,
     /// which reports the read-only deny separately from the namespace deny so
-    /// the error message can name *which* constraint fired. M10/W22:
+    /// the error message can name *which* constraint fired.
     /// `branch_deny` glob list runs *after* the allow check — a name on the
     /// deny list is refused even when an allow glob accepted it (deny wins).
     pub fn allows_branch_name(&self, name: &str) -> bool {

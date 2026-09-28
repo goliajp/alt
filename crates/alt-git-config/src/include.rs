@@ -115,7 +115,7 @@ fn gitdir_matches(pattern: &[u8], ctx: &IncludeContext, case_insensitive: bool) 
         pat = p;
     }
     // `./` is relative to the including file — git resolves it against the
-    // config file's directory; M1 reads repo-local config, where the only
+    // config file's directory; only repo-local config is read, where the only
     // sensible anchor is the git dir's parent. Revisit with global config.
     if !(pat.starts_with(b"/") || pat.starts_with(b"**") || pat.starts_with(b"./")) {
         let mut p = b"**/".to_vec();

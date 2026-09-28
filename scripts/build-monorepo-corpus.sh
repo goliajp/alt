@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build the M8-A1 monorepo synth corpus at $1 (default:
+# Build the monorepo synth corpus at $1 (default:
 # .dev/corpus/monorepo). Reproducible: same script run → same bytes.
 # Override size via ALT_MONOREPO_PACKAGES / ALT_MONOREPO_FILES_PER_PKG /
 # ALT_MONOREPO_COMMITS (defaults: 200 / 250 / 8000).

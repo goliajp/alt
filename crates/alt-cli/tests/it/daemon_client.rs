@@ -1,5 +1,5 @@
 //! The `alt` client routes hot commands (reads `status`/`branch`/`diff`/`log`,
-//! and since D4 the writes) through the per-repo `altd` daemon, auto-spawning
+//! and the writes) through the per-repo `altd` daemon, auto-spawning
 //! one if none is up, and falls back to running directly when the daemon is
 //! disabled or unreachable. These drive the real `alt` binary end to end and
 //! check what matters: routing yields the *same* output as the direct path,
@@ -170,7 +170,7 @@ fn client_routes_writes_through_the_daemon() {
     );
 }
 
-/// Exactly-once (D5c): when a write's request reaches the daemon but the
+/// Exactly-once: when a write's request reaches the daemon but the
 /// response is lost (a stand-in server that reads the request then drops the
 /// connection), the client retries with the *same* idempotency id rather than
 /// erroring or silently double-running. The first attempt's response is eaten

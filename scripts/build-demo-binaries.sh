@@ -50,7 +50,7 @@ from openpyxl.styles import Font, PatternFill
 
 # Pillow's PIL.PngImagePlugin writes IDAT with parameters libz can't
 # reproduce verbatim, so alt-prism-png declines those PNGs (PNG Tier 1
-# hit rate ~10% — design/prisms.md §5). We sidestep that by encoding
+# hit rate ~10%). We sidestep that by encoding
 # the PNG ourselves via the stock libz `compress2` path that Python's
 # zlib module uses: same level, same window/memLevel/strategy as
 # `alt-prism-png::zlib_deflate`, so the round trip matches every time.
@@ -653,7 +653,7 @@ docx_doc(ROOT/'assets/docs/press.docx',
             'Format-aware diff for PNG, ZIP, OOXML, JSON, and TOML — out of the box.',
         ]),
         ('Roadmap', [
-            'Multi-machine sync (in progress), partial-clone wire (M10), and a managed altd server (M9+).',
+            'Multi-machine sync (in progress), partial-clone wire, and a managed altd server.',
         ]),
     ])
 

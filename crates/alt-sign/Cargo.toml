@@ -1,6 +1,6 @@
 [package]
 name = "alt-sign"
-description = "Ed25519 keygen / sign / verify for alt operation signatures (A5b)"
+description = "Ed25519 keygen / sign / verify for alt operation signatures"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

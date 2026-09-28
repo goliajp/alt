@@ -149,7 +149,7 @@ pub struct Counters {
 }
 
 /// How a record is stored on disk (reserved encodings never reach callers:
-/// reading one is a format error until the milestone that defines it).
+/// reading one is a format error until a format version defines it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Encoding {
     Raw,
@@ -198,7 +198,7 @@ impl Default for Options {
     }
 }
 
-/// How much a chunk read re-hashes. Tiered verification (M3.5 §阶段 B):
+/// How much a chunk read re-hashes. Tiered verification:
 /// the per-layer/per-chunk hash was the dominant read cost, so the default
 /// read verifies once at the boundary and deep scrubbing is opt-in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -922,7 +922,7 @@ impl ChunkStore {
     /// Reads a chunk back, resolving any lineage delta chain. The default
     /// re-hashes once, at the requested address: a corrupt layer anywhere in
     /// the chain changes the assembled bytes, so a single boundary hash still
-    /// detects it (tiered verification, M3.5 §阶段 B — the per-chunk hash was
+    /// detects it (tiered verification — the per-chunk hash was
     /// ~89% of read time). Deep per-layer verification is [`verify_chunk`];
     /// the blob assembler reads with [`read_unverified`] and hashes at the
     /// blob boundary instead.

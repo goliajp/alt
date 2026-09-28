@@ -3,12 +3,12 @@
 //! L1 semantic fidelity by construction: objects are the canonical bytes
 //! the store holds (their git ids cannot change), refs and HEAD come from
 //! the native ref state, and the preserved `git-import/config` returns
-//! verbatim (compatibility contract 2). Pack layout is git's internal
+//! verbatim. Pack layout is git's internal
 //! freedom — the export writes one plain pack (L2 byte fidelity is
-//! explicitly not pursued, per VISION §8.1).
+//! explicitly not pursued).
 //!
 //! The target directory must not exist or be empty: export never merges
-//! into an existing repository (refreshing one is M4 territory), and it
+//! into an existing repository (refreshing one is out of scope), and it
 //! fails loudly rather than guessing.
 
 use std::fs;

@@ -1,4 +1,4 @@
-//! A6 (C3): the four capability gates — read-only, branch namespace, force,
+//! The four capability gates — read-only, branch namespace, force,
 //! path — each deny their respective overreach with a clear error and *zero
 //! on-disk side effect*. A repo with no `.alt/policy` file behaves byte-for-
 //! byte as before — the gates are silent until policy says otherwise.
@@ -182,7 +182,7 @@ fn path_allow_denies_out_of_tree_paths() {
 }
 
 /// The zero-regression red line: a repo with no `.alt/policy` file behaves
-/// exactly as before C3. Every command — including the writes the gates
+/// exactly as without gates. Every command — including the writes the gates
 /// could touch — must succeed for any principal.
 #[test]
 fn missing_policy_is_a_full_capabilities_default() {
@@ -201,7 +201,7 @@ fn missing_policy_is_a_full_capabilities_default() {
     ok(alt_as(repo, &["branch", "-d", "main-rewrite"], "bot"));
 }
 
-/// C4: a denied write with `--json` reports a structured JSON error on
+/// A denied write with `--json` reports a structured JSON error on
 /// stderr (kind = "capability_denied") so an agent can detect the denial
 /// without parsing the human "fatal: …" string. Exit code is non-zero.
 #[test]

@@ -1,6 +1,6 @@
-//! Read-path decomposition: where the `.alt` read time goes. S10 measured
-//! direct reads at ~3-5x slower than git; S1 showed the components (BLAKE3
-//! 2-18 GiB/s, zstd lineage decode ~831 MiB/s). This bench reads chunks at
+//! Read-path decomposition: where the `.alt` read time goes. Direct reads
+//! measured ~3-5x slower than git; the components measure at BLAKE3
+//! 2-18 GiB/s and zstd lineage decode ~831 MiB/s. This bench reads chunks at
 //! increasing delta-chain depth: a plain chunk is one decode + one re-hash,
 //! a depth-D chain is D decodes + D re-hashes. The slope across depth
 //! attributes the read cost to per-layer unchain vs the fixed read floor.

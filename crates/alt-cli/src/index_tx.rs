@@ -2,8 +2,8 @@
 //! index-only mutation (today: `alt add`). One entry per touched path with
 //! its old (None = was not in the index) and new (None = was removed)
 //! side. `alt undo` parses this back and restores the index entries to
-//! their prior state — A2's "any state-changing op is reversible" extended
-//! beyond the ref-tx kind A4 was already covering.
+//! their prior state — "any state-changing op is reversible" extended
+//! beyond the ref-tx kind that was already covered.
 //!
 //! Wire format (little-endian, self-describing — the algo discriminator
 //! travels in the payload so a future store could read its own log even

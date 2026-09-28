@@ -1,10 +1,10 @@
-//! The M2 numbers (CP3 exit evidence): per corpus repo — .alt volume vs
+//! Storage numbers per corpus repo — .alt volume vs
 //! git's object store, import throughput, and full-store read throughput
-//! through the .alt backend vs the M1 direct-.git path.
+//! through the .alt backend vs the direct-.git path.
 //!
 //! Guarded by ALT_BENCH=1 on top of --ignored: timing belongs to release
 //! builds run by hand, not to the (debug) corpus gate. No ratio
-//! assertions — numbers are reported, the plan doc records them.
+//! assertions — numbers are reported only.
 
 use std::fs;
 use std::path::Path;
@@ -41,7 +41,7 @@ fn corpus_bench_volume_and_throughput() {
     let corpus = std::env::var("ALT_CORPUS").expect("set ALT_CORPUS to the corpus directory");
 
     eprintln!(
-        "| repo | git objects | .alt raw | .alt compact | ratio | import | read .alt | read .git (M1) |"
+        "| repo | git objects | .alt raw | .alt compact | ratio | import | read .alt | read .git |"
     );
     eprintln!("|---|---|---|---|---|---|---|---|");
 
@@ -63,7 +63,7 @@ fn corpus_bench_volume_and_throughput() {
         let alt_raw = dir_bytes(&alt_dir);
 
         // --- compact: reclaim the dead weight from lineage delta re-encoding
-        // (S5/S6 supersede full tree/commit/blob records; S7 drops them) ---
+        // (lineage deltas supersede full tree/commit/blob records; compaction drops them) ---
         let compact = {
             let mut odb = NativeOdb::open(&alt_dir).unwrap();
             let r = odb.compact().unwrap();
@@ -82,7 +82,7 @@ fn corpus_bench_volume_and_throughput() {
         }
         let alt_read_s = t0.elapsed().as_secs_f64();
 
-        // --- same reads through the M1 direct-.git path ---
+        // --- same reads through the direct-.git path ---
         let t0 = Instant::now();
         let mut git_read_bytes = 0u64;
         for oid in &oids {

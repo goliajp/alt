@@ -13,8 +13,8 @@
 //! handle ([`crate::native::StoreSink`]) that owns its own fds, so
 //! concurrent appends overlap the flush.
 //!
-//! M5 daemon path used a local copy of this code; M14/W44 lifts it
-//! into a shared module so `altd-server` can group-coalesce its
+//! The daemon path used a local copy of this code; it now lives in a
+//! shared module so `altd-server` can group-coalesce its
 //! receive-pack fsyncs against multi-client traffic by the same logic.
 
 use std::sync::{Condvar, Mutex};
@@ -37,8 +37,8 @@ struct GroupInner {
     /// so a committer whose own flush failed reports it instead of
     /// looping a dead disk.
     last_error: Option<String>,
-    /// Total fsyncs performed (success + failure both increment). M14/W44
-    /// exposes this so a test can prove coalescing actually happened —
+    /// Total fsyncs performed (success + failure both increment).
+    /// Exposed so a test can prove coalescing actually happened —
     /// `fsync_count < commit_count` under N-way concurrency means the
     /// group commit did its job.
     fsync_count: u64,

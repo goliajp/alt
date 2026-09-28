@@ -1,5 +1,5 @@
 //! `--json` on the write commands `add` / `commit` / `switch` / `merge` /
-//! `flow` / `undo` (VISION §4 A1): an agent reads the consequence of each
+//! `flow` / `undo`: an agent reads the consequence of each
 //! state change (new oids, conflict lists, op effects) as a stable schema.
 
 use std::path::Path;
