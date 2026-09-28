@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: take the controlling principal from each request, not the daemon's environment
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/daemon.rs
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/identity.rs
+touched: crates/alt-cli/src/native/notes.rs
+touched: crates/alt-cli/tests/it/daemon_client.rs
