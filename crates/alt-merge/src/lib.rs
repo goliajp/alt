@@ -9,7 +9,7 @@
 //!
 //! Pure logic: bytes in, bytes out, no business types or I/O.
 
-use alt_diff::split_lines;
+use alt_diff::{Edit, split_lines};
 
 /// Labels written into conflict markers (`<<<<<<< ours` … `>>>>>>> theirs`).
 pub struct Labels<'a> {
@@ -46,9 +46,62 @@ pub fn merge(base: &[u8], ours: &[u8], theirs: &[u8], labels: &Labels) -> Merge 
     let a = split_lines(ours);
     let b = split_lines(theirs);
 
-    let ea = alt_diff::diff_lines(&o, &a); // base → ours
-    let eb = alt_diff::diff_lines(&o, &b); // base → theirs
+    let mut ea = alt_diff::diff_lines(&o, &a); // base → ours
+    let mut eb = alt_diff::diff_lines(&o, &b); // base → theirs
+    slide_down(&mut ea, &o, &a);
+    slide_down(&mut eb, &o, &b);
+    merge_edits(&o, &a, &b, &ea, &eb, labels)
+}
 
+/// Moves every pure insertion and pure deletion as far down as it can go.
+/// Where such a hunk sits is ambiguous when its lines repeat the ones next to
+/// it (a blank line added beside a blank line), and the two diffs can settle
+/// that differently; the same change made on both sides would then sit at two
+/// places, look like two one-sided changes, and be applied twice. One
+/// canonical spot makes identical changes line up.
+fn slide_down(edits: &mut [Edit], base: &[&[u8]], side: &[&[u8]]) {
+    for i in 0..edits.len() {
+        // the equal run after this edit ends where the next edit begins
+        let (old_limit, new_limit) = edits
+            .get(i + 1)
+            .map_or((base.len(), side.len()), |n| (n.old.start, n.new.start));
+        let e = &mut edits[i];
+        if e.old.is_empty() {
+            // inserting side[new] before base[old.start]: shift one line down
+            // while the first inserted line equals the base line after it
+            while e.old.start < old_limit
+                && e.new.end < new_limit
+                && base[e.old.start] == side[e.new.start]
+            {
+                shift(e);
+            }
+        } else if e.new.is_empty() {
+            // deleting base[old]: shift while its first line equals the base
+            // line right after the deleted run
+            while e.old.end < old_limit
+                && e.new.start < new_limit
+                && base[e.old.start] == base[e.old.end]
+            {
+                shift(e);
+            }
+        }
+    }
+}
+
+fn shift(e: &mut Edit) {
+    e.old = e.old.start + 1..e.old.end + 1;
+    e.new = e.new.start + 1..e.new.end + 1;
+}
+
+/// The diff3 walk over two edit scripts against the same base.
+fn merge_edits(
+    o: &[&[u8]],
+    a: &[&[u8]],
+    b: &[&[u8]],
+    ea: &[Edit],
+    eb: &[Edit],
+    labels: &Labels,
+) -> Merge {
     let mut out: Vec<u8> = Vec::new();
     let mut conflicts = 0;
 
@@ -256,6 +309,48 @@ mod tests {
     }
 
     #[test]
+    fn one_insertion_placed_differently_by_each_diff_is_applied_once() {
+        let base = split_lines(b"use\n\nimpl\n");
+        let side = split_lines(b"use\n\nmod\n\nimpl\n");
+        // both scripts are valid for this change: the added blank line either
+        // before `mod` or after it
+        let mut ea = vec![Edit {
+            old: 1..1,
+            new: 1..3,
+        }];
+        let mut eb = vec![Edit {
+            old: 2..2,
+            new: 2..4,
+        }];
+        slide_down(&mut ea, &base, &side);
+        slide_down(&mut eb, &base, &side);
+        assert_eq!(ea, eb);
+        let r = merge_edits(&base, &side, &side, &ea, &eb, &Labels::default());
+        assert!(r.is_clean());
+        assert_eq!(r.content, b"use\n\nmod\n\nimpl\n");
+    }
+
+    #[test]
+    fn one_deletion_placed_differently_by_each_diff_is_applied_once() {
+        let base = split_lines(b"a\n\n\nb\n");
+        let side = split_lines(b"a\n\nb\n");
+        let mut ea = vec![Edit {
+            old: 1..2,
+            new: 1..1,
+        }];
+        let mut eb = vec![Edit {
+            old: 2..3,
+            new: 2..2,
+        }];
+        slide_down(&mut ea, &base, &side);
+        slide_down(&mut eb, &base, &side);
+        assert_eq!(ea, eb);
+        let r = merge_edits(&base, &side, &side, &ea, &eb, &Labels::default());
+        assert!(r.is_clean());
+        assert_eq!(r.content, b"a\n\nb\n");
+    }
+
+    #[test]
     fn randomized_identity_invariants() {
         // For any inputs: merging when only one side changed must yield that
         // side exactly and never conflict. merge(base,X,base)==X and
@@ -286,6 +381,12 @@ mod tests {
             let theirs_only = merge(&base, &base, &x, &Labels::default());
             assert!(theirs_only.is_clean(), "theirs-only must not conflict");
             assert_eq!(theirs_only.content, x, "merge(base,base,X) must equal X");
+            let both = merge(&base, &x, &x, &Labels::default());
+            assert!(
+                both.is_clean(),
+                "the same change on both sides must not conflict"
+            );
+            assert_eq!(both.content, x, "merge(base,X,X) must equal X");
         }
     }
 }
