@@ -206,9 +206,17 @@ pub fn write_frame(w: &mut impl Write, payload: &[u8]) -> io::Result<()> {
 pub fn read_frame(r: &mut impl Read) -> io::Result<Vec<u8>> {
     let mut len = [0u8; 4];
     r.read_exact(&mut len)?;
-    let len = u32::from_le_bytes(len) as usize;
-    let mut payload = vec![0u8; len];
-    r.read_exact(&mut payload)?;
+    let len = u64::from(u32::from_le_bytes(len));
+    // grow with the bytes that actually arrive, so a length prefix alone
+    // cannot make the peer allocate up to 4 GiB
+    let mut payload = Vec::new();
+    r.take(len).read_to_end(&mut payload)?;
+    if payload.len() as u64 != len {
+        return Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "truncated daemon frame",
+        ));
+    }
     Ok(payload)
 }
 
@@ -298,6 +306,14 @@ mod tests {
         let mut cursor = std::io::Cursor::new(buf);
         let got = read_frame(&mut cursor).unwrap();
         assert_eq!(got, payload);
+    }
+
+    #[test]
+    fn frame_shorter_than_its_length_prefix_is_an_error() {
+        let mut buf = u32::MAX.to_le_bytes().to_vec();
+        buf.extend_from_slice(b"abc");
+        let err = read_frame(&mut std::io::Cursor::new(buf)).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::UnexpectedEof);
     }
 
     #[test]
