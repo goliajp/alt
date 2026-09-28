@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: sha256 native stores and racily clean index entries
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/add.rs
+touched: crates/alt-cli/src/native/lfs.rs
+touched: crates/alt-cli/src/native/merge.rs
+touched: crates/alt-cli/tests/it/import_materialize.rs
+touched: crates/alt-repo/src/lib.rs
+touched: crates/alt-repo/src/object_format.rs
