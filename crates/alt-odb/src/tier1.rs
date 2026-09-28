@@ -168,7 +168,7 @@ impl Tier1Map {
             let mut tail = vec![0u8; drop_bytes as usize];
             self.file.seek(SeekFrom::Start(target_len))?;
             self.file.read_exact(&mut tail)?;
-            for rec in tail.chunks_exact(REC_LEN) {
+            for rec in tail.as_chunks::<REC_LEN>().0 {
                 let blob = BlobId(rec[..32].try_into().unwrap());
                 self.map.remove(&blob);
             }

@@ -218,7 +218,7 @@ impl BlobMap {
             let mut tail = vec![0u8; drop_bytes as usize];
             self.file.seek(SeekFrom::Start(target_len))?;
             self.file.read_exact(&mut tail)?;
-            for rec in tail.chunks_exact(REC_LEN) {
+            for rec in tail.as_chunks::<REC_LEN>().0 {
                 let mut blob = [0u8; 32];
                 blob.copy_from_slice(&rec[..32]);
                 self.map.remove(&BlobId(blob));

@@ -654,15 +654,29 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
     Ok(0)
 }
 
-/// Runs a git-layer command against an opened repository.
-pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, out: &mut W) -> Res<()> {
+/// `HEAD` in a revision (also `HEAD~n`, `HEAD^`, `HEAD:path`) means the
+/// current workspace's HEAD, which outside the default workspace lives in
+/// `workspaces/<name>/HEAD` rather than the repository's bare `HEAD`.
+fn at_head(spec: &str, head: &str) -> String {
+    match spec.strip_prefix("HEAD") {
+        Some(rest) if rest.is_empty() || rest.starts_with(['~', '^', ':']) => {
+            format!("{head}{rest}")
+        }
+        _ => spec.to_owned(),
+    }
+}
+
+/// Runs a git-layer command against an opened repository. `head` is the
+/// ref that `HEAD` stands for in this invocation's workspace.
+pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, head: &str, out: &mut W) -> Res<()> {
+    let at_head = |spec: &str| at_head(spec, head);
     match cmd {
         Command::RevParse { rev } => {
-            let oid = resolve(repo, rev)?;
+            let oid = resolve(repo, &at_head(rev))?;
             writeln!(out, "{oid}")?;
         }
         Command::CatFile(args) => {
-            let oid = resolve(repo, &args.object)?;
+            let oid = resolve(repo, &at_head(&args.object))?;
             let obj = repo
                 .read_object(&oid)?
                 .ok_or_else(|| format!("object {oid} not found"))?;
@@ -676,9 +690,9 @@ pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, out: &mut W) -> Res<(
                 return Err("one of -t, -s or -p is required".into());
             }
         }
-        Command::Log(args) => log_cmd::run(out, repo, args.clone())?,
+        Command::Log(args) => log_cmd::run(out, repo, args.clone().map_rev(at_head))?,
         Command::Show { rev, json } => {
-            let spec = rev.clone().unwrap_or_else(|| "HEAD".to_string());
+            let spec = at_head(rev.as_deref().unwrap_or("HEAD"));
             // `<rev>:<path>` selects a blob at `path` as of commit
             // `rev`, matching git show's revision-blob form. The
             // commit + diff path stays for everything else.
@@ -697,8 +711,8 @@ pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, out: &mut W) -> Res<(
             crate::log_cmd::run(out, repo, args)?;
         }
         Command::Blame { path, rev, follow } => {
-            let spec = rev.as_deref().unwrap_or("HEAD");
-            crate::blame::run(out, repo, path, spec, *follow)?;
+            let spec = at_head(rev.as_deref().unwrap_or("HEAD"));
+            crate::blame::run(out, repo, path, &spec, *follow)?;
         }
         Command::Config {
             key,
@@ -760,9 +774,21 @@ pub fn run_on_store<W: Write>(
             run_native(&mut repo, c, out)
         }
         c => {
-            run_git(repo, c, out)?;
+            let head = workspace_head(cwd, cli.workspace.as_deref())?;
+            run_git(repo, c, &head, out)?;
             Ok(0)
         }
+    }
+}
+
+/// The ref `HEAD` stands for when a git-layer command runs from `cwd`: the
+/// workspace's own HEAD inside an alt repository, the bare `HEAD` in a plain
+/// git one. An explicitly named workspace that does not resolve is an error.
+pub fn workspace_head(cwd: &Path, workspace: Option<&str>) -> Res<String> {
+    match native::resolve_workspace(cwd, workspace) {
+        Ok((_, coord)) => Ok(coord.head_ref().to_owned()),
+        Err(e) if workspace.is_some() => Err(e),
+        Err(_) => Ok("HEAD".to_owned()),
     }
 }
 

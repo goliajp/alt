@@ -74,7 +74,7 @@ fn parse_node(data: &[u8]) -> Result<(u8, Vec<NodeEntry>), StoreError> {
         return Err(StoreError::Format("manifest node length mismatch"));
     }
     let mut entries = Vec::with_capacity(count);
-    for raw in data[NODE_HEADER_LEN..].chunks_exact(NODE_ENTRY_LEN) {
+    for raw in data[NODE_HEADER_LEN..].as_chunks::<NODE_ENTRY_LEN>().0 {
         let mut id = [0u8; 32];
         id.copy_from_slice(&raw[..32]);
         entries.push(NodeEntry {

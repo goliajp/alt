@@ -175,6 +175,14 @@ impl Repository {
     /// Opens a native `.alt` store. The hash algorithm and config come
     /// from the preserved git config (`git-import/config`, contract 2);
     /// a store without one defaults like a fresh git repository.
+    /// Opens the `.alt` store at `alt_dir` directly, for callers that have
+    /// already resolved which repository (and which workspace working tree)
+    /// applies — a named workspace's tree holds only a marker file, which
+    /// [`Self::discover`] does not follow.
+    pub fn open_alt(alt_dir: PathBuf, work_tree: Option<PathBuf>) -> Result<Self, RepoError> {
+        Self::open_alt_dir(alt_dir, work_tree)
+    }
+
     fn open_alt_dir(alt_dir: PathBuf, work_tree: Option<PathBuf>) -> Result<Self, RepoError> {
         let config_path = alt_dir.join("git-import/config");
         let plain = match fs::read(&config_path) {

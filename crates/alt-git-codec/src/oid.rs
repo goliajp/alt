@@ -108,8 +108,8 @@ fn decode_hex(dst: &mut [u8], hex: &[u8]) -> Result<(), ParseOidError> {
             _ => Err(ParseOidError::InvalidHexByte(b)),
         }
     }
-    for (dst, pair) in dst.iter_mut().zip(hex.chunks_exact(2)) {
-        *dst = (nibble(pair[0])? << 4) | nibble(pair[1])?;
+    for (dst, &[hi, lo]) in dst.iter_mut().zip(hex.as_chunks::<2>().0) {
+        *dst = (nibble(hi)? << 4) | nibble(lo)?;
     }
     Ok(())
 }
