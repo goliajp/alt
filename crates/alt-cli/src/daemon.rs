@@ -22,6 +22,8 @@ pub const FORWARDED_ENV: &[&str] = &[
     "ALT_PRINCIPAL_KIND",
     "ALT_PRINCIPAL_ID",
     "ALT_SESSION_ID",
+    // whom an agent acts for, recorded in commit metadata
+    "ALT_CONTROLLING",
     "ALT_RELAXED_DURABILITY",
 ];
 

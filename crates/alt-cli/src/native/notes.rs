@@ -47,15 +47,12 @@ impl NativeRepo<'_> {
         );
         touched.sort();
         let principal = &self.id.principal;
-        let controlling = std::env::var("ALT_CONTROLLING")
-            .ok()
-            .filter(|v| !v.is_empty());
         let mut note = meta::derive(
             message,
             Facts {
                 author_type: principal.kind.as_str(),
                 author: &principal.id,
-                controlling: controlling.as_deref(),
+                controlling: self.id.controlling.as_deref(),
                 session: principal.session.as_deref(),
                 touched,
             },

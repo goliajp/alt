@@ -215,3 +215,33 @@ fn client_write_retries_with_same_id_when_response_is_lost_after_send() {
         "expected base + exactly one commit: {log}"
     );
 }
+
+/// A commit through the daemon records whom the agent acts for from the
+/// client's request, not from whatever environment the daemon started with.
+#[test]
+fn commit_metadata_through_the_daemon_takes_the_callers_controlling() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."], false));
+    let commit_as = |file: &str, controlling: &str| {
+        std::fs::write(root.join(file), "x\n").unwrap();
+        ok(alt(root, &["add", file], true));
+        let o = Command::new(env!("CARGO_BIN_EXE_alt"))
+            .current_dir(root)
+            .env("GIT_AUTHOR_NAME", "tester")
+            .env("GIT_AUTHOR_EMAIL", "t@e")
+            .env("USER", "tester")
+            .env("ALT_DAEMON_IDLE_MS", "1500")
+            .env("ALT_PRINCIPAL_KIND", "agent")
+            .env("ALT_CONTROLLING", controlling)
+            .args(["commit", "-m", &format!("feat: {file}")])
+            .output()
+            .unwrap();
+        ok(o);
+        ok(alt(root, &["meta", "show"], false))
+    };
+    let first = commit_as("a.txt", "alice@example.org");
+    let second = commit_as("b.txt", "bob@example.org");
+    assert!(first.contains("controlling: alice@example.org"), "{first}");
+    assert!(second.contains("controlling: bob@example.org"), "{second}");
+}
