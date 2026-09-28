@@ -413,11 +413,11 @@ mod tests {
     }
 
     #[test]
-    fn project_alt_gitignore_shape() {
-        // mirror alt's own .gitignore — exact shape from the project root
+    fn rooted_directory_rules() {
+        // a typical project .gitignore: rooted directory-only rules
         let g =
-            "/.claude/\n/.dev/\n/.alt/\n/target/\n/fuzz/target/\n/fuzz/corpus/\n/fuzz/artifacts/\n";
-        assert!(check(g, ".claude", true));
+            "/.cache/\n/.dev/\n/.alt/\n/target/\n/fuzz/target/\n/fuzz/corpus/\n/fuzz/artifacts/\n";
+        assert!(check(g, ".cache", true));
         assert!(check(g, ".dev", true));
         assert!(check(g, ".alt", true));
         assert!(check(g, "target", true));
@@ -425,9 +425,9 @@ mod tests {
         assert!(check(g, "fuzz/corpus", true));
         assert!(check(g, "fuzz/artifacts", true));
         // not at root
-        assert!(!check(g, "sub/.claude", true));
+        assert!(!check(g, "sub/.cache", true));
         // not a directory
-        assert!(!check(g, ".claude", false));
+        assert!(!check(g, ".cache", false));
         // entries that should NOT be ignored
         assert!(!check(g, "crates", true));
         assert!(!check(g, "scripts", true));
