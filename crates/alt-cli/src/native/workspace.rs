@@ -319,3 +319,29 @@ fn workspace_of(head: &str) -> &str {
         .and_then(|n| n.strip_suffix("/HEAD"))
         .unwrap_or(DEFAULT_WORKSPACE)
 }
+
+/// Reads a working tree's `.alt` marker file: line 1 is the repo root (the
+/// directory holding the real `.alt`), line 2 is the workspace name.
+pub(super) fn parse_workspace_marker(path: &Path) -> Res<(PathBuf, String)> {
+    let content = std::fs::read_to_string(path)?;
+    let mut lines = content.lines();
+    let repo_root = lines.next().ok_or("malformed .alt workspace marker")?;
+    let name = lines.next().ok_or("malformed .alt workspace marker")?;
+    Ok((PathBuf::from(repo_root), name.to_owned()))
+}
+
+/// A workspace name: a single path segment (it becomes part of the ref name
+/// `workspaces/<name>/HEAD` and a directory), so no slashes, dots, control or
+/// special chars, and not the reserved default name.
+pub(super) fn check_workspace_name(name: &str) -> Res<()> {
+    let bad = name.is_empty()
+        || name == DEFAULT_WORKSPACE
+        || name.starts_with('.')
+        || name.contains('/')
+        || name.contains(['\\', ' ', '~', '^', ':', '?', '*', '[', '.'])
+        || name.bytes().any(|b| b < 0x20 || b == 0x7f);
+    if bad {
+        return Err(format!("'{name}' is not a valid workspace name").into());
+    }
+    Ok(())
+}

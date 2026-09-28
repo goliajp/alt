@@ -14,6 +14,9 @@ impl NativeRepo<'_> {
     ) -> Res<()> {
         self.ensure_writable("commit")?;
         self.ensure_topic_branch_or_unborn("commit")?;
+        if self.bisect_in_progress() {
+            return Err("commit: a bisect is in progress; end it with `alt bisect reset`".into());
+        }
         // Path gate is `add`-only on purpose: the restricted principal's
         // *choice* of what to stage is what the policy constrains. Pre-existing
         // index entries inherited from another principal (e.g. operator's

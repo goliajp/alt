@@ -130,6 +130,11 @@ pub enum Command {
         #[arg(short = 'M', long = "follow")]
         follow: bool,
     },
+    /// Find the commit that introduced a change by binary search
+    Bisect {
+        #[command(subcommand)]
+        op: BisectOp,
+    },
     /// Replay the current branch's own commits onto another base
     Rebase {
         /// The base to replay onto
@@ -359,6 +364,32 @@ pub enum Command {
     },
 }
 
+/// `alt bisect` steps, as in git.
+#[derive(Subcommand)]
+pub enum BisectOp {
+    /// Start a session, optionally naming the bad commit and good ones
+    Start {
+        /// The bad commit
+        bad: Option<String>,
+        /// Known good commits
+        good: Vec<String>,
+    },
+    /// Mark commits (default: the one being tested) as bad
+    Bad { revs: Vec<String> },
+    /// Mark commits (default: the one being tested) as good
+    Good { revs: Vec<String> },
+    /// Mark commits (default: the one being tested) as untestable
+    Skip { revs: Vec<String> },
+    /// End the session and go back to the branch
+    Reset,
+    /// Let a command judge each commit: exit 0 good, 125 skip, 1-127 bad,
+    /// anything else stops
+    Run {
+        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+        cmd: Vec<String>,
+    },
+}
+
 /// `alt ci` subcommand surface. Only `validate` exists so far; future
 /// segments (runner / scheduler / cache) land here as new variants.
 #[derive(Subcommand)]
@@ -578,6 +609,7 @@ pub fn is_native(cmd: &Command) -> bool {
             | Command::CherryPick { .. }
             | Command::Revert { .. }
             | Command::Rebase { .. }
+            | Command::Bisect { .. }
             | Command::Switch { .. }
             | Command::Diff { .. }
             | Command::Merge { .. }
@@ -641,6 +673,17 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
             json,
             semantic,
         } => repo.diff(*cached, *json, *semantic, out)?,
+        Command::Bisect { op } => {
+            match op {
+                BisectOp::Start { bad, good } => repo.bisect_start(bad.as_deref(), good, out)?,
+                BisectOp::Bad { revs } => repo.bisect_mark("bad", revs, out)?,
+                BisectOp::Good { revs } => repo.bisect_mark("good", revs, out)?,
+                BisectOp::Skip { revs } => repo.bisect_mark("skip", revs, out)?,
+                BisectOp::Reset => repo.bisect_reset(out)?,
+                BisectOp::Run { cmd } => repo.bisect_run(cmd, out)?,
+            }
+            return Ok(0);
+        }
         Command::Rebase {
             upstream,
             interactive,

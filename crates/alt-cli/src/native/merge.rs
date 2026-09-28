@@ -245,6 +245,11 @@ impl NativeRepo<'_> {
             )
             .into());
         }
+        if self.bisect_in_progress() {
+            return Err(
+                format!("{verb}: a bisect is in progress; end it with `alt bisect reset`").into(),
+            );
+        }
         if self.rebase_in_progress() {
             return Err(format!(
                 "{verb}: a rebase is in progress; finish it with `alt rebase --continue`, \
