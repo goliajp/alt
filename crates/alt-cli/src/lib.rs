@@ -16,4 +16,5 @@ pub mod json;
 pub mod log_cmd;
 pub mod native;
 pub mod policy;
+pub mod precommit;
 pub mod quote;

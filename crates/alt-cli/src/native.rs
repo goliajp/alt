@@ -22,7 +22,7 @@ use bstr::{BString, ByteSlice};
 mod add;
 mod bisect;
 mod cherry_pick;
-mod commit;
+pub mod commit;
 mod merge;
 use merge::Resolved;
 mod rebase;
@@ -5190,7 +5190,8 @@ mod tests {
         let mut o = open(root, None);
         let mut repo = o.repo();
         repo.add(&[".".to_owned()], false, &mut sink).unwrap();
-        repo.commit("first", false, false, &mut sink).unwrap();
+        repo.commit("first", Default::default(), false, &mut sink)
+            .unwrap();
         repo.branch(Some("feat".to_owned()), None, false, &mut sink)
             .unwrap();
 
@@ -5209,7 +5210,8 @@ mod tests {
         let mut o2 = open(root, Some("ws2"));
         let mut ws2 = o2.repo();
         ws2.add(&[".".to_owned()], false, &mut sink).unwrap();
-        ws2.commit("ws2 work", false, false, &mut sink).unwrap();
+        ws2.commit("ws2 work", Default::default(), false, &mut sink)
+            .unwrap();
 
         // default workspace: still on main, working tree and HEAD unchanged
         assert_eq!(
@@ -5251,7 +5253,8 @@ mod tests {
         let mut o = open(root, None);
         let mut repo = o.repo();
         repo.add(&[".".to_owned()], false, &mut sink).unwrap();
-        repo.commit("c", false, false, &mut sink).unwrap();
+        repo.commit("c", Default::default(), false, &mut sink)
+            .unwrap();
 
         assert!(repo.remove_workspace("default").is_err());
         let wt = root.join("bad");

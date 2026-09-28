@@ -54,6 +54,7 @@ dependencies = [
  "encoding_rs",
  "flate2",
  "libc",
+ "regex",
  "tempfile",
  "tiny_http",
 ]

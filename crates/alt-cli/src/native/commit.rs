@@ -1,6 +1,16 @@
 //! Recording commits: `alt commit` and `alt commit --amend`.
 
 use super::*;
+use crate::precommit::{self, Change, Severity};
+
+/// How `alt commit` was asked to behave.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct CommitOptions {
+    /// Record the commit even when it changes nothing.
+    pub allow_empty: bool,
+    /// Skip the pre-commit checks.
+    pub no_verify: bool,
+}
 
 impl NativeRepo<'_> {
     /// `alt commit -m <msg>`: write a tree + commit from the index, advance
@@ -8,7 +18,7 @@ impl NativeRepo<'_> {
     pub fn commit(
         &mut self,
         message: &str,
-        allow_empty: bool,
+        opts: CommitOptions,
         json: bool,
         out: &mut impl Write,
     ) -> Res<()> {
@@ -31,7 +41,7 @@ impl NativeRepo<'_> {
         // forgotten `add`); git refuses it too, merges aside
         if let Some(p) = parent
             && merging.is_none()
-            && !allow_empty
+            && !opts.allow_empty
             && self.commit_tree(p)? == tree
         {
             return Err(
@@ -39,6 +49,9 @@ impl NativeRepo<'_> {
                         record an empty commit)"
                     .into(),
             );
+        }
+        if !opts.no_verify {
+            self.run_precommit()?;
         }
         let parents: Vec<ObjectId> = parent.into_iter().chain(merging).collect();
 
@@ -75,7 +88,13 @@ impl NativeRepo<'_> {
     /// commit built from the index, as git does — same parents and author,
     /// the new (or, without `-m`, the old) message, a fresh committer. The
     /// old commit is left untouched and stays reachable through the op log.
-    pub fn amend(&mut self, message: Option<&str>, json: bool, out: &mut impl Write) -> Res<()> {
+    pub fn amend(
+        &mut self,
+        message: Option<&str>,
+        no_verify: bool,
+        json: bool,
+        out: &mut impl Write,
+    ) -> Res<()> {
         self.ensure_writable("commit --amend")?;
         self.ensure_topic_branch_or_unborn("commit --amend")?;
         self.ensure_no_merge_in_progress("commit --amend")?;
@@ -109,6 +128,9 @@ impl NativeRepo<'_> {
         };
 
         let tree = self.staged_tree()?;
+        if !no_verify {
+            self.run_precommit()?;
+        }
         let id = self.id.clone();
         let (name, email) = id.sig();
         let me = Sig {
@@ -130,6 +152,70 @@ impl NativeRepo<'_> {
             "amend",
         )?;
         report_commit(&branch, commit, tree, json, out)
+    }
+
+    /// `alt commit --validate`: run the pre-commit checks on what is staged
+    /// without committing. Returns whether any check failed.
+    pub fn validate(&mut self, json: bool, out: &mut impl Write) -> Res<bool> {
+        let findings = self.precommit_findings()?;
+        if json {
+            crate::json::emit(out, precommit::to_json(&findings))?;
+        } else if findings.is_empty() {
+            writeln!(out, "pre-commit checks passed")?;
+        } else {
+            write!(out, "{}", precommit::render(&findings))?;
+        }
+        Ok(findings.iter().any(|f| f.severity == Severity::Error))
+    }
+
+    /// Runs the pre-commit checks: warnings go to stderr, errors stop the
+    /// commit.
+    fn run_precommit(&mut self) -> Res<()> {
+        let (errors, warnings): (Vec<_>, Vec<_>) = self
+            .precommit_findings()?
+            .into_iter()
+            .partition(|f| f.severity == Severity::Error);
+        eprint!("{}", precommit::render(&warnings));
+        if !errors.is_empty() {
+            return Err(format!(
+                "commit refused by the pre-commit checks (see `alt commit --validate --json`; \
+                 skip them with --no-verify):\n{}",
+                precommit::render(&errors).trim_end()
+            )
+            .into());
+        }
+        Ok(())
+    }
+
+    /// Checks every file the index changes against HEAD.
+    fn precommit_findings(&mut self) -> Res<Vec<precommit::Finding>> {
+        let head: std::collections::HashMap<BString, WorkEntry> = self
+            .head_entries()?
+            .into_iter()
+            .map(|e| (e.path.clone(), e))
+            .collect();
+        let mut files = Vec::new();
+        for e in index_entries(&self.index()?) {
+            // links and submodules carry no content of their own to scan
+            if e.mode == 0o120000 || e.mode == 0o160000 {
+                continue;
+            }
+            let old = head.get(&e.path);
+            if old.is_some_and(|o| o.oid == e.oid) {
+                continue;
+            }
+            let old = old.map(|o| self.blob_bytes(o.oid)).transpose()?;
+            files.push((e.path.to_string(), old, self.blob_bytes(e.oid)?));
+        }
+        let changes: Vec<Change> = files
+            .iter()
+            .map(|(path, old, new)| Change {
+                path,
+                old: old.as_deref(),
+                new,
+            })
+            .collect();
+        Ok(precommit::check(&changes))
     }
 
     /// The index's stage-0 entries written out as a tree.

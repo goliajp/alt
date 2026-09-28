@@ -64,7 +64,7 @@ pub enum Command {
     /// Record staged changes as a new commit
     Commit {
         /// Commit message (with --amend, defaults to the amended commit's)
-        #[arg(short = 'm', required_unless_present = "amend")]
+        #[arg(short = 'm', required_unless_present_any = ["amend", "validate"])]
         message: Option<String>,
         /// Replace the current branch tip with a new commit made from the
         /// index, keeping its parents and author
@@ -77,7 +77,14 @@ pub enum Command {
         /// Record the commit even when it changes nothing
         #[arg(long)]
         allow_empty: bool,
-        /// Emit the new commit/tree oids as a JSON object
+        /// Skip the pre-commit checks (secret scan, large-file warning)
+        #[arg(short = 'n', long)]
+        no_verify: bool,
+        /// Only run the pre-commit checks on what is staged; commit nothing
+        #[arg(long, conflicts_with_all = ["amend", "message", "no_verify"])]
+        validate: bool,
+        /// Emit the new commit/tree oids (or, with --validate, the findings)
+        /// as a JSON object
         #[arg(long)]
         json: bool,
     },
@@ -631,19 +638,32 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
     match cmd {
         Command::Add { paths, json } => repo.add(paths, *json, out)?,
         Command::Commit {
-            message,
-            amend: true,
+            validate: true,
             json,
             ..
-        } => repo.amend(message.as_deref(), *json, out)?,
+        } => {
+            // exit 1 when a check fails, like a refused commit
+            return Ok(if repo.validate(*json, out)? { 1 } else { 0 });
+        }
+        Command::Commit {
+            message,
+            amend: true,
+            no_verify,
+            json,
+            ..
+        } => repo.amend(message.as_deref(), *no_verify, *json, out)?,
         Command::Commit {
             message,
             allow_empty,
+            no_verify,
             json,
             ..
         } => repo.commit(
             message.as_deref().unwrap_or_default(),
-            *allow_empty,
+            crate::native::commit::CommitOptions {
+                allow_empty: *allow_empty,
+                no_verify: *no_verify,
+            },
             *json,
             out,
         )?,
