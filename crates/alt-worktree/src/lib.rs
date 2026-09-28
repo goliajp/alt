@@ -480,7 +480,7 @@ pub fn write_commit(
 }
 
 /// Just the byte assembly half of [`write_commit`] — useful for callers
-/// (M10/W15 commit-signing path) that want to mutate the bytes before
+/// (e.g. commit signing) that want to mutate the bytes before
 /// hashing + storing. The caller is responsible for the put + hash.
 pub fn build_commit_bytes(
     tree: ObjectId,
