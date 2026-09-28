@@ -1,4 +1,4 @@
-//! Local daemon (D1: wire protocol + framing).
+//! Local daemon wire protocol and framing.
 //!
 //! The `alt` client and the `altd` daemon speak this over a Unix socket. A
 //! request carries the command's argv, the client's working directory (so
@@ -17,7 +17,7 @@ pub const FORWARDED_ENV: &[&str] = &[
     "GIT_AUTHOR_NAME",
     "GIT_AUTHOR_EMAIL",
     "USER",
-    // A5a structured principal: kind/id distinguish agent runs from human
+    // structured principal: kind/id distinguish agent runs from human
     // logins, session correlates a multi-step agent run in the op log.
     "ALT_PRINCIPAL_KIND",
     "ALT_PRINCIPAL_ID",
@@ -28,7 +28,7 @@ pub const FORWARDED_ENV: &[&str] = &[
 /// A client-chosen idempotency token: 16 bytes, unique per command invocation
 /// and stable across that invocation's retries. The daemon stamps it on the
 /// command's ref transaction and, on a same-id retry, detects the write as
-/// already applied instead of running it twice (D5c, exactly-once). Structurally
+/// already applied instead of running it twice (exactly-once). Structurally
 /// identical to `alt_refs::IdemKey`.
 pub type RequestId = [u8; 16];
 
@@ -39,7 +39,7 @@ pub struct Request {
     pub args: Vec<String>,
     pub cwd: PathBuf,
     pub env: Vec<(String, String)>,
-    /// Exactly-once token for a non-idempotent write (D5c). `None` for reads,
+    /// Exactly-once token for a non-idempotent write. `None` for reads,
     /// for the direct CLI path, and for an old client whose frame carries no
     /// trailing id field (the daemon then degrades to at-most-once).
     pub id: Option<RequestId>,
@@ -251,7 +251,7 @@ mod tests {
 
     #[test]
     fn an_old_clients_frame_without_the_id_field_decodes_as_no_id() {
-        // a pre-D5c frame ends after `env`, with no trailing id byte; the new
+        // an old client's frame ends after `env`, with no trailing id byte; the new
         // decoder must read it back as `id: None` (backward compatibility)
         let mut legacy = Vec::new();
         legacy.extend_from_slice(&1u32.to_le_bytes()); // 1 arg

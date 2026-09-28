@@ -33,7 +33,7 @@ fn now_ms() -> u64 {
 /// What kind of principal is acting: a human user (default) or an automated
 /// agent. The op-log records this with the principal's id so a multi-agent
 /// workspace can answer "who did this" without losing the human/automation
-/// distinction. (A5a; A6 will key capabilities off this.)
+/// distinction. The capability policy matches on `<kind>:<id>`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrincipalKind {
     Human,
@@ -71,7 +71,7 @@ impl Principal {
     /// Encode this principal + a verb into the op-log `actor` string. Format:
     /// `<kind>:<id>;session:<s>;user:<u>;verb:<v>`, with `session` omitted when
     /// `None`. `:` and `;` in any value are sanitized to `_` so the grammar is
-    /// trivial to re-parse (the only A5 audit consumer right now). The `user`
+    /// trivial to re-parse. The `user`
     /// field is carried for debuggability when `id != user` (agent runs as a
     /// human login); [`parse_actor`] keeps it for display only.
     pub fn actor_string(&self, user: &str, verb: &str) -> String {
@@ -89,7 +89,7 @@ impl Principal {
     }
 
     /// Inverse of [`actor_string`], plus a compatibility path for the legacy
-    /// `cli/<verb>@<user>` form written before A5a — those parse as a Human
+    /// `cli/<verb>@<user>` form written by older alt — those parse as a Human
     /// principal with `id = user`, no session. Returns `(principal, verb)`;
     /// the verb is the empty string when the input has none.
     pub fn parse_actor(s: &str) -> (Principal, String) {
@@ -185,7 +185,7 @@ impl Identity {
 
     /// The op-log actor string for a verb. New structured form via
     /// [`Principal::actor_string`]; the parse side accepts the legacy
-    /// `cli/<verb>@<user>` form for ops written before A5a.
+    /// `cli/<verb>@<user>` form for ops written by older alt.
     fn actor(&self, verb: &str) -> String {
         self.principal.actor_string(&self.user, verb)
     }
@@ -205,7 +205,7 @@ pub struct Store {
     odb: NativeOdb,
     refs: RefStore,
     algo: HashAlgo,
-    /// The repository's A6 policy, loaded from `<alt-dir>/policy`. A missing
+    /// The repository's capability policy, loaded from `<alt-dir>/policy`. A missing
     /// file → [`Policy::empty`] (every principal gets [`Capabilities::full`]),
     /// the zero-regression default. Daemon re-reads in [`refresh`](Self::refresh)
     /// so an operator edit is picked up on the next request.
@@ -229,21 +229,21 @@ impl Store {
         &self.alt_dir
     }
 
-    /// Mutable access to the odb. M9/W10c: `altd-server` puts incoming
+    /// Mutable access to the odb. `altd-server` puts incoming
     /// pack objects through here directly, since it doesn't own a
     /// NativeRepo (no working tree / index in the wire path).
     pub fn odb_mut(&mut self) -> &mut NativeOdb {
         &mut self.odb
     }
 
-    /// Read-only handle for cheap state checks (e.g. the W46 post-ingest
+    /// Read-only handle for cheap state checks (e.g. the post-ingest
     /// cursor snapshot in altd-server, which only needs to compare two
     /// `OdbCheckpoint`s and never writes).
     pub fn odb(&self) -> &NativeOdb {
         &self.odb
     }
 
-    /// Read-only odb fetch. M10/W15: the wire's commit-signature pass
+    /// Read-only odb fetch. The wire's commit-signature pass
     /// re-reads each newly-ingested commit through this so verification
     /// shares the same `NativeOdb` everyone else writes against (no
     /// risk of a separate handle pinning a stale view).
@@ -264,7 +264,7 @@ impl Store {
     /// Read-path catch-up: bring the odb and ref state up to date with writes
     /// committed by other processes since the last refresh. The daemon calls
     /// this at the start of every request so a served read is never stale.
-    /// Also re-loads the A6 policy so a `.alt/policy` edit takes effect on
+    /// Also re-loads the capability policy so a `.alt/policy` edit takes effect on
     /// the next request without restarting the daemon.
     pub fn refresh(&mut self) -> Res<()> {
         self.odb.refresh()?;
@@ -278,8 +278,8 @@ impl Store {
         self.policy.lookup(principal)
     }
 
-    /// The principals this store trusts for A5b push signature checks
-    /// (M10/W14). Reads `<alt-dir>/trust/<principal>.pub` files via the
+    /// The principals this store trusts for push signature checks.
+    /// Reads `<alt-dir>/trust/<principal>.pub` files via the
     /// same scanner the local sig-verify command uses, so wire and local
     /// trust roots can't diverge.
     pub fn trust_keys(&self) -> Res<Vec<(String, alt_sign::PublicKey)>> {
@@ -289,7 +289,7 @@ impl Store {
     /// The op that applied a keyed write, if one is in the durable idempotency
     /// index — i.e. a request carrying `key` already took effect. The daemon
     /// checks this (after [`refresh`](Self::refresh)) before running a keyed
-    /// write, so a same-id retry is acked instead of applied twice (D5c). Built
+    /// write, so a same-id retry is acked instead of applied twice. Built
     /// by replay, so it survives a daemon restart.
     pub fn applied_request(&self, key: &IdemKey) -> Option<OpId> {
         self.refs.applied_request(key)
@@ -457,7 +457,7 @@ impl OpenRepo {
 
 /// `alt init [dir]`: create an empty native repo with an unborn HEAD → main.
 /// `alt clone <url> [<dir>]`: init + remote add origin + fetch + switch
-/// to the server's HEAD branch (M6/W6). The destination directory defaults
+/// to the server's HEAD branch. The destination directory defaults
 /// to the URL's last path segment with any `.git` suffix stripped — same
 /// convention as `git clone`.
 ///
@@ -468,8 +468,8 @@ impl OpenRepo {
 /// `alt import <target>`: ingest the git repo discovered at `cwd` into
 /// `<target>/.alt`, then materialize HEAD's tree into `<target>` so
 /// the work tree matches `alt status` (clean instead of "everything
-/// deleted"). Pre-M17 callers had to follow `alt import` with
-/// `alt switch <branch>` manually to get a usable work tree.
+/// deleted"), so callers don't have to follow `alt import` with
+/// `alt switch <branch>` to get a usable work tree.
 ///
 /// When `<target>` is the same path the import was discovered in,
 /// alt would be checking out into the directory that already holds
@@ -762,13 +762,13 @@ pub struct NativeRepo<'a> {
     index_path: PathBuf,
     /// The caller acting through this view.
     id: Identity,
-    /// The A6 capability gate for this caller's [`Principal`], derived from
+    /// The capability gate for this caller's [`Principal`], derived from
     /// the store's policy at [`attach`](Self::attach). Force / path gates are
     /// applied here in `NativeRepo`; ref-namespace / read-only gates are
     /// applied inside [`RefStore::commit_idempotent`] via [`RefPolicy`].
     caps: Capabilities,
     /// The idempotency key stamped on this command's terminal ref transaction
-    /// (D5c). `Some` only on the daemon's exactly-once write path; `None` for
+    /// `Some` only on the daemon's exactly-once write path; `None` for
     /// reads and the direct CLI (where `commit_idempotent` is a plain commit).
     idem_key: Option<IdemKey>,
 }
@@ -799,11 +799,11 @@ impl<'a> NativeRepo<'a> {
     /// Reject the operation when the caller's policy forbids any write. Called
     /// at the top of every mutating command — covers `add` (which only writes
     /// the index, not refs) as well as the ref-producing commands.
-    /// W8 — local A6 branch_allow check for a push. `branch_allow` is a
+    /// Local branch_allow check for a push. `branch_allow` is a
     /// list of glob patterns; if non-empty, every remote ref a push would
     /// touch must match at least one pattern. The check uses the *short*
     /// branch name (the part after `refs/heads/`) so a pattern like
-    /// `feature/*` lines up with how A6 patterns are written for local
+    /// `feature/*` lines up with how policy patterns are written for local
     /// commit gating.
     fn ensure_push_branch_allowed(&self, changes: &[RefChange]) -> Res<()> {
         let allow = &self.caps.branch_allow;
@@ -837,8 +837,8 @@ impl<'a> NativeRepo<'a> {
         Ok(())
     }
 
-    /// W8 — git-default "non-fast-forward needs `-f`" gate, independent
-    /// of A6. Force (`-f`) skips this; A6's `forbid_force` is the deeper
+    /// Git-default "non-fast-forward needs `-f`" gate, independent
+    /// of the capability policy. Force (`-f`) skips this; the policy's `forbid_force` is the deeper
     /// gate that even `-f` cannot bypass (handled separately by
     /// [`ensure_no_force`]).
     fn ensure_fast_forward(&self, changes: &[RefChange]) -> Res<()> {
@@ -1018,7 +1018,7 @@ impl<'a> NativeRepo<'a> {
     /// the store to do the atomic CAS-append with the namespace gate folded
     /// in (via [`RefPolicy`]). A denial — at any axis — costs no on-disk
     /// state. Uses [`self.idem_key`](Self::idem_key) so daemon-keyed writes
-    /// flow through unchanged (D5c). Use [`commit_refs_unkeyed`] for the
+    /// flow through unchanged. Use [`commit_refs_unkeyed`] for the
     /// *non-terminal* tx of a multi-tx command (e.g. switch-with-create).
     fn commit_refs(&mut self, verb: &str, changes: &[RefChange]) -> Res<OpId> {
         self.commit_refs_with(verb, changes, self.idem_key)
@@ -1027,7 +1027,7 @@ impl<'a> NativeRepo<'a> {
     /// Like [`commit_refs`] but always with `idem_key = None` — for the
     /// non-terminal ref tx of a command that produces several (switch-with-
     /// create's create-branch, workspace add's HEAD wire-up). The terminal
-    /// tx of the same command goes through [`commit_refs`] so D5c's
+    /// tx of the same command goes through [`commit_refs`] so the
     /// exactly-once retry still works.
     fn commit_refs_unkeyed(&mut self, verb: &str, changes: &[RefChange]) -> Res<OpId> {
         self.commit_refs_with(verb, changes, None)
@@ -1046,7 +1046,7 @@ impl<'a> NativeRepo<'a> {
         let read_only = self.caps.read_only;
         let has_constraint = !allow.is_empty() || !deny.is_empty();
         let is_branch_allowed = move |name: &str| {
-            // M10/W22: deny wins over allow.
+            // deny wins over allow
             if deny.iter().any(|g| g.matches(name)) {
                 return false;
             }
@@ -1070,7 +1070,7 @@ impl<'a> NativeRepo<'a> {
             self.store
                 .refs
                 .commit_idempotent(&actor, now_ms(), changes, key, Some(&policy))?;
-        // A5b: opt-in op-level signing. Best-effort — a missing sec key
+        // opt-in op-level signing. Best-effort — a missing sec key
         // logs nothing and is not fatal (signing is a per-repo capability,
         // not a hard requirement). Verification at read time tells the
         // auditor which ops are signed and which aren't.
@@ -1117,7 +1117,7 @@ impl<'a> NativeRepo<'a> {
         Ok(())
     }
 
-    /// W9 — when signing is enabled, return `Some((principal, sig_text))`
+    /// When signing is enabled, return `Some((principal, sig_text))`
     /// for the canonical push payload over `updates`; the caller appends
     /// the pair to the wire capability list. Returns `Ok(None)` when
     /// signing is off or the sec key isn't present (a sign-policy file
@@ -1147,12 +1147,12 @@ impl<'a> NativeRepo<'a> {
         };
         let sec = alt_sign::SecretKey::from_text(&sec_text)
             .map_err(|e| format!("malformed sec key at {}: {e}", sec_path.display()))?;
-        // M14/W45: when the server advertised a single-use nonce in its
+        // when the server advertised a single-use nonce in its
         // info/refs caps, sign over `nonce <hex>\n` + canonical payload
         // and echo the nonce back as a cap on the push. The server
         // looks the nonce up and consumes it; a replay of the same
         // captured push bytes hits a consumed/absent nonce and fails.
-        // Servers that didn't advertise a nonce (pre-W45) get the
+        // Servers that didn't advertise a nonce (older ones) get the
         // legacy payload — backward-compat.
         let payload =
             alt_wire::canonical_push_payload_with_nonce(updates, server_nonce, self.store.algo);
@@ -1163,7 +1163,7 @@ impl<'a> NativeRepo<'a> {
         Ok(Some((principal, sig_text)))
     }
 
-    /// M10/W15 — when sign-policy is on and a sec key is on disk,
+    /// When sign-policy is on and a sec key is on disk,
     /// produce the *signed* form of `unsigned_bytes` (an `alt-sig`
     /// header line spliced into the commit's header block). The caller
     /// rehashes and puts to the odb. `Ok(None)` means "leave the commit
@@ -1282,7 +1282,7 @@ impl<'a> NativeRepo<'a> {
         for rel in &targets {
             entries.retain(|e| &e.path != rel);
             if let Some(w) = scan.iter().find(|w| &w.path == rel) {
-                // A6 path gate: deny staging any path the policy excludes,
+                // path gate: deny staging any path the policy excludes,
                 // *before* writing the blob into the odb — so a denial costs
                 // no on-disk side effect (the odb put would otherwise persist
                 // before the index is even written).
@@ -1306,7 +1306,7 @@ impl<'a> NativeRepo<'a> {
             },
         )?;
 
-        // M8-B1: record the index delta so `alt undo` can roll an `add`
+        // record the index delta so `alt undo` can roll an `add`
         // back. Skip when the call was a true no-op (touched zero paths or
         // every touched path's entry was unchanged) — keeps an empty add
         // from polluting the op log and wasting an undo step.
@@ -1403,7 +1403,7 @@ impl<'a> NativeRepo<'a> {
             format!("{message}\n")
         };
         let mut bytes = build_commit_bytes(tree, &parents, &sig, &sig, &msg);
-        // M10/W15: when sign-policy is on and a sec key is on disk for
+        // when sign-policy is on and a sec key is on disk for
         // the principal, splice an `alt-sig` header into the commit and
         // rehash. The signed commit is the canonical commit from the
         // store's POV — there is no second "unsigned" stored.
@@ -1441,7 +1441,7 @@ impl<'a> NativeRepo<'a> {
 
     /// `alt status`: staged / unstaged / untracked against HEAD and the index,
     /// plus any unmerged (conflicted) paths left by a merge. With `json`, emits
-    /// the stable structured schema instead of the human view (VISION §4 A1).
+    /// the stable structured schema instead of the human view.
     pub fn status(&self, json: bool, out: &mut impl Write) -> Res<()> {
         let branch = self.head_branch()?;
         let head = self.head_entries()?;
@@ -1532,8 +1532,8 @@ impl<'a> NativeRepo<'a> {
 
     /// `alt diff` (index → working tree) or `alt diff --cached` (HEAD →
     /// index): a git-style unified diff of the tracked changes. With `json`,
-    /// emits the structured per-file/per-hunk schema (VISION §4 A1). With
-    /// `semantic`, item-level AST diff (A8b) replaces the unified diff for
+    /// emits the structured per-file/per-hunk schema. With
+    /// `semantic`, item-level AST diff replaces the unified diff for
     /// files in a language we have a parser for (`.rs` today); other files
     /// fall back to the same line/binary output as without `--semantic`.
     pub fn diff(&self, cached: bool, json: bool, semantic: bool, out: &mut impl Write) -> Res<()> {
@@ -1548,7 +1548,7 @@ impl<'a> NativeRepo<'a> {
             )
         } else {
             let raw = self.index()?;
-            // Sparse-from-index (M8/A3b): no directory walk. One stat per
+            // Sparse-from-index: no directory walk. One stat per
             // indexed path, only read+hash on a stat mismatch. Untracked
             // files are not in `alt diff`'s output (show_added=false), so
             // skipping the dir traversal is correct — same shape git diff
@@ -1614,7 +1614,7 @@ impl<'a> NativeRepo<'a> {
                     .map(hunk_json)
                     .collect()
             };
-            // A8 B1 (E2): binary files get a structured chunk-diff summary so
+            // binary files get a structured chunk-diff summary so
             // an agent can answer "how much of this binary is genuinely
             // shared" via the same `--json` surface it uses for text — without
             // the dump-the-bytes blow-up. Text files leave the field null;
@@ -1624,7 +1624,7 @@ impl<'a> NativeRepo<'a> {
             } else {
                 Json::Null
             };
-            // M7-B3: perceptual-style hint for recognised binary kinds
+            // perceptual-style hint for recognised binary kinds
             // (PNG today). Mirrors the human view's "perceptual diff: …"
             // line; `null` for non-image / unknown / text. Additive — v1
             // schema stays backward-compatible.
@@ -1633,7 +1633,7 @@ impl<'a> NativeRepo<'a> {
             } else {
                 Json::Null
             };
-            // M10/W20 (B2): structured part-aware breakdown so an
+            // structured part-aware breakdown so an
             // agent answers "which named chunk changed" without
             // re-parsing the binary. `null` when neither side is a
             // recognised kind (PNG today).
@@ -1681,7 +1681,7 @@ impl<'a> NativeRepo<'a> {
 
     /// Writes one file's `diff --git` stanza (header + hunks, or a binary
     /// notice) to `buf`. When `semantic` is set and the path has a parser,
-    /// the body is replaced by an A8b AST-diff summary instead of the
+    /// the body is replaced by an AST-diff summary instead of the
     /// unified hunks.
     fn emit_file_diff(
         &self,
@@ -1719,7 +1719,7 @@ impl<'a> NativeRepo<'a> {
         let n7 = abbrev(ch.new.map(|w| w.oid));
         buf.extend_from_slice(format!("index {o7}..{n7}\n").as_bytes());
 
-        // A8b: when --semantic is set and we have a parser for this path,
+        // when --semantic is set and we have a parser for this path,
         // render the AST-level summary in place of the unified hunks. A
         // parse error or unsupported language falls through to the regular
         // diff body — the caller never loses signal, only sometimes the
@@ -1738,7 +1738,7 @@ impl<'a> NativeRepo<'a> {
             return Ok(());
         }
 
-        // M12/W34 + W34b: structured-data semantic diff. `--semantic`
+        // structured-data semantic diff. `--semantic`
         // gate as above; dispatch routes by file extension via
         // `summary_for_path` (.json content-detect + .toml explicit).
         // Parse failures fall through to the line diff — no signal loss.
@@ -1755,7 +1755,7 @@ impl<'a> NativeRepo<'a> {
 
         if alt_diff::is_binary(&old_bytes) || alt_diff::is_binary(&new_bytes) {
             // git-compat line first (existing tests + muscle memory key off
-            // this exact wording); then an A8 B1 chunk-diff summary so the
+            // this exact wording); then a chunk-diff summary so the
             // human view answers "how much is genuinely shared" too.
             buf.extend_from_slice(
                 format!("Binary files a/{path} and b/{path} differ\n").as_bytes(),
@@ -1773,7 +1773,7 @@ impl<'a> NativeRepo<'a> {
                 )
                 .as_bytes(),
             );
-            // M10/W20 (B2): when both sides decompose under a known
+            // when both sides decompose under a known
             // format (PNG today), surface the part-aware line so a
             // reviewer reads "IDAT changed but IHDR didn't" rather
             // than "47% bytes shared". Silent when either side isn't
@@ -1782,7 +1782,7 @@ impl<'a> NativeRepo<'a> {
             if let Some(ps) = alt_diff::part_aware::summary(&old_bytes, &new_bytes) {
                 buf.extend_from_slice(format!("{}\n", ps.render()).as_bytes());
             }
-            // M7-B3: when both sides are a kind we have a fingerprint for
+            // when both sides are a kind we have a fingerprint for
             // (PNG today), surface the perceptual-style hint so a reader
             // sees "is this a small tweak or a wholly different image"
             // without an external image tool. Stays silent when either
@@ -2000,13 +2000,11 @@ impl<'a> NativeRepo<'a> {
         Ok(())
     }
 
-    /// `alt tag [-d <name>] [<name> [<rev>]] [--json]`. Lightweight tags
-    /// only: each tag is a ref under `refs/tags/<name>` pointing
+    /// `alt tag [-d <name>] [<name> [<rev>]] [-a] [-m <msg>] [--json]`.
+    /// A lightweight tag is a ref under `refs/tags/<name>` pointing
     /// directly at the named commit (or HEAD when `rev` is omitted).
-    /// Annotated tags (`git tag -a`) write a tag *object* whose oid
-    /// the ref points to instead; that path is out of scope for the
-    /// first M17 dogfood pass and would land as a follow-up `-a /
-    /// -m` arg pair.
+    /// With `-a` or `-m`, an annotated tag writes a tag *object* whose
+    /// oid the ref points to instead.
     #[allow(clippy::too_many_arguments)]
     pub fn tag(
         &mut self,
@@ -2356,8 +2354,8 @@ impl<'a> NativeRepo<'a> {
     /// Gitlink entries (mode 160000) point at a submodule commit that lives
     /// in another repo — there is nothing to write at our odb's level. Match
     /// git's plain `clone` (no `--recurse-submodules`) by ensuring the
-    /// placeholder directory exists and stopping there. M7 will grow real
-    /// submodule fetch/checkout; A1 only removes the materialise crash.
+    /// placeholder directory exists and stopping there. Submodule
+    /// fetch/checkout is not implemented; this only avoids the materialise crash.
     fn materialize(&self, w: &WorkEntry) -> Res<()> {
         let abs = self.abs(&w.path)?;
         if w.mode == 0o160000 {
@@ -2940,7 +2938,7 @@ impl<'a> NativeRepo<'a> {
     /// `main` *and* back-merge `main` into `develop`, delete the release
     /// branch, move HEAD to `develop` — all in one ref-tx + one op-log
     /// entry. A conflict on either merge aborts the whole flow (atomicity
-    /// keeps the prior state untouched). M8/C1 reuses the SIGKILL harness.
+    /// keeps the prior state untouched).
     pub fn flow_release_finish(&mut self, name: &str, json: bool, out: &mut impl Write) -> Res<()> {
         let flow = self.flow_model().release(name)?;
         let dev_ref = format!("refs/heads/{}", "develop");
@@ -3095,8 +3093,7 @@ impl<'a> NativeRepo<'a> {
 
         // Step 3: one atomic ref-tx — advance target + advance back-ref +
         // delete topic + move HEAD to back-ref. SIGKILL anywhere splits
-        // into pre/post only (M8/C0 fixture verifies this for the whole
-        // flow family).
+        // into pre/post only.
         let head_old = self.store.refs.get(&self.head_ref).cloned();
         let head_ref = self.head_ref.clone();
         let mut changes = vec![
@@ -3161,10 +3158,10 @@ impl<'a> NativeRepo<'a> {
     /// branch/HEAD state) and re-materialize HEAD's tree. The inverse is
     /// itself recorded as an op, so undo is append-only and re-undoable.
     pub fn undo(&mut self, json: bool, out: &mut impl Write) -> Res<()> {
-        // M8-B1: dispatch on the very last op's payload kind. Ref-tx ops
-        // invert their ref changes (the M4 path); index-tx ops restore
-        // the prior stage-0 entries for each touched path — A2's "any
-        // state-changing op is reversible" extended beyond refs.
+        // dispatch on the very last op's payload kind. Ref-tx ops
+        // invert their ref changes; index-tx ops restore the prior
+        // stage-0 entries for each touched path, so any state-changing
+        // op is reversible, not just ref updates.
         let last = self.store.refs.last_op().ok_or("nothing to undo")?.clone();
         match last.payload.first().copied() {
             Some(alt_refs::PAYLOAD_REF_TX) => self.undo_ref_tx(json, out),
@@ -3525,7 +3522,7 @@ impl<'a> NativeRepo<'a> {
     /// `alt fetch <remote> [refspecs…]`: ls-refs the remote, request the
     /// objects reachable from each matched server ref, ingest the streamed
     /// packfile into the native odb, and update `refs/remotes/<remote>/*`
-    /// in one ref transaction (M6/W4).
+    /// in one ref transaction.
     ///
     /// The fetch is a self-contained round-trip — `done\n` short-circuits
     /// negotiation, so the server sends acknowledgments-free and we always
@@ -3795,7 +3792,7 @@ impl<'a> NativeRepo<'a> {
 
     /// `alt push <remote> [<refspec>…]`: send the objects reachable from
     /// the local tips the refspec selects, ask the server to update the
-    /// matching refs (M6/W5 — git smart-http v1 receive-pack).
+    /// matching refs (git smart-http v1 receive-pack).
     ///
     /// Refspec forms (no wildcards yet):
     /// - `<src>` → push local `refs/heads/<src>` to remote `refs/heads/<src>`.
@@ -3837,7 +3834,7 @@ impl<'a> NativeRepo<'a> {
         if !ad.supports("report-status") {
             return Err("remote does not support report-status".into());
         }
-        // M14/W45: pick up the server-issued single-use nonce if it
+        // pick up the server-issued single-use nonce if it
         // advertised one. `maybe_sign_push` will then sign over
         // `nonce <hex>\n` + canonical payload, and we echo the same
         // value back as `alt-nonce=<hex>` on the push capability list
@@ -3899,9 +3896,9 @@ impl<'a> NativeRepo<'a> {
             return Ok(());
         }
 
-        // M6/W8 — cross-party A6 pre-check: run the local capability
+        // cross-party pre-check: run the local capability
         // policy against the would-be ref changes BEFORE going to the
-        // wire. The server enforces its own A6 (which we can't always
+        // wire. The server enforces its own policy (which we can't always
         // know up-front), but the local gate stops a forbidden push from
         // leaking the pack body onto the network at all.
         let pseudo_changes: Vec<RefChange> = updates
@@ -3964,11 +3961,11 @@ impl<'a> NativeRepo<'a> {
             "side-band-64k".into(),
             agent,
         ];
-        // W9 — alt-to-alt private extension: when local signing policy
+        // alt-to-alt private extension: when local signing policy
         // is enabled and we have a sec key on disk, sign the canonical
         // push payload and attach `alt-principal=<id>` +
         // `alt-sig=alt-sig-ed25519:<sig>` to the cap list. Git's
-        // receive-pack silently ignores unknown caps; an alt server (W10+)
+        // receive-pack silently ignores unknown caps; an alt server
         // looks for the pair and verifies it against its trust store.
         if let Some((principal, sig_text)) =
             self.maybe_sign_push(&updates, server_nonce.as_deref())?
@@ -4010,7 +4007,7 @@ impl<'a> NativeRepo<'a> {
         // render and (locally) record the push as an op so it shows up in
         // op-log; the local ref state didn't change, so we don't commit a
         // ref tx — this is purely an audit marker, omitted here to keep
-        // scope tight (W5 follow-up: structured "push" op in op-log)
+        // scope tight
         if json {
             use crate::json::Json;
             let refs_json: Vec<Json> = report
@@ -4076,7 +4073,7 @@ impl<'a> NativeRepo<'a> {
     }
 
     /// `alt op-log`: audit-view the op log, newest first. Each entry surfaces
-    /// the A5a structured principal (parsed from the actor string) and, for
+    /// the structured principal (parsed from the actor string) and, for
     /// ref-transaction payloads, the list of ref changes that op made. Other
     /// payload kinds (e.g. import) appear with `ref_changes = null` so the
     /// audit trail is complete even for non-ref ops.
@@ -4146,7 +4143,7 @@ impl<'a> NativeRepo<'a> {
         Ok(())
     }
 
-    /// `alt verify` — M10/W16. For each `commits` oid (or each commit
+    /// `alt verify`: for each `commits` oid (or each commit
     /// reachable from HEAD up to `max_count` when the list is empty),
     /// read the commit object, parse its `alt-sig` header, and verify
     /// against the repo's trust store. Renders one row per commit:
@@ -4451,8 +4448,8 @@ impl<'a> NativeRepo<'a> {
 /// Renders `status` as the stable JSON schema (version 1):
 /// `{schema_version, branch, principal:{kind,id,session?}, staged:[…],
 /// unstaged:[…], untracked:[…], unmerged:[…], clean}`. `change` ∈
-/// `added`/`modified`/`deleted`; `principal` is the A5a actor — added at C4
-/// so an agent can self-check "who am I to this repo" via the same
+/// `added`/`modified`/`deleted`; `principal` is the structured actor, so
+/// an agent can self-check "who am I to this repo" via the same
 /// machine-first surface it uses for everything else.
 fn render_status_json(
     out: &mut impl Write,
@@ -4499,7 +4496,7 @@ fn render_status_json(
     Ok(())
 }
 
-/// JSON shape for an M7-B3 perceptual hint:
+/// JSON shape for a perceptual hint:
 /// `{kind:"perceptual_diff", prism, distance}` where `prism` is the
 /// content kind (`"png"` today) and `distance` is the [0.0, 1.0]
 /// fraction of fingerprint bits that flipped. `Json::Null` when neither
@@ -4521,7 +4518,7 @@ fn perceptual_diff_json(old: &[u8], new: &[u8]) -> crate::json::Json {
     ])
 }
 
-/// JSON shape for an M10/W20 B2 part-aware diff:
+/// JSON shape for a part-aware diff:
 /// `{kind:"part_diff", prism, all_same, parts:[{name, status, old_bytes?,
 /// new_bytes?}]}`. `null` when neither side is a recognised kind so the
 /// caller falls back to the chunk_diff field above.
@@ -4568,10 +4565,10 @@ fn part_aware_diff_json(old: &[u8], new: &[u8]) -> crate::json::Json {
     ])
 }
 
-/// JSON shape for an A8 B1 binary chunk diff:
+/// JSON shape for a binary chunk diff:
 /// `{kind:"binary_chunk_diff", shared_chunks, added_chunks, removed_chunks,
 /// old_chunks, new_chunks, old_bytes, new_bytes, byte_shared_ratio}`. The
-/// `kind` discriminator leaves room for B2 (part-aware) under the same
+/// `kind` discriminator leaves room for other diff kinds under the same
 /// `chunk_diff` field without a v1 schema bump.
 fn binary_chunk_diff_json(old: &[u8], new: &[u8]) -> crate::json::Json {
     use crate::json::Json;
@@ -4604,7 +4601,7 @@ fn lang_for(path: &[u8]) -> Option<alt_treediff::Lang> {
     }
 }
 
-/// JSON shape for an A8b AST diff:
+/// JSON shape for an AST diff:
 /// `{kind:"ast_diff", logical_changes:[…], format_only_changes:[…],
 /// items_added:[…], items_removed:[…], is_format_only}`. Returns `Null` if
 /// the path has no parser, or if parsing failed on either side (the caller
@@ -4762,9 +4759,9 @@ fn hex32(b: &[u8; 32]) -> String {
     s
 }
 
-/// JSON shape for an A5a principal: `{kind: "human"|"agent", id, session}`
+/// JSON shape for a structured principal: `{kind: "human"|"agent", id, session}`
 /// (session is `null` when unset). Re-used wherever an actor is surfaced
-/// — currently `status --json`; a later op-log viewer will reuse it.
+/// — `status --json` and `op-log --json`.
 fn principal_json(p: &Principal) -> crate::json::Json {
     use crate::json::Json;
     let kind = match p.kind {
@@ -5305,7 +5302,7 @@ fn parse_object_format(advertised: Option<&str>) -> Res<HashAlgo> {
     }
 }
 
-/// A5b op-level signing policy, read from `<alt-dir>/sign-policy`. The
+/// Op-level signing policy, read from `<alt-dir>/sign-policy`. The
 /// file is a tiny `key=value` text shape (same convention as remotes /
 /// policy elsewhere in alt):
 ///
@@ -5417,7 +5414,7 @@ fn nibble(c: u8) -> Option<u8> {
     }
 }
 
-/// The verdict shape used by `alt verify` (M10/W16) for one commit. The
+/// The verdict shape used by `alt verify` for one commit. The
 /// taxonomy mirrors [`SigVerdict`] used by `op-log --verify` so an
 /// auditor sees the same vocabulary across the two surfaces.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -5929,7 +5926,7 @@ mod tests {
     }
 
     /// `actor_string` and `parse_actor` are mutual inverses for the structured
-    /// A5a form — same principal+verb survive an encode/decode round-trip,
+    /// form — same principal+verb survive an encode/decode round-trip,
     /// including the optional `session` correlator.
     #[test]
     fn principal_actor_roundtrip() {
@@ -5954,7 +5951,7 @@ mod tests {
         }
     }
 
-    /// Op-log entries written by alt before A5a use `cli/<verb>@<user>` (the
+    /// Op-log entries written by older alt use `cli/<verb>@<user>` (the
     /// pre-structured form). They must still parse as a Human principal with
     /// `id == user`, so importing/reading older repositories is lossless.
     #[test]
@@ -5971,9 +5968,9 @@ mod tests {
         assert_eq!(verb, "flow");
     }
 
-    /// `Identity::from_lookup` reads the new A5a env vars when present and
+    /// `Identity::from_lookup` reads the principal env vars when present and
     /// degrades to a Human principal anchored on `USER` when they are not —
-    /// so pre-A5a callers see exactly the old behaviour (defaults preserved).
+    /// so callers that don't set them see exactly the old behaviour (defaults preserved).
     #[test]
     fn identity_reads_alt_principal_env_with_defaults() {
         let id = Identity::from_lookup(|k| match k {

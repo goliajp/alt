@@ -37,7 +37,7 @@ pub enum RefError {
     SymrefDepth(String),
     #[error("payload kind {0} is reserved for ref transactions")]
     ReservedPayload(u8),
-    /// A6 capability gate denied this transaction. The string names the ref
+    /// The capability gate denied this transaction. The string names the ref
     /// (or `<read-only>` for a blanket deny) so the operator can act on the
     /// audit message.
     #[error("capability denied: {0}")]
@@ -55,7 +55,7 @@ pub enum RefError {
 ///
 /// Layered intentionally as a thin callback type so `alt-refs` stays oblivious
 /// to where the policy comes from (alt-cli has its own glob / [`Capabilities`]
-/// model). A6 design §6 puts the *ref-shaped* gates here (read-only + branch
+/// model). The *ref-shaped* gates live here (read-only + branch
 /// namespace); force and path gates live in [`NativeRepo`] where ancestry and
 /// working-tree paths are already in scope.
 ///
@@ -142,7 +142,7 @@ pub struct RefStore {
     applied: usize,
     /// Idempotency index: a write's client key → the op that applied it. Built
     /// by replay alongside `refs` (so it is durable and survives a restart),
-    /// it lets a retried write be detected and not applied twice (D5c). Only the
+    /// it lets a retried write be detected and not applied twice. Only the
     /// recent (post-snapshot) keys are kept — long enough for any in-flight
     /// retry, which happens within one client invocation.
     by_key: HashMap<IdemKey, OpId>,
@@ -213,7 +213,7 @@ impl RefStore {
     /// with zero on-disk side effect (no oplog write, no idempotency entry).
     /// `policy = None` is the unconstrained path used by tests, imports, and
     /// the legacy [`commit`](Self::commit) shim; production CLI callers pass
-    /// `Some(&policy)` so the chokepoint enforces A6 (design §6 decision 4).
+    /// `Some(&policy)` so the chokepoint enforces the capability gate.
     pub fn commit_idempotent(
         &mut self,
         actor: &str,
