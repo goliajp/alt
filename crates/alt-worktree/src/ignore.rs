@@ -4,7 +4,9 @@
 //! (`gitignore(5)`): enough to handle every shape that appears in real
 //! `.gitignore` files at the repository root. Patterns are loaded from one
 //! file at a time into an [`IgnoreLayer`]; `scan_dir` stacks layers as it
-//! descends, and the deepest layer's last matching rule wins.
+//! descends, and the deepest layer's last matching rule wins. Below every
+//! `.gitignore` sits the user's global excludes file, at git's default
+//! location: `$XDG_CONFIG_HOME/git/ignore`, else `$HOME/.config/git/ignore`.
 //!
 //! ## Supported syntax
 //!
@@ -26,11 +28,9 @@
 //! ## Not supported (yet)
 //!
 //! - Character classes (`[abc]`, `[a-z]`).
-//! - The `core.excludesFile` global ignore.
-//! - Per-user `.git/info/exclude`.
-//!
-//! These are accepted by git but never appear in `alt`'s own `.gitignore`;
-//! they can be filled in later when a real working tree needs them.
+//! - A `core.excludesFile` setting that moves the global excludes file
+//!   (the default location above is read).
+//! - Per-repository `info/exclude`.
 
 /// One parsed `.gitignore` line.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,6 +69,20 @@ impl IgnoreStack {
         Self::default()
     }
 
+    /// A stack whose bottom layer is the user's global excludes file, rooted
+    /// at the working tree, so every `.gitignore` takes precedence over it.
+    pub(crate) fn with_global_excludes() -> std::io::Result<Self> {
+        let mut stack = Self::new();
+        if let Some(path) = global_excludes_path() {
+            match std::fs::read(path) {
+                Ok(bytes) => stack.push(parse_layer(&bytes, b"")),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(stack)
+    }
+
     pub(crate) fn push(&mut self, layer: IgnoreLayer) {
         self.layers.push(layer);
     }
@@ -93,6 +107,16 @@ impl IgnoreStack {
         }
         false
     }
+}
+
+/// git's global excludes file when `core.excludesFile` is unset. An empty
+/// variable counts as unset, as it does for git.
+fn global_excludes_path() -> Option<std::path::PathBuf> {
+    let set = |k| std::env::var_os(k).filter(|v| !v.is_empty());
+    let config = set("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| set("HOME").map(|h| std::path::Path::new(&h).join(".config")))?;
+    Some(config.join("git").join("ignore"))
 }
 
 /// Parse one `.gitignore` file's bytes into a layer rooted at `base`. The

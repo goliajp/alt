@@ -64,3 +64,75 @@ fn alt_add_dot_skips_gitignored_paths_at_root() {
     let log = ok(alt(root, &["log", "-n", "1", "--json"]));
     assert!(log.contains("\"tree\":"), "no tree in commit: {log}");
 }
+
+/// `alt` with the global-excludes environment pinned: `set` pairs are
+/// exported, `unset` names are removed, so the developer's own excludes
+/// file never leaks in.
+fn alt_env(repo: &Path, args: &[&str], set: &[(&str, &Path)], unset: &[&str]) -> Output {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_alt"));
+    cmd.current_dir(repo)
+        .env("ALT_NO_DAEMON", "1")
+        .env("GIT_AUTHOR_NAME", "tester")
+        .env("GIT_AUTHOR_EMAIL", "t@e")
+        .args(args);
+    for (k, v) in set {
+        cmd.env(k, v);
+    }
+    for k in unset {
+        cmd.env_remove(k);
+    }
+    cmd.output().unwrap()
+}
+
+fn staged_after_add_dot(root: &Path, set: &[(&str, &Path)], unset: &[&str]) -> String {
+    ok(alt_env(root, &["init", "."], set, unset));
+    ok(alt_env(root, &["add", "."], set, unset));
+    ok(alt_env(root, &["status"], set, unset))
+}
+
+fn scratch_tree(root: &Path) {
+    std::fs::write(root.join("keep.txt"), "k\n").unwrap();
+    std::fs::create_dir(root.join(".scratch")).unwrap();
+    std::fs::write(root.join(".scratch/notes.md"), "n\n").unwrap();
+    std::fs::write(root.join("trace.out"), "t\n").unwrap();
+}
+
+#[test]
+fn the_global_excludes_file_under_xdg_config_home_applies() {
+    let repo = tempfile::tempdir().unwrap();
+    let config = tempfile::tempdir().unwrap();
+    std::fs::create_dir(config.path().join("git")).unwrap();
+    std::fs::write(config.path().join("git/ignore"), ".scratch/\n*.out\n").unwrap();
+    scratch_tree(repo.path());
+
+    let st = staged_after_add_dot(repo.path(), &[("XDG_CONFIG_HOME", config.path())], &[]);
+    assert!(st.contains("keep.txt"), "{st}");
+    assert!(!st.contains(".scratch"), "{st}");
+    assert!(!st.contains("trace.out"), "{st}");
+}
+
+#[test]
+fn without_xdg_config_home_the_file_under_home_applies() {
+    let repo = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(home.path().join(".config/git")).unwrap();
+    std::fs::write(home.path().join(".config/git/ignore"), "*.out\n").unwrap();
+    scratch_tree(repo.path());
+
+    let st = staged_after_add_dot(repo.path(), &[("HOME", home.path())], &["XDG_CONFIG_HOME"]);
+    assert!(!st.contains("trace.out"), "{st}");
+    assert!(st.contains(".scratch/notes.md"), "{st}");
+}
+
+#[test]
+fn a_repository_gitignore_overrides_the_global_excludes() {
+    let repo = tempfile::tempdir().unwrap();
+    let config = tempfile::tempdir().unwrap();
+    std::fs::create_dir(config.path().join("git")).unwrap();
+    std::fs::write(config.path().join("git/ignore"), "*.out\n").unwrap();
+    scratch_tree(repo.path());
+    std::fs::write(repo.path().join(".gitignore"), "!trace.out\n").unwrap();
+
+    let st = staged_after_add_dot(repo.path(), &[("XDG_CONFIG_HOME", config.path())], &[]);
+    assert!(st.contains("trace.out"), "{st}");
+}
