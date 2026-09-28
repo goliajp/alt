@@ -1550,10 +1550,12 @@ impl<'a> NativeRepo<'a> {
         &mut self,
         name: Option<String>,
         delete: Option<String>,
+        remotes: bool,
         json: bool,
         out: &mut impl Write,
     ) -> Res<()> {
         match (name, delete) {
+            (_, Some(target)) if remotes => self.delete_ref(&format!("refs/remotes/{target}"), out),
             (_, Some(target)) => self.delete_branch(&target, out),
             (Some(new), None) => self.create_branch(&new, out),
             (None, None) => self.list_branches(json, out),
@@ -1631,21 +1633,30 @@ impl<'a> NativeRepo<'a> {
         if full == self.head_branch()? {
             return Err(format!("cannot delete branch '{name}': it is the current branch").into());
         }
+        self.delete_ref(&full, out)
+    }
+
+    /// Deletes `full` (a branch or remote-tracking ref) in one undoable op.
+    fn delete_ref(&mut self, full: &str, out: &mut impl Write) -> Res<()> {
+        let short = full
+            .strip_prefix("refs/heads/")
+            .or_else(|| full.strip_prefix("refs/remotes/"))
+            .unwrap_or(full);
         let old = self
             .store
             .refs
-            .get(&full)
+            .get(full)
             .cloned()
-            .ok_or_else(|| format!("branch '{name}' not found"))?;
+            .ok_or_else(|| format!("branch '{short}' not found"))?;
         self.commit_refs(
             "branch",
             &[RefChange {
-                name: full,
+                name: full.to_owned(),
                 old: Some(old),
                 new: None,
             }],
         )?;
-        writeln!(out, "deleted branch '{name}'")?;
+        writeln!(out, "deleted branch '{short}'")?;
         Ok(())
     }
 
@@ -4867,7 +4878,7 @@ mod tests {
         repo.add(&[".".to_owned()], false, &mut sink).unwrap();
         repo.commit("first", Default::default(), false, &mut sink)
             .unwrap();
-        repo.branch(Some("feat".to_owned()), None, false, &mut sink)
+        repo.branch(Some("feat".to_owned()), None, false, false, &mut sink)
             .unwrap();
 
         // a second workspace on `feat`, in its own working tree outside the repo

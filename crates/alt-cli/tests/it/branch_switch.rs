@@ -122,3 +122,61 @@ fn branch_switch_materializes_tree_and_exports_clean() {
         "feat tree: {feat_ls}"
     );
 }
+
+#[test]
+fn remote_tracking_branches_delete_with_r_and_undo_back() {
+    let dirs: Vec<_> = (0..4).map(|_| tempfile::tempdir().unwrap()).collect();
+    let (up, clone, dst, exp) = (
+        dirs[0].path(),
+        dirs[1].path(),
+        dirs[2].path(),
+        dirs[3].path(),
+    );
+    let commit = |args: &[&str]| {
+        let o = git(up, args);
+        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    };
+    commit(&["init", "-q", "-b", "main"]);
+    std::fs::write(up.join("a.txt"), "a\n").unwrap();
+    commit(&["add", "."]);
+    commit(&[
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@e",
+        "commit",
+        "-q",
+        "-m",
+        "c",
+    ]);
+    let o = Command::new("git")
+        .args(["clone", "-q"])
+        .arg(up)
+        .arg(clone)
+        .output()
+        .unwrap();
+    assert!(o.status.success());
+    ok(alt(clone, &["import", &dst.display().to_string()]));
+
+    let refs = |exp_dir: &Path| {
+        let _ = std::fs::remove_dir_all(exp_dir);
+        ok(alt(dst, &["export", &exp_dir.display().to_string()]));
+        String::from_utf8(git(exp_dir, &["show-ref"]).stdout).unwrap()
+    };
+    assert!(refs(&exp.join("1")).contains("refs/remotes/origin/main"));
+
+    // without -r the name is a local branch, which does not exist
+    assert!(!alt(dst, &["branch", "-d", "origin/main"]).status.success());
+    ok(alt(dst, &["branch", "-d", "origin/main", "-r"]));
+    let after = refs(&exp.join("2"));
+    assert!(!after.contains("refs/remotes/origin/main"), "{after}");
+    assert!(after.contains("refs/heads/main"), "{after}");
+    assert!(
+        !alt(dst, &["branch", "-d", "origin/main", "-r"])
+            .status
+            .success()
+    );
+
+    ok(alt(dst, &["undo"]));
+    assert!(refs(&exp.join("3")).contains("refs/remotes/origin/main"));
+}

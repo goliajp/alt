@@ -107,6 +107,9 @@ pub enum Command {
         /// Delete the named branch
         #[arg(short = 'd')]
         delete: Option<String>,
+        /// With -d, the branch is a remote-tracking one (`<remote>/<branch>`)
+        #[arg(short = 'r', long = "remotes", requires = "delete")]
+        remotes: bool,
         /// Emit the branch list as a stable JSON object
         #[arg(long)]
         json: bool,
@@ -742,9 +745,12 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
             }
         }
         Command::Status { json } => repo.status(*json, out)?,
-        Command::Branch { name, delete, json } => {
-            repo.branch(name.clone(), delete.clone(), *json, out)?
-        }
+        Command::Branch {
+            name,
+            delete,
+            remotes,
+            json,
+        } => repo.branch(name.clone(), delete.clone(), *remotes, *json, out)?,
         Command::Tag {
             name,
             rev,
