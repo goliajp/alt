@@ -49,3 +49,4 @@ mod write_json;
 
 mod cli_matrix;
 mod corpus_cli;
+mod corpus_history;
