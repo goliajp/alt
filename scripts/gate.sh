@@ -17,15 +17,15 @@ cd "$(dirname "$0")/.."
 class="${1:?usage: scripts/gate.sh lint|unit|it|corpus|all}"
 
 # The core never talks to a language model: no LLM, tokenizer or
-# embedding crate anywhere in the dependency graph, and the only crate
-# allowed an HTTP client is the git wire transport. A future LLM
-# integration lives in its own opt-in crate, `alt-llm-bridge`, which is
-# the one exemption on both counts.
+# embedding crate anywhere in the dependency graph, and the only crates
+# allowed an HTTP client are the protocol transports (git wire, LFS). A
+# future LLM integration lives in its own opt-in crate, `alt-llm-bridge`,
+# which is the one exemption on both counts.
 LLM_CRATES='async-openai openai openai-api-rs anthropic anthropic-sdk
 misanthropy tiktoken-rs tokenizers llm llm-chain ollama-rs rust-bert
 candle-core candle-transformers ort fastembed genai langchain-rust'
 HTTP_CRATES='reqwest hyper ureq isahc surf attohttpc curl awc'
-HTTP_OWNERS='alt-wire-http alt-llm-bridge'
+HTTP_OWNERS='alt-wire-http alt-lfs alt-llm-bridge'
 LLM_SOURCE='\b(openai|anthropic|claude|gemini|cohere|mistral|ollama|tiktoken|huggingface)\b|\bllm_|\buse llm\b|api\.openai\.com|api\.anthropic\.com|generativelanguage\.googleapis\.com'
 
 # workspace members that depend on $1, directly when $2 = 1
