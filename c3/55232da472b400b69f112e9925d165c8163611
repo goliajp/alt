@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: feat
+summary: delete remote-tracking branches with branch -d -r
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli.rs
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/tests/it/branch_switch.rs
