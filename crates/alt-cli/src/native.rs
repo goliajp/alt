@@ -19,6 +19,7 @@ use alt_worktree::{
 };
 use bstr::{BString, ByteSlice};
 
+mod merge;
 mod workspace;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
@@ -1387,7 +1388,8 @@ impl<'a> NativeRepo<'a> {
 
         let branch = self.head_branch()?;
         let parent = self.store.refs.resolve(&branch)?;
-        let parents: Vec<ObjectId> = parent.into_iter().collect();
+        let merging = self.merge_head()?;
+        let parents: Vec<ObjectId> = parent.into_iter().chain(merging).collect();
 
         let when = (now_ms() / 1000) as i64;
         let (name, email) = self.id.sig();
@@ -1422,6 +1424,9 @@ impl<'a> NativeRepo<'a> {
                 new: Some(RefTarget::Oid(commit)),
             }],
         )?;
+        if merging.is_some() {
+            self.finish_merge()?;
+        }
         let short = branch.strip_prefix("refs/heads/").unwrap_or(&branch);
         if json {
             use crate::json::Json;
@@ -2213,6 +2218,7 @@ impl<'a> NativeRepo<'a> {
         json: bool,
         out: &mut impl Write,
     ) -> Res<()> {
+        self.ensure_no_merge_in_progress("switch")?;
         let full = format!("refs/heads/{name}");
         let current = self.head_branch()?;
 
@@ -2611,6 +2617,7 @@ impl<'a> NativeRepo<'a> {
             }
             MergeOutcome::Conflicted(resolved) => {
                 self.write_conflicted(&resolved)?;
+                self.start_merge(theirs)?;
                 let conflicts: Vec<BString> = resolved
                     .iter()
                     .filter(|r| r.conflicted)
@@ -2679,18 +2686,14 @@ impl<'a> NativeRepo<'a> {
         theirs: ObjectId,
         label: &str,
     ) -> Res<MergeOutcome> {
-        let base = self.merge_base(ours, theirs)?;
-        if base == Some(theirs) {
+        let bases = self.merge_bases(&[ours], &[theirs])?;
+        if bases == [theirs] {
             return Ok(MergeOutcome::UpToDate);
         }
-        if base == Some(ours) {
+        if bases == [ours] {
             return Ok(MergeOutcome::FastForward(theirs));
         }
-
-        let base_entries = match base {
-            Some(b) => self.commit_entries(b)?,
-            None => Vec::new(), // unrelated histories: empty base
-        };
+        let base_entries = self.base_entries(&bases)?;
         let ours_entries = self.commit_entries(ours)?;
         let theirs_entries = self.commit_entries(theirs)?;
         let resolved = self.merge_trees(&base_entries, &ours_entries, &theirs_entries, label)?;
@@ -4248,152 +4251,6 @@ impl<'a> NativeRepo<'a> {
             }],
         )?;
         Ok(())
-    }
-
-    /// The merge base (lowest common ancestor) of two commits, or `None` for
-    /// unrelated histories. Picks one base when several exist (criss-cross
-    /// histories aren't a dogfood concern yet).
-    fn merge_base(&self, a: ObjectId, b: ObjectId) -> Res<Option<ObjectId>> {
-        if a == b {
-            return Ok(Some(a));
-        }
-        let anc_a = self.ancestors(a)?;
-        let anc_b = self.ancestors(b)?;
-        let common: std::collections::HashSet<ObjectId> =
-            anc_a.intersection(&anc_b).copied().collect();
-        // a base is a common commit that is not a proper ancestor of another
-        // common commit (i.e. a maximal element of the common set)
-        let mut bases = common.clone();
-        for c in &common {
-            for x in self.ancestors(*c)? {
-                if x != *c {
-                    bases.remove(&x);
-                }
-            }
-        }
-        Ok(bases.into_iter().next())
-    }
-
-    /// All commits reachable from `start` (inclusive) via parent links.
-    fn ancestors(&self, start: ObjectId) -> Res<std::collections::HashSet<ObjectId>> {
-        let mut seen = std::collections::HashSet::new();
-        let mut stack = vec![start];
-        while let Some(c) = stack.pop() {
-            if !seen.insert(c) {
-                continue;
-            }
-            let obj = self.store.odb.get(&c)?.ok_or("commit missing from store")?;
-            for p in alt_git_codec::Commit::parse(&obj.data)?.parents() {
-                if !seen.contains(&p) {
-                    stack.push(p);
-                }
-            }
-        }
-        Ok(seen)
-    }
-
-    /// Three-way merges two trees over their common base, path by path.
-    fn merge_trees(
-        &mut self,
-        base: &[WorkEntry],
-        ours: &[WorkEntry],
-        theirs: &[WorkEntry],
-        their_label: &str,
-    ) -> Res<Vec<Resolved>> {
-        use std::collections::{BTreeSet, HashMap};
-        let map = |es: &[WorkEntry]| -> HashMap<BString, WorkEntry> {
-            es.iter().map(|e| (e.path.clone(), e.clone())).collect()
-        };
-        let (bm, om, tm) = (map(base), map(ours), map(theirs));
-        let paths: BTreeSet<BString> = bm
-            .keys()
-            .chain(om.keys())
-            .chain(tm.keys())
-            .cloned()
-            .collect();
-
-        let mut out = Vec::with_capacity(paths.len());
-        for path in paths {
-            let bo = bm.get(&path).cloned();
-            let ao = om.get(&path).cloned();
-            let to = tm.get(&path).cloned();
-            out.push(self.resolve_path(path, bo, ao, to, their_label)?);
-        }
-        Ok(out)
-    }
-
-    /// Resolves one path's three-way state into a clean entry or a conflict.
-    fn resolve_path(
-        &mut self,
-        path: BString,
-        bo: Option<WorkEntry>,
-        ao: Option<WorkEntry>,
-        to: Option<WorkEntry>,
-        their_label: &str,
-    ) -> Res<Resolved> {
-        let same = |x: &Option<WorkEntry>, y: &Option<WorkEntry>| match (x, y) {
-            (None, None) => true,
-            (Some(p), Some(q)) => p.oid == q.oid && p.mode == q.mode,
-            _ => false,
-        };
-        if same(&ao, &to) {
-            return Ok(Resolved::clean(path, ao)); // both agree (incl. both-deleted)
-        }
-        if same(&ao, &bo) {
-            return Ok(Resolved::clean(path, to)); // ours unchanged → take theirs
-        }
-        if same(&to, &bo) {
-            return Ok(Resolved::clean(path, ao)); // theirs unchanged → take ours
-        }
-
-        // both sides diverged from base
-        match (&ao, &to) {
-            (Some(a), Some(t)) => {
-                let base_bytes = match &bo {
-                    Some(b) => self.blob_bytes(b.oid)?,
-                    None => Vec::new(),
-                };
-                let ours_bytes = self.blob_bytes(a.oid)?;
-                let theirs_bytes = self.blob_bytes(t.oid)?;
-                let unmergeable = a.mode != t.mode
-                    || alt_diff::is_binary(&base_bytes)
-                    || alt_diff::is_binary(&ours_bytes)
-                    || alt_diff::is_binary(&theirs_bytes);
-                if unmergeable {
-                    // keep ours in the working tree, record all three stages
-                    return Ok(make_conflict(path, bo, ao, to, ours_bytes));
-                }
-                let labels = alt_merge::Labels {
-                    ours: "HEAD",
-                    theirs: their_label,
-                };
-                let m = alt_merge::merge(&base_bytes, &ours_bytes, &theirs_bytes, &labels);
-                if m.is_clean() {
-                    let oid = ObjectId::hash_object(self.store.algo, ObjectKind::Blob, &m.content);
-                    self.store.odb.put(oid, ObjectKind::Blob, &m.content)?;
-                    Ok(Resolved::clean(
-                        path.clone(),
-                        Some(WorkEntry {
-                            path,
-                            oid,
-                            mode: a.mode,
-                        }),
-                    ))
-                } else {
-                    Ok(make_conflict(path, bo, ao, to, m.content))
-                }
-            }
-            // modify/delete: one side changed the file, the other removed it
-            (Some(a), None) => {
-                let bytes = self.blob_bytes(a.oid)?;
-                Ok(make_conflict(path, bo, ao, to, bytes))
-            }
-            (None, Some(t)) => {
-                let bytes = self.blob_bytes(t.oid)?;
-                Ok(make_conflict(path, bo, ao, to, bytes))
-            }
-            (None, None) => unreachable!("same(ao, to) already handled both-None"),
-        }
     }
 
     /// Writes a conflicted merge state to disk: each resolution's working-tree

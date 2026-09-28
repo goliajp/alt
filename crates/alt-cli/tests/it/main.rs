@@ -22,6 +22,7 @@ mod identity;
 mod import_materialize;
 mod log_patch;
 mod merge;
+mod merge_criss_cross;
 mod monorepo_bench;
 mod op_log;
 mod push;
