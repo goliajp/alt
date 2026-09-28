@@ -8,6 +8,7 @@
 //! `--abort` has nothing to rewind.
 
 use super::commit::{NewCommit, parse_sig};
+use super::notes::MetaInput;
 use super::sequence_editor::{self as ed, Action};
 use super::*;
 
@@ -285,6 +286,12 @@ impl NativeRepo<'_> {
             &scratch,
             Some(head),
             "rebase",
+            // the note follows the commit it replaces: the replayed one, or
+            // for squash and fixup the one it melds into
+            &MetaInput {
+                carry_from: Some(if action.melds() { head } else { commit }),
+                ..Default::default()
+            },
         )?;
         Ok(())
     }

@@ -115,14 +115,19 @@ pub fn run(
         return run_json(out, repo, start, limit);
     }
 
+    let notes = repo.resolve_ref(crate::meta::NOTES_REF)?;
     let mut first = true;
     for item in repo.rev_walk(start)?.take(limit) {
         let (oid, _) = item?;
         let obj = repo.read_object(&oid)?.expect("walked oid exists");
         let payload = reencode(&obj.data);
         match args.pretty.as_str() {
+            // raw shows the stored object as is
             "raw" => write_raw(out, &oid, &payload, &mut first)?,
-            "oneline" => write_oneline(out, &oid, &payload)?,
+            "oneline" => match note_message(repo, notes, oid)? {
+                Some(m) => write_oneline(out, &oid, format!("\n\n{m}").as_bytes())?,
+                None => write_oneline(out, &oid, &payload)?,
+            },
             other => {
                 return Err(
                     format!("unsupported --pretty={other} (supported: raw, oneline)").into(),
@@ -458,9 +463,25 @@ fn emit_file_stanza(
     Ok(())
 }
 
+/// The message a commit's metadata note puts in place of its own, if any.
+fn note_message(
+    repo: &Repository,
+    notes: Option<ObjectId>,
+    oid: ObjectId,
+) -> Result<Option<String>, Box<dyn std::error::Error>> {
+    let Some(notes) = notes else {
+        return Ok(None);
+    };
+    let read = |id: ObjectId| -> crate::meta::ReadResult {
+        Ok(repo.read_object(&id)?.map(|o| (o.kind, o.data.to_vec())))
+    };
+    Ok(crate::meta::find(&read, repo.algo(), notes, oid)?.and_then(|m| m.message))
+}
+
 /// `log --json`: `{schema_version, commits:[{oid, tree, parents, author,
-/// committer, message}]}`. `author`/`committer` are the raw ident lines
-/// (`Name <email> ts tz`); `message` is the full commit message.
+/// committer, message, note_message}]}`. `author`/`committer` are the raw
+/// ident lines (`Name <email> ts tz`); `message` is the full commit message,
+/// `note_message` the replacement a metadata note holds (or null).
 fn run_json(
     out: &mut impl Write,
     repo: &Repository,
@@ -468,6 +489,7 @@ fn run_json(
     limit: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crate::json::Json;
+    let notes = repo.resolve_ref(crate::meta::NOTES_REF)?;
     let mut commits = Vec::new();
     for item in repo.rev_walk(start)?.take(limit) {
         let (oid, _) = item?;
@@ -491,6 +513,10 @@ fn run_json(
             ("author", opt(commit.author())),
             ("committer", opt(commit.committer())),
             ("message", Json::str(commit.message())),
+            (
+                "note_message",
+                note_message(repo, notes, oid)?.map_or(Json::Null, Json::str),
+            ),
         ]));
     }
     let doc = Json::Object(vec![

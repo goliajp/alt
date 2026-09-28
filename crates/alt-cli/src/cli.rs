@@ -83,6 +83,12 @@ pub enum Command {
         /// Only run the pre-commit checks on what is staged; commit nothing
         #[arg(long, conflicts_with_all = ["amend", "message", "no_verify"])]
         validate: bool,
+        /// Record a one-line decision in the commit's metadata (up to 3)
+        #[arg(long = "decision", value_name = "TEXT")]
+        decisions: Vec<String>,
+        /// Record an extra metadata field (`key=value`, e.g. `model=…`)
+        #[arg(long = "meta", value_name = "KEY=VALUE", value_parser = parse_key_value)]
+        extra: Vec<(String, String)>,
         /// Emit the new commit/tree oids (or, with --validate, the findings)
         /// as a JSON object
         #[arg(long)]
@@ -136,6 +142,12 @@ pub enum Command {
         /// of lines (matches git's default `-M50`).
         #[arg(short = 'M', long = "follow")]
         follow: bool,
+    },
+    /// Show or change the metadata recorded with a commit (kept in git
+    /// notes under refs/notes/alt/meta; the commit itself never changes)
+    Meta {
+        #[command(subcommand)]
+        op: MetaOp,
     },
     /// Find the commit that introduced a change by binary search
     Bisect {
@@ -369,6 +381,42 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+}
+
+/// `alt meta` operations.
+#[derive(Subcommand)]
+pub enum MetaOp {
+    /// Print a commit's metadata
+    Show {
+        /// The commit (default: HEAD)
+        #[arg(default_value = "HEAD")]
+        rev: String,
+        /// Emit a JSON object instead of the note text
+        #[arg(long)]
+        json: bool,
+    },
+    /// Replace a commit's message or add to its metadata, leaving the
+    /// commit itself untouched
+    Set {
+        /// The commit (default: HEAD)
+        #[arg(default_value = "HEAD")]
+        rev: String,
+        /// A message that stands in for the commit's own in `alt log`
+        #[arg(short = 'm', value_name = "MESSAGE")]
+        message: Option<String>,
+        /// Add a one-line decision (up to 3 in total)
+        #[arg(long = "decision", value_name = "TEXT")]
+        decisions: Vec<String>,
+        /// Set an extra field (`key=value`)
+        #[arg(long = "meta", value_name = "KEY=VALUE", value_parser = parse_key_value)]
+        extra: Vec<(String, String)>,
+    },
+}
+
+fn parse_key_value(s: &str) -> Result<(String, String), String> {
+    s.split_once('=')
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .ok_or_else(|| format!("expected key=value, got '{s}'"))
 }
 
 /// `alt bisect` steps, as in git.
@@ -617,6 +665,7 @@ pub fn is_native(cmd: &Command) -> bool {
             | Command::Revert { .. }
             | Command::Rebase { .. }
             | Command::Bisect { .. }
+            | Command::Meta { .. }
             | Command::Switch { .. }
             | Command::Diff { .. }
             | Command::Merge { .. }
@@ -647,26 +696,26 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
         }
         Command::Commit {
             message,
-            amend: true,
-            no_verify,
-            json,
-            ..
-        } => repo.amend(message.as_deref(), *no_verify, *json, out)?,
-        Command::Commit {
-            message,
+            amend,
             allow_empty,
             no_verify,
+            decisions,
+            extra,
             json,
             ..
-        } => repo.commit(
-            message.as_deref().unwrap_or_default(),
-            crate::native::commit::CommitOptions {
+        } => {
+            let opts = crate::native::commit::CommitOptions {
                 allow_empty: *allow_empty,
                 no_verify: *no_verify,
-            },
-            *json,
-            out,
-        )?,
+                decisions: decisions.clone(),
+                extra: extra.clone(),
+            };
+            if *amend {
+                repo.amend(message.as_deref(), opts, *json, out)?
+            } else {
+                repo.commit(message.as_deref().unwrap_or_default(), opts, *json, out)?
+            }
+        }
         Command::Status { json } => repo.status(*json, out)?,
         Command::Branch { name, delete, json } => {
             repo.branch(name.clone(), delete.clone(), *json, out)?
@@ -693,6 +742,15 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
             json,
             semantic,
         } => repo.diff(*cached, *json, *semantic, out)?,
+        Command::Meta { op } => match op {
+            MetaOp::Show { rev, json } => repo.meta_show(rev, *json, out)?,
+            MetaOp::Set {
+                rev,
+                message,
+                decisions,
+                extra,
+            } => repo.meta_set(rev, message.as_deref(), decisions, extra, out)?,
+        },
         Command::Bisect { op } => {
             match op {
                 BisectOp::Start { bad, good } => repo.bisect_start(bad.as_deref(), good, out)?,

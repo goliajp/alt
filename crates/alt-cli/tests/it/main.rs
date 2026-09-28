@@ -11,6 +11,7 @@ mod cherry_pick;
 mod ci_validate;
 mod clone;
 mod commit_loop;
+mod commit_meta;
 mod config;
 mod credential_helper;
 mod daemon_client;

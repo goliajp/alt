@@ -1,15 +1,30 @@
 //! Recording commits: `alt commit` and `alt commit --amend`.
 
+use super::notes::MetaInput;
 use super::*;
 use crate::precommit::{self, Change, Severity};
 
 /// How `alt commit` was asked to behave.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 pub struct CommitOptions {
     /// Record the commit even when it changes nothing.
     pub allow_empty: bool,
     /// Skip the pre-commit checks.
     pub no_verify: bool,
+    /// One-line decisions to record in the commit's metadata.
+    pub decisions: Vec<String>,
+    /// Extra `key=value` metadata fields.
+    pub extra: Vec<(String, String)>,
+}
+
+impl CommitOptions {
+    fn meta(&self, carry_from: Option<ObjectId>) -> MetaInput {
+        MetaInput {
+            decisions: self.decisions.clone(),
+            extra: self.extra.clone(),
+            carry_from,
+        }
+    }
 }
 
 impl NativeRepo<'_> {
@@ -75,6 +90,7 @@ impl NativeRepo<'_> {
             &branch,
             parent,
             "commit",
+            &opts.meta(None),
         )?;
         if merging.is_some() {
             self.finish_merge()?;
@@ -91,7 +107,7 @@ impl NativeRepo<'_> {
     pub fn amend(
         &mut self,
         message: Option<&str>,
-        no_verify: bool,
+        opts: CommitOptions,
         json: bool,
         out: &mut impl Write,
     ) -> Res<()> {
@@ -128,7 +144,7 @@ impl NativeRepo<'_> {
         };
 
         let tree = self.staged_tree()?;
-        if !no_verify {
+        if !opts.no_verify {
             self.run_precommit()?;
         }
         let id = self.id.clone();
@@ -150,6 +166,7 @@ impl NativeRepo<'_> {
             &branch,
             Some(old),
             "amend",
+            &opts.meta(Some(old)),
         )?;
         report_commit(&branch, commit, tree, json, out)
     }
@@ -228,13 +245,15 @@ impl NativeRepo<'_> {
     }
 
     /// Stores a commit (signed when the sign policy asks for it) and moves
-    /// `branch` from `old` to it in one ref transaction.
+    /// `branch` from `old` to it, together with the commit's metadata note,
+    /// in one ref transaction.
     pub(super) fn record_commit(
         &mut self,
         c: NewCommit<'_>,
         branch: &str,
         old: Option<ObjectId>,
         verb: &str,
+        meta: &MetaInput,
     ) -> Res<ObjectId> {
         let mut bytes = build_commit_bytes(c.tree, c.parents, c.author, c.committer, c.message);
         // when sign-policy is on and a sec key is on disk for
@@ -247,14 +266,13 @@ impl NativeRepo<'_> {
         let commit = ObjectId::hash_object(self.store.algo, ObjectKind::Commit, &bytes);
         self.store.odb.put(commit, ObjectKind::Commit, &bytes)?;
         self.store.odb.flush()?;
-        self.commit_refs(
-            verb,
-            &[RefChange {
-                name: branch.to_owned(),
-                old: old.map(RefTarget::Oid),
-                new: Some(RefTarget::Oid(commit)),
-            }],
-        )?;
+        let note = self.meta_for(c.message, c.tree, c.parents, meta)?;
+        let move_branch = RefChange {
+            name: branch.to_owned(),
+            old: old.map(RefTarget::Oid),
+            new: Some(RefTarget::Oid(commit)),
+        };
+        self.commit_refs_with_note(verb, &[move_branch], commit, &note)?;
         Ok(commit)
     }
 }

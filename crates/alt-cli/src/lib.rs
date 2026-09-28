@@ -14,6 +14,7 @@ pub mod group_commit;
 pub mod index_tx;
 pub mod json;
 pub mod log_cmd;
+pub mod meta;
 pub mod native;
 pub mod policy;
 pub mod precommit;

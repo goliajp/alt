@@ -214,6 +214,7 @@ impl NativeRepo<'_> {
             &branch,
             Some(head),
             "revert",
+            &Default::default(),
         )
     }
 

@@ -295,7 +295,7 @@ impl NativeRepo<'_> {
         }
     }
 
-    fn rev(&self, r: &str) -> Res<ObjectId> {
+    pub(super) fn rev(&self, r: &str) -> Res<ObjectId> {
         let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
         Ok(repo
             .rev_parse(r)?
