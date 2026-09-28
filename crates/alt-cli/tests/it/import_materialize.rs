@@ -101,3 +101,33 @@ fn import_into_existing_work_tree_does_not_clobber_files() {
     // The .alt store still landed though.
     assert!(dst.join(".alt").is_dir());
 }
+
+#[test]
+fn a_sha256_repository_imports_and_keeps_working() {
+    let src_tmp = tempfile::tempdir().unwrap();
+    let dst_tmp = tempfile::tempdir().unwrap();
+    let exp_tmp = tempfile::tempdir().unwrap();
+    let (src, dst) = (src_tmp.path(), dst_tmp.path());
+    git(src, &["init", "-q", "-b", "main", "--object-format=sha256"]);
+    fs::create_dir(src.join("d")).unwrap();
+    fs::write(src.join("a.txt"), "alpha\n").unwrap();
+    fs::write(src.join("d/b.txt"), "beta\n").unwrap();
+    git(src, &["add", "."]);
+    git(src, &["commit", "-q", "-m", "c1"]);
+
+    let out = ok(alt(src, &["import", &dst.display().to_string()]));
+    assert!(out.contains("materialized main"), "got: {out}");
+    assert_eq!(fs::read_to_string(dst.join("d/b.txt")).unwrap(), "beta\n");
+    assert!(ok(alt(dst, &["status"])).contains("nothing to commit"));
+
+    fs::write(dst.join("a.txt"), "changed\n").unwrap();
+    ok(alt(dst, &["add", "."]));
+    ok(alt(dst, &["commit", "-m", "c2"]));
+    assert!(ok(alt(dst, &["status"])).contains("nothing to commit"));
+
+    let exp = exp_tmp.path().join("r");
+    ok(alt(dst, &["export", &exp.display().to_string()]));
+    git(&exp, &["fsck", "--strict"]);
+    git(&exp, &["checkout", "-q", "main"]);
+    assert_eq!(fs::read_to_string(exp.join("a.txt")).unwrap(), "changed\n");
+}

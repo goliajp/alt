@@ -97,6 +97,7 @@ impl NativeRepo<'_> {
                 entries: entries.clone(),
                 extensions: Vec::new(),
             },
+            self.store.algo,
         )?;
 
         // record the index delta so `alt undo` can roll an `add`

@@ -311,6 +311,7 @@ impl NativeRepo<'_> {
                 entries,
                 extensions: Vec::new(),
             },
+            self.store.algo,
         )?;
         Ok(())
     }

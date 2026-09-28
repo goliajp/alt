@@ -169,7 +169,7 @@ impl NativeRepo<'_> {
             }
             written += 1;
         }
-        save_index(&self.index_path, &index)?;
+        save_index(&self.index_path, &index, self.store.algo)?;
         Ok(written)
     }
 

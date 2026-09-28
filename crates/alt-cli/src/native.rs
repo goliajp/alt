@@ -71,8 +71,8 @@ impl Store {
             odb: NativeOdb::open(&alt_dir)?,
             refs: RefStore::open(&alt_dir)?,
             policy: Policy::load(&alt_dir)?,
+            algo: alt_repo::native_object_format(&alt_dir)?,
             alt_dir,
-            algo: HashAlgo::Sha1,
         })
     }
 
@@ -558,7 +558,7 @@ pub fn init(dir: Option<PathBuf>, out: &mut impl Write) -> Res<()> {
             new: Some(RefTarget::Symbolic("refs/heads/main".to_owned())),
         }],
     )?;
-    save_index(&alt_dir.join("index"), &empty_index())?;
+    save_index(&alt_dir.join("index"), &empty_index(), HashAlgo::Sha1)?;
     writeln!(
         out,
         "Initialized empty alt repository in {}",
@@ -1995,6 +1995,7 @@ impl<'a> NativeRepo<'a> {
                 entries,
                 extensions: Vec::new(),
             },
+            self.store.algo,
         )?;
         Ok(())
     }
@@ -2756,6 +2757,7 @@ impl<'a> NativeRepo<'a> {
                 entries,
                 extensions: Vec::new(),
             },
+            self.store.algo,
         )?;
         // Record the undo itself so a redo can find it. We use the inverse
         // change list (swap old/new) so chaining undos behaves intuitively
@@ -4677,15 +4679,39 @@ fn empty_index() -> Index {
 }
 
 /// Atomic index write to `path`: temp file + rename (sibling temp).
-fn save_index(path: &Path, index: &Index) -> Res<()> {
-    let bytes = index.serialize(HashAlgo::Sha1);
+///
+/// Racily clean entries are handled as git does: an entry whose mtime is not
+/// older than the index file itself may be rewritten within the same clock
+/// tick (coarse on Linux) with the same size, which a stat compare cannot
+/// see. Those entries get a zero mtime, so the next scan re-hashes them.
+fn save_index(path: &Path, index: &Index, algo: HashAlgo) -> Res<()> {
     let tmp = path.with_extension("tmp");
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&tmp, &bytes)?;
+    std::fs::write(&tmp, index.serialize(algo))?;
+    let stamp = file_mtime(&std::fs::metadata(&tmp)?);
+    if index.entries.iter().any(|e| e.mtime >= stamp) {
+        let mut smudged = index.clone();
+        for e in smudged.entries.iter_mut().filter(|e| e.mtime >= stamp) {
+            e.mtime = (0, 0);
+        }
+        std::fs::write(&tmp, smudged.serialize(algo))?;
+    }
     std::fs::rename(&tmp, path)?;
     Ok(())
+}
+
+#[cfg(unix)]
+fn file_mtime(meta: &std::fs::Metadata) -> (u32, u32) {
+    use std::os::unix::fs::MetadataExt;
+    (meta.mtime() as u32, meta.mtime_nsec() as u32)
+}
+
+// stat is never trusted off unix, so no entry is ever racily clean
+#[cfg(not(unix))]
+fn file_mtime(_meta: &std::fs::Metadata) -> (u32, u32) {
+    (u32::MAX, u32::MAX)
 }
 
 /// Builds an index entry for a working-tree file, filling stat from its

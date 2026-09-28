@@ -1,3 +1,4 @@
+// CARVE-OUT: pre-existing oversized module; split pieces out as they are touched
 //! Repository facade.
 //!
 //! Domain layer between the storage crates (codec, pack, refs, config,
@@ -5,6 +6,7 @@
 //! discovery, object reads, rev-parse, revision walking — over either
 //! backend: a `.git` directory or a native `.alt` store.
 
+mod object_format;
 mod odb;
 mod revwalk;
 
@@ -17,6 +19,8 @@ use alt_git_pack::IndexedPack;
 use alt_git_refs::{RefStore, RefTarget};
 use alt_odb::NativeOdb;
 use bstr::{BString, ByteSlice};
+pub use object_format::native_object_format;
+use object_format::object_format;
 
 pub use revwalk::RevWalk;
 
@@ -126,18 +130,7 @@ impl Repository {
         // bootstrap: extensions.* must be readable before anything else,
         // and includes cannot change them — parse the plain file first
         let config_path = git_dir.join("config");
-        let plain = match fs::read(&config_path) {
-            Ok(data) => Config {
-                entries: alt_git_config::parse_file(&data)?,
-            },
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Config::default(),
-            Err(e) => return Err(e.into()),
-        };
-        let algo = match plain.get_str("extensions", None, "objectformat") {
-            None => HashAlgo::Sha1,
-            Some(v) if v.as_ref() as &[u8] == b"sha256" => HashAlgo::Sha256,
-            Some(_) => return Err(RepoError::Format("unknown extensions.objectFormat")),
-        };
+        let algo = object_format(&config_path)?;
 
         let refs = RefStore::open(&git_dir, algo)?;
         let branch = match refs.read("HEAD")? {
@@ -185,18 +178,7 @@ impl Repository {
 
     fn open_alt_dir(alt_dir: PathBuf, work_tree: Option<PathBuf>) -> Result<Self, RepoError> {
         let config_path = alt_dir.join("git-import/config");
-        let plain = match fs::read(&config_path) {
-            Ok(data) => Config {
-                entries: alt_git_config::parse_file(&data)?,
-            },
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Config::default(),
-            Err(e) => return Err(e.into()),
-        };
-        let algo = match plain.get_str("extensions", None, "objectformat") {
-            None => HashAlgo::Sha1,
-            Some(v) if v.as_ref() as &[u8] == b"sha256" => HashAlgo::Sha256,
-            Some(_) => return Err(RepoError::Format("unknown extensions.objectFormat")),
-        };
+        let algo = object_format(&config_path)?;
 
         let refs = alt_refs::RefStore::open(&alt_dir)?;
         let branch = match refs.get("HEAD") {
