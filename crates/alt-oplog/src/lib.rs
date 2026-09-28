@@ -205,6 +205,77 @@ fn replay_records(
     Ok(valid)
 }
 
+/// One pass over the whole log file: the verified ops, and where the last
+/// whole record ends against how long the file is.
+struct Scan {
+    ops: Vec<Op>,
+    by_id: HashMap<OpId, u32>,
+    valid_len: u64,
+    file_len: u64,
+}
+
+impl Scan {
+    /// A new log without its header yet, or a torn tail to cut.
+    fn needs_repair(&self) -> bool {
+        self.valid_len < HEADER_LEN as u64 || self.valid_len < self.file_len
+    }
+}
+
+fn read_all(file: &mut File) -> std::io::Result<Vec<u8>> {
+    let mut data = Vec::new();
+    file.seek(SeekFrom::Start(0))?;
+    file.read_to_end(&mut data)?;
+    Ok(data)
+}
+
+/// Verifies and replays a snapshot of the file taken under the lock.
+fn scan(data: &[u8]) -> Result<Scan, OpLogError> {
+    // a crash between create and the header fsync can leave a short
+    // file; anything that is not a header prefix is foreign
+    if data.len() < HEADER_LEN {
+        if !file_header().starts_with(data) {
+            return Err(OpLogError::Format("bad oplog header"));
+        }
+    } else {
+        if data[..4] != MAGIC {
+            return Err(OpLogError::Format("bad oplog header"));
+        }
+        if data[4] != VERSION {
+            return Err(OpLogError::Format("unsupported oplog version"));
+        }
+    }
+
+    let mut ops = Vec::new();
+    let mut by_id = HashMap::new();
+    // a record that runs past EOF (torn length field or torn body) ends
+    // the walk; the caller truncates back to the last whole record
+    let start = HEADER_LEN.min(data.len());
+    let valid_len = replay_records(data, start, ROOT, &mut ops, &mut by_id)? as u64;
+    Ok(Scan {
+        ops,
+        by_id,
+        valid_len,
+        file_len: data.len() as u64,
+    })
+}
+
+/// Rescans and repairs; the caller holds the exclusive lock.
+fn scan_and_repair(file: &mut File) -> Result<Scan, OpLogError> {
+    let mut scan = scan(&read_all(file)?)?;
+    if scan.valid_len < HEADER_LEN as u64 {
+        file.set_len(0)?;
+        file.seek(SeekFrom::Start(0))?;
+        file.write_all(&file_header())?;
+        file.sync_all()?;
+        scan.valid_len = HEADER_LEN as u64;
+    } else if scan.valid_len < scan.file_len {
+        file.set_len(scan.valid_len)?;
+        file.sync_all()?;
+    }
+    scan.file_len = scan.valid_len;
+    Ok(scan)
+}
+
 /// Takes an exclusive advisory lock on the log file for the duration of one
 /// append. `flock` is per-open-file-description and auto-releases when the fd
 /// closes (incl. a crash), so there are no stale lock files. Non-unix has no
@@ -213,6 +284,15 @@ fn replay_records(
 fn lock_exclusive(file: &File) -> std::io::Result<()> {
     use std::os::unix::io::AsRawFd;
     if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn lock_shared(file: &File) -> std::io::Result<()> {
+    use std::os::unix::io::AsRawFd;
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH) } != 0 {
         return Err(std::io::Error::last_os_error());
     }
     Ok(())
@@ -233,6 +313,11 @@ fn lock_exclusive(_file: &File) -> std::io::Result<()> {
 }
 
 #[cfg(not(unix))]
+fn lock_shared(_file: &File) -> std::io::Result<()> {
+    Ok(())
+}
+
+#[cfg(not(unix))]
 fn unlock(_file: &File) -> std::io::Result<()> {
     Ok(())
 }
@@ -241,6 +326,12 @@ impl OpLog {
     /// Opens (or creates) the log in `dir`, replaying and verifying the
     /// whole chain. A torn tail is truncated; a broken chain or corrupt
     /// record refuses to open.
+    ///
+    /// The file is read under a shared lock: writers append under the
+    /// exclusive one, so a short tail seen here is a crashed writer's, never
+    /// a live append in flight. Repairing it (or writing the header of a new log)
+    /// retakes the lock exclusively and rescans, since another opener may
+    /// have repaired it or a writer appended in between.
     pub fn open(dir: &Path) -> Result<Self, OpLogError> {
         std::fs::create_dir_all(dir)?;
         let path = dir.join("log");
@@ -250,74 +341,30 @@ impl OpLog {
             .write(true)
             .open(dir.join("sync.lock"))?;
         let durable_path = dir.join("durable");
+        let mut file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&path)?;
 
-        let existing = match std::fs::read(&path) {
-            Ok(data) => Some(data),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-            Err(e) => return Err(e.into()),
-        };
-
-        let Some(data) = existing else {
-            let mut file = OpenOptions::new()
-                .create_new(true)
-                .read(true)
-                .write(true)
-                .open(&path)?;
-            file.write_all(&file_header())?;
-            file.sync_all()?;
-            return Ok(Self {
-                file,
-                ops: Vec::new(),
-                by_id: HashMap::new(),
-                len_bytes: HEADER_LEN as u64,
-                sync_lock,
-                durable_path,
-                defer: false,
-                write_count: 0,
-            });
-        };
-
-        // a crash between create and the header fsync can leave a short
-        // file; anything that is not a header prefix is foreign
-        if data.len() < HEADER_LEN {
-            if !file_header().starts_with(&data) {
-                return Err(OpLogError::Format("bad oplog header"));
-            }
-        } else {
-            if data[..4] != MAGIC {
-                return Err(OpLogError::Format("bad oplog header"));
-            }
-            if data[4] != VERSION {
-                return Err(OpLogError::Format("unsupported oplog version"));
-            }
+        // only the read needs the lock; verifying the copy does not
+        lock_shared(&file)?;
+        let data = read_all(&mut file);
+        let _ = unlock(&file);
+        let mut scan = scan(&data?)?;
+        if scan.needs_repair() {
+            lock_exclusive(&file)?;
+            let repaired = scan_and_repair(&mut file);
+            let _ = unlock(&file);
+            scan = repaired?;
         }
-
-        let mut ops: Vec<Op> = Vec::new();
-        let mut by_id = HashMap::new();
-        // a record that runs past EOF (torn length field or torn body) ends
-        // the walk; the file is truncated back to the last whole record
-        let start = HEADER_LEN.min(data.len());
-        let valid_len = replay_records(&data, start, ROOT, &mut ops, &mut by_id)? as u64;
-
-        let mut file = OpenOptions::new().read(true).write(true).open(&path)?;
-        let len_bytes = if valid_len < HEADER_LEN as u64 {
-            file.set_len(0)?;
-            file.write_all(&file_header())?;
-            file.sync_all()?;
-            HEADER_LEN as u64
-        } else {
-            if valid_len < data.len() as u64 {
-                file.set_len(valid_len)?;
-                file.sync_all()?;
-            }
-            file.seek(SeekFrom::Start(valid_len))?;
-            valid_len
-        };
+        file.seek(SeekFrom::Start(scan.valid_len))?;
         Ok(Self {
             file,
-            ops,
-            by_id,
-            len_bytes,
+            ops: scan.ops,
+            by_id: scan.by_id,
+            len_bytes: scan.valid_len,
             sync_lock,
             durable_path,
             defer: false,
@@ -708,5 +755,43 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn open_waits_out_an_in_flight_append_instead_of_truncating_it() {
+        // a writer mid-append holds the exclusive lock with half its record
+        // on disk; an open must not mistake that for a crashed writer's torn
+        // tail and cut it off
+        let dir = tempfile::tempdir().unwrap();
+        OpLog::open(dir.path())
+            .unwrap()
+            .append("a", 1, b"first")
+            .unwrap();
+        let path = dir.path().join("log");
+        let before = std::fs::read(&path).unwrap();
+
+        // the exact bytes the next append would write, built on a copy
+        let scratch = tempfile::tempdir().unwrap();
+        std::fs::write(scratch.path().join("log"), &before).unwrap();
+        OpLog::open(scratch.path())
+            .unwrap()
+            .append("a", 2, b"second")
+            .unwrap();
+        let record = std::fs::read(scratch.path().join("log")).unwrap()[before.len()..].to_vec();
+
+        let mut writer = OpenOptions::new().append(true).open(&path).unwrap();
+        lock_exclusive(&writer).unwrap();
+        let (head, tail) = record.split_at(record.len() / 2);
+        writer.write_all(head).unwrap();
+
+        let log_dir = dir.path().to_path_buf();
+        let opener = std::thread::spawn(move || OpLog::open(&log_dir).unwrap().len());
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(!opener.is_finished(), "open did not wait for the writer");
+
+        writer.write_all(tail).unwrap();
+        unlock(&writer).unwrap();
+        assert_eq!(opener.join().unwrap(), 2, "the in-flight record was cut");
     }
 }
