@@ -62,7 +62,7 @@ pub struct Status {
 /// nothing changed.
 pub fn scan_worktree(root: &Path, algo: HashAlgo) -> Result<Vec<WorkEntry>, WorktreeError> {
     let mut out = Vec::new();
-    let mut stack = ignore::IgnoreStack::new();
+    let mut stack = ignore::IgnoreStack::with_global_excludes()?;
     scan_dir(root, root, algo, None, &mut stack, &mut out)?;
     out.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(out)
@@ -93,7 +93,7 @@ pub fn scan_worktree_with_index(
         }
     }
     let mut out = Vec::new();
-    let mut stack = ignore::IgnoreStack::new();
+    let mut stack = ignore::IgnoreStack::with_global_excludes()?;
     scan_dir(root, root, algo, Some(&by_path), &mut stack, &mut out)?;
     out.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(out)
