@@ -382,7 +382,7 @@ mod tests {
 
     #[test]
     fn dotdir_anchored_dir_only_matches_top_level_directory() {
-        // The shape `alt`'s own `.gitignore` uses for `/.dev/`, `/.alt/`.
+        // a rooted directory rule, the shape of `/.alt/` or `/target/`
         assert!(check("/.dev/", ".dev", true));
         assert!(check("/.dev/", ".dev", true));
         assert!(!check("/.dev/", ".dev", false)); // file with same name
