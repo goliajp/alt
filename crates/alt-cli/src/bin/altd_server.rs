@@ -1651,6 +1651,8 @@ fn commit_ref_updates(
         } else {
             None
         },
+        // a served repository has no working trees to keep in step
+        state_check: None,
     };
     store_guard
         .refs_mut()

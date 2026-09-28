@@ -1,3 +1,4 @@
+// CARVE-OUT: pre-existing oversized module; split pieces out as they are touched
 //! Native `.alt` repository commands: `init`, `add`, `commit`, `status`.
 //! These wire the alt-worktree write primitives and alt-refs op log into a
 //! dogfoodable commit loop. The control dir is `<root>/.alt`; the index is
@@ -17,6 +18,8 @@ use alt_worktree::{
     scan_indexed_paths, scan_worktree, scan_worktree_with_index, status, write_commit, write_tree,
 };
 use bstr::{BString, ByteSlice};
+
+mod workspace;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -1049,6 +1052,10 @@ impl<'a> NativeRepo<'a> {
             }
             allow.is_empty() || allow.iter().any(|g| g.matches(name))
         };
+        let own_head = self.head_ref.clone();
+        let one_workspace_per_branch = move |refs: &_, changes: &[RefChange]| {
+            workspace::one_workspace_per_branch(&own_head, refs, changes)
+        };
         let policy = RefPolicy {
             read_only,
             is_branch_allowed: if has_constraint {
@@ -1056,6 +1063,7 @@ impl<'a> NativeRepo<'a> {
             } else {
                 None
             },
+            state_check: Some(&one_workspace_per_branch),
         };
         let actor = self.id.actor(verb);
         let id =
@@ -1213,212 +1221,6 @@ impl<'a> NativeRepo<'a> {
             }
         }
         Ok(false)
-    }
-
-    /// `alt workspace add <name> <path>`: create a parallel workspace whose
-    /// working tree is `worktree`, checked out on `branch`. The HEAD is a
-    /// per-workspace ref in the shared store, so it is transactional and
-    /// undoable; the index and working tree are this workspace's alone.
-    pub fn create_workspace(&mut self, name: &str, worktree: &Path, branch: &str) -> Res<()> {
-        check_workspace_name(name)?;
-        let head_ref = format!("workspaces/{name}/HEAD");
-        if self.store.refs.get(&head_ref).is_some() {
-            return Err(format!("a workspace named '{name}' already exists").into());
-        }
-        let branch_ref = format!("refs/heads/{branch}");
-        let commit = self
-            .store
-            .refs
-            .resolve(&branch_ref)?
-            .ok_or_else(|| format!("invalid reference: {branch}"))?;
-
-        // the working tree must live outside the repository: a tree nested
-        // under another workspace's would show up there as untracked files.
-        std::fs::create_dir_all(worktree)?;
-        let abs = std::fs::canonicalize(worktree)?;
-        let repo_root =
-            std::fs::canonicalize(self.store.alt_dir.parent().unwrap_or(&self.store.alt_dir))?;
-        if abs.starts_with(&repo_root) {
-            return Err("workspace working tree must be outside the repository".into());
-        }
-
-        let ws_dir = self.store.alt_dir.join("workspaces").join(name);
-        std::fs::create_dir_all(&ws_dir)?;
-        std::fs::write(
-            ws_dir.join("meta"),
-            abs.to_str().ok_or("non-utf8 worktree path")?,
-        )?;
-        // a `.alt` *file* in the working tree points back at the repo, so
-        // commands run from inside it auto-select this workspace (git-worktree
-        // style). scan_worktree skips `.alt` by name, so it is not content.
-        std::fs::write(
-            abs.join(".alt"),
-            format!(
-                "{}\n{name}\n",
-                repo_root.to_str().ok_or("non-utf8 repo path")?
-            ),
-        )?;
-
-        // point this workspace's HEAD at the branch (one ref transaction)
-        self.commit_refs_unkeyed(
-            "workspace",
-            &[RefChange {
-                name: head_ref.clone(),
-                old: None,
-                new: Some(RefTarget::Symbolic(branch_ref)),
-            }],
-        )?;
-
-        // materialize the branch tree into the new working tree + index by
-        // attaching a child view (sharing this store) and checking out from an
-        // empty base
-        let child = Coord {
-            root: abs,
-            workspace: name.to_owned(),
-            head_ref,
-            index_path: ws_dir.join("index"),
-        };
-        let mut ws = NativeRepo::attach(&mut *self.store, child, self.id.clone(), None);
-        let target = ws.commit_entries(commit)?;
-        ws.checkout(&[], &target)?;
-        Ok(())
-    }
-
-    /// `alt workspace remove <name>`: drop a named workspace's HEAD ref and
-    /// control dir. The working-tree files are left in place (the caller owns
-    /// them); the default workspace cannot be removed.
-    pub fn remove_workspace(&mut self, name: &str) -> Res<()> {
-        if name == DEFAULT_WORKSPACE {
-            return Err("cannot remove the default workspace".into());
-        }
-        let head_ref = format!("workspaces/{name}/HEAD");
-        let old = self
-            .store
-            .refs
-            .get(&head_ref)
-            .cloned()
-            .ok_or_else(|| format!("no such workspace '{name}'"))?;
-        self.commit_refs_unkeyed(
-            "workspace",
-            &[RefChange {
-                name: head_ref,
-                old: Some(old),
-                new: None,
-            }],
-        )?;
-        let ws_dir = self.store.alt_dir.join("workspaces").join(name);
-        // drop the working tree's `.alt` marker so it no longer resolves
-        if let Ok(worktree) = std::fs::read_to_string(ws_dir.join("meta")) {
-            let _ = std::fs::remove_file(PathBuf::from(worktree.trim()).join(".alt"));
-        }
-        if ws_dir.exists() {
-            std::fs::remove_dir_all(&ws_dir)?;
-        }
-        Ok(())
-    }
-
-    /// All workspaces: the default plus every registered named one, as
-    /// `(name, working-tree path, is-current)`.
-    pub fn list_workspaces(&self) -> Res<Vec<(String, PathBuf, bool)>> {
-        let mut out = vec![(
-            DEFAULT_WORKSPACE.to_owned(),
-            self.store
-                .alt_dir
-                .parent()
-                .unwrap_or(&self.store.alt_dir)
-                .to_path_buf(),
-            self.workspace == DEFAULT_WORKSPACE,
-        )];
-        let ws_root = self.store.alt_dir.join("workspaces");
-        if let Ok(entries) = std::fs::read_dir(&ws_root) {
-            let mut named: Vec<_> = entries.filter_map(|e| e.ok()).collect();
-            named.sort_by_key(|e| e.file_name());
-            for entry in named {
-                let name = entry.file_name().to_string_lossy().into_owned();
-                let meta = entry.path().join("meta");
-                if let Ok(worktree) = std::fs::read_to_string(&meta) {
-                    out.push((
-                        name.clone(),
-                        PathBuf::from(worktree.trim()),
-                        self.workspace == name,
-                    ));
-                }
-            }
-        }
-        Ok(out)
-    }
-
-    /// `alt workspace add <name> <path> [branch]`: create the workspace (on
-    /// `branch`, defaulting to the current branch) and report it.
-    pub fn workspace_add(
-        &mut self,
-        name: &str,
-        path: &Path,
-        branch: Option<&str>,
-        json: bool,
-        out: &mut impl Write,
-    ) -> Res<()> {
-        let cur = self.head_branch()?;
-        let branch = match branch {
-            Some(b) => b.to_owned(),
-            None => cur.strip_prefix("refs/heads/").unwrap_or(&cur).to_owned(),
-        };
-        self.create_workspace(name, path, &branch)?;
-        if json {
-            use crate::json::Json;
-            crate::json::emit(
-                out,
-                vec![
-                    ("workspace", Json::str(name)),
-                    ("branch", Json::str(&branch)),
-                    ("path", Json::str(path.to_string_lossy().as_bytes())),
-                ],
-            )?;
-        } else {
-            writeln!(
-                out,
-                "Created workspace '{name}' at {} on {branch}",
-                path.display()
-            )?;
-        }
-        Ok(())
-    }
-
-    /// `alt workspace remove <name>`: drop the workspace and report it.
-    pub fn workspace_remove(&mut self, name: &str, json: bool, out: &mut impl Write) -> Res<()> {
-        self.remove_workspace(name)?;
-        if json {
-            use crate::json::Json;
-            crate::json::emit(out, vec![("removed", Json::str(name))])?;
-        } else {
-            writeln!(out, "Removed workspace '{name}'")?;
-        }
-        Ok(())
-    }
-
-    /// `alt workspace list`: the workspaces, human or JSON.
-    pub fn workspace_list(&self, json: bool, out: &mut impl Write) -> Res<()> {
-        let list = self.list_workspaces()?;
-        if json {
-            use crate::json::Json;
-            let arr = list
-                .iter()
-                .map(|(name, path, current)| {
-                    Json::Object(vec![
-                        ("name", Json::str(name)),
-                        ("path", Json::str(path.to_string_lossy().as_bytes())),
-                        ("current", Json::Bool(*current)),
-                    ])
-                })
-                .collect();
-            crate::json::emit(out, vec![("workspaces", Json::Array(arr))])?;
-        } else {
-            for (name, path, current) in &list {
-                let mark = if *current { "* " } else { "  " };
-                writeln!(out, "{mark}{name}\t{}", path.display())?;
-            }
-        }
-        Ok(())
     }
 
     fn index(&self) -> Res<Index> {

@@ -38,6 +38,7 @@ mod verify_commit;
 mod wire_corpus;
 mod wire_test_server;
 mod workspace;
+mod workspace_branch_guard;
 mod write_json;
 
 mod cli_matrix;
