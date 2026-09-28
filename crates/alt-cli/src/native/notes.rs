@@ -83,6 +83,9 @@ impl NativeRepo<'_> {
     /// ref change that publishes it.
     pub(super) fn note_change(&mut self, target: ObjectId, note: &Meta) -> Res<RefChange> {
         let parent = self.store.refs.resolve(meta::NOTES_REF)?;
+        // another writer flushes its objects before it moves the ref, so
+        // catching the odb up after reading the ref makes the tip readable
+        self.store.odb.refresh()?;
         let (name, email) = self.id.sig();
         let signature = format!("{name} <{email}> {} +0000", now_ms() / 1000);
         let algo = self.store.algo;

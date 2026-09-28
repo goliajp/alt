@@ -176,10 +176,9 @@ fn concurrent_commits_under_relaxed_durability_dont_corrupt_the_store() {
                 std::thread::spawn(move || {
                     std::fs::write(tree.join("f.txt"), format!("round {r}\n")).unwrap();
                     assert!(alt_fast(&tree, &["add", "."]).status.success(), "add");
-                    assert!(
-                        alt_fast(&tree, &["commit", "-m", "work"]).status.success(),
-                        "commit"
-                    );
+                    let o = alt_fast(&tree, &["commit", "-m", "work"]);
+                    let err = String::from_utf8_lossy(&o.stderr);
+                    assert!(o.status.success(), "commit: {err}");
                 })
             })
             .collect();
