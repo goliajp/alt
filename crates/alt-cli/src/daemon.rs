@@ -68,6 +68,16 @@ fn get_u32(buf: &[u8], at: &mut usize) -> io::Result<u32> {
     Ok(v)
 }
 
+/// Reads an item count, rejecting one the rest of the frame cannot hold at
+/// `min_item` bytes per item, so a hostile count cannot drive the allocation.
+fn get_count(buf: &[u8], at: &mut usize, min_item: usize) -> io::Result<usize> {
+    let n = get_u32(buf, at)? as usize;
+    if n > (buf.len() - *at) / min_item {
+        return Err(truncated());
+    }
+    Ok(n)
+}
+
 fn get_bytes(buf: &[u8], at: &mut usize) -> io::Result<Vec<u8>> {
     let len = get_u32(buf, at)? as usize;
     let end = at
@@ -119,13 +129,13 @@ impl Request {
 
     pub fn decode(buf: &[u8]) -> io::Result<Request> {
         let mut at = 0;
-        let n = get_u32(buf, &mut at)? as usize;
+        let n = get_count(buf, &mut at, 4)?;
         let mut args = Vec::with_capacity(n);
         for _ in 0..n {
             args.push(get_string(buf, &mut at)?);
         }
         let cwd = PathBuf::from(get_string(buf, &mut at)?);
-        let m = get_u32(buf, &mut at)? as usize;
+        let m = get_count(buf, &mut at, 8)?;
         let mut env = Vec::with_capacity(m);
         for _ in 0..m {
             let k = get_string(buf, &mut at)?;
@@ -294,5 +304,13 @@ mod tests {
     fn truncated_frame_is_an_error() {
         assert!(Request::decode(&[0xff, 0xff, 0xff, 0xff]).is_err());
         assert!(Response::decode(&[]).is_err());
+    }
+
+    #[test]
+    fn oversized_env_count_is_an_error() {
+        // zero args, empty cwd, then an env count no frame could back
+        let mut frame = vec![0, 0, 0, 0, 0, 0, 0, 0];
+        frame.extend_from_slice(&u32::MAX.to_le_bytes());
+        assert!(Request::decode(&frame).is_err());
     }
 }
