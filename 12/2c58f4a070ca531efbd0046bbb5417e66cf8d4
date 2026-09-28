@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: feat
+summary: add an LFS pointer and batch-download client
+author-type: human
+author: doracawl
+touched: Cargo.lock
+touched: Cargo.toml
+touched: crates/alt-lfs/Cargo.toml
+touched: crates/alt-lfs/src/lib.rs
+touched: crates/alt-lfs/tests/it/download.rs
+touched: crates/alt-lfs/tests/it/main.rs
+touched: scripts/gate.sh
