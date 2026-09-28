@@ -326,7 +326,8 @@ pub enum WorkspaceOp {
         name: String,
         /// Working-tree directory for the workspace
         path: std::path::PathBuf,
-        /// Branch to check out (defaults to the current branch)
+        /// Branch to check out (defaults to a new branch named after the
+        /// workspace, at the current commit)
         branch: Option<String>,
     },
     /// List the workspaces

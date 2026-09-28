@@ -42,6 +42,10 @@ pub enum RefError {
     /// audit message.
     #[error("capability denied: {0}")]
     CapabilityDenied(String),
+    /// The caller's [`RefPolicy::state_check`] refused the transaction
+    /// against the current ref state.
+    #[error("{0}")]
+    Rejected(String),
 }
 
 /// Per-call capability gate for ref-affecting transactions. The store invokes
@@ -63,7 +67,15 @@ pub struct RefPolicy<'a> {
     /// `Some(f)` constrains writable ref names to those `f` accepts. `None`
     /// (the common case: no policy file, or no rule matched) is "any name OK".
     pub is_branch_allowed: Option<&'a dyn Fn(&str) -> bool>,
+    /// `Some(f)` vets the transaction against the ref state it would apply
+    /// to: `f` sees every ref as it stands after catching up on other
+    /// writers, inside the same lock, so the verdict cannot go stale before
+    /// the write. `Err(reason)` aborts it as [`RefError::Rejected`].
+    pub state_check: Option<&'a StateCheck>,
 }
+
+/// See [`RefPolicy::state_check`].
+pub type StateCheck = dyn Fn(&BTreeMap<String, RefTarget>, &[RefChange]) -> Result<(), String>;
 
 impl RefPolicy<'_> {
     /// The unconstrained policy: any ref, any direction. Pass this (or simply
@@ -73,10 +85,15 @@ impl RefPolicy<'_> {
         RefPolicy {
             read_only: false,
             is_branch_allowed: None,
+            state_check: None,
         }
     }
 
-    fn check(&self, changes: &[RefChange]) -> Result<(), RefError> {
+    fn check(
+        &self,
+        refs: &BTreeMap<String, RefTarget>,
+        changes: &[RefChange],
+    ) -> Result<(), RefError> {
         if self.read_only && !changes.is_empty() {
             return Err(RefError::CapabilityDenied(
                 "<read-only>: principal cannot write any ref".into(),
@@ -91,6 +108,9 @@ impl RefPolicy<'_> {
                     )));
                 }
             }
+        }
+        if let Some(f) = self.state_check {
+            f(refs, changes).map_err(RefError::Rejected)?;
         }
         Ok(())
     }
@@ -217,7 +237,7 @@ impl RefStore {
                     // append (no oplog row, no idempotency update) — denial
                     // costs nothing observable.
                     if let Some(p) = policy {
-                        p.check(changes)?;
+                        p.check(refs, changes)?;
                     }
                     apply_changes(&mut refs.clone(), changes, false)?;
                     Ok(tx::encode_tx(changes, key))
