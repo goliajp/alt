@@ -197,6 +197,15 @@ fn main() {
         .filter(|n: &usize| *n > 0)
         .unwrap_or(4);
 
+    // M11/W25: install signal handlers so SIGINT (Ctrl-C) and SIGTERM
+    // (`systemctl stop`, `docker stop`, k8s preStop) tip the shutdown
+    // flag. The handler must stay async-signal-safe, so it only does an
+    // atomic store; the main thread polls it and drives the actual
+    // shutdown sequence. Installed before the listening line: a
+    // supervisor may signal as soon as it sees it, and a signal landing
+    // earlier would take the default action and skip the drain.
+    install_signal_handlers();
+
     let server =
         Arc::new(Server::http(&bind).unwrap_or_else(|e| die(&format!("bind {bind}: {e}"))));
     eprintln!(
@@ -204,13 +213,6 @@ fn main() {
         server.server_addr(),
         mode.describe()
     );
-
-    // M11/W25: install signal handlers so SIGINT (Ctrl-C) and SIGTERM
-    // (`systemctl stop`, `docker stop`, k8s preStop) tip the shutdown
-    // flag. The handler must stay async-signal-safe, so it only does an
-    // atomic store; the main thread polls it and drives the actual
-    // shutdown sequence.
-    install_signal_handlers();
 
     let mode = Arc::new(mode);
     let mut handles = Vec::with_capacity(workers);
