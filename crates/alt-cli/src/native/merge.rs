@@ -31,7 +31,7 @@ impl NativeRepo<'_> {
     }
 
     /// Every commit reachable from `starts` (inclusive), each with its parents.
-    fn ancestry(
+    pub(super) fn ancestry(
         &self,
         starts: &[ObjectId],
     ) -> Res<std::collections::HashMap<ObjectId, Vec<ObjectId>>> {
@@ -245,6 +245,13 @@ impl NativeRepo<'_> {
             )
             .into());
         }
+        if self.rebase_in_progress() {
+            return Err(format!(
+                "{verb}: a rebase is in progress; finish it with `alt rebase --continue`, \
+                 `--skip` or `--abort`"
+            )
+            .into());
+        }
         if self.revert_state()?.is_some() {
             return Err(format!(
                 "{verb}: a revert is in progress; finish it with `alt revert --continue` \
@@ -253,5 +260,106 @@ impl NativeRepo<'_> {
             .into());
         }
         Ok(())
+    }
+
+    /// Writes a conflicted merge state to disk: each resolution's working-tree
+    /// bytes, then an index carrying stage-0 entries for clean paths and
+    /// stage 1/2/3 entries for conflicted ones (so git tools see the merge).
+    pub(super) fn write_conflicted(&mut self, resolved: &[Resolved]) -> Res<()> {
+        for r in resolved {
+            let abs = self.abs(&r.path)?;
+            if let Some(bytes) = &r.worktree {
+                if let Some(parent) = abs.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                if abs.symlink_metadata().is_ok() {
+                    std::fs::remove_file(&abs)?;
+                }
+                std::fs::write(&abs, bytes)?;
+            } else {
+                match &r.entry {
+                    Some(e) => self.materialize(e)?,
+                    None => {
+                        if abs.symlink_metadata().is_ok() {
+                            std::fs::remove_file(&abs)?;
+                            self.prune_empty_dirs(abs.parent());
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut entries = Vec::new();
+        for r in resolved {
+            if r.conflicted {
+                for (stage, w) in &r.stages {
+                    entries.push(stage_entry(w, *stage));
+                }
+            } else if let Some(e) = &r.entry {
+                entries.push(self.make_entry(e)?);
+            }
+        }
+        save_index(
+            &self.index_path,
+            &Index {
+                version: 2,
+                entries,
+                extensions: Vec::new(),
+            },
+        )?;
+        Ok(())
+    }
+}
+
+/// One path's merge resolution.
+pub(super) struct Resolved {
+    pub(super) path: BString,
+    /// The clean result entry (`None` = deleted); meaningless when conflicted.
+    pub(super) entry: Option<WorkEntry>,
+    pub(super) conflicted: bool,
+    /// Bytes to write to the working tree on conflict (markers or the kept
+    /// side); `None` for a clean resolution.
+    pub(super) worktree: Option<Vec<u8>>,
+    /// Unmerged index entries `(stage, entry)` for a conflict.
+    pub(super) stages: Vec<(u8, WorkEntry)>,
+}
+
+impl Resolved {
+    pub(super) fn clean(path: BString, entry: Option<WorkEntry>) -> Self {
+        Resolved {
+            path,
+            entry,
+            conflicted: false,
+            worktree: None,
+            stages: Vec::new(),
+        }
+    }
+}
+
+/// Builds a conflicted resolution: working-tree `bytes` plus stage 1/2/3
+/// index entries for whichever of base/ours/theirs are present.
+pub(super) fn make_conflict(
+    path: BString,
+    bo: Option<WorkEntry>,
+    ao: Option<WorkEntry>,
+    to: Option<WorkEntry>,
+    bytes: Vec<u8>,
+) -> Resolved {
+    let mut stages = Vec::new();
+    if let Some(b) = bo {
+        stages.push((1u8, b));
+    }
+    if let Some(a) = ao {
+        stages.push((2u8, a));
+    }
+    if let Some(t) = to {
+        stages.push((3u8, t));
+    }
+    Resolved {
+        path,
+        entry: None,
+        conflicted: true,
+        worktree: Some(bytes),
+        stages,
     }
 }

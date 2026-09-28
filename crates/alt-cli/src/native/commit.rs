@@ -45,6 +45,7 @@ impl NativeRepo<'_> {
             self.finish_merge()?;
         }
         self.revert_committed()?;
+        self.rebase_committed()?;
         report_commit(&branch, commit, tree, json, out)
     }
 
@@ -168,7 +169,7 @@ fn with_newline(message: &str) -> String {
 }
 
 /// Splits a git identity line `Name <email> <seconds> <tz>`.
-fn parse_sig(line: &str) -> Res<Sig<'_>> {
+pub(super) fn parse_sig(line: &str) -> Res<Sig<'_>> {
     let bad = || format!("malformed identity line: {line}");
     let (who, tz) = line.rsplit_once(' ').ok_or_else(bad)?;
     let (who, when) = who.rsplit_once(' ').ok_or_else(bad)?;

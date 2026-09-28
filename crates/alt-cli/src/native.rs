@@ -22,7 +22,10 @@ use bstr::{BString, ByteSlice};
 mod cherry_pick;
 mod commit;
 mod merge;
+use merge::Resolved;
+mod rebase;
 mod revert;
+mod sequence_editor;
 mod workspace;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
@@ -4041,54 +4044,6 @@ impl<'a> NativeRepo<'a> {
         )?;
         Ok(())
     }
-
-    /// Writes a conflicted merge state to disk: each resolution's working-tree
-    /// bytes, then an index carrying stage-0 entries for clean paths and
-    /// stage 1/2/3 entries for conflicted ones (so git tools see the merge).
-    fn write_conflicted(&mut self, resolved: &[Resolved]) -> Res<()> {
-        for r in resolved {
-            let abs = self.abs(&r.path)?;
-            if let Some(bytes) = &r.worktree {
-                if let Some(parent) = abs.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-                if abs.symlink_metadata().is_ok() {
-                    std::fs::remove_file(&abs)?;
-                }
-                std::fs::write(&abs, bytes)?;
-            } else {
-                match &r.entry {
-                    Some(e) => self.materialize(e)?,
-                    None => {
-                        if abs.symlink_metadata().is_ok() {
-                            std::fs::remove_file(&abs)?;
-                            self.prune_empty_dirs(abs.parent());
-                        }
-                    }
-                }
-            }
-        }
-
-        let mut entries = Vec::new();
-        for r in resolved {
-            if r.conflicted {
-                for (stage, w) in &r.stages {
-                    entries.push(stage_entry(w, *stage));
-                }
-            } else if let Some(e) = &r.entry {
-                entries.push(self.make_entry(e)?);
-            }
-        }
-        save_index(
-            &self.index_path,
-            &Index {
-                version: 2,
-                entries,
-                extensions: Vec::new(),
-            },
-        )?;
-        Ok(())
-    }
 }
 
 /// Renders `status` as the stable JSON schema (version 1):
@@ -4466,59 +4421,6 @@ enum MergeOutcome {
     },
     /// At least one path conflicts; the per-path resolutions to write out.
     Conflicted(Vec<Resolved>),
-}
-
-/// One path's merge resolution.
-struct Resolved {
-    path: BString,
-    /// The clean result entry (`None` = deleted); meaningless when conflicted.
-    entry: Option<WorkEntry>,
-    conflicted: bool,
-    /// Bytes to write to the working tree on conflict (markers or the kept
-    /// side); `None` for a clean resolution.
-    worktree: Option<Vec<u8>>,
-    /// Unmerged index entries `(stage, entry)` for a conflict.
-    stages: Vec<(u8, WorkEntry)>,
-}
-
-impl Resolved {
-    fn clean(path: BString, entry: Option<WorkEntry>) -> Self {
-        Resolved {
-            path,
-            entry,
-            conflicted: false,
-            worktree: None,
-            stages: Vec::new(),
-        }
-    }
-}
-
-/// Builds a conflicted resolution: working-tree `bytes` plus stage 1/2/3
-/// index entries for whichever of base/ours/theirs are present.
-fn make_conflict(
-    path: BString,
-    bo: Option<WorkEntry>,
-    ao: Option<WorkEntry>,
-    to: Option<WorkEntry>,
-    bytes: Vec<u8>,
-) -> Resolved {
-    let mut stages = Vec::new();
-    if let Some(b) = bo {
-        stages.push((1u8, b));
-    }
-    if let Some(a) = ao {
-        stages.push((2u8, a));
-    }
-    if let Some(t) = to {
-        stages.push((3u8, t));
-    }
-    Resolved {
-        path,
-        entry: None,
-        conflicted: true,
-        worktree: Some(bytes),
-        stages,
-    }
 }
 
 /// A zero-stat index entry at a given merge `stage` (1=base, 2=ours,

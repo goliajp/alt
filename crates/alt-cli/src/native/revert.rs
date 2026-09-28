@@ -308,7 +308,7 @@ impl NativeRepo<'_> {
             .ok_or_else(|| format!("{verb}: the branch has no commits yet"))?)
     }
 
-    fn commit_tree(&self, commit: ObjectId) -> Res<ObjectId> {
+    pub(super) fn commit_tree(&self, commit: ObjectId) -> Res<ObjectId> {
         let obj = self
             .store
             .odb
@@ -319,7 +319,7 @@ impl NativeRepo<'_> {
             .ok_or("commit without a tree")?)
     }
 
-    fn commit_parents(&self, commit: ObjectId) -> Res<Vec<ObjectId>> {
+    pub(super) fn commit_parents(&self, commit: ObjectId) -> Res<Vec<ObjectId>> {
         let obj = self
             .store
             .odb

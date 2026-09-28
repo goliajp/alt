@@ -127,6 +127,28 @@ pub enum Command {
         #[arg(short = 'M', long = "follow")]
         follow: bool,
     },
+    /// Replay the current branch's own commits onto another base
+    Rebase {
+        /// The base to replay onto
+        #[arg(required_unless_present_any = ["cont", "skip", "abort"])]
+        upstream: Option<String>,
+        /// Edit the list of commits first (pick, reword, squash, fixup,
+        /// drop) in $GIT_SEQUENCE_EDITOR, $GIT_EDITOR, $VISUAL or $EDITOR
+        #[arg(short = 'i', long)]
+        interactive: bool,
+        /// Commit the resolved step and go on
+        #[arg(long = "continue", id = "cont", conflicts_with_all = ["upstream", "skip", "abort"])]
+        cont: bool,
+        /// Drop the stopped step and go on
+        #[arg(long, conflicts_with_all = ["upstream", "abort"])]
+        skip: bool,
+        /// Put the branch back as it was before the rebase
+        #[arg(long, conflicts_with = "upstream")]
+        abort: bool,
+        /// Emit a structured JSON result instead of human lines.
+        #[arg(long)]
+        json: bool,
+    },
     /// Record new commits that undo earlier ones
     Revert {
         /// Commits to revert, in order
@@ -552,6 +574,7 @@ pub fn is_native(cmd: &Command) -> bool {
             | Command::Tag { .. }
             | Command::CherryPick { .. }
             | Command::Revert { .. }
+            | Command::Rebase { .. }
             | Command::Switch { .. }
             | Command::Diff { .. }
             | Command::Merge { .. }
@@ -607,6 +630,29 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
             json,
             semantic,
         } => repo.diff(*cached, *json, *semantic, out)?,
+        Command::Rebase {
+            upstream,
+            interactive,
+            cont,
+            skip,
+            abort,
+            json,
+        } => {
+            if *abort {
+                repo.rebase_abort(out)?;
+                return Ok(0);
+            }
+            let stopped = if *cont {
+                repo.rebase_continue(*json, out)?
+            } else if *skip {
+                repo.rebase_skip(*json, out)?
+            } else {
+                let upstream = upstream.as_deref().unwrap_or_default();
+                repo.rebase(upstream, *interactive, *json, out)?
+            };
+            // git exits 1 when a rebase stops in conflict
+            return Ok(if stopped { 1 } else { 0 });
+        }
         Command::Revert {
             revs,
             mainline,
