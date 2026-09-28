@@ -127,6 +127,27 @@ pub enum Command {
         #[arg(short = 'M', long = "follow")]
         follow: bool,
     },
+    /// Record new commits that undo earlier ones
+    Revert {
+        /// Commits to revert, in order
+        #[arg(required_unless_present_any = ["cont", "abort"])]
+        revs: Vec<String>,
+        /// For a merge commit, the parent (1-based) whose side is kept
+        #[arg(short = 'm', long = "mainline")]
+        mainline: Option<usize>,
+        /// Commit the resolved revert and go on with the rest
+        #[arg(long = "continue", id = "cont", conflicts_with_all = ["revs", "abort", "mainline"])]
+        cont: bool,
+        /// Put the branch back where it was before the reverts
+        #[arg(long, conflicts_with_all = ["revs", "mainline"])]
+        abort: bool,
+        /// Use the generated message (alt never opens an editor; accepted as in git)
+        #[arg(long)]
+        no_edit: bool,
+        /// Emit a structured JSON result instead of human lines.
+        #[arg(long)]
+        json: bool,
+    },
     /// Apply the changes from a commit on top of the current branch
     CherryPick {
         /// Revision of the commit to apply
@@ -530,6 +551,7 @@ pub fn is_native(cmd: &Command) -> bool {
             | Command::Branch { .. }
             | Command::Tag { .. }
             | Command::CherryPick { .. }
+            | Command::Revert { .. }
             | Command::Switch { .. }
             | Command::Diff { .. }
             | Command::Merge { .. }
@@ -585,6 +607,26 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
             json,
             semantic,
         } => repo.diff(*cached, *json, *semantic, out)?,
+        Command::Revert {
+            revs,
+            mainline,
+            cont,
+            abort,
+            json,
+            ..
+        } => {
+            if *abort {
+                repo.revert_abort(out)?;
+                return Ok(0);
+            }
+            let stopped = if *cont {
+                repo.revert_continue(*json, out)?
+            } else {
+                repo.revert(revs, *mainline, *json, out)?
+            };
+            // git exits 1 when a revert stops in conflict
+            return Ok(if stopped { 1 } else { 0 });
+        }
         Command::CherryPick { rev, json } => {
             // git exits 1 when a cherry-pick stops in conflict
             return Ok(if repo.cherry_pick(rev, *json, out)? {

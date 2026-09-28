@@ -44,6 +44,7 @@ impl NativeRepo<'_> {
         if merging.is_some() {
             self.finish_merge()?;
         }
+        self.revert_committed()?;
         report_commit(&branch, commit, tree, json, out)
     }
 
@@ -109,7 +110,7 @@ impl NativeRepo<'_> {
     }
 
     /// The index's stage-0 entries written out as a tree.
-    fn staged_tree(&mut self) -> Res<ObjectId> {
+    pub(super) fn staged_tree(&mut self) -> Res<ObjectId> {
         let staged = index_entries(&self.index()?);
         if staged.is_empty() {
             return Err("nothing to commit (empty index)".into());
@@ -119,7 +120,7 @@ impl NativeRepo<'_> {
 
     /// Stores a commit (signed when the sign policy asks for it) and moves
     /// `branch` from `old` to it in one ref transaction.
-    fn record_commit(
+    pub(super) fn record_commit(
         &mut self,
         c: NewCommit<'_>,
         branch: &str,
@@ -150,12 +151,12 @@ impl NativeRepo<'_> {
 }
 
 /// The content of a commit about to be written.
-struct NewCommit<'a> {
-    tree: ObjectId,
-    parents: &'a [ObjectId],
-    author: &'a Sig<'a>,
-    committer: &'a Sig<'a>,
-    message: &'a str,
+pub(super) struct NewCommit<'a> {
+    pub(super) tree: ObjectId,
+    pub(super) parents: &'a [ObjectId],
+    pub(super) author: &'a Sig<'a>,
+    pub(super) committer: &'a Sig<'a>,
+    pub(super) message: &'a str,
 }
 
 fn with_newline(message: &str) -> String {

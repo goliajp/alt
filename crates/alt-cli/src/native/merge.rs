@@ -245,6 +245,13 @@ impl NativeRepo<'_> {
             )
             .into());
         }
+        if self.revert_state()?.is_some() {
+            return Err(format!(
+                "{verb}: a revert is in progress; finish it with `alt revert --continue` \
+                 or `alt revert --abort`"
+            )
+            .into());
+        }
         Ok(())
     }
 }

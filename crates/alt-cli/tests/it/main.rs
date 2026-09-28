@@ -31,6 +31,7 @@ mod push_policy;
 mod push_wire_ext;
 mod read_json;
 mod remote;
+mod revert;
 mod show;
 mod status_json;
 mod tag;
