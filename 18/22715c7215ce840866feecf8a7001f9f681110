@@ -1,0 +1,18 @@
+schema: alt-meta/1
+type: feat
+summary: check out git-lfs contents while commits keep the pointers
+author-type: human
+author: doracawl
+touched: Cargo.lock
+touched: crates/alt-cli/Cargo.toml
+touched: crates/alt-cli/src/cli.rs
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/add.rs
+touched: crates/alt-cli/src/native/http_auth.rs
+touched: crates/alt-cli/src/native/lfs.rs
+touched: crates/alt-cli/tests/it/lfs.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-lfs/tests/it/download.rs
+touched: crates/alt-odb/src/lib.rs
+touched: crates/alt-odb/src/storage_view.rs
+touched: crates/alt-worktree/src/lib.rs
