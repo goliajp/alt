@@ -702,16 +702,20 @@ fn daemon_group_commit_loses_no_concurrent_writes() {
 /// process per `git commit` and serializes on the index lock, so its commit rate
 /// is single-threaded.
 ///
-/// To compare apples to apples with `git commit`, the timed loop is commit-only:
+/// To compare apples to apples with `git commit --allow-empty`, the timed loop is commit-only:
 /// each workspace stages once up front, then commits repeatedly (each commit
 /// writes a fresh commit object on its branch — the fsync-bound path — without a
 /// re-`add` round-trip). Prints commits/sec at a range of concurrency levels;
 /// not an assertion (fsync timing is hardware-dependent and the fast tier forbids
 /// ratio assertions). Run:
-///   cargo test --release -p alt-cli --test it -- --ignored --nocapture daemon_commit_throughput
+///   ALT_BENCH=1 RUST_TEST_NOCAPTURE=1 scripts/gate.sh corpus -p alt-cli --test it --filter daemon_server::daemon_commit_throughput --exact --release
 #[test]
-#[ignore = "bench: concurrent commit throughput through the daemon, run manually"]
+#[ignore = "bench: set ALT_BENCH=1, run by hand in release"]
 fn daemon_commit_throughput() {
+    if std::env::var("ALT_BENCH").as_deref() != Ok("1") {
+        eprintln!("daemon_commit_throughput: skipped (set ALT_BENCH=1 to run)");
+        return;
+    }
     // each concurrency level commits into its own pool of workspaces so writers
     // never contend on the same branch (that would serialize on a ref conflict,
     // not on fsync — we want to measure the fsync coalescing)
@@ -740,8 +744,8 @@ fn daemon_commit_throughput() {
                 ],
             ));
             // stage once up front so the timed loop is commit-only (matching a
-            // bare `git commit`); the staged content stays the index for every
-            // commit in the loop
+            // `git commit --allow-empty`); the staged content stays the index
+            // for every commit in the loop
             std::fs::write(tree.join("f.txt"), format!("w{w} staged\n")).unwrap();
             ok(alt(&tree, &["add", "."]));
             trees_v.push(tree);
@@ -755,7 +759,12 @@ fn daemon_commit_throughput() {
                 let sock = d.sock.clone();
                 std::thread::spawn(move || {
                     for _ in 0..rounds {
-                        let c = run_as(&sock, &tree, &["commit", "-m", "x"], "bench");
+                        let c = run_as(
+                            &sock,
+                            &tree,
+                            &["commit", "--allow-empty", "-m", "x"],
+                            "bench",
+                        );
                         assert_eq!(c.exit_code, 0, "commit: {}", err_str(&c));
                     }
                 })
