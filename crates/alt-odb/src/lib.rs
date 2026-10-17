@@ -533,6 +533,17 @@ impl NativeOdb {
         &self.blobs
     }
 
+    /// Finish an unfinished object batch, including after a command error.
+    /// Unlike `flush`, an idle call neither synchronizes nor counts a write.
+    /// Daemons call this before handing a request to a durability barrier so
+    /// a failed put cannot retain its exclusive lock across requests.
+    pub fn flush_pending(&mut self) -> Result<(), OdbError> {
+        if self.held {
+            self.flush()?;
+        }
+        Ok(())
+    }
+
     /// Durability point: blob store first (chunks before blobmap inside),
     /// then `map.alt`, so a crash never leaves a durable identity record
     /// pointing at lost content.
@@ -649,13 +660,21 @@ impl NativeOdb {
             if covers(read_durable(&self.durable_path), target) {
                 return Ok(());
             }
-            let (pf, bf) = self.blobs.file_lens()?;
-            let eofs = [pf, bf, self.map.file_len()?];
-            self.blobs.fsync()?; // chunks then blobmap, in order
-            self.tier1.sync()?; // then tier1 (references blob ids above)
-            self.map.fsync()?; // then map.alt (may reference tier1 ids)
-            write_durable(&self.durable_path, eofs)?;
-            Ok(())
+            // Otherwise a concurrent writer could append a map entry after
+            // its content file was synchronized but before map.alt's fsync.
+            // The batch released its exclusive lock before entering sync_to.
+            lock_shared(&self.lock)?;
+            let synced = (|| -> Result<(), OdbError> {
+                let (pf, bf) = self.blobs.file_lens()?;
+                let eofs = [pf, bf, self.map.file_len()?];
+                self.blobs.fsync()?; // chunks then blobmap, in order
+                self.tier1.sync()?; // then tier1 (references blob ids above)
+                self.map.fsync()?; // then map.alt (may reference tier1 ids)
+                write_durable(&self.durable_path, eofs)?;
+                Ok(())
+            })();
+            let _ = unlock(&self.lock);
+            synced
         })();
         let _ = unlock(&self.sync_lock);
         result

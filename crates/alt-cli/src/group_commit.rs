@@ -11,7 +11,8 @@
 //!
 //! The fsync runs **without** the store `Mutex` — the caller hands in a
 //! handle ([`crate::native::StoreSink`]) that owns its own fds, so
-//! concurrent appends overlap the flush.
+//! completed batches can share the flush. The sink's shared odb lock keeps
+//! new object appends out of the data-to-log synchronization interval.
 //!
 //! The daemon path used a local copy of this code; it now lives in a
 //! shared module so `altd-server` can group-coalesce its

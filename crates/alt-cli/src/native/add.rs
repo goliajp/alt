@@ -7,6 +7,9 @@ impl NativeRepo<'_> {
     /// updating the index to match the working tree.
     pub fn add(&mut self, paths: &[String], json: bool, out: &mut impl Write) -> Res<()> {
         self.ensure_writable("add")?;
+        self.lock_workspace()?;
+        self.ensure_no_pending_recovery()?;
+        let before = self.index()?;
         // add re-reads + re-puts every staged path anyway; the stat-cache
         // fast path would save the scan-time hash but lose to read_for +
         // odb.put on the next line. Wins for a smarter add are tracked
@@ -29,7 +32,7 @@ impl NativeRepo<'_> {
         let mut entries: Vec<IndexEntry> = if staging_all {
             Vec::new()
         } else {
-            prior_stage_zero.clone()
+            before.entries.clone()
         };
 
         let mut staged = 0;
@@ -90,40 +93,21 @@ impl NativeRepo<'_> {
         }
 
         self.store.odb.flush()?;
-        save_index(
-            &self.index_path,
-            &Index {
-                version: 2,
-                entries: entries.clone(),
-                extensions: Vec::new(),
-            },
-            self.store.algo,
-        )?;
-
-        // record the index delta so `alt undo` can roll an `add`
-        // back. Skip when the call was a true no-op (touched zero paths or
-        // every touched path's entry was unchanged) — keeps an empty add
-        // from polluting the op log and wasting an undo step.
-        let prior_by_path: std::collections::HashMap<&BString, &IndexEntry> =
-            prior_stage_zero.iter().map(|e| (&e.path, e)).collect();
-        let new_by_path: std::collections::HashMap<&BString, &IndexEntry> =
-            entries.iter().map(|e| (&e.path, e)).collect();
-        let mut changes = Vec::new();
-        for p in &touched_paths {
-            let old = prior_by_path.get(p).map(|e| (e.oid, e.mode));
-            let new = new_by_path.get(p).map(|e| (e.oid, e.mode));
-            if old != new {
-                changes.push(crate::index_tx::IndexChange {
-                    path: p.clone(),
-                    old,
-                    new,
-                });
-            }
-        }
-        if !changes.is_empty() {
-            let payload = crate::index_tx::encode(&changes, self.store.algo);
-            let actor = self.id.actor("add");
-            self.store.refs.record_op(&actor, now_ms(), &payload)?;
+        entries.sort_by(|a, b| a.path.cmp(&b.path).then(a.stage().cmp(&b.stage())));
+        let after = Index {
+            version: 2,
+            entries,
+            extensions: Vec::new(),
+        };
+        if recovery::canonical_index(before.clone(), self.store.algo)
+            != recovery::canonical_index(after.clone(), self.store.algo)
+        {
+            self.write_index_transaction(
+                before,
+                after,
+                &touched_paths.into_iter().collect::<Vec<_>>(),
+                None,
+            )?;
         }
         if json {
             crate::json::emit(out, vec![("staged", crate::json::Json::Num(staged as i64))])?;

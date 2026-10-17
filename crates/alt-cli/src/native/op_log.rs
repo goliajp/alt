@@ -37,6 +37,64 @@ pub(super) fn render_op_log_json(
             ("verb", Json::str(&verb)),
             ("ref_changes", ref_changes),
         ];
+        if let Some(tx) = parse_ref_tx_or_none(&op.payload)?
+            && let Some(context) = tx.context
+        {
+            let context: recovery::RefContext = serde_json::from_slice(&context)?;
+            fields.push((
+                "workspace",
+                Json::Object(vec![
+                    ("name", Json::str(context.workspace.name)),
+                    ("instance", Json::str(context.workspace.instance)),
+                ]),
+            ));
+            fields.push((
+                "inverse_of",
+                context.inverse_of.map(Json::str).unwrap_or(Json::Null),
+            ));
+        }
+        if matches!(op.payload.first(), Some(0x30..=0x33)) {
+            if op.payload.get(1) != Some(&1) {
+                return Err("unsupported recovery record version".into());
+            }
+            let value: serde_json::Value = serde_json::from_slice(&op.payload[2..])?;
+            let mut recovery = vec![(
+                "phase",
+                Json::str(if matches!(op.payload[0], 0x30 | 0x32) {
+                    "prepared"
+                } else {
+                    "completed"
+                }),
+            )];
+            for key in [
+                "prepared",
+                "before",
+                "after",
+                "index_before",
+                "index_after",
+                "inverse_of",
+            ] {
+                if let Some(value) = value.get(key).and_then(serde_json::Value::as_str) {
+                    recovery.push((key, Json::str(value)));
+                }
+            }
+            if let Some(workspace) = value.get("workspace") {
+                recovery.push((
+                    "workspace",
+                    Json::Object(vec![
+                        (
+                            "name",
+                            Json::str(workspace["name"].as_str().unwrap_or_default()),
+                        ),
+                        (
+                            "instance",
+                            Json::str(workspace["instance"].as_str().unwrap_or_default()),
+                        ),
+                    ]),
+                ));
+            }
+            fields.push(("recovery", Json::Object(recovery)));
+        }
         if let Some(v) = verdicts.get(&op.id) {
             let (status, signer): (&'static str, Option<&str>) = match v {
                 SigVerdict::Ok { principal } => ("signed-ok", Some(principal.as_str())),

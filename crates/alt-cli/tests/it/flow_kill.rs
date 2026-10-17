@@ -1,18 +1,35 @@
 //! SIGKILL recovery test for `alt flow` — the atomicity contract.
 //!
-//! Each `flow feature start` and `flow feature finish` runs in one
-//! ref-tx + one op-log entry. A power-loss (SIGKILL) at any
-//! point should leave the store in either the pre- or post-state, never
-//! a half-finished hybrid. This test verifies that by spawning a child
-//! that hammers start/finish in a tight loop, killing it mid-flight,
-//! then re-opening the store and checking every invariant the alt CLI
-//! itself relies on. After recovery, a fresh start/finish round must
-//! still go through — i.e. the store is operable, not just "doesn't
-//! crash on open".
+//! Ref changes commit atomically. File/index materialization has a durable
+//! prepare/completion record and can be interrupted between writes. After a
+//! SIGKILL, reads must remain usable; explicit, precondition-checked recovery
+//! must finish pending intents before a fresh flow cycle can run.
 
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
+
+fn workload_command() -> Command {
+    let mut command = Command::new(std::env::current_exe().unwrap());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    command
+}
+
+fn kill_workload(child: &mut std::process::Child) {
+    // This exact process group was created above. Killing only the launcher
+    // can leave its current alt subprocess running and miss the crash window.
+    #[cfg(unix)]
+    assert_eq!(
+        unsafe { libc::kill(-(child.id() as i32), libc::SIGKILL) },
+        0
+    );
+    #[cfg(not(unix))]
+    child.kill().unwrap();
+}
 
 fn alt(repo: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_alt"))
@@ -44,6 +61,14 @@ fn ok(o: Output) -> String {
 /// is staged) so the subsequent fresh round can use the standard
 /// clean-tree path.
 fn settle_post_kill_dirty_state(root: &Path) {
+    // D02 records unfinished local writes explicitly. Complete only the
+    // recorded intent, with the product's full prestate checks, before moving on.
+    let pending: serde_json::Value =
+        serde_json::from_str(&ok(alt(root, &["operation", "pending", "--json"]))).unwrap();
+    for operation in pending["operations"].as_array().unwrap() {
+        let id = operation["operation_id"].as_str().unwrap();
+        ok(alt(root, &["operation", "recover", id]));
+    }
     let status_json = alt(root, &["status", "--json"]);
     if !status_json.status.success() {
         return;
@@ -119,7 +144,7 @@ fn killed_flow_feature_recovers_and_converges() {
     ok(alt(root, &["commit", "-m", "seed"]));
     ok(alt(root, &["flow", "init"]));
 
-    let mut child = Command::new(std::env::current_exe().unwrap())
+    let mut child = workload_command()
         .args(["--ignored", "--exact", "flow_kill::flow_child_workload"])
         .env("ALT_FLOW_KILL_REPO", root)
         .stdout(Stdio::null())
@@ -131,7 +156,7 @@ fn killed_flow_feature_recovers_and_converges() {
     // then SIGKILL. The kill point is deliberately random with respect
     // to where in start/finish the child is — that's the whole test.
     std::thread::sleep(Duration::from_millis(250));
-    child.kill().unwrap();
+    kill_workload(&mut child);
     child.wait().unwrap();
 
     // 1. Store opens. Any panic or "format" error here = atomicity broken.
@@ -194,7 +219,7 @@ fn killed_flow_feature_recovers_and_converges() {
 /// looping release start → commit → finish, SIGKILL, and verify the
 /// store stays atomic just like the feature variant. Release finish
 /// does *two* merges in one ref-tx (main, then back-merge into
-/// develop) — a real test that the release helper kept the single-op-log
+/// develop) — a real test that the release helper kept the atomic ref-transaction
 /// contract.
 #[test]
 #[ignore = "spawns a child workload; cousin of killed_flow_feature_recovers"]
@@ -207,7 +232,7 @@ fn killed_flow_release_recovers_and_converges() {
     ok(alt(root, &["commit", "-m", "seed"]));
     ok(alt(root, &["flow", "init"]));
 
-    let mut child = Command::new(std::env::current_exe().unwrap())
+    let mut child = workload_command()
         .args(["--ignored", "--exact", "flow_kill::release_child_workload"])
         .env("ALT_FLOW_KILL_REPO", root)
         .stdout(Stdio::null())
@@ -215,7 +240,7 @@ fn killed_flow_release_recovers_and_converges() {
         .spawn()
         .unwrap();
     std::thread::sleep(Duration::from_millis(250));
-    child.kill().unwrap();
+    kill_workload(&mut child);
     child.wait().unwrap();
 
     for args in [
@@ -291,7 +316,7 @@ fn repeated_kills_keep_the_store_consistent() {
             Instant::now() < deadline,
             "repeated kill test exceeded budget after round {round}"
         );
-        let mut child = Command::new(std::env::current_exe().unwrap())
+        let mut child = workload_command()
             .args(["--ignored", "--exact", "flow_kill::flow_child_workload"])
             .env("ALT_FLOW_KILL_REPO", root)
             .stdout(Stdio::null())
@@ -299,7 +324,7 @@ fn repeated_kills_keep_the_store_consistent() {
             .spawn()
             .unwrap();
         std::thread::sleep(Duration::from_millis(120));
-        child.kill().unwrap();
+        kill_workload(&mut child);
         child.wait().unwrap();
 
         // log + branch + status all succeed every round

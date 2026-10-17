@@ -222,6 +222,20 @@ impl RefStore {
         key: Option<IdemKey>,
         policy: Option<&RefPolicy<'_>>,
     ) -> Result<OpId, RefError> {
+        self.commit_scoped(actor, timestamp_ms, changes, key, policy, None)
+    }
+
+    /// A ref transaction with caller-owned recovery context, committed in the
+    /// same log frame as the ref changes. Legacy callers omit the context.
+    pub fn commit_scoped(
+        &mut self,
+        actor: &str,
+        timestamp_ms: u64,
+        changes: &[RefChange],
+        key: Option<IdemKey>,
+        policy: Option<&RefPolicy<'_>>,
+        context: Option<&[u8]>,
+    ) -> Result<OpId, RefError> {
         // The validate → append must be atomic against other writers: inside
         // the append lock, fold in any ops they committed since (so `refs` is
         // the true current state), then CAS-validate this transaction against
@@ -240,7 +254,10 @@ impl RefStore {
                         p.check(refs, changes)?;
                     }
                     apply_changes(&mut refs.clone(), changes, false)?;
-                    Ok(tx::encode_tx(changes, key))
+                    Ok(match context {
+                        Some(context) => tx::encode_scoped_tx(changes, key, context),
+                        None => tx::encode_tx(changes, key),
+                    })
                 })?;
         self.oplog.sync()?;
         // our own op is durable now; fold it into the map, the cursor, and the

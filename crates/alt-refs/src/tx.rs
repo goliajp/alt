@@ -25,6 +25,8 @@ pub type IdemKey = [u8; 16];
 pub struct ParsedTx {
     pub changes: Vec<RefChange>,
     pub key: Option<IdemKey>,
+    /// Caller-owned recovery context. Absent in legacy transactions.
+    pub context: Option<Vec<u8>>,
 }
 
 const TARGET_ABSENT: u8 = 0;
@@ -124,7 +126,7 @@ pub fn parse_tx(payload: &[u8]) -> Result<Option<ParsedTx>, RefError> {
         return Ok(None);
     }
     let version = payload.get(1).copied();
-    if version != Some(1) && version != Some(TX_VERSION) {
+    if !matches!(version, Some(1..=3)) {
         return Err(RefError::Format("unsupported ref tx version"));
     }
     let count_bytes = payload
@@ -132,6 +134,9 @@ pub fn parse_tx(payload: &[u8]) -> Result<Option<ParsedTx>, RefError> {
         .ok_or(RefError::Format("ref tx truncated"))?;
     let count = u32::from_le_bytes(count_bytes.try_into().unwrap()) as usize;
     let mut at = 6;
+    if count > payload.len() / 4 {
+        return Err(RefError::Format("ref tx count exceeds payload"));
+    }
     let mut changes = Vec::with_capacity(count);
     for _ in 0..count {
         let len_bytes = payload
@@ -170,8 +175,68 @@ pub fn parse_tx(payload: &[u8]) -> Result<Option<ParsedTx>, RefError> {
             _ => return Err(RefError::Format("bad idempotency key length in ref tx")),
         }
     };
+    let context = if version == Some(3) {
+        let len = payload
+            .get(at..at + 4)
+            .ok_or(RefError::Format("ref context truncated"))?;
+        let len = u32::from_le_bytes(len.try_into().unwrap()) as usize;
+        at += 4;
+        let bytes = payload
+            .get(at..at + len)
+            .ok_or(RefError::Format("ref context truncated"))?;
+        at += len;
+        Some(bytes.to_vec())
+    } else {
+        None
+    };
     if at != payload.len() {
         return Err(RefError::Format("ref tx has trailing bytes"));
     }
-    Ok(Some(ParsedTx { changes, key }))
+    Ok(Some(ParsedTx {
+        changes,
+        key,
+        context,
+    }))
+}
+
+/// Version 3 preserves an opaque recovery context in the same atomic ref op.
+pub fn encode_scoped_tx(changes: &[RefChange], key: Option<IdemKey>, context: &[u8]) -> Vec<u8> {
+    let mut out = encode_tx(changes, key);
+    out[1] = 3;
+    out.extend_from_slice(&(context.len() as u32).to_le_bytes());
+    out.extend_from_slice(context);
+    out
+}
+
+#[cfg(test)]
+mod scoped_tests {
+    use super::*;
+
+    #[test]
+    fn context_round_trip_and_legacy_remain_distinct() {
+        let changes = vec![RefChange {
+            name: "HEAD".to_owned(),
+            old: None,
+            new: Some(RefTarget::Symbolic("refs/heads/main".to_owned())),
+        }];
+        let scoped = parse_tx(&encode_scoped_tx(&changes, Some([7; 16]), b"scope"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(scoped.changes, changes);
+        assert_eq!(scoped.key, Some([7; 16]));
+        assert_eq!(scoped.context.as_deref(), Some(b"scope".as_slice()));
+        let mut legacy = encode_tx(&changes, None);
+        assert_eq!(parse_tx(&legacy).unwrap().unwrap().context, None);
+        legacy[1] = 1;
+        legacy.pop();
+        assert_eq!(parse_tx(&legacy).unwrap().unwrap().context, None);
+    }
+
+    #[test]
+    fn truncated_context_and_unbounded_counts_are_rejected() {
+        let mut bytes = encode_scoped_tx(&[], None, b"scope");
+        bytes.pop();
+        assert!(parse_tx(&bytes).is_err());
+        assert!(parse_tx(&[1, 3, 255, 255, 255, 255]).is_err());
+    }
 }

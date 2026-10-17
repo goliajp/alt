@@ -22,6 +22,7 @@ use http_auth::{build_transport, http_auth};
 
 mod add;
 mod bisect;
+mod checkout_recovery;
 mod cherry_pick;
 pub mod commit;
 mod http_auth;
@@ -30,10 +31,12 @@ mod lfs;
 pub use identity::{Identity, Principal, PrincipalKind};
 mod merge;
 mod op_log;
+mod operation;
 use op_log::render_op_log_json;
 pub mod notes;
 use merge::Resolved;
 mod rebase;
+mod recovery;
 mod revert;
 mod sequence_editor;
 mod workspace;
@@ -167,12 +170,13 @@ impl Store {
 
     /// An independent fsync handle over the odb (chunks → blobmap → `map.alt`)
     /// and the ref log, in that durability order. The daemon holds one and
-    /// fsyncs off the write path — it owns its own fds, so a fsync overlaps
-    /// concurrent appends and N commits coalesce onto one fsync.
+    /// fsyncs off the request mutex. A shared odb lock excludes new appends
+    /// across the data-to-log barrier; multiple completed writes can coalesce.
     pub fn sink(&self) -> Res<StoreSink> {
         Ok(StoreSink {
             odb: self.odb.sink()?,
             oplog: self.refs.sync_handle()?,
+            odb_lock: self.alt_dir.join("odb.lock"),
         })
     }
 }
@@ -180,17 +184,36 @@ impl Store {
 /// Off-write-path durability handle for a [`Store`] (see [`Store::sink`]): the
 /// odb (objects) then the oplog (ref ops), so a durable ref op always has its
 /// commit object durable. Fsyncs through independent fds, needing no `&mut
-/// Store`, so the daemon's group commit overlaps the fsync with appends.
+/// Store`. New object appends wait until both data and log are synchronized.
 pub struct StoreSink {
     odb: alt_odb::OdbSink,
     oplog: std::fs::File,
+    odb_lock: PathBuf,
 }
 
 impl StoreSink {
     /// One fsync of everything currently on disk, in durability order. Because
     /// fsync flushes the whole inode, this makes durable every append present
-    /// when it runs — one call covers any number of concurrent commits.
+    /// when it runs. Callers must flush their odb batch first to release its
+    /// exclusive write lock, including when durability is deferred.
     pub fn fsync_all(&self) -> Res<()> {
+        // Each barrier needs an independent open-file description: sharing a
+        // cloned fd would let one concurrent barrier unlock another's lock.
+        // Closing the fd releases it on both success and error.
+        let _barrier = std::fs::File::open(&self.odb_lock)?;
+        #[cfg(unix)]
+        {
+            use std::os::fd::AsRawFd;
+            loop {
+                if unsafe { libc::flock(_barrier.as_raw_fd(), libc::LOCK_SH) } == 0 {
+                    break;
+                }
+                let error = std::io::Error::last_os_error();
+                if error.kind() != std::io::ErrorKind::Interrupted {
+                    return Err(error.into());
+                }
+            }
+        }
         self.odb.fsync()?;
         self.oplog.sync_all()?;
         Ok(())
@@ -546,10 +569,18 @@ pub fn init(dir: Option<PathBuf>, out: &mut impl Write) -> Res<()> {
         return Err(format!("{} already exists", alt_dir.display()).into());
     }
     std::fs::create_dir_all(&root)?;
+    std::fs::create_dir(&alt_dir)?;
+    std::fs::File::open(&root)?.sync_all()?;
     let mut odb = NativeOdb::open(&alt_dir)?;
     odb.flush()?;
     let mut refs = RefStore::open(&alt_dir)?;
-    refs.commit(
+    let context = serde_json::to_vec(&recovery::RefContext {
+        version: 1,
+        workspace: recovery::workspace_identity_at(&alt_dir.join("index"), DEFAULT_WORKSPACE)?,
+        inverse_of: None,
+        checkout: None,
+    })?;
+    refs.commit_scoped(
         &Identity::from_env().actor("init"),
         now_ms(),
         &[RefChange {
@@ -557,6 +588,9 @@ pub fn init(dir: Option<PathBuf>, out: &mut impl Write) -> Res<()> {
             old: None,
             new: Some(RefTarget::Symbolic("refs/heads/main".to_owned())),
         }],
+        None,
+        None,
+        Some(&context),
     )?;
     save_index(&alt_dir.join("index"), &empty_index(), HashAlgo::Sha1)?;
     writeln!(
@@ -597,6 +631,9 @@ pub struct NativeRepo<'a> {
     /// `Some` only on the daemon's exactly-once write path; `None` for
     /// reads and the direct CLI (where `commit_idempotent` is a plain commit).
     idem_key: Option<IdemKey>,
+    write_lock: Option<std::fs::File>,
+    inverse_of: Option<String>,
+    checkout_intent: Option<checkout_recovery::CheckoutIntent>,
 }
 
 impl<'a> NativeRepo<'a> {
@@ -619,6 +656,9 @@ impl<'a> NativeRepo<'a> {
             id,
             caps,
             idem_key,
+            write_lock: None,
+            inverse_of: None,
+            checkout_intent: None,
         }
     }
 
@@ -715,11 +755,15 @@ impl<'a> NativeRepo<'a> {
         Ok(Some(self.is_ancestor(old, new)?))
     }
 
-    fn ensure_writable(&self, verb: &str) -> Res<()> {
+    fn ensure_writable(&mut self, verb: &str) -> Res<()> {
         if self.caps.read_only {
             return Err(format!("capability denied: principal cannot {verb} (read-only)").into());
         }
-        Ok(())
+        self.lock_workspace()?;
+        if self.caps.read_only {
+            return Err(format!("capability denied: principal cannot {verb} (read-only)").into());
+        }
+        self.ensure_no_pending_recovery()
     }
 
     /// Refuse `verb` on a protected branch (`main` / `develop` from the
@@ -866,6 +910,7 @@ impl<'a> NativeRepo<'a> {
         key: Option<IdemKey>,
     ) -> Res<OpId> {
         self.ensure_writable(verb)?;
+        self.lock_workspace()?;
         self.ensure_no_force(changes)?;
         let allow = self.caps.branch_allow.clone();
         let deny = self.caps.branch_deny.clone();
@@ -892,10 +937,20 @@ impl<'a> NativeRepo<'a> {
             state_check: Some(&one_workspace_per_branch),
         };
         let actor = self.id.actor(verb);
-        let id =
-            self.store
-                .refs
-                .commit_idempotent(&actor, now_ms(), changes, key, Some(&policy))?;
+        let context = serde_json::to_vec(&recovery::RefContext {
+            version: 1,
+            workspace: self.workspace_identity()?,
+            inverse_of: self.inverse_of.clone(),
+            checkout: self.checkout_intent.clone(),
+        })?;
+        let id = self.store.refs.commit_scoped(
+            &actor,
+            now_ms(),
+            changes,
+            key,
+            Some(&policy),
+            Some(&context),
+        )?;
         // opt-in op-level signing. Best-effort — a missing sec key
         // logs nothing and is not fatal (signing is a per-repo capability,
         // not a hard requirement). Verification at read time tells the
@@ -1956,59 +2011,7 @@ impl<'a> NativeRepo<'a> {
     /// Materializes `target` into the working tree, removing tracked files in
     /// `old` that are absent from `target`, and rewrites the index to match.
     fn checkout(&mut self, old: &[WorkEntry], target: &[WorkEntry]) -> Res<()> {
-        use std::collections::HashSet;
-        let old_paths: HashSet<&BString> = old.iter().map(|e| &e.path).collect();
-        let target_paths: HashSet<&BString> = target.iter().map(|e| &e.path).collect();
-
-        // validate first: an untracked file in the way of a target file is a
-        // collision — refuse before touching anything. Gitlinks expect a
-        // directory (the submodule placeholder), so an existing dir there is
-        // not a collision; let materialize() decide.
-        for t in target {
-            if t.mode == 0o160000 {
-                continue;
-            }
-            if !old_paths.contains(&t.path) && self.abs(&t.path)?.symlink_metadata().is_ok() {
-                return Err(format!(
-                    "untracked working tree file '{}' would be overwritten by switch",
-                    t.path
-                )
-                .into());
-            }
-        }
-
-        for o in old {
-            if !target_paths.contains(&o.path) {
-                // Gitlinks point at a submodule directory we never managed
-                // on-disk; leaving the placeholder alone matches git's
-                // `git switch` behaviour (it only removes regular tracked
-                // files, not submodule directories).
-                if o.mode == 0o160000 {
-                    continue;
-                }
-                let abs = self.abs(&o.path)?;
-                if abs.symlink_metadata().is_ok() {
-                    std::fs::remove_file(&abs)?;
-                    self.prune_empty_dirs(abs.parent());
-                }
-            }
-        }
-
-        let mut entries = Vec::with_capacity(target.len());
-        for t in target {
-            self.materialize(t)?;
-            entries.push(self.make_entry(t)?);
-        }
-        save_index(
-            &self.index_path,
-            &Index {
-                version: 2,
-                entries,
-                extensions: Vec::new(),
-            },
-            self.store.algo,
-        )?;
-        Ok(())
+        self.recoverable_checkout(old, target)
     }
 
     /// Writes one tree entry to the working tree (regular file, executable,
@@ -2674,129 +2677,6 @@ impl<'a> NativeRepo<'a> {
                 "Merged '{}' into '{}' and back-merged into '{back_ref}', deleted '{}'",
                 flow.branch, flow.target, flow.branch
             )?;
-        }
-        Ok(())
-    }
-
-    /// `alt undo`: invert the most recent ref transaction (restoring the prior
-    /// branch/HEAD state) and re-materialize HEAD's tree. The inverse is
-    /// itself recorded as an op, so undo is append-only and re-undoable.
-    pub fn undo(&mut self, json: bool, out: &mut impl Write) -> Res<()> {
-        // dispatch on the very last op's payload kind. Ref-tx ops
-        // invert their ref changes; index-tx ops restore the prior
-        // stage-0 entries for each touched path, so any state-changing
-        // op is reversible, not just ref updates.
-        let last = self.store.refs.last_op().ok_or("nothing to undo")?.clone();
-        match last.payload.first().copied() {
-            Some(alt_refs::PAYLOAD_REF_TX) => self.undo_ref_tx(json, out),
-            Some(crate::index_tx::PAYLOAD_INDEX_TX) => self.undo_index_tx(&last.payload, json, out),
-            Some(other) => Err(format!("unknown op kind {other:#04x} — nothing to undo").into()),
-            None => Err("nothing to undo".into()),
-        }
-    }
-
-    fn undo_ref_tx(&mut self, json: bool, out: &mut impl Write) -> Res<()> {
-        let changes = self
-            .store
-            .refs
-            .last_transaction()?
-            .ok_or("nothing to undo")?;
-        self.ensure_clean("undo")?;
-
-        // capture the current HEAD tree to drive the checkout's removals
-        let old = index_entries(&self.index()?);
-        let inverse: Vec<RefChange> = changes
-            .iter()
-            .map(|c| RefChange {
-                name: c.name.clone(),
-                old: c.new.clone(),
-                new: c.old.clone(),
-            })
-            .collect();
-        self.commit_refs("undo", &inverse)?;
-
-        let target = self.head_entries()?;
-        self.checkout(&old, &target)?;
-        if json {
-            use crate::json::Json;
-            let refs = changes.iter().map(|c| Json::str(&c.name)).collect();
-            crate::json::emit(
-                out,
-                vec![("undone", Json::Bool(true)), ("refs", Json::Array(refs))],
-            )?;
-        } else {
-            writeln!(out, "Undid the last operation")?;
-        }
-        Ok(())
-    }
-
-    fn undo_index_tx(&mut self, payload: &[u8], json: bool, out: &mut impl Write) -> Res<()> {
-        let changes = crate::index_tx::decode(payload).map_err(|e| e.to_string())?;
-        // Read current stage-0 entries, then rewrite each touched path
-        // back to its `old` side (None = drop the entry, Some = re-create
-        // with a zero-stat baseline; the next status walk re-stamps).
-        let mut entries: Vec<IndexEntry> = self
-            .index()?
-            .entries
-            .into_iter()
-            .filter(|e| e.stage() == 0)
-            .collect();
-        for ch in &changes {
-            entries.retain(|e| e.path != ch.path);
-            if let Some((oid, mode)) = ch.old {
-                entries.push(IndexEntry {
-                    ctime: (0, 0),
-                    mtime: (0, 0),
-                    dev: 0,
-                    ino: 0,
-                    mode,
-                    uid: 0,
-                    gid: 0,
-                    size: 0,
-                    oid,
-                    flags: (ch.path.len().min(0x0FFF)) as u16,
-                    extended_flags: None,
-                    path: ch.path.clone(),
-                });
-            }
-        }
-        entries.sort_by(|a, b| a.path.cmp(&b.path));
-        save_index(
-            &self.index_path,
-            &Index {
-                version: 2,
-                entries,
-                extensions: Vec::new(),
-            },
-            self.store.algo,
-        )?;
-        // Record the undo itself so a redo can find it. We use the inverse
-        // change list (swap old/new) so chaining undos behaves intuitively
-        // (undo of undo = the original state).
-        let inverse: Vec<crate::index_tx::IndexChange> = changes
-            .iter()
-            .map(|c| crate::index_tx::IndexChange {
-                path: c.path.clone(),
-                old: c.new,
-                new: c.old,
-            })
-            .collect();
-        let inv_payload = crate::index_tx::encode(&inverse, self.store.algo);
-        let actor = self.id.actor("undo");
-        self.store.refs.record_op(&actor, now_ms(), &inv_payload)?;
-
-        if json {
-            use crate::json::Json;
-            let paths = changes
-                .iter()
-                .map(|c| Json::str(c.path.to_str_lossy().to_string()))
-                .collect();
-            crate::json::emit(
-                out,
-                vec![("undone", Json::Bool(true)), ("paths", Json::Array(paths))],
-            )?;
-        } else {
-            writeln!(out, "Undid the last operation ({} path(s))", changes.len())?;
         }
         Ok(())
     }
@@ -4788,6 +4668,50 @@ fn gitlink_entry(w: &WorkEntry) -> IndexEntry {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    #[test]
+    fn store_durability_barrier_waits_for_object_batch() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let dir = tempfile::tempdir().unwrap();
+        init(Some(dir.path().to_owned()), &mut Vec::new()).unwrap();
+        let mut store = Store::open(dir.path().join(".alt")).unwrap();
+        store.set_defer_durability(true);
+        store.odb.flush_pending().unwrap();
+        assert_eq!(store.write_epoch(), 0, "idle cleanup is not a write");
+        let sink = store.sink().unwrap();
+        let data = b"object in an unfinished deferred batch";
+        let oid = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, data);
+        store.odb.put(oid, ObjectKind::Blob, data).unwrap();
+        // A command can fail after writing part of its object batch.
+        let bad_oid = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, b"declared");
+        assert!(
+            store
+                .odb
+                .put(bad_oid, ObjectKind::Blob, b"wrong identity")
+                .is_err()
+        );
+        let (started_tx, started_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            sink.fsync_all().unwrap();
+            done_tx.send(()).unwrap();
+        });
+        started_rx.recv().unwrap();
+        assert!(matches!(
+            done_rx.recv_timeout(Duration::from_millis(100)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        store.odb.flush_pending().unwrap();
+        done_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        worker.join().unwrap();
+        drop(store);
+        let reopened = Store::open(dir.path().join(".alt")).unwrap();
+        assert_eq!(reopened.odb.get(&oid).unwrap().unwrap().data, data);
+    }
+
     /// Opens an owning handle on `root`'s default (or named) workspace.
     fn open(root: &Path, ws: Option<&str>) -> OpenRepo {
         OpenRepo::discover(root, ws, Identity::from_env()).unwrap()
@@ -4885,6 +4809,7 @@ mod tests {
         let wt_tmp = tempfile::tempdir().unwrap();
         let wt = wt_tmp.path().join("ws2-tree");
         repo.create_workspace("ws2", &wt, "feat").unwrap();
+        drop(repo); // end the mutating command view before opening another
         assert_eq!(
             std::fs::read_to_string(wt.join("a.txt")).unwrap(),
             "main\n",
@@ -4898,6 +4823,7 @@ mod tests {
         ws2.add(&[".".to_owned()], false, &mut sink).unwrap();
         ws2.commit("ws2 work", Default::default(), false, &mut sink)
             .unwrap();
+        drop(ws2);
 
         // default workspace: still on main, working tree and HEAD unchanged
         assert_eq!(

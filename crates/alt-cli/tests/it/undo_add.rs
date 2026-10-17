@@ -126,3 +126,384 @@ fn undo_after_commit_still_inverts_the_ref_tx_not_the_index() {
         "after undoing the only commit, log must be empty or report unborn HEAD: stdout={log} stderr={stderr}",
     );
 }
+
+fn index_bytes(root: &Path) -> Vec<u8> {
+    std::fs::read(root.join(".alt/index")).unwrap()
+}
+
+#[test]
+fn recovery_rejects_cross_workspace_without_touching_either_index() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("repo");
+    let peer = dir.path().join("peer");
+    std::fs::create_dir(&root).unwrap();
+    ok(alt(&root, &["init", "."]));
+    std::fs::write(root.join("f"), "baseline").unwrap();
+    ok(alt(&root, &["add", "f"]));
+    ok(alt(&root, &["commit", "-m", "baseline"]));
+    ok(alt(
+        &root,
+        &["workspace", "add", "peer", peer.to_str().unwrap()],
+    ));
+    std::fs::write(root.join("f"), "main staged").unwrap();
+    ok(alt(&root, &["add", "f"]));
+    std::fs::write(peer.join("f"), "peer staged").unwrap();
+    ok(alt(&peer, &["add", "f"]));
+    let main_before = index_bytes(&root);
+    let peer_index = root.join(".alt/workspaces/peer/index");
+    let peer_before = std::fs::read(&peer_index).unwrap();
+    let log = std::fs::read(root.join(".alt/oplog/log")).unwrap();
+    let refused = alt(&root, &["undo"]);
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("different workspace"));
+    assert_eq!(index_bytes(&root), main_before);
+    assert_eq!(std::fs::read(&peer_index).unwrap(), peer_before);
+    assert_eq!(std::fs::read(root.join(".alt/oplog/log")).unwrap(), log);
+    ok(alt(&peer, &["undo"]));
+    assert_eq!(index_bytes(&root), main_before);
+    assert_eq!(std::fs::read(peer.join("f")).unwrap(), b"peer staged");
+    assert_eq!(std::fs::read(root.join("f")).unwrap(), b"main staged");
+}
+
+#[test]
+fn recovery_refuses_modified_worktree_and_index_without_partial_changes() {
+    use alt_git_codec::HashAlgo;
+    use alt_git_index::Index;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("f"), "staged").unwrap();
+    ok(alt(root, &["add", "f"]));
+    let before = index_bytes(root);
+    std::fs::write(root.join("f"), "later edit").unwrap();
+    let refused = alt(root, &["undo"]);
+    assert!(!refused.status.success());
+    assert_eq!(index_bytes(root), before);
+    std::fs::write(root.join("f"), "staged").unwrap();
+    let mut conflict = Index::parse(&before, HashAlgo::Sha1).unwrap();
+    conflict.entries[0].flags |= 1 << 12;
+    let bytes = conflict.serialize(HashAlgo::Sha1);
+    std::fs::write(root.join(".alt/index"), &bytes).unwrap();
+    assert!(!alt(root, &["undo"]).status.success());
+    assert_eq!(index_bytes(root), bytes);
+}
+
+#[test]
+fn recovery_reads_frozen_legacy_record_but_refuses_automatic_undo() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+    let payload = include_bytes!("fixtures/legacy-index-v1.bin");
+    let changes = alt_cli::index_tx::decode(payload).unwrap();
+    assert_eq!(changes.len(), 1);
+    {
+        let mut refs = alt_refs::RefStore::open(root.join(".alt")).unwrap();
+        refs.record_op("legacy-fixture", 1, payload).unwrap();
+    }
+    let before = index_bytes(root);
+    let log = std::fs::read(root.join(".alt/oplog/log")).unwrap();
+    ok(alt(root, &["op-log", "--json"]));
+    let refused = alt(root, &["undo"]);
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("legacy operation"));
+    assert_eq!(index_bytes(root), before);
+    assert_eq!(std::fs::read(root.join(".alt/oplog/log")).unwrap(), log);
+}
+
+#[test]
+fn recovery_ref_undo_preflights_untracked_collision_before_moving_refs() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("f"), "baseline").unwrap();
+    std::fs::write(root.join("keep"), "untouched").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "baseline"]));
+    std::fs::remove_file(root.join("f")).unwrap();
+    ok(alt(root, &["add", "f"]));
+    ok(alt(root, &["commit", "-m", "remove"]));
+    std::fs::write(root.join("f"), "untracked precious data").unwrap();
+    let index = index_bytes(root);
+    let log = std::fs::read(root.join(".alt/oplog/log")).unwrap();
+    let refused = alt(root, &["undo"]);
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("untracked"));
+    assert_eq!(index_bytes(root), index);
+    assert_eq!(std::fs::read(root.join(".alt/oplog/log")).unwrap(), log);
+    assert_eq!(
+        std::fs::read(root.join("f")).unwrap(),
+        b"untracked precious data"
+    );
+}
+
+#[test]
+fn recovery_missing_completion_survives_restart_and_blocks_mutation() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("f"), "staged").unwrap();
+    ok(alt(root, &["add", "f"]));
+    let path = root.join(".alt/oplog/log");
+    let bytes = std::fs::read(&path).unwrap();
+    let mut cursor = 5;
+    let mut last = 5;
+    while cursor < bytes.len() {
+        last = cursor;
+        let n = u32::from_le_bytes(bytes[cursor..cursor + 4].try_into().unwrap()) as usize;
+        cursor += 4 + n + 8;
+    }
+    // Reproduce a crash after atomic index replacement, before completion.
+    std::fs::write(&path, &bytes[..last]).unwrap();
+    let before = index_bytes(root);
+    let log_before = std::fs::read(&path).unwrap();
+    ok(alt(root, &["status", "--json"]));
+    for args in [
+        &["undo"][..],
+        &["add", "f"][..],
+        &["commit", "-m", "must not apply"][..],
+    ] {
+        let refused = alt(root, args);
+        assert!(!refused.status.success());
+        assert!(String::from_utf8_lossy(&refused.stderr).contains("outcome unknown"));
+        assert_eq!(index_bytes(root), before);
+        assert_eq!(std::fs::read(&path).unwrap(), log_before);
+    }
+}
+
+#[test]
+fn recovery_workspace_name_reuse_cannot_claim_the_old_instance() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("root");
+    let peer = dir.path().join("peer");
+    let recreated = dir.path().join("recreated");
+    std::fs::create_dir(&root).unwrap();
+    ok(alt(&root, &["init", "."]));
+    std::fs::write(root.join("f"), "base").unwrap();
+    ok(alt(&root, &["add", "f"]));
+    ok(alt(&root, &["commit", "-m", "base"]));
+    ok(alt(
+        &root,
+        &["workspace", "add", "peer", peer.to_str().unwrap()],
+    ));
+    std::fs::write(peer.join("f"), "staged").unwrap();
+    ok(alt(&peer, &["add", "f"]));
+    let completion = {
+        let log = alt_oplog::OpLog::open(&root.join(".alt/oplog")).unwrap();
+        log.ops().last().unwrap().payload.clone()
+    };
+    let id_path = root.join(".alt/workspaces/peer/workspace-id");
+    let previous_id = std::fs::read(&id_path).unwrap();
+    ok(alt(&root, &["workspace", "remove", "peer"]));
+    ok(alt(
+        &root,
+        &[
+            "workspace",
+            "add",
+            "peer",
+            recreated.to_str().unwrap(),
+            "peer",
+        ],
+    ));
+    assert_ne!(std::fs::read(&id_path).unwrap(), previous_id);
+    // Select the historical completion again; its intent still names old id.
+    {
+        let mut refs = alt_refs::RefStore::open(root.join(".alt")).unwrap();
+        refs.record_op("test-selection", 1, &completion).unwrap();
+    }
+    let index_path = root.join(".alt/workspaces/peer/index");
+    let before = std::fs::read(&index_path).unwrap();
+    assert!(!alt(&recreated, &["undo"]).status.success());
+    assert_eq!(std::fs::read(&index_path).unwrap(), before);
+}
+
+#[test]
+fn recovery_add_preserves_unrelated_conflict_stages_and_undo_restores_them() {
+    use alt_git_codec::HashAlgo;
+    use alt_git_index::Index;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("conflict"), "conflicted").unwrap();
+    ok(alt(root, &["add", "conflict"]));
+    let mut index = Index::parse(&index_bytes(root), HashAlgo::Sha1).unwrap();
+    index.entries[0].flags |= 1 << 12;
+    std::fs::write(root.join(".alt/index"), index.serialize(HashAlgo::Sha1)).unwrap();
+    std::fs::write(root.join("other"), "other").unwrap();
+    ok(alt(root, &["add", "other"]));
+    let staged = Index::parse(&index_bytes(root), HashAlgo::Sha1).unwrap();
+    assert!(
+        staged
+            .entries
+            .iter()
+            .any(|e| e.path == b"conflict"[..] && e.stage() == 1)
+    );
+    ok(alt(root, &["undo"]));
+    let restored = Index::parse(&index_bytes(root), HashAlgo::Sha1).unwrap();
+    assert_eq!(restored.entries.len(), 1);
+    assert_eq!(restored.entries[0].stage(), 1);
+}
+
+fn remove_final_log_frame(root: &Path) {
+    let path = root.join(".alt/oplog/log");
+    let bytes = std::fs::read(&path).unwrap();
+    let mut cursor = 5;
+    let mut last = 5;
+    while cursor < bytes.len() {
+        last = cursor;
+        let len = u32::from_le_bytes(bytes[cursor..cursor + 4].try_into().unwrap()) as usize;
+        cursor += 4 + len + 8;
+    }
+    std::fs::write(path, &bytes[..last]).unwrap();
+}
+
+#[test]
+fn recovery_ref_intent_precedes_files_and_survives_missing_completion() {
+    for restore_old_file in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        ok(alt(root, &["init", "."]));
+        std::fs::write(root.join("f"), "committed data").unwrap();
+        ok(alt(root, &["add", "f"]));
+        ok(alt(root, &["commit", "-m", "first"]));
+        let before_index = index_bytes(root);
+        ok(alt(root, &["undo"]));
+        remove_final_log_frame(root);
+        if restore_old_file {
+            // Ref undo committed its intent, but materialization never began.
+            std::fs::write(root.join("f"), "committed data").unwrap();
+            std::fs::write(root.join(".alt/index"), before_index).unwrap();
+        }
+        let before = index_bytes(root);
+        let log = std::fs::read(root.join(".alt/oplog/log")).unwrap();
+        let result = alt(root, &["add", "."]);
+        assert!(!result.status.success());
+        assert!(String::from_utf8_lossy(&result.stderr).contains("incomplete ref recovery"));
+        assert_eq!(index_bytes(root), before);
+        assert_eq!(std::fs::read(root.join(".alt/oplog/log")).unwrap(), log);
+        ok(alt(root, &["op-log", "--json"]));
+        recover_pending(root);
+        assert!(!root.join("f").exists());
+    }
+}
+
+#[test]
+fn recovery_prepared_index_without_replacement_is_not_reported_as_success() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+    let initial = index_bytes(root);
+    std::fs::write(root.join("f"), "new").unwrap();
+    ok(alt(root, &["add", "f"]));
+    remove_final_log_frame(root);
+    std::fs::write(root.join(".alt/index"), &initial).unwrap();
+    let refused = alt(root, &["undo"]);
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("outcome unknown"));
+    assert_eq!(index_bytes(root), initial);
+    assert_eq!(std::fs::read(root.join("f")).unwrap(), b"new");
+    recover_pending(root);
+    assert!(staged_paths(root).contains("\"staged\":[{\"path\":\"f\""));
+}
+
+fn recover_pending(root: &Path) {
+    let pending: serde_json::Value =
+        serde_json::from_str(&ok(alt(root, &["operation", "pending", "--json"]))).unwrap();
+    let operations = pending["operations"].as_array().unwrap();
+    assert_eq!(operations.len(), 1);
+    let id = operations[0]["operation_id"].as_str().unwrap();
+    let before: serde_json::Value =
+        serde_json::from_str(&ok(alt(root, &["operation", "status", id, "--json"]))).unwrap();
+    assert_eq!(before["operation"]["outcome"], "unknown");
+    let after: serde_json::Value =
+        serde_json::from_str(&ok(alt(root, &["operation", "recover", id, "--json"]))).unwrap();
+    assert_eq!(after["operation"]["state"], "completed");
+    let log = std::fs::read(root.join(".alt/oplog/log")).unwrap();
+    ok(alt(root, &["operation", "recover", id]));
+    assert_eq!(
+        std::fs::read(root.join(".alt/oplog/log")).unwrap(),
+        log,
+        "recovery retry must not append or apply again"
+    );
+}
+
+#[test]
+fn recovery_pending_operation_refuses_an_unrecorded_third_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("f"), "recorded").unwrap();
+    ok(alt(root, &["add", "f"]));
+    remove_final_log_frame(root);
+    std::fs::write(root.join("f"), "later user work").unwrap();
+    let pending: serde_json::Value =
+        serde_json::from_str(&ok(alt(root, &["operation", "pending", "--json"]))).unwrap();
+    let id = pending["operations"][0]["operation_id"].as_str().unwrap();
+    let before = index_bytes(root);
+    let log = std::fs::read(root.join(".alt/oplog/log")).unwrap();
+    assert!(!alt(root, &["operation", "recover", id]).status.success());
+    assert_eq!(index_bytes(root), before);
+    assert_eq!(std::fs::read(root.join(".alt/oplog/log")).unwrap(), log);
+    assert_eq!(std::fs::read(root.join("f")).unwrap(), b"later user work");
+}
+
+#[test]
+fn recovery_reads_the_frozen_legacy_frame_chain_without_rewriting_it() {
+    // Captured from the pre-fix product (c355232, Linux, 2026-10-17).
+    // These are the original ALTL frames, not frames generated by this test.
+    let bytes = include_bytes!("fixtures/legacy-oplog-v1.bin");
+    let dir = tempfile::tempdir().unwrap();
+    let oplog_dir = dir.path().join("oplog");
+    std::fs::create_dir(&oplog_dir).unwrap();
+    std::fs::write(oplog_dir.join("log"), bytes).unwrap();
+    {
+        let refs = alt_refs::RefStore::open(dir.path()).unwrap();
+        assert!(refs.len() >= 3);
+        assert_eq!(
+            refs.last_op().unwrap().payload,
+            include_bytes!("fixtures/legacy-index-v1.bin")
+        );
+        assert!(refs.oplog().ops().len() >= 6);
+    }
+    assert_eq!(std::fs::read(oplog_dir.join("log")).unwrap(), bytes);
+}
+
+#[test]
+fn recovery_resumes_each_file_and_index_boundary_without_touching_untracked_data() {
+    for boundary in 0..4 {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        ok(alt(root, &["init", "."]));
+        for path in ["a", "b"] {
+            std::fs::write(root.join(path), "old").unwrap();
+        }
+        ok(alt(root, &["add", "."]));
+        ok(alt(root, &["commit", "-m", "base"]));
+        for path in ["a", "b"] {
+            std::fs::write(root.join(path), "new").unwrap();
+        }
+        ok(alt(root, &["add", "."]));
+        ok(alt(root, &["commit", "-m", "change"]));
+        let index_before = index_bytes(root);
+        std::fs::write(root.join("untracked"), "precious").unwrap();
+        ok(alt(root, &["undo"]));
+        remove_final_log_frame(root);
+        // Model the persisted states at each boundary of the two-file undo.
+        if boundary == 0 {
+            std::fs::write(root.join("a"), "new").unwrap();
+        }
+        if boundary <= 1 {
+            std::fs::write(root.join("b"), "new").unwrap();
+        }
+        if boundary <= 2 {
+            std::fs::write(root.join(".alt/index"), index_before).unwrap();
+        }
+        recover_pending(root);
+        for path in ["a", "b"] {
+            assert_eq!(std::fs::read(root.join(path)).unwrap(), b"old");
+        }
+        assert_eq!(std::fs::read(root.join("untracked")).unwrap(), b"precious");
+        let status: serde_json::Value = serde_json::from_str(&staged_paths(root)).unwrap();
+        assert_eq!(status["staged"], serde_json::json!([]));
+        assert_eq!(status["unstaged"], serde_json::json!([]));
+    }
+}

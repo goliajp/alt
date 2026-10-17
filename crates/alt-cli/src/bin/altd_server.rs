@@ -1241,6 +1241,12 @@ fn handle_receive_pack(
                 Err(e) => Err(format!("index-pack: {e}")),
             },
         };
+        // Failed ingest may have appended objects before returning an error.
+        // Finish that batch before another thread starts a durability barrier.
+        let result = match g.odb_mut().flush_pending() {
+            Ok(()) => result,
+            Err(e) => Err(format!("index-pack: {e}")),
+        };
         // Same cheap snapshot for the post-ingest cursor.
         let post = g.odb().cursor();
         (pre, post, result)

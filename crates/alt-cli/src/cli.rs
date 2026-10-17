@@ -286,6 +286,13 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Inspect and finish interrupted local operations
+    Operation {
+        #[command(subcommand)]
+        op: OperationOp,
+        #[arg(long, global = true)]
+        json: bool,
+    },
     /// Manage parallel workspaces (isolated HEAD/index/working tree)
     Workspace {
         #[command(subcommand)]
@@ -678,6 +685,16 @@ pub fn ci_validate<W: Write>(
     Ok(if error_count > 0 { 1 } else { 0 })
 }
 
+#[derive(clap::Subcommand, Debug)]
+pub enum OperationOp {
+    /// List incomplete operations belonging to this workspace instance
+    Pending,
+    /// Show the durable state of one operation
+    Status { id: String },
+    /// Finish a prepared operation after checking every affected prestate
+    Recover { id: String },
+}
+
 /// Whether a command runs against the native `.alt` store (vs the git layer or
 /// repo creation). `init` is neither — it creates a fresh repo.
 pub fn is_native(cmd: &Command) -> bool {
@@ -699,6 +716,7 @@ pub fn is_native(cmd: &Command) -> bool {
             | Command::Merge { .. }
             | Command::Flow { .. }
             | Command::Undo { .. }
+            | Command::Operation { .. }
             | Command::Workspace { .. }
             | Command::Remote { .. }
             | Command::Fetch { .. }
@@ -712,6 +730,44 @@ pub fn is_native(cmd: &Command) -> bool {
 /// Runs a native command against an attached repo, returning the process exit
 /// code (1 when a merge stops in conflict, else 0).
 pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> Res<u8> {
+    let read_only = matches!(
+        cmd,
+        Command::Operation { .. }
+            | Command::Status { .. }
+            | Command::Diff { .. }
+            | Command::OpLog { .. }
+            | Command::Verify { .. }
+            | Command::Commit { validate: true, .. }
+            | Command::Branch {
+                name: None,
+                delete: None,
+                ..
+            }
+            | Command::Tag {
+                name: None,
+                delete: None,
+                ..
+            }
+            | Command::Workspace {
+                op: WorkspaceOp::List,
+                ..
+            }
+            | Command::Remote {
+                op: RemoteOp::List,
+                ..
+            }
+            | Command::Identity {
+                op: IdentityOp::List,
+                ..
+            }
+            | Command::Meta {
+                op: MetaOp::Show { .. }
+            }
+            | Command::Lfs { op: LfsOp::Ls }
+    );
+    if !read_only {
+        repo.begin_workspace_write()?;
+    }
     match cmd {
         Command::Add { paths, json } => repo.add(paths, *json, out)?,
         Command::Commit {
@@ -879,6 +935,11 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
             } => repo.flow_hotfix_finish(name, *json, out)?,
         },
         Command::Undo { json } => repo.undo(*json, out)?,
+        Command::Operation { op, json } => match op {
+            OperationOp::Pending => repo.operation_pending(*json, out)?,
+            OperationOp::Status { id } => repo.operation_status(id, *json, out)?,
+            OperationOp::Recover { id } => repo.operation_recover(id, *json, out)?,
+        },
         Command::Workspace { op, json } => match op {
             WorkspaceOp::Add { name, path, branch } => {
                 repo.workspace_add(name, path, branch.as_deref(), *json, out)?

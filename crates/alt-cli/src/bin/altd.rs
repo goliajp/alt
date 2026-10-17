@@ -233,7 +233,16 @@ mod unix {
             let mut guard = shared.lock().expect("daemon store mutex poisoned");
             let (store, repo) = &mut *guard;
             let before = store.write_epoch();
-            let resp = handle(store, repo, &req);
+            let mut resp = handle(store, repo, &req);
+            // Failed commands can leave an object batch open. Release it
+            // before any off-mutex durability barrier waits on the odb lock.
+            if let Err(e) = store.odb_mut().flush_pending() {
+                resp = Response {
+                    exit_code: 128,
+                    stdout: Vec::new(),
+                    stderr: format!("fatal: durability: {e}\n").into_bytes(),
+                };
+            }
             let ticket = (store.write_epoch() != before).then(|| group.assign());
             (resp, ticket)
         };

@@ -23,6 +23,7 @@ impl NativeRepo<'_> {
         branch: &str,
         new_branch_at: Option<ObjectId>,
     ) -> Res<()> {
+        self.ensure_writable("workspace add")?;
         check_workspace_name(name)?;
         let head_ref = format!("workspaces/{name}/HEAD");
         if self.store.refs.get(&head_ref).is_some() {
@@ -73,6 +74,25 @@ impl NativeRepo<'_> {
         }
 
         let ws_dir = self.store.alt_dir.join("workspaces").join(name);
+        if ws_dir.exists() {
+            return Err(
+                "workspace registry already exists; inspect incomplete creation before retrying"
+                    .into(),
+            );
+        }
+        if abs.join(".alt").exists() || abs.join(".git").exists() {
+            return Err("workspace destination already contains repository metadata".into());
+        }
+        // Check the destination before publishing either its marker or HEAD.
+        let target = self.commit_entries(commit)?;
+        let preview = Coord {
+            root: abs.clone(),
+            workspace: name.to_owned(),
+            head_ref: head_ref.clone(),
+            index_path: ws_dir.join("index"),
+        };
+        NativeRepo::attach(&mut *self.store, preview, self.id.clone(), None)
+            .preflight_checkout(&[], &target)?;
         std::fs::create_dir_all(&ws_dir)?;
         std::fs::write(
             ws_dir.join("meta"),
