@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: test
+summary: support scoped gates and explicit daemon benchmarks
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/daemon_server.rs
+touched: scripts/gate.sh
+touched: scripts/test-gate.py
