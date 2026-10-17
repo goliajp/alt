@@ -1,0 +1,25 @@
+schema: alt-meta/1
+type: fix
+summary: scope undo and journal workspace writes
+author-type: human
+author: doracawl
+touched: Cargo.lock
+touched: crates/alt-cli/Cargo.toml
+touched: crates/alt-cli/src/bin/altd.rs
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/cli.rs
+touched: crates/alt-cli/src/group_commit.rs
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/add.rs
+touched: crates/alt-cli/src/native/checkout_recovery.rs
+touched: crates/alt-cli/src/native/op_log.rs
+touched: crates/alt-cli/src/native/operation.rs
+touched: crates/alt-cli/src/native/recovery.rs
+touched: crates/alt-cli/src/native/workspace.rs
+touched: crates/alt-cli/tests/it/fixtures/legacy-index-v1.bin
+touched: crates/alt-cli/tests/it/fixtures/legacy-oplog-v1.bin
+touched: crates/alt-cli/tests/it/flow_kill.rs
+touched: crates/alt-cli/tests/it/undo_add.rs
+touched: crates/alt-odb/src/lib.rs
+touched: crates/alt-refs/src/lib.rs
+touched: crates/alt-refs/src/tx.rs
