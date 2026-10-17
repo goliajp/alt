@@ -231,3 +231,67 @@ issues are welcome; pull requests are not currently accepted. If you want
 to use a part of `alt` as a library in your own project, the workspace
 crates (`alt-store`, `alt-git-pack`, `alt-wire`, `alt-diff`, …) are
 self-contained and each has its own purpose described in their rustdoc.
+### Execute a candidate and collect evidence
+
+`evidence run` materializes the candidate's selected source and explicit auxiliary
+inputs into a new directory outside existing repositories. The original workspace
+is left available for editing. The scratch filesystem must satisfy the task
+platform contract. Commands receive only the declared environment and an empty
+stdin. Declare build output directories in `validation.validation.outputs`; they
+cannot overlap inputs, exclusions, or observer metadata. Files created outside
+those directories invalidate the observation.
+
+Probe the tools on the machine that will execute the validation, and use the
+returned `tools` array in the task's validation context. Bind each command's first
+argument to an executable:
+
+```sh
+alt runner probe --bindings '[{"name":"bash","path":"/bin/bash","version_args":["--version"]}]' \
+  --environment '{"PATH":"/usr/bin:/bin"}' --json
+alt evidence run <candidate-id> --profile '<profile-json>' --json
+alt evidence run-status <attempt-id> --json
+alt evidence collect <attempt-id> --json
+```
+
+A local profile has this shape (the scratch directory must already exist):
+
+```json
+{
+  "kind": "local",
+  "scratch": "/absolute/path/outside/repositories",
+  "tools": [{"name": "bash", "path": "/bin/bash", "version_args": ["--version"]}],
+  "timeout_ms": 60000
+}
+```
+
+A `remote_sync` profile also supplies `device`, the absolute `sync_program` path
+to the existing canonical synchronization tool, an absolute remote `observer`
+path to this version of `alt`, its pinned `observer_blake3`, and
+`max_wait_seconds` (1–3600). Tool bindings name remote executable paths. The
+synchronization tool discovers the device address; alt records its actual route,
+script bytes and original output, then invokes the observer through
+`/usr/local/bin/bench-lock heavy`. The observer binary is read and verified before
+launch and after collection. No binary is installed by this command.
+
+Top-level ignored auxiliary files travel in a manifest-checked transfer bundle;
+auxiliary directories use the synchronization tool's `--also`. Source files
+must arrive through the normal source transfer. The receiver checks the actual
+materialized source, auxiliary files, directory membership and tool bytes before
+and after execution. External dependency versions need a corresponding
+`validation.validation.external_probes` mapping from provider to bound-tool argv;
+an asserted version without an observation cannot qualify.
+
+Each launch has an immutable attempt ID and a nonce that can execute once.
+Following a lost response, query the original request and its attributed attempt,
+then collect its existing report. Collection never reruns commands. An
+uncollected attempt blocks another launch for the same task. Reusing a completed
+request ID returns its original result. Failed validation still preserves its
+raw streams and evidence with an applied receipt: exit 1 means not eligible;
+exit 75 means the result is unknown. `evidence check` recomputes eligibility and
+returns reasons without changing history.
+
+The collector authenticates the original report against its private launch
+record and verifies every captured artifact. This provides attribution within
+trusted local/SSH execution; it is not a sandbox for hostile code running as the
+same user. Imported reports remain `reported`. Abandoning a task preserves its
+attempts and evidence and does not roll back external processes or services.

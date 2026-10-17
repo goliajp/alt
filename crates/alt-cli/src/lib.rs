@@ -22,6 +22,7 @@ pub mod policy;
 pub mod precommit;
 pub mod quote;
 pub mod request;
+pub mod runner;
 
 pub mod execution;
 

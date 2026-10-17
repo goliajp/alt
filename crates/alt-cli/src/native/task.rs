@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 mod candidate;
 mod commands;
 mod evidence;
+mod run;
 
 pub(super) const TASK_OPERATION: u8 = 0x34;
 
@@ -114,7 +115,13 @@ impl NativeRepo<'_> {
             workspace: std::fs::read_to_string(self.index_path.with_file_name("workspace-id"))?,
         })
     }
+    fn evidence_request_complete(&self, id: &str) -> Res<bool> {
+        self.record_request_complete(id, false)
+    }
     fn task_request_complete(&self, id: &str) -> Res<bool> {
+        self.record_request_complete(id, true)
+    }
+    fn record_request_complete(&self, id: &str, require_success: bool) -> Res<bool> {
         crate::request::parse_id(id)?;
         let directory = self.store.alt_dir.join("requests").join(id);
         let bytes = match std::fs::read(directory.join("intent.json")) {
@@ -125,7 +132,9 @@ impl NativeRepo<'_> {
         let intent: crate::request::Intent = serde_json::from_slice(&bytes)?;
         Ok(
             crate::request::read_completion(&directory, &intent)?.is_some_and(
-                |(completion, response)| completion.outcome == "applied" && response.exit_code == 0,
+                |(completion, response)| {
+                    completion.outcome == "applied" && (!require_success || response.exit_code == 0)
+                },
             ),
         )
     }

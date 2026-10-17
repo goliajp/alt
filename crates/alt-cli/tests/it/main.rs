@@ -44,6 +44,7 @@ mod show;
 mod status_json;
 mod tag;
 mod task_evidence;
+mod task_runner;
 mod undo_add;
 mod url_rewrite;
 mod verify_commit;

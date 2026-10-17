@@ -32,6 +32,13 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
+    /// Inspect tools or execute one immutable validation snapshot
+    Runner {
+        #[command(subcommand)]
+        op: RunnerOp,
+        #[arg(long, global = true)]
+        json: bool,
+    },
     /// Record an authorized task in an isolated workspace
     Task {
         #[command(subcommand)]
@@ -756,6 +763,20 @@ pub enum CandidateOp {
 }
 #[derive(clap::Subcommand, Debug)]
 pub enum EvidenceOp {
+    /// Materialize the candidate and execute through the selected runner
+    Run {
+        candidate: String,
+        #[arg(long)]
+        profile: String,
+    },
+    /// Read an existing run report without launching validation again
+    Collect {
+        id: String,
+    },
+    /// Inspect durable launch attribution and collection receipts
+    RunStatus {
+        id: String,
+    },
     /// Preserve an external report; imported claims never become observed runs
     Import {
         candidate: String,
@@ -777,6 +798,19 @@ pub enum EvidenceOp {
         id: String,
         #[arg(value_parser = ["stdout", "stderr", "original-report"])]
         stream: String,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum RunnerOp {
+    Probe {
+        #[arg(long)]
+        bindings: String,
+        #[arg(long)]
+        environment: String,
+    },
+    Execute {
+        spec: std::path::PathBuf,
     },
 }
 
@@ -844,7 +878,12 @@ pub fn mutates_command(cmd: &Command) -> bool {
             return matches!(op, TaskOp::Create { .. } | TaskOp::Abandon { .. });
         }
         Command::Candidate { op, .. } => return matches!(op, CandidateOp::Create { .. }),
-        Command::Evidence { op, .. } => return matches!(op, EvidenceOp::Import { .. }),
+        Command::Evidence { op, .. } => {
+            return matches!(
+                op,
+                EvidenceOp::Import { .. } | EvidenceOp::Run { .. } | EvidenceOp::Collect { .. }
+            );
+        }
         _ => {}
     }
     if matches!(

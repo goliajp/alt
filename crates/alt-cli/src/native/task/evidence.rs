@@ -9,6 +9,11 @@ impl NativeRepo<'_> {
     ) -> Res<()> {
         use crate::cli::EvidenceOp;
         match op {
+            EvidenceOp::Run { candidate, profile } => {
+                self.evidence_run(candidate, profile, json_mode, out)
+            }
+            EvidenceOp::Collect { id } => self.evidence_collect(id, json_mode, out),
+            EvidenceOp::RunStatus { id } => self.evidence_run_status(id, json_mode, out),
             EvidenceOp::Import {
                 candidate: candidate_id,
                 report,
@@ -61,7 +66,7 @@ impl NativeRepo<'_> {
             EvidenceOp::Show { id } => {
                 let store = self.task_store()?;
                 let evidence: Evidence = store.load(id)?;
-                let complete = self.task_request_complete(&evidence.creator_request)?;
+                let complete = self.evidence_request_complete(&evidence.creator_request)?;
                 emit(
                     out,
                     json_mode,
@@ -85,7 +90,7 @@ impl NativeRepo<'_> {
                     |artifact| store.verify_blob(artifact),
                 )?;
                 if !self.task_request_complete(&candidate.creator_request)?
-                    || !self.task_request_complete(&evidence.creator_request)?
+                    || !self.evidence_request_complete(&evidence.creator_request)?
                 {
                     validity.eligible = false;
                     validity.reasons.push("creation_completion_unknown".into());

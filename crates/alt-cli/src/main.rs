@@ -37,6 +37,21 @@ fn run() -> Response {
         *error.details = serde_json::json!({"path_bytes_hex": machine::hex(cwd.as_os_str().as_encoded_bytes()), "encoding":"os_bytes"});
         return error.response(parsed.json, parsed.cli.request_id.as_deref());
     }
+    if let Command::Runner { op, .. } = &parsed.cli.command {
+        if parsed.cli.request_id.is_some() || parsed.cli.workspace.is_some() {
+            return Failure::usage("runner uses its snapshot nonce; repository request/workspace selectors are not supported")
+                .response(parsed.json, parsed.cli.request_id.as_deref());
+        }
+        let mut stdout = Vec::new();
+        return match alt_cli::runner::run(op, &mut stdout) {
+            Ok(()) => Response {
+                exit_code: 0,
+                stdout,
+                stderr: Vec::new(),
+            },
+            Err(error) => machine::from_error(error.as_ref(), false).response(parsed.json, None),
+        };
+    }
     let identity = Identity::from_env();
     let native_write =
         cli::is_native(&parsed.cli.command) && cli::mutates_command(&parsed.cli.command);

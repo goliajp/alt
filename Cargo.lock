@@ -43,6 +43,7 @@ dependencies = [
  "alt-oplog",
  "alt-refs",
  "alt-repo",
+ "alt-runner",
  "alt-sign",
  "alt-task",
  "alt-testutil",
@@ -300,6 +301,20 @@ dependencies = [
  "alt-refs",
  "alt-testutil",
  "bstr",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
+name = "alt-runner"
+version = "0.0.0"
+dependencies = [
+ "alt-input",
+ "alt-task",
+ "blake3",
+ "libc",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror",
 ]

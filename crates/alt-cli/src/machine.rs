@@ -167,6 +167,18 @@ fn canonical_matches(matches: &clap::ArgMatches) -> Value {
         if matches!(id.as_str(), "request_id" | "workspace") {
             continue;
         }
+        // Clap propagates a subcommand's global flag into ancestor values,
+        // even where debug builds do not register its argument definition.
+        // Preserve the same raw boolean representation in every build mode.
+        if id.as_str() == "json" {
+            let raw = if matches_json(matches) {
+                "true"
+            } else {
+                "false"
+            };
+            args.insert(id.as_str(), vec![hex(raw.as_bytes())]);
+            continue;
+        }
         if let Some(values) = matches.get_raw(id.as_str()) {
             args.insert(
                 id.as_str(),
@@ -231,6 +243,15 @@ pub fn from_error(error: &(dyn std::error::Error + 'static), writing: bool) -> F
             }
             alt_task::Error::Precondition(_) => {
                 return Failure::refusal("precondition_failed", task.to_string());
+            }
+            _ => {}
+        }
+    }
+    if let Some(runner) = error.downcast_ref::<alt_runner::Error>() {
+        match runner {
+            alt_runner::Error::Input(input) => return from_error(input, writing),
+            alt_runner::Error::Invalid(_) | alt_runner::Error::Json(_) => {
+                return Failure::refusal("invalid_runner_input", runner.to_string());
             }
             _ => {}
         }
@@ -366,6 +387,30 @@ pub fn finish(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inherited_json_flags_keep_stable_request_bindings_without_panicking() {
+        let parse_args = |args: &[&str]| {
+            parse(args.iter().map(OsString::from).collect()).unwrap_or_else(|response| {
+                panic!(
+                    "parse failed: {}",
+                    String::from_utf8_lossy(&response.stderr)
+                )
+            })
+        };
+        let plain = parse_args(&["alt", "workspace", "add", "task", "/tmp/task"]);
+        assert!(!plain.json);
+        assert_eq!(plain.normalized["values"]["json"], json!([hex(b"false")]));
+        let before = parse_args(&["alt", "workspace", "--json", "add", "task", "/tmp/task"]);
+        let after = parse_args(&["alt", "workspace", "add", "task", "/tmp/task", "--json"]);
+        assert!(before.json && after.json);
+        let repeated = parse_args(&["alt", "workspace", "add", "task", "/tmp/task", "--json"]);
+        assert_eq!(repeated.normalized, after.normalized);
+        assert_eq!(after.normalized["values"]["json"], json!([hex(b"true")]));
+        assert_ne!(plain.normalized, after.normalized);
+        let runner = parse_args(&["alt", "runner", "execute", "spec.json", "--json"]);
+        assert!(runner.json);
+    }
 
     #[test]
     fn unicode_refusal_is_one_json_value_on_stderr() {
