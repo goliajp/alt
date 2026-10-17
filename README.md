@@ -84,6 +84,36 @@ alt commit -am "wip"
 alt flow feature finish newthing
 ```
 
+## Machine results and retries
+
+Commands supporting `--json` emit one failure object on stderr and leave stdout
+empty on failure. The error includes `kind`, `outcome`, `request_id`,
+`operation_id`, and `next_action`; original diagnostics are retained in
+`details`. Exit codes are 1 for a known refusal or conflict, 2 for usage,
+128 for an execution error, and 75 when effects are unknown.
+
+Writes in an existing native repository receive a durable request identity.
+Supply your own 32-digit hexadecimal id when coordinating retries:
+
+```sh
+alt --request-id 0123456789abcdef0123456789abcdef add src --json
+alt request status 0123456789abcdef0123456789abcdef --json
+alt request result 0123456789abcdef0123456789abcdef --json
+alt request pending --json
+```
+
+A completed request replays its original stdout, stderr, and exit code, including
+failures. Reusing its id with different arguments, caller identity, or workspace
+is refused. An interrupted request remains unknown and is never automatically
+executed again. Recovering one prepared operation does not prove the remaining
+command steps completed. Inspect `alt operation status <id> --json` before using
+`alt operation recover <id> --json`.
+
+Request receipts are private `.alt` state. `init`, `import`, `clone`, and Git-layer
+`export`/`config` do not support `--request-id`. Repository recovery does not undo
+external commands or remote effects. Interactive editors are unavailable in
+JSON mode.
+
 ## Compatibility with git
 
 Refs, commits, trees, blobs, and tags use the same SHA-1 object IDs git

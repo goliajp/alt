@@ -122,7 +122,14 @@ fn merge_json_clean_and_conflict() {
 
     let m = alt(root, &["merge", "x", "--json"]);
     assert!(!m.status.success(), "conflicting merge exits non-zero");
-    let json = String::from_utf8(m.stdout).unwrap();
+    assert!(m.stdout.is_empty());
+    let failure: serde_json::Value = serde_json::from_slice(&m.stderr).unwrap();
+    assert_eq!(failure["error"]["kind"], "conflict");
+    assert_eq!(failure["error"]["outcome"], "partial");
+    let json = failure["error"]["details"]["command_output"]["text"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     assert_valid_json(&json);
     assert!(json.contains("\"result\":\"conflicted\""), "{json}");
     assert!(json.contains("\"commit\":null"), "{json}");

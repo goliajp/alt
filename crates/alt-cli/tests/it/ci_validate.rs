@@ -123,7 +123,12 @@ needs = ["a"]
         "cycle must exit non-zero: stdout={}",
         String::from_utf8_lossy(&out.stdout)
     );
-    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(out.stdout.is_empty());
+    let failure: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(failure["error"]["kind"], "validation_failed");
+    let stdout = failure["error"]["details"]["command_output"]["text"]
+        .as_str()
+        .unwrap();
     let mut had_cycle = false;
     for line in stdout.lines() {
         // Each diagnostic is one JSON object on its own line.

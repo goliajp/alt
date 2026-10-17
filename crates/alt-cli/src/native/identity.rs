@@ -120,6 +120,8 @@ pub struct Identity {
     /// Whom an agent acts for (`ALT_CONTROLLING`), recorded in commit
     /// metadata.
     pub(super) controlling: Option<String>,
+    pub(super) protected_override: bool,
+    execution_environment: std::collections::BTreeMap<String, String>,
 }
 
 impl Identity {
@@ -155,7 +157,27 @@ impl Identity {
             author_name,
             author_email,
             controlling: get("ALT_CONTROLLING").filter(|v| !v.is_empty()),
+            protected_override: get("ALT_PROTECTED_OVERRIDE").is_some(),
+            execution_environment: [
+                "GIT_SEQUENCE_EDITOR",
+                "GIT_EDITOR",
+                "VISUAL",
+                "EDITOR",
+                "ALT_RELAXED_DURABILITY",
+                "ALT_NO_CREDENTIAL_HELPER",
+            ]
+            .into_iter()
+            .filter_map(|key| get(key).map(|value| (key.to_owned(), value)))
+            .collect(),
         }
+    }
+
+    pub fn binding(&self) -> serde_json::Value {
+        serde_json::json!({
+            "actor": self.actor("request"), "author_name": self.author_name,
+            "author_email": self.author_email, "controlling": self.controlling,
+            "protected_override": self.protected_override, "environment":self.execution_environment,
+        })
     }
 
     /// The op-log actor string for a verb. New structured form via

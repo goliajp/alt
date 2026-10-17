@@ -47,12 +47,12 @@ mod unix {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
-    use alt_cli::cli::{self, Cli};
-    use alt_cli::daemon::{self, Request, Response};
+    use alt_cli::daemon::{self, Request};
+    use alt_cli::execution::Execution;
     use alt_cli::group_commit::GroupCommit;
+    use alt_cli::machine::{self, Failure};
     use alt_cli::native::{Identity, Store, StoreSink};
     use alt_repo::Repository;
-    use clap::Parser;
 
     type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -226,92 +226,65 @@ mod unix {
     ) -> Res<()> {
         let payload = daemon::read_frame(&mut stream)?;
         let req = Request::decode(&payload)?;
-        // phase 1: run the command. A write appends but defers its fsync; if the
-        // write epoch advanced, take a ticket while still holding the store
-        // Mutex (so the ticket is in commit order and its bytes are on disk).
-        let (resp, ticket) = {
+        let parsed = match machine::parse(
+            std::iter::once("alt".into())
+                .chain(req.args.iter().map(Into::into))
+                .collect(),
+        ) {
+            Ok(parsed) => parsed,
+            Err(response) => {
+                daemon::write_frame(&mut stream, &response.encode())?;
+                return Ok(());
+            }
+        };
+        let execution = match Execution::prepare(
+            parsed,
+            req.cwd.clone(),
+            Identity::from_map(&req.env),
+            req.id,
+        ) {
+            Ok(execution) => execution,
+            Err(response) => {
+                daemon::write_frame(&mut stream, &response.encode())?;
+                return Ok(());
+            }
+        };
+        let (response, operations, ticket, barrier_ok) = {
             let mut guard = shared.lock().expect("daemon store mutex poisoned");
             let (store, repo) = &mut *guard;
-            let before = store.write_epoch();
-            let mut resp = handle(store, repo, &req);
-            // Failed commands can leave an object batch open. Release it
-            // before any off-mutex durability barrier waits on the odb lock.
-            if let Err(e) = store.odb_mut().flush_pending() {
-                resp = Response {
-                    exit_code: 128,
-                    stdout: Vec::new(),
-                    stderr: format!("fatal: durability: {e}\n").into_bytes(),
-                };
+            let refreshed = store
+                .refresh()
+                .and_then(|()| repo.refresh().map_err(Into::into));
+            let (mut response, operations) = match refreshed {
+                Ok(()) => execution.on_store(store, repo),
+                Err(error) => (execution.failure(error.as_ref()), Vec::new()),
+            };
+            let mut barrier_ok = true;
+            if let Err(error) = store.odb_mut().flush_pending() {
+                response = Failure::unknown(format!("durability: {error}")).response(
+                    execution.parsed.json,
+                    execution.id.as_ref().map(|id| machine::hex(id)).as_deref(),
+                );
+                barrier_ok = false;
             }
-            let ticket = (store.write_epoch() != before).then(|| group.assign());
-            (resp, ticket)
+            let ticket = execution.writing.then(|| group.assign());
+            (response, operations, ticket, barrier_ok)
         };
-        // phase 2: for a write, wait for the group-commit fsync that covers this
-        // ticket — performing it ourselves if no one else is. The fsync runs off
-        // the store Mutex, so concurrent commits append meanwhile and one fsync
-        // covers them all. Reads carry no ticket and skip this entirely.
-        let resp = match ticket {
-            Some(t) => match group.await_durable(sink, t) {
-                Ok(()) => resp,
-                Err(e) => Response {
-                    exit_code: 128,
-                    stdout: Vec::new(),
-                    stderr: format!("fatal: durability: {e}\n").into_bytes(),
-                },
-            },
-            None => resp,
+        let response = if barrier_ok {
+            match ticket
+                .map(|ticket| group.await_durable(sink, ticket))
+                .transpose()
+            {
+                Ok(_) => execution.publish(response, operations),
+                Err(error) => Failure::unknown(format!("durability: {error}")).response(
+                    execution.parsed.json,
+                    execution.id.as_ref().map(|id| machine::hex(id)).as_deref(),
+                ),
+            }
+        } else {
+            response
         };
-        daemon::write_frame(&mut stream, &resp.encode())?;
+        daemon::write_frame(&mut stream, &response.encode())?;
         Ok(())
-    }
-
-    /// Runs a request, turning any error into a `fatal:` stderr + exit 128 — the
-    /// same shape the `alt` binary reports for an uncaught error.
-    fn handle(store: &mut Store, repo: &mut Repository, req: &Request) -> Response {
-        match dispatch(store, repo, req) {
-            Ok(resp) => resp,
-            Err(e) => Response {
-                exit_code: 128,
-                stdout: Vec::new(),
-                stderr: format!("fatal: {e}\n").into_bytes(),
-            },
-        }
-    }
-
-    fn dispatch(store: &mut Store, repo: &mut Repository, req: &Request) -> Res<Response> {
-        // the request argv carries no program name; clap expects one
-        let argv = std::iter::once("alt".to_owned()).chain(req.args.iter().cloned());
-        let cli = Cli::try_parse_from(argv)?;
-        let id = Identity::from_map(&req.env);
-        // per-request catch-up on both the native store and the git-layer
-        // repository: see writes other processes committed since the last
-        // request, so a served read is never stale
-        store.refresh()?;
-        repo.refresh()?;
-        // exactly-once: a keyed write whose key is already in the durable
-        // idempotency index has taken effect — a retry after a lost response (or
-        // even after this daemon was restarted, since the index is rebuilt on
-        // open). Ack it without re-running, so the write lands exactly once. The
-        // ack does not byte-reproduce the original stdout (documented caveat);
-        // the client just needs a response to stop retrying, and an agent can
-        // re-query for the result.
-        if let Some(key) = req.id
-            && store.applied_request(&key).is_some()
-        {
-            return Ok(Response {
-                exit_code: 0,
-                stdout: Vec::new(),
-                stderr: b"note: request already applied (idempotent retry); \
-                    query with `alt status` / `alt log` for the result\n"
-                    .to_vec(),
-            });
-        }
-        let mut out = Vec::new();
-        let code = cli::run_on_store(&cli, store, repo, &req.cwd, id, req.id, &mut out)?;
-        Ok(Response {
-            exit_code: code,
-            stdout: out,
-            stderr: Vec::new(),
-        })
     }
 }

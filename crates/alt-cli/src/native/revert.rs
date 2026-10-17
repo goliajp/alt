@@ -376,12 +376,12 @@ impl NativeRepo<'_> {
         for t in &s.todo {
             text.push_str(&format!("todo {t}\n"));
         }
-        std::fs::write(self.revert_state_path(), text)?;
+        crate::durable::write(self.revert_state_path(), text)?;
         Ok(())
     }
 
     fn clear_revert_state(&self) -> Res<()> {
-        match std::fs::remove_file(self.revert_state_path()) {
+        match crate::durable::remove_file(self.revert_state_path()) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
             _ => Ok(()),
         }

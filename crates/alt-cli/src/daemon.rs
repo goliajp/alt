@@ -25,6 +25,12 @@ pub const FORWARDED_ENV: &[&str] = &[
     // whom an agent acts for, recorded in commit metadata
     "ALT_CONTROLLING",
     "ALT_RELAXED_DURABILITY",
+    "ALT_PROTECTED_OVERRIDE",
+    "GIT_SEQUENCE_EDITOR",
+    "GIT_EDITOR",
+    "VISUAL",
+    "EDITOR",
+    "ALT_NO_CREDENTIAL_HELPER",
 ];
 
 /// A client-chosen idempotency token: 16 bytes, unique per command invocation
@@ -189,6 +195,9 @@ impl Response {
         at += 1;
         let stdout = get_bytes(buf, &mut at)?;
         let stderr = get_bytes(buf, &mut at)?;
+        if at != buf.len() {
+            return Err(bad("trailing bytes in daemon response"));
+        }
         Ok(Response {
             exit_code,
             stdout,
@@ -199,7 +208,9 @@ impl Response {
 
 /// Writes a length-prefixed frame to `w`.
 pub fn write_frame(w: &mut impl Write, payload: &[u8]) -> io::Result<()> {
-    w.write_all(&(payload.len() as u32).to_le_bytes())?;
+    let length = u32::try_from(payload.len())
+        .map_err(|_| bad("daemon frame exceeds the 32-bit length limit"))?;
+    w.write_all(&length.to_le_bytes())?;
     w.write_all(payload)?;
     w.flush()
 }

@@ -32,6 +32,12 @@ pub(super) fn render_op_log_json(
         };
         let mut fields = vec![
             ("id", Json::str(hex32(&op.id.0))),
+            (
+                "request_id",
+                requests::operation_request(op)?
+                    .map(Json::str)
+                    .unwrap_or(Json::Null),
+            ),
             ("timestamp_ms", Json::Num(op.timestamp_ms as i64)),
             ("principal", principal_json(&principal)),
             ("verb", Json::str(&verb)),

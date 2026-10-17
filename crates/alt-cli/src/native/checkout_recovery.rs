@@ -28,6 +28,8 @@ struct FileChange {
 pub(super) struct CheckoutIntent {
     version: u32,
     pub(super) workspace: WorkspaceIdentity,
+    #[serde(default)]
+    pub(super) request_id: Option<String>,
     index_before: String,
     index_after: String,
     files: Vec<FileChange>,
@@ -38,6 +40,8 @@ pub(super) struct CheckoutIntent {
 struct CheckoutDone {
     version: u32,
     prepared: String,
+    #[serde(default)]
+    request_id: Option<String>,
 }
 
 impl NativeRepo<'_> {
@@ -56,17 +60,25 @@ impl NativeRepo<'_> {
                 Some(&COMPLETE_CHECKOUT) => {
                     let done: CheckoutDone = decode(&op.payload, COMPLETE_CHECKOUT)?;
                     if done.version != 1 {
-                        return Err("unsupported checkout completion".into());
+                        return Err(crate::machine::Failure::refusal(
+                            "unsupported_record",
+                            "unsupported checkout completion",
+                        )
+                        .into());
                     }
                     completed.insert(done.prepared);
                 }
                 Some(&PREPARE_CHECKOUT) => {
                     let pending: CheckoutIntent = decode(&op.payload, PREPARE_CHECKOUT)?;
                     if pending.version != 1 {
-                        return Err("unsupported checkout intent".into());
+                        return Err(crate::machine::Failure::refusal(
+                            "unsupported_record",
+                            "unsupported checkout intent",
+                        )
+                        .into());
                     }
                     if pending.workspace == identity && !completed.contains(&op.id.to_string()) {
-                        return Err(format!("operation {} has an incomplete checkout; recovery required (outcome unknown)", op.id).into());
+                        return Err(crate::machine::Failure::pending(op.id, format!("operation {} has an incomplete checkout; recovery required (outcome unknown)", op.id)).into());
                     }
                 }
                 Some(&alt_refs::PAYLOAD_REF_TX) => {
@@ -78,7 +90,7 @@ impl NativeRepo<'_> {
                             && context.checkout.is_some()
                             && !completed.contains(&op.id.to_string())
                         {
-                            return Err(format!("operation {} has an incomplete ref recovery; recovery required (outcome unknown)", op.id).into());
+                            return Err(crate::machine::Failure::pending(op.id, format!("operation {} has an incomplete ref recovery; recovery required (outcome unknown)", op.id)).into());
                         }
                     }
                 }
@@ -210,6 +222,7 @@ impl NativeRepo<'_> {
         Ok(CheckoutIntent {
             version: 1,
             workspace: self.workspace_identity()?,
+            request_id: self.request_id.map(|id| crate::machine::hex(&id)),
             index_before: self.snapshot(&canonical_index(self.index()?, self.store.algo))?,
             index_after: self.snapshot(&canonical_index(index_after, self.store.algo))?,
             files,
@@ -220,7 +233,7 @@ impl NativeRepo<'_> {
         let abs = self.abs(path)?;
         match state {
             None => {
-                std::fs::remove_file(&abs)?;
+                crate::durable::remove_file(&abs)?;
                 if let Some(parent) = abs.parent() {
                     std::fs::File::open(parent)?.sync_all()?;
                 }
@@ -241,7 +254,7 @@ impl NativeRepo<'_> {
                     let temp = tempfile::tempdir_in(parent)?;
                     let link = temp.path().join("link");
                     symlink_to(&bytes, &link)?;
-                    std::fs::rename(link, &abs)?;
+                    crate::durable::rename(link, &abs)?;
                     std::fs::File::open(parent)?.sync_all()?;
                 } else {
                     use std::os::unix::fs::PermissionsExt;
@@ -280,7 +293,11 @@ impl NativeRepo<'_> {
         intent: CheckoutIntent,
     ) -> Res<()> {
         if intent.version != 1 || intent.workspace != self.workspace_identity()? {
-            return Err("recovery workspace instance does not match".into());
+            return Err(crate::machine::Failure::refusal(
+                "precondition_failed",
+                "recovery workspace instance does not match",
+            )
+            .into());
         }
         // Check every path and snapshot before changing the first byte.
         let mut outstanding = Vec::new();
@@ -297,9 +314,11 @@ impl NativeRepo<'_> {
             }
             let actual = self.file_state(&path, false)?;
             if actual != change.before && actual != change.after {
-                return Err(
-                    "recovery precondition failed: path matches neither recorded state".into(),
-                );
+                return Err(crate::machine::Failure::refusal(
+                    "precondition_failed",
+                    "recovery precondition failed: path matches neither recorded state",
+                )
+                .into());
             }
             if actual != change.after {
                 outstanding.push(change);
@@ -311,9 +330,11 @@ impl NativeRepo<'_> {
         Index::parse(&after, self.store.algo)?;
         let current = hash(&canonical_index(self.index()?, self.store.algo));
         if current != intent.index_before && current != intent.index_after {
-            return Err(
-                "recovery precondition failed: index matches neither recorded state".into(),
-            );
+            return Err(crate::machine::Failure::refusal(
+                "precondition_failed",
+                "recovery precondition failed: index matches neither recorded state",
+            )
+            .into());
         }
         for change in outstanding {
             self.apply_file_state(&BString::from(change.path.clone()), &change.after)?;
@@ -329,6 +350,7 @@ impl NativeRepo<'_> {
                 &CheckoutDone {
                     version: 1,
                     prepared: operation.to_string(),
+                    request_id: self.request_id.map(|id| crate::machine::hex(&id)),
                 },
             )?,
         )?;
@@ -365,11 +387,19 @@ impl NativeRepo<'_> {
         // Validate the entire affected set before the first file replacement.
         for change in &intent.files {
             if self.file_state(&BString::from(change.path.clone()), false)? != change.before {
-                return Err("checkout precondition changed after preparation".into());
+                return Err(crate::machine::Failure::refusal(
+                    "precondition_failed",
+                    "checkout precondition changed after preparation",
+                )
+                .into());
             }
         }
         if hash(&canonical_index(self.index()?, self.store.algo)) != intent.index_before {
-            return Err("checkout index changed after preparation".into());
+            return Err(crate::machine::Failure::refusal(
+                "precondition_failed",
+                "checkout index changed after preparation",
+            )
+            .into());
         }
         for change in &intent.files {
             self.apply_file_state(&BString::from(change.path.clone()), &change.after)?;
@@ -383,6 +413,7 @@ impl NativeRepo<'_> {
                 &CheckoutDone {
                     version: 1,
                     prepared: prepared.to_string(),
+                    request_id: self.request_id.map(|id| crate::machine::hex(&id)),
                 },
             )?,
         )?;

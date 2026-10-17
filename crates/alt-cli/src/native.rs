@@ -37,6 +37,7 @@ pub mod notes;
 use merge::Resolved;
 mod rebase;
 mod recovery;
+mod requests;
 mod revert;
 mod sequence_editor;
 mod workspace;
@@ -579,6 +580,7 @@ pub fn init(dir: Option<PathBuf>, out: &mut impl Write) -> Res<()> {
         workspace: recovery::workspace_identity_at(&alt_dir.join("index"), DEFAULT_WORKSPACE)?,
         inverse_of: None,
         checkout: None,
+        request_id: None,
     })?;
     refs.commit_scoped(
         &Identity::from_env().actor("init"),
@@ -627,10 +629,9 @@ pub struct NativeRepo<'a> {
     /// applied here in `NativeRepo`; ref-namespace / read-only gates are
     /// applied inside [`RefStore::commit_idempotent`] via [`RefPolicy`].
     caps: Capabilities,
-    /// The idempotency key stamped on this command's terminal ref transaction
-    /// `Some` only on the daemon's exactly-once write path; `None` for
-    /// reads and the direct CLI (where `commit_idempotent` is a plain commit).
-    idem_key: Option<IdemKey>,
+    /// Whole-command attribution. Receipts deduplicate execution; individual
+    /// ref transactions must all run and must never share a deduplication key.
+    request_id: Option<IdemKey>,
     write_lock: Option<std::fs::File>,
     inverse_of: Option<String>,
     checkout_intent: Option<checkout_recovery::CheckoutIntent>,
@@ -638,13 +639,12 @@ pub struct NativeRepo<'a> {
 
 impl<'a> NativeRepo<'a> {
     /// Binds a borrowed store to a workspace + identity for one command, with an
-    /// optional idempotency `idem_key` (the daemon injects it for a keyed write;
-    /// `None` everywhere else).
+    /// optional request identity for attributing every operation in a write.
     pub fn attach(
         store: &'a mut Store,
         coord: Coord,
         id: Identity,
-        idem_key: Option<IdemKey>,
+        request_id: Option<IdemKey>,
     ) -> Self {
         let caps = store.capabilities_for(&id.principal);
         Self {
@@ -655,7 +655,7 @@ impl<'a> NativeRepo<'a> {
             index_path: coord.index_path,
             id,
             caps,
-            idem_key,
+            request_id,
             write_lock: None,
             inverse_of: None,
             checkout_intent: None,
@@ -686,16 +686,22 @@ impl<'a> NativeRepo<'a> {
                 None => continue,
             };
             if deny.iter().any(|g| g.matches(short)) {
-                return Err(format!(
-                    "capability denied: push to '{}' is blocked by branch_deny",
-                    c.name
+                return Err(crate::machine::Failure::refusal(
+                    "capability_denied",
+                    format!(
+                        "capability denied: push to '{}' is blocked by branch_deny",
+                        c.name
+                    ),
                 )
                 .into());
             }
             if !allow.is_empty() && !allow.iter().any(|g| g.matches(short)) {
-                return Err(format!(
-                    "capability denied: push to '{}' is not in branch_allow",
-                    c.name
+                return Err(crate::machine::Failure::refusal(
+                    "capability_denied",
+                    format!(
+                        "capability denied: push to '{}' is not in branch_allow",
+                        c.name
+                    ),
                 )
                 .into());
             }
@@ -757,11 +763,19 @@ impl<'a> NativeRepo<'a> {
 
     fn ensure_writable(&mut self, verb: &str) -> Res<()> {
         if self.caps.read_only {
-            return Err(format!("capability denied: principal cannot {verb} (read-only)").into());
+            return Err(crate::machine::Failure::refusal(
+                "capability_denied",
+                format!("capability denied: principal cannot {verb} (read-only)"),
+            )
+            .into());
         }
         self.lock_workspace()?;
         if self.caps.read_only {
-            return Err(format!("capability denied: principal cannot {verb} (read-only)").into());
+            return Err(crate::machine::Failure::refusal(
+                "capability_denied",
+                format!("capability denied: principal cannot {verb} (read-only)"),
+            )
+            .into());
         }
         self.ensure_no_pending_recovery()
     }
@@ -790,7 +804,7 @@ impl<'a> NativeRepo<'a> {
     }
 
     fn ensure_topic_branch_or_unborn(&self, verb: &str) -> Res<()> {
-        if std::env::var_os("ALT_PROTECTED_OVERRIDE").is_some() {
+        if self.id.protected_override {
             return Ok(());
         }
         let model = self.flow_model();
@@ -825,8 +839,10 @@ impl<'a> NativeRepo<'a> {
         } else {
             (&model.feature_prefix, "feature")
         };
-        Err(format!(
-            "refusing to {verb} directly on protected branch '{short}'.\n\
+        Err(crate::machine::Failure::refusal(
+            "precondition_failed",
+            format!(
+                "refusing to {verb} directly on protected branch '{short}'.\n\
              alt's collaboration model is git-flow; topic branches are how work merges \
              back. To carry your staged changes onto a topic branch right now:\n\
              \n\
@@ -837,6 +853,7 @@ impl<'a> NativeRepo<'a> {
              \n\
              (override with ALT_PROTECTED_OVERRIDE=1 only for emergency recovery — \
              not for normal work.)"
+            ),
         )
         .into())
     }
@@ -845,7 +862,11 @@ impl<'a> NativeRepo<'a> {
     /// not match. Empty allow-list = no constraint.
     fn ensure_path_allowed(&self, path: &str) -> Res<()> {
         if !self.caps.allows_path_name(path) {
-            return Err(format!("capability denied: path '{path}' is not in path_allow").into());
+            return Err(crate::machine::Failure::refusal(
+                "capability_denied",
+                format!("capability denied: path '{path}' is not in path_allow"),
+            )
+            .into());
         }
         Ok(())
     }
@@ -873,9 +894,12 @@ impl<'a> NativeRepo<'a> {
                 }
             };
             if force {
-                return Err(format!(
-                    "capability denied: forbid_force is set and {} would not be a fast-forward",
-                    c.name
+                return Err(crate::machine::Failure::refusal(
+                    "capability_denied",
+                    format!(
+                        "capability denied: forbid_force is set and {} would not be a fast-forward",
+                        c.name
+                    ),
                 )
                 .into());
             }
@@ -887,18 +911,12 @@ impl<'a> NativeRepo<'a> {
     /// read-only and force/non-FF *before* entering the ref store, then asks
     /// the store to do the atomic CAS-append with the namespace gate folded
     /// in (via [`RefPolicy`]). A denial — at any axis — costs no on-disk
-    /// state. Uses [`self.idem_key`](Self::idem_key) so daemon-keyed writes
-    /// flow through unchanged. Use [`commit_refs_unkeyed`] for the
-    /// *non-terminal* tx of a multi-tx command (e.g. switch-with-create).
+    /// state. All subtransactions carry the request id in their context.
     fn commit_refs(&mut self, verb: &str, changes: &[RefChange]) -> Res<OpId> {
-        self.commit_refs_with(verb, changes, self.idem_key)
+        self.commit_refs_with(verb, changes, None)
     }
 
-    /// Like [`commit_refs`] but always with `idem_key = None` — for the
-    /// non-terminal ref tx of a command that produces several (switch-with-
-    /// create's create-branch, workspace add's HEAD wire-up). The terminal
-    /// tx of the same command goes through [`commit_refs`] so the
-    /// exactly-once retry still works.
+    /// Intermediate ref transaction, attributed to the same whole command.
     fn commit_refs_unkeyed(&mut self, verb: &str, changes: &[RefChange]) -> Res<OpId> {
         self.commit_refs_with(verb, changes, None)
     }
@@ -942,6 +960,7 @@ impl<'a> NativeRepo<'a> {
             workspace: self.workspace_identity()?,
             inverse_of: self.inverse_of.clone(),
             checkout: self.checkout_intent.clone(),
+            request_id: self.request_id.map(|id| crate::machine::hex(&id)),
         })?;
         let id = self.store.refs.commit_scoped(
             &actor,
@@ -995,6 +1014,8 @@ impl<'a> NativeRepo<'a> {
             .create(true)
             .open(&sigs_path)?;
         f.write_all(line.as_bytes())?;
+        f.sync_all()?;
+        std::fs::File::open(sigs_path.parent().expect("oplog directory"))?.sync_all()?;
         Ok(())
     }
 
@@ -1664,7 +1685,11 @@ impl<'a> NativeRepo<'a> {
         check_branch_name(name)?;
         let full = format!("refs/heads/{name}");
         if self.store.refs.get(&full).is_some() {
-            return Err(format!("a branch named '{name}' already exists").into());
+            return Err(crate::machine::Failure::refusal(
+                "precondition_failed",
+                format!("a branch named '{name}' already exists"),
+            )
+            .into());
         }
         let commit = self
             .store
@@ -1949,7 +1974,11 @@ impl<'a> NativeRepo<'a> {
         if create {
             check_branch_name(name)?;
             if self.store.refs.get(&full).is_some() {
-                return Err(format!("a branch named '{name}' already exists").into());
+                return Err(crate::machine::Failure::refusal(
+                    "precondition_failed",
+                    format!("a branch named '{name}' already exists"),
+                )
+                .into());
             }
             // a new branch starts at the current commit (if any); the working
             // tree and index carry over unchanged, so no checkout is needed.
@@ -1974,7 +2003,11 @@ impl<'a> NativeRepo<'a> {
         }
 
         if self.store.refs.get(&full).is_none() {
-            return Err(format!("invalid reference: {name}").into());
+            return Err(crate::machine::Failure::refusal(
+                "precondition_failed",
+                format!("invalid reference: {name}"),
+            )
+            .into());
         }
         if full == current {
             return report(out, "already_on", &format!("Already on '{name}'"));
@@ -2000,8 +2033,9 @@ impl<'a> NativeRepo<'a> {
         let worktree = self.scan_tree(&raw)?;
         let st = status(&head, &index, &worktree);
         if !st.staged.is_empty() || !st.unstaged.is_empty() {
-            return Err(format!(
-                "your local changes would be overwritten by {action}; commit them first"
+            return Err(crate::machine::Failure::refusal(
+                "precondition_failed",
+                format!("your local changes would be overwritten by {action}; commit them first"),
             )
             .into());
         }
@@ -2025,7 +2059,7 @@ impl<'a> NativeRepo<'a> {
         let abs = self.abs(&w.path)?;
         if w.mode == 0o160000 {
             if abs.symlink_metadata().is_ok_and(|m| !m.is_dir()) {
-                std::fs::remove_file(&abs)?;
+                crate::durable::remove_file(&abs)?;
             }
             std::fs::create_dir_all(&abs)?;
             return Ok(());
@@ -2034,7 +2068,7 @@ impl<'a> NativeRepo<'a> {
             std::fs::create_dir_all(parent)?;
         }
         if abs.symlink_metadata().is_ok() {
-            std::fs::remove_file(&abs)?;
+            crate::durable::remove_file(&abs)?;
         }
         let obj = self
             .store
@@ -2048,7 +2082,7 @@ impl<'a> NativeRepo<'a> {
                 Some(p) => self.lfs_content(&p)?,
                 None => None,
             };
-            std::fs::write(&abs, content.as_deref().unwrap_or(&obj.data))?;
+            crate::durable::write(&abs, content.as_deref().unwrap_or(&obj.data))?;
             set_exec(&abs, w.mode == 0o100755)?;
         }
         Ok(())
@@ -2323,7 +2357,11 @@ impl<'a> NativeRepo<'a> {
         let feat_ref = format!("refs/heads/{}", flow.branch);
         let base_ref = format!("refs/heads/{}", flow.base);
         if self.store.refs.get(&feat_ref).is_some() {
-            return Err(format!("a branch named '{}' already exists", flow.branch).into());
+            return Err(crate::machine::Failure::refusal(
+                "precondition_failed",
+                format!("a branch named '{}' already exists", flow.branch),
+            )
+            .into());
         }
         let base = self
             .store
@@ -2499,7 +2537,11 @@ impl<'a> NativeRepo<'a> {
         let topic_ref = format!("refs/heads/{}", flow.branch);
         let base_ref = format!("refs/heads/{}", flow.base);
         if self.store.refs.get(&topic_ref).is_some() {
-            return Err(format!("a branch named '{}' already exists", flow.branch).into());
+            return Err(crate::machine::Failure::refusal(
+                "precondition_failed",
+                format!("a branch named '{}' already exists", flow.branch),
+            )
+            .into());
         }
         let base = self.store.refs.resolve(&base_ref)?.ok_or_else(|| {
             format!(
@@ -2701,7 +2743,7 @@ impl<'a> NativeRepo<'a> {
         std::fs::create_dir_all(path.parent().unwrap())?;
         let fetch = default_fetch_refspec(name);
         let body = format!("url={url}\nfetch={fetch}\n");
-        std::fs::write(&path, body)?;
+        crate::durable::write(&path, body)?;
         if json {
             use crate::json::Json;
             crate::json::emit(
@@ -2751,7 +2793,7 @@ impl<'a> NativeRepo<'a> {
         if !path.exists() {
             return Err(format!("no such remote '{name}'").into());
         }
-        std::fs::remove_file(&path)?;
+        crate::durable::remove_file(&path)?;
         if json {
             use crate::json::Json;
             crate::json::emit(out, vec![("removed", Json::str(name))])?;
@@ -2791,7 +2833,7 @@ impl<'a> NativeRepo<'a> {
             );
         }
         let (sec, pub_) = alt_sign::SecretKey::generate();
-        std::fs::write(&pub_path, pub_.to_text())?;
+        crate::durable::write(&pub_path, pub_.to_text())?;
         write_secret_file(&sec_path, sec.to_text().as_bytes())?;
         if json {
             use crate::json::Json;
@@ -2869,7 +2911,7 @@ impl<'a> NativeRepo<'a> {
         let dir = self.store.alt_dir.join("trust");
         std::fs::create_dir_all(&dir)?;
         let dst = dir.join(format!("{principal}.pub"));
-        std::fs::write(&dst, key.to_text())?;
+        crate::durable::write(&dst, key.to_text())?;
         if json {
             use crate::json::Json;
             crate::json::emit(
@@ -3092,7 +3134,7 @@ impl<'a> NativeRepo<'a> {
         };
         if bytes_written == 0 {
             // server said "nothing new" — drop the empty file, skip indexing
-            let _ = std::fs::remove_file(&tmp_pack);
+            let _ = crate::durable::remove_file(&tmp_pack);
         } else {
             // index the pack and ingest its objects into the native odb
             let indexed = alt_git_pack::index_pack(&tmp_pack, algo, true)
@@ -3356,7 +3398,7 @@ impl<'a> NativeRepo<'a> {
             std::fs::read(&written.pack_path)?
         };
         // best-effort cleanup; not fatal if the dir is busy
-        let _ = std::fs::remove_dir_all(&pack_dir);
+        let _ = crate::durable::remove_dir_all(&pack_dir);
 
         // capabilities to declare on the push request
         let agent = format!("agent=alt/{}", env!("CARGO_PKG_VERSION"));
@@ -3972,13 +4014,16 @@ fn stage_entry(w: &WorkEntry, stage: u8) -> IndexEntry {
 fn symlink_to(target: &[u8], at: &Path) -> Res<()> {
     use std::os::unix::ffi::OsStrExt;
     std::os::unix::fs::symlink(std::ffi::OsStr::from_bytes(target), at)?;
+    if let Some(parent) = at.parent() {
+        std::fs::File::open(parent)?.sync_all()?;
+    }
     Ok(())
 }
 
 #[cfg(not(unix))]
 fn symlink_to(target: &[u8], at: &Path) -> Res<()> {
     // no symlink support: fall back to a regular file holding the target text
-    std::fs::write(at, target)?;
+    crate::durable::write(at, target)?;
     Ok(())
 }
 
@@ -3986,7 +4031,7 @@ fn symlink_to(target: &[u8], at: &Path) -> Res<()> {
 fn set_exec(path: &Path, exec: bool) -> Res<()> {
     use std::os::unix::fs::PermissionsExt;
     let perm = if exec { 0o755 } else { 0o644 };
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(perm))?;
+    crate::durable::set_permissions(path, std::fs::Permissions::from_mode(perm))?;
     Ok(())
 }
 
@@ -4472,14 +4517,14 @@ fn write_secret_file(path: &Path, body: &[u8]) -> Res<()> {
         f.sync_all()?;
     }
     set_secret_perms(&tmp)?;
-    std::fs::rename(&tmp, path)?;
+    crate::durable::rename(&tmp, path)?;
     Ok(())
 }
 
 #[cfg(unix)]
 fn set_secret_perms(path: &Path) -> Res<()> {
     use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    crate::durable::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
     Ok(())
 }
 
@@ -4580,16 +4625,16 @@ fn save_index(path: &Path, index: &Index, algo: HashAlgo) -> Res<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&tmp, index.serialize(algo))?;
+    crate::durable::write(&tmp, index.serialize(algo))?;
     let stamp = file_mtime(&std::fs::metadata(&tmp)?);
     if index.entries.iter().any(|e| e.mtime >= stamp) {
         let mut smudged = index.clone();
         for e in smudged.entries.iter_mut().filter(|e| e.mtime >= stamp) {
             e.mtime = (0, 0);
         }
-        std::fs::write(&tmp, smudged.serialize(algo))?;
+        crate::durable::write(&tmp, smudged.serialize(algo))?;
     }
-    std::fs::rename(&tmp, path)?;
+    crate::durable::rename(&tmp, path)?;
     Ok(())
 }
 

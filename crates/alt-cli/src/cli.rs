@@ -25,10 +25,20 @@ pub struct Cli {
     /// Operate in the named parallel workspace instead of the default one
     #[arg(long, global = true)]
     pub workspace: Option<String>,
+    /// Stable request identity for a write in an existing native repository
+    #[arg(long, global = true, value_name = "HEX")]
+    pub request_id: Option<String>,
 }
 
 #[derive(Subcommand)]
 pub enum Command {
+    /// Inspect durable whole-command receipts without executing the command
+    Request {
+        #[command(subcommand)]
+        op: RequestOp,
+        #[arg(long, global = true)]
+        json: bool,
+    },
     /// Provide contents or details of repository objects
     CatFile(CatFileArgs),
     /// Pick out and massage parameters
@@ -686,6 +696,16 @@ pub fn ci_validate<W: Write>(
 }
 
 #[derive(clap::Subcommand, Debug)]
+pub enum RequestOp {
+    /// List requests without a durable completion
+    Pending,
+    /// Inspect request scope, completion, and attributed operations
+    Status { id: String },
+    /// Read the entire recorded stdout, stderr, and exit code
+    Result { id: String },
+}
+
+#[derive(clap::Subcommand, Debug)]
 pub enum OperationOp {
     /// List incomplete operations belonging to this workspace instance
     Pending,
@@ -700,7 +720,8 @@ pub enum OperationOp {
 pub fn is_native(cmd: &Command) -> bool {
     matches!(
         cmd,
-        Command::Add { .. }
+        Command::Request { .. }
+            | Command::Add { .. }
             | Command::Commit { .. }
             | Command::Status { .. }
             | Command::Branch { .. }
@@ -729,10 +750,32 @@ pub fn is_native(cmd: &Command) -> bool {
 
 /// Runs a native command against an attached repo, returning the process exit
 /// code (1 when a merge stops in conflict, else 0).
-pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> Res<u8> {
-    let read_only = matches!(
+pub fn mutates_command(cmd: &Command) -> bool {
+    if matches!(
         cmd,
-        Command::Operation { .. }
+        Command::Operation {
+            op: OperationOp::Recover { .. },
+            ..
+        }
+    ) {
+        return true;
+    }
+    if let Command::Config { value, unset, .. } = cmd {
+        return value.is_some() || unset.is_some();
+    }
+    if !is_native(cmd) {
+        return matches!(
+            cmd,
+            Command::Init { .. }
+                | Command::Clone { .. }
+                | Command::Import { .. }
+                | Command::Export { .. }
+        );
+    }
+    !matches!(
+        cmd,
+        Command::Request { .. }
+            | Command::Operation { .. }
             | Command::Status { .. }
             | Command::Diff { .. }
             | Command::OpLog { .. }
@@ -764,11 +807,29 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
                 op: MetaOp::Show { .. }
             }
             | Command::Lfs { op: LfsOp::Ls }
-    );
-    if !read_only {
+    )
+}
+
+pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> Res<u8> {
+    if matches!(
+        cmd,
+        Command::Rebase {
+            interactive: true,
+            json: true,
+            ..
+        }
+    ) {
+        return Err(crate::machine::Failure::refusal(
+            "interactive_input_required",
+            "interactive rebase requires an editor and is unavailable in JSON mode",
+        )
+        .into());
+    }
+    if mutates_command(cmd) && !matches!(cmd, Command::Operation { .. }) {
         repo.begin_workspace_write()?;
     }
     match cmd {
+        Command::Request { op, json } => repo.request_query(op, *json, out)?,
         Command::Add { paths, json } => repo.add(paths, *json, out)?,
         Command::Commit {
             validate: true,
@@ -1101,9 +1162,8 @@ pub fn run_on_store<W: Write>(
         Command::Init { .. } => Err("the daemon does not serve 'init'".into()),
         c if is_native(c) => {
             let (_alt_dir, coord) = native::resolve_workspace(cwd, cli.workspace.as_deref())?;
-            // the idempotency key is stamped on the command's terminal ref
-            // transaction; the daemon's earlier `applied_request` check (in
-            // dispatch) already short-circuited a completed duplicate
+            // Execution has already claimed the whole request. The id here
+            // attributes each operation; it is not a ref transaction dedup key.
             let mut repo = NativeRepo::attach(store, coord, id, request_id);
             run_native(&mut repo, c, out)
         }

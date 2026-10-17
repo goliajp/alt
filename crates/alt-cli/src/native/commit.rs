@@ -59,11 +59,12 @@ impl NativeRepo<'_> {
             && !opts.allow_empty
             && self.commit_tree(p)? == tree
         {
-            return Err(
+            return Err(crate::machine::Failure::refusal(
+                "precondition_failed",
                 "nothing to commit: the index matches HEAD (use --allow-empty to \
-                        record an empty commit)"
-                    .into(),
-            );
+                        record an empty commit)",
+            )
+            .into());
         }
         if !opts.no_verify {
             self.run_precommit()?;
@@ -192,12 +193,15 @@ impl NativeRepo<'_> {
             .precommit_findings()?
             .into_iter()
             .partition(|f| f.severity == Severity::Error);
-        eprint!("{}", precommit::render(&warnings));
+        crate::diagnostics::emit(precommit::render(&warnings).as_bytes())?;
         if !errors.is_empty() {
-            return Err(format!(
-                "commit refused by the pre-commit checks (see `alt commit --validate --json`; \
+            return Err(crate::machine::Failure::refusal(
+                "precondition_failed",
+                format!(
+                    "commit refused by the pre-commit checks (see `alt commit --validate --json`; \
                  skip them with --no-verify):\n{}",
-                precommit::render(&errors).trim_end()
+                    precommit::render(&errors).trim_end()
+                ),
             )
             .into());
         }
@@ -239,7 +243,11 @@ impl NativeRepo<'_> {
     pub(super) fn staged_tree(&mut self) -> Res<ObjectId> {
         let staged = index_entries(&self.index()?);
         if staged.is_empty() {
-            return Err("nothing to commit (empty index)".into());
+            return Err(crate::machine::Failure::refusal(
+                "precondition_failed",
+                "nothing to commit (empty index)",
+            )
+            .into());
         }
         Ok(write_tree(&mut self.store.odb, &staged, self.store.algo)?)
     }

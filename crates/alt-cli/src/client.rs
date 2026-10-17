@@ -31,7 +31,6 @@ mod imp {
     use std::os::unix::net::UnixStream;
     use std::path::Path;
     use std::process::{Command, Stdio};
-    use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::{Duration, Instant};
 
     use crate::cli::Command as Cmd;
@@ -127,8 +126,7 @@ mod imp {
     /// - `LostAfterSend` if the budget runs out after the request had gone out —
     ///   the caller surfaces the at-most-once error rather than risk a double run
     ///   (a direct run carries no id and could not be deduplicated).
-    pub fn serve_write(alt_dir: &Path, args: &[String]) -> Outcome {
-        let id = new_request_id();
+    pub fn serve_write(alt_dir: &Path, args: &[String], id: RequestId) -> Outcome {
         let mut sent = false;
         let deadline = Instant::now() + WRITE_RETRY_BUDGET;
         loop {
@@ -178,26 +176,6 @@ mod imp {
             },
             Err(_) => Outcome::LostAfterSend,
         }
-    }
-
-    /// A fresh idempotency id, unique per call: process id and start time make
-    /// it unique across invocations (so two separate commands never collide),
-    /// and a process-local counter covers the rare case of one process issuing
-    /// several writes. All retries of one write reuse the value, so the daemon
-    /// can match a retry to the original.
-    fn new_request_id() -> RequestId {
-        static COUNTER: AtomicU32 = AtomicU32::new(0);
-        let pid = std::process::id();
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or(0);
-        let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let mut id = [0u8; 16];
-        id[0..4].copy_from_slice(&pid.to_le_bytes());
-        id[4..12].copy_from_slice(&nanos.to_le_bytes());
-        id[12..16].copy_from_slice(&seq.to_le_bytes());
-        id
     }
 
     /// Connects to `sock`; if nothing is listening, spawns `altd` and polls for

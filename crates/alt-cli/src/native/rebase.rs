@@ -351,11 +351,12 @@ impl NativeRepo<'_> {
             if todo.len() == 1 { "" } else { "s" }
         ));
         text.push_str(ed::TODO_HELP);
+        ed::check_machine_mode()?;
         let path = self.index_path.with_file_name("REBASE_TODO");
-        std::fs::write(&path, text)?;
+        crate::durable::write(&path, text)?;
         ed::edit(&path, true)?;
         let edited = std::fs::read_to_string(&path)?;
-        std::fs::remove_file(&path)?;
+        crate::durable::remove_file(&path)?;
         let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
         ed::parse_todo(&edited, |rev| {
             repo.rev_parse(rev)?
@@ -373,11 +374,12 @@ impl NativeRepo<'_> {
 
     /// Runs the editor on a commit message and applies git's cleanup.
     fn edited_message(&self, message: &str) -> Res<String> {
+        ed::check_machine_mode()?;
         let path = self.index_path.with_file_name("REBASE_MSG");
-        std::fs::write(&path, message)?;
+        crate::durable::write(&path, message)?;
         ed::edit(&path, false)?;
         let edited = ed::cleanup(&std::fs::read_to_string(&path)?);
-        std::fs::remove_file(&path)?;
+        crate::durable::remove_file(&path)?;
         if edited.is_empty() {
             return Err("rebase: aborting because the commit message is empty".into());
         }
@@ -542,13 +544,13 @@ impl NativeRepo<'_> {
         }
         let path = self.rebase_state_path();
         let tmp = path.with_extension("tmp");
-        std::fs::write(&tmp, text)?;
-        std::fs::rename(&tmp, &path)?;
+        crate::durable::write(&tmp, text)?;
+        crate::durable::rename(&tmp, &path)?;
         Ok(())
     }
 
     fn clear_rebase_state(&self) -> Res<()> {
-        match std::fs::remove_file(self.rebase_state_path()) {
+        match crate::durable::remove_file(self.rebase_state_path()) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
             _ => Ok(()),
         }

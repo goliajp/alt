@@ -9,7 +9,10 @@ use recovery::{COMPLETE, IndexIntent, PREPARE, RefContext, WorkspaceIdentity, de
 impl NativeRepo<'_> {
     fn operation_by_id(&self, id: &str) -> Res<alt_oplog::Op> {
         if id.len() != 64 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err("operation id must be 64 hexadecimal digits".into());
+            return Err(crate::machine::Failure::usage(
+                "operation id must be 64 hexadecimal digits",
+            )
+            .into());
         }
         self.store
             .refs
@@ -28,7 +31,11 @@ impl NativeRepo<'_> {
             }
             let done: serde_json::Value = decode(&op.payload, kind)?;
             if done["version"] != 1 {
-                return Err("unsupported operation completion".into());
+                return Err(crate::machine::Failure::refusal(
+                    "unsupported_record",
+                    "unsupported operation completion",
+                )
+                .into());
             }
             if done["prepared"].as_str() == Some(&id.to_string()) {
                 return Ok(true);
@@ -61,7 +68,11 @@ impl NativeRepo<'_> {
                     Some(bytes) => {
                         let context: RefContext = serde_json::from_slice(&bytes)?;
                         if context.version != 1 {
-                            return Err("unsupported ref context".into());
+                            return Err(crate::machine::Failure::refusal(
+                                "unsupported_record",
+                                "unsupported ref context",
+                            )
+                            .into());
                         }
                         let complete = context.checkout.is_none()
                             || self.operation_complete(op.id, COMPLETE_CHECKOUT)?;
@@ -83,6 +94,12 @@ impl NativeRepo<'_> {
         let scoped = workspace.is_some();
         Ok(Json::Object(vec![
             ("operation_id", Json::str(op.id.to_string())),
+            (
+                "request_id",
+                requests::operation_request(op)?
+                    .map(Json::str)
+                    .unwrap_or(Json::Null),
+            ),
             (
                 "state",
                 Json::str(if !scoped {
@@ -166,16 +183,28 @@ impl NativeRepo<'_> {
         // Pending state is the reason for this command; unlike ordinary writes
         // it checks capabilities and takes the lock without rejecting pending.
         if self.caps.read_only {
-            return Err("capability denied: principal cannot recover (read-only)".into());
+            return Err(crate::machine::Failure::refusal(
+                "capability_denied",
+                "capability denied: principal cannot recover (read-only)",
+            )
+            .into());
         }
         self.lock_workspace()?;
         if self.caps.read_only {
-            return Err("capability denied: principal cannot recover (read-only)".into());
+            return Err(crate::machine::Failure::refusal(
+                "capability_denied",
+                "capability denied: principal cannot recover (read-only)",
+            )
+            .into());
         }
         let op = self.operation_by_id(id)?;
         let (workspace, completed, recoverable) = self.operation_info(&op)?;
         if workspace.as_ref() != Some(&self.workspace_identity()?) {
-            return Err("operation lacks matching workspace instance ownership".into());
+            return Err(crate::machine::Failure::refusal(
+                "precondition_failed",
+                "operation lacks matching workspace instance ownership",
+            )
+            .into());
         }
         if !recoverable {
             return Err(
@@ -193,7 +222,11 @@ impl NativeRepo<'_> {
                     let tx = alt_refs::parse_tx(&op.payload)?.ok_or("not a ref operation")?;
                     for change in &tx.changes {
                         if self.store.refs.get(&change.name) != change.new.as_ref() {
-                            return Err("recovery precondition failed: refs changed".into());
+                            return Err(crate::machine::Failure::refusal(
+                                "precondition_failed",
+                                "recovery precondition failed: refs changed",
+                            )
+                            .into());
                         }
                     }
                     let context: RefContext =
@@ -203,7 +236,13 @@ impl NativeRepo<'_> {
                         context.checkout.ok_or("missing checkout intent")?,
                     )?;
                 }
-                _ => return Err("unsupported recovery operation".into()),
+                _ => {
+                    return Err(crate::machine::Failure::refusal(
+                        "unsupported_record",
+                        "unsupported recovery operation",
+                    )
+                    .into());
+                }
             }
         }
         self.operation_status(id, json, out)

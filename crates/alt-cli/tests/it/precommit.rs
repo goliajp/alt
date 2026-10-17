@@ -80,7 +80,13 @@ fn validate_reports_json_without_committing() {
     ok(alt(root, &["add", "."]));
     let o = alt(root, &["commit", "--validate", "--json"]);
     assert_eq!(o.status.code(), Some(1));
-    let out = String::from_utf8(o.stdout).unwrap();
+    assert!(o.stdout.is_empty());
+    let failure: serde_json::Value = serde_json::from_slice(&o.stderr).unwrap();
+    assert_eq!(failure["error"]["kind"], "validation_failed");
+    assert_eq!(failure["error"]["outcome"], "not_applied");
+    let out = failure["error"]["details"]["command_output"]["text"]
+        .as_str()
+        .unwrap();
     assert!(
         out.starts_with("{\"schema_version\":1,\"ok\":false,\"findings\":[{"),
         "{out}"

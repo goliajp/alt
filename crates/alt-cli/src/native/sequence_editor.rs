@@ -96,6 +96,7 @@ pub(super) fn parse_todo(
 /// list `GIT_SEQUENCE_EDITOR` first, then `GIT_EDITOR`, `VISUAL`, `EDITOR`,
 /// and `vi`. The value is a shell command, so arguments in it work.
 pub(super) fn edit(path: &Path, todo_list: bool) -> Res<()> {
+    check_machine_mode()?;
     let set = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
     let editor = todo_list
         .then(|| set("GIT_SEQUENCE_EDITOR"))
@@ -139,6 +140,17 @@ pub(super) fn cleanup(message: &str) -> String {
         return String::new();
     }
     out.join("\n") + "\n"
+}
+
+pub(super) fn check_machine_mode() -> Res<()> {
+    if crate::diagnostics::json_mode() {
+        return Err(crate::machine::Failure::refusal(
+            "interactive_input_required",
+            "interactive editors are unavailable in JSON mode; supply an explicit todo or message",
+        )
+        .into());
+    }
+    Ok(())
 }
 
 #[cfg(test)]

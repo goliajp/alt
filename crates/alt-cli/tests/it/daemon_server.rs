@@ -267,10 +267,9 @@ fn a_keyed_write_sent_twice_to_one_daemon_applies_once() {
     // same id again: the daemon detects it as already applied and acks
     let retry = run_keyed(&d.sock, root, &["commit", "-m", "once"], "tester", id);
     assert_eq!(retry.exit_code, 0, "retry: {}", err_str(&retry));
-    assert!(
-        err_str(&retry).contains("already applied"),
-        "retry should be an idempotent ack, got: {}",
-        err_str(&retry)
+    assert_eq!(
+        retry, first,
+        "retry must reproduce the complete original response"
     );
 
     // exactly one new commit on top of base — the retry did not double-apply
@@ -300,11 +299,12 @@ fn a_keyed_write_retried_after_the_daemon_dies_does_not_double_apply() {
     let id = Some([42u8; 16]);
 
     // daemon #1 applies the keyed commit, then dies (dropped at the block end)
-    {
+    let first = {
         let d1 = Daemon::start(&alt_dir);
         let r = run_keyed(&d1.sock, root, &["commit", "-m", "once"], "tester", id);
         assert_eq!(r.exit_code, 0, "first commit: {}", err_str(&r));
-    }
+        r
+    };
     let log1 = ok(alt(root, &["log", "--json"]));
     assert_eq!(
         log1.matches("\"oid\"").count(),
@@ -317,10 +317,9 @@ fn a_keyed_write_retried_after_the_daemon_dies_does_not_double_apply() {
     let d2 = Daemon::start(&alt_dir);
     let retry = run_keyed(&d2.sock, root, &["commit", "-m", "once"], "tester", id);
     assert_eq!(retry.exit_code, 0, "retry: {}", err_str(&retry));
-    assert!(
-        err_str(&retry).contains("already applied"),
-        "a restarted daemon should still dedup a durable key, got: {}",
-        err_str(&retry)
+    assert_eq!(
+        retry, first,
+        "restart must preserve the complete original response"
     );
 
     // still exactly one commit — no double write across the daemon restart
@@ -905,4 +904,135 @@ fn daemon_history_reads_follow_the_requesting_workspace() {
     assert_eq!(out_str(&r), ok(alt(root, &["rev-parse", "feat"])));
     let r = d.run(root, &["log", "-n", "1"]);
     assert!(out_str(&r).contains("on main"), "{}", out_str(&r));
+}
+
+#[test]
+fn lost_response_after_execution_replays_the_durable_bytes_after_restart() {
+    let root = tempfile::tempdir().unwrap();
+    ok(alt(root.path(), &["init", "."]));
+    std::fs::write(root.path().join("a.txt"), "staged\n").unwrap();
+    ok(alt(root.path(), &["add", "."]));
+    let id = [87; 16];
+    let alt_dir = root.path().join(".alt");
+    let directory = alt_dir.join("requests").join(alt_cli::machine::hex(&id));
+    {
+        let daemon = Daemon::start(&alt_dir);
+        let req = Request {
+            args: vec![
+                "commit".into(),
+                "-m".into(),
+                "lost result".into(),
+                "--json".into(),
+            ],
+            cwd: root.path().to_owned(),
+            env: vec![
+                ("GIT_AUTHOR_NAME".into(), "tester".into()),
+                ("GIT_AUTHOR_EMAIL".into(), "tester@e".into()),
+                ("USER".into(), "tester".into()),
+            ],
+            id: Some(id),
+        };
+        let mut stream = UnixStream::connect(&daemon.sock).unwrap();
+        daemon::write_frame(&mut stream, &req.encode()).unwrap();
+        // Deliberately discard the response after a complete request frame.
+        stream.shutdown(std::net::Shutdown::Both).unwrap();
+        drop(stream);
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !directory.join("completed.json").exists() {
+            assert!(
+                Instant::now() < deadline,
+                "command did not publish its receipt"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+    let recorded =
+        Response::decode(&std::fs::read(directory.join("response.bin")).unwrap()).unwrap();
+    let daemon = Daemon::start(&alt_dir);
+    let retried = run_keyed(
+        &daemon.sock,
+        root.path(),
+        &["commit", "-m", "lost result", "--json"],
+        "tester",
+        Some(id),
+    );
+    assert_eq!(retried, recorded);
+    assert_eq!(retried.exit_code, 0);
+    assert_eq!(
+        ok(alt(root.path(), &["log", "--json"]))
+            .matches("\"oid\"")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn concurrent_same_id_waits_for_the_receipt_without_holding_the_store_mutex() {
+    let root = tempfile::tempdir().unwrap();
+    ok(alt(root.path(), &["init", "."]));
+    std::fs::write(root.path().join("a.txt"), "staged\n").unwrap();
+    ok(alt(root.path(), &["add", "."]));
+    let daemon = Daemon::start(&root.path().join(".alt"));
+    let start = std::sync::Barrier::new(2);
+    std::thread::scope(|scope| {
+        let first = scope.spawn(|| {
+            start.wait();
+            run_keyed(
+                &daemon.sock,
+                root.path(),
+                &["commit", "-m", "once", "--json"],
+                "tester",
+                Some([89; 16]),
+            )
+        });
+        start.wait();
+        let second = run_keyed(
+            &daemon.sock,
+            root.path(),
+            &["commit", "-m", "once", "--json"],
+            "tester",
+            Some([89; 16]),
+        );
+        let first = first.join().unwrap();
+        assert_eq!(first.exit_code, 0, "{}", err_str(&first));
+        assert_eq!(first, second);
+    });
+}
+
+#[test]
+fn protected_override_is_per_request_in_a_warm_daemon() {
+    let root = tempfile::tempdir().unwrap();
+    ok(alt(root.path(), &["init", "."]));
+    std::fs::write(root.path().join("a.txt"), "base\n").unwrap();
+    ok(alt(root.path(), &["add", "."]));
+    ok(alt(root.path(), &["commit", "-m", "base"]));
+    ok(alt(root.path(), &["flow", "init"]));
+    let daemon = Daemon::start(&root.path().join(".alt"));
+    let exchange = |request: &Request| {
+        let mut stream = UnixStream::connect(&daemon.sock).unwrap();
+        daemon::write_frame(&mut stream, &request.encode()).unwrap();
+        Response::decode(&daemon::read_frame(&mut stream).unwrap()).unwrap()
+    };
+    let mut request = Request {
+        args: ["commit", "-m", "override", "--allow-empty", "--json"]
+            .map(str::to_owned)
+            .to_vec(),
+        cwd: root.path().to_owned(),
+        env: vec![
+            ("USER".into(), "tester".into()),
+            ("ALT_PROTECTED_OVERRIDE".into(), "1".into()),
+        ],
+        id: Some([90; 16]),
+    };
+    let first = exchange(&request);
+    assert_eq!(first.exit_code, 0, "{}", err_str(&first));
+    request
+        .env
+        .retain(|(key, _)| key != "ALT_PROTECTED_OVERRIDE");
+    request.id = Some([91; 16]);
+    let second = exchange(&request);
+    assert_eq!(second.exit_code, 1, "{}", err_str(&second));
+    let failure: serde_json::Value = serde_json::from_slice(&second.stderr).unwrap();
+    assert_eq!(failure["error"]["kind"], "precondition_failed");
+    assert_eq!(failure["error"]["outcome"], "not_applied");
 }

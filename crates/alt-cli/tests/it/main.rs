@@ -26,6 +26,7 @@ mod identity;
 mod import_materialize;
 mod lfs;
 mod log_patch;
+mod machine_results;
 mod merge;
 mod merge_criss_cross;
 mod monorepo_bench;

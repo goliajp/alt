@@ -225,13 +225,13 @@ impl NativeRepo<'_> {
 
     /// Records `theirs` as the second parent the resolving commit will get.
     pub(super) fn start_merge(&self, theirs: ObjectId) -> Res<()> {
-        std::fs::write(self.merge_head_path(), format!("{theirs}\n"))?;
+        crate::durable::write(self.merge_head_path(), format!("{theirs}\n"))?;
         Ok(())
     }
 
     /// Forgets the unfinished merge once its commit is recorded.
     pub(super) fn finish_merge(&self) -> Res<()> {
-        match std::fs::remove_file(self.merge_head_path()) {
+        match crate::durable::remove_file(self.merge_head_path()) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
             _ => Ok(()),
         }
@@ -278,15 +278,15 @@ impl NativeRepo<'_> {
                     std::fs::create_dir_all(parent)?;
                 }
                 if abs.symlink_metadata().is_ok() {
-                    std::fs::remove_file(&abs)?;
+                    crate::durable::remove_file(&abs)?;
                 }
-                std::fs::write(&abs, bytes)?;
+                crate::durable::write(&abs, bytes)?;
             } else {
                 match &r.entry {
                     Some(e) => self.materialize(e)?,
                     None => {
                         if abs.symlink_metadata().is_ok() {
-                            std::fs::remove_file(&abs)?;
+                            crate::durable::remove_file(&abs)?;
                             self.prune_empty_dirs(abs.parent());
                         }
                     }

@@ -34,7 +34,11 @@ impl NativeRepo<'_> {
         let commit = match new_branch_at {
             Some(at) => {
                 if self.store.refs.get(&branch_ref).is_some() {
-                    return Err(format!("a branch named '{branch}' already exists").into());
+                    return Err(crate::machine::Failure::refusal(
+                        "precondition_failed",
+                        format!("a branch named '{branch}' already exists"),
+                    )
+                    .into());
                 }
                 changes.push(RefChange {
                     name: branch_ref.clone(),
@@ -43,11 +47,12 @@ impl NativeRepo<'_> {
                 });
                 at
             }
-            None => self
-                .store
-                .refs
-                .resolve(&branch_ref)?
-                .ok_or_else(|| format!("invalid reference: {branch}"))?,
+            None => self.store.refs.resolve(&branch_ref)?.ok_or_else(|| {
+                crate::machine::Failure::refusal(
+                    "precondition_failed",
+                    format!("invalid reference: {branch}"),
+                )
+            })?,
         };
         changes.push(RefChange {
             name: head_ref.clone(),
@@ -91,17 +96,17 @@ impl NativeRepo<'_> {
             head_ref: head_ref.clone(),
             index_path: ws_dir.join("index"),
         };
-        NativeRepo::attach(&mut *self.store, preview, self.id.clone(), None)
+        NativeRepo::attach(&mut *self.store, preview, self.id.clone(), self.request_id)
             .preflight_checkout(&[], &target)?;
         std::fs::create_dir_all(&ws_dir)?;
-        std::fs::write(
+        crate::durable::write(
             ws_dir.join("meta"),
             abs.to_str().ok_or("non-utf8 worktree path")?,
         )?;
         // a `.alt` *file* in the working tree points back at the repo, so
         // commands run from inside it auto-select this workspace (git-worktree
         // style). scan_worktree skips `.alt` by name, so it is not content.
-        std::fs::write(
+        crate::durable::write(
             abs.join(".alt"),
             format!(
                 "{}\n{name}\n",
@@ -111,10 +116,16 @@ impl NativeRepo<'_> {
 
         // point this workspace's HEAD at the branch (one ref transaction);
         // if the store refuses it, the markers above must not outlive it
-        if let Err(e) = self.commit_refs_unkeyed("workspace", &changes) {
-            let _ = std::fs::remove_dir_all(&ws_dir);
-            let _ = std::fs::remove_file(abs.join(".alt"));
-            return Err(e);
+        if let Err(error) = self.commit_refs_unkeyed("workspace", &changes) {
+            let cleanup = crate::durable::remove_file(abs.join(".alt"))
+                .and_then(|()| crate::durable::remove_dir_all(&ws_dir));
+            if let Err(cleanup) = cleanup {
+                return Err(crate::machine::Failure::unknown(format!(
+                    "{error}; workspace marker cleanup failed: {cleanup}"
+                ))
+                .into());
+            }
+            return Err(error);
         }
 
         // materialize the branch tree into the new working tree + index by
@@ -126,7 +137,7 @@ impl NativeRepo<'_> {
             head_ref,
             index_path: ws_dir.join("index"),
         };
-        let mut ws = NativeRepo::attach(&mut *self.store, child, self.id.clone(), None);
+        let mut ws = NativeRepo::attach(&mut *self.store, child, self.id.clone(), self.request_id);
         let target = ws.commit_entries(commit)?;
         ws.checkout(&[], &target)?;
         Ok(())
@@ -156,11 +167,14 @@ impl NativeRepo<'_> {
         )?;
         let ws_dir = self.store.alt_dir.join("workspaces").join(name);
         // drop the working tree's `.alt` marker so it no longer resolves
-        if let Ok(worktree) = std::fs::read_to_string(ws_dir.join("meta")) {
-            let _ = std::fs::remove_file(PathBuf::from(worktree.trim()).join(".alt"));
+        let worktree = std::fs::read_to_string(ws_dir.join("meta"))?;
+        match crate::durable::remove_file(PathBuf::from(worktree.trim()).join(".alt")) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
         }
         if ws_dir.exists() {
-            std::fs::remove_dir_all(&ws_dir)?;
+            crate::durable::remove_dir_all(&ws_dir)?;
         }
         Ok(())
     }

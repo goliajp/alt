@@ -98,8 +98,8 @@ impl NativeRepo<'_> {
         std::fs::create_dir_all(link.parent().expect("under .alt/lfs"))?;
         // the content is durable before the link names it
         let tmp = link.with_extension(format!("tmp{}", std::process::id()));
-        std::fs::write(&tmp, id.0)?;
-        std::fs::rename(&tmp, &link)?;
+        crate::durable::write(&tmp, id.0)?;
+        crate::durable::rename(&tmp, &link)?;
         Ok(pointer)
     }
 
@@ -151,7 +151,7 @@ impl NativeRepo<'_> {
             if std::fs::read(&abs).ok().as_deref() != Some(&p.encode()[..]) {
                 continue; // edited or already real: leave it alone
             }
-            std::fs::write(&abs, &content)?;
+            crate::durable::write(&abs, &content)?;
             if let Some(e) = index
                 .entries
                 .iter_mut()

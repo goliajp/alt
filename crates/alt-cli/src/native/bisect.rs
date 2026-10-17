@@ -140,7 +140,7 @@ impl NativeRepo<'_> {
                 },
             ],
         )?;
-        std::fs::remove_file(self.bisect_state_path())?;
+        crate::durable::remove_file(self.bisect_state_path())?;
         let short = state
             .branch
             .strip_prefix("refs/heads/")
@@ -159,14 +159,17 @@ impl NativeRepo<'_> {
         loop {
             let at = self.bisect_head()?;
             writeln!(out, "running {}", cmd.join(" "))?;
-            let status = std::process::Command::new("sh")
+            let output = std::process::Command::new("sh")
                 .arg("-c")
                 .arg(&script)
                 .arg(&cmd[0])
                 .args(&cmd[1..])
                 .current_dir(&self.root)
-                .status()
+                .output()
                 .map_err(|e| format!("bisect run: could not run '{}': {e}", cmd[0]))?;
+            out.write_all(&output.stdout)?;
+            crate::diagnostics::emit(&output.stderr)?;
+            let status = output.status;
             let verdict = match status.code() {
                 Some(0) => "good",
                 Some(125) => "skip",
@@ -375,7 +378,7 @@ impl NativeRepo<'_> {
         for k in &s.skip {
             text.push_str(&format!("skip {k}\n"));
         }
-        std::fs::write(self.bisect_state_path(), text)?;
+        crate::durable::write(self.bisect_state_path(), text)?;
         Ok(())
     }
 }

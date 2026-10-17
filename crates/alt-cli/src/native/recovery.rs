@@ -22,6 +22,8 @@ pub(super) struct RefContext {
     pub inverse_of: Option<String>,
     #[serde(default)]
     pub checkout: Option<checkout_recovery::CheckoutIntent>,
+    #[serde(default)]
+    pub request_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -36,6 +38,8 @@ struct PathGuard {
 pub(super) struct IndexIntent {
     version: u32,
     pub(super) workspace: WorkspaceIdentity,
+    #[serde(default)]
+    pub(super) request_id: Option<String>,
     before: String,
     after: String,
     worktree: Vec<PathGuard>,
@@ -47,6 +51,8 @@ pub(super) struct IndexIntent {
 struct Completion {
     version: u32,
     prepared: String,
+    #[serde(default)]
+    request_id: Option<String>,
 }
 
 pub(super) fn encode<T: Serialize>(kind: u8, value: &T) -> Res<Vec<u8>> {
@@ -57,7 +63,11 @@ pub(super) fn encode<T: Serialize>(kind: u8, value: &T) -> Res<Vec<u8>> {
 
 pub(super) fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8], kind: u8) -> Res<T> {
     if bytes.get(..2) != Some(&[kind, 1]) {
-        return Err("unsupported recovery record version".into());
+        return Err(crate::machine::Failure::refusal(
+            "unsupported_record",
+            "unsupported recovery record version",
+        )
+        .into());
     }
     Ok(serde_json::from_slice(&bytes[2..])?)
 }
@@ -221,7 +231,11 @@ impl NativeRepo<'_> {
         for guard in guards {
             let actual = self.path_guard(&BString::from(guard.path.clone()))?;
             if actual != *guard {
-                return Err("recovery precondition failed: working-tree path changed".into());
+                return Err(crate::machine::Failure::refusal(
+                    "precondition_failed",
+                    "recovery precondition failed: working-tree path changed",
+                )
+                .into());
             }
         }
         Ok(())
@@ -234,14 +248,22 @@ impl NativeRepo<'_> {
                 Some(&COMPLETE) => {
                     let done: Completion = decode(&op.payload, COMPLETE)?;
                     if done.version != 1 {
-                        return Err("unsupported recovery completion".into());
+                        return Err(crate::machine::Failure::refusal(
+                            "unsupported_record",
+                            "unsupported recovery completion",
+                        )
+                        .into());
                     }
                     completed.insert(done.prepared);
                 }
                 Some(&PREPARE) => {
                     let intent: IndexIntent = decode(&op.payload, PREPARE)?;
                     if intent.version != 1 {
-                        return Err("unsupported index intent".into());
+                        return Err(crate::machine::Failure::refusal(
+                            "unsupported_record",
+                            "unsupported index intent",
+                        )
+                        .into());
                     }
                     if intent.workspace == *identity && !completed.contains(&op.id.to_string()) {
                         return Ok(Some((op.id, intent)));
@@ -256,8 +278,11 @@ impl NativeRepo<'_> {
     pub(super) fn ensure_no_pending_recovery(&self) -> Res<()> {
         self.ensure_no_pending_checkout()?;
         if let Some((id, _)) = self.pending_index(&self.workspace_identity()?)? {
-            return Err(format!(
-                "operation {id} has no durable completion; recovery required (outcome unknown)"
+            return Err(crate::machine::Failure::pending(
+                id,
+                format!(
+                    "operation {id} has no durable completion; recovery required (outcome unknown)"
+                ),
             )
             .into());
         }
@@ -276,11 +301,16 @@ impl NativeRepo<'_> {
         let before = canonical_index(before, self.store.algo);
         let after = canonical_index(after, self.store.algo);
         if canonical_index(self.index()?, self.store.algo) != before {
-            return Err("index changed while preparing operation".into());
+            return Err(crate::machine::Failure::refusal(
+                "precondition_failed",
+                "index changed while preparing operation",
+            )
+            .into());
         }
         let intent = IndexIntent {
             version: 1,
             workspace: self.workspace_identity()?,
+            request_id: self.request_id.map(|id| crate::machine::hex(&id)),
             before: self.snapshot(&before)?,
             after: self.snapshot(&after)?,
             worktree: touched
@@ -311,6 +341,7 @@ impl NativeRepo<'_> {
         let done = Completion {
             version: 1,
             prepared: prepared.to_string(),
+            request_id: self.request_id.map(|id| crate::machine::hex(&id)),
         };
         self.store
             .refs
@@ -320,7 +351,11 @@ impl NativeRepo<'_> {
 
     pub(super) fn recover_index(&mut self, operation: OpId, intent: IndexIntent) -> Res<()> {
         if intent.version != 1 || intent.workspace != self.workspace_identity()? {
-            return Err("recovery workspace instance does not match".into());
+            return Err(crate::machine::Failure::refusal(
+                "precondition_failed",
+                "recovery workspace instance does not match",
+            )
+            .into());
         }
         self.check_guards(&intent.worktree)?;
         for guard in &intent.worktree {
@@ -335,9 +370,11 @@ impl NativeRepo<'_> {
         Index::parse(&after, self.store.algo)?;
         let current = hash(&canonical_index(self.index()?, self.store.algo));
         if current != intent.before && current != intent.after {
-            return Err(
-                "recovery precondition failed: index matches neither recorded state".into(),
-            );
+            return Err(crate::machine::Failure::refusal(
+                "precondition_failed",
+                "recovery precondition failed: index matches neither recorded state",
+            )
+            .into());
         }
         if current != intent.after {
             durable_write(&self.index_path, &after)?;
@@ -350,6 +387,7 @@ impl NativeRepo<'_> {
                 &Completion {
                     version: 1,
                     prepared: operation.to_string(),
+                    request_id: self.request_id.map(|id| crate::machine::hex(&id)),
                 },
             )?,
         )?;
@@ -375,7 +413,9 @@ impl NativeRepo<'_> {
                         | Some(&checkout_recovery::COMPLETE_CHECKOUT)
                 )
             })
-            .ok_or("nothing to undo")?
+            .ok_or_else(|| {
+                crate::machine::Failure::refusal("precondition_failed", "nothing to undo")
+            })?
             .clone();
         use crate::json::Json;
         let mut fields = vec![("undone", Json::Bool(true))];
@@ -385,10 +425,10 @@ impl NativeRepo<'_> {
                 let prepared = self.store.refs.oplog().ops().iter()
                     .find(|op| op.id.to_string() == done.prepared).ok_or("missing recovery intent")?;
                 let intent: IndexIntent = decode(&prepared.payload, PREPARE)?;
-                if intent.workspace != workspace { return Err("last operation belongs to a different workspace instance; select its workspace".into()); }
-                if intent.version != 1 || done.version != 1 { return Err("unsupported recovery record".into()); }
+                if intent.workspace != workspace { return Err(crate::machine::Failure::refusal("precondition_failed", "last operation belongs to a different workspace instance; select its workspace").into()); }
+                if intent.version != 1 || done.version != 1 { return Err(crate::machine::Failure::refusal("unsupported_record", "unsupported recovery record").into()); }
                 if hash(&canonical_index(self.index()?, self.store.algo)) != intent.after {
-                    return Err("recovery precondition failed: index changed".into());
+                    return Err(crate::machine::Failure::refusal("precondition_failed", "recovery precondition failed: index changed").into());
                 }
                 self.check_guards(&intent.worktree)?;
                 for guard in &intent.worktree {
@@ -400,7 +440,7 @@ impl NativeRepo<'_> {
                 fields.push(("paths", Json::Array(intent.worktree.iter().map(|g| Json::str(&g.path)).collect())));
                 let inverse = IndexIntent {
                     before: intent.after, after: intent.before,
-                    inverse_of: Some(prepared.id.to_string()), ..intent
+                    inverse_of: Some(prepared.id.to_string()), request_id: self.request_id.map(|id| crate::machine::hex(&id)), ..intent
                 };
                 self.apply_index_intent(inverse, &bytes)?;
             }
@@ -409,8 +449,8 @@ impl NativeRepo<'_> {
                 fields.push(("refs", Json::Array(tx.changes.iter().map(|c| Json::str(&c.name)).collect())));
                 self.undo_scoped_refs(&last)?;
             },
-            Some(&crate::index_tx::PAYLOAD_INDEX_TX) => return Err("legacy operation lacks workspace ownership and recovery prestate; automatic undo refused".into()),
-            _ => return Err("unknown or incomplete operation; automatic undo refused".into()),
+            Some(&crate::index_tx::PAYLOAD_INDEX_TX) => return Err(crate::machine::Failure::refusal("unsupported_record", "legacy operation lacks workspace ownership and recovery prestate; automatic undo refused").into()),
+            _ => return Err(crate::machine::Failure::refusal("unsupported_record", "unknown or incomplete operation; automatic undo refused").into()),
         }
         if json {
             crate::json::emit(out, fields)?;
@@ -422,25 +462,38 @@ impl NativeRepo<'_> {
 
     fn undo_scoped_refs(&mut self, op: &alt_oplog::Op) -> Res<()> {
         let tx = alt_refs::parse_tx(&op.payload)?.ok_or("not a ref operation")?;
-        let context = tx.context.ok_or("legacy operation lacks workspace ownership and recovery prestate; automatic undo refused")?;
+        let context = tx.context.ok_or_else(|| crate::machine::Failure::refusal("unsupported_record", "legacy operation lacks workspace ownership and recovery prestate; automatic undo refused"))?;
         let context: RefContext = serde_json::from_slice(&context)?;
         if context.version != 1 || context.workspace != self.workspace_identity()? {
-            return Err(
-                "last operation belongs to a different workspace instance or unsupported scope"
-                    .into(),
-            );
+            return Err(crate::machine::Failure::refusal(
+                "precondition_failed",
+                "last operation belongs to a different workspace instance or unsupported scope",
+            )
+            .into());
         }
         for c in &tx.changes {
             if (c.name == "HEAD" || c.name.starts_with("workspaces/")) && c.name != self.head_ref {
-                return Err("operation changes another workspace; automatic undo refused".into());
+                return Err(crate::machine::Failure::refusal(
+                    "precondition_failed",
+                    "operation changes another workspace; automatic undo refused",
+                )
+                .into());
             }
             if self.store.refs.get(&c.name) != c.new.as_ref() {
-                return Err("recovery precondition failed: refs changed".into());
+                return Err(crate::machine::Failure::refusal(
+                    "precondition_failed",
+                    "recovery precondition failed: refs changed",
+                )
+                .into());
             }
         }
         self.ensure_clean("undo")?;
         if self.index()?.entries.iter().any(|e| e.stage() != 0) {
-            return Err("recovery precondition failed: unmerged index".into());
+            return Err(crate::machine::Failure::refusal(
+                "precondition_failed",
+                "recovery precondition failed: unmerged index",
+            )
+            .into());
         }
         let old = index_entries(&self.index()?);
         // Resolve the future HEAD using an overlay, before mutating any ref.
@@ -513,7 +566,11 @@ impl NativeRepo<'_> {
                 .any(|c| c.is_empty() || matches!(c, "." | ".." | ".alt" | ".git"))
             || Path::new(path).is_absolute()
         {
-            return Err("unsafe recovery path".into());
+            return Err(crate::machine::Failure::refusal(
+                "precondition_failed",
+                "unsafe recovery path",
+            )
+            .into());
         }
         let abs = self.root.join(path);
         let mut parent = abs.parent();
@@ -523,7 +580,11 @@ impl NativeRepo<'_> {
             }
             match p.symlink_metadata() {
                 Ok(m) if m.file_type().is_symlink() || !m.is_dir() => {
-                    return Err("recovery path traverses an unsafe parent".into());
+                    return Err(crate::machine::Failure::refusal(
+                        "precondition_failed",
+                        "recovery path traverses an unsafe parent",
+                    )
+                    .into());
                 }
                 Ok(_) => {}
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -546,7 +607,11 @@ impl NativeRepo<'_> {
                     .map_err(|_| "unsupported non-UTF-8 checkout path")?,
             )?;
             if entry.mode != 0o160000 && path.symlink_metadata().is_ok_and(|m| m.is_dir()) {
-                return Err("checkout target is occupied by a directory".into());
+                return Err(crate::machine::Failure::refusal(
+                    "precondition_failed",
+                    "checkout target is occupied by a directory",
+                )
+                .into());
             }
             if entry.mode != 0o160000
                 && !old_paths.contains(&entry.path)
@@ -565,7 +630,11 @@ impl NativeRepo<'_> {
                 }
                 match p.symlink_metadata() {
                     Ok(m) if !m.is_dir() || m.file_type().is_symlink() => {
-                        return Err("checkout parent is not a safe directory".into());
+                        return Err(crate::machine::Failure::refusal(
+                            "precondition_failed",
+                            "checkout parent is not a safe directory",
+                        )
+                        .into());
                     }
                     Ok(_) => {}
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}

@@ -1,151 +1,193 @@
-//! The `alt` CLI binary. Parses the command line and dispatches: native `.alt`
-//! commands against a freshly opened store, git-layer commands against a
-//! discovered repository, `init` creates a new repo. The daemon (`altd`) reuses
-//! the same per-command dispatch in `alt_cli::cli`, against a store it holds
-//! open across requests.
-
+//! Direct and daemon commands share parsing, failures, and durable receipts.
+use alt_cli::cli::{self, Command};
+use alt_cli::daemon::Response;
+use alt_cli::execution::Execution;
+use alt_cli::machine::{self, Failure};
+use alt_cli::native::{self, Identity, Store};
+use alt_repo::Repository;
 use std::io::Write;
 use std::process::ExitCode;
 
-use alt_cli::cli::{self, Cli, Command};
-use alt_cli::native::{self, Identity, OpenRepo};
-use alt_repo::Repository;
-use clap::Parser;
-
 fn main() -> ExitCode {
-    // Cheap pre-parse so a parse / config error before clap runs is still
-    // reported in the right shape; clap's own errors stay structured by clap.
-    let json_mode = std::env::args().any(|a| a == "--json");
-    match run() {
-        Ok(code) => ExitCode::from(code),
-        Err(e) => {
-            let msg = format!("{e}");
-            // capability gate denials surface as JSON on stderr when the command
-            // was invoked with `--json`, so an agent driving alt never has to
-            // parse the human "fatal: …" string to know it was denied.
-            if json_mode && let Some(rest) = msg.strip_prefix("capability denied: ") {
-                eprintln!(
-                    "{{\"schema_version\":1,\"error\":{{\"kind\":\"capability_denied\",\"message\":{}}}}}",
-                    json_str(rest)
-                );
-                ExitCode::from(1)
-            } else {
-                eprintln!("fatal: {msg}");
-                ExitCode::from(128)
-            }
-        }
-    }
+    let response = run();
+    let delivered = std::io::stdout()
+        .lock()
+        .write_all(&response.stdout)
+        .and_then(|()| std::io::stderr().lock().write_all(&response.stderr));
+    ExitCode::from(if delivered.is_ok() {
+        response.exit_code
+    } else {
+        75
+    })
 }
 
-/// Compact JSON-string-literal encoder for the one error message field above;
-/// keeps `main` from pulling in a JSON helper just to render an error.
-fn json_str(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for b in s.bytes() {
-        match b {
-            b'"' => out.push_str("\\\""),
-            b'\\' => out.push_str("\\\\"),
-            b'\n' => out.push_str("\\n"),
-            b'\r' => out.push_str("\\r"),
-            b'\t' => out.push_str("\\t"),
-            0x00..=0x1f => out.push_str(&format!("\\u{b:04x}")),
-            _ => out.push(b as char),
+fn run() -> Response {
+    let mut args = std::env::args_os().collect::<Vec<_>>();
+    let mut parsed = match machine::parse(args.clone()) {
+        Ok(parsed) => parsed,
+        Err(response) => return response,
+    };
+    let cwd = match std::env::current_dir() {
+        Ok(cwd) => cwd,
+        Err(error) => return machine::from_error(&error, false).response(parsed.json, None),
+    };
+    if cwd.to_str().is_none() {
+        let mut error = Failure::usage("non-UTF-8 working directories are not supported");
+        error.kind = "unsupported_path";
+        *error.details = serde_json::json!({"path_bytes_hex": machine::hex(cwd.as_os_str().as_encoded_bytes()), "encoding":"os_bytes"});
+        return error.response(parsed.json, parsed.cli.request_id.as_deref());
+    }
+    let identity = Identity::from_env();
+    let native_write =
+        cli::is_native(&parsed.cli.command) && cli::mutates_command(&parsed.cli.command);
+    if native_write {
+        let id = match parsed.cli.request_id.as_deref() {
+            Some(id) => match alt_cli::request::parse_id(id) {
+                Ok(id) => id,
+                Err(error) => return error.response(parsed.json, Some(id)),
+            },
+            None => match alt_cli::request::new_id() {
+                Ok(id) => id,
+                Err(error) => {
+                    return machine::from_error(&error, false).response(parsed.json, None);
+                }
+            },
+        };
+        if parsed.cli.request_id.is_none() {
+            args.splice(1..1, ["--request-id".into(), machine::hex(&id).into()]);
+            parsed = match machine::parse(args.clone()) {
+                Ok(parsed) => parsed,
+                Err(response) => return response,
+            };
+        }
+        let submitted = alt_cli::execution::binding(&parsed, &cwd, &identity)
+            .and_then(|(dir, _, _, value)| alt_cli::request::record_submission(&dir, id, &value));
+        if let Err(error) = submitted {
+            return machine::from_error(error.as_ref(), false)
+                .response(parsed.json, Some(&machine::hex(&id)));
         }
     }
-    out.push('"');
-    out
-}
-
-fn run() -> Result<u8, Box<dyn std::error::Error>> {
-    let cli = Cli::parse();
-    let cwd = std::env::current_dir()?;
-
-    // Hot commands route through the per-repo daemon to skip the store open;
-    // the daemon is auto-spawned if not already up. Local-first: anything the
-    // daemon can't serve falls through to the direct path below. A read is
-    // idempotent (re-runs harmlessly on any failure). A write is exactly-once:
-    // it carries an idempotency id and `serve_write` retries with that id on a
-    // lost response (the daemon dedups a completed write, durably). Only a
-    // first-attempt `NotSent` falls back to a direct run; a write whose request
-    // had gone out and never got a response surfaces an error after the retry
-    // budget rather than risk a double run.
     #[cfg(unix)]
-    if alt_cli::client::routes_through_daemon(&cli.command)
+    if alt_cli::client::routes_through_daemon(&parsed.cli.command)
         && !alt_cli::client::disabled()
-        && let Ok((alt_dir, _)) = native::resolve_workspace(&cwd, cli.workspace.as_deref())
+        && cwd.to_str().is_some()
+        && let Ok((alt_dir, _)) = native::resolve_workspace(&cwd, parsed.cli.workspace.as_deref())
     {
         use alt_cli::client::Outcome;
-        let args = std::env::args().skip(1).collect::<Vec<_>>();
-        let idempotent = alt_cli::client::is_idempotent(&cli.command);
-        let outcome = if idempotent {
-            alt_cli::client::try_serve(&alt_dir, &args)
+        let argv = args
+            .iter()
+            .skip(1)
+            .map(|s| s.to_str().expect("validated arguments").to_owned())
+            .collect::<Vec<_>>();
+        let outcome = if native_write {
+            let id =
+                alt_cli::request::parse_id(parsed.cli.request_id.as_deref().expect("write id"))
+                    .expect("validated id");
+            alt_cli::client::serve_write(&alt_dir, &argv, id)
         } else {
-            alt_cli::client::serve_write(&alt_dir, &args)
+            alt_cli::client::try_serve(&alt_dir, &argv)
         };
         match outcome {
-            Outcome::Served(resp) => {
-                use std::io::Write as _;
-                std::io::stdout().write_all(&resp.stdout)?;
-                std::io::stderr().write_all(&resp.stderr)?;
-                return Ok(resp.exit_code);
+            Outcome::Served(response) => {
+                if parsed.json
+                    && response.exit_code != 0
+                    && serde_json::from_slice::<serde_json::Value>(&response.stderr)
+                        .ok()
+                        .and_then(|v| v["error"]["outcome"].as_str().map(str::to_owned))
+                        .is_none()
+                {
+                    let mut error =
+                        Failure::unknown("daemon did not return a supported command result");
+                    *error.details = serde_json::json!({"stdout":machine::bytes_value(&response.stdout),"stderr":machine::bytes_value(&response.stderr)});
+                    return error.response(true, parsed.cli.request_id.as_deref());
+                }
+                return response;
             }
-            Outcome::LostAfterSend if !idempotent => {
-                return Err(
-                    "the daemon connection dropped after the command was sent and \
-                    repeated retries did not reconnect; it may have already taken effect — \
-                    check with `alt status` / `alt log` before retrying"
-                        .into(),
-                );
+            Outcome::LostAfterSend if native_write => {
+                return Failure::unknown(
+                    "daemon response was lost; query this request before any new write",
+                )
+                .response(parsed.json, parsed.cli.request_id.as_deref());
             }
-            // NotSent (daemon never acted), or a lost response for an idempotent
-            // read — fall through and run the command directly
             Outcome::NotSent | Outcome::LostAfterSend => {}
         }
     }
-
-    let stdout = std::io::stdout().lock();
-    let mut out = std::io::BufWriter::new(stdout);
-    let id = Identity::from_env();
-
-    let code = match &cli.command {
-        Command::Init { dir } => {
-            native::init(dir.clone(), &mut out)?;
-            0
-        }
-        Command::Clone { url, dir, json } => {
-            native::clone(url, dir.as_deref(), *json, &cwd, id, &mut out)?;
-            0
-        }
-        Command::Import { target } => {
-            let repo = Repository::discover(&cwd)?;
-            native::import(&repo, target, &cwd, id, &mut out)?;
-            0
-        }
-        Command::Ci { op, json } => match op {
-            alt_cli::cli::CiOp::Validate { paths } => {
-                alt_cli::cli::ci_validate(&cwd, paths, *json, &mut out)?
-            }
-        },
-        c if cli::is_native(c) => {
-            let mut open = OpenRepo::discover(&cwd, cli.workspace.as_deref(), id)?;
-            cli::run_native(&mut open.repo(), c, &mut out)?
-        }
-        c => {
-            // inside a named workspace the tree holds only a `.alt` marker, so
-            // open the repository it points at rather than discovering upward
-            let (repo, head) = match native::resolve_workspace(&cwd, cli.workspace.as_deref()) {
-                Ok((alt_dir, coord)) => (
-                    Repository::open_alt(alt_dir, Some(coord.root().to_owned()))?,
-                    coord.head_ref().to_owned(),
-                ),
-                Err(e) if cli.workspace.is_some() => return Err(e),
-                Err(_) => (Repository::discover(&cwd)?, "HEAD".to_owned()),
-            };
-            cli::run_git(&repo, c, &head, &mut out)?;
-            0
-        }
+    let execution = match Execution::prepare(parsed, cwd.clone(), identity, None) {
+        Ok(execution) => execution,
+        Err(response) => return response,
     };
-    out.flush()?;
-    Ok(code)
+    if cli::is_native(&execution.parsed.cli.command) {
+        let opened = (|| -> Result<_, Box<dyn std::error::Error>> {
+            let (dir, coord) =
+                native::resolve_workspace(&cwd, execution.parsed.cli.workspace.as_deref())?;
+            let store = Store::open(dir.clone())?;
+            let repo = Repository::open_alt(dir, Some(coord.root().to_owned()))?;
+            Ok((store, repo))
+        })();
+        let (mut store, repo) = match opened {
+            Ok(pair) => pair,
+            Err(error) => return execution.failure(error.as_ref()),
+        };
+        let (response, operations) = execution.on_store(&mut store, &repo);
+        let barrier = store
+            .odb_mut()
+            .flush_pending()
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+            .and_then(|()| {
+                if execution.writing {
+                    store.sink()?.fsync_all()
+                } else {
+                    Ok(())
+                }
+            });
+        if let Err(error) = barrier {
+            return Failure::unknown(format!("durability: {error}")).response(
+                execution.parsed.json,
+                execution.parsed.cli.request_id.as_deref(),
+            );
+        }
+        return execution.publish(response, operations);
+    }
+    let capture = alt_cli::diagnostics::Capture::start(execution.parsed.json);
+    let mut out = Vec::new();
+    let result = (|| -> Result<u8, Box<dyn std::error::Error>> {
+        match &execution.parsed.cli.command {
+            Command::Init { dir } => native::init(dir.clone(), &mut out)?,
+            Command::Clone { url, dir, json } => native::clone(
+                url,
+                dir.as_deref(),
+                *json,
+                &cwd,
+                execution.identity.clone(),
+                &mut out,
+            )?,
+            Command::Import { target } => native::import(
+                &Repository::discover(&cwd)?,
+                target,
+                &cwd,
+                execution.identity.clone(),
+                &mut out,
+            )?,
+            Command::Ci {
+                op: cli::CiOp::Validate { paths },
+                json,
+            } => return cli::ci_validate(&cwd, paths, *json, &mut out),
+            command => {
+                let (repo, head) = match native::resolve_workspace(
+                    &cwd,
+                    execution.parsed.cli.workspace.as_deref(),
+                ) {
+                    Ok((dir, coord)) => (
+                        Repository::open_alt(dir, Some(coord.root().to_owned()))?,
+                        coord.head_ref().to_owned(),
+                    ),
+                    Err(error) if execution.parsed.cli.workspace.is_some() => return Err(error),
+                    Err(_) => (Repository::discover(&cwd)?, "HEAD".to_owned()),
+                };
+                cli::run_git(&repo, command, &head, &mut out)?;
+            }
+        }
+        Ok(0)
+    })();
+    execution.finish(result, out, capture.finish(), &[])
 }
