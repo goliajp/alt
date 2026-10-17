@@ -176,6 +176,12 @@ fn run() -> Response {
                 execution.identity.clone(),
                 &mut out,
             )?,
+            Command::Intake {
+                source,
+                target,
+                git,
+                json,
+            } => native::task_intake(source, target, git, *json, &mut out)?,
             Command::Import { target } => native::import(
                 &Repository::discover(&cwd)?,
                 target,

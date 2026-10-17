@@ -28,6 +28,7 @@ dependencies = [
 name = "alt-cli"
 version = "0.0.0"
 dependencies = [
+ "alt-delivery",
  "alt-diff",
  "alt-export",
  "alt-flow",
@@ -63,6 +64,28 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tiny_http",
+]
+
+[[package]]
+name = "alt-delivery"
+version = "0.0.0"
+dependencies = [
+ "alt-git-codec",
+ "alt-git-config",
+ "alt-git-index",
+ "alt-git-pack",
+ "alt-git-refs",
+ "alt-import",
+ "alt-input",
+ "alt-odb",
+ "alt-refs",
+ "alt-repo",
+ "blake3",
+ "bstr",
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

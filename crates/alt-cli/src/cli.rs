@@ -73,6 +73,17 @@ pub enum Command {
     RevParse { rev: String },
     /// Show commit logs
     Log(log_cmd::LogArgs),
+    /// Verify and independently import a supported Git source for tasks
+    Intake {
+        source: std::path::PathBuf,
+        /// New directory outside every repository (must not already exist)
+        target: std::path::PathBuf,
+        /// Absolute Git executable used for independent verification
+        #[arg(long, default_value = "/usr/bin/git")]
+        git: std::path::PathBuf,
+        #[arg(long, global = true)]
+        json: bool,
+    },
     /// Import this git repository into a .alt store
     Import {
         /// Destination directory: the store is created at <DIR>/.alt
@@ -725,6 +736,52 @@ pub fn ci_validate<W: Write>(
 
 #[derive(clap::Subcommand, Debug)]
 pub enum TaskOp {
+    /// Show the complete candidate diff against the task baseline
+    Changes {
+        candidate: String,
+    },
+    /// Record explicit review of a current candidate and its observed evidence
+    Review {
+        candidate: String,
+        #[arg(long)]
+        evidence: String,
+        #[arg(long)]
+        reviewer: String,
+        #[arg(long)]
+        reason: String,
+        #[arg(long, short = 'm')]
+        message: String,
+    },
+    ReviewShow {
+        id: String,
+    },
+    /// Atomically integrate a reviewed candidate into its unoccupied target
+    Integrate {
+        review: String,
+    },
+    IntegrationShow {
+        id: String,
+    },
+    /// Collect an already recorded ref transaction without applying it again
+    IntegrationCollect {
+        id: String,
+    },
+    /// Export a completed integration to a verified independent Git directory
+    Export {
+        integration: String,
+        target: std::path::PathBuf,
+        #[arg(long, default_value = "/usr/bin/git")]
+        git: std::path::PathBuf,
+    },
+    DeliveryShow {
+        id: String,
+    },
+    /// Verify an existing delivery after a lost publication response
+    DeliveryCollect {
+        id: String,
+        #[arg(long, default_value = "/usr/bin/git")]
+        git: std::path::PathBuf,
+    },
     /// Record a task definition and current isolated-workspace baseline
     Create {
         /// JSON TaskSpec; pass a file's contents with shell substitution
@@ -875,7 +932,16 @@ pub fn is_native(cmd: &Command) -> bool {
 pub fn mutates_command(cmd: &Command) -> bool {
     match cmd {
         Command::Task { op, .. } => {
-            return matches!(op, TaskOp::Create { .. } | TaskOp::Abandon { .. });
+            return matches!(
+                op,
+                TaskOp::Create { .. }
+                    | TaskOp::Abandon { .. }
+                    | TaskOp::Review { .. }
+                    | TaskOp::Integrate { .. }
+                    | TaskOp::IntegrationCollect { .. }
+                    | TaskOp::Export { .. }
+                    | TaskOp::DeliveryCollect { .. }
+            );
         }
         Command::Candidate { op, .. } => return matches!(op, CandidateOp::Create { .. }),
         Command::Evidence { op, .. } => {
@@ -904,6 +970,7 @@ pub fn mutates_command(cmd: &Command) -> bool {
             Command::Init { .. }
                 | Command::Clone { .. }
                 | Command::Import { .. }
+                | Command::Intake { .. }
                 | Command::Export { .. }
         );
     }

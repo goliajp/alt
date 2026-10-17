@@ -6,6 +6,8 @@ use serde_json::json;
 use std::collections::BTreeMap;
 
 mod candidate;
+mod delivery;
+pub(super) use delivery::delivery_intake;
 mod commands;
 mod evidence;
 mod run;
@@ -149,6 +151,19 @@ impl NativeRepo<'_> {
             return Err(crate::machine::Failure::unknown("task creation has no successful durable request completion; inspect its request and operation").into());
         }
         if active {
+            for (integration_id, integration) in store.list::<alt_task::Integration>()? {
+                if integration.task == id {
+                    if self.integration_abandoned(store, &integration)? {
+                        return Err(refused("task was abandoned without applying integration"));
+                    }
+                    if self.integration_completed(store, &integration_id, &integration)? {
+                        return Err(refused(
+                            "task is already integrated; inspect its immutable delivery",
+                        ));
+                    }
+                    return Err(crate::machine::Failure::unknown("integration intent has no successful durable completion; inspect integration-show and collect its attributed ref transaction").into());
+                }
+            }
             for (_, event) in store.list::<Event>()? {
                 if event.task == id {
                     if !self.task_request_complete(&event.creator_request)? {
@@ -168,6 +183,25 @@ impl NativeRepo<'_> {
     fn task_state(&self, store: &alt_task::Store, id: &str, task: &Task) -> Res<&'static str> {
         if !self.task_request_complete(&task.creator_request)? {
             return Ok("unknown");
+        }
+        let integrations: Vec<_> = store
+            .list::<alt_task::Integration>()?
+            .into_iter()
+            .filter(|(_, i)| i.task == id)
+            .collect();
+        if integrations.len() > 1 {
+            return Ok("unknown");
+        }
+        if let Some((integration_id, integration)) = integrations.first() {
+            return Ok(
+                if self.integration_completed(store, integration_id, integration)? {
+                    "integrated"
+                } else if self.integration_abandoned(store, integration)? {
+                    "abandoned"
+                } else {
+                    "unknown"
+                },
+            );
         }
         let events: Vec<_> = store
             .list::<Event>()?

@@ -295,3 +295,87 @@ record and verifies every captured artifact. This provides attribution within
 trusted local/SSH execution; it is not a sandbox for hostile code running as the
 same user. Imported reports remain `reported`. Abandoning a task preserves its
 attempts and evidence and does not roll back external processes or services.
+
+### Review, integration, and an independent Git exit
+
+`alt intake SOURCE NEW_DIRECTORY --git /absolute/path/to/git --json` checks a
+complete local Git source and creates an independent native repository. The
+source is read only. Intake preserves its canonical objects (including original
+unreachable objects), public refs, HEAD, and supported configuration. It rejects
+bare/linked/shallow/partial/sparse/alternate-backed repositories, external config,
+filters/hooks/credentials, unsupported paths, and unsafe symlinks. The destination
+must be new and outside every repository. File names are probed on the actual
+destination filesystem before checkout; no Unicode normalization is applied.
+The original `import`/`export` commands retain their general storage behavior.
+
+Create the task before editing its isolated workspace. Its private baseline
+records the original object inventory and public refs. Named workspace HEADs and
+their new task branches do not become delivery refs. Existing tasks without a
+captured delivery baseline cannot silently acquire one; start a fresh independent
+intake. Source objects already present when a native repository captures its
+first task baseline, including unreachable objects, belong to that original
+inventory and are preserved. Later unreviewed candidate objects are excluded.
+
+After `candidate create` and a successful observed `evidence run`:
+
+```sh
+alt task changes CANDIDATE --json
+alt task review CANDIDATE --evidence EVIDENCE --reviewer OWNER \
+  --reason 'Reviewed the complete change and its validation' \
+  -m 'fix: describe the reviewed change' --json
+alt task review-show REVIEW --json
+alt task integrate REVIEW --json
+alt task integration-show INTEGRATION --json
+# If the ref transaction applied but its response was lost:
+alt task integration-collect INTEGRATION --json
+alt task export INTEGRATION /new/independent/git-directory \
+  --git /absolute/path/to/git --json
+alt task delivery-show DELIVERY --json
+# Verify an existing export after a lost publication response:
+alt task delivery-collect DELIVERY --git /absolute/path/to/git --json
+```
+
+Review and integration also check the candidate against the Git delivery input
+rules. A passing validation command cannot authorize an LFS pointer or external
+filtering requirement that the independent exit cannot deliver.
+
+Integration rechecks selected source, explicit auxiliary inputs, observed evidence,
+review, target commit, and public commit metadata. The target must be at the task
+baseline and must not be checked out in another workspace: switch that workspace
+to a separate holding branch first. Integration atomically updates the target and
+its commit note; other workspaces' indexes and files remain unchanged. Changed
+inputs or target state require a fresh task/candidate/review as indicated by the
+refusal. Review attribution records the caller's statement; it is not an external
+identity or signature verification service.
+
+A successful integration is immutable delivery input. Export includes original
+baseline objects plus the integrated commit and note, and freezes the required
+refs. HEAD retains the baseline selection. Git independently checks the output
+with `fsck --strict`; alt verifies canonical objects, refs, configuration semantics,
+file bytes, symlinks and executable modes. Config is serialized with the same
+parsed semantics except that the physical `extensions.refstorage` declaration is
+removed for the files backend. Verification logs and Git executable identity are
+in the private delivery report. Task records, auxiliary validation inputs, logs,
+and later workspace edits do not enter the Git directory. Export does not push.
+
+Integration and export use normal durable request identities. If a response is
+lost, query the original request and `integration-show`; a prepared or unknown
+integration cannot authorize delivery or automatically launch another integration.
+The original operation records identify whether the target ref transaction was
+applied. `integration-collect` can acknowledge that existing transaction without
+moving refs again. An unapplied intent can be abandoned only after the original
+request is no longer active and the log proves no matching ref transaction exists.
+An abandoned task retains its candidates, evidence and workspace files.
+
+Delivery publication records the complete verified report before the directory is
+made visible. `delivery-collect` verifies that existing directory against its exact
+object/ref/config/file inventory; it neither regenerates nor repairs the output.
+
+When a response containing an integration or delivery id is lost, use
+`alt request status REQUEST --json`, then `alt operation status OPERATION --json`
+for its attributed operations. The integration preparation operation identifies
+the integration record; an export-ready operation identifies the delivery record.
+If export stopped during verification, its destination is still absent and no
+ready delivery exists. Confirm that the original process has stopped before
+starting a new export; the original request remains unknown. Task queries remain
+available while the external Git verifier runs.

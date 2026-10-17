@@ -188,7 +188,7 @@ impl NativeRepo<'_> {
 
     /// Runs the pre-commit checks: warnings go to stderr, errors stop the
     /// commit.
-    fn run_precommit(&mut self) -> Res<()> {
+    pub(super) fn run_precommit(&mut self) -> Res<()> {
         let (errors, warnings): (Vec<_>, Vec<_>) = self
             .precommit_findings()?
             .into_iter()

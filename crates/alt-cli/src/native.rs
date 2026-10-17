@@ -326,6 +326,16 @@ impl OpenRepo {
 /// alt would be checking out into the directory that already holds
 /// the source files — we leave that case alone (skip checkout) so we
 /// never clobber the user's existing working copy.
+pub fn task_intake(
+    source: &Path,
+    target: &Path,
+    git: &Path,
+    json_mode: bool,
+    out: &mut impl Write,
+) -> Res<()> {
+    task::delivery_intake(source, target, git, json_mode, out)
+}
+
 pub fn import(
     repo: &alt_repo::Repository,
     target: &Path,

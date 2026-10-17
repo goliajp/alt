@@ -1,5 +1,7 @@
 //! Private, immutable task records. These objects never enter Git's ODB.
+mod delivery;
 mod model;
+pub use delivery::*;
 mod run;
 pub use run::*;
 mod store;

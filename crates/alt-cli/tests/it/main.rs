@@ -43,6 +43,7 @@ mod revert;
 mod show;
 mod status_json;
 mod tag;
+mod task_delivery;
 mod task_evidence;
 mod task_runner;
 mod undo_add;

@@ -11,6 +11,7 @@ license = "MIT OR Apache-2.0"
 alt-input = { path = "crates/alt-input" }
 alt-task = { path = "crates/alt-task" }
 alt-runner = { path = "crates/alt-runner" }
+alt-delivery = { path = "crates/alt-delivery" }
 alt-cdc = { path = "crates/alt-cdc" }
 alt-diff = { path = "crates/alt-diff" }
 alt-git-codec = { path = "crates/alt-git-codec" }
