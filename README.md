@@ -114,6 +114,70 @@ Request receipts are private `.alt` state. `init`, `import`, `clone`, and Git-la
 external commands or remote effects. Interactive editors are unavailable in
 JSON mode.
 
+## Tasks, candidates and evidence
+
+Task records bind an authorized change to a named workspace, its baseline and
+an existing target branch. They currently support macOS arm64 on local APFS
+and Linux x86_64 on ext4. Create a workspace with `alt workspace add`, then run
+`alt task create --definition '<JSON>' --target refs/heads/main --json` inside
+it. The workspace branch must differ from the target. The definition is a JSON
+value, not a filename; for example:
+
+```json
+{
+  "purpose": "Fix parser handling of empty input",
+  "authority": "owner-approved parser fix",
+  "allowed_paths": ["src/parser.rs", "tests/parser.rs"],
+  "auxiliary": [{"path": ".fixtures/parser", "purpose": "validation data"}],
+  "exclusions": [],
+  "validation": {
+    "commands": [["cargo", "test", "--locked", "parser"]],
+    "cwd": ".",
+    "environment": {"values": {}, "complete": false},
+    "tools": [],
+    "external": [],
+    "validation": {"required": "parser regression tests pass"}
+  }
+}
+```
+
+The auxiliary directory must exist. Include every ignored fixture, probe and
+generator used by validation. Environment values must contain no credentials;
+external dependencies use provider/version references. Unknown tool or
+environment identities remain explicit and prevent eligible evidence.
+
+```sh
+alt task list --json
+alt task show <task-id> --json
+alt candidate create <task-id> --json
+alt candidate show <candidate-id> --json
+alt candidate check <candidate-id> --json
+alt task abandon <task-id> --reason "superseded" --json
+```
+
+Candidates snapshot the index plus the declared auxiliary roots into private
+storage. Stage source changes first; unstaged source edits are not selected.
+Changed auxiliary bytes, modes, links or directory membership change the input
+identity. `candidate check` recomputes that identity and the target condition;
+its JSON `current` field reports the result. A successful query exit does not
+mean the candidate is current. Use `--parent <candidate-id>` when recording a
+successor. Old candidates, failed evidence and abandoned work are retained.
+
+`alt evidence import <candidate-id> --report '<JSON>' --stdout <path>
+--stderr <path> --json` records an external receipt. Its schema includes the
+candidate and manifest ids, before/after manifest ids, actual execution context,
+runner, binary/artifact digests, timestamps and termination. Imports always
+remain `reported`, even if the submitted report claims `observed` or exit zero.
+Use `evidence show <id> --json` and `evidence check <id> --json` to inspect the
+record and its eligibility reasons. `evidence log <id> stdout`, `stderr` or
+`original-report` emits the full original bytes; JSON mode uses hexadecimal.
+Missing or corrupt logs, unknown execution, stale inputs and a moved target
+prevent eligibility. These commands record and inspect evidence; runner
+execution and reviewed integration are not yet available.
+
+Task metadata, auxiliary snapshots and logs live under `.alt/task-data`, outside
+the Git object database. `alt export` does not include that private store.
+
 ## Compatibility with git
 
 Refs, commits, trees, blobs, and tags use the same SHA-1 object IDs git

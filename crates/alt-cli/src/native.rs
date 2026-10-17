@@ -40,6 +40,7 @@ mod recovery;
 mod requests;
 mod revert;
 mod sequence_editor;
+mod task;
 mod workspace;
 pub use workspace::resolve_workspace;
 

@@ -33,7 +33,8 @@ impl Store {
 
 pub(super) fn operation_request(op: &alt_oplog::Op) -> Res<Option<String>> {
     let context = match op.payload.first() {
-        Some(&recovery::PREPARE)
+        Some(&task::TASK_OPERATION)
+        | Some(&recovery::PREPARE)
         | Some(&recovery::COMPLETE)
         | Some(&checkout_recovery::PREPARE_CHECKOUT)
         | Some(&checkout_recovery::COMPLETE_CHECKOUT) => {

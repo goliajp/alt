@@ -46,6 +46,17 @@ impl NativeRepo<'_> {
 
     fn operation_info(&self, op: &alt_oplog::Op) -> Res<(Option<WorkspaceIdentity>, bool, bool)> {
         match op.payload.first() {
+            Some(&task::TASK_OPERATION) => {
+                let operation: task::TaskOperation = decode(&op.payload, task::TASK_OPERATION)?;
+                if operation.version != 1 {
+                    return Err(crate::machine::Failure::refusal(
+                        "unsupported_record",
+                        "unsupported task operation version",
+                    )
+                    .into());
+                }
+                Ok((Some(operation.workspace), true, false))
+            }
             Some(&PREPARE) => {
                 let intent: IndexIntent = decode(&op.payload, PREPARE)?;
                 Ok((
@@ -92,8 +103,34 @@ impl NativeRepo<'_> {
     fn operation_json(&self, op: &alt_oplog::Op) -> Res<Json> {
         let (workspace, complete, recoverable) = self.operation_info(op)?;
         let scoped = workspace.is_some();
+        let task = if op.payload.first() == Some(&task::TASK_OPERATION) {
+            Some(decode::<task::TaskOperation>(
+                &op.payload,
+                task::TASK_OPERATION,
+            )?)
+        } else {
+            None
+        };
         Ok(Json::Object(vec![
             ("operation_id", Json::str(op.id.to_string())),
+            (
+                "task_id",
+                task.as_ref()
+                    .map(|task| Json::str(&task.task_id))
+                    .unwrap_or(Json::Null),
+            ),
+            (
+                "record_id",
+                task.as_ref()
+                    .map(|task| Json::str(&task.record_id))
+                    .unwrap_or(Json::Null),
+            ),
+            (
+                "action",
+                task.as_ref()
+                    .map(|task| Json::str(&task.action))
+                    .unwrap_or(Json::Null),
+            ),
             (
                 "request_id",
                 requests::operation_request(op)?

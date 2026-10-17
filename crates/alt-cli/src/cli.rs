@@ -32,6 +32,27 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
+    /// Record an authorized task in an isolated workspace
+    Task {
+        #[command(subcommand)]
+        op: TaskOp,
+        #[arg(long, global = true)]
+        json: bool,
+    },
+    /// Capture and inspect immutable candidates and complete input identities
+    Candidate {
+        #[command(subcommand)]
+        op: CandidateOp,
+        #[arg(long, global = true)]
+        json: bool,
+    },
+    /// Preserve validation reports and inspect their current validity
+    Evidence {
+        #[command(subcommand)]
+        op: EvidenceOp,
+        #[arg(long, global = true)]
+        json: bool,
+    },
     /// Inspect durable whole-command receipts without executing the command
     Request {
         #[command(subcommand)]
@@ -696,6 +717,70 @@ pub fn ci_validate<W: Write>(
 }
 
 #[derive(clap::Subcommand, Debug)]
+pub enum TaskOp {
+    /// Record a task definition and current isolated-workspace baseline
+    Create {
+        /// JSON TaskSpec; pass a file's contents with shell substitution
+        #[arg(long)]
+        definition: String,
+        /// Existing integration target, recorded with its expected object id
+        #[arg(long)]
+        target: String,
+    },
+    List,
+    Show {
+        id: String,
+    },
+    /// Append an abandonment record; keep candidates, logs and workspace files
+    Abandon {
+        id: String,
+        #[arg(long)]
+        reason: String,
+    },
+}
+#[derive(clap::Subcommand, Debug)]
+pub enum CandidateOp {
+    /// Snapshot index-selected source plus the task's explicit auxiliary roots
+    Create {
+        task: String,
+        #[arg(long)]
+        parent: Option<String>,
+    },
+    Show {
+        id: String,
+    },
+    /// Recompute current source and auxiliary inputs without accepting old evidence
+    Check {
+        id: String,
+    },
+}
+#[derive(clap::Subcommand, Debug)]
+pub enum EvidenceOp {
+    /// Preserve an external report; imported claims never become observed runs
+    Import {
+        candidate: String,
+        #[arg(long)]
+        report: String,
+        #[arg(long)]
+        stdout: Option<std::path::PathBuf>,
+        #[arg(long)]
+        stderr: Option<std::path::PathBuf>,
+    },
+    Show {
+        id: String,
+    },
+    Check {
+        id: String,
+    },
+    /// Read an entire preserved output stream without truncation
+    Log {
+        id: String,
+        #[arg(value_parser = ["stdout", "stderr", "original-report"])]
+        stream: String,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
 pub enum RequestOp {
     /// List requests without a durable completion
     Pending,
@@ -720,7 +805,10 @@ pub enum OperationOp {
 pub fn is_native(cmd: &Command) -> bool {
     matches!(
         cmd,
-        Command::Request { .. }
+        Command::Task { .. }
+            | Command::Candidate { .. }
+            | Command::Evidence { .. }
+            | Command::Request { .. }
             | Command::Add { .. }
             | Command::Commit { .. }
             | Command::Status { .. }
@@ -751,6 +839,14 @@ pub fn is_native(cmd: &Command) -> bool {
 /// Runs a native command against an attached repo, returning the process exit
 /// code (1 when a merge stops in conflict, else 0).
 pub fn mutates_command(cmd: &Command) -> bool {
+    match cmd {
+        Command::Task { op, .. } => {
+            return matches!(op, TaskOp::Create { .. } | TaskOp::Abandon { .. });
+        }
+        Command::Candidate { op, .. } => return matches!(op, CandidateOp::Create { .. }),
+        Command::Evidence { op, .. } => return matches!(op, EvidenceOp::Import { .. }),
+        _ => {}
+    }
     if matches!(
         cmd,
         Command::Operation {
@@ -829,6 +925,9 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
         repo.begin_workspace_write()?;
     }
     match cmd {
+        Command::Task { op, json } => repo.task_command(op, *json, out)?,
+        Command::Candidate { op, json } => repo.candidate_command(op, *json, out)?,
+        Command::Evidence { op, json } => repo.evidence_command(op, *json, out)?,
         Command::Request { op, json } => repo.request_query(op, *json, out)?,
         Command::Add { paths, json } => repo.add(paths, *json, out)?,
         Command::Commit {

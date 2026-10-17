@@ -209,6 +209,32 @@ pub fn from_error(error: &(dyn std::error::Error + 'static), writing: bool) -> F
             _ => {}
         }
     }
+    if let Some(input) = error.downcast_ref::<alt_input::Error>() {
+        match input {
+            alt_input::Error::Path { .. } | alt_input::Error::Unsupported(_) => {
+                return Failure::refusal("unsupported_input", input.to_string());
+            }
+            alt_input::Error::Changed(_) => {
+                return Failure::refusal("input_changed", input.to_string());
+            }
+            alt_input::Error::Integrity(_) => {
+                return Failure::refusal("input_integrity", input.to_string());
+            }
+            _ => {}
+        }
+    }
+    if let Some(task) = error.downcast_ref::<alt_task::Error>() {
+        match task {
+            alt_task::Error::Input(input) => return from_error(input, writing),
+            alt_task::Error::Invalid(_) | alt_task::Error::Json(_) => {
+                return Failure::refusal("invalid_record", task.to_string());
+            }
+            alt_task::Error::Precondition(_) => {
+                return Failure::refusal("precondition_failed", task.to_string());
+            }
+            _ => {}
+        }
+    }
     if error.is::<alt_flow::FlowError>() {
         return Failure::usage(error.to_string());
     }

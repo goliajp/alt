@@ -59,6 +59,19 @@ pub(super) fn render_op_log_json(
                 context.inverse_of.map(Json::str).unwrap_or(Json::Null),
             ));
         }
+        if op.payload.first() == Some(&task::TASK_OPERATION) {
+            let operation: task::TaskOperation =
+                recovery::decode(&op.payload, task::TASK_OPERATION)?;
+            fields.push(("task_id", Json::str(operation.task_id)));
+            fields.push(("record_id", Json::str(operation.record_id)));
+            fields.push((
+                "workspace",
+                Json::Object(vec![
+                    ("name", Json::str(operation.workspace.name)),
+                    ("instance", Json::str(operation.workspace.instance)),
+                ]),
+            ));
+        }
         if matches!(op.payload.first(), Some(0x30..=0x33)) {
             if op.payload.get(1) != Some(&1) {
                 return Err("unsupported recovery record version".into());

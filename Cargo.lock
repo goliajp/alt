@@ -36,6 +36,7 @@ dependencies = [
  "alt-git-index",
  "alt-git-pack",
  "alt-import",
+ "alt-input",
  "alt-lfs",
  "alt-merge",
  "alt-odb",
@@ -43,6 +44,7 @@ dependencies = [
  "alt-refs",
  "alt-repo",
  "alt-sign",
+ "alt-task",
  "alt-testutil",
  "alt-treediff",
  "alt-wire",
@@ -166,6 +168,18 @@ dependencies = [
  "alt-repo",
  "alt-testutil",
  "bstr",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
+name = "alt-input"
+version = "0.0.0"
+dependencies = [
+ "blake3",
+ "libc",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror",
 ]
@@ -314,6 +328,21 @@ dependencies = [
  "tempfile",
  "thiserror",
  "zstd",
+]
+
+[[package]]
+name = "alt-task"
+version = "0.0.0"
+dependencies = [
+ "alt-input",
+ "alt-store",
+ "blake3",
+ "libc",
+ "memmap2",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]

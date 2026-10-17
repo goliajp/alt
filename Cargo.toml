@@ -8,6 +8,8 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+alt-input = { path = "crates/alt-input" }
+alt-task = { path = "crates/alt-task" }
 alt-cdc = { path = "crates/alt-cdc" }
 alt-diff = { path = "crates/alt-diff" }
 alt-git-codec = { path = "crates/alt-git-codec" }

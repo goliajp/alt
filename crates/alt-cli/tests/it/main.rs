@@ -43,6 +43,7 @@ mod revert;
 mod show;
 mod status_json;
 mod tag;
+mod task_evidence;
 mod undo_add;
 mod url_rewrite;
 mod verify_commit;
