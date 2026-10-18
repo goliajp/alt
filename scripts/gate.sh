@@ -7,6 +7,7 @@
 #   unit   per-crate library tests (--lib)        after every change
 #   it     integration test binaries              before finishing a feature
 #   corpus ignored corpus sweeps (.dev/corpus)    at checkpoint exits
+#   package internal installer boundaries        after packaging changes
 #   all    everything above                       at checkpoint exits
 #
 # Fast tier = default (non-ignored). Full tier adds the corpus class.
@@ -16,7 +17,7 @@ cd "$(dirname "$0")/.."
 
 usage() {
     cat <<'EOF'
-Usage: scripts/gate.sh <lint|unit|it|corpus|all> [options]
+Usage: scripts/gate.sh <lint|unit|it|corpus|package|all> [options]
   -p, --package NAME   Check one package (default: the entire workspace)
       --workspace      Explicitly check the entire workspace
       --test NAME      Select an integration target (it/corpus, requires -p)
@@ -32,7 +33,8 @@ Examples:
 
 Scoped lint formats and compiles only the selected package; the read-only
 LLM isolation policy still checks the whole repository. Unknown arguments
-are errors. Workspace/release checks belong on a remote runner.
+are errors. The package class takes no scope/profile options and does not build
+Rust code. Workspace/release checks belong on a remote runner.
 EOF
 }
 
@@ -47,7 +49,7 @@ class=$1
 shift
 case "$class" in
     -h|--help) [ "$#" -eq 0 ] || die "unexpected arguments after help"; usage; exit 0 ;;
-    lint|unit|it|corpus|all) ;;
+    lint|unit|it|corpus|package|all) ;;
     *) die "unknown class: $class" ;;
 esac
 package='' scope='' target='' filter='' exact='' release='' help=''
@@ -77,6 +79,9 @@ done
 if [ -n "$target$filter" ]; then
     [ -n "$package" ] || die "--test/--filter require --package"
     case "$class" in lint|all) die "--test/--filter are not valid for $class" ;; esac
+fi
+if [ "$class" = package ] && [ -n "$scope$target$filter$exact$release" ]; then
+    die "package does not accept scope, test, filter or profile options"
 fi
 [ -z "$target" ] || [ "$class" != unit ] || die "--test is not valid for unit"
 [ -z "$exact" ] || [ -n "$filter" ] || die "--exact requires --filter"
@@ -182,14 +187,20 @@ run_corpus() {
     )
 }
 
+run_package() {
+    python3 scripts/test-package.py
+}
+
 case "$class" in
 lint) run_lint ;;
 unit) run_tests unit ;;
 it) run_tests it ;;
 corpus) run_corpus ;;
+package) run_package ;;
 all)
     run_lint
     run_tests unit
+    case "$package" in ''|alt-cli) run_package ;; esac
     run_tests it
     run_corpus
     ;;

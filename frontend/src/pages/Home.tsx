@@ -24,10 +24,9 @@ export function Home() {
             <span className="text-warm">rebuilt in pure Rust.</span>
           </p>
           <p className="text-base sm:text-lg text-fg-muted leading-relaxed mb-10">
-            Native large- and binary-file handling. Byte-exact import and
-            export of git repositories. A built-in git smart-http v2 server.
-            One static binary, no system C dependencies, and the same wire as
-            the git servers you already use.
+            Native large- and binary-file handling. Git object and history
+            preservation, reviewed tasks, and an independently verified Git exit.
+            A built-in git smart-http v2 server for existing hosts.
           </p>
 
           <div className="flex flex-wrap gap-3 mb-14">
@@ -55,7 +54,7 @@ export function Home() {
             <CodeBlock className="text-[13px]">
               {`git clone https://github.com/goliajp/alt.git
 cd alt
-cargo install --path crates/alt-cli \\
+cargo install --locked --path crates/alt-cli \\
   --bin alt --bin altd --bin altd-server`}
             </CodeBlock>
           </div>
@@ -67,13 +66,13 @@ cargo install --path crates/alt-cli \\
         <div className="px-6 py-16 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-14 gap-y-10">
           <Feature
             tag="01"
-            title="One static binary"
-            body="No system C dependencies in the default build. Clones, fuzz-tests, and ships as a single binary on every supported platform."
+            title="Native Rust tools"
+            body="The CLI, local daemon, and HTTP server are separate executables. Internal packages target macOS arm64 and Linux x86_64; system runtime requirements are recorded with each build."
           />
           <Feature
             tag="02"
-            title="Faster than git on hot paths"
-            body="A daemon-backed status, commit, branch, switch, and log beat git native on monorepo-scale repositories on day one."
+            title="Tasks with observed evidence"
+            body="Bind selected source and validation inputs to an isolated run, inspect the full change, then review and integrate against the expected target."
           />
           <Feature
             tag="03"
@@ -92,8 +91,8 @@ cargo install --path crates/alt-cli \\
           />
           <Feature
             tag="06"
-            title="Talks to any git server"
-            body="alt clone, fetch, and push speak git smart-http v2. Push from alt to GitHub byte-exact; export a .alt back to a .git on demand."
+            title="Git protocol and independent exit"
+            body="Clone, fetch, and push use git smart-http v2. Reviewed delivery verifies canonical objects, refs, HEAD, configuration semantics, and files; pack layout and reflogs are outside that guarantee."
           />
         </div>
       </section>

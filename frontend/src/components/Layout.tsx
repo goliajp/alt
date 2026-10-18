@@ -5,7 +5,7 @@ export function Layout() {
   const version = useVersion();
   const buildLabel = version.data
     ? `${version.data.version}/${version.data.build}`
-    : "0.0.0/dev";
+    : "version unavailable";
 
   return (
     <div className="min-h-screen flex flex-col">

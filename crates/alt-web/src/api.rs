@@ -1973,7 +1973,10 @@ mod tests {
         assert_eq!(status, 200);
         let s = String::from_utf8(body).unwrap();
         assert!(s.contains("\"schema_version\":1"), "got {s}");
-        assert!(s.contains("\"version\":\"0.0.0\""), "got {s}");
+        assert!(
+            s.contains(&format!("\"version\":\"{}\"", env!("CARGO_PKG_VERSION"))),
+            "got {s}"
+        );
         assert!(s.contains("\"build\":"), "got {s}");
     }
 }

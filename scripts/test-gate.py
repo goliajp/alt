@@ -33,6 +33,11 @@ class GateTests(unittest.TestCase):
         (self.root / "scripts").mkdir()
         self.gate = self.root / "scripts/gate.sh"
         shutil.copyfile(GATE, self.gate)
+        (self.root / "scripts/test-package.py").write_text(
+            "from pathlib import Path\nimport os,sys\n"
+            "Path('package-called').write_text('yes')\n"
+            "sys.exit(int(os.environ.get('GATE_PACKAGE_EXIT', '0')))\n"
+        )
         for name in ("crates", "fuzz", ".dev/corpus", "bin"):
             (self.root / name).mkdir(parents=True)
         cargo = self.root / "bin/cargo"
@@ -41,7 +46,7 @@ class GateTests(unittest.TestCase):
         self.log = self.root / "calls.jsonl"
         self.env = dict(os.environ, PATH=f"{cargo.parent}:{os.environ['PATH']}",
                         GATE_CALLS=str(self.log))
-        for name in ("ALT_CORPUS", "GATE_FAIL"):
+        for name in ("ALT_CORPUS", "GATE_FAIL", "GATE_PACKAGE_EXIT"):
             self.env.pop(name, None)
 
     def run_gate(self, *args):
@@ -51,6 +56,24 @@ class GateTests(unittest.TestCase):
         calls = [json.loads(line) for line in self.log.read_text().splitlines()] \
             if self.log.exists() else []
         return result, calls
+
+    def test_package_class_runs_without_cargo_and_rejects_scope(self):
+        result, calls = self.run_gate("package")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls, [])
+        self.assertTrue((self.root / "package-called").exists())
+        for options in (["-p", "alt-cli"], ["--workspace"], ["--release"]):
+            result, calls = self.run_gate("package", *options)
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(calls, [])
+
+    def test_package_failure_stops_full_gate_before_integration(self):
+        self.env["GATE_PACKAGE_EXIT"] = "19"
+        result, calls = self.run_gate("all", "-p", "alt-cli")
+        self.assertEqual(result.returncode, 19)
+        self.assertEqual([c["args"] for c in calls if c["args"][0] == "test"],
+                         [["test", "--package", "alt-cli", "--lib", "--"]])
+        self.assertNotIn(": OK", result.stdout)
 
     def test_scope_and_filter(self):
         result, calls = self.run_gate("it", "-p", "alt-cli", "--test", "it",

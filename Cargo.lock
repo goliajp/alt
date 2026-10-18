@@ -19,14 +19,14 @@ dependencies = [
 
 [[package]]
 name = "alt-cdc"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "criterion",
 ]
 
 [[package]]
 name = "alt-cli"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "alt-delivery",
  "alt-diff",
@@ -68,7 +68,7 @@ dependencies = [
 
 [[package]]
 name = "alt-delivery"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "alt-git-codec",
  "alt-git-config",
@@ -90,7 +90,7 @@ dependencies = [
 
 [[package]]
 name = "alt-diff"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "alt-cdc",
  "flate2",
@@ -98,7 +98,7 @@ dependencies = [
 
 [[package]]
 name = "alt-export"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "alt-git-codec",
  "alt-git-config",
@@ -116,11 +116,11 @@ dependencies = [
 
 [[package]]
 name = "alt-flow"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 
 [[package]]
 name = "alt-git-codec"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "alt-testutil",
  "bstr",
@@ -133,7 +133,7 @@ dependencies = [
 
 [[package]]
 name = "alt-git-config"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "alt-testutil",
  "bstr",
@@ -143,7 +143,7 @@ dependencies = [
 
 [[package]]
 name = "alt-git-index"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "alt-git-codec",
  "alt-testutil",
@@ -156,7 +156,7 @@ dependencies = [
 
 [[package]]
 name = "alt-git-pack"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "alt-git-codec",
  "alt-testutil",
@@ -171,7 +171,7 @@ dependencies = [
 
 [[package]]
 name = "alt-git-refs"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "alt-git-codec",
  "alt-testutil",
@@ -182,7 +182,7 @@ dependencies = [
 
 [[package]]
 name = "alt-import"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "alt-git-codec",
  "alt-git-pack",
@@ -198,7 +198,7 @@ dependencies = [
 
 [[package]]
 name = "alt-input"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "blake3",
  "libc",
@@ -210,7 +210,7 @@ dependencies = [
 
 [[package]]
 name = "alt-lfs"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -222,14 +222,14 @@ dependencies = [
 
 [[package]]
 name = "alt-merge"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "alt-diff",
 ]
 
 [[package]]
 name = "alt-odb"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "alt-git-codec",
  "alt-git-pack",
@@ -247,7 +247,7 @@ dependencies = [
 
 [[package]]
 name = "alt-oplog"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "blake3",
  "libc",
@@ -257,11 +257,11 @@ dependencies = [
 
 [[package]]
 name = "alt-prism"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 
 [[package]]
 name = "alt-prism-deflate"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "alt-prism",
  "flate2",
@@ -270,7 +270,7 @@ dependencies = [
 
 [[package]]
 name = "alt-prism-png"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "alt-prism",
  "flate2",
@@ -279,7 +279,7 @@ dependencies = [
 
 [[package]]
 name = "alt-prism-store"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "alt-prism",
  "alt-prism-deflate",
@@ -292,7 +292,7 @@ dependencies = [
 
 [[package]]
 name = "alt-prism-zip"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "alt-prism",
  "flate2",
@@ -302,7 +302,7 @@ dependencies = [
 
 [[package]]
 name = "alt-refs"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "alt-git-codec",
  "alt-oplog",
@@ -313,7 +313,7 @@ dependencies = [
 
 [[package]]
 name = "alt-repo"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "alt-git-codec",
  "alt-git-config",
@@ -330,7 +330,7 @@ dependencies = [
 
 [[package]]
 name = "alt-runner"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "alt-input",
  "alt-task",
@@ -344,7 +344,7 @@ dependencies = [
 
 [[package]]
 name = "alt-sign"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "ed25519-dalek",
  "rand_core",
@@ -354,7 +354,7 @@ dependencies = [
 
 [[package]]
 name = "alt-store"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "alt-cdc",
  "alt-git-codec",
@@ -370,7 +370,7 @@ dependencies = [
 
 [[package]]
 name = "alt-task"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "alt-input",
  "alt-store",
@@ -385,7 +385,7 @@ dependencies = [
 
 [[package]]
 name = "alt-testutil"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "alt-git-codec",
  "flate2",
@@ -393,7 +393,7 @@ dependencies = [
 
 [[package]]
 name = "alt-treediff"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "proc-macro2",
  "syn",
@@ -402,7 +402,7 @@ dependencies = [
 
 [[package]]
 name = "alt-verify"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "alt-git-codec",
  "alt-git-pack",
@@ -411,7 +411,7 @@ dependencies = [
 
 [[package]]
 name = "alt-web"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "alt-diff",
  "alt-git-codec",
@@ -425,7 +425,7 @@ dependencies = [
 
 [[package]]
 name = "alt-wire"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "alt-git-codec",
  "thiserror",
@@ -433,7 +433,7 @@ dependencies = [
 
 [[package]]
 name = "alt-wire-http"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "alt-wire",
  "thiserror",
@@ -442,7 +442,7 @@ dependencies = [
 
 [[package]]
 name = "alt-worktree"
-version = "0.0.0"
+version = "0.1.0-internal.1"
 dependencies = [
  "alt-git-codec",
  "alt-git-index",

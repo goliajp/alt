@@ -1,12 +1,13 @@
 # alt
 
 A version control system written in pure Rust. Native handling for large and
-binary files, byte-exact import/export of git repositories, and a built-in
+binary files, Git object and history preservation, and a built-in
 HTTP server that speaks the git smart-protocol so you can keep using existing
 hosts (GitHub, self-hosted, anything that talks git).
 
-> Status: pre-1.0, in active dogfood. The on-disk format is stabilising. No
-> releases yet — install from source.
+> Status: `0.1.0-internal.1`, an internal dogfood candidate. Public releases
+> remain paused. See [internal installation](docs/internal-install.md) for
+> building, verifying, upgrading and removing a local package.
 
 ## Why
 
@@ -23,15 +24,17 @@ principles in safe Rust, with no C dependencies in the default build.
 
 ## What works today
 
-- **Repository read** — open any `.git` directory and read commits, trees,
+- **Repository read** — open supported `.git` directories and read commits, trees,
   refs, the index, packs (including delta resolution).
 - **Native store** — a `.alt` directory that holds BLAKE3-addressed,
   zstd-compressed chunks. Reproducible content-defined chunking gives
   cross-file and across-commit deduplication on the binary and large-file
   shapes git struggles with.
 - **Import / export** — `alt import` ingests a `.git` directory into `.alt`;
-  `alt export` rebuilds a byte-exact `.git`. Round-trip fidelity is tested
-  against a multi-repo corpus.
+  `alt export` rebuilds a Git repository with L1 semantic fidelity. Canonical
+  objects, required refs and applicable configuration semantics are preserved;
+  pack layout, reflogs and stat caches are outside this promise. Round-trip
+  fidelity is tested against a multi-repo corpus.
 - **Daily CLI** — `init`, `add`, `commit`, `status`, `branch`, `switch`,
   `diff`, `log`, `merge`, plus a built-in `git-flow` model (`alt flow
   feature start / finish`, release, hotfix) and an `undo` for the last
@@ -46,18 +49,31 @@ principles in safe Rust, with no C dependencies in the default build.
   (read-only, force-deny, branch and path allow-lists).
 - **Structured diff** — line, binary, and format-aware (PNG perceptual
   fingerprinting, ZIP/OOXML, JSON, TOML).
-- **Operation log** — every state change is recorded; `alt undo` rolls back
-  the last one. Tamper-evident via signature chain.
+- **Operation log** — repository transactions retain their recorded scope and
+  state. `alt undo` checks workspace identity and recovery preconditions;
+  unscoped old records and changed state are refused. External effects are
+  outside repository undo.
+- **Reviewed tasks** — isolated candidates, observed validation, complete change
+  review, target preconditions, atomic integration and independent Git delivery.
 
 ## Install
 
 ```sh
 git clone https://github.com/goliajp/alt.git
 cd alt
-cargo install --path crates/alt-cli --bin alt --bin altd --bin altd-server
+cargo install --locked --path crates/alt-cli --bin alt --bin altd --bin altd-server
 ```
 
-Requires a recent stable Rust toolchain. No system C libraries needed.
+Requires a compatible Rust toolchain; the internal build baseline is Rust/Cargo
+1.99.1. The default Rust dependencies do not require separately installed C
+libraries, but executables can depend on platform runtimes. Internal packages
+cover macOS arm64/APFS and Linux x86_64/ext4, and record their actual build
+environment. Public remotes may lag local internal candidates until an explicitly
+authorized push.
+
+The [installed task example](docs/task-walkthrough.md) walks through validation,
+review, integration and a verified Git exit. Read [recovery and compatibility](docs/recovery.md)
+before using a new build with an existing repository.
 
 ## Quick start
 
@@ -172,26 +188,29 @@ Use `evidence show <id> --json` and `evidence check <id> --json` to inspect the
 record and its eligibility reasons. `evidence log <id> stdout`, `stderr` or
 `original-report` emits the full original bytes; JSON mode uses hexadecimal.
 Missing or corrupt logs, unknown execution, stale inputs and a moved target
-prevent eligibility. These commands record and inspect evidence; runner
-execution and reviewed integration are not yet available.
+prevent eligibility. Use the observed runner and review commands below when
+executing and integrating a candidate; an imported report cannot authorize it.
 
 Task metadata, auxiliary snapshots and logs live under `.alt/task-data`, outside
 the Git object database. `alt export` does not include that private store.
 
 ## Compatibility with git
 
-Refs, commits, trees, blobs, and tags use the same SHA-1 object IDs git
-does, so:
+Commits, trees, blobs and tags retain their canonical Git bytes and object IDs.
+Validated task intake samples include SHA-1/files, SHA-256/files and
+SHA-1/reftable. Within the [supported input scope](docs/recovery.md):
 
-- Pushing from `alt` to a git server is byte-exact.
+- Object transfer preserves canonical content and identity.
 - Cloning a git server into `alt` and exporting back to `.git` gives the
   same object graph.
-- A `.alt` repository can be exported to `.git` at any time and used by
-  stock `git` — `alt export` is the escape hatch.
+- `alt export` produces a Git repository for committed repository state.
+  Reviewed `task export` additionally checks the frozen delivery inventory
+  independently with Git. Neither includes uncommitted or private task data.
 
 `alt` does not coexist with `.git` in the same working tree by design:
 running `alt init` in a `.git`-managed directory is rejected. Use
-`alt import .` to migrate, or work in separate directories.
+`alt intake /existing/git-repo /new/native-repo --git /absolute/path/to/git`
+for supported task intake into an independent directory; the source stays intact.
 
 ## Server
 
@@ -209,11 +228,10 @@ what each principal may do.
 
 ## Status and roadmap
 
-`alt` is in dogfood. The CLI surface and on-disk format are stable enough
-for the author's daily use, but neither has a versioned compatibility
-promise yet. There are no binary releases — install from source. A 1.0 will
-freeze the on-disk format and publish binary releases through normal
-channels.
+`alt` is in internal dogfood. The versioned package identifies the exact build;
+it does not promise unrestricted forward or backward on-disk compatibility.
+Public binary releases remain paused. Internal installation, recovery, and real
+project acceptance are recorded separately from unit and corpus tests.
 
 ## License
 
@@ -231,7 +249,7 @@ issues are welcome; pull requests are not currently accepted. If you want
 to use a part of `alt` as a library in your own project, the workspace
 crates (`alt-store`, `alt-git-pack`, `alt-wire`, `alt-diff`, …) are
 self-contained and each has its own purpose described in their rustdoc.
-### Execute a candidate and collect evidence
+## Execute a candidate and collect evidence
 
 `evidence run` materializes the candidate's selected source and explicit auxiliary
 inputs into a new directory outside existing repositories. The original workspace
@@ -296,7 +314,7 @@ trusted local/SSH execution; it is not a sandbox for hostile code running as the
 same user. Imported reports remain `reported`. Abandoning a task preserves its
 attempts and evidence and does not roll back external processes or services.
 
-### Review, integration, and an independent Git exit
+## Review, integration, and an independent Git exit
 
 `alt intake SOURCE NEW_DIRECTORY --git /absolute/path/to/git --json` checks a
 complete local Git source and creates an independent native repository. The
