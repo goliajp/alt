@@ -44,7 +44,8 @@ def inputs():
     # generator, and packaged documents. It is not a claim of a hermetic build.
     paths = {ROOT / name for name in PAYLOAD.values()}
     paths.update(ROOT / name for name in ["Cargo.toml", "Cargo.lock", "scripts/package-internal.py",
-                                         "scripts/gate.sh", "scripts/test-gate.py", "scripts/test-package.py"])
+                                         "scripts/gate.sh", "scripts/test-gate.py", "scripts/test-package.py",
+                                         "scripts/with-test-postgres.sh"])
     for name in [".cargo/config", ".cargo/config.toml", "rust-toolchain", "rust-toolchain.toml"]:
         if (ROOT / name).exists():
             paths.add(ROOT / name)

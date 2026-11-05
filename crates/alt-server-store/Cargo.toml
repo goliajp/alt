@@ -1,0 +1,22 @@
+[package]
+name = "alt-server-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+alt-git-codec.workspace = true
+alt-remote-protocol.workspace = true
+alt-repository-service.workspace = true
+blake3.workspace = true
+ed25519-dalek.workspace = true
+rand_core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tempfile.workspace = true
+libc.workspace = true
+postgres = { version = "0.19.14", features = ["with-serde_json-1"] }
+
+[dev-dependencies]
+tempfile.workspace = true
