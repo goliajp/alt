@@ -257,3 +257,6 @@ fn http_error_status_surfaces_typed_with_body() {
         other => panic!("expected HttpStatus, got {other:?}"),
     }
 }
+
+#[path = "it/native.rs"]
+mod native;

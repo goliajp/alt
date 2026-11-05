@@ -18,9 +18,7 @@ impl NativeRepo<'_> {
                 let task = self.require_task(&store, task_id, true)?;
                 if let Some(parent) = parent {
                     let candidate: Candidate = store.load(parent)?;
-                    if candidate.task != *task_id
-                        || !self.task_request_complete(&candidate.creator_request)?
-                    {
+                    if candidate.task != *task_id || !self.task_record_complete(&candidate)? {
                         return Err(refused(
                             "parent candidate is not a completed candidate of this task",
                         ));
@@ -94,7 +92,7 @@ impl NativeRepo<'_> {
                 let store = self.task_store()?;
                 let candidate: Candidate = store.load(id)?;
                 let manifest: alt_input::Manifest = store.load(&candidate.manifest)?;
-                let complete = self.task_request_complete(&candidate.creator_request)?;
+                let complete = self.task_record_complete(&candidate)?;
                 emit(
                     out,
                     json_mode,
@@ -107,7 +105,7 @@ impl NativeRepo<'_> {
                 let task = self.require_task(&store, &candidate.task, true)?;
                 let current = self.task_manifest(&task)?.id()?;
                 let targets = self.task_targets(&candidate.target_expected)?;
-                let complete = self.task_request_complete(&candidate.creator_request)?;
+                let complete = self.task_record_complete(&candidate)?;
                 let valid = complete
                     && current == candidate.manifest
                     && targets == candidate.target_expected;

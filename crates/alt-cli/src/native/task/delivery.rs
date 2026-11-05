@@ -91,7 +91,7 @@ impl NativeRepo<'_> {
         let record = records
             .next()
             .ok_or_else(|| refused("task has no frozen delivery baseline"))?;
-        if records.next().is_some() || !self.task_request_complete(&record.1.creator_request)? {
+        if records.next().is_some() || !self.task_record_complete(&record.1)? {
             return Err(refused("task baseline is ambiguous or incomplete"));
         }
         let snapshot: alt_delivery::Snapshot =
@@ -109,8 +109,8 @@ impl NativeRepo<'_> {
         let task = self.require_task(store, &candidate.task, true)?;
         let evidence: Evidence = store.load(evidence_id)?;
         if evidence.candidate != candidate_id
-            || !self.task_request_complete(&candidate.creator_request)?
-            || !self.evidence_request_complete(&evidence.creator_request)?
+            || !self.task_record_complete(&candidate)?
+            || !self.task_record_complete(&evidence)?
         {
             return Err(refused(
                 "candidate/evidence identity or completion is not valid",
@@ -211,7 +211,7 @@ impl NativeRepo<'_> {
         let store = self.task_store()?;
         let candidate: Candidate = store.load(candidate_id)?;
         let task = self.require_task(&store, &candidate.task, true)?;
-        if !self.task_request_complete(&candidate.creator_request)?
+        if !self.task_record_complete(&candidate)?
             || self.task_manifest(&task)?.id()? != candidate.manifest
         {
             return Err(refused(
@@ -273,7 +273,7 @@ impl NativeRepo<'_> {
         emit(
             out,
             json_mode,
-            json!({"review_id":id,"review":review,"creation_complete":self.task_request_complete(&review.creator_request)?,"diff":changes}),
+            json!({"review_id":id,"review":review,"creation_complete":self.task_record_complete(&review)?,"diff":changes}),
         )
     }
     pub(super) fn task_integrate(
@@ -288,7 +288,7 @@ impl NativeRepo<'_> {
         self.lock_workspace()?;
         let mut store = self.task_store()?;
         let review: Review = store.load(review_id)?;
-        if !self.task_request_complete(&review.creator_request)? {
+        if !self.task_record_complete(&review)? {
             return Err(refused("review creation is incomplete"));
         }
         self.store.refresh()?;
@@ -474,9 +474,7 @@ impl NativeRepo<'_> {
         }
         let review: Review = store.load(&integration.review)?;
         let baseline: TaskBaseline = store.load(&review.baseline)?;
-        if baseline.task != integration.task
-            || !self.task_request_complete(&review.creator_request)?
-        {
+        if baseline.task != integration.task || !self.task_record_complete(&review)? {
             return Err(refused("integration review/baseline mismatch"));
         }
         let snapshot: alt_delivery::Snapshot =
@@ -583,7 +581,32 @@ impl NativeRepo<'_> {
         store: &alt_task::Store,
         integration: &Integration,
     ) -> Res<Option<String>> {
-        let task: Task = store.load(&integration.task)?;
+        let _: Task = store.load(&integration.task)?;
+        crate::request::parse_id(&integration.creator_request)?;
+        let intent: crate::request::Intent = match super::transfer_source::bounded(
+            &self
+                .store
+                .alt_dir
+                .join("requests")
+                .join(&integration.creator_request)
+                .join("intent.json"),
+            4 * 1024 * 1024,
+        ) {
+            Ok(raw) => serde_json::from_slice(&raw)?,
+            Err(alt_task_transfer::Error::Io(error))
+                if error.kind() == std::io::ErrorKind::NotFound =>
+            {
+                return Ok(None);
+            }
+            Err(error) => return Err(error.into()),
+        };
+        if intent.repository != self.task_scope()?.repository
+            || intent.request_id != integration.creator_request
+        {
+            return Err(refused(
+                "integration source intent does not belong to this repository",
+            ));
+        }
         let mut found = None;
         for op in self.store.refs.oplog().ops() {
             let Some(tx) = alt_refs::parse_tx(&op.payload)? else {
@@ -592,7 +615,7 @@ impl NativeRepo<'_> {
             let Some(context) = tx.context else { continue };
             let context: recovery::RefContext = serde_json::from_slice(&context)?;
             if !matches!(context.version, 1 | 2)
-                || context.workspace.instance != task.scope.workspace
+                || context.workspace.instance != intent.workspace
                 || context.request_id.as_deref() != Some(&integration.creator_request)
             {
                 continue;
@@ -629,16 +652,22 @@ impl NativeRepo<'_> {
         id: &str,
         integration: &Integration,
     ) -> Res<bool> {
+        if self.received_record_complete(&alt_task_service::RecordKey {
+            kind: alt_task_service::RecordKind::Integration,
+            id: id.into(),
+        })? {
+            return Ok(true);
+        }
         let Some(operation) = self.integration_ref_operation_with_store(store, integration)? else {
             return Ok(false);
         };
-        if self.task_request_complete(&integration.creator_request)? {
+        if self.task_record_complete(integration)? {
             return Ok(true);
         }
         for (_, receipt) in store.list::<alt_task::IntegrationReceipt>()? {
             if receipt.integration == id
                 && receipt.ref_operation == operation
-                && self.task_request_complete(&receipt.creator_request)?
+                && self.task_record_complete(&receipt)?
             {
                 return Ok(true);
             }
@@ -738,7 +767,7 @@ impl NativeRepo<'_> {
         for (_, event) in store.list::<Event>()? {
             if event.task == integration.task
                 && event.state == TaskState::Abandoned
-                && self.task_request_complete(&event.creator_request)?
+                && self.task_record_complete(&event)?
             {
                 return Ok(true);
             }
@@ -754,11 +783,11 @@ impl NativeRepo<'_> {
         id: &str,
         delivery: &Delivery,
     ) -> Res<bool> {
-        if self.task_request_complete(&delivery.creator_request)? {
+        if self.task_record_complete(delivery)? {
             return Ok(true);
         }
         for (_, receipt) in store.list::<alt_task::DeliveryReceipt>()? {
-            if receipt.delivery == id && self.task_request_complete(&receipt.creator_request)? {
+            if receipt.delivery == id && self.task_record_complete(&receipt)? {
                 store.verify_blob(&receipt.verification)?;
                 return Ok(true);
             }

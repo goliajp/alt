@@ -736,6 +736,11 @@ pub fn ci_validate<W: Write>(
 
 #[derive(clap::Subcommand, Debug)]
 pub enum TaskOp {
+    /// Publish selected task history or receive and continue published work
+    Remote {
+        #[command(subcommand)]
+        op: TaskRemoteOp,
+    },
     /// Show the complete candidate diff against the task baseline
     Changes {
         candidate: String,
@@ -800,6 +805,88 @@ pub enum TaskOp {
         id: String,
         #[arg(long)]
         reason: String,
+    },
+}
+#[derive(clap::Subcommand, Debug)]
+pub enum TaskRemoteOp {
+    /// Bind an HTTPS origin, repository and operator-provided receipt key
+    Connect {
+        name: String,
+        #[arg(long)]
+        url: String,
+        #[arg(long)]
+        repository: String,
+        #[arg(long)]
+        receipt_key: String,
+        #[arg(long)]
+        allow_loopback_http: bool,
+    },
+    /// Freeze the exact records, attachments and optional ref updates to publish
+    Preview {
+        remote: String,
+        /// JSON selection and optional ref updates; only these roots are followed
+        #[arg(long)]
+        plan: std::path::PathBuf,
+    },
+    /// Send or resume an already previewed publication using its original ID
+    Publish {
+        id: String,
+        #[arg(long)]
+        prepare_only: bool,
+    },
+    /// Sign the original completed evidence statement with a collector key
+    Attest {
+        evidence: String,
+        #[arg(long)]
+        key_file: std::path::PathBuf,
+    },
+    /// Download the complete ready selection for an independent current review
+    Review {
+        remote: String,
+        #[arg(long)]
+        actor: String,
+        #[arg(long)]
+        request: String,
+    },
+    /// Approve the exact previously inspected request as the current reviewer
+    Approve {
+        remote: String,
+        #[arg(long)]
+        actor: String,
+        #[arg(long)]
+        request: String,
+        #[arg(long)]
+        integration: String,
+        #[arg(long)]
+        digest: String,
+    },
+    /// Query the authoritative outcome without sending a new publication
+    Status { id: String },
+    /// List published roots, or the signed publications containing a root
+    List {
+        remote: String,
+        #[arg(long)]
+        kind: String,
+        #[arg(long)]
+        id: Option<String>,
+        #[arg(long)]
+        after: Option<String>,
+    },
+    /// Receive an explicitly selected signed publication; never execute it
+    Receive {
+        remote: String,
+        #[arg(long)]
+        kind: String,
+        #[arg(long)]
+        id: String,
+        #[arg(long)]
+        publication: String,
+    },
+    /// Accept a received task in this isolated workspace with its original ID
+    Adopt {
+        task: String,
+        #[arg(long)]
+        publication: String,
     },
 }
 #[derive(clap::Subcommand, Debug)]
@@ -932,6 +1019,14 @@ pub fn is_native(cmd: &Command) -> bool {
 pub fn mutates_command(cmd: &Command) -> bool {
     match cmd {
         Command::Task { op, .. } => {
+            if let TaskOp::Remote { op } = op {
+                return !matches!(
+                    op,
+                    TaskRemoteOp::List { .. }
+                        | TaskRemoteOp::Status { .. }
+                        | TaskRemoteOp::Attest { .. }
+                );
+            }
             return matches!(
                 op,
                 TaskOp::Create { .. }

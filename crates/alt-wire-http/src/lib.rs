@@ -272,3 +272,5 @@ mod tests {
         assert_eq!(t.base_url, "https://github.com/user/repo.git");
     }
 }
+
+pub mod native;

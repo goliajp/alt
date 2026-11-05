@@ -26,6 +26,10 @@ alt-command-protocol.workspace = true
 alt-delivery.workspace = true
 alt-input.workspace = true
 alt-task.workspace = true
+alt-task-transfer.workspace = true
+alt-task-service.workspace = true
+alt-remote-protocol.workspace = true
+alt-repository-service.workspace = true
 alt-runner.workspace = true
 alt-diff.workspace = true
 alt-git-codec.workspace = true
@@ -46,6 +50,7 @@ alt-treediff.workspace = true
 alt-wire.workspace = true
 alt-wire-http.workspace = true
 blake3.workspace = true
+ed25519-dalek.workspace = true
 tempfile.workspace = true
 tiny_http.workspace = true
 alt-worktree.workspace = true
@@ -64,6 +69,10 @@ libc.workspace = true
 libc.workspace = true
 
 [dev-dependencies]
+alt-server.workspace = true
+alt-server-store.workspace = true
+postgres = {version="0.19",features=["with-serde_json-1"]}
+tokio = {version="1",features=["rt-multi-thread","net","sync"]}
 alt-sign.workspace = true
 alt-testutil.workspace = true
 criterion.workspace = true

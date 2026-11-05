@@ -93,6 +93,27 @@ impl Store {
         lease_ms: u64,
         max_objects: usize,
     ) -> Result<PublicationWork> {
+        self.acquire_work(credential, key, lease_ms, max_objects, false)
+    }
+    /// A current reviewer may inspect an already-ready selected publication.
+    /// This handle cannot publish on behalf of the originating actor.
+    pub fn acquire_review(
+        &mut self,
+        credential: &Credential,
+        key: &RequestKey,
+        lease_ms: u64,
+        max_objects: usize,
+    ) -> Result<PublicationWork> {
+        self.acquire_work(credential, key, lease_ms, max_objects, true)
+    }
+    fn acquire_work(
+        &mut self,
+        credential: &Credential,
+        key: &RequestKey,
+        lease_ms: u64,
+        max_objects: usize,
+        review: bool,
+    ) -> Result<PublicationWork> {
         if lease_ms == 0 || lease_ms > 300_000 || max_objects == 0 {
             return Err(Error::Limit("worker lease or object bound"));
         }
@@ -101,16 +122,35 @@ impl Store {
         instance(&mut tx, &self.spec, &self.signing_key)?;
         let current = snapshot(&mut tx, &self.spec, &key.scope.repository_instance_id)?;
         let auth = authorize(&mut tx, &self.spec, credential, &current)?;
-        check_key(key, &current.scope, &auth.actor_id)?;
+        key.validate()?;
+        if review {
+            if key.scope != current.scope {
+                return Err(Error::Unauthorized);
+            }
+            crate::tasks::reviewer(&mut tx, &self.spec, credential, &current)?;
+        } else {
+            check_key(key, &current.scope, &auth.actor_id)?;
+        }
         let row =
             request_row(&mut tx, key)?.ok_or(Error::Precondition("request not registered"))?;
         let time = now(&mut tx)?;
         active(&row, time)?;
+        if review && row.get::<_, String>("state") != "ready" {
+            return Err(Error::Precondition("publication not ready for review"));
+        }
         if unsigned(row.get("worker_lease_until"))? > time {
             return Err(Error::Precondition("publication worker already leased"));
         }
         let publication: Publication = serde_json::from_value(row.get("publication"))?;
-        alt_repository_service::authorize_intent(&publication, &current, &auth, self.limits, time)?;
+        if !review {
+            alt_repository_service::authorize_intent(
+                &publication,
+                &current,
+                &auth,
+                self.limits,
+                time,
+            )?;
+        }
         let manifest: Manifest = serde_json::from_value(row.get("manifest"))?;
         manifest.validate(self.limits)?;
         let repository = &key.scope.repository_instance_id;

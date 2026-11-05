@@ -9,6 +9,7 @@ impl NativeRepo<'_> {
     ) -> Res<()> {
         use crate::cli::TaskOp;
         match op {
+            TaskOp::Remote { op } => self.task_remote_command(op, json_mode, out),
             TaskOp::Changes { candidate } => self.task_changes(candidate, json_mode, out),
             TaskOp::Review {
                 candidate,
@@ -119,7 +120,7 @@ impl NativeRepo<'_> {
                 let store = self.task_store()?;
                 let mut tasks = Vec::new();
                 for (id, task) in store.list::<Task>()? {
-                    let complete = self.task_request_complete(&task.creator_request)?;
+                    let complete = self.task_record_complete(&task)?;
                     let state = self.task_state(&store, &id, &task)?;
                     tasks.push(json!({"task_id":id,"task":task,"state":state,"creation_state":if complete {"completed"} else {"unknown"}}));
                 }
@@ -128,12 +129,12 @@ impl NativeRepo<'_> {
             TaskOp::Show { id } => {
                 let store = self.task_store()?;
                 let task: Task = store.load(id)?;
-                let complete = self.task_request_complete(&task.creator_request)?;
+                let complete = self.task_record_complete(&task)?;
                 let state = self.task_state(&store, id, &task)?;
                 let mut events = Vec::new();
                 for (event_id, event) in store.list::<Event>()? {
                     if &event.task == id {
-                        let completed = self.task_request_complete(&event.creator_request)?;
+                        let completed = self.task_record_complete(&event)?;
                         events.push(json!({"event_id":event_id,"event":event,"request_state":if completed {"completed"} else {"unknown"}}));
                     }
                 }

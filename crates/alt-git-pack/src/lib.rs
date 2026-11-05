@@ -7,6 +7,7 @@ mod cache;
 pub mod delta;
 mod idx;
 mod index_pack;
+mod ingress;
 mod pack;
 mod write;
 
@@ -18,6 +19,7 @@ use alt_git_codec::{ObjectId, ObjectKind, RawObject};
 use cache::DeltaBaseCache;
 pub use idx::PackIndex;
 pub use index_pack::{IndexedPackOnDisk, index_pack};
+pub use ingress::*;
 pub use pack::{EntryInfo, EntryKind, Pack};
 pub use write::{PackWriter, WrittenPack};
 
@@ -25,6 +27,8 @@ pub use write::{PackWriter, WrittenPack};
 pub enum PackError {
     #[error("io")]
     Io(#[from] std::io::Error),
+    #[error("pack resource limit: {0}")]
+    Limit(&'static str),
     #[error("pack format: {0}")]
     Format(&'static str),
 }

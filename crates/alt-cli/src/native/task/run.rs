@@ -50,6 +50,105 @@ fn captured(store: &mut alt_task::Store, path: &Path) -> Res<Artifact> {
 }
 
 impl NativeRepo<'_> {
+    // Launch/collection bookkeeping remains local and is not imported as task
+    // execution history. Bind a receipt to the actual completed response.
+    pub(super) fn run_receipt_complete(&self, receipt: &RunReceipt) -> Res<bool> {
+        crate::request::parse_id(&receipt.creator_request)?;
+        let directory = self
+            .store
+            .alt_dir
+            .join("requests")
+            .join(&receipt.creator_request);
+        let intent = match std::fs::read(directory.join("intent.json")) {
+            Ok(raw) => serde_json::from_slice::<crate::request::Intent>(&raw)?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(e) => return Err(e.into()),
+        };
+        let Some((completion, response)) = crate::request::read_completion(&directory, &intent)?
+        else {
+            return Ok(false);
+        };
+        if completion.outcome != "applied" {
+            return Ok(false);
+        }
+        if intent.repository != self.task_scope()?.repository
+            || intent.request_id != receipt.creator_request
+        {
+            return Err(refused(
+                "run collection completion does not bind this receipt",
+            ));
+        }
+        // Human-mode failed validation predates machine failure details. The
+        // original completed operation still binds the exact local receipt;
+        // it is never exported as a fabricated JSON source response.
+        if let Ok(value) = alt_task_service::command_record_result(
+            &response,
+            &receipt.creator_request,
+            4 * 1024 * 1024,
+        ) && (value["receipt_id"] != receipt.id()?
+            || value["evidence_id"] != receipt.evidence
+            || value["attempt_id"] != receipt.attempt)
+        {
+            return Err(refused("run collection response record mismatch"));
+        }
+        for op in self.store.refs.oplog().ops() {
+            if op.payload.first() != Some(&TASK_OPERATION)
+                || !completion.operations.contains(&op.id.to_string())
+            {
+                continue;
+            }
+            let operation: TaskOperation = recovery::decode(&op.payload, TASK_OPERATION)?;
+            if operation.version == 1
+                && operation.workspace.instance == intent.workspace
+                && operation.request_id.as_deref() == Some(&receipt.creator_request)
+                && operation.action == "evidence-run-collect"
+                && operation.record_id == receipt.id()?
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+    pub(super) fn local_collected_evidence_complete(&self, evidence: &Evidence) -> Res<bool> {
+        let id = evidence.id()?;
+        // Read without reopening the store lock already held by the caller.
+        for op in self.store.refs.oplog().ops() {
+            if op.payload.first() != Some(&TASK_OPERATION) {
+                continue;
+            }
+            let operation: TaskOperation = recovery::decode(&op.payload, TASK_OPERATION)?;
+            if operation.action != "evidence-run-collect"
+                || operation.request_id.as_deref() != Some(&evidence.creator_request)
+            {
+                continue;
+            }
+            alt_task::check_id(&operation.record_id)?;
+            let path = self
+                .store
+                .alt_dir
+                .join("task-data/records/run-receipt")
+                .join(format!("{}.json", operation.record_id));
+            let raw = super::transfer_source::bounded(&path, 4 * 1024 * 1024)?;
+            let value: serde_json::Value = serde_json::from_slice(&raw)?;
+            if value["schema_version"] != 1
+                || value["hash_algorithm"] != "blake3"
+                || value["kind"] != "run-receipt"
+            {
+                return Err(refused("invalid local run receipt envelope"));
+            }
+            let receipt: RunReceipt = serde_json::from_value(value["record"].clone())?;
+            if receipt.id()? != operation.record_id {
+                return Err(refused("local run receipt address mismatch"));
+            }
+            if receipt.evidence == id
+                && receipt.creator_request == evidence.creator_request
+                && self.run_receipt_complete(&receipt)?
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
     pub(super) fn evidence_run(
         &mut self,
         candidate_id: &str,
@@ -63,7 +162,7 @@ impl NativeRepo<'_> {
         let mut store = self.task_store()?;
         let candidate: Candidate = store.load(candidate_id)?;
         let task = self.require_task(&store, &candidate.task, true)?;
-        if !self.task_request_complete(&candidate.creator_request)? {
+        if !self.task_record_complete(&candidate)? {
             return Err(
                 crate::machine::Failure::unknown("candidate creation is not complete").into(),
             );
@@ -73,9 +172,7 @@ impl NativeRepo<'_> {
             if attempt.task == candidate.task {
                 let mut finished = false;
                 for (_, receipt) in &receipts {
-                    if receipt.attempt == id
-                        && self.evidence_request_complete(&receipt.creator_request)?
-                    {
+                    if receipt.attempt == id && self.run_receipt_complete(receipt)? {
                         finished = true;
                     }
                 }
@@ -232,7 +329,7 @@ impl NativeRepo<'_> {
         let mut receipts = Vec::new();
         for (receipt_id, receipt) in store.list::<RunReceipt>()? {
             if receipt.attempt == id {
-                let complete = self.evidence_request_complete(&receipt.creator_request)?;
+                let complete = self.run_receipt_complete(&receipt)?;
                 receipts.push(json!({"receipt_id":receipt_id,"receipt":receipt,"collection_complete":complete}));
             }
         }

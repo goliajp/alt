@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 pub struct ReadSnapshot {
     pub scope: Scope,
     pub refs: BTreeMap<String, ObjectId>,
+    pub default_branch: String,
     pub transaction_sequence: u64,
     pin_id: String,
     actor: String,
@@ -72,17 +73,21 @@ impl Store {
                 ),
             );
         }
-        let sequence = unsigned(
-            tx.query_one(
-                "SELECT transaction_sequence FROM alt_repositories WHERE id=$1",
-                &[&repository],
-            )?
-            .get(0),
+        let metadata = tx.query_one(
+            "SELECT transaction_sequence,default_branch FROM alt_repositories WHERE id=$1",
+            &[&repository],
         )?;
+        let sequence = unsigned(metadata.get(0))?;
+        let default_branch: String = metadata.get(1);
+        alt_remote_protocol::validate_ref_name(&default_branch)?;
+        if !default_branch.starts_with("refs/heads/") {
+            return Err(Error::Integrity("repository default branch"));
+        }
         tx.commit().map_err(|_| Error::OutcomeUnknown)?;
         Ok(ReadSnapshot {
             scope: current.scope,
             refs: current.refs,
+            default_branch,
             transaction_sequence: sequence,
             pin_id,
             actor: auth.actor_id,

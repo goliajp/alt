@@ -1,0 +1,23 @@
+[package]
+name = "alt-task-transfer"
+description = "Explicit immutable task publication packages and received history"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+alt-remote-protocol.workspace = true
+alt-repository-service.workspace = true
+alt-task-service.workspace = true
+alt-task.workspace = true
+alt-input.workspace = true
+alt-git-codec.workspace = true
+blake3.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tempfile.workspace = true
+libc.workspace = true
+
+[dev-dependencies]
+alt-command-protocol.workspace = true

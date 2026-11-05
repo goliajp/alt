@@ -45,6 +45,7 @@ mod status_json;
 mod tag;
 mod task_delivery;
 mod task_evidence;
+mod task_remote;
 mod task_runner;
 mod undo_add;
 mod url_rewrite;

@@ -11,6 +11,8 @@ pub(super) use delivery::delivery_intake;
 mod commands;
 mod evidence;
 mod run;
+mod transfer;
+mod transfer_source;
 
 pub(super) const TASK_OPERATION: u8 = 0x34;
 
@@ -117,37 +119,14 @@ impl NativeRepo<'_> {
             workspace: std::fs::read_to_string(self.index_path.with_file_name("workspace-id"))?,
         })
     }
-    fn evidence_request_complete(&self, id: &str) -> Res<bool> {
-        self.record_request_complete(id, false)
-    }
-    fn task_request_complete(&self, id: &str) -> Res<bool> {
-        self.record_request_complete(id, true)
-    }
-    fn record_request_complete(&self, id: &str, require_success: bool) -> Res<bool> {
-        crate::request::parse_id(id)?;
-        let directory = self.store.alt_dir.join("requests").join(id);
-        let bytes = match std::fs::read(directory.join("intent.json")) {
-            Ok(bytes) => bytes,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-            Err(error) => return Err(error.into()),
-        };
-        let intent: crate::request::Intent = serde_json::from_slice(&bytes)?;
-        Ok(
-            crate::request::read_completion(&directory, &intent)?.is_some_and(
-                |(completion, response)| {
-                    completion.outcome == "applied" && (!require_success || response.exit_code == 0)
-                },
-            ),
-        )
-    }
     fn require_task(&self, store: &alt_task::Store, id: &str, active: bool) -> Res<Task> {
         let task: Task = store.load(id)?;
-        if task.scope != self.task_scope()? {
+        if task.scope != self.task_scope()? && !self.task_adopted(id)? {
             return Err(refused(
                 "task belongs to a different repository/workspace instance",
             ));
         }
-        if !self.task_request_complete(&task.creator_request)? {
+        if !self.task_record_complete(&task)? {
             return Err(crate::machine::Failure::unknown("task creation has no successful durable request completion; inspect its request and operation").into());
         }
         if active {
@@ -166,7 +145,7 @@ impl NativeRepo<'_> {
             }
             for (_, event) in store.list::<Event>()? {
                 if event.task == id {
-                    if !self.task_request_complete(&event.creator_request)? {
+                    if !self.task_record_complete(&event)? {
                         return Err(crate::machine::Failure::unknown(
                             "task state event has no successful durable request completion",
                         )
@@ -181,7 +160,7 @@ impl NativeRepo<'_> {
         Ok(task)
     }
     fn task_state(&self, store: &alt_task::Store, id: &str, task: &Task) -> Res<&'static str> {
-        if !self.task_request_complete(&task.creator_request)? {
+        if !self.task_record_complete(task)? {
             return Ok("unknown");
         }
         let integrations: Vec<_> = store
@@ -212,7 +191,7 @@ impl NativeRepo<'_> {
             return Ok("unknown");
         }
         if let Some((_, event)) = events.first() {
-            if !self.task_request_complete(&event.creator_request)? {
+            if !self.task_record_complete(event)? {
                 return Ok("unknown");
             }
             return Ok(match event.state {

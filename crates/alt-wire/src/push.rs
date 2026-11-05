@@ -508,6 +508,26 @@ pub struct PushHead {
 /// caller is responsible for the pack stream that follows (which may
 /// be many gigabytes — the server streams it).
 pub fn parse_push_request_head<R: Read>(r: &mut R, algo: HashAlgo) -> Result<PushHead, PushError> {
+    parse_push_head(r, algo, usize::MAX, usize::MAX, false)
+}
+
+/// Bounded receive-pack command parsing for network ingress. Capabilities are
+/// accepted only on the first command, and only a flush terminates the head.
+pub fn parse_push_request_head_bounded<R: Read>(
+    r: &mut R,
+    algo: HashAlgo,
+    max_updates: usize,
+    max_capability_bytes: usize,
+) -> Result<PushHead, PushError> {
+    parse_push_head(r, algo, max_updates, max_capability_bytes, true)
+}
+fn parse_push_head<R: Read>(
+    r: &mut R,
+    algo: HashAlgo,
+    max_updates: usize,
+    max_capability_bytes: usize,
+    strict: bool,
+) -> Result<PushHead, PushError> {
     let mut updates: Vec<RefUpdate> = Vec::new();
     let mut capabilities: Vec<String> = Vec::new();
     let mut scratch = Vec::new();
@@ -516,13 +536,29 @@ pub fn parse_push_request_head<R: Read>(r: &mut R, algo: HashAlgo) -> Result<Pus
         let f = pkt::read_frame(r, &mut scratch)?;
         match f {
             Frame::Flush => break,
-            Frame::Delim | Frame::ResponseEnd => break,
+            Frame::Delim | Frame::ResponseEnd => {
+                if strict {
+                    return Err(PushError::BadRefLine(b"expected command flush".to_vec()));
+                }
+                break;
+            }
             Frame::Data(line) => {
+                if updates.len() >= max_updates {
+                    return Err(PushError::BadRefLine(b"command count limit".to_vec()));
+                }
                 let trimmed = trim_newline(line);
                 let (head, caps_part) = match trimmed.iter().position(|&b| b == 0) {
                     Some(i) => (&trimmed[..i], Some(&trimmed[i + 1..])),
                     None => (trimmed, None),
                 };
+                if let Some(caps) = caps_part
+                    && (caps.len() > max_capability_bytes
+                        || (strict && (!updates.is_empty() || caps.contains(&0))))
+                {
+                    return Err(PushError::BadRefLine(
+                        b"invalid command capabilities".to_vec(),
+                    ));
+                }
                 let s =
                     std::str::from_utf8(head).map_err(|_| PushError::BadRefLine(head.to_vec()))?;
                 let mut parts = s.splitn(3, ' ');
@@ -1044,5 +1080,31 @@ mod tests {
             tail, b"PACKDUMMY1234567",
             "pack bytes must remain in the reader for the streaming path"
         );
+    }
+    #[test]
+    fn bounded_push_head_rejects_excess_commands_caps_and_wrong_terminators() {
+        let oid = sha1("0011223344556677889900112233445566778899");
+        let update = RefUpdate {
+            name: "refs/heads/main".into(),
+            old: None,
+            new: Some(oid),
+        };
+        let mut raw = Vec::new();
+        encode_push_request(&mut raw, &[update], &["report-status"], HashAlgo::Sha1, b"").unwrap();
+        assert!(parse_push_request_head_bounded(&mut &raw[..], HashAlgo::Sha1, 1, 100).is_ok());
+        assert!(parse_push_request_head_bounded(&mut &raw[..], HashAlgo::Sha1, 0, 100).is_err());
+        assert!(parse_push_request_head_bounded(&mut &raw[..], HashAlgo::Sha1, 1, 1).is_err());
+        let mut wrong = raw.clone();
+        let n = wrong.len();
+        wrong[n - 4..].copy_from_slice(b"0001");
+        assert!(parse_push_request_head_bounded(&mut &wrong[..], HashAlgo::Sha1, 1, 100).is_err());
+        let mut second = raw[..raw.len() - 4].to_vec();
+        pkt::write_data(
+            &mut second,
+            format!("{} {oid} refs/heads/other\0report-status\n", "0".repeat(40)).as_bytes(),
+        )
+        .unwrap();
+        pkt::write_flush(&mut second).unwrap();
+        assert!(parse_push_request_head_bounded(&mut &second[..], HashAlgo::Sha1, 2, 100).is_err());
     }
 }

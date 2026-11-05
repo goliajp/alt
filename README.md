@@ -397,3 +397,7 @@ If export stopped during verification, its destination is still absent and no
 ready delivery exists. Confirm that the original process has stopped before
 starting a new export; the original request remains unknown. Task queries remain
 available while the external Git verifier runs.
+
+The new [native data-plane candidate](crates/alt-server/README.md) supports
+[explicit task publication and cross-client continuation](docs/task-remote.md),
+with signed server receipts and separate current review authorization.

@@ -58,3 +58,6 @@ pub use recovery::*;
 
 mod verified;
 pub use verified::VerifiedTaskGraph;
+
+mod publication;
+pub use publication::VerifiedPublication;

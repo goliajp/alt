@@ -55,7 +55,8 @@ pub struct TaskBundle {
     pub omissions: Vec<AttachmentOmission>,
     pub attestations: Vec<CollectorAttestation>,
 }
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TaskLimits {
     pub objects: usize,
     pub records: usize,

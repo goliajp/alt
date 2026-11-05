@@ -120,11 +120,24 @@ pub(crate) fn retain(
         tx.execute("INSERT INTO alt_task_roots(repository,kind,record_id,publication_digest) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING", &[repository,&kind,&root.id,&digest])?;
     }
     tx.execute("INSERT INTO alt_task_bundles(repository,bundle_blake3,epoch,actor_id,request_id) VALUES($1,$2,$3,$4,$5)", &[repository,bundle,&integer(work.key.scope.recovery_epoch)?,&work.key.actor_id,&work.key.request_id])?;
+    for selection in tasks.records() {
+        tx.execute("INSERT INTO alt_task_bundle_records(repository,epoch,actor_id,request_id,kind,record_id,payload_blake3) VALUES($1,$2,$3,$4,$5,$6,$7)", &[repository,&integer(work.key.scope.recovery_epoch)?,&work.key.actor_id,&work.key.request_id,&selection.record.kind.as_str(),&selection.record.id,&selection.payload.blake3])?;
+    }
+    for root in tasks.roots() {
+        let kind = serde_json::to_value(root.kind)?
+            .as_str()
+            .ok_or(Error::Integrity("task root kind"))?
+            .to_owned();
+        tx.execute("INSERT INTO alt_task_bundle_roots(repository,epoch,actor_id,request_id,kind,record_id) VALUES($1,$2,$3,$4,$5,$6)", &[repository,&integer(work.key.scope.recovery_epoch)?,&work.key.actor_id,&work.key.request_id,&kind,&root.id])?;
+    }
     tx.execute("UPDATE alt_current_approvals SET consumed_sequence=$5 WHERE repository=$1 AND epoch=$2 AND actor_id=$3 AND request_id=$4", &[repository,&integer(work.key.scope.recovery_epoch)?,&work.key.actor_id,&work.key.request_id,&integer(sequence)?])?;
     Ok(())
 }
 
-fn collector_policy(tx: &mut Transaction<'_>, repository: &str) -> Result<(u64, CollectorPolicy)> {
+pub(crate) fn collector_policy(
+    tx: &mut Transaction<'_>,
+    repository: &str,
+) -> Result<(u64, CollectorPolicy)> {
     match tx.query_opt(
         "SELECT generation,policy FROM alt_collector_policies WHERE repository=$1",
         &[&repository],
@@ -133,7 +146,7 @@ fn collector_policy(tx: &mut Transaction<'_>, repository: &str) -> Result<(u64, 
         None => Ok((0, CollectorPolicy::default())),
     }
 }
-fn reviewer(
+pub(crate) fn reviewer(
     tx: &mut Transaction<'_>,
     spec: &InstanceSpec,
     credential: &Credential,
@@ -258,6 +271,7 @@ impl Store {
     }
     /// A separate current decision by an authorized reviewer. Historical Review
     /// records alone never populate the server's approval table.
+    #[allow(clippy::too_many_arguments)]
     pub fn approve_integration(
         &mut self,
         credential: &Credential,
@@ -265,6 +279,7 @@ impl Store {
         graph: &VerifiedGraph,
         tasks: &VerifiedTaskGraph,
         integration_id: &str,
+        inspected: &alt_remote_protocol::ApprovalContext,
         ttl_ms: u64,
     ) -> Result<()> {
         if ttl_ms == 0 || ttl_ms > 86_400_000 {
@@ -289,6 +304,28 @@ impl Store {
         check_pins(&mut tx, work, graph, Some(tasks))?;
         let (generation, policy) =
             collector_policy(&mut tx, &current.scope.repository_instance_id)?;
+        let target_refs: BTreeMap<_, _> = work
+            .publication
+            .refs
+            .iter()
+            .map(|update| {
+                (
+                    update.name.clone(),
+                    current.refs.get(&update.name).map(ToString::to_string),
+                )
+            })
+            .collect();
+        if inspected.request_digest != row.get::<_, String>("digest")
+            || inspected.runtime_generation != self.spec.runtime_generation.to_string()
+            || inspected.policy_version != current.policy_version.to_string()
+            || inspected.collector_generation != generation.to_string()
+            || inspected.revocation_generation != current.revocation_generation.to_string()
+            || inspected.target_refs != target_refs
+        {
+            return Err(Error::Precondition(
+                "inspected approval context changed; inspect again",
+            ));
+        }
         let time = now(&mut tx)?;
         assessment(tasks, review, &current, &policy, time)?;
         let expires = integer(

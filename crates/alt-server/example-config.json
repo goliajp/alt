@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "instance": {
+    "installation_id": "local-alt",
+    "workspace_id": "local-workspace",
+    "deployment_mode": "self_hosted",
+    "runtime_generation": 1
+  },
+  "database_environment": "ALT_SERVER_DATABASE",
+  "bytes_directory": "data",
+  "receipt_key_file": "receipt.key",
+  "listen": "127.0.0.1:8080",
+  "limits": {
+    "request_bytes": 8388608,
+    "ref_updates": 1000,
+    "record_roots": 1000,
+    "manifest_entries": 100000,
+    "graph_objects": 100000,
+    "graph_edges": 1000000,
+    "structured_bytes": 4194304,
+    "tree_paths": 1000000,
+    "path_bytes": 4096,
+    "walk_steps": 10000000,
+    "chunk_bytes": "1048576",
+    "object_bytes": "268435456",
+    "total_bytes": "4294967296"
+  },
+  "tasks": {
+    "objects": 100000,
+    "records": 10000,
+    "edges": 100000,
+    "structured_bytes": 4194304,
+    "total_bytes": 4294967296,
+    "work_bytes": 34359738368,
+    "artifact_bytes": 268435456,
+    "paths": 1000000,
+    "path_bytes": 4096,
+    "walk_steps": 10000000
+  },
+  "http": {
+    "connections": 128,
+    "workers": 8,
+    "header_bytes": 16384,
+    "headers": 64,
+    "header_timeout_ms": 5000,
+    "body_timeout_ms": 60000,
+    "work_timeout_ms": 30000,
+    "connection_timeout_ms": 120000,
+    "database_connect_timeout_ms": 5000,
+    "database_statement_timeout_ms": 15000,
+    "upload_ttl_ms": 3600000,
+    "worker_lease_ms": 60000,
+    "approval_ttl_ms": 300000
+  }
+}

@@ -22,6 +22,13 @@ if args[0] == os.environ.get("GATE_FAIL"):
     sys.exit(17)
 if args[:3] == ["tree", "-i", "ureq"]:
     print(f"alt-wire-http v0.0.0 ({os.environ['PWD']}/crates/alt-wire-http)")
+    owner = os.environ.get("GATE_HTTP_OWNER")
+    if owner:
+        print(f"{owner} v0.0.0 ({os.environ['PWD']}/crates/{owner})")
+if args[:3] == ["tree", "-i", "async-openai"]:
+    owner = os.environ.get("GATE_LLM_OWNER")
+    if owner:
+        print(f"{owner} v0.0.0 ({os.environ['PWD']}/crates/{owner})")
 '''
 
 
@@ -46,7 +53,7 @@ class GateTests(unittest.TestCase):
         self.log = self.root / "calls.jsonl"
         self.env = dict(os.environ, PATH=f"{cargo.parent}:{os.environ['PATH']}",
                         GATE_CALLS=str(self.log))
-        for name in ("ALT_CORPUS", "GATE_FAIL", "GATE_PACKAGE_EXIT"):
+        for name in ("ALT_CORPUS", "GATE_FAIL", "GATE_PACKAGE_EXIT", "GATE_HTTP_OWNER", "GATE_LLM_OWNER"):
             self.env.pop(name, None)
 
     def run_gate(self, *args):
@@ -108,6 +115,20 @@ class GateTests(unittest.TestCase):
              "--", "-D", "warnings"]])
         self.assertTrue(all(c["args"][0] == "tree" for c in calls[2:]))
         self.assertGreater(len(calls), 2)
+
+    def test_server_transport_is_allowed_but_core_http_and_server_llm_are_denied(self):
+        self.env["GATE_HTTP_OWNER"] = "alt-server"
+        result, _ = self.run_gate("lint", "-p", "alt-server")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.env["GATE_HTTP_OWNER"] = "alt-server-store"
+        result, _ = self.run_gate("lint", "-p", "alt-server")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("alt-server-store depends on HTTP", result.stderr)
+        self.env["GATE_HTTP_OWNER"] = "alt-server"
+        self.env["GATE_LLM_OWNER"] = "alt-server"
+        result, _ = self.run_gate("lint", "-p", "alt-server")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("alt-server pulls in", result.stderr)
 
     def test_all_default_and_explicit_scopes(self):
         for options, scope, fmt_scope in [

@@ -8,6 +8,8 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+alt-task-transfer = { path = "crates/alt-task-transfer" }
+alt-server = { path = "crates/alt-server" }
 alt-command-protocol = { path = "crates/alt-command-protocol" }
 alt-task-service = { path = "crates/alt-task-service" }
 alt-server-store = { path = "crates/alt-server-store" }
@@ -61,6 +63,7 @@ sha1 = "0.11"
 sha2 = "0.11"
 syn = { version = "2", features = ["full", "extra-traits"] }
 proc-macro2 = "1"
+url = "2"
 ureq = { version = "2", default-features = false, features = ["tls"] }
 tempfile = "3"
 tiny_http = { version = "0.12", default-features = false }

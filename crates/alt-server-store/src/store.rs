@@ -74,6 +74,7 @@ impl Store {
             .to_string();
         tx.execute("INSERT INTO alt_instance(singleton,installation_id,workspace_id,deployment_mode,runtime_generation,signing_key_id) VALUES(true,$1,$2,$3,$4,$5)", &[&spec.installation_id,&spec.workspace_id,&spec.mode(),&integer(spec.runtime_generation)?,&key_id])?;
         crate::schema::apply_v2(&mut tx)?;
+        crate::schema::apply_v3(&mut tx)?;
         tx.commit()?;
         Self::open(client, bytes, spec, signing_key, limits)
     }
@@ -86,7 +87,7 @@ impl Store {
     ) -> Result<Self> {
         spec.validate()?;
         limits.validate()?;
-        crate::schema::check(&mut client, 2)?;
+        crate::schema::check(&mut client, 3)?;
         let mut tx = client.transaction()?;
         instance(&mut tx, &spec, &signing_key)?;
         tx.commit()?;
@@ -137,6 +138,45 @@ impl Store {
         tx.commit()?;
         Ok(token)
     }
+    /// Explicit operator initialization with a secret already fsynced by the
+    /// caller. Exact replay is allowed; a failed response cannot strand an
+    /// installation with an unknowable randomly generated first credential.
+    pub fn bootstrap_admin_with_token(
+        &mut self,
+        actor: &str,
+        expires_at_unix_ms: u64,
+        token: &str,
+    ) -> Result<()> {
+        validate_token(token)?;
+        let mut tx = self.client.transaction()?;
+        instance(&mut tx, &self.spec, &self.signing_key)?;
+        tx.batch_execute("LOCK TABLE alt_credentials IN EXCLUSIVE MODE")?;
+        if self.spec.deployment_mode != DeploymentMode::SelfHosted {
+            return Err(Error::Unauthorized);
+        }
+        let attribution = Attribution {
+            kind: alt_remote_protocol::ActorKind::Human,
+            on_behalf_of: None,
+            delegation_id: None,
+            agent_session: None,
+        };
+        let rows = tx.query("SELECT token_digest FROM alt_credentials LIMIT 2", &[])?;
+        if !rows.is_empty()
+            && (rows.len() != 1 || rows[0].get::<_, String>(0) != token_digest(token))
+        {
+            return Err(Error::Unauthorized);
+        }
+        insert_known_token(
+            &mut tx,
+            token,
+            actor,
+            &attribution,
+            self.spec.deployment_mode,
+            expires_at_unix_ms,
+            true,
+        )?;
+        tx.commit().map_err(|_| Error::OutcomeUnknown)
+    }
     pub fn authenticate(&mut self, token: &str) -> Result<Credential> {
         if token.len() != 69 || !token.starts_with("alt1_") {
             return Err(Error::Unauthorized);
@@ -173,6 +213,35 @@ impl Store {
         )?;
         tx.commit()?;
         Ok(token)
+    }
+    /// Register a separately generated, privately persisted operator secret.
+    /// Reuse with different claims is rejected rather than rotating authority.
+    pub fn issue_local_token_with_secret(
+        &mut self,
+        admin: &Credential,
+        token: &str,
+        actor: &str,
+        attribution: &Attribution,
+        expires_at_unix_ms: u64,
+        administrator: bool,
+    ) -> Result<()> {
+        validate_token(token)?;
+        let mut tx = self.client.transaction()?;
+        instance(&mut tx, &self.spec, &self.signing_key)?;
+        require_admin(&mut tx, &self.spec, admin)?;
+        if self.spec.deployment_mode != DeploymentMode::SelfHosted {
+            return Err(Error::Unauthorized);
+        }
+        insert_known_token(
+            &mut tx,
+            token,
+            actor,
+            attribution,
+            self.spec.deployment_mode,
+            expires_at_unix_ms,
+            administrator,
+        )?;
+        tx.commit().map_err(|_| Error::OutcomeUnknown)
     }
     pub fn create_repository(
         &mut self,
@@ -309,6 +378,48 @@ fn insert_token(
     expires: u64,
     administrator: bool,
 ) -> Result<String> {
+    let mut secret = [0u8; 32];
+    OsRng.fill_bytes(&mut secret);
+    let token = format!(
+        "alt1_{}",
+        secret
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    );
+    insert_known_token(
+        tx,
+        &token,
+        actor,
+        attribution,
+        source,
+        expires,
+        administrator,
+    )?;
+    Ok(token)
+}
+fn validate_token(token: &str) -> Result<()> {
+    if token.len() != 69
+        || !token.starts_with("alt1_")
+        || !token.as_bytes()[5..]
+            .iter()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(b))
+    {
+        return Err(Error::Unauthorized);
+    }
+    Ok(())
+}
+#[allow(clippy::too_many_arguments)]
+fn insert_known_token(
+    tx: &mut Transaction<'_>,
+    token: &str,
+    actor: &str,
+    attribution: &Attribution,
+    source: DeploymentMode,
+    expires: u64,
+    administrator: bool,
+) -> Result<()> {
+    validate_token(token)?;
     Scope {
         installation_id: actor.into(),
         repository_instance_id: "actor".into(),
@@ -319,17 +430,22 @@ fn insert_token(
     if expires <= now(tx)? {
         return Err(Error::Precondition("credential expiry"));
     }
-    let mut secret = [0u8; 32];
-    OsRng.fill_bytes(&mut secret);
-    let token = format!(
-        "alt1_{}",
-        secret
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<String>()
-    );
-    tx.execute("INSERT INTO alt_credentials(token_digest,actor_id,attribution,identity_source,expires_at,administrator) VALUES($1,$2,$3,$4,$5,$6)",&[&token_digest(&token),&actor,&serde_json::to_value(attribution)?,&mode(source),&integer(expires)?,&administrator])?;
-    Ok(token)
+    let digest = token_digest(token);
+    let attribution = serde_json::to_value(attribution)?;
+    tx.execute("INSERT INTO alt_credentials(token_digest,actor_id,attribution,identity_source,expires_at,administrator) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(token_digest) DO NOTHING",&[&digest,&actor,&attribution,&mode(source),&integer(expires)?,&administrator])?;
+    let row=tx.query_one("SELECT actor_id,attribution,identity_source,expires_at,administrator,revoked FROM alt_credentials WHERE token_digest=$1 FOR SHARE",&[&digest])?;
+    if row.get::<_, String>(0) != actor
+        || row.get::<_, serde_json::Value>(1) != attribution
+        || row.get::<_, String>(2) != mode(source)
+        || row.get::<_, i64>(3) != integer(expires)?
+        || row.get::<_, bool>(4) != administrator
+        || row.get::<_, bool>(5)
+    {
+        return Err(Error::Precondition(
+            "credential secret already has different or revoked claims",
+        ));
+    }
+    Ok(())
 }
 pub(crate) fn credential_row(
     tx: &mut Transaction<'_>,

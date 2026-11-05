@@ -229,6 +229,30 @@ fn source_proof_binds_original_scope_command_and_returned_record() {
 
 #[derive(Default)]
 struct Objects(BTreeMap<alt_git_codec::ObjectId, (alt_git_codec::ObjectKind, Vec<u8>)>);
+
+#[test]
+fn failed_validation_source_result_requires_applied_bound_machine_details() {
+    let request = "a".repeat(32);
+    let details = json!({"evidence_id":"b".repeat(64),"receipt_id":"c".repeat(64)});
+    let mut error = json!({"schema_version":1,"error":{"kind":"validation_not_eligible","outcome":"applied","request_id":request,"details":details}});
+    let response = |value: &serde_json::Value| alt_command_protocol::Response {
+        exit_code: 1,
+        stdout: vec![],
+        stderr: serde_json::to_vec(value).unwrap(),
+    };
+    assert_eq!(
+        command_record_result(&response(&error), &request, 100_000).unwrap(),
+        details
+    );
+    error["error"]["outcome"] = json!("not_applied");
+    assert!(command_record_result(&response(&error), &request, 100_000).is_err());
+    error["error"]["outcome"] = json!("applied");
+    error["error"]["request_id"] = json!("d".repeat(32));
+    assert!(command_record_result(&response(&error), &request, 100_000).is_err());
+    error["error"]["request_id"] = json!(request);
+    error["error"]["kind"] = json!("precondition_failed");
+    assert!(command_record_result(&response(&error), &request, 100_000).is_err());
+}
 impl Objects {
     fn put(&mut self, kind: alt_git_codec::ObjectKind, bytes: Vec<u8>) -> alt_git_codec::ObjectId {
         let id = alt_git_codec::ObjectId::hash_object(alt_git_codec::HashAlgo::Sha1, kind, &bytes);

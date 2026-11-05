@@ -8,6 +8,11 @@ const MAX_PREALLOC: usize = 64 << 20;
 /// Applies a git delta (the inflated payload of an ofs/ref-delta entry)
 /// to `base`: `<src size varint><tgt size varint><copy|insert ops…>`.
 pub fn apply(base: &[u8], delta: &[u8]) -> Result<Vec<u8>, PackError> {
+    apply_bounded(base, delta, u64::MAX)
+}
+
+/// Apply a delta while enforcing its declared target and an external output budget.
+pub fn apply_bounded(base: &[u8], delta: &[u8], max_output: u64) -> Result<Vec<u8>, PackError> {
     let mut pos = 0;
     let src_size = varint(delta, &mut pos)?;
     if src_size != base.len() as u64 {
@@ -15,6 +20,9 @@ pub fn apply(base: &[u8], delta: &[u8]) -> Result<Vec<u8>, PackError> {
     }
     let tgt_size = varint(delta, &mut pos)?;
 
+    if tgt_size > max_output || tgt_size > usize::MAX as u64 {
+        return Err(PackError::Limit("delta output limit"));
+    }
     // never reserve the untrusted tgt_size unbounded (fuzz found a 32 GiB
     // reservation OOM); grow the vec naturally and let the final length
     // check validate the real result against tgt_size
@@ -43,6 +51,12 @@ pub fn apply(base: &[u8], delta: &[u8]) -> Result<Vec<u8>, PackError> {
             let chunk = base
                 .get(off as usize..(off + len) as usize)
                 .ok_or(PackError::Format("delta copy out of base bounds"))?;
+            if (out.len() as u64)
+                .checked_add(chunk.len() as u64)
+                .is_none_or(|n| n > tgt_size)
+            {
+                return Err(PackError::Format("delta exceeds declared target"));
+            }
             out.extend_from_slice(chunk);
         } else if op != 0 {
             // insert the next `op` literal bytes
@@ -50,6 +64,12 @@ pub fn apply(base: &[u8], delta: &[u8]) -> Result<Vec<u8>, PackError> {
             let chunk = delta
                 .get(pos..pos + n)
                 .ok_or(PackError::Format("truncated delta insert"))?;
+            if (out.len() as u64)
+                .checked_add(chunk.len() as u64)
+                .is_none_or(|n| n > tgt_size)
+            {
+                return Err(PackError::Format("delta exceeds declared target"));
+            }
             out.extend_from_slice(chunk);
             pos += n;
         } else {
@@ -78,11 +98,13 @@ fn varint(d: &[u8], pos: &mut usize) -> Result<u64, PackError> {
             .get(*pos)
             .ok_or(PackError::Format("truncated delta size varint"))?;
         *pos += 1;
-        // checked_shl rejects a varint with more continuation bytes than a
-        // u64 can hold (shift >= 64) — fuzz found this shift-overflow panic
-        v |= u64::from(b & 0x7f)
-            .checked_shl(shift)
-            .ok_or(PackError::Format("delta size varint too long"))?;
+        // Bound both the shift and high bits: checked_shl alone would discard
+        // overflowing payload bits in the final otherwise-valid shift.
+        let part = u64::from(b & 0x7f);
+        if shift >= 64 || part > (u64::MAX >> shift) {
+            return Err(PackError::Format("delta size varint too long"));
+        }
+        v |= part << shift;
         if b & 0x80 == 0 {
             return Ok(v);
         }
@@ -134,5 +156,18 @@ mod tests {
         // 10 continuation bytes push the shift past 63: must Err, not panic
         let delta = b"\x80\x80\x80\x80\x80\x80\x80\x80\x80\x80\x00";
         assert!(apply(b"", delta).is_err());
+    }
+    #[test]
+    fn rejects_high_bit_overflow_and_output_beyond_declared_target() {
+        let mut delta = vec![0];
+        delta.extend_from_slice(&[0x80; 9]);
+        delta.push(2);
+        assert!(apply(b"", &delta).is_err());
+        assert!(apply_bounded(b"", b"\x00\x01\x02ab", 100).is_err());
+        assert!(matches!(
+            apply_bounded(b"", b"\x00\x02\x02ab", 1),
+            Err(PackError::Limit(_))
+        ));
+        assert_eq!(apply_bounded(b"", b"\x00\x02\x02ab", 2).unwrap(), b"ab");
     }
 }

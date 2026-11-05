@@ -141,7 +141,7 @@ pub fn check_source(
     {
         return Err(Error::Integrity("source command not completed"));
     }
-    let value = strict_json::decode(&response.stdout, limit)?;
+    let value = command_record_result(&response, &proof.request_id, limit)?;
     let field = match proof.record.kind {
         RecordKind::Task => "task_id",
         RecordKind::Candidate => "candidate_id",
@@ -163,4 +163,33 @@ pub fn check_source(
         proof_id,
         original_operations: completion.operations,
     })
+}
+
+/// A failed validation can still durably produce evidence. Its machine result
+/// is in the applied failure's details, not stdout; other failures do not prove
+/// that any record was created.
+pub fn command_record_result(
+    response: &alt_command_protocol::Response,
+    request_id: &str,
+    limit: usize,
+) -> Result<serde_json::Value> {
+    if response.exit_code == 0 {
+        return strict_json::decode(&response.stdout, limit);
+    }
+    if !response.stdout.is_empty() {
+        return Err(Error::Integrity("failed source response stdout"));
+    }
+    let value = strict_json::decode(&response.stderr, limit)?;
+    let error = &value["error"];
+    if value["schema_version"] != 1
+        || error["kind"] != "validation_not_eligible"
+        || error["outcome"] != "applied"
+        || error["request_id"] != request_id
+        || !error["details"].is_object()
+    {
+        return Err(Error::Integrity(
+            "source failure has no applied record result",
+        ));
+    }
+    Ok(error["details"].clone())
 }

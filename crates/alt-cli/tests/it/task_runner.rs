@@ -124,6 +124,34 @@ fn failure(output: &Output) -> Value {
     serde_json::from_slice::<Value>(&output.stderr).unwrap()["error"].clone()
 }
 #[test]
+fn human_mode_failed_validation_still_has_record_bound_local_completion() {
+    let f = fixture("exit 7\n");
+    let failed = run(
+        &f.workspace,
+        &["evidence", "run", &f.candidate, "--profile", &f.profile],
+    );
+    assert!(!failed.status.success());
+    let store = alt_task::Store::open(&f.main.join(".alt/task-data")).unwrap();
+    let evidence = store.list::<alt_task::Evidence>().unwrap();
+    let receipts = store.list::<alt_task::RunReceipt>().unwrap();
+    assert_eq!(evidence.len(), 1);
+    assert_eq!(receipts.len(), 1);
+    let evidence_id = evidence[0].0.clone();
+    let attempt = receipts[0].1.attempt.clone();
+    drop(store);
+    assert_eq!(
+        value(&f.workspace, &["evidence", "show", &evidence_id, "--json"])["creation_state"],
+        "completed"
+    );
+    assert_eq!(
+        value(
+            &f.workspace,
+            &["evidence", "run-status", &attempt, "--json"]
+        )["receipts"][0]["collection_complete"],
+        true
+    );
+}
+#[test]
 fn isolated_run_replay_and_read_only_collection_preserve_exact_logs() {
     let f = fixture(
         "test \"$(cat source.txt)\" = base || exit 9\ntest -f .ignored/probe && test -f probe.txt || exit 8\nprintf 'before\\377\\000after\\n'\nprintf 'diagnostic\\n' >&2\nprintf output > target/result\n",

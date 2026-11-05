@@ -46,10 +46,17 @@ impl Store {
             .ok_or(Error::Limit("upload lifetime"))?;
         let mut contents = BTreeMap::new();
         for entry in &manifest.entries {
-            if let Some(previous) = contents.insert(entry.blake3.clone(), entry.bytes)
-                && previous != entry.bytes
-            {
-                return Err(Error::Integrity("conflicting content sizes"));
+            for (digest, bytes) in std::iter::once((&entry.blake3, entry.bytes)).chain(
+                entry
+                    .chunks
+                    .iter()
+                    .map(|chunk| (&chunk.blake3, chunk.bytes)),
+            ) {
+                if let Some(previous) = contents.insert(digest.clone(), bytes)
+                    && previous != bytes
+                {
+                    return Err(Error::Integrity("conflicting content sizes"));
+                }
             }
         }
         let repository = &publication.key.scope.repository_instance_id;
@@ -141,6 +148,16 @@ impl Store {
         entry: &ContentEntry,
         proof: &DurableBytes,
     ) -> Result<()> {
+        self.register_upload(credential, key, entry, proof, false)
+    }
+    pub(crate) fn register_upload(
+        &mut self,
+        credential: &Credential,
+        key: &RequestKey,
+        entry: &ContentEntry,
+        proof: &DurableBytes,
+        chunk: bool,
+    ) -> Result<()> {
         if proof.scope() != &key.scope
             || proof.blake3() != entry.blake3
             || proof.bytes() != entry.bytes
@@ -181,9 +198,23 @@ impl Store {
         check_key(key, &current.scope, &auth.actor_id)?;
         let row =
             request_row(&mut tx, key)?.ok_or(Error::Precondition("request not registered"))?;
-        active(&row, now(&mut tx)?)?;
+        let time = now(&mut tx)?;
+        active(&row, time)?;
+        let publication: Publication = serde_json::from_value(row.get("publication"))?;
+        authorize_intent(&publication, &current, &auth, self.limits, time)?;
         let manifest: Manifest = serde_json::from_value(row.get("manifest"))?;
-        if !manifest.entries.contains(entry)
+        let selected = if chunk {
+            entry.kind == ContentKind::Attachment
+                && entry.git_oid.is_none()
+                && manifest
+                    .entries
+                    .iter()
+                    .flat_map(|e| &e.chunks)
+                    .any(|c| c.blake3 == entry.blake3 && c.bytes == entry.bytes)
+        } else {
+            manifest.entries.contains(entry)
+        };
+        if !selected
             || proof.scope() != &key.scope
             || proof.blake3() != entry.blake3
             || proof.bytes() != entry.bytes

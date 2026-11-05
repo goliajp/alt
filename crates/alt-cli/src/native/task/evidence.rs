@@ -24,7 +24,7 @@ impl NativeRepo<'_> {
                 let mut store = self.task_store()?;
                 let candidate: Candidate = store.load(candidate_id)?;
                 self.require_task(&store, &candidate.task, true)?;
-                if !self.task_request_complete(&candidate.creator_request)? {
+                if !self.task_record_complete(&candidate)? {
                     return Err(crate::machine::Failure::unknown(
                         "candidate creation has no successful completion",
                     )
@@ -66,7 +66,7 @@ impl NativeRepo<'_> {
             EvidenceOp::Show { id } => {
                 let store = self.task_store()?;
                 let evidence: Evidence = store.load(id)?;
-                let complete = self.evidence_request_complete(&evidence.creator_request)?;
+                let complete = self.task_record_complete(&evidence)?;
                 emit(
                     out,
                     json_mode,
@@ -89,8 +89,8 @@ impl NativeRepo<'_> {
                     &targets,
                     |artifact| store.verify_blob(artifact),
                 )?;
-                if !self.task_request_complete(&candidate.creator_request)?
-                    || !self.evidence_request_complete(&evidence.creator_request)?
+                if !self.task_record_complete(&candidate)?
+                    || !self.task_record_complete(&evidence)?
                 {
                     validity.eligible = false;
                     validity.reasons.push("creation_completion_unknown".into());

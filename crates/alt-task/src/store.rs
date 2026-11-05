@@ -98,13 +98,28 @@ impl Store {
         self.blob(artifact).map(|_| ())
     }
     pub fn publish<T: Record>(&mut self, record: &T) -> Result<String> {
-        let id = record.id()?;
         let bytes = serde_json::to_vec(&Envelope {
             schema_version: 1,
             hash_algorithm: "blake3".into(),
             kind: T::KIND.into(),
             record,
         })?;
+        self.retain_source_record::<T>(&record.id()?, &bytes)
+    }
+    /// Retain a validated original envelope without rewriting its bytes or
+    /// claiming that its creator request ran here. Completion/origin checks
+    /// belong to the caller's verified publication import.
+    ///
+    /// An existing canonical record is kept. Alternate original encodings must
+    /// remain in the caller's immutable received package.
+    pub fn retain_source_record<T: Record>(&mut self, id: &str, bytes: &[u8]) -> Result<String> {
+        check_id(id)?;
+        let record: T = decode(bytes)?;
+        if record.id()? != id {
+            return Err(Error::Invalid(
+                "source record content does not match its address".into(),
+            ));
+        }
         let directory = self.directory.join("records").join(T::KIND);
         fs::create_dir_all(&directory)?;
         let destination = directory.join(format!("{id}.json"));
@@ -113,17 +128,17 @@ impl Store {
             if previous.id()? != id {
                 return Err(Error::Invalid("immutable record content mismatch".into()));
             }
-            return Ok(id);
+            return Ok(id.into());
         }
         self.blobs.fsync()?;
         let mut file = tempfile::NamedTempFile::new_in(&directory)?;
-        file.write_all(&bytes)?;
+        file.write_all(bytes)?;
         file.as_file().sync_all()?;
         file.persist_noclobber(&destination)
             .map_err(|error| error.error)?;
         File::open(&directory)?.sync_all()?;
         File::open(self.directory.join("records"))?.sync_all()?;
-        Ok(id)
+        Ok(id.into())
     }
     pub fn load<T: Record>(&self, id: &str) -> Result<T> {
         self.source_record(id).map(|(record, _)| record)

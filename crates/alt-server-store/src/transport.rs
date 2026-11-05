@@ -1,0 +1,341 @@
+use crate::requests::{active, check_key, request_row};
+use crate::store::{authorize, credential_row, instance, integer, now, snapshot, unsigned};
+use crate::{Credential, Error, InstanceSpec, PublicationWork, Result, Store};
+use alt_remote_protocol::{ContentEntry, Manifest, Publication, RequestKey, Scope};
+
+pub use alt_remote_protocol::{PrincipalInfo, PublishedBundle, RepositoryInfo, ReviewSelection};
+impl Store {
+    pub fn published_records(
+        &mut self,
+        credential: &Credential,
+        scope: &Scope,
+        kind: alt_remote_protocol::RecordKind,
+        after: Option<&str>,
+        count: usize,
+    ) -> Result<Vec<alt_remote_protocol::RecordRoot>> {
+        if count == 0 || count > 100 {
+            return Err(Error::Limit("record page size"));
+        }
+        if let Some(id) = after {
+            alt_task::check_id(id).map_err(|_| Error::Unauthorized)?;
+        }
+        let name = serde_json::to_value(kind)?
+            .as_str()
+            .ok_or(Error::Integrity("record kind"))?
+            .to_owned();
+        let mut tx = self.client.transaction()?;
+        instance(&mut tx, &self.spec, &self.signing_key)?;
+        let current = snapshot(&mut tx, &self.spec, &scope.repository_instance_id)?;
+        authorize(&mut tx, &self.spec, credential, &current)?;
+        if &current.scope != scope {
+            return Err(Error::Unauthorized);
+        }
+        let records=tx.query("SELECT DISTINCT record_id FROM alt_task_records WHERE repository=$1 AND kind=$2 AND record_id>$3 ORDER BY record_id LIMIT $4", &[&scope.repository_instance_id,&name,&after.unwrap_or(""),&integer(count as u64)?])?.into_iter()
+            .map(|row| alt_remote_protocol::RecordRoot {kind,id:row.get(0)}).collect();
+        tx.commit()?;
+        Ok(records)
+    }
+    /// A current reviewer inspects the exact selected pending publication.
+    /// The response is received history plus present refs, not approval.
+    pub fn review_selection(
+        &mut self,
+        credential: &Credential,
+        key: &RequestKey,
+    ) -> Result<ReviewSelection> {
+        let mut tx = self.client.transaction()?;
+        instance(&mut tx, &self.spec, &self.signing_key)?;
+        let (row, current) = review_request(&mut tx, &self.spec, credential, key)?;
+        let (collector_generation, _) =
+            crate::tasks::collector_policy(&mut tx, &key.scope.repository_instance_id)?;
+        let result = ReviewSelection {
+            publication: serde_json::from_value(row.get("publication"))?,
+            manifest: serde_json::from_value(row.get("manifest"))?,
+            current_refs: current
+                .refs
+                .into_iter()
+                .map(|(name, oid)| (name, oid.to_string()))
+                .collect(),
+            policy_version: current.policy_version.to_string(),
+            runtime_generation: self.spec.runtime_generation.to_string(),
+            collector_generation: collector_generation.to_string(),
+            revocation_generation: current.revocation_generation.to_string(),
+        };
+        tx.commit()?;
+        Ok(result)
+    }
+    pub fn open_review_content(
+        &mut self,
+        credential: &Credential,
+        key: &RequestKey,
+        digest: &str,
+    ) -> Result<(u64, std::fs::File)> {
+        alt_task::check_id(digest).map_err(|_| Error::Unauthorized)?;
+        let mut tx = self.client.transaction()?;
+        instance(&mut tx, &self.spec, &self.signing_key)?;
+        let (row, _) = review_request(&mut tx, &self.spec, credential, key)?;
+        let manifest: Manifest = serde_json::from_value(row.get("manifest"))?;
+        let entry = manifest
+            .entries
+            .iter()
+            .find(|entry| entry.blake3 == digest)
+            .ok_or(Error::Unauthorized)?;
+        let time = integer(now(&mut tx)?)?;
+        if tx.query_opt("SELECT 1 FROM alt_pins p JOIN alt_blobs b ON b.repository=p.repository AND b.blake3=p.blake3 WHERE p.repository=$1 AND p.pin_id=$2 AND p.blake3=$3 AND p.expires_at>$4 AND b.state='stored' AND b.bytes=$5", &[&key.scope.repository_instance_id,&crate::requests::upload_pin(key),&digest,&time,&integer(entry.bytes)?])?.is_none() {return Err(Error::Precondition("review content pin expired"));}
+        let file = self.bytes.read(&key.scope, digest, entry.bytes)?;
+        tx.commit()?;
+        Ok((entry.bytes, file))
+    }
+    /// Early admission for Git receive-pack before reading a potentially large
+    /// body. Exact per-ref/path/force checks still occur at publication.
+    pub fn check_git_receive_access(
+        &mut self,
+        credential: &Credential,
+        repository: &str,
+    ) -> Result<()> {
+        let mut tx = self.client.transaction()?;
+        instance(&mut tx, &self.spec, &self.signing_key)?;
+        let current = snapshot(&mut tx, &self.spec, repository)?;
+        let auth = authorize(&mut tx, &self.spec, credential, &current)?;
+        if !current.writes_enabled
+            || !auth
+                .grants
+                .iter()
+                .any(|grant| grant.create || grant.update || grant.delete)
+        {
+            return Err(Error::Unauthorized);
+        }
+        tx.commit()?;
+        Ok(())
+    }
+    pub fn receipt_public_key(&self) -> String {
+        self.signing_key
+            .verifying_key()
+            .as_bytes()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    }
+    pub fn principal(&mut self, credential: &Credential) -> Result<PrincipalInfo> {
+        let mut tx = self.client.transaction()?;
+        instance(&mut tx, &self.spec, &self.signing_key)?;
+        let row = credential_row(&mut tx, &self.spec, credential)?;
+        let value = PrincipalInfo {
+            actor_id: row.get("actor_id"),
+            attribution: serde_json::from_value(row.get("attribution"))?,
+        };
+        tx.commit()?;
+        Ok(value)
+    }
+    pub fn repository_info(
+        &mut self,
+        credential: &Credential,
+        repository: &str,
+    ) -> Result<RepositoryInfo> {
+        let mut tx = self.client.transaction()?;
+        instance(&mut tx, &self.spec, &self.signing_key)?;
+        let current = snapshot(&mut tx, &self.spec, repository)?;
+        authorize(&mut tx, &self.spec, credential, &current)?;
+        let result = RepositoryInfo {
+            scope: current.scope,
+            object_format: current.object_format,
+            default_branch: tx
+                .query_one(
+                    "SELECT default_branch FROM alt_repositories WHERE id=$1",
+                    &[&repository],
+                )?
+                .get(0),
+            refs: current
+                .refs
+                .into_iter()
+                .map(|(name, oid)| (name, oid.to_string()))
+                .collect(),
+            policy_version: current.policy_version.to_string(),
+            revocation_generation: current.revocation_generation.to_string(),
+        };
+        tx.commit()?;
+        alt_remote_protocol::validate_ref_name(&result.default_branch)?;
+        if !result.default_branch.starts_with("refs/heads/") {
+            return Err(Error::Integrity("repository default branch"));
+        }
+        Ok(result)
+    }
+    pub fn set_default_branch(
+        &mut self,
+        credential: &Credential,
+        repository: &str,
+        branch: &str,
+    ) -> Result<()> {
+        alt_remote_protocol::validate_ref_name(branch)?;
+        if !branch.starts_with("refs/heads/") {
+            return Err(Error::Precondition(
+                "default branch must be under refs/heads/",
+            ));
+        }
+        let mut tx = self.client.transaction()?;
+        instance(&mut tx, &self.spec, &self.signing_key)?;
+        snapshot(&mut tx, &self.spec, repository)?;
+        crate::store::require_admin(&mut tx, &self.spec, credential)?;
+        tx.execute(
+            "UPDATE alt_repositories SET default_branch=$2 WHERE id=$1",
+            &[&repository, &branch],
+        )?;
+        tx.commit().map_err(|_| Error::OutcomeUnknown)?;
+        Ok(())
+    }
+    /// Authenticate and select an upload before accepting or writing its body.
+    /// Equal content can have multiple selected semantic roles; all entries are
+    /// returned so registration verifies each of their chunk/mapping claims.
+    pub fn selected_upload(
+        &mut self,
+        credential: &Credential,
+        key: &RequestKey,
+        digest: &str,
+    ) -> Result<Vec<ContentEntry>> {
+        alt_task::check_id(digest).map_err(|_| Error::Unauthorized)?;
+        let mut tx = self.client.transaction()?;
+        instance(&mut tx, &self.spec, &self.signing_key)?;
+        let current = snapshot(&mut tx, &self.spec, &key.scope.repository_instance_id)?;
+        let auth = authorize(&mut tx, &self.spec, credential, &current)?;
+        check_key(key, &current.scope, &auth.actor_id)?;
+        let row = request_row(&mut tx, key)?.ok_or(Error::Unauthorized)?;
+        active(&row, now(&mut tx)?)?;
+        let publication: Publication = serde_json::from_value(row.get("publication"))?;
+        alt_repository_service::authorize_intent(
+            &publication,
+            &current,
+            &auth,
+            self.limits,
+            now(&mut tx)?,
+        )?;
+        let manifest: Manifest = serde_json::from_value(row.get("manifest"))?;
+        let entries: Vec<_> = manifest
+            .entries
+            .into_iter()
+            .filter(|entry| entry.blake3 == digest)
+            .collect();
+        if entries.is_empty() {
+            return Err(Error::Unauthorized);
+        }
+        tx.commit()?;
+        Ok(entries)
+    }
+    /// Relinquish only this fenced worker. It cannot extend a lease, change a
+    /// request result or release another worker's newer incarnation.
+    pub fn release_publication(
+        &mut self,
+        credential: &Credential,
+        work: &PublicationWork,
+    ) -> Result<()> {
+        let mut tx = self.client.transaction()?;
+        instance(&mut tx, &self.spec, &self.signing_key)?;
+        let current = snapshot(&mut tx, &self.spec, &work.key.scope.repository_instance_id)?;
+        let auth = authorize(&mut tx, &self.spec, credential, &current)?;
+        if current.scope != work.key.scope {
+            return Err(Error::Unauthorized);
+        }
+        if auth.actor_id != work.key.actor_id {
+            crate::tasks::reviewer(&mut tx, &self.spec, credential, &current)?;
+        }
+        crate::publication::worker(&mut tx, work)?;
+        tx.execute("UPDATE alt_requests SET worker_lease_until=0 WHERE repository=$1 AND epoch=$2 AND actor_id=$3 AND request_id=$4 AND fence=$5", &[&work.key.scope.repository_instance_id,&integer(work.key.scope.recovery_epoch)?,&work.key.actor_id,&work.key.request_id,&integer(work.fence)?])?;
+        tx.commit().map_err(|_| Error::OutcomeUnknown)?;
+        Ok(())
+    }
+    /// Download a permanently published raw payload, never a digest guessed
+    /// from another request's temporary upload. Open the descriptor under the
+    /// same repository lock used by GC; later unlink cannot invalidate it.
+    pub fn open_published_content(
+        &mut self,
+        credential: &Credential,
+        scope: &Scope,
+        digest: &str,
+    ) -> Result<(u64, std::fs::File)> {
+        alt_task::check_id(digest).map_err(|_| Error::Unauthorized)?;
+        let mut tx = self.client.transaction()?;
+        instance(&mut tx, &self.spec, &self.signing_key)?;
+        let current = snapshot(&mut tx, &self.spec, &scope.repository_instance_id)?;
+        authorize(&mut tx, &self.spec, credential, &current)?;
+        if &current.scope != scope {
+            return Err(Error::Unauthorized);
+        }
+        let row = tx.query_opt("SELECT b.bytes FROM alt_blobs b WHERE b.repository=$1 AND b.blake3=$2 AND b.state='stored' AND EXISTS(SELECT 1 FROM alt_pins p WHERE p.repository=b.repository AND p.blake3=b.blake3 AND p.expires_at IS NULL)", &[&scope.repository_instance_id,&digest])?.ok_or(Error::Unauthorized)?;
+        let size = unsigned(row.get(0))?;
+        let file = self.bytes.read(scope, digest, size)?;
+        tx.commit()?;
+        Ok((size, file))
+    }
+    /// Select published task bundles by any selected immutable record. Original manifest,
+    /// publication and receipt are retained; a receiving client never invents
+    /// a local request completion for the originating workspace.
+    pub fn bundles_for_record(
+        &mut self,
+        credential: &Credential,
+        scope: &Scope,
+        root: &alt_remote_protocol::RecordRoot,
+        after_digest: Option<&str>,
+        count: usize,
+    ) -> Result<Vec<PublishedBundle>> {
+        root.validate()?;
+        if count == 0 || count > 100 {
+            return Err(Error::Limit("bundle page size"));
+        }
+        if let Some(digest) = after_digest {
+            alt_task::check_id(digest).map_err(|_| Error::Unauthorized)?;
+        }
+        let mut tx = self.client.transaction()?;
+        instance(&mut tx, &self.spec, &self.signing_key)?;
+        let current = snapshot(&mut tx, &self.spec, &scope.repository_instance_id)?;
+        authorize(&mut tx, &self.spec, credential, &current)?;
+        if &current.scope != scope {
+            return Err(Error::Unauthorized);
+        }
+        let kind = serde_json::to_value(root.kind)?
+            .as_str()
+            .ok_or(Error::Integrity("task root kind"))?
+            .to_owned();
+        let rows = tx.query("SELECT q.publication,q.manifest,q.result FROM alt_task_bundle_records r JOIN alt_requests q ON q.repository=r.repository AND q.epoch=r.epoch AND q.actor_id=r.actor_id AND q.request_id=r.request_id WHERE r.repository=$1 AND r.kind=$2 AND r.record_id=$3 AND q.state='committed' AND q.digest>$4 ORDER BY q.digest LIMIT $5", &[&scope.repository_instance_id,&kind,&root.id,&after_digest.unwrap_or(""),&integer(count as u64)?])?;
+        let mut result = Vec::new();
+        let mut bytes = 0usize;
+        for row in rows {
+            let publication: serde_json::Value = row.get(0);
+            let manifest: serde_json::Value = row.get(1);
+            let state: alt_remote_protocol::RequestState = serde_json::from_value(row.get(2))?;
+            bytes = bytes
+                .checked_add(serde_json::to_vec(&publication)?.len())
+                .and_then(|v| v.checked_add(serde_json::to_vec(&manifest).ok()?.len()))
+                .ok_or(Error::Limit("bundle page bytes"))?;
+            if bytes > self.limits.total_bytes.min(usize::MAX as u64) as usize {
+                return Err(Error::Limit("bundle page bytes"));
+            }
+            let alt_remote_protocol::RequestState::Committed { receipt } = state else {
+                return Err(Error::Integrity("published task receipt"));
+            };
+            result.push(PublishedBundle {
+                publication: serde_json::from_value(publication)?,
+                manifest: serde_json::from_value(manifest)?,
+                receipt: *receipt,
+            });
+        }
+        tx.commit()?;
+        Ok(result)
+    }
+}
+fn review_request(
+    tx: &mut postgres::Transaction<'_>,
+    spec: &InstanceSpec,
+    credential: &Credential,
+    key: &RequestKey,
+) -> Result<(postgres::Row, alt_repository_service::RepositorySnapshot)> {
+    key.validate()?;
+    let current = snapshot(tx, spec, &key.scope.repository_instance_id)?;
+    crate::tasks::reviewer(tx, spec, credential, &current)?;
+    if current.scope != key.scope {
+        return Err(Error::Unauthorized);
+    }
+    let row = request_row(tx, key)?.ok_or(Error::Unauthorized)?;
+    active(&row, now(tx)?)?;
+    if row.get::<_, String>("state") != "ready" {
+        return Err(Error::Precondition("publication not ready for review"));
+    }
+    Ok((row, current))
+}

@@ -166,6 +166,150 @@ pub(super) fn verified(
 }
 #[test]
 #[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
+fn v2_migration_recovers_every_publication_of_a_root_and_preserves_raw_variants() {
+    let mut f = Fixture::new();
+    let mut payload = task_payload("original-selection");
+    let root = payload.publication.record_roots[0].clone();
+    let mut originals = Vec::new();
+    for variant in 0..2 {
+        if variant == 1 {
+            payload.publication.key.request_id = "second-selection".into();
+            let record = payload
+                .manifest
+                .entries
+                .iter()
+                .position(|entry| entry.kind == ContentKind::Record)
+                .unwrap();
+            payload.contents[record].push(b' ');
+            let artifact = alt_task::Artifact {
+                blake3: blake3::hash(&payload.contents[record]).to_hex().to_string(),
+                bytes: payload.contents[record].len() as u64,
+            };
+            let bundle = payload
+                .manifest
+                .entries
+                .iter()
+                .position(|entry| entry.kind == ContentKind::TaskBundle)
+                .unwrap();
+            let mut selection: TaskBundle =
+                serde_json::from_slice(&payload.contents[bundle]).unwrap();
+            selection.records[0].payload = artifact;
+            payload.contents[bundle] = serde_json::to_vec(&selection).unwrap();
+            for index in [record, bundle] {
+                let entry = &mut payload.manifest.entries[index];
+                entry.blake3 = blake3::hash(&payload.contents[index]).to_hex().to_string();
+                entry.bytes = payload.contents[index].len() as u64;
+                entry.chunks = vec![Chunk {
+                    offset: 0,
+                    bytes: entry.bytes,
+                    blake3: entry.blake3.clone(),
+                }];
+            }
+            payload.publication.content_manifest = payload.manifest.id(limits()).unwrap();
+        }
+        payload.upload(&mut f.store, &f.credential);
+        let work = f
+            .store
+            .acquire_publication(&f.credential, &payload.publication.key, 60_000, 1000)
+            .unwrap();
+        let (graph, tasks) = verified(&work, payload.commit);
+        f.store
+            .mark_ready_with_tasks(&f.credential, &work, &graph, &tasks)
+            .unwrap();
+        let receipt = f
+            .store
+            .publish_with_tasks(&f.credential, &work, &graph, &tasks)
+            .unwrap();
+        originals.push((receipt, payload.manifest.clone(), payload.contents.clone()));
+    }
+    assert_eq!(
+        f.client()
+            .query_one("SELECT count(*) FROM alt_task_roots", &[])
+            .unwrap()
+            .get::<_, i64>(0),
+        1
+    );
+    f.client().batch_execute("DROP TABLE alt_task_bundle_records,alt_task_bundle_roots; ALTER TABLE alt_repositories DROP COLUMN default_branch; DELETE FROM alt_schema WHERE version=3").unwrap();
+    assert!(
+        Store::open(
+            f.client(),
+            ByteStore::open(&f.root.path().join("bytes")).unwrap(),
+            f.spec.clone(),
+            SigningKey::from_bytes(&[7; 32]),
+            limits()
+        )
+        .is_err()
+    );
+    let mut migrated = Store::migrate_v2(
+        f.client(),
+        ByteStore::open(&f.root.path().join("bytes")).unwrap(),
+        f.spec.clone(),
+        SigningKey::from_bytes(&[7; 32]),
+        limits(),
+    )
+    .unwrap();
+    assert!(f.store.authenticate(&f.token).is_err());
+    let credential = migrated.authenticate(&f.token).unwrap();
+    let scope = payload.publication.key.scope.clone();
+    let bundles = migrated
+        .bundles_for_record(&credential, &scope, &root, None, 100)
+        .unwrap();
+    assert_eq!(bundles.len(), 2);
+    let first = migrated
+        .bundles_for_record(&credential, &scope, &root, None, 1)
+        .unwrap();
+    let second = migrated
+        .bundles_for_record(
+            &credential,
+            &scope,
+            &root,
+            Some(&first[0].receipt.body.request_digest),
+            1,
+        )
+        .unwrap();
+    assert_eq!(second.len(), 1);
+    assert_ne!(first[0].receipt, second[0].receipt);
+    for published in bundles {
+        let original = originals
+            .iter()
+            .find(|original| original.0 == published.receipt)
+            .unwrap();
+        assert_eq!(published.manifest, original.1);
+        for (entry, bytes) in published.manifest.entries.iter().zip(&original.2) {
+            let (size, mut file) = migrated
+                .open_published_content(&credential, &scope, &entry.blake3)
+                .unwrap();
+            let mut actual = Vec::new();
+            std::io::Read::read_to_end(&mut file, &mut actual).unwrap();
+            assert_eq!(size, bytes.len() as u64);
+            assert_eq!(&actual, bytes);
+        }
+    }
+    assert_eq!(
+        migrated
+            .repository_info(&credential, "repository")
+            .unwrap()
+            .default_branch,
+        "refs/heads/main"
+    );
+    migrated
+        .set_default_branch(&credential, "repository", "refs/heads/explicit-unborn")
+        .unwrap();
+    assert_eq!(
+        migrated
+            .repository_info(&credential, "repository")
+            .unwrap()
+            .default_branch,
+        "refs/heads/explicit-unborn"
+    );
+    assert!(
+        migrated
+            .set_default_branch(&credential, "repository", "refs/tags/v1")
+            .is_err()
+    );
+}
+#[test]
+#[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
 fn task_publication_retains_original_records_and_artifacts_in_one_transaction() {
     let mut f = Fixture::new();
     let payload = task_payload("task-publish");
@@ -286,7 +430,7 @@ fn explicit_v1_migration_preserves_rows_and_fences_old_runtime() {
     .unwrap();
     // Recreate the actual frozen v1 layout, preserving its original checksum
     // and existing identity, credentials and repository rows.
-    f.client().batch_execute("DROP TABLE alt_current_approvals,alt_review_grants,alt_collector_policies,alt_task_bundles,alt_task_records; DELETE FROM alt_schema WHERE version=2").unwrap();
+    f.client().batch_execute("DROP TABLE alt_task_bundle_records,alt_task_bundle_roots,alt_current_approvals,alt_review_grants,alt_collector_policies,alt_task_bundles,alt_task_records; ALTER TABLE alt_repositories DROP COLUMN default_branch; DELETE FROM alt_schema WHERE version>=2").unwrap();
     assert!(
         Store::open(
             f.client(),
@@ -827,6 +971,139 @@ fn current_reviewer(f: &mut Fixture, data: &IntegrationPayload) -> (String, Cred
 
 #[test]
 #[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
+fn reviewer_inspects_only_ready_selection_and_releases_worker_without_publisher_authority() {
+    let mut f = Fixture::new();
+    let base = Payload::new("review-base", None);
+    base.upload(&mut f.store, &f.credential);
+    base.publish(&mut f.store, &f.credential);
+    let data = integration_payload(&base, false, false);
+    let (_, reviewer) = current_reviewer(&mut f, &data);
+    let key = &data.payload.publication.key;
+    data.payload.upload(&mut f.store, &f.credential);
+    assert!(f.store.review_selection(&reviewer, key).is_err());
+    let (work, graph, tasks) = ready_integration(&mut f, &data);
+    let selection = f.store.review_selection(&reviewer, key).unwrap();
+    assert_eq!(selection.publication, data.payload.publication);
+    assert_eq!(selection.manifest, data.payload.manifest);
+    assert!(
+        f.store.review_selection(&f.credential, key).is_err(),
+        "publish/admin alone is not current review authority"
+    );
+    let index = data
+        .payload
+        .manifest
+        .entries
+        .iter()
+        .position(|entry| entry.kind == ContentKind::Record)
+        .unwrap();
+    let entry = &data.payload.manifest.entries[index];
+    let (size, mut file) = f
+        .store
+        .open_review_content(&reviewer, key, &entry.blake3)
+        .unwrap();
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut file, &mut bytes).unwrap();
+    assert_eq!(size, bytes.len() as u64);
+    assert_eq!(bytes, data.payload.contents[index]);
+    assert!(
+        f.store
+            .open_published_content(&reviewer, &key.scope, &entry.blake3)
+            .is_err()
+    );
+    let unrelated = task_payload("unrelated-private-task");
+    unrelated.upload(&mut f.store, &f.credential);
+    let private = unrelated
+        .manifest
+        .entries
+        .iter()
+        .find(|entry| entry.kind == ContentKind::Record)
+        .unwrap();
+    assert!(
+        f.store
+            .open_review_content(&reviewer, key, &private.blake3)
+            .is_err()
+    );
+    f.store
+        .set_review_grant(&f.credential, "repository", "reviewer", false)
+        .unwrap();
+    assert!(f.store.review_selection(&reviewer, key).is_err());
+    assert!(
+        f.store
+            .open_review_content(&reviewer, key, &entry.blake3)
+            .is_err()
+    );
+    f.store
+        .set_review_grant(&f.credential, "repository", "reviewer", true)
+        .unwrap();
+    f.store.release_publication(&f.credential, &work).unwrap();
+    let review_work = f
+        .store
+        .acquire_review(&reviewer, key, 60_000, 1000)
+        .unwrap();
+    assert!(
+        f.store
+            .publish_with_tasks(&reviewer, &review_work, &graph, &tasks)
+            .is_err()
+    );
+    let inspected = f
+        .store
+        .review_selection(&reviewer, key)
+        .unwrap()
+        .approval_context(limits())
+        .unwrap();
+    f.store
+        .approve_integration(
+            &reviewer,
+            &review_work,
+            &graph,
+            &tasks,
+            &data.integration,
+            &inspected,
+            60_000,
+        )
+        .unwrap();
+    f.store
+        .release_publication(&reviewer, &review_work)
+        .unwrap();
+    assert!(
+        f.store
+            .publish_with_tasks(&f.credential, &work, &graph, &tasks)
+            .is_err(),
+        "old publisher worker must remain fenced"
+    );
+    let next = f
+        .store
+        .acquire_publication(&f.credential, key, 60_000, 1000)
+        .unwrap();
+    f.store
+        .publish_with_tasks(&f.credential, &next, &graph, &tasks)
+        .unwrap();
+    assert!(f.store.review_selection(&reviewer, key).is_err());
+    let records = f
+        .store
+        .published_records(
+            &reviewer,
+            &key.scope,
+            alt_remote_protocol::RecordKind::Task,
+            None,
+            100,
+        )
+        .unwrap();
+    assert_eq!(records.len(), 1);
+    let bundles = f
+        .store
+        .bundles_for_record(&reviewer, &key.scope, &records[0], None, 100)
+        .unwrap();
+    assert_eq!(
+        bundles.len(),
+        1,
+        "selected dependency records are discoverable without being explicit roots"
+    );
+    assert_eq!(bundles[0].publication, data.payload.publication);
+}
+
+#[test]
+#[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
 fn current_review_is_separate_and_commits_with_refs_records_and_receipt() {
     let mut f = Fixture::new();
     let base = Payload::new("base", None);
@@ -839,6 +1116,13 @@ fn current_review_is_separate_and_commits_with_refs_records_and_receipt() {
             .publish_with_tasks(&f.credential, &work, &graph, &tasks)
             .is_err()
     );
+    let (_, reviewer) = current_reviewer(&mut f, &data);
+    let inspected = f
+        .store
+        .review_selection(&reviewer, &data.payload.publication.key)
+        .unwrap()
+        .approval_context(limits())
+        .unwrap();
     assert!(
         f.store
             .approve_integration(
@@ -847,13 +1131,21 @@ fn current_review_is_separate_and_commits_with_refs_records_and_receipt() {
                 &graph,
                 &tasks,
                 &data.integration,
+                &inspected,
                 60_000
             )
             .is_err()
     );
-    let (_, reviewer) = current_reviewer(&mut f, &data);
     f.store
-        .approve_integration(&reviewer, &work, &graph, &tasks, &data.integration, 60_000)
+        .approve_integration(
+            &reviewer,
+            &work,
+            &graph,
+            &tasks,
+            &data.integration,
+            &inspected,
+            60_000,
+        )
         .unwrap();
     assert_eq!(f.counts(), (1, 1, 1));
     f.client().batch_execute("CREATE FUNCTION fail_integration_outbox() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected integration persistence failure'; END $$; CREATE TRIGGER fail_integration_outbox BEFORE INSERT ON alt_outbox FOR EACH ROW EXECUTE FUNCTION fail_integration_outbox()").unwrap();
@@ -921,6 +1213,50 @@ fn current_review_is_separate_and_commits_with_refs_records_and_receipt() {
 
 #[test]
 #[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
+fn current_review_cannot_adopt_policy_changed_since_inspection() {
+    let mut f = Fixture::new();
+    let base = Payload::new("base", None);
+    base.upload(&mut f.store, &f.credential);
+    base.publish(&mut f.store, &f.credential);
+    let data = integration_payload(&base, false, false);
+    let (work, graph, tasks) = ready_integration(&mut f, &data);
+    let (_, reviewer) = current_reviewer(&mut f, &data);
+    let selection = f
+        .store
+        .review_selection(&reviewer, &data.payload.publication.key)
+        .unwrap();
+    let inspected = selection.approval_context(limits()).unwrap();
+    f.client()
+        .execute(
+            "UPDATE alt_repositories SET policy_version=policy_version+1 WHERE id='repository'",
+            &[],
+        )
+        .unwrap();
+    assert!(
+        f.store
+            .approve_integration(
+                &reviewer,
+                &work,
+                &graph,
+                &tasks,
+                &data.integration,
+                &inspected,
+                60_000
+            )
+            .is_err(),
+        "an approval must not silently adopt a policy installed after inspection"
+    );
+    assert_eq!(
+        f.client()
+            .query_one("SELECT count(*) FROM alt_current_approvals", &[])
+            .unwrap()
+            .get::<_, i64>(0),
+        0
+    );
+}
+
+#[test]
+#[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
 fn current_review_rechecks_revocation_policy_expiry_and_target_at_commit() {
     for changed in [
         "review-grant",
@@ -938,8 +1274,22 @@ fn current_review_rechecks_revocation_policy_expiry_and_target_at_commit() {
         let data = integration_payload(&base, false, false);
         let (work, graph, tasks) = ready_integration(&mut f, &data);
         let (token, reviewer) = current_reviewer(&mut f, &data);
+        let inspected = f
+            .store
+            .review_selection(&reviewer, &data.payload.publication.key)
+            .unwrap()
+            .approval_context(limits())
+            .unwrap();
         f.store
-            .approve_integration(&reviewer, &work, &graph, &tasks, &data.integration, 60_000)
+            .approve_integration(
+                &reviewer,
+                &work,
+                &graph,
+                &tasks,
+                &data.integration,
+                &inspected,
+                60_000,
+            )
             .unwrap();
         match changed {
             "review-grant" => f
@@ -1016,9 +1366,23 @@ fn omitted_evidence_is_retained_as_history_but_cannot_authorize_integration() {
     let mut data = integration_payload(&base, true, false);
     let (work, graph, tasks) = ready_integration(&mut f, &data);
     let (_, reviewer) = current_reviewer(&mut f, &data);
+    let inspected = f
+        .store
+        .review_selection(&reviewer, &data.payload.publication.key)
+        .unwrap()
+        .approval_context(limits())
+        .unwrap();
     assert!(
         f.store
-            .approve_integration(&reviewer, &work, &graph, &tasks, &data.integration, 60_000)
+            .approve_integration(
+                &reviewer,
+                &work,
+                &graph,
+                &tasks,
+                &data.integration,
+                &inspected,
+                60_000
+            )
             .is_err()
     );
     assert!(
@@ -1052,8 +1416,22 @@ fn recovered_original_integration_can_be_reviewed_without_fabricated_completion(
     let data = integration_payload(&base, false, true);
     let (work, graph, tasks) = ready_integration(&mut f, &data);
     let (_, reviewer) = current_reviewer(&mut f, &data);
+    let inspected = f
+        .store
+        .review_selection(&reviewer, &data.payload.publication.key)
+        .unwrap()
+        .approval_context(limits())
+        .unwrap();
     f.store
-        .approve_integration(&reviewer, &work, &graph, &tasks, &data.integration, 60_000)
+        .approve_integration(
+            &reviewer,
+            &work,
+            &graph,
+            &tasks,
+            &data.integration,
+            &inspected,
+            60_000,
+        )
         .unwrap();
     f.store
         .publish_with_tasks(&f.credential, &work, &graph, &tasks)
