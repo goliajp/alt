@@ -113,10 +113,10 @@ fn undo_after_commit_still_inverts_the_ref_tx_not_the_index() {
     ok(alt(root, &["add", "a.txt"]));
     ok(alt(root, &["commit", "-m", "first"]));
 
-    // The last op is now a commit (ref tx). Undo must invert the ref
-    // change — moves HEAD back to unborn, drops a.txt from the working
-    // tree (the checkout step restores the prior tree, which was empty).
+    let index = index_bytes(root);
     ok(alt(root, &["undo"]));
+    assert_eq!(index_bytes(root), index);
+    assert_eq!(std::fs::read(root.join("a.txt")).unwrap(), b"alpha\n");
     // Log should no longer find any commit on main.
     let log_out = alt(root, &["log", "--pretty=oneline"]);
     let log = String::from_utf8_lossy(&log_out.stdout);
@@ -211,7 +211,7 @@ fn recovery_reads_frozen_legacy_record_but_refuses_automatic_undo() {
 }
 
 #[test]
-fn recovery_ref_undo_preflights_untracked_collision_before_moving_refs() {
+fn commit_undo_preserves_untracked_collision_without_a_checkout() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
@@ -224,12 +224,8 @@ fn recovery_ref_undo_preflights_untracked_collision_before_moving_refs() {
     ok(alt(root, &["commit", "-m", "remove"]));
     std::fs::write(root.join("f"), "untracked precious data").unwrap();
     let index = index_bytes(root);
-    let log = std::fs::read(root.join(".alt/oplog/log")).unwrap();
-    let refused = alt(root, &["undo"]);
-    assert!(!refused.status.success());
-    assert!(String::from_utf8_lossy(&refused.stderr).contains("untracked"));
+    ok(alt(root, &["undo"]));
     assert_eq!(index_bytes(root), index);
-    assert_eq!(std::fs::read(root.join(".alt/oplog/log")).unwrap(), log);
     assert_eq!(
         std::fs::read(root.join("f")).unwrap(),
         b"untracked precious data"
@@ -362,14 +358,18 @@ fn recovery_ref_intent_precedes_files_and_survives_missing_completion() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         ok(alt(root, &["init", "."]));
+        std::fs::write(root.join("f"), "before").unwrap();
+        ok(alt(root, &["add", "f"]));
+        ok(alt(root, &["commit", "-m", "base"]));
+        ok(alt(root, &["branch", "before"]));
         std::fs::write(root.join("f"), "committed data").unwrap();
         ok(alt(root, &["add", "f"]));
         ok(alt(root, &["commit", "-m", "first"]));
         let before_index = index_bytes(root);
-        ok(alt(root, &["undo"]));
+        ok(alt(root, &["switch", "before"]));
         remove_final_log_frame(root);
         if restore_old_file {
-            // Ref undo committed its intent, but materialization never began.
+            // The switch committed its intent, but materialization never began.
             std::fs::write(root.join("f"), "committed data").unwrap();
             std::fs::write(root.join(".alt/index"), before_index).unwrap();
         }
@@ -382,7 +382,7 @@ fn recovery_ref_intent_precedes_files_and_survives_missing_completion() {
         assert_eq!(std::fs::read(root.join(".alt/oplog/log")).unwrap(), log);
         ok(alt(root, &["op-log", "--json"]));
         recover_pending(root);
-        assert!(!root.join("f").exists());
+        assert_eq!(std::fs::read(root.join("f")).unwrap(), b"before");
     }
 }
 
@@ -478,6 +478,7 @@ fn recovery_resumes_each_file_and_index_boundary_without_touching_untracked_data
         }
         ok(alt(root, &["add", "."]));
         ok(alt(root, &["commit", "-m", "base"]));
+        ok(alt(root, &["branch", "before"]));
         for path in ["a", "b"] {
             std::fs::write(root.join(path), "new").unwrap();
         }
@@ -485,9 +486,9 @@ fn recovery_resumes_each_file_and_index_boundary_without_touching_untracked_data
         ok(alt(root, &["commit", "-m", "change"]));
         let index_before = index_bytes(root);
         std::fs::write(root.join("untracked"), "precious").unwrap();
-        ok(alt(root, &["undo"]));
+        ok(alt(root, &["switch", "before"]));
         remove_final_log_frame(root);
-        // Model the persisted states at each boundary of the two-file undo.
+        // Model the persisted states at each boundary of the two-file checkout.
         if boundary == 0 {
             std::fs::write(root.join("a"), "new").unwrap();
         }
@@ -506,4 +507,202 @@ fn recovery_resumes_each_file_and_index_boundary_without_touching_untracked_data
         assert_eq!(status["staged"], serde_json::json!([]));
         assert_eq!(status["unstaged"], serde_json::json!([]));
     }
+}
+
+#[test]
+fn commit_and_amend_undo_preserve_exact_index_files_modes_links_and_later_edits() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+    for kind in ["first", "commit", "amend"] {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        ok(alt(root, &["init", "."]));
+        if kind != "first" {
+            std::fs::write(root.join("f"), "baseline").unwrap();
+            ok(alt(root, &["add", "."]));
+            ok(alt(root, &["commit", "-m", "baseline"]));
+        }
+        let refs_before = alt_refs::RefStore::open(root.join(".alt"))
+            .unwrap()
+            .iter()
+            .map(|(n, t)| (n.to_owned(), t.clone()))
+            .collect::<Vec<_>>();
+        std::fs::write(root.join("f"), "staged change").unwrap();
+        std::fs::write(root.join("exec"), "executable").unwrap();
+        std::fs::set_permissions(root.join("exec"), std::fs::Permissions::from_mode(0o751))
+            .unwrap();
+        symlink("f", root.join("link")).unwrap();
+        ok(alt(root, &["add", "."]));
+        let args = if kind == "amend" {
+            vec!["commit", "--amend", "-m", "changed"]
+        } else {
+            vec!["commit", "-m", "changed"]
+        };
+        ok(alt(root, &args));
+        let refs_after = alt_refs::RefStore::open(root.join(".alt"))
+            .unwrap()
+            .iter()
+            .map(|(n, t)| (n.to_owned(), t.clone()))
+            .collect::<Vec<_>>();
+        std::fs::write(root.join("f"), "later unstaged edit").unwrap();
+        std::fs::write(root.join("untracked"), "precious").unwrap();
+        let index = index_bytes(root);
+        for expected_refs in [refs_before, refs_after] {
+            ok(alt(root, &["undo"]));
+            assert_eq!(index_bytes(root), index, "{kind}");
+            assert_eq!(
+                std::fs::read(root.join("f")).unwrap(),
+                b"later unstaged edit"
+            );
+            assert_eq!(std::fs::read(root.join("exec")).unwrap(), b"executable");
+            assert_eq!(
+                std::fs::metadata(root.join("exec"))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o751
+            );
+            assert_eq!(
+                std::fs::read_link(root.join("link")).unwrap(),
+                Path::new("f")
+            );
+            assert_eq!(std::fs::read(root.join("untracked")).unwrap(), b"precious");
+            let refs = alt_refs::RefStore::open(root.join(".alt"))
+                .unwrap()
+                .iter()
+                .map(|(n, t)| (n.to_owned(), t.clone()))
+                .collect::<Vec<_>>();
+            assert_eq!(refs, expected_refs, "{kind}");
+        }
+    }
+}
+
+#[test]
+fn ref_undo_refuses_legacy_missing_or_unknown_effects_without_mutation() {
+    for effects in [None, Some("unknown"), Some("checkout")] {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        ok(alt(root, &["init", "."]));
+        std::fs::write(root.join("f"), "precious").unwrap();
+        ok(alt(root, &["add", "."]));
+        ok(alt(root, &["commit", "-m", "base"]));
+        let mut refs = alt_refs::RefStore::open(root.join(".alt")).unwrap();
+        let tx = alt_refs::parse_tx(&refs.last_op().unwrap().payload)
+            .unwrap()
+            .unwrap();
+        let mut context: serde_json::Value = serde_json::from_slice(&tx.context.unwrap()).unwrap();
+        if let Some(effect) = effects {
+            context["effects"] = effect.into();
+        } else {
+            context["version"] = 1.into();
+            context.as_object_mut().unwrap().remove("effects");
+        }
+        let change = alt_refs::RefChange {
+            name: "refs/heads/fixture".to_owned(),
+            old: None,
+            new: Some(alt_refs::RefTarget::Oid(
+                refs.resolve("HEAD").unwrap().unwrap(),
+            )),
+        };
+        refs.commit_scoped(
+            "human:tester commit",
+            1,
+            &[change],
+            None,
+            None,
+            Some(&serde_json::to_vec(&context).unwrap()),
+        )
+        .unwrap();
+        drop(refs);
+        let index = index_bytes(root);
+        let log = std::fs::read(root.join(".alt/oplog/log")).unwrap();
+        let result = alt(root, &["undo", "--json"]);
+        assert!(!result.status.success());
+        let response: serde_json::Value = serde_json::from_slice(&result.stderr).unwrap();
+        assert_eq!(response["error"]["kind"], "unsupported_record");
+        assert_eq!(index_bytes(root), index);
+        assert_eq!(std::fs::read(root.join(".alt/oplog/log")).unwrap(), log);
+        assert_eq!(std::fs::read(root.join("f")).unwrap(), b"precious");
+    }
+}
+
+#[test]
+fn commit_undo_request_replay_never_applies_a_second_inverse() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("f"), "precious").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "first"]));
+    let index = index_bytes(root);
+    let args = [
+        "--request-id",
+        "11223344556677889900aabbccddeeff",
+        "undo",
+        "--json",
+    ];
+    ok(alt(root, &args));
+    let log = std::fs::read(root.join(".alt/oplog/log")).unwrap();
+    ok(alt(root, &args));
+    assert_eq!(std::fs::read(root.join(".alt/oplog/log")).unwrap(), log);
+    assert_eq!(index_bytes(root), index);
+    assert_eq!(std::fs::read(root.join("f")).unwrap(), b"precious");
+    assert!(
+        alt_refs::RefStore::open(root.join(".alt"))
+            .unwrap()
+            .resolve("HEAD")
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn switch_undo_checks_recorded_poststate_before_changing_any_ref() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("f"), "before").unwrap();
+    std::fs::write(root.join("keep"), "untouched").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "base"]));
+    ok(alt(root, &["branch", "before"]));
+    std::fs::remove_file(root.join("f")).unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "remove"]));
+    ok(alt(root, &["switch", "before"]));
+    ok(alt(root, &["switch", "main"]));
+    std::fs::write(root.join("f"), "untracked precious").unwrap();
+    let log = std::fs::read(root.join(".alt/oplog/log")).unwrap();
+    let index = index_bytes(root);
+    assert!(!alt(root, &["undo"]).status.success());
+    assert_eq!(std::fs::read(root.join(".alt/oplog/log")).unwrap(), log);
+    assert_eq!(index_bytes(root), index);
+    assert_eq!(
+        std::fs::read(root.join("f")).unwrap(),
+        b"untracked precious"
+    );
+    std::fs::remove_file(root.join("f")).unwrap();
+    ok(alt(root, &["undo"]));
+    assert_eq!(std::fs::read(root.join("f")).unwrap(), b"before");
+    ok(alt(root, &["undo"]));
+    assert!(!root.join("f").exists());
+}
+
+#[test]
+fn revert_undo_restores_recorded_workspace_delta() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+    std::fs::write(root.join("f"), "before").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "base"]));
+    std::fs::write(root.join("f"), "after").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "change"]));
+    ok(alt(root, &["revert", "HEAD"]));
+    assert_eq!(std::fs::read(root.join("f")).unwrap(), b"before");
+    ok(alt(root, &["undo"]));
+    assert_eq!(std::fs::read(root.join("f")).unwrap(), b"after");
+    ok(alt(root, &["undo"]));
+    assert_eq!(std::fs::read(root.join("f")).unwrap(), b"before");
 }

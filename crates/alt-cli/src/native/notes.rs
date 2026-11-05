@@ -117,12 +117,13 @@ impl NativeRepo<'_> {
         changes: &[RefChange],
         target: ObjectId,
         note: &Meta,
-    ) -> Res<()> {
+        effects: recovery::RefEffects,
+    ) -> Res<OpId> {
         loop {
             let mut all = changes.to_vec();
             all.push(self.note_change(target, note)?);
-            match self.commit_refs(verb, &all) {
-                Ok(_) => return Ok(()),
+            match self.commit_refs_with(verb, &all, None, effects) {
+                Ok(operation) => return Ok(operation),
                 Err(e) if notes_moved(&*e) => continue,
                 Err(e) => return Err(e),
             }
@@ -191,7 +192,7 @@ impl NativeRepo<'_> {
                 format!("{m}\n")
             });
         }
-        self.commit_refs_with_note("meta", &[], commit, &note)?;
+        self.commit_refs_with_note("meta", &[], commit, &note, recovery::RefEffects::RefsOnly)?;
         writeln!(out, "metadata updated for {commit}")?;
         Ok(())
     }

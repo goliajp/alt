@@ -587,7 +587,8 @@ pub fn init(dir: Option<PathBuf>, out: &mut impl Write) -> Res<()> {
     odb.flush()?;
     let mut refs = RefStore::open(&alt_dir)?;
     let context = serde_json::to_vec(&recovery::RefContext {
-        version: 1,
+        version: 2,
+        effects: recovery::RefEffects::Unknown,
         workspace: recovery::workspace_identity_at(&alt_dir.join("index"), DEFAULT_WORKSPACE)?,
         inverse_of: None,
         checkout: None,
@@ -924,12 +925,35 @@ impl<'a> NativeRepo<'a> {
     /// in (via [`RefPolicy`]). A denial — at any axis — costs no on-disk
     /// state. All subtransactions carry the request id in their context.
     fn commit_refs(&mut self, verb: &str, changes: &[RefChange]) -> Res<OpId> {
-        self.commit_refs_with(verb, changes, None)
+        self.commit_refs_with(verb, changes, None, recovery::RefEffects::Unknown)
     }
 
     /// Intermediate ref transaction, attributed to the same whole command.
     fn commit_refs_unkeyed(&mut self, verb: &str, changes: &[RefChange]) -> Res<OpId> {
-        self.commit_refs_with(verb, changes, None)
+        self.commit_refs_with(verb, changes, None, recovery::RefEffects::Unknown)
+    }
+
+    fn commit_refs_only(&mut self, verb: &str, changes: &[RefChange]) -> Res<OpId> {
+        self.commit_refs_with(verb, changes, None, recovery::RefEffects::RefsOnly)
+    }
+
+    fn commit_refs_checkout(
+        &mut self,
+        verb: &str,
+        changes: &[RefChange],
+        old: &[WorkEntry],
+        target: &[WorkEntry],
+    ) -> Res<OpId> {
+        self.lock_workspace()?;
+        self.ensure_no_pending_recovery()?;
+        self.preflight_checkout(old, target)?;
+        let intent = self.prepare_checkout(old, target)?;
+        self.checkout_intent = Some(intent.clone());
+        let result = self.commit_refs(verb, changes);
+        self.checkout_intent = None;
+        let operation = result?;
+        self.apply_prepared_checkout(operation, &intent)?;
+        Ok(operation)
     }
 
     fn commit_refs_with(
@@ -937,6 +961,7 @@ impl<'a> NativeRepo<'a> {
         verb: &str,
         changes: &[RefChange],
         key: Option<IdemKey>,
+        effects: recovery::RefEffects,
     ) -> Res<OpId> {
         self.ensure_writable(verb)?;
         self.lock_workspace()?;
@@ -967,7 +992,12 @@ impl<'a> NativeRepo<'a> {
         };
         let actor = self.id.actor(verb);
         let context = serde_json::to_vec(&recovery::RefContext {
-            version: 1,
+            version: 2,
+            effects: if self.checkout_intent.is_some() {
+                recovery::RefEffects::Checkout
+            } else {
+                effects
+            },
             workspace: self.workspace_identity()?,
             inverse_of: self.inverse_of.clone(),
             checkout: self.checkout_intent.clone(),
@@ -1707,7 +1737,7 @@ impl<'a> NativeRepo<'a> {
             .refs
             .resolve(&self.head_branch()?)?
             .ok_or("cannot create a branch before the first commit")?;
-        self.commit_refs(
+        self.commit_refs_only(
             "branch",
             &[RefChange {
                 name: full,
@@ -1739,7 +1769,7 @@ impl<'a> NativeRepo<'a> {
             .get(full)
             .cloned()
             .ok_or_else(|| format!("branch '{short}' not found"))?;
-        self.commit_refs(
+        self.commit_refs_only(
             "branch",
             &[RefChange {
                 name: full.to_owned(),
@@ -1842,7 +1872,7 @@ impl<'a> NativeRepo<'a> {
                 .resolve(&self.head_branch()?)?
                 .ok_or("cannot tag before the first commit")?,
         };
-        self.commit_refs(
+        self.commit_refs_only(
             "tag",
             &[RefChange {
                 name: full,
@@ -1862,7 +1892,7 @@ impl<'a> NativeRepo<'a> {
             .get(&full)
             .cloned()
             .ok_or_else(|| format!("tag '{name}' not found"))?;
-        self.commit_refs(
+        self.commit_refs_only(
             "tag",
             &[RefChange {
                 name: full,
@@ -1941,7 +1971,7 @@ impl<'a> NativeRepo<'a> {
         self.store.odb.put(tag_oid, ObjectKind::Tag, &bytes)?;
         self.store.odb.flush()?;
 
-        self.commit_refs(
+        self.commit_refs_only(
             "tag",
             &[RefChange {
                 name: full,
@@ -2030,8 +2060,18 @@ impl<'a> NativeRepo<'a> {
             None => Vec::new(), // unborn target: tree becomes empty
         };
         let old = index_entries(&self.index()?);
-        self.checkout(&old, &target)?;
-        self.move_head(&current, &full)?;
+        let head_ref = self.head_ref.clone();
+        let head_old = self.store.refs.get(&head_ref).cloned();
+        self.commit_refs_checkout(
+            "switch",
+            &[RefChange {
+                name: head_ref,
+                old: head_old,
+                new: Some(RefTarget::Symbolic(full.clone())),
+            }],
+            &old,
+            &target,
+        )?;
         report(out, "switched", &format!("Switched to branch '{name}'"))
     }
 
@@ -2118,7 +2158,7 @@ impl<'a> NativeRepo<'a> {
     fn move_head(&mut self, from: &str, to: &str) -> Res<()> {
         let old = self.store.refs.get(&self.head_ref).cloned();
         let head_ref = self.head_ref.clone();
-        self.commit_refs(
+        self.commit_refs_only(
             "switch",
             &[RefChange {
                 name: head_ref,
@@ -2158,8 +2198,7 @@ impl<'a> NativeRepo<'a> {
             MergeOutcome::FastForward(commit) => {
                 let target = self.commit_entries(commit)?;
                 let old = index_entries(&self.index()?);
-                self.checkout(&old, &target)?;
-                self.advance_branch(&cur, ours, commit)?;
+                self.advance_branch_checkout(&cur, ours, commit, &old, &target)?;
                 self.report_merge(
                     json,
                     out,
@@ -2172,8 +2211,7 @@ impl<'a> NativeRepo<'a> {
             }
             MergeOutcome::Merged { commit, entries } => {
                 let old = index_entries(&self.index()?);
-                self.checkout(&old, &entries)?;
-                self.advance_branch(&cur, ours, commit)?;
+                self.advance_branch_checkout(&cur, ours, commit, &old, &entries)?;
                 self.report_merge(
                     json,
                     out,
@@ -2327,7 +2365,7 @@ impl<'a> NativeRepo<'a> {
         };
         let head_old = self.store.refs.get(&self.head_ref).cloned();
         let head_ref = self.head_ref.clone();
-        self.commit_refs(
+        self.commit_refs_only(
             "flow",
             &[
                 RefChange {
@@ -2385,11 +2423,10 @@ impl<'a> NativeRepo<'a> {
         // develop's; materialize it (a no-op when already on develop)
         let target = self.commit_entries(base)?;
         let old = index_entries(&self.index()?);
-        self.checkout(&old, &target)?;
 
         let head_old = self.store.refs.get(&self.head_ref).cloned();
         let head_ref = self.head_ref.clone();
-        self.commit_refs(
+        self.commit_refs_checkout(
             "flow",
             &[
                 RefChange {
@@ -2403,6 +2440,8 @@ impl<'a> NativeRepo<'a> {
                     new: Some(RefTarget::Symbolic(feat_ref.clone())),
                 },
             ],
+            &old,
+            &target,
         )?;
         if json {
             use crate::json::Json;
@@ -2458,7 +2497,8 @@ impl<'a> NativeRepo<'a> {
         // one atomic op: advance develop, delete the feature, move HEAD
         let head_old = self.store.refs.get(&self.head_ref).cloned();
         let head_ref = self.head_ref.clone();
-        self.commit_refs(
+        let old = index_entries(&self.index()?);
+        self.commit_refs_checkout(
             "flow",
             &[
                 RefChange {
@@ -2477,11 +2517,10 @@ impl<'a> NativeRepo<'a> {
                     new: Some(RefTarget::Symbolic(dev_ref.clone())),
                 },
             ],
+            &old,
+            &entries,
         )?;
 
-        // bring the working tree to the merged develop
-        let old = index_entries(&self.index()?);
-        self.checkout(&old, &entries)?;
         if json {
             use crate::json::Json;
             crate::json::emit(
@@ -2564,11 +2603,10 @@ impl<'a> NativeRepo<'a> {
 
         let target = self.commit_entries(base)?;
         let old = index_entries(&self.index()?);
-        self.checkout(&old, &target)?;
 
         let head_old = self.store.refs.get(&self.head_ref).cloned();
         let head_ref = self.head_ref.clone();
-        self.commit_refs(
+        self.commit_refs_checkout(
             "flow",
             &[
                 RefChange {
@@ -2582,6 +2620,8 @@ impl<'a> NativeRepo<'a> {
                     new: Some(RefTarget::Symbolic(topic_ref.clone())),
                 },
             ],
+            &old,
+            &target,
         )?;
         if json {
             use crate::json::Json;
@@ -2703,11 +2743,8 @@ impl<'a> NativeRepo<'a> {
                 new: Some(RefTarget::Oid(new_back)),
             });
         }
-        self.commit_refs("flow", &changes)?;
-
-        // bring the working tree onto the back-ref (develop)'s tree
         let old = index_entries(&self.index()?);
-        self.checkout(&old, &back_entries)?;
+        self.commit_refs_checkout("flow", &changes, &old, &back_entries)?;
         if json {
             use crate::json::Json;
             crate::json::emit(
@@ -3197,7 +3234,7 @@ impl<'a> NativeRepo<'a> {
             }
         }
         if !changes.is_empty() {
-            self.commit_refs("fetch", &changes)?;
+            self.commit_refs_only("fetch", &changes)?;
         }
 
         if json {
@@ -3696,14 +3733,23 @@ impl<'a> NativeRepo<'a> {
     }
 
     /// Advances `branch` from `old` to `new` in one ref transaction.
-    fn advance_branch(&mut self, branch: &str, old: ObjectId, new: ObjectId) -> Res<()> {
-        self.commit_refs(
+    fn advance_branch_checkout(
+        &mut self,
+        branch: &str,
+        old: ObjectId,
+        new: ObjectId,
+        before: &[WorkEntry],
+        after: &[WorkEntry],
+    ) -> Res<()> {
+        self.commit_refs_checkout(
             "merge",
             &[RefChange {
                 name: branch.to_owned(),
                 old: Some(RefTarget::Oid(old)),
                 new: Some(RefTarget::Oid(new)),
             }],
+            before,
+            after,
         )?;
         Ok(())
     }

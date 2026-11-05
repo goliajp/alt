@@ -35,11 +35,22 @@ pub(super) struct CheckoutIntent {
     files: Vec<FileChange>,
 }
 
+/// A complete tracked prestate for a multi-step operation such as rebase.
+/// Stored by content identity so a restarted command cannot invent a prestate.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkspaceSnapshot {
+    version: u32,
+    workspace: WorkspaceIdentity,
+    index: String,
+    files: Vec<(Vec<u8>, Option<FileState>)>,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct CheckoutDone {
-    version: u32,
-    prepared: String,
+pub(super) struct CheckoutDone {
+    pub(super) version: u32,
+    pub(super) prepared: String,
     #[serde(default)]
     request_id: Option<String>,
 }
@@ -166,6 +177,136 @@ impl NativeRepo<'_> {
         Ok(FileState {
             mode: entry.mode,
             contents: self.snapshot(&bytes)?,
+        })
+    }
+
+    pub(super) fn snapshot_workspace(&self) -> Res<String> {
+        let index = self.index()?;
+        let mut files = Vec::new();
+        for entry in &index.entries {
+            self.validate_recovery_path(&entry.path)?;
+            files.push((entry.path.to_vec(), self.file_state(&entry.path, true)?));
+        }
+        let snapshot = WorkspaceSnapshot {
+            version: 1,
+            workspace: self.workspace_identity()?,
+            index: self.snapshot(&canonical_index(index, self.store.algo))?,
+            files,
+        };
+        self.snapshot(&serde_json::to_vec(&snapshot)?)
+    }
+
+    pub(super) fn completed_workspace_delta(&self, snapshot: &str) -> Res<CheckoutIntent> {
+        let snapshot: WorkspaceSnapshot = serde_json::from_slice(&self.read_snapshot(snapshot)?)?;
+        if snapshot.version != 1 || snapshot.workspace != self.workspace_identity()? {
+            return Err("invalid workspace recovery snapshot".into());
+        }
+        Index::parse(&self.read_snapshot(&snapshot.index)?, self.store.algo)?;
+        let index = self.index()?;
+        let before: std::collections::BTreeMap<_, _> = snapshot.files.into_iter().collect();
+        let paths: std::collections::BTreeSet<_> = before
+            .keys()
+            .cloned()
+            .chain(index.entries.iter().map(|e| e.path.to_vec()))
+            .collect();
+        let mut files = Vec::new();
+        for path in paths {
+            let path_bytes = BString::from(path.clone());
+            self.validate_recovery_path(&path_bytes)?;
+            let before = before.get(&path).cloned().flatten();
+            let after = self.file_state(&path_bytes, true)?;
+            if before != after {
+                files.push(FileChange {
+                    path,
+                    before,
+                    after,
+                });
+            }
+        }
+        Ok(CheckoutIntent {
+            version: 1,
+            workspace: snapshot.workspace,
+            request_id: self.request_id.map(|id| crate::machine::hex(&id)),
+            index_before: snapshot.index,
+            index_after: self.snapshot(&canonical_index(index, self.store.algo))?,
+            files,
+        })
+    }
+
+    /// A multi-step operation has already materialized this delta. Its ref
+    /// transaction still needs an explicit completion; interrupted recovery
+    /// can validate the recorded poststate and finish the same operation.
+    pub(super) fn complete_checkout_record(&mut self, operation: OpId) -> Res<()> {
+        self.store.sink()?.fsync_all()?;
+        self.store.refs.record_op(
+            &self.id.actor("checkout"),
+            now_ms(),
+            &encode(
+                COMPLETE_CHECKOUT,
+                &CheckoutDone {
+                    version: 1,
+                    prepared: operation.to_string(),
+                    request_id: self.request_id.map(|id| crate::machine::hex(&id)),
+                },
+            )?,
+        )?;
+        Ok(())
+    }
+
+    /// Invert the recorded workspace delta, after validating its entire
+    /// poststate. Resolve no files from the new or old HEAD trees.
+    pub(super) fn inverse_checkout(&self, intent: &CheckoutIntent) -> Res<CheckoutIntent> {
+        if intent.version != 1 || intent.workspace != self.workspace_identity()? {
+            return Err(crate::machine::Failure::refusal(
+                "unsupported_record",
+                "invalid checkout recovery scope",
+            )
+            .into());
+        }
+        for id in [&intent.index_before, &intent.index_after] {
+            Index::parse(&self.read_snapshot(id)?, self.store.algo)?;
+        }
+        if hash(&canonical_index(self.index()?, self.store.algo)) != intent.index_after {
+            return Err(crate::machine::Failure::refusal(
+                "precondition_failed",
+                "recovery precondition failed: index changed",
+            )
+            .into());
+        }
+        for change in &intent.files {
+            let path = BString::from(change.path.clone());
+            self.validate_recovery_path(&path)?;
+            self.ensure_path_allowed(
+                std::str::from_utf8(&path).map_err(|_| "unsupported non-UTF-8 recovery path")?,
+            )?;
+            for state in [&change.before, &change.after].into_iter().flatten() {
+                if state.mode != 0o160000 {
+                    self.read_snapshot(&state.contents)?;
+                }
+            }
+            if self.file_state(&path, false)? != change.after {
+                return Err(crate::machine::Failure::refusal(
+                    "precondition_failed",
+                    "recovery precondition failed: working-tree path changed",
+                )
+                .into());
+            }
+        }
+        Ok(CheckoutIntent {
+            version: 1,
+            workspace: intent.workspace.clone(),
+            request_id: self.request_id.map(|id| crate::machine::hex(&id)),
+            index_before: intent.index_after.clone(),
+            index_after: intent.index_before.clone(),
+            files: intent
+                .files
+                .iter()
+                .map(|change| FileChange {
+                    path: change.path.clone(),
+                    before: change.after.clone(),
+                    after: change.before.clone(),
+                })
+                .collect(),
         })
     }
 

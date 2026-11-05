@@ -14,6 +14,7 @@ use super::*;
 
 /// What a stopped or running rebase remembers.
 struct RebaseState {
+    recovery: Option<String>,
     /// The branch being rebased (`refs/heads/…`).
     branch: String,
     /// Where the branch pointed before the rebase.
@@ -73,6 +74,8 @@ impl NativeRepo<'_> {
             }
         }
 
+        let recovery = Some(self.snapshot_workspace()?);
+
         // hand HEAD to the scratch ref, sitting on the new base
         let scratch = self.scratch_ref();
         let head_ref = self.head_ref.clone();
@@ -95,6 +98,7 @@ impl NativeRepo<'_> {
         let target = self.commit_entries(onto)?;
         self.checkout(&old, &target)?;
         let state = RebaseState {
+            recovery,
             branch,
             orig,
             onto,
@@ -187,14 +191,25 @@ impl NativeRepo<'_> {
         let new = self.rebase_head()?;
         self.leave_scratch(&state.branch)?;
         if new != state.orig {
-            self.commit_refs(
+            self.checkout_intent = state
+                .recovery
+                .as_deref()
+                .map(|id| self.completed_workspace_delta(id))
+                .transpose()?;
+            let has_intent = self.checkout_intent.is_some();
+            let operation = self.commit_refs(
                 "rebase",
                 &[RefChange {
                     name: state.branch.clone(),
                     old: Some(RefTarget::Oid(state.orig)),
                     new: Some(RefTarget::Oid(new)),
                 }],
-            )?;
+            );
+            self.checkout_intent = None;
+            let operation = operation?;
+            if has_intent {
+                self.complete_checkout_record(operation)?;
+            }
         }
         self.clear_rebase_state()?;
         if json {
@@ -277,6 +292,7 @@ impl NativeRepo<'_> {
         let scratch = self.scratch_ref();
         self.record_commit(
             NewCommit {
+                effects: recovery::RefEffects::Unknown,
                 tree,
                 parents: &parents,
                 author: &author,
@@ -514,9 +530,11 @@ impl NativeRepo<'_> {
         let oid = |v: &str| v.parse::<ObjectId>().map_err(|_| corrupt());
         let (mut branch, mut orig, mut onto, mut current) = (None, None, None, None);
         let mut todo = Vec::new();
+        let mut recovery = None;
         for line in text.lines() {
             let (key, value) = line.split_once(' ').ok_or_else(corrupt)?;
             match key {
+                "recovery" => recovery = Some(value.to_owned()),
                 "branch" => branch = Some(value.to_owned()),
                 "orig" => orig = Some(oid(value)?),
                 "onto" => onto = Some(oid(value)?),
@@ -526,6 +544,7 @@ impl NativeRepo<'_> {
             }
         }
         Ok(Some(RebaseState {
+            recovery,
             branch: branch.ok_or_else(corrupt)?,
             orig: orig.ok_or_else(corrupt)?,
             onto: onto.ok_or_else(corrupt)?,
@@ -536,6 +555,9 @@ impl NativeRepo<'_> {
 
     fn save_rebase_state(&self, s: &RebaseState) -> Res<()> {
         let mut text = format!("branch {}\norig {}\nonto {}\n", s.branch, s.orig, s.onto);
+        if let Some(recovery) = &s.recovery {
+            text.push_str(&format!("recovery {recovery}\n"));
+        }
         if let Some((a, c)) = s.current {
             text.push_str(&format!("current {} {c}\n", a.word()));
         }

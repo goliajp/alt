@@ -82,6 +82,7 @@ impl NativeRepo<'_> {
         let msg = with_newline(message);
         let commit = self.record_commit(
             NewCommit {
+                effects: recovery::RefEffects::RefsOnly,
                 tree,
                 parents: &parents,
                 author: &me,
@@ -158,6 +159,7 @@ impl NativeRepo<'_> {
         };
         let commit = self.record_commit(
             NewCommit {
+                effects: recovery::RefEffects::RefsOnly,
                 tree,
                 parents: &parents,
                 author: &author,
@@ -280,13 +282,18 @@ impl NativeRepo<'_> {
             old: old.map(RefTarget::Oid),
             new: Some(RefTarget::Oid(commit)),
         };
-        self.commit_refs_with_note(verb, &[move_branch], commit, &note)?;
+        let operation =
+            self.commit_refs_with_note(verb, &[move_branch], commit, &note, c.effects)?;
+        if let Some(intent) = self.checkout_intent.clone() {
+            self.apply_prepared_checkout(operation, &intent)?;
+        }
         Ok(commit)
     }
 }
 
 /// The content of a commit about to be written.
 pub(super) struct NewCommit<'a> {
+    pub(super) effects: recovery::RefEffects,
     pub(super) tree: ObjectId,
     pub(super) parents: &'a [ObjectId],
     pub(super) author: &'a Sig<'a>,

@@ -182,9 +182,13 @@ impl NativeRepo<'_> {
         let entries: Vec<WorkEntry> = resolved.into_iter().filter_map(|r| r.entry).collect();
         let tree = write_tree(&mut self.store.odb, &entries, self.store.algo)?;
         let old = index_entries(&self.index()?);
-        self.checkout(&old, &entries)?;
+        self.preflight_checkout(&old, &entries)?;
+        let intent = self.prepare_checkout(&old, &entries)?;
         let msg = self.revert_message(target, mainline)?;
-        Ok(Reverted::Committed(self.commit_revert(head, tree, &msg)?))
+        self.checkout_intent = Some(intent);
+        let result = self.commit_revert(head, tree, &msg);
+        self.checkout_intent = None;
+        Ok(Reverted::Committed(result?))
     }
 
     /// Records a revert commit on top of `head`, refusing one that changes
@@ -205,6 +209,7 @@ impl NativeRepo<'_> {
         };
         self.record_commit(
             NewCommit {
+                effects: recovery::RefEffects::RefsOnly,
                 tree,
                 parents: &[head],
                 author: &me,

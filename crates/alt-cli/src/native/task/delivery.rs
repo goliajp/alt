@@ -591,7 +591,7 @@ impl NativeRepo<'_> {
             };
             let Some(context) = tx.context else { continue };
             let context: recovery::RefContext = serde_json::from_slice(&context)?;
-            if context.version != 1
+            if !matches!(context.version, 1 | 2)
                 || context.workspace.instance != task.scope.workspace
                 || context.request_id.as_deref() != Some(&integration.creator_request)
             {

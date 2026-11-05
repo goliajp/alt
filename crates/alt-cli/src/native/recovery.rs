@@ -14,10 +14,23 @@ pub(super) struct WorkspaceIdentity {
     pub instance: String,
 }
 
+/// Recovery semantics are written by the operation, never inferred from an
+/// actor label or from the absence of a checkout in historical records.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum RefEffects {
+    #[default]
+    Unknown,
+    RefsOnly,
+    Checkout,
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct RefContext {
     pub version: u32,
+    #[serde(default)]
+    pub effects: RefEffects,
     pub workspace: WorkspaceIdentity,
     pub inverse_of: Option<String>,
     #[serde(default)]
@@ -399,24 +412,36 @@ impl NativeRepo<'_> {
         self.lock_workspace()?;
         self.ensure_no_pending_recovery()?;
         let workspace = self.workspace_identity()?;
-        let last = self
+        let mut last = self
             .store
             .refs
             .oplog()
             .ops()
-            .iter()
-            .rev()
-            .find(|op| {
-                !matches!(
-                    op.payload.first(),
-                    Some(&checkout_recovery::PREPARE_CHECKOUT)
-                        | Some(&checkout_recovery::COMPLETE_CHECKOUT)
-                )
-            })
+            .last()
             .ok_or_else(|| {
                 crate::machine::Failure::refusal("precondition_failed", "nothing to undo")
             })?
             .clone();
+        if last.payload.first() == Some(&checkout_recovery::COMPLETE_CHECKOUT) {
+            let done: checkout_recovery::CheckoutDone =
+                decode(&last.payload, checkout_recovery::COMPLETE_CHECKOUT)?;
+            if done.version != 1 {
+                return Err(crate::machine::Failure::refusal(
+                    "unsupported_record",
+                    "unsupported checkout completion",
+                )
+                .into());
+            }
+            last = self
+                .store
+                .refs
+                .oplog()
+                .ops()
+                .iter()
+                .find(|op| op.id.to_string() == done.prepared)
+                .ok_or("missing checkout intent")?
+                .clone();
+        }
         use crate::json::Json;
         let mut fields = vec![("undone", Json::Bool(true))];
         match last.payload.first() {
@@ -444,6 +469,15 @@ impl NativeRepo<'_> {
                 };
                 self.apply_index_intent(inverse, &bytes)?;
             }
+            Some(&checkout_recovery::PREPARE_CHECKOUT) => {
+                let intent: checkout_recovery::CheckoutIntent = decode(
+                    &last.payload, checkout_recovery::PREPARE_CHECKOUT,
+                )?;
+                let inverse = self.inverse_checkout(&intent)?;
+                let prepared = self.store.refs.record_op(&self.id.actor("undo"), now_ms(),
+                    &encode(checkout_recovery::PREPARE_CHECKOUT, &inverse)?)?;
+                self.apply_prepared_checkout(prepared, &inverse)?;
+            }
             Some(&alt_refs::PAYLOAD_REF_TX) => {
                 let tx = alt_refs::parse_tx(&last.payload)?.ok_or("not a ref transaction")?;
                 fields.push(("refs", Json::Array(tx.changes.iter().map(|c| Json::str(&c.name)).collect())));
@@ -464,7 +498,7 @@ impl NativeRepo<'_> {
         let tx = alt_refs::parse_tx(&op.payload)?.ok_or("not a ref operation")?;
         let context = tx.context.ok_or_else(|| crate::machine::Failure::refusal("unsupported_record", "legacy operation lacks workspace ownership and recovery prestate; automatic undo refused"))?;
         let context: RefContext = serde_json::from_slice(&context)?;
-        if context.version != 1 || context.workspace != self.workspace_identity()? {
+        if context.workspace != self.workspace_identity()? {
             return Err(crate::machine::Failure::refusal(
                 "precondition_failed",
                 "last operation belongs to a different workspace instance or unsupported scope",
@@ -487,22 +521,6 @@ impl NativeRepo<'_> {
                 .into());
             }
         }
-        self.ensure_clean("undo")?;
-        if self.index()?.entries.iter().any(|e| e.stage() != 0) {
-            return Err(crate::machine::Failure::refusal(
-                "precondition_failed",
-                "recovery precondition failed: unmerged index",
-            )
-            .into());
-        }
-        let old = index_entries(&self.index()?);
-        // Resolve the future HEAD using an overlay, before mutating any ref.
-        let mut refs: std::collections::BTreeMap<_, _> = self
-            .store
-            .refs
-            .iter()
-            .map(|(n, t)| (n.to_owned(), t.clone()))
-            .collect();
         let inverse: Vec<_> = tx
             .changes
             .iter()
@@ -512,49 +530,39 @@ impl NativeRepo<'_> {
                 new: c.old.clone(),
             })
             .collect();
-        for c in &inverse {
-            match &c.new {
-                Some(t) => {
-                    refs.insert(c.name.clone(), t.clone());
-                }
-                None => {
-                    refs.remove(&c.name);
-                }
+        // Version 1 did not describe the operation's effects. In particular,
+        // a missing checkout is not evidence that the workspace was untouched.
+        if context.version != 2 {
+            return Err(crate::machine::Failure::refusal(
+                "unsupported_record",
+                "legacy operation lacks explicit recovery effects; automatic undo refused",
+            )
+            .into());
+        }
+        let intent = match (context.effects, context.checkout) {
+            (RefEffects::RefsOnly, None) => None,
+            (RefEffects::Checkout, Some(intent)) => Some(self.inverse_checkout(&intent)?),
+            _ => {
+                return Err(crate::machine::Failure::refusal(
+                    "unsupported_record",
+                    "unknown or incomplete recovery effects; automatic undo refused",
+                )
+                .into());
             }
-        }
-        let mut name = self.head_ref.clone();
-        let mut target = None;
-        let mut resolved = false;
-        for _ in 0..6 {
-            match refs.get(&name) {
-                Some(RefTarget::Symbolic(n)) => name = n.clone(),
-                Some(RefTarget::Oid(oid)) => {
-                    target = Some(*oid);
-                    resolved = true;
-                    break;
-                }
-                None => {
-                    resolved = true;
-                    break;
-                }
-            }
-        }
-        if !resolved {
-            return Err("recovery HEAD has a symbolic reference cycle".into());
-        }
-        let target = match target {
-            Some(oid) => self.commit_entries(oid)?,
-            None => Vec::new(),
         };
-        self.preflight_checkout(&old, &target)?;
-        let intent = self.prepare_checkout(&old, &target)?;
         self.inverse_of = Some(op.id.to_string());
-        self.checkout_intent = Some(intent.clone());
-        let result = self.commit_refs("undo", &inverse);
+        self.checkout_intent = intent.clone();
+        let result = if intent.is_some() {
+            self.commit_refs("undo", &inverse)
+        } else {
+            self.commit_refs_only("undo", &inverse)
+        };
         self.inverse_of = None;
         self.checkout_intent = None;
         let operation = result?;
-        self.apply_prepared_checkout(operation, &intent)?;
+        if let Some(intent) = intent {
+            self.apply_prepared_checkout(operation, &intent)?;
+        }
         Ok(())
     }
 

@@ -77,7 +77,6 @@ impl NativeRepo<'_> {
         // Apply the new tree to the working tree + index, just like
         // `alt merge`'s success path does.
         let old = index_entries(&self.index()?);
-        self.checkout(&old, &entries)?;
 
         // Build the commit: keep the original author ident, but
         // committer + commit time are our own identity + now. Message
@@ -116,7 +115,7 @@ impl NativeRepo<'_> {
             self.store.algo,
         )?;
         self.store.odb.flush()?;
-        self.advance_branch(&head_ref, head_oid, commit)?;
+        self.advance_branch_checkout(&head_ref, head_oid, commit, &old, &entries)?;
 
         if json {
             use crate::json::Json;

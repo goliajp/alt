@@ -78,7 +78,7 @@ impl NativeRepo<'_> {
                 match tx.context {
                     Some(bytes) => {
                         let context: RefContext = serde_json::from_slice(&bytes)?;
-                        if context.version != 1 {
+                        if !matches!(context.version, 1 | 2) {
                             return Err(crate::machine::Failure::refusal(
                                 "unsupported_record",
                                 "unsupported ref context",

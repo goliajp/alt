@@ -64,16 +64,27 @@ Abandonment does not terminate a runner or reverse external effects.
 
 ## Undo and old logs
 
-The old ALTL frame chain and opaque payload bytes remain readable. Old index
-transactions without a reliable workspace identity and expected state cannot be
-automatically undone. Upgrade neither rewrites those bytes nor attributes them
-to the current workspace. Unknown/corrupt payloads are not silently skipped.
+Undo of a newly recorded `commit` or `commit --amend` restores its reference
+transaction, including the metadata note ref. It leaves the current index bytes,
+working files, modes, symlinks and untracked files intact, including edits made
+after the commit. Undoing the first commit returns the branch to an unborn state
+with its staged files retained. Undo-of-undo restores the reference transaction
+again without checking out a tree.
 
-New undo checks the recorded workspace instance and expected current state.
-Changed index/worktree content, conflicting stages, occupied untracked paths,
-changed shared refs, missing pre-state or a recreated workspace cause refusal
-before unsafe restoration. Do not delete logs, edit request records, force a
-different workspace or erase an untracked file merely to make undo succeed.
+Workspace-changing operations use recorded before/after snapshots. Undo checks
+the workspace instance, affected paths, index and shared refs before restoration.
+A changed affected path, occupied untracked path, changed index/ref, missing
+snapshot or recreated workspace causes refusal before restoration. Unrelated
+working files are preserved. Do not delete logs, edit request records, force a
+different workspace or erase untracked files merely to make undo succeed.
+
+The old ALTL frame chain and opaque payload bytes remain readable. Historical
+ref transactions without explicit recovery effects cannot be automatically
+undone: a missing checkout field does not prove the operation left files alone.
+Old index transactions without reliable ownership and expected state are also
+refused. New operations whose complete recovery effects are not recorded refuse
+automatic undo as well. Upgrade does not rewrite these bytes or attribute them
+to the current workspace. Unknown/corrupt payloads are not silently skipped.
 
 ## Preserve data and exit to Git
 
