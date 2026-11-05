@@ -1,3 +1,4 @@
+mod web;
 use crate::{NativeOptions, Output, RequestAction, Route, execute_native, parse_route};
 use alt_remote_protocol::{ErrorCode, Failure, Limits, RequestKey, Retry};
 use alt_server_store::{ByteStore, Error, InstanceSpec, Store};
@@ -20,6 +21,7 @@ use std::{
     time::Duration,
 };
 use tokio::{io::AsyncWriteExt, net::TcpListener, sync::Semaphore};
+pub use web::WebOptions;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 type ResponseBody = UnsyncBoxBody<Bytes, BoxError>;
@@ -73,6 +75,8 @@ struct State {
     factory: StoreFactory,
     options: HttpOptions,
     workers: Arc<Semaphore>,
+    browser: Option<WebOptions>,
+    passwords: Arc<Semaphore>,
 }
 fn full(bytes: impl Into<Bytes>) -> ResponseBody {
     Full::new(bytes.into())
@@ -212,7 +216,23 @@ fn key(route: &Route) -> Option<RequestKey> {
         _ => None,
     }
 }
-async fn handle(request: Request<Incoming>, state: Arc<State>) -> Response<ResponseBody> {
+async fn handle(
+    request: Request<Incoming>,
+    state: Arc<State>,
+    peer: std::net::IpAddr,
+) -> Response<ResponseBody> {
+    if request.method() == hyper::Method::GET
+        && request.uri().path() == "/livez"
+        && request.uri().query().is_none()
+    {
+        return response(200, "application/json", full("{\"alive\":true}"));
+    }
+    if state.browser.as_ref().is_some_and(|browser| {
+        request.uri().path().starts_with("/web/")
+            || browser.assets.get(request.uri().path()).is_some()
+    }) {
+        return web::handle(request, state, peer).await;
+    }
     let Some(route) = parse_route(
         request.method().as_str(),
         request.uri().path(),
@@ -452,11 +472,26 @@ async fn handle(request: Request<Incoming>, state: Arc<State>) -> Response<Respo
     )
     .await;
     match result {
-        Ok(Ok(Ok(Output::Bytes {
+        Ok(Ok(result)) => render_output(result, request_key),
+        _ => failure(
+            503,
+            ErrorCode::OutcomeUnknown,
+            "Processing may still be running; query the original request",
+            request_key,
+            Retry::QueryOutcome,
+        ),
+    }
+}
+fn render_output(
+    result: alt_server_store::Result<Output>,
+    request_key: Option<RequestKey>,
+) -> Response<ResponseBody> {
+    match result {
+        Ok(Output::Bytes {
             content_type,
             bytes,
-        }))) => response(200, content_type, full(bytes)),
-        Ok(Ok(Ok(Output::GitReport { bytes, request }))) => {
+        }) => response(200, content_type, full(bytes)),
+        Ok(Output::GitReport { bytes, request }) => {
             let mut output = response(200, "application/x-git-receive-pack-result", full(bytes));
             let location = format!(
                 "/v1/repositories/{}/epochs/{}/requests/{}/{}",
@@ -471,11 +506,11 @@ async fn handle(request: Request<Incoming>, state: Arc<State>) -> Response<Respo
             );
             output
         }
-        Ok(Ok(Ok(Output::Temporary {
+        Ok(Output::Temporary {
             content_type,
             bytes,
             file,
-        }))) => {
+        }) => {
             let stream = tokio_util::io::ReaderStream::with_capacity(
                 tokio::fs::File::from_std(file.into_file()),
                 65536,
@@ -488,7 +523,7 @@ async fn handle(request: Request<Incoming>, state: Arc<State>) -> Response<Respo
                 .insert(header::CONTENT_LENGTH, bytes.into());
             output
         }
-        Ok(Ok(Ok(Output::Json(value)))) => match serde_json::to_vec(&value) {
+        Ok(Output::Json(value)) => match serde_json::to_vec(&value) {
             Ok(bytes) => response(200, "application/json", full(bytes)),
             Err(_) => failure(
                 500,
@@ -498,11 +533,11 @@ async fn handle(request: Request<Incoming>, state: Arc<State>) -> Response<Respo
                 Retry::QueryOutcome,
             ),
         },
-        Ok(Ok(Ok(Output::File {
+        Ok(Output::File {
             bytes,
             digest,
             file,
-        }))) => {
+        }) => {
             let stream =
                 tokio_util::io::ReaderStream::with_capacity(tokio::fs::File::from_std(file), 65536)
                     .map_ok(Frame::data)
@@ -521,16 +556,10 @@ async fn handle(request: Request<Incoming>, state: Arc<State>) -> Response<Respo
             );
             output
         }
-        Ok(Ok(Err(error))) => store_failure(error, request_key),
-        _ => failure(
-            503,
-            ErrorCode::OutcomeUnknown,
-            "Processing may still be running; query the original request",
-            request_key,
-            Retry::QueryOutcome,
-        ),
+        Err(error) => store_failure(error, request_key),
     }
 }
+
 enum BodyError {
     Limit,
     Malformed,
@@ -565,6 +594,26 @@ pub async fn serve(
     options: HttpOptions,
     shutdown: impl std::future::Future<Output = ()>,
 ) -> std::io::Result<()> {
+    serve_with_browser(listener, factory, options, None, shutdown).await
+}
+pub async fn serve_with_browser(
+    listener: TcpListener,
+    factory: StoreFactory,
+    options: HttpOptions,
+    browser: Option<WebOptions>,
+    shutdown: impl std::future::Future<Output = ()>,
+) -> std::io::Result<()> {
+    if let Some(ref browser) = browser {
+        browser.validate()?;
+    }
+    let check_factory = factory.clone();
+    let origin = browser.as_ref().map(|b| b.origin.clone());
+    tokio::task::spawn_blocking(move || {
+        check_factory.open()?.check_browser_binding(origin.as_ref())
+    })
+    .await
+    .map_err(|_| std::io::Error::other("browser binding check unavailable"))?
+    .map_err(|_| std::io::Error::other("browser binding does not match configuration"))?;
     if options.connections == 0
         || options.workers == 0
         || options.header_bytes < 8192
@@ -584,10 +633,12 @@ pub async fn serve(
         factory,
         workers: Arc::new(Semaphore::new(options.workers)),
         options,
+        browser,
+        passwords: Arc::new(Semaphore::new(2)),
     });
     tokio::pin!(shutdown);
     loop {
-        let socket = tokio::select! { _ = &mut shutdown => return Ok(()), accepted = listener.accept() => accepted?.0 };
+        let (socket, peer) = tokio::select! { _ = &mut shutdown => return Ok(()), accepted = listener.accept() => accepted? };
         let Ok(permit) = connections.clone().try_acquire_owned() else {
             drop(socket);
             continue;
@@ -604,7 +655,7 @@ pub async fn serve(
             let lifetime = state.options.connection_timeout;
             let service = service_fn(move |request| {
                 let state = state.clone();
-                async move { Ok::<_, Infallible>(handle(request, state).await) }
+                async move { Ok::<_, Infallible>(handle(request, state, peer.ip()).await) }
             });
             let _ = tokio::time::timeout(
                 lifetime,

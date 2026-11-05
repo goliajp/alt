@@ -2,6 +2,7 @@ use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
 use alt_remote_protocol::*;
 use alt_repository_service::{Grant, RefSelector};
 use alt_server::{HttpOptions, NativeOptions, StoreFactory};
+mod browser;
 mod chunks;
 mod git;
 mod native_client;
@@ -34,6 +35,9 @@ struct Running {
 }
 impl Running {
     fn start(f: &Fixture) -> Self {
+        Self::start_with_browser(f, None)
+    }
+    fn start_with_browser(f: &Fixture, browser: Option<alt_server::WebOptions>) -> Self {
         let mut database: postgres::Config = f.admin_dsn.parse().unwrap();
         database.dbname(&f.database);
         let signing_key = SigningKey::from_bytes(&[7; 32]);
@@ -73,7 +77,7 @@ impl Running {
             rt.block_on(async {
                 let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
                 address_tx.send(listener.local_addr().unwrap()).unwrap();
-                alt_server::serve(listener, factory, options, async {
+                alt_server::serve_with_browser(listener, factory, options, browser, async {
                     let _ = shutdown_rx.await;
                 })
                 .await
@@ -505,4 +509,38 @@ impl Payload {
             commit,
         }
     }
+}
+
+#[test]
+#[ignore = "requires isolated PostgreSQL and loopback HTTP; checks public liveness independently of fenced readiness"]
+fn liveness_does_not_claim_readiness_after_runtime_fencing() {
+    let f = Fixture::new();
+    let server = Running::start(&f);
+    let live = || {
+        ureq::get(&format!("{}/livez", server.url))
+            .call()
+            .unwrap()
+            .into_string()
+            .unwrap()
+    };
+    assert_eq!(live(), "{\"alive\":true}");
+    assert_eq!(
+        ureq::get(&format!("{}/healthz", server.url))
+            .call()
+            .unwrap()
+            .into_string()
+            .unwrap(),
+        "{\"ready\":true}"
+    );
+    f.client()
+        .execute(
+            "UPDATE alt_instance SET runtime_generation=runtime_generation+1",
+            &[],
+        )
+        .unwrap();
+    assert!(matches!(
+        ureq::get(&format!("{}/healthz", server.url)).call(),
+        Err(ureq::Error::Status(503, _))
+    ));
+    assert_eq!(live(), "{\"alive\":true}");
 }

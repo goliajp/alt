@@ -3,6 +3,9 @@
 # No existing database/container is reused or removed. The exact image identity
 # and test command exit status are recorded by the calling gate's log.
 set -eu
+if [ -n "${ALT_SERVER_TEST_POSTGRES_BIN:-}" ]; then
+    exec "$(dirname "$0")/with-test-postgres-native.sh" "$@"
+fi
 [ "$#" -gt 0 ] || { echo 'usage: scripts/with-test-postgres.sh <command> [args...]' >&2; exit 2; }
 image=${ALT_SERVER_TEST_POSTGRES_IMAGE:-postgres:18.6}
 run=$(mktemp -d "${TMPDIR:-/tmp}/alt-postgres-test.XXXXXXXX")

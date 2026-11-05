@@ -1,0 +1,15 @@
+**
+!Cargo.toml
+!Cargo.lock
+!LICENSE-MIT
+!LICENSE-APACHE
+!crates/
+!crates/**
+!workbench/
+!workbench/**
+workbench/node_modules
+workbench/dist
+workbench/*.tsbuildinfo
+!self-hosted/
+!self-hosted/Dockerfile
+!self-hosted/entrypoint.sh

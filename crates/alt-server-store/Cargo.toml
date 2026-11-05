@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+alt-browser-auth.workspace = true
 alt-task.workspace = true
 alt-task-service.workspace = true
 alt-git-codec.workspace = true

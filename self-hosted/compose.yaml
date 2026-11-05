@@ -1,0 +1,68 @@
+# Run from the prepared installation directory; all paths are local to it.
+services:
+  database:
+    image: "${ALT_DATABASE_IMAGE:?exact locally loaded image identity required}"
+    pull_policy: never
+    restart: unless-stopped
+    network_mode: none
+    environment:
+      POSTGRES_DB: alt
+      POSTGRES_USER: alt
+      POSTGRES_PASSWORD_FILE: /run/secrets/database-password
+      POSTGRES_INITDB_ARGS: --auth-local=scram-sha-256 --auth-host=scram-sha-256
+    command: [postgres, -c, "listen_addresses=", -c, "unix_socket_directories=/var/run/postgresql"]
+    volumes:
+      - postgres:/var/lib/postgresql
+      - socket:/var/run/postgresql
+      - ./secrets/database-password:/run/secrets/database-password:ro
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -h /var/run/postgresql -U alt -d alt"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    security_opt: [no-new-privileges:true]
+
+  edge:
+    image: "${ALT_EDGE_IMAGE:?exact locally loaded image identity required}"
+    pull_policy: never
+    restart: unless-stopped
+    user: "${ALT_UID:?}:${ALT_GID:?}"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    ports:
+      - "${ALT_BIND_ADDRESS:-127.0.0.1}:${ALT_HTTPS_PORT:?}:8443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./tls:/run/tls:ro
+    tmpfs: [/tmp, /data, /config]
+
+  app:
+    image: "${ALT_IMAGE:?exact locally loaded image identity required}"
+    pull_policy: never
+    restart: unless-stopped
+    user: "${ALT_UID:?}:${ALT_GID:?}"
+    network_mode: service:edge
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    depends_on:
+      database: {condition: service_healthy}
+      edge: {condition: service_started}
+    volumes:
+      - ./config:/etc/alt:ro
+      - ./secrets/receipt.key:/run/alt/receipt.key:ro
+      - ./secrets/database:/run/alt/database:ro
+      - ./data:/var/lib/alt
+      - socket:/var/run/postgresql:ro
+    tmpfs:
+      - /tmp:mode=1777,size=${ALT_TEMP_BYTES:-4294967296}
+    healthcheck:
+      test: [CMD, /usr/local/bin/alt-entrypoint, health]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+volumes:
+  postgres:
+  socket:

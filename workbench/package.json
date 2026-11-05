@@ -1,0 +1,26 @@
+{
+  "name": "@alt/workbench",
+  "version": "0.1.0-internal.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "test": "bun test src/*.test.ts",
+    "check": "tsc -b --noEmit && bun test src/*.test.ts"
+  },
+  "dependencies": {
+    "@golia/ui": "file:vendor/golia-ui-0.1.0.tgz",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "lucide-react": "1.31.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@vitejs/plugin-react": "6.0.5",
+    "typescript": "6.0.3",
+    "vite": "8.2.1",
+    "playwright-core": "1.63.0"
+  }
+}

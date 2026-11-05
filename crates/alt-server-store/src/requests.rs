@@ -127,6 +127,15 @@ impl Store {
         // Old epochs may return retained facts. Absence is meaningful only in
         // the current epoch; never turn a restored snapshot's gap into replay.
         let result = match request_row(&mut tx, key)? {
+            Some(row)
+                if key.scope.recovery_epoch != current.scope.recovery_epoch
+                    && matches!(
+                        row.get::<_, String>("state").as_str(),
+                        "receiving" | "ready"
+                    ) =>
+            {
+                RequestObservation::Unknown { key: key.clone() }
+            }
             Some(row) => RequestObservation::Recorded {
                 key: key.clone(),
                 result: Box::new(serde_json::from_value(row.get("result"))?),

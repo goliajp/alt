@@ -1,4 +1,6 @@
+mod browser;
 mod faults;
+mod maintenance;
 mod tasks;
 
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};

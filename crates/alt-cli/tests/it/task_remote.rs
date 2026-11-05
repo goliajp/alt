@@ -130,6 +130,41 @@ impl Server {
         store
             .set_review_grant(&admin, "repository", "reviewer", true)
             .unwrap();
+        let socket = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        socket.set_nonblocking(true).unwrap();
+        let origin = alt_browser_auth::PublicOrigin::parse(&format!(
+            "http://{}",
+            socket.local_addr().unwrap()
+        ))
+        .unwrap();
+        store.enable_browser(&admin, &origin).unwrap();
+        store
+            .create_local_user(
+                &admin,
+                "reviewer",
+                "reviewer",
+                "Independent reviewer",
+                "a private browser acceptance password",
+                false,
+            )
+            .unwrap();
+        let asset_dir = std::env::var_os("ALT_WORKBENCH_ASSETS")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                let assets = root.path().join("web-assets");
+                std::fs::create_dir(&assets).unwrap();
+                std::fs::write(
+                    assets.join("index.html"),
+                    "<!doctype html><title>alt acceptance</title>",
+                )
+                .unwrap();
+                assets
+            });
+        let browser = alt_server::WebOptions {
+            origin,
+            assets: alt_server::WebAssets::load(&asset_dir).unwrap(),
+            session_ttl_ms: 600_000,
+        };
         let factory = StoreFactory {
             database: config,
             bytes,
@@ -164,11 +199,17 @@ impl Server {
                 .build()
                 .unwrap()
                 .block_on(async {
-                    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+                    let listener = tokio::net::TcpListener::from_std(socket).unwrap();
                     address_tx.send(listener.local_addr().unwrap()).unwrap();
-                    alt_server::serve(listener, factory, options, async {
-                        let _ = shutdown_rx.await;
-                    })
+                    alt_server::serve_with_browser(
+                        listener,
+                        factory,
+                        options,
+                        Some(browser),
+                        async {
+                            let _ = shutdown_rx.await;
+                        },
+                    )
                     .await
                     .unwrap();
                 });
@@ -630,6 +671,46 @@ fn two_clients_continue_original_task_revalidate_review_publish_and_export_witho
         )["state"],
         "ready"
     );
+    let web_base = format!("/web/repositories/repository/epochs/1/requests/bob/{final_id}");
+    let (cookie, browser_session) = browser_login(&server);
+    let (status, browser_review) =
+        browser_json(&server, &format!("{web_base}/review"), &cookie, None, None);
+    assert_eq!(status, 200, "{browser_review}");
+    assert_eq!(browser_review["candidate_id"], continued["candidate_id"]);
+    assert_eq!(browser_review["historical_reviewer"], "bob");
+    assert_eq!(browser_review["eligible"], true, "{browser_review}");
+    assert!(
+        browser_review["changes"][0]["patch"]
+            .as_str()
+            .unwrap()
+            .contains("+second-client")
+    );
+    assert_eq!(browser_review["evidence"][0]["accepted"], true);
+    let mut stale = browser_review["inspected"].clone();
+    stale["request_digest"] = json!("0".repeat(64));
+    assert_eq!(
+        browser_json(
+            &server,
+            &format!("{web_base}/approve"),
+            &cookie,
+            browser_session["csrf"].as_str(),
+            Some(json!({"integration_id":integrated["integration_id"],"inspected":stale}))
+        )
+        .0,
+        409
+    );
+    // Optional real-browser acceptance consumes this same live task and service.
+    if let Some(script) = std::env::var_os("ALT_WORKBENCH_ACCEPTANCE") {
+        let result = Command::new("node")
+            .arg(script)
+            .env("ALT_BROWSER_ORIGIN", &server.url)
+            .env("ALT_BROWSER_REVIEW", &web_base)
+            .env("ALT_BROWSER_TASK", task_id)
+            .status()
+            .unwrap();
+        assert!(result.success(), "real workbench acceptance failed");
+    }
+    assert_eq!(browser_json(&server, &format!("{web_base}/approve"), &cookie, browser_session["csrf"].as_str(), Some(json!({"integration_id":integrated["integration_id"],"inspected":browser_review["inspected"]}))).0, 200);
     connect(&aw, &server, &server.reviewer, "reviewer");
     let inspected = value(
         &aw,
@@ -685,6 +766,31 @@ fn two_clients_continue_original_task_revalidate_review_publish_and_export_witho
         )["observation"]["result"]["receipt"],
         committed["receipt"]
     );
+    let (status, task_page) = browser_json(
+        &server,
+        &format!("/web/repositories/repository/records/task/{task_id}"),
+        &cookie,
+        None,
+        None,
+    );
+    assert_eq!(status, 200, "{task_page}");
+    assert_eq!(task_page["summary"]["id"], task_id);
+    assert!(
+        task_page["attachments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|a| a["name"] == "original-record.json")
+    );
+    let (status, deliveries) = browser_json(
+        &server,
+        "/web/repositories/repository/records/delivery",
+        &cookie,
+        None,
+        None,
+    );
+    assert_eq!(status, 200, "{deliveries}");
+    assert_eq!(deliveries["items"][0]["id"], delivered["delivery_id"]);
     let final_git = root.path().join("final-git");
     git(
         root.path(),
@@ -734,4 +840,104 @@ fn two_clients_continue_original_task_revalidate_review_publish_and_export_witho
         .unwrap(),
         original_record
     );
+}
+
+fn browser_request(
+    server: &Server,
+    path: &str,
+    cookie: Option<&str>,
+    csrf: Option<&str>,
+    body: Option<Value>,
+) -> (u16, String, Value) {
+    use std::io::Write;
+    let headers = tempfile::NamedTempFile::new().unwrap();
+    let output = tempfile::NamedTempFile::new().unwrap();
+    let mut command = Command::new("curl");
+    command
+        .args([
+            "--silent",
+            "--show-error",
+            "--max-time",
+            "60",
+            "--dump-header",
+        ])
+        .arg(headers.path())
+        .arg("--output")
+        .arg(output.path())
+        .args(["--write-out", "%{http_code}", "--header"])
+        .arg(format!("Origin: {}", server.url));
+    if let Some(cookie) = cookie {
+        command.arg("--header").arg(format!("Cookie: {cookie}"));
+    }
+    if let Some(csrf) = csrf {
+        command.arg("--header").arg(format!("X-Alt-CSRF: {csrf}"));
+    }
+    if body.is_some() {
+        command.args([
+            "--header",
+            "Content-Type: application/json",
+            "--data-binary",
+            "@-",
+        ]);
+    }
+    let mut child = command
+        .arg(format!("{}{path}", server.url))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    if let Some(body) = body {
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(&serde_json::to_vec(&body).unwrap())
+            .unwrap();
+    } else {
+        drop(child.stdin.take());
+    }
+    let result = child.wait_with_output().unwrap();
+    assert!(
+        result.status.success(),
+        "browser request failed: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    (
+        std::str::from_utf8(&result.stdout)
+            .unwrap()
+            .parse()
+            .unwrap(),
+        std::fs::read_to_string(headers.path()).unwrap(),
+        serde_json::from_reader(std::fs::File::open(output.path()).unwrap()).unwrap(),
+    )
+}
+fn browser_login(server: &Server) -> (String, Value) {
+    let (status, headers, value) = browser_request(
+        server,
+        "/web/login",
+        None,
+        None,
+        Some(json!({"login_name":"reviewer","password":"a private browser acceptance password"})),
+    );
+    assert_eq!(status, 200, "{value}");
+    let cookie = headers
+        .lines()
+        .find_map(|line| {
+            line.split_once(':')
+                .filter(|(name, _)| name.eq_ignore_ascii_case("set-cookie"))
+                .map(|(_, value)| value.trim().split(';').next().unwrap().to_owned())
+        })
+        .unwrap();
+    (cookie, value)
+}
+fn browser_json(
+    server: &Server,
+    path: &str,
+    cookie: &str,
+    csrf: Option<&str>,
+    body: Option<Value>,
+) -> (u16, Value) {
+    let (status, _, value) = browser_request(server, path, Some(cookie), csrf, body);
+    (status, value)
 }

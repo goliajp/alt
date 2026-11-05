@@ -51,6 +51,56 @@ enum Action {
     /// Verify current schema, persisted mode, receipt key and volume identity
     Health,
     BuildInfo,
+    /// Read-only administrator counters; does not perform a storage scrub
+    Status,
+    /// Read administrator operation history without secrets or action details
+    Audit {
+        #[arg(long)]
+        before: Option<u64>,
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+    },
+    /// Explicit checksummed schema upgrade; save the next config before commit
+    Migrate {
+        #[arg(long)]
+        from_schema: u32,
+        #[arg(long)]
+        output_config: PathBuf,
+    },
+    /// Encrypted physical backup, including credentials and the receipt key
+    Backup {
+        #[arg(long, default_value_t = alt_server_store::SCHEMA_VERSION)]
+        schema: u32,
+        #[arg(long)]
+        recipient: String,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Authenticate and decrypt every backup entry without restoring a database
+    BackupVerify {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        identity: PathBuf,
+        #[arg(long)]
+        trusted_receipt_key: String,
+        #[arg(long)]
+        maximum_bytes: u64,
+    },
+    /// Restore to a dedicated empty database and absent volume/key paths
+    Restore {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        identity: PathBuf,
+        #[arg(long)]
+        trusted_receipt_key: String,
+        #[arg(long)]
+        maximum_bytes: u64,
+        /// Attest that the old instance is externally stopped and fenced
+        #[arg(long)]
+        source_fenced: bool,
+    },
     RepositoryCreate {
         id: String,
         #[arg(long)]
@@ -94,6 +144,43 @@ enum Action {
         #[arg(long)]
         attribution: Option<PathBuf>,
     },
+    /// Persist the configured origin before enabling browser traffic
+    BrowserEnable,
+    /// Create a local browser user from a private password file
+    UserCreate {
+        actor: String,
+        #[arg(long)]
+        login: String,
+        #[arg(long)]
+        display_name: String,
+        #[arg(long)]
+        password_file: PathBuf,
+        #[arg(long)]
+        administrator: bool,
+    },
+    UserResetPassword {
+        actor: String,
+        #[arg(long)]
+        password_file: PathBuf,
+    },
+    /// Recover an existing local administrator with physical instance access
+    RecoverLocalAdministrator {
+        actor: String,
+        #[arg(long)]
+        password_file: PathBuf,
+        #[arg(long)]
+        reason: String,
+    },
+    /// Recover an existing local human administrator with a short-lived token
+    RecoverLocalToken {
+        actor: String,
+        #[arg(long)]
+        secret: PathBuf,
+        #[arg(long)]
+        expires_unix_ms: u64,
+        #[arg(long)]
+        reason: String,
+    },
     TokenRevoke {
         #[arg(long)]
         secret: PathBuf,
@@ -120,15 +207,54 @@ fn json_file<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
     serde_json::from_slice(&operator::read_regular(path, 4 * 1024 * 1024, false)?)
         .map_err(|_| Error::Config("operator input JSON"))
 }
+fn password_file(path: &Path) -> Result<String> {
+    let raw = operator::read_regular(path, 1025, true)?;
+    let value = std::str::from_utf8(&raw).map_err(|_| Error::Config("password encoding"))?;
+    Ok(value.strip_suffix('\n').unwrap_or(value).to_owned())
+}
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
+fn public_key(value: &str) -> Result<[u8; 32]> {
+    if value.len() != 64
+        || !value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return Err(Error::Config(
+            "trusted receipt key must be 64 lowercase hex digits",
+        ));
+    }
+    let mut key = [0u8; 32];
+    for (index, byte) in key.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&value[index * 2..index * 2 + 2], 16)
+            .map_err(|_| Error::Config("trusted receipt key"))?;
+    }
+    Ok(key)
+}
 fn build_info() -> Value {
-    json!({"product":"alt-server","version":env!("CARGO_PKG_VERSION"),"build_id":option_env!("ALT_BUILD_ID").unwrap_or("development"),"protocol":1,"schema":3})
+    json!({"product":"alt-server","version":env!("CARGO_PKG_VERSION"),"build_id":option_env!("ALT_BUILD_ID").unwrap_or("development"),"protocol":1,"schema":alt_server_store::SCHEMA_VERSION})
 }
 fn execute(args: &Args) -> Result<Value> {
     if let Action::BuildInfo = &args.command {
         return Ok(build_info());
+    }
+    if let Action::BackupVerify {
+        input,
+        identity,
+        trusted_receipt_key,
+        maximum_bytes,
+    } = &args.command
+    {
+        let verified = operator::backup::verify(
+            input,
+            identity,
+            public_key(trusted_receipt_key)?,
+            *maximum_bytes,
+        )?;
+        return Ok(
+            json!({"verified":true,"restored":false,"manifest_digest":verified.manifest_digest,"catalog":verified.manifest.catalog}),
+        );
     }
     if let Action::Secret { kind, output } = &args.command {
         let mut seed = [0u8; 32];
@@ -147,6 +273,52 @@ fn execute(args: &Args) -> Result<Value> {
             .as_deref()
             .ok_or(Error::Config("--config is required"))?,
     )?;
+    match &args.command {
+        Action::Migrate {
+            from_schema,
+            output_config,
+        } => {
+            let next = config.migrate(*from_schema, output_config)?;
+            return Ok(
+                json!({"migrated":true,"instance":next.instance,"configuration":output_config,"schema":alt_server_store::SCHEMA_VERSION}),
+            );
+        }
+        Action::Backup {
+            schema,
+            recipient,
+            output,
+        } => {
+            let manifest = operator::backup::create(&config, *schema, recipient, output)?;
+            return Ok(
+                json!({"backup_created":true,"restored":false,"operation_id":manifest.operation_id,"output":output,"catalog":manifest.catalog,"payload":manifest.payload}),
+            );
+        }
+        Action::Restore {
+            input,
+            identity,
+            trusted_receipt_key,
+            maximum_bytes,
+            source_fenced,
+        } => {
+            if !source_fenced {
+                return Err(Error::Config(
+                    "--source-fenced is required for disaster recovery",
+                ));
+            }
+            let verified = operator::backup::verify(
+                input,
+                identity,
+                public_key(trusted_receipt_key)?,
+                *maximum_bytes,
+            )?;
+            let digest = verified.manifest_digest.clone();
+            let catalog = operator::backup::restore(&config, verified, *source_fenced)?;
+            return Ok(
+                json!({"restored":true,"manifest_digest":digest,"catalog":catalog,"old_credentials_revoked":true}),
+            );
+        }
+        _ => (),
+    }
     if let Action::Initialize { resume } = &args.command {
         let store = config.initialize(*resume)?;
         return Ok(
@@ -161,6 +333,7 @@ fn execute(args: &Args) -> Result<Value> {
             drop(store);
             let factory = config.factory()?;
             let options = config.http_options();
+            let browser = config.browser_options()?;
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(config.http.workers.min(16))
                 .enable_all()
@@ -172,7 +345,7 @@ fn execute(args: &Args) -> Result<Value> {
                 let line=json!({"event":"listening","address":address,"instance":config.instance,"build":build_info()});
                 println!("{line}");std::io::stdout().flush().map_err(|_|Error::File)?;
                 let mut termination=tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).map_err(|_|Error::Config("termination signal"))?;
-                alt_server::serve(listener,factory,options,async move {tokio::select! {_=tokio::signal::ctrl_c()=>{},_=termination.recv()=>{}}}).await.map_err(|_|Error::Unknown)
+                alt_server::serve_with_browser(listener,factory,options,browser,async move {tokio::select! {_=tokio::signal::ctrl_c()=>{},_=termination.recv()=>{}}}).await.map_err(|_|Error::Unknown)
             })?;
             return Ok(json!({"event":"stopped"}));
         }
@@ -195,11 +368,44 @@ fn execute(args: &Args) -> Result<Value> {
         }
         _ => (),
     }
+    if let Action::RecoverLocalAdministrator {
+        actor,
+        password_file: path,
+        reason,
+    } = &args.command
+    {
+        store.recover_local_administrator(actor, &password_file(path)?, reason)?;
+        return Ok(json!({"actor":actor,"recovered":true,"old_credentials_revoked":true}));
+    }
+    if let Action::RecoverLocalToken {
+        actor,
+        secret,
+        expires_unix_ms,
+        reason,
+    } = &args.command
+    {
+        store.recover_local_token(
+            actor,
+            &operator::read_token(secret)?,
+            *expires_unix_ms,
+            reason,
+        )?;
+        return Ok(
+            json!({"actor":actor,"recovered":true,"old_credentials_revoked":true,"expires_unix_ms":expires_unix_ms.to_string()}),
+        );
+    }
     let token = operator::read_token(args.credential.as_deref().ok_or(Error::Config(
         "--credential is required for this operator action",
     ))?)?;
     let admin = store.authenticate(&token)?;
     let result = match &args.command {
+        Action::Status => {
+            serde_json::to_value(store.instance_status(&admin)?).map_err(|_| Error::Store)?
+        }
+        Action::Audit { before, limit } => {
+            serde_json::to_value(store.instance_audit(&admin, *before, *limit)?)
+                .map_err(|_| Error::Store)?
+        }
         Action::RepositoryCreate { id, quota_bytes } => {
             json!({"repository":store.create_repository(&admin,id,*quota_bytes)?})
         }
@@ -269,6 +475,39 @@ fn execute(args: &Args) -> Result<Value> {
             )?;
             json!({"actor":actor,"credential_registered":true,"expires_unix_ms":expires_unix_ms.to_string()})
         }
+        Action::BrowserEnable => {
+            let browser = config
+                .browser
+                .as_ref()
+                .ok_or(Error::Config("browser configuration required"))?;
+            let origin = alt_browser_auth::PublicOrigin::parse(&browser.public_origin)
+                .map_err(|_| Error::Config("browser origin"))?;
+            store.enable_browser(&admin, &origin)?;
+            json!({"browser_enabled":true,"public_origin":origin.as_str()})
+        }
+        Action::UserCreate {
+            actor,
+            login,
+            display_name,
+            password_file,
+            administrator,
+        } => {
+            let raw = operator::read_regular(password_file, 1025, true)?;
+            let password = std::str::from_utf8(&raw)
+                .map_err(|_| Error::Config("password encoding"))?
+                .strip_suffix('\n')
+                .unwrap_or(
+                    std::str::from_utf8(&raw).map_err(|_| Error::Config("password encoding"))?,
+                );
+            json!({"user":store.create_local_user(&admin, actor, login, display_name, password, *administrator)?})
+        }
+        Action::UserResetPassword {
+            actor,
+            password_file: path,
+        } => {
+            store.reset_local_password(&admin, actor, &password_file(path)?)?;
+            json!({"actor":actor,"password_reset":true,"old_credentials_revoked":true})
+        }
         Action::TokenRevoke { secret } => {
             store.revoke(&admin, &operator::read_token(secret)?)?;
             json!({"revoked":true})
@@ -290,9 +529,14 @@ fn main() -> ExitCode {
         Err(error) => {
             let writing = !matches!(
                 args.command,
-                Action::Health | Action::BuildInfo | Action::Serve
+                Action::Health
+                    | Action::BuildInfo
+                    | Action::Serve
+                    | Action::Status
+                    | Action::Audit { .. }
+                    | Action::BackupVerify { .. }
             );
-            let unknown = matches!(error, Error::Unknown)
+            let unknown = matches!(error, Error::Unknown | Error::RestoreStage(_))
                 || (writing && matches!(error, Error::Store | Error::Database));
             eprintln!(
                 "{}",

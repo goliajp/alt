@@ -8,6 +8,7 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+alt-browser-auth = { path = "crates/alt-browser-auth" }
 alt-task-transfer = { path = "crates/alt-task-transfer" }
 alt-server = { path = "crates/alt-server" }
 alt-command-protocol = { path = "crates/alt-command-protocol" }

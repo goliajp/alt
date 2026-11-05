@@ -46,7 +46,25 @@ def inputs():
     paths.update(ROOT / name for name in ["Cargo.toml", "Cargo.lock", "scripts/package-internal.py",
                                          "scripts/gate.sh", "scripts/test-gate.py", "scripts/test-package.py",
                                          "scripts/with-test-postgres.sh",
+                                         "scripts/with-test-postgres-native.sh",
+                                         "scripts/package-server.py",
                                          "crates/alt-server/example-config.json"])
+    # The server's browser assets are executable product inputs, including the
+    # independently versioned shared UI archive. Never fingerprint node_modules
+    # or generated dist output as though it were the source of the build.
+    for name in ["package.json", "bun.lock", "index.html", "tsconfig.json", "vite.config.ts"]:
+        paths.add(ROOT / "workbench" / name)
+    for area in ["src", "public", "scripts", "vendor"]:
+        for path in (ROOT / "workbench" / area).rglob("*"):
+            if path.is_symlink():
+                raise ValueError(f"workbench source link is unsupported: {path}")
+            if path.is_file():
+                paths.add(path)
+    for path in (ROOT / "self-hosted").rglob("*"):
+        if path.is_symlink():
+            raise ValueError(f"server distribution link is unsupported: {path}")
+        if path.is_file() and '__pycache__' not in path.parts:
+            paths.add(path)
     for name in [".cargo/config", ".cargo/config.toml", "rust-toolchain", "rust-toolchain.toml"]:
         if (ROOT / name).exists():
             paths.add(ROOT / name)

@@ -75,6 +75,7 @@ impl Store {
         tx.execute("INSERT INTO alt_instance(singleton,installation_id,workspace_id,deployment_mode,runtime_generation,signing_key_id) VALUES(true,$1,$2,$3,$4,$5)", &[&spec.installation_id,&spec.workspace_id,&spec.mode(),&integer(spec.runtime_generation)?,&key_id])?;
         crate::schema::apply_v2(&mut tx)?;
         crate::schema::apply_v3(&mut tx)?;
+        crate::schema::apply_v4(&mut tx)?;
         tx.commit()?;
         Self::open(client, bytes, spec, signing_key, limits)
     }
@@ -87,7 +88,7 @@ impl Store {
     ) -> Result<Self> {
         spec.validate()?;
         limits.validate()?;
-        crate::schema::check(&mut client, 3)?;
+        crate::schema::check(&mut client, 4)?;
         let mut tx = client.transaction()?;
         instance(&mut tx, &spec, &signing_key)?;
         tx.commit()?;
@@ -175,6 +176,13 @@ impl Store {
             expires_at_unix_ms,
             true,
         )?;
+        crate::browser::audit_details(
+            &mut tx,
+            actor,
+            "instance.bootstrap",
+            actor,
+            &serde_json::json!({"credential_id":token_digest(token),"expires_at_unix_ms":expires_at_unix_ms.to_string()}),
+        )?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)
     }
     pub fn authenticate(&mut self, token: &str) -> Result<Credential> {
@@ -211,6 +219,14 @@ impl Store {
             expires_at_unix_ms,
             administrator,
         )?;
+        crate::browser::audit_admin(
+            &mut tx,
+            &self.spec,
+            admin,
+            "credential.issue",
+            actor,
+            serde_json::json!({"credential_id":token_digest(&token),"attribution":attribution,"expires_at_unix_ms":expires_at_unix_ms.to_string(),"administrator":administrator}),
+        )?;
         tx.commit()?;
         Ok(token)
     }
@@ -241,6 +257,14 @@ impl Store {
             expires_at_unix_ms,
             administrator,
         )?;
+        crate::browser::audit_admin(
+            &mut tx,
+            &self.spec,
+            admin,
+            "credential.issue",
+            actor,
+            serde_json::json!({"credential_id":token_digest(token),"attribution":attribution,"expires_at_unix_ms":expires_at_unix_ms.to_string(),"administrator":administrator}),
+        )?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)
     }
     pub fn create_repository(
@@ -259,6 +283,14 @@ impl Store {
         instance(&mut tx, &self.spec, &self.signing_key)?;
         require_admin(&mut tx, &self.spec, admin)?;
         tx.execute("INSERT INTO alt_repositories(id,recovery_epoch,object_format,quota_bytes) VALUES($1,1,'sha1',$2)",&[&repository,&integer(quota_bytes)?])?;
+        crate::browser::audit_admin(
+            &mut tx,
+            &self.spec,
+            admin,
+            "repository.create",
+            repository,
+            serde_json::json!({"quota_bytes":quota_bytes.to_string()}),
+        )?;
         tx.commit()?;
         Ok(scope)
     }
@@ -283,6 +315,14 @@ impl Store {
             "UPDATE alt_repositories SET revocation_generation=revocation_generation+1 WHERE id=$1",
             &[&repository],
         )?;
+        crate::browser::audit_admin(
+            &mut tx,
+            &self.spec,
+            admin,
+            "repository.grants",
+            repository,
+            serde_json::json!({"actor_id":actor,"can_read":can_read,"publish_records":publish_records,"grants":grants}),
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -303,19 +343,40 @@ impl Store {
             "UPDATE alt_repositories SET policies=$2,policy_version=policy_version+1 WHERE id=$1",
             &[&repository, &serde_json::to_value(policies)?],
         )?;
+        crate::browser::audit_admin(
+            &mut tx,
+            &self.spec,
+            admin,
+            "repository.policies",
+            repository,
+            serde_json::json!({"policies":policies}),
+        )?;
         tx.commit()?;
         Ok(())
     }
     pub fn revoke(&mut self, admin: &Credential, token: &str) -> Result<()> {
         let mut tx = self.client.transaction()?;
+        // Credential revocation takes the instance barrier before credential
+        // rows, including when two administrators revoke each other.
+        tx.query_one(
+            "SELECT singleton FROM alt_instance WHERE singleton FOR UPDATE",
+            &[],
+        )?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         require_admin(&mut tx, &self.spec, admin)?;
+        let actor: String = credential_row(&mut tx, &self.spec, admin)?.get("actor_id");
         tx.execute(
             "UPDATE alt_credentials SET revoked=true WHERE token_digest=$1",
             &[&token_digest(token)],
         )?;
-        tx.commit()?;
-        Ok(())
+        crate::browser::audit_details(
+            &mut tx,
+            &actor,
+            "credential.revoke",
+            &token_digest(token),
+            &serde_json::json!({}),
+        )?;
+        tx.commit().map_err(|_| Error::OutcomeUnknown)
     }
 }
 pub(crate) fn integer(value: u64) -> Result<i64> {
@@ -364,7 +425,7 @@ fn mode(mode: DeploymentMode) -> &'static str {
         DeploymentMode::Cloud => "cloud",
     }
 }
-fn token_digest(token: &str) -> String {
+pub(crate) fn token_digest(token: &str) -> String {
     blake3::derive_key("jp.golia.alt.server-token.v1", token.as_bytes())
         .iter()
         .map(|b| format!("{b:02x}"))
@@ -410,7 +471,7 @@ fn validate_token(token: &str) -> Result<()> {
     Ok(())
 }
 #[allow(clippy::too_many_arguments)]
-fn insert_known_token(
+pub(crate) fn insert_known_token(
     tx: &mut Transaction<'_>,
     token: &str,
     actor: &str,
@@ -459,6 +520,7 @@ pub(crate) fn credential_row(
     {
         return Err(Error::Unauthorized);
     }
+    crate::browser::check_credential(tx, credential, &row.get::<_, String>("actor_id"))?;
     Ok(row)
 }
 pub(crate) fn require_admin(

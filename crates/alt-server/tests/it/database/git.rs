@@ -22,7 +22,7 @@ fn git(directory: &Path, token: &str, args: &[&str]) -> Output {
         .output()
         .unwrap()
 }
-fn ok(directory: &Path, token: &str, args: &[&str]) -> Vec<u8> {
+pub(super) fn ok(directory: &Path, token: &str, args: &[&str]) -> Vec<u8> {
     let output = git(directory, token, args);
     assert!(
         output.status.success(),
@@ -31,7 +31,7 @@ fn ok(directory: &Path, token: &str, args: &[&str]) -> Vec<u8> {
     );
     output.stdout
 }
-fn identity(directory: &Path, token: &str) {
+pub(super) fn identity(directory: &Path, token: &str) {
     ok(directory, token, &["config", "user.name", "Original Actor"]);
     ok(
         directory,
@@ -39,7 +39,7 @@ fn identity(directory: &Path, token: &str) {
         &["config", "user.email", "original@example.test"],
     );
 }
-fn text(bytes: Vec<u8>) -> String {
+pub(super) fn text(bytes: Vec<u8>) -> String {
     String::from_utf8(bytes).unwrap().trim().to_owned()
 }
 

@@ -1,0 +1,73 @@
+export type Locale = 'en' | 'zh' | 'ja';
+const en = {
+  instanceHealth:'Instance status', healthReadOnly:'Read-only database observation. Stored bytes are counted per repository; file integrity and backup availability are not checked here.', schema:'Schema', generation:'Runtime generation', storedBytes:'Stored bytes', reservedBytes:'Reserved bytes', pendingRequests:'Current unfinished requests', recoveryGaps:'Unresolved requests from before recovery', pendingEvents:'Events awaiting delivery', observedAt:'Observed at', lastRestore:'Last recorded restoration', noRestoreRecorded:'No restoration recorded', backupRecovery:'Backup and recovery', operationHistory:'Operation history', backupInstructions:'A local operator creates encrypted backups with alt-server backup, checks packages with backup-verify, and restores to an isolated destination with restore. Each step reports its own result. Keep the decryption key outside this server.', backupUnconfirmed:'A backup start without a matching creation record has an unconfirmed result. Inspect the original output package. Creation does not prove external storage or a successful recovery drill.',
+
+  sessions: 'Active sessions', currentSession: 'This session', createdAt: 'Created', expiresAt: 'Expires', revokeSession: 'Revoke session',
+  firstParentHistory: 'History · first parent', purpose: 'Purpose', authority: 'Authority', allowedPaths: 'Allowed paths', baseline: 'Baseline', tree: 'Tree', runner: 'Runner', command: 'Command', outcome: 'Outcome', provenance: 'Original provenance', reason: 'Rationale', message: 'Message', before: 'Before', destination: 'Destination', inbox: 'Inbox', repositories: 'Repositories', repository: 'Repository', tasks: 'Tasks', reviews: 'Reviews', deliveries: 'Deliveries', settings: 'Settings', history: 'History', files: 'Files',
+  explorer: 'Explorer', inspector: 'Inspector', activity: 'Activity', workspace: 'Workspace', product: 'Product', account: 'Account',
+  close: 'Close', reset: 'Reset layout', resize: 'Resize', toggle: 'Toggle', tabs: 'Documents', tabHint: 'Arrow keys select; Alt + arrows reorder', moved: 'Moved',
+  signIn: 'Sign in', signOut: 'Sign out', loginName: 'Login name', password: 'Password', localLogin: 'Sign in to this instance',
+  loading: 'Loading…', retry: 'Retry', refresh: 'Refresh', next: 'Load more', empty: 'No entries', selectRepository: 'Select a repository',
+  selfHosted: 'Self-hosted', cloud: 'Cloud', language: 'Language', theme: 'Theme', light: 'Light', dark: 'Dark',
+  search: 'Find a document or repository', commands: 'Commands', open: 'Open', confirm: 'Confirm', cancel: 'Cancel',
+  connection: 'The server could not be reached. Check the connection and try again.',
+  denied: 'You do not have permission to view or change this resource.',
+  expired: 'Your session has ended. Sign in again.',
+  conflict: 'The resource changed. Refresh and inspect the current state before trying again.',
+  unknown: 'The outcome is not yet confirmed. Refresh the original request before taking another action.',
+  failed: 'The request could not be completed.', invalidLogin: 'The login name or password was not accepted.',
+  source: 'Source', publishedBy: 'Published by', candidate: 'Candidate', evidence: 'Evidence', changes: 'Changes',
+  accepted: 'Accepted by current policy', notAccepted: 'Needs attention', historicalReview: 'Historical reviewer', currentDecision: 'Current decision',
+  approve: 'Approve this selection', approveHint: 'Approve the exact candidate, evidence, target and policy shown here.', approved: 'Approval recorded',
+  pending: 'Awaiting review', committed: 'Published', receiving: 'Uploading', ready: 'Ready', rejected: 'Rejected', expiredRequest: 'Expired',
+  record: 'Record', task: 'Task', review: 'Review', integration: 'Integration', delivery: 'Delivery', attachments: 'Attachments', related: 'Related records',
+  download: 'Download original', omitted: 'Not published', binary: 'Binary content', truncated: 'Preview is limited. Download the original for the full content.',
+  branch: 'Branch', commit: 'Commit', parent: 'Parent', author: 'Author', size: 'Size', name: 'Name', path: 'Path',
+  readOnly: 'Read only', writable: 'Writes enabled', noReview: 'No requests require your review.',
+  scopeNote: 'This document remains attached to its original repository.',
+  instance: 'Instance', version: 'Version', users: 'Users', createUser: 'Create user', displayName: 'Display name', administrator: 'Instance administrator',
+  enabled: 'Enabled', disabled: 'Disabled', disable: 'Disable', enable: 'Enable', saved: 'Saved',
+  adminNote: 'Instance administration does not grant access to repository contents.',
+  noDocuments: 'Open a repository or task to begin.', back: 'Back', session: 'Session', details: 'Details',
+} as const;
+type Messages = { [K in keyof typeof en]: string };
+const zh: Messages = {
+  instanceHealth:'实例状态',healthReadOnly:'只读数据库快照。存储字节按仓库计数；这里不检查文件完整性或备份是否仍可用。',schema:'数据版本',generation:'运行代次',storedBytes:'已存储字节',reservedBytes:'预留字节',pendingRequests:'当前未完成请求',recoveryGaps:'恢复前结果未决的请求',pendingEvents:'待投递事件',observedAt:'检查时间',lastRestore:'最近记录的恢复',noRestoreRecorded:'没有恢复记录',backupRecovery:'备份与恢复',operationHistory:'操作记录',backupInstructions:'本机运维人员通过 alt-server backup 生成加密备份，使用 backup-verify 校验包，再通过 restore 恢复到隔离目标。各步骤分别报告结果。解密密钥应保存在此服务器以外。',backupUnconfirmed:'备份开始后没有对应的生成记录，表示结果待确认，请检查原输出包。生成成功不代表已异地保存或恢复演练通过。',
+
+  sessions:'有效会话',currentSession:'当前会话',createdAt:'创建时间',expiresAt:'到期时间',revokeSession:'撤销会话',
+  firstParentHistory:'历史 · 第一父提交',purpose:'目的',authority:'授权依据',allowedPaths:'允许路径',baseline:'基线',tree:'目录树',runner:'执行器',command:'命令',outcome:'结果',provenance:'原始来源声明',reason:'理由',message:'说明',before:'前态',destination:'交付目标',inbox:'收件箱',repositories:'仓库',repository:'仓库',tasks:'任务',reviews:'审查',deliveries:'交付',settings:'设置',history:'历史',files:'文件',
+  explorer:'资源',inspector:'检查器',activity:'活动',workspace:'工作空间',product:'产品',account:'账号',
+  close:'关闭',reset:'重置布局',resize:'调整大小',toggle:'显示或隐藏',tabs:'文档',tabHint:'方向键切换；Alt + 方向键调整顺序',moved:'已移动',
+  signIn:'登录',signOut:'退出登录',loginName:'登录名',password:'密码',localLogin:'登录此实例',
+  loading:'加载中…',retry:'重试',refresh:'刷新',next:'加载更多',empty:'暂无条目',selectRepository:'选择仓库',
+  selfHosted:'自托管',cloud:'Cloud',language:'语言',theme:'主题',light:'浅色',dark:'深色',
+  search:'查找文档或仓库',commands:'命令',open:'打开',confirm:'确认',cancel:'取消',
+  connection:'无法连接服务器。请检查连接后重试。',denied:'你没有查看或修改此资源的权限。',expired:'会话已结束，请重新登录。',
+  conflict:'资源已变化。请刷新并查看当前状态后再试。',unknown:'结果尚未确认。请先刷新原请求，再进行后续操作。',failed:'请求未能完成。',invalidLogin:'登录名或密码未被接受。',
+  source:'来源',publishedBy:'发布者',candidate:'候选',evidence:'证据',changes:'差异',accepted:'当前策略接受',notAccepted:'需要处理',historicalReview:'历史审查者',currentDecision:'当前决定',
+  approve:'批准此选择',approveHint:'批准这里展示的确切候选、证据、目标和策略。',approved:'批准已记录',pending:'待审查',committed:'已发布',receiving:'上传中',ready:'已就绪',rejected:'已拒绝',expiredRequest:'已过期',
+  record:'记录',task:'任务',review:'审查',integration:'集成',delivery:'交付',attachments:'附件',related:'关联记录',download:'下载原始内容',omitted:'未发布',binary:'二进制内容',truncated:'预览内容受限，可下载原始内容查看全文。',
+  branch:'分支',commit:'提交',parent:'父提交',author:'作者',size:'大小',name:'名称',path:'路径',readOnly:'只读',writable:'允许写入',noReview:'没有需要你审查的请求。',scopeNote:'此文档始终归属原仓库。',
+  instance:'实例',version:'版本',users:'用户',createUser:'创建用户',displayName:'显示名称',administrator:'实例管理员',enabled:'已启用',disabled:'已停用',disable:'停用',enable:'启用',saved:'已保存',adminNote:'实例管理权限不授予仓库内容访问权。',noDocuments:'打开仓库或任务开始工作。',back:'返回',session:'会话',details:'详情',
+};
+const ja: Messages = {
+  instanceHealth:'インスタンスの状態',healthReadOnly:'読み取り専用のデータベース観測です。保存バイト数はリポジトリごとに集計し、ファイルの整合性やバックアップの存在は検査しません。',schema:'データバージョン',generation:'実行世代',storedBytes:'保存バイト数',reservedBytes:'予約バイト数',pendingRequests:'現在の未完了リクエスト',recoveryGaps:'復元前の結果未確定リクエスト',pendingEvents:'配信待ちイベント',observedAt:'観測日時',lastRestore:'最後に記録された復元',noRestoreRecorded:'復元記録なし',backupRecovery:'バックアップと復元',operationHistory:'操作履歴',backupInstructions:'ローカル管理者が alt-server backup で暗号化バックアップを生成し、backup-verify で検証してから restore で隔離先に復元します。各手順は個別に結果を報告します。復号鍵はサーバーの外で保管してください。',backupUnconfirmed:'開始に対応する生成記録がない場合、結果は未確定です。元の出力パッケージを確認してください。生成成功は外部保存や復元訓練の成功を意味しません。',
+
+  sessions:'有効なセッション',currentSession:'現在のセッション',createdAt:'作成日時',expiresAt:'有効期限',revokeSession:'セッションを取り消す',
+  firstParentHistory:'履歴 · 最初の親',purpose:'目的',authority:'権限の根拠',allowedPaths:'許可されたパス',baseline:'ベースライン',tree:'ツリー',runner:'実行環境',command:'コマンド',outcome:'結果',provenance:'元の出所の申告',reason:'根拠',message:'メッセージ',before:'変更前',destination:'配信先',inbox:'受信トレイ',repositories:'リポジトリ',repository:'リポジトリ',tasks:'タスク',reviews:'レビュー',deliveries:'デリバリー',settings:'設定',history:'履歴',files:'ファイル',
+  explorer:'エクスプローラー',inspector:'インスペクター',activity:'アクティビティ',workspace:'ワークスペース',product:'製品',account:'アカウント',
+  close:'閉じる',reset:'レイアウトをリセット',resize:'サイズ変更',toggle:'表示を切り替え',tabs:'ドキュメント',tabHint:'矢印キーで選択、Alt + 矢印キーで並べ替え',moved:'移動しました',
+  signIn:'ログイン',signOut:'ログアウト',loginName:'ログイン名',password:'パスワード',localLogin:'このインスタンスにログイン',
+  loading:'読み込み中…',retry:'再試行',refresh:'更新',next:'さらに読み込む',empty:'項目がありません',selectRepository:'リポジトリを選択',
+  selfHosted:'セルフホスト',cloud:'Cloud',language:'言語',theme:'テーマ',light:'ライト',dark:'ダーク',
+  search:'ドキュメントやリポジトリを検索',commands:'コマンド',open:'開く',confirm:'確認',cancel:'キャンセル',
+  connection:'サーバーに接続できません。接続を確認して再試行してください。',denied:'このリソースを表示または変更する権限がありません。',expired:'セッションが終了しました。再度ログインしてください。',
+  conflict:'リソースが変更されました。更新して現在の状態を確認してください。',unknown:'結果はまだ確認できていません。元のリクエストを更新してから次の操作を行ってください。',failed:'リクエストを完了できませんでした。',invalidLogin:'ログイン名またはパスワードが正しくありません。',
+  source:'出所',publishedBy:'公開者',candidate:'候補',evidence:'エビデンス',changes:'差分',accepted:'現在のポリシーで受理',notAccepted:'対応が必要',historicalReview:'過去のレビュアー',currentDecision:'現在の判断',
+  approve:'この選択を承認',approveHint:'ここに表示された候補、エビデンス、対象、ポリシーを承認します。',approved:'承認を記録しました',pending:'レビュー待ち',committed:'公開済み',receiving:'アップロード中',ready:'準備完了',rejected:'拒否',expiredRequest:'期限切れ',
+  record:'記録',task:'タスク',review:'レビュー',integration:'統合',delivery:'デリバリー',attachments:'添付ファイル',related:'関連記録',download:'原本をダウンロード',omitted:'未公開',binary:'バイナリ内容',truncated:'プレビューには制限があります。全文は原本をダウンロードしてください。',
+  branch:'ブランチ',commit:'コミット',parent:'親コミット',author:'作成者',size:'サイズ',name:'名前',path:'パス',readOnly:'読み取り専用',writable:'書き込み可能',noReview:'レビューが必要なリクエストはありません。',scopeNote:'このドキュメントは元のリポジトリに属しています。',
+  instance:'インスタンス',version:'バージョン',users:'ユーザー',createUser:'ユーザーを作成',displayName:'表示名',administrator:'インスタンス管理者',enabled:'有効',disabled:'無効',disable:'無効にする',enable:'有効にする',saved:'保存しました',adminNote:'インスタンスの管理権限はリポジトリの内容へのアクセス権を付与しません。',noDocuments:'リポジトリやタスクを開いて開始してください。',back:'戻る',session:'セッション',details:'詳細',
+};
+export function messages(locale: Locale): Messages { return { en, zh, ja }[locale]; }
+export type Text = Messages;

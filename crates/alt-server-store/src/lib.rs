@@ -44,3 +44,17 @@ pub use transport::*;
 
 mod chunks;
 pub use chunks::*;
+
+mod browser;
+pub use browser::*;
+mod workbench;
+pub use tasks::CurrentReviewAssessment;
+pub use workbench::*;
+
+/// Current persisted schema; runtime open validates all migration checksums.
+pub const SCHEMA_VERSION: u32 = 4;
+
+mod accounts;
+pub use accounts::*;
+mod maintenance;
+pub use maintenance::*;

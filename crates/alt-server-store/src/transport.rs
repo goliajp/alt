@@ -179,6 +179,14 @@ impl Store {
             "UPDATE alt_repositories SET default_branch=$2 WHERE id=$1",
             &[&repository, &branch],
         )?;
+        crate::browser::audit_admin(
+            &mut tx,
+            &self.spec,
+            credential,
+            "repository.default_branch",
+            repository,
+            serde_json::json!({"branch":branch}),
+        )?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)?;
         Ok(())
     }

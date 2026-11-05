@@ -1,3 +1,4 @@
+mod maintenance;
 use super::*;
 use alt_server::operator::{Config, HttpBounds};
 use std::{
@@ -45,6 +46,7 @@ impl OperatorDb {
         let root = tempfile::tempdir().unwrap();
         let config = root.path().join("server.json");
         let spec = Config {
+            browser: None,
             version: 1,
             instance: InstanceSpec {
                 installation_id: "operator-instance".into(),

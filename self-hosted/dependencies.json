@@ -1,0 +1,96 @@
+{
+  "format": 1,
+  "images": [
+    {
+      "repository": "library/rust",
+      "tag": "1.99.1-bookworm",
+      "digest": "sha256:7085845219c18e7c5b1f34ed9ce89b84f822f2e3d54a02774cedc996ac0f304f",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux",
+          "variant": "v8"
+        }
+      ],
+      "manifests": {
+        "amd64": "sha256:4715c3ad743951a3cea90e8b432f2a17e0ef5f3f3c3abf75108879e783b396f0",
+        "arm64": "sha256:e566673f94ee3013baae79d08125b5ca1e66e9be2db8d4e07f2e4f81b5b99807"
+      }
+    },
+    {
+      "repository": "oven/bun",
+      "tag": "1.4.4-debian",
+      "digest": "sha256:93d5032fe06d163427822dc1598f420363759bb18155c9cc90eb1be05a64a19e",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux"
+        }
+      ],
+      "manifests": {
+        "amd64": "sha256:b740c3f5600e6360684f240d31c67ffb759def968bfa98ed98c4cce970707735",
+        "arm64": "sha256:352c8711914d5b8a326dec0aad4b105776df37fb109fce0e3ea7ee93ff622386"
+      }
+    },
+    {
+      "repository": "library/postgres",
+      "tag": "18.6-bookworm",
+      "digest": "sha256:f1ea2a1a4fb7b68d4836be1fdcb8a6466a89b072158bf9d97663600538c294c5",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux",
+          "variant": "v8"
+        }
+      ],
+      "manifests": {
+        "amd64": "sha256:02fb3245e038f33536cf13bc6c4e59f21d07b0cea3c1fe1c07c6e8aa8f083bcc",
+        "arm64": "sha256:d628bc2cef336ab1f527cd6e8de5f04827c069e5f24153b5e99d9bf64e5ff925"
+      }
+    },
+    {
+      "repository": "library/caddy",
+      "tag": "2.11.8-alpine",
+      "digest": "sha256:f6228111e5fafa1a5238258d0858e103f10599b8d1659a146e7726681a002bb9",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux",
+          "variant": "v8"
+        }
+      ],
+      "manifests": {
+        "amd64": "sha256:84202bd39c87ddba4611c3c85e7cb9c96d529bd536acf96a6d66cee4057fe8a3",
+        "arm64": "sha256:d48486623b1522f9e6d0fd0407e2929eb66bf2cc5bfbf71c2d89611d6fd24c35"
+      }
+    }
+  ],
+  "age": [
+    {
+      "name": "age-v1.3.2-linux-amd64.tar.gz",
+      "digest": "sha256:cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10",
+      "browser_download_url": "https://github.com/FiloSottile/age/releases/download/v1.3.2/age-v1.3.2-linux-amd64.tar.gz"
+    },
+    {
+      "name": "age-v1.3.2-linux-arm64.tar.gz",
+      "digest": "sha256:6b8dc4333c53a5a57c9e5834e3a48f92605d7154014cd07269ff3327db5d37f4",
+      "browser_download_url": "https://github.com/FiloSottile/age/releases/download/v1.3.2/age-v1.3.2-linux-arm64.tar.gz"
+    }
+  ]
+}

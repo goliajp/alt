@@ -60,3 +60,177 @@ The [native task workflow](../../docs/task-remote.md) describes explicit selecti
 resumption, receipt verification and cross-workspace continuation. Database and
 process tests run through `scripts/with-test-postgres.sh`; ignored database tests
 belong to the closing corpus gate, not to an optional manual test category.
+
+## Browser workbench
+
+Build `workbench/` with its frozen Bun lockfile, then point the instance at the
+resulting `dist` directory. Add a `browser` member to the instance configuration:
+
+```json
+{
+  "public_origin": "https://alt.example.org",
+  "assets_directory": "workbench/dist",
+  "session_ttl_ms": 43200000
+}
+```
+
+The origin must be canonical, without a trailing slash. HTTPS is required except
+for literal loopback or localhost development. The edge must preserve this
+browser origin. Forwarded client-address headers are not trusted; login admission
+uses the direct peer and a separate account/global budget. Asset files are frozen
+at startup, bounded and restricted to regular files. Restart after installing a
+new workbench build.
+
+Enable the configured origin and create a local browser account explicitly:
+
+```sh
+alt-server --config server.json --credential admin.token browser-enable
+alt-server --config server.json --credential admin.token user-create owner \
+  --login owner --display-name Owner --password-file owner.password --administrator
+```
+
+`owner.password` is a private UTF-8 file (mode 0600 or stricter); one trailing
+newline is removed. Passwords must contain 12–256 bytes. The password is never
+accepted in a URL or printed in an operator result. The browser account must
+receive separate repository grants. After enablement, removing the browser
+configuration prevents the service from starting; it cannot silently rebind
+existing sessions to another origin.
+
+The workbench uses HttpOnly, host-only sessions and exact Origin plus CSRF checks
+for mutations. Passwords are not Git HTTPS credentials. Users can inspect their
+active sessions and revoke other sessions from Settings; signing out revokes the
+current session. Disabling an account or resetting its password revokes its
+existing credentials, including CLI/agent tokens. Changes are recorded in the
+instance audit. The explicit administrative reset command is:
+
+```sh
+alt-server --config server.json --credential admin.token user-reset-password owner \
+  --password-file replacement.password
+```
+
+If all administrator credentials are lost or revoked, an operator with physical
+access to the configured database and receipt key can recover an **existing**
+local administrator. This operation is unavailable over HTTP and in Cloud mode:
+
+```sh
+alt-server --config server.json recover-local-administrator owner \
+  --password-file replacement.password --reason "Recovered a locked administrator"
+```
+
+Recovery re-enables that account, advances its account generation, revokes its old
+credentials, and records the reason under `local-operator`. It never creates a
+Cloud login or claims another account by matching an email address.
+
+Repository and task pages expose published content only. Review pages separately
+show original provenance and the current policy decision; approval binds the
+inspected request, target refs and policy generations. A limited preview always
+retains an authenticated original download. If an approval response is lost,
+refresh the same review to query the persisted approval before acting again.
+Document addresses retain repository, revision and request identity; opening a
+shared link independently checks the receiving user's access.
+
+### Physical backup, upgrade and recovery
+
+`backup` creates a **disaster recovery backup**, including the receipt signing
+key, password hashes and credential records. It is distinct from portable
+migration. `age` (X25519 recipient/identity) and PostgreSQL `pg_dump`/`pg_restore`
+matching the database major version must be on the operator's `PATH`. Keep the
+age private identity off the server, and retain the receipt public key from
+`health` independently of the backup. The current acceptance tools are
+PostgreSQL 18.6 and age 1.3.2.
+
+```sh
+alt-server --config server.json backup --recipient age1... --output /backup/new-snapshot
+alt-server backup-verify --input /offsite/snapshot --identity /private/backup.agekey \
+  --trusted-receipt-key RECEIPT_PUBLIC_KEY_HEX --maximum-bytes 1099511627776
+```
+
+The output directory must not exist. Publication, credential updates and GC
+wait behind the same instance barrier while metadata and byte contents are
+exported. `manifest.json` is a signed completion marker; a missing marker is an
+incomplete backup. The tar payload is age encrypted, including the SQL archive,
+configuration and signing key. The signed manifest contains plaintext instance
+IDs, repository IDs, refs, snapshot watermarks, file sizes and hashes: protect
+both output files as confidential backup material. Copy **both** files to
+independent storage. Verification checks signatures, ciphertext and every
+archive entry, but reports `restored:false`; it is not a restore drill.
+
+Operator scratch space is private and may temporarily contain plaintext SQL
+and decrypted files. Use an encrypted filesystem or a private tmpfs for
+`TMPDIR`. A killed process can leave its scratch directory behind; retain the
+operation's isolated scratch directory until investigation finishes, then
+remove that exact directory. Do not expose scratch or backup directories through
+the web server.
+
+A historical schema backup requires an explicit `--schema` (supported source
+schemas: 1–4). Stop the old service, save and verify its backup, then upgrade:
+
+```sh
+alt-server --config server.json migrate --from-schema 3 --output-config server-next.json
+alt-server --config server-next.json health
+```
+
+The next config is synced before the database transaction. Repeating the same
+migration with that exact output file reconciles a committed upgrade after a
+lost response. It does not advance the generation twice. Keep the old binary
+and config for diagnosis; the old binary is fenced after migration and cannot
+open the new schema. An upgrade rollback restores a backup into an isolated
+instance, rather than pointing an old binary at the upgraded database.
+
+For disaster recovery, externally stop and fence the old service first. Create
+a dedicated empty PostgreSQL database and a new config pointing to **absent**
+byte-volume and receipt-key paths. Preserve the source installation/workspace
+and deployment mode. Select a runtime generation greater than every historical
+repository epoch and at least two greater than the backup's runtime generation.
+Keep the service isolated from clients throughout the drill.
+
+```sh
+alt-server --config restored.json restore --input /offsite/snapshot \
+  --identity /private/backup.agekey --trusted-receipt-key RECEIPT_PUBLIC_KEY_HEX \
+  --maximum-bytes 1099511627776 --source-fenced
+alt-server --config restored.json health
+```
+
+`--source-fenced` records an operator prerequisite; a command against a new
+local database cannot fence a different machine. Restore refuses existing
+volumes/keys or a nonempty database. It checks the SQL catalog and every stored
+byte before activation, upgrades supported historical schemas, raises runtime
+and repository epochs, and revokes old credentials and browser sessions. It
+preserves committed receipts. An old request that was unfinished at the backup
+watermark remains **unknown**, even after GC; the source might have committed
+it after the snapshot. Do not automatically replay it under a fresh request ID.
+
+An interrupted restore reports its failed stage and an unknown outcome. Keep
+that isolated destination for inspection. `health` with the new config refuses
+the database until activation commits. If `health` succeeds after a lost
+response, inspect the retained `instance.restore` audit and verify the refs and
+objects before admitting traffic. Do not overwrite the target or restore an
+older snapshot over newly accepted writes. To retry an incomplete pre-activation
+restore, use another empty database and new absent volume/key paths.
+
+For a pre-browser backup or lost administrator token, the physical operator
+can recover an **existing local human administrator** using a new private token
+file and an expiry no more than one hour in the future:
+
+```sh
+alt-server secret token --output recovered.token
+alt-server --config restored.json recover-local-token owner --secret recovered.token \
+  --expires-unix-ms EXPIRY_IN_MILLISECONDS --reason 'isolated recovery'
+```
+
+This revokes that actor's old credentials and records the reason. Repeating the
+same unrevoked secret and expiry is idempotent. It cannot create an actor or
+activate local credentials in Cloud. Use the recovered administrator to issue
+normal credentials or create the first browser account, then revoke the short
+recovery token. Existing browser administrators can instead use the password
+recovery command above.
+
+Operator acceptance includes a real schema-3 binary, Git push before upgrade,
+clone after upgrade, encrypted backup verification and isolated restoration.
+For the ignored PostgreSQL tests, set `ALT_SERVER_TEST_OLD_BINARY` to a binary
+built from the S04 commit
+`0ad8d5abc9d7112026c2147bf50c0a6c0f7d43a3`. Hosts without Docker can select an
+isolated native PostgreSQL installation with
+`ALT_SERVER_TEST_POSTGRES_BIN=/absolute/path/to/bin`; the existing
+`scripts/with-test-postgres.sh` entrypoint then starts a private Unix-socket-only
+cluster and removes only that cluster afterward.

@@ -1,0 +1,11 @@
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import '@golia/ui/tokens.css';
+import '@golia/ui/controls.css';
+import '@golia/ui/actions.css';
+import '@golia/ui/feedback.css';
+import '@golia/ui/dialog.css';
+import '@golia/ui/workbench.css';
+import './style.css';
+import { App } from './App';
+createRoot(document.getElementById('root')!).render(<StrictMode><App/></StrictMode>);

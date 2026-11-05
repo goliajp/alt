@@ -229,7 +229,7 @@ fn v2_migration_recovers_every_publication_of_a_root_and_preserves_raw_variants(
             .get::<_, i64>(0),
         1
     );
-    f.client().batch_execute("DROP TABLE alt_task_bundle_records,alt_task_bundle_roots; ALTER TABLE alt_repositories DROP COLUMN default_branch; DELETE FROM alt_schema WHERE version=3").unwrap();
+    f.client().batch_execute("DROP TABLE alt_browser_binding,alt_web_sessions,alt_web_accounts,alt_login_budgets,alt_instance_audit; DROP TABLE alt_task_bundle_records,alt_task_bundle_roots; ALTER TABLE alt_repositories DROP COLUMN default_branch; DELETE FROM alt_schema WHERE version>=3").unwrap();
     assert!(
         Store::open(
             f.client(),
@@ -430,7 +430,7 @@ fn explicit_v1_migration_preserves_rows_and_fences_old_runtime() {
     .unwrap();
     // Recreate the actual frozen v1 layout, preserving its original checksum
     // and existing identity, credentials and repository rows.
-    f.client().batch_execute("DROP TABLE alt_task_bundle_records,alt_task_bundle_roots,alt_current_approvals,alt_review_grants,alt_collector_policies,alt_task_bundles,alt_task_records; ALTER TABLE alt_repositories DROP COLUMN default_branch; DELETE FROM alt_schema WHERE version>=2").unwrap();
+    f.client().batch_execute("DROP TABLE alt_browser_binding,alt_web_sessions,alt_web_accounts,alt_login_budgets,alt_instance_audit; DROP TABLE alt_task_bundle_records,alt_task_bundle_roots,alt_current_approvals,alt_review_grants,alt_collector_policies,alt_task_bundles,alt_task_records; ALTER TABLE alt_repositories DROP COLUMN default_branch; DELETE FROM alt_schema WHERE version>=2").unwrap();
     assert!(
         Store::open(
             f.client(),

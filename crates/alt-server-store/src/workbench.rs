@@ -1,0 +1,243 @@
+//! Authorized workbench projections over the publication authority.
+use crate::store::{authorize, credential_row, instance, integer, now, snapshot, unsigned};
+use crate::{Credential, Error, Result, Store};
+use alt_git_codec::{ObjectId, ObjectKind};
+use alt_remote_protocol::{Publication, RequestKey, Scope};
+use serde::Serialize;
+
+#[derive(Serialize)]
+pub struct Page<T> {
+    pub items: Vec<T>,
+    pub next: Option<String>,
+}
+#[derive(Serialize)]
+pub struct WorkbenchRepository {
+    pub scope: Scope,
+    pub default_branch: String,
+    pub writes_enabled: bool,
+    pub can_review: bool,
+    pub can_publish: bool,
+}
+#[derive(Serialize)]
+pub struct WorkbenchRequest {
+    pub key: RequestKey,
+    pub state: String,
+    pub digest: String,
+    pub roots: Vec<alt_remote_protocol::RecordRoot>,
+}
+pub struct PublishedRecord {
+    pub record: alt_task_service::TaskRecord,
+    pub payload: alt_task::Artifact,
+    pub publication: crate::PublishedBundle,
+}
+fn page_size(limit: usize) -> Result<i64> {
+    if limit == 0 || limit > 100 {
+        return Err(Error::Limit("workbench page size"));
+    }
+    integer(limit as u64 + 1)
+}
+impl Store {
+    pub fn workbench_repositories(
+        &mut self,
+        credential: &Credential,
+        after: &str,
+        limit: usize,
+    ) -> Result<Page<WorkbenchRepository>> {
+        let bound = page_size(limit)?;
+        if after.len() > 128 {
+            return Err(Error::Limit("repository cursor"));
+        }
+        let mut tx = self.client.transaction()?;
+        instance(&mut tx, &self.spec, &self.signing_key)?;
+        let actor: String = credential_row(&mut tx, &self.spec, credential)?.get("actor_id");
+        let rows=tx.query("SELECT r.id,r.recovery_epoch,r.default_branch,r.writes_enabled,g.publish_records,COALESCE(v.can_review,false) FROM alt_repositories r JOIN alt_grants g ON g.repository=r.id AND g.actor_id=$1 LEFT JOIN alt_review_grants v ON v.repository=r.id AND v.actor_id=$1 WHERE g.can_read AND r.id>$2 ORDER BY r.id LIMIT $3", &[&actor,&after,&bound])?;
+        let has_more = rows.len() > limit;
+        let items = rows
+            .into_iter()
+            .take(limit)
+            .map(|row| {
+                Ok(WorkbenchRepository {
+                    scope: Scope {
+                        installation_id: self.spec.installation_id.clone(),
+                        repository_instance_id: row.get(0),
+                        recovery_epoch: unsigned(row.get(1))?,
+                    },
+                    default_branch: row.get(2),
+                    writes_enabled: row.get(3),
+                    can_publish: row.get(4),
+                    can_review: row.get(5),
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let next = if has_more {
+            items.last().map(|v| v.scope.repository_instance_id.clone())
+        } else {
+            None
+        };
+        tx.commit()?;
+        Ok(Page { items, next })
+    }
+    /// Only current ready selections visible to a current repository reviewer.
+    /// Uploading/private requests are never included, even for administrators.
+    pub fn workbench_inbox(
+        &mut self,
+        credential: &Credential,
+        after: &str,
+        limit: usize,
+    ) -> Result<Page<WorkbenchRequest>> {
+        let bound = page_size(limit)?;
+        if after.len() > 400 {
+            return Err(Error::Limit("inbox cursor"));
+        }
+        let parts = if after.is_empty() {
+            vec!["", "", ""]
+        } else {
+            after.split('/').collect::<Vec<_>>()
+        };
+        if parts.len() != 3 {
+            return Err(Error::Precondition("inbox cursor"));
+        }
+        let mut tx = self.client.transaction()?;
+        instance(&mut tx, &self.spec, &self.signing_key)?;
+        let actor: String = credential_row(&mut tx, &self.spec, credential)?.get("actor_id");
+        let time = integer(now(&mut tx)?)?;
+        let rows=tx.query("SELECT q.repository,q.epoch,q.actor_id,q.request_id,q.digest,q.publication->'record_roots' AS roots FROM alt_requests q JOIN alt_repositories r ON r.id=q.repository AND r.recovery_epoch=q.epoch JOIN alt_grants g ON g.repository=q.repository AND g.actor_id=$1 JOIN alt_review_grants v ON v.repository=q.repository AND v.actor_id=$1 WHERE g.can_read AND v.can_review AND r.writes_enabled AND q.state='ready' AND q.expires_at>$2 AND (q.repository,q.actor_id,q.request_id)>($3,$4,$5) AND EXISTS(SELECT 1 FROM jsonb_array_elements(q.publication->'record_roots') root WHERE root->>'kind' IN ('integration','delivery')) ORDER BY q.repository,q.actor_id,q.request_id LIMIT $6", &[&actor,&time,&parts[0],&parts[1],&parts[2],&bound])?;
+        let has_more = rows.len() > limit;
+        let items = rows
+            .into_iter()
+            .take(limit)
+            .map(|row| {
+                Ok(WorkbenchRequest {
+                    key: RequestKey {
+                        scope: Scope {
+                            installation_id: self.spec.installation_id.clone(),
+                            repository_instance_id: row.get(0),
+                            recovery_epoch: unsigned(row.get(1))?,
+                        },
+                        actor_id: row.get(2),
+                        request_id: row.get(3),
+                    },
+                    state: "ready".into(),
+                    digest: row.get(4),
+                    roots: serde_json::from_value(row.get(5))?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let next = if has_more {
+            items.last().map(|item| {
+                format!(
+                    "{}/{}/{}",
+                    item.key.scope.repository_instance_id, item.key.actor_id, item.key.request_id
+                )
+            })
+        } else {
+            None
+        };
+        tx.commit()?;
+        Ok(Page { items, next })
+    }
+    /// Return only permanently published objects in the authorized repository.
+    /// The immutable descriptor is opened under the same lock as publication/GC.
+    pub fn open_published_object(
+        &mut self,
+        credential: &Credential,
+        repository: &str,
+        oid: ObjectId,
+    ) -> Result<(ObjectKind, u64, std::fs::File)> {
+        let mut tx = self.client.transaction()?;
+        instance(&mut tx, &self.spec, &self.signing_key)?;
+        let current = snapshot(&mut tx, &self.spec, repository)?;
+        authorize(&mut tx, &self.spec, credential, &current)?;
+        let row=tx.query_opt("SELECT o.kind,o.blake3,b.bytes FROM alt_objects o JOIN alt_blobs b ON b.repository=o.repository AND b.blake3=o.blake3 WHERE o.repository=$1 AND o.oid=$2 AND b.state='stored' AND EXISTS(SELECT 1 FROM alt_pins p WHERE p.repository=o.repository AND p.blake3=o.blake3 AND p.expires_at IS NULL)", &[&repository,&oid.to_string()])?.ok_or(Error::Unauthorized)?;
+        let kind: String = row.get(0);
+        let digest: String = row.get(1);
+        let bytes = unsigned(row.get(2))?;
+        if bytes > self.limits.object_bytes {
+            return Err(Error::Limit("published object read bytes"));
+        }
+        let file = self.bytes.read(&current.scope, &digest, bytes)?;
+        let kind = kind
+            .parse()
+            .map_err(|_| Error::Integrity("published object kind"))?;
+        tx.commit()?;
+        let mut file = file;
+        let mut remaining = bytes;
+        let mut hasher = blake3::Hasher::new();
+        let mut buffer = [0u8; 65536];
+        use std::io::{Read, Seek};
+        while remaining > 0 {
+            let length = file.read(&mut buffer[..remaining.min(65536) as usize])?;
+            if length == 0 {
+                return Err(Error::Integrity("published object truncated"));
+            }
+            hasher.update(&buffer[..length]);
+            remaining -= length as u64;
+        }
+        if file.read(&mut buffer[..1])? != 0 || hasher.finalize().to_hex().as_str() != digest {
+            return Err(Error::Integrity("published object bytes"));
+        }
+        file.rewind()?;
+        Ok((kind, bytes, file))
+    }
+    pub fn published_record(
+        &mut self,
+        credential: &Credential,
+        scope: &Scope,
+        root: &alt_remote_protocol::RecordRoot,
+        max_bytes: usize,
+    ) -> Result<PublishedRecord> {
+        use std::io::Read;
+        root.validate()?;
+        if max_bytes == 0 || max_bytes > 16 * 1024 * 1024 {
+            return Err(Error::Limit("record projection bytes"));
+        }
+        let kind = serde_json::to_value(root.kind)?
+            .as_str()
+            .ok_or(Error::Integrity("record kind"))?
+            .to_owned();
+        let mut tx = self.client.transaction()?;
+        instance(&mut tx, &self.spec, &self.signing_key)?;
+        let current = snapshot(&mut tx, &self.spec, &scope.repository_instance_id)?;
+        authorize(&mut tx, &self.spec, credential, &current)?;
+        if current.scope != *scope {
+            return Err(Error::Unauthorized);
+        }
+        let row=tx.query_opt("SELECT r.payload_blake3,b.bytes,q.publication,q.manifest,q.result FROM alt_task_records r JOIN alt_task_bundle_records br ON br.repository=r.repository AND br.kind=r.kind AND br.record_id=r.record_id AND br.payload_blake3=r.payload_blake3 JOIN alt_requests q ON q.repository=br.repository AND q.epoch=br.epoch AND q.actor_id=br.actor_id AND q.request_id=br.request_id JOIN alt_blobs b ON b.repository=r.repository AND b.blake3=r.payload_blake3 WHERE r.repository=$1 AND r.kind=$2 AND r.record_id=$3 AND q.state='committed' AND b.state='stored' ORDER BY q.epoch,q.actor_id,q.request_id,r.payload_blake3 LIMIT 1", &[&scope.repository_instance_id,&kind,&root.id])?.ok_or(Error::Unauthorized)?;
+        let payload = alt_task::Artifact {
+            blake3: row.get(0),
+            bytes: unsigned(row.get(1))?,
+        };
+        if payload.bytes > max_bytes as u64 {
+            return Err(Error::Limit("record projection bytes"));
+        }
+        let file = self.bytes.read(scope, &payload.blake3, payload.bytes)?;
+        let publication: Publication = serde_json::from_value(row.get(2))?;
+        let manifest = serde_json::from_value(row.get(3))?;
+        let state: alt_remote_protocol::RequestState = serde_json::from_value(row.get(4))?;
+        let alt_remote_protocol::RequestState::Committed { receipt } = state else {
+            return Err(Error::Integrity("record publication state"));
+        };
+        tx.commit()?;
+        let mut raw = Vec::new();
+        file.take(max_bytes as u64 + 1).read_to_end(&mut raw)?;
+        if raw.len() as u64 != payload.bytes
+            || blake3::hash(&raw).to_hex().as_str() != payload.blake3
+        {
+            return Err(Error::Integrity("record projection payload"));
+        }
+        let key = alt_task_service::RecordKey {
+            kind: serde_json::from_value(serde_json::Value::String(kind))?,
+            id: root.id.clone(),
+        };
+        let record = alt_task_service::TaskRecord::decode(&key, &raw, max_bytes)?;
+        Ok(PublishedRecord {
+            record,
+            payload,
+            publication: crate::PublishedBundle {
+                publication,
+                manifest,
+                receipt: *receipt,
+            },
+        })
+    }
+}

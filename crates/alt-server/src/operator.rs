@@ -14,6 +14,8 @@ use std::{
     time::Duration,
 };
 
+pub mod backup;
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("invalid operator configuration: {0}")]
@@ -26,6 +28,8 @@ pub enum Error {
     Store,
     #[error("operator action outcome is unknown; inspect the same instance before retrying")]
     Unknown,
+    #[error("restoration incomplete at {0}; inspect the isolated destination before retrying")]
+    RestoreStage(&'static str),
 }
 impl From<alt_server_store::Error> for Error {
     fn from(error: alt_server_store::Error) -> Self {
@@ -51,6 +55,15 @@ pub struct Config {
     pub limits: Limits,
     pub tasks: alt_task_service::TaskLimits,
     pub http: HttpBounds,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser: Option<BrowserConfig>,
+}
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BrowserConfig {
+    pub public_origin: String,
+    pub assets_directory: PathBuf,
+    pub session_ttl_ms: u64,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -85,10 +98,24 @@ impl Config {
                 *item = parent.join(&*item);
             }
         }
+        if let Some(browser) = &mut config.browser
+            && browser.assets_directory.is_relative()
+        {
+            browser.assets_directory = parent.join(&browser.assets_directory);
+        }
         config.validate()?;
         Ok(config)
     }
     pub fn validate(&self) -> Result<()> {
+        if let Some(browser) = &self.browser {
+            alt_browser_auth::PublicOrigin::parse(&browser.public_origin)
+                .map_err(|_| Error::Config("browser public origin"))?;
+            if !browser.assets_directory.is_absolute()
+                || !(60_000..=43_200_000).contains(&browser.session_ttl_ms)
+            {
+                return Err(Error::Config("browser assets/session limits"));
+            }
+        }
         self.limits
             .validate()
             .map_err(|_| Error::Config("transfer limits"))?;
@@ -221,7 +248,7 @@ impl Config {
             serde_json::json!({"version":1,"installation_id":self.instance.installation_id,"workspace_id":self.instance.workspace_id,"deployment_mode":self.instance.deployment_mode,"receipt_key_id":blake3::hash(self.signing_key()?.verifying_key().as_bytes()).to_hex().to_string()}),
         )
     }
-    fn check_volume(&self) -> Result<()> {
+    pub(super) fn check_volume(&self) -> Result<()> {
         let marker: serde_json::Value = serde_json::from_slice(&read_regular(
             &self.bytes_directory.join("instance.json"),
             4096,
@@ -300,6 +327,65 @@ impl Config {
             connect_timeout: Duration::from_millis(self.http.database_connect_timeout_ms),
             statement_timeout: Duration::from_millis(self.http.database_statement_timeout_ms),
         })
+    }
+    /// Save the next configuration before the database commit. After a crash,
+    /// the operator can query it directly; re-running this same operation does
+    /// not silently choose a second generation or overwrite another config.
+    pub fn migrate(&self, from: u32, output: &Path) -> Result<Self> {
+        self.check_volume()?;
+        if !(1..alt_server_store::SCHEMA_VERSION).contains(&from) {
+            return Err(Error::Config("unsupported source schema"));
+        }
+        let mut next = self.clone();
+        next.instance.runtime_generation = next
+            .instance
+            .runtime_generation
+            .checked_add(1)
+            .ok_or(Error::Config("runtime generation overflow"))?;
+        next.validate()?;
+        let encoded =
+            serde_json::to_vec_pretty(&next).map_err(|_| Error::Config("next configuration"))?;
+        if output.exists() {
+            if read_regular(output, 65536, true)? != encoded {
+                return Err(Error::Config(
+                    "next configuration already exists with different contents",
+                ));
+            }
+            if next.open().is_ok() {
+                return Ok(next);
+            }
+        } else {
+            create_private(output, &encoded)?;
+        }
+        let client = self.client()?;
+        let bytes = ByteStore::open(&self.bytes_directory)?;
+        let key = self.signing_key()?;
+        let migrated = match from {
+            1 => Store::migrate_v1(client, bytes, self.instance.clone(), key, self.limits),
+            2 => Store::migrate_v2(client, bytes, self.instance.clone(), key, self.limits),
+            3 => Store::migrate_v3(client, bytes, self.instance.clone(), key, self.limits),
+            _ => unreachable!(),
+        };
+        match migrated {
+            Ok(store) if store.spec() == &next.instance => Ok(next),
+            Err(alt_server_store::Error::OutcomeUnknown) if next.open().is_ok() => Ok(next),
+            Err(error) => Err(error.into()),
+            _ => Err(Error::Unknown),
+        }
+    }
+    pub fn browser_options(&self) -> Result<Option<crate::WebOptions>> {
+        self.browser
+            .as_ref()
+            .map(|browser| {
+                Ok(crate::WebOptions {
+                    origin: alt_browser_auth::PublicOrigin::parse(&browser.public_origin)
+                        .map_err(|_| Error::Config("browser origin"))?,
+                    assets: crate::WebAssets::load(&browser.assets_directory)
+                        .map_err(|_| Error::Config("workbench assets"))?,
+                    session_ttl_ms: browser.session_ttl_ms,
+                })
+            })
+            .transpose()
     }
     pub fn http_options(&self) -> HttpOptions {
         let h = &self.http;

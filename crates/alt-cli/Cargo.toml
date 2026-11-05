@@ -69,6 +69,7 @@ libc.workspace = true
 libc.workspace = true
 
 [dev-dependencies]
+alt-browser-auth.workspace = true
 alt-server.workspace = true
 alt-server-store.workspace = true
 postgres = {version="0.19",features=["with-serde_json-1"]}
