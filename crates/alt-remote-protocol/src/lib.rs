@@ -237,6 +237,7 @@ pub enum Feature {
     GitSmartHttp,
     Publications,
     TaskRecords,
+    TaskBundlesV1,
     Receipts,
     PortableBundles,
 }
@@ -254,6 +255,16 @@ pub struct Capabilities {
     pub limits: Limits,
 }
 impl Capabilities {
+    pub fn require_task_bundles(&self) -> Result<()> {
+        self.negotiate(VERSION, VERSION)?;
+        if !self.features.contains(&Feature::TaskRecords)
+            || !self.features.contains(&Feature::TaskBundlesV1)
+            || !self.features.contains(&Feature::Publications)
+        {
+            return Err(Error::Invalid("task bundle capability unavailable"));
+        }
+        Ok(())
+    }
     pub fn negotiate(&self, client_min: u32, client_max: u32) -> Result<u32> {
         self.limits.validate()?;
         identifier(&self.installation_id, "installation id")?;

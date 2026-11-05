@@ -11,17 +11,23 @@ use std::collections::BTreeMap;
 /// A leased worker snapshot. The fence is rechecked for every transition; a
 /// stale worker can leave orphan bytes but cannot publish or change a result.
 pub struct PublicationWork {
-    key: RequestKey,
-    fence: u64,
-    publication: Publication,
-    manifest: Manifest,
-    source: PinnedSource,
+    pub(crate) key: RequestKey,
+    pub(crate) fence: u64,
+    pub(crate) publication: Publication,
+    pub(crate) manifest: Manifest,
+    pub(crate) source: PinnedSource,
 }
 impl PublicationWork {
     pub fn publication(&self) -> &Publication {
         &self.publication
     }
     pub fn source(&self) -> &impl ObjectSource {
+        &self.source
+    }
+    pub fn manifest(&self) -> &Manifest {
+        &self.manifest
+    }
+    pub fn artifacts(&self) -> &impl alt_task_service::ArtifactSource {
         &self.source
     }
     pub fn roots(&self) -> Result<Vec<ObjectId>> {
@@ -37,10 +43,28 @@ impl PublicationWork {
             .collect()
     }
 }
-struct PinnedSource {
+pub(crate) struct PinnedSource {
     bytes: ByteStore,
     scope: alt_remote_protocol::Scope,
-    objects: BTreeMap<ObjectId, (ObjectKind, String, u64)>,
+    pub(crate) objects: BTreeMap<ObjectId, (ObjectKind, String, u64)>,
+    artifacts: BTreeMap<String, u64>,
+}
+impl alt_task_service::ArtifactSource for PinnedSource {
+    fn open(
+        &self,
+        artifact: &alt_task::Artifact,
+    ) -> alt_task_service::Result<Box<dyn std::io::Read + '_>> {
+        if self.artifacts.get(&artifact.blake3) != Some(&artifact.bytes) {
+            return Err(alt_task_service::Error::Integrity(
+                "artifact outside selected publication",
+            ));
+        }
+        let file = self
+            .bytes
+            .read(&self.scope, &artifact.blake3, artifact.bytes)
+            .map_err(|_| alt_task_service::Error::Integrity("selected artifact unavailable"))?;
+        Ok(Box::new(file))
+    }
 }
 impl ObjectSource for PinnedSource {
     fn open(&self, oid: ObjectId) -> alt_repository_service::Result<Option<ObjectReader<'_>>> {
@@ -149,6 +173,11 @@ impl Store {
             objects.insert(oid, (kind, digest, bytes));
         }
         let fence=unsigned(tx.query_one("UPDATE alt_requests SET fence=fence+1,worker_lease_until=$5 WHERE repository=$1 AND epoch=$2 AND actor_id=$3 AND request_id=$4 RETURNING fence",&[repository,&integer(key.scope.recovery_epoch)?,&key.actor_id,&key.request_id,&integer(lease_until)?])?.get(0))?;
+        let artifacts = manifest
+            .entries
+            .iter()
+            .map(|e| (e.blake3.clone(), e.bytes))
+            .collect();
         tx.commit().map_err(|_| Error::OutcomeUnknown)?;
         Ok(PublicationWork {
             key: key.clone(),
@@ -159,6 +188,7 @@ impl Store {
                 bytes: self.bytes.clone(),
                 scope: key.scope.clone(),
                 objects,
+                artifacts,
             },
         })
     }
@@ -228,9 +258,25 @@ impl Store {
         work: &PublicationWork,
         graph: &VerifiedGraph,
     ) -> Result<()> {
-        if !work.publication.record_roots.is_empty() {
-            return Err(Error::Precondition("task graph acceptance required"));
-        }
+        self.mark_ready_checked(credential, work, graph, None)
+    }
+    pub fn mark_ready_with_tasks(
+        &mut self,
+        credential: &Credential,
+        work: &PublicationWork,
+        graph: &VerifiedGraph,
+        tasks: &alt_task_service::VerifiedTaskGraph,
+    ) -> Result<()> {
+        self.mark_ready_checked(credential, work, graph, Some(tasks))
+    }
+    fn mark_ready_checked(
+        &mut self,
+        credential: &Credential,
+        work: &PublicationWork,
+        graph: &VerifiedGraph,
+        tasks: Option<&alt_task_service::VerifiedTaskGraph>,
+    ) -> Result<()> {
+        crate::tasks::check_selection(work, tasks)?;
         // Reusing published bytes skips upload registration, but it must not
         // skip this request's chunk claims. Do the bounded I/O before SQL locks.
         for entry in &work.manifest.entries {
@@ -247,6 +293,7 @@ impl Store {
         }
         // Graph validation must have used this worker's authorized object set.
         check_graph_pins(&mut tx, work, graph)?;
+        crate::tasks::check_pins(&mut tx, work, graph, tasks)?;
         let state = RequestState::Ready {
             digest: row.get("digest"),
         };
@@ -262,9 +309,27 @@ impl Store {
         work: &PublicationWork,
         graph: &VerifiedGraph,
     ) -> Result<Receipt> {
+        self.publish_checked(credential, work, graph, None)
+    }
+    pub fn publish_with_tasks(
+        &mut self,
+        credential: &Credential,
+        work: &PublicationWork,
+        graph: &VerifiedGraph,
+        tasks: &alt_task_service::VerifiedTaskGraph,
+    ) -> Result<Receipt> {
+        self.publish_checked(credential, work, graph, Some(tasks))
+    }
+    fn publish_checked(
+        &mut self,
+        credential: &Credential,
+        work: &PublicationWork,
+        graph: &VerifiedGraph,
+        tasks: Option<&alt_task_service::VerifiedTaskGraph>,
+    ) -> Result<Receipt> {
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = snapshot(&mut tx, &self.spec, &work.key.scope.repository_instance_id)?;
+        let mut current = snapshot(&mut tx, &self.spec, &work.key.scope.repository_instance_id)?;
         let auth = authorize(&mut tx, &self.spec, credential, &current)?;
         check_key(&work.key, &current.scope, &auth.actor_id)?;
         let row = request_row(&mut tx, &work.key)?
@@ -280,11 +345,9 @@ impl Store {
         if row.get::<_, String>("state") != "ready" {
             return Err(Error::Precondition("request not ready"));
         }
-        // Task graphs are attached through the task service, never inferred
-        // from unrelated uploads. Until that adapter is present fail closed.
-        if !work.publication.record_roots.is_empty() {
-            return Err(Error::Precondition("task graph acceptance required"));
-        }
+        crate::tasks::check_selection(work, tasks)?;
+        crate::tasks::check_pins(&mut tx, work, graph, tasks)?;
+        crate::tasks::approve_current(&mut tx, &self.spec, work, tasks, &mut current, self.limits)?;
         let validated = match validate_publication(
             &work.publication,
             &current,
@@ -348,6 +411,7 @@ impl Store {
             }
         }
         let sequence=unsigned(tx.query_one("UPDATE alt_repositories SET transaction_sequence=transaction_sequence+1 WHERE id=$1 RETURNING transaction_sequence",&[repository])?.get(0))?;
+        crate::tasks::retain(&mut tx, work, tasks, sequence, &validated.digest)?;
         let body = ReceiptBody {
             publication: work.publication.clone(),
             request_digest: validated.digest,
@@ -390,7 +454,7 @@ impl Store {
         Ok(receipt)
     }
 }
-fn worker(tx: &mut Transaction<'_>, work: &PublicationWork) -> Result<postgres::Row> {
+pub(crate) fn worker(tx: &mut Transaction<'_>, work: &PublicationWork) -> Result<postgres::Row> {
     let row = request_row(tx, &work.key)?.ok_or(Error::Precondition("request not registered"))?;
     let time = now(tx)?;
     active(&row, time)?;
@@ -400,7 +464,7 @@ fn worker(tx: &mut Transaction<'_>, work: &PublicationWork) -> Result<postgres::
     }
     Ok(row)
 }
-fn check_graph_pins(
+pub(crate) fn check_graph_pins(
     tx: &mut Transaction<'_>,
     work: &PublicationWork,
     graph: &VerifiedGraph,

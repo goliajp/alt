@@ -6,7 +6,9 @@ mod read;
 mod requests;
 pub use publication::*;
 pub use read::*;
+mod schema;
 mod store;
+mod tasks;
 pub use bytes::*;
 pub use store::*;
 
@@ -18,6 +20,8 @@ pub enum Error {
     Database(#[from] postgres::Error),
     #[error("protocol: {0}")]
     Protocol(#[from] alt_remote_protocol::Error),
+    #[error("task: {0}")]
+    Task(#[from] alt_task_service::Error),
     #[error("repository: {0}")]
     Repository(#[from] alt_repository_service::Error),
     #[error("encoding: {0}")]

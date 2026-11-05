@@ -81,6 +81,30 @@ pub struct Op {
     pub payload: Vec<u8>,
 }
 
+impl Op {
+    /// Decode an original operation body, preserving its content identity.
+    /// This validates framing, not the authority or meaning of its payload.
+    pub fn from_body(body: &[u8]) -> Result<Self, OpLogError> {
+        parse_body(body)
+    }
+
+    /// Return the exact canonical body of this operation for a scoped source
+    /// proof. Reject edited fields rather than silently changing its identity.
+    pub fn body(&self) -> Result<Vec<u8>, OpLogError> {
+        if self.actor.len() > u16::MAX as usize || self.payload.len() > u32::MAX as usize {
+            return Err(OpLogError::Format("operation field exceeds encoding limit"));
+        }
+        let mut body = encode_body(&self.parent, self.timestamp_ms, &self.actor, &self.payload);
+        body[32..64].copy_from_slice(&self.change_id);
+        if blake3::hash(&body).as_bytes() != &self.id.0 {
+            return Err(OpLogError::Format(
+                "operation body differs from its identity",
+            ));
+        }
+        Ok(body)
+    }
+}
+
 fn encode_body(parent: &OpId, timestamp_ms: u64, actor: &str, payload: &[u8]) -> Vec<u8> {
     let mut body = Vec::with_capacity(BODY_FIXED_LEN + actor.len() + payload.len());
     body.extend_from_slice(&parent.0);
@@ -627,6 +651,26 @@ fn file_header() -> [u8; HEADER_LEN] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_body_preserves_reserved_fields_and_refuses_identity_changes() {
+        let mut raw = encode_body(&ROOT, 42, "source actor", b"source payload");
+        raw[32..64].fill(7);
+        let op = Op::from_body(&raw).unwrap();
+        assert_eq!(op.change_id, [7; 32]);
+        assert_eq!(op.body().unwrap(), raw);
+        for end in 0..raw.len() {
+            assert!(Op::from_body(&raw[..end]).is_err());
+        }
+        let mut trailing = raw.clone();
+        trailing.push(0);
+        assert!(Op::from_body(&trailing).is_err());
+        let mut edited = op.clone();
+        edited.actor.push('x');
+        assert!(edited.body().is_err());
+        edited.actor = "x".repeat(u16::MAX as usize + 1);
+        assert!(edited.body().is_err());
+    }
 
     #[test]
     fn appends_chain_and_replays() {

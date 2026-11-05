@@ -43,3 +43,11 @@ capabilities, path scope and current policy at publication.
 Instance limits include parsed-object bytes, graph objects/edges, expanded tree
 paths and aggregate traversal work. These bounds are supplied by the instance
 and constrain admission/validation; they are not throughput promises.
+
+Task-bearing publications negotiate `task_records`, `publications` and
+`task_bundles_v1`. Their transfer manifest contains exactly one explicitly typed
+`task_bundle` entry. Ref-only publications contain none. The bundle's digest
+binds the selected original record encodings, source proofs, companions and
+attachment omissions through the transfer manifest. Existing content kind tags
+and canonical request encodings are unchanged; the new kind requires its new
+capability rather than guessing a bundle from an arbitrary record payload.

@@ -8,6 +8,8 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+alt-command-protocol = { path = "crates/alt-command-protocol" }
+alt-task-service = { path = "crates/alt-task-service" }
 alt-server-store = { path = "crates/alt-server-store" }
 alt-repository-service = { path = "crates/alt-repository-service" }
 alt-remote-protocol = { path = "crates/alt-remote-protocol" }

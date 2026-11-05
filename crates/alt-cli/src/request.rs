@@ -5,7 +5,6 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::daemon::{RequestId, Response};
@@ -13,31 +12,7 @@ use crate::machine::{Failure, hex};
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Intent {
-    pub version: u32,
-    pub hash_algorithm: String,
-    pub request_id: String,
-    pub binding_digest: String,
-    pub repository: String,
-    pub workspace: String,
-    pub started_ms: u128,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Completion {
-    pub version: u32,
-    pub hash_algorithm: String,
-    pub request_id: String,
-    pub binding_digest: String,
-    pub finished_ms: u128,
-    pub response_digest: String,
-    pub response_bytes: u64,
-    pub operations: Vec<String>,
-    pub outcome: String,
-}
+pub use alt_command_protocol::{Completion, Intent};
 
 pub enum Claimed {
     Execute(Claim),
@@ -212,24 +187,10 @@ pub fn read_completion(directory: &Path, intent: &Intent) -> Res<Option<(Complet
         Err(error) => return Err(error.into()),
     };
     let completion: Completion = serde_json::from_slice(&bytes)?;
-    if completion.version != 1
-        || completion.hash_algorithm != "blake3"
-        || completion.request_id != intent.request_id
-        || completion.binding_digest != intent.binding_digest
-        || !matches!(
-            completion.outcome.as_str(),
-            "applied" | "not_applied" | "partial" | "unknown"
-        )
-    {
-        return Err(Failure::unknown("invalid or unsupported request completion").into());
-    }
     let bytes = std::fs::read(directory.join("response.bin"))?;
-    if bytes.len() as u64 != completion.response_bytes
-        || digest(&bytes) != completion.response_digest
-    {
-        return Err(Failure::unknown("recorded response is incomplete or corrupt").into());
-    }
-    Ok(Some((completion, Response::decode(&bytes)?)))
+    let response = alt_command_protocol::validate_completion(intent, &completion, &bytes)
+        .map_err(|error| Failure::unknown(error.to_string()))?;
+    Ok(Some((completion, response)))
 }
 
 fn durable_write(path: &Path, bytes: &[u8]) -> Res<()> {

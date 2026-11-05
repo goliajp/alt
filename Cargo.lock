@@ -28,6 +28,7 @@ dependencies = [
 name = "alt-cli"
 version = "0.1.0-internal.1"
 dependencies = [
+ "alt-command-protocol",
  "alt-delivery",
  "alt-diff",
  "alt-export",
@@ -64,6 +65,16 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tiny_http",
+]
+
+[[package]]
+name = "alt-command-protocol"
+version = "0.1.0-internal.1"
+dependencies = [
+ "blake3",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -369,9 +380,15 @@ dependencies = [
 name = "alt-server-store"
 version = "0.1.0-internal.1"
 dependencies = [
+ "alt-command-protocol",
+ "alt-delivery",
  "alt-git-codec",
+ "alt-input",
+ "alt-refs",
  "alt-remote-protocol",
  "alt-repository-service",
+ "alt-task",
+ "alt-task-service",
  "blake3",
  "ed25519-dalek",
  "libc",
@@ -418,6 +435,28 @@ dependencies = [
  "blake3",
  "libc",
  "memmap2",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
+name = "alt-task-service"
+version = "0.1.0-internal.1"
+dependencies = [
+ "alt-command-protocol",
+ "alt-delivery",
+ "alt-git-codec",
+ "alt-git-config",
+ "alt-input",
+ "alt-oplog",
+ "alt-refs",
+ "alt-remote-protocol",
+ "alt-repository-service",
+ "alt-task",
+ "blake3",
+ "ed25519-dalek",
  "serde",
  "serde_json",
  "tempfile",

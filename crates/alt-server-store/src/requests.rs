@@ -18,12 +18,7 @@ impl Store {
         ttl_ms: u64,
     ) -> Result<RequestState> {
         publication.validate(self.limits)?;
-        manifest.validate(self.limits)?;
-        if manifest.object_format != publication.object_format
-            || manifest.id(self.limits)? != publication.content_manifest
-        {
-            return Err(Error::Integrity("transfer manifest identity"));
-        }
+        manifest.validate_publication(publication, self.limits)?;
         if ttl_ms == 0 || ttl_ms > 86_400_000 {
             return Err(Error::Limit("upload lifetime"));
         }

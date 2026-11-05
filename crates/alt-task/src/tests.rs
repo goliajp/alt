@@ -149,6 +149,20 @@ fn immutable_records_and_large_raw_logs_survive_reopen_and_detect_corruption() {
         Termination::Exit { code: 7 }
     );
     assert_eq!(store.list::<Evidence>().unwrap().len(), 2);
+    let source_path = directory
+        .path()
+        .join("records/evidence")
+        .join(format!("{passed}.json"));
+    let original = std::fs::read(&source_path).unwrap();
+    let pretty =
+        serde_json::to_vec_pretty(&serde_json::from_slice::<serde_json::Value>(&original).unwrap())
+            .unwrap();
+    std::fs::write(&source_path, &pretty).unwrap();
+    let (record, source) = store.source_record::<Evidence>(&passed).unwrap();
+    assert_eq!(record.id().unwrap(), passed);
+    assert_eq!(source, pretty);
+    assert_ne!(source, original);
+
     std::fs::write(
         directory
             .path()

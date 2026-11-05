@@ -53,13 +53,7 @@ pub struct Request {
     pub id: Option<RequestId>,
 }
 
-/// The captured result of running a command.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Response {
-    pub exit_code: u8,
-    pub stdout: Vec<u8>,
-    pub stderr: Vec<u8>,
-}
+pub use alt_command_protocol::Response;
 
 fn put_bytes(out: &mut Vec<u8>, b: &[u8]) {
     out.extend_from_slice(&(b.len() as u32).to_le_bytes());
@@ -177,32 +171,6 @@ impl Request {
             .filter_map(|&k| std::env::var(k).ok().map(|v| (k.to_owned(), v)))
             .collect();
         Ok(Request { args, cwd, env, id })
-    }
-}
-
-impl Response {
-    pub fn encode(&self) -> Vec<u8> {
-        let mut out = Vec::new();
-        out.push(self.exit_code);
-        put_bytes(&mut out, &self.stdout);
-        put_bytes(&mut out, &self.stderr);
-        out
-    }
-
-    pub fn decode(buf: &[u8]) -> io::Result<Response> {
-        let mut at = 0;
-        let exit_code = *buf.first().ok_or_else(truncated)?;
-        at += 1;
-        let stdout = get_bytes(buf, &mut at)?;
-        let stderr = get_bytes(buf, &mut at)?;
-        if at != buf.len() {
-            return Err(bad("trailing bytes in daemon response"));
-        }
-        Ok(Response {
-            exit_code,
-            stdout,
-            stderr,
-        })
     }
 }
 

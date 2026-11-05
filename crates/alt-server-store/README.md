@@ -30,10 +30,30 @@ before unlinking and syncing the directory. Concurrent stale GC workers cannot
 delete a newly uploaded incarnation. Read snapshots retain their metadata
 watermark and object bytes across ref deletion; each object open rechecks access.
 
-The current transaction adapter publishes refs. Selected task roots require the
-task-service acceptance adapter and are refused until that is supplied. Cloud
-identity issuance, portable backup/operator workflows and outbox delivery are
-separate integrations; table existence does not mean those workflows ran.
+Selected task roots require an opaque `VerifiedTaskGraph` bound to the exact
+bundle and publication. The task-aware ready/publish APIs retain original raw
+record variants, bundle selection and all required artifact/Git pins in the same
+transaction as refs, receipt, audit and outbox. The ref-only APIs reject task roots.
+
+Historical reviews never authorize a current mutation. Task publications that
+change refs require a separate current integration approval. Reviewer read and
+review grants are independent of publish grants. Approval binds the exact
+integration, candidate/evidence, bundle, target refs, reviewer credential and
+current policy generations. Publication rechecks credential/grant revocation,
+approval/key expiry, collector policy, evidence eligibility and target CAS under
+the repository lock, then consumes the approval atomically. Received history can
+be retained without changing refs, including explicitly omitted attachments;
+that history cannot silently become accepted evidence.
+
+Schema versions have immutable checksums. Opening requires the current schema;
+`Store::migrate_v1` explicitly upgrades the original v1 layout in one transaction,
+preserves existing data, advances the runtime generation and fences old upload
+workers. Callers must reopen with the returned instance specification. An old
+process or worker cannot continue writes after migration.
+
+Cloud identity issuance, task transport/UI, portable backup/operator workflows
+and outbox delivery are separate integrations; table existence does not mean
+those workflows ran.
 
 Tests use the normal scoped gate. Actual database/fault tests are ignored in the
 fast tier and required in the corpus tier. On an isolated Linux runner:

@@ -126,19 +126,25 @@ impl Store {
         Ok(id)
     }
     pub fn load<T: Record>(&self, id: &str) -> Result<T> {
+        self.source_record(id).map(|(record, _)| record)
+    }
+    /// Read a validated record and its original envelope bytes for explicit
+    /// publication. Re-encoding the record is not its original source payload.
+    pub fn source_record<T: Record>(&self, id: &str) -> Result<(T, Vec<u8>)> {
         check_id(id)?;
-        let record: T = decode(&fs::read(
+        let bytes = fs::read(
             self.directory
                 .join("records")
                 .join(T::KIND)
                 .join(format!("{id}.json")),
-        )?)?;
+        )?;
+        let record: T = decode(&bytes)?;
         if record.id()? != id {
             return Err(Error::Invalid(
                 "record content does not match its address".into(),
             ));
         }
-        Ok(record)
+        Ok((record, bytes))
     }
     pub fn list<T: Record>(&self) -> Result<Vec<(String, T)>> {
         let directory = self.directory.join("records").join(T::KIND);

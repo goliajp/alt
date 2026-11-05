@@ -1,4 +1,5 @@
 mod faults;
+mod tasks;
 
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
 use alt_remote_protocol::*;

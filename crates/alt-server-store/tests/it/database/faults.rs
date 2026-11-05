@@ -112,10 +112,41 @@ fn real_disk_full_never_publishes_bytes_or_refs() {
 #[test]
 #[ignore = "requires isolated PostgreSQL; kills only its own recorded child at real durability boundaries"]
 fn publication_process_crash_boundaries() {
+    crash_boundaries(false);
+}
+#[test]
+#[ignore = "requires isolated PostgreSQL; kills only its own recorded task-publication child"]
+fn task_publication_process_crash_boundaries() {
+    crash_boundaries(true);
+}
+fn crash_payload(tasks: bool) -> Payload {
+    if tasks {
+        super::tasks::task_payload("crash")
+    } else {
+        Payload::new("crash", None)
+    }
+}
+fn publish_crash_payload(p: &Payload, store: &mut Store, credential: &Credential, tasks: bool) {
+    if tasks {
+        let work = store
+            .acquire_publication(credential, &p.publication.key, 30_000, 1000)
+            .unwrap();
+        let (graph, tasks) = super::tasks::verified(&work, p.commit);
+        store
+            .mark_ready_with_tasks(credential, &work, &graph, &tasks)
+            .unwrap();
+        store
+            .publish_with_tasks(credential, &work, &graph, &tasks)
+            .unwrap();
+    } else {
+        p.publish(store, credential);
+    }
+}
+fn crash_boundaries(tasks: bool) {
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
     if let Ok(phase) = std::env::var("ALT_SERVER_FAULT_PHASE") {
-        crash_child(&phase);
+        crash_child(&phase, tasks);
         return;
     }
     for phase in [
@@ -140,7 +171,11 @@ fn publication_process_crash_boundaries() {
             .args([
                 "--ignored",
                 "--exact",
-                "database::faults::publication_process_crash_boundaries",
+                if tasks {
+                    "database::faults::task_publication_process_crash_boundaries"
+                } else {
+                    "database::faults::publication_process_crash_boundaries"
+                },
                 "--nocapture",
             ])
             .env("ALT_SERVER_FAULT_PHASE", phase)
@@ -185,10 +220,22 @@ fn publication_process_crash_boundaries() {
             "phase {phase}, child {child_pid}, status {status}: {}",
             std::fs::read_to_string(&output).unwrap()
         );
-        let p = Payload::new("crash", None);
+        let p = crash_payload(tasks);
+        if tasks {
+            for table in ["alt_task_records", "alt_task_roots", "alt_task_bundles"] {
+                assert_eq!(
+                    f.client()
+                        .query_one(&format!("SELECT count(*) FROM {table}"), &[])
+                        .unwrap()
+                        .get::<_, i64>(0),
+                    i64::from(phase == "after_commit"),
+                    "{phase} {table}"
+                );
+            }
+        }
         let observation = f.store.query(&f.credential, &p.publication.key).unwrap();
         if phase == "after_commit" {
-            assert_eq!(f.counts(), (1, 1, 1));
+            assert_eq!(f.counts(), (i64::from(!tasks), 1, 1));
             assert!(
                 matches!(observation,RequestObservation::Recorded {result,..} if matches!(*result,RequestState::Committed {..}))
             );
@@ -212,12 +259,12 @@ fn publication_process_crash_boundaries() {
                 locker.batch_execute("DROP TRIGGER test_pause_publication ON alt_outbox; DROP FUNCTION test_pause_publication()").unwrap();
             }
             p.upload(&mut f.store, &f.credential);
-            p.publish(&mut f.store, &f.credential);
-            assert_eq!(f.counts(), (1, 1, 1));
+            publish_crash_payload(&p, &mut f.store, &f.credential, tasks);
+            assert_eq!(f.counts(), (i64::from(!tasks), 1, 1));
         }
     }
 }
-fn crash_child(phase: &str) {
+fn crash_child(phase: &str, tasks: bool) {
     let dsn = std::env::var("ALT_SERVER_TEST_ADMIN_DSN").unwrap();
     let database = std::env::var("ALT_SERVER_FAULT_DB").unwrap();
     let root = std::path::PathBuf::from(std::env::var("ALT_SERVER_FAULT_ROOT").unwrap());
@@ -241,7 +288,7 @@ fn crash_child(phase: &str) {
     )
     .unwrap();
     let credential = store.authenticate(&token).unwrap();
-    let p = Payload::new("crash", None);
+    let p = crash_payload(tasks);
     let stop = || -> ! {
         std::fs::write(root.join("signal"), phase).unwrap();
         loop {
@@ -272,6 +319,19 @@ fn crash_child(phase: &str) {
     let work = store
         .acquire_publication(&credential, &p.publication.key, 30_000, 1000)
         .unwrap();
+    if tasks {
+        let (graph, tasks) = super::tasks::verified(&work, p.commit);
+        store
+            .mark_ready_with_tasks(&credential, &work, &graph, &tasks)
+            .unwrap();
+        if phase == "ready" {
+            stop();
+        }
+        store
+            .publish_with_tasks(&credential, &work, &graph, &tasks)
+            .unwrap();
+        stop();
+    }
     let graph = verify_graph(
         work.source(),
         HashAlgo::Sha1,

@@ -151,6 +151,7 @@ pub enum ContentKind {
     Tag,
     Record,
     Attachment,
+    TaskBundle,
 }
 impl ContentKind {
     fn tag(self) -> &'static str {
@@ -161,6 +162,7 @@ impl ContentKind {
             Self::Tag => "tag",
             Self::Record => "record",
             Self::Attachment => "attachment",
+            Self::TaskBundle => "task_bundle",
         }
     }
 }
@@ -249,7 +251,8 @@ impl Manifest {
                 return Err(Error::Invalid("duplicate content entry"));
             }
             match (entry.kind, &entry.git_oid) {
-                (ContentKind::Record | ContentKind::Attachment, None) => {}
+                (ContentKind::Record | ContentKind::Attachment | ContentKind::TaskBundle, None) => {
+                }
                 (
                     ContentKind::Commit | ContentKind::Tree | ContentKind::Blob | ContentKind::Tag,
                     Some(oid),
@@ -261,6 +264,26 @@ impl Manifest {
                 }
                 _ => return Err(Error::Invalid("content kind and Git id")),
             }
+        }
+        Ok(())
+    }
+    /// Bind an explicit task inventory to this exact publication. Git-only
+    /// publications do not implicitly select any task history.
+    pub fn validate_publication(&self, publication: &Publication, limits: Limits) -> Result<()> {
+        self.validate(limits)?;
+        publication.validate(limits)?;
+        if self.object_format != publication.object_format
+            || self.id(limits)? != publication.content_manifest
+        {
+            return Err(Error::Invalid("publication manifest binding"));
+        }
+        let bundles = self
+            .entries
+            .iter()
+            .filter(|e| e.kind == ContentKind::TaskBundle)
+            .count();
+        if bundles != usize::from(!publication.record_roots.is_empty()) {
+            return Err(Error::Invalid("task bundle selection"));
         }
         Ok(())
     }

@@ -73,6 +73,7 @@ impl Store {
             .to_hex()
             .to_string();
         tx.execute("INSERT INTO alt_instance(singleton,installation_id,workspace_id,deployment_mode,runtime_generation,signing_key_id) VALUES(true,$1,$2,$3,$4,$5)", &[&spec.installation_id,&spec.workspace_id,&spec.mode(),&integer(spec.runtime_generation)?,&key_id])?;
+        crate::schema::apply_v2(&mut tx)?;
         tx.commit()?;
         Self::open(client, bytes, spec, signing_key, limits)
     }
@@ -85,19 +86,7 @@ impl Store {
     ) -> Result<Self> {
         spec.validate()?;
         limits.validate()?;
-        let rows = client.query(
-            "SELECT version,checksum FROM alt_schema ORDER BY version",
-            &[],
-        )?;
-        if rows.len() != 1
-            || rows[0].get::<_, i32>(0) != 1
-            || rows[0].get::<_, String>(1)
-                != blake3::hash(include_bytes!("schema.sql")).to_hex().as_str()
-        {
-            return Err(Error::Precondition(
-                "unsupported or altered database schema",
-            ));
-        }
+        crate::schema::check(&mut client, 2)?;
         let mut tx = client.transaction()?;
         instance(&mut tx, &spec, &signing_key)?;
         tx.commit()?;
@@ -342,7 +331,7 @@ fn insert_token(
     tx.execute("INSERT INTO alt_credentials(token_digest,actor_id,attribution,identity_source,expires_at,administrator) VALUES($1,$2,$3,$4,$5,$6)",&[&token_digest(&token),&actor,&serde_json::to_value(attribution)?,&mode(source),&integer(expires)?,&administrator])?;
     Ok(token)
 }
-fn credential_row(
+pub(crate) fn credential_row(
     tx: &mut Transaction<'_>,
     spec: &InstanceSpec,
     credential: &Credential,

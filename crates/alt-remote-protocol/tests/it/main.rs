@@ -354,3 +354,45 @@ fn counters_round_trip_above_javascript_integer_precision_without_coercion() {
         assert!(Publication::decode(&serde_json::to_vec(&bad).unwrap(), limits()).is_err());
     }
 }
+
+#[test]
+fn task_inventory_requires_one_explicit_bundle_and_capability() {
+    let mut p = publication();
+    let mut manifest = Manifest::empty(ObjectFormat::Sha1);
+    p.content_manifest = manifest.id(limits()).unwrap();
+    assert!(manifest.validate_publication(&p, limits()).is_err());
+    manifest.entries.push(ContentEntry {
+        kind: ContentKind::TaskBundle,
+        blake3: "a".repeat(64),
+        bytes: 0,
+        git_oid: None,
+        chunks: vec![],
+    });
+    p.content_manifest = manifest.id(limits()).unwrap();
+    assert!(manifest.validate_publication(&p, limits()).is_ok());
+    p.record_roots.clear();
+    assert!(manifest.validate_publication(&p, limits()).is_err());
+    p.record_roots = publication().record_roots;
+    manifest.entries.push(ContentEntry {
+        kind: ContentKind::TaskBundle,
+        blake3: "b".repeat(64),
+        bytes: 0,
+        git_oid: None,
+        chunks: vec![],
+    });
+    p.content_manifest = manifest.id(limits()).unwrap();
+    assert!(manifest.validate_publication(&p, limits()).is_err());
+    let mut capabilities = Capabilities {
+        protocol_min: 1,
+        protocol_max: 1,
+        installation_id: "receiver".into(),
+        runtime_generation: 1,
+        deployment_mode: DeploymentMode::SelfHosted,
+        object_formats: vec![ObjectFormat::Sha1],
+        limits: limits(),
+        features: vec![Feature::Publications, Feature::TaskRecords],
+    };
+    assert!(capabilities.require_task_bundles().is_err());
+    capabilities.features.push(Feature::TaskBundlesV1);
+    assert!(capabilities.require_task_bundles().is_ok());
+}
