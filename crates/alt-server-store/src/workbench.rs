@@ -209,7 +209,7 @@ impl Store {
         if current.scope != *scope {
             return Err(Error::Unauthorized);
         }
-        let row=tx.query_opt("SELECT r.payload_blake3,b.bytes,q.publication,q.manifest,q.result FROM alt_task_records r JOIN alt_task_bundle_records br ON br.repository=r.repository AND br.kind=r.kind AND br.record_id=r.record_id AND br.payload_blake3=r.payload_blake3 JOIN alt_requests q ON q.repository=br.repository AND q.epoch=br.epoch AND q.actor_id=br.actor_id AND q.request_id=br.request_id JOIN alt_blobs b ON b.repository=r.repository AND b.blake3=r.payload_blake3 WHERE r.repository=$1 AND r.kind=$2 AND r.record_id=$3 AND q.state='committed' AND b.state='stored' ORDER BY q.epoch,q.actor_id,q.request_id,r.payload_blake3 LIMIT 1", &[&scope.repository_instance_id,&kind,&root.id])?.ok_or(Error::Unauthorized)?;
+        let row=tx.query_opt("SELECT h.payload_blake3,b.bytes,h.publication,h.manifest,h.receipt FROM (SELECT br.repository,br.payload_blake3,q.digest,q.publication,q.manifest,q.result->'receipt' AS receipt FROM alt_task_bundle_records br JOIN alt_requests q ON q.repository=br.repository AND q.epoch=br.epoch AND q.actor_id=br.actor_id AND q.request_id=br.request_id WHERE br.repository=$1 AND br.kind=$2 AND br.record_id=$3 AND q.state='committed' UNION ALL SELECT r.repository,r.payload_blake3,p.digest,p.publication,p.manifest,p.receipt FROM alt_archived_records r JOIN alt_archived_publications p ON p.repository=r.repository AND p.digest=r.digest WHERE r.repository=$1 AND r.kind=$2 AND r.record_id=$3) h JOIN alt_blobs b ON b.repository=h.repository AND b.blake3=h.payload_blake3 WHERE b.state='stored' ORDER BY h.digest,h.payload_blake3 LIMIT 1", &[&scope.repository_instance_id,&kind,&root.id])?.ok_or(Error::Unauthorized)?;
         let payload = alt_task::Artifact {
             blake3: row.get(0),
             bytes: unsigned(row.get(1))?,
@@ -220,10 +220,15 @@ impl Store {
         let file = self.bytes.read(scope, &payload.blake3, payload.bytes)?;
         let publication: Publication = serde_json::from_value(row.get(2))?;
         let manifest = serde_json::from_value(row.get(3))?;
-        let state: alt_remote_protocol::RequestState = serde_json::from_value(row.get(4))?;
-        let alt_remote_protocol::RequestState::Committed { receipt } = state else {
-            return Err(Error::Integrity("record publication state"));
-        };
+        let receipt: alt_remote_protocol::Receipt = serde_json::from_value(row.get(4))?;
+        let provenance = crate::provenance::load(
+            &mut tx,
+            scope,
+            &publication,
+            &receipt,
+            &self.signing_key,
+            self.limits,
+        )?;
         tx.commit()?;
         let mut raw = Vec::new();
         file.take(max_bytes as u64 + 1).read_to_end(&mut raw)?;
@@ -243,7 +248,8 @@ impl Store {
             publication: crate::PublishedBundle {
                 publication,
                 manifest,
-                receipt: *receipt,
+                receipt,
+                provenance,
             },
         })
     }

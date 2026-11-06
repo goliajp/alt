@@ -9,7 +9,7 @@ use ed25519_dalek::Signer;
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
 
-fn task_limits() -> TaskLimits {
+pub(super) fn task_limits() -> TaskLimits {
     TaskLimits {
         objects: 1000,
         records: 1000,
@@ -229,7 +229,7 @@ fn v2_migration_recovers_every_publication_of_a_root_and_preserves_raw_variants(
             .get::<_, i64>(0),
         1
     );
-    f.client().batch_execute("DROP TABLE alt_device_authorizations,alt_client_credentials,alt_cloud_logins,alt_delegations,alt_cloud_reservations,alt_cloud_ingress,alt_cloud_credentials,alt_cloud_accounts,alt_cloud_binding; DROP TABLE alt_browser_binding,alt_web_sessions,alt_web_accounts,alt_login_budgets,alt_instance_audit; DROP TABLE alt_task_bundle_records,alt_task_bundle_roots; ALTER TABLE alt_repositories DROP COLUMN default_branch; DELETE FROM alt_schema WHERE version>=3").unwrap();
+    f.client().batch_execute("DROP TABLE alt_archived_records,alt_archived_publications; DROP TABLE alt_cloud_portable_reservations,alt_portable_import_content,alt_portable_imports; ALTER TABLE alt_repositories DROP COLUMN portable_import; DROP TABLE alt_portable_exports; ALTER TABLE alt_repositories DROP COLUMN portable_freeze; DROP TABLE alt_publication_provenance; DROP TABLE alt_device_authorizations,alt_client_credentials,alt_cloud_logins,alt_delegations,alt_cloud_reservations,alt_cloud_ingress,alt_cloud_credentials,alt_cloud_accounts,alt_cloud_binding; DROP TABLE alt_browser_binding,alt_web_sessions,alt_web_accounts,alt_login_budgets,alt_instance_audit; DROP TABLE alt_task_bundle_records,alt_task_bundle_roots; ALTER TABLE alt_repositories DROP COLUMN default_branch; DELETE FROM alt_schema WHERE version>=3").unwrap();
     assert!(
         Store::open(
             f.client(),
@@ -377,6 +377,95 @@ fn task_publication_retains_original_records_and_artifacts_in_one_transaction() 
 }
 #[test]
 #[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
+fn task_publication_preserves_every_selected_payload_after_gc() {
+    let mut f = Fixture::new();
+    let mut payload = task_payload("complete-signed-selection");
+    let raw = b"explicitly selected extra Git object".to_vec();
+    add(&mut payload, ContentKind::Blob, raw.clone());
+    payload.manifest.entries.last_mut().unwrap().git_oid =
+        Some(ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, &raw).to_string());
+    payload.publication.content_manifest = payload.manifest.id(limits()).unwrap();
+    payload.upload(&mut f.store, &f.credential);
+    let work = f
+        .store
+        .acquire_publication(&f.credential, &payload.publication.key, 60_000, 1000)
+        .unwrap();
+    let (graph, tasks) = verified(&work, payload.commit);
+    f.store
+        .mark_ready_with_tasks(&f.credential, &work, &graph, &tasks)
+        .unwrap();
+    f.store
+        .publish_with_tasks(&f.credential, &work, &graph, &tasks)
+        .unwrap();
+    f.client()
+        .execute(
+            "UPDATE alt_pins SET expires_at=0 WHERE expires_at IS NOT NULL",
+            &[],
+        )
+        .unwrap();
+    f.store
+        .collect_orphans(&f.credential, "repository", 100)
+        .unwrap();
+    for (entry, original) in payload.manifest.entries.iter().zip(&payload.contents) {
+        let (size, mut file) = f
+            .store
+            .open_published_content(&f.credential, &payload.publication.key.scope, &entry.blake3)
+            .expect("every signed manifest entry must remain downloadable");
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(&mut file, &mut bytes).unwrap();
+        assert_eq!(size, original.len() as u64);
+        assert_eq!(&bytes, original);
+    }
+}
+
+#[test]
+#[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
+fn task_publication_preserves_baseline_after_ref_deletion() {
+    let mut f = Fixture::new();
+    let old = Payload::new("historical-task-baseline", None);
+    old.upload(&mut f.store, &f.credential);
+    old.publish(&mut f.store, &f.credential);
+    let mut payload = task_payload("historical-task-baseline");
+    payload.publication.key.request_id = "publish-task-baseline".into();
+    assert_eq!(payload.commit, old.commit);
+    payload.upload(&mut f.store, &f.credential);
+    let work = f
+        .store
+        .acquire_publication(&f.credential, &payload.publication.key, 60_000, 1000)
+        .unwrap();
+    let (graph, tasks) = verified(&work, payload.commit);
+    f.store
+        .mark_ready_with_tasks(&f.credential, &work, &graph, &tasks)
+        .unwrap();
+    f.store
+        .publish_with_tasks(&f.credential, &work, &graph, &tasks)
+        .unwrap();
+    let mut deletion = Payload::new("remove-current-ref", Some(old.commit));
+    deletion.publication.refs[0].new = None;
+    deletion.manifest.entries.clear();
+    deletion.contents.clear();
+    deletion.publication.content_manifest = deletion.manifest.id(limits()).unwrap();
+    deletion.upload(&mut f.store, &f.credential);
+    deletion.publish(&mut f.store, &f.credential);
+    assert_eq!(f.counts().0, 0);
+    f.store
+        .collect_orphans(&f.credential, "repository", 100)
+        .unwrap();
+    let (_, mut file) = f
+        .store
+        .open_published_content(
+            &f.credential,
+            &payload.publication.key.scope,
+            &old.manifest.entries[1].blake3,
+        )
+        .expect("task baseline must survive current ref deletion");
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut file, &mut bytes).unwrap();
+    assert_eq!(bytes, old.contents[1]);
+}
+
+#[test]
+#[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
 fn task_publication_refuses_revoked_publish_scope_and_wrong_verified_bundle() {
     let mut f = Fixture::new();
     let payload = task_payload("selected-task");
@@ -430,7 +519,7 @@ fn explicit_v1_migration_preserves_rows_and_fences_old_runtime() {
     .unwrap();
     // Recreate the actual frozen v1 layout, preserving its original checksum
     // and existing identity, credentials and repository rows.
-    f.client().batch_execute("DROP TABLE alt_device_authorizations,alt_client_credentials,alt_cloud_logins,alt_delegations,alt_cloud_reservations,alt_cloud_ingress,alt_cloud_credentials,alt_cloud_accounts,alt_cloud_binding; DROP TABLE alt_browser_binding,alt_web_sessions,alt_web_accounts,alt_login_budgets,alt_instance_audit; DROP TABLE alt_task_bundle_records,alt_task_bundle_roots,alt_current_approvals,alt_review_grants,alt_collector_policies,alt_task_bundles,alt_task_records; ALTER TABLE alt_repositories DROP COLUMN default_branch; DELETE FROM alt_schema WHERE version>=2").unwrap();
+    f.client().batch_execute("DROP TABLE alt_archived_records,alt_archived_publications; DROP TABLE alt_cloud_portable_reservations,alt_portable_import_content,alt_portable_imports; ALTER TABLE alt_repositories DROP COLUMN portable_import; DROP TABLE alt_portable_exports; ALTER TABLE alt_repositories DROP COLUMN portable_freeze; DROP TABLE alt_publication_provenance; DROP TABLE alt_device_authorizations,alt_client_credentials,alt_cloud_logins,alt_delegations,alt_cloud_reservations,alt_cloud_ingress,alt_cloud_credentials,alt_cloud_accounts,alt_cloud_binding; DROP TABLE alt_browser_binding,alt_web_sessions,alt_web_accounts,alt_login_budgets,alt_instance_audit; DROP TABLE alt_task_bundle_records,alt_task_bundle_roots,alt_current_approvals,alt_review_grants,alt_collector_policies,alt_task_bundles,alt_task_records; ALTER TABLE alt_repositories DROP COLUMN default_branch; DELETE FROM alt_schema WHERE version>=2").unwrap();
     assert!(
         Store::open(
             f.client(),

@@ -59,6 +59,8 @@ pub struct PublishedBundle {
     pub publication: Publication,
     pub manifest: Manifest,
     pub receipt: Receipt,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub provenance: Vec<crate::TransferProof>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

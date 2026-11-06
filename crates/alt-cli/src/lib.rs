@@ -20,6 +20,7 @@ pub mod machine;
 pub mod meta;
 pub mod native;
 pub mod policy;
+pub mod portable;
 pub mod precommit;
 pub mod quote;
 pub mod request;

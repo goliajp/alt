@@ -1,5 +1,6 @@
 //! Bounded native HTTP transport. Caller owns durable intents, origin/key
 //! trust, local publication previews and all decisions to resume a request.
+pub mod portable;
 use alt_remote_protocol::*;
 use ed25519_dalek::{Signature, VerifyingKey};
 use serde::{Serialize, de::DeserializeOwned};
@@ -10,6 +11,8 @@ use std::{
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("portable protocol: {0}")]
+    Portable(#[from] alt_portable::Error),
     #[error("native protocol: {0}")]
     Protocol(#[from] alt_remote_protocol::Error),
     #[error("invalid native connection or response: {0}")]

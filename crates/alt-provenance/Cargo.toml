@@ -1,0 +1,15 @@
+[package]
+name = "alt-provenance"
+description = "Verification of original publication receipts and explicit transfer evidence"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+alt-remote-protocol.workspace = true
+blake3.workspace = true
+ed25519-dalek.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

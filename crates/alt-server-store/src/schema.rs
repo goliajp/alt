@@ -3,12 +3,17 @@ use alt_remote_protocol::Limits;
 use ed25519_dalek::SigningKey;
 use postgres::{Client, GenericClient};
 
-const MIGRATIONS: [&str; 5] = [
+const MIGRATIONS: [&str; 10] = [
     include_str!("schema.sql"),
     include_str!("schema-v2.sql"),
     include_str!("schema-v3.sql"),
     include_str!("schema-v4.sql"),
     include_str!("schema-v5.sql"),
+    include_str!("schema-v6.sql"),
+    include_str!("schema-v7.sql"),
+    include_str!("schema-v8.sql"),
+    include_str!("schema-v9.sql"),
+    include_str!("schema-v10.sql"),
 ];
 pub(crate) fn check(client: &mut impl GenericClient, expected: usize) -> Result<()> {
     let rows = client.query(
@@ -39,6 +44,21 @@ pub(crate) fn apply_v4(client: &mut impl GenericClient) -> Result<()> {
 }
 pub(crate) fn apply_v5(client: &mut impl GenericClient) -> Result<()> {
     apply(client, 5)
+}
+pub(crate) fn apply_v6(client: &mut impl GenericClient) -> Result<()> {
+    apply(client, 6)
+}
+pub(crate) fn apply_v7(client: &mut impl GenericClient) -> Result<()> {
+    apply(client, 7)
+}
+pub(crate) fn apply_v8(client: &mut impl GenericClient) -> Result<()> {
+    apply(client, 8)
+}
+pub(crate) fn apply_v9(client: &mut impl GenericClient) -> Result<()> {
+    apply(client, 9)
+}
+pub(crate) fn apply_v10(client: &mut impl GenericClient) -> Result<()> {
+    apply(client, 10)
 }
 fn apply(client: &mut impl GenericClient, version: usize) -> Result<()> {
     client.batch_execute(MIGRATIONS[version - 1])?;
@@ -94,6 +114,51 @@ impl Store {
     ) -> Result<Self> {
         Self::migrate_from(client, bytes, spec, signing_key, limits, 4)
     }
+    pub fn migrate_v5(
+        client: Client,
+        bytes: ByteStore,
+        spec: InstanceSpec,
+        signing_key: SigningKey,
+        limits: Limits,
+    ) -> Result<Self> {
+        Self::migrate_from(client, bytes, spec, signing_key, limits, 5)
+    }
+    pub fn migrate_v6(
+        client: Client,
+        bytes: ByteStore,
+        spec: InstanceSpec,
+        signing_key: SigningKey,
+        limits: Limits,
+    ) -> Result<Self> {
+        Self::migrate_from(client, bytes, spec, signing_key, limits, 6)
+    }
+    pub fn migrate_v7(
+        client: Client,
+        bytes: ByteStore,
+        spec: InstanceSpec,
+        signing_key: SigningKey,
+        limits: Limits,
+    ) -> Result<Self> {
+        Self::migrate_from(client, bytes, spec, signing_key, limits, 7)
+    }
+    pub fn migrate_v8(
+        client: Client,
+        bytes: ByteStore,
+        spec: InstanceSpec,
+        signing_key: SigningKey,
+        limits: Limits,
+    ) -> Result<Self> {
+        Self::migrate_from(client, bytes, spec, signing_key, limits, 8)
+    }
+    pub fn migrate_v9(
+        client: Client,
+        bytes: ByteStore,
+        spec: InstanceSpec,
+        signing_key: SigningKey,
+        limits: Limits,
+    ) -> Result<Self> {
+        Self::migrate_from(client, bytes, spec, signing_key, limits, 9)
+    }
     fn migrate_from(
         mut client: Client,
         bytes: ByteStore,
@@ -115,6 +180,7 @@ impl Store {
         for version in from + 1..=MIGRATIONS.len() {
             apply(&mut tx, version)?;
         }
+        crate::provenance::backfill_legacy(&mut tx, &spec, &signing_key, limits)?;
         tx.execute("UPDATE alt_requests SET fence=fence+1,worker_lease_until=0 WHERE state IN ('receiving','ready')", &[])?;
         spec.runtime_generation = spec
             .runtime_generation

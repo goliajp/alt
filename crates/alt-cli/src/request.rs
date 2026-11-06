@@ -366,6 +366,45 @@ pub fn query(
     Ok(())
 }
 
+/// Reconciliation may run while holding the store mutex, so it must never
+/// wait for another request whose executor could be waiting for that mutex.
+/// The returned guard does not change the original intent or result files.
+pub(crate) fn try_lock_existing(alt_dir: &Path, request: &str) -> Res<File> {
+    use std::os::{fd::AsRawFd, unix::fs::OpenOptionsExt};
+    let id = parse_id(request)?;
+    if hex(&id) != request {
+        return Err(
+            Failure::refusal("request_mismatch", "original request id must be canonical").into(),
+        );
+    }
+    let path = alt_dir.join("requests").join(request).join("lock");
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(path)?;
+    if !lock.metadata()?.is_file() {
+        return Err(Failure::refusal(
+            "request_mismatch",
+            "original request lock is not a regular file",
+        )
+        .into());
+    }
+    // SAFETY: fd belongs to the live local File; LOCK_NB cannot block.
+    if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        let error = std::io::Error::last_os_error();
+        if error.kind() == std::io::ErrorKind::WouldBlock {
+            return Err(Failure::refusal(
+                "request_active",
+                "original request is still running; inspect it after it finishes",
+            )
+            .into());
+        }
+        return Err(error.into());
+    }
+    Ok(lock)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

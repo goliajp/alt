@@ -1,0 +1,19 @@
+[package]
+name = "alt-portable"
+description = "Bounded signed portable repository catalogs and streaming archives"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+alt-git-codec.workspace = true
+alt-provenance.workspace = true
+alt-remote-protocol.workspace = true
+alt-repository-service.workspace = true
+alt-task.workspace = true
+alt-task-service.workspace = true
+blake3.workspace = true
+ed25519-dalek.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

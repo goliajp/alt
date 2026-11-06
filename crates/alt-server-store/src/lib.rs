@@ -1,6 +1,11 @@
 //! PostgreSQL publication authority and a durable immutable POSIX byte store.
 mod bytes;
 mod gc;
+mod portable;
+mod portable_import;
+pub use portable::*;
+pub use portable_import::*;
+mod provenance;
 mod publication;
 mod read;
 mod requests;
@@ -14,6 +19,8 @@ pub use store::*;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("portable migration: {0}")]
+    Portable(#[from] alt_portable::Error),
     #[error("storage I/O: {0}")]
     Io(#[from] std::io::Error),
     #[error("database: {0}")]
@@ -54,7 +61,7 @@ pub use tasks::CurrentReviewAssessment;
 pub use workbench::*;
 
 /// Current persisted schema; runtime open validates all migration checksums.
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 10;
 
 mod accounts;
 pub use accounts::*;

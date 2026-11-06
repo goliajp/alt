@@ -317,6 +317,14 @@ impl Store {
             ));
         }
         integer(generation)?;
+        crate::provenance::append_recovery(
+            &mut tx,
+            &self.spec,
+            &self.signing_key,
+            self.limits,
+            generation,
+            backup_digest,
+        )?;
         match (self.spec.deployment_mode, cloud) {
             (alt_remote_protocol::DeploymentMode::Cloud, Some(binding)) => {
                 crate::cloud::restore_binding(&mut tx, &self.spec, generation, &binding)?;
@@ -332,8 +340,8 @@ impl Store {
         // source AFTER this watermark. Retain its original observed state;
         // query() reports these old-epoch gaps as Unknown, never Expired.
         // Reservations and temporary pins belong to the fenced incarnation.
-        tx.batch_execute("DELETE FROM alt_device_authorizations; DELETE FROM alt_cloud_logins; DELETE FROM alt_cloud_reservations; UPDATE alt_cloud_ingress SET reserved_bytes=0; UPDATE alt_cloud_binding SET service=NULL;")?;
-        tx.batch_execute("UPDATE alt_requests SET reserved_bytes=0; UPDATE alt_repositories SET reserved_bytes=0")?;
+        tx.batch_execute("DELETE FROM alt_device_authorizations; DELETE FROM alt_cloud_logins; DELETE FROM alt_cloud_reservations; DELETE FROM alt_cloud_portable_reservations; UPDATE alt_cloud_ingress SET reserved_bytes=0; UPDATE alt_cloud_binding SET service=NULL;")?;
+        tx.batch_execute("UPDATE alt_requests SET reserved_bytes=0; UPDATE alt_portable_imports SET reserved_bytes=0; UPDATE alt_repositories SET reserved_bytes=0,portable_import=NULL")?;
         tx.batch_execute("UPDATE alt_requests SET fence=fence+1,worker_lease_until=0; UPDATE alt_credentials SET revoked=true; UPDATE alt_web_accounts SET generation=generation+1; DELETE FROM alt_web_sessions; DELETE FROM alt_login_budgets; DELETE FROM alt_pins WHERE expires_at IS NOT NULL")?;
         tx.execute("UPDATE alt_repositories SET recovery_epoch=$1,revocation_generation=revocation_generation+1", &[&integer(generation)?])?;
         tx.execute(

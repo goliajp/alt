@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+alt-portable.workspace = true
 alt-wire.workspace = true
 alt-remote-protocol.workspace = true
 blake3.workspace = true

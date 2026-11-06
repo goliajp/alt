@@ -1,5 +1,7 @@
+import { migrationEn, migrationZh, migrationJa } from './migration-copy';
 export type Locale = 'en' | 'zh' | 'ja';
 const en = {
+  ...migrationEn,
   productsUnavailable:"Product navigation is unavailable. Your current document remains open.",switchProduct:"Switch product",continueProduct:"Continue",switchProductHint:"Save any unsubmitted changes before leaving this workbench. The destination checks your access again.",cloudAccount:"GOLIA Cloud",retryProducts:"Retry products",
   agentCredentials:'Agent credentials',agentScopeNote:'Each agent is limited to one repository and at most one hour. Access also requires its human parent credential and current repository permissions.',recoveryEpoch:'Recovery epoch',revoked:'Revoked',agentRecorded:'Issued · current access is checked on each request',agentRecords:'May publish task records',agentNoRecords:'Cannot publish task records',agentCreate:'Create',agentUpdate:'Update',agentDelete:'Delete',agentForce:'Force update',agentAllPaths:'All paths',agentNoPaths:'No changed paths',
 
@@ -37,6 +39,7 @@ const en = {
 } as const;
 type Messages = { [K in keyof typeof en]: string };
 const zh: Messages = {
+  ...migrationZh,
   productsUnavailable:"产品导航暂时不可用，当前文档保持打开。",switchProduct:"切换产品",continueProduct:"继续",switchProductHint:"离开工作台前请保存尚未提交的内容，目标产品会重新检查访问权限。",cloudAccount:"GOLIA Cloud",retryProducts:"重试产品导航",
   agentCredentials:'Agent 凭据',agentScopeNote:'每个 agent 仅限一个仓库，最长一小时。访问还需父级人类凭据有效，并符合仓库当前权限。',recoveryEpoch:'恢复代次',revoked:'已撤销',agentRecorded:'已签发 · 每次请求重新检查权限',agentRecords:'可发布任务记录',agentNoRecords:'不可发布任务记录',agentCreate:'创建',agentUpdate:'更新',agentDelete:'删除',agentForce:'强制更新',agentAllPaths:'所有路径',agentNoPaths:'不可修改路径',
 
@@ -61,6 +64,7 @@ const zh: Messages = {
   instance:'实例',version:'版本',users:'用户',createUser:'创建用户',displayName:'显示名称',administrator:'实例管理员',enabled:'已启用',disabled:'已停用',disable:'停用',enable:'启用',saved:'已保存',adminNote:'实例管理权限不授予仓库内容访问权。',noDocuments:'打开仓库或任务开始工作。',back:'返回',session:'会话',details:'详情',
 };
 const ja: Messages = {
+  ...migrationJa,
   productsUnavailable:"製品ナビゲーションを取得できません。現在のドキュメントは開いたままです。",switchProduct:"製品を切り替える",continueProduct:"続ける",switchProductHint:"このワークベンチを離れる前に未送信の変更を保存してください。移動先でアクセス権限を再確認します。",cloudAccount:"GOLIA Cloud",retryProducts:"製品一覧を再取得",
   agentCredentials:'エージェント認証情報',agentScopeNote:'各エージェントは一つのリポジトリに限定され、有効期間は最大一時間です。親となる人間の認証情報と現在の権限も毎回確認します。',recoveryEpoch:'復元世代',revoked:'取り消し済み',agentRecorded:'発行済み · アクセスごとに権限を確認',agentRecords:'タスク記録の公開が可能',agentNoRecords:'タスク記録の公開は不可',agentCreate:'作成',agentUpdate:'更新',agentDelete:'削除',agentForce:'強制更新',agentAllPaths:'すべてのパス',agentNoPaths:'変更できるパスなし',
 

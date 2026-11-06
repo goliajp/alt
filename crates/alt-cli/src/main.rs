@@ -66,6 +66,20 @@ fn run() -> Response {
             Err(error) => machine::from_error(error.as_ref(), false).response(parsed.json, None),
         };
     }
+    if let Command::Portable { op, .. } = &parsed.cli.command {
+        if parsed.cli.request_id.is_some() || parsed.cli.workspace.is_some() {
+            return Failure::usage("portable transfer uses its private journal; repository request/workspace selectors are not supported").response(parsed.json,None);
+        }
+        let mut stdout = Vec::new();
+        return match alt_cli::portable::run(op, &mut stdout) {
+            Ok(()) => Response {
+                exit_code: 0,
+                stdout,
+                stderr: Vec::new(),
+            },
+            Err(error) => machine::from_error(error.as_ref(), false).response(parsed.json, None),
+        };
+    }
     let identity = Identity::from_env();
     let native_write =
         cli::is_native(&parsed.cli.command) && cli::mutates_command(&parsed.cli.command);

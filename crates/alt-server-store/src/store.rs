@@ -92,6 +92,11 @@ impl Store {
         crate::schema::apply_v3(&mut tx)?;
         crate::schema::apply_v4(&mut tx)?;
         crate::schema::apply_v5(&mut tx)?;
+        crate::schema::apply_v6(&mut tx)?;
+        crate::schema::apply_v7(&mut tx)?;
+        crate::schema::apply_v8(&mut tx)?;
+        crate::schema::apply_v9(&mut tx)?;
+        crate::schema::apply_v10(&mut tx)?;
         if let Some((audience, digest, provision_digest)) = cloud {
             crate::cloud::initialize_binding(&mut tx, &spec, audience, digest, provision_digest)?;
         }
@@ -599,7 +604,7 @@ pub(crate) fn snapshot(
     spec: &InstanceSpec,
     repository: &str,
 ) -> Result<RepositorySnapshot> {
-    let row=tx.query_opt("SELECT recovery_epoch,object_format,policy_version,revocation_generation,policies,writes_enabled FROM alt_repositories WHERE id=$1 FOR UPDATE",&[&repository])?.ok_or(Error::Unauthorized)?;
+    let row=tx.query_opt("SELECT recovery_epoch,object_format,policy_version,revocation_generation,policies,writes_enabled AND portable_freeze IS NULL AND portable_import IS NULL FROM alt_repositories WHERE id=$1 FOR UPDATE",&[&repository])?.ok_or(Error::Unauthorized)?;
     if row.get::<_, String>(1) != "sha1" {
         return Err(Error::Precondition("unsupported repository object format"));
     }

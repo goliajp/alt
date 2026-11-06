@@ -50,7 +50,6 @@ pub(crate) fn check_pins(
     };
     let repository = &work.key.scope.repository_instance_id;
     let pin_id = upload_pin(&work.key);
-    let time = integer(now(tx)?)?;
     for artifact in tasks
         .facts()
         .retained_artifacts()
@@ -65,9 +64,15 @@ pub(crate) fn check_pins(
         {
             return Err(Error::Integrity("task artifact not selected"));
         }
-        let row = tx.query_opt("SELECT b.bytes FROM alt_blobs b JOIN alt_pins p ON p.repository=b.repository AND p.blake3=b.blake3 WHERE b.repository=$1 AND b.blake3=$2 AND b.state='stored' AND p.pin_id=$3 AND p.expires_at>$4", &[repository,&artifact.blake3,&pin_id,&time])?.ok_or(Error::Precondition("task artifact pin expired"))?;
-        if unsigned(row.get(0))? != artifact.bytes {
-            return Err(Error::Integrity("task artifact size"));
+    }
+    // Receivers download the immutable signed manifest, including explicitly
+    // selected objects outside the task's minimum graph. All of it must remain
+    // pinned, not just the subset needed to validate today's task roots.
+    let time = integer(now(tx)?)?;
+    for entry in &work.manifest.entries {
+        let row = tx.query_opt("SELECT b.bytes FROM alt_blobs b JOIN alt_pins p ON p.repository=b.repository AND p.blake3=b.blake3 WHERE b.repository=$1 AND b.blake3=$2 AND b.state='stored' AND p.pin_id=$3 AND p.expires_at>$4", &[repository,&entry.blake3,&pin_id,&time])?.ok_or(Error::Precondition("task selection pin expired"))?;
+        if unsigned(row.get(0))? != entry.bytes {
+            return Err(Error::Integrity("task selection size"));
         }
     }
     for oid in tasks.git_objects() {
@@ -83,6 +88,7 @@ pub(crate) fn check_pins(
 pub(crate) fn retain(
     tx: &mut Transaction<'_>,
     work: &PublicationWork,
+    graph: &VerifiedGraph,
     tasks: Option<&VerifiedTaskGraph>,
     sequence: u64,
     digest: &str,
@@ -93,19 +99,16 @@ pub(crate) fn retain(
     let repository = &work.key.scope.repository_instance_id;
     let bundle = &tasks.bundle_artifact().blake3;
     let pin_id = format!("task-bundle:{bundle}");
-    for artifact in tasks
-        .facts()
-        .retained_artifacts()
-        .iter()
-        .chain(std::iter::once(tasks.bundle_artifact()))
-    {
-        pin(tx, repository, &pin_id, &artifact.blake3, None)?;
+    for entry in &work.manifest.entries {
+        pin(tx, repository, &pin_id, &entry.blake3, None)?;
     }
-    for oid in tasks.git_objects() {
+    // The original publication also names its old/new ref graphs. Keep those
+    // historical inputs even after current refs advance or disappear.
+    for oid in graph.objects() {
         let (_, digest, _) = work
             .source
             .objects
-            .get(oid)
+            .get(&oid)
             .ok_or(Error::Integrity("task object mapping"))?;
         pin(tx, repository, &pin_id, digest, None)?;
     }

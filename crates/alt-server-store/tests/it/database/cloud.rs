@@ -101,7 +101,7 @@ fn lease(sequence: u64, revision: u64) -> Lease {
         expires_at_unix_ms: Counter(now + 60_000),
     }
 }
-fn claims(sequence: u64, revision: u64) -> AccountAuthorization {
+pub(super) fn claims(sequence: u64, revision: u64) -> AccountAuthorization {
     AccountAuthorization {
         lease: lease(sequence, revision),
         account_id: "owner".to_string().try_into().unwrap(),
@@ -111,7 +111,7 @@ fn claims(sequence: u64, revision: u64) -> AccountAuthorization {
         capabilities: vec![Capability::UseProduct, Capability::ManageInstance],
     }
 }
-fn service(sequence: u64, revision: u64, writes: bool) -> AltServiceAuthorization {
+pub(super) fn service(sequence: u64, revision: u64, writes: bool) -> AltServiceAuthorization {
     AltServiceAuthorization {
         lease: lease(sequence, revision),
         writes_enabled: writes,
@@ -122,7 +122,7 @@ fn service(sequence: u64, revision: u64, writes: bool) -> AltServiceAuthorizatio
         },
     }
 }
-fn cloud() -> Fixture {
+pub(super) fn cloud() -> Fixture {
     let mut f = Fixture::new();
     // Reuse only the independently allocated test database and its destructor.
     // This is fixture construction, not a supported product migration.
@@ -154,7 +154,7 @@ fn cloud() -> Fixture {
     f.store.refresh_cloud_service(&service(2, 1, true)).unwrap();
     f
 }
-fn repository(f: &mut Fixture) {
+pub(super) fn repository(f: &mut Fixture) {
     f.store
         .create_repository(&f.credential, "repository", 100_000_000)
         .unwrap();

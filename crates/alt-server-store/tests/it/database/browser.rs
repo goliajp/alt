@@ -240,7 +240,7 @@ fn v3_upgrade_preserves_publication_and_cloud_never_uses_local_passwords() {
     let payload = Payload::new("before-browser-schema", None);
     payload.upload(&mut f.store, &f.credential);
     let receipt = payload.publish(&mut f.store, &f.credential);
-    f.client().batch_execute("DROP TABLE alt_device_authorizations,alt_client_credentials,alt_cloud_logins,alt_delegations,alt_cloud_reservations,alt_cloud_ingress,alt_cloud_credentials,alt_cloud_accounts,alt_cloud_binding; DROP TABLE alt_browser_binding,alt_web_sessions,alt_web_accounts,alt_login_budgets,alt_instance_audit; DELETE FROM alt_schema WHERE version>=4").unwrap();
+    f.client().batch_execute("DROP TABLE alt_archived_records,alt_archived_publications; DROP TABLE alt_cloud_portable_reservations,alt_portable_import_content,alt_portable_imports; ALTER TABLE alt_repositories DROP COLUMN portable_import; DROP TABLE alt_portable_exports; ALTER TABLE alt_repositories DROP COLUMN portable_freeze; DROP TABLE alt_publication_provenance; DROP TABLE alt_device_authorizations,alt_client_credentials,alt_cloud_logins,alt_delegations,alt_cloud_reservations,alt_cloud_ingress,alt_cloud_credentials,alt_cloud_accounts,alt_cloud_binding; DROP TABLE alt_browser_binding,alt_web_sessions,alt_web_accounts,alt_login_budgets,alt_instance_audit; DELETE FROM alt_schema WHERE version>=4").unwrap();
     assert!(
         Store::open(
             f.client(),

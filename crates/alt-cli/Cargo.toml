@@ -22,6 +22,8 @@ name = "altd-server"
 path = "src/bin/altd_server.rs"
 
 [dependencies]
+alt-provenance.workspace = true
+alt-portable.workspace = true
 alt-command-protocol.workspace = true
 alt-delivery.workspace = true
 alt-input.workspace = true

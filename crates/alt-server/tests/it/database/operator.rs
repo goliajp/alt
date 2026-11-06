@@ -47,6 +47,7 @@ impl OperatorDb {
         let root = tempfile::tempdir().unwrap();
         let config = root.path().join("server.json");
         let spec = Config {
+            portable: None,
             cloud: None,
             browser: None,
             version: 1,

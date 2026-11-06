@@ -112,6 +112,17 @@ fn configuration(
 ) -> Result<Config> {
     let mut config: Config = serde_json::from_str(include_str!("../../example-config.json"))
         .map_err(|_| Error::Config("packaged Cloud defaults"))?;
+    // Older frozen provisioning intents predate portable transfer. Restarting
+    // one must preserve its opt-out and exact config bytes. Other saved fields
+    // still have to match the specification through ensure/verify_artifacts.
+    let saved = directory.join("config.json");
+    if saved.symlink_metadata().is_ok() {
+        let prior: Config = serde_json::from_slice(&read_regular(&saved, 65536, true)?)
+            .map_err(|_| Error::Config("saved provision configuration"))?;
+        if prior.portable.is_none() {
+            config.portable = None;
+        }
+    }
     config.instance = InstanceSpec {
         installation_id: spec.audience.installation_id.as_str().into(),
         workspace_id: spec.audience.workspace_id.as_str().into(),

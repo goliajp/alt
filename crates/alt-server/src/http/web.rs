@@ -112,7 +112,27 @@ async fn handle_inner(
         Ok(route) => route,
         Err(error) => return store_failure(error, None),
     };
-    let writing = request.method() == hyper::Method::POST;
+    let writing = matches!(*request.method(), hyper::Method::POST | hyper::Method::PUT);
+    let binary_upload = matches!(
+        &route,
+        WebRoute::Portable(crate::PortableRoute::Import(
+            _,
+            crate::ImportAction::Upload(_)
+        ))
+    );
+    let archive_download = matches!(
+        &route,
+        WebRoute::Portable(crate::PortableRoute::Export(
+            _,
+            _,
+            crate::ExportAction::Archive
+        ))
+    );
+    let expected_content_type = if binary_upload {
+        "application/octet-stream"
+    } else {
+        "application/json"
+    };
     if request.headers().contains_key(header::AUTHORIZATION) {
         return unauthenticated();
     }
@@ -169,12 +189,12 @@ async fn handle_inner(
                     .get(header::CONTENT_TYPE)
                     .and_then(|v| v.to_str().ok())
                     .and_then(|v| v.split(';').next())
-                    .is_none_or(|v| !v.trim().eq_ignore_ascii_case("application/json")))
+                    .is_none_or(|v| !v.trim().eq_ignore_ascii_case(expected_content_type)))
     {
         return failure(
             415,
             ErrorCode::InvalidRequest,
-            "JSON without content encoding is required",
+            "Use the required content type without content encoding",
             None,
             Retry::Never,
         );
@@ -209,10 +229,47 @@ async fn handle_inner(
     } else {
         None
     };
-    let max = if writing {
-        state.factory.limits.request_bytes.min(16_384) as u64
+    let (permit, max) = if let WebRoute::Portable(selected) = &route {
+        let selected = selected.clone();
+        let factory = state.factory.clone();
+        let token = token.clone().ok_or(Error::Unauthorized);
+        let origin = browser.origin.clone();
+        let options = state.options.native.clone();
+        let prepared = tokio::time::timeout(
+            state.options.work_timeout,
+            tokio::task::spawn_blocking(move || {
+                let mut store = factory.open()?;
+                let token = token?;
+                let credential = factory.authenticate(&mut store, &token)?;
+                store.browser_session(&credential, &origin)?;
+                let max =
+                    crate::portable::request_bytes(&mut store, &credential, &options, &selected)?;
+                Ok::<_, Error>((permit, max))
+            }),
+        )
+        .await;
+        match prepared {
+            Ok(Ok(Ok(value))) => value,
+            Ok(Ok(Err(error))) => return store_failure(error, None),
+            _ => {
+                return failure(
+                    503,
+                    ErrorCode::TemporarilyUnavailable,
+                    "Current migration authority could not be checked",
+                    None,
+                    Retry::SameRequest,
+                );
+            }
+        }
     } else {
-        0
+        (
+            permit,
+            if writing {
+                state.factory.limits.request_bytes.min(16_384) as u64
+            } else {
+                0
+            },
+        )
     };
     let source =
         match tokio::time::timeout(state.options.body_timeout, spool(request.into_body(), max))
@@ -254,10 +311,21 @@ async fn handle_inner(
         let _password_permit = password_permit;
         let mut source = source;
         source.as_file_mut().rewind()?;
-        let mut raw = Vec::new();
-        source.as_file_mut().read_to_end(&mut raw)?;
         let mut store = factory.open()?;
         store.check_browser_binding(Some(&browser.origin))?;
+        if let WebRoute::Portable(selected) = &route {
+            let token = token.as_deref().ok_or(Error::Unauthorized)?;
+            let credential = factory.authenticate(&mut store, token)?;
+            store.browser_session(&credential, &browser.origin)?;
+            let output = crate::portable::execute(&mut store, &credential, &options, selected.clone(), source.as_file_mut(), &mut |store| {
+                let current = factory.authenticate(store, token)?;
+                store.browser_session(&current, &browser.origin)?;
+                Ok(current)
+            })?;
+            return Ok((output, None));
+        }
+        let mut raw = Vec::new();
+        source.as_file_mut().read_to_end(&mut raw)?;
         if route == WebRoute::Config {
             return Ok((Output::Json(json!({"deployment_mode":store.spec().deployment_mode,"workspace_id":store.spec().workspace_id})), None));
         }
@@ -336,7 +404,13 @@ async fn handle_inner(
             if download {
                 response.headers_mut().insert(
                     header::CONTENT_DISPOSITION,
-                    "attachment; filename=\"alt-original.bin\"".parse().unwrap(),
+                    if archive_download {
+                        "attachment; filename=\"alt-snapshot.altportable\""
+                    } else {
+                        "attachment; filename=\"alt-original.bin\""
+                    }
+                    .parse()
+                    .unwrap(),
                 );
             }
             response

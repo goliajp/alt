@@ -455,7 +455,7 @@ impl Store {
             }
         }
         let sequence=unsigned(tx.query_one("UPDATE alt_repositories SET transaction_sequence=transaction_sequence+1 WHERE id=$1 RETURNING transaction_sequence",&[repository])?.get(0))?;
-        crate::tasks::retain(&mut tx, work, tasks, sequence, &validated.digest)?;
+        crate::tasks::retain(&mut tx, work, graph, tasks, sequence, &validated.digest)?;
         let body = ReceiptBody {
             publication: work.publication.clone(),
             request_digest: validated.digest,

@@ -30,3 +30,20 @@ test('an oversized successful response is refused rather than partially accepted
   try { await api.request('/web/session'); throw new Error('unexpected acceptance'); }
   catch (error) { expect(error).toBeInstanceOf(ApiError); expect((error as ApiError).code).toBe('response'); }
 });
+test('portable empty mutations and binary file slices retain CSRF and uncertain outcomes',async()=>{
+  const api=new Api();
+  api.setSession({csrf:'csrf-proof'} as Parameters<Api['setSession']>[0]);
+  const slice=new Blob(['content']);let requests=0;
+  globalThis.fetch=(async(_path,options)=>{
+    requests++;expect(options?.credentials).toBe('same-origin');expect(options?.redirect).toBe('error');
+    expect(new Headers(options?.headers).get('X-Alt-CSRF')).toBe('csrf-proof');
+    if(requests===1){expect(options?.method).toBe('POST');expect(options?.body).toBeUndefined();}
+    else {expect(options?.method).toBe('PUT');expect(options?.body).toBe(slice);expect(new Headers(options?.headers).get('Content-Type')).toBe('application/octet-stream');}
+    return Response.json({state:'preparing'});
+  }) as typeof fetch;
+  await api.portable('/web/repositories/r/epochs/1/portable/exports/q','POST');
+  await api.portable('/web/repositories/r/epochs/1/portable/imports/a/q/content/b','PUT',slice);
+  globalThis.fetch=(async()=>{requests++;throw new TypeError('disconnected');}) as typeof fetch;
+  await expect(api.portable('/web/repositories/r/epochs/1/portable/imports/a/q/activate','POST',{})).rejects.toMatchObject({uncertain:true,status:0});
+  expect(requests).toBe(3);
+});

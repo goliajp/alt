@@ -125,6 +125,29 @@ fn cloud_provision_interrupt_resume_and_storage_binding() {
             assert_eq!(std::fs::read(state.join(name)).unwrap(), saved[index]);
         }
     }
+    let mut generated: serde_json::Value = serde_json::from_slice(&saved[3]).unwrap();
+    assert_eq!(generated["portable"]["total_bytes"], "4294967296");
+    // An upgrade/restart must not enable a new API or replace a legacy frozen
+    // config. Exercise the real initializer with its pre-portable encoding.
+    generated.as_object_mut().unwrap().remove("portable");
+    let legacy: alt_server::operator::Config = serde_json::from_value(generated).unwrap();
+    let legacy_bytes = serde_json::to_vec_pretty(&legacy).unwrap();
+    std::fs::write(state.join("config.json"), &legacy_bytes).unwrap();
+    assert!(initialize().output().unwrap().status.success());
+    assert_eq!(
+        std::fs::read(state.join("config.json")).unwrap(),
+        legacy_bytes
+    );
+    // Bounds remain part of a frozen new configuration, not an ignored field.
+    let mut changed: serde_json::Value = serde_json::from_slice(&saved[3]).unwrap();
+    changed["portable"]["total_bytes"] = serde_json::json!("1");
+    std::fs::write(
+        state.join("config.json"),
+        serde_json::to_vec(&changed).unwrap(),
+    )
+    .unwrap();
+    assert!(!initialize().output().unwrap().status.success());
+    std::fs::write(state.join("config.json"), &saved[3]).unwrap();
     let exists: i64 = blocker
         .query_one("SELECT count(*) FROM alt_instance", &[])
         .unwrap()

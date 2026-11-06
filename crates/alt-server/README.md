@@ -175,6 +175,97 @@ alt auth logout --credential-file "$HOME/.alt-credentials/example.json"
 If revocation is unconfirmed, the file is retained for a retry. Loopback HTTP is
 available only with explicit `--allow-loopback-http` and a literal loopback IP.
 
+### Portable repository migration
+
+Cloud and self-hosted servers use the same signed portable archive. It carries
+repository objects, refs, task history, original publication signatures and
+explicit historical identity mappings. Passwords, sessions, tokens, private
+keys and current review approvals are excluded. The target retains its own
+installation identity, signing key and current authorization policy. Archives
+contain original repository contents in plaintext: keep them and the private
+resume journals in protected storage.
+
+Fresh installation templates enable the `portable` configuration block. Older
+configurations without that block keep the API disabled; restarting Cloud
+initialization preserves their frozen configuration. An operator can explicitly
+enable it in a reviewed runtime configuration. The example budgets allow 16 MiB
+of catalog metadata, one million entries, 100,000 publications, 256 MiB per blob,
+4 GiB of contents, 32 GiB of verification reads and ten million read operations.
+Receiving imports expire after one hour. These are resource ceilings, not a
+throughput guarantee. Repository/Cloud quotas and current permissions also
+apply. Budget private scratch space and review HTTP timeouts for the expected
+archive size; changing a client limit cannot enlarge server limits.
+
+Use an authenticated human administrator with repository read access at the
+source and full import authority at an empty destination repository. Create
+destination accounts/grants explicitly. An identity mapping records historical
+attribution; it does not grant access or copy an old approval. Obtain each
+endpoint's credentials with `alt auth login`. Obtain the source installation,
+repository ID, recovery epoch and receipt public key through a trusted source
+connection, independently of an archive received from someone else.
+
+```sh
+alt portable export --credential-file source.json --journal source-export \
+  --repository example --output snapshot.altportable --json
+alt portable export-status --credential-file source.json --journal source-export --json
+```
+
+The journal's verified `envelope.json` contains `catalog.identities` and
+`catalog.source`. Supply exactly one mapping for every listed identity, using
+both source installation and actor ID. For example, `mappings.json` can contain:
+
+```json
+[
+  {"installation_id":"source-installation","actor_id":"owner","target_actor":"new-owner"},
+  {"installation_id":"source-installation","actor_id":"former-member","target_actor":null}
+]
+```
+
+`null` explicitly preserves attribution without linking to a current target
+actor. A non-null actor must already exist at the destination. Review the
+actual catalog rather than copying these illustrative IDs.
+
+```sh
+alt portable import --credential-file target.json --journal target-import \
+  --repository example --archive snapshot.altportable --mappings mappings.json \
+  --source-installation SOURCE_INSTALLATION --source-repository SOURCE_REPOSITORY \
+  --source-epoch SOURCE_EPOCH --source-key SOURCE_RECEIPT_PUBLIC_KEY --json
+alt portable import-status --credential-file target.json --journal target-import --json
+alt portable freeze-source --credential-file source.json --journal source-export --json
+alt portable activate-import --credential-file target.json --journal target-import --json
+```
+
+Import verifies the complete archive locally before staging and uploads missing
+whole blobs; activation is a separate atomic operation. A source freeze succeeds
+only if its refs, policies and watermark still match the export. If the source
+advanced, abandon the old receiving import, create a new export and new import
+journals, then stage and freeze that snapshot. Already stored matching bytes can
+be reused. This is a maintenance-window cutover, with no automatic endpoint
+switch. Verify the target receipt, original task history and an independent Git
+clone before updating client endpoints. Preserve the source for the chosen
+observation period. Replaying an accepted import returns its original receipt
+and leaves later target writes intact.
+
+After interruption or an unconfirmed response, keep the same journal and query
+`export-status` or `import-status`. Repeat the original export/import command
+with the same arguments to resume; do not replace its identity mappings or make
+a fresh request merely because a reply was lost. An expired receiving import
+must be abandoned before staging a new intent. Old-scope unknown results after
+recovery require inspection; they are not proof that nothing happened.
+
+```sh
+alt portable abandon-import --credential-file target.json --journal target-import --json
+alt portable reopen-source --credential-file source.json --journal source-export --json
+alt portable retire-export --credential-file source.json --journal source-export --json
+```
+
+These are explicit disposition commands, not an automatic final step. Reopening
+allows source writes again; retirement releases snapshot retention and requires
+the source to be reopened first. Neither command deletes the local archive.
+Keep a cut-over source externally fenced if retiring its snapshot. The workbench
+offers the same migration operations from repository administration, with an
+immutable browser journal and explicit file reselection after a reload.
+
 ### Physical backup, upgrade and recovery
 
 `backup` creates a **disaster recovery backup**, including the receipt signing
@@ -209,7 +300,7 @@ remove that exact directory. Do not expose scratch or backup directories through
 the web server.
 
 A historical schema backup requires an explicit `--schema` (supported source
-schemas: 1–4). Stop the old service, save and verify its backup, then upgrade:
+schemas: 1–9). Stop the old service, save and verify its backup, then upgrade:
 
 ```sh
 alt-server --config server.json migrate --from-schema 3 --output-config server-next.json

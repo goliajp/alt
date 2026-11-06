@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 [dependencies]
+alt-portable.workspace = true
 subtle = "2"
 alt-server-store.workspace = true
 alt-cloud-client.workspace = true

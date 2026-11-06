@@ -67,7 +67,7 @@ Copy the completed package off the server, verify all entries with `backup-verif
 
 Upgrade only after a verified external backup. Stop application writes, load the new exact image, and use its explicit `migrate --from-schema N --output-config /path/to/new-config.json` on the same dedicated storage. Review the produced config and health result, then switch the mounted config and application image. Supported source schemas are reported by the current operator; an older binary must reject the new schema. There is no automatic downgrade after new writes. Retain source data and separately plan any return path.
 
-The full command arguments, trust-key handling, generation selection and failure recovery rules are in the included [server operator guide](../crates/alt-server/README.md). Disaster recovery packages contain secrets and preserve installation identity; they are not the portable cross-mode migration format.
+The full command arguments, trust-key handling, generation selection and failure recovery rules are in the included [server operator guide](../crates/alt-server/README.md). Disaster recovery packages contain secrets and preserve installation identity; they are not the portable cross-mode migration format. The same guide covers `alt portable` exports, explicit identity mapping, empty-target import and source cutover. Fresh configurations enable bounded portable transfer; existing configurations require an explicit operator opt-in.
 
 ## References
 

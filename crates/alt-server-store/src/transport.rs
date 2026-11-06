@@ -301,28 +301,35 @@ impl Store {
             .as_str()
             .ok_or(Error::Integrity("task root kind"))?
             .to_owned();
-        let rows = tx.query("SELECT q.publication,q.manifest,q.result FROM alt_task_bundle_records r JOIN alt_requests q ON q.repository=r.repository AND q.epoch=r.epoch AND q.actor_id=r.actor_id AND q.request_id=r.request_id WHERE r.repository=$1 AND r.kind=$2 AND r.record_id=$3 AND q.state='committed' AND q.digest>$4 ORDER BY q.digest LIMIT $5", &[&scope.repository_instance_id,&kind,&root.id,&after_digest.unwrap_or(""),&integer(count as u64)?])?;
+        let rows = tx.query("SELECT publication,manifest,receipt FROM (SELECT q.digest,q.publication,q.manifest,q.result->'receipt' AS receipt FROM alt_task_bundle_records r JOIN alt_requests q ON q.repository=r.repository AND q.epoch=r.epoch AND q.actor_id=r.actor_id AND q.request_id=r.request_id WHERE r.repository=$1 AND r.kind=$2 AND r.record_id=$3 AND q.state='committed' UNION ALL SELECT p.digest,p.publication,p.manifest,p.receipt FROM alt_archived_records r JOIN alt_archived_publications p ON p.repository=r.repository AND p.digest=r.digest WHERE r.repository=$1 AND r.kind=$2 AND r.record_id=$3) h WHERE digest>$4 ORDER BY digest LIMIT $5", &[&scope.repository_instance_id,&kind,&root.id,&after_digest.unwrap_or(""),&integer(count as u64)?])?;
         let mut result = Vec::new();
         let mut bytes = 0usize;
         for row in rows {
             let publication: serde_json::Value = row.get(0);
             let manifest: serde_json::Value = row.get(1);
-            let state: alt_remote_protocol::RequestState = serde_json::from_value(row.get(2))?;
+            let receipt: alt_remote_protocol::Receipt = serde_json::from_value(row.get(2))?;
+            let publication = serde_json::from_value(publication)?;
+            let provenance = crate::provenance::load(
+                &mut tx,
+                scope,
+                &publication,
+                &receipt,
+                &self.signing_key,
+                self.limits,
+            )?;
+            let bundle = PublishedBundle {
+                publication,
+                manifest: serde_json::from_value(manifest)?,
+                receipt,
+                provenance,
+            };
             bytes = bytes
-                .checked_add(serde_json::to_vec(&publication)?.len())
-                .and_then(|v| v.checked_add(serde_json::to_vec(&manifest).ok()?.len()))
+                .checked_add(serde_json::to_vec(&bundle)?.len())
                 .ok_or(Error::Limit("bundle page bytes"))?;
             if bytes > self.limits.total_bytes.min(usize::MAX as u64) as usize {
                 return Err(Error::Limit("bundle page bytes"));
             }
-            let alt_remote_protocol::RequestState::Committed { receipt } = state else {
-                return Err(Error::Integrity("published task receipt"));
-            };
-            result.push(PublishedBundle {
-                publication: serde_json::from_value(publication)?,
-                manifest: serde_json::from_value(manifest)?,
-                receipt: *receipt,
-            });
+            result.push(bundle);
         }
         tx.commit()?;
         Ok(result)

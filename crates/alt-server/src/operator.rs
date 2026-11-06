@@ -45,6 +45,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub portable: Option<alt_portable::http::Bounds>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cloud: Option<CloudConfig>,
     pub version: u32,
     pub instance: InstanceSpec,
@@ -245,6 +247,11 @@ impl Config {
             || h.worker_lease_ms < h.work_timeout_ms
         {
             return Err(Error::Config("HTTP/worker bounds"));
+        }
+        if let Some(portable) = self.portable {
+            portable
+                .verification(self.limits, self.tasks)
+                .map_err(|_| Error::Config("portable validation bounds"))?;
         }
         let t = &self.tasks;
         if [
@@ -492,6 +499,11 @@ impl Config {
             2 => Store::migrate_v2(client, bytes, self.instance.clone(), key, self.limits),
             3 => Store::migrate_v3(client, bytes, self.instance.clone(), key, self.limits),
             4 => Store::migrate_v4(client, bytes, self.instance.clone(), key, self.limits),
+            5 => Store::migrate_v5(client, bytes, self.instance.clone(), key, self.limits),
+            7 => Store::migrate_v7(client, bytes, self.instance.clone(), key, self.limits),
+            8 => Store::migrate_v8(client, bytes, self.instance.clone(), key, self.limits),
+            9 => Store::migrate_v9(client, bytes, self.instance.clone(), key, self.limits),
+            6 => Store::migrate_v6(client, bytes, self.instance.clone(), key, self.limits),
             _ => unreachable!(),
         };
         match migrated {
@@ -527,6 +539,7 @@ impl Config {
             work_timeout: Duration::from_millis(h.work_timeout_ms),
             connection_timeout: Duration::from_millis(h.connection_timeout_ms),
             native: NativeOptions {
+                portable: self.portable,
                 task_limits: self.tasks,
                 upload_ttl_ms: h.upload_ttl_ms,
                 worker_lease_ms: h.worker_lease_ms,

@@ -3,6 +3,7 @@ mod cloud;
 mod delegation;
 mod faults;
 mod maintenance;
+mod provenance;
 mod tasks;
 
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
@@ -67,12 +68,16 @@ struct Fixture {
     database: String,
     root: tempfile::TempDir,
     spec: InstanceSpec,
+    signing_seed: [u8; 32],
     store: Store,
     token: String,
     credential: Credential,
 }
 impl Fixture {
     fn new() -> Self {
+        Self::with_identity("installation", [7; 32])
+    }
+    fn with_identity(installation: &str, signing_seed: [u8; 32]) -> Self {
         assert_eq!(
             std::env::var("ALT_SERVER_TEST_ISOLATED").as_deref(),
             Ok("1"),
@@ -91,7 +96,7 @@ impl Fixture {
             .unwrap();
         let root = tempfile::tempdir().unwrap();
         let spec = InstanceSpec {
-            installation_id: "installation".into(),
+            installation_id: installation.into(),
             workspace_id: "workspace".into(),
             deployment_mode: DeploymentMode::SelfHosted,
             runtime_generation: 1,
@@ -102,7 +107,7 @@ impl Fixture {
             config.connect(NoTls).unwrap(),
             ByteStore::open(&root.path().join("bytes")).unwrap(),
             spec.clone(),
-            SigningKey::from_bytes(&[7; 32]),
+            SigningKey::from_bytes(&signing_seed),
             limits(),
         )
         .unwrap();
@@ -119,6 +124,7 @@ impl Fixture {
             database,
             root,
             spec,
+            signing_seed,
             store,
             token,
             credential,
@@ -134,7 +140,7 @@ impl Fixture {
             self.client(),
             ByteStore::open(&self.root.path().join("bytes")).unwrap(),
             self.spec.clone(),
-            SigningKey::from_bytes(&[7; 32]),
+            SigningKey::from_bytes(&self.signing_seed),
             limits(),
         )
         .unwrap()
@@ -727,3 +733,5 @@ fn published_content_reuse_checks_the_new_requests_chunk_manifest() {
     assert!(f.store.publish(&f.credential, &work, &graph).is_err());
     assert_eq!(f.counts(), (2, 2, 2));
 }
+
+mod portable;

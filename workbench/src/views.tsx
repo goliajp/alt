@@ -1,3 +1,4 @@
+import { MigrationView } from './migration';
 import { useState, type ReactNode } from 'react';
 import { File, Folder, GitCommitHorizontal, ArrowUpRight } from 'lucide-react';
 import { Button, Field, Input } from '@golia/ui/controls';
@@ -32,14 +33,15 @@ export function DocumentView(props: Props) {
     case 'blob': return <BlobView {...props} document={document}/>;
     case 'record': return <RecordView {...props} document={document}/>;
     case 'review': return <ReviewView {...props} document={document}/>;
+    case 'migration': return <MigrationView repository={document.repository} session={props.session} t={t} log={props.log}/>;
     case 'settings': return <SettingsView {...props}/>;
   }
 }
-function RepositoryView({ repository, t, open }: Props & { repository: string }) {
+function RepositoryView({ repository, t, open, session }: Props & { repository: string }) {
   const [revision, refresh] = useState(0);
   const resource = useResource<Repository & { refs: Record<string,string> }>(repoPath(repository),revision);
   return <><Heading title={repository} t={t} refresh={()=>refresh(value=>value+1)}/>{resource.error?<Failure error={resource.error} t={t} retry={()=>refresh(value=>value+1)}/>:!resource.value?<Loading t={t}/>:<>
-    <div className="document-actions"><Button onClick={()=>open({kind:'history',repository})}>{t.history}</Button><Button onClick={()=>open({kind:'tasks',repository})}>{t.tasks}</Button><Button onClick={()=>open({kind:'deliveries',repository})}>{t.deliveries}</Button></div>
+    <div className="document-actions"><Button onClick={()=>open({kind:'history',repository})}>{t.history}</Button><Button onClick={()=>open({kind:'tasks',repository})}>{t.tasks}</Button><Button onClick={()=>open({kind:'deliveries',repository})}>{t.deliveries}</Button>{session.user.administrator&&<Button onClick={()=>open({kind:'migration',repository})}>{t.migration}</Button>}</div>
     <h2>{t.branch}</h2><div className="resource-list">{Object.entries(resource.value.refs).map(([name,oid])=><button key={name} className="resource-row" onClick={()=>open({kind:'tree',repository,commit:oid,path:''})}><strong>{name}</strong><code>{oid}</code>{name===resource.value!.default_branch&&<span>HEAD</span>}</button>)}</div>
     {Object.keys(resource.value.refs).length===0&&<p className="message">{t.empty}</p>}
   </>}</>;

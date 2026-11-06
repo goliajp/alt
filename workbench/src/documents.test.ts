@@ -22,3 +22,9 @@ test('shared document addresses preserve exact repository, request and epoch and
   expect(documentFromHash('#document=%')).toBeUndefined();
   expect(documentFromHash('#document=' + encodeURIComponent(JSON.stringify({ kind:'script', src:'javascript:alert(1)' })))).toBeUndefined();
 });
+test('migration documents stay bound to their original repository and carry no credentials',()=>{
+  const document={kind:'migration' as const,repository:'source'};
+  expect(documentFromHash(documentHash(document))).toEqual(document);
+  expect(documentFromHash(documentHash({...document,token:'secret'} as typeof document))).toBeUndefined();
+  expect(documentKey(document)).not.toBe(documentKey({...document,repository:'target'}));
+});

@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WebRoute {
+    Portable(crate::PortableRoute),
     Config,
     InstanceStatus,
     InstanceAudit { before: Option<u64> },
@@ -86,6 +87,12 @@ pub fn parse(
 ) -> Result<WebRoute> {
     if path.len() > 2048 || path.contains('%') || path.contains('\\') || !path.is_ascii() {
         return Err(Error::Precondition("web route"));
+    }
+    if let Some(tail) = path.strip_prefix("/web/")
+        && let Some(crate::Route::Portable(route)) =
+            crate::parse_route(method, &format!("/v1/{tail}"), query, installation)
+    {
+        return Ok(WebRoute::Portable(route));
     }
     let parts = path.split('/').collect::<Vec<_>>();
     let none = || arguments(query, &[]).map(|_| ());

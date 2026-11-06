@@ -8,6 +8,7 @@ mod cloud;
 mod git;
 mod native_client;
 mod operator;
+mod portable;
 use alt_server_store::{ByteStore, Credential, InstanceSpec, Store};
 use ed25519_dalek::SigningKey;
 use postgres::{Client, NoTls};
@@ -48,7 +49,7 @@ impl Running {
     ) -> Self {
         let mut database: postgres::Config = f.admin_dsn.parse().unwrap();
         database.dbname(&f.database);
-        let signing_key = SigningKey::from_bytes(&[7; 32]);
+        let signing_key = SigningKey::from_bytes(&[f.key_seed; 32]);
         let factory = StoreFactory {
             cloud,
             database,
@@ -69,6 +70,7 @@ impl Running {
             work_timeout: Duration::from_secs(10),
             connection_timeout: Duration::from_secs(30),
             native: NativeOptions {
+                portable: Some(portable::bounds()),
                 task_limits: task_limits(),
                 upload_ttl_ms: 60_000,
                 worker_lease_ms: 30_000,
@@ -365,6 +367,7 @@ fn grants() -> Vec<Grant> {
     }]
 }
 struct Fixture {
+    key_seed: u8,
     admin_dsn: String,
     database: String,
     root: tempfile::TempDir,
@@ -375,6 +378,9 @@ struct Fixture {
 }
 impl Fixture {
     fn new() -> Self {
+        Self::new_with_identity("installation", 7)
+    }
+    fn new_with_identity(installation: &str, key_seed: u8) -> Self {
         assert_eq!(
             std::env::var("ALT_SERVER_TEST_ISOLATED").as_deref(),
             Ok("1"),
@@ -393,7 +399,7 @@ impl Fixture {
             .unwrap();
         let root = tempfile::tempdir().unwrap();
         let spec = InstanceSpec {
-            installation_id: "installation".into(),
+            installation_id: installation.into(),
             workspace_id: "workspace".into(),
             deployment_mode: DeploymentMode::SelfHosted,
             runtime_generation: 1,
@@ -404,7 +410,7 @@ impl Fixture {
             config.connect(NoTls).unwrap(),
             ByteStore::open(&root.path().join("bytes")).unwrap(),
             spec.clone(),
-            SigningKey::from_bytes(&[7; 32]),
+            SigningKey::from_bytes(&[key_seed; 32]),
             limits(),
         )
         .unwrap();
@@ -417,6 +423,7 @@ impl Fixture {
             .set_grants(&credential, "repository", "owner", true, true, &grants())
             .unwrap();
         Self {
+            key_seed,
             admin_dsn,
             database,
             root,

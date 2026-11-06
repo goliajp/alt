@@ -160,6 +160,7 @@ fn store_failure(error: Error, key: Option<RequestKey>) -> Response<ResponseBody
             Retry::QueryOutcome,
         ),
         Error::Limit(_)
+        | Error::Portable(alt_portable::Error::Limit(_))
         | Error::Repository(alt_repository_service::Error::Limit(_))
         | Error::Task(alt_task_service::Error::Limit(_)) => failure(
             413,
@@ -190,13 +191,22 @@ fn store_failure(error: Error, key: Option<RequestKey>) -> Response<ResponseBody
             key,
             Retry::Never,
         ),
-        Error::Integrity(_) | Error::Task(_) | Error::Repository(_) => failure(
-            422,
-            ErrorCode::IntegrityError,
-            "Selected content or dependency validation failed",
+        Error::Portable(alt_portable::Error::Io(_)) => failure(
+            503,
+            ErrorCode::TemporarilyUnavailable,
+            "Instance storage is temporarily unavailable",
             key,
-            Retry::NewIntent,
+            Retry::SameRequest,
         ),
+        Error::Integrity(_) | Error::Task(_) | Error::Repository(_) | Error::Portable(_) => {
+            failure(
+                422,
+                ErrorCode::IntegrityError,
+                "Selected content or dependency validation failed",
+                key,
+                Retry::NewIntent,
+            )
+        }
         Error::Database(_) | Error::Io(_) => failure(
             503,
             ErrorCode::TemporarilyUnavailable,
@@ -238,7 +248,9 @@ pub fn authorization(headers: &hyper::HeaderMap) -> Option<String> {
 }
 fn key(route: &Route) -> Option<RequestKey> {
     match route {
-        Route::Request(key, _) => Some(key.clone()),
+        Route::Request(key, _) | Route::Portable(crate::PortableRoute::Import(key, _)) => {
+            Some(key.clone())
+        }
         _ => None,
     }
 }
@@ -354,21 +366,22 @@ async fn handle(
             Retry::Never,
         );
     }
-    if matches!(
+    if (matches!(
         route,
         Route::Begin(_) | Route::IssueAgent | Route::Request(_, RequestAction::Approve)
-    ) && (request
-        .headers()
-        .get_all(header::CONTENT_TYPE)
-        .iter()
-        .count()
-        != 1
-        || request
+    ) || matches!(&route, Route::Portable(p) if p.has_json_body()))
+        && (request
             .headers()
-            .get(header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.split(';').next())
-            .is_none_or(|value| !value.trim().eq_ignore_ascii_case("application/json")))
+            .get_all(header::CONTENT_TYPE)
+            .iter()
+            .count()
+            != 1
+            || request
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.split(';').next())
+                .is_none_or(|value| !value.trim().eq_ignore_ascii_case("application/json")))
     {
         return failure(
             415,
@@ -380,12 +393,20 @@ async fn handle(
     }
     let factory = state.factory.clone();
     let selected_route = route.clone();
+    let selected_options = state.options.native.clone();
+    let request_token = token.clone();
     let prepared = tokio::time::timeout(
         state.options.work_timeout,
         tokio::task::spawn_blocking(move || {
             let mut store = factory.open()?;
-            let credential = factory.authenticate(&mut store, &token)?;
+            let credential = factory.authenticate(&mut store, &request_token)?;
             let size = match &selected_route {
+                Route::Portable(route) => crate::portable::request_bytes(
+                    &mut store,
+                    &credential,
+                    &selected_options,
+                    route,
+                )?,
                 Route::IssueAgent => 16_384,
                 Route::GitReceive(repository) => {
                     store.check_git_receive_access(&credential, repository)?;
@@ -501,6 +522,17 @@ async fn handle(
             let mut store = factory.open()?;
             source.as_file_mut().seek(SeekFrom::Start(0))?;
             match route {
+                Route::Portable(route) => {
+                    let current = factory.authenticate(&mut store, &token)?;
+                    crate::portable::execute(
+                        &mut store,
+                        &current,
+                        &options,
+                        route,
+                        source.as_file_mut(),
+                        &mut |store| factory.authenticate(store, &token),
+                    )
+                }
                 Route::GitAdvertise(..) | Route::GitUpload(..) | Route::GitReceive(..) => {
                     crate::execute_git(
                         &mut store,
@@ -653,6 +685,11 @@ pub async fn serve_with_browser(
     browser: Option<WebOptions>,
     shutdown: impl std::future::Future<Output = ()>,
 ) -> std::io::Result<()> {
+    if let Some(portable) = options.native.portable {
+        portable
+            .verification(factory.limits, options.native.task_limits)
+            .map_err(|_| std::io::Error::other("invalid portable limits"))?;
+    }
     if let Some(ref browser) = browser {
         browser.validate()?;
     }

@@ -8,6 +8,7 @@ use std::io::Read;
 pub use alt_remote_protocol::{ApprovalRequest, BeginRequest};
 #[derive(Clone)]
 pub struct NativeOptions {
+    pub portable: Option<alt_portable::http::Bounds>,
     pub task_limits: TaskLimits,
     pub upload_ttl_ms: u64,
     pub worker_lease_ms: u64,
@@ -34,10 +35,10 @@ pub enum Output {
         file: std::fs::File,
     },
 }
-fn json(value: &impl Serialize) -> Result<Output> {
+pub(crate) fn json(value: &impl Serialize) -> Result<Output> {
     Ok(Output::Json(serde_json::to_value(value)?))
 }
-fn body<T: for<'de> Deserialize<'de>>(source: &mut dyn Read, max: usize) -> Result<T> {
+pub(crate) fn body<T: for<'de> Deserialize<'de>>(source: &mut dyn Read, max: usize) -> Result<T> {
     let mut raw = Vec::new();
     source
         .take((max as u64).saturating_add(1))
@@ -47,7 +48,7 @@ fn body<T: for<'de> Deserialize<'de>>(source: &mut dyn Read, max: usize) -> Resu
     }
     Ok(serde_json::from_slice(&raw)?)
 }
-fn empty(source: &mut dyn Read) -> Result<()> {
+pub(crate) fn empty(source: &mut dyn Read) -> Result<()> {
     if source.read(&mut [0u8; 1])? != 0 {
         return Err(Error::Precondition("unexpected request body"));
     }
@@ -61,6 +62,9 @@ pub fn execute_native(
     source: &mut dyn Read,
 ) -> Result<Output> {
     match route {
+        Route::Portable(_) => Err(Error::Precondition(
+            "portable route requires refreshed authority dispatch",
+        )),
         Route::GitAdvertise(..) | Route::GitUpload(..) | Route::GitReceive(..) => {
             Err(Error::Precondition("Git route requires Git dispatch"))
         }

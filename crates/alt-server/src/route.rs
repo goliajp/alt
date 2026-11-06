@@ -15,6 +15,7 @@ pub enum RequestAction {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Route {
+    Portable(crate::PortableRoute),
     Health,
     Capabilities,
     Principal,
@@ -32,14 +33,14 @@ pub enum Route {
     GitUpload(String),
     GitReceive(String),
 }
-fn id(value: &str) -> bool {
+pub(crate) fn id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
         && value
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
-fn digest(value: &str) -> bool {
+pub(crate) fn digest(value: &str) -> bool {
     value.len() == 64
         && value
             .bytes()
@@ -111,6 +112,9 @@ pub fn parse_route(
             ("POST", ["", "v1", "delegations", value, "revoke"]) if digest(value) => {
                 return Some(Route::RevokeAgent((*value).into()));
             }
+            ("GET", ["", "v1", "portable", "capabilities"]) => {
+                return Some(Route::Portable(crate::PortableRoute::Capabilities));
+            }
             ("GET", ["", "healthz"]) => return Some(Route::Health),
             ("GET", ["", "v1", "capabilities"]) => return Some(Route::Capabilities),
             ("GET", ["", "v1", "principal"]) => return Some(Route::Principal),
@@ -136,6 +140,9 @@ pub fn parse_route(
         return None;
     }
     match (method, &p[6..]) {
+        (_, ["portable", tail @ ..]) if query.is_none() => {
+            crate::portable::route::parse(method, scope, tail).map(Route::Portable)
+        }
         ("GET", ["tasks", kind]) => Some(Route::Records(scope, record_kind(kind)?, after(query)?)),
         ("POST", ["requests"]) if query.is_none() => Some(Route::Begin(scope)),
         ("GET", ["content", content]) if query.is_none() && digest(content) => {

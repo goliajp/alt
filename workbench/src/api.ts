@@ -44,14 +44,25 @@ export class Api {
   private csrf = '';
   setSession(session: Session | null) { this.csrf = session?.csrf ?? ''; }
   async request<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
-    if (!path.startsWith('/web/') || path.startsWith('//')) throw new Error('invalid API path');
     const writing = body !== undefined;
+    return this.send<T>(path, writing ? 'POST' : 'GET', writing ? JSON.stringify(body) : undefined,
+      writing ? { 'Content-Type': 'application/json', 'X-Alt-CSRF': this.csrf } : { Accept: 'application/json' }, signal, 8 * 1024 * 1024);
+  }
+  async portable<T>(path: string, method: 'GET' | 'POST' | 'PUT', body?: unknown, signal?: AbortSignal): Promise<T> {
+    const writing = method !== 'GET';
+    const binary = body instanceof globalThis.Blob;
+    if (method === 'PUT' && !binary) throw new Error('portable uploads require a file slice');
+    return this.send<T>(path, method, body === undefined ? undefined : binary ? body : JSON.stringify(body),
+      writing ? { 'Content-Type': binary ? 'application/octet-stream' : 'application/json', 'X-Alt-CSRF': this.csrf } : { Accept: 'application/json' }, signal, 32 * 1024 * 1024);
+  }
+  private async send<T>(path: string, method: 'GET' | 'POST' | 'PUT', body: BodyInit | undefined, headers: Record<string,string>, signal: AbortSignal | undefined, maximum: number): Promise<T> {
+    if (!path.startsWith('/web/') || path.startsWith('//')) throw new Error('invalid API path');
+    const writing = method !== 'GET';
     let response: Response;
     try {
       response = await fetch(path, {
-        method: writing ? 'POST' : 'GET', credentials: 'same-origin', redirect: 'error', cache: 'no-store', signal,
-        headers: writing ? { 'Content-Type': 'application/json', 'X-Alt-CSRF': this.csrf } : { Accept: 'application/json' },
-        body: writing ? JSON.stringify(body) : undefined,
+        method, credentials: 'same-origin', redirect: 'error', cache: 'no-store', signal,
+        headers, body,
       });
     } catch (error) {
       if (signal?.aborted) throw error;
@@ -67,7 +78,7 @@ export class Api {
           const { value, done } = await reader.read();
           if (done) break;
           length += value.length;
-          if (length > 8 * 1024 * 1024) { await reader.cancel(); throw new Error('response limit'); }
+          if (length > maximum) { await reader.cancel(); throw new Error('response limit'); }
           chunks.push(value);
         }
       } catch { throw new ApiError(response.status, 'response', writing); }

@@ -8,6 +8,8 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+alt-portable = { path = "crates/alt-portable" }
+alt-provenance = { path = "crates/alt-provenance" }
 golia-platform-contract = { path = "vendor/golia-platform-contract", version = "=0.1.0" }
 alt-cloud-client = { path = "crates/alt-cloud-client" }
 alt-browser-auth = { path = "crates/alt-browser-auth" }

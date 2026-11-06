@@ -121,3 +121,65 @@ pub(crate) fn check_publication(tx: &mut Transaction<'_>, spec: &InstanceSpec) -
     }
     Ok(())
 }
+
+// Portable migration has its own immutable request table; it never invents a
+// native publication completion solely to reuse quota accounting.
+pub(crate) fn reserve_portable(
+    tx: &mut Transaction<'_>,
+    spec: &InstanceSpec,
+    key: &RequestKey,
+    bytes: u64,
+) -> Result<()> {
+    let Some(policy) = service(tx, spec)? else {
+        return Ok(());
+    };
+    check_storage(tx, &policy)?;
+    let current = month(tx)?;
+    reserve_month(tx, &current, bytes, policy.limits.monthly_ingress_bytes.0)?;
+    tx.execute("INSERT INTO alt_cloud_portable_reservations(repository,import_id,month,remaining_bytes) VALUES($1,$2,$3,$4)", &[&key.scope.repository_instance_id,&key.request_id,&current,&integer(bytes)?])?;
+    Ok(())
+}
+pub(crate) fn accept_portable(
+    tx: &mut Transaction<'_>,
+    spec: &InstanceSpec,
+    key: &RequestKey,
+    bytes: u64,
+) -> Result<()> {
+    let Some(policy) = service(tx, spec)? else {
+        return Ok(());
+    };
+    check_storage(tx, &policy)?;
+    let row = tx.query_opt("SELECT month,remaining_bytes FROM alt_cloud_portable_reservations WHERE repository=$1 AND import_id=$2", &[&key.scope.repository_instance_id,&key.request_id])?.ok_or(Error::Precondition("Cloud portable reservation missing"))?;
+    let previous: String = row.get(0);
+    let remaining = unsigned(row.get(1))?;
+    if bytes > remaining {
+        return Err(Error::Integrity(
+            "Cloud portable ingress exceeds reservation",
+        ));
+    }
+    let current = month(tx)?;
+    if previous != current {
+        tx.execute(
+            "UPDATE alt_cloud_ingress SET reserved_bytes=reserved_bytes-$2 WHERE month=$1",
+            &[&previous, &integer(remaining)?],
+        )?;
+        reserve_month(
+            tx,
+            &current,
+            remaining,
+            policy.limits.monthly_ingress_bytes.0,
+        )?;
+        tx.execute("UPDATE alt_cloud_portable_reservations SET month=$3 WHERE repository=$1 AND import_id=$2", &[&key.scope.repository_instance_id,&key.request_id,&current])?;
+    }
+    if tx.execute("UPDATE alt_cloud_ingress SET accepted_bytes=accepted_bytes+$2,reserved_bytes=reserved_bytes-$2 WHERE month=$1 AND accepted_bytes+reserved_bytes<=$3", &[&current,&integer(bytes)?,&integer(policy.limits.monthly_ingress_bytes.0)?])? != 1 {
+        return Err(Error::Limit("Cloud portable ingress allowance reduced"));
+    }
+    tx.execute("UPDATE alt_cloud_portable_reservations SET remaining_bytes=remaining_bytes-$3 WHERE repository=$1 AND import_id=$2", &[&key.scope.repository_instance_id,&key.request_id,&integer(bytes)?])?;
+    Ok(())
+}
+pub(crate) fn release_portable(tx: &mut Transaction<'_>, key: &RequestKey) -> Result<()> {
+    if let Some(row) = tx.query_opt("DELETE FROM alt_cloud_portable_reservations WHERE repository=$1 AND import_id=$2 RETURNING month,remaining_bytes", &[&key.scope.repository_instance_id,&key.request_id])? {
+        tx.execute("UPDATE alt_cloud_ingress SET reserved_bytes=reserved_bytes-$2 WHERE month=$1", &[&row.get::<_,String>(0),&row.get::<_,i64>(1)])?;
+    }
+    Ok(())
+}

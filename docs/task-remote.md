@@ -77,6 +77,24 @@ identities. Complete continuation requires the selected attachments. Imported
 commands are never automatically executed. Run validation again with an explicitly
 chosen runner profile before accepting the new candidate.
 
+If adoption was interrupted, inspect its original whole-command request first.
+A marker alone does not authorize task work. When the original request has no
+successful completion, explicitly authorize a new adoption with a new request ID:
+
+```sh
+alt task remote adopt TASK_ID --publication REQUEST_DIGEST \
+  --reconcile-request ORIGINAL_REQUEST_ID --request-id NEW_REQUEST_ID --json
+```
+
+The original request must match the current adoption marker and must no longer
+be running. The command rechecks the received publication, baseline, targets and
+path permissions, and preserves the exact previous marker in its history. It
+does not modify the original request or claim that request completed. The new
+adoption becomes usable only after its own successful whole-command completion.
+If reconciliation is itself interrupted, inspect that new request and explicitly
+reconcile it under another new request ID. Already successful adoptions, changed
+preconditions and damaged history are refused.
+
 For a task publication that changes refs, include the exact integration target
 and notes updates in `refs`, and supply collector attestations accepted by the
 repository's current policy. `task remote attest EVIDENCE_ID --key-file KEY --json`

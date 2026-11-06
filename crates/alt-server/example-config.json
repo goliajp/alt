@@ -37,6 +37,16 @@
     "path_bytes": 4096,
     "walk_steps": 10000000
   },
+  "portable": {
+    "metadata_bytes": 16777216,
+    "entries": 1000000,
+    "publications": 100000,
+    "blob_bytes": "268435456",
+    "total_bytes": "4294967296",
+    "work_bytes": "34359738368",
+    "reads": 10000000,
+    "import_ttl_ms": "3600000"
+  },
   "http": {
     "connections": 128,
     "workers": 8,

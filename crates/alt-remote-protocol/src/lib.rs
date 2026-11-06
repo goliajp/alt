@@ -7,9 +7,11 @@
 pub mod authorization;
 pub mod delegation;
 pub mod login;
+mod provenance;
 mod publication;
 mod receipt;
 
+pub use provenance::*;
 pub use publication::*;
 pub use receipt::*;
 use serde::{Deserialize, Serialize};

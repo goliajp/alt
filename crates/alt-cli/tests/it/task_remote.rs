@@ -1,3 +1,5 @@
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+mod adopt;
 use alt_remote_protocol::{ActorKind, Attribution, DeploymentMode, Limits};
 use alt_repository_service::{Grant, RefSelector};
 use alt_server::{HttpOptions, NativeOptions, StoreFactory};
@@ -60,6 +62,9 @@ struct Server {
     admin_dsn: String,
     database: String,
     _root: tempfile::TempDir,
+    factory: StoreFactory,
+    options: HttpOptions,
+    browser: alt_server::WebOptions,
     shutdown: Option<tokio::sync::oneshot::Sender<()>>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
@@ -185,12 +190,42 @@ impl Server {
             work_timeout: Duration::from_secs(30),
             connection_timeout: Duration::from_secs(60),
             native: NativeOptions {
+                portable: None,
                 task_limits: task_limits(),
                 upload_ttl_ms: 600_000,
                 worker_lease_ms: 60_000,
                 approval_ttl_ms: 300_000,
             },
         };
+        let (url, shutdown, thread) =
+            Self::start(socket, factory.clone(), options.clone(), browser.clone());
+        Self {
+            url,
+            token,
+            bob,
+            reviewer,
+            store,
+            admin,
+            admin_dsn,
+            database,
+            _root: root,
+            factory,
+            options,
+            browser,
+            shutdown: Some(shutdown),
+            thread: Some(thread),
+        }
+    }
+    fn start(
+        socket: std::net::TcpListener,
+        factory: StoreFactory,
+        options: HttpOptions,
+        browser: alt_server::WebOptions,
+    ) -> (
+        String,
+        tokio::sync::oneshot::Sender<()>,
+        std::thread::JoinHandle<()>,
+    ) {
         let (address_tx, address_rx) = std::sync::mpsc::channel();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let thread = std::thread::spawn(move || {
@@ -215,19 +250,31 @@ impl Server {
                     .unwrap();
                 });
         });
-        Self {
-            url: format!("http://{}", address_rx.recv().unwrap()),
-            token,
-            bob,
-            reviewer,
-            store,
-            admin,
-            admin_dsn,
-            database,
-            _root: root,
-            shutdown: Some(shutdown_tx),
-            thread: Some(thread),
-        }
+        (
+            format!("http://{}", address_rx.recv().unwrap()),
+            shutdown_tx,
+            thread,
+        )
+    }
+    fn activate_recovery(&mut self, generation: u64) {
+        self.shutdown.take().unwrap().send(()).unwrap();
+        self.thread.take().unwrap().join().unwrap();
+        self.store
+            .activate_restored(generation, &"ab".repeat(32))
+            .unwrap();
+        self.factory.instance = self.store.spec().clone();
+        let socket =
+            std::net::TcpListener::bind(self.url.strip_prefix("http://").unwrap()).unwrap();
+        socket.set_nonblocking(true).unwrap();
+        let (url, shutdown, thread) = Self::start(
+            socket,
+            self.factory.clone(),
+            self.options.clone(),
+            self.browser.clone(),
+        );
+        assert_eq!(url, self.url);
+        self.shutdown = Some(shutdown);
+        self.thread = Some(thread);
     }
     fn receipt_key(&self) -> String {
         alt_input::hex(SigningKey::from_bytes(&[7; 32]).verifying_key().as_bytes())
@@ -248,8 +295,12 @@ impl Server {
 }
 impl Drop for Server {
     fn drop(&mut self) {
-        let _ = self.shutdown.take().unwrap().send(());
-        self.thread.take().unwrap().join().unwrap();
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+        if let Some(thread) = self.thread.take() {
+            thread.join().unwrap();
+        }
         Client::connect(&self.admin_dsn, NoTls)
             .unwrap()
             .batch_execute(&format!("DROP DATABASE {} WITH (FORCE)", self.database))
@@ -840,6 +891,41 @@ fn two_clients_continue_original_task_revalidate_review_publish_and_export_witho
         )
         .unwrap(),
         original_record
+    );
+    // A recovery transaction revokes credentials and advances the current scope;
+    // the original signed publication remains historical evidence of epoch 1.
+    server.activate_recovery(10);
+    assert!(server.store.authenticate(&server.token).is_err());
+    let (fresh_cookie, _) = browser_login(&server);
+    let fresh_token = fresh_cookie.split_once('=').unwrap().1;
+    let recovered = root.path().join("recovered-client");
+    std::fs::create_dir(&recovered).unwrap();
+    ok(&recovered, fresh_token, &["init", "."]);
+    connect(&recovered, &server, fresh_token, "restored");
+    value(
+        &recovered,
+        fresh_token,
+        &[
+            "task",
+            "remote",
+            "receive",
+            "restored",
+            "--kind",
+            "delivery",
+            "--id",
+            string(&delivered, "delivery_id"),
+            "--publication",
+            final_digest,
+            "--json",
+        ],
+    );
+    assert_eq!(
+        value(
+            &recovered,
+            fresh_token,
+            &["task", "show", task_id, "--json"]
+        )["state"],
+        "integrated",
     );
 }
 

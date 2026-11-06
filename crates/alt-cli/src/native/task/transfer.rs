@@ -5,7 +5,9 @@ use alt_task_service::{RecordKey, TaskLimits, TaskRecord};
 use alt_task_transfer::{Package, Received};
 use alt_wire_http::native::{Options, Transport, verify_receipt};
 use std::io::{Read, Seek, SeekFrom};
+mod adoption;
 mod current_review;
+use adoption::{Adoption, Predecessor};
 
 fn limits() -> protocol::Limits {
     protocol::Limits {
@@ -76,6 +78,8 @@ struct PublishedOrigin {
     version: u32,
     binding: Binding,
     receipt: protocol::Receipt,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    provenance: Vec<protocol::TransferProof>,
 }
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -83,15 +87,6 @@ struct Plan {
     selection: alt_task_transfer::Selection,
     #[serde(default)]
     refs: Vec<protocol::RefUpdate>,
-}
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Adoption {
-    version: u32,
-    task: String,
-    publication: String,
-    destination: Scope,
-    creator_request: String,
 }
 
 fn key_bytes(key: &str) -> Res<[u8; 32]> {
@@ -262,43 +257,12 @@ impl NativeRepo<'_> {
     }
     pub(super) fn task_adopted(&self, id: &str) -> Res<bool> {
         alt_task::check_id(id)?;
-        let path = self
-            .index_path
-            .with_file_name("task-adoptions")
-            .join(format!("{id}.json"));
-        if !path.exists() {
+        if !self.adoption_path(id).exists() {
             return Ok(false);
         }
-        let adoption: Adoption = json_file(&path)?;
-        if adoption.version != 1
-            || adoption.task != id
-            || adoption.destination != self.task_scope()?
-        {
-            return Err(refused("task adoption destination mismatch"));
-        }
-        crate::request::parse_id(&adoption.creator_request)?;
-        let directory = self
-            .store
-            .alt_dir
-            .join("requests")
-            .join(&adoption.creator_request);
-        let intent: crate::request::Intent = json_file(&directory.join("intent.json"))?;
-        let Some((completion, response)) = crate::request::read_completion(&directory, &intent)?
-        else {
+        let (adoption, _, _) = self.read_adoption(id)?;
+        if !self.adoption_applied(&adoption)? {
             return Ok(false);
-        };
-        if completion.outcome != "applied" || response.exit_code != 0 {
-            return Ok(false);
-        }
-        let result: serde_json::Value = serde_json::from_slice(&response.stdout)?;
-        if intent.repository != adoption.destination.repository
-            || intent.workspace != adoption.destination.workspace
-            || intent.request_id != adoption.creator_request
-            || result["adopted_task_id"] != id
-            || result["publication_digest"] != adoption.publication
-            || result["destination"] != serde_json::to_value(&adoption.destination)?
-        {
-            return Err(refused("task adoption completion binding mismatch"));
         }
         for package in self.received_packages()? {
             if package.request().publication.digest(limits())? == adoption.publication {
@@ -366,16 +330,17 @@ impl NativeRepo<'_> {
             self.check_binding(&origin.binding)?;
             let package = Package::open(&path.join("sealed"), limits())?;
             let publication = &package.request().publication;
-            if origin.version != 1
-                || publication.key.scope != origin.binding.scope
+            if origin.version != if origin.provenance.is_empty() { 1 } else { 2 }
                 || path.file_name().and_then(|n| n.to_str())
                     != Some(publication.digest(limits())?.as_str())
             {
                 return Err(refused("received publication origin mismatch"));
             }
-            verify_receipt(
-                &origin.receipt,
+            alt_provenance::verify_origin(
                 publication,
+                &origin.receipt,
+                &origin.provenance,
+                &origin.binding.scope,
                 &key_bytes(&origin.binding.receipt_key)?,
                 limits(),
             )?;
@@ -520,9 +485,17 @@ impl NativeRepo<'_> {
                 json_mode,
                 out,
             ),
-            TaskRemoteOp::Adopt { task, publication } => {
-                self.received_adopt(task, publication, json_mode, out)
-            }
+            TaskRemoteOp::Adopt {
+                task,
+                publication,
+                reconcile_request,
+            } => self.received_adopt(
+                task,
+                publication,
+                reconcile_request.as_deref(),
+                json_mode,
+                out,
+            ),
         }
     }
     fn publication_preview(
@@ -742,15 +715,14 @@ impl NativeRepo<'_> {
         let selected = found.ok_or_else(|| {
             refused("selected signed publication is not available for this record")
         })?;
-        if selected.publication.key.scope != binding.scope {
-            return Err(refused("received publication scope mismatch"));
-        }
         selected
             .manifest
             .validate_publication(&selected.publication, limits())?;
-        verify_receipt(
-            &selected.receipt,
+        alt_provenance::verify_origin(
             &selected.publication,
+            &selected.receipt,
+            &selected.provenance,
+            &binding.scope,
             &key_bytes(&binding.receipt_key)?,
             limits(),
         )?;
@@ -799,9 +771,10 @@ impl NativeRepo<'_> {
         write_json(
             &directory.join("origin.json"),
             &PublishedOrigin {
-                version: 1,
+                version: if selected.provenance.is_empty() { 1 } else { 2 },
                 binding,
                 receipt: selected.receipt,
+                provenance: selected.provenance,
             },
         )?;
         emit(
@@ -814,6 +787,7 @@ impl NativeRepo<'_> {
         &mut self,
         id: &str,
         publication: &str,
+        reconcile_request: Option<&str>,
         json_mode: bool,
         out: &mut impl Write,
     ) -> Res<()> {
@@ -874,27 +848,72 @@ impl NativeRepo<'_> {
         }
         self.task_check_paths(task)?;
         let destination = self.task_scope()?;
-        let parent = self.index_path.with_file_name("task-adoptions");
-        std::fs::create_dir_all(&parent)?;
-        let path = parent.join(format!("{id}.json"));
-        if path.exists() {
-            return Err(refused(
-                "this workspace already has an adoption record for the task; inspect its original request",
-            ));
-        }
+        let creator_request = self.task_request()?;
+        let path = self.adoption_path(id);
+        let mut original_lock = None;
+        let supersedes = if path.exists() {
+            let Some(original_request) = reconcile_request else {
+                return Err(refused(
+                    "this workspace already has an adoption record for the task; inspect its original request",
+                ));
+            };
+            let (previous, raw, depth) = self.read_adoption(id)?;
+            if previous.creator_request != original_request
+                || original_request == creator_request
+                || previous.publication != publication
+            {
+                return Err(refused(
+                    "reconciliation must name the current adoption's exact original request and publication, under a new request",
+                ));
+            }
+            original_lock = Some(crate::request::try_lock_existing(
+                &self.store.alt_dir,
+                original_request,
+            )?);
+            if self.adoption_applied(&previous)? {
+                return Err(refused(
+                    "the original adoption already completed successfully",
+                ));
+            }
+            if depth >= 64 {
+                return Err(refused(
+                    "task adoption history exceeds the supported chain limit",
+                ));
+            }
+            let predecessor = Predecessor {
+                digest: blake3::hash(&raw).to_hex().to_string(),
+                request: original_request.into(),
+            };
+            self.preserve_adoption(id, &raw, &predecessor)?;
+            Some(predecessor)
+        } else {
+            if reconcile_request.is_some() {
+                return Err(refused("task has no adoption record to reconcile"));
+            }
+            None
+        };
+        std::fs::create_dir_all(path.parent().expect("adoption parent"))?;
         let adoption = Adoption {
-            version: 1,
+            version: if supersedes.is_some() { 2 } else { 1 },
             task: id.into(),
             publication: publication.into(),
             destination,
-            creator_request: self.task_request()?,
+            creator_request,
+            supersedes,
         };
         write_json(&path, &adoption)?;
-        let operation = self.task_operation(id, "task-adopt", publication)?;
+        let action = if adoption.supersedes.is_some() {
+            "task-adopt-reconcile"
+        } else {
+            "task-adopt"
+        };
+        let operation = self.task_operation(id, action, publication)?;
         emit(
             out,
             json_mode,
-            json!({"adopted_task_id":id,"publication_digest":publication,"destination":adoption.destination,"original_scope":task.scope,"operation_id":operation}),
-        )
+            json!({"adopted_task_id":id,"publication_digest":publication,"destination":adoption.destination,"original_scope":task.scope,"operation_id":operation,"supersedes":adoption.supersedes}),
+        )?;
+        drop(original_lock);
+        Ok(())
     }
 }
