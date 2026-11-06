@@ -48,11 +48,26 @@ impl Store {
     /// Explicit first initialization, never invoked as a fallback from open.
     /// The caller supplies a dedicated database connection and persisted key.
     pub fn initialize(
+        client: Client,
+        bytes: ByteStore,
+        spec: InstanceSpec,
+        signing_key: SigningKey,
+        limits: Limits,
+    ) -> Result<Self> {
+        if spec.deployment_mode != DeploymentMode::SelfHosted {
+            return Err(Error::Precondition(
+                "Cloud requires explicit platform binding",
+            ));
+        }
+        Self::initialize_bound(client, bytes, spec, signing_key, limits, None)
+    }
+    pub(crate) fn initialize_bound(
         mut client: Client,
         bytes: ByteStore,
         spec: InstanceSpec,
         signing_key: SigningKey,
         limits: Limits,
+        cloud: Option<(&golia_platform_contract::Audience, &str, Option<&str>)>,
     ) -> Result<Self> {
         spec.validate()?;
         limits.validate()?;
@@ -76,6 +91,10 @@ impl Store {
         crate::schema::apply_v2(&mut tx)?;
         crate::schema::apply_v3(&mut tx)?;
         crate::schema::apply_v4(&mut tx)?;
+        crate::schema::apply_v5(&mut tx)?;
+        if let Some((audience, digest, provision_digest)) = cloud {
+            crate::cloud::initialize_binding(&mut tx, &spec, audience, digest, provision_digest)?;
+        }
         tx.commit()?;
         Self::open(client, bytes, spec, signing_key, limits)
     }
@@ -88,7 +107,7 @@ impl Store {
     ) -> Result<Self> {
         spec.validate()?;
         limits.validate()?;
-        crate::schema::check(&mut client, 4)?;
+        crate::schema::check(&mut client, crate::SCHEMA_VERSION as usize)?;
         let mut tx = client.transaction()?;
         instance(&mut tx, &spec, &signing_key)?;
         tx.commit()?;
@@ -208,7 +227,9 @@ impl Store {
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         require_admin(&mut tx, &self.spec, admin)?;
-        if self.spec.deployment_mode != DeploymentMode::SelfHosted {
+        if self.spec.deployment_mode != DeploymentMode::SelfHosted
+            || attribution.kind == alt_remote_protocol::ActorKind::Agent
+        {
             return Err(Error::Unauthorized);
         }
         let token = insert_token(
@@ -245,7 +266,9 @@ impl Store {
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         require_admin(&mut tx, &self.spec, admin)?;
-        if self.spec.deployment_mode != DeploymentMode::SelfHosted {
+        if self.spec.deployment_mode != DeploymentMode::SelfHosted
+            || attribution.kind == alt_remote_protocol::ActorKind::Agent
+        {
             return Err(Error::Unauthorized);
         }
         insert_known_token(
@@ -282,6 +305,7 @@ impl Store {
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         require_admin(&mut tx, &self.spec, admin)?;
+        crate::cloud::repository_quota(&mut tx, &self.spec)?;
         tx.execute("INSERT INTO alt_repositories(id,recovery_epoch,object_format,quota_bytes) VALUES($1,1,'sha1',$2)",&[&repository,&integer(quota_bytes)?])?;
         crate::browser::audit_admin(
             &mut tx,
@@ -417,6 +441,9 @@ pub(crate) fn instance(
             "instance identity, mode, generation or signing key",
         ));
     }
+    if spec.deployment_mode == DeploymentMode::Cloud {
+        crate::cloud::check_instance(tx, spec)?;
+    }
     Ok(())
 }
 fn mode(mode: DeploymentMode) -> &'static str {
@@ -459,7 +486,7 @@ fn insert_token(
     )?;
     Ok(token)
 }
-fn validate_token(token: &str) -> Result<()> {
+pub(crate) fn validate_token(token: &str) -> Result<()> {
     if token.len() != 69
         || !token.starts_with("alt1_")
         || !token.as_bytes()[5..]
@@ -520,7 +547,15 @@ pub(crate) fn credential_row(
     {
         return Err(Error::Unauthorized);
     }
-    crate::browser::check_credential(tx, credential, &row.get::<_, String>("actor_id"))?;
+    let delegated = crate::delegation::check(tx, spec, credential, &row)?;
+    if delegated {
+        return Ok(row);
+    }
+    if spec.deployment_mode == DeploymentMode::Cloud {
+        crate::cloud::check_credential(tx, spec, credential, &row)?;
+    } else {
+        crate::browser::check_credential(tx, credential, &row.get::<_, String>("actor_id"))?;
+    }
     Ok(row)
 }
 pub(crate) fn require_admin(
@@ -546,7 +581,7 @@ pub(crate) fn authorize(
     if !grant.get::<_, bool>(0) {
         return Err(Error::Unauthorized);
     }
-    Ok(Authorization {
+    let mut auth = Authorization {
         scope: snapshot.scope.clone(),
         runtime_generation: spec.runtime_generation,
         actor_id: actor,
@@ -555,7 +590,9 @@ pub(crate) fn authorize(
         revocation_generation: snapshot.revocation_generation,
         grants: serde_json::from_value(grant.get(2))?,
         publish_records: grant.get(1),
-    })
+    };
+    crate::delegation::restrict(tx, credential, &mut auth)?;
+    Ok(auth)
 }
 pub(crate) fn snapshot(
     tx: &mut Transaction<'_>,
@@ -591,6 +628,6 @@ pub(crate) fn snapshot(
         refs,
         policies: serde_json::from_value(row.get(4))?,
         approved_publications: BTreeSet::new(),
-        writes_enabled: row.get(5),
+        writes_enabled: row.get::<_, bool>(5) && crate::cloud::writes_enabled(tx, spec)?,
     })
 }

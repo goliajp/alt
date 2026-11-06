@@ -50,7 +50,11 @@ impl Store {
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         let actor: String = credential_row(&mut tx, &self.spec, credential)?.get("actor_id");
+        if crate::delegation::parent(&mut tx, &credential.digest)?.is_some() {
+            return Err(Error::Unauthorized);
+        }
         let rows=tx.query("SELECT r.id,r.recovery_epoch,r.default_branch,r.writes_enabled,g.publish_records,COALESCE(v.can_review,false) FROM alt_repositories r JOIN alt_grants g ON g.repository=r.id AND g.actor_id=$1 LEFT JOIN alt_review_grants v ON v.repository=r.id AND v.actor_id=$1 WHERE g.can_read AND r.id>$2 ORDER BY r.id LIMIT $3", &[&actor,&after,&bound])?;
+        let service_writes = crate::cloud::writes_enabled(&mut tx, &self.spec)?;
         let has_more = rows.len() > limit;
         let items = rows
             .into_iter()
@@ -63,7 +67,7 @@ impl Store {
                         recovery_epoch: unsigned(row.get(1))?,
                     },
                     default_branch: row.get(2),
-                    writes_enabled: row.get(3),
+                    writes_enabled: row.get::<_, bool>(3) && service_writes,
                     can_publish: row.get(4),
                     can_review: row.get(5),
                 })
@@ -100,6 +104,9 @@ impl Store {
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         let actor: String = credential_row(&mut tx, &self.spec, credential)?.get("actor_id");
+        if crate::delegation::parent(&mut tx, &credential.digest)?.is_some() {
+            return Err(Error::Unauthorized);
+        }
         let time = integer(now(&mut tx)?)?;
         let rows=tx.query("SELECT q.repository,q.epoch,q.actor_id,q.request_id,q.digest,q.publication->'record_roots' AS roots FROM alt_requests q JOIN alt_repositories r ON r.id=q.repository AND r.recovery_epoch=q.epoch JOIN alt_grants g ON g.repository=q.repository AND g.actor_id=$1 JOIN alt_review_grants v ON v.repository=q.repository AND v.actor_id=$1 WHERE g.can_read AND v.can_review AND r.writes_enabled AND q.state='ready' AND q.expires_at>$2 AND (q.repository,q.actor_id,q.request_id)>($3,$4,$5) AND EXISTS(SELECT 1 FROM jsonb_array_elements(q.publication->'record_roots') root WHERE root->>'kind' IN ('integration','delivery')) ORDER BY q.repository,q.actor_id,q.request_id LIMIT $6", &[&actor,&time,&parts[0],&parts[1],&parts[2],&bound])?;
         let has_more = rows.len() > limit;

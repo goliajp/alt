@@ -263,6 +263,40 @@ impl Store {
     /// of the old service. The operator supplies a generation strictly newer
     /// than every source epoch. This cannot fence an independent remote DB.
     pub fn activate_restored(&mut self, generation: u64, backup_digest: &str) -> Result<()> {
+        self.activate_restored_inner(generation, backup_digest, None)
+    }
+    /// A current, independently challenged runtime probe must prove which
+    /// authenticated archive was activated, not merely that a fresh DB opens.
+    pub fn check_restored_backup(&mut self, backup_digest: &str) -> Result<()> {
+        crate::bytes::check_digest(backup_digest)?;
+        let mut tx = self.client.transaction()?;
+        instance(&mut tx, &self.spec, &self.signing_key)?;
+        let expected = serde_json::json!({"backup_digest":backup_digest,"generation":self.spec.runtime_generation});
+        let found: bool = tx.query_one(
+            "SELECT EXISTS(SELECT 1 FROM alt_instance_audit WHERE action='instance.restore' AND subject_id=$1 AND details @> $2)",
+            &[&self.spec.installation_id, &expected],
+        )?.get(0);
+        if !found {
+            return Err(Error::Precondition("restored backup identity"));
+        }
+        Ok(())
+    }
+    /// Atomically replace Cloud authority, advance all recovery epochs and
+    /// revoke credentials. The caller must first fence the source externally.
+    pub fn activate_restored_cloud(
+        &mut self,
+        generation: u64,
+        backup_digest: &str,
+        binding: crate::CloudRestoreBinding<'_>,
+    ) -> Result<()> {
+        self.activate_restored_inner(generation, backup_digest, Some(binding))
+    }
+    fn activate_restored_inner(
+        &mut self,
+        generation: u64,
+        backup_digest: &str,
+        cloud: Option<crate::CloudRestoreBinding<'_>>,
+    ) -> Result<()> {
         crate::bytes::check_digest(backup_digest)?;
         let mut tx = self.client.transaction()?;
         tx.query_one("SELECT pg_advisory_xact_lock(715071909111)", &[])?;
@@ -283,10 +317,22 @@ impl Store {
             ));
         }
         integer(generation)?;
+        match (self.spec.deployment_mode, cloud) {
+            (alt_remote_protocol::DeploymentMode::Cloud, Some(binding)) => {
+                crate::cloud::restore_binding(&mut tx, &self.spec, generation, &binding)?;
+            }
+            (alt_remote_protocol::DeploymentMode::SelfHosted, None) => {}
+            _ => {
+                return Err(Error::Precondition(
+                    "recovery deployment authority mismatch",
+                ));
+            }
+        }
         // A snapshot's unfinished request may have committed on the lost
         // source AFTER this watermark. Retain its original observed state;
         // query() reports these old-epoch gaps as Unknown, never Expired.
         // Reservations and temporary pins belong to the fenced incarnation.
+        tx.batch_execute("DELETE FROM alt_device_authorizations; DELETE FROM alt_cloud_logins; DELETE FROM alt_cloud_reservations; UPDATE alt_cloud_ingress SET reserved_bytes=0; UPDATE alt_cloud_binding SET service=NULL;")?;
         tx.batch_execute("UPDATE alt_requests SET reserved_bytes=0; UPDATE alt_repositories SET reserved_bytes=0")?;
         tx.batch_execute("UPDATE alt_requests SET fence=fence+1,worker_lease_until=0; UPDATE alt_credentials SET revoked=true; UPDATE alt_web_accounts SET generation=generation+1; DELETE FROM alt_web_sessions; DELETE FROM alt_login_budgets; DELETE FROM alt_pins WHERE expires_at IS NOT NULL")?;
         tx.execute("UPDATE alt_repositories SET recovery_epoch=$1,revocation_generation=revocation_generation+1", &[&integer(generation)?])?;

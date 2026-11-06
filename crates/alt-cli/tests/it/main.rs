@@ -56,6 +56,7 @@ mod workspace;
 mod workspace_branch_guard;
 mod write_json;
 
+mod auth;
 mod cli_matrix;
 mod corpus_cli;
 mod corpus_history;

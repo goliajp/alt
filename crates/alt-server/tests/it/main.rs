@@ -75,3 +75,53 @@ fn root_pages_accept_only_one_canonical_cursor_and_supported_root_kind() {
         .is_none()
     );
 }
+
+#[test]
+fn cloud_configuration_requires_exact_explicit_audience_and_private_runtime_key() {
+    use alt_remote_protocol::DeploymentMode;
+    use golia_platform_contract::{Audience, Counter, Product};
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("example-config.json");
+    let mut config = alt_server::operator::Config::read(&path).unwrap();
+    config.instance.deployment_mode = DeploymentMode::Cloud;
+    assert!(config.validate().is_err());
+    config.browser = Some(alt_server::operator::BrowserConfig {
+        public_origin: "https://alt.example.test".into(),
+        assets_directory: std::path::PathBuf::from("/tmp/alt-test-assets"),
+        session_ttl_ms: 60_000,
+    });
+    let audience = Audience {
+        organization_id: "org".to_string().try_into().unwrap(),
+        workspace_id: config.instance.workspace_id.clone().try_into().unwrap(),
+        installation_id: config.instance.installation_id.clone().try_into().unwrap(),
+        generation: Counter(config.instance.runtime_generation),
+        product: Product::Alt,
+        origin: config
+            .browser
+            .as_ref()
+            .unwrap()
+            .public_origin
+            .clone()
+            .try_into()
+            .unwrap(),
+        control_origin: "https://cloud.example.test".to_string().try_into().unwrap(),
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let key = dir.path().join("runtime.key");
+    alt_server::operator::create_private(&key, "ab".repeat(32).as_bytes()).unwrap();
+    config.cloud = Some(alt_server::operator::CloudConfig {
+        provision_digest: None,
+        audience,
+        runtime_credential_file: key.clone(),
+    });
+    config.validate().unwrap();
+    assert!(config.cloud_runtime().unwrap().is_some());
+    config.instance.deployment_mode = DeploymentMode::SelfHosted;
+    assert!(config.validate().is_err());
+    config.instance.deployment_mode = DeploymentMode::Cloud;
+    config.cloud.as_mut().unwrap().audience.generation.0 += 1;
+    assert!(config.validate().is_err());
+    config.cloud.as_mut().unwrap().audience.generation.0 -= 1;
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(key, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(config.cloud_runtime().is_err());
+}

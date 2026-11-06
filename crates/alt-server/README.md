@@ -129,6 +129,52 @@ refresh the same review to query the persisted approval before acting again.
 Document addresses retain repository, revision and request identity; opening a
 shared link independently checks the receiving user's access.
 
+### Terminal login
+
+`alt auth login` works outside a repository. It prints a verification URL and a
+short terminal code; open the URL, sign in, compare the code and explicitly
+authorize the terminal. Cloud instances use their configured platform account;
+self-hosted instances use their local browser account. The approval grants the
+account's current authority, including instance administration if held, and never
+adds repository access. The credential expires within eight hours and no later
+than the approving browser session's expiry.
+
+```sh
+mkdir -m 700 "$HOME/.alt-credentials"
+alt auth login --server https://alt.example.org \
+  --credential-file "$HOME/.alt-credentials/example.json"
+alt auth status --credential-file "$HOME/.alt-credentials/example.json"
+export ALT_SERVER_CREDENTIAL="$HOME/.alt-credentials/example.json"
+```
+
+The destination must be new. Its parent directory must already exist; keep it
+private. The CLI saves owned mode-0600 files without printing their secrets and
+rejects symlink credential files. Native task remote commands consume
+`ALT_SERVER_CREDENTIAL`; do not also set `ALT_SERVER_TOKEN`. The operator's
+`--credential` option accepts this file after checking its origin, installation
+and receipt key. A browser password is never a substitute for this credential.
+
+If login stops or its outcome is unconfirmed, repeat the same command with
+`--resume`. The adjacent `.login` directory contains private recovery state;
+retain it until completion. `--no-wait` saves the request and returns the public
+URL/code immediately; `--resume` later finishes that same authorization. Device
+requests expire after five minutes. A credential already saved in the journal
+can still be finalized after its device request expires. An expired request with
+no saved credential requires checking Settings for an approval before starting
+another login at a new destination.
+
+Settings lists terminal credentials and supports explicit revocation. Browser
+sign-out leaves separately approved terminal credentials in place; account
+revocation and Cloud authority checks still apply. To revoke and remove the
+private local file, run:
+
+```sh
+alt auth logout --credential-file "$HOME/.alt-credentials/example.json"
+```
+
+If revocation is unconfirmed, the file is retained for a retry. Loopback HTTP is
+available only with explicit `--allow-loopback-http` and a literal loopback IP.
+
 ### Physical backup, upgrade and recovery
 
 `backup` creates a **disaster recovery backup**, including the receipt signing
@@ -234,3 +280,36 @@ isolated native PostgreSQL installation with
 `ALT_SERVER_TEST_POSTGRES_BIN=/absolute/path/to/bin`; the existing
 `scripts/with-test-postgres.sh` entrypoint then starts a private Unix-socket-only
 cluster and removes only that cluster afterward.
+
+Use [agent delegation](../../docs/task-remote.md#agent-credentials) for short,
+explicit repository capabilities. Native clients register and inspect them under
+`/v1/delegations`; browser Settings provides owner-only inspection and revocation.
+
+Cloud disaster recovery uses a versioned `RecoverySpec` issued by the regional
+control plane. It retains the organization, workspace, installation and public
+origins, and supplies a higher generation and fresh runtime/database credentials.
+The encrypted archive retains the receipt signing key and historical records.
+The regional executor must stop and fence the old incarnation before invoking:
+
+```sh
+alt-server cloud-restore --spec recovery.json --directory /private/new-instance \
+  --assets /opt/alt/workbench --input external-backup --identity backup.agekey \
+  --source-fenced
+```
+
+The spec fixes the authenticated backup digest, trusted receipt public key and
+maximum extracted size. Decryption keys stay with the operator. The target
+directory must already exist with mode 0700; its database comes from
+`ALT_SERVER_DATABASE` or the explicit `--database-environment` setting. This
+command uses the same archive verification and restoration as `restore` above.
+Cloud binding replacement, epoch advancement and credential revocation commit
+atomically. Fresh account and service authority must be obtained afterward.
+
+Repeating the same completed recovery verifies its persistent receipt and leaves
+later target writes intact. An incomplete target is preserved and refused;
+repetition does not overwrite it. A restored generation can only start through
+`cloud-initialize` when its frozen intent and completed recovery receipt match.
+The control plane's independent readiness challenge includes the backup digest,
+so merely starting an empty database cannot complete recovery. Regional fencing
+and readiness do not replace verification of the restored repository contents.
+

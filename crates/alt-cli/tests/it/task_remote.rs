@@ -166,6 +166,7 @@ impl Server {
             session_ttl_ms: 600_000,
         };
         let factory = StoreFactory {
+            cloud: None,
             database: config,
             bytes,
             instance: spec,

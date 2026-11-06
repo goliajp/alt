@@ -16,6 +16,7 @@ WORKDIR /build
 RUN apt-get update && apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu gcc-x86-64-linux-gnu libc6-dev-arm64-cross libc6-dev-amd64-cross && rm -rf /var/lib/apt/lists/*
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ ./crates/
+COPY vendor/ ./vendor/
 RUN --mount=type=cache,id=alt-server-registry,target=/usr/local/cargo/registry,sharing=locked --mount=type=cache,id=alt-server-target-${TARGETARCH},target=/build/target,sharing=locked test -n "$ALT_BUILD_ID" && case "$TARGETARCH" in amd64) target=x86_64-unknown-linux-gnu;; arm64) target=aarch64-unknown-linux-gnu;; *) exit 2;; esac && \
     rustup target add "$target" && \
     CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
@@ -38,6 +39,7 @@ COPY --from=build /out/age/age /out/age/age-keygen /usr/local/bin/
 COPY --from=web /build/workbench/dist /opt/alt/workbench
 COPY self-hosted/entrypoint.sh /usr/local/bin/alt-entrypoint
 COPY LICENSE-MIT LICENSE-APACHE /opt/alt/licenses/
+RUN mkdir -p /var/lib/alt-cloud && chown 9000:9000 /var/lib/alt-cloud && chmod 0700 /var/lib/alt-cloud
 ENV TMPDIR=/tmp HOME=/tmp
 USER 9000:9000
 WORKDIR /opt/alt

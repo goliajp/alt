@@ -1,6 +1,260 @@
 use super::*;
 use std::os::unix::fs::PermissionsExt;
 
+#[test]
+#[ignore = "requires isolated PostgreSQL, age and matching PostgreSQL tools; real Cloud backup and fresh runtime binding"]
+fn cloud_backup_restores_with_fresh_binding_and_rejects_old_credentials() {
+    use golia_platform_contract::{
+        AccountAuthorization, Audience, Capability, Counter, Lease, Product,
+    };
+    let source = OperatorDb::new();
+    let configure = |db: &OperatorDb, generation: u64, key: &str| {
+        let mut config = Config::read(&db.config).unwrap();
+        config.instance.deployment_mode = DeploymentMode::Cloud;
+        config.instance.runtime_generation = generation;
+        let audience = Audience {
+            organization_id: "organization".to_string().try_into().unwrap(),
+            workspace_id: config.instance.workspace_id.clone().try_into().unwrap(),
+            installation_id: config.instance.installation_id.clone().try_into().unwrap(),
+            product: Product::Alt,
+            generation: Counter(generation),
+            origin: "https://alt.example.test".to_string().try_into().unwrap(),
+            control_origin: "https://cloud.example.test".to_string().try_into().unwrap(),
+        };
+        let credential = db.root.path().join("runtime.key");
+        std::fs::write(&credential, key).unwrap();
+        std::fs::set_permissions(&credential, std::fs::Permissions::from_mode(0o600)).unwrap();
+        config.cloud = Some(alt_server::operator::CloudConfig {
+            audience,
+            runtime_credential_file: credential,
+            provision_digest: Some(
+                blake3::hash(format!("spec-{generation}").as_bytes())
+                    .to_hex()
+                    .to_string(),
+            ),
+        });
+        std::fs::write(&db.config, serde_json::to_vec(&config).unwrap()).unwrap();
+        config
+    };
+    let config = configure(&source, 1, &"ab".repeat(32));
+    source.ok(&[
+        "secret",
+        "receipt-key",
+        "--output",
+        &source.path("receipt.key"),
+    ]);
+    source.ok(&["initialize"]);
+    let mut store = Store::open(
+        Client::connect(&source.dsn, NoTls).unwrap(),
+        ByteStore::open(&config.bytes_directory).unwrap(),
+        config.instance.clone(),
+        config.signing_key().unwrap(),
+        limits(),
+    )
+    .unwrap();
+    let claims = AccountAuthorization {
+        lease: Lease {
+            version: 1,
+            audience: config.cloud.as_ref().unwrap().audience.clone(),
+            sequence: Counter(1),
+            revocation_generation: Counter(1),
+            issued_at_unix_ms: Counter(future() - 3_600_000),
+            expires_at_unix_ms: Counter(future() - 3_540_000),
+        },
+        account_id: "owner".to_string().try_into().unwrap(),
+        session_id: "session".to_string().try_into().unwrap(),
+        membership_id: "member".to_string().try_into().unwrap(),
+        display_name: "Owner".into(),
+        capabilities: vec![Capability::UseProduct, Capability::ManageInstance],
+    };
+    let token = alt_browser_auth::token();
+    store
+        .accept_cloud_login(&token, "sealed-grant", &claims, future(), true)
+        .unwrap();
+    assert!(store.authenticate(&token).is_ok());
+    let trust = source.ok(&["health"])["receipt_public_key"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let external = tempfile::tempdir().unwrap();
+    let (identity, recipient) = encryption_key(external.path());
+    let backup = external.path().join("cloud-backup");
+    let input = backup.to_str().unwrap();
+    source.ok(&["backup", "--recipient", &recipient, "--output", input]);
+    let target = OperatorDb::new();
+    let restored_config = configure(&target, 10, &"cd".repeat(32));
+    let result = target.ok(&[
+        "restore",
+        "--input",
+        input,
+        "--identity",
+        &identity,
+        "--trusted-receipt-key",
+        &trust,
+        "--maximum-bytes",
+        "100000000",
+        "--source-fenced",
+    ]);
+    assert_eq!(result["old_credentials_revoked"], true);
+    assert_eq!(target.ok(&["health"])["ready"], true);
+    let mut restored = Store::open(
+        Client::connect(&target.dsn, NoTls).unwrap(),
+        ByteStore::open(&restored_config.bytes_directory).unwrap(),
+        restored_config.instance.clone(),
+        restored_config.signing_key().unwrap(),
+        limits(),
+    )
+    .unwrap();
+    assert!(restored.authenticate(&token).is_err());
+    let runtime = restored_config.cloud_runtime().unwrap().unwrap();
+    runtime.check(&mut restored).unwrap();
+    assert!(
+        config
+            .cloud_runtime()
+            .unwrap()
+            .unwrap()
+            .check(&mut restored)
+            .is_err()
+    );
+    let mut fresh = claims;
+    fresh.lease.audience = restored_config.cloud.unwrap().audience;
+    let fresh_token = alt_browser_auth::token();
+    restored
+        .accept_cloud_login(&fresh_token, "fresh-envelope", &fresh, future(), true)
+        .unwrap();
+    assert!(restored.authenticate(&fresh_token).is_ok());
+    assert!(
+        store.authenticate(&token).is_ok(),
+        "isolated restore does not itself fence the source"
+    );
+    assert_eq!(source.ok(&["health"])["instance"]["runtime_generation"], 1);
+    // The executor-facing command reconciles a lost completion response without
+    // importing the archive again or overwriting a completed target.
+    use golia_platform_contract::lifecycle::{Images, ProvisionSpec, RecoveryBackup, RecoverySpec};
+    let verified = alt_server::operator::backup::verify(
+        &backup,
+        std::path::Path::new(&identity),
+        config.signing_key().unwrap().verifying_key().to_bytes(),
+        100_000_000,
+    )
+    .unwrap();
+    let source_spec = ProvisionSpec {
+        version: 1,
+        audience: config.cloud.as_ref().unwrap().audience.clone(),
+        region: "region".to_string().try_into().unwrap(),
+        images: Images {
+            application: format!("sha256:{}", "a".repeat(64)),
+            database: format!("sha256:{}", "b".repeat(64)),
+            edge: Some(format!("sha256:{}", "c".repeat(64))),
+        },
+        runtime_key: "ab".repeat(32).try_into().unwrap(),
+        data_key: "01".repeat(32).try_into().unwrap(),
+        database_password: "02".repeat(32).try_into().unwrap(),
+    };
+    let mut next_spec = source_spec.clone();
+    next_spec.audience.generation = Counter(20);
+    next_spec.runtime_key = "03".repeat(32).try_into().unwrap();
+    next_spec.data_key = "04".repeat(32).try_into().unwrap();
+    next_spec.database_password = "05".repeat(32).try_into().unwrap();
+    let recovery = RecoverySpec {
+        version: 1,
+        operation_id: "restore-operation".to_string().try_into().unwrap(),
+        source: source_spec,
+        target: next_spec.clone(),
+        backup: RecoveryBackup {
+            manifest_digest: verified.manifest_digest,
+            receipt_public_key: trust,
+            generation: Counter(1),
+            maximum_bytes: Counter(100_000_000),
+        },
+    };
+    let managed = OperatorDb::new();
+    let state = managed.root.path().join("state");
+    let assets = managed.root.path().join("assets");
+    std::fs::create_dir(&state).unwrap();
+    std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o700)).unwrap();
+    std::fs::create_dir(&assets).unwrap();
+    std::fs::write(
+        assets.join("index.html"),
+        "<!doctype html><title>Alt</title>",
+    )
+    .unwrap();
+    let spec_path = managed.root.path().join("recovery.json");
+    alt_server::operator::create_private(&spec_path, &serde_json::to_vec(&recovery).unwrap())
+        .unwrap();
+    let restore_args = [
+        "cloud-restore",
+        "--spec",
+        spec_path.to_str().unwrap(),
+        "--directory",
+        state.to_str().unwrap(),
+        "--assets",
+        assets.to_str().unwrap(),
+        "--database-environment",
+        "ALT_OPERATOR_DATABASE",
+        "--input",
+        input,
+        "--identity",
+        &identity,
+        "--source-fenced",
+    ];
+    for _ in 0..2 {
+        let outcome = managed.ok(&restore_args);
+        assert_eq!(outcome["instance"]["runtime_generation"], 20);
+        assert_eq!(outcome["manifest_digest"], recovery.backup.manifest_digest);
+    }
+    let mut db = Client::connect(&managed.dsn, NoTls).unwrap();
+    assert_eq!(
+        db.query_one(
+            "SELECT count(*) FROM alt_instance_audit WHERE action='instance.restore'",
+            &[]
+        )
+        .unwrap()
+        .get::<_, i64>(0),
+        1
+    );
+    let provision_path = state.join("provision.json");
+    let start_args = [
+        "cloud-initialize",
+        "--spec",
+        provision_path.to_str().unwrap(),
+        "--directory",
+        state.to_str().unwrap(),
+        "--assets",
+        assets.to_str().unwrap(),
+        "--database-environment",
+        "ALT_OPERATOR_DATABASE",
+    ];
+    managed.ok(&start_args);
+    let cfg = Config::read(&state.join("config.json")).unwrap();
+    let mut recovered = Store::open(
+        Client::connect(&managed.dsn, NoTls).unwrap(),
+        ByteStore::open(&cfg.bytes_directory).unwrap(),
+        cfg.instance.clone(),
+        cfg.signing_key().unwrap(),
+        limits(),
+    )
+    .unwrap();
+    let runtime = cfg.cloud_runtime().unwrap().unwrap();
+    let mut probe = golia_platform_contract::lifecycle::Probe {
+        version: 1,
+        audience: next_spec.audience.clone(),
+        spec_digest: next_spec.digest().unwrap(),
+        challenge: "f".repeat(64),
+        recovery_manifest_digest: Some(recovery.backup.manifest_digest.clone()),
+    };
+    runtime.readiness(&mut recovered, probe.clone()).unwrap();
+    probe.recovery_manifest_digest = Some("a".repeat(64));
+    assert!(runtime.readiness(&mut recovered, probe).is_err());
+    db.execute(
+        "DELETE FROM alt_instance_audit WHERE action='instance.restore'",
+        &[],
+    )
+    .unwrap();
+    assert!(!managed.run(&restore_args).status.success());
+    assert!(!managed.run(&start_args).status.success());
+}
+
 fn prepare(db: &OperatorDb) -> (Store, String, String) {
     let seed = db.path("receipt.key");
     let admin = db.path("admin.token");
@@ -257,7 +511,7 @@ fn migration_persists_next_config_and_reconciles_same_generation_after_lost_resp
     let (_store, _admin, _password) = prepare(&db);
     // Separate real-old-binary upgrade acceptance also runs before release.
     // This focused test freezes the historical schema-3 checksum/layout.
-    Client::connect(&db.dsn, NoTls).unwrap().batch_execute("DROP TABLE alt_browser_binding,alt_web_sessions,alt_web_accounts,alt_login_budgets,alt_instance_audit; DELETE FROM alt_schema WHERE version=4").unwrap();
+    Client::connect(&db.dsn, NoTls).unwrap().batch_execute("DROP TABLE alt_device_authorizations,alt_client_credentials,alt_cloud_logins,alt_delegations,alt_cloud_reservations,alt_cloud_ingress,alt_cloud_credentials,alt_cloud_accounts,alt_cloud_binding; DROP TABLE alt_browser_binding,alt_web_sessions,alt_web_accounts,alt_login_budgets,alt_instance_audit; DELETE FROM alt_schema WHERE version>=4").unwrap();
     assert!(!db.run(&["health"]).status.success());
     let next = db.path("next.json");
     let migrated = db.ok(&["migrate", "--from-schema", "3", "--output-config", &next]);
@@ -482,7 +736,10 @@ fn actual_previous_binary_upgrade_preserves_git_data_and_its_backup_restores_in_
         "100000000",
         "--source-fenced",
     ]);
-    assert_eq!(restored["catalog"]["schema"], 4);
+    assert_eq!(
+        restored["catalog"]["schema"],
+        alt_server_store::SCHEMA_VERSION
+    );
     assert_eq!(
         restored["catalog"]["repositories"][0]["refs"]["refs/heads/main"],
         oid

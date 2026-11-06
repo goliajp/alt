@@ -258,5 +258,7 @@ fn http_error_status_surfaces_typed_with_body() {
     }
 }
 
+#[path = "it/device.rs"]
+mod device;
 #[path = "it/native.rs"]
 mod native;

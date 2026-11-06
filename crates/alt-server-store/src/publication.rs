@@ -247,6 +247,7 @@ impl Store {
         let auth = authorize(&mut tx, &self.spec, credential, &current)?;
         check_key(&work.key, &current.scope, &auth.actor_id)?;
         let row = worker(&mut tx, work)?;
+        crate::requests::check_request_attribution(&row, &auth)?;
         let expiry = now(&mut tx)?
             .checked_add(lease_ms)
             .ok_or(Error::Limit("worker lease"))?
@@ -273,6 +274,7 @@ impl Store {
         let auth = authorize(&mut tx, &self.spec, credential, &current)?;
         check_key(&work.key, &current.scope, &auth.actor_id)?;
         let row = worker(&mut tx, work)?;
+        crate::requests::check_request_attribution(&row, &auth)?;
         let state = RequestState::Rejected {
             digest: row.get("digest"),
             failure: alt_remote_protocol::Failure {
@@ -328,6 +330,7 @@ impl Store {
         let auth = authorize(&mut tx, &self.spec, credential, &current)?;
         check_key(&work.key, &current.scope, &auth.actor_id)?;
         let row = worker(&mut tx, work)?;
+        crate::requests::check_request_attribution(&row, &auth)?;
         for root in work.roots()? {
             graph.node(root)?;
         }
@@ -374,6 +377,7 @@ impl Store {
         check_key(&work.key, &current.scope, &auth.actor_id)?;
         let row = request_row(&mut tx, &work.key)?
             .ok_or(Error::Precondition("request not registered"))?;
+        crate::requests::check_request_attribution(&row, &auth)?;
         if row.get::<_, String>("state") == "committed" {
             let state: RequestState = serde_json::from_value(row.get("result"))?;
             if let RequestState::Committed { receipt } = state {
@@ -490,6 +494,10 @@ impl Store {
             &result,
             unsigned(row.get("reserved_bytes"))?,
         )?;
+        // SQL work and lock waits can outlive a lease checked on entry.
+        crate::store::credential_row(&mut tx, &self.spec, credential)?;
+        crate::tasks::recheck_current_authority(&mut tx, &self.spec, work, tasks, &current)?;
+        crate::cloud_quota::check_publication(&mut tx, &self.spec)?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)?;
         Ok(receipt)
     }
@@ -533,6 +541,7 @@ pub(crate) fn finish(
     reservation: u64,
 ) -> Result<()> {
     let repository = &key.scope.repository_instance_id;
+    crate::cloud_quota::release(tx, key)?;
     tx.execute("UPDATE alt_requests SET state=$5,result=$6,reserved_bytes=0,worker_lease_until=0 WHERE repository=$1 AND epoch=$2 AND actor_id=$3 AND request_id=$4",&[repository,&integer(key.scope.recovery_epoch)?,&key.actor_id,&key.request_id,&state,&serde_json::to_value(result)?])?;
     tx.execute(
         "UPDATE alt_repositories SET reserved_bytes=reserved_bytes-$2 WHERE id=$1",

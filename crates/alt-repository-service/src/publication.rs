@@ -16,50 +16,7 @@ pub struct Authorization {
     pub grants: Vec<Grant>,
     pub publish_records: bool,
 }
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Grant {
-    pub refs: RefSelector,
-    pub create: bool,
-    pub update: bool,
-    pub delete: bool,
-    pub force: bool,
-    /// None means all paths; Some(empty) grants no changed paths. Paths are
-    /// raw Git bytes, matched at component boundaries, never lossy UTF-8.
-    pub paths: Option<Vec<Vec<u8>>>,
-}
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub enum RefSelector {
-    Exact(String),
-    /// Must end in '/', e.g. refs/heads/. Never a free-form glob.
-    Namespace(String),
-}
-impl RefSelector {
-    pub fn validate(&self) -> Result<()> {
-        match self {
-            Self::Exact(value) => alt_remote_protocol::validate_ref_name(value)?,
-            Self::Namespace(value) => {
-                if value == "refs/" {
-                    return Ok(());
-                }
-                let prefix = value
-                    .strip_suffix('/')
-                    .ok_or(Error::Forbidden("invalid ref namespace policy"))?;
-                alt_remote_protocol::validate_ref_name(prefix)?;
-            }
-        }
-        Ok(())
-    }
-    fn matches(&self, name: &str) -> bool {
-        match self {
-            Self::Exact(value) => value == name,
-            Self::Namespace(value) => {
-                value.starts_with("refs/") && value.ends_with('/') && name.starts_with(value)
-            }
-        }
-    }
-}
+pub use alt_remote_protocol::authorization::{Grant, RefSelector};
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RefPolicy {
@@ -68,29 +25,10 @@ pub struct RefPolicy {
     pub allow_delete: bool,
     pub require_review: bool,
 }
-impl Grant {
-    pub fn validate(&self) -> Result<()> {
-        self.refs.validate()?;
-        if let Some(paths) = &self.paths
-            && paths.iter().any(|p| !valid_path_prefix(p))
-        {
-            return Err(Error::Forbidden("invalid path grant"));
-        }
-        Ok(())
-    }
-}
 impl RefPolicy {
     pub fn validate(&self) -> Result<()> {
-        self.refs.validate()
+        Ok(self.refs.validate()?)
     }
-}
-fn valid_path_prefix(prefix: &[u8]) -> bool {
-    !prefix.is_empty()
-        && prefix.len() <= 4096
-        && !prefix.contains(&0)
-        && !prefix
-            .split(|b| *b == b'/')
-            .any(|p| p.is_empty() || p == b"." || p == b"..")
 }
 
 /// Read under the repository's transaction lock. Review approvals are populated

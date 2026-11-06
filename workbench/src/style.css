@@ -3,3 +3,7 @@
 @media(max-width:720px){.global-bar{flex-wrap:wrap}.global-bar .mode{display:none}.document{padding:16px 12px}.record-fields>div{grid-template-columns:1fr;gap:2px}.resource-row{flex-wrap:wrap;gap:8px}.resource-row strong{min-width:60%}.resource-row time{display:none}.global-bar>.button:last-child{margin-left:auto}.global-bar .preferences{order:2}.source,.patch{padding:8px}.document-heading{align-items:flex-start}.global-bar .button{min-height:32px}}
 
 .command-anchor{margin-left:auto}html[data-theme="dark"] .brand img,html[data-theme="dark"] .login img{content:url("/mark-white.svg")}
+
+.device-code{font-family:var(--font-code);font-size:28px;letter-spacing:.12em;overflow-wrap:anywhere}.device-origin{overflow-wrap:anywhere}
+
+.agent-credential{border:1px solid var(--ui-line);padding:1rem;border-radius:.5rem;overflow-wrap:anywhere}.agent-credential h3{margin-top:0}.agent-credential ul{padding-inline-start:1.25rem}

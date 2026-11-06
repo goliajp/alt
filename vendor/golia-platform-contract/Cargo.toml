@@ -1,0 +1,17 @@
+[package]
+name = "golia-platform-contract"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "MIT OR Apache-2.0"
+description = "Versioned GOLIA account and product installation authorization contract"
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+url = "2"
+sha2 = "0.10"
+base64 = "0.22"
+[[test]]
+name = "it"
+path = "tests/it/main.rs"

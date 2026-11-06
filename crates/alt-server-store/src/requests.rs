@@ -97,8 +97,14 @@ impl Store {
             expires_at_unix_ms: expires,
         };
         tx.execute("INSERT INTO alt_requests(repository,epoch,actor_id,request_id,digest,publication,manifest,state,result,expires_at,reserved_bytes) VALUES($1,$2,$3,$4,$5,$6,$7,'receiving',$8,$9,$10)",&[repository,&integer(publication.key.scope.recovery_epoch)?,&publication.key.actor_id,&publication.key.request_id,&digest,&serde_json::to_value(publication)?,&serde_json::to_value(manifest)?,&serde_json::to_value(&state)?,&integer(expires)?,&integer(reservation)?])?;
-        for digest in contents.keys() {
+        let mut ingress_reservation = 0u64;
+        for (digest, bytes) in &contents {
             let published = tx.query_opt("SELECT 1 FROM alt_pins p JOIN alt_blobs b ON b.repository=p.repository AND b.blake3=p.blake3 WHERE p.repository=$1 AND p.blake3=$2 AND p.expires_at IS NULL AND b.state='stored' LIMIT 1", &[repository, digest])?.is_some();
+            if !published && manifest.entries.iter().any(|entry| &entry.blake3 == digest) {
+                ingress_reservation = ingress_reservation
+                    .checked_add(*bytes)
+                    .ok_or(Error::Limit("Cloud ingress reservation"))?;
+            }
             tx.execute("INSERT INTO alt_request_content(repository,epoch,actor_id,request_id,blake3,verified) VALUES($1,$2,$3,$4,$5,$6)", &[repository,&integer(publication.key.scope.recovery_epoch)?,&publication.key.actor_id,&publication.key.request_id,digest,&published])?;
             pin(
                 &mut tx,
@@ -108,6 +114,7 @@ impl Store {
                 Some(expires),
             )?;
         }
+        crate::cloud_quota::reserve(&mut tx, &self.spec, &publication.key, ingress_reservation)?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)?;
         Ok(state)
     }
@@ -126,7 +133,11 @@ impl Store {
         }
         // Old epochs may return retained facts. Absence is meaningful only in
         // the current epoch; never turn a restored snapshot's gap into replay.
-        let result = match request_row(&mut tx, key)? {
+        let row = request_row(&mut tx, key)?;
+        if let Some(row) = &row {
+            check_request_attribution(row, &auth)?;
+        }
+        let result = match row {
             Some(row)
                 if key.scope.recovery_epoch != current.scope.recovery_epoch
                     && matches!(
@@ -271,6 +282,15 @@ impl Store {
                 )?;
             }
         }
+        let verified: bool = tx.query_opt("SELECT verified FROM alt_request_content WHERE repository=$1 AND epoch=$2 AND actor_id=$3 AND request_id=$4 AND blake3=$5", &[repository,&integer(key.scope.recovery_epoch)?,&key.actor_id,&key.request_id,&entry.blake3])?.ok_or(Error::Precondition("request content selection missing"))?.get(0);
+        if !verified
+            && manifest
+                .entries
+                .iter()
+                .any(|item| item.blake3 == entry.blake3)
+        {
+            crate::cloud_quota::accept(&mut tx, &self.spec, key, entry.bytes)?;
+        }
         if tx.execute("UPDATE alt_request_content SET verified=true WHERE repository=$1 AND epoch=$2 AND actor_id=$3 AND request_id=$4 AND blake3=$5", &[repository,&integer(key.scope.recovery_epoch)?,&key.actor_id,&key.request_id,&entry.blake3])? != 1 {
             return Err(Error::Precondition("request content selection missing"));
         }
@@ -329,4 +349,19 @@ fn git_kind(kind: ContentKind) -> Result<&'static str> {
         ContentKind::Tag => Ok("tag"),
         _ => Err(Error::Integrity("non-Git content kind")),
     }
+}
+
+/// An agent cannot inspect or mutate another session's private request merely
+/// because both are attributed to the same human owner.
+pub(crate) fn check_request_attribution(
+    row: &postgres::Row,
+    auth: &alt_repository_service::Authorization,
+) -> Result<()> {
+    if auth.attribution.kind == alt_remote_protocol::ActorKind::Agent {
+        let publication: Publication = serde_json::from_value(row.get("publication"))?;
+        if publication.attribution != auth.attribution {
+            return Err(Error::Unauthorized);
+        }
+    }
+    Ok(())
 }

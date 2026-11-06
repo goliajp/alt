@@ -9,6 +9,9 @@ import { closeDocuments, documentKey, documentFromHash, documentHash, moveDocume
 import { messages, type Locale, type Text } from './i18n';
 import { errorText, Failure, Loading, useResource } from './resource';
 import { DocumentView } from './views';
+import { CloudProducts } from './products';
+import { DeviceAuthorization } from './device';
+import { captureDeviceEntry } from './device-location';
 
 function savedPreference<T extends string>(key: string, choices: readonly T[], fallback: T): T {
   try { const value = localStorage.getItem(key); return choices.includes(value as T) ? value as T : fallback; } catch { return fallback; }
@@ -44,6 +47,8 @@ function Login({ t, done }: { t: Text; done: (session: Session) => void }) {
   </form></main>;
 }
 export function App() {
+  const [device,setDevice]=useState(captureDeviceEntry);
+  useEffect(()=>{const change=()=>setDevice(captureDeviceEntry());window.addEventListener('hashchange',change);return()=>window.removeEventListener('hashchange',change);},[]);
   const [locale, setLocale] = useState<Locale>(() => savedPreference('alt.locale', ['en', 'zh', 'ja'], 'en'));
   const [theme, setTheme] = useState(() => savedPreference('alt.theme', ['light', 'dark'], 'light'));
   const [session, setSession] = useState<Session | null | undefined>();
@@ -70,7 +75,7 @@ export function App() {
   </NativeSelect><NativeSelect aria-label={t.theme} value={theme} onChange={event => setTheme(event.target.value as 'light' | 'dark')}>
     <option value="light">{t.light}</option><option value="dark">{t.dark}</option>
   </NativeSelect></div>;
-  return <>{session ? <Workbench key={`${session.installation_id}:${session.user.actor_id}`} session={session} t={t} locale={locale} preferences={preferences} notification={error}
+  return <>{session && device ? <><div className="login-preferences">{preferences}</div><DeviceAuthorization code={device.code} session={session} t={t} close={()=>{history.replaceState(null,'',location.pathname+location.search);setDevice(null);}}/></>:session ? <Workbench key={`${session.installation_id}:${session.user.actor_id}`} session={session} t={t} locale={locale} preferences={preferences} notification={error}
     signOut={async () => {
       try { await api.request('/web/logout', {}); api.setSession(null); setSession(null); }
       catch (error) { setError(error); refresh(value => value + 1); }
@@ -123,11 +128,8 @@ function Workbench({ session, t, locale, preferences, signOut, notification }: {
     ...(repositories.value?.items ?? []).map(item => ({title:item.scope.repository_instance_id,run:()=>open({kind:'repository',repository:item.scope.repository_instance_id})})),
   ].filter(item=>item.title.toLocaleLowerCase().includes(search.toLocaleLowerCase())).slice(0,50);
   return <div className="app-shell"><header className="global-bar"><a href="/" className="brand" aria-label="alt"><img src="/mark-ink.svg" alt=""/>alt</a>
-    <NativeSelect aria-label={t.product} value="alt" onChange={event => {
-      const product = session.products.find(item => item.product === event.target.value);
-      if (product && new URL(product.url).protocol === 'https:') window.location.assign(product.url);
-    }}><option value="alt">alt</option>{session.products.filter(item=>item.product !== 'alt').map(item=><option key={item.product} value={item.product}>{item.title}</option>)}</NativeSelect>
-    <span className="workspace" title={t.workspace}>{session.workspace_id}</span><span className="mode">{session.deployment_mode==='cloud'?t.cloud:t.selfHosted}</span>
+    {session.deployment_mode==='cloud'?<CloudProducts t={t} workspace={session.workspace_id}/>:<><NativeSelect aria-label={t.product} value="alt"><option value="alt">alt</option></NativeSelect><span className="workspace" title={t.workspace}>{session.workspace_id}</span></>}
+    <span className="mode">{session.deployment_mode==='cloud'?t.cloud:t.selfHosted}</span>
     <span ref={commandTrigger} className="command-anchor"><Button variant="ghost" className="command-trigger" onClick={()=>showPalette(true)} aria-label={t.commands}><Search size={16}/><span className="command-label">{t.search}</span><kbd>⌘ K</kbd></Button></span>
     {preferences}<Button variant="ghost" onClick={()=>open({kind:'settings'})}>{session.user.display_name}</Button><Button variant="ghost" busy={signingOut} onClick={async()=>{setSigningOut(true);try{await signOut();}finally{setSigningOut(false);}}}>{t.signOut}</Button>
   </header>{notification !== undefined && <p className="session-notice failure" role="alert">{errorText(notification,t)}</p>}<WorkbenchLayout labels={labels} storageKey={`alt.layout:${session.installation_id}:${session.user.actor_id}`} routeKey={active}

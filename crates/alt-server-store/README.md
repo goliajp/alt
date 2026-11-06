@@ -74,3 +74,22 @@ Connections are supplied by the application. The test wrapper uses loopback
 `NoTls`; production connection/TLS and role configuration belong to the operator
 adapter. Request/graph/resource bounds are advertised protocol limits, not
 performance guarantees.
+
+Cloud initialization requires the exact organization/workspace/product/instance,
+generation and origins plus the runtime credential digest. Account leases and
+paid-service leases use the versioned `golia-platform-contract`; the database
+checks their audience, sequence, authority revision and clock at use, including
+immediately before publication commit. HTTP refresh happens outside transactions.
+A controller outage does not extend a lease. Removing and rejoining membership
+revokes the former credentials and clears both content and review ACLs.
+
+Cloud storage quotas aggregate catalogued bytes and reservations across every
+repository in the instance, including resumable chunks. Monthly ingress here
+means newly accepted root content bytes in a UTC calendar month: chunks do not
+charge again for their root, and repeated verification of the same request does
+not charge twice. This is a logical admission metric; HTTP/TLS wire traffic is a
+separate operational measurement, not this allowance. Requests reserve before
+upload; verified content settles usage, and finalization or expiry releases the
+unused reservation. Work crossing a month boundary must acquire the current
+month's remaining allowance. Service expiry or quota exhaustion never grants
+access, but an independently valid member can still read/export authorized data.

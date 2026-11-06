@@ -45,7 +45,7 @@ class GateTests(unittest.TestCase):
             "Path('package-called').write_text('yes')\n"
             "sys.exit(int(os.environ.get('GATE_PACKAGE_EXIT', '0')))\n"
         )
-        for name in ("crates", "fuzz", ".dev/corpus", "bin"):
+        for name in ("crates", "vendor", "fuzz", ".dev/corpus", "bin"):
             (self.root / name).mkdir(parents=True)
         cargo = self.root / "bin/cargo"
         cargo.write_text(FAKE_CARGO)
@@ -120,6 +120,13 @@ class GateTests(unittest.TestCase):
         self.env["GATE_HTTP_OWNER"] = "alt-server"
         result, _ = self.run_gate("lint", "-p", "alt-server")
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.env["GATE_HTTP_OWNER"] = "alt-cloud-client"
+        result, _ = self.run_gate("lint", "-p", "alt-cloud-client")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.env["GATE_HTTP_OWNER"] = "golia-platform-contract"
+        result, _ = self.run_gate("lint", "-p", "alt-cloud-client")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("golia-platform-contract depends on HTTP", result.stderr)
         self.env["GATE_HTTP_OWNER"] = "alt-server-store"
         result, _ = self.run_gate("lint", "-p", "alt-server")
         self.assertNotEqual(result.returncode, 0)

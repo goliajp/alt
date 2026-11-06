@@ -152,6 +152,9 @@ pub(crate) fn reviewer(
     credential: &Credential,
     current: &RepositorySnapshot,
 ) -> Result<String> {
+    if crate::delegation::parent(tx, &credential.digest)?.is_some() {
+        return Err(Error::Unauthorized);
+    }
     let auth = authorize(tx, spec, credential, current)?;
     if tx
         .query_opt(
@@ -500,4 +503,35 @@ impl Store {
             reason,
         })
     }
+}
+
+/// The selected approval was already validated before ref changes. Recheck its
+/// time-sensitive authority at the end of the same transaction, after potentially
+/// expensive pin/record writes. The original snapshot remains the review target.
+pub(crate) fn recheck_current_authority(
+    tx: &mut Transaction<'_>,
+    spec: &InstanceSpec,
+    work: &PublicationWork,
+    tasks: Option<&VerifiedTaskGraph>,
+    current: &RepositorySnapshot,
+) -> Result<()> {
+    let Some(tasks) = tasks else {
+        return Ok(());
+    };
+    if work.publication.refs.is_empty() {
+        return Ok(());
+    }
+    let row = tx.query_one("SELECT reviewer_credential,expires_at,integration_id FROM alt_current_approvals WHERE repository=$1 AND epoch=$2 AND actor_id=$3 AND request_id=$4", &[&work.key.scope.repository_instance_id,&integer(work.key.scope.recovery_epoch)?,&work.key.actor_id,&work.key.request_id])?;
+    let time = now(tx)?;
+    if unsigned(row.get(1))? <= time {
+        return Err(Error::Precondition(
+            "integration approval expired during publication",
+        ));
+    }
+    reviewer(tx, spec, &Credential { digest: row.get(0) }, current)?;
+    let integration: String = row.get(2);
+    let review = integration_review(work, tasks, &integration)?;
+    let (_, policy) = collector_policy(tx, &current.scope.repository_instance_id)?;
+    assessment(tasks, review, current, &policy, time)?;
+    Ok(())
 }

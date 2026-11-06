@@ -13,3 +13,6 @@ workbench/*.tsbuildinfo
 !self-hosted/
 !self-hosted/Dockerfile
 !self-hosted/entrypoint.sh
+
+!vendor/
+!vendor/**

@@ -507,6 +507,7 @@ pub fn restore(
         ));
     }
     target.validate()?;
+    let cloud = target.cloud_runtime()?;
     let original = &backup.manifest.catalog;
     if target.instance.installation_id != original.instance.installation_id
         || target.instance.workspace_id != original.instance.workspace_id
@@ -640,6 +641,13 @@ pub fn restore(
                 key,
                 target.limits,
             )?,
+            4 => alt_server_store::Store::migrate_v4(
+                client,
+                bytes,
+                original.instance.clone(),
+                key,
+                target.limits,
+            )?,
             _ => alt_server_store::Store::open(
                 client,
                 bytes,
@@ -649,7 +657,19 @@ pub fn restore(
             )?,
         };
         stage = "recovery activation";
-        store.activate_restored(target.instance.runtime_generation, &backup.manifest_digest)?;
+        if let Some(cloud) = &cloud {
+            store.activate_restored_cloud(
+                target.instance.runtime_generation,
+                &backup.manifest_digest,
+                alt_server_store::CloudRestoreBinding {
+                    audience: cloud.audience(),
+                    runtime_key_digest: cloud.key_digest(),
+                    provision_digest: cloud.provision_digest(),
+                },
+            )?;
+        } else {
+            store.activate_restored(target.instance.runtime_generation, &backup.manifest_digest)?;
+        }
         drop(store);
         stage = "final health verification";
         target.open()?;

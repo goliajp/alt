@@ -41,6 +41,42 @@ impl ByteStore {
             root: root.to_path_buf(),
         })
     }
+    /// Probe only service-owned temporary data, after checking the mounted
+    /// volume marker. Missing or replaced volumes never become ready.
+    pub(crate) fn readiness(&self, spec: &crate::InstanceSpec, key_id: &str) -> Result<()> {
+        let mut marker = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(self.root.join("instance.json"))?;
+        let meta = marker.metadata()?;
+        if !meta.is_file() || meta.len() > 4096 || meta.permissions().mode() & 0o077 != 0 {
+            return Err(Error::Integrity("volume identity file"));
+        }
+        let mut bytes = Vec::new();
+        Read::by_ref(&mut marker)
+            .take(4097)
+            .read_to_end(&mut bytes)?;
+        let identity: serde_json::Value = serde_json::from_slice(&bytes)?;
+        if identity
+            != serde_json::json!({"version":1,"installation_id":spec.installation_id,
+            "workspace_id":spec.workspace_id,"deployment_mode":spec.deployment_mode,"receipt_key_id":key_id})
+        {
+            return Err(Error::Integrity("volume identity"));
+        }
+        let mut probe = tempfile::NamedTempFile::new_in(&self.root)?;
+        let mut random = [0u8; 32];
+        rand_core::RngCore::fill_bytes(&mut rand_core::OsRng, &mut random);
+        probe.write_all(&random)?;
+        probe.as_file().sync_all()?;
+        File::open(&self.root)?.sync_all()?;
+        let actual = fs::read(probe.path())?;
+        if actual != random {
+            return Err(Error::Integrity("storage readiness"));
+        }
+        probe.close()?;
+        File::open(&self.root)?.sync_all()?;
+        Ok(())
+    }
     fn repository(&self, scope: &Scope) -> Result<PathBuf> {
         scope.validate()?;
         let installation = self.root.join(&scope.installation_id);

@@ -1,3 +1,5 @@
+mod device;
+mod provision;
 mod web;
 use crate::{NativeOptions, Output, RequestAction, Route, execute_native, parse_route};
 use alt_remote_protocol::{ErrorCode, Failure, Limits, RequestKey, Retry};
@@ -30,6 +32,7 @@ type ResponseBody = UnsyncBoxBody<Bytes, BoxError>;
 /// initialization or local bootstrap when configuration/authorization is absent.
 #[derive(Clone)]
 pub struct StoreFactory {
+    pub cloud: Option<Arc<crate::cloud::Runtime>>,
     pub database: postgres::Config,
     pub bytes: ByteStore,
     pub instance: InstanceSpec,
@@ -50,13 +53,29 @@ impl StoreFactory {
         client.batch_execute(&format!(
             "SET statement_timeout = {timeout}; SET lock_timeout = {timeout}"
         ))?;
-        Store::open(
+        let mut store = Store::open(
             client,
             self.bytes.clone(),
             self.instance.clone(),
             self.signing_key.clone(),
             self.limits,
-        )
+        )?;
+        match (&self.cloud, self.instance.deployment_mode) {
+            (Some(cloud), alt_remote_protocol::DeploymentMode::Cloud) => cloud.check(&mut store)?,
+            (None, alt_remote_protocol::DeploymentMode::SelfHosted) => (),
+            _ => return Err(Error::Unauthorized),
+        }
+        Ok(store)
+    }
+    pub fn authenticate(
+        &self,
+        store: &mut Store,
+        token: &str,
+    ) -> alt_server_store::Result<alt_server_store::Credential> {
+        if let Some(cloud) = &self.cloud {
+            cloud.refresh(store, token)?;
+        }
+        store.authenticate(token)
     }
 }
 #[derive(Clone)]
@@ -119,6 +138,13 @@ fn store_failure(error: Error, key: Option<RequestKey>) -> Response<ResponseBody
     // PostgreSQL/I/O details may contain internal paths, SQL, connection
     // settings or credentials. Client messages are stable and redacted.
     match error {
+        Error::AuthorityUnavailable => failure(
+            503,
+            ErrorCode::TemporarilyUnavailable,
+            "Current account authority could not be verified; retry when the platform is available",
+            key,
+            Retry::SameRequest,
+        ),
         Error::Unauthorized => failure(
             403,
             ErrorCode::Forbidden,
@@ -221,6 +247,15 @@ async fn handle(
     state: Arc<State>,
     peer: std::net::IpAddr,
 ) -> Response<ResponseBody> {
+    if request.uri().path() == "/cloud/runtime/v1/health" {
+        return provision::handle(request, state).await;
+    }
+    if matches!(
+        request.uri().path(),
+        "/oauth/device/code" | "/oauth/token" | "/oauth/revoke"
+    ) {
+        return device::handle(request, state, peer).await;
+    }
     if request.method() == hyper::Method::GET
         && request.uri().path() == "/livez"
         && request.uri().query().is_none()
@@ -248,6 +283,20 @@ async fn handle(
         );
     };
     let request_key = key(&route);
+    if matches!(
+        route,
+        Route::IssueAgent | Route::Delegations(_) | Route::Delegation(_) | Route::RevokeAgent(_)
+    ) && (request.headers().contains_key(header::COOKIE)
+        || request.headers().contains_key(header::ORIGIN))
+    {
+        return failure(
+            403,
+            ErrorCode::Forbidden,
+            "Use a terminal credential for native delegation requests",
+            None,
+            Retry::Never,
+        );
+    }
     let protocol_v2 = request.headers().get_all("Git-Protocol").iter().count() == 1
         && request
             .headers()
@@ -307,7 +356,7 @@ async fn handle(
     }
     if matches!(
         route,
-        Route::Begin(_) | Route::Request(_, RequestAction::Approve)
+        Route::Begin(_) | Route::IssueAgent | Route::Request(_, RequestAction::Approve)
     ) && (request
         .headers()
         .get_all(header::CONTENT_TYPE)
@@ -335,8 +384,9 @@ async fn handle(
         state.options.work_timeout,
         tokio::task::spawn_blocking(move || {
             let mut store = factory.open()?;
-            let credential = store.authenticate(&token)?;
+            let credential = factory.authenticate(&mut store, &token)?;
             let size = match &selected_route {
+                Route::IssueAgent => 16_384,
                 Route::GitReceive(repository) => {
                     store.check_git_receive_access(&credential, repository)?;
                     store

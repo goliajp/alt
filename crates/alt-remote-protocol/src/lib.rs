@@ -4,6 +4,9 @@
 //! no authority: services must bind the actor to authentication, check every
 //! object and task dependency, and publish through one durable transaction.
 
+pub mod authorization;
+pub mod delegation;
+pub mod login;
 mod publication;
 mod receipt;
 

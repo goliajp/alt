@@ -1,0 +1,20 @@
+[package]
+name = "alt-cloud-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+[dependencies]
+golia-platform-contract.workspace = true
+ureq.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+blake3.workspace = true
+rand_core.workspace = true
+base64 = "0.22"
+chacha20poly1305 = "0.10"
+[dev-dependencies]
+tiny_http.workspace = true
+[[test]]
+name = "it"
+path = "tests/it/main.rs"

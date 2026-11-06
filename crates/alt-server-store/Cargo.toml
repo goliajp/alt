@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+golia-platform-contract.workspace = true
 alt-browser-auth.workspace = true
 alt-task.workspace = true
 alt-task-service.workspace = true

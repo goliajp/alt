@@ -1,3 +1,4 @@
+mod cloud_login;
 use super::*;
 use crate::web_route::{self, WebRoute};
 use alt_browser_auth::PublicOrigin;
@@ -95,6 +96,12 @@ async fn handle_inner(
             asset.content_type,
             full(Bytes::copy_from_slice(&asset.bytes)),
         );
+    }
+    if matches!(
+        request.uri().path(),
+        "/web/login/start" | "/web/login/callback"
+    ) {
+        return cloud_login::handle(request, state, peer).await;
     }
     let route = match web_route::parse(
         request.method().as_str(),
@@ -263,13 +270,46 @@ async fn handle_inner(
             return Ok((Output::Json(session), Some(cookie)));
         }
         let token = token.ok_or(Error::Unauthorized)?;
-        let credential = store.authenticate(&token)?;
+        let credential = factory.authenticate(&mut store, &token)?;
         // Repeat membership/account checks for every browser operation. Business
         // methods additionally recheck the credential inside their transaction.
         store.browser_session(&credential, &browser.origin)?;
         match route {
             WebRoute::Session => Ok((Output::Json(session(&mut store, &credential, &browser.origin, &token, &factory.signing_key)?), None)),
+            WebRoute::Navigation => {
+                let cloud=factory.cloud.as_ref().ok_or(Error::Unauthorized)?;
+                Ok((output(cloud.navigation(&mut store,&token)?)?,None))
+            }
             WebRoute::Sessions => Ok((output(store.browser_sessions(&credential, &browser.origin)?)?, None)),
+            WebRoute::DeviceConsent(code) => Ok((output(store.device_consent(&credential,&browser.origin,&code,peer)?)?,None)),
+            WebRoute::DeviceDecision => {
+                #[derive(Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct Decision { user_code:String, allow:bool }
+                let input:Decision=serde_json::from_slice(&raw)?;
+                let consent=store.device_consent(&credential,&browser.origin,&input.user_code,peer)?;
+                let local=super::device::credential(&factory.signing_key,&consent.id);
+                let sealed=if input.allow {
+                    if let Some(cloud)=&factory.cloud {
+                        let descriptor=store.cloud_refresh(&token)?;
+                        let grant=cloud.sealer.open(&descriptor.sealed_grant,&descriptor.credential_digest).map_err(|_|Error::Unauthorized)?;
+                        Some(cloud.sealer.seal(&grant,&alt_server_store::cloud_credential_digest(&local)?).map_err(|_|Error::Integrity("Cloud grant encryption"))?)
+                    } else {None}
+                } else {None};
+                Ok((output(store.decide_device_authorization(&credential,&browser.origin,&input.user_code,input.allow,&local,sealed.as_deref())?)?,None))
+            },
+            WebRoute::AgentDelegations(after) => Ok((output(store.agent_delegations(&credential,&after)?)?,None)),
+            WebRoute::RevokeAgent(id) => {
+                let _:Empty=serde_json::from_slice(&raw)?;
+                store.revoke_agent(&credential,&id)?;
+                Ok((Output::Json(json!({"revoked":true})),None))
+            },
+            WebRoute::ClientCredentials => Ok((output(store.client_credentials(&credential)?)?,None)),
+            WebRoute::RevokeClientCredential(id) => {
+                let _:Empty=serde_json::from_slice(&raw)?;
+                store.revoke_client_credential(&credential,&id)?;
+                Ok((Output::Json(json!({"revoked":true})),None))
+            },
             WebRoute::RevokeSession(id) => {
                 let _: Empty = serde_json::from_slice(&raw)?;
                 store.revoke_browser_session(&credential, &browser.origin, &id)?;

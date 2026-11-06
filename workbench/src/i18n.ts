@@ -1,5 +1,10 @@
 export type Locale = 'en' | 'zh' | 'ja';
 const en = {
+  productsUnavailable:"Product navigation is unavailable. Your current document remains open.",switchProduct:"Switch product",continueProduct:"Continue",switchProductHint:"Save any unsubmitted changes before leaving this workbench. The destination checks your access again.",cloudAccount:"GOLIA Cloud",retryProducts:"Retry products",
+  agentCredentials:'Agent credentials',agentScopeNote:'Each agent is limited to one repository and at most one hour. Access also requires its human parent credential and current repository permissions.',recoveryEpoch:'Recovery epoch',revoked:'Revoked',agentRecorded:'Issued · current access is checked on each request',agentRecords:'May publish task records',agentNoRecords:'Cannot publish task records',agentCreate:'Create',agentUpdate:'Update',agentDelete:'Delete',agentForce:'Force update',agentAllPaths:'All paths',agentNoPaths:'No changed paths',
+
+  deviceTitle:'Authorize terminal access',deviceEnter:'Enter the code shown in your terminal.',deviceCode:'Terminal code',deviceMatch:'Check that this code matches your terminal. Continue only if you started this request.',deviceScope:'Allow alt CLI to use your current account permissions, including instance administration when granted.',deviceLifetime:'This credential lasts at most eight hours and no later than this session’s scheduled expiry. You can revoke it separately in Settings.',deviceAllow:'Authorize this terminal',deviceDeny:'Deny access',deviceApproved:'Authorization recorded. Return to your terminal.',deviceDenied:'This request was denied.',clientCredentials:'Terminal credentials',cliCredential:'alt CLI',revokeCredential:'Revoke credential',
+
   instanceHealth:'Instance status', healthReadOnly:'Read-only database observation. Stored bytes are counted per repository; file integrity and backup availability are not checked here.', schema:'Schema', generation:'Runtime generation', storedBytes:'Stored bytes', reservedBytes:'Reserved bytes', pendingRequests:'Current unfinished requests', recoveryGaps:'Unresolved requests from before recovery', pendingEvents:'Events awaiting delivery', observedAt:'Observed at', lastRestore:'Last recorded restoration', noRestoreRecorded:'No restoration recorded', backupRecovery:'Backup and recovery', operationHistory:'Operation history', backupInstructions:'A local operator creates encrypted backups with alt-server backup, checks packages with backup-verify, and restores to an isolated destination with restore. Each step reports its own result. Keep the decryption key outside this server.', backupUnconfirmed:'A backup start without a matching creation record has an unconfirmed result. Inspect the original output package. Creation does not prove external storage or a successful recovery drill.',
 
   sessions: 'Active sessions', currentSession: 'This session', createdAt: 'Created', expiresAt: 'Expires', revokeSession: 'Revoke session',
@@ -32,6 +37,11 @@ const en = {
 } as const;
 type Messages = { [K in keyof typeof en]: string };
 const zh: Messages = {
+  productsUnavailable:"产品导航暂时不可用，当前文档保持打开。",switchProduct:"切换产品",continueProduct:"继续",switchProductHint:"离开工作台前请保存尚未提交的内容，目标产品会重新检查访问权限。",cloudAccount:"GOLIA Cloud",retryProducts:"重试产品导航",
+  agentCredentials:'Agent 凭据',agentScopeNote:'每个 agent 仅限一个仓库，最长一小时。访问还需父级人类凭据有效，并符合仓库当前权限。',recoveryEpoch:'恢复代次',revoked:'已撤销',agentRecorded:'已签发 · 每次请求重新检查权限',agentRecords:'可发布任务记录',agentNoRecords:'不可发布任务记录',agentCreate:'创建',agentUpdate:'更新',agentDelete:'删除',agentForce:'强制更新',agentAllPaths:'所有路径',agentNoPaths:'不可修改路径',
+
+  deviceTitle:'授权终端访问',deviceEnter:'输入终端显示的代码。',deviceCode:'终端代码',deviceMatch:'请核对代码与终端一致。仅在你发起此请求时继续。',deviceScope:'允许 alt CLI 使用你当前的账号权限，包括已授予的实例管理权限。',deviceLifetime:'凭据最多有效八小时，且不会超过此会话的预定到期时间。你可以在设置中单独撤销。',deviceAllow:'授权此终端',deviceDeny:'拒绝访问',deviceApproved:'授权已记录。请返回终端。',deviceDenied:'此请求已被拒绝。',clientCredentials:'终端凭据',cliCredential:'alt CLI',revokeCredential:'撤销凭据',
+
   instanceHealth:'实例状态',healthReadOnly:'只读数据库快照。存储字节按仓库计数；这里不检查文件完整性或备份是否仍可用。',schema:'数据版本',generation:'运行代次',storedBytes:'已存储字节',reservedBytes:'预留字节',pendingRequests:'当前未完成请求',recoveryGaps:'恢复前结果未决的请求',pendingEvents:'待投递事件',observedAt:'检查时间',lastRestore:'最近记录的恢复',noRestoreRecorded:'没有恢复记录',backupRecovery:'备份与恢复',operationHistory:'操作记录',backupInstructions:'本机运维人员通过 alt-server backup 生成加密备份，使用 backup-verify 校验包，再通过 restore 恢复到隔离目标。各步骤分别报告结果。解密密钥应保存在此服务器以外。',backupUnconfirmed:'备份开始后没有对应的生成记录，表示结果待确认，请检查原输出包。生成成功不代表已异地保存或恢复演练通过。',
 
   sessions:'有效会话',currentSession:'当前会话',createdAt:'创建时间',expiresAt:'到期时间',revokeSession:'撤销会话',
@@ -51,6 +61,11 @@ const zh: Messages = {
   instance:'实例',version:'版本',users:'用户',createUser:'创建用户',displayName:'显示名称',administrator:'实例管理员',enabled:'已启用',disabled:'已停用',disable:'停用',enable:'启用',saved:'已保存',adminNote:'实例管理权限不授予仓库内容访问权。',noDocuments:'打开仓库或任务开始工作。',back:'返回',session:'会话',details:'详情',
 };
 const ja: Messages = {
+  productsUnavailable:"製品ナビゲーションを取得できません。現在のドキュメントは開いたままです。",switchProduct:"製品を切り替える",continueProduct:"続ける",switchProductHint:"このワークベンチを離れる前に未送信の変更を保存してください。移動先でアクセス権限を再確認します。",cloudAccount:"GOLIA Cloud",retryProducts:"製品一覧を再取得",
+  agentCredentials:'エージェント認証情報',agentScopeNote:'各エージェントは一つのリポジトリに限定され、有効期間は最大一時間です。親となる人間の認証情報と現在の権限も毎回確認します。',recoveryEpoch:'復元世代',revoked:'取り消し済み',agentRecorded:'発行済み · アクセスごとに権限を確認',agentRecords:'タスク記録の公開が可能',agentNoRecords:'タスク記録の公開は不可',agentCreate:'作成',agentUpdate:'更新',agentDelete:'削除',agentForce:'強制更新',agentAllPaths:'すべてのパス',agentNoPaths:'変更できるパスなし',
+
+  deviceTitle:'ターミナルアクセスの許可',deviceEnter:'ターミナルに表示されたコードを入力してください。',deviceCode:'ターミナルコード',deviceMatch:'ターミナルのコードと一致することを確認してください。自分で開始したリクエストの場合のみ続行してください。',deviceScope:'alt CLI に現在のアカウント権限の使用を許可します。付与済みのインスタンス管理権限も含まれます。',deviceLifetime:'認証情報は最長八時間、このセッションの予定有効期限まで使用できます。設定から個別に取り消せます。',deviceAllow:'このターミナルを許可',deviceDeny:'アクセスを拒否',deviceApproved:'許可を記録しました。ターミナルに戻ってください。',deviceDenied:'このリクエストは拒否されました。',clientCredentials:'ターミナルの認証情報',cliCredential:'alt CLI',revokeCredential:'認証情報を取り消す',
+
   instanceHealth:'インスタンスの状態',healthReadOnly:'読み取り専用のデータベース観測です。保存バイト数はリポジトリごとに集計し、ファイルの整合性やバックアップの存在は検査しません。',schema:'データバージョン',generation:'実行世代',storedBytes:'保存バイト数',reservedBytes:'予約バイト数',pendingRequests:'現在の未完了リクエスト',recoveryGaps:'復元前の結果未確定リクエスト',pendingEvents:'配信待ちイベント',observedAt:'観測日時',lastRestore:'最後に記録された復元',noRestoreRecorded:'復元記録なし',backupRecovery:'バックアップと復元',operationHistory:'操作履歴',backupInstructions:'ローカル管理者が alt-server backup で暗号化バックアップを生成し、backup-verify で検証してから restore で隔離先に復元します。各手順は個別に結果を報告します。復号鍵はサーバーの外で保管してください。',backupUnconfirmed:'開始に対応する生成記録がない場合、結果は未確定です。元の出力パッケージを確認してください。生成成功は外部保存や復元訓練の成功を意味しません。',
 
   sessions:'有効なセッション',currentSession:'現在のセッション',createdAt:'作成日時',expiresAt:'有効期限',revokeSession:'セッションを取り消す',

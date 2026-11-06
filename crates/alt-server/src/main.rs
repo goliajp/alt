@@ -26,6 +26,38 @@ struct Args {
 }
 #[derive(Subcommand)]
 enum Action {
+    /// Restore or reconcile one frozen Cloud recovery into a new incarnation
+    CloudRestore {
+        #[arg(long)]
+        spec: PathBuf,
+        #[arg(long)]
+        directory: PathBuf,
+        #[arg(long)]
+        assets: PathBuf,
+        #[arg(long, default_value = "127.0.0.1:8081")]
+        listen: std::net::SocketAddr,
+        #[arg(long, default_value = "ALT_SERVER_DATABASE")]
+        database_environment: String,
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        identity: PathBuf,
+        #[arg(long)]
+        source_fenced: bool,
+    },
+    /// Initialize or resume exactly one frozen Cloud provision specification
+    CloudInitialize {
+        #[arg(long)]
+        spec: PathBuf,
+        #[arg(long)]
+        directory: PathBuf,
+        #[arg(long)]
+        assets: PathBuf,
+        #[arg(long, default_value = "127.0.0.1:8081")]
+        listen: std::net::SocketAddr,
+        #[arg(long, default_value = "ALT_SERVER_DATABASE")]
+        database_environment: String,
+    },
     /// Generate and fsync a secret before registering it with the database
     Secret {
         #[arg(value_enum)]
@@ -236,6 +268,86 @@ fn build_info() -> Value {
     json!({"product":"alt-server","version":env!("CARGO_PKG_VERSION"),"build_id":option_env!("ALT_BUILD_ID").unwrap_or("development"),"protocol":1,"schema":alt_server_store::SCHEMA_VERSION})
 }
 fn execute(args: &Args) -> Result<Value> {
+    if let Action::CloudRestore {
+        spec,
+        directory,
+        assets,
+        listen,
+        database_environment,
+        input,
+        identity,
+        source_fenced,
+    } = &args.command
+    {
+        if !source_fenced {
+            return Err(Error::Config(
+                "--source-fenced is required for disaster recovery",
+            ));
+        }
+        let spec: golia_platform_contract::lifecycle::RecoverySpec =
+            serde_json::from_slice(&operator::read_regular(spec, 65536, true)?)
+                .map_err(|_| Error::Config("recovery specification"))?;
+        spec.validate()
+            .map_err(|_| Error::Config("recovery specification"))?;
+        let verified = operator::backup::verify(
+            input,
+            identity,
+            public_key(&spec.backup.receipt_public_key)?,
+            spec.backup.maximum_bytes.0,
+        )?;
+        let instance = &verified.manifest.catalog.instance;
+        if verified.manifest_digest != spec.backup.manifest_digest
+            || instance.installation_id != spec.target.audience.installation_id.as_str()
+            || instance.workspace_id != spec.target.audience.workspace_id.as_str()
+            || instance.runtime_generation != spec.backup.generation.0
+            || instance.deployment_mode != alt_remote_protocol::DeploymentMode::Cloud
+        {
+            return Err(Error::Config("recovery backup differs from frozen intent"));
+        }
+        let config = operator::provision::prepare_recovery(
+            &spec,
+            directory,
+            assets,
+            *listen,
+            database_environment,
+        )?;
+        if config
+            .receipt_key_file
+            .try_exists()
+            .map_err(|_| Error::File)?
+        {
+            let mut store = config
+                .open()
+                .map_err(|_| Error::RestoreStage("existing recovery verification"))?;
+            store
+                .check_restored_backup(&spec.backup.manifest_digest)
+                .map_err(|_| Error::RestoreStage("existing recovery receipt"))?;
+        } else {
+            operator::backup::restore(&config, verified, *source_fenced)?;
+        }
+        return Ok(
+            json!({"restored":true,"instance":config.instance,"manifest_digest":spec.backup.manifest_digest,"old_credentials_revoked":true}),
+        );
+    }
+    if let Action::CloudInitialize {
+        spec,
+        directory,
+        assets,
+        listen,
+        database_environment,
+    } = &args.command
+    {
+        let config = operator::provision::initialize(
+            spec,
+            directory,
+            assets,
+            *listen,
+            database_environment,
+        )?;
+        return Ok(json!({"initialized":true,"instance":config.instance,
+            "configuration":directory.join("config.json"),
+            "spec_digest":config.cloud.as_ref().and_then(|c| c.provision_digest.as_ref())}));
+    }
     if let Action::BuildInfo = &args.command {
         return Ok(build_info());
     }
@@ -394,10 +506,10 @@ fn execute(args: &Args) -> Result<Value> {
             json!({"actor":actor,"recovered":true,"old_credentials_revoked":true,"expires_unix_ms":expires_unix_ms.to_string()}),
         );
     }
-    let token = operator::read_token(args.credential.as_deref().ok_or(Error::Config(
+    let token = config.read_credential(args.credential.as_deref().ok_or(Error::Config(
         "--credential is required for this operator action",
     ))?)?;
-    let admin = store.authenticate(&token)?;
+    let admin = config.factory()?.authenticate(&mut store, &token)?;
     let result = match &args.command {
         Action::Status => {
             serde_json::to_value(store.instance_status(&admin)?).map_err(|_| Error::Store)?

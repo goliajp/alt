@@ -5,9 +5,12 @@ ordinary Git push. A publication can also include explicit ref changes. The
 server preserves original record IDs, raw encodings, attachments and completion
 proofs; receiving them does not mean the receiving machine executed the commands.
 
-Obtain an instance URL, repository ID, scoped token and trusted receipt public
-key from its operator. Set `ALT_SERVER_TOKEN` for the invoking process. The token
-does not enter the remote URL, saved binding, publication package or Git export.
+Obtain an instance URL, repository ID and trusted receipt public key from its
+operator. Use [terminal login](../crates/alt-server/README.md#terminal-login) to
+save a private credential, then set `ALT_SERVER_CREDENTIAL` to that file's path.
+An existing operator-issued token can still be supplied through
+`ALT_SERVER_TOKEN`; setting both variables is refused. The token does not enter
+the remote URL, saved binding, publication package or Git export.
 
 ```sh
 alt task remote connect origin --url https://alt.example.test \
@@ -98,3 +101,75 @@ inspection. Approval names the inspected digest and rechecks target refs and
 policy. The server separately rechecks reviewer authority, trusted collectors,
 evidence eligibility and ref preconditions at the final transaction. Original
 Review records remain historical facts throughout this process.
+
+## Agent credentials
+
+A human terminal credential can delegate access to exactly one repository and
+recovery epoch in either deployment mode. The agent may read that repository's
+published content. Its **write** authority is separately limited by refs, raw
+path prefixes and task-record publication. Agents cannot administer the instance,
+approve a current review, inspect another session's private request, or delegate
+again. Their current parent credential and repository permissions are checked
+on every operation; an old grant cannot override a later restriction.
+
+Prepare an explicit plan using the scope returned by the repository connection:
+
+```json
+{
+  "purpose": "Prepare the selected candidate",
+  "agent_session": "candidate-session-1",
+  "lifetime_seconds": 900,
+  "scope": {
+    "repository": {
+      "installation_id": "INSTALLATION_ID",
+      "repository_instance_id": "REPOSITORY_ID",
+      "recovery_epoch": "1"
+    },
+    "grants": [{
+      "refs": {"Exact": "refs/heads/agent/candidate"},
+      "create": true,
+      "update": true,
+      "delete": false,
+      "force": false,
+      "paths": [[115, 114, 99]]
+    }],
+    "publish_records": true
+  }
+}
+```
+
+The byte prefix above is `src`. Prefixes match at path-component boundaries;
+`null` permits all write paths and an empty array permits no changed paths.
+An empty `grants` array provides no ref writes. Use only the capabilities needed
+for the task. The lifetime is at most one hour and cannot exceed the parent's
+scheduled expiry. Repository restoration changes its epoch and invalidates the
+old scope.
+
+```sh
+alt auth delegate --credential-file human.json --agent-file agent.json \
+  --plan delegation.json --json
+# After an interrupted or unconfirmed result, reuse the same private journal:
+alt auth delegate --credential-file human.json --agent-file agent.json --resume --json
+# Give the agent only this file, then create its own pinned remote binding:
+export ALT_SERVER_CREDENTIAL=/absolute/private/path/agent.json
+```
+
+The CLI writes a private immutable request before registration. Resume retains
+its token, delegation ID, purpose, expiry and scope; it does not extend authority
+or resurrect a revoked credential. Keep the `.delegation` directory when the
+outcome is unconfirmed. Successful completion saves the private credential file
+and removes that journal. Secrets are never printed in the command result.
+
+Inspect or revoke credentials with the current human account, including from a
+separate login. Administrative access does not expose other owners' agents:
+
+```sh
+alt auth delegations --credential-file human.json --json
+alt auth revoke-agent --credential-file human.json --credential-id CREDENTIAL_ID --json
+alt auth logout --credential-file agent.json --json
+```
+
+Settings also lists agent purposes, sessions, scopes and expiries and supports
+individual revocation. A lost revocation response requires refreshing the list
+to observe its durable result. Revoking the parent terminal credential disables
+all agents derived from it.

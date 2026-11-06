@@ -90,6 +90,23 @@ pub fn execute_native(
                 &serde_json::json!({"capabilities":caps,"receipt_public_key":store.receipt_public_key()}),
             )
         }
+        Route::IssueAgent => {
+            let request: alt_remote_protocol::delegation::DelegationRequest = body(source, 16_384)?;
+            json(&store.issue_agent(credential, &request)?)
+        }
+        Route::Delegations(after) => {
+            empty(source)?;
+            json(&store.agent_delegations(credential, after.as_deref().unwrap_or(""))?)
+        }
+        Route::Delegation(digest) => {
+            empty(source)?;
+            json(&store.agent_delegation(credential, &digest)?)
+        }
+        Route::RevokeAgent(digest) => {
+            empty(source)?;
+            store.revoke_agent(credential, &digest)?;
+            json(&serde_json::json!({"revoked":true,"credential_id":digest}))
+        }
         Route::Principal => {
             empty(source)?;
             json(&store.principal(credential)?)

@@ -84,6 +84,9 @@ impl Store {
         credential: &Credential,
         origin: &PublicOrigin,
     ) -> Result<Vec<ActiveBrowserSession>> {
+        if self.spec.deployment_mode == DeploymentMode::Cloud {
+            return self.cloud_browser_sessions(credential, origin);
+        }
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         binding(&mut tx, origin)?;
@@ -118,6 +121,9 @@ impl Store {
         origin: &PublicOrigin,
         id: &str,
     ) -> Result<()> {
+        if self.spec.deployment_mode == DeploymentMode::Cloud {
+            return self.revoke_cloud_browser_session(credential, origin, id);
+        }
         alt_task::check_id(id).map_err(|_| Error::Unauthorized)?;
         let mut tx = self.client.transaction()?;
         tx.query_one(

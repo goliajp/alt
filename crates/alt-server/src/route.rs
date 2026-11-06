@@ -18,6 +18,10 @@ pub enum Route {
     Health,
     Capabilities,
     Principal,
+    Delegations(Option<String>),
+    IssueAgent,
+    Delegation(String),
+    RevokeAgent(String),
     Repository(String),
     Begin(Scope),
     Request(RequestKey, RequestAction),
@@ -95,8 +99,18 @@ pub fn parse_route(
         }
         _ => {}
     }
+    if method == "GET" && path == "/v1/delegations" {
+        return Some(Route::Delegations(after(query)?));
+    }
     if query.is_none() {
         match (method, p.as_slice()) {
+            ("POST", ["", "v1", "delegations"]) => return Some(Route::IssueAgent),
+            ("GET", ["", "v1", "delegations", value]) if digest(value) => {
+                return Some(Route::Delegation((*value).into()));
+            }
+            ("POST", ["", "v1", "delegations", value, "revoke"]) if digest(value) => {
+                return Some(Route::RevokeAgent((*value).into()));
+            }
             ("GET", ["", "healthz"]) => return Some(Route::Health),
             ("GET", ["", "v1", "capabilities"]) => return Some(Route::Capabilities),
             ("GET", ["", "v1", "principal"]) => return Some(Route::Principal),

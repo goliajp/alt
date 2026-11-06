@@ -4,7 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 [dependencies]
+subtle = "2"
 alt-server-store.workspace = true
+alt-cloud-client.workspace = true
+golia-platform-contract.workspace = true
 alt-browser-auth.workspace = true
 url.workspace = true
 alt-remote-protocol.workspace = true
@@ -35,5 +38,6 @@ tar = "0.4"
 tokio-util = {version="0.7",features=["io"]}
 
 [dev-dependencies]
+tiny_http = "0.12"
 alt-wire-http.workspace = true
 ureq.workspace = true

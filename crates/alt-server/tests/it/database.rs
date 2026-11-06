@@ -4,6 +4,7 @@ use alt_repository_service::{Grant, RefSelector};
 use alt_server::{HttpOptions, NativeOptions, StoreFactory};
 mod browser;
 mod chunks;
+mod cloud;
 mod git;
 mod native_client;
 mod operator;
@@ -38,10 +39,18 @@ impl Running {
         Self::start_with_browser(f, None)
     }
     fn start_with_browser(f: &Fixture, browser: Option<alt_server::WebOptions>) -> Self {
+        Self::start_with_cloud(f, browser, None)
+    }
+    fn start_with_cloud(
+        f: &Fixture,
+        browser: Option<alt_server::WebOptions>,
+        cloud: Option<std::sync::Arc<alt_server::cloud::Runtime>>,
+    ) -> Self {
         let mut database: postgres::Config = f.admin_dsn.parse().unwrap();
         database.dbname(&f.database);
         let signing_key = SigningKey::from_bytes(&[7; 32]);
         let factory = StoreFactory {
+            cloud,
             database,
             bytes: ByteStore::open(&f.root.path().join("bytes")).unwrap(),
             instance: f.spec.clone(),

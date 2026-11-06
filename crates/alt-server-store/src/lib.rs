@@ -32,6 +32,8 @@ pub enum Error {
     Limit(&'static str),
     #[error("precondition failed: {0}")]
     Precondition(&'static str),
+    #[error("current account authority is temporarily unavailable")]
+    AuthorityUnavailable,
     #[error("access denied")]
     Unauthorized,
     #[error("transaction outcome unknown; query the original request")]
@@ -52,9 +54,24 @@ pub use tasks::CurrentReviewAssessment;
 pub use workbench::*;
 
 /// Current persisted schema; runtime open validates all migration checksums.
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 mod accounts;
 pub use accounts::*;
 mod maintenance;
 pub use maintenance::*;
+
+mod cloud;
+pub use cloud::*;
+
+mod cloud_quota;
+
+mod delegation;
+
+mod cloud_browser;
+
+mod cloud_login;
+pub use cloud_login::CloudLoginClaim;
+
+mod device_login;
+pub use device_login::*;

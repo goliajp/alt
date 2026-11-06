@@ -1,4 +1,6 @@
 mod browser;
+mod cloud;
+mod delegation;
 mod faults;
 mod maintenance;
 mod tasks;

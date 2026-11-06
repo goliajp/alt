@@ -18,3 +18,5 @@ mod web_assets;
 mod web_route;
 pub use web_assets::Assets as WebAssets;
 mod web_review;
+
+pub mod cloud;

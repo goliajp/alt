@@ -15,6 +15,7 @@ use std::{
 };
 
 pub mod backup;
+pub mod provision;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -43,6 +44,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cloud: Option<CloudConfig>,
     pub version: u32,
     pub instance: InstanceSpec,
     /// Name of an explicit environment variable, never the DB secret itself.
@@ -57,6 +60,14 @@ pub struct Config {
     pub http: HttpBounds,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub browser: Option<BrowserConfig>,
+}
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CloudConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provision_digest: Option<String>,
+    pub audience: golia_platform_contract::Audience,
+    pub runtime_credential_file: PathBuf,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -83,6 +94,33 @@ pub struct HttpBounds {
     pub approval_ttl_ms: u64,
 }
 impl Config {
+    /// Accept either an explicitly issued raw operator secret or the private,
+    /// origin-bound envelope produced by `alt auth login`.
+    pub fn read_credential(&self, path: &Path) -> Result<String> {
+        let bytes = read_regular(path, 16_384, true)?;
+        if bytes.first() != Some(&b'{') {
+            return read_token(path);
+        }
+        let value: alt_remote_protocol::login::SavedCredential = serde_json::from_slice(&bytes)
+            .map_err(|_| Error::Config("credential file encoding"))?;
+        value
+            .validate()
+            .map_err(|_| Error::Config("credential file fields"))?;
+        let key: String = self
+            .signing_key()?
+            .verifying_key()
+            .as_bytes()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        if self.browser.as_ref().map(|b| b.public_origin.as_str()) != Some(value.origin.as_str())
+            || self.instance.installation_id != value.installation_id
+            || value.receipt_public_key != key
+        {
+            return Err(Error::Config("credential belongs to a different instance"));
+        }
+        Ok(value.access_token)
+    }
     pub fn read(path: &Path) -> Result<Self> {
         let bytes = read_regular(path, 65536, false)?;
         let mut config: Self =
@@ -103,10 +141,49 @@ impl Config {
         {
             browser.assets_directory = parent.join(&browser.assets_directory);
         }
+        if let Some(cloud) = &mut config.cloud
+            && cloud.runtime_credential_file.is_relative()
+        {
+            cloud.runtime_credential_file = parent.join(&cloud.runtime_credential_file);
+        }
         config.validate()?;
         Ok(config)
     }
     pub fn validate(&self) -> Result<()> {
+        use alt_remote_protocol::DeploymentMode;
+        match (&self.cloud, self.instance.deployment_mode) {
+            (Some(cloud), DeploymentMode::Cloud) => {
+                cloud
+                    .audience
+                    .validate()
+                    .map_err(|_| Error::Config("Cloud audience"))?;
+                if cloud
+                    .provision_digest
+                    .as_deref()
+                    .is_some_and(|d| !golia_platform_contract::lifecycle::lower_hex_32(d))
+                {
+                    return Err(Error::Config("Cloud provision digest"));
+                }
+                let a = &cloud.audience;
+                if a.product != golia_platform_contract::Product::Alt
+                    || a.installation_id.as_str() != self.instance.installation_id
+                    || a.workspace_id.as_str() != self.instance.workspace_id
+                    || a.generation.0 != self.instance.runtime_generation
+                    || !cloud.runtime_credential_file.is_absolute()
+                    || self.browser.as_ref().is_some_and(|b| {
+                        b.public_origin != a.origin.as_str() || b.session_ttl_ms > 8 * 3_600_000
+                    })
+                {
+                    return Err(Error::Config("Cloud instance binding"));
+                }
+            }
+            (None, DeploymentMode::SelfHosted) => (),
+            _ => {
+                return Err(Error::Config(
+                    "deployment mode requires exact Cloud configuration",
+                ));
+            }
+        }
         if let Some(browser) = &self.browser {
             alt_browser_auth::PublicOrigin::parse(&browser.public_origin)
                 .map_err(|_| Error::Config("browser public origin"))?;
@@ -233,15 +310,32 @@ impl Config {
             .map_err(|_| Error::Config("receipt key must contain 32 raw bytes"))?;
         Ok(SigningKey::from_bytes(&bytes))
     }
+    pub fn cloud_runtime(&self) -> Result<Option<std::sync::Arc<crate::cloud::Runtime>>> {
+        self.validate()?;
+        self.cloud
+            .as_ref()
+            .map(|cloud| {
+                let bytes = read_regular(&cloud.runtime_credential_file, 65, true)?;
+                let text = std::str::from_utf8(&bytes)
+                    .map_err(|_| Error::Config("Cloud runtime credential"))?;
+                let credential = text
+                    .strip_suffix('\n')
+                    .unwrap_or(text)
+                    .to_owned()
+                    .try_into()
+                    .map_err(|_| Error::Config("Cloud runtime credential"))?;
+                crate::cloud::Runtime::new(cloud.audience.clone(), credential)
+                    .and_then(|runtime| match &cloud.provision_digest {
+                        Some(digest) => runtime.provisioned(digest.clone()),
+                        None => Ok(runtime),
+                    })
+                    .map(std::sync::Arc::new)
+                    .map_err(|_| Error::Config("Cloud runtime credential"))
+            })
+            .transpose()
+    }
     pub fn open(&self) -> Result<Store> {
-        self.check_volume()?;
-        Ok(Store::open(
-            self.client()?,
-            ByteStore::open(&self.bytes_directory)?,
-            self.instance.clone(),
-            self.signing_key()?,
-            self.limits,
-        )?)
+        Ok(self.factory()?.open()?)
     }
     fn volume_identity(&self) -> Result<serde_json::Value> {
         Ok(
@@ -264,6 +358,7 @@ impl Config {
     }
     pub fn initialize(&self, resume: bool) -> Result<Store> {
         self.validate()?;
+        let cloud = self.cloud_runtime()?;
         let signing_key = self.signing_key()?;
         let bytes = ByteStore::open(&self.bytes_directory)?;
         let marker = self.bytes_directory.join("instance.json");
@@ -299,12 +394,38 @@ impl Config {
                     "database already initialized; explicit resume required",
                 ));
             }
-            Ok(Store::open(
+            let mut store = Store::open(
                 client,
                 bytes,
                 self.instance.clone(),
                 signing_key,
                 self.limits,
+            )?;
+            if let Some(cloud) = &cloud {
+                cloud.check(&mut store)?;
+            }
+            Ok(store)
+        } else if let Some(cloud) = cloud {
+            if let Some(digest) = cloud.provision_digest() {
+                return Ok(Store::initialize_cloud_provisioned(
+                    client,
+                    bytes,
+                    self.instance.clone(),
+                    signing_key,
+                    self.limits,
+                    cloud.audience(),
+                    cloud.key_digest(),
+                    digest,
+                )?);
+            }
+            Ok(Store::initialize_cloud(
+                client,
+                bytes,
+                self.instance.clone(),
+                signing_key,
+                self.limits,
+                cloud.audience(),
+                cloud.key_digest(),
             )?)
         } else {
             Ok(Store::initialize(
@@ -319,6 +440,7 @@ impl Config {
     pub fn factory(&self) -> Result<StoreFactory> {
         self.check_volume()?;
         Ok(StoreFactory {
+            cloud: self.cloud_runtime()?,
             database: self.database()?,
             bytes: ByteStore::open(&self.bytes_directory)?,
             instance: self.instance.clone(),
@@ -332,6 +454,11 @@ impl Config {
     /// the operator can query it directly; re-running this same operation does
     /// not silently choose a second generation or overwrite another config.
     pub fn migrate(&self, from: u32, output: &Path) -> Result<Self> {
+        if self.cloud.is_some() {
+            return Err(Error::Config(
+                "Cloud migration requires coordinated platform generation binding",
+            ));
+        }
         self.check_volume()?;
         if !(1..alt_server_store::SCHEMA_VERSION).contains(&from) {
             return Err(Error::Config("unsupported source schema"));
@@ -364,6 +491,7 @@ impl Config {
             1 => Store::migrate_v1(client, bytes, self.instance.clone(), key, self.limits),
             2 => Store::migrate_v2(client, bytes, self.instance.clone(), key, self.limits),
             3 => Store::migrate_v3(client, bytes, self.instance.clone(), key, self.limits),
+            4 => Store::migrate_v4(client, bytes, self.instance.clone(), key, self.limits),
             _ => unreachable!(),
         };
         match migrated {

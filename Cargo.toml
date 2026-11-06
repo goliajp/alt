@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+members = ["crates/*", "vendor/golia-platform-contract"]
 
 [workspace.package]
 version = "0.1.0-internal.1"
@@ -8,6 +8,8 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+golia-platform-contract = { path = "vendor/golia-platform-contract", version = "=0.1.0" }
+alt-cloud-client = { path = "crates/alt-cloud-client" }
 alt-browser-auth = { path = "crates/alt-browser-auth" }
 alt-task-transfer = { path = "crates/alt-task-transfer" }
 alt-server = { path = "crates/alt-server" }

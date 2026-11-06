@@ -10,11 +10,12 @@ type Props = { document: Document; session: Session; t: Text; open: (document: D
 function Heading({ title, refresh, t, children }: { title: string; refresh: () => void; t: Text; children?: ReactNode }) {
   return <header className="document-heading"><h1>{title}</h1><div>{children}<Button small onClick={refresh}>{t.refresh}</Button></div></header>;
 }
-function Paged<T>({ path, t, title, row, empty }: { path: string; t: Text; title: string; row: (value: T) => ReactNode; empty?: string }) {
+function Paged<T>({ path, t, title, row, empty, onRefresh }: { path: string; t: Text; title: string; row: (value: T) => ReactNode; empty?: string; onRefresh?: () => void }) {
   const [cursors, setCursors] = useState<string[]>(['']), [revision, refresh] = useState(0);
   const cursor = cursors.at(-1) ?? '';
   const resource = useResource<Page<T>>(`${path}${path.includes('?')?'&':'?'}after=${encodeURIComponent(cursor)}`, revision);
-  return <><Heading title={title} t={t} refresh={()=>refresh(value=>value+1)}/>{resource.error ? <Failure error={resource.error} retry={()=>refresh(value=>value+1)} t={t}/>:!resource.value ? <Loading t={t}/>:<>
+  const reload=()=>{onRefresh?.();refresh(value=>value+1);};
+  return <><Heading title={title} t={t} refresh={reload}/>{resource.error ? <Failure error={resource.error} retry={reload} t={t}/>:!resource.value ? <Loading t={t}/>:<>
     <div className="resource-list">{resource.value.items.length ? resource.value.items.map(row) : <p className="message">{empty ?? t.empty}</p>}</div>
     <div className="pagination"><Button disabled={cursors.length===1} onClick={()=>setCursors(current=>current.slice(0,-1))}>{t.back}</Button><Button disabled={!resource.value.next} onClick={()=>setCursors(current=>[...current,resource.value!.next!])}>{t.next}</Button></div>
   </>}</>;
@@ -90,7 +91,7 @@ function SettingsView({session,t,log}:Props) {
   const [revision,refresh]=useState(0),[busy,setBusy]=useState(false),[failure,setFailure]=useState<unknown>();
   return <><Heading title={t.settings} t={t} refresh={()=>refresh(value=>value+1)}/><dl className="record-fields"><div><dt>{t.instance}</dt><dd>{session.installation_id}</dd></div><div><dt>{t.workspace}</dt><dd>{session.workspace_id}</dd></div><div><dt>{t.version}</dt><dd>{session.build_id}</dd></div><div><dt>{t.account}</dt><dd>{session.user.display_name}</dd></div></dl>
     {session.user.administrator&&session.deployment_mode==='self_hosted'&&<InstanceOperations t={t} revision={revision}/>}
-    {session.deployment_mode==='self_hosted'&&<Sessions t={t} log={log}/>}
+    <Sessions t={t} log={log}/><Sessions client t={t} log={log}/><AgentCredentials t={t} log={log}/>
     {session.user.administrator&&session.deployment_mode==='self_hosted'&&<><p>{t.adminNote}</p><Paged<LocalUser> key={revision} path="/web/users" title={t.users} t={t} row={user=><div className="resource-row" key={user.actor_id}><strong>{user.display_name}</strong><span>{user.login_name}</span><span>{user.disabled?t.disabled:t.enabled}</span><Button small disabled={busy||user.actor_id===session.user.actor_id} onClick={async()=>{
       setBusy(true);setFailure(undefined);try{await api.request(`/web/users/${encodeURIComponent(user.actor_id)}/state`,{disabled:!user.disabled});refresh(value=>value+1);log(t.saved);}catch(error){setFailure(error);}finally{setBusy(false);}
     }}>{user.disabled?t.enable:t.disable}</Button></div>}/><h2>{t.createUser}</h2><form className="user-form" onSubmit={async event=>{
@@ -102,11 +103,26 @@ function SettingsView({session,t,log}:Props) {
 }
 
 type BrowserSession = { id:string; created_at_unix_ms:string; expires_at_unix_ms:string; current:boolean };
-function Sessions({t,log}:{t:Text;log:(message:string)=>void}) {
+function Sessions({t,log,client=false}:{t:Text;log:(message:string)=>void;client?:boolean}) {
   const [revision,refresh]=useState(0),[busy,setBusy]=useState(false),[failure,setFailure]=useState<unknown>();
-  const resource=useResource<BrowserSession[]>('/web/sessions',revision);
+  const path=client?'/web/client-credentials':'/web/sessions';
+  const resource=useResource<BrowserSession[]>(path,revision);
   const reload=()=>{setFailure(undefined);refresh(value=>value+1);};
-  return <section><Heading title={t.sessions} t={t} refresh={reload}/>{resource.error?<Failure error={resource.error} t={t} retry={reload}/>:!resource.value?<Loading t={t}/>:<div className="resource-list">{resource.value.map(session=><div className="resource-row" key={session.id}><strong>{session.current?t.currentSession:t.session}</strong><span>{t.createdAt}: {new Date(Number(session.created_at_unix_ms)).toLocaleString()}</span><span>{t.expiresAt}: {new Date(Number(session.expires_at_unix_ms)).toLocaleString()}</span><Button small disabled={busy||session.current||failure!==undefined} onClick={async()=>{setBusy(true);setFailure(undefined);try{await api.request(`/web/sessions/${session.id}/revoke`,{});refresh(value=>value+1);log(t.saved);}catch(error){setFailure(error);}finally{setBusy(false);}}}>{t.revokeSession}</Button></div>)}</div>}{failure!==undefined&&<p role="alert" className="failure">{errorText(failure,t)}</p>}</section>;
+  return <section><Heading title={client?t.clientCredentials:t.sessions} t={t} refresh={reload}/>{resource.error?<Failure error={resource.error} t={t} retry={reload}/>:!resource.value?<Loading t={t}/>:<div className="resource-list">{resource.value.map(session=><div className="resource-row" key={session.id}><strong>{client?t.cliCredential:session.current?t.currentSession:t.session}</strong><span>{t.createdAt}: {new Date(Number(session.created_at_unix_ms)).toLocaleString()}</span><span>{t.expiresAt}: {new Date(Number(session.expires_at_unix_ms)).toLocaleString()}</span><Button small disabled={busy||session.current||failure!==undefined} onClick={async()=>{setBusy(true);setFailure(undefined);try{await api.request(`${path}/${session.id}/revoke`,{});refresh(value=>value+1);log(t.saved);}catch(error){setFailure(error);}finally{setBusy(false);}}}>{client?t.revokeCredential:t.revokeSession}</Button></div>)}</div>}{failure!==undefined&&<p role="alert" className="failure">{errorText(failure,t)}</p>}</section>;
+}
+
+type AgentCredential={credential_id:string;purpose:string;attribution:{agent_session:string};scope:{repository:{repository_instance_id:string;recovery_epoch:string};publish_records:boolean;grants:{refs:{Exact?:string;Namespace?:string};create:boolean;update:boolean;delete:boolean;force:boolean;paths:number[][]|null}[]};expires_at_unix_ms:string;revoked:boolean};
+function displayGrantPath(bytes:number[]):string {
+  try { return JSON.stringify(new TextDecoder('utf-8',{fatal:true}).decode(new Uint8Array(bytes))); }
+  catch { return bytes.map(byte=>`\\x${byte.toString(16).padStart(2,'0')}`).join(''); }
+}
+function AgentCredentials({t,log}:{t:Text;log:(message:string)=>void}) {
+  const [revision,refresh]=useState(0),[busy,setBusy]=useState(false),[failure,setFailure]=useState<unknown>();
+  return <section className="agent-credentials"><p>{t.agentScopeNote}</p><Paged<AgentCredential> key={revision} path="/web/delegations" title={t.agentCredentials} t={t} onRefresh={()=>setFailure(undefined)} row={agent=><article className="agent-credential" key={agent.credential_id}>
+    <h3>{agent.purpose}</h3><p>{t.repository}: {agent.scope.repository.repository_instance_id} · {t.recoveryEpoch}: {agent.scope.repository.recovery_epoch}</p><p>{t.session}: <code>{agent.attribution.agent_session}</code></p><p>{t.expiresAt}: {new Date(Number(agent.expires_at_unix_ms)).toLocaleString()} · {agent.revoked?t.revoked:Number(agent.expires_at_unix_ms)<=Date.now()?t.expiredRequest:t.agentRecorded}</p>
+    <p>{agent.scope.publish_records?t.agentRecords:t.agentNoRecords}</p><ul>{agent.scope.grants.map((grant,index)=><li key={index}><code>{grant.refs.Exact??grant.refs.Namespace}</code> · {[grant.create&&t.agentCreate,grant.update&&t.agentUpdate,grant.delete&&t.agentDelete,grant.force&&t.agentForce].filter(Boolean).join(' · ')||t.readOnly}<p>{t.allowedPaths}: {grant.paths===null?t.agentAllPaths:grant.paths.length===0?t.agentNoPaths:grant.paths.map(displayGrantPath).join(', ')}</p></li>)}</ul>
+    <Button small disabled={busy||agent.revoked||failure!==undefined} onClick={async()=>{setBusy(true);setFailure(undefined);try{await api.request(`/web/delegations/${agent.credential_id}/revoke`,{});refresh(value=>value+1);log(t.saved);}catch(error){setFailure(error);}finally{setBusy(false);}}}>{t.revokeCredential}</Button>
+  </article>}/>{failure!==undefined&&<p role="alert" className="failure">{errorText(failure,t)}</p>}</section>;
 }
 
 function InstanceOperations({t,revision}:{t:Text;revision:number}) {

@@ -60,6 +60,11 @@ def inputs():
                 raise ValueError(f"workbench source link is unsupported: {path}")
             if path.is_file():
                 paths.add(path)
+    for path in (ROOT / "vendor").rglob("*"):
+        if path.is_symlink():
+            raise ValueError(f"vendored source link is unsupported: {path}")
+        if path.is_file():
+            paths.add(path)
     for path in (ROOT / "self-hosted").rglob("*"):
         if path.is_symlink():
             raise ValueError(f"server distribution link is unsupported: {path}")

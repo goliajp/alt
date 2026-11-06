@@ -288,6 +288,9 @@ impl Store {
         credential: &Credential,
         origin: &PublicOrigin,
     ) -> Result<BrowserSession> {
+        if self.spec.deployment_mode == DeploymentMode::Cloud {
+            return self.cloud_browser_session(credential, origin);
+        }
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         binding(&mut tx, origin)?;
@@ -301,6 +304,13 @@ impl Store {
         Ok(value)
     }
     pub fn browser_logout(&mut self, credential: &Credential, origin: &PublicOrigin) -> Result<()> {
+        if self.spec.deployment_mode == DeploymentMode::Cloud {
+            return self.revoke_cloud_browser_session(
+                credential,
+                origin,
+                &credential.digest.clone(),
+            );
+        }
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         binding(&mut tx, origin)?;
@@ -397,7 +407,11 @@ pub(crate) fn check_credential(
     if let Some(row)=tx.query_opt("SELECT s.account_generation,a.generation,s.expires_at FROM alt_web_sessions s JOIN alt_web_accounts a ON a.actor_id=s.actor_id WHERE s.token_digest=$1 FOR SHARE OF s,a", &[&credential.digest])? && (row.get::<_,i64>(0)!=row.get::<_,i64>(1)||row.get::<_,i64>(2)<=time) {return Err(Error::Unauthorized);}
     Ok(())
 }
-fn login_budget(tx: &mut Transaction<'_>, login: &str, network: std::net::IpAddr) -> Result<()> {
+pub(crate) fn login_budget(
+    tx: &mut Transaction<'_>,
+    login: &str,
+    network: std::net::IpAddr,
+) -> Result<()> {
     let time = integer(now(tx)?)?;
     // A single stable global row serializes admission and bounds the number of
     // attacker-chosen keys written in each minute. Stale keys are removed here.

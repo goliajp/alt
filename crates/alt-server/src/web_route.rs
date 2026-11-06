@@ -10,8 +10,15 @@ pub enum WebRoute {
     InstanceAudit { before: Option<u64> },
     Login,
     Session,
+    Navigation,
     Sessions,
     RevokeSession(String),
+    DeviceConsent(String),
+    DeviceDecision,
+    ClientCredentials,
+    AgentDelegations(String),
+    RevokeAgent(String),
+    RevokeClientCredential(String),
     Logout,
     Repositories { after: String },
     Inbox { after: String },
@@ -112,6 +119,10 @@ pub fn parse(
             none()?;
             WebRoute::Login
         }
+        ("GET", ["", "web", "navigation"]) => {
+            none()?;
+            WebRoute::Navigation
+        }
         ("GET", ["", "web", "session"]) => {
             none()?;
             WebRoute::Session
@@ -119,6 +130,32 @@ pub fn parse(
         ("GET", ["", "web", "sessions"]) => {
             none()?;
             WebRoute::Sessions
+        }
+        ("GET", ["", "web", "device"]) => {
+            let mut args = arguments(query, &["user_code"])?;
+            let code = args
+                .remove("user_code")
+                .ok_or(Error::Precondition("user code required"))?;
+            WebRoute::DeviceConsent(alt_remote_protocol::login::user_code(&code)?)
+        }
+        ("POST", ["", "web", "device"]) => {
+            none()?;
+            WebRoute::DeviceDecision
+        }
+        ("GET", ["", "web", "delegations"]) => WebRoute::AgentDelegations(after()?),
+        ("POST", ["", "web", "delegations", id, "revoke"]) => {
+            none()?;
+            alt_task::check_id(id).map_err(|_| Error::Precondition("credential id"))?;
+            WebRoute::RevokeAgent((*id).into())
+        }
+        ("GET", ["", "web", "client-credentials"]) => {
+            none()?;
+            WebRoute::ClientCredentials
+        }
+        ("POST", ["", "web", "client-credentials", id, "revoke"]) => {
+            none()?;
+            alt_task::check_id(id).map_err(|_| Error::Precondition("credential id"))?;
+            WebRoute::RevokeClientCredential((*id).into())
         }
         ("POST", ["", "web", "sessions", id, "revoke"]) => {
             none()?;

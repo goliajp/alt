@@ -105,15 +105,16 @@ scoped_cargo() {
 # The core never talks to a language model: no LLM, tokenizer or
 # embedding crate anywhere in the dependency graph, and the only crates
 # allowed an HTTP dependency are the protocol transports (git wire, LFS,
-# authenticated server). The server uses hyper for ingress and ureq only in
-# its real-client acceptance tests; domain/store crates remain isolated. A
+# authenticated server and fixed-origin Cloud client). The server uses hyper
+# for ingress; the Cloud adapter owns platform HTTP. Domain/store and public
+# contract crates remain isolated. A
 # future LLM integration lives in its own opt-in crate, `alt-llm-bridge`,
 # which is the one exemption on both counts.
 LLM_CRATES='async-openai openai openai-api-rs anthropic anthropic-sdk
 misanthropy tiktoken-rs tokenizers llm llm-chain ollama-rs rust-bert
 candle-core candle-transformers ort fastembed genai langchain-rust'
 HTTP_CRATES='reqwest hyper ureq isahc surf attohttpc curl awc'
-HTTP_OWNERS='alt-wire-http alt-lfs alt-server alt-llm-bridge'
+HTTP_OWNERS='alt-wire-http alt-lfs alt-server alt-cloud-client alt-llm-bridge'
 LLM_SOURCE='\b(openai|anthropic|claude|gemini|cohere|mistral|ollama|tiktoken|huggingface)\b|\bllm_|\buse llm\b|api\.openai\.com|api\.anthropic\.com|generativelanguage\.googleapis\.com'
 
 # workspace members that depend on $1, directly when $2 = 1
@@ -144,7 +145,7 @@ run_isolation() {
             fail=1
         done
     done
-    if grep -rniE "$LLM_SOURCE" crates fuzz --include='*.rs' --include=Cargo.toml \
+    if grep -rniE "$LLM_SOURCE" crates vendor fuzz --include='*.rs' --include=Cargo.toml \
         --exclude-dir=alt-llm-bridge --exclude-dir=target >&2; then
         echo "llm isolation: LLM reference in core source (above)" >&2
         fail=1

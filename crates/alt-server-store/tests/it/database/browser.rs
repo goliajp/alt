@@ -2,6 +2,7 @@ use super::*;
 use alt_browser_auth::PublicOrigin;
 
 const PASSWORD: &str = "a local password for the browser test";
+mod device;
 fn origin() -> PublicOrigin {
     PublicOrigin::parse("https://alt.example.test").unwrap()
 }
@@ -239,7 +240,7 @@ fn v3_upgrade_preserves_publication_and_cloud_never_uses_local_passwords() {
     let payload = Payload::new("before-browser-schema", None);
     payload.upload(&mut f.store, &f.credential);
     let receipt = payload.publish(&mut f.store, &f.credential);
-    f.client().batch_execute("DROP TABLE alt_browser_binding,alt_web_sessions,alt_web_accounts,alt_login_budgets,alt_instance_audit; DELETE FROM alt_schema WHERE version=4").unwrap();
+    f.client().batch_execute("DROP TABLE alt_device_authorizations,alt_client_credentials,alt_cloud_logins,alt_delegations,alt_cloud_reservations,alt_cloud_ingress,alt_cloud_credentials,alt_cloud_accounts,alt_cloud_binding; DROP TABLE alt_browser_binding,alt_web_sessions,alt_web_accounts,alt_login_budgets,alt_instance_audit; DELETE FROM alt_schema WHERE version>=4").unwrap();
     assert!(
         Store::open(
             f.client(),
@@ -277,32 +278,17 @@ fn v3_upgrade_preserves_publication_and_cloud_never_uses_local_passwords() {
     let mut cloud_spec = store.spec().clone();
     cloud_spec.deployment_mode = DeploymentMode::Cloud;
     f.client().batch_execute("UPDATE alt_instance SET deployment_mode='cloud'; UPDATE alt_credentials SET identity_source='cloud'").unwrap();
-    let mut cloud = Store::open(
-        f.client(),
-        ByteStore::open(&f.root.path().join("bytes")).unwrap(),
-        cloud_spec,
-        SigningKey::from_bytes(&[7; 32]),
-        limits(),
-    )
-    .unwrap();
-    let admin = cloud.authenticate(&f.token).unwrap();
+    // Changing the deployment column cannot manufacture a platform binding.
     assert!(
-        cloud
-            .browser_login(
-                &origin(),
-                "bob",
-                PASSWORD,
-                "127.0.0.1".parse().unwrap(),
-                3_600_000
-            )
-            .is_err()
+        Store::open(
+            f.client(),
+            ByteStore::open(&f.root.path().join("bytes")).unwrap(),
+            cloud_spec,
+            SigningKey::from_bytes(&[7; 32]),
+            limits(),
+        )
+        .is_err()
     );
-    assert!(
-        cloud
-            .create_local_user(&admin, "eve", "eve", "Eve", PASSWORD, true)
-            .is_err()
-    );
-    assert!(cloud.bootstrap_admin("new-owner", future()).is_err());
 }
 
 #[test]

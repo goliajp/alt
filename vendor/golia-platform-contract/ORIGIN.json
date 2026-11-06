@@ -1,0 +1,45 @@
+{
+  "package": "golia-platform-contract",
+  "version": "0.1.0",
+  "canonical_source": "GOLIA platform core/crates/platform-contract",
+  "license": "MIT OR Apache-2.0",
+  "status": "development candidate; source identity is the file digest manifest",
+  "files": [
+    {
+      "path": "Cargo.toml",
+      "sha256": "e68313980edc77c7d748bd8806b4155bcfa7f2934367d8a09156774047dfd02e"
+    },
+    {
+      "path": "README.md",
+      "sha256": "bb37242c98c8ef54adfaee1c2289d54a0bf920003728a54aa51b1497b02b123f"
+    },
+    {
+      "path": "LICENSE-MIT",
+      "sha256": "d557550782e083262ffdc206abf85fd82c63c2ea4c2581efaaef0f010c7bc7a9"
+    },
+    {
+      "path": "LICENSE-APACHE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "path": "src/lib.rs",
+      "sha256": "9619bc64336de15460366a1f2548887b53c7cd6e19c0d0648bdc8a196a996285"
+    },
+    {
+      "path": "src/lifecycle.rs",
+      "sha256": "cb1880af716e04e91ad1f115d3ce3c8514b384490800229a797d0d6fb8d48430"
+    },
+    {
+      "path": "src/navigation.rs",
+      "sha256": "6eb49e8f1260d46e6271ebfe4c489a6dc232ffe5cd5d58499bacb5c2fc885d07"
+    },
+    {
+      "path": "tests/it/main.rs",
+      "sha256": "f79c3adbca518ec4fc78bdeaee4b75f9b9a1181ad381a9971c6673e8026f39cf"
+    },
+    {
+      "path": "tests/it/lifecycle.rs",
+      "sha256": "16418589aa6d85b9f3a6890aba941fb26c36bfcda2fb56af9dc334e8bd1b1647"
+    }
+  ]
+}

@@ -32,6 +32,13 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
+    /// Sign in to a server through explicit browser device consent
+    Auth {
+        #[command(subcommand)]
+        op: AuthOp,
+        #[arg(long, global = true)]
+        json: bool,
+    },
     /// Inspect tools or execute one immutable validation snapshot
     Runner {
         #[command(subcommand)]
@@ -807,6 +814,62 @@ pub enum TaskOp {
         reason: String,
     },
 }
+#[derive(clap::Subcommand, Debug)]
+pub enum AuthOp {
+    /// Give an agent a short credential with explicit repository and write bounds
+    Delegate {
+        #[arg(long)]
+        credential_file: std::path::PathBuf,
+        #[arg(long)]
+        agent_file: std::path::PathBuf,
+        /// JSON purpose, agent_session, lifetime_seconds and scope
+        #[arg(long, required_unless_present = "resume", conflicts_with = "resume")]
+        plan: Option<std::path::PathBuf>,
+        /// Retry the same privately saved delegation after interruption
+        #[arg(long)]
+        resume: bool,
+    },
+    /// List agent credentials belonging to the current human account
+    Delegations {
+        #[arg(long)]
+        credential_file: std::path::PathBuf,
+        #[arg(long)]
+        after: Option<String>,
+    },
+    /// Revoke one agent credential owned by the current human account
+    RevokeAgent {
+        #[arg(long)]
+        credential_file: std::path::PathBuf,
+        #[arg(long)]
+        credential_id: String,
+    },
+    /// Save a private, origin-bound credential after explicit browser consent
+    Login {
+        #[arg(long)]
+        server: String,
+        #[arg(long)]
+        credential_file: std::path::PathBuf,
+        /// Continue the same saved request after interruption
+        #[arg(long)]
+        resume: bool,
+        /// Save the request and print its public confirmation URL without polling
+        #[arg(long)]
+        no_wait: bool,
+        #[arg(long)]
+        allow_loopback_http: bool,
+    },
+    /// Check the current principal and installation without printing secrets
+    Status {
+        #[arg(long)]
+        credential_file: std::path::PathBuf,
+    },
+    /// Revoke the saved credential before removing its private file
+    Logout {
+        #[arg(long)]
+        credential_file: std::path::PathBuf,
+    },
+}
+
 #[derive(clap::Subcommand, Debug)]
 pub enum TaskRemoteOp {
     /// Bind an HTTPS origin, repository and operator-provided receipt key

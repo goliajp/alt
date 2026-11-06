@@ -133,8 +133,18 @@ fn write_json(path: &Path, value: &impl serde::Serialize) -> Res<()> {
     Ok(crate::durable::write(path, serde_json::to_vec(value)?)?)
 }
 fn transport(binding: &Binding) -> Res<Transport> {
-    let token = std::env::var("ALT_SERVER_TOKEN")
-        .map_err(|_| refused("set ALT_SERVER_TOKEN to the scoped server credential"))?;
+    let token = if let Some(path) = std::env::var_os("ALT_SERVER_CREDENTIAL") {
+        if std::env::var_os("ALT_SERVER_TOKEN").is_some() {
+            return Err(refused(
+                "set only one of ALT_SERVER_CREDENTIAL or ALT_SERVER_TOKEN",
+            ));
+        }
+        crate::auth::credential_for_origin(Path::new(&path), &binding.origin)?
+    } else {
+        std::env::var("ALT_SERVER_TOKEN").map_err(|_| {
+            refused("set ALT_SERVER_CREDENTIAL to the private file saved by alt auth login")
+        })?
+    };
     Ok(Transport::new(
         &binding.origin,
         token,

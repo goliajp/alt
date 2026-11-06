@@ -29,7 +29,7 @@ fn snapshot_barrier_blocks_gc_and_publication_until_every_byte_is_verified() {
         f.store.bytes().clone(),
         &f.spec,
         &SigningKey::from_bytes(&[7; 32]),
-        4,
+        alt_server_store::SCHEMA_VERSION,
     )
     .unwrap();
     assert_eq!(

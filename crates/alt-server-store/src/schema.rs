@@ -3,11 +3,12 @@ use alt_remote_protocol::Limits;
 use ed25519_dalek::SigningKey;
 use postgres::{Client, GenericClient};
 
-const MIGRATIONS: [&str; 4] = [
+const MIGRATIONS: [&str; 5] = [
     include_str!("schema.sql"),
     include_str!("schema-v2.sql"),
     include_str!("schema-v3.sql"),
     include_str!("schema-v4.sql"),
+    include_str!("schema-v5.sql"),
 ];
 pub(crate) fn check(client: &mut impl GenericClient, expected: usize) -> Result<()> {
     let rows = client.query(
@@ -35,6 +36,9 @@ pub(crate) fn apply_v3(client: &mut impl GenericClient) -> Result<()> {
 }
 pub(crate) fn apply_v4(client: &mut impl GenericClient) -> Result<()> {
     apply(client, 4)
+}
+pub(crate) fn apply_v5(client: &mut impl GenericClient) -> Result<()> {
+    apply(client, 5)
 }
 fn apply(client: &mut impl GenericClient, version: usize) -> Result<()> {
     client.batch_execute(MIGRATIONS[version - 1])?;
@@ -80,6 +84,15 @@ impl Store {
         limits: Limits,
     ) -> Result<Self> {
         Self::migrate_from(client, bytes, spec, signing_key, limits, 3)
+    }
+    pub fn migrate_v4(
+        client: Client,
+        bytes: ByteStore,
+        spec: InstanceSpec,
+        signing_key: SigningKey,
+        limits: Limits,
+    ) -> Result<Self> {
+        Self::migrate_from(client, bytes, spec, signing_key, limits, 4)
     }
     fn migrate_from(
         mut client: Client,
