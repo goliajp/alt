@@ -91,7 +91,7 @@ impl Store {
                 }
             }
         }
-        if tx.execute("UPDATE alt_repositories SET reserved_bytes=reserved_bytes+$2 WHERE id=$1 AND $2<=quota_bytes-stored_bytes-reserved_bytes",&[repository,&integer(reservation)?])?!=1 { return Err(Error::Limit("repository quota")); }
+        if tx.execute("UPDATE alt_repositories SET reserved_bytes=reserved_bytes+$2 WHERE id=$1 AND $2<=quota_bytes-stored_bytes-reserved_bytes-link_bytes",&[repository,&integer(reservation)?])?!=1 { return Err(Error::Limit("repository quota")); }
         let state = RequestState::Receiving {
             digest: digest.clone(),
             expires_at_unix_ms: expires,
@@ -255,7 +255,7 @@ impl Store {
         if !blob.get::<_, bool>(1) {
             let reservation = unsigned(row.get("reserved_bytes"))?;
             let release = reservation.min(entry.bytes);
-            if tx.execute("UPDATE alt_repositories SET stored_bytes=stored_bytes+$2,reserved_bytes=reserved_bytes-$3 WHERE id=$1 AND $2::bigint-$3::bigint<=quota_bytes-stored_bytes-reserved_bytes",&[repository,&integer(entry.bytes)?,&integer(release)?])?!=1 { return Err(Error::Limit("repository quota")); }
+            if tx.execute("UPDATE alt_repositories SET stored_bytes=stored_bytes+$2,reserved_bytes=reserved_bytes-$3 WHERE id=$1 AND $2::bigint-$3::bigint<=quota_bytes-stored_bytes-reserved_bytes-link_bytes",&[repository,&integer(entry.bytes)?,&integer(release)?])?!=1 { return Err(Error::Limit("repository quota")); }
             tx.execute("UPDATE alt_requests SET reserved_bytes=reserved_bytes-$5 WHERE repository=$1 AND epoch=$2 AND actor_id=$3 AND request_id=$4",&[repository,&integer(key.scope.recovery_epoch)?,&key.actor_id,&key.request_id,&integer(release)?])?;
         }
         tx.execute(

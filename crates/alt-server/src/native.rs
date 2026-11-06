@@ -62,6 +62,9 @@ pub fn execute_native(
     source: &mut dyn Read,
 ) -> Result<Output> {
     match route {
+        Route::ChangeLink(_) => Err(Error::Precondition(
+            "change-link route requires refreshed authority dispatch",
+        )),
         Route::Portable(_) => Err(Error::Precondition(
             "portable route requires refreshed authority dispatch",
         )),

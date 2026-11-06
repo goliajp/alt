@@ -1,0 +1,19 @@
+[package]
+name = "golia-change-link-http"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "MIT OR Apache-2.0"
+description = "Bounded authenticated transport for GOLIA change-link events"
+[dependencies]
+golia-change-link = { path = "../golia-change-link", version = "=0.1.0" }
+ed25519-dalek = "2"
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+serde_json = "1"
+tokio = { version = "1", features = ["net", "time"] }
+thiserror = "2"
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros", "net", "io-util", "time"] }
+[[test]]
+name = "it"
+path = "tests/it/main.rs"

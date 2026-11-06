@@ -343,6 +343,11 @@ async fn handle_inner(
         // methods additionally recheck the credential inside their transaction.
         store.browser_session(&credential, &browser.origin)?;
         match route {
+            WebRoute::ChangeLink(selected) => {
+                crate::change_links::api::request_bytes(&mut store, &credential, &selected)?;
+                let output = crate::change_links::api::execute(&mut store, &credential, &factory.change_links, selected, &mut &raw[..])?;
+                Ok((output, None))
+            }
             WebRoute::Session => Ok((Output::Json(session(&mut store, &credential, &browser.origin, &token, &factory.signing_key)?), None)),
             WebRoute::Navigation => {
                 let cloud=factory.cloud.as_ref().ok_or(Error::Unauthorized)?;

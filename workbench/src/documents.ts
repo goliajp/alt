@@ -1,7 +1,8 @@
 import type { RecordKind } from './api';
 export type Document =
   | { kind: 'inbox' | 'repositories' | 'settings' }
-  | { kind: 'repository' | 'history' | 'tasks' | 'deliveries' | 'migration'; repository: string }
+  | { kind: 'repository' | 'history' | 'tasks' | 'deliveries' | 'migration' | 'associations'; repository: string }
+  | { kind: 'deliveryLinks'; repository:string; delivery:string }
   | { kind: 'tree'; repository: string; commit: string; path: string }
   | { kind: 'blob'; repository: string; oid: string; path: string }
   | { kind: 'record'; repository: string; recordKind: RecordKind; id: string }
@@ -45,7 +46,8 @@ export function documentFromHash(hash: string): Document | undefined {
   const exact = (...keys: string[]) => Object.keys(data).sort().join(',') === keys.sort().join(',');
   if (['inbox', 'repositories', 'settings'].includes(String(data.kind)) && exact('kind')) return data as Document;
   if (!identity('repository')) return;
-  if (['repository', 'history', 'tasks', 'deliveries', 'migration'].includes(String(data.kind)) && exact('kind', 'repository')) return data as Document;
+  if (['repository', 'history', 'tasks', 'deliveries', 'migration', 'associations'].includes(String(data.kind)) && exact('kind', 'repository')) return data as Document;
+  if(data.kind==='deliveryLinks'&&text('delivery',64)&&/^[0-9a-f]{64}$/.test(data.delivery as string)&&exact('kind','repository','delivery'))return data as Document;
   if (data.kind === 'tree' && oid('commit') && text('path', 8192) && /^(?:[0-9a-f]{2})*$/.test(data.path as string) && exact('kind', 'repository', 'commit', 'path')) return data as Document;
   if (data.kind === 'blob' && oid('oid') && text('path', 4096) && exact('kind', 'repository', 'oid', 'path')) return data as Document;
   if (data.kind === 'record' && ['task', 'candidate', 'evidence', 'review', 'integration', 'delivery'].includes(String(data.recordKind)) && text('id', 64) && /^[0-9a-f]{64}$/.test(data.id as string) && exact('kind', 'repository', 'recordKind', 'id')) return data as Document;

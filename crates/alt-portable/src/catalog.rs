@@ -116,6 +116,10 @@ pub struct Catalog {
     /// These are historical evidence, never current target authorization.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub import_receipts: Vec<Blob>,
+    /// Signed cross-product history only. Embedded public keys never install a
+    /// live channel, credential, task claim, or current approval on the target.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub change_links: Vec<golia_change_link::HistoricalEvent>,
     pub identities: Vec<IdentityRequirement>,
     pub blobs: Vec<Blob>,
 }
@@ -156,6 +160,7 @@ impl Catalog {
             || self.blobs.len() > limits.entries
             || self.publications.len() > limits.publications
             || self.import_receipts.len() > limits.entries
+            || self.change_links.len() > limits.entries
         {
             return Err(Error::Limit("catalog entries"));
         }
@@ -169,7 +174,27 @@ impl Catalog {
         )?;
         ordered(self.blobs.iter().map(|v| v.blake3.as_str()))?;
         ordered(self.import_receipts.iter().map(|v| v.blake3.as_str()))?;
-        let mut bytes = 0u64;
+        let mut previous_link = None;
+        for history in &self.change_links {
+            history
+                .validate()
+                .map_err(|_| Error::Invalid("change-link history"))?;
+            let digest = history
+                .statement
+                .digest()
+                .map_err(|_| Error::Invalid("change-link identity"))?;
+            if previous_link
+                .as_ref()
+                .is_some_and(|previous| previous >= &digest)
+            {
+                return Err(Error::Invalid("duplicate or unordered change-link history"));
+            }
+            previous_link = Some(digest);
+        }
+        let mut bytes = self.change_link_bytes()?;
+        if bytes > limits.total_bytes {
+            return Err(Error::Limit("archive bytes"));
+        }
         let mut blobs = BTreeMap::new();
         for blob in &self.blobs {
             decode_hex::<32>(&blob.blake3)?;
@@ -260,6 +285,13 @@ impl Catalog {
             policy.validate()?;
         }
         Ok(())
+    }
+    /// Logical canonical signed metadata, counted separately from file blobs.
+    pub fn change_link_bytes(&self) -> Result<u64> {
+        self.change_links.iter().try_fold(0u64, |sum, history| {
+            sum.checked_add(serde_json::to_vec(history)?.len() as u64)
+                .ok_or(Error::Limit("change-link bytes"))
+        })
     }
     pub fn canonical_bytes(&self, limits: PackageLimits) -> Result<Vec<u8>> {
         self.validate(limits)?;

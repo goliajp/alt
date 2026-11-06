@@ -1,5 +1,6 @@
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 mod adopt;
+mod changes;
 use alt_remote_protocol::{ActorKind, Attribution, DeploymentMode, Limits};
 use alt_repository_service::{Grant, RefSelector};
 use alt_server::{HttpOptions, NativeOptions, StoreFactory};
@@ -171,6 +172,7 @@ impl Server {
             session_ttl_ms: 600_000,
         };
         let factory = StoreFactory {
+            change_links: Vec::new().into(),
             cloud: None,
             database: config,
             bytes,
@@ -891,6 +893,14 @@ fn two_clients_continue_original_task_revalidate_review_publish_and_export_witho
         )
         .unwrap(),
         original_record
+    );
+    changes::inspect_delivery(
+        &mut server,
+        &aw,
+        "origin",
+        string(&delivered, "delivery_id"),
+        &definition,
+        &alice,
     );
     // A recovery transaction revokes credentials and advances the current scope;
     // the original signed publication remains historical evidence of epoch 1.

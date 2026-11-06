@@ -78,6 +78,18 @@ enum Action {
         #[arg(long)]
         expires_unix_ms: u64,
     },
+    /// Explicitly install one operator-configured cross-product pairing
+    LinkInstall {
+        repository: String,
+        epoch: u64,
+        channel: String,
+    },
+    /// Disable a pairing without removing its historical signed facts
+    LinkDisable {
+        repository: String,
+        epoch: u64,
+        channel: String,
+    },
     /// Open an existing instance without migration/bootstrap fallback
     Serve,
     /// Verify current schema, persisted mode, receipt key and volume identity
@@ -511,6 +523,38 @@ fn execute(args: &Args) -> Result<Value> {
     ))?)?;
     let admin = config.factory()?.authenticate(&mut store, &token)?;
     let result = match &args.command {
+        Action::LinkInstall {
+            repository,
+            epoch,
+            channel,
+        } => {
+            let scope = alt_remote_protocol::Scope {
+                installation_id: config.instance.installation_id.clone(),
+                repository_instance_id: repository.clone(),
+                recovery_epoch: *epoch,
+            };
+            let factory = config.factory()?;
+            let runtime = factory
+                .change_links
+                .iter()
+                .find(|c| c.matches(&scope, channel))
+                .ok_or(Error::Config("change-link is not configured"))?;
+            runtime.install(&factory, &token)?;
+            json!({"repository":repository,"channel":channel,"installed":true})
+        }
+        Action::LinkDisable {
+            repository,
+            epoch,
+            channel,
+        } => {
+            let scope = alt_remote_protocol::Scope {
+                installation_id: config.instance.installation_id.clone(),
+                repository_instance_id: repository.clone(),
+                recovery_epoch: *epoch,
+            };
+            store.disable_change_channel(&admin, &scope, channel)?;
+            json!({"repository":repository,"channel":channel,"disabled":true})
+        }
         Action::Status => {
             serde_json::to_value(store.instance_status(&admin)?).map_err(|_| Error::Store)?
         }

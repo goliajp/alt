@@ -1,5 +1,6 @@
 //! Bounded native HTTP transport. Caller owns durable intents, origin/key
 //! trust, local publication previews and all decisions to resume a request.
+pub mod change_links;
 pub mod portable;
 use alt_remote_protocol::*;
 use ed25519_dalek::{Signature, VerifyingKey};

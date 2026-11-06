@@ -404,3 +404,9 @@ The control plane's independent readiness challenge includes the backup digest,
 so merely starting an empty database cannot complete recovery. Regional fencing
 and readiness do not replace verification of the restored repository contents.
 
+
+## Sentori connections
+
+[Delivery associations](../../docs/change-links.md) describes reciprocal operator
+pairing, current credentials, explicit install/disable, CLI and workbench flows,
+and the distinction between repair requests, actual Tasks and runtime evidence.

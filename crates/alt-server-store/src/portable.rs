@@ -353,10 +353,17 @@ impl Store {
             objects: vec![],
             publications: vec![],
             import_receipts: vec![],
+            change_links: vec![],
             identities: vec![],
             blobs: vec![],
         };
         let bound = integer((limits.package.entries as u64).saturating_add(1))?;
+        catalog.change_links = crate::link_history::list(
+            &mut tx,
+            repository,
+            limits.package.entries,
+            limits.package.metadata_bytes,
+        )?;
         // Do not recursively include previous export snapshots. Only live
         // publication roots, including retained task history, seed this one.
         let rows = tx.query("SELECT b.blake3,b.bytes,b.state FROM alt_blobs b WHERE b.repository=$1 AND EXISTS(SELECT 1 FROM alt_pins p WHERE p.repository=b.repository AND p.blake3=b.blake3 AND p.expires_at IS NULL AND p.pin_id NOT LIKE 'portable-export:%') ORDER BY b.blake3 LIMIT $2", &[repository,&bound])?;

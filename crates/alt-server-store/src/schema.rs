@@ -3,7 +3,7 @@ use alt_remote_protocol::Limits;
 use ed25519_dalek::SigningKey;
 use postgres::{Client, GenericClient};
 
-const MIGRATIONS: [&str; 10] = [
+const MIGRATIONS: [&str; 13] = [
     include_str!("schema.sql"),
     include_str!("schema-v2.sql"),
     include_str!("schema-v3.sql"),
@@ -14,6 +14,9 @@ const MIGRATIONS: [&str; 10] = [
     include_str!("schema-v8.sql"),
     include_str!("schema-v9.sql"),
     include_str!("schema-v10.sql"),
+    include_str!("schema-v11.sql"),
+    include_str!("schema-v12.sql"),
+    include_str!("schema-v13.sql"),
 ];
 pub(crate) fn check(client: &mut impl GenericClient, expected: usize) -> Result<()> {
     let rows = client.query(
@@ -59,6 +62,15 @@ pub(crate) fn apply_v9(client: &mut impl GenericClient) -> Result<()> {
 }
 pub(crate) fn apply_v10(client: &mut impl GenericClient) -> Result<()> {
     apply(client, 10)
+}
+pub(crate) fn apply_v11(client: &mut impl GenericClient) -> Result<()> {
+    apply(client, 11)
+}
+pub(crate) fn apply_v12(client: &mut impl GenericClient) -> Result<()> {
+    apply(client, 12)
+}
+pub(crate) fn apply_v13(client: &mut impl GenericClient) -> Result<()> {
+    apply(client, 13)
 }
 fn apply(client: &mut impl GenericClient, version: usize) -> Result<()> {
     client.batch_execute(MIGRATIONS[version - 1])?;
@@ -158,6 +170,33 @@ impl Store {
         limits: Limits,
     ) -> Result<Self> {
         Self::migrate_from(client, bytes, spec, signing_key, limits, 9)
+    }
+    pub fn migrate_v10(
+        client: Client,
+        bytes: ByteStore,
+        spec: InstanceSpec,
+        signing_key: SigningKey,
+        limits: Limits,
+    ) -> Result<Self> {
+        Self::migrate_from(client, bytes, spec, signing_key, limits, 10)
+    }
+    pub fn migrate_v11(
+        client: Client,
+        bytes: ByteStore,
+        spec: InstanceSpec,
+        signing_key: SigningKey,
+        limits: Limits,
+    ) -> Result<Self> {
+        Self::migrate_from(client, bytes, spec, signing_key, limits, 11)
+    }
+    pub fn migrate_v12(
+        client: Client,
+        bytes: ByteStore,
+        spec: InstanceSpec,
+        signing_key: SigningKey,
+        limits: Limits,
+    ) -> Result<Self> {
+        Self::migrate_from(client, bytes, spec, signing_key, limits, 12)
     }
     fn migrate_from(
         mut client: Client,

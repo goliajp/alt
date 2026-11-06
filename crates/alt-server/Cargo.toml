@@ -4,7 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 [dependencies]
+golia-change-link.workspace = true
+golia-change-link-http.workspace = true
 alt-portable.workspace = true
+alt-provenance.workspace = true
 subtle = "2"
 alt-server-store.workspace = true
 alt-cloud-client.workspace = true
@@ -39,6 +42,7 @@ tar = "0.4"
 tokio-util = {version="0.7",features=["io"]}
 
 [dev-dependencies]
+alt-command-protocol.workspace = true
 tiny_http = "0.12"
 alt-wire-http.workspace = true
 ureq.workspace = true

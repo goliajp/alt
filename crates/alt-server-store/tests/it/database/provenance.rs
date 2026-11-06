@@ -122,7 +122,7 @@ fn schema_five_restored_history_uses_matching_durable_backup_audit() {
     // version five already persisted, and dropping only the new lineage table.
     f.client()
         .batch_execute(
-            "DROP TABLE alt_archived_records,alt_archived_publications; DROP TABLE alt_cloud_portable_reservations,alt_portable_import_content,alt_portable_imports; ALTER TABLE alt_repositories DROP COLUMN portable_import; DROP TABLE alt_portable_exports; ALTER TABLE alt_repositories DROP COLUMN portable_freeze; DROP TABLE alt_publication_provenance; DELETE FROM alt_schema WHERE version>=6",
+            "DROP TABLE alt_link_task_claims,alt_link_current,alt_link_inbox,alt_link_outbox,alt_link_channels; DROP TABLE alt_link_history; ALTER TABLE alt_repositories DROP COLUMN link_bytes; DROP TABLE alt_archived_records,alt_archived_publications; DROP TABLE alt_cloud_portable_reservations,alt_portable_import_content,alt_portable_imports; ALTER TABLE alt_repositories DROP COLUMN portable_import; DROP TABLE alt_portable_exports; ALTER TABLE alt_repositories DROP COLUMN portable_freeze; DROP TABLE alt_publication_provenance; DELETE FROM alt_schema WHERE version>=6",
         )
         .unwrap();
     let mut upgraded = Store::migrate_v5(
@@ -166,7 +166,7 @@ fn legacy_backfill_refuses_missing_or_wrong_epoch_audit_without_partial_migratio
         f.store.activate_restored(10, &"b".repeat(64)).unwrap();
         f.client()
             .batch_execute(
-                "DROP TABLE alt_archived_records,alt_archived_publications; DROP TABLE alt_cloud_portable_reservations,alt_portable_import_content,alt_portable_imports; ALTER TABLE alt_repositories DROP COLUMN portable_import; DROP TABLE alt_portable_exports; ALTER TABLE alt_repositories DROP COLUMN portable_freeze; DROP TABLE alt_publication_provenance; DELETE FROM alt_schema WHERE version>=6",
+                "DROP TABLE alt_link_task_claims,alt_link_current,alt_link_inbox,alt_link_outbox,alt_link_channels; DROP TABLE alt_link_history; ALTER TABLE alt_repositories DROP COLUMN link_bytes; DROP TABLE alt_archived_records,alt_archived_publications; DROP TABLE alt_cloud_portable_reservations,alt_portable_import_content,alt_portable_imports; ALTER TABLE alt_repositories DROP COLUMN portable_import; DROP TABLE alt_portable_exports; ALTER TABLE alt_repositories DROP COLUMN portable_freeze; DROP TABLE alt_publication_provenance; DELETE FROM alt_schema WHERE version>=6",
             )
             .unwrap();
         f.client().batch_execute(replace).unwrap();

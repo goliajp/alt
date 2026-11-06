@@ -1,3 +1,4 @@
+mod change_links;
 mod maintenance;
 mod provision;
 use super::*;
@@ -47,6 +48,7 @@ impl OperatorDb {
         let root = tempfile::tempdir().unwrap();
         let config = root.path().join("server.json");
         let spec = Config {
+            change_links: Vec::new(),
             portable: None,
             cloud: None,
             browser: None,

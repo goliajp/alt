@@ -1,0 +1,41 @@
+{
+  "package": "golia-change-link",
+  "version": "0.1.0",
+  "canonical_source": "GOLIA shared core/crates/change-link",
+  "license": "MIT OR Apache-2.0",
+  "status": "development candidate; source identity is the file digest manifest",
+  "files": [
+    {
+      "path": "Cargo.toml",
+      "sha256": "aa514e6c628253386a726a6bc149cec48bda4cf1a7822ee17d81d82b4f8d81c4"
+    },
+    {
+      "path": "LICENSE-APACHE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "path": "LICENSE-MIT",
+      "sha256": "d557550782e083262ffdc206abf85fd82c63c2ea4c2581efaaef0f010c7bc7a9"
+    },
+    {
+      "path": "README.md",
+      "sha256": "a42fa240e6eb630d41bb689e1d9843d9c546437b91944e2635a3a728287dff19"
+    },
+    {
+      "path": "src/lib.rs",
+      "sha256": "c3cb71d852016e03159473121a0020e2e46efea60f866c150c29572456dd4ad9"
+    },
+    {
+      "path": "src/transport.rs",
+      "sha256": "3a6b1b9d89105d1f0bf2334e90bf39385c0fbafbccf84fe7527d19ea2db63493"
+    },
+    {
+      "path": "tests/it/main.rs",
+      "sha256": "d5837aec28da76367359ef5d286019869ac00c1cff885ea3f2758715dc07c544"
+    },
+    {
+      "path": "tests/it/transport.rs",
+      "sha256": "1d83ec58a11e713631155c691fa52bcd19199587464ab8048349ef8a82256a68"
+    }
+  ]
+}

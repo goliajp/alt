@@ -33,9 +33,19 @@ pub struct TaskSpec {
     pub auxiliary: Vec<alt_input::InputRoot>,
     pub exclusions: Vec<String>,
     pub validation: alt_input::Context,
+    /// Original signed request and acceptance. This preserves historical
+    /// attribution only; the caller separately checks current remote authority
+    /// and claims the exact planned Task before creating a source-linked task.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repair_source: Option<Box<golia_change_link::RepairSource>>,
 }
 impl TaskSpec {
     pub fn validate(&self) -> Result<()> {
+        if let Some(source) = &self.repair_source {
+            source
+                .validate()
+                .map_err(|_| Error::Invalid("invalid repair source proof".into()))?;
+        }
         if self.purpose.trim().is_empty()
             || self.authority.trim().is_empty()
             || self.allowed_paths.is_empty()
@@ -81,6 +91,20 @@ impl Record for Task {
     fn validate(&self) -> Result<()> {
         version(self.schema_version)?;
         self.spec.validate()?;
+        if let Some(source) = &self.spec.repair_source {
+            let golia_change_link::Body::RepairRequest(request) = &source.request.event.body else {
+                return Err(Error::Invalid(
+                    "repair source must be a repair request".into(),
+                ));
+            };
+            if self.target_expected.len() != 1
+                || !self.target_expected.contains_key(&request.target_ref)
+            {
+                return Err(Error::Invalid(
+                    "repair target differs from the signed request".into(),
+                ));
+            }
+        }
         if self.scope.repository.is_empty()
             || self.scope.workspace.is_empty()
             || self.creator_request.is_empty()

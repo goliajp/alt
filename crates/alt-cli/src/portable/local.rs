@@ -506,6 +506,7 @@ mod tests {
                 objects: vec![],
                 publications: vec![],
                 import_receipts: vec![],
+                change_links: vec![],
                 identities: vec![],
                 blobs: blobs.clone(),
             },

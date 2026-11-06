@@ -655,6 +655,27 @@ pub fn restore(
                 key,
                 target.limits,
             )?,
+            12 => alt_server_store::Store::migrate_v12(
+                client,
+                bytes,
+                original.instance.clone(),
+                key,
+                target.limits,
+            )?,
+            11 => alt_server_store::Store::migrate_v11(
+                client,
+                bytes,
+                original.instance.clone(),
+                key,
+                target.limits,
+            )?,
+            10 => alt_server_store::Store::migrate_v10(
+                client,
+                bytes,
+                original.instance.clone(),
+                key,
+                target.limits,
+            )?,
             9 => alt_server_store::Store::migrate_v9(
                 client,
                 bytes,

@@ -1,3 +1,4 @@
+import { ChangeLinksView } from './change-links';
 import { MigrationView } from './migration';
 import { useState, type ReactNode } from 'react';
 import { File, Folder, GitCommitHorizontal, ArrowUpRight } from 'lucide-react';
@@ -34,6 +35,7 @@ export function DocumentView(props: Props) {
     case 'record': return <RecordView {...props} document={document}/>;
     case 'review': return <ReviewView {...props} document={document}/>;
     case 'migration': return <MigrationView repository={document.repository} session={props.session} t={t} log={props.log}/>;
+    case 'associations':case 'deliveryLinks':return <ChangeLinksView repository={document.repository} delivery={document.kind==='deliveryLinks'?document.delivery:undefined} session={props.session} t={t} open={open}/>;
     case 'settings': return <SettingsView {...props}/>;
   }
 }
@@ -41,7 +43,7 @@ function RepositoryView({ repository, t, open, session }: Props & { repository: 
   const [revision, refresh] = useState(0);
   const resource = useResource<Repository & { refs: Record<string,string> }>(repoPath(repository),revision);
   return <><Heading title={repository} t={t} refresh={()=>refresh(value=>value+1)}/>{resource.error?<Failure error={resource.error} t={t} retry={()=>refresh(value=>value+1)}/>:!resource.value?<Loading t={t}/>:<>
-    <div className="document-actions"><Button onClick={()=>open({kind:'history',repository})}>{t.history}</Button><Button onClick={()=>open({kind:'tasks',repository})}>{t.tasks}</Button><Button onClick={()=>open({kind:'deliveries',repository})}>{t.deliveries}</Button>{session.user.administrator&&<Button onClick={()=>open({kind:'migration',repository})}>{t.migration}</Button>}</div>
+    <div className="document-actions"><Button onClick={()=>open({kind:'history',repository})}>{t.history}</Button><Button onClick={()=>open({kind:'tasks',repository})}>{t.tasks}</Button><Button onClick={()=>open({kind:'deliveries',repository})}>{t.deliveries}</Button><Button onClick={()=>open({kind:'associations',repository})}>{t.associations}</Button>{session.user.administrator&&<Button onClick={()=>open({kind:'migration',repository})}>{t.migration}</Button>}</div>
     <h2>{t.branch}</h2><div className="resource-list">{Object.entries(resource.value.refs).map(([name,oid])=><button key={name} className="resource-row" onClick={()=>open({kind:'tree',repository,commit:oid,path:''})}><strong>{name}</strong><code>{oid}</code>{name===resource.value!.default_branch&&<span>HEAD</span>}</button>)}</div>
     {Object.keys(resource.value.refs).length===0&&<p className="message">{t.empty}</p>}
   </>}</>;
@@ -66,6 +68,7 @@ function RecordView({document,t,open}:Props & {document:Extract<Document,{kind:'
   const [revision,refresh]=useState(0);
   const resource=useResource<RecordDetail>(repoPath(document.repository,`/records/${document.recordKind}/${document.id}`),revision);
   return <><Heading title={t[document.recordKind]} t={t} refresh={()=>refresh(value=>value+1)}/>{resource.error?<Failure error={resource.error} t={t} retry={()=>refresh(value=>value+1)}/>:!resource.value?<Loading t={t}/>:<>
+    {document.recordKind==='delivery'&&<Button onClick={()=>open({kind:'deliveryLinks',repository:document.repository,delivery:document.id})}>{t.deliveryLinks}</Button>}
     <h2>{resource.value.summary.title}</h2><p><code>{resource.value.summary.id}</code></p><dl className="record-fields">{resource.value.fields.map(field=><div key={field.label}><dt>{field.label in t?t[field.label as keyof Text]:field.label}</dt><dd>{field.value}</dd></div>)}</dl>
     {resource.value.fields_truncated&&<p>{t.truncated}</p>}<h2>{t.source}</h2><p>{t.publishedBy}: {resource.value.publication.actor_id}</p><p><code>{resource.value.publication.digest}</code> · {resource.value.publication.sequence}</p>
     <h2>{t.related}</h2><div className="resource-list">{resource.value.related.map(record=><button className="resource-row" key={`${record.kind}:${record.id}`} onClick={()=>open({kind:'record',repository:document.repository,recordKind:record.kind,id:record.id})}><strong>{t[record.kind]}</strong><span>{record.title}</span><code>{record.id.slice(0,12)}</code></button>)}</div>

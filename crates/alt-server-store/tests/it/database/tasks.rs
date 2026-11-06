@@ -55,16 +55,26 @@ fn add(payload: &mut Payload, kind: ContentKind, raw: Vec<u8>) -> alt_task::Arti
     artifact
 }
 pub(super) fn task_payload(request: &str) -> Payload {
+    task_payload_with_source(request, None)
+}
+pub(super) fn task_payload_with_source(
+    request: &str,
+    source: Option<golia_change_link::RepairSource>,
+) -> Payload {
     let mut payload = Payload::new(request, None);
     payload.publication.refs.clear();
     let tree = payload.manifest.entries[0].git_oid.clone().unwrap();
-    let task: alt_task::Task = serde_json::from_value(json!({
+    let mut task: alt_task::Task = serde_json::from_value(json!({
         "schema_version":1,"scope":{"repository":"original","workspace":"original-worktree"},
         "spec":{"purpose":"publish selected task","authority":"owner","allowed_paths":["."],"auxiliary":[],"exclusions":[],
             "validation":{"commands":[["verify"]],"cwd":".","environment":{"values":{},"complete":true},"tools":[],"external":[],"validation":{}}},
         "baseline":{"head":payload.commit.to_string(),"tree":tree,"refs":{}},
         "target_expected":{"refs/heads/main":payload.commit.to_string()},"creator_request":"original-create"
     })).unwrap();
+    if let Some(source) = source {
+        task.spec.repair_source = Some(Box::new(source));
+        task.creator_request = format!("create-{request}");
+    }
     let id = task.id().unwrap();
     let key = RecordKey {
         kind: RecordKind::Task,
@@ -229,7 +239,7 @@ fn v2_migration_recovers_every_publication_of_a_root_and_preserves_raw_variants(
             .get::<_, i64>(0),
         1
     );
-    f.client().batch_execute("DROP TABLE alt_archived_records,alt_archived_publications; DROP TABLE alt_cloud_portable_reservations,alt_portable_import_content,alt_portable_imports; ALTER TABLE alt_repositories DROP COLUMN portable_import; DROP TABLE alt_portable_exports; ALTER TABLE alt_repositories DROP COLUMN portable_freeze; DROP TABLE alt_publication_provenance; DROP TABLE alt_device_authorizations,alt_client_credentials,alt_cloud_logins,alt_delegations,alt_cloud_reservations,alt_cloud_ingress,alt_cloud_credentials,alt_cloud_accounts,alt_cloud_binding; DROP TABLE alt_browser_binding,alt_web_sessions,alt_web_accounts,alt_login_budgets,alt_instance_audit; DROP TABLE alt_task_bundle_records,alt_task_bundle_roots; ALTER TABLE alt_repositories DROP COLUMN default_branch; DELETE FROM alt_schema WHERE version>=3").unwrap();
+    f.client().batch_execute("DROP TABLE alt_link_task_claims,alt_link_current,alt_link_inbox,alt_link_outbox,alt_link_channels; DROP TABLE alt_link_history; ALTER TABLE alt_repositories DROP COLUMN link_bytes; DROP TABLE alt_archived_records,alt_archived_publications; DROP TABLE alt_cloud_portable_reservations,alt_portable_import_content,alt_portable_imports; ALTER TABLE alt_repositories DROP COLUMN portable_import; DROP TABLE alt_portable_exports; ALTER TABLE alt_repositories DROP COLUMN portable_freeze; DROP TABLE alt_publication_provenance; DROP TABLE alt_device_authorizations,alt_client_credentials,alt_cloud_logins,alt_delegations,alt_cloud_reservations,alt_cloud_ingress,alt_cloud_credentials,alt_cloud_accounts,alt_cloud_binding; DROP TABLE alt_browser_binding,alt_web_sessions,alt_web_accounts,alt_login_budgets,alt_instance_audit; DROP TABLE alt_task_bundle_records,alt_task_bundle_roots; ALTER TABLE alt_repositories DROP COLUMN default_branch; DELETE FROM alt_schema WHERE version>=3").unwrap();
     assert!(
         Store::open(
             f.client(),
@@ -519,7 +529,7 @@ fn explicit_v1_migration_preserves_rows_and_fences_old_runtime() {
     .unwrap();
     // Recreate the actual frozen v1 layout, preserving its original checksum
     // and existing identity, credentials and repository rows.
-    f.client().batch_execute("DROP TABLE alt_archived_records,alt_archived_publications; DROP TABLE alt_cloud_portable_reservations,alt_portable_import_content,alt_portable_imports; ALTER TABLE alt_repositories DROP COLUMN portable_import; DROP TABLE alt_portable_exports; ALTER TABLE alt_repositories DROP COLUMN portable_freeze; DROP TABLE alt_publication_provenance; DROP TABLE alt_device_authorizations,alt_client_credentials,alt_cloud_logins,alt_delegations,alt_cloud_reservations,alt_cloud_ingress,alt_cloud_credentials,alt_cloud_accounts,alt_cloud_binding; DROP TABLE alt_browser_binding,alt_web_sessions,alt_web_accounts,alt_login_budgets,alt_instance_audit; DROP TABLE alt_task_bundle_records,alt_task_bundle_roots,alt_current_approvals,alt_review_grants,alt_collector_policies,alt_task_bundles,alt_task_records; ALTER TABLE alt_repositories DROP COLUMN default_branch; DELETE FROM alt_schema WHERE version>=2").unwrap();
+    f.client().batch_execute("DROP TABLE alt_link_task_claims,alt_link_current,alt_link_inbox,alt_link_outbox,alt_link_channels; DROP TABLE alt_link_history; ALTER TABLE alt_repositories DROP COLUMN link_bytes; DROP TABLE alt_archived_records,alt_archived_publications; DROP TABLE alt_cloud_portable_reservations,alt_portable_import_content,alt_portable_imports; ALTER TABLE alt_repositories DROP COLUMN portable_import; DROP TABLE alt_portable_exports; ALTER TABLE alt_repositories DROP COLUMN portable_freeze; DROP TABLE alt_publication_provenance; DROP TABLE alt_device_authorizations,alt_client_credentials,alt_cloud_logins,alt_delegations,alt_cloud_reservations,alt_cloud_ingress,alt_cloud_credentials,alt_cloud_accounts,alt_cloud_binding; DROP TABLE alt_browser_binding,alt_web_sessions,alt_web_accounts,alt_login_budgets,alt_instance_audit; DROP TABLE alt_task_bundle_records,alt_task_bundle_roots,alt_current_approvals,alt_review_grants,alt_collector_policies,alt_task_bundles,alt_task_records; ALTER TABLE alt_repositories DROP COLUMN default_branch; DELETE FROM alt_schema WHERE version>=2").unwrap();
     assert!(
         Store::open(
             f.client(),
@@ -631,6 +641,7 @@ fn completed_source(
         RecordKind::TaskBaseline => "baseline_id",
         RecordKind::Review => "review_id",
         RecordKind::Integration => "integration_id",
+        RecordKind::Delivery => "delivery_id",
         RecordKind::IntegrationReceipt => "receipt_id",
         _ => panic!("fixture kind"),
     };
@@ -1533,4 +1544,160 @@ fn recovered_original_integration_can_be_reviewed_without_fabricated_completion(
             .get::<_, i64>(0),
         8
     );
+}
+
+/// A native, verified Delivery fixture, with its original command proof and
+/// exact export report. No link endpoint may invent this identity from a HEAD.
+pub(super) fn published_delivery(f: &mut Fixture) -> (String, Payload) {
+    let base = Payload::new("delivery-base", None);
+    base.upload(&mut f.store, &f.credential);
+    base.publish(&mut f.store, &f.credential);
+    let mut data = integration_payload(&base, false, false);
+    let payload = &mut data.payload;
+    let index = payload
+        .manifest
+        .entries
+        .iter()
+        .position(|e| e.kind == ContentKind::TaskBundle)
+        .unwrap();
+    let mut bundle: TaskBundle = serde_json::from_slice(&payload.contents.remove(index)).unwrap();
+    payload.manifest.entries.remove(index);
+    let record = |kind| {
+        let selection = bundle
+            .records
+            .iter()
+            .find(|s| s.record.kind == kind)
+            .unwrap();
+        let index = payload
+            .manifest
+            .entries
+            .iter()
+            .position(|e| e.blake3 == selection.payload.blake3)
+            .unwrap();
+        TaskRecord::decode(
+            &selection.record,
+            &payload.contents[index],
+            task_limits().structured_bytes,
+        )
+        .unwrap()
+    };
+    let TaskRecord::Task(task) = record(RecordKind::Task) else {
+        panic!("task")
+    };
+    let TaskRecord::Integration(integration) = record(RecordKind::Integration) else {
+        panic!("integration")
+    };
+    let TaskRecord::TaskBaseline(baseline_record) = record(RecordKind::TaskBaseline) else {
+        panic!("baseline")
+    };
+    let index = payload
+        .manifest
+        .entries
+        .iter()
+        .position(|e| e.blake3 == baseline_record.snapshot.blake3)
+        .unwrap();
+    let baseline: alt_delivery::Snapshot =
+        serde_json::from_slice(&payload.contents[index]).unwrap();
+    let mut exported = baseline.clone();
+    exported
+        .refs
+        .insert(integration.target.clone(), integration.commit.clone());
+    exported.refs.insert(
+        "refs/notes/alt/meta".into(),
+        integration.notes_after.clone(),
+    );
+    for entry in &payload.manifest.entries {
+        if let Some(oid) = &entry.git_oid {
+            exported.objects.insert(
+                oid.clone(),
+                alt_delivery::ObjectIdentity {
+                    kind: match entry.kind {
+                        ContentKind::Tree => "tree",
+                        ContentKind::Commit => "commit",
+                        _ => panic!("fixture object"),
+                    }
+                    .into(),
+                    bytes: entry.bytes,
+                    blake3: entry.blake3.clone(),
+                },
+            );
+        }
+    }
+    let report = alt_delivery::ExportReport {
+        baseline_id: baseline.id().unwrap(),
+        exported,
+        files: BTreeMap::new(),
+        git: alt_delivery::GitCheck {
+            program: "/usr/bin/git".into(),
+            binary_blake3: "d".repeat(64),
+            version_stdout_hex: alt_input::hex(b"git version historical-fixture"),
+            version_stderr_hex: String::new(),
+            fsck_stdout_hex: String::new(),
+            fsck_stderr_hex: String::new(),
+            fsck_exit: 0,
+        },
+        config_transform: "files refs; extensions.refstorage removed".into(),
+    };
+    let delivery = alt_task::Delivery {
+        schema_version: 1,
+        task: task.id().unwrap(),
+        integration: integration.id().unwrap(),
+        destination: "/original/delivery".into(),
+        report: add(
+            payload,
+            ContentKind::Attachment,
+            serde_json::to_vec(&report).unwrap(),
+        ),
+        creator_request: "original-delivery".into(),
+    };
+    let id = delivery.id().unwrap();
+    let (record, selection) = selected_record(&delivery, payload);
+    bundle
+        .sources
+        .push(completed_source(&record, &task.scope, payload, None));
+    bundle.roots = vec![RecordRoot {
+        kind: alt_remote_protocol::RecordKind::Delivery,
+        id: id.clone(),
+    }];
+    bundle.records.push(selection);
+    payload.publication.record_roots = bundle.roots.clone();
+    add(
+        payload,
+        ContentKind::TaskBundle,
+        serde_json::to_vec(&bundle).unwrap(),
+    );
+    payload.publication.content_manifest = payload.manifest.id(limits()).unwrap();
+    let (_, reviewer) = current_reviewer(f, &data);
+    let (work, graph, tasks) = ready_integration(f, &data);
+    f.store.release_publication(&f.credential, &work).unwrap();
+    let review = f
+        .store
+        .acquire_review(&reviewer, &data.payload.publication.key, 60_000, 1000)
+        .unwrap();
+    let inspected = f
+        .store
+        .review_selection(&reviewer, &data.payload.publication.key)
+        .unwrap()
+        .approval_context(limits())
+        .unwrap();
+    f.store
+        .approve_integration(
+            &reviewer,
+            &review,
+            &graph,
+            &tasks,
+            &data.integration,
+            &inspected,
+            60_000,
+        )
+        .unwrap();
+    f.store.release_publication(&reviewer, &review).unwrap();
+    let next = f
+        .store
+        .acquire_publication(&f.credential, &data.payload.publication.key, 60_000, 1000)
+        .unwrap();
+    f.store
+        .publish_with_tasks(&f.credential, &next, &graph, &tasks)
+        .unwrap();
+    (id, data.payload)
 }

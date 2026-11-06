@@ -152,6 +152,7 @@ impl Local {
                 workspace: "original-worktree".into(),
             },
             spec: alt_task::TaskSpec {
+                repair_source: None,
                 purpose: "continue original task".into(),
                 authority: "owner".into(),
                 allowed_paths: vec![".".into()],

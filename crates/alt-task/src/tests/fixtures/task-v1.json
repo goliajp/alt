@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "scope": {
+    "repository": "compatibility-repository",
+    "workspace": "compatibility-workspace"
+  },
+  "spec": {
+    "purpose": "Preserve existing task identity",
+    "authority": "Explicit fixture authorization",
+    "allowed_paths": [
+      "."
+    ],
+    "auxiliary": [],
+    "exclusions": [],
+    "validation": {
+      "commands": [
+        [
+          "test-tool"
+        ]
+      ],
+      "cwd": ".",
+      "environment": {
+        "values": {},
+        "complete": true
+      },
+      "tools": [
+        {
+          "name": "test-tool",
+          "version": "1",
+          "binary_blake3": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        }
+      ],
+      "external": [],
+      "validation": {
+        "required": "test-tool"
+      }
+    }
+  },
+  "baseline": {
+    "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "tree": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "refs": {
+      "refs/heads/main": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  "target_expected": {
+    "refs/heads/main": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "creator_request": "cccccccccccccccccccccccccccccccc"
+}

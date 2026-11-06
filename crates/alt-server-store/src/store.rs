@@ -37,6 +37,14 @@ pub struct Credential {
     pub(crate) digest: String,
 }
 
+impl Credential {
+    /// Stable opaque credential identity for explicit integration installation.
+    /// This digest cannot be used as a bearer or construct an authenticated handle.
+    pub fn identifier(&self) -> &str {
+        &self.digest
+    }
+}
+
 pub struct Store {
     pub(crate) client: Client,
     pub(crate) bytes: ByteStore,
@@ -97,6 +105,9 @@ impl Store {
         crate::schema::apply_v8(&mut tx)?;
         crate::schema::apply_v9(&mut tx)?;
         crate::schema::apply_v10(&mut tx)?;
+        crate::schema::apply_v11(&mut tx)?;
+        crate::schema::apply_v12(&mut tx)?;
+        crate::schema::apply_v13(&mut tx)?;
         if let Some((audience, digest, provision_digest)) = cloud {
             crate::cloud::initialize_binding(&mut tx, &spec, audience, digest, provision_digest)?;
         }

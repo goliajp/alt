@@ -66,7 +66,7 @@ fn authorize_write(
     Ok(())
 }
 fn empty(tx: &mut Transaction<'_>, repository: &str) -> Result<()> {
-    let empty: bool = tx.query_one("SELECT transaction_sequence=0 AND NOT EXISTS(SELECT 1 FROM alt_refs WHERE repository=$1) AND NOT EXISTS(SELECT 1 FROM alt_task_records WHERE repository=$1) AND NOT EXISTS(SELECT 1 FROM alt_requests WHERE repository=$1) FROM alt_repositories WHERE id=$1", &[&repository])?.get(0);
+    let empty: bool = tx.query_one("SELECT transaction_sequence=0 AND NOT EXISTS(SELECT 1 FROM alt_link_history WHERE repository=$1) AND NOT EXISTS(SELECT 1 FROM alt_refs WHERE repository=$1) AND NOT EXISTS(SELECT 1 FROM alt_task_records WHERE repository=$1) AND NOT EXISTS(SELECT 1 FROM alt_requests WHERE repository=$1) FROM alt_repositories WHERE id=$1", &[&repository])?.get(0);
     if !empty {
         return Err(Error::Precondition(
             "portable import requires a new empty repository",
@@ -182,8 +182,9 @@ impl Store {
         let expires = time
             .checked_add(ttl_ms)
             .ok_or(Error::Limit("portable import lifetime"))?;
-        let mut reservation = 0u64;
-        let mut ingress = 0u64;
+        let metadata_bytes = envelope.catalog.change_link_bytes()?;
+        let mut reservation = metadata_bytes;
+        let mut ingress = metadata_bytes;
         for blob in &envelope.catalog.blobs {
             ingress = ingress
                 .checked_add(blob.bytes)
@@ -211,7 +212,7 @@ impl Store {
                 tx.execute("INSERT INTO alt_blobs(repository,blake3,bytes,state,created_at) VALUES($1,$2,$3,'staging',$4)", &[repository,&blob.blake3,&integer(blob.bytes)?,&integer(time)?])?;
             }
         }
-        if tx.execute("UPDATE alt_repositories SET reserved_bytes=reserved_bytes+$2,portable_import=$3 WHERE id=$1 AND $2<=quota_bytes-stored_bytes-reserved_bytes", &[repository,&integer(reservation)?,&key.request_id])? != 1 {
+        if tx.execute("UPDATE alt_repositories SET reserved_bytes=reserved_bytes+$2,portable_import=$3 WHERE id=$1 AND $2<=quota_bytes-stored_bytes-reserved_bytes-link_bytes", &[repository,&integer(reservation)?,&key.request_id])? != 1 {
             return Err(Error::Limit("repository quota"));
         }
         tx.execute("INSERT INTO alt_portable_imports(repository,import_id,actor_id,epoch,digest,intent,envelope,state,expires_at,reserved_bytes,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,'receiving',$8,$9,$10)", &[repository,&key.request_id,&key.actor_id,&integer(key.scope.recovery_epoch)?,&digest,&serde_json::to_value(intent)?,&serde_json::to_value(envelope)?,&integer(expires)?,&integer(reservation)?,&integer(time)?])?;
@@ -226,6 +227,9 @@ impl Store {
             )?;
         }
         crate::cloud_quota::reserve_portable(&mut tx, &self.spec, key, ingress)?;
+        // Canonical metadata has already arrived and is bound by the immutable
+        // envelope. Abandoning an import does not erase accepted ingress.
+        crate::cloud_quota::accept_portable(&mut tx, &self.spec, key, metadata_bytes)?;
         crate::browser::audit_details(
             &mut tx,
             &key.actor_id,
@@ -298,7 +302,7 @@ impl Store {
         if !blob.get::<_, bool>(2) {
             let remaining = unsigned(row.get("reserved_bytes"))?;
             let release = remaining.min(proof.bytes());
-            if tx.execute("UPDATE alt_repositories SET stored_bytes=stored_bytes+$2,reserved_bytes=reserved_bytes-$3 WHERE id=$1 AND $2::bigint-$3::bigint<=quota_bytes-stored_bytes-reserved_bytes", &[repository,&integer(proof.bytes())?,&integer(release)?])? != 1 {
+            if tx.execute("UPDATE alt_repositories SET stored_bytes=stored_bytes+$2,reserved_bytes=reserved_bytes-$3 WHERE id=$1 AND $2::bigint-$3::bigint<=quota_bytes-stored_bytes-reserved_bytes-link_bytes", &[repository,&integer(proof.bytes())?,&integer(release)?])? != 1 {
                 return Err(Error::Limit("repository quota"));
             }
             tx.execute("UPDATE alt_portable_imports SET reserved_bytes=reserved_bytes-$3 WHERE repository=$1 AND import_id=$2", &[repository,&key.request_id,&integer(release)?])?;

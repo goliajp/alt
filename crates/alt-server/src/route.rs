@@ -15,6 +15,7 @@ pub enum RequestAction {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Route {
+    ChangeLink(crate::change_links::route::ChangeRoute),
     Portable(crate::PortableRoute),
     Health,
     Capabilities,
@@ -105,6 +106,11 @@ pub fn parse_route(
     }
     if query.is_none() {
         match (method, p.as_slice()) {
+            ("POST", ["", "api", "v1", "change-links", "inbox"]) => {
+                return Some(Route::ChangeLink(
+                    crate::change_links::route::ChangeRoute::Inbox,
+                ));
+            }
             ("POST", ["", "v1", "delegations"]) => return Some(Route::IssueAgent),
             ("GET", ["", "v1", "delegations", value]) if digest(value) => {
                 return Some(Route::Delegation((*value).into()));
@@ -140,6 +146,9 @@ pub fn parse_route(
         return None;
     }
     match (method, &p[6..]) {
+        (_, ["changes", tail @ ..]) => {
+            crate::change_links::route::parse(method, scope, tail, query).map(Route::ChangeLink)
+        }
         (_, ["portable", tail @ ..]) if query.is_none() => {
             crate::portable::route::parse(method, scope, tail).map(Route::Portable)
         }

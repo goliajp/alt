@@ -28,3 +28,10 @@ test('migration documents stay bound to their original repository and carry no c
   expect(documentFromHash(documentHash({...document,token:'secret'} as typeof document))).toBeUndefined();
   expect(documentKey(document)).not.toBe(documentKey({...document,repository:'target'}));
 });
+
+test('delivery association shares bind the exact repository and delivery',()=>{
+  const doc={kind:'deliveryLinks' as const,repository:'original',delivery:'a'.repeat(64)};
+  expect(documentFromHash(documentHash(doc))).toEqual(doc);
+  expect(documentFromHash(documentHash({...doc,delivery:'a'.repeat(63)}))).toBeUndefined();
+  expect(documentFromHash(documentHash({...doc,peer:'https://arbitrary.test'} as typeof doc))).toBeUndefined();
+});

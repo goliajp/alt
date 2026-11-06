@@ -8,7 +8,7 @@ impl Drop for ChildGuard {
         let _ = self.0.wait();
     }
 }
-fn pause_library(root: &Path) -> std::path::PathBuf {
+pub(super) fn pause_library(root: &Path) -> std::path::PathBuf {
     let source = root.join("pause-fsync.c");
     let library = root.join("pause-fsync.so");
     std::fs::write(&source,r#"
@@ -54,7 +54,7 @@ int fsync(int fd) {
     );
     library
 }
-fn snapshot(path: &Path) -> BTreeMap<String, Vec<u8>> {
+pub(super) fn snapshot(path: &Path) -> BTreeMap<String, Vec<u8>> {
     std::fs::read_dir(path)
         .unwrap()
         .map(|entry| {
@@ -66,7 +66,7 @@ fn snapshot(path: &Path) -> BTreeMap<String, Vec<u8>> {
         })
         .collect()
 }
-fn interrupt_at_boundary(mut command: Command, phase: &str, log: &Path) {
+pub(super) fn interrupt_at_boundary(mut command: Command, phase: &str, log: &Path) {
     let mut child = ChildGuard(command.spawn().unwrap());
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {

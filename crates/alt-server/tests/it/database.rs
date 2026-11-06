@@ -3,6 +3,7 @@ use alt_remote_protocol::*;
 use alt_repository_service::{Grant, RefSelector};
 use alt_server::{HttpOptions, NativeOptions, StoreFactory};
 mod browser;
+mod change_links;
 mod chunks;
 mod cloud;
 mod git;
@@ -47,10 +48,19 @@ impl Running {
         browser: Option<alt_server::WebOptions>,
         cloud: Option<std::sync::Arc<alt_server::cloud::Runtime>>,
     ) -> Self {
+        Self::start_with_links(f, browser, cloud, vec![])
+    }
+    fn start_with_links(
+        f: &Fixture,
+        browser: Option<alt_server::WebOptions>,
+        cloud: Option<std::sync::Arc<alt_server::cloud::Runtime>>,
+        links: Vec<alt_server::change_links::ChannelRuntime>,
+    ) -> Self {
         let mut database: postgres::Config = f.admin_dsn.parse().unwrap();
         database.dbname(&f.database);
         let signing_key = SigningKey::from_bytes(&[f.key_seed; 32]);
         let factory = StoreFactory {
+            change_links: links.into(),
             cloud,
             database,
             bytes: ByteStore::open(&f.root.path().join("bytes")).unwrap(),
@@ -105,7 +115,12 @@ impl Running {
     fn send(&self, method: &str, path: &str, token: Option<&str>, body: &[u8]) -> ureq::Response {
         let mut request =
             ureq::request(method, &format!("{}{path}", self.url)).timeout(Duration::from_secs(15));
-        if method == "POST" && (path.ends_with("/requests") || path.ends_with("/approve")) {
+        if method == "POST"
+            && (path.ends_with("/requests")
+                || path.ends_with("/approve")
+                || path.contains("/changes/")
+                || path == "/api/v1/change-links/inbox")
+        {
             request = request.set("Content-Type", "application/json");
         }
         if let Some(token) = token {

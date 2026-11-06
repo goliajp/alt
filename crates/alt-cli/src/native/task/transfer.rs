@@ -6,6 +6,7 @@ use alt_task_transfer::{Package, Received};
 use alt_wire_http::native::{Options, Transport, verify_receipt};
 use std::io::{Read, Seek, SeekFrom};
 mod adoption;
+mod changes;
 mod current_review;
 use adoption::{Adoption, Predecessor};
 
@@ -356,6 +357,7 @@ impl NativeRepo<'_> {
     ) -> Res<()> {
         use crate::cli::TaskRemoteOp;
         match op {
+            TaskRemoteOp::Changes { op } => self.change_command(op, json_mode, out),
             TaskRemoteOp::Connect {
                 name,
                 url,

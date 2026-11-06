@@ -34,6 +34,7 @@ fn task() -> alt_task::Task {
             workspace: "origin-worktree".into(),
         },
         spec: alt_task::TaskSpec {
+            repair_source: None,
             purpose: "publish the selected candidate".into(),
             authority: "owner".into(),
             allowed_paths: vec![".".into()],

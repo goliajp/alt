@@ -778,3 +778,125 @@ fn browser_migration_requires_current_cookie_origin_and_csrf_for_binary_uploads(
         0
     );
 }
+
+#[test]
+#[ignore = "requires isolated PostgreSQL and actual browser HTTP authentication"]
+fn change_links_use_current_browser_scope_and_csrf() {
+    let mut f = Fixture::new();
+    user(&mut f, "browser", true);
+    user(&mut f, "ungranted", false);
+    f.store
+        .set_grants(
+            &f.credential,
+            "repository",
+            "browser",
+            true,
+            true,
+            &grants(),
+        )
+        .unwrap();
+    let origin = PublicOrigin::parse(ORIGIN).unwrap();
+    f.store.enable_browser(&f.credential, &origin).unwrap();
+    let assets = f.root.path().join("link-assets");
+    std::fs::create_dir(&assets).unwrap();
+    std::fs::write(
+        assets.join("index.html"),
+        "<!doctype html><title>alt</title>",
+    )
+    .unwrap();
+    let (config, runtime) = super::change_links::channel(&mut f, "http://127.0.0.1:1");
+    let server = Running::start_with_links(
+        &f,
+        Some(alt_server::WebOptions {
+            origin,
+            assets: alt_server::WebAssets::load(&assets).unwrap(),
+            session_ttl_ms: 60000,
+        }),
+        None,
+        vec![runtime],
+    );
+    let (cookie, session) = login(&server, "browser");
+    let (outsider, _) = login(&server, "ungranted");
+    let path = "/web/repositories/repository/epochs/1/changes";
+    let channels = format!("{path}/channels");
+    assert_eq!(get(&server, &channels, &outsider).0, 403);
+    let (status, values) = get(&server, &channels, &cookie);
+    assert_eq!(status, 200, "{values}");
+    assert_eq!(
+        values[0]["peer_browser_origin"],
+        "https://sentori.example.test"
+    );
+    assert_eq!(server.command("GET", &channels, &f.token).0, 401);
+    assert_eq!(
+        get(&server, &channels.replace("epochs/1", "epochs/2"), &cookie).0,
+        403
+    );
+    let request = super::change_links::repair_request(&f, &config);
+    assert_eq!(
+        server
+            .json(
+                "POST",
+                golia_change_link_http::INBOX_PATH,
+                &f.token,
+                &request
+            )
+            .0,
+        200
+    );
+    let digest = request.digest().unwrap();
+    let (status, history) = get(&server, &format!("{path}/events/{digest}"), &cookie);
+    assert_eq!(status, 200);
+    assert_eq!(
+        history["statement"],
+        serde_json::to_value(&request).unwrap()
+    );
+    let mapping = format!("{path}/mappings");
+    assert_eq!(
+        send(
+            &server,
+            "POST",
+            &mapping,
+            Some(&cookie),
+            Some(ORIGIN),
+            None,
+            Some(json!({}))
+        )
+        .status(),
+        403
+    );
+    let csrf = session["csrf"].as_str().unwrap();
+    assert_eq!(
+        send(
+            &server,
+            "POST",
+            &mapping,
+            Some(&cookie),
+            Some("https://foreign.test"),
+            Some(csrf),
+            Some(json!({}))
+        )
+        .status(),
+        403
+    );
+    // Valid browser authentication reaches the same strict business decoder.
+    assert_eq!(
+        send(
+            &server,
+            "POST",
+            &mapping,
+            Some(&cookie),
+            Some(ORIGIN),
+            Some(csrf),
+            Some(json!({}))
+        )
+        .status(),
+        400
+    );
+    f.store
+        .disable_local_user(&f.credential, "browser", true)
+        .unwrap();
+    assert_eq!(
+        get(&server, &format!("{path}/events/{digest}"), &cookie).0,
+        403
+    );
+}

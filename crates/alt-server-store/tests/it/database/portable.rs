@@ -431,7 +431,7 @@ fn cloud_unpaid_owner_exports_with_current_account_but_billing_authority_alone_c
 fn schema_six_upgrade_preserves_task_history_and_requires_explicit_migration() {
     let mut f = Fixture::new();
     let (payload, receipt) = publish_task(&mut f, "schema-six-history");
-    f.client().batch_execute("DROP TABLE alt_archived_records,alt_archived_publications; DROP TABLE alt_cloud_portable_reservations,alt_portable_import_content,alt_portable_imports; ALTER TABLE alt_repositories DROP COLUMN portable_import; DROP TABLE alt_portable_exports; ALTER TABLE alt_repositories DROP COLUMN portable_freeze; DELETE FROM alt_schema WHERE version>=7").unwrap();
+    f.client().batch_execute("DROP TABLE alt_link_task_claims,alt_link_current,alt_link_inbox,alt_link_outbox,alt_link_channels; DROP TABLE alt_link_history; ALTER TABLE alt_repositories DROP COLUMN link_bytes; DROP TABLE alt_archived_records,alt_archived_publications; DROP TABLE alt_cloud_portable_reservations,alt_portable_import_content,alt_portable_imports; ALTER TABLE alt_repositories DROP COLUMN portable_import; DROP TABLE alt_portable_exports; ALTER TABLE alt_repositories DROP COLUMN portable_freeze; DELETE FROM alt_schema WHERE version>=7").unwrap();
     assert!(
         Store::open(
             f.client(),
@@ -480,7 +480,7 @@ fn schema_nine_upgrade_keeps_completed_exports_available() {
         .prepare_portable_export(&f.credential, scope, "legacy-export", portable_limits())
         .unwrap();
     let original = export.envelope().encode(portable_limits().package).unwrap();
-    f.client().batch_execute("ALTER TABLE alt_portable_exports DROP COLUMN verified_at; DELETE FROM alt_schema WHERE version=10").unwrap();
+    f.client().batch_execute("DROP TABLE alt_link_task_claims,alt_link_current,alt_link_inbox,alt_link_outbox,alt_link_channels; DROP TABLE alt_link_history; ALTER TABLE alt_repositories DROP COLUMN link_bytes; ALTER TABLE alt_portable_exports DROP COLUMN verified_at; DELETE FROM alt_schema WHERE version>=10").unwrap();
     assert!(
         Store::open(
             f.client(),
@@ -1305,7 +1305,7 @@ fn portable_staging_catalog_failure_rolls_back_quota_and_write_fence() {
 #[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
 fn schema_seven_requires_explicit_upgrade_before_portable_staging() {
     let f = Fixture::new();
-    f.client().batch_execute("DROP TABLE alt_archived_records,alt_archived_publications; DROP TABLE alt_cloud_portable_reservations,alt_portable_import_content,alt_portable_imports; ALTER TABLE alt_repositories DROP COLUMN portable_import; ALTER TABLE alt_portable_exports DROP COLUMN verified_at; DELETE FROM alt_schema WHERE version>=8").unwrap();
+    f.client().batch_execute("DROP TABLE alt_link_task_claims,alt_link_current,alt_link_inbox,alt_link_outbox,alt_link_channels; DROP TABLE alt_link_history; ALTER TABLE alt_repositories DROP COLUMN link_bytes; DROP TABLE alt_archived_records,alt_archived_publications; DROP TABLE alt_cloud_portable_reservations,alt_portable_import_content,alt_portable_imports; ALTER TABLE alt_repositories DROP COLUMN portable_import; ALTER TABLE alt_portable_exports DROP COLUMN verified_at; DELETE FROM alt_schema WHERE version>=8").unwrap();
     assert!(
         Store::open(
             f.client(),
@@ -1961,7 +1961,7 @@ fn schema_eight_upgrade_preserves_receiving_import_and_explicitly_fences_old_run
     let mut target = Fixture::new();
     let (_source, export, intent) = import_fixture(&target);
     stage_import(&mut target, &export, &intent);
-    target.client().batch_execute("DROP TABLE alt_archived_records,alt_archived_publications; ALTER TABLE alt_portable_exports DROP COLUMN verified_at; DELETE FROM alt_schema WHERE version>=9").unwrap();
+    target.client().batch_execute("DROP TABLE alt_link_task_claims,alt_link_current,alt_link_inbox,alt_link_outbox,alt_link_channels; DROP TABLE alt_link_history; ALTER TABLE alt_repositories DROP COLUMN link_bytes; DROP TABLE alt_archived_records,alt_archived_publications; ALTER TABLE alt_portable_exports DROP COLUMN verified_at; DELETE FROM alt_schema WHERE version>=9").unwrap();
     assert!(
         Store::open(
             target.client(),
@@ -2472,3 +2472,5 @@ fn portable_export_pause_child() {
         "export must recheck current authority after validation"
     );
 }
+
+mod change_links;

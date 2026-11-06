@@ -316,6 +316,12 @@ impl Store {
                 }
             }
         }
+        crate::link_history::import(
+            &mut tx,
+            repository,
+            &envelope.catalog,
+            unsigned(row.get("reserved_bytes"))?,
+        )?;
         tx.execute("UPDATE alt_repositories SET transaction_sequence=1,policy_version=policy_version+1,policies=$2,default_branch=$3,reserved_bytes=reserved_bytes-$4,portable_import=NULL WHERE id=$1", &[repository,&serde_json::to_value(&envelope.catalog.protections)?,&envelope.catalog.default_branch,&row.get::<_,i64>("reserved_bytes")])?;
         crate::cloud_quota::release_portable(&mut tx, key)?;
         let receipt = ImportReceipt::sign(

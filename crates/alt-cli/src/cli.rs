@@ -878,7 +878,57 @@ pub enum AuthOp {
 }
 
 #[derive(clap::Subcommand, Debug)]
+pub enum ChangeOp {
+    /// List the explicitly configured Sentori channels
+    Channels { remote: String },
+    /// List historical facts and their current delivery state
+    List {
+        remote: String,
+        #[arg(long)]
+        after: Option<String>,
+    },
+    /// Read an original signed fact under current repository permission
+    Show { remote: String, digest: String },
+    /// Inspect a repair request and any actually published native Task
+    Repair { remote: String, digest: String },
+    /// Create a local Task from a currently authorized repair request
+    RepairCreate {
+        remote: String,
+        digest: String,
+        /// Normal TaskSpec JSON; source is supplied by the verified request
+        #[arg(long)]
+        definition: String,
+        #[arg(long)]
+        target: String,
+        /// Explicitly replace an interrupted local creation under a new request
+        #[arg(long)]
+        reconcile_request: Option<String>,
+    },
+    /// Save an exact Delivery mapping or withdrawal before sending it
+    Preview {
+        remote: String,
+        #[arg(long)]
+        plan: std::path::PathBuf,
+    },
+    /// Send or resume a saved association using its original request
+    Send { id: String },
+    /// Query a saved association without creating a new request
+    Status { id: String },
+    /// Explicitly resume a pending statement with this actor's current credential
+    Reauthorize {
+        remote: String,
+        channel: String,
+        digest: String,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
 pub enum TaskRemoteOp {
+    /// Inspect and publish exact associations with Sentori
+    Changes {
+        #[command(subcommand)]
+        op: ChangeOp,
+    },
     /// Bind an HTTPS origin, repository and operator-provided receipt key
     Connect {
         name: String,
@@ -1093,6 +1143,15 @@ pub fn mutates_command(cmd: &Command) -> bool {
     match cmd {
         Command::Task { op, .. } => {
             if let TaskOp::Remote { op } = op {
+                if let TaskRemoteOp::Changes { op } = op {
+                    return matches!(
+                        op,
+                        ChangeOp::Preview { .. }
+                            | ChangeOp::Send { .. }
+                            | ChangeOp::Reauthorize { .. }
+                            | ChangeOp::RepairCreate { .. }
+                    );
+                }
                 return !matches!(
                     op,
                     TaskRemoteOp::List { .. }

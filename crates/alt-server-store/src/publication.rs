@@ -430,6 +430,15 @@ impl Store {
             }
         };
         check_graph_pins(&mut tx, work, graph)?;
+        crate::change_repair::claim_published_tasks(
+            &mut tx,
+            &self.spec,
+            work,
+            tasks,
+            &current,
+            &auth,
+            &row.get::<_, String>("digest"),
+        )?;
         let repository = &work.key.scope.repository_instance_id;
         for update in &validated.updates {
             let ref_pin = format!("ref:{}", update.name);

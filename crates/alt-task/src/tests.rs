@@ -1,5 +1,6 @@
 use super::*;
 use std::collections::BTreeMap;
+mod repair_source;
 
 fn manifest() -> alt_input::Manifest {
     alt_input::Manifest {

@@ -32,6 +32,7 @@ type ResponseBody = UnsyncBoxBody<Bytes, BoxError>;
 /// initialization or local bootstrap when configuration/authorization is absent.
 #[derive(Clone)]
 pub struct StoreFactory {
+    pub change_links: Arc<[crate::change_links::ChannelRuntime]>,
     pub cloud: Option<Arc<crate::cloud::Runtime>>,
     pub database: postgres::Config,
     pub bytes: ByteStore,
@@ -248,6 +249,7 @@ pub fn authorization(headers: &hyper::HeaderMap) -> Option<String> {
 }
 fn key(route: &Route) -> Option<RequestKey> {
     match route {
+        Route::ChangeLink(route) => route.request_key(),
         Route::Request(key, _) | Route::Portable(crate::PortableRoute::Import(key, _)) => {
             Some(key.clone())
         }
@@ -297,7 +299,11 @@ async fn handle(
     let request_key = key(&route);
     if matches!(
         route,
-        Route::IssueAgent | Route::Delegations(_) | Route::Delegation(_) | Route::RevokeAgent(_)
+        Route::IssueAgent
+            | Route::Delegations(_)
+            | Route::Delegation(_)
+            | Route::RevokeAgent(_)
+            | Route::ChangeLink(_)
     ) && (request.headers().contains_key(header::COOKIE)
         || request.headers().contains_key(header::ORIGIN))
     {
@@ -369,7 +375,8 @@ async fn handle(
     if (matches!(
         route,
         Route::Begin(_) | Route::IssueAgent | Route::Request(_, RequestAction::Approve)
-    ) || matches!(&route, Route::Portable(p) if p.has_json_body()))
+    ) || matches!(&route, Route::Portable(p) if p.has_json_body())
+        || matches!(&route, Route::ChangeLink(p) if p.has_json_body()))
         && (request
             .headers()
             .get_all(header::CONTENT_TYPE)
@@ -401,6 +408,9 @@ async fn handle(
             let mut store = factory.open()?;
             let credential = factory.authenticate(&mut store, &request_token)?;
             let size = match &selected_route {
+                Route::ChangeLink(route) => {
+                    crate::change_links::api::request_bytes(&mut store, &credential, route)?
+                }
                 Route::Portable(route) => crate::portable::request_bytes(
                     &mut store,
                     &credential,
@@ -522,6 +532,16 @@ async fn handle(
             let mut store = factory.open()?;
             source.as_file_mut().seek(SeekFrom::Start(0))?;
             match route {
+                Route::ChangeLink(route) => {
+                    let current = factory.authenticate(&mut store, &token)?;
+                    crate::change_links::api::execute(
+                        &mut store,
+                        &current,
+                        &factory.change_links,
+                        route,
+                        source.as_file_mut(),
+                    )
+                }
                 Route::Portable(route) => {
                     let current = factory.authenticate(&mut store, &token)?;
                     crate::portable::execute(
@@ -714,6 +734,10 @@ pub async fn serve_with_browser(
         .contains(&Duration::ZERO)
     {
         return Err(std::io::Error::other("invalid HTTP limits"));
+    }
+    let mut background = tokio::task::JoinSet::new();
+    if !factory.change_links.is_empty() {
+        background.spawn(crate::change_links::worker(factory.clone()));
     }
     let connections = Arc::new(Semaphore::new(options.connections));
     let state = Arc::new(State {

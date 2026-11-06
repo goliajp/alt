@@ -48,6 +48,9 @@ export class Api {
     return this.send<T>(path, writing ? 'POST' : 'GET', writing ? JSON.stringify(body) : undefined,
       writing ? { 'Content-Type': 'application/json', 'X-Alt-CSRF': this.csrf } : { Accept: 'application/json' }, signal, 8 * 1024 * 1024);
   }
+  async postEmpty<T>(path:string):Promise<T> {
+    return this.send<T>(path,'POST',undefined,{'Content-Type':'application/json','X-Alt-CSRF':this.csrf},undefined,8*1024*1024);
+  }
   async portable<T>(path: string, method: 'GET' | 'POST' | 'PUT', body?: unknown, signal?: AbortSignal): Promise<T> {
     const writing = method !== 'GET';
     const binary = body instanceof globalThis.Blob;

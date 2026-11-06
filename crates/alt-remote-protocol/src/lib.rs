@@ -5,6 +5,7 @@
 //! object and task dependency, and publish through one durable transaction.
 
 pub mod authorization;
+pub mod change_links;
 pub mod delegation;
 pub mod login;
 mod provenance;

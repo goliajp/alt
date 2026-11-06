@@ -149,6 +149,7 @@ fn fixture() -> (Catalog, Bytes) {
             }],
             publications: vec![historical],
             import_receipts: vec![],
+            change_links: vec![],
             identities: vec![IdentityRequirement {
                 installation_id: "source".into(),
                 actor_id: "author".into(),
@@ -1009,3 +1010,5 @@ fn archive_inspection_binds_external_source_trust_and_exact_canonical_header() {
         Err(alt_portable::Error::Limit("archive metadata bytes"))
     ));
 }
+
+mod change_links;

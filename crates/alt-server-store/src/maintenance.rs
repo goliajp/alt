@@ -77,7 +77,7 @@ impl Store {
         let row = tx.query_one("SELECT \
             floor(extract(epoch FROM clock_timestamp())*1000)::bigint, \
             (SELECT count(*) FROM alt_repositories), \
-            (SELECT COALESCE(sum(bytes),0)::text FROM alt_blobs WHERE state='stored'), \
+            ((SELECT COALESCE(sum(bytes),0) FROM alt_blobs WHERE state='stored') + (SELECT COALESCE(sum(link_bytes),0) FROM alt_repositories))::text, \
             (SELECT COALESCE(sum(reserved_bytes),0)::text FROM alt_repositories), \
             (SELECT count(*) FROM alt_requests q JOIN alt_repositories r ON q.repository=r.id WHERE q.state IN ('receiving','ready') AND q.epoch=r.recovery_epoch), \
             (SELECT count(*) FROM alt_requests q JOIN alt_repositories r ON q.repository=r.id WHERE q.state IN ('receiving','ready') AND q.epoch<>r.recovery_epoch), \

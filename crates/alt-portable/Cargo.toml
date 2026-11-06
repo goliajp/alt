@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+golia-change-link.workspace = true
 alt-git-codec.workspace = true
 alt-provenance.workspace = true
 alt-remote-protocol.workspace = true

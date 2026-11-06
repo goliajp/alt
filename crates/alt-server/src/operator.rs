@@ -44,6 +44,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub change_links: Vec<crate::change_links::ChannelConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub portable: Option<alt_portable::http::Bounds>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -148,11 +150,35 @@ impl Config {
         {
             cloud.runtime_credential_file = parent.join(&cloud.runtime_credential_file);
         }
+        for channel in &mut config.change_links {
+            for path in [
+                &mut channel.local_credential_file,
+                &mut channel.peer_credential_file,
+            ] {
+                if path.is_relative() {
+                    *path = parent.join(&*path);
+                }
+            }
+        }
         config.validate()?;
         Ok(config)
     }
     pub fn validate(&self) -> Result<()> {
         use alt_remote_protocol::DeploymentMode;
+        let mut identifiers = std::collections::BTreeSet::new();
+        if self.change_links.len() > 32 {
+            return Err(Error::Config("change-link configuration limit"));
+        }
+        for channel in &self.change_links {
+            channel.validate(&self.instance)?;
+            if !identifiers.insert((
+                &channel.scope.repository_instance_id,
+                channel.scope.recovery_epoch,
+                &channel.channel,
+            )) {
+                return Err(Error::Config("duplicate change-link configuration"));
+            }
+        }
         match (&self.cloud, self.instance.deployment_mode) {
             (Some(cloud), DeploymentMode::Cloud) => {
                 cloud
@@ -447,6 +473,12 @@ impl Config {
     pub fn factory(&self) -> Result<StoreFactory> {
         self.check_volume()?;
         Ok(StoreFactory {
+            change_links: self
+                .change_links
+                .iter()
+                .map(|c| c.load(self))
+                .collect::<Result<Vec<_>>>()?
+                .into(),
             cloud: self.cloud_runtime()?,
             database: self.database()?,
             bytes: ByteStore::open(&self.bytes_directory)?,
@@ -503,6 +535,9 @@ impl Config {
             7 => Store::migrate_v7(client, bytes, self.instance.clone(), key, self.limits),
             8 => Store::migrate_v8(client, bytes, self.instance.clone(), key, self.limits),
             9 => Store::migrate_v9(client, bytes, self.instance.clone(), key, self.limits),
+            12 => Store::migrate_v12(client, bytes, self.instance.clone(), key, self.limits),
+            11 => Store::migrate_v11(client, bytes, self.instance.clone(), key, self.limits),
+            10 => Store::migrate_v10(client, bytes, self.instance.clone(), key, self.limits),
             6 => Store::migrate_v6(client, bytes, self.instance.clone(), key, self.limits),
             _ => unreachable!(),
         };

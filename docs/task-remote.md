@@ -191,3 +191,8 @@ Settings also lists agent purposes, sessions, scopes and expiries and supports
 individual revocation. A lost revocation response requires refreshing the list
 to observe its durable result. Revoking the parent terminal credential disables
 all agents derived from it.
+
+## Sentori associations
+
+See [Delivery associations](change-links.md) for exact release mapping, saved
+request recovery, signed repair sources and native Task publication.

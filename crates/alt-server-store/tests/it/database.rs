@@ -1,4 +1,5 @@
 mod browser;
+mod change_links;
 mod cloud;
 mod delegation;
 mod faults;

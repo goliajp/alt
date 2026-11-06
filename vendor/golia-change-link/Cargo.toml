@@ -1,0 +1,17 @@
+[package]
+name = "golia-change-link"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "MIT OR Apache-2.0"
+description = "Versioned, authenticated cross-product change and runtime observation records"
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+blake3 = "1"
+ed25519-dalek = "2"
+url = "2"
+[[test]]
+name = "it"
+path = "tests/it/main.rs"

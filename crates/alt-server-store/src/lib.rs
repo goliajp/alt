@@ -61,7 +61,15 @@ pub use tasks::CurrentReviewAssessment;
 pub use workbench::*;
 
 /// Current persisted schema; runtime open validates all migration checksums.
-pub const SCHEMA_VERSION: u32 = 10;
+pub const SCHEMA_VERSION: u32 = 13;
+
+mod change_channel;
+mod link_history;
+pub use change_channel::*;
+mod change_delivery;
+mod change_events;
+mod change_repair;
+pub use change_events::*;
 
 mod accounts;
 pub use accounts::*;
@@ -82,3 +90,8 @@ pub use cloud_login::CloudLoginClaim;
 
 mod device_login;
 pub use device_login::*;
+
+pub use change_repair::RepairTaskClaim;
+
+mod change_queries;
+pub use change_queries::*;

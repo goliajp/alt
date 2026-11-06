@@ -19,7 +19,7 @@ fn month(tx: &mut Transaction<'_>) -> Result<String> {
         .get(0))
 }
 fn check_storage(tx: &mut Transaction<'_>, policy: &AltServiceAuthorization) -> Result<()> {
-    let row=tx.query_one("SELECT COALESCE(sum(stored_bytes::numeric + reserved_bytes::numeric),0) <= $1::bigint::numeric FROM alt_repositories", &[&integer(policy.limits.stored_bytes.0)?])?;
+    let row=tx.query_one("SELECT COALESCE(sum(stored_bytes::numeric + reserved_bytes::numeric + link_bytes::numeric),0) <= $1::bigint::numeric FROM alt_repositories", &[&integer(policy.limits.stored_bytes.0)?])?;
     if !row.get::<_, bool>(0) {
         return Err(Error::Limit("Cloud aggregate storage quota"));
     }
@@ -180,6 +180,32 @@ pub(crate) fn accept_portable(
 pub(crate) fn release_portable(tx: &mut Transaction<'_>, key: &RequestKey) -> Result<()> {
     if let Some(row) = tx.query_opt("DELETE FROM alt_cloud_portable_reservations WHERE repository=$1 AND import_id=$2 RETURNING month,remaining_bytes", &[&key.scope.repository_instance_id,&key.request_id])? {
         tx.execute("UPDATE alt_cloud_ingress SET reserved_bytes=reserved_bytes-$2 WHERE month=$1", &[&row.get::<_,String>(0),&row.get::<_,i64>(1)])?;
+    }
+    Ok(())
+}
+
+/// New signed event/receipt metadata only. Replays have zero delta. Delivery
+/// receipt capacity is reserved in repository storage; a reduced/expired Cloud
+/// allowance leaves the receipt pending rather than inventing an acceptance.
+pub(crate) fn accept_link_metadata(
+    tx: &mut Transaction<'_>,
+    spec: &InstanceSpec,
+    bytes: u64,
+) -> Result<()> {
+    let Some(policy) = service(tx, spec)? else {
+        return Ok(());
+    };
+    check_storage(tx, &policy)?;
+    if bytes == 0 {
+        return Ok(());
+    }
+    let current = month(tx)?;
+    tx.execute(
+        "INSERT INTO alt_cloud_ingress(month) VALUES($1) ON CONFLICT DO NOTHING",
+        &[&current],
+    )?;
+    if tx.execute("UPDATE alt_cloud_ingress SET accepted_bytes=accepted_bytes+$2 WHERE month=$1 AND accepted_bytes::numeric+reserved_bytes::numeric+$2::bigint::numeric<=$3::bigint::numeric", &[&current,&integer(bytes)?,&integer(policy.limits.monthly_ingress_bytes.0)?])?!=1 {
+        return Err(Error::Limit("Cloud monthly accepted ingress quota"));
     }
     Ok(())
 }

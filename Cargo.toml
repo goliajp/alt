@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "vendor/golia-platform-contract"]
+members = ["crates/*", "vendor/golia-platform-contract", "vendor/golia-change-link", "vendor/golia-change-link-http"]
 
 [workspace.package]
 version = "0.1.0-internal.1"
@@ -8,6 +8,8 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+golia-change-link-http = { path = "vendor/golia-change-link-http", version = "=0.1.0" }
+golia-change-link = { path = "vendor/golia-change-link", version = "=0.1.0" }
 alt-portable = { path = "crates/alt-portable" }
 alt-provenance = { path = "crates/alt-provenance" }
 golia-platform-contract = { path = "vendor/golia-platform-contract", version = "=0.1.0" }

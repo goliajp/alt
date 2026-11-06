@@ -262,3 +262,6 @@ fn http_error_status_surfaces_typed_with_body() {
 mod device;
 #[path = "it/native.rs"]
 mod native;
+
+#[path = "it/change_links.rs"]
+mod change_links;
