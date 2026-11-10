@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: perf
+summary: sha-1 on x86 with one shared round body over two blocks, and sha instruction paths
+author-type: human
+author: doracawl
+touched: crates/alt-hash/examples/sha1_speed.rs
+touched: crates/alt-hash/src/sha1.rs
+touched: crates/alt-hash/src/sha1/x86.rs
+touched: crates/alt-hash/src/sha1/x86/avx2.rs
+touched: crates/alt-hash/src/sha1/x86/sha.rs
+touched: crates/alt-hash/src/sha256.rs
+touched: crates/alt-hash/src/sha256/x86.rs
+touched: crates/alt-hash/src/sha256/x86/sha.rs
+touched: crates/alt-hash/tests/it/main.rs
