@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: include file-backed pack segments in backup, verification and restore
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/maintenance.rs
+touched: crates/alt-server-store/src/packs.rs
+touched: crates/alt-server/src/operator/backup.rs
