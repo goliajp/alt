@@ -1,0 +1,27 @@
+schema: alt-meta/1
+type: feat
+summary: native publications land their Git objects in a segment; object reads come from segments
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/lib.rs
+touched: crates/alt-pack-segment/src/send.rs
+touched: crates/alt-pack-segment/src/set.rs
+touched: crates/alt-server-store/src/database.rs
+touched: crates/alt-server-store/src/packs.rs
+touched: crates/alt-server-store/src/publication.rs
+touched: crates/alt-server-store/src/publication/refs.rs
+touched: crates/alt-server-store/src/store.rs
+touched: crates/alt-server-store/src/workbench.rs
+touched: crates/alt-server-store/tests/it/database/browser.rs
+touched: crates/alt-server-store/tests/it/database/buffered_read.rs
+touched: crates/alt-server-store/tests/it/database/change_links.rs
+touched: crates/alt-server-store/tests/it/database/change_links/repair.rs
+touched: crates/alt-server-store/tests/it/database/portable.rs
+touched: crates/alt-server-store/tests/it/database/portable/change_links.rs
+touched: crates/alt-server-store/tests/it/database/provenance.rs
+touched: crates/alt-server-store/tests/it/database/segments.rs
+touched: crates/alt-server-store/tests/it/database/tasks.rs
+touched: crates/alt-server-store/tests/it/database/upload_selection.rs
+touched: crates/alt-server/src/http.rs
+touched: crates/alt-server/src/http/pool.rs
+touched: crates/alt-server/tests/it/database/operator/maintenance.rs
