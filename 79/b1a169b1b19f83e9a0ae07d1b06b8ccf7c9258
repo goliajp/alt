@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: perf
+summary: keep the blake3 chaining value in registers across blocks; split work for the pool down to 32 KiB
+author-type: human
+author: doracawl
+touched: crates/alt-hash/src/blake3.rs
+touched: crates/alt-hash/src/blake3/sse41.rs
+touched: crates/alt-hash/src/blake3/tree.rs
