@@ -6,6 +6,8 @@ mod portable;
 mod portable_import;
 pub use portable::*;
 pub use portable_import::*;
+mod packs;
+pub use packs::*;
 mod provenance;
 mod publication;
 mod read;
@@ -65,7 +67,7 @@ pub use tasks::CurrentReviewAssessment;
 pub use workbench::*;
 
 /// Current persisted schema; runtime open validates all migration checksums.
-pub const SCHEMA_VERSION: u32 = 17;
+pub const SCHEMA_VERSION: u32 = 18;
 
 mod change_channel;
 mod link_history;

@@ -76,6 +76,9 @@ impl DurableBytes {
 impl ByteStore {
     /// The parent is provisioned by the operator. New directories are private;
     /// symlinks or non-directories at storage-owned components are rejected.
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
+    }
     pub fn open(root: &Path) -> Result<Self> {
         directory(root)?;
         Ok(Self {

@@ -8,8 +8,7 @@ pub use native::*;
 mod http;
 pub use http::*;
 mod git;
-mod git_receive;
-mod git_representations;
+mod git_packs;
 pub use git::{execute_git, execute_git_with_refresh};
 pub mod operator;
 

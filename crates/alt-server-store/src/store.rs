@@ -113,6 +113,7 @@ impl Store {
         crate::schema::apply_v15(tx.raw_mut())?;
         crate::schema::apply_v16(tx.raw_mut())?;
         crate::schema::apply_v17(tx.raw_mut())?;
+        crate::schema::apply_v18(tx.raw_mut())?;
         if let Some((audience, digest, provision_digest)) = cloud {
             crate::cloud::initialize_binding(&mut tx, &spec, audience, digest, provision_digest)?;
         }

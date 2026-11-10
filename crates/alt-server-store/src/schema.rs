@@ -3,7 +3,7 @@ use alt_remote_protocol::Limits;
 use ed25519_dalek::SigningKey;
 use postgres::{Client, GenericClient};
 
-const MIGRATIONS: [&str; 17] = [
+const MIGRATIONS: [&str; 18] = [
     include_str!("schema.sql"),
     include_str!("schema-v2.sql"),
     include_str!("schema-v3.sql"),
@@ -21,6 +21,7 @@ const MIGRATIONS: [&str; 17] = [
     include_str!("schema-v15.sql"),
     include_str!("schema-v16.sql"),
     include_str!("schema-v17.sql"),
+    include_str!("schema-v18.sql"),
 ];
 pub(crate) fn check(client: &mut impl GenericClient, expected: usize) -> Result<()> {
     let rows = client.query(
@@ -90,6 +91,9 @@ pub(crate) fn apply_v16(client: &mut impl GenericClient) -> Result<()> {
 }
 pub(crate) fn apply_v17(client: &mut impl GenericClient) -> Result<()> {
     apply(client, 17)
+}
+pub(crate) fn apply_v18(client: &mut impl GenericClient) -> Result<()> {
+    apply(client, 18)
 }
 fn apply(client: &mut impl GenericClient, version: usize) -> Result<()> {
     client.batch_execute(MIGRATIONS[version - 1])?;

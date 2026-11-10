@@ -94,6 +94,117 @@ impl Node {
         }
     }
 }
+/// Read access to already-verified objects for ancestry and path checks. An
+/// implementation may hold every node in memory or load each on demand.
+pub trait Graph {
+    fn node(&self, oid: ObjectId) -> Result<std::borrow::Cow<'_, Node>>;
+    fn graph_limits(&self) -> GraphLimits;
+}
+impl Graph for VerifiedGraph {
+    fn node(&self, oid: ObjectId) -> Result<std::borrow::Cow<'_, Node>> {
+        VerifiedGraph::node(self, oid).map(std::borrow::Cow::Borrowed)
+    }
+    fn graph_limits(&self) -> GraphLimits {
+        self.limits
+    }
+}
+pub(crate) fn budget(graph: &(impl Graph + ?Sized)) -> WalkBudget {
+    WalkBudget(graph.graph_limits().walk_steps)
+}
+pub(crate) fn is_ancestor_bounded(
+    graph: &(impl Graph + ?Sized),
+    old: ObjectId,
+    new: ObjectId,
+    budget: &mut WalkBudget,
+) -> Result<bool> {
+    let mut pending = vec![new];
+    let mut seen = BTreeSet::new();
+    while let Some(oid) = pending.pop() {
+        budget.step()?;
+        if !seen.insert(oid) {
+            continue;
+        }
+        let node = graph.node(oid)?;
+        let Node::Commit { parents, .. } = node.as_ref() else {
+            return Err(Error::Integrity("ancestry target is not a commit"));
+        };
+        if oid == old {
+            return Ok(true);
+        }
+        pending.extend(parents);
+    }
+    Ok(false)
+}
+pub(crate) fn changed_paths_bounded(
+    graph: &(impl Graph + ?Sized),
+    before: Option<ObjectId>,
+    after: Option<ObjectId>,
+    budget: &mut WalkBudget,
+) -> Result<Vec<Vec<u8>>> {
+    let before = paths(graph, before, budget)?;
+    let after = paths(graph, after, budget)?;
+    let names: BTreeSet<_> = before.keys().chain(after.keys()).collect();
+    Ok(names
+        .into_iter()
+        .filter(|p| before.get(*p) != after.get(*p))
+        .cloned()
+        .collect())
+}
+fn paths(
+    graph: &(impl Graph + ?Sized),
+    commit: Option<ObjectId>,
+    budget: &mut WalkBudget,
+) -> Result<BTreeMap<Vec<u8>, (u32, ObjectId)>> {
+    let limits = graph.graph_limits();
+    let mut paths = BTreeMap::new();
+    let Some(commit) = commit else {
+        return Ok(paths);
+    };
+    let node = graph.node(commit)?;
+    let Node::Commit { tree, .. } = node.as_ref() else {
+        return Err(Error::Forbidden("path scope requires commit targets"));
+    };
+    let mut pending = vec![(Vec::new(), *tree)];
+    let mut work = 0usize;
+    while let Some((prefix, oid)) = pending.pop() {
+        budget.step()?;
+        work = work.checked_add(1).ok_or(Error::Limit("tree expansion"))?;
+        if work > limits.paths {
+            return Err(Error::Limit("tree expansion"));
+        }
+        let node = graph.node(oid)?;
+        let Node::Tree(entries) = node.as_ref() else {
+            return Err(Error::Integrity("tree type"));
+        };
+        for entry in entries {
+            budget.step()?;
+            let mut path = prefix.clone();
+            path.extend_from_slice(&entry.name);
+            if path.len() > limits.path_bytes {
+                return Err(Error::Limit("path bytes"));
+            }
+            if entry.mode == 0o040000 {
+                let child = graph.node(entry.oid)?;
+                let Node::Tree(children) = child.as_ref() else {
+                    return Err(Error::Integrity("tree type"));
+                };
+                if !children.is_empty() {
+                    path.push(b'/');
+                    pending.push((path, entry.oid));
+                    if pending.len() > limits.paths {
+                        return Err(Error::Limit("tree expansion"));
+                    }
+                    continue;
+                }
+            }
+            paths.insert(path, (entry.mode, entry.oid));
+            if paths.len() > limits.paths {
+                return Err(Error::Limit("tree paths"));
+            }
+        }
+    }
+    Ok(paths)
+}
 /// Only constructible by complete byte/hash/type validation. This is evidence
 /// about a pinned snapshot, not a capability to publish without a transaction.
 pub struct VerifiedGraph {
@@ -142,22 +253,7 @@ impl VerifiedGraph {
         new: ObjectId,
         budget: &mut WalkBudget,
     ) -> Result<bool> {
-        let mut pending = vec![new];
-        let mut seen = BTreeSet::new();
-        while let Some(oid) = pending.pop() {
-            budget.step()?;
-            if !seen.insert(oid) {
-                continue;
-            }
-            let Node::Commit { parents, .. } = self.node(oid)? else {
-                return Err(Error::Integrity("ancestry target is not a commit"));
-            };
-            if oid == old {
-                return Ok(true);
-            }
-            pending.extend(parents);
-        }
-        Ok(false)
+        is_ancestor_bounded(self, old, new, budget)
     }
     /// Changes include modes, symlink targets, gitlinks, empty trees, and raw
     /// non-UTF8 paths. A bounded iterative walk prevents recursive stack growth.
@@ -174,65 +270,7 @@ impl VerifiedGraph {
         after: Option<ObjectId>,
         budget: &mut WalkBudget,
     ) -> Result<Vec<Vec<u8>>> {
-        let before = self.paths(before, budget)?;
-        let after = self.paths(after, budget)?;
-        let names: BTreeSet<_> = before.keys().chain(after.keys()).collect();
-        Ok(names
-            .into_iter()
-            .filter(|p| before.get(*p) != after.get(*p))
-            .cloned()
-            .collect())
-    }
-    fn paths(
-        &self,
-        commit: Option<ObjectId>,
-        budget: &mut WalkBudget,
-    ) -> Result<BTreeMap<Vec<u8>, (u32, ObjectId)>> {
-        let mut paths = BTreeMap::new();
-        let Some(commit) = commit else {
-            return Ok(paths);
-        };
-        let Node::Commit { tree, .. } = self.node(commit)? else {
-            return Err(Error::Forbidden("path scope requires commit targets"));
-        };
-        let mut pending = vec![(Vec::new(), *tree)];
-        let mut work = 0usize;
-        while let Some((prefix, oid)) = pending.pop() {
-            budget.step()?;
-            work = work.checked_add(1).ok_or(Error::Limit("tree expansion"))?;
-            if work > self.limits.paths {
-                return Err(Error::Limit("tree expansion"));
-            }
-            let Node::Tree(entries) = self.node(oid)? else {
-                return Err(Error::Integrity("tree type"));
-            };
-            for entry in entries {
-                budget.step()?;
-                let mut path = prefix.clone();
-                path.extend_from_slice(&entry.name);
-                if path.len() > self.limits.path_bytes {
-                    return Err(Error::Limit("path bytes"));
-                }
-                if entry.mode == 0o040000 {
-                    let Node::Tree(children) = self.node(entry.oid)? else {
-                        return Err(Error::Integrity("tree type"));
-                    };
-                    if !children.is_empty() {
-                        path.push(b'/');
-                        pending.push((path, entry.oid));
-                        if pending.len() > self.limits.paths {
-                            return Err(Error::Limit("tree expansion"));
-                        }
-                        continue;
-                    }
-                }
-                paths.insert(path, (entry.mode, entry.oid));
-                if paths.len() > self.limits.paths {
-                    return Err(Error::Limit("tree paths"));
-                }
-            }
-        }
-        Ok(paths)
+        changed_paths_bounded(self, before, after, budget)
     }
 }
 
@@ -382,7 +420,7 @@ fn single_header<'a>(
     }
     Ok(value)
 }
-fn parse_node(kind: ObjectKind, data: &[u8], algo: HashAlgo) -> Result<Node> {
+pub fn parse_node(kind: ObjectKind, data: &[u8], algo: HashAlgo) -> Result<Node> {
     Ok(match kind {
         ObjectKind::Blob => Node::Blob,
         ObjectKind::Commit => {

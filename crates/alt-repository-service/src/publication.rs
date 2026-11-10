@@ -1,4 +1,4 @@
-use crate::{Error, Node, Result, VerifiedGraph};
+use crate::{Error, Graph, Node, Result, graph};
 use alt_git_codec::ObjectId;
 use alt_remote_protocol::{Attribution, Limits, ObjectFormat, Publication, Scope};
 use std::collections::{BTreeMap, BTreeSet};
@@ -111,12 +111,12 @@ pub fn validate_publication(
     publication: &Publication,
     snapshot: &RepositorySnapshot,
     auth: &Authorization,
-    graph: &VerifiedGraph,
+    graph: &(impl Graph + ?Sized),
     limits: Limits,
     now: u64,
 ) -> Result<ValidatedPublication> {
     let digest = authorize_intent(publication, snapshot, auth, limits, now)?;
-    let mut budget = graph.budget();
+    let mut budget = graph::budget(graph);
     let mut resulting = snapshot.refs.clone();
     let mut updates = Vec::new();
     for update in &publication.refs {
@@ -137,7 +137,9 @@ pub fn validate_publication(
         }
         if let Some(oid) = new {
             let node = graph.node(oid)?;
-            if update.name.starts_with("refs/heads/") && !matches!(node, Node::Commit { .. }) {
+            if update.name.starts_with("refs/heads/")
+                && !matches!(node.as_ref(), Node::Commit { .. })
+            {
                 return Err(Error::Integrity("branch target is not a commit"));
             }
         }
@@ -145,10 +147,10 @@ pub fn validate_publication(
             (Some(old), Some(new)) => {
                 if update.name.starts_with("refs/tags/") {
                     true
-                } else if matches!(graph.node(old)?, Node::Commit { .. })
-                    && matches!(graph.node(new)?, Node::Commit { .. })
+                } else if matches!(graph.node(old)?.as_ref(), Node::Commit { .. })
+                    && matches!(graph.node(new)?.as_ref(), Node::Commit { .. })
                 {
-                    !graph.is_ancestor_bounded(old, new, &mut budget)?
+                    !graph::is_ancestor_bounded(graph, old, new, &mut budget)?
                 } else {
                     true
                 }
@@ -234,14 +236,13 @@ fn path_allowed(path: &[u8], prefixes: &[Vec<u8>]) -> bool {
     })
 }
 fn path_changes_allowed(
-    graph: &VerifiedGraph,
+    graph: &(impl Graph + ?Sized),
     old: Option<ObjectId>,
     new: Option<ObjectId>,
     paths: &[Vec<u8>],
     budget: &mut crate::graph::WalkBudget,
 ) -> Result<bool> {
-    if graph
-        .changed_paths_bounded(old, new, budget)?
+    if graph::changed_paths_bounded(graph, old, new, budget)?
         .iter()
         .any(|p| !path_allowed(p, paths))
     {
@@ -256,7 +257,8 @@ fn path_changes_allowed(
         if !old_history.insert(oid) {
             continue;
         }
-        let Node::Commit { parents, .. } = graph.node(oid)? else {
+        let node = graph.node(oid)?;
+        let Node::Commit { parents, .. } = node.as_ref() else {
             return Err(Error::Integrity("old branch target"));
         };
         pending.extend(parents);
@@ -268,7 +270,8 @@ fn path_changes_allowed(
         if old_history.contains(&oid) || !seen.insert(oid) {
             continue;
         }
-        let Node::Commit { parents, .. } = graph.node(oid)? else {
+        let node = graph.node(oid)?;
+        let Node::Commit { parents, .. } = node.as_ref() else {
             return Err(Error::Integrity("new branch target"));
         };
         let bases: Vec<_> = if parents.is_empty() {
@@ -277,8 +280,7 @@ fn path_changes_allowed(
             parents.iter().copied().map(Some).collect()
         };
         for base in bases {
-            if graph
-                .changed_paths_bounded(base, Some(oid), budget)?
+            if graph::changed_paths_bounded(graph, base, Some(oid), budget)?
                 .iter()
                 .any(|p| !path_allowed(p, paths))
             {

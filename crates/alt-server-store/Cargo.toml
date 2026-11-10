@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 alt-byte-segment.workspace = true
+alt-pack-segment.workspace = true
 alt-server-telemetry.workspace = true
 golia-change-link.workspace = true
 alt-portable.workspace = true

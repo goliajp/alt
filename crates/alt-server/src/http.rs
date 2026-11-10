@@ -107,7 +107,6 @@ struct State {
     workers: Arc<Semaphore>,
     browser: Option<WebOptions>,
     passwords: Arc<Semaphore>,
-    git_representations: Arc<crate::git_representations::RepresentationCache>,
 }
 fn full(bytes: impl Into<Bytes>) -> ResponseBody {
     Full::new(bytes.into())
@@ -549,7 +548,6 @@ async fn handle(
     let options = state.options.native.clone();
     let factory = state.factory.clone();
     let metrics = state.metrics.clone();
-    let git_representations = state.git_representations.clone();
     let result = tokio::time::timeout(
         state.options.work_timeout,
         spawn_observed(Phase::Execute, move || {
@@ -592,10 +590,6 @@ async fn handle(
                         protocol_v2,
                         source.as_file_mut(),
                         &mut |store| factory.authenticate(store, &token),
-                        Some(crate::git_representations::Context {
-                            cache: &git_representations,
-                            generation: factory.instance.runtime_generation,
-                        }),
                     )
                 }
                 _ => execute_native(
@@ -795,7 +789,6 @@ pub async fn serve_with_browser(
         options,
         browser,
         passwords: Arc::new(Semaphore::new(2)),
-        git_representations: Arc::new(crate::git_representations::RepresentationCache::default()),
     });
     if !state.factory.change_links.is_empty() {
         background.spawn(crate::change_links::worker(

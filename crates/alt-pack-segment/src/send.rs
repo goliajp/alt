@@ -84,6 +84,10 @@ impl Selection {
     pub fn is_empty(&self) -> bool {
         self.objects.is_empty()
     }
+
+    pub fn objects(&self) -> &[Oid] {
+        &self.objects
+    }
 }
 
 impl SegmentSet {
