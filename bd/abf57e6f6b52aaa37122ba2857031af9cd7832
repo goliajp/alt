@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: a middle size of mixed crc-32 chunk on aarch64
+author-type: human
+author: doracawl
+touched: crates/alt-hash/src/crc32/arm.rs
