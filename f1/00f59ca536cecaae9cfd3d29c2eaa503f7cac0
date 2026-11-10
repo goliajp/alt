@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: answer git's flush-packet probe before a chunked push
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/git_packs.rs
+touched: crates/alt-server/tests/it/database/git.rs
