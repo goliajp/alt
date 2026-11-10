@@ -361,7 +361,8 @@ async fn handle(
             state.options.work_timeout,
             spawn_observed(Phase::Authority, move || {
                 let _permit = permit;
-                factory.open().map(|_| ())
+                // readiness means the schema and instance rows are current right now
+                factory.open().and_then(|mut store| store.check_connection())
             }),
         )
         .await

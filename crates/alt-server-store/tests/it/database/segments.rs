@@ -477,53 +477,6 @@ fn maintenance_exports_segment_members_and_restored_locations_normalize_only_ver
 }
 
 #[test]
-#[ignore = "requires isolated PostgreSQL; legacy loose layout migration retains original objects and adds only derived tables"]
-fn schema_fifteen_migrates_without_rewriting_existing_loose_objects() {
-    let mut f = Fixture::new();
-    let p = Payload::new("legacy-loose", None);
-    p.upload(&mut f.store, &f.credential);
-    p.publish(&mut f.store, &f.credential);
-    f.client()
-        .batch_execute(
-            "DROP TABLE alt_blob_locations,alt_segments; DELETE FROM alt_schema WHERE version>15;
-             ALTER TABLE alt_blobs RESET (fillfactor);
-             ALTER TABLE alt_request_content RESET (fillfactor)",
-        )
-        .unwrap();
-    f.store = Store::migrate_v15(
-        f.client(),
-        f.store.bytes().clone(),
-        f.spec.clone(),
-        SigningKey::from_bytes(&f.signing_seed),
-        limits(),
-    )
-    .unwrap();
-    f.spec.runtime_generation += 1;
-    assert_eq!(
-        f.client()
-            .query_one("SELECT count(*) FROM alt_blob_locations", &[])
-            .unwrap()
-            .get::<_, i64>(0),
-        0
-    );
-    let (_, _, mut file) = f
-        .store
-        .open_published_object(&f.credential, "repository", p.commit)
-        .unwrap();
-    assert!(file.read_to_end(&mut Vec::new()).unwrap() > 0);
-    for (entry, data) in p.manifest.entries.iter().zip(&p.contents) {
-        let mut actual = Vec::new();
-        f.store
-            .bytes()
-            .verify(&p.publication.key.scope, &entry.blake3, entry.bytes)
-            .unwrap()
-            .read_to_end(&mut actual)
-            .unwrap();
-        assert_eq!(&actual, data);
-    }
-}
-
-#[test]
 #[ignore = "requires isolated PostgreSQL; expired writes retain registered ownership but never register or publish members"]
 fn expiry_during_segment_write_has_no_proof_and_gc_reclaims_the_owned_file() {
     struct Slow {

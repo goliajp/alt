@@ -147,6 +147,10 @@ impl Store {
     /// Revalidate a retained connection before reuse. No schema, instance or
     /// Cloud authority decision is cached; operations still check credentials
     /// and repository state in their own transactions.
+    /// the database connection ended; the store cannot serve another request
+    pub fn is_closed(&self) -> bool {
+        self.client.is_closed()
+    }
     pub fn check_connection(&mut self) -> Result<()> {
         let mut tx = self.client.transaction()?;
         // only row locks are taken; nothing here needs a synchronous flush

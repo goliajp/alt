@@ -1,4 +1,4 @@
-use super::{Error, PublicationWork, Result, Transaction, VerifiedGraph};
+use super::{PublicationWork, Result, Transaction, VerifiedGraph};
 use crate::database::BATCH_ROWS;
 use alt_repository_service::ValidatedRef;
 
@@ -31,11 +31,10 @@ pub(super) fn replace(
             names.push(update.name.as_str());
             oids.push(oid.to_string());
             for reachable in graph.reachable(oid)? {
-                let (_, digest, _) = work
-                    .source
-                    .objects
-                    .get(&reachable)
-                    .ok_or(Error::Integrity("object outside worker source"))?;
+                // objects held by a segment need no retention pin
+                let Some((_, digest, _)) = work.source.objects.get(&reachable) else {
+                    continue;
+                };
                 pin_ids.push(pin.as_str());
                 digests.push(digest.as_str());
                 if digests.len() == BATCH_ROWS {

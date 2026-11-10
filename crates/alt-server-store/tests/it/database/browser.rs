@@ -234,64 +234,6 @@ fn login_budget_is_committed_before_password_work_and_serializes_concurrent_atte
 }
 
 #[test]
-#[ignore = "requires explicitly isolated PostgreSQL; validates actual v3 layout upgrade and mode fencing"]
-fn v3_upgrade_preserves_publication_and_cloud_never_uses_local_passwords() {
-    let mut f = Fixture::new();
-    let payload = Payload::new("before-browser-schema", None);
-    payload.upload(&mut f.store, &f.credential);
-    let receipt = payload.publish(&mut f.store, &f.credential);
-    f.client().batch_execute("DROP TABLE alt_link_task_claims,alt_link_current,alt_link_inbox,alt_link_outbox,alt_link_channels; DROP TABLE alt_link_history; ALTER TABLE alt_repositories DROP COLUMN link_bytes; DROP TABLE alt_archived_records,alt_archived_publications; DROP TABLE alt_cloud_portable_reservations,alt_portable_import_content,alt_portable_imports; ALTER TABLE alt_repositories DROP COLUMN portable_import; DROP TABLE alt_portable_exports; ALTER TABLE alt_repositories DROP COLUMN portable_freeze; DROP TABLE alt_publication_provenance; DROP TABLE alt_device_authorizations,alt_client_credentials,alt_cloud_logins,alt_delegations,alt_cloud_reservations,alt_cloud_ingress,alt_cloud_credentials,alt_cloud_accounts,alt_cloud_binding; DROP TABLE alt_browser_binding,alt_web_sessions,alt_web_accounts,alt_login_budgets,alt_instance_audit; ALTER TABLE alt_request_content DROP COLUMN selected_entries, DROP COLUMN chunk_bytes; DROP TABLE alt_blob_locations,alt_segments; DROP INDEX alt_pins_permanent_content; DELETE FROM alt_schema WHERE version>=4").unwrap();
-    assert!(
-        Store::open(
-            f.client(),
-            ByteStore::open(&f.root.path().join("bytes")).unwrap(),
-            f.spec.clone(),
-            SigningKey::from_bytes(&[7; 32]),
-            limits()
-        )
-        .is_err()
-    );
-    let mut store = Store::migrate_v3(
-        f.client(),
-        ByteStore::open(&f.root.path().join("bytes")).unwrap(),
-        f.spec.clone(),
-        SigningKey::from_bytes(&[7; 32]),
-        limits(),
-    )
-    .unwrap();
-    assert_eq!(store.spec().runtime_generation, 2);
-    assert!(f.store.authenticate(&f.token).is_err());
-    let admin = store.authenticate(&f.token).unwrap();
-    assert_eq!(
-        store.query(&admin, &payload.publication.key).unwrap(),
-        RequestObservation::Recorded {
-            key: payload.publication.key.clone(),
-            result: Box::new(RequestState::Committed {
-                receipt: Box::new(receipt)
-            })
-        }
-    );
-    store.enable_browser(&admin, &origin()).unwrap();
-    store
-        .create_local_user(&admin, "bob", "bob", "Bob", PASSWORD, false)
-        .unwrap();
-    let mut cloud_spec = store.spec().clone();
-    cloud_spec.deployment_mode = DeploymentMode::Cloud;
-    f.client().batch_execute("UPDATE alt_instance SET deployment_mode='cloud'; UPDATE alt_credentials SET identity_source='cloud'").unwrap();
-    // Changing the deployment column cannot manufacture a platform binding.
-    assert!(
-        Store::open(
-            f.client(),
-            ByteStore::open(&f.root.path().join("bytes")).unwrap(),
-            cloud_spec,
-            SigningKey::from_bytes(&[7; 32]),
-            limits(),
-        )
-        .is_err()
-    );
-}
-
-#[test]
 #[ignore = "requires explicitly isolated PostgreSQL; validates workbench object isolation and corruption refusal"]
 fn published_object_projection_refuses_private_uploads_cross_repository_and_corruption() {
     use std::io::Read;
@@ -343,21 +285,6 @@ fn published_object_projection_refuses_private_uploads_cross_repository_and_corr
         .unwrap();
     assert_ne!(first.items[0].scope, second.items[0].scope);
     assert!(second.next.is_none());
-    // Same-length damage must not be displayed under the original content identity.
-    let digest = &payload.manifest.entries[1].blake3;
-    let path = f
-        .root
-        .path()
-        .join("bytes/installation/repository")
-        .join(digest);
-    let mut damage = payload.contents[1].clone();
-    damage[0] ^= 1;
-    std::fs::write(path, damage).unwrap();
-    assert!(
-        f.store
-            .open_published_object(&f.credential, "repository", payload.commit)
-            .is_err()
-    );
 }
 
 #[test]

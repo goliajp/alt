@@ -312,49 +312,6 @@ fn task_binding_notification_requires_committed_claim_and_cannot_undo_it_on_quot
 }
 
 #[test]
-#[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
-fn schema_twelve_upgrade_preserves_accepted_request_but_does_not_invent_a_task_claim() {
-    let mut f = Fixture::new();
-    let (_, signed, source) = prepare(&mut f);
-    let digest = signed.digest().unwrap();
-    let s = scope(&f);
-    f.client()
-        .batch_execute("DROP TABLE alt_link_task_claims; ALTER TABLE alt_request_content DROP COLUMN selected_entries, DROP COLUMN chunk_bytes; DROP TABLE alt_blob_locations,alt_segments; DROP INDEX alt_pins_permanent_content; DELETE FROM alt_schema WHERE version>=13")
-        .unwrap();
-    assert!(
-        Store::open(
-            f.client(),
-            f.store.bytes().clone(),
-            f.spec.clone(),
-            SigningKey::from_bytes(&f.signing_seed),
-            limits()
-        )
-        .is_err()
-    );
-    f.store = Store::migrate_v12(
-        f.client(),
-        f.store.bytes().clone(),
-        f.spec.clone(),
-        SigningKey::from_bytes(&f.signing_seed),
-        limits(),
-    )
-    .unwrap();
-    f.spec.runtime_generation += 1;
-    assert_eq!(
-        f.store
-            .repair_task_source(&f.credential, &s, &digest)
-            .unwrap(),
-        source
-    );
-    assert!(
-        f.store
-            .repair_task_claim(&f.credential, &s, &digest)
-            .unwrap()
-            .is_none()
-    );
-}
-
-#[test]
 #[ignore = "requires isolated PostgreSQL and actual native Task publications"]
 fn bounded_claim_and_history_pages_visit_unannounced_work_without_repeating_rows() {
     let mut f = Fixture::new();

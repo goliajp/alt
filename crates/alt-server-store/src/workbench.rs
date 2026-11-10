@@ -1,7 +1,6 @@
 //! Authorized workbench projections over the publication authority.
 use crate::store::{authorize, credential_row, instance, integer, now, snapshot, unsigned};
 use crate::{Credential, Error, Result, Store};
-use alt_git_codec::{ObjectId, ObjectKind};
 use alt_remote_protocol::{Publication, RequestKey, Scope};
 use serde::Serialize;
 
@@ -142,53 +141,6 @@ impl Store {
         };
         tx.commit()?;
         Ok(Page { items, next })
-    }
-    /// Return only permanently published objects in the authorized repository.
-    /// The immutable descriptor is opened under the same lock as publication/GC.
-    pub fn open_published_object(
-        &mut self,
-        credential: &Credential,
-        repository: &str,
-        oid: ObjectId,
-    ) -> Result<(ObjectKind, u64, crate::StoredReader)> {
-        let mut tx = self.client.transaction()?;
-        instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = snapshot(&mut tx, &self.spec, repository)?;
-        authorize(&mut tx, &self.spec, credential, &current)?;
-        let row=tx.query_opt("SELECT o.kind,o.blake3,b.bytes FROM alt_objects o JOIN alt_blobs b ON b.repository=o.repository AND b.blake3=o.blake3 WHERE o.repository=$1 AND o.oid=$2 AND b.state='stored' AND EXISTS(SELECT 1 FROM alt_pins p WHERE p.repository=o.repository AND p.blake3=o.blake3 AND p.expires_at IS NULL)", &[&repository,&oid.to_string()])?.ok_or(Error::Unauthorized)?;
-        let kind: String = row.get(0);
-        let digest: String = row.get(1);
-        let bytes = unsigned(row.get(2))?;
-        if bytes > self.limits.object_bytes {
-            return Err(Error::Limit("published object read bytes"));
-        }
-        let location =
-            crate::segments::location(&mut tx, &current.scope.repository_instance_id, &digest)?;
-        let file = self
-            .bytes
-            .read_payload(&current.scope, &digest, bytes, location.as_ref())?;
-        let kind = kind
-            .parse()
-            .map_err(|_| Error::Integrity("published object kind"))?;
-        tx.commit()?;
-        let mut file = file;
-        let mut remaining = bytes;
-        let mut hasher = blake3::Hasher::new();
-        let mut buffer = [0u8; 65536];
-        use std::io::{Read, Seek};
-        while remaining > 0 {
-            let length = file.read(&mut buffer[..remaining.min(65536) as usize])?;
-            if length == 0 {
-                return Err(Error::Integrity("published object truncated"));
-            }
-            hasher.update(&buffer[..length]);
-            remaining -= length as u64;
-        }
-        if file.read(&mut buffer[..1])? != 0 || hasher.finalize().to_hex().as_str() != digest {
-            return Err(Error::Integrity("published object bytes"));
-        }
-        file.rewind()?;
-        Ok((kind, bytes, file))
     }
     pub fn published_record(
         &mut self,

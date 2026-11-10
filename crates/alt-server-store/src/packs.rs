@@ -5,8 +5,8 @@ use crate::{
     Credential, Error, Result, Store,
     store::{authorize, credential_row, instance, integer, now, snapshot, unsigned},
 };
-use alt_git_codec::ObjectId;
-use alt_pack_segment::{Segment, SegmentSet};
+use alt_git_codec::{ObjectId, ObjectKind};
+use alt_pack_segment::{Kind, Segment, SegmentSet};
 use alt_remote_protocol::{Publication, Receipt, ReceiptBody, RequestState, Scope};
 use alt_repository_service::{Graph, validate_publication};
 use ed25519_dalek::Signer;
@@ -56,7 +56,115 @@ pub struct NewSegment<'a> {
     pub inline: Option<&'a [u8]>,
 }
 
+pub(crate) fn object_kind(kind: Kind) -> ObjectKind {
+    match kind {
+        Kind::Commit => ObjectKind::Commit,
+        Kind::Tree => ObjectKind::Tree,
+        Kind::Blob => ObjectKind::Blob,
+        Kind::Tag => ObjectKind::Tag,
+    }
+}
+
+/// a segment built from natively uploaded Git objects, not yet published
+pub(crate) struct Materialized {
+    pub(crate) id: String,
+    pub(crate) objects: u64,
+    pub(crate) bytes: u64,
+    pub(crate) flags: u32,
+    pub(crate) inline: Option<Vec<u8>>,
+    pub(crate) segment: Arc<Segment>,
+    pub(crate) path: PathBuf,
+}
+
+pub(crate) fn insert_segment(tx: &mut crate::database::Transaction<'_>, repository: &str, sequence: u64, segment: &NewSegment<'_>) -> Result<()> {
+    tx.execute(
+        "INSERT INTO alt_pack_segments(repository,segment_id,sequence,objects,bytes,flags,state,inline) VALUES($1,$2,$3,$4,$5,$6,'live',$7)",
+        &[&repository, &segment.id, &integer(sequence)?, &integer(segment.objects)?, &integer(segment.bytes)?, &(segment.flags as i32), &segment.inline],
+    )?;
+    Ok(())
+}
+
 impl Store {
+    /// A Git object of the repository, read from its segments. Every published Git
+    /// object lives there, whichever protocol brought it in.
+    pub fn open_published_object(
+        &mut self,
+        credential: &Credential,
+        repository: &str,
+        oid: ObjectId,
+    ) -> Result<(ObjectKind, u64, std::io::Cursor<Vec<u8>>)> {
+        let view = self.pack_view(credential, repository)?;
+        let key: [u8; 20] = oid.as_bytes().try_into().map_err(|_| Error::Unauthorized)?;
+        let record = view.segments.record(&key).map_err(|_| Error::Integrity("pack segment record"))?.ok_or(Error::Unauthorized)?;
+        if record.size > self.limits.object_bytes {
+            return Err(Error::Limit("published object read bytes"));
+        }
+        let (kind, data) = view.segments.read(&key).map_err(|_| Error::Integrity("published object bytes"))?;
+        Ok((object_kind(kind), data.len() as u64, std::io::Cursor::new(data)))
+    }
+
+    /// live segments of a repository, read inside the caller's transaction
+    pub(crate) fn live_segment_ids(tx: &mut crate::database::Transaction<'_>, repository: &str) -> Result<Vec<(String, bool)>> {
+        Ok(tx
+            .query("SELECT segment_id,inline IS NOT NULL FROM alt_pack_segments WHERE repository=$1 AND state='live' ORDER BY sequence", &[&repository])?
+            .iter()
+            .map(|row| (row.get(0), row.get(1)))
+            .collect())
+    }
+
+    /// Packs the Git objects a native publication uploaded into one segment, so that Git
+    /// clients can fetch them. The file is written; the row is the caller's to insert.
+    pub(crate) fn materialize(&mut self, repository: &str, existing: &SegmentSet, objects: Vec<(Kind, Vec<u8>)>) -> Result<Option<Materialized>> {
+        if objects.is_empty() {
+            return Ok(None);
+        }
+        let failed = |_| Error::Integrity("native Git objects do not form a valid segment");
+        let pack = alt_pack_segment::build_pack(objects.iter().map(|(kind, data)| (*kind, data.as_slice()))).map_err(failed)?;
+        let ingested = alt_pack_segment::ingest(
+            &pack,
+            existing,
+            &alt_pack_segment::Limits {
+                objects: self.limits.graph_objects as u64,
+                object_bytes: self.limits.object_bytes,
+                inflated_bytes: self.limits.total_bytes,
+                delta_depth: 1,
+            },
+        )
+        .map_err(failed)?;
+        let mut content = pack;
+        ingested.write_index(&mut content).map_err(failed)?;
+        let mut nonce = [0u8; 16];
+        rand_core::RngCore::fill_bytes(&mut rand_core::OsRng, &mut nonce);
+        let id: String = nonce.iter().map(|byte| format!("{byte:02x}")).collect();
+        let path = self.pack_path(repository, &id)?;
+        let inline = content.len() <= INLINE_SEGMENT_BYTES;
+        {
+            use std::{io::Write, os::unix::fs::OpenOptionsExt};
+            let mut file = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path)?;
+            file.write_all(&content)?;
+            if !inline {
+                file.sync_all()?;
+                std::fs::File::open(path.parent().expect("segment directory"))?.sync_all()?;
+            }
+        }
+        let segment = match Segment::open(&path) {
+            Ok(segment) => Arc::new(segment),
+            Err(_) => {
+                let _ = std::fs::remove_file(&path);
+                return Err(Error::Integrity("materialized segment"));
+            }
+        };
+        Ok(Some(Materialized {
+            id,
+            objects: ingested.objects() as u64,
+            bytes: content.len() as u64,
+            flags: ingested.flags(),
+            inline: inline.then_some(content),
+            segment,
+            path,
+        }))
+    }
+
     /// directory holding one repository's segments, created on first use
     pub fn pack_directory(&self, repository: &str) -> Result<PathBuf> {
         let packs = self.bytes().root().join("packs");
@@ -83,7 +191,7 @@ impl Store {
     }
 
     /// `ids` pairs each live segment with whether its bytes are still held by its row
-    fn open_segments(&mut self, repository: &str, ids: &[(String, bool)]) -> Result<SegmentSet> {
+    pub(crate) fn open_segments(&mut self, repository: &str, ids: &[(String, bool)]) -> Result<SegmentSet> {
         let mut segments = Vec::with_capacity(ids.len());
         for (id, inline) in ids {
             let path = self.pack_path(repository, id)?;
@@ -216,11 +324,7 @@ impl Store {
         let current = snapshot(&mut tx, &self.spec, repository)?;
         let auth = authorize(&mut tx, &self.spec, credential, &current)?;
         let row = tx.query_one("SELECT default_branch,pack_unreachable FROM alt_repositories WHERE id=$1", &[&repository])?;
-        let ids: Vec<(String, bool)> = tx
-            .query("SELECT segment_id,inline IS NOT NULL FROM alt_pack_segments WHERE repository=$1 AND state='live' ORDER BY sequence", &[&repository])?
-            .iter()
-            .map(|row| (row.get(0), row.get(1)))
-            .collect();
+        let ids = Self::live_segment_ids(&mut tx, repository)?;
         tx.commit()?;
         Ok(PackView {
             scope: current.scope,
@@ -287,10 +391,7 @@ impl Store {
             {
                 return Err(Error::Limit("repository quota"));
             }
-            tx.execute(
-                "INSERT INTO alt_pack_segments(repository,segment_id,sequence,objects,bytes,flags,state,inline) VALUES($1,$2,$3,$4,$5,$6,'live',$7)",
-                &[repository, &segment.id, &integer(sequence)?, &integer(segment.objects)?, &integer(segment.bytes)?, &(segment.flags as i32), &segment.inline],
-            )?;
+            insert_segment(&mut tx, repository, sequence, segment)?;
         }
         let body = ReceiptBody {
             publication: publication.clone(),

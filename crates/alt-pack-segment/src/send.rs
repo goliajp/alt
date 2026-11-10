@@ -50,6 +50,20 @@ fn entry_header(code: u8, mut size: u64) -> Vec<u8> {
     out
 }
 
+/// a self-contained pack of whole objects, for content that did not arrive as a pack
+pub fn build_pack<'a>(objects: impl ExactSizeIterator<Item = (Kind, &'a [u8])>) -> Result<Vec<u8>, Error> {
+    let mut pack = pack_header(objects.len() as u64)?.to_vec();
+    for (kind, data) in objects {
+        pack.extend_from_slice(&entry_header(kind as u8, data.len() as u64));
+        let mut encoder = flate2::write::ZlibEncoder::new(pack, flate2::Compression::fast());
+        encoder.write_all(data)?;
+        pack = encoder.finish()?;
+    }
+    let trailer = sha1::Sha1::digest(&pack);
+    pack.extend_from_slice(&trailer);
+    Ok(pack)
+}
+
 const WANT: u8 = 1;
 const HAVE: u8 = 2;
 

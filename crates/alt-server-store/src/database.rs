@@ -37,6 +37,9 @@ impl Connection {
             statements: Statements::default(),
         }
     }
+    pub fn is_closed(&self) -> bool {
+        self.client.is_closed()
+    }
     /// one statement outside any transaction block, with the cached plan
     pub fn query_one(&mut self, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<Row, Error> {
         let statement = match self.statements.values.get(sql) {

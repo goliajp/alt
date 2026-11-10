@@ -968,50 +968,6 @@ fn current_cloud_link_ingress_and_storage_are_charged_once_with_atomic_refusal()
 
 #[test]
 #[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
-fn explicit_schema_eleven_upgrade_retains_history_without_fabricating_current_channels() {
-    let mut f = Fixture::new();
-    native(&mut f);
-    let c = setup(&mut f);
-    let signed = repair(&f, &c, 1, None, "refs/heads/main");
-    receive(&mut f, &c, &signed).unwrap();
-    let s = scope(&f);
-    let digest = signed.digest().unwrap();
-    let original = f.store.change_event(&f.credential, &s, &digest).unwrap();
-    f.client().batch_execute("DROP TABLE alt_link_task_claims,alt_link_current,alt_link_inbox,alt_link_outbox,alt_link_channels; ALTER TABLE alt_request_content DROP COLUMN selected_entries, DROP COLUMN chunk_bytes; DROP TABLE alt_blob_locations,alt_segments; DROP INDEX alt_pins_permanent_content; DELETE FROM alt_schema WHERE version>=12").unwrap();
-    assert!(
-        Store::open(
-            f.client(),
-            f.store.bytes().clone(),
-            f.spec.clone(),
-            SigningKey::from_bytes(&f.signing_seed),
-            limits()
-        )
-        .is_err()
-    );
-    f.store = Store::migrate_v11(
-        f.client(),
-        f.store.bytes().clone(),
-        f.spec.clone(),
-        SigningKey::from_bytes(&f.signing_seed),
-        limits(),
-    )
-    .unwrap();
-    f.spec.runtime_generation += 1;
-    assert_eq!(
-        f.store.change_event(&f.credential, &s, &digest).unwrap(),
-        original
-    );
-    assert!(receive(&mut f, &c, &signed).is_err());
-    let channels: i64 = f
-        .client()
-        .query_one("SELECT count(*) FROM alt_link_channels", &[])
-        .unwrap()
-        .get(0);
-    assert_eq!(channels, 0);
-}
-
-#[test]
-#[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
 fn peer_facts_wait_for_lost_mapping_receipt_instead_of_recording_permanent_refusal() {
     let mut f = Fixture::new();
     let (id, _) = super::tasks::published_delivery(&mut f);

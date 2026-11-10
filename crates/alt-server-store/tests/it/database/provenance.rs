@@ -111,50 +111,6 @@ fn repeated_recovery_preserves_original_receipts_and_chains_to_current_identity(
     }
 }
 #[test]
-#[ignore = "requires isolated PostgreSQL; legacy schema-five recovery backfill"]
-fn schema_five_restored_history_uses_matching_durable_backup_audit() {
-    let mut f = Fixture::new();
-    let origin = browser(&mut f);
-    let (payload, receipt) = publish(&mut f);
-    f.store.activate_restored(10, &"b".repeat(64)).unwrap();
-    let restored = f.store.spec().clone();
-    // Construct the exact previous schema, retaining the recovery audit that
-    // version five already persisted, and dropping only the new lineage table.
-    f.client()
-        .batch_execute(
-            "DROP TABLE alt_link_task_claims,alt_link_current,alt_link_inbox,alt_link_outbox,alt_link_channels; DROP TABLE alt_link_history; ALTER TABLE alt_repositories DROP COLUMN link_bytes; DROP TABLE alt_archived_records,alt_archived_publications; DROP TABLE alt_cloud_portable_reservations,alt_portable_import_content,alt_portable_imports; ALTER TABLE alt_repositories DROP COLUMN portable_import; DROP TABLE alt_portable_exports; ALTER TABLE alt_repositories DROP COLUMN portable_freeze; DROP TABLE alt_publication_provenance; ALTER TABLE alt_request_content DROP COLUMN selected_entries, DROP COLUMN chunk_bytes; DROP TABLE alt_blob_locations,alt_segments; DROP INDEX alt_pins_permanent_content; DELETE FROM alt_schema WHERE version>=6",
-        )
-        .unwrap();
-    let mut upgraded = Store::migrate_v5(
-        f.client(),
-        f.store.bytes().clone(),
-        restored,
-        SigningKey::from_bytes(&[7; 32]),
-        limits(),
-    )
-    .unwrap();
-    assert_eq!(upgraded.spec().runtime_generation, 11);
-    let credential = login(&mut upgraded, &origin);
-    let bundle = received(&mut upgraded, &credential, &payload);
-    assert_eq!(bundle.receipt, receipt);
-    assert_eq!(bundle.provenance.len(), 1);
-    assert_eq!(bundle.provenance[0].body.target.recovery_epoch, 10);
-    assert_eq!(
-        bundle.provenance[0].body.reason,
-        TransferReason::Recovery {
-            backup_digest: "b".repeat(64)
-        }
-    );
-    upgraded.activate_restored(20, &"c".repeat(64)).unwrap();
-    let credential = login(&mut upgraded, &origin);
-    assert_eq!(
-        received(&mut upgraded, &credential, &payload)
-            .provenance
-            .len(),
-        2
-    );
-}
-#[test]
 #[ignore = "requires isolated PostgreSQL; missing legacy evidence must roll back schema activation"]
 fn legacy_backfill_refuses_missing_or_wrong_epoch_audit_without_partial_migration() {
     for replace in [

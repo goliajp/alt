@@ -100,8 +100,10 @@ impl Drop for Lease {
             return;
         }
         let mut idle = self.pool.0.idle.lock().expect("idle stores");
-        if !idle.closed && idle.stores.len() < self.pool.0.limit {
-            idle.stores.push(self.store.take().expect("store lease"));
+        let store = self.store.take().expect("store lease");
+        // a connection that died during the request is dropped, not reused
+        if !idle.closed && !store.is_closed() && idle.stores.len() < self.pool.0.limit {
+            idle.stores.push(store);
         }
     }
 }

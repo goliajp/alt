@@ -34,6 +34,11 @@ impl SegmentSet {
             .find_map(|segment| segment.find(oid).map(|index| (segment.as_ref(), index)))
     }
 
+    /// whether any segment holds the object
+    pub fn locate_any(&self, oid: &Oid) -> bool {
+        self.locate(oid).is_some()
+    }
+
     pub fn record(&self, oid: &Oid) -> Result<Option<Record>, Error> {
         self.locate(oid).map(|(segment, index)| segment.record(index)).transpose()
     }
