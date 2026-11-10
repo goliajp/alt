@@ -181,7 +181,7 @@ pub(crate) fn receive(
         let _ = std::fs::remove_file(path);
     }
     let (request, outcome) = match result {
-        Ok(request) => (Some(request), Ok(())),
+        Ok(request) => (request, Ok(())),
         Err(error) => (None, Err(error)),
     };
     let message = match &outcome {
@@ -245,8 +245,21 @@ fn publish(
     head: &alt_wire::push::PushHead,
     pack: &[u8],
     created: &mut Option<std::path::PathBuf>,
-) -> Result<RequestKey> {
+) -> Result<Option<RequestKey>> {
     let limits = store.limits();
+    // A client may list refs it does not change. They take no part in the publication,
+    // but a stale expectation is still a conflict.
+    let mut changes = Vec::new();
+    for update in &head.updates {
+        if update.old != update.new {
+            changes.push(update);
+        } else if view.refs.get(&update.name).copied() != update.old {
+            return Err(Error::Precondition("reference changed since it was read"));
+        }
+    }
+    if changes.is_empty() {
+        return Ok(None);
+    }
     let mut nonce = [0u8; 40];
     OsRng.fill_bytes(&mut nonce);
     let mut segments = view.segments.segments().to_vec();
@@ -300,7 +313,7 @@ fn publish(
     let set = SegmentSet::new(segments);
     let mut remaining = limits.walk_steps;
     let mut refs = Vec::new();
-    for update in &head.updates {
+    for update in changes {
         let force = match (update.old, update.new) {
             (Some(old), Some(new)) => {
                 update.name.starts_with("refs/tags/")
@@ -355,7 +368,7 @@ fn publish(
     if let Some((id, _, _, segment, _, _)) = stored {
         store.adopt_segment(repository, &id, segment)?;
     }
-    Ok(key)
+    Ok(Some(key))
 }
 
 fn peel(set: &SegmentSet, mut oid: Oid, remaining: &mut usize) -> Result<Option<Oid>> {
