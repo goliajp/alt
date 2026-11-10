@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: perf
+summary: blake3 rounds on eight lanes in assembly, with one state word kept in memory
+author-type: human
+author: doracawl
+touched: crates/alt-hash/src/blake3/avx2.rs
+touched: crates/alt-hash/src/blake3/avx2/rounds.rs
