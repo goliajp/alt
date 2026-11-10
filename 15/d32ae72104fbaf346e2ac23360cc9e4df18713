@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: perf
+summary: x86-64 SHA-1 with an unrolled schedule and an AVX2+BMI2 variant
+author-type: human
+author: doracawl
+touched: crates/alt-hash/examples/sha1_speed.rs
+touched: crates/alt-hash/src/sha1.rs
+touched: crates/alt-hash/src/sha1/x86.rs
