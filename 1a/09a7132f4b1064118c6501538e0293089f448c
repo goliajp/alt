@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: feat
+summary: catalog block store experiment, snapshot catalog-proof-metadata-source-v1 (not admitted)
+author-type: human
+author: doracawl
+touched: crates/alt-git-pack/src/representation.rs
+touched: crates/alt-server-store/src/bytes.rs
+touched: crates/alt-server-store/src/bytes/segments.rs
+touched: crates/alt-server-store/src/bytes/verified_reader.rs
+touched: crates/alt-server-store/src/catalog/pins/write.rs
+touched: crates/alt-server-store/src/catalog/pins/write/batch.rs
+touched: crates/alt-server-store/src/catalog/pins/write_tests.rs
+touched: crates/alt-server-store/src/catalog/retention.rs
+touched: crates/alt-server-store/src/requests.rs
