@@ -28,7 +28,6 @@ dependencies = [
  "argon2",
  "blake3",
  "rand_core 0.6.4",
- "thiserror",
  "url",
 ]
 
@@ -37,7 +36,6 @@ name = "alt-byte-segment"
 version = "0.1.0"
 dependencies = [
  "blake3",
- "thiserror",
 ]
 
 [[package]]
@@ -45,7 +43,6 @@ name = "alt-catalog-block"
 version = "0.1.0"
 dependencies = [
  "blake3",
- "thiserror",
 ]
 
 [[package]]
@@ -123,7 +120,6 @@ dependencies = [
  "rand_core 0.6.4",
  "serde",
  "serde_json",
- "thiserror",
  "tiny_http",
  "ureq",
 ]
@@ -135,7 +131,6 @@ dependencies = [
  "blake3",
  "serde",
  "serde_json",
- "thiserror",
 ]
 
 [[package]]
@@ -192,7 +187,6 @@ dependencies = [
  "alt-testutil",
  "bstr",
  "tempfile",
- "thiserror",
 ]
 
 [[package]]
@@ -209,7 +203,6 @@ dependencies = [
  "alt-testutil",
  "bstr",
  "tempfile",
- "thiserror",
 ]
 
 [[package]]
@@ -219,7 +212,6 @@ dependencies = [
  "alt-testutil",
  "bstr",
  "tempfile",
- "thiserror",
 ]
 
 [[package]]
@@ -231,7 +223,6 @@ dependencies = [
  "alt-testutil",
  "bstr",
  "tempfile",
- "thiserror",
 ]
 
 [[package]]
@@ -246,7 +237,6 @@ dependencies = [
  "criterion",
  "memmap2",
  "tempfile",
- "thiserror",
 ]
 
 [[package]]
@@ -257,7 +247,6 @@ dependencies = [
  "alt-testutil",
  "bstr",
  "tempfile",
- "thiserror",
 ]
 
 [[package]]
@@ -277,7 +266,6 @@ dependencies = [
  "alt-testutil",
  "bstr",
  "tempfile",
- "thiserror",
 ]
 
 [[package]]
@@ -297,7 +285,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "thiserror",
 ]
 
 [[package]]
@@ -307,7 +294,6 @@ dependencies = [
  "alt-hash",
  "serde",
  "serde_json",
- "thiserror",
  "tiny_http",
  "ureq",
 ]
@@ -334,7 +320,6 @@ dependencies = [
  "blake3",
  "libc",
  "tempfile",
- "thiserror",
 ]
 
 [[package]]
@@ -344,7 +329,6 @@ dependencies = [
  "blake3",
  "libc",
  "tempfile",
- "thiserror",
 ]
 
 [[package]]
@@ -359,7 +343,6 @@ dependencies = [
  "memmap2",
  "rayon",
  "tempfile",
- "thiserror",
 ]
 
 [[package]]
@@ -377,7 +360,6 @@ dependencies = [
  "golia-change-link",
  "serde",
  "serde_json",
- "thiserror",
 ]
 
 [[package]]
@@ -412,7 +394,6 @@ dependencies = [
  "alt-store",
  "blake3",
  "tempfile",
- "thiserror",
 ]
 
 [[package]]
@@ -432,7 +413,6 @@ dependencies = [
  "blake3",
  "ed25519-dalek",
  "serde_json",
- "thiserror",
 ]
 
 [[package]]
@@ -443,7 +423,6 @@ dependencies = [
  "alt-oplog",
  "blake3",
  "tempfile",
- "thiserror",
 ]
 
 [[package]]
@@ -454,7 +433,6 @@ dependencies = [
  "golia-change-link",
  "serde",
  "serde_json",
- "thiserror",
 ]
 
 [[package]]
@@ -471,7 +449,6 @@ dependencies = [
  "alt-testutil",
  "bstr",
  "tempfile",
- "thiserror",
 ]
 
 [[package]]
@@ -483,7 +460,6 @@ dependencies = [
  "alt-remote-protocol",
  "bstr",
  "serde",
- "thiserror",
 ]
 
 [[package]]
@@ -497,7 +473,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "thiserror",
 ]
 
 [[package]]
@@ -543,7 +518,6 @@ dependencies = [
  "subtle",
  "tar",
  "tempfile",
- "thiserror",
  "tiny_http",
  "tokio",
  "tokio-util",
@@ -580,7 +554,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "thiserror",
 ]
 
 [[package]]
@@ -604,7 +577,6 @@ dependencies = [
  "ed25519-dalek",
  "rand_core 0.6.4",
  "tempfile",
- "thiserror",
 ]
 
 [[package]]
@@ -619,7 +591,6 @@ dependencies = [
  "criterion",
  "memmap2",
  "tempfile",
- "thiserror",
  "zstd",
 ]
 
@@ -637,7 +608,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "thiserror",
 ]
 
 [[package]]
@@ -659,7 +629,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "thiserror",
 ]
 
 [[package]]
@@ -678,7 +647,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "thiserror",
 ]
 
 [[package]]
@@ -695,7 +663,6 @@ version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "syn 2.0.118",
- "thiserror",
 ]
 
 [[package]]
@@ -726,7 +693,6 @@ name = "alt-wire"
 version = "0.1.0"
 dependencies = [
  "alt-git-codec",
- "thiserror",
 ]
 
 [[package]]
@@ -741,7 +707,6 @@ dependencies = [
  "golia-change-link",
  "serde",
  "serde_json",
- "thiserror",
  "ureq",
  "url",
 ]
@@ -758,7 +723,6 @@ dependencies = [
  "alt-testutil",
  "bstr",
  "tempfile",
- "thiserror",
 ]
 
 [[package]]

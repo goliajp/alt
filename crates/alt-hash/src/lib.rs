@@ -4,6 +4,7 @@
 //! and keeps a portable one that the others are tested against.
 
 mod adler32;
+pub mod blake3;
 mod cache;
 pub mod crc32;
 pub mod sha1;

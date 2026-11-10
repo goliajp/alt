@@ -1,6 +1,6 @@
 [package]
 name = "alt-hash"
-description = "Hash functions implemented for the hardware, with no dependencies: SHA-1, SHA-256, CRC-32"
+description = "Hash functions implemented for the hardware, with no dependencies: SHA-1, SHA-256, BLAKE3, CRC-32, Adler-32"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
