@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: perf
+summary: eight-lane SHA-1 rounds in assembly, message lengths computed once
+author-type: human
+author: doracawl
+touched: crates/alt-hash/examples/sha1_speed.rs
+touched: crates/alt-hash/src/sha1_many.rs
