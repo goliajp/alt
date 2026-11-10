@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: skip unchanged refs in a push instead of rejecting the whole request
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/git_packs.rs
