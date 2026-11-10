@@ -1,0 +1,15 @@
+schema: alt-meta/1
+type: feat
+summary: crc-32 by carry-less multiplication in alt-hash, used for pack entry checksums
+author-type: human
+author: doracawl
+touched: crates/alt-git-pack/src/index_pack.rs
+touched: crates/alt-git-pack/src/write.rs
+touched: crates/alt-hash/src/cache.rs
+touched: crates/alt-hash/src/crc32.rs
+touched: crates/alt-hash/src/crc32/arm.rs
+touched: crates/alt-hash/src/crc32/x86.rs
+touched: crates/alt-hash/src/lib.rs
+touched: crates/alt-hash/src/sha1_many.rs
+touched: crates/alt-hash/tests/it/main.rs
+touched: crates/alt-pack-segment/src/format.rs
