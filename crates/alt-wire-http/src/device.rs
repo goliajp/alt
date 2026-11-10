@@ -3,15 +3,27 @@ use alt_remote_protocol::login::*;
 use serde::de::DeserializeOwned;
 use std::{io::Read, time::Duration};
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum Error {
-    #[error("invalid device authorization connection or response")]
     Invalid,
-    #[error("device authorization service is unavailable; retain pending state to resume")]
     Unavailable,
-    #[error("device authorization: {0:?}")]
     Rejected(DeviceError),
 }
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Invalid => f.write_str("invalid device authorization connection or response"),
+            Self::Unavailable => f.write_str(
+                "device authorization service is unavailable; retain pending state to resume",
+            ),
+            Self::Rejected(e) => write!(f, "device authorization: {e:?}"),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
 pub type Result<T> = std::result::Result<T, Error>;
 pub struct Client {
     origin: String,

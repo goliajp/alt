@@ -23,29 +23,67 @@ use alt_oplog::{OpLog, OpLogError};
 pub use alt_oplog::OpId;
 pub use tx::{IdemKey, PAYLOAD_REF_TX, ParsedTx, RefChange, parse_tx};
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum RefError {
-    #[error("io")]
-    Io(#[from] std::io::Error),
-    #[error("oplog")]
-    OpLog(#[from] OpLogError),
-    #[error("ref format: {0}")]
+    Io(std::io::Error),
+    OpLog(OpLogError),
     Format(&'static str),
-    #[error("ref {name}: expected state does not match")]
-    Conflict { name: String },
-    #[error("symref chain too deep resolving {0}")]
+    Conflict {
+        name: String,
+    },
     SymrefDepth(String),
-    #[error("payload kind {0} is reserved for ref transactions")]
     ReservedPayload(u8),
     /// The capability gate denied this transaction. The string names the ref
     /// (or `<read-only>` for a blanket deny) so the operator can act on the
     /// audit message.
-    #[error("capability denied: {0}")]
     CapabilityDenied(String),
     /// The caller's [`RefPolicy::state_check`] refused the transaction
     /// against the current ref state.
-    #[error("{0}")]
     Rejected(String),
+}
+
+impl std::fmt::Display for RefError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(_) => f.write_str("io"),
+            Self::OpLog(_) => f.write_str("oplog"),
+            Self::Format(what) => write!(f, "ref format: {what}"),
+            Self::Conflict { name } => write!(f, "ref {name}: expected state does not match"),
+            Self::SymrefDepth(name) => write!(f, "symref chain too deep resolving {name}"),
+            Self::ReservedPayload(kind) => {
+                write!(f, "payload kind {kind} is reserved for ref transactions")
+            }
+            Self::CapabilityDenied(what) => write!(f, "capability denied: {what}"),
+            Self::Rejected(reason) => write!(f, "{reason}"),
+        }
+    }
+}
+
+impl std::error::Error for RefError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            Self::OpLog(e) => Some(e),
+            Self::Format(_)
+            | Self::Conflict { .. }
+            | Self::SymrefDepth(_)
+            | Self::ReservedPayload(_)
+            | Self::CapabilityDenied(_)
+            | Self::Rejected(_) => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for RefError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
+}
+
+impl From<OpLogError> for RefError {
+    fn from(e: OpLogError) -> Self {
+        Self::OpLog(e)
+    }
 }
 
 /// Per-call capability gate for ref-affecting transactions. The store invokes

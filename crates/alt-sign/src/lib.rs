@@ -80,23 +80,32 @@ impl std::fmt::Debug for Sig {
 }
 
 /// Errors parsing or validating a key / signature.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum SignError {
     /// Prefix wasn't `alt-<kind>-ed25519:` or the kind didn't match the
     /// loader's expectation.
-    #[error("malformed key/sig prefix: {0:?}")]
     BadPrefix(String),
     /// Base64 body had non-alphabet characters or wrong length.
-    #[error("malformed base64 body")]
     BadBody,
     /// Key parsed into something the curve rejected (off-curve, etc.).
-    #[error("invalid Ed25519 key: {0}")]
     BadKey(String),
     /// Signature verification failed — message didn't sign with the
     /// given public key.
-    #[error("signature does not verify")]
     BadSignature,
 }
+
+impl std::fmt::Display for SignError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BadPrefix(v) => write!(f, "malformed key/sig prefix: {v:?}"),
+            Self::BadBody => f.write_str("malformed base64 body"),
+            Self::BadKey(v) => write!(f, "invalid Ed25519 key: {v}"),
+            Self::BadSignature => f.write_str("signature does not verify"),
+        }
+    }
+}
+
+impl std::error::Error for SignError {}
 
 impl SecretKey {
     /// Generate a fresh keypair from the OS RNG. Returns

@@ -159,22 +159,44 @@ impl GitTransport {
 /// Reasons a request fails. Wraps [`ureq::Error`] with a typed split for
 /// the common "server gave us 4xx/5xx" case so the caller can react
 /// without string-matching.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum TransportError {
     /// I/O failure on the wire (connection refused, TLS handshake error,
     /// truncated body). Wraps the underlying io::Error from ureq.
-    #[error("transport io: {0}")]
-    Io(#[from] io::Error),
+    Io(io::Error),
     /// The server returned a non-2xx HTTP status. `body` is captured so
     /// the caller can surface the error page (git servers send useful
     /// stderr text in the body of 401/403/404/500).
-    #[error("http {status}: {body}")]
     HttpStatus { status: u16, body: String },
     /// ureq couldn't process the request at the transport layer (DNS,
     /// URL parse, TLS). Distinct from `HttpStatus` so the caller doesn't
     /// have to guess.
-    #[error("transport: {0}")]
     Other(String),
+}
+
+impl std::fmt::Display for TransportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(e) => write!(f, "transport io: {e}"),
+            Self::HttpStatus { status, body } => write!(f, "http {status}: {body}"),
+            Self::Other(msg) => write!(f, "transport: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for TransportError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            Self::HttpStatus { .. } | Self::Other(_) => None,
+        }
+    }
+}
+
+impl From<io::Error> for TransportError {
+    fn from(e: io::Error) -> Self {
+        Self::Io(e)
+    }
 }
 
 impl TransportError {

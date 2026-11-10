@@ -28,14 +28,36 @@ pub use pack::{EntryInfo, EntryKind, Pack};
 pub use representation::{PlainRepresentation, RepresentationLimits};
 pub use write::{PackWriter, WrittenPack};
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum PackError {
-    #[error("io")]
-    Io(#[from] std::io::Error),
-    #[error("pack resource limit: {0}")]
+    Io(std::io::Error),
     Limit(&'static str),
-    #[error("pack format: {0}")]
     Format(&'static str),
+}
+
+impl std::fmt::Display for PackError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(_) => f.write_str("io"),
+            Self::Limit(v) => write!(f, "pack resource limit: {v}"),
+            Self::Format(v) => write!(f, "pack format: {v}"),
+        }
+    }
+}
+
+impl std::error::Error for PackError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for PackError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
 }
 
 /// A fully resolved object read from a pack. Data is shared with the

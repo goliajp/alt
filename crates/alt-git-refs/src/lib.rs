@@ -189,12 +189,34 @@ fn parse_loose(data: &[u8], algo: HashAlgo) -> Result<RefTarget, RefError> {
     Ok(RefTarget::Direct(packed::parse_oid(line, algo)?))
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum RefError {
-    #[error("io")]
-    Io(#[from] io::Error),
-    #[error("ref format: {0}")]
+    Io(io::Error),
     Format(&'static str),
-    #[error("symref chain deeper than {MAX_SYMREF_DEPTH}")]
     SymrefDepth,
+}
+
+impl std::fmt::Display for RefError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(_) => f.write_str("io"),
+            Self::Format(v) => write!(f, "ref format: {v}"),
+            Self::SymrefDepth => write!(f, "symref chain deeper than {MAX_SYMREF_DEPTH}"),
+        }
+    }
+}
+
+impl std::error::Error for RefError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<io::Error> for RefError {
+    fn from(e: io::Error) -> Self {
+        Self::Io(e)
+    }
 }

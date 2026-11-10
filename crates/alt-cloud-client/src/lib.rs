@@ -14,18 +14,42 @@ use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{io::Read, time::Duration};
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum Error {
-    #[error("platform authorization refused")]
     Unauthorized,
-    #[error("platform is temporarily unavailable")]
     Unavailable,
-    #[error("invalid or oversized platform response")]
     Invalid,
-    #[error("sealed platform grant does not match its credential binding")]
     SealedGrant,
-    #[error("platform contract validation failed: {0}")]
-    Contract(#[from] golia_platform_contract::Error),
+    Contract(golia_platform_contract::Error),
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unauthorized => f.write_str("platform authorization refused"),
+            Self::Unavailable => f.write_str("platform is temporarily unavailable"),
+            Self::Invalid => f.write_str("invalid or oversized platform response"),
+            Self::SealedGrant => {
+                f.write_str("sealed platform grant does not match its credential binding")
+            }
+            Self::Contract(e) => write!(f, "platform contract validation failed: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Contract(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<golia_platform_contract::Error> for Error {
+    fn from(e: golia_platform_contract::Error) -> Self {
+        Self::Contract(e)
+    }
 }
 pub type Result<T> = std::result::Result<T, Error>;
 const MAX_RESPONSE: u64 = 64 * 1024;

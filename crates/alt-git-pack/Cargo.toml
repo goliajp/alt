@@ -11,7 +11,6 @@ alt-hash.workspace = true
 alt-inflate.workspace = true
 alt-git-codec.workspace = true
 memmap2.workspace = true
-thiserror.workspace = true
 
 [dev-dependencies]
 alt-testutil.workspace = true

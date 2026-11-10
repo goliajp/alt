@@ -103,24 +103,65 @@ fn unlock(_file: &File) -> std::io::Result<()> {
     Ok(())
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum OdbError {
-    #[error("io")]
-    Io(#[from] std::io::Error),
-    #[error("store")]
-    Store(#[from] StoreError),
-    #[error("odb format: {0}")]
+    Io(std::io::Error),
+    Store(StoreError),
     Format(&'static str),
-    #[error("object {claimed} does not hash to its id (got {actual})")]
     HashMismatch { claimed: ObjectId, actual: ObjectId },
-    #[error("object {0} maps to {1} bytes but the store returned a different length")]
     SizeMismatch(ObjectId, u64),
-    #[error("tier1 record for {0} is malformed: {1}")]
     Tier1Record(BlobId, tier1::RecordError),
-    #[error("tier1 recompose failed for {0}")]
     Tier1Recompose(BlobId),
-    #[error("tier1 recomposed bytes do not hash to {0}")]
     Tier1HashMismatch(BlobId),
+}
+
+impl std::fmt::Display for OdbError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(_) => f.write_str("io"),
+            Self::Store(_) => f.write_str("store"),
+            Self::Format(what) => write!(f, "odb format: {what}"),
+            Self::HashMismatch { claimed, actual } => {
+                write!(f, "object {claimed} does not hash to its id (got {actual})")
+            }
+            Self::SizeMismatch(oid, len) => write!(
+                f,
+                "object {oid} maps to {len} bytes but the store returned a different length"
+            ),
+            Self::Tier1Record(id, e) => write!(f, "tier1 record for {id} is malformed: {e}"),
+            Self::Tier1Recompose(id) => write!(f, "tier1 recompose failed for {id}"),
+            Self::Tier1HashMismatch(id) => {
+                write!(f, "tier1 recomposed bytes do not hash to {id}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for OdbError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            Self::Store(e) => Some(e),
+            Self::Format(_)
+            | Self::HashMismatch { .. }
+            | Self::SizeMismatch(..)
+            | Self::Tier1Record(..)
+            | Self::Tier1Recompose(_)
+            | Self::Tier1HashMismatch(_) => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for OdbError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
+}
+
+impl From<StoreError> for OdbError {
+    fn from(e: StoreError) -> Self {
+        Self::Store(e)
+    }
 }
 
 /// A point-in-time write cursor of a [`NativeOdb`] for [`NativeOdb::rewind`]:

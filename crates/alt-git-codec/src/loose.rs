@@ -110,14 +110,30 @@ fn parse_header(reader: &mut impl Read, oid: &ObjectId) -> Result<(ObjectKind, u
     Ok((kind, size))
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum LooseError {
-    #[error("object {0} not found in loose store")]
     NotFound(ObjectId),
-    #[error("io error on loose object {oid}")]
     Io { oid: ObjectId, source: io::Error },
-    #[error("corrupt loose object {oid}: {reason}")]
     Corrupt { oid: ObjectId, reason: &'static str },
+}
+
+impl std::fmt::Display for LooseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotFound(oid) => write!(f, "object {oid} not found in loose store"),
+            Self::Io { oid, .. } => write!(f, "io error on loose object {oid}"),
+            Self::Corrupt { oid, reason } => write!(f, "corrupt loose object {oid}: {reason}"),
+        }
+    }
+}
+
+impl std::error::Error for LooseError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io { source, .. } => Some(source),
+            Self::NotFound(_) | Self::Corrupt { .. } => None,
+        }
+    }
 }
 
 #[cfg(test)]

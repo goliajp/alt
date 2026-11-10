@@ -141,19 +141,38 @@ impl FromStr for ObjectId {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ParseOidError {
-    #[error("invalid object id length {0}: expected 40 (SHA-1) or 64 (SHA-256) hex chars")]
     InvalidHexLength(usize),
-    #[error("invalid hex byte {0:#04x} in object id")]
     InvalidHexByte(u8),
-    #[error("invalid raw object id length {len} for {algo:?}: expected {expected}")]
     InvalidRawLength {
         algo: HashAlgo,
         len: usize,
         expected: usize,
     },
 }
+
+impl std::fmt::Display for ParseOidError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidHexLength(len) => write!(
+                f,
+                "invalid object id length {len}: expected 40 (SHA-1) or 64 (SHA-256) hex chars"
+            ),
+            Self::InvalidHexByte(byte) => write!(f, "invalid hex byte {byte:#04x} in object id"),
+            Self::InvalidRawLength {
+                algo,
+                len,
+                expected,
+            } => write!(
+                f,
+                "invalid raw object id length {len} for {algo:?}: expected {expected}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ParseOidError {}
 
 #[cfg(test)]
 mod tests {

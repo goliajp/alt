@@ -9,7 +9,6 @@ license.workspace = true
 alt-hash.workspace = true
 alt-inflate.workspace = true
 bstr.workspace = true
-thiserror.workspace = true
 
 [dev-dependencies]
 alt-deflate.workspace = true

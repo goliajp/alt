@@ -66,16 +66,38 @@ pub struct RefRecord {
 }
 
 /// Errors from request encoding / response parsing.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum LsRefsError {
-    #[error("pkt-line: {0}")]
-    Pkt(#[from] PktError),
+    Pkt(PktError),
     /// A line in the response wasn't `<oid> <name>[…]`.
-    #[error("malformed ref line: {0:?}")]
     BadRefLine(Vec<u8>),
     /// The advertised `object-format` wasn't one we know how to parse.
-    #[error("unsupported object format: {0}")]
     BadObjectFormat(String),
+}
+
+impl std::fmt::Display for LsRefsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Pkt(e) => write!(f, "pkt-line: {e}"),
+            Self::BadRefLine(line) => write!(f, "malformed ref line: {line:?}"),
+            Self::BadObjectFormat(name) => write!(f, "unsupported object format: {name}"),
+        }
+    }
+}
+
+impl std::error::Error for LsRefsError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Pkt(e) => Some(e),
+            Self::BadRefLine(_) | Self::BadObjectFormat(_) => None,
+        }
+    }
+}
+
+impl From<PktError> for LsRefsError {
+    fn from(e: PktError) -> Self {
+        Self::Pkt(e)
+    }
 }
 
 /// Encode an `ls-refs` request body. The caller wraps this in the HTTP

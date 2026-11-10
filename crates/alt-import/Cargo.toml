@@ -13,7 +13,6 @@ alt-odb.workspace = true
 alt-refs.workspace = true
 alt-repo.workspace = true
 bstr.workspace = true
-thiserror.workspace = true
 
 [dev-dependencies]
 alt-testutil.workspace = true

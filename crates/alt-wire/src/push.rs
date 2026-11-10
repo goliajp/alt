@@ -86,29 +86,62 @@ impl V1RefAdvertisement {
 }
 
 /// Reasons request encoding / response parsing fails.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum PushError {
-    #[error("pkt-line: {0}")]
-    Pkt(#[from] PktError),
+    Pkt(PktError),
     /// First frame wasn't `# service=git-receive-pack\n`.
-    #[error("unexpected service header: {0:?}")]
     BadService(String),
     /// A ref-advertisement line wasn't `<oid> <name>[\0<caps>]`.
-    #[error("malformed ref-ad line: {0:?}")]
     BadRefLine(Vec<u8>),
     /// A status-report line wasn't `unpack …` / `ok …` / `ng …`.
-    #[error("malformed status line: {0:?}")]
     BadStatusLine(Vec<u8>),
     /// Sideband channel byte wasn't 1, 2, or 3.
-    #[error("invalid sideband channel: {0}")]
     BadSideband(u8),
     /// Sideband band 3 (fatal error from server).
-    #[error("server error (sideband band 3): {0}")]
     ServerError(String),
     /// IO error draining the pack trailer or sideband body — surfaces
     /// when the server can't keep reading after the command flush.
-    #[error("io: {0}")]
-    Io(#[from] std::io::Error),
+    Io(std::io::Error),
+}
+
+impl std::fmt::Display for PushError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Pkt(e) => write!(f, "pkt-line: {e}"),
+            Self::BadService(name) => write!(f, "unexpected service header: {name:?}"),
+            Self::BadRefLine(line) => write!(f, "malformed ref-ad line: {line:?}"),
+            Self::BadStatusLine(line) => write!(f, "malformed status line: {line:?}"),
+            Self::BadSideband(band) => write!(f, "invalid sideband channel: {band}"),
+            Self::ServerError(msg) => write!(f, "server error (sideband band 3): {msg}"),
+            Self::Io(e) => write!(f, "io: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for PushError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Pkt(e) => Some(e),
+            Self::Io(e) => Some(e),
+            Self::BadService(_)
+            | Self::BadRefLine(_)
+            | Self::BadStatusLine(_)
+            | Self::BadSideband(_)
+            | Self::ServerError(_) => None,
+        }
+    }
+}
+
+impl From<PktError> for PushError {
+    fn from(e: PktError) -> Self {
+        Self::Pkt(e)
+    }
+}
+
+impl From<std::io::Error> for PushError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
 }
 
 /// Capability name an alt client sends to declare which principal

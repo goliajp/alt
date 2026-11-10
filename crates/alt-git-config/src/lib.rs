@@ -148,16 +148,38 @@ fn parse_int(v: &BStr) -> Result<i64, ConfigError> {
         .ok_or(ConfigError::Value("integer overflow"))
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum ConfigError {
-    #[error("io")]
-    Io(#[from] std::io::Error),
-    #[error("config syntax: {0}")]
+    Io(std::io::Error),
     Syntax(&'static str),
-    #[error("config value: {0}")]
     Value(&'static str),
-    #[error("include depth exceeds {}", include::MAX_INCLUDE_DEPTH)]
     IncludeDepth,
+}
+
+impl std::fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(_) => f.write_str("io"),
+            Self::Syntax(v) => write!(f, "config syntax: {v}"),
+            Self::Value(v) => write!(f, "config value: {v}"),
+            Self::IncludeDepth => write!(f, "include depth exceeds {}", include::MAX_INCLUDE_DEPTH),
+        }
+    }
+}
+
+impl std::error::Error for ConfigError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for ConfigError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
 }
 
 // needed by parse_int / parse_bool

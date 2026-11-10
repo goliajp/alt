@@ -18,21 +18,35 @@ pub mod backup;
 mod change_links;
 pub mod provision;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum Error {
-    #[error("invalid operator configuration: {0}")]
     Config(&'static str),
-    #[error("operator file is unavailable or could not be persisted")]
     File,
-    #[error("database connection is unavailable")]
     Database,
-    #[error("instance is not ready or operator action was refused")]
     Store,
-    #[error("operator action outcome is unknown; inspect the same instance before retrying")]
     Unknown,
-    #[error("restoration incomplete at {0}; inspect the isolated destination before retrying")]
     RestoreStage(&'static str),
 }
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Config(v) => write!(f, "invalid operator configuration: {v}"),
+            Self::File => f.write_str("operator file is unavailable or could not be persisted"),
+            Self::Database => f.write_str("database connection is unavailable"),
+            Self::Store => f.write_str("instance is not ready or operator action was refused"),
+            Self::Unknown => f.write_str(
+                "operator action outcome is unknown; inspect the same instance before retrying",
+            ),
+            Self::RestoreStage(v) => write!(
+                f,
+                "restoration incomplete at {v}; inspect the isolated destination before retrying"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
 impl From<alt_server_store::Error> for Error {
     fn from(error: alt_server_store::Error) -> Self {
         match error {

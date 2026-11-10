@@ -21,18 +21,45 @@ pub const MAX_POINTER_BYTES: usize = 1024;
 
 const MEDIA_TYPE: &str = "application/vnd.git-lfs+json";
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum Error {
-    #[error("LFS request to {url} failed: {reason}")]
     Http { url: String, reason: String },
-    #[error("LFS server answered with something that is not a batch response: {0}")]
     Response(String),
-    #[error("LFS server has no {oid}: {message}")]
     Missing { oid: String, message: String },
-    #[error("LFS object {oid} arrived corrupt: {reason}")]
     Corrupt { oid: String, reason: String },
-    #[error("io")]
-    Io(#[from] std::io::Error),
+    Io(std::io::Error),
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Http { url, reason } => write!(f, "LFS request to {url} failed: {reason}"),
+            Self::Response(v) => write!(
+                f,
+                "LFS server answered with something that is not a batch response: {v}"
+            ),
+            Self::Missing { oid, message } => write!(f, "LFS server has no {oid}: {message}"),
+            Self::Corrupt { oid, reason } => {
+                write!(f, "LFS object {oid} arrived corrupt: {reason}")
+            }
+            Self::Io(_) => f.write_str("io"),
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
 }
 
 /// What a pointer names: the sha256 of the content (lowercase hex) and its

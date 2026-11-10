@@ -95,13 +95,22 @@ impl AstDiff {
 }
 
 /// Reasons [`tree_diff`] couldn't classify.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum TreeDiffError {
     /// One side didn't parse as the requested language; the caller should
     /// fall back to line-diff with the wrapped error in the audit trail.
-    #[error("parse error on {side} side: {err}")]
     Parse { side: &'static str, err: syn::Error },
 }
+
+impl std::fmt::Display for TreeDiffError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Parse { side, err } => write!(f, "parse error on {side} side: {err}"),
+        }
+    }
+}
+
+impl std::error::Error for TreeDiffError {}
 
 /// Compute the item-level AST diff between two source strings.
 pub fn tree_diff(old: &str, new: &str, lang: Lang) -> Result<AstDiff, TreeDiffError> {

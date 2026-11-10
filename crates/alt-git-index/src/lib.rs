@@ -309,10 +309,32 @@ mod tests {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum IndexError {
-    #[error("io")]
-    Io(#[from] std::io::Error),
-    #[error("index format: {0}")]
+    Io(std::io::Error),
     Format(&'static str),
+}
+
+impl std::fmt::Display for IndexError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(_) => f.write_str("io"),
+            Self::Format(v) => write!(f, "index format: {v}"),
+        }
+    }
+}
+
+impl std::error::Error for IndexError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for IndexError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
 }

@@ -23,16 +23,38 @@ use alt_store::{BlobId, BlobStore, StoreError};
 mod tier1map;
 use tier1map::Tier1Map;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum PrismStoreError {
-    #[error(transparent)]
-    Store(#[from] StoreError),
-    #[error("tier1 record corrupt: {0}")]
+    Store(StoreError),
     Record(&'static str),
-    #[error("tier1 recompose failed for {0}")]
     Recompose(BlobId),
-    #[error("recomposed bytes do not hash to {0}")]
     HashMismatch(BlobId),
+}
+
+impl std::fmt::Display for PrismStoreError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Store(e) => std::fmt::Display::fmt(e, f),
+            Self::Record(v) => write!(f, "tier1 record corrupt: {v}"),
+            Self::Recompose(v) => write!(f, "tier1 recompose failed for {v}"),
+            Self::HashMismatch(v) => write!(f, "recomposed bytes do not hash to {v}"),
+        }
+    }
+}
+
+impl std::error::Error for PrismStoreError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Store(e) => e.source(),
+            _ => None,
+        }
+    }
+}
+
+impl From<StoreError> for PrismStoreError {
+    fn from(e: StoreError) -> Self {
+        Self::Store(e)
+    }
 }
 
 /// A blob store that decomposes recognized formats into deduplicated parts

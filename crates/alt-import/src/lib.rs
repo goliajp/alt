@@ -22,28 +22,101 @@ use alt_refs::{RefChange, RefError, RefStore, RefTarget};
 use alt_repo::{RepoError, Repository};
 use bstr::ByteSlice;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum ImportError {
-    #[error("io")]
-    Io(#[from] std::io::Error),
-    #[error(transparent)]
-    Repo(#[from] RepoError),
-    #[error(transparent)]
-    Odb(#[from] OdbError),
-    #[error(transparent)]
-    Refs(#[from] RefError),
-    #[error(transparent)]
-    Pack(#[from] alt_git_pack::PackError),
-    #[error(transparent)]
-    Loose(#[from] alt_git_codec::LooseError),
-    #[error(transparent)]
-    GitRefs(#[from] alt_git_refs::RefError),
-    #[error(transparent)]
-    Object(#[from] alt_git_codec::ObjectParseError),
-    #[error("ref name is not utf-8: {0}")]
+    Io(std::io::Error),
+    Repo(RepoError),
+    Odb(OdbError),
+    Refs(RefError),
+    Pack(alt_git_pack::PackError),
+    Loose(alt_git_codec::LooseError),
+    GitRefs(alt_git_refs::RefError),
+    Object(alt_git_codec::ObjectParseError),
     NonUtf8Ref(String),
-    #[error("import source must be a git repository, not a native .alt store")]
     NotAGitSource,
+}
+
+impl std::fmt::Display for ImportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(_) => f.write_str("io"),
+            Self::Repo(e) => std::fmt::Display::fmt(e, f),
+            Self::Odb(e) => std::fmt::Display::fmt(e, f),
+            Self::Refs(e) => std::fmt::Display::fmt(e, f),
+            Self::Pack(e) => std::fmt::Display::fmt(e, f),
+            Self::Loose(e) => std::fmt::Display::fmt(e, f),
+            Self::GitRefs(e) => std::fmt::Display::fmt(e, f),
+            Self::Object(e) => std::fmt::Display::fmt(e, f),
+            Self::NonUtf8Ref(name) => write!(f, "ref name is not utf-8: {name}"),
+            Self::NotAGitSource => {
+                f.write_str("import source must be a git repository, not a native .alt store")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ImportError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            Self::Repo(e) => e.source(),
+            Self::Odb(e) => e.source(),
+            Self::Refs(e) => e.source(),
+            Self::Pack(e) => e.source(),
+            Self::Loose(e) => e.source(),
+            Self::GitRefs(e) => e.source(),
+            Self::Object(e) => e.source(),
+            Self::NonUtf8Ref(_) | Self::NotAGitSource => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for ImportError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
+}
+
+impl From<RepoError> for ImportError {
+    fn from(e: RepoError) -> Self {
+        Self::Repo(e)
+    }
+}
+
+impl From<OdbError> for ImportError {
+    fn from(e: OdbError) -> Self {
+        Self::Odb(e)
+    }
+}
+
+impl From<RefError> for ImportError {
+    fn from(e: RefError) -> Self {
+        Self::Refs(e)
+    }
+}
+
+impl From<alt_git_pack::PackError> for ImportError {
+    fn from(e: alt_git_pack::PackError) -> Self {
+        Self::Pack(e)
+    }
+}
+
+impl From<alt_git_codec::LooseError> for ImportError {
+    fn from(e: alt_git_codec::LooseError) -> Self {
+        Self::Loose(e)
+    }
+}
+
+impl From<alt_git_refs::RefError> for ImportError {
+    fn from(e: alt_git_refs::RefError) -> Self {
+        Self::GitRefs(e)
+    }
+}
+
+impl From<alt_git_codec::ObjectParseError> for ImportError {
+    fn from(e: alt_git_codec::ObjectParseError) -> Self {
+        Self::Object(e)
+    }
 }
 
 /// What one import run did.

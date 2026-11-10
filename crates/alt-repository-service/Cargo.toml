@@ -9,5 +9,4 @@ alt-hash.workspace = true
 alt-git-codec.workspace = true
 alt-remote-protocol.workspace = true
 bstr.workspace = true
-thiserror.workspace = true
 serde.workspace = true

@@ -23,7 +23,6 @@ ed25519-dalek.workspace = true
 rand_core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-thiserror.workspace = true
 tempfile.workspace = true
 libc.workspace = true
 postgres = { version = "0.19.14", features = ["with-serde_json-1"] }

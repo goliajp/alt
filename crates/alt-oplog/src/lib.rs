@@ -35,14 +35,36 @@ const HEADER_LEN: usize = 5;
 const BODY_FIXED_LEN: usize = 78;
 const CHECKSUM_LEN: usize = 8;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum OpLogError {
-    #[error("io")]
-    Io(#[from] std::io::Error),
-    #[error("oplog format: {0}")]
+    Io(std::io::Error),
     Format(&'static str),
-    #[error("op too large: {0} bytes")]
     TooLarge(usize),
+}
+
+impl std::fmt::Display for OpLogError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(_) => f.write_str("io"),
+            Self::Format(v) => write!(f, "oplog format: {v}"),
+            Self::TooLarge(v) => write!(f, "op too large: {v} bytes"),
+        }
+    }
+}
+
+impl std::error::Error for OpLogError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for OpLogError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
 }
 
 /// BLAKE3 of an op's body — its identity in the chain.

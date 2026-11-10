@@ -167,28 +167,60 @@ pub struct FetchPreamble {
 }
 
 /// Reasons request encoding / response parsing fails.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum FetchError {
-    #[error("pkt-line: {0}")]
-    Pkt(#[from] PktError),
+    Pkt(PktError),
     /// A response line wasn't valid UTF-8 or had an unexpected shape for
     /// its section.
-    #[error("malformed response line in section {section:?}: {line:?}")]
-    BadLine { section: String, line: Vec<u8> },
+    BadLine {
+        section: String,
+        line: Vec<u8>,
+    },
     /// The server sent an unknown section header (forward-compat: we don't
     /// invent how to parse a new section, but we surface it typed so a
     /// caller can decide).
-    #[error("unknown response section: {0:?}")]
     UnknownSection(String),
     /// Sideband band 3 — server reported a fatal error mid-pack.
-    #[error("server error (sideband band 3): {0}")]
     ServerError(String),
     /// Sideband channel byte wasn't 1, 2, or 3.
-    #[error("invalid sideband channel: {0}")]
     BadSideband(u8),
     /// A packfile sideband pkt-line was empty (no channel byte at all).
-    #[error("sideband pkt-line missing channel byte")]
     EmptySidebandPkt,
+}
+
+impl std::fmt::Display for FetchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Pkt(e) => write!(f, "pkt-line: {e}"),
+            Self::BadLine { section, line } => write!(
+                f,
+                "malformed response line in section {section:?}: {line:?}"
+            ),
+            Self::UnknownSection(name) => write!(f, "unknown response section: {name:?}"),
+            Self::ServerError(msg) => write!(f, "server error (sideband band 3): {msg}"),
+            Self::BadSideband(band) => write!(f, "invalid sideband channel: {band}"),
+            Self::EmptySidebandPkt => f.write_str("sideband pkt-line missing channel byte"),
+        }
+    }
+}
+
+impl std::error::Error for FetchError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Pkt(e) => Some(e),
+            Self::BadLine { .. }
+            | Self::UnknownSection(_)
+            | Self::ServerError(_)
+            | Self::BadSideband(_)
+            | Self::EmptySidebandPkt => None,
+        }
+    }
+}
+
+impl From<PktError> for FetchError {
+    fn from(e: PktError) -> Self {
+        Self::Pkt(e)
+    }
 }
 
 /// Parse a fetch response up to (but not including) the packfile sideband

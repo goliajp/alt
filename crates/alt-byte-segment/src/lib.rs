@@ -14,14 +14,36 @@ const TRAILER: u64 = 32;
 pub const MAX_MEMBERS: usize = 8192;
 pub const MAX_BYTES: u64 = 64 * 1024 * 1024;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum Error {
-    #[error("segment I/O")]
-    Io(#[from] io::Error),
-    #[error("segment format: {0}")]
+    Io(io::Error),
     Format(&'static str),
-    #[error("segment limit: {0}")]
     Limit(&'static str),
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(_) => f.write_str("segment I/O"),
+            Self::Format(v) => write!(f, "segment format: {v}"),
+            Self::Limit(v) => write!(f, "segment limit: {v}"),
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<io::Error> for Error {
+    fn from(e: io::Error) -> Self {
+        Self::Io(e)
+    }
 }
 pub type Result<T> = std::result::Result<T, Error>;
 

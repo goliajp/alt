@@ -10,28 +10,73 @@ use std::{
     time::Duration,
 };
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum Error {
-    #[error("portable protocol: {0}")]
-    Portable(#[from] alt_portable::Error),
-    #[error("native protocol: {0}")]
-    Protocol(#[from] alt_remote_protocol::Error),
-    #[error("invalid native connection or response: {0}")]
+    Portable(alt_portable::Error),
+    Protocol(alt_remote_protocol::Error),
     Invalid(&'static str),
-    #[error("native transfer limit: {0}")]
     Limit(&'static str),
-    #[error("native HTTP request failed ({status})")]
     Rejected {
         status: u16,
         failure: Option<Box<Failure>>,
     },
-    #[error("native transport unavailable")]
     Unavailable,
-    #[error("native write outcome is unknown; query the original request")]
-    OutcomeUnknown { key: Box<RequestKey> },
-    #[error("local transfer I/O: {0}")]
-    Io(#[from] std::io::Error),
+    OutcomeUnknown {
+        key: Box<RequestKey>,
+    },
+    Io(std::io::Error),
 }
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Portable(e) => write!(f, "portable protocol: {e}"),
+            Self::Protocol(e) => write!(f, "native protocol: {e}"),
+            Self::Invalid(what) => write!(f, "invalid native connection or response: {what}"),
+            Self::Limit(what) => write!(f, "native transfer limit: {what}"),
+            Self::Rejected { status, .. } => write!(f, "native HTTP request failed ({status})"),
+            Self::Unavailable => f.write_str("native transport unavailable"),
+            Self::OutcomeUnknown { .. } => {
+                f.write_str("native write outcome is unknown; query the original request")
+            }
+            Self::Io(e) => write!(f, "local transfer I/O: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Portable(e) => Some(e),
+            Self::Protocol(e) => Some(e),
+            Self::Io(e) => Some(e),
+            Self::Invalid(_)
+            | Self::Limit(_)
+            | Self::Rejected { .. }
+            | Self::Unavailable
+            | Self::OutcomeUnknown { .. } => None,
+        }
+    }
+}
+
+impl From<alt_portable::Error> for Error {
+    fn from(e: alt_portable::Error) -> Self {
+        Self::Portable(e)
+    }
+}
+
+impl From<alt_remote_protocol::Error> for Error {
+    fn from(e: alt_remote_protocol::Error) -> Self {
+        Self::Protocol(e)
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
+}
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Clone, Copy)]

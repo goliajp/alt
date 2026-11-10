@@ -15,16 +15,52 @@ use alt_git_index::Index;
 use alt_odb::{NativeOdb, OdbError};
 use bstr::{BString, ByteSlice};
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum WorktreeError {
-    #[error("io")]
-    Io(#[from] std::io::Error),
-    #[error(transparent)]
-    Odb(#[from] OdbError),
-    #[error(transparent)]
-    Object(#[from] alt_git_codec::ObjectParseError),
-    #[error("object {0} is not a tree")]
+    Io(std::io::Error),
+    Odb(OdbError),
+    Object(alt_git_codec::ObjectParseError),
     NotATree(ObjectId),
+}
+
+impl std::fmt::Display for WorktreeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(_) => f.write_str("io"),
+            Self::Odb(e) => std::fmt::Display::fmt(e, f),
+            Self::Object(e) => std::fmt::Display::fmt(e, f),
+            Self::NotATree(v) => write!(f, "object {v} is not a tree"),
+        }
+    }
+}
+
+impl std::error::Error for WorktreeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            Self::Odb(e) => e.source(),
+            Self::Object(e) => e.source(),
+            _ => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for WorktreeError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
+}
+
+impl From<OdbError> for WorktreeError {
+    fn from(e: OdbError) -> Self {
+        Self::Odb(e)
+    }
+}
+
+impl From<alt_git_codec::ObjectParseError> for WorktreeError {
+    fn from(e: alt_git_codec::ObjectParseError) -> Self {
+        Self::Object(e)
+    }
 }
 
 /// One path's identity: its git blob/link id and mode. The unit the three

@@ -7,12 +7,34 @@ use alt_remote_protocol::{
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use std::collections::BTreeSet;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum Error {
-    #[error("publication evidence: {0}")]
-    Protocol(#[from] alt_remote_protocol::Error),
-    #[error("invalid publication evidence: {0}")]
+    Protocol(alt_remote_protocol::Error),
     Invalid(&'static str),
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Protocol(e) => write!(f, "publication evidence: {e}"),
+            Self::Invalid(v) => write!(f, "invalid publication evidence: {v}"),
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Protocol(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<alt_remote_protocol::Error> for Error {
+    fn from(e: alt_remote_protocol::Error) -> Self {
+        Self::Protocol(e)
+    }
 }
 pub type Result<T> = std::result::Result<T, Error>;
 

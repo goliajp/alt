@@ -9,7 +9,6 @@ license.workspace = true
 alt-git-codec.workspace = true
 alt-oplog.workspace = true
 blake3.workspace = true
-thiserror.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

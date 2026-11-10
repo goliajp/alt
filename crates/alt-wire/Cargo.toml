@@ -7,4 +7,3 @@ license.workspace = true
 
 [dependencies]
 alt-git-codec.workspace = true
-thiserror.workspace = true

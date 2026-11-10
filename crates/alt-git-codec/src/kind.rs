@@ -51,6 +51,13 @@ impl FromStr for ObjectKind {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
-#[error("unknown object kind")]
+#[derive(Debug, PartialEq, Eq)]
 pub struct ParseKindError;
+
+impl std::fmt::Display for ParseKindError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("unknown object kind")
+    }
+}
+
+impl std::error::Error for ParseKindError {}

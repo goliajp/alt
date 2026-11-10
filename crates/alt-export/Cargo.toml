@@ -13,7 +13,6 @@ alt-git-refs.workspace = true
 alt-odb.workspace = true
 alt-refs.workspace = true
 bstr.workspace = true
-thiserror.workspace = true
 
 [dev-dependencies]
 alt-import.workspace = true

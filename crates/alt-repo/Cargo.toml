@@ -13,7 +13,6 @@ alt-git-config.workspace = true
 alt-git-pack.workspace = true
 alt-git-refs.workspace = true
 bstr.workspace = true
-thiserror.workspace = true
 
 [dev-dependencies]
 alt-import.workspace = true

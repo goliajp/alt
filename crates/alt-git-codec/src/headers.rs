@@ -91,13 +91,22 @@ impl HeaderBlock {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ObjectParseError {
-    #[error("header block: {0}")]
     Headers(&'static str),
-    #[error("tree: {0}")]
     Tree(&'static str),
 }
+
+impl std::fmt::Display for ObjectParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Headers(what) => write!(f, "header block: {what}"),
+            Self::Tree(what) => write!(f, "tree: {what}"),
+        }
+    }
+}
+
+impl std::error::Error for ObjectParseError {}
 
 #[cfg(test)]
 mod tests {

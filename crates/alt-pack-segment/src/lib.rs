@@ -56,22 +56,49 @@ pub const FLAG_DUPLICATES: u32 = 1;
 /// set when the pack carried an object an earlier segment already holds
 pub const FLAG_OVERLAP: u32 = 2;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum Error {
-    #[error("io")]
-    Io(#[from] std::io::Error),
-    #[error("pack format: {0}")]
+    Io(std::io::Error),
     Format(&'static str),
-    #[error("pack limit: {0}")]
     Limit(&'static str),
-    #[error("object {} references missing or mistyped object {}", hex(.0), hex(.1))]
     Dangling(Oid, Oid),
-    #[error("delta base {} is not available", hex(.0))]
     MissingBase(Oid),
-    #[error("segment corrupt: {0}")]
     Corrupt(&'static str),
-    #[error("object {} not found", hex(.0))]
     NotFound(Oid),
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(_) => f.write_str("io"),
+            Self::Format(v) => write!(f, "pack format: {v}"),
+            Self::Limit(v) => write!(f, "pack limit: {v}"),
+            Self::Dangling(a, b) => write!(
+                f,
+                "object {} references missing or mistyped object {}",
+                hex(a),
+                hex(b)
+            ),
+            Self::MissingBase(v) => write!(f, "delta base {} is not available", hex(v)),
+            Self::Corrupt(v) => write!(f, "segment corrupt: {v}"),
+            Self::NotFound(v) => write!(f, "object {} not found", hex(v)),
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
 }
 
 pub fn hex(oid: &Oid) -> String {

@@ -23,15 +23,24 @@ pub const ATTACHMENT: u8 = 1 << 5;
 pub const TASK_BUNDLE: u8 = 1 << 6;
 pub const CHUNK: u8 = 1 << 7;
 
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Error {
-    #[error("catalog format: {0}")]
     Format(&'static str),
-    #[error("catalog limit: {0}")]
     Limit(&'static str),
-    #[error("catalog conflict: {0}")]
     Conflict(&'static str),
 }
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Format(v) => write!(f, "catalog format: {v}"),
+            Self::Limit(v) => write!(f, "catalog limit: {v}"),
+            Self::Conflict(v) => write!(f, "catalog conflict: {v}"),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Clone, Copy, Debug)]

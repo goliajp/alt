@@ -87,12 +87,34 @@ fn invalid() -> io::Error {
         "invalid command response framing",
     )
 }
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum Error {
-    #[error("invalid command receipt: {0}")]
     Invalid(&'static str),
-    #[error("command response: {0}")]
-    Response(#[from] io::Error),
+    Response(io::Error),
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Invalid(v) => write!(f, "invalid command receipt: {v}"),
+            Self::Response(e) => write!(f, "command response: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Response(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<io::Error> for Error {
+    fn from(e: io::Error) -> Self {
+        Self::Response(e)
+    }
 }
 pub fn validate_completion(
     intent: &Intent,

@@ -9,7 +9,6 @@ license.workspace = true
 alt-remote-protocol.workspace = true
 blake3.workspace = true
 ed25519-dalek.workspace = true
-thiserror.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

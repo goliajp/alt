@@ -13,16 +13,52 @@ pub use tools::{ToolBinding, probe};
 
 pub const CONTROL: &str = ".alt-runner";
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum Error {
-    #[error("runner I/O: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("runner encoding: {0}")]
-    Json(#[from] serde_json::Error),
-    #[error(transparent)]
-    Input(#[from] alt_input::Error),
-    #[error("runner precondition: {0}")]
+    Io(std::io::Error),
+    Json(serde_json::Error),
+    Input(alt_input::Error),
     Invalid(String),
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(e) => write!(f, "runner I/O: {e}"),
+            Self::Json(e) => write!(f, "runner encoding: {e}"),
+            Self::Input(e) => std::fmt::Display::fmt(e, f),
+            Self::Invalid(v) => write!(f, "runner precondition: {v}"),
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            Self::Json(e) => Some(e),
+            Self::Input(e) => e.source(),
+            _ => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
+}
+
+impl From<serde_json::Error> for Error {
+    fn from(e: serde_json::Error) -> Self {
+        Self::Json(e)
+    }
+}
+
+impl From<alt_input::Error> for Error {
+    fn from(e: alt_input::Error) -> Self {
+        Self::Input(e)
+    }
 }
 pub type Result<T> = std::result::Result<T, Error>;
 

@@ -8,4 +8,3 @@ license.workspace = true
 [dependencies]
 syn.workspace = true
 proc-macro2.workspace = true
-thiserror.workspace = true

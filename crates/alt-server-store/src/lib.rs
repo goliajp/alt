@@ -23,35 +23,109 @@ mod tasks;
 pub use bytes::*;
 pub use store::*;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum Error {
-    #[error("portable migration: {0}")]
-    Portable(#[from] alt_portable::Error),
-    #[error("storage I/O: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("database: {0}")]
-    Database(#[from] postgres::Error),
-    #[error("protocol: {0}")]
-    Protocol(#[from] alt_remote_protocol::Error),
-    #[error("task: {0}")]
-    Task(#[from] alt_task_service::Error),
-    #[error("repository: {0}")]
-    Repository(#[from] alt_repository_service::Error),
-    #[error("encoding: {0}")]
-    Json(#[from] serde_json::Error),
-    #[error("integrity failure: {0}")]
+    Portable(alt_portable::Error),
+    Io(std::io::Error),
+    Database(postgres::Error),
+    Protocol(alt_remote_protocol::Error),
+    Task(alt_task_service::Error),
+    Repository(alt_repository_service::Error),
+    Json(serde_json::Error),
     Integrity(&'static str),
-    #[error("storage limit exceeded: {0}")]
     Limit(&'static str),
-    #[error("precondition failed: {0}")]
     Precondition(&'static str),
-    #[error("current account authority is temporarily unavailable")]
     AuthorityUnavailable,
-    #[error("access denied")]
     Unauthorized,
-    #[error("transaction outcome unknown; query the original request")]
     OutcomeUnknown,
 }
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Portable(e) => write!(f, "portable migration: {e}"),
+            Self::Io(e) => write!(f, "storage I/O: {e}"),
+            Self::Database(e) => write!(f, "database: {e}"),
+            Self::Protocol(e) => write!(f, "protocol: {e}"),
+            Self::Task(e) => write!(f, "task: {e}"),
+            Self::Repository(e) => write!(f, "repository: {e}"),
+            Self::Json(e) => write!(f, "encoding: {e}"),
+            Self::Integrity(what) => write!(f, "integrity failure: {what}"),
+            Self::Limit(what) => write!(f, "storage limit exceeded: {what}"),
+            Self::Precondition(what) => write!(f, "precondition failed: {what}"),
+            Self::AuthorityUnavailable => {
+                f.write_str("current account authority is temporarily unavailable")
+            }
+            Self::Unauthorized => f.write_str("access denied"),
+            Self::OutcomeUnknown => {
+                f.write_str("transaction outcome unknown; query the original request")
+            }
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Portable(e) => Some(e),
+            Self::Io(e) => Some(e),
+            Self::Database(e) => Some(e),
+            Self::Protocol(e) => Some(e),
+            Self::Task(e) => Some(e),
+            Self::Repository(e) => Some(e),
+            Self::Json(e) => Some(e),
+            Self::Integrity(_)
+            | Self::Limit(_)
+            | Self::Precondition(_)
+            | Self::AuthorityUnavailable
+            | Self::Unauthorized
+            | Self::OutcomeUnknown => None,
+        }
+    }
+}
+
+impl From<alt_portable::Error> for Error {
+    fn from(e: alt_portable::Error) -> Self {
+        Self::Portable(e)
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
+}
+
+impl From<postgres::Error> for Error {
+    fn from(e: postgres::Error) -> Self {
+        Self::Database(e)
+    }
+}
+
+impl From<alt_remote_protocol::Error> for Error {
+    fn from(e: alt_remote_protocol::Error) -> Self {
+        Self::Protocol(e)
+    }
+}
+
+impl From<alt_task_service::Error> for Error {
+    fn from(e: alt_task_service::Error) -> Self {
+        Self::Task(e)
+    }
+}
+
+impl From<alt_repository_service::Error> for Error {
+    fn from(e: alt_repository_service::Error) -> Self {
+        Self::Repository(e)
+    }
+}
+
+impl From<serde_json::Error> for Error {
+    fn from(e: serde_json::Error) -> Self {
+        Self::Json(e)
+    }
+}
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 mod transport;

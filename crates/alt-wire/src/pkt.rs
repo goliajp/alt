@@ -43,22 +43,50 @@ pub enum Frame<'a> {
 pub const MAX_LINE_LEN: usize = 0xfff0;
 
 /// Reasons a pkt-line stream fails to decode.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum PktError {
-    #[error("io")]
-    Io(#[from] std::io::Error),
+    Io(std::io::Error),
     /// The 4-byte length prefix wasn't valid ASCII hex.
-    #[error("length prefix is not valid hex: {0:?}")]
     BadLength([u8; 4]),
     /// The header claimed a length larger than `MAX_LINE_LEN` or smaller
     /// than the 4-byte header itself. A truthful claim from a peer's bug
     /// or an adversary trying to skew our reader.
-    #[error("length prefix out of bounds: {0}")]
     LengthOutOfBounds(usize),
     /// The header claimed a length the stream cannot satisfy (e.g. a 1024-
     /// byte data line followed by EOF after 500 bytes).
-    #[error("truncated pkt-line: header claimed {claimed} bytes, got {got}")]
-    Truncated { claimed: usize, got: usize },
+    Truncated {
+        claimed: usize,
+        got: usize,
+    },
+}
+
+impl std::fmt::Display for PktError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(_) => f.write_str("io"),
+            Self::BadLength(hdr) => write!(f, "length prefix is not valid hex: {hdr:?}"),
+            Self::LengthOutOfBounds(len) => write!(f, "length prefix out of bounds: {len}"),
+            Self::Truncated { claimed, got } => write!(
+                f,
+                "truncated pkt-line: header claimed {claimed} bytes, got {got}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for PktError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            Self::BadLength(_) | Self::LengthOutOfBounds(_) | Self::Truncated { .. } => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for PktError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
 }
 
 /// Read one pkt-line from `r` into `buf` (resized to fit). Returns the

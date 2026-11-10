@@ -210,13 +210,22 @@ pub fn encode_record(prism: PrismId, recipe: &[u8], parts: &[BlobId]) -> Vec<u8>
     out
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum RecordError {
-    #[error("tier1 record truncated")]
     Truncated,
-    #[error("tier1 record has trailing bytes")]
     TrailingBytes,
 }
+
+impl std::fmt::Display for RecordError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Truncated => f.write_str("tier1 record truncated"),
+            Self::TrailingBytes => f.write_str("tier1 record has trailing bytes"),
+        }
+    }
+}
+
+impl std::error::Error for RecordError {}
 
 pub fn decode_record(rec: &[u8]) -> Result<(PrismId, Vec<u8>, Vec<BlobId>), RecordError> {
     let err = || RecordError::Truncated;

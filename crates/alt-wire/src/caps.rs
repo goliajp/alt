@@ -62,22 +62,47 @@ impl CapabilityAd {
 }
 
 /// Reasons capability parsing fails.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum CapsError {
-    #[error("pkt-line: {0}")]
-    Pkt(#[from] PktError),
+    Pkt(PktError),
     /// Header pkt-line was `# service=<name>\n` but `<name>` is wrong.
-    #[error("unexpected service header: {0}")]
     BadService(String),
     /// The first non-header pkt-line wasn't `version N\n`.
-    #[error("missing version line")]
     MissingVersion,
     /// `version` was something other than `2`. We don't implement v0/v1.
-    #[error("unsupported protocol version: {0}")]
     UnsupportedVersion(u32),
     /// A capability line wasn't UTF-8 or had an unexpected shape.
-    #[error("malformed capability line: {0:?}")]
     BadCapability(Vec<u8>),
+}
+
+impl std::fmt::Display for CapsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Pkt(e) => write!(f, "pkt-line: {e}"),
+            Self::BadService(name) => write!(f, "unexpected service header: {name}"),
+            Self::MissingVersion => f.write_str("missing version line"),
+            Self::UnsupportedVersion(v) => write!(f, "unsupported protocol version: {v}"),
+            Self::BadCapability(line) => write!(f, "malformed capability line: {line:?}"),
+        }
+    }
+}
+
+impl std::error::Error for CapsError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Pkt(e) => Some(e),
+            Self::BadService(_)
+            | Self::MissingVersion
+            | Self::UnsupportedVersion(_)
+            | Self::BadCapability(_) => None,
+        }
+    }
+}
+
+impl From<PktError> for CapsError {
+    fn from(e: PktError) -> Self {
+        Self::Pkt(e)
+    }
 }
 
 /// Parse a smart-http v2 capability advertisement from a byte stream

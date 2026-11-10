@@ -14,7 +14,6 @@ alt-delivery.workspace = true
 blake3.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-thiserror.workspace = true
 ed25519-dalek.workspace = true
 alt-command-protocol.workspace = true
 alt-git-config.workspace = true

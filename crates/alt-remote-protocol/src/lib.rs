@@ -19,17 +19,26 @@ use serde::{Deserialize, Serialize};
 
 pub const VERSION: u32 = 1;
 
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Error {
-    #[error("unsupported protocol version: {0}")]
     Version(u32),
-    #[error("invalid protocol field: {0}")]
     Invalid(&'static str),
-    #[error("protocol limit exceeded: {0}")]
     Limit(&'static str),
-    #[error("invalid protocol JSON: {0}")]
     Json(String),
 }
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Version(v) => write!(f, "unsupported protocol version: {v}"),
+            Self::Invalid(v) => write!(f, "invalid protocol field: {v}"),
+            Self::Limit(v) => write!(f, "protocol limit exceeded: {v}"),
+            Self::Json(v) => write!(f, "invalid protocol JSON: {v}"),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Opaque immutable identifiers. Identity issuers control their meaning;

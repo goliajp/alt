@@ -9,7 +9,6 @@ license.workspace = true
 alt-cdc.workspace = true
 blake3.workspace = true
 memmap2.workspace = true
-thiserror.workspace = true
 zstd.workspace = true
 
 [dev-dependencies]

@@ -21,24 +21,83 @@ use alt_odb::{NativeOdb, OdbError};
 use alt_refs::{RefError, RefStore, RefTarget};
 use bstr::BString;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum ExportError {
-    #[error("io")]
-    Io(#[from] std::io::Error),
-    #[error(transparent)]
-    Odb(#[from] OdbError),
-    #[error(transparent)]
-    Refs(#[from] RefError),
-    #[error(transparent)]
-    GitRefs(#[from] alt_git_refs::RefError),
-    #[error(transparent)]
-    Pack(#[from] alt_git_pack::PackError),
-    #[error(transparent)]
-    Config(#[from] alt_git_config::ConfigError),
-    #[error("export format: {0}")]
+    Io(std::io::Error),
+    Odb(OdbError),
+    Refs(RefError),
+    GitRefs(alt_git_refs::RefError),
+    Pack(alt_git_pack::PackError),
+    Config(alt_git_config::ConfigError),
     Format(&'static str),
-    #[error("export target {0} exists and is not empty")]
     TargetNotEmpty(std::path::PathBuf),
+}
+
+impl std::fmt::Display for ExportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(_) => f.write_str("io"),
+            Self::Odb(e) => std::fmt::Display::fmt(e, f),
+            Self::Refs(e) => std::fmt::Display::fmt(e, f),
+            Self::GitRefs(e) => std::fmt::Display::fmt(e, f),
+            Self::Pack(e) => std::fmt::Display::fmt(e, f),
+            Self::Config(e) => std::fmt::Display::fmt(e, f),
+            Self::Format(v) => write!(f, "export format: {v}"),
+            Self::TargetNotEmpty(v) => {
+                write!(f, "export target {} exists and is not empty", v.display())
+            }
+        }
+    }
+}
+
+impl std::error::Error for ExportError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            Self::Odb(e) => e.source(),
+            Self::Refs(e) => e.source(),
+            Self::GitRefs(e) => e.source(),
+            Self::Pack(e) => e.source(),
+            Self::Config(e) => e.source(),
+            _ => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for ExportError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
+}
+
+impl From<OdbError> for ExportError {
+    fn from(e: OdbError) -> Self {
+        Self::Odb(e)
+    }
+}
+
+impl From<RefError> for ExportError {
+    fn from(e: RefError) -> Self {
+        Self::Refs(e)
+    }
+}
+
+impl From<alt_git_refs::RefError> for ExportError {
+    fn from(e: alt_git_refs::RefError) -> Self {
+        Self::GitRefs(e)
+    }
+}
+
+impl From<alt_git_pack::PackError> for ExportError {
+    fn from(e: alt_git_pack::PackError) -> Self {
+        Self::Pack(e)
+    }
+}
+
+impl From<alt_git_config::ConfigError> for ExportError {
+    fn from(e: alt_git_config::ConfigError) -> Self {
+        Self::Config(e)
+    }
 }
 
 /// What one export produced.

@@ -50,20 +50,42 @@ const MAX_DELTA_DEPTH: usize = 16;
 /// Budget for the delta-base cache (resolved bases kept hot).
 const DELTA_CACHE_BUDGET: usize = 64 << 20;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum StoreError {
-    #[error("io")]
-    Io(#[from] std::io::Error),
-    #[error("store format: {0}")]
+    Io(std::io::Error),
     Format(&'static str),
-    #[error("chunk {0} not found")]
     NotFound(ChunkId),
-    #[error("blob {0} not found")]
     BlobNotFound(BlobId),
-    #[error("chunk {id} corrupt: {reason}")]
     Corrupt { id: ChunkId, reason: &'static str },
-    #[error("chunk too large: {0} bytes")]
     TooLarge(usize),
+}
+
+impl std::fmt::Display for StoreError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(_) => f.write_str("io"),
+            Self::Format(v) => write!(f, "store format: {v}"),
+            Self::NotFound(v) => write!(f, "chunk {v} not found"),
+            Self::BlobNotFound(v) => write!(f, "blob {v} not found"),
+            Self::Corrupt { id, reason } => write!(f, "chunk {id} corrupt: {reason}"),
+            Self::TooLarge(v) => write!(f, "chunk too large: {v} bytes"),
+        }
+    }
+}
+
+impl std::error::Error for StoreError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for StoreError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
 }
 
 /// BLAKE3 hash of the chunk's original (uncompressed) bytes — the chunk's

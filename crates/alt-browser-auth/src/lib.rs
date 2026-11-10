@@ -8,23 +8,32 @@ use rand_core::{OsRng, RngCore};
 use std::net::IpAddr;
 use url::{Host, Url};
 
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Error {
-    #[error("invalid public origin")]
     Origin,
-    #[error("invalid credential encoding")]
     Credential,
-    #[error("password does not meet the input policy")]
     Password,
-    #[error("stored password encoding is unsupported")]
     PasswordEncoding,
-    #[error("password operation unavailable")]
     PasswordOperation,
-    #[error("request origin or session proof is invalid")]
     Request,
-    #[error("invalid session duration")]
     Duration,
 }
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Origin => f.write_str("invalid public origin"),
+            Self::Credential => f.write_str("invalid credential encoding"),
+            Self::Password => f.write_str("password does not meet the input policy"),
+            Self::PasswordEncoding => f.write_str("stored password encoding is unsupported"),
+            Self::PasswordOperation => f.write_str("password operation unavailable"),
+            Self::Request => f.write_str("request origin or session proof is invalid"),
+            Self::Duration => f.write_str("invalid session duration"),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// A configured, canonical origin; neither Host nor forwarded headers select it.
