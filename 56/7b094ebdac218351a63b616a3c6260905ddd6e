@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: feat
+summary: gzip framing and a writer for alt-deflate
+author-type: human
+author: doracawl
+touched: Cargo.lock
+touched: crates/alt-deflate/Cargo.toml
+touched: crates/alt-deflate/src/adler.rs
+touched: crates/alt-deflate/src/lib.rs
+touched: crates/alt-deflate/src/writer.rs
+touched: crates/alt-deflate/tests/it/main.rs
+touched: crates/alt-deflate/tests/it/oracle.rs
