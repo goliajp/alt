@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: accept side-band-64k on push and ignore unknown push capabilities
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/git_packs.rs
