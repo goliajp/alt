@@ -1,6 +1,6 @@
 {
   "name": "@alt/workbench",
-  "version": "0.1.0-internal.1",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {

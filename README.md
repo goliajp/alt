@@ -5,8 +5,9 @@ binary files, Git object and history preservation, and a built-in
 HTTP server that speaks the git smart-protocol so you can keep using existing
 hosts (GitHub, self-hosted, anything that talks git).
 
-> Status: `0.1.0-internal.1`, an internal dogfood candidate. Public releases
-> remain paused. See [internal installation](docs/internal-install.md) for
+> Status: `0.1.0`. The server is released as a
+> [self-hosted distribution](https://github.com/goliajp/alt-selfhosted). Client packages are not
+> published yet; see [internal installation](docs/internal-install.md) for
 > building, verifying, upgrading and removing a local package.
 
 ## Why

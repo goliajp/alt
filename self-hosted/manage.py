@@ -126,7 +126,7 @@ def prepare(args):
     config['receipt_key_file'] = '/run/alt/receipt.key'
     config['browser'] = {'public_origin': public_origin, 'assets_directory': '/opt/alt/workbench', 'session_ttl_ms': 3_600_000}
     write(target / 'config/config.json', json.dumps(config, indent=2) + '\n', uid, gid)
-    write(target / '.env', f'COMPOSE_PROJECT_NAME={args.project}\nALT_IMAGE={local_images["application_image"]}\nALT_DATABASE_IMAGE={local_images["database_image"]}\nALT_EDGE_IMAGE={local_images["edge_image"]}\nALT_UID={uid}\nALT_GID={gid}\nALT_BIND_ADDRESS={args.bind}\nALT_HTTPS_PORT={origin.port or 443}\n', uid, gid)
+    write(target / '.env', f'COMPOSE_PROJECT_NAME={args.project}\nALT_IMAGE={local_images["application_image"]}\nALT_DATABASE_IMAGE={local_images["database_image"]}\nALT_EDGE_IMAGE={local_images["edge_image"]}\nALT_UID={uid}\nALT_GID={gid}\nALT_BIND_ADDRESS={args.bind}\nALT_HTTPS_PORT={args.https_port or origin.port or 443}\n', uid, gid)
     write(target / 'bundle-identity.json', json.dumps({'source_digest': manifest['source_digest'], 'architecture': manifest['architecture'], 'bundle_manifest_sha256': sha(source / 'bundle.json'), **local_images}, indent=2) + '\n', uid, gid)
     if os.geteuid() == 0:
         os.chown(target, uid, gid)
@@ -175,6 +175,7 @@ def main():
     prep.add_argument('--certificate', type=Path, required=True)
     prep.add_argument('--private-key', type=Path, required=True)
     prep.add_argument('--bind', default='127.0.0.1', choices=['127.0.0.1', '0.0.0.0'])
+    prep.add_argument('--https-port', type=int, help='host port of the HTTPS edge when a front proxy owns the public port (default: the port of --origin)')
     prep.add_argument('--uid', type=int)
     prep.add_argument('--gid', type=int)
     init = sub.add_parser('initialize', help='initialize explicitly; never resume or migrate on restart')

@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*", "vendor/golia-platform-contract", "vendor/golia-change-link", "vendor/golia-change-link-http"]
 
 [workspace.package]
-version = "0.1.0-internal.1"
+version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 

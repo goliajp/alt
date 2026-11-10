@@ -1,0 +1,123 @@
+name: Verify and publish self-hosted images
+on:
+  push:
+    branches: [master]
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: public-selfhosted-images
+  cancel-in-progress: false
+env:
+  IMAGE: ghcr.io/goliajp/alt/alt-server
+jobs:
+  product:
+    if: github.repository == 'goliajp/alt-selfhosted'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.99.1'
+      - name: Test the exported server sources
+        run: |
+          cargo test --locked \
+            -p alt-pack-segment -p alt-git-pack -p alt-remote-protocol -p alt-repository-service \
+            -p alt-task-service -p alt-server-store -p alt-server
+  build:
+    if: github.repository == 'goliajp/alt-selfhosted'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build a native offline bundle
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: python3 scripts/package-server.py --architecture "$ARCH" --output "$RUNNER_TEMP/bundle" --jobs 4
+      - name: Install and exercise this exact bundle
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          python3 self-hosted/tests/install_smoke.py --bundle "$RUNNER_TEMP/bundle" \
+            --expected-version "$(cat VERSION)" --output "acceptance-$ARCH.json"
+      - name: Publish the verified architecture by digest
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          image_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["application_image"])' "$RUNNER_TEMP/bundle/bundle.json")"
+          tag="$IMAGE:candidate-$GITHUB_SHA-$ARCH"
+          docker tag "$image_id" "$tag"
+          docker push "$tag"
+          digest="$(docker buildx imagetools inspect "$tag" --format '{{json .Manifest.Digest}}' | tr -d '\"')"
+          mkdir digests
+          touch "digests/${digest#sha256:}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.arch }}
+          path: digests/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: acceptance-${{ matrix.arch }}
+          path: acceptance-${{ matrix.arch }}.json
+          if-no-files-found: error
+  publish:
+    needs: [product, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digest-*
+          path: digests
+          merge-multiple: true
+      - name: Publish verified manifest; preserve immutable versions
+        env:
+          SOURCE_REF: ${{ github.ref }}
+          SOURCE_TAG: ${{ github.ref_name }}
+        run: |
+          sources=()
+          for path in digests/*; do sources+=("$IMAGE@sha256:$(basename "$path")"); done
+          test "${#sources[@]}" = 2
+          docker buildx imagetools create --tag "$IMAGE:sha-$GITHUB_SHA" "${sources[@]}"
+          if [[ "$SOURCE_REF" == refs/tags/* ]]; then
+            version="$(cat VERSION)"
+            test "$SOURCE_TAG" = "v$version"
+            if docker buildx imagetools inspect "$IMAGE:$version" > /dev/null 2>&1; then
+              echo 'Refusing to overwrite an existing version. Publish a new release.' >&2
+              exit 1
+            fi
+            docker buildx imagetools create --tag "$IMAGE:$version" --tag "$IMAGE:latest" "$IMAGE:sha-$GITHUB_SHA"
+          fi

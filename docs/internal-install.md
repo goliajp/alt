@@ -1,6 +1,6 @@
 # Internal installation
 
-The `0.1.0-internal.1` package is a dogfood candidate, not a public release or a
+The `0.1.0` package is a dogfood candidate, not a public release or a
 promise that future repository formats can be downgraded. Public binary release
 automation remains paused. Obtain an archive and its SHA-256 from its builder.
 
@@ -55,7 +55,7 @@ mkdir unpacked
 tar -xzpf alt-internal.tar.gz -C unpacked
 ```
 
-Enter its `unpacked/alt-0.1.0-internal.1-TARGET` directory:
+Enter its `unpacked/alt-0.1.0-TARGET` directory:
 
 ```sh
 python3 install.py verify
