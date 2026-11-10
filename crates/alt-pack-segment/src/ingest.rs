@@ -206,7 +206,7 @@ pub fn ingest(pack: &[u8], existing: &SegmentSet, limits: &Limits) -> Result<Ing
         .map(|(index, _)| index)
         .collect();
     let plain: Vec<(usize, Meta)> = plain_indexes
-        .par_chunks(256)
+        .par_chunks(32)
         .map(|batch| -> Result<Vec<(usize, Meta)>, Error> {
             let kept: Vec<(usize, Kind, &[u8])> = batch
                 .iter()
