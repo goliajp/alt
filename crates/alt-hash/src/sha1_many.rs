@@ -102,10 +102,10 @@ mod avx2 {
         }
     }
 
-    /// Turns eight rows of eight big-endian words (one row per lane) into eight
-    /// registers of one word position each.
+    /// Turns eight rows of eight big-endian words (one row per lane) into eight rows
+    /// of one word position each, written straight to `out`.
     #[inline(always)]
-    unsafe fn transpose(rows: [__m256i; 8]) -> [__m256i; 8] {
+    unsafe fn transpose(rows: [__m256i; 8], out: &mut [[u32; 8]; 8]) {
         unsafe {
             let swap = _mm256_setr_epi8(
                 3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12, 3, 2, 1, 0, 7, 6, 5, 4, 11,
@@ -128,16 +128,16 @@ mod avx2 {
             let u5 = _mm256_unpackhi_epi64(t4, t6);
             let u6 = _mm256_unpacklo_epi64(t5, t7);
             let u7 = _mm256_unpackhi_epi64(t5, t7);
-            [
-                _mm256_permute2x128_si256::<0x20>(u0, u4),
-                _mm256_permute2x128_si256::<0x20>(u1, u5),
-                _mm256_permute2x128_si256::<0x20>(u2, u6),
-                _mm256_permute2x128_si256::<0x20>(u3, u7),
-                _mm256_permute2x128_si256::<0x31>(u0, u4),
-                _mm256_permute2x128_si256::<0x31>(u1, u5),
-                _mm256_permute2x128_si256::<0x31>(u2, u6),
-                _mm256_permute2x128_si256::<0x31>(u3, u7),
-            ]
+            let base = out.as_mut_ptr();
+            let store = |row: usize, word: __m256i| _mm256_store_si256(base.add(row).cast(), word);
+            store(0, _mm256_permute2x128_si256::<0x20>(u0, u4));
+            store(1, _mm256_permute2x128_si256::<0x20>(u1, u5));
+            store(2, _mm256_permute2x128_si256::<0x20>(u2, u6));
+            store(3, _mm256_permute2x128_si256::<0x20>(u3, u7));
+            store(4, _mm256_permute2x128_si256::<0x31>(u0, u4));
+            store(5, _mm256_permute2x128_si256::<0x31>(u1, u5));
+            store(6, _mm256_permute2x128_si256::<0x31>(u2, u6));
+            store(7, _mm256_permute2x128_si256::<0x31>(u3, u7));
         }
     }
 
@@ -337,11 +337,13 @@ mod avx2 {
     #[target_feature(enable = "avx2")]
     unsafe fn compress(context: &mut Context, blocks: &[*const u8; 8]) {
         unsafe {
-            let low = transpose(blocks.map(|block| _mm256_loadu_si256(block.cast())));
-            let high = transpose(blocks.map(|block| _mm256_loadu_si256(block.add(32).cast())));
-            for (row, word) in context.words.iter_mut().zip(low.into_iter().chain(high)) {
-                _mm256_store_si256(row.as_mut_ptr().cast(), word);
-            }
+            let (low, rest) = context.words.split_first_chunk_mut::<8>().unwrap();
+            let high = rest.first_chunk_mut::<8>().unwrap();
+            transpose(blocks.map(|block| _mm256_loadu_si256(block.cast())), low);
+            transpose(
+                blocks.map(|block| _mm256_loadu_si256(block.add(32).cast())),
+                high,
+            );
             std::arch::asm!(
                 "lea rax, [r11 + 160 + 512]\n",
                 "lea rcx, [rax + 512]\n",
