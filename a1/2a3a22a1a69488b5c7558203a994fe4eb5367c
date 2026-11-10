@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: perf
+summary: sums of two registers as lea in the sha-256 rounds on x86
+author-type: human
+author: doracawl
+touched: crates/alt-hash/src/crc32/x86.rs
+touched: crates/alt-hash/src/sha256/x86/avx2.rs
