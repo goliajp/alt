@@ -48,7 +48,7 @@ impl Hasher {
 struct HashWriter<W: Write> {
     inner: W,
     hasher: Hasher,
-    crc: Option<flate2::Crc>,
+    crc: Option<alt_hash::Crc32>,
     written: u64,
 }
 
@@ -222,7 +222,7 @@ impl PackWriter {
         bytes: usize,
     ) -> Result<u64, PackError> {
         let offset = self.out.written;
-        self.out.crc = Some(flate2::Crc::new());
+        self.out.crc = Some(alt_hash::Crc32::new());
 
         // entry header: 3-bit type + size varint (low 4 bits first)
         let mut header = Vec::with_capacity(10);
@@ -244,7 +244,7 @@ impl PackWriter {
     }
 
     fn finish_entry(&mut self, oid: ObjectId, offset: u64) {
-        let crc = self.out.crc.take().expect("entry crc active").sum();
+        let crc = self.out.crc.take().expect("entry crc active").finalize();
         self.entries.push((oid, offset, crc));
     }
 

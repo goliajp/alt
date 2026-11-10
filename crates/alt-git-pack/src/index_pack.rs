@@ -52,7 +52,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
-use flate2::Crc;
 use flate2::read::ZlibDecoder;
 use memmap2::Mmap;
 
@@ -259,15 +258,14 @@ fn read_entry(
         return Err(PackError::Format("entry runs past pack body"));
     }
 
-    let mut crc = Crc::new();
-    crc.update(&map[header_start..next_offset as usize]);
+    let crc32 = alt_hash::crc32(&map[header_start..next_offset as usize]);
 
     Ok(RawEntry {
         offset,
         next_offset,
         kind,
         payload,
-        crc32: crc.sum(),
+        crc32,
     })
 }
 

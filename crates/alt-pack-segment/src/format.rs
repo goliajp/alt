@@ -20,11 +20,7 @@ const FOOTER: usize = 64;
 const MAGIC: &[u8; 8] = b"ALTPSEG1";
 pub(crate) const NO_BASE: u32 = u32::MAX;
 
-pub(crate) fn crc32(bytes: &[u8]) -> u32 {
-    let mut crc = flate2::Crc::new();
-    crc.update(bytes);
-    crc.sum()
-}
+pub(crate) use alt_hash::crc32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Delta {

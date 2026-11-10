@@ -201,8 +201,59 @@ fn sha256_accelerated_matches_portable_at_every_length_and_split() {
 #[test]
 fn reports_the_selected_implementations() {
     println!(
-        "sha1: {}, sha256: {}",
+        "sha1: {}, sha256: {}, crc32: {}",
         alt_hash::sha1::implementation(),
-        alt_hash::sha256::implementation()
+        alt_hash::sha256::implementation(),
+        alt_hash::crc32::implementation()
     );
+}
+
+/// bit by bit, straight from the definition
+fn crc32_by_definition(data: &[u8]) -> u32 {
+    let mut register = !0u32;
+    for byte in data {
+        register ^= *byte as u32;
+        for _ in 0..8 {
+            register = (register >> 1) ^ if register & 1 != 0 { 0xedb8_8320 } else { 0 };
+        }
+    }
+    !register
+}
+
+#[test]
+fn crc32_published_vectors() {
+    assert_eq!(alt_hash::crc32(b""), 0);
+    assert_eq!(alt_hash::crc32(b"123456789"), 0xcbf4_3926);
+    assert_eq!(
+        alt_hash::crc32(b"The quick brown fox jumps over the lazy dog"),
+        0x414f_a339
+    );
+}
+
+#[test]
+fn crc32_matches_the_definition_at_every_length_and_split() {
+    let data = noise(1200, 0x2545_f491_4f6c_dd1d);
+    for len in 0..data.len() {
+        let expected = crc32_by_definition(&data[..len]);
+        assert_eq!(alt_hash::crc32(&data[..len]), expected, "length {len}");
+        assert_eq!(
+            !alt_hash::crc32::portable(!0, &data[..len]),
+            expected,
+            "portable, length {len}"
+        );
+        let mut streaming = alt_hash::Crc32::new();
+        let cut = len / 3;
+        streaming.update(&data[..cut]);
+        streaming.update(&data[cut..len]);
+        assert_eq!(streaming.finalize(), expected, "split at {cut} of {len}");
+    }
+    // long inputs take other paths: every length around the chunk sizes, then a big one
+    let large = noise(1 << 20, 7);
+    for len in (4000..24000).step_by(61).chain([150_000, 1 << 20]) {
+        assert_eq!(
+            alt_hash::crc32(&large[..len]),
+            crc32_by_definition(&large[..len]),
+            "length {len}"
+        );
+    }
 }
