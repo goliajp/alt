@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: feat
+summary: rotate container logs and cap memory in the self-hosted compose
+author-type: human
+author: doracawl
+touched: self-hosted/compose.yaml
