@@ -149,15 +149,7 @@ pub(crate) fn receive(
     if head.updates.is_empty() {
         return Err(Error::Integrity("empty Git push"));
     }
-    for cap in &head.capabilities {
-        if !matches!(
-            cap.as_str(),
-            "report-status" | "atomic" | "delete-refs" | "ofs-delta" | "object-format=sha1"
-        ) && !cap.starts_with("agent=")
-        {
-            return Err(Error::Precondition("unsupported Git push capability"));
-        }
-    }
+    // as in Git, capabilities the server does not know are ignored, not refused
     let mut names = BTreeSet::new();
     for update in &head.updates {
         alt_remote_protocol::validate_ref_name(&update.name)?;
@@ -218,8 +210,21 @@ pub(crate) fn receive(
             None => alt_wire::push::CommandStatus::Ok(update.name.clone()),
         })
         .collect();
-    let mut body = Vec::new();
-    alt_wire::push::encode_report_status(&mut body, Ok(()), &commands)?;
+    let mut report = Vec::new();
+    alt_wire::push::encode_report_status(&mut report, Ok(()), &commands)?;
+    let body = if head.capabilities.iter().any(|cap| cap == "side-band-64k") {
+        // the report travels on band 1, closed by a flush packet
+        let mut framed = Vec::with_capacity(report.len() + 16);
+        for chunk in report.chunks(65515) {
+            framed.extend_from_slice(format!("{:04x}", chunk.len() + 5).as_bytes());
+            framed.push(1);
+            framed.extend_from_slice(chunk);
+        }
+        pkt::write_flush(&mut framed)?;
+        framed
+    } else {
+        report
+    };
     match request {
         Some(request) => Ok(Output::GitReport {
             bytes: body,
@@ -397,6 +402,7 @@ pub(crate) fn read(
                     "atomic",
                     "delete-refs",
                     "ofs-delta",
+                    "side-band-64k",
                     "object-format=sha1",
                     "agent=alt-server",
                 ],
