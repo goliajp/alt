@@ -324,7 +324,16 @@ fn failed_git_probe_retains_exit_and_raw_non_utf8_output() {
     )
     .unwrap();
     fs::set_permissions(&verifier, fs::Permissions::from_mode(0o700)).unwrap();
-    let error = git_check(&verifier, temp.path()).unwrap_err().to_string();
+    // Another test forking at the moment the script was written holds its descriptor
+    // until that child calls exec, and the kernel refuses to run a file open for
+    // writing; the window is a few microseconds.
+    let error = loop {
+        let error = git_check(&verifier, temp.path()).unwrap_err().to_string();
+        if !error.contains("Text file busy") {
+            break error;
+        }
+        std::thread::yield_now();
+    };
     assert!(error.contains("exit=Some(9)"), "{error}");
     assert!(error.contains("stdout_hex=ff006f7574"), "{error}");
     assert!(error.contains("stderr_hex=65727200"), "{error}");
