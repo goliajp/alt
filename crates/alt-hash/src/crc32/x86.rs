@@ -9,6 +9,7 @@ use std::arch::x86_64::*;
 
 const AHEAD_4: [u64; 2] = ahead(4 * 128);
 const AHEAD_1: [u64; 2] = ahead(128);
+const AHEAD_2: [u64; 2] = ahead(2 * 128);
 /// x^64, to bring the upper half of a 96-bit remainder down
 const AHEAD_HALF: u64 = (super::power(64) as u64) << 1;
 /// the polynomial with its top bit, and the quotient of x^64 by it, both reflected
@@ -62,7 +63,7 @@ pub(super) unsafe fn fold(register: u32, data: &[u8]) -> u32 {
         let seed = _mm_cvtsi32_si128(register as i32);
         let (mut blocks, rest) = data.as_chunks::<16>();
         let mut remainder;
-        if blocks.len() >= 8 {
+        if blocks.len() >= 4 {
             let by = pair(AHEAD_4);
             let mut lanes = [
                 _mm_xor_si128(load(&blocks[0]), seed),
@@ -77,11 +78,11 @@ pub(super) unsafe fn fold(register: u32, data: &[u8]) -> u32 {
                 }
                 blocks = tail;
             }
+            // two pairs side by side, then the pair of results
             let by = pair(AHEAD_1);
-            remainder = lanes[0];
-            for lane in &lanes[1..] {
-                remainder = step(remainder, by, *lane);
-            }
+            let first = step(lanes[0], by, lanes[1]);
+            let second = step(lanes[2], by, lanes[3]);
+            remainder = step(first, pair(AHEAD_2), second);
         } else {
             remainder = _mm_xor_si128(load(&blocks[0]), seed);
             blocks = &blocks[1..];
