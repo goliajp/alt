@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: write transposed words of the eight sha-1 lanes straight into place
+author-type: human
+author: doracawl
+touched: crates/alt-hash/src/sha1_many.rs
