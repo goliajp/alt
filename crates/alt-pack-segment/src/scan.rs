@@ -1,7 +1,6 @@
 //! One sequential pass over a pack: entry boundaries, inflated payloads, entry checksums.
 
 use crate::{Error, Kind, Oid};
-use flate2::{Decompress, FlushDecompress, Status};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Form {
@@ -71,35 +70,19 @@ pub(crate) fn header(pack: &[u8], pos: usize) -> Result<(Form, u64, usize), Erro
 }
 
 /// inflates exactly `size` bytes from `input`; returns the bytes and the compressed length
-pub(crate) fn inflate(
-    engine: &mut Decompress,
-    input: &[u8],
-    size: usize,
-) -> Result<(Vec<u8>, usize), Error> {
-    engine.reset(true);
-    // one spare byte lets the stream end be told apart from an oversized payload
-    let mut out = Vec::with_capacity(size + 1);
-    loop {
-        let consumed = engine.total_in() as usize;
-        let produced = out.len();
-        let status = engine
-            .decompress_vec(&input[consumed..], &mut out, FlushDecompress::None)
-            .map_err(|_| Error::Format("zlib stream"))?;
-        if out.len() > size {
-            return Err(Error::Format("entry larger than its header"));
-        }
-        match status {
-            Status::StreamEnd => break,
-            _ if engine.total_in() as usize == consumed && out.len() == produced => {
-                return Err(Error::Format("truncated zlib stream"));
-            }
-            _ => {}
-        }
-    }
-    if out.len() != size {
-        return Err(Error::Format("entry shorter than its header"));
-    }
-    Ok((out, engine.total_in() as usize))
+pub(crate) fn inflate(input: &[u8], size: usize) -> Result<(Vec<u8>, usize), Error> {
+    let mut out = vec![0; size];
+    let consumed = alt_inflate::inflate_exact(alt_inflate::Format::Zlib, input, &mut out).map_err(
+        |error| {
+            Error::Format(match error {
+                alt_inflate::Error::TooLong => "entry larger than its header",
+                alt_inflate::Error::TooShort => "entry shorter than its header",
+                alt_inflate::Error::Truncated => "truncated zlib stream",
+                _ => "zlib stream",
+            })
+        },
+    )?;
+    Ok((out, consumed))
 }
 
 pub(crate) struct Scanned {
@@ -127,7 +110,6 @@ pub(crate) fn scan(
     }
     let body_end = pack.len() - 20;
     let mut entries = Vec::with_capacity(count);
-    let mut engine = Decompress::new(true);
     let mut inflated = 0u64;
     let mut pos = 12;
     for index in 0..count {
@@ -148,7 +130,7 @@ pub(crate) fn scan(
             .checked_add(size)
             .filter(|total| *total <= limits.inflated_bytes)
             .ok_or(Error::Limit("inflated bytes"))?;
-        let (data, compressed) = inflate(&mut engine, &pack[pos + head..body_end], size as usize)?;
+        let (data, compressed) = inflate(&pack[pos + head..body_end], size as usize)?;
         let len = head + compressed;
         let data = match form {
             Form::Plain(kind @ Kind::Blob) if data.len() > keep => {

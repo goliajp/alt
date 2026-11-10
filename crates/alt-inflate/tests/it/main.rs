@@ -197,7 +197,7 @@ fn damaged_streams_are_refused_without_panicking() {
     let mut long = vec![0; 40_001];
     assert_eq!(
         inflate_exact(Format::Zlib, &stream, &mut long).err(),
-        Some(Error::Truncated)
+        Some(Error::TooShort)
     );
 }
 

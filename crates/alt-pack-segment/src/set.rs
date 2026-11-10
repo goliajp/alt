@@ -5,7 +5,6 @@ use crate::{
     format::Delta,
     scan::{self, Form},
 };
-use flate2::Decompress;
 use std::sync::Arc;
 
 #[derive(Clone, Default)]
@@ -61,7 +60,6 @@ impl SegmentSet {
 
     /// the canonical bytes of an object, resolving its delta chain
     pub fn read(&self, oid: &Oid) -> Result<(Kind, Vec<u8>), Error> {
-        let mut engine = Decompress::new(true);
         let mut deltas = Vec::new();
         let (mut segment, mut index) = self.locate(oid).ok_or(Error::NotFound(*oid))?;
         let kind = segment.record(index)?.kind;
@@ -69,7 +67,7 @@ impl SegmentSet {
             let record = segment.record(index)?;
             let entry = segment.entry(&record)?;
             let (form, size, head) = scan::header(entry, 0)?;
-            let (payload, _) = scan::inflate(&mut engine, &entry[head..], size as usize)?;
+            let (payload, _) = scan::inflate(&entry[head..], size as usize)?;
             match (record.delta, form) {
                 (Delta::Plain, Form::Plain(_)) => break payload,
                 (Delta::Inside, Form::Offset(_) | Form::Reference(_)) => {

@@ -300,9 +300,8 @@ pub fn ingest(pack: &[u8], existing: &SegmentSet, limits: &Limits) -> Result<Ing
             let data = match &raw.data {
                 Some(data) => data.clone(),
                 None => {
-                    let mut engine = flate2::Decompress::new(true);
                     let start = raw.offset as usize + raw.header as usize;
-                    scan::inflate(&mut engine, &pack[start..], raw.size as usize)?.0
+                    scan::inflate(&pack[start..], raw.size as usize)?.0
                 }
             };
             Ok(Frame {

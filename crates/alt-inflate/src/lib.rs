@@ -34,6 +34,8 @@ pub enum Error {
     Truncated,
     /// the content is longer than the caller allows
     TooLong,
+    /// the content is shorter than the caller said it is
+    TooShort,
 }
 
 impl std::fmt::Display for Error {
@@ -43,6 +45,7 @@ impl std::fmt::Display for Error {
             Self::Checksum => f.write_str("compressed data fails its checksum"),
             Self::Truncated => f.write_str("compressed data ends early"),
             Self::TooLong => f.write_str("decompressed data exceeds the limit"),
+            Self::TooShort => f.write_str("decompressed data is shorter than expected"),
         }
     }
 }
@@ -72,7 +75,11 @@ fn exact(inflater: &mut Inflater, input: &[u8], output: &mut [u8]) -> Result<usi
         return Ok(step.consumed);
     }
     if step.produced < output.len() {
-        return Err(Error::Truncated);
+        return Err(if step.done {
+            Error::TooShort
+        } else {
+            Error::Truncated
+        });
     }
     // the output is full: the stream must end without producing anything more
     let mut probe = [0u8; 1];

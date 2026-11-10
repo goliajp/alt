@@ -354,6 +354,7 @@ version = "0.1.0"
 dependencies = [
  "alt-git-pack",
  "alt-hash",
+ "alt-inflate",
  "blake3",
  "flate2",
  "memmap2",
