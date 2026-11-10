@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: perf
+summary: sha-256 on x86 with avx2 schedule for two blocks and bmi rounds
+author-type: human
+author: doracawl
+touched: crates/alt-hash/examples/sha1_speed.rs
+touched: crates/alt-hash/src/sha256.rs
+touched: crates/alt-hash/src/sha256/x86.rs
+touched: crates/alt-hash/src/sha256/x86/avx2.rs
