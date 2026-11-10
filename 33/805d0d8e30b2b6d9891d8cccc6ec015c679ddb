@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: interleave the sha-256 schedule with the first block's rounds on x86
+author-type: human
+author: doracawl
+touched: crates/alt-hash/src/sha256/x86/avx2.rs
