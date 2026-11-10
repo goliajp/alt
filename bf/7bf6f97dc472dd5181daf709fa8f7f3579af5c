@@ -1,0 +1,25 @@
+schema: alt-meta/1
+type: feat
+summary: alt-deflate, deflate compression byte-identical with zlib; inflate pack entries with alt-inflate
+author-type: human
+author: doracawl
+touched: Cargo.lock
+touched: crates/alt-deflate/Cargo.toml
+touched: crates/alt-deflate/src/adler.rs
+touched: crates/alt-deflate/src/bits.rs
+touched: crates/alt-deflate/src/block.rs
+touched: crates/alt-deflate/src/encoder.rs
+touched: crates/alt-deflate/src/lib.rs
+touched: crates/alt-deflate/src/tables.rs
+touched: crates/alt-deflate/src/trees.rs
+touched: crates/alt-deflate/src/window.rs
+touched: crates/alt-deflate/tests/it/main.rs
+touched: crates/alt-deflate/tests/it/oracle.rs
+touched: crates/alt-git-pack/Cargo.toml
+touched: crates/alt-git-pack/src/index_pack.rs
+touched: crates/alt-git-pack/src/ingress.rs
+touched: crates/alt-git-pack/src/lib.rs
+touched: crates/alt-git-pack/src/pack.rs
+touched: crates/alt-git-pack/src/representation.rs
+touched: crates/alt-inflate/src/lib.rs
+touched: crates/alt-inflate/src/reader.rs
