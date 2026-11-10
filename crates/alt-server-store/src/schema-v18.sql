@@ -9,6 +9,9 @@ CREATE TABLE alt_pack_segments (
   flags integer NOT NULL,
   state text NOT NULL CHECK (state IN ('live','retired')),
   retired_at bigint,
+  -- a small segment's whole file, made durable by the publishing commit itself;
+  -- the file on disk is then only a cache until the segment is settled
+  inline bytea,
   PRIMARY KEY(repository, segment_id)
 );
 CREATE INDEX alt_pack_segments_live ON alt_pack_segments(repository, sequence) WHERE state='live';

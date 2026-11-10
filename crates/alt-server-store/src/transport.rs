@@ -97,6 +97,8 @@ impl Store {
         repository: &str,
     ) -> Result<()> {
         let mut tx = self.client.transaction()?;
+        // only row locks are taken; nothing here needs a synchronous flush
+        tx.execute("SET LOCAL synchronous_commit=off", &[])?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         let current = snapshot(&mut tx, &self.spec, repository)?;
         let auth = authorize(&mut tx, &self.spec, credential, &current)?;
@@ -121,6 +123,8 @@ impl Store {
     }
     pub fn principal(&mut self, credential: &Credential) -> Result<PrincipalInfo> {
         let mut tx = self.client.transaction()?;
+        // only row locks are taken; nothing here needs a synchronous flush
+        tx.execute("SET LOCAL synchronous_commit=off", &[])?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         let row = credential_row(&mut tx, &self.spec, credential)?;
         let value = PrincipalInfo {
@@ -136,6 +140,8 @@ impl Store {
         repository: &str,
     ) -> Result<RepositoryInfo> {
         let mut tx = self.client.transaction()?;
+        // only row locks are taken; nothing here needs a synchronous flush
+        tx.execute("SET LOCAL synchronous_commit=off", &[])?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         let current = snapshot(&mut tx, &self.spec, repository)?;
         authorize(&mut tx, &self.spec, credential, &current)?;

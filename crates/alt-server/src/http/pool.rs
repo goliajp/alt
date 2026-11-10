@@ -49,9 +49,8 @@ impl Pool {
         };
         let store = match retained {
             Some(mut store) => {
-                // A failed checkout drops this connection. It never retries a
-                // request or hides a current schema/instance/Cloud failure.
-                store.check_connection()?;
+                // Every store transaction checks the instance row itself, and a
+                // dead connection fails its first statement; neither is retried.
                 self.0.factory.check_mode(&mut store)?;
                 store
             }

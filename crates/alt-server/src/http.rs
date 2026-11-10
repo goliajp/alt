@@ -87,6 +87,18 @@ impl StoreFactory {
         }
         store.authenticate(token)
     }
+    /// authentication and the repository view of a Git request in one transaction
+    pub fn git_open(
+        &self,
+        store: &mut Store,
+        token: &str,
+        repository: &str,
+    ) -> alt_server_store::Result<(alt_server_store::Credential, alt_server_store::PackView)> {
+        if let Some(cloud) = &self.cloud {
+            cloud.refresh(store, token)?;
+        }
+        store.git_open(token, repository)
+    }
 }
 #[derive(Clone)]
 pub struct HttpOptions {
@@ -430,7 +442,16 @@ async fn handle(
         state.options.work_timeout,
         spawn_observed(Phase::Authority, move || {
             let mut store = factory.open()?;
-            let credential = factory.authenticate(&mut store, &request_token)?;
+            let (credential, view) = match &selected_route {
+                Route::GitReceive(repository)
+                | Route::GitUpload(repository)
+                | Route::GitAdvertise(repository, _) => {
+                    let (credential, view) =
+                        factory.git_open(&mut store, &request_token, repository)?;
+                    (credential, Some(view))
+                }
+                _ => (factory.authenticate(&mut store, &request_token)?, None),
+            };
             let size = match &selected_route {
                 Route::ChangeLink(route) => {
                     crate::change_links::api::request_bytes(&mut store, &credential, route)?
@@ -442,22 +463,18 @@ async fn handle(
                     route,
                 )?,
                 Route::IssueAgent => 16_384,
-                Route::GitReceive(repository) => {
-                    store.check_git_receive_access(&credential, repository)?;
+                Route::GitReceive(_) => {
+                    if !view.as_ref().is_some_and(|view| view.writable) {
+                        return Err(Error::Unauthorized);
+                    }
                     store
                         .limits()
                         .total_bytes
                         .checked_add(store.limits().request_bytes as u64)
                         .ok_or(Error::Limit("Git body bytes"))?
                 }
-                Route::GitUpload(repository) => {
-                    store.repository_info(&credential, repository)?;
-                    store.limits().request_bytes as u64
-                }
-                Route::GitAdvertise(repository, _) => {
-                    store.repository_info(&credential, repository)?;
-                    0
-                }
+                Route::GitUpload(_) => store.limits().request_bytes as u64,
+                Route::GitAdvertise(..) => 0,
                 Route::Request(key, RequestAction::Upload(digest)) => {
                     let entries = store.selected_upload(&credential, key, digest)?;
                     entries[0].bytes
@@ -475,11 +492,11 @@ async fn handle(
                 Route::Request(_, RequestAction::Approve) => store.limits().request_bytes as u64,
                 _ => 0,
             };
-            Ok::<_, Error>((credential, permit, size))
+            Ok::<_, Error>((credential, permit, size, view))
         }),
     )
     .await;
-    let (credential, permit, size) = match prepared {
+    let (credential, permit, size, view) = match prepared {
         Ok(Ok(Ok(value))) => value,
         Ok(Ok(Err(error))) => return store_failure(error, request_key),
         _ => {
@@ -589,7 +606,7 @@ async fn handle(
                         route,
                         protocol_v2,
                         source.as_file_mut(),
-                        &mut |store| factory.authenticate(store, &token),
+                        view.ok_or(Error::Integrity("Git repository view"))?,
                     )
                 }
                 _ => execute_native(

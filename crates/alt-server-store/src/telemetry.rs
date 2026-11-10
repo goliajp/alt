@@ -54,8 +54,10 @@ pub fn committed(receipt: &alt_remote_protocol::Receipt) {
     }
 }
 pub(crate) fn authenticated(row: &postgres::Row) {
+    authenticated_as(&row.get::<_, serde_json::Value>("attribution"));
+}
+pub(crate) fn authenticated_as(attribution: &serde_json::Value) {
     if let Some(trace) = Trace::current() {
-        let attribution: serde_json::Value = row.get("attribution");
         let actor = match attribution.get("kind").and_then(serde_json::Value::as_str) {
             Some("human") => Actor::Human,
             Some("agent") => Actor::Agent,

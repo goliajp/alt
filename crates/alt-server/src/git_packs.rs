@@ -98,7 +98,7 @@ fn ancestor(set: &SegmentSet, old: &Oid, new: &Oid, remaining: &mut usize) -> Re
     Ok(false)
 }
 
-pub(crate) fn receive(store: &mut Store, credential: &Credential, repository: &str, source: &mut dyn Read) -> Result<Output> {
+pub(crate) fn receive(store: &mut Store, credential: &Credential, repository: &str, source: &mut dyn Read, view: PackView) -> Result<Output> {
     let limits = store.limits();
     let head = alt_wire::push::parse_push_request_head_bounded(
         &mut (&mut *source).take(limits.request_bytes as u64),
@@ -122,7 +122,6 @@ pub(crate) fn receive(store: &mut Store, credential: &Credential, repository: &s
             return Err(Error::Integrity("invalid or duplicate Git update"));
         }
     }
-    let view = store.pack_view(credential, repository)?;
     let mut pack = Vec::new();
     source.take(limits.total_bytes.saturating_add(1)).read_to_end(&mut pack)?;
     if pack.len() as u64 > limits.total_bytes {
@@ -199,15 +198,19 @@ fn publish(
             let path = store.pack_path(repository, &segment_id)?;
             let mut file = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path)?;
             *created = Some(path.clone());
-            let mut index = Vec::new();
-            ingested.write_index(&mut index).map_err(segment_error)?;
-            file.write_all(pack)?;
-            file.write_all(&index)?;
-            file.sync_all()?;
-            std::fs::File::open(path.parent().expect("segment directory"))?.sync_all()?;
-            let bytes = (pack.len() + index.len()) as u64;
-            segments.push(Arc::new(Segment::open(&path).map_err(segment_error)?));
-            stored = Some((segment_id, ingested.objects() as u64, bytes, ingested.flags()));
+            let mut content = Vec::with_capacity(pack.len() + ingested.objects() * 96 + 2048);
+            content.extend_from_slice(pack);
+            ingested.write_index(&mut content).map_err(segment_error)?;
+            file.write_all(&content)?;
+            let bytes = content.len() as u64;
+            let inline = content.len() <= alt_server_store::INLINE_SEGMENT_BYTES;
+            if !inline {
+                file.sync_all()?;
+                std::fs::File::open(path.parent().expect("segment directory"))?.sync_all()?;
+            }
+            let segment = Arc::new(Segment::open(&path).map_err(segment_error)?);
+            segments.push(segment.clone());
+            stored = Some((segment_id, ingested.objects() as u64, ingested.flags(), segment, if inline { Some(content) } else { None }, bytes));
         }
     }
     let set = SegmentSet::new(segments);
@@ -241,10 +244,13 @@ fn publish(
         content_manifest: manifest.id(limits)?,
     };
     let graph = PackGraph { set: &set, limits: limits.into() };
-    let segment = stored.as_ref().map(|(id, objects, bytes, flags)| NewSegment { id, objects: *objects, bytes: *bytes, flags: *flags });
+    let segment = stored.as_ref().map(|(id, objects, flags, _, inline, bytes)| NewSegment { id, objects: *objects, bytes: *bytes, flags: *flags, inline: inline.as_deref() });
     // Git has no durable client request id; the generated one records the server
     // transaction for inspection, not for replay
     alt_server_store::telemetry::observe(alt_server_telemetry::Phase::Commit, || store.pack_publish(credential, &publication, &graph, segment))?;
+    if let Some((id, _, _, segment, _, _)) = stored {
+        store.adopt_segment(repository, &id, segment)?;
+    }
     Ok(key)
 }
 
@@ -262,9 +268,7 @@ fn peel(set: &SegmentSet, mut oid: Oid, remaining: &mut usize) -> Result<Option<
     Ok(peeled)
 }
 
-pub(crate) fn read(store: &mut Store, credential: &Credential, repository: &str, receive: bool, command: &Command) -> Result<Output> {
-    let limits = store.limits();
-    let view = store.pack_view(credential, repository)?;
+pub(crate) fn read(limits: alt_remote_protocol::Limits, receive: bool, command: &Command, view: PackView) -> Result<Output> {
     let bytes = |content_type, bytes| Ok(Output::Bytes { content_type, bytes });
     let mut output = Vec::new();
     if matches!(command, Command::Advertisement) {

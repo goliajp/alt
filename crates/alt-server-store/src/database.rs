@@ -37,6 +37,18 @@ impl Connection {
             statements: Statements::default(),
         }
     }
+    /// one statement outside any transaction block, with the cached plan
+    pub fn query_one(&mut self, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<Row, Error> {
+        let statement = match self.statements.values.get(sql) {
+            Some(statement) => statement.clone(),
+            None => {
+                let statement = self.client.prepare(sql)?;
+                self.statements.insert(sql, statement.clone());
+                statement
+            }
+        };
+        self.client.query_one(&statement, params)
+    }
     pub fn transaction(&mut self) -> Result<Transaction<'_>, Error> {
         Ok(Transaction {
             inner: self.client.transaction()?,

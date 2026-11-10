@@ -9,7 +9,7 @@ mod http;
 pub use http::*;
 mod git;
 mod git_packs;
-pub use git::{execute_git, execute_git_with_refresh};
+pub use git::execute_git;
 pub mod operator;
 
 mod browse;

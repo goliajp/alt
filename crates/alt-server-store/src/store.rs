@@ -149,6 +149,8 @@ impl Store {
     /// and repository state in their own transactions.
     pub fn check_connection(&mut self) -> Result<()> {
         let mut tx = self.client.transaction()?;
+        // only row locks are taken; nothing here needs a synchronous flush
+        tx.execute("SET LOCAL synchronous_commit=off", &[])?;
         let rows = tx.query(
             "SELECT version,checksum FROM alt_schema ORDER BY version",
             &[],
@@ -247,6 +249,8 @@ impl Store {
         let digest = token_digest(token);
         let credential = Credential { digest };
         let mut tx = self.client.transaction()?;
+        // only row locks are taken; nothing here needs a synchronous flush
+        tx.execute("SET LOCAL synchronous_commit=off", &[])?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         credential_row(&mut tx, &self.spec, &credential)?;
         tx.commit()?;
@@ -352,6 +356,8 @@ impl Store {
             serde_json::json!({"quota_bytes":quota_bytes.to_string()}),
         )?;
         tx.commit()?;
+        // the first push then pays no directory creation
+        self.pack_directory(repository)?;
         Ok(scope)
     }
     pub fn set_grants(

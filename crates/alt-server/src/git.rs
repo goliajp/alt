@@ -121,6 +121,7 @@ fn command(
     }
 }
 
+/// Runs one Git smart HTTP request for an already authenticated caller.
 pub fn execute_git(
     store: &mut Store,
     credential: &Credential,
@@ -128,23 +129,13 @@ pub fn execute_git(
     protocol_v2: bool,
     source: &mut dyn Read,
 ) -> Result<Output> {
-    execute_git_with_refresh(store, credential, route, protocol_v2, source, &mut |_| {
-        Ok(credential.clone())
-    })
+    let repository = match &route {
+        Route::GitAdvertise(repository, _) | Route::GitUpload(repository) | Route::GitReceive(repository) => repository.clone(),
+        _ => return Err(Error::Precondition("not a Git endpoint")),
+    };
+    let view = store.pack_view(credential, &repository)?;
+    execute_git_with_cache(store, credential, route, protocol_v2, source, view)
 }
-/// Refresh external authority after buffered read work and before its final
-/// current-permission transaction. Receive publication keeps its own checks.
-pub fn execute_git_with_refresh(
-    store: &mut Store,
-    credential: &Credential,
-    route: Route,
-    protocol_v2: bool,
-    source: &mut dyn Read,
-    refresh: &mut dyn FnMut(&mut Store) -> Result<Credential>,
-) -> Result<Output> {
-    execute_git_with_cache(store, credential, route, protocol_v2, source, refresh)
-}
-
 
 pub(crate) fn execute_git_with_cache(
     store: &mut Store,
@@ -152,7 +143,7 @@ pub(crate) fn execute_git_with_cache(
     route: Route,
     protocol_v2: bool,
     source: &mut dyn Read,
-    _refresh: &mut dyn FnMut(&mut Store) -> Result<Credential>,
+    view: alt_server_store::PackView,
 ) -> Result<Output> {
     let (repository, receive, advertisement) = match &route {
         Route::GitAdvertise(repository, receive) => (repository.clone(), *receive, true),
@@ -164,8 +155,11 @@ pub(crate) fn execute_git_with_cache(
         return Err(Error::Precondition("Git fetch protocol v2 is required"));
     }
     if receive && !advertisement {
-        return crate::git_packs::receive(store, credential, &repository, source);
+        if !view.writable {
+            return Err(Error::Unauthorized);
+        }
+        return crate::git_packs::receive(store, credential, &repository, source, view);
     }
     let command = command(source, advertisement, store.limits())?;
-    crate::git_packs::read(store, credential, &repository, receive, &command)
+    crate::git_packs::read(store.limits(), receive, &command, view)
 }
