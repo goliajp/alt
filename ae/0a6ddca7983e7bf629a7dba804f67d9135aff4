@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: four crc-32 lanes from 64 bytes on x86, merged pairwise
+author-type: human
+author: doracawl
+touched: crates/alt-hash/src/crc32/x86.rs
