@@ -152,7 +152,9 @@ macro_rules! extend {
 /// One round. Only `$d` and `$h` change, so the eight roles rotate through the
 /// registers. `$y` arrives holding b ^ c, which was a ^ b one round earlier, and `$z`
 /// leaves holding a ^ b for the next round: the majority is b where a and b agree
-/// and c where they differ.
+/// and c where they differ. Sums of two registers are written as `lea`, which only
+/// runs on two of the four integer units and so leaves the other two to the six
+/// rotations of a round, which can run nowhere else.
 macro_rules! round {
     ($a:literal, $b:literal, $c:literal, $d:literal, $e:literal, $f:literal, $g:literal, $h:literal, $y:literal, $z:literal, $at:literal) => {
         concat!(
@@ -166,18 +168,22 @@ macro_rules! round {
             ", ",
             $g,
             "\n",
-            "add ",
+            "lea ",
             $h,
-            ", r11d\n",
+            ", [",
+            $h,
+            " + r11d]\n",
             "mov r12d, ",
             $e,
             "\n",
             "and r12d, ",
             $f,
             "\n",
-            "add ",
+            "lea ",
             $h,
-            ", r12d\n",
+            ", [",
+            $h,
+            " + r12d]\n",
             "rorx r11d, ",
             $e,
             ", 25\n",
@@ -189,14 +195,18 @@ macro_rules! round {
             $e,
             ", 6\n",
             "xor r11d, r12d\n",
-            "add ",
+            "lea ",
             $h,
-            ", r11d\n",
-            "add ",
+            ", [",
+            $h,
+            " + r11d]\n",
+            "lea ",
             $d,
-            ", ",
+            ", [",
+            $d,
+            " + ",
             $h,
-            "\n",
+            "]\n",
             "mov ",
             $z,
             ", ",
@@ -217,11 +227,13 @@ macro_rules! round {
             ", ",
             $b,
             "\n",
-            "add ",
+            "lea ",
             $h,
-            ", ",
+            ", [",
+            $h,
+            " + ",
             $y,
-            "\n",
+            "]\n",
             "rorx r11d, ",
             $a,
             ", 22\n",
@@ -233,9 +245,11 @@ macro_rules! round {
             $a,
             ", 2\n",
             "xor r11d, r12d\n",
-            "add ",
+            "lea ",
             $h,
-            ", r11d\n",
+            ", [",
+            $h,
+            " + r11d]\n",
         )
     };
 }

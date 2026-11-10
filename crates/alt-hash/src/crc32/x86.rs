@@ -62,7 +62,7 @@ pub(super) unsafe fn fold(register: u32, data: &[u8]) -> u32 {
         let load = |bytes: &[u8]| _mm_loadu_si128(bytes.as_ptr().cast());
         let seed = _mm_cvtsi32_si128(register as i32);
         let (mut blocks, rest) = data.as_chunks::<16>();
-        let mut remainder;
+        let remainder;
         if blocks.len() >= 4 {
             let by = pair(AHEAD_4);
             let mut lanes = [
@@ -87,6 +87,17 @@ pub(super) unsafe fn fold(register: u32, data: &[u8]) -> u32 {
             remainder = _mm_xor_si128(load(&blocks[0]), seed);
             blocks = &blocks[1..];
         }
+        finish(remainder, blocks, rest)
+    }
+}
+
+/// folds the remaining whole blocks into the remainder, reduces it to the register
+/// and finishes the last bytes
+#[inline]
+#[target_feature(enable = "pclmulqdq,sse2,sse4.1")]
+unsafe fn finish(mut remainder: __m128i, blocks: &[[u8; 16]], rest: &[u8]) -> u32 {
+    unsafe {
+        let load = |bytes: &[u8]| _mm_loadu_si128(bytes.as_ptr().cast());
         let by = pair(AHEAD_1);
         for block in blocks {
             remainder = step(remainder, by, load(block));
