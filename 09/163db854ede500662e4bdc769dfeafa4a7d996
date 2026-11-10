@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: refactor
+summary: drop redundant digest conversions
+author-type: human
+author: doracawl
+touched: crates/alt-repository-service/src/graph.rs
