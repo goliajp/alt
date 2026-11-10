@@ -1,9 +1,17 @@
 # Run from the prepared installation directory; all paths are local to it.
+# Container logs carry the access log; rotation keeps them bounded.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "${ALT_LOG_FILE_BYTES:-50m}"
+    max-file: "${ALT_LOG_FILES:-10}"
 services:
   database:
     image: "${ALT_DATABASE_IMAGE:?exact locally loaded image identity required}"
     pull_policy: never
     restart: unless-stopped
+    logging: *logging
+    mem_limit: "${ALT_DATABASE_MEMORY:-2g}"
     network_mode: none
     environment:
       POSTGRES_DB: alt
@@ -26,6 +34,8 @@ services:
     image: "${ALT_EDGE_IMAGE:?exact locally loaded image identity required}"
     pull_policy: never
     restart: unless-stopped
+    logging: *logging
+    mem_limit: "${ALT_EDGE_MEMORY:-256m}"
     user: "${ALT_UID:?}:${ALT_GID:?}"
     read_only: true
     cap_drop: [ALL]
@@ -41,6 +51,8 @@ services:
     image: "${ALT_IMAGE:?exact locally loaded image identity required}"
     pull_policy: never
     restart: unless-stopped
+    logging: *logging
+    mem_limit: "${ALT_MEMORY:-2g}"
     user: "${ALT_UID:?}:${ALT_GID:?}"
     network_mode: service:edge
     read_only: true
