@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: read and resend offset deltas from segments; keep three real Git tests
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/scan.rs
+touched: crates/alt-pack-segment/tests/it/main.rs
+touched: crates/alt-server/tests/it/database/git.rs
