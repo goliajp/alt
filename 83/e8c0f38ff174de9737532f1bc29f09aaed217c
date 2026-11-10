@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: smaller hashing batches so pack ingest keeps every core busy
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/ingest.rs
