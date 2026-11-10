@@ -90,7 +90,7 @@ fn whole_repository_round_trips() {
     fs::create_dir(&source).unwrap();
     repository(&source, 40);
     git(&source, &["repack", "-adq", "--depth=20", "--window=20"]);
-    let pack = git_in(&source, &["pack-objects", "--all", "--stdout", "-q"], b"");
+    let pack = git_in(&source, &["pack-objects", "--all", "--stdout", "-q", "--delta-base-offset"], b"");
     let set = SegmentSet::new(vec![segment(work.path(), "one.seg", &pack, &SegmentSet::default())]);
     let ids = objects(&source, &["--all"]);
     assert_eq!(set.objects() as usize, ids.len());
@@ -123,13 +123,13 @@ fn thin_increment_and_fetch_selection() {
     fs::create_dir(&source).unwrap();
     repository(&source, 10);
     let old = text(git(&source, &["rev-parse", "HEAD"]));
-    let first = git_in(&source, &["pack-objects", "--all", "--stdout", "-q"], b"");
+    let first = git_in(&source, &["pack-objects", "--all", "--stdout", "-q", "--delta-base-offset"], b"");
     let base = SegmentSet::new(vec![segment(work.path(), "one.seg", &first, &SegmentSet::default())]);
 
     fs::write(source.join("src/big.txt"), fs::read_to_string(source.join("src/big.txt")).unwrap().replace("line 5 ", "line five ")).unwrap();
     git(&source, &["commit", "-qam", "increment"]);
     let new = text(git(&source, &["rev-parse", "HEAD"]));
-    let thin = git_in(&source, &["pack-objects", "--thin", "--stdout", "-q", "--revs"], format!("{new}\n^{old}\n").as_bytes());
+    let thin = git_in(&source, &["pack-objects", "--thin", "--stdout", "-q", "--revs", "--delta-base-offset"], format!("{new}\n^{old}\n").as_bytes());
     let second = segment(work.path(), "two.seg", &thin, &base);
     let both = SegmentSet::new(vec![base.segments()[0].clone(), second]);
     let added = objects(&source, &[&new, &format!("^{old}")]);
@@ -170,7 +170,7 @@ fn corruption_is_detected() {
     let source = work.path().join("source");
     fs::create_dir(&source).unwrap();
     repository(&source, 3);
-    let pack = git_in(&source, &["pack-objects", "--all", "--stdout", "-q"], b"");
+    let pack = git_in(&source, &["pack-objects", "--all", "--stdout", "-q", "--delta-base-offset"], b"");
     let mut broken = pack.clone();
     let middle = broken.len() / 2;
     broken[middle] ^= 1;
@@ -188,4 +188,30 @@ fn corruption_is_detected() {
     bytes[last] ^= 1;
     fs::write(&path, &bytes).unwrap();
     assert!(Segment::open(&path).is_err());
+}
+
+#[test]
+fn selection_with_nested_tags_notes_and_symlinks() {
+    let work = tempfile::tempdir().unwrap();
+    let source = work.path().join("source");
+    fs::create_dir(&source).unwrap();
+    repository(&source, 2);
+    std::os::unix::fs::symlink("src/big.txt", source.join("link")).unwrap();
+    fs::write(source.join("asset.bin"), [0u8, 255, 1, 0, 13, 10, 200]).unwrap();
+    git(&source, &["add", "-A"]);
+    git(&source, &["commit", "-q", "-m", "more"]);
+    git(&source, &["tag", "-a", "v2", "v1", "-m", "nested"]);
+    git(&source, &["notes", "add", "-m", "facts", "HEAD"]);
+    let pack = git_in(&source, &["pack-objects", "--all", "--stdout", "-q", "--delta-base-offset"], b"");
+    let set = SegmentSet::new(vec![segment(work.path(), "one.seg", &pack, &SegmentSet::default())]);
+    let wants: Vec<_> = ["HEAD", "v1", "v2"].iter().map(|name| oid(&text(git(&source, &["rev-parse", name])))).collect();
+    let selection = set.select(&wants, &[]).unwrap();
+    let expected = objects(&source, &["HEAD", "v1", "v2"]);
+    assert_eq!(selection.len(), expected.len());
+    let mut sent = Vec::new();
+    set.write_selected(&selection, true, &mut sent).unwrap();
+    let target = work.path().join("target");
+    fs::create_dir(&target).unwrap();
+    git(&target, &["init", "-q", "--bare"]);
+    git_in(&target, &["index-pack", "--stdin", "--strict"], &sent);
 }

@@ -6,6 +6,7 @@ use flate2::{Decompress, FlushDecompress, Status};
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Form {
     Plain(Kind),
+    /// as parsed: distance back to the base entry; `scan` turns it into the base's offset
     Offset(u64),
     Reference(Oid),
 }
@@ -54,8 +55,10 @@ pub(crate) fn header(pack: &[u8], pos: usize) -> Result<(Form, u64, usize), Erro
                     .ok_or_else(fail)?
                     | u64::from(byte & 0x7f);
             }
-            let base = (pos as u64).checked_sub(distance).filter(|base| *base >= 12 && distance > 0);
-            Form::Offset(base.ok_or_else(fail)?)
+            if distance == 0 {
+                return Err(fail());
+            }
+            Form::Offset(distance)
         }
         7 => {
             let oid = pack.get(at..at + 20).ok_or_else(fail)?;
@@ -129,6 +132,12 @@ pub(crate) fn scan(
     let mut pos = 12;
     for index in 0..count {
         let (form, size, head) = header(&pack[..body_end], pos)?;
+        let form = match form {
+            Form::Offset(distance) => Form::Offset(
+                (pos as u64).checked_sub(distance).filter(|base| *base >= 12).ok_or(Error::Format("delta base offset"))?,
+            ),
+            other => other,
+        };
         if size > limits.object_bytes {
             return Err(Error::Limit("object bytes"));
         }
