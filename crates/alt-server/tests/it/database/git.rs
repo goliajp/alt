@@ -355,3 +355,35 @@ fn real_git_many_refs_clone_and_bounded_gzip_requests() {
     );
     assert_eq!(f.counts(), (65, 1, 1));
 }
+
+#[test]
+#[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
+fn real_git_default_client_pushes_a_pack_larger_than_its_post_buffer() {
+    let f = Fixture::new();
+    let server = Running::start(&f);
+    let temp = tempfile::tempdir().unwrap();
+    let first = temp.path().join("first");
+    std::fs::create_dir(&first).unwrap();
+    let url = format!("{}/git/repository", server.url);
+    ok(&first, &f.token, &["init", "-q", "--initial-branch=main"]);
+    identity(&first, &f.token);
+    // incompressible, so the pack exceeds git's default 1 MiB post buffer and the
+    // client probes with a lone flush packet before a chunked request
+    let mut state = 0x9e37_79b9_7f4a_7c15u64;
+    let noise: Vec<u8> = (0..3 * 1024 * 1024)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state as u8
+        })
+        .collect();
+    std::fs::write(first.join("asset.bin"), &noise).unwrap();
+    ok(&first, &f.token, &["add", "."]);
+    ok(&first, &f.token, &["commit", "-qm", "large asset"]);
+    ok(&first, &f.token, &["push", "-q", &url, "main"]);
+    ok(temp.path(), &f.token, &["clone", "--quiet", &url, "second"]);
+    let second = temp.path().join("second");
+    assert_eq!(std::fs::read(second.join("asset.bin")).unwrap(), noise);
+    ok(&second, &f.token, &["fsck", "--strict", "--full"]);
+}

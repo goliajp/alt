@@ -115,6 +115,30 @@ pub(crate) fn receive(
     view: PackView,
 ) -> Result<Output> {
     let limits = store.limits();
+    // Before a body too large for its buffer, git sends a lone flush packet to probe
+    // authentication; it expects an empty success and then sends the real request.
+    let mut probe = [0u8; 4];
+    let mut filled = 0;
+    while filled < probe.len() {
+        match source.read(&mut probe[filled..])? {
+            0 => break,
+            count => filled += count,
+        }
+    }
+    let mut rest = [0u8; 1];
+    let more = if filled == probe.len() {
+        source.read(&mut rest)?
+    } else {
+        0
+    };
+    if &probe[..filled] == b"0000" && more == 0 {
+        return Ok(Output::Bytes {
+            content_type: "application/x-git-receive-pack-result",
+            bytes: Vec::new(),
+        });
+    }
+    let mut replay = std::io::Cursor::new([&probe[..filled], &rest[..more]].concat()).chain(source);
+    let source: &mut dyn Read = &mut replay;
     let head = alt_wire::push::parse_push_request_head_bounded(
         &mut (&mut *source).take(limits.request_bytes as u64),
         HashAlgo::Sha1,
