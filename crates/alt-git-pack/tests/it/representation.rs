@@ -4,7 +4,6 @@ use alt_git_pack::{
     ingest_pack_with_representations,
 };
 use flate2::{Compression, write::ZlibEncoder};
-use sha1::Digest;
 use std::{
     fs::File,
     io::{Cursor, Write},
@@ -51,8 +50,8 @@ fn plain_pack(algo: HashAlgo, objects: &[Vec<u8>]) -> Vec<u8> {
         pack.extend_from_slice(&zlib.finish().unwrap());
     }
     let trailer = match algo {
-        HashAlgo::Sha1 => sha1::Sha1::digest(&pack).to_vec(),
-        HashAlgo::Sha256 => sha2::Sha256::digest(&pack).to_vec(),
+        HashAlgo::Sha1 => alt_hash::sha1(&pack).to_vec(),
+        HashAlgo::Sha256 => alt_hash::sha256(&pack).to_vec(),
     };
     pack.extend_from_slice(&trailer);
     pack

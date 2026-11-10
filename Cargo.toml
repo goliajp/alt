@@ -70,8 +70,6 @@ libc = "0.2"
 memmap2 = "0.9"
 rand_core = { version = "0.6", default-features = false, features = ["std", "getrandom"] }
 rayon = "1"
-sha1 = "0.11"
-sha2 = "0.11"
 syn = { version = "2", features = ["full", "extra-traits"] }
 proc-macro2 = "1"
 url = "2"

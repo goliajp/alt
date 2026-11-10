@@ -181,11 +181,9 @@ fn inflate(bytes: &[u8], size: u64) -> Result<(Vec<u8>, usize), PackError> {
     }
 }
 fn checksum(bytes: &[u8], algo: HashAlgo) -> Vec<u8> {
-    use sha1::{Digest, Sha1};
-    use sha2::Sha256;
     match algo {
-        HashAlgo::Sha1 => Sha1::digest(bytes).to_vec(),
-        HashAlgo::Sha256 => Sha256::digest(bytes).to_vec(),
+        HashAlgo::Sha1 => alt_hash::sha1(bytes).to_vec(),
+        HashAlgo::Sha256 => alt_hash::sha256(bytes).to_vec(),
     }
 }
 /// Decode a complete pack within explicit resource bounds. The caller owns

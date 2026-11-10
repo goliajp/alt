@@ -1,4 +1,4 @@
-use alt_hash::{Sha1, sha1, sha1_many};
+use alt_hash::{Sha1, Sha256, sha1, sha1_many, sha256};
 use std::{
     io::Write,
     process::{Command, Stdio},
@@ -137,5 +137,61 @@ fn sha1_many_matches_one_at_a_time() {
                 bodies[index].len()
             );
         }
+    }
+}
+
+#[test]
+fn sha256_published_vectors() {
+    assert_eq!(
+        hex(&sha256(b"")),
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    );
+    assert_eq!(
+        hex(&sha256(b"abc")),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
+    assert_eq!(
+        hex(&sha256(
+            b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"
+        )),
+        "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
+    );
+    assert_eq!(
+        hex(&sha256(&vec![b'a'; 1_000_000])),
+        "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0"
+    );
+}
+
+#[test]
+fn sha256_accelerated_matches_portable_at_every_length_and_split() {
+    let data = noise(1024, 0x1234_5678_9abc_def1);
+    for len in 0..data.len() {
+        let mut padded = data[..len].to_vec();
+        padded.push(0x80);
+        while padded.len() % 64 != 56 {
+            padded.push(0);
+        }
+        padded.extend_from_slice(&((len as u64) * 8).to_be_bytes());
+        let mut state = [
+            0x6a09_e667u32,
+            0xbb67_ae85,
+            0x3c6e_f372,
+            0xa54f_f53a,
+            0x510e_527f,
+            0x9b05_688c,
+            0x1f83_d9ab,
+            0x5be0_cd19,
+        ];
+        alt_hash::sha256::portable(&mut state, &padded);
+        let expected: Vec<u8> = state.iter().flat_map(|word| word.to_be_bytes()).collect();
+        assert_eq!(sha256(&data[..len]).to_vec(), expected, "length {len}");
+    }
+    let whole = sha256(&data);
+    for step in [1, 3, 63, 64, 65, 127, 1000] {
+        let mut hasher = Sha256::new();
+        for chunk in data.chunks(step) {
+            hasher.update(chunk);
+        }
+        assert_eq!(hasher.finalize(), whole, "step {step}");
     }
 }

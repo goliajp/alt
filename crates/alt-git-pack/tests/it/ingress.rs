@@ -17,8 +17,7 @@ fn limits() -> IngressLimits {
     }
 }
 fn finish(mut bytes: Vec<u8>) -> Vec<u8> {
-    use sha1::{Digest, Sha1};
-    let digest = Sha1::digest(&bytes);
+    let digest = alt_hash::sha1(&bytes);
     bytes.extend_from_slice(&digest);
     bytes
 }

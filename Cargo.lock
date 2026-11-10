@@ -199,11 +199,10 @@ version = "0.1.0"
 name = "alt-git-codec"
 version = "0.1.0"
 dependencies = [
+ "alt-hash",
  "alt-testutil",
  "bstr",
  "flate2",
- "sha1",
- "sha2 0.11.0",
  "tempfile",
  "thiserror",
 ]
@@ -223,10 +222,9 @@ name = "alt-git-index"
 version = "0.1.0"
 dependencies = [
  "alt-git-codec",
+ "alt-hash",
  "alt-testutil",
  "bstr",
- "sha1",
- "sha2 0.11.0",
  "tempfile",
  "thiserror",
 ]
@@ -236,12 +234,11 @@ name = "alt-git-pack"
 version = "0.1.0"
 dependencies = [
  "alt-git-codec",
+ "alt-hash",
  "alt-testutil",
  "criterion",
  "flate2",
  "memmap2",
- "sha1",
- "sha2 0.11.0",
  "tempfile",
  "thiserror",
 ]
@@ -293,9 +290,9 @@ dependencies = [
 name = "alt-lfs"
 version = "0.1.0"
 dependencies = [
+ "alt-hash",
  "serde",
  "serde_json",
- "sha2 0.11.0",
  "thiserror",
  "tiny_http",
  "ureq",
@@ -468,11 +465,10 @@ name = "alt-repository-service"
 version = "0.1.0"
 dependencies = [
  "alt-git-codec",
+ "alt-hash",
  "alt-remote-protocol",
  "bstr",
  "serde",
- "sha1",
- "sha2 0.11.0",
  "thiserror",
 ]
 
@@ -2809,17 +2805,6 @@ dependencies = [
  "serde",
  "serde_core",
  "zmij",
-]
-
-[[package]]
-name = "sha1"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aacc4cc499359472b4abe1bf11d0b12e688af9a805fa5e3016f9a386dc2d0214"
-dependencies = [
- "cfg-if",
- "cpufeatures 0.3.0",
- "digest 0.11.3",
 ]
 
 [[package]]

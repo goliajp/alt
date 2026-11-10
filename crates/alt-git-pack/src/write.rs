@@ -9,10 +9,9 @@ use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
+use alt_hash::{Sha1, Sha256};
 use flate2::Compression;
 use flate2::write::ZlibEncoder;
-use sha1::{Digest, Sha1};
-use sha2::Sha256;
 
 use crate::{DeltaOptions, PackError, PlainRepresentation, delta_window::Window};
 

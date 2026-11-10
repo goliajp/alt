@@ -1,10 +1,6 @@
 use core::fmt;
 use core::str::FromStr;
 
-use sha1::Sha1;
-use sha1::digest::{Digest, Output};
-use sha2::Sha256;
-
 use crate::ObjectKind;
 
 /// Hash algorithms git can use for object ids (`extensions.objectFormat`).
@@ -37,9 +33,23 @@ pub enum ObjectId {
 impl ObjectId {
     /// Computes the object id of `data` as an object of type `kind`.
     pub fn hash_object(algo: HashAlgo, kind: ObjectKind, data: &[u8]) -> Self {
+        let length = data.len().to_string();
+        let parts: [&[u8]; 5] = [kind.as_bytes(), b" ", length.as_bytes(), b"\0", data];
         match algo {
-            HashAlgo::Sha1 => Self::Sha1(digest_object::<Sha1>(kind, data).into()),
-            HashAlgo::Sha256 => Self::Sha256(digest_object::<Sha256>(kind, data).into()),
+            HashAlgo::Sha1 => {
+                let mut hasher = alt_hash::Sha1::new();
+                for part in parts {
+                    hasher.update(part);
+                }
+                Self::Sha1(hasher.finalize())
+            }
+            HashAlgo::Sha256 => {
+                let mut hasher = alt_hash::Sha256::new();
+                for part in parts {
+                    hasher.update(part);
+                }
+                Self::Sha256(hasher.finalize())
+            }
         }
     }
 
@@ -87,16 +97,6 @@ impl ObjectId {
             len => Err(ParseOidError::InvalidHexLength(len)),
         }
     }
-}
-
-fn digest_object<D: Digest>(kind: ObjectKind, data: &[u8]) -> Output<D> {
-    let mut hasher = D::new();
-    hasher.update(kind.as_bytes());
-    hasher.update(b" ");
-    hasher.update(data.len().to_string().as_bytes());
-    hasher.update(b"\0");
-    hasher.update(data);
-    hasher.finalize()
 }
 
 fn decode_hex(dst: &mut [u8], hex: &[u8]) -> Result<(), ParseOidError> {

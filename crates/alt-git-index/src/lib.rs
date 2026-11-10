@@ -6,7 +6,6 @@ use std::path::Path;
 
 use alt_git_codec::{HashAlgo, ObjectId};
 use bstr::{BString, ByteSlice};
-use sha1::digest::Digest;
 
 /// Stage bits and friends live in `flags`; typed accessors below.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,8 +79,8 @@ impl Index {
         let content_end = data.len() - raw;
         let checksum = &data[content_end..];
         let computed: Vec<u8> = match algo {
-            HashAlgo::Sha1 => sha1::Sha1::digest(&data[..content_end]).to_vec(),
-            HashAlgo::Sha256 => sha2::Sha256::digest(&data[..content_end]).to_vec(),
+            HashAlgo::Sha1 => alt_hash::sha1(&data[..content_end]).to_vec(),
+            HashAlgo::Sha256 => alt_hash::sha256(&data[..content_end]).to_vec(),
         };
         if checksum != computed {
             return Err(ERR("index checksum mismatch"));
@@ -177,8 +176,8 @@ impl Index {
         }
 
         let trailer: Vec<u8> = match algo {
-            HashAlgo::Sha1 => sha1::Sha1::digest(&out).to_vec(),
-            HashAlgo::Sha256 => sha2::Sha256::digest(&out).to_vec(),
+            HashAlgo::Sha1 => alt_hash::sha1(&out).to_vec(),
+            HashAlgo::Sha256 => alt_hash::sha256(&out).to_vec(),
         };
         out.extend_from_slice(&trailer);
         out
@@ -294,7 +293,7 @@ mod tests {
     use super::*;
 
     fn with_trailer(mut buf: Vec<u8>) -> Vec<u8> {
-        let t = sha1::Sha1::digest(&buf);
+        let t = alt_hash::sha1(&buf);
         buf.extend_from_slice(&t);
         buf
     }

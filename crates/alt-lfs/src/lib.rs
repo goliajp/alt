@@ -13,7 +13,6 @@ use std::collections::BTreeMap;
 use std::io::Read;
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 pub const SPEC: &str = "https://git-lfs.github.com/spec/v1";
 
@@ -48,7 +47,7 @@ impl Pointer {
     /// The pointer for `content`.
     pub fn of(content: &[u8]) -> Pointer {
         Pointer {
-            oid: hex(&Sha256::digest(content)),
+            oid: hex(&alt_hash::sha256(content)),
             size: content.len() as u64,
         }
     }

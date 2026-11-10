@@ -355,8 +355,7 @@ fn resolve_all(entries: &[RawEntry]) -> Result<Vec<Resolved>, PackError> {
 }
 
 fn verify_trailer(map: &[u8], algo: HashAlgo, trailer: &[u8]) -> Result<(), PackError> {
-    use sha1::{Digest, Sha1};
-    use sha2::Sha256;
+    use alt_hash::{Sha1, Sha256};
     let body = &map[..map.len() - trailer.len()];
     let actual: Vec<u8> = match algo {
         HashAlgo::Sha1 => {
@@ -384,8 +383,7 @@ fn read_be_u32(buf: &[u8], at: usize) -> u32 {
 /// here so we don't have to expose the writer's internals across modules
 /// (and so this stays a self-contained read-and-index path).
 fn build_idx(algo: HashAlgo, entries: &mut [(ObjectId, u64, u32)], trailer: &[u8]) -> Vec<u8> {
-    use sha1::{Digest, Sha1};
-    use sha2::Sha256;
+    use alt_hash::{Sha1, Sha256};
     entries.sort_unstable_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
 
     let mut out = Vec::with_capacity(8 + 256 * 4 + entries.len() * (algo.raw_len() + 8) + 64);

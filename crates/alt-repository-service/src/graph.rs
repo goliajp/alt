@@ -1,6 +1,5 @@
 use crate::{Error, Result};
 use alt_git_codec::{Commit, HashAlgo, ObjectId, ObjectKind, Tag, Tree};
-use sha1::Digest;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io::Read;
 
@@ -368,8 +367,8 @@ pub fn verify_object(
         return Err(Error::Limit("structured object bytes"));
     }
     let mut data = Vec::new();
-    let mut sha1 = sha1::Sha1::new();
-    let mut sha256 = sha2::Sha256::new();
+    let mut sha1 = alt_hash::Sha1::new();
+    let mut sha256 = alt_hash::Sha256::new();
     let header = format!("{} {}\0", object.kind, object.bytes);
     sha1.update(header.as_bytes());
     sha256.update(header.as_bytes());
