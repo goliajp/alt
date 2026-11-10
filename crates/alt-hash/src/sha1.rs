@@ -90,6 +90,15 @@ fn compress(state: &mut [u32; 5], blocks: &[u8]) {
         return;
     }
     #[cfg(target_arch = "x86_64")]
+    if std::arch::is_x86_feature_detected!("avx2")
+        && std::arch::is_x86_feature_detected!("bmi1")
+        && std::arch::is_x86_feature_detected!("bmi2")
+    {
+        // the features were just detected on this CPU
+        unsafe { x86::compress_bmi(state, blocks) };
+        return;
+    }
+    #[cfg(target_arch = "x86_64")]
     if std::arch::is_x86_feature_detected!("ssse3") {
         // the feature was just detected on this CPU
         unsafe { x86::compress(state, blocks) };

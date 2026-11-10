@@ -21,6 +21,9 @@ fn main() {
         rounds as f64 * 16384.0 / (1 << 20) as f64 / seconds
     );
 
+    if std::env::args().nth(1).as_deref() == Some("single") {
+        return;
+    }
     let small: Vec<Vec<u8>> = (0..8192usize)
         .map(|index| vec![index as u8; 700 + index % 600])
         .collect();
