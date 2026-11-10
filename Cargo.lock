@@ -147,6 +147,8 @@ dependencies = [
 name = "alt-deflate"
 version = "0.1.0"
 dependencies = [
+ "alt-hash",
+ "alt-inflate",
  "libz-sys",
 ]
 

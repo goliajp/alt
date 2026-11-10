@@ -271,3 +271,31 @@ fn long_distance_repeats() {
     }
     tally.report("long-distance repeats");
 }
+
+#[test]
+fn gzip_and_the_writer_wrap_the_same_stream() {
+    use std::io::Write;
+    let data: Vec<u8> = (0..50_000u32)
+        .flat_map(|n| (n % 251).to_le_bytes())
+        .collect();
+    for level in [0u8, 1, 6, 9] {
+        let raw = alt_deflate::compress(&data, level, alt_deflate::Format::Raw);
+        let gzip = alt_deflate::compress(&data, level, alt_deflate::Format::Gzip);
+        assert_eq!(&gzip[10..gzip.len() - 8], raw, "level {level}");
+        let (content, consumed) =
+            alt_inflate::inflate(alt_inflate::Format::Gzip, &gzip, data.len()).unwrap();
+        assert_eq!(content, data, "level {level}");
+        assert_eq!(consumed, gzip.len(), "level {level}");
+
+        let mut writer = alt_deflate::Writer::new(Vec::new(), level, alt_deflate::Format::Zlib);
+        for piece in data.chunks(777) {
+            writer.write_all(piece).unwrap();
+        }
+        assert_eq!(writer.total_in(), data.len() as u64);
+        assert_eq!(
+            writer.finish().unwrap(),
+            alt_deflate::compress(&data, level, alt_deflate::Format::Zlib),
+            "level {level}"
+        );
+    }
+}

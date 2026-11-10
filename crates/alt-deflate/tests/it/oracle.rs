@@ -96,6 +96,7 @@ pub fn check(what: &str, data: &[u8]) -> usize {
             let expected = match format {
                 Format::Raw => raw(data, i32::from(level)),
                 Format::Zlib => zlib(data, i32::from(level)),
+                Format::Gzip => unreachable!("gzip is not compared with libz"),
             };
             let actual = alt_deflate::compress(data, level, format);
             compared += 1;

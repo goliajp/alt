@@ -4,15 +4,15 @@
 //! default strategy, compressing the whole input in one call into a buffer
 //! of `deflateBound` / `compressBound` size.
 
-mod adler;
 mod bits;
 mod block;
 mod encoder;
 mod tables;
 mod trees;
 mod window;
+mod writer;
 
-pub use adler::adler32;
+pub use writer::Writer;
 
 /// Framing of the compressed stream.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -21,6 +21,8 @@ pub enum Format {
     Raw,
     /// two-byte zlib header, deflate stream, Adler-32 of the input
     Zlib,
+    /// a gzip member without name or time, then CRC-32 and length of the input
+    Gzip,
 }
 
 /// largest stored block
@@ -34,18 +36,35 @@ const MAX_STORED: usize = 65535;
 pub fn compress(data: &[u8], level: u8, format: Format) -> Vec<u8> {
     assert!(level <= 9, "deflate level {level} out of range");
     let mut out = Vec::new();
-    if format == Format::Zlib {
-        out.extend_from_slice(&zlib_header(level));
+    match format {
+        Format::Raw => {}
+        Format::Zlib => out.extend_from_slice(&zlib_header(level)),
+        Format::Gzip => out.extend_from_slice(&gzip_header(level)),
     }
     let mut out = if level == 0 {
         store(data, out)
     } else {
         encoder::deflate(data, level, out)
     };
-    if format == Format::Zlib {
-        out.extend_from_slice(&adler32(data).to_be_bytes());
+    match format {
+        Format::Raw => {}
+        Format::Zlib => out.extend_from_slice(&alt_hash::adler32(1, data).to_be_bytes()),
+        Format::Gzip => {
+            out.extend_from_slice(&alt_hash::crc32(data).to_le_bytes());
+            out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        }
     }
     out
+}
+
+fn gzip_header(level: u8) -> [u8; 10] {
+    // deflate, no optional fields, no time; then the effort hint and "unknown system"
+    let effort = match level {
+        9 => 2,
+        1 => 4,
+        _ => 0,
+    };
+    [0x1f, 0x8b, 8, 0, 0, 0, 0, 0, effort, 255]
 }
 
 fn zlib_header(level: u8) -> [u8; 2] {
