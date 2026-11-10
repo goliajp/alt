@@ -160,83 +160,128 @@ mod avx2 {
         }
     }
 
-    #[inline(always)]
-    unsafe fn word(w: &mut [__m256i; 16], t: usize) -> __m256i {
-        unsafe { if t < 16 { w[t] } else { schedule(w, t) } }
+    /// the round function of (b, c, d) into ymm5
+    macro_rules! function_asm {
+        (choose, $b:literal, $c:literal, $d:literal) => {
+            concat!(
+                "vpxor ymm5, ",
+                $c,
+                ", ",
+                $d,
+                "\n",
+                "vpand ymm5, ymm5, ",
+                $b,
+                "\n",
+                "vpxor ymm5, ymm5, ",
+                $d,
+                "\n"
+            )
+        };
+        (parity, $b:literal, $c:literal, $d:literal) => {
+            concat!(
+                "vpxor ymm5, ",
+                $b,
+                ", ",
+                $c,
+                "\n",
+                "vpxor ymm5, ymm5, ",
+                $d,
+                "\n"
+            )
+        };
+        (majority, $b:literal, $c:literal, $d:literal) => {
+            concat!(
+                "vpor ymm5, ",
+                $b,
+                ", ",
+                $c,
+                "\n",
+                "vpand ymm5, ymm5, ",
+                $d,
+                "\n",
+                "vpand ymm6, ",
+                $b,
+                ", ",
+                $c,
+                "\n",
+                "vpor ymm5, ymm5, ymm6\n"
+            )
+        };
     }
 
-    /// One round with the working variables in the given roles; only `e` and `b` change.
-    macro_rules! round {
-        ($a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:expr, $k:expr, $word:expr) => {
-            // `$a` is the value that arrives last: everything else is summed first
-            $e = _mm256_add_epi32(
-                _mm256_add_epi32($e, _mm256_add_epi32(_mm256_add_epi32($f, $k), $word)),
-                rotate::<5, 27>($a),
-            );
-            $b = rotate::<30, 2>($b);
-        };
-    }
-    macro_rules! five {
-        ($w:ident, $t:expr, $k:expr, $f:ident, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident) => {
-            round!($a, $b, $c, $d, $e, $f!($b, $c, $d), $k, word(&mut $w, $t));
-            round!(
+    /// One round for all eight lanes. The word (constant included) and the round
+    /// function are added to `e` first; the rotation of `a`, the value computed last,
+    /// joins at the end. Written as assembly because the compiler reorders these sums.
+    macro_rules! round_asm {
+        ($f:ident, $a:literal, $b:literal, $c:literal, $d:literal, $e:literal, $t:literal) => {
+            concat!(
+                function_asm!($f, $b, $c, $d),
+                "vpaddd ",
                 $e,
-                $a,
-                $b,
-                $c,
-                $d,
-                $f!($a, $b, $c),
-                $k,
-                word(&mut $w, $t + 1)
-            );
-            round!(
-                $d,
+                ", ",
                 $e,
-                $a,
-                $b,
-                $c,
-                $f!($e, $a, $b),
-                $k,
-                word(&mut $w, $t + 2)
-            );
-            round!(
-                $c,
-                $d,
+                ", ymmword ptr [r11 + ",
+                $t,
+                "*32]\n",
+                "vpaddd ",
                 $e,
-                $a,
-                $b,
-                $f!($d, $e, $a),
-                $k,
-                word(&mut $w, $t + 3)
-            );
-            round!(
-                $b,
-                $c,
-                $d,
+                ", ",
                 $e,
+                ", ymm5\n",
+                "vpslld ymm5, ",
                 $a,
-                $f!($c, $d, $e),
-                $k,
-                word(&mut $w, $t + 4)
-            );
-        };
-    }
-    macro_rules! choose {
-        ($b:expr, $c:expr, $d:expr) => {
-            _mm256_xor_si256($d, _mm256_and_si256($b, _mm256_xor_si256($c, $d)))
-        };
-    }
-    macro_rules! parity {
-        ($b:expr, $c:expr, $d:expr) => {
-            _mm256_xor_si256(_mm256_xor_si256($b, $c), $d)
-        };
-    }
-    macro_rules! majority {
-        ($b:expr, $c:expr, $d:expr) => {
-            _mm256_or_si256(
-                _mm256_and_si256($b, $c),
-                _mm256_and_si256($d, _mm256_or_si256($b, $c)),
+                ", 5\n",
+                "vpsrld ymm6, ",
+                $a,
+                ", 27\n",
+                "vpor ymm5, ymm5, ymm6\n",
+                "vpaddd ",
+                $e,
+                ", ",
+                $e,
+                ", ymm5\n",
+                "vpslld ymm5, ",
+                $b,
+                ", 30\n",
+                "vpsrld ",
+                $b,
+                ", ",
+                $b,
+                ", 2\n",
+                "vpor ",
+                $b,
+                ", ",
+                $b,
+                ", ymm5\n"
             )
+        };
+    }
+
+    /// schedule word `$t`, stored with its round constant
+    macro_rules! extend {
+        ($w:ident, $wk:ident, $k:ident, $t:expr) => {
+            let word = schedule(&mut $w, $t);
+            _mm256_storeu_si256($wk.add($t), _mm256_add_epi32(word, $k[$t / 20]));
+        };
+    }
+    macro_rules! extend_sixteen {
+        ($w:ident, $wk:ident, $k:ident, $base:expr) => {
+            extend!($w, $wk, $k, $base + 0);
+            extend!($w, $wk, $k, $base + 1);
+            extend!($w, $wk, $k, $base + 2);
+            extend!($w, $wk, $k, $base + 3);
+            extend!($w, $wk, $k, $base + 4);
+            extend!($w, $wk, $k, $base + 5);
+            extend!($w, $wk, $k, $base + 6);
+            extend!($w, $wk, $k, $base + 7);
+            extend!($w, $wk, $k, $base + 8);
+            extend!($w, $wk, $k, $base + 9);
+            extend!($w, $wk, $k, $base + 10);
+            extend!($w, $wk, $k, $base + 11);
+            extend!($w, $wk, $k, $base + 12);
+            extend!($w, $wk, $k, $base + 13);
+            extend!($w, $wk, $k, $base + 14);
+            extend!($w, $wk, $k, $base + 15);
         };
     }
 
@@ -250,23 +295,110 @@ mod avx2 {
             w[..8].copy_from_slice(&low);
             w[8..].copy_from_slice(&high);
             let k = K.map(|value| _mm256_set1_epi32(value as i32));
+            // every word is written here, constant included, before the rounds read it
+            let mut words = std::mem::MaybeUninit::<[__m256i; 80]>::uninit();
+            let wk = words.as_mut_ptr().cast::<__m256i>();
+            for (t, word) in w.iter().enumerate() {
+                _mm256_storeu_si256(wk.add(t), _mm256_add_epi32(*word, k[0]));
+            }
+            // expanded with constant positions: a run-time loop would index the window in
+            // memory and chain every word through a store and a reload
+            extend_sixteen!(w, wk, k, 16);
+            extend_sixteen!(w, wk, k, 32);
+            extend_sixteen!(w, wk, k, 48);
+            extend_sixteen!(w, wk, k, 64);
             let [mut a, mut b, mut c, mut d, mut e] = *state;
-            five!(w, 0, k[0], choose, a, b, c, d, e);
-            five!(w, 5, k[0], choose, a, b, c, d, e);
-            five!(w, 10, k[0], choose, a, b, c, d, e);
-            five!(w, 15, k[0], choose, a, b, c, d, e);
-            five!(w, 20, k[1], parity, a, b, c, d, e);
-            five!(w, 25, k[1], parity, a, b, c, d, e);
-            five!(w, 30, k[1], parity, a, b, c, d, e);
-            five!(w, 35, k[1], parity, a, b, c, d, e);
-            five!(w, 40, k[2], majority, a, b, c, d, e);
-            five!(w, 45, k[2], majority, a, b, c, d, e);
-            five!(w, 50, k[2], majority, a, b, c, d, e);
-            five!(w, 55, k[2], majority, a, b, c, d, e);
-            five!(w, 60, k[3], parity, a, b, c, d, e);
-            five!(w, 65, k[3], parity, a, b, c, d, e);
-            five!(w, 70, k[3], parity, a, b, c, d, e);
-            five!(w, 75, k[3], parity, a, b, c, d, e);
+            std::arch::asm!(
+                round_asm!(choose, "ymm0", "ymm1", "ymm2", "ymm3", "ymm4", 0),
+                round_asm!(choose, "ymm4", "ymm0", "ymm1", "ymm2", "ymm3", 1),
+                round_asm!(choose, "ymm3", "ymm4", "ymm0", "ymm1", "ymm2", 2),
+                round_asm!(choose, "ymm2", "ymm3", "ymm4", "ymm0", "ymm1", 3),
+                round_asm!(choose, "ymm1", "ymm2", "ymm3", "ymm4", "ymm0", 4),
+                round_asm!(choose, "ymm0", "ymm1", "ymm2", "ymm3", "ymm4", 5),
+                round_asm!(choose, "ymm4", "ymm0", "ymm1", "ymm2", "ymm3", 6),
+                round_asm!(choose, "ymm3", "ymm4", "ymm0", "ymm1", "ymm2", 7),
+                round_asm!(choose, "ymm2", "ymm3", "ymm4", "ymm0", "ymm1", 8),
+                round_asm!(choose, "ymm1", "ymm2", "ymm3", "ymm4", "ymm0", 9),
+                round_asm!(choose, "ymm0", "ymm1", "ymm2", "ymm3", "ymm4", 10),
+                round_asm!(choose, "ymm4", "ymm0", "ymm1", "ymm2", "ymm3", 11),
+                round_asm!(choose, "ymm3", "ymm4", "ymm0", "ymm1", "ymm2", 12),
+                round_asm!(choose, "ymm2", "ymm3", "ymm4", "ymm0", "ymm1", 13),
+                round_asm!(choose, "ymm1", "ymm2", "ymm3", "ymm4", "ymm0", 14),
+                round_asm!(choose, "ymm0", "ymm1", "ymm2", "ymm3", "ymm4", 15),
+                round_asm!(choose, "ymm4", "ymm0", "ymm1", "ymm2", "ymm3", 16),
+                round_asm!(choose, "ymm3", "ymm4", "ymm0", "ymm1", "ymm2", 17),
+                round_asm!(choose, "ymm2", "ymm3", "ymm4", "ymm0", "ymm1", 18),
+                round_asm!(choose, "ymm1", "ymm2", "ymm3", "ymm4", "ymm0", 19),
+                round_asm!(parity, "ymm0", "ymm1", "ymm2", "ymm3", "ymm4", 20),
+                round_asm!(parity, "ymm4", "ymm0", "ymm1", "ymm2", "ymm3", 21),
+                round_asm!(parity, "ymm3", "ymm4", "ymm0", "ymm1", "ymm2", 22),
+                round_asm!(parity, "ymm2", "ymm3", "ymm4", "ymm0", "ymm1", 23),
+                round_asm!(parity, "ymm1", "ymm2", "ymm3", "ymm4", "ymm0", 24),
+                round_asm!(parity, "ymm0", "ymm1", "ymm2", "ymm3", "ymm4", 25),
+                round_asm!(parity, "ymm4", "ymm0", "ymm1", "ymm2", "ymm3", 26),
+                round_asm!(parity, "ymm3", "ymm4", "ymm0", "ymm1", "ymm2", 27),
+                round_asm!(parity, "ymm2", "ymm3", "ymm4", "ymm0", "ymm1", 28),
+                round_asm!(parity, "ymm1", "ymm2", "ymm3", "ymm4", "ymm0", 29),
+                round_asm!(parity, "ymm0", "ymm1", "ymm2", "ymm3", "ymm4", 30),
+                round_asm!(parity, "ymm4", "ymm0", "ymm1", "ymm2", "ymm3", 31),
+                round_asm!(parity, "ymm3", "ymm4", "ymm0", "ymm1", "ymm2", 32),
+                round_asm!(parity, "ymm2", "ymm3", "ymm4", "ymm0", "ymm1", 33),
+                round_asm!(parity, "ymm1", "ymm2", "ymm3", "ymm4", "ymm0", 34),
+                round_asm!(parity, "ymm0", "ymm1", "ymm2", "ymm3", "ymm4", 35),
+                round_asm!(parity, "ymm4", "ymm0", "ymm1", "ymm2", "ymm3", 36),
+                round_asm!(parity, "ymm3", "ymm4", "ymm0", "ymm1", "ymm2", 37),
+                round_asm!(parity, "ymm2", "ymm3", "ymm4", "ymm0", "ymm1", 38),
+                round_asm!(parity, "ymm1", "ymm2", "ymm3", "ymm4", "ymm0", 39),
+                round_asm!(majority, "ymm0", "ymm1", "ymm2", "ymm3", "ymm4", 40),
+                round_asm!(majority, "ymm4", "ymm0", "ymm1", "ymm2", "ymm3", 41),
+                round_asm!(majority, "ymm3", "ymm4", "ymm0", "ymm1", "ymm2", 42),
+                round_asm!(majority, "ymm2", "ymm3", "ymm4", "ymm0", "ymm1", 43),
+                round_asm!(majority, "ymm1", "ymm2", "ymm3", "ymm4", "ymm0", 44),
+                round_asm!(majority, "ymm0", "ymm1", "ymm2", "ymm3", "ymm4", 45),
+                round_asm!(majority, "ymm4", "ymm0", "ymm1", "ymm2", "ymm3", 46),
+                round_asm!(majority, "ymm3", "ymm4", "ymm0", "ymm1", "ymm2", 47),
+                round_asm!(majority, "ymm2", "ymm3", "ymm4", "ymm0", "ymm1", 48),
+                round_asm!(majority, "ymm1", "ymm2", "ymm3", "ymm4", "ymm0", 49),
+                round_asm!(majority, "ymm0", "ymm1", "ymm2", "ymm3", "ymm4", 50),
+                round_asm!(majority, "ymm4", "ymm0", "ymm1", "ymm2", "ymm3", 51),
+                round_asm!(majority, "ymm3", "ymm4", "ymm0", "ymm1", "ymm2", 52),
+                round_asm!(majority, "ymm2", "ymm3", "ymm4", "ymm0", "ymm1", 53),
+                round_asm!(majority, "ymm1", "ymm2", "ymm3", "ymm4", "ymm0", 54),
+                round_asm!(majority, "ymm0", "ymm1", "ymm2", "ymm3", "ymm4", 55),
+                round_asm!(majority, "ymm4", "ymm0", "ymm1", "ymm2", "ymm3", 56),
+                round_asm!(majority, "ymm3", "ymm4", "ymm0", "ymm1", "ymm2", 57),
+                round_asm!(majority, "ymm2", "ymm3", "ymm4", "ymm0", "ymm1", 58),
+                round_asm!(majority, "ymm1", "ymm2", "ymm3", "ymm4", "ymm0", 59),
+                round_asm!(parity, "ymm0", "ymm1", "ymm2", "ymm3", "ymm4", 60),
+                round_asm!(parity, "ymm4", "ymm0", "ymm1", "ymm2", "ymm3", 61),
+                round_asm!(parity, "ymm3", "ymm4", "ymm0", "ymm1", "ymm2", 62),
+                round_asm!(parity, "ymm2", "ymm3", "ymm4", "ymm0", "ymm1", 63),
+                round_asm!(parity, "ymm1", "ymm2", "ymm3", "ymm4", "ymm0", 64),
+                round_asm!(parity, "ymm0", "ymm1", "ymm2", "ymm3", "ymm4", 65),
+                round_asm!(parity, "ymm4", "ymm0", "ymm1", "ymm2", "ymm3", 66),
+                round_asm!(parity, "ymm3", "ymm4", "ymm0", "ymm1", "ymm2", 67),
+                round_asm!(parity, "ymm2", "ymm3", "ymm4", "ymm0", "ymm1", 68),
+                round_asm!(parity, "ymm1", "ymm2", "ymm3", "ymm4", "ymm0", 69),
+                round_asm!(parity, "ymm0", "ymm1", "ymm2", "ymm3", "ymm4", 70),
+                round_asm!(parity, "ymm4", "ymm0", "ymm1", "ymm2", "ymm3", 71),
+                round_asm!(parity, "ymm3", "ymm4", "ymm0", "ymm1", "ymm2", 72),
+                round_asm!(parity, "ymm2", "ymm3", "ymm4", "ymm0", "ymm1", 73),
+                round_asm!(parity, "ymm1", "ymm2", "ymm3", "ymm4", "ymm0", 74),
+                round_asm!(parity, "ymm0", "ymm1", "ymm2", "ymm3", "ymm4", 75),
+                round_asm!(parity, "ymm4", "ymm0", "ymm1", "ymm2", "ymm3", 76),
+                round_asm!(parity, "ymm3", "ymm4", "ymm0", "ymm1", "ymm2", 77),
+                round_asm!(parity, "ymm2", "ymm3", "ymm4", "ymm0", "ymm1", 78),
+                round_asm!(parity, "ymm1", "ymm2", "ymm3", "ymm4", "ymm0", 79),
+                in("r11") wk,
+                inout("ymm0") a,
+                inout("ymm1") b,
+                inout("ymm2") c,
+                inout("ymm3") d,
+                inout("ymm4") e,
+                out("ymm5") _,
+                out("ymm6") _,
+                options(nostack, readonly),
+            );
             state[0] = _mm256_add_epi32(state[0], a);
             state[1] = _mm256_add_epi32(state[1], b);
             state[2] = _mm256_add_epi32(state[2], c);
@@ -280,14 +412,12 @@ mod avx2 {
         unsafe {
             let mut out = vec![[0u8; 20]; messages.len()];
             // longest first, so the lanes of one step have similar amounts left
+            let lengths: Vec<u64> = messages
+                .iter()
+                .map(|parts| parts.iter().map(|part| part.len() as u64).sum())
+                .collect();
             let mut order: Vec<usize> = (0..messages.len()).collect();
-            let length = |job: usize| {
-                messages[job]
-                    .iter()
-                    .map(|part| part.len() as u64)
-                    .sum::<u64>()
-            };
-            order.sort_by_key(|job| std::cmp::Reverse(length(*job)));
+            order.sort_unstable_by_key(|job| std::cmp::Reverse(lengths[*job]));
             let mut queue = order.into_iter();
             let mut state = [_mm256_setzero_si256(); 5];
             let mut lanes: [Option<Lane<'_>>; 8] = Default::default();
@@ -337,7 +467,7 @@ mod avx2 {
                             parts: messages[job],
                             part: 0,
                             offset: 0,
-                            bytes: length(job),
+                            bytes: lengths[job],
                             stage: 0,
                         });
                     }

@@ -5,23 +5,26 @@ use alt_hash::{sha1, sha1_many};
 use std::time::Instant;
 
 fn main() {
+    let mode = std::env::args().nth(1);
     let buffer = vec![0x5au8; 16384];
     let mut rounds = 0u64;
     let mut sink = 0u8;
     let start = Instant::now();
-    while start.elapsed().as_secs_f64() < 1.0 {
+    while mode.as_deref() != Some("many") && start.elapsed().as_secs_f64() < 1.0 {
         for _ in 0..256 {
             sink ^= sha1(std::hint::black_box(&buffer))[0];
         }
         rounds += 256;
     }
     let seconds = start.elapsed().as_secs_f64();
-    println!(
-        "single stream, 16 KiB in cache: {:.0} MiB/s ({sink:02x})",
-        rounds as f64 * 16384.0 / (1 << 20) as f64 / seconds
-    );
+    if mode.as_deref() != Some("many") {
+        println!(
+            "single stream, 16 KiB in cache: {:.0} MiB/s ({sink:02x})",
+            rounds as f64 * 16384.0 / (1 << 20) as f64 / seconds
+        );
+    }
 
-    if std::env::args().nth(1).as_deref() == Some("single") {
+    if mode.as_deref() == Some("single") {
         return;
     }
     let small: Vec<Vec<u8>> = (0..8192usize)
@@ -31,9 +34,18 @@ fn main() {
     let parts: Vec<[&[u8]; 1]> = small.iter().map(|body| [body.as_slice()]).collect();
     let messages: Vec<&[&[u8]]> = parts.iter().map(|part| part.as_slice()).collect();
     let mut best = (f64::MAX, f64::MAX);
-    for _ in 0..20 {
+    let reference: Vec<[u8; 20]> = small.iter().map(|body| sha1(body)).collect();
+    for _ in 0..if mode.as_deref() == Some("many") {
+        400
+    } else {
+        20
+    } {
         let start = Instant::now();
-        let one: Vec<[u8; 20]> = small.iter().map(|body| sha1(body)).collect();
+        let one: Vec<[u8; 20]> = if mode.as_deref() == Some("many") {
+            reference.clone()
+        } else {
+            small.iter().map(|body| sha1(body)).collect()
+        };
         let single = start.elapsed().as_secs_f64();
         let start = Instant::now();
         let many = sha1_many(&messages);
