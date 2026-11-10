@@ -516,43 +516,6 @@ fn encrypted_backup_authenticates_every_entry_and_restores_refs_with_new_epoch()
     assert_eq!(source.ok(&["health"])["instance"]["runtime_generation"], 1);
 }
 
-fn start_binary(
-    binary: &std::ffi::OsStr,
-    config: &std::path::Path,
-    dsn: &str,
-) -> (ServerProcess, String) {
-    let mut child = ServerProcess(
-        Command::new(binary)
-            .arg("--config")
-            .arg(config)
-            .arg("serve")
-            .env("ALT_OPERATOR_DATABASE", dsn)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap(),
-    );
-    let stdout = child.0.stdout.take().unwrap();
-    let (tx, rx) = std::sync::mpsc::channel();
-    let reader = std::thread::spawn(move || {
-        let mut line = String::new();
-        BufReader::new(stdout).read_line(&mut line).unwrap();
-        let _ = tx.send(line);
-    });
-    let result = rx.recv_timeout(Duration::from_secs(15));
-    if result.is_err() {
-        let _ = child.0.kill();
-        let _ = child.0.wait();
-        panic!("server did not become ready");
-    }
-    reader.join().unwrap();
-    let ready: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
-    (
-        child,
-        format!("http://{}", ready["address"].as_str().unwrap()),
-    )
-}
-
 fn tool_path(name: &str) -> PathBuf {
     std::env::split_paths(&std::env::var_os("PATH").unwrap())
         .map(|dir| dir.join(name))

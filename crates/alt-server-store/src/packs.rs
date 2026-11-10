@@ -76,7 +76,12 @@ pub(crate) struct Materialized {
     pub(crate) path: PathBuf,
 }
 
-pub(crate) fn insert_segment(tx: &mut crate::database::Transaction<'_>, repository: &str, sequence: u64, segment: &NewSegment<'_>) -> Result<()> {
+pub(crate) fn insert_segment(
+    tx: &mut crate::database::Transaction<'_>,
+    repository: &str,
+    sequence: u64,
+    segment: &NewSegment<'_>,
+) -> Result<()> {
     tx.execute(
         "INSERT INTO alt_pack_segments(repository,segment_id,sequence,objects,bytes,flags,state,inline) VALUES($1,$2,$3,$4,$5,$6,'live',$7)",
         &[&repository, &segment.id, &integer(sequence)?, &integer(segment.objects)?, &integer(segment.bytes)?, &(segment.flags as i32), &segment.inline],
@@ -95,16 +100,30 @@ impl Store {
     ) -> Result<(ObjectKind, u64, std::io::Cursor<Vec<u8>>)> {
         let view = self.pack_view(credential, repository)?;
         let key: [u8; 20] = oid.as_bytes().try_into().map_err(|_| Error::Unauthorized)?;
-        let record = view.segments.record(&key).map_err(|_| Error::Integrity("pack segment record"))?.ok_or(Error::Unauthorized)?;
+        let record = view
+            .segments
+            .record(&key)
+            .map_err(|_| Error::Integrity("pack segment record"))?
+            .ok_or(Error::Unauthorized)?;
         if record.size > self.limits.object_bytes {
             return Err(Error::Limit("published object read bytes"));
         }
-        let (kind, data) = view.segments.read(&key).map_err(|_| Error::Integrity("published object bytes"))?;
-        Ok((object_kind(kind), data.len() as u64, std::io::Cursor::new(data)))
+        let (kind, data) = view
+            .segments
+            .read(&key)
+            .map_err(|_| Error::Integrity("published object bytes"))?;
+        Ok((
+            object_kind(kind),
+            data.len() as u64,
+            std::io::Cursor::new(data),
+        ))
     }
 
     /// live segments of a repository, read inside the caller's transaction
-    pub(crate) fn live_segment_ids(tx: &mut crate::database::Transaction<'_>, repository: &str) -> Result<Vec<(String, bool)>> {
+    pub(crate) fn live_segment_ids(
+        tx: &mut crate::database::Transaction<'_>,
+        repository: &str,
+    ) -> Result<Vec<(String, bool)>> {
         Ok(tx
             .query("SELECT segment_id,inline IS NOT NULL FROM alt_pack_segments WHERE repository=$1 AND state='live' ORDER BY sequence", &[&repository])?
             .iter()
@@ -114,12 +133,20 @@ impl Store {
 
     /// Packs the Git objects a native publication uploaded into one segment, so that Git
     /// clients can fetch them. The file is written; the row is the caller's to insert.
-    pub(crate) fn materialize(&mut self, repository: &str, existing: &SegmentSet, objects: Vec<(Kind, Vec<u8>)>) -> Result<Option<Materialized>> {
+    pub(crate) fn materialize(
+        &mut self,
+        repository: &str,
+        existing: &SegmentSet,
+        objects: Vec<(Kind, Vec<u8>)>,
+    ) -> Result<Option<Materialized>> {
         if objects.is_empty() {
             return Ok(None);
         }
         let failed = |_| Error::Integrity("native Git objects do not form a valid segment");
-        let pack = alt_pack_segment::build_pack(objects.iter().map(|(kind, data)| (*kind, data.as_slice()))).map_err(failed)?;
+        let pack = alt_pack_segment::build_pack(
+            objects.iter().map(|(kind, data)| (*kind, data.as_slice())),
+        )
+        .map_err(failed)?;
         let ingested = alt_pack_segment::ingest(
             &pack,
             existing,
@@ -140,7 +167,11 @@ impl Store {
         let inline = content.len() <= INLINE_SEGMENT_BYTES;
         {
             use std::{io::Write, os::unix::fs::OpenOptionsExt};
-            let mut file = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path)?;
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&path)?;
             file.write_all(&content)?;
             if !inline {
                 file.sync_all()?;
@@ -181,17 +212,25 @@ impl Store {
         if segment.len() != 32 || !segment.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             return Err(Error::Integrity("segment id"));
         }
-        Ok(self.pack_directory(repository)?.join(format!("{segment}.seg")))
+        Ok(self
+            .pack_directory(repository)?
+            .join(format!("{segment}.seg")))
     }
 
     /// makes a segment this process just wrote available to later requests
     pub fn adopt_segment(&self, repository: &str, id: &str, segment: Arc<Segment>) -> Result<()> {
-        OPEN.lock().unwrap().insert(self.pack_path(repository, id)?, segment);
+        OPEN.lock()
+            .unwrap()
+            .insert(self.pack_path(repository, id)?, segment);
         Ok(())
     }
 
     /// `ids` pairs each live segment with whether its bytes are still held by its row
-    pub(crate) fn open_segments(&mut self, repository: &str, ids: &[(String, bool)]) -> Result<SegmentSet> {
+    pub(crate) fn open_segments(
+        &mut self,
+        repository: &str,
+        ids: &[(String, bool)],
+    ) -> Result<SegmentSet> {
         let mut segments = Vec::with_capacity(ids.len());
         for (id, inline) in ids {
             let path = self.pack_path(repository, id)?;
@@ -210,7 +249,10 @@ impl Store {
                         std::fs::write(&staging, &bytes)?;
                         std::fs::rename(&staging, &path)?;
                     }
-                    let segment = Arc::new(Segment::open(&path).map_err(|_| Error::Integrity("pack segment unavailable"))?);
+                    let segment = Arc::new(
+                        Segment::open(&path)
+                            .map_err(|_| Error::Integrity("pack segment unavailable"))?,
+                    );
                     OPEN.lock().unwrap().insert(path, segment.clone());
                     segment
                 }
@@ -225,7 +267,9 @@ impl Store {
         if token.len() != 69 || !token.starts_with("alt1_") {
             return Err(Error::Unauthorized);
         }
-        let credential = Credential { digest: crate::store::token_digest(token) };
+        let credential = Credential {
+            digest: crate::store::token_digest(token),
+        };
         let view = self.pack_view(&credential, repository)?;
         Ok((credential, view))
     }
@@ -243,28 +287,46 @@ impl Store {
     /// The same decision as `pack_view_locked` from one statement and therefore one
     /// snapshot, without row locks. Delegated credentials return None and take the
     /// transactional path, which owns the delegation rules.
-    fn pack_view_statement(&mut self, credential: &Credential, repository: &str) -> Result<Option<PackView>> {
+    fn pack_view_statement(
+        &mut self,
+        credential: &Credential,
+        repository: &str,
+    ) -> Result<Option<PackView>> {
         use serde_json::Value;
-        let row = self.client.query_one(VIEW, &[&credential.digest, &repository])?;
+        let row = self
+            .client
+            .query_one(VIEW, &[&credential.digest, &repository])?;
         let field = |index: usize| row.get::<_, Option<Value>>(index);
-        let text = |value: &Value, key: &str| value.get(key).and_then(Value::as_str).map(str::to_owned);
+        let text =
+            |value: &Value, key: &str| value.get(key).and_then(Value::as_str).map(str::to_owned);
         let number = |value: &Value, key: &str| value.get(key).and_then(Value::as_i64);
         let flag = |value: &Value, key: &str| value.get(key).and_then(Value::as_bool);
         let instance = field(0).ok_or(Error::Precondition("instance not initialized"))?;
         if text(&instance, "installation_id").as_deref() != Some(self.spec.installation_id.as_str())
             || text(&instance, "workspace_id").as_deref() != Some(self.spec.workspace_id.as_str())
             || text(&instance, "deployment_mode").as_deref() != Some("self_hosted")
-            || number(&instance, "runtime_generation") != Some(integer(self.spec.runtime_generation)?)
-            || text(&instance, "signing_key_id").as_deref() != Some(blake3::hash(self.signing_key.verifying_key().as_bytes()).to_hex().as_str())
+            || number(&instance, "runtime_generation")
+                != Some(integer(self.spec.runtime_generation)?)
+            || text(&instance, "signing_key_id").as_deref()
+                != Some(
+                    blake3::hash(self.signing_key.verifying_key().as_bytes())
+                        .to_hex()
+                        .as_str(),
+                )
         {
-            return Err(Error::Precondition("instance identity, mode, generation or signing key"));
+            return Err(Error::Precondition(
+                "instance identity, mode, generation or signing key",
+            ));
         }
         if row.get::<_, bool>(2) {
             return Ok(None);
         }
         let time: i64 = row.get(9);
         let credential_row = field(1).ok_or(Error::Unauthorized)?;
-        let attribution = credential_row.get("attribution").cloned().unwrap_or(Value::Null);
+        let attribution = credential_row
+            .get("attribution")
+            .cloned()
+            .unwrap_or(Value::Null);
         if text(&credential_row, "identity_source").as_deref() != Some("self_hosted")
             || flag(&credential_row, "revoked") != Some(false)
             || number(&credential_row, "expires_at").is_none_or(|expires| expires <= time)
@@ -291,26 +353,45 @@ impl Store {
         if flag(&grant, "can_read") != Some(true) {
             return Err(Error::Unauthorized);
         }
-        let grants: Vec<alt_repository_service::Grant> = serde_json::from_value(grant.get("grants").cloned().unwrap_or(Value::Null))?;
+        let grants: Vec<alt_repository_service::Grant> =
+            serde_json::from_value(grant.get("grants").cloned().unwrap_or(Value::Null))?;
         let mut refs = BTreeMap::new();
-        for pair in field(7).and_then(|value| value.as_array().cloned()).unwrap_or_default() {
-            let (Some(name), Some(oid)) = (pair.get(0).and_then(Value::as_str), pair.get(1).and_then(Value::as_str)) else {
+        for pair in field(7)
+            .and_then(|value| value.as_array().cloned())
+            .unwrap_or_default()
+        {
+            let (Some(name), Some(oid)) = (
+                pair.get(0).and_then(Value::as_str),
+                pair.get(1).and_then(Value::as_str),
+            ) else {
                 return Err(Error::Integrity("stored reference"));
             };
-            refs.insert(name.to_owned(), oid.parse().map_err(|_| Error::Integrity("stored reference object id"))?);
+            refs.insert(
+                name.to_owned(),
+                oid.parse()
+                    .map_err(|_| Error::Integrity("stored reference object id"))?,
+            );
         }
         let ids: Vec<(String, bool)> = serde_json::from_value(field(8).unwrap_or(Value::Null))?;
         Ok(Some(PackView {
             scope: Scope {
                 installation_id: self.spec.installation_id.clone(),
                 repository_instance_id: repository.into(),
-                recovery_epoch: unsigned(number(&repository_row, "recovery_epoch").ok_or(Error::Integrity("repository epoch"))?)?,
+                recovery_epoch: unsigned(
+                    number(&repository_row, "recovery_epoch")
+                        .ok_or(Error::Integrity("repository epoch"))?,
+                )?,
             },
             refs,
-            default_branch: text(&repository_row, "default_branch").ok_or(Error::Integrity("default branch"))?,
+            default_branch: text(&repository_row, "default_branch")
+                .ok_or(Error::Integrity("default branch"))?,
             unreachable: flag(&repository_row, "pack_unreachable") == Some(true),
-            writable: flag(&repository_row, "writable") == Some(true) && grants.iter().any(|grant| grant.create || grant.update || grant.delete),
-            actor_id: text(&credential_row, "actor_id").ok_or(Error::Integrity("credential actor"))?,
+            writable: flag(&repository_row, "writable") == Some(true)
+                && grants
+                    .iter()
+                    .any(|grant| grant.create || grant.update || grant.delete),
+            actor_id: text(&credential_row, "actor_id")
+                .ok_or(Error::Integrity("credential actor"))?,
             attribution: serde_json::from_value(attribution)?,
             segments: self.open_segments(repository, &ids)?,
         }))
@@ -323,7 +404,10 @@ impl Store {
         instance(&mut tx, &self.spec, &self.signing_key)?;
         let current = snapshot(&mut tx, &self.spec, repository)?;
         let auth = authorize(&mut tx, &self.spec, credential, &current)?;
-        let row = tx.query_one("SELECT default_branch,pack_unreachable FROM alt_repositories WHERE id=$1", &[&repository])?;
+        let row = tx.query_one(
+            "SELECT default_branch,pack_unreachable FROM alt_repositories WHERE id=$1",
+            &[&repository],
+        )?;
         let ids = Self::live_segment_ids(&mut tx, repository)?;
         tx.commit()?;
         Ok(PackView {
@@ -331,7 +415,11 @@ impl Store {
             refs: current.refs,
             default_branch: row.get(0),
             unreachable: row.get(1),
-            writable: current.writes_enabled && auth.grants.iter().any(|grant| grant.create || grant.update || grant.delete),
+            writable: current.writes_enabled
+                && auth
+                    .grants
+                    .iter()
+                    .any(|grant| grant.create || grant.update || grant.delete),
             actor_id: auth.actor_id,
             attribution: auth.attribution,
             segments: self.open_segments(repository, &ids)?,
@@ -353,7 +441,8 @@ impl Store {
         let current = snapshot(&mut tx, &self.spec, repository)?;
         let auth = authorize(&mut tx, &self.spec, credential, &current)?;
         let time = now(&mut tx)?;
-        let validated = validate_publication(publication, &current, &auth, graph, self.limits, time)?;
+        let validated =
+            validate_publication(publication, &current, &auth, graph, self.limits, time)?;
         let mut names = Vec::new();
         let mut oids = Vec::new();
         let mut deleted = Vec::new();
@@ -373,9 +462,15 @@ impl Store {
             )?;
         }
         if !deleted.is_empty() {
-            tx.execute("DELETE FROM alt_refs WHERE repository=$1 AND name=ANY($2)", &[repository, &deleted])?;
+            tx.execute(
+                "DELETE FROM alt_refs WHERE repository=$1 AND name=ANY($2)",
+                &[repository, &deleted],
+            )?;
         }
-        let unreachable = publication.refs.iter().any(|update| update.force || update.new.is_none());
+        let unreachable = publication
+            .refs
+            .iter()
+            .any(|update| update.force || update.new.is_none());
         let sequence = unsigned(
             tx.query_one(
                 "UPDATE alt_repositories SET transaction_sequence=transaction_sequence+1,pack_unreachable=pack_unreachable OR $2 WHERE id=$1 RETURNING transaction_sequence",
@@ -403,16 +498,27 @@ impl Store {
         let signature = self.signing_key.sign(&body.signing_bytes(self.limits)?);
         let receipt = Receipt {
             body,
-            signing_key_id: blake3::hash(self.signing_key.verifying_key().as_bytes()).to_hex().to_string(),
-            signature: signature.to_bytes().iter().map(|byte| format!("{byte:02x}")).collect(),
+            signing_key_id: blake3::hash(self.signing_key.verifying_key().as_bytes())
+                .to_hex()
+                .to_string(),
+            signature: signature
+                .to_bytes()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect(),
         };
         let event = serde_json::json!({"kind":"publication_committed","receipt":receipt});
         tx.execute(
             "INSERT INTO alt_audit(repository,sequence,actor_id,event) VALUES($1,$2,$3,$4)",
             &[repository, &integer(sequence)?, &auth.actor_id, &event],
         )?;
-        tx.execute("INSERT INTO alt_outbox(repository,sequence,event) VALUES($1,$2,$3)", &[repository, &integer(sequence)?, &event])?;
-        let result = RequestState::Committed { receipt: Box::new(receipt.clone()) };
+        tx.execute(
+            "INSERT INTO alt_outbox(repository,sequence,event) VALUES($1,$2,$3)",
+            &[repository, &integer(sequence)?, &event],
+        )?;
+        let result = RequestState::Committed {
+            receipt: Box::new(receipt.clone()),
+        };
         tx.execute(
             "INSERT INTO alt_requests(repository,epoch,actor_id,request_id,digest,publication,manifest,state,result,expires_at,reserved_bytes) VALUES($1,$2,$3,$4,$5,$6,$7,'committed',$8,0,0)",
             &[

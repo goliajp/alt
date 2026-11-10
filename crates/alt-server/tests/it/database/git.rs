@@ -355,4 +355,3 @@ fn real_git_many_refs_clone_and_bounded_gzip_requests() {
     );
     assert_eq!(f.counts(), (65, 1, 1));
 }
-

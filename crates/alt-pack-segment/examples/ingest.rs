@@ -7,7 +7,12 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let pack = std::fs::read(args.next().expect("pack path")).unwrap();
     let rounds: usize = args.next().map_or(15, |value| value.parse().unwrap());
-    let limits = Limits { objects: 1 << 24, object_bytes: 1 << 32, inflated_bytes: 1 << 40, delta_depth: 4096 };
+    let limits = Limits {
+        objects: 1 << 24,
+        object_bytes: 1 << 32,
+        inflated_bytes: 1 << 40,
+        delta_depth: 4096,
+    };
     let mut times = Vec::new();
     let mut objects = 0;
     for _ in 0..rounds {
@@ -19,5 +24,10 @@ fn main() {
         objects = ingested.objects();
     }
     times.sort_by(f64::total_cmp);
-    println!("objects {objects} pack_bytes {} median_ms {:.2} min_ms {:.2}", pack.len(), times[times.len() / 2], times[0]);
+    println!(
+        "objects {objects} pack_bytes {} median_ms {:.2} min_ms {:.2}",
+        pack.len(),
+        times[times.len() / 2],
+        times[0]
+    );
 }

@@ -92,7 +92,9 @@ impl ObjectSource for PinnedSource {
                     reader: Box::new(std::io::Cursor::new(data)),
                 })),
                 Err(alt_pack_segment::Error::NotFound(_)) => Ok(None),
-                Err(_) => Err(alt_repository_service::Error::Integrity("pack segment object")),
+                Err(_) => Err(alt_repository_service::Error::Integrity(
+                    "pack segment object",
+                )),
             };
         };
         let file = self
@@ -450,9 +452,21 @@ impl Store {
             Ok(segment) => (segment, false),
             Err(_) => (None, true),
         };
-        let result = self.publish_transaction(credential, work, graph, tasks, read_integrity, materialized.as_ref(), unavailable);
+        let result = self.publish_transaction(
+            credential,
+            work,
+            graph,
+            tasks,
+            read_integrity,
+            // None: the request's Git objects could not be read back
+            (!unavailable).then_some(materialized.as_ref()),
+        );
         match (&result, materialized) {
-            (Ok(_), Some(segment)) => self.adopt_segment(&work.key.scope.repository_instance_id, &segment.id, segment.segment)?,
+            (Ok(_), Some(segment)) => self.adopt_segment(
+                &work.key.scope.repository_instance_id,
+                &segment.id,
+                segment.segment,
+            )?,
             (Err(_), Some(segment)) => {
                 // nothing references an unpublished segment
                 let _ = std::fs::remove_file(&segment.path);
@@ -462,7 +476,11 @@ impl Store {
         result
     }
     /// the request's Git objects that no segment holds yet, packed into a new segment
-    fn materialize_publication(&mut self, work: &PublicationWork, graph: &VerifiedGraph) -> Result<Option<crate::packs::Materialized>> {
+    fn materialize_publication(
+        &mut self,
+        work: &PublicationWork,
+        graph: &VerifiedGraph,
+    ) -> Result<Option<crate::packs::Materialized>> {
         use alt_repository_service::ObjectSource;
         let mut objects = Vec::new();
         for oid in graph.objects() {
@@ -472,7 +490,10 @@ impl Store {
             if !work.source.objects.contains_key(&oid) || work.source.segments.locate_any(&key) {
                 continue;
             }
-            let mut object = work.source.open(oid)?.ok_or(Error::Integrity("selected Git object unavailable"))?;
+            let mut object = work
+                .source
+                .open(oid)?
+                .ok_or(Error::Integrity("selected Git object unavailable"))?;
             let mut data = Vec::with_capacity(object.bytes as usize);
             std::io::Read::read_to_end(&mut object.reader, &mut data)?;
             let kind = match object.kind {
@@ -493,8 +514,7 @@ impl Store {
         graph: &VerifiedGraph,
         tasks: Option<&alt_task_service::VerifiedTaskGraph>,
         read_integrity: Result<()>,
-        materialized: Option<&crate::packs::Materialized>,
-        unavailable: bool,
+        materialized: Option<Option<&crate::packs::Materialized>>,
     ) -> Result<Receipt> {
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
@@ -512,9 +532,9 @@ impl Store {
             return Err(Error::Integrity("committed request result"));
         }
         read_integrity?;
-        if unavailable {
+        let Some(materialized) = materialized else {
             return Err(Error::Integrity("selected Git object unavailable"));
-        }
+        };
         let _ = worker(&mut tx, work)?;
         if row.get::<_, String>("state") != "ready" {
             return Err(Error::Precondition("request not ready"));
@@ -571,7 +591,11 @@ impl Store {
         )?;
         let repository = &work.key.scope.repository_instance_id;
         refs::replace(&mut tx, work, graph, &validated.updates)?;
-        let unreachable = work.publication.refs.iter().any(|update| update.force || update.new.is_none());
+        let unreachable = work
+            .publication
+            .refs
+            .iter()
+            .any(|update| update.force || update.new.is_none());
         let sequence=unsigned(tx.query_one("UPDATE alt_repositories SET transaction_sequence=transaction_sequence+1,pack_unreachable=pack_unreachable OR $2 WHERE id=$1 RETURNING transaction_sequence",&[repository,&unreachable])?.get(0))?;
         if let Some(segment) = materialized {
             crate::packs::insert_segment(
@@ -659,7 +683,8 @@ pub(crate) fn check_graph_pins(
         for oid in batch {
             match work.source.objects.get(oid) {
                 Some(found) => selected.push(found),
-                None if <[u8; 20]>::try_from(oid.as_bytes()).is_ok_and(|key| work.source.segments.locate_any(&key)) => {}
+                None if <[u8; 20]>::try_from(oid.as_bytes())
+                    .is_ok_and(|key| work.source.segments.locate_any(&key)) => {}
                 None => return Err(Error::Integrity("graph outside authorized source")),
             }
         }

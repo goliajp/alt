@@ -362,7 +362,9 @@ async fn handle(
             spawn_observed(Phase::Authority, move || {
                 let _permit = permit;
                 // readiness means the schema and instance rows are current right now
-                factory.open().and_then(|mut store| store.check_connection())
+                factory
+                    .open()
+                    .and_then(|mut store| store.check_connection())
             }),
         )
         .await

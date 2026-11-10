@@ -54,7 +54,9 @@ impl Ingested {
     }
 
     fn find(&self, oid: &Oid) -> Option<usize> {
-        self.records.binary_search_by(|record| record.oid.cmp(oid)).ok()
+        self.records
+            .binary_search_by(|record| record.oid.cmp(oid))
+            .ok()
     }
 
     pub fn kind(&self, oid: &Oid) -> Option<Kind> {
@@ -66,7 +68,12 @@ impl Ingested {
         self.commits
             .binary_search_by(|commit| commit.oid.cmp(oid))
             .ok()
-            .map(|index| (&self.commits[index].tree, self.commits[index].parents.as_slice()))
+            .map(|index| {
+                (
+                    &self.commits[index].tree,
+                    self.commits[index].parents.as_slice(),
+                )
+            })
     }
 
     /// appends the index; the caller has already written the `pack_len` pack bytes
@@ -114,8 +121,9 @@ fn descend(
         }
         let raw = &shared.entries[child];
         let delta = raw.data.as_deref().ok_or(Error::Format("delta payload"))?;
-        let data = alt_git_pack::delta::apply_bounded(&frame.data, delta, shared.limits.object_bytes)
-            .map_err(|_| Error::Format("delta instructions"))?;
+        let data =
+            alt_git_pack::delta::apply_bounded(&frame.data, delta, shared.limits.object_bytes)
+                .map_err(|_| Error::Format("delta instructions"))?;
         let kind = frame.kind;
         let (oid, blake3) = digest(kind, &data);
         let meta = Meta {
@@ -165,14 +173,20 @@ pub fn ingest(pack: &[u8], existing: &SegmentSet, limits: &Limits) -> Result<Ing
         return Err(Error::Format("pack checksum"));
     }
     let entries = scanned.entries;
-    let offsets: HashMap<u64, usize> = entries.iter().enumerate().map(|(index, raw)| (raw.offset, index)).collect();
+    let offsets: HashMap<u64, usize> = entries
+        .iter()
+        .enumerate()
+        .map(|(index, raw)| (raw.offset, index))
+        .collect();
     let mut offset_children: HashMap<usize, Vec<usize>> = HashMap::new();
     let mut by_base: HashMap<Oid, Vec<usize>> = HashMap::new();
     for (index, raw) in entries.iter().enumerate() {
         match raw.form {
             Form::Plain(_) => {}
             Form::Offset(base) => {
-                let base = *offsets.get(&base).ok_or(Error::Format("delta base offset"))?;
+                let base = *offsets
+                    .get(&base)
+                    .ok_or(Error::Format("delta base offset"))?;
                 offset_children.entry(base).or_default().push(index);
             }
             Form::Reference(base) => by_base.entry(base).or_default().push(index),
@@ -195,11 +209,35 @@ pub fn ingest(pack: &[u8], existing: &SegmentSet, limits: &Limits) -> Result<Ing
             Some(match &raw.data {
                 Some(data) => object::parse(kind, data).map(|parsed| {
                     let (oid, blake3) = digest(kind, data);
-                    (index, Meta { oid, blake3, kind, size: raw.size, depth: 0, base: None, outside: false, parsed })
+                    (
+                        index,
+                        Meta {
+                            oid,
+                            blake3,
+                            kind,
+                            size: raw.size,
+                            depth: 0,
+                            base: None,
+                            outside: false,
+                            parsed,
+                        },
+                    )
                 }),
                 None => {
                     let (kind, (oid, blake3), size) = large[&index];
-                    Ok((index, Meta { oid, blake3, kind, size, depth: 0, base: None, outside: false, parsed: Parsed::Blob }))
+                    Ok((
+                        index,
+                        Meta {
+                            oid,
+                            blake3,
+                            kind,
+                            size,
+                            depth: 0,
+                            base: None,
+                            outside: false,
+                            parsed: Parsed::Blob,
+                        },
+                    ))
                 }
             })
         })
@@ -239,7 +277,14 @@ pub fn ingest(pack: &[u8], existing: &SegmentSet, limits: &Limits) -> Result<Ing
                     scan::inflate(&mut engine, &pack[start..], raw.size as usize)?.0
                 }
             };
-            Ok(Frame { data, kind, depth: 0, index: Some(index), children, next: 0 })
+            Ok(Frame {
+                data,
+                kind,
+                depth: 0,
+                index: Some(index),
+                children,
+                next: 0,
+            })
         })
         .collect::<Result<Vec<_>, Error>>()?;
     for (index, meta) in resolve(inside)? {
@@ -252,7 +297,14 @@ pub fn ingest(pack: &[u8], existing: &SegmentSet, limits: &Limits) -> Result<Ing
             continue;
         }
         let (kind, data) = existing.read(base).map_err(|_| Error::MissingBase(*base))?;
-        outside.push(Frame { data, kind, depth: 0, index: None, children: children.clone(), next: 0 });
+        outside.push(Frame {
+            data,
+            kind,
+            depth: 0,
+            index: None,
+            children: children.clone(),
+            next: 0,
+        });
     }
     for (index, meta) in resolve(outside)? {
         metas[index].get_or_insert(meta);
@@ -275,7 +327,11 @@ pub fn ingest(pack: &[u8], existing: &SegmentSet, limits: &Limits) -> Result<Ing
         }
         position[index] = (kept.len() - 1) as u32;
     }
-    let lookup = |oid: &Oid| kept.binary_search_by(|index| metas[*index].oid.cmp(oid)).ok().map(|at| &metas[kept[at]]);
+    let lookup = |oid: &Oid| {
+        kept.binary_search_by(|index| metas[*index].oid.cmp(oid))
+            .ok()
+            .map(|at| &metas[kept[at]])
+    };
 
     // every reference resolves inside the pack or in the segments already present
     let check = |from: &Oid, to: &Oid, kind: Kind| -> Result<(), Error> {
@@ -283,7 +339,11 @@ pub fn ingest(pack: &[u8], existing: &SegmentSet, limits: &Limits) -> Result<Ing
             Some(meta) => Some(meta.kind),
             None => existing.kind(to)?,
         };
-        if found == Some(kind) { Ok(()) } else { Err(Error::Dangling(*from, *to)) }
+        if found == Some(kind) {
+            Ok(())
+        } else {
+            Err(Error::Dangling(*from, *to))
+        }
     };
     kept.par_iter().try_for_each(|index| {
         let meta = &metas[*index];
@@ -291,19 +351,34 @@ pub fn ingest(pack: &[u8], existing: &SegmentSet, limits: &Limits) -> Result<Ing
             Parsed::Blob => Ok(()),
             Parsed::Commit { tree, parents } => {
                 check(&meta.oid, tree, Kind::Tree)?;
-                parents.iter().try_for_each(|parent| check(&meta.oid, parent, Kind::Commit))
+                parents
+                    .iter()
+                    .try_for_each(|parent| check(&meta.oid, parent, Kind::Commit))
             }
-            Parsed::Tree(entries) => entries.iter().try_for_each(|(oid, kind)| check(&meta.oid, oid, *kind)),
+            Parsed::Tree(entries) => entries
+                .iter()
+                .try_for_each(|(oid, kind)| check(&meta.oid, oid, *kind)),
             Parsed::Tag { object, kind } => check(&meta.oid, object, *kind),
         }
     })?;
-    if kept.par_iter().any(|index| existing.locate(&metas[*index].oid).is_some()) {
+    if kept
+        .par_iter()
+        .any(|index| existing.locate(&metas[*index].oid).is_some())
+    {
         flags |= FLAG_OVERLAP;
     }
 
     // generation numbers: one more than the largest parent generation
-    let commit_indexes: Vec<usize> = kept.iter().copied().filter(|index| metas[*index].kind == Kind::Commit).collect();
-    let slot: HashMap<Oid, usize> = commit_indexes.iter().enumerate().map(|(at, index)| (metas[*index].oid, at)).collect();
+    let commit_indexes: Vec<usize> = kept
+        .iter()
+        .copied()
+        .filter(|index| metas[*index].kind == Kind::Commit)
+        .collect();
+    let slot: HashMap<Oid, usize> = commit_indexes
+        .iter()
+        .enumerate()
+        .map(|(at, index)| (metas[*index].oid, at))
+        .collect();
     let mut generation = vec![0u32; commit_indexes.len()];
     for start in 0..commit_indexes.len() {
         let mut stack = vec![start];
@@ -312,7 +387,9 @@ pub fn ingest(pack: &[u8], existing: &SegmentSet, limits: &Limits) -> Result<Ing
                 stack.pop();
                 continue;
             }
-            let Parsed::Commit { parents, .. } = &metas[commit_indexes[at]].parsed else { unreachable!() };
+            let Parsed::Commit { parents, .. } = &metas[commit_indexes[at]].parsed else {
+                unreachable!()
+            };
             let mut highest = 0;
             let mut waiting = false;
             for parent in parents {
@@ -325,7 +402,13 @@ pub fn ingest(pack: &[u8], existing: &SegmentSet, limits: &Limits) -> Result<Ing
                         waiting = true;
                     }
                     Some(parent_at) => highest = highest.max(generation[*parent_at]),
-                    None => highest = highest.max(existing.commit(parent).map_or(0, |commit| commit.generation)),
+                    None => {
+                        highest = highest.max(
+                            existing
+                                .commit(parent)
+                                .map_or(0, |commit| commit.generation),
+                        )
+                    }
                 }
             }
             if !waiting {
@@ -338,8 +421,15 @@ pub fn ingest(pack: &[u8], existing: &SegmentSet, limits: &Limits) -> Result<Ing
         .iter()
         .zip(&generation)
         .map(|(index, generation)| {
-            let Parsed::Commit { tree, parents } = &metas[*index].parsed else { unreachable!() };
-            CommitRow { oid: metas[*index].oid, tree: *tree, generation: *generation, parents: parents.clone() }
+            let Parsed::Commit { tree, parents } = &metas[*index].parsed else {
+                unreachable!()
+            };
+            CommitRow {
+                oid: metas[*index].oid,
+                tree: *tree,
+                generation: *generation,
+                parents: parents.clone(),
+            }
         })
         .collect();
     let records = kept
@@ -364,5 +454,10 @@ pub fn ingest(pack: &[u8], existing: &SegmentSet, limits: &Limits) -> Result<Ing
             }
         })
         .collect();
-    Ok(Ingested { records, commits, flags, pack_len: pack.len() as u64 })
+    Ok(Ingested {
+        records,
+        commits,
+        flags,
+        pack_len: pack.len() as u64,
+    })
 }

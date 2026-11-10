@@ -134,14 +134,20 @@ pub(crate) fn scan(
         let (form, size, head) = header(&pack[..body_end], pos)?;
         let form = match form {
             Form::Offset(distance) => Form::Offset(
-                (pos as u64).checked_sub(distance).filter(|base| *base >= 12).ok_or(Error::Format("delta base offset"))?,
+                (pos as u64)
+                    .checked_sub(distance)
+                    .filter(|base| *base >= 12)
+                    .ok_or(Error::Format("delta base offset"))?,
             ),
             other => other,
         };
         if size > limits.object_bytes {
             return Err(Error::Limit("object bytes"));
         }
-        inflated = inflated.checked_add(size).filter(|total| *total <= limits.inflated_bytes).ok_or(Error::Limit("inflated bytes"))?;
+        inflated = inflated
+            .checked_add(size)
+            .filter(|total| *total <= limits.inflated_bytes)
+            .ok_or(Error::Limit("inflated bytes"))?;
         let (data, compressed) = inflate(&mut engine, &pack[pos + head..body_end], size as usize)?;
         let len = head + compressed;
         let data = match form {

@@ -51,7 +51,9 @@ fn entry_header(code: u8, mut size: u64) -> Vec<u8> {
 }
 
 /// a self-contained pack of whole objects, for content that did not arrive as a pack
-pub fn build_pack<'a>(objects: impl ExactSizeIterator<Item = (Kind, &'a [u8])>) -> Result<Vec<u8>, Error> {
+pub fn build_pack<'a>(
+    objects: impl ExactSizeIterator<Item = (Kind, &'a [u8])>,
+) -> Result<Vec<u8>, Error> {
     let mut pack = pack_header(objects.len() as u64)?.to_vec();
     for (kind, data) in objects {
         pack.extend_from_slice(&entry_header(kind as u8, data.len() as u64));
@@ -69,7 +71,14 @@ const HAVE: u8 = 2;
 
 /// adds `bit` to a commit's flags, queueing it on first sight; `open` counts queued commits
 /// that are wanted and not known to be held
-fn mark(flags: &mut HashMap<Oid, u8>, heap: &mut BinaryHeap<(u32, Oid)>, open: &mut usize, oid: Oid, bit: u8, generation: u32) {
+fn mark(
+    flags: &mut HashMap<Oid, u8>,
+    heap: &mut BinaryHeap<(u32, Oid)>,
+    open: &mut usize,
+    oid: Oid,
+    bit: u8,
+    generation: u32,
+) {
     let entry = flags.entry(oid).or_insert_with(|| {
         heap.push((generation, oid));
         0
@@ -116,7 +125,10 @@ impl SegmentSet {
             out.write_all(only.pack())?;
             return Ok(());
         }
-        let mut out = Hashing { inner: out, hasher: sha1::Sha1::new() };
+        let mut out = Hashing {
+            inner: out,
+            hasher: sha1::Sha1::new(),
+        };
         out.put(&pack_header(self.objects())?)?;
         for segment in self.segments() {
             let pack = segment.pack();
@@ -125,7 +137,13 @@ impl SegmentSet {
         out.finish()
     }
 
-    fn tree_objects(&self, tree: &Oid, seen: &mut HashSet<Oid>, skip: &HashSet<Oid>, out: Option<&mut Vec<Oid>>) -> Result<(), Error> {
+    fn tree_objects(
+        &self,
+        tree: &Oid,
+        seen: &mut HashSet<Oid>,
+        skip: &HashSet<Oid>,
+        out: Option<&mut Vec<Oid>>,
+    ) -> Result<(), Error> {
         let mut out = out;
         let mut pending = vec![*tree];
         while let Some(oid) = pending.pop() {
@@ -168,7 +186,10 @@ impl SegmentSet {
             loop {
                 match self.kind(&oid)?.ok_or(Error::NotFound(oid))? {
                     Kind::Commit => {
-                        let generation = self.commit(&oid).ok_or(Error::Corrupt("commit graph"))?.generation;
+                        let generation = self
+                            .commit(&oid)
+                            .ok_or(Error::Corrupt("commit graph"))?
+                            .generation;
                         mark(&mut flags, &mut heap, &mut open, oid, WANT, generation);
                         break;
                     }
@@ -177,7 +198,9 @@ impl SegmentSet {
                             objects.push(oid);
                         }
                         let (kind, data) = self.read(&oid)?;
-                        let Parsed::Tag { object, .. } = object::parse(kind, &data)? else { unreachable!() };
+                        let Parsed::Tag { object, .. } = object::parse(kind, &data)? else {
+                            unreachable!()
+                        };
                         oid = object;
                     }
                     Kind::Tree => {
@@ -195,7 +218,14 @@ impl SegmentSet {
         }
         for have in haves {
             if let Some(commit) = self.commit(have) {
-                mark(&mut flags, &mut heap, &mut open, *have, HAVE, commit.generation);
+                mark(
+                    &mut flags,
+                    &mut heap,
+                    &mut open,
+                    *have,
+                    HAVE,
+                    commit.generation,
+                );
             }
         }
         // children always carry a higher generation than their parents, so a commit's flags
@@ -213,8 +243,18 @@ impl SegmentSet {
                 commits.push((oid, commit.tree));
             }
             for parent in &commit.parents {
-                let generation = self.commit(parent).ok_or(Error::Corrupt("commit graph"))?.generation;
-                mark(&mut flags, &mut heap, &mut open, *parent, if state & HAVE != 0 { HAVE } else { WANT }, generation);
+                let generation = self
+                    .commit(parent)
+                    .ok_or(Error::Corrupt("commit graph"))?
+                    .generation;
+                mark(
+                    &mut flags,
+                    &mut heap,
+                    &mut open,
+                    *parent,
+                    if state & HAVE != 0 { HAVE } else { WANT },
+                    generation,
+                );
             }
         }
         for (_, oid) in heap {
@@ -242,9 +282,17 @@ impl SegmentSet {
     }
 
     /// writes `selection` as one pack; with `thin`, deltas may rest on objects the client holds
-    pub fn write_selected(&self, selection: &Selection, thin: bool, out: &mut impl Write) -> Result<(), Error> {
+    pub fn write_selected(
+        &self,
+        selection: &Selection,
+        thin: bool,
+        out: &mut impl Write,
+    ) -> Result<(), Error> {
         let chosen: HashSet<&Oid> = selection.objects.iter().collect();
-        let mut out = Hashing { inner: out, hasher: sha1::Sha1::new() };
+        let mut out = Hashing {
+            inner: out,
+            hasher: sha1::Sha1::new(),
+        };
         out.put(&pack_header(selection.objects.len() as u64)?)?;
         for oid in &selection.objects {
             let (segment, index) = self.locate(oid).ok_or(Error::NotFound(*oid))?;
@@ -267,7 +315,8 @@ impl SegmentSet {
                 continue;
             }
             let (kind, data) = self.read(oid)?;
-            let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+            let mut encoder =
+                flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
             encoder.write_all(&data)?;
             out.put(&entry_header(kind as u8, data.len() as u64))?;
             out.put(&encoder.finish()?)?;

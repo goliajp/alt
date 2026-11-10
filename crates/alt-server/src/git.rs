@@ -130,7 +130,9 @@ pub fn execute_git(
     source: &mut dyn Read,
 ) -> Result<Output> {
     let repository = match &route {
-        Route::GitAdvertise(repository, _) | Route::GitUpload(repository) | Route::GitReceive(repository) => repository.clone(),
+        Route::GitAdvertise(repository, _)
+        | Route::GitUpload(repository)
+        | Route::GitReceive(repository) => repository.clone(),
         _ => return Err(Error::Precondition("not a Git endpoint")),
     };
     let view = store.pack_view(credential, &repository)?;

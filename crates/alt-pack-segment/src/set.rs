@@ -24,7 +24,10 @@ impl SegmentSet {
     }
 
     pub fn objects(&self) -> u64 {
-        self.segments.iter().map(|segment| segment.len() as u64).sum()
+        self.segments
+            .iter()
+            .map(|segment| segment.len() as u64)
+            .sum()
     }
 
     pub(crate) fn locate(&self, oid: &Oid) -> Option<(&Segment, usize)> {
@@ -40,7 +43,9 @@ impl SegmentSet {
     }
 
     pub fn record(&self, oid: &Oid) -> Result<Option<Record>, Error> {
-        self.locate(oid).map(|(segment, index)| segment.record(index)).transpose()
+        self.locate(oid)
+            .map(|(segment, index)| segment.record(index))
+            .transpose()
     }
 
     pub fn kind(&self, oid: &Oid) -> Result<Option<Kind>, Error> {
@@ -48,7 +53,10 @@ impl SegmentSet {
     }
 
     pub fn commit(&self, oid: &Oid) -> Option<CommitInfo> {
-        self.segments.iter().rev().find_map(|segment| segment.commit(oid))
+        self.segments
+            .iter()
+            .rev()
+            .find_map(|segment| segment.commit(oid))
     }
 
     /// the canonical bytes of an object, resolving its delta chain

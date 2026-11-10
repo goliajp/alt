@@ -113,7 +113,8 @@ pub(crate) fn write_index(
     pack_len: u64,
     out: &mut impl Write,
 ) -> Result<(), Error> {
-    let mut body = Vec::with_capacity(1024 + records.len() * RECORD + commits.len() * (COMMIT + 20));
+    let mut body =
+        Vec::with_capacity(1024 + records.len() * RECORD + commits.len() * (COMMIT + 20));
     let mut fanout = [0u32; 256];
     for record in records {
         fanout[record.oid[0] as usize] += 1;
@@ -176,7 +177,8 @@ impl Segment {
         if &footer[56..] != MAGIC {
             return Err(bad());
         }
-        let u32_at = |at: usize| u32::from_le_bytes(footer[at..at + 4].try_into().unwrap()) as usize;
+        let u32_at =
+            |at: usize| u32::from_le_bytes(footer[at..at + 4].try_into().unwrap()) as usize;
         let pack_len = u64::from_le_bytes(footer[..8].try_into().unwrap()) as usize;
         let (records, commits, parent_count) = (u32_at(8), u32_at(12), u32_at(16));
         let fanout_at = pack_len;
@@ -263,7 +265,8 @@ impl Segment {
                 std::cmp::Ordering::Less => low = middle + 1,
                 std::cmp::Ordering::Greater => high = middle,
                 std::cmp::Ordering::Equal => {
-                    let u32_at = |at: usize| u32::from_le_bytes(raw[at..at + 4].try_into().unwrap());
+                    let u32_at =
+                        |at: usize| u32::from_le_bytes(raw[at..at + 4].try_into().unwrap());
                     let (start, count) = (u32_at(44) as usize, u32_at(48) as usize);
                     if start + count > self.parent_count {
                         return None;
