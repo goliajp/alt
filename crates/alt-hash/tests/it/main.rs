@@ -195,3 +195,14 @@ fn sha256_accelerated_matches_portable_at_every_length_and_split() {
         assert_eq!(hasher.finalize(), whole, "step {step}");
     }
 }
+
+/// Prints which implementations the tests above exercised: on a machine without the
+/// SHA instructions the suite is run again under an emulator that has them.
+#[test]
+fn reports_the_selected_implementations() {
+    println!(
+        "sha1: {}, sha256: {}",
+        alt_hash::sha1::implementation(),
+        alt_hash::sha256::implementation()
+    );
+}

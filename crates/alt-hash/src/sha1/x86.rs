@@ -1,4 +1,4 @@
-//! SHA-1 compression for x86-64 without SHA instructions.
+//! SHA-1 compression for x86-64: SSSE3 here, AVX2 and the SHA instructions in submodules.
 
 use super::K;
 use std::arch::x86_64::*;
@@ -84,34 +84,6 @@ macro_rules! round_asm {
     };
 }
 
-/// The same round with BMI2 rotations, which need no copy and leave the flags alone.
-macro_rules! round_bmi {
-    ($f:ident, $a:literal, $b:literal, $c:literal, $d:literal, $e:literal, $t:literal) => {
-        concat!(
-            function_asm!($f, $b, $c, $d),
-            "add ",
-            $e,
-            ", dword ptr [r11 + ",
-            $t,
-            "*4]\n",
-            "add ",
-            $e,
-            ", r9d\n",
-            "rorx r10d, ",
-            $a,
-            ", 27\n",
-            "add ",
-            $e,
-            ", r10d\n",
-            "rorx ",
-            $b,
-            ", ",
-            $b,
-            ", 2\n"
-        )
-    };
-}
-
 /// The next four schedule words. `$w0` holds the words sixteen back and is replaced by
 /// the new ones; `$w1`..`$w3` are the three groups after it.
 macro_rules! extend {
@@ -131,13 +103,11 @@ macro_rules! extend {
     };
 }
 
-/// The block function, instantiated once per instruction-set level. The message
-/// schedule is computed four words at a time with the round constant already added,
-/// so the eighty rounds only read finished words.
-macro_rules! block_function {
-    ($(#[$attribute:meta])* $name:ident, $round:ident) => {
-        $(#[$attribute])*
-        pub(super) unsafe fn $name(state: &mut [u32; 5], blocks: &[u8]) {
+/// The block function for any x86-64 with SSSE3. The message schedule is computed four
+/// words at a time with the round constant already added, so the eighty rounds only
+/// read finished words.
+#[target_feature(enable = "ssse3")]
+pub(super) unsafe fn compress(state: &mut [u32; 5], blocks: &[u8]) {
     unsafe {
         let swap = _mm_set_epi8(12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3);
         let k = K.map(|value| _mm_set1_epi32(value as i32));
@@ -176,86 +146,86 @@ macro_rules! block_function {
             // round and puts the newest value at the head of the chain, which doubles
             // the latency of every round.
             std::arch::asm!(
-                $round!(choose, "eax", "edx", "esi", "edi", "r8d", 0),
-                $round!(choose, "r8d", "eax", "edx", "esi", "edi", 1),
-                $round!(choose, "edi", "r8d", "eax", "edx", "esi", 2),
-                $round!(choose, "esi", "edi", "r8d", "eax", "edx", 3),
-                $round!(choose, "edx", "esi", "edi", "r8d", "eax", 4),
-                $round!(choose, "eax", "edx", "esi", "edi", "r8d", 5),
-                $round!(choose, "r8d", "eax", "edx", "esi", "edi", 6),
-                $round!(choose, "edi", "r8d", "eax", "edx", "esi", 7),
-                $round!(choose, "esi", "edi", "r8d", "eax", "edx", 8),
-                $round!(choose, "edx", "esi", "edi", "r8d", "eax", 9),
-                $round!(choose, "eax", "edx", "esi", "edi", "r8d", 10),
-                $round!(choose, "r8d", "eax", "edx", "esi", "edi", 11),
-                $round!(choose, "edi", "r8d", "eax", "edx", "esi", 12),
-                $round!(choose, "esi", "edi", "r8d", "eax", "edx", 13),
-                $round!(choose, "edx", "esi", "edi", "r8d", "eax", 14),
-                $round!(choose, "eax", "edx", "esi", "edi", "r8d", 15),
-                $round!(choose, "r8d", "eax", "edx", "esi", "edi", 16),
-                $round!(choose, "edi", "r8d", "eax", "edx", "esi", 17),
-                $round!(choose, "esi", "edi", "r8d", "eax", "edx", 18),
-                $round!(choose, "edx", "esi", "edi", "r8d", "eax", 19),
-                $round!(parity, "eax", "edx", "esi", "edi", "r8d", 20),
-                $round!(parity, "r8d", "eax", "edx", "esi", "edi", 21),
-                $round!(parity, "edi", "r8d", "eax", "edx", "esi", 22),
-                $round!(parity, "esi", "edi", "r8d", "eax", "edx", 23),
-                $round!(parity, "edx", "esi", "edi", "r8d", "eax", 24),
-                $round!(parity, "eax", "edx", "esi", "edi", "r8d", 25),
-                $round!(parity, "r8d", "eax", "edx", "esi", "edi", 26),
-                $round!(parity, "edi", "r8d", "eax", "edx", "esi", 27),
-                $round!(parity, "esi", "edi", "r8d", "eax", "edx", 28),
-                $round!(parity, "edx", "esi", "edi", "r8d", "eax", 29),
-                $round!(parity, "eax", "edx", "esi", "edi", "r8d", 30),
-                $round!(parity, "r8d", "eax", "edx", "esi", "edi", 31),
-                $round!(parity, "edi", "r8d", "eax", "edx", "esi", 32),
-                $round!(parity, "esi", "edi", "r8d", "eax", "edx", 33),
-                $round!(parity, "edx", "esi", "edi", "r8d", "eax", 34),
-                $round!(parity, "eax", "edx", "esi", "edi", "r8d", 35),
-                $round!(parity, "r8d", "eax", "edx", "esi", "edi", 36),
-                $round!(parity, "edi", "r8d", "eax", "edx", "esi", 37),
-                $round!(parity, "esi", "edi", "r8d", "eax", "edx", 38),
-                $round!(parity, "edx", "esi", "edi", "r8d", "eax", 39),
-                $round!(majority, "eax", "edx", "esi", "edi", "r8d", 40),
-                $round!(majority, "r8d", "eax", "edx", "esi", "edi", 41),
-                $round!(majority, "edi", "r8d", "eax", "edx", "esi", 42),
-                $round!(majority, "esi", "edi", "r8d", "eax", "edx", 43),
-                $round!(majority, "edx", "esi", "edi", "r8d", "eax", 44),
-                $round!(majority, "eax", "edx", "esi", "edi", "r8d", 45),
-                $round!(majority, "r8d", "eax", "edx", "esi", "edi", 46),
-                $round!(majority, "edi", "r8d", "eax", "edx", "esi", 47),
-                $round!(majority, "esi", "edi", "r8d", "eax", "edx", 48),
-                $round!(majority, "edx", "esi", "edi", "r8d", "eax", 49),
-                $round!(majority, "eax", "edx", "esi", "edi", "r8d", 50),
-                $round!(majority, "r8d", "eax", "edx", "esi", "edi", 51),
-                $round!(majority, "edi", "r8d", "eax", "edx", "esi", 52),
-                $round!(majority, "esi", "edi", "r8d", "eax", "edx", 53),
-                $round!(majority, "edx", "esi", "edi", "r8d", "eax", 54),
-                $round!(majority, "eax", "edx", "esi", "edi", "r8d", 55),
-                $round!(majority, "r8d", "eax", "edx", "esi", "edi", 56),
-                $round!(majority, "edi", "r8d", "eax", "edx", "esi", 57),
-                $round!(majority, "esi", "edi", "r8d", "eax", "edx", 58),
-                $round!(majority, "edx", "esi", "edi", "r8d", "eax", 59),
-                $round!(parity, "eax", "edx", "esi", "edi", "r8d", 60),
-                $round!(parity, "r8d", "eax", "edx", "esi", "edi", 61),
-                $round!(parity, "edi", "r8d", "eax", "edx", "esi", 62),
-                $round!(parity, "esi", "edi", "r8d", "eax", "edx", 63),
-                $round!(parity, "edx", "esi", "edi", "r8d", "eax", 64),
-                $round!(parity, "eax", "edx", "esi", "edi", "r8d", 65),
-                $round!(parity, "r8d", "eax", "edx", "esi", "edi", 66),
-                $round!(parity, "edi", "r8d", "eax", "edx", "esi", 67),
-                $round!(parity, "esi", "edi", "r8d", "eax", "edx", 68),
-                $round!(parity, "edx", "esi", "edi", "r8d", "eax", 69),
-                $round!(parity, "eax", "edx", "esi", "edi", "r8d", 70),
-                $round!(parity, "r8d", "eax", "edx", "esi", "edi", 71),
-                $round!(parity, "edi", "r8d", "eax", "edx", "esi", 72),
-                $round!(parity, "esi", "edi", "r8d", "eax", "edx", 73),
-                $round!(parity, "edx", "esi", "edi", "r8d", "eax", 74),
-                $round!(parity, "eax", "edx", "esi", "edi", "r8d", 75),
-                $round!(parity, "r8d", "eax", "edx", "esi", "edi", 76),
-                $round!(parity, "edi", "r8d", "eax", "edx", "esi", 77),
-                $round!(parity, "esi", "edi", "r8d", "eax", "edx", 78),
-                $round!(parity, "edx", "esi", "edi", "r8d", "eax", 79),
+                round_asm!(choose, "eax", "edx", "esi", "edi", "r8d", 0),
+                round_asm!(choose, "r8d", "eax", "edx", "esi", "edi", 1),
+                round_asm!(choose, "edi", "r8d", "eax", "edx", "esi", 2),
+                round_asm!(choose, "esi", "edi", "r8d", "eax", "edx", 3),
+                round_asm!(choose, "edx", "esi", "edi", "r8d", "eax", 4),
+                round_asm!(choose, "eax", "edx", "esi", "edi", "r8d", 5),
+                round_asm!(choose, "r8d", "eax", "edx", "esi", "edi", 6),
+                round_asm!(choose, "edi", "r8d", "eax", "edx", "esi", 7),
+                round_asm!(choose, "esi", "edi", "r8d", "eax", "edx", 8),
+                round_asm!(choose, "edx", "esi", "edi", "r8d", "eax", 9),
+                round_asm!(choose, "eax", "edx", "esi", "edi", "r8d", 10),
+                round_asm!(choose, "r8d", "eax", "edx", "esi", "edi", 11),
+                round_asm!(choose, "edi", "r8d", "eax", "edx", "esi", 12),
+                round_asm!(choose, "esi", "edi", "r8d", "eax", "edx", 13),
+                round_asm!(choose, "edx", "esi", "edi", "r8d", "eax", 14),
+                round_asm!(choose, "eax", "edx", "esi", "edi", "r8d", 15),
+                round_asm!(choose, "r8d", "eax", "edx", "esi", "edi", 16),
+                round_asm!(choose, "edi", "r8d", "eax", "edx", "esi", 17),
+                round_asm!(choose, "esi", "edi", "r8d", "eax", "edx", 18),
+                round_asm!(choose, "edx", "esi", "edi", "r8d", "eax", 19),
+                round_asm!(parity, "eax", "edx", "esi", "edi", "r8d", 20),
+                round_asm!(parity, "r8d", "eax", "edx", "esi", "edi", 21),
+                round_asm!(parity, "edi", "r8d", "eax", "edx", "esi", 22),
+                round_asm!(parity, "esi", "edi", "r8d", "eax", "edx", 23),
+                round_asm!(parity, "edx", "esi", "edi", "r8d", "eax", 24),
+                round_asm!(parity, "eax", "edx", "esi", "edi", "r8d", 25),
+                round_asm!(parity, "r8d", "eax", "edx", "esi", "edi", 26),
+                round_asm!(parity, "edi", "r8d", "eax", "edx", "esi", 27),
+                round_asm!(parity, "esi", "edi", "r8d", "eax", "edx", 28),
+                round_asm!(parity, "edx", "esi", "edi", "r8d", "eax", 29),
+                round_asm!(parity, "eax", "edx", "esi", "edi", "r8d", 30),
+                round_asm!(parity, "r8d", "eax", "edx", "esi", "edi", 31),
+                round_asm!(parity, "edi", "r8d", "eax", "edx", "esi", 32),
+                round_asm!(parity, "esi", "edi", "r8d", "eax", "edx", 33),
+                round_asm!(parity, "edx", "esi", "edi", "r8d", "eax", 34),
+                round_asm!(parity, "eax", "edx", "esi", "edi", "r8d", 35),
+                round_asm!(parity, "r8d", "eax", "edx", "esi", "edi", 36),
+                round_asm!(parity, "edi", "r8d", "eax", "edx", "esi", 37),
+                round_asm!(parity, "esi", "edi", "r8d", "eax", "edx", 38),
+                round_asm!(parity, "edx", "esi", "edi", "r8d", "eax", 39),
+                round_asm!(majority, "eax", "edx", "esi", "edi", "r8d", 40),
+                round_asm!(majority, "r8d", "eax", "edx", "esi", "edi", 41),
+                round_asm!(majority, "edi", "r8d", "eax", "edx", "esi", 42),
+                round_asm!(majority, "esi", "edi", "r8d", "eax", "edx", 43),
+                round_asm!(majority, "edx", "esi", "edi", "r8d", "eax", 44),
+                round_asm!(majority, "eax", "edx", "esi", "edi", "r8d", 45),
+                round_asm!(majority, "r8d", "eax", "edx", "esi", "edi", 46),
+                round_asm!(majority, "edi", "r8d", "eax", "edx", "esi", 47),
+                round_asm!(majority, "esi", "edi", "r8d", "eax", "edx", 48),
+                round_asm!(majority, "edx", "esi", "edi", "r8d", "eax", 49),
+                round_asm!(majority, "eax", "edx", "esi", "edi", "r8d", 50),
+                round_asm!(majority, "r8d", "eax", "edx", "esi", "edi", 51),
+                round_asm!(majority, "edi", "r8d", "eax", "edx", "esi", 52),
+                round_asm!(majority, "esi", "edi", "r8d", "eax", "edx", 53),
+                round_asm!(majority, "edx", "esi", "edi", "r8d", "eax", 54),
+                round_asm!(majority, "eax", "edx", "esi", "edi", "r8d", 55),
+                round_asm!(majority, "r8d", "eax", "edx", "esi", "edi", 56),
+                round_asm!(majority, "edi", "r8d", "eax", "edx", "esi", 57),
+                round_asm!(majority, "esi", "edi", "r8d", "eax", "edx", 58),
+                round_asm!(majority, "edx", "esi", "edi", "r8d", "eax", 59),
+                round_asm!(parity, "eax", "edx", "esi", "edi", "r8d", 60),
+                round_asm!(parity, "r8d", "eax", "edx", "esi", "edi", 61),
+                round_asm!(parity, "edi", "r8d", "eax", "edx", "esi", 62),
+                round_asm!(parity, "esi", "edi", "r8d", "eax", "edx", 63),
+                round_asm!(parity, "edx", "esi", "edi", "r8d", "eax", 64),
+                round_asm!(parity, "eax", "edx", "esi", "edi", "r8d", 65),
+                round_asm!(parity, "r8d", "eax", "edx", "esi", "edi", 66),
+                round_asm!(parity, "edi", "r8d", "eax", "edx", "esi", 67),
+                round_asm!(parity, "esi", "edi", "r8d", "eax", "edx", 68),
+                round_asm!(parity, "edx", "esi", "edi", "r8d", "eax", 69),
+                round_asm!(parity, "eax", "edx", "esi", "edi", "r8d", 70),
+                round_asm!(parity, "r8d", "eax", "edx", "esi", "edi", 71),
+                round_asm!(parity, "edi", "r8d", "eax", "edx", "esi", 72),
+                round_asm!(parity, "esi", "edi", "r8d", "eax", "edx", 73),
+                round_asm!(parity, "edx", "esi", "edi", "r8d", "eax", 74),
+                round_asm!(parity, "eax", "edx", "esi", "edi", "r8d", 75),
+                round_asm!(parity, "r8d", "eax", "edx", "esi", "edi", 76),
+                round_asm!(parity, "edi", "r8d", "eax", "edx", "esi", 77),
+                round_asm!(parity, "esi", "edi", "r8d", "eax", "edx", 78),
+                round_asm!(parity, "edx", "esi", "edi", "r8d", "eax", 79),
                 in("r11") wk,
                 inout("eax") a,
                 inout("edx") b,
@@ -274,18 +244,6 @@ macro_rules! block_function {
         }
     }
 }
-    };
-}
 
-block_function!(
-    /// for any x86-64 with SSSE3
-    #[target_feature(enable = "ssse3")]
-    compress,
-    round_asm
-);
-block_function!(
-    /// VEX-encoded schedule and flag-free rotations
-    #[target_feature(enable = "avx2,bmi1,bmi2")]
-    compress_bmi,
-    round_bmi
-);
+pub(super) mod avx2;
+pub(super) mod sha;

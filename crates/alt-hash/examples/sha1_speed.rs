@@ -19,7 +19,8 @@ fn main() {
     let seconds = start.elapsed().as_secs_f64();
     if mode.as_deref() != Some("many") {
         println!(
-            "single stream, 16 KiB in cache: {:.0} MiB/s ({sink:02x})",
+            "single stream ({}), 16 KiB in cache: {:.0} MiB/s ({sink:02x})",
+            alt_hash::sha1::implementation(),
             rounds as f64 * 16384.0 / (1 << 20) as f64 / seconds
         );
     }

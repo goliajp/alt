@@ -80,31 +80,40 @@ pub fn sha1(data: &[u8]) -> [u8; 20] {
     hasher.finalize()
 }
 
+type Compress = unsafe fn(&mut [u32; 5], &[u8]);
+
+/// the fastest implementation this CPU supports, and its name
+fn select() -> (&'static str, Compress) {
+    #[cfg(target_arch = "aarch64")]
+    if std::arch::is_aarch64_feature_detected!("sha2") {
+        return ("sha instructions", arm::compress);
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        use std::arch::is_x86_feature_detected as detected;
+        if detected!("sha") && detected!("ssse3") && detected!("sse4.1") {
+            return ("sha instructions", x86::sha::compress);
+        }
+        if detected!("avx2") && detected!("bmi1") && detected!("bmi2") {
+            return ("avx2", x86::avx2::compress);
+        }
+        if detected!("ssse3") {
+            return ("ssse3", x86::compress);
+        }
+    }
+    ("portable", portable)
+}
+
+/// which implementation runs on this CPU
+pub fn implementation() -> &'static str {
+    select().0
+}
+
 /// folds whole 64-byte blocks into `state`
 fn compress(state: &mut [u32; 5], blocks: &[u8]) {
     debug_assert!(blocks.len().is_multiple_of(64));
-    #[cfg(target_arch = "aarch64")]
-    if std::arch::is_aarch64_feature_detected!("sha2") {
-        // the feature was just detected on this CPU
-        unsafe { arm::compress(state, blocks) };
-        return;
-    }
-    #[cfg(target_arch = "x86_64")]
-    if std::arch::is_x86_feature_detected!("avx2")
-        && std::arch::is_x86_feature_detected!("bmi1")
-        && std::arch::is_x86_feature_detected!("bmi2")
-    {
-        // the features were just detected on this CPU
-        unsafe { x86::compress_bmi(state, blocks) };
-        return;
-    }
-    #[cfg(target_arch = "x86_64")]
-    if std::arch::is_x86_feature_detected!("ssse3") {
-        // the feature was just detected on this CPU
-        unsafe { x86::compress(state, blocks) };
-        return;
-    }
-    portable(state, blocks);
+    // an implementation is only selected after its CPU features were detected
+    unsafe { select().1(state, blocks) }
 }
 
 /// the next schedule word, kept in a rolling window of sixteen

@@ -92,16 +92,34 @@ pub fn sha256(data: &[u8]) -> [u8; 32] {
     hasher.finalize()
 }
 
+type Compress = unsafe fn(&mut [u32; 8], &[u8]);
+
+/// the fastest implementation this CPU supports, and its name
+fn select() -> (&'static str, Compress) {
+    #[cfg(target_arch = "aarch64")]
+    if std::arch::is_aarch64_feature_detected!("sha2") {
+        return ("sha instructions", arm::compress);
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        use std::arch::is_x86_feature_detected as detected;
+        if detected!("sha") && detected!("ssse3") && detected!("sse4.1") {
+            return ("sha instructions", x86::sha::compress);
+        }
+    }
+    ("portable", portable)
+}
+
+/// which implementation runs on this CPU
+pub fn implementation() -> &'static str {
+    select().0
+}
+
 /// folds whole 64-byte blocks into `state`
 fn compress(state: &mut [u32; 8], blocks: &[u8]) {
     debug_assert!(blocks.len().is_multiple_of(64));
-    #[cfg(target_arch = "aarch64")]
-    if std::arch::is_aarch64_feature_detected!("sha2") {
-        // the feature was just detected on this CPU
-        unsafe { arm::compress(state, blocks) };
-        return;
-    }
-    portable(state, blocks);
+    // an implementation is only selected after its CPU features were detected
+    unsafe { select().1(state, blocks) }
 }
 
 /// the schedule word for round `t`, kept in a rolling window of sixteen
@@ -216,3 +234,5 @@ pub fn portable(state: &mut [u32; 8], blocks: &[u8]) {
 
 #[cfg(target_arch = "aarch64")]
 mod arm;
+#[cfg(target_arch = "x86_64")]
+mod x86;
