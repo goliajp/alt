@@ -9,5 +9,5 @@ license.workspace = true
 alt-hash.workspace = true
 
 [dev-dependencies]
+alt-hash.workspace = true
 alt-inflate.workspace = true
-libz-sys = "1"

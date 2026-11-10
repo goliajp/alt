@@ -9,4 +9,4 @@ license.workspace = true
 alt-hash.workspace = true
 
 [dev-dependencies]
-flate2.workspace = true
+alt-deflate.workspace = true

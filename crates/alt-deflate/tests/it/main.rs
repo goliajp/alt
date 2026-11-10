@@ -1,9 +1,9 @@
-mod oracle;
+mod golden;
+mod text;
 
-use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use oracle::check;
+use golden::Tally;
 
 /// xorshift64*
 struct Rng(u64);
@@ -30,65 +30,10 @@ impl Rng {
     }
 }
 
-fn rust_files(dir: &Path, found: &mut Vec<PathBuf>) {
-    let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
-        .unwrap()
-        .map(|entry| entry.unwrap().path())
-        .collect();
-    entries.sort();
-    for path in entries {
-        if path.is_dir() {
-            if path.file_name().is_some_and(|name| name != "target") {
-                rust_files(&path, found);
-            }
-        } else if path.extension().is_some_and(|ext| ext == "rs") {
-            found.push(path);
-        }
-    }
-}
-
-/// the workspace's own sources, concatenated in path order
+/// two mebibytes of generated text
 fn text() -> &'static [u8] {
     static TEXT: OnceLock<Vec<u8>> = OnceLock::new();
-    TEXT.get_or_init(|| {
-        let crates = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-        let mut files = Vec::new();
-        rust_files(crates, &mut files);
-        let mut text = Vec::new();
-        for file in files {
-            text.extend_from_slice(&std::fs::read(file).unwrap());
-            if text.len() >= 2 << 20 {
-                break;
-            }
-        }
-        assert!(text.len() >= 1 << 20, "only {} bytes of text", text.len());
-        text
-    })
-}
-
-fn report(class: &str, inputs: usize, compared: usize) {
-    println!(
-        "{class}: {inputs} inputs, {compared} comparisons against libz {}",
-        oracle::version()
-    );
-}
-
-/// counts inputs and comparisons of one test
-#[derive(Default)]
-struct Tally {
-    inputs: usize,
-    compared: usize,
-}
-
-impl Tally {
-    fn check(&mut self, what: &str, data: &[u8]) {
-        self.inputs += 1;
-        self.compared += check(what, data);
-    }
-
-    fn report(&self, class: &str) {
-        report(class, self.inputs, self.compared);
-    }
+    TEXT.get_or_init(|| text::generate(0x7e87, 2 << 20))
 }
 
 const EDGE_LENGTHS: [usize; 24] = [
@@ -98,23 +43,26 @@ const EDGE_LENGTHS: [usize; 24] = [
 
 #[test]
 fn edge_lengths() {
-    let mut tally = Tally::default();
+    let mut tally = Tally::new();
     let random = Rng(1).bytes(200_000);
     let text = text();
     let zeros = vec![0u8; 200_000];
     for len in EDGE_LENGTHS {
-        tally.check(&format!("random prefix {len}"), &random[..len]);
-        tally.check(&format!("text prefix {len}"), &text[..len]);
-        tally.check(&format!("zeros {len}"), &zeros[..len]);
+        tally.check(&random[..len]);
+        tally.check(&text[..len]);
+        tally.check(&zeros[..len]);
     }
-    tally.report("edge lengths");
+    tally.finish(
+        "edge_lengths",
+        "09e6dc3932286c70571157706a408348d1ab6f183402b6fba46d0db0b1c23272",
+    );
 }
 
 #[test]
 fn zeros_and_patterns() {
-    let mut tally = Tally::default();
-    tally.check("zeros 1 MiB", &vec![0u8; 1 << 20]);
-    tally.check("0xff 70000", &vec![0xffu8; 70_000]);
+    let mut tally = Tally::new();
+    tally.check(&vec![0u8; 1 << 20]);
+    tally.check(&vec![0xffu8; 70_000]);
     let mut rng = Rng(2);
     for (period, total) in [
         (1, 1000),
@@ -129,74 +77,86 @@ fn zeros_and_patterns() {
     ] {
         let unit = rng.bytes(period);
         let data: Vec<u8> = unit.iter().copied().cycle().take(total).collect();
-        tally.check(&format!("random unit of {period} repeated"), &data);
+        tally.check(&data);
     }
     let unit = &text()[..300];
     let data: Vec<u8> = unit.iter().copied().cycle().take(250_000).collect();
-    tally.check("text unit of 300 repeated", &data);
-    tally.report("zeros and patterns");
+    tally.check(&data);
+    tally.finish(
+        "zeros_and_patterns",
+        "98790d9b6bdfe4c05af582a1ce1d0000959e3bf45e8ae772d3e5c9768eac11d7",
+    );
 }
 
 #[test]
 fn random_bytes() {
-    let mut tally = Tally::default();
+    let mut tally = Tally::new();
     let mut rng = Rng(3);
     for len in (1..64).chain([
         100, 1000, 5000, 16_383, 16_384, 16_385, 50_000, 100_000, 307_200,
     ]) {
-        tally.check(&format!("random {len}"), &rng.bytes(len));
+        tally.check(&rng.bytes(len));
     }
-    tally.report("random");
+    tally.finish(
+        "random_bytes",
+        "7405ff20a41b265a0564ee14099600e74f89e6ba95f7034a77a7a3b30818a9dc",
+    );
 }
 
 #[test]
 fn text_whole_and_chunks() {
-    let mut tally = Tally::default();
+    let mut tally = Tally::new();
     let text = text();
-    tally.check("text", text);
-    for (n, chunk) in text.chunks(150_000).enumerate() {
-        tally.check(&format!("text chunk {n}"), chunk);
+    tally.check(text);
+    for chunk in text.chunks(150_000) {
+        tally.check(chunk);
     }
-    tally.report("text");
+    tally.finish(
+        "text_whole_and_chunks",
+        "5e43360d6153cff7507d773e0591fefa252cc5e0cc44fcba8bddd2805deb246a",
+    );
 }
 
 #[test]
 fn text_prefixes() {
-    let mut tally = Tally::default();
+    let mut tally = Tally::new();
     let text = text();
     for len in 0..=2000 {
-        tally.check(&format!("text prefix {len}"), &text[..len]);
+        tally.check(&text[..len]);
     }
     let mut len = 2001;
     while len < text.len() {
-        tally.check(&format!("text prefix {len}"), &text[..len]);
+        tally.check(&text[..len]);
         len += len / 3 + 17;
     }
-    tally.report("text prefixes");
+    tally.finish(
+        "text_prefixes",
+        "9912da2e79a274386f4fa228de85d19ba864d47f7ffb2e140c913f76e891314a",
+    );
 }
 
 #[test]
 fn text_suffix_windows() {
-    let mut tally = Tally::default();
+    let mut tally = Tally::new();
     let text = text();
     let mut rng = Rng(4);
     for _ in 0..60 {
         let start = rng.below(text.len() - 100_000);
         let len = rng.below(100_000);
-        tally.check(
-            &format!("text {start}..{}", start + len),
-            &text[start..start + len],
-        );
+        tally.check(&text[start..start + len]);
     }
-    tally.report("text windows");
+    tally.finish(
+        "text_suffix_windows",
+        "d3e38d908ecd4e5e9d9f47a188457b9cccd4ee95a293fff75575cafb52a40f58",
+    );
 }
 
 #[test]
 fn mixed_regions() {
-    let mut tally = Tally::default();
+    let mut tally = Tally::new();
     let text = text();
     let mut rng = Rng(5);
-    for round in 0..6 {
+    for _ in 0..6 {
         let mut data = Vec::new();
         while data.len() < 400_000 {
             let len = 1 + rng.below(30_000);
@@ -210,21 +170,21 @@ fn mixed_regions() {
                 _ => data.extend_from_slice(&rng.narrow(len, 4)),
             }
         }
-        tally.check(&format!("mixed regions round {round}"), &data);
+        tally.check(&data);
     }
-    tally.report("mixed");
+    tally.finish(
+        "mixed_regions",
+        "a04c784538861702d6f3426cfb0aecf148748c3c98793557a5b3d1d2cdff1838",
+    );
 }
 
 #[test]
 fn low_entropy() {
-    let mut tally = Tally::default();
+    let mut tally = Tally::new();
     let mut rng = Rng(6);
     for alphabet in [2, 3, 4, 8, 16, 60] {
         for len in [10, 1000, 40_000, 300_000] {
-            tally.check(
-                &format!("alphabet of {alphabet}, {len} bytes"),
-                &rng.narrow(len, alphabet),
-            );
+            tally.check(&rng.narrow(len, alphabet));
         }
     }
     // skewed frequencies push the code lengths to their limits
@@ -240,21 +200,21 @@ fn low_entropy() {
         for i in (1..shuffled.len()).rev() {
             shuffled.swap(i, rng.below(i + 1));
         }
-        tally.check(&format!("fibonacci frequencies, shuffle {seed}"), &shuffled);
+        tally.check(&shuffled);
     }
-    tally.report("low entropy");
+    tally.finish(
+        "low_entropy",
+        "beafde62a4a96bf0d4701defdc269d7ffeb0520466aab73cbbb56e522f7da293",
+    );
 }
 
 #[test]
 fn long_distance_repeats() {
-    let mut tally = Tally::default();
+    let mut tally = Tally::new();
     let mut rng = Rng(7);
     let text = text();
     for distance in (32_768 - 270..=32_768 - 255).chain(32_760..=32_776) {
-        for (kind, phrase) in [
-            ("random", rng.bytes(400)),
-            ("text", text[5000..5400].to_vec()),
-        ] {
+        for phrase in [rng.bytes(400), text[5000..5400].to_vec()] {
             // the phrase, incompressible filler, the phrase again `distance` later
             for lead in [0, 1, 2, 300, 40_000] {
                 let mut data = rng.bytes(lead);
@@ -262,14 +222,14 @@ fn long_distance_repeats() {
                 data.extend_from_slice(&rng.bytes(distance - phrase.len()));
                 data.extend_from_slice(&phrase);
                 data.extend_from_slice(&rng.bytes(50));
-                tally.check(
-                    &format!("{kind} phrase repeated {distance} back after {lead}"),
-                    &data,
-                );
+                tally.check(&data);
             }
         }
     }
-    tally.report("long-distance repeats");
+    tally.finish(
+        "long_distance_repeats",
+        "7f0a341cea7d3827825c8b9e93023f44fbaff3f0887b83e04b3f9f2afaa4a46d",
+    );
 }
 
 #[test]
@@ -314,7 +274,7 @@ fn the_general_compressor_round_trips() {
             })
             .collect()
     };
-    let source = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/src/trees.rs")).unwrap();
+    let source = &text()[..7568];
     let mut inputs: Vec<Vec<u8>> = vec![
         Vec::new(),
         vec![1],
@@ -334,7 +294,7 @@ fn the_general_compressor_round_trips() {
     let mut mixed = Vec::new();
     for round in 0..60 {
         mixed.extend(noise(1500 + round * 13, 256));
-        mixed.extend(&source[round * 31..round * 31 + 2500]);
+        mixed.extend_from_slice(&source[round * 31..round * 31 + 2500]);
         mixed.extend(vec![round as u8; 400]);
         // a repeat from just inside and just outside the window
         let back = if round % 2 == 0 { 32768 } else { 32769 };

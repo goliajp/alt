@@ -1,6 +1,7 @@
+mod text;
+
 use alt_inflate::{Error, Format, Inflater, Reader, inflate, inflate_exact};
-use flate2::{Compression, write};
-use std::io::{Read, Write};
+use std::io::Read;
 
 fn noise(len: usize, mut state: u64, alphabet: u8) -> Vec<u8> {
     (0..len)
@@ -13,22 +14,9 @@ fn noise(len: usize, mut state: u64, alphabet: u8) -> Vec<u8> {
         .collect()
 }
 
-/// source text of this repository: realistic compressible input
+/// generated text: realistic compressible input
 fn text() -> Vec<u8> {
-    let mut out = Vec::new();
-    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
-    for krate in ["alt-inflate", "alt-hash", "alt-pack-segment"] {
-        let mut files: Vec<_> = std::fs::read_dir(format!("{root}/{krate}/src"))
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .filter(|path| path.extension().is_some_and(|ext| ext == "rs"))
-            .collect();
-        files.sort();
-        for file in files {
-            out.extend(std::fs::read(file).unwrap());
-        }
-    }
-    out
+    text::generate(0x7e87, 150_000)
 }
 
 fn corpus() -> Vec<(String, Vec<u8>)> {
@@ -57,24 +45,25 @@ fn corpus() -> Vec<(String, Vec<u8>)> {
     inputs
 }
 
-fn compress(format: Format, level: u32, data: &[u8]) -> Vec<u8> {
-    let level = Compression::new(level);
-    match format {
-        Format::Raw => {
-            let mut encoder = write::DeflateEncoder::new(Vec::new(), level);
-            encoder.write_all(data).unwrap();
-            encoder.finish().unwrap()
-        }
-        Format::Zlib => {
-            let mut encoder = write::ZlibEncoder::new(Vec::new(), level);
-            encoder.write_all(data).unwrap();
-            encoder.finish().unwrap()
-        }
-        Format::Gzip => {
-            let mut encoder = write::GzEncoder::new(Vec::new(), level);
-            encoder.write_all(data).unwrap();
-            encoder.finish().unwrap()
-        }
+/// which of the two compressors makes the stream
+#[derive(Clone, Copy, Debug)]
+enum Maker {
+    /// the one whose output is the bytes zlib produces
+    AsZlib,
+    General,
+}
+
+const MAKERS: [Maker; 2] = [Maker::AsZlib, Maker::General];
+
+fn compress(maker: Maker, format: Format, level: u8, data: &[u8]) -> Vec<u8> {
+    let format = match format {
+        Format::Raw => alt_deflate::Format::Raw,
+        Format::Zlib => alt_deflate::Format::Zlib,
+        Format::Gzip => alt_deflate::Format::Gzip,
+    };
+    match maker {
+        Maker::AsZlib => alt_deflate::compress_as_zlib(data, level, format),
+        Maker::General => alt_deflate::compress(data, level, format),
     }
 }
 
@@ -83,21 +72,23 @@ fn whole_streams_decode_and_report_their_length() {
     for (name, data) in corpus() {
         for format in [Format::Raw, Format::Zlib, Format::Gzip] {
             for level in [0, 1, 6, 9] {
-                let mut stream = compress(format, level, &data);
-                let length = stream.len();
-                // bytes after the stream do not belong to it
-                stream.extend_from_slice(b"trailing bytes that are not part of it");
-                let what = format!("{name}, {format:?}, level {level}");
-                let (content, consumed) = inflate(format, &stream, usize::MAX).expect(&what);
-                assert_eq!(content, data, "{what}");
-                assert_eq!(consumed, length, "{what}");
-                let mut exact = vec![0; data.len()];
-                assert_eq!(
-                    inflate_exact(format, &stream, &mut exact),
-                    Ok(length),
-                    "{what}"
-                );
-                assert_eq!(exact, data, "{what}");
+                for maker in MAKERS {
+                    let mut stream = compress(maker, format, level, &data);
+                    let length = stream.len();
+                    // bytes after the stream do not belong to it
+                    stream.extend_from_slice(b"trailing bytes that are not part of it");
+                    let what = format!("{name}, {maker:?}, {format:?}, level {level}");
+                    let (content, consumed) = inflate(format, &stream, usize::MAX).expect(&what);
+                    assert_eq!(content, data, "{what}");
+                    assert_eq!(consumed, length, "{what}");
+                    let mut exact = vec![0; data.len()];
+                    assert_eq!(
+                        inflate_exact(format, &stream, &mut exact),
+                        Ok(length),
+                        "{what}"
+                    );
+                    assert_eq!(exact, data, "{what}");
+                }
             }
         }
     }
@@ -109,13 +100,16 @@ fn any_split_of_input_and_output_gives_the_same_content() {
         if data.len() > 70_000 && name != "text" && name != "mixed" {
             continue;
         }
-        for (format, level) in [
-            (Format::Zlib, 1),
-            (Format::Gzip, 6),
-            (Format::Raw, 9),
-            (Format::Zlib, 0),
+        for (maker, format, level) in [
+            (Maker::AsZlib, Format::Zlib, 1),
+            (Maker::AsZlib, Format::Gzip, 6),
+            (Maker::AsZlib, Format::Raw, 9),
+            (Maker::AsZlib, Format::Zlib, 0),
+            (Maker::General, Format::Raw, 1),
+            (Maker::General, Format::Zlib, 6),
+            (Maker::General, Format::Gzip, 9),
         ] {
-            let stream = compress(format, level, &data);
+            let stream = compress(maker, format, level, &data);
             for seed in 1..6u64 {
                 let sizes = noise(4096, seed, 0);
                 let mut inflater = Inflater::new(format);
@@ -142,7 +136,7 @@ fn any_split_of_input_and_output_gives_the_same_content() {
                     done = step.done;
                     assert!(turn < 10_000_000, "{name}: no progress");
                 }
-                let what = format!("{name}, {format:?}, level {level}, split {seed}");
+                let what = format!("{name}, {maker:?}, {format:?}, level {level}, split {seed}");
                 assert_eq!(content, data, "{what}");
                 assert_eq!(held, stream.len(), "{what}");
                 assert_eq!(inflater.total_in(), stream.len() as u64, "{what}");
@@ -157,34 +151,36 @@ fn damaged_streams_are_refused_without_panicking() {
     let data = text();
     let data = &data[..40_000];
     for format in [Format::Raw, Format::Zlib, Format::Gzip] {
-        let stream = compress(format, 6, data);
-        let flips = noise(4000, 11, 0);
-        for round in 0..2000 {
-            let mut damaged = stream.clone();
-            let at = (flips[round] as usize * 251 + flips[round + 1] as usize * 17 + round * 7)
-                % damaged.len();
-            damaged[at] ^= 1 << (flips[round + 2] % 8);
-            // either an error, or (a flip the format cannot see) some content
-            let _ = inflate(format, &damaged, 1 << 20);
-        }
-        for cut in (0..stream.len()).step_by(97) {
-            assert_eq!(
-                inflate(format, &stream[..cut], 1 << 20).err(),
-                Some(Error::Truncated),
-                "{format:?} cut at {cut}"
-            );
-        }
-        let mut wrong = stream.clone();
-        let last = wrong.len() - 1;
-        wrong[last] ^= 0x40;
-        if format != Format::Raw {
-            assert_eq!(
-                inflate(format, &wrong, 1 << 20).err(),
-                Some(Error::Checksum)
-            );
+        for maker in MAKERS {
+            let stream = compress(maker, format, 6, data);
+            let flips = noise(4000, 11, 0);
+            for round in 0..2000 {
+                let mut damaged = stream.clone();
+                let at = (flips[round] as usize * 251 + flips[round + 1] as usize * 17 + round * 7)
+                    % damaged.len();
+                damaged[at] ^= 1 << (flips[round + 2] % 8);
+                // either an error, or (a flip the format cannot see) some content
+                let _ = inflate(format, &damaged, 1 << 20);
+            }
+            for cut in (0..stream.len()).step_by(97) {
+                assert_eq!(
+                    inflate(format, &stream[..cut], 1 << 20).err(),
+                    Some(Error::Truncated),
+                    "{maker:?} {format:?} cut at {cut}"
+                );
+            }
+            let mut wrong = stream.clone();
+            let last = wrong.len() - 1;
+            wrong[last] ^= 0x40;
+            if format != Format::Raw {
+                assert_eq!(
+                    inflate(format, &wrong, 1 << 20).err(),
+                    Some(Error::Checksum)
+                );
+            }
         }
     }
-    let stream = compress(Format::Zlib, 6, data);
+    let stream = compress(Maker::AsZlib, Format::Zlib, 6, data);
     assert_eq!(
         inflate(Format::Zlib, &stream, 39_999).err(),
         Some(Error::TooLong)
@@ -205,9 +201,9 @@ fn damaged_streams_are_refused_without_panicking() {
 fn readers_follow_one_stream_or_every_gzip_member() {
     let data = text();
     let (first, second) = data.split_at(data.len() / 3);
-    let mut file = compress(Format::Gzip, 6, first);
+    let mut file = compress(Maker::AsZlib, Format::Gzip, 6, first);
     let one = file.len();
-    file.extend(compress(Format::Gzip, 1, second));
+    file.extend(compress(Maker::General, Format::Gzip, 1, second));
 
     let mut single = Reader::new(Format::Gzip, &file[..]);
     let mut content = Vec::new();
