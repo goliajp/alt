@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: perf
+summary: unrolled ARMv8 SHA-1; pack segment ingest hashes object ids in batches with alt-hash
+author-type: human
+author: doracawl
+touched: Cargo.lock
+touched: crates/alt-hash/examples/sha1_speed.rs
+touched: crates/alt-hash/src/sha1.rs
+touched: crates/alt-pack-segment/Cargo.toml
+touched: crates/alt-pack-segment/src/ingest.rs
+touched: crates/alt-pack-segment/src/lib.rs
+touched: crates/alt-pack-segment/src/send.rs
