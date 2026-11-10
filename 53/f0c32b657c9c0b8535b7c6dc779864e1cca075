@@ -1,0 +1,20 @@
+schema: alt-meta/1
+type: feat
+summary: blake3 in alt-hash
+author-type: human
+author: doracawl
+touched: Cargo.lock
+touched: crates/alt-hash/Cargo.toml
+touched: crates/alt-hash/examples/blake3_speed.rs
+touched: crates/alt-hash/src/blake3.rs
+touched: crates/alt-hash/src/blake3/avx2.rs
+touched: crates/alt-hash/src/blake3/digest.rs
+touched: crates/alt-hash/src/blake3/hasher.rs
+touched: crates/alt-hash/src/blake3/lanes.rs
+touched: crates/alt-hash/src/blake3/neon.rs
+touched: crates/alt-hash/src/blake3/portable.rs
+touched: crates/alt-hash/src/blake3/sse41.rs
+touched: crates/alt-hash/src/blake3/tree.rs
+touched: crates/alt-hash/src/lib.rs
+touched: crates/alt-hash/tests/it/blake3.rs
+touched: crates/alt-hash/tests/it/main.rs
