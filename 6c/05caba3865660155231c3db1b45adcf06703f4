@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: chore
+summary: record alt-pack-segment in the lock file for server crates
+author-type: human
+author: doracawl
+touched: Cargo.lock
