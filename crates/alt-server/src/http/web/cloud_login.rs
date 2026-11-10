@@ -35,8 +35,8 @@ fn cookie(origin: &PublicOrigin, values: &[&str]) -> Result<String> {
     result.ok_or(Error::Unauthorized)
 }
 fn derived(key: &ed25519_dalek::SigningKey, purpose: &'static str, secret: &str) -> String {
-    let key = blake3::derive_key(purpose, &key.to_bytes());
-    blake3::keyed_hash(&key, secret.as_bytes())
+    let key = alt_hash::blake3::derive_key(purpose, &key.to_bytes());
+    alt_hash::blake3::keyed_hash(&key, secret.as_bytes())
         .to_hex()
         .to_string()
 }

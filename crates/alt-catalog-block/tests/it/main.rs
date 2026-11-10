@@ -19,7 +19,7 @@ fn block(n: usize) -> Block {
 }
 fn resign(bytes: &mut [u8]) -> Digest {
     let end = bytes.len() - 32;
-    let id = *blake3::hash(&bytes[..end]).as_bytes();
+    let id = *alt_hash::blake3::hash(&bytes[..end]).as_bytes();
     bytes[end..].copy_from_slice(&id);
     id
 }

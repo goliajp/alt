@@ -83,7 +83,10 @@ impl Ingested {
 }
 
 fn digest(kind: Kind, data: &[u8]) -> (Oid, [u8; 32]) {
-    (object_id(kind, data), *blake3::hash(data).as_bytes())
+    (
+        object_id(kind, data),
+        *alt_hash::blake3::hash(data).as_bytes(),
+    )
 }
 
 struct Shared<'a> {
@@ -235,7 +238,7 @@ pub fn ingest(pack: &[u8], existing: &SegmentSet, limits: &Limits) -> Result<Ing
                     *index,
                     Meta {
                         oid,
-                        blake3: *blake3::hash(data).as_bytes(),
+                        blake3: *alt_hash::blake3::hash(data).as_bytes(),
                         kind: *kind,
                         size: data.len() as u64,
                         depth: 0,

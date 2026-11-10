@@ -10,7 +10,6 @@ alt-deflate.workspace = true
 alt-git-pack.workspace = true
 alt-hash.workspace = true
 alt-inflate.workspace = true
-blake3.workspace = true
 memmap2.workspace = true
 rayon.workspace = true
 

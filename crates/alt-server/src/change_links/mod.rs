@@ -83,13 +83,17 @@ impl ChannelConfig {
             &self.peer_public_key,
             &self.target,
             &self.peer_browser_origin,
-            blake3::hash(local_token.as_bytes()).to_hex().to_string(),
-            blake3::hash(peer_token.as_bytes()).to_hex().to_string(),
+            alt_hash::blake3::hash(local_token.as_bytes())
+                .to_hex()
+                .to_string(),
+            alt_hash::blake3::hash(peer_token.as_bytes())
+                .to_hex()
+                .to_string(),
         ))
         .map_err(|_| operator::Error::Config("change-link configuration"))?;
         Ok(ChannelRuntime {
             config: self.clone(),
-            digest: blake3::hash(&identity).to_hex().to_string(),
+            digest: alt_hash::blake3::hash(&identity).to_hex().to_string(),
             local_token,
             peer_token,
         })

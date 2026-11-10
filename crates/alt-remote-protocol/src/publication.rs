@@ -136,7 +136,7 @@ impl Publication {
         Ok(bytes)
     }
     pub fn digest(&self, limits: Limits) -> Result<String> {
-        let mut hash = blake3::Hasher::new_derive_key("jp.golia.alt.publication.v1");
+        let mut hash = alt_hash::blake3::Hasher::new_derive_key("jp.golia.alt.publication.v1");
         hash.update(&self.canonical_bytes(limits)?);
         Ok(hash.finalize().to_hex().to_string())
     }
@@ -300,7 +300,8 @@ impl Manifest {
         Ok(bytes)
     }
     pub fn id(&self, limits: Limits) -> Result<String> {
-        let mut hash = blake3::Hasher::new_derive_key("jp.golia.alt.transfer-manifest.v1");
+        let mut hash =
+            alt_hash::blake3::Hasher::new_derive_key("jp.golia.alt.transfer-manifest.v1");
         hash.update(&self.canonical_bytes(limits)?);
         Ok(hash.finalize().to_hex().to_string())
     }

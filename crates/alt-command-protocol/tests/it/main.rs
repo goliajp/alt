@@ -40,7 +40,7 @@ fn completion_binds_source_request_and_exact_response() {
         request_id: intent.request_id.clone(),
         binding_digest: intent.binding_digest.clone(),
         finished_ms: 2,
-        response_digest: blake3::hash(&bytes).to_hex().to_string(),
+        response_digest: alt_hash::blake3::hash(&bytes).to_hex().to_string(),
         response_bytes: bytes.len() as u64,
         operations: vec![],
         outcome: "applied".into(),

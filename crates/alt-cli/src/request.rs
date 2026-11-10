@@ -45,7 +45,7 @@ pub fn new_id() -> std::io::Result<RequestId> {
 }
 
 fn digest(bytes: &[u8]) -> String {
-    blake3::hash(bytes).to_hex().to_string()
+    alt_hash::blake3::hash(bytes).to_hex().to_string()
 }
 
 fn now_ms() -> u128 {

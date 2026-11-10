@@ -179,7 +179,7 @@ fn clean_completed_journal(path: &Path, value: &SavedCredential) -> Res<bool> {
         || issued.access_token != value.access_token
         || issued.expires_at_unix_ms != value.expires_at_unix_ms
         || issued.device_digest
-            != blake3::hash(pending.authorization.device_code.as_bytes())
+            != alt_hash::blake3::hash(pending.authorization.device_code.as_bytes())
                 .to_hex()
                 .as_str()
     {
@@ -393,7 +393,7 @@ fn login(
                         &issued_path,
                         &Issued {
                             version: 1,
-                            device_digest: blake3::hash(
+                            device_digest: alt_hash::blake3::hash(
                                 pending.authorization.device_code.as_bytes(),
                             )
                             .to_hex()
@@ -424,7 +424,7 @@ fn login(
     let issued: Issued = read(&mut private_file(&issued_path, false)?)?;
     if issued.version != 1
         || issued.device_digest
-            != blake3::hash(pending.authorization.device_code.as_bytes())
+            != alt_hash::blake3::hash(pending.authorization.device_code.as_bytes())
                 .to_hex()
                 .as_str()
         || issued.expires_at_unix_ms <= now()?

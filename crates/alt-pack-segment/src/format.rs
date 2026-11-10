@@ -142,7 +142,7 @@ pub(crate) fn write_index(
     footer.extend_from_slice(&(commits.len() as u32).to_le_bytes());
     footer.extend_from_slice(&parent_count.to_le_bytes());
     footer.extend_from_slice(&flags.to_le_bytes());
-    footer.extend_from_slice(blake3::hash(&body).as_bytes());
+    footer.extend_from_slice(alt_hash::blake3::hash(&body).as_bytes());
     footer.extend_from_slice(MAGIC);
     out.write_all(&body)?;
     out.write_all(&footer)?;
@@ -184,7 +184,7 @@ impl Segment {
         if pack_len < 32 || parents_at + parent_count * 20 != footer_at {
             return Err(bad());
         }
-        if blake3::hash(&map[fanout_at..footer_at]).as_bytes() != &footer[24..56] {
+        if alt_hash::blake3::hash(&map[fanout_at..footer_at]).as_bytes() != &footer[24..56] {
             return Err(Error::Corrupt("segment index checksum"));
         }
         Ok(Self {

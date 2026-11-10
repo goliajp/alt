@@ -79,7 +79,7 @@ fn verify(mut input: File, blob: &Blob) -> Res<File> {
     if input.metadata()?.len() != blob.bytes {
         return Err(refused("local migration content length changed"));
     }
-    let mut hash = blake3::Hasher::new();
+    let mut hash = alt_hash::blake3::Hasher::new();
     let mut remaining = blob.bytes;
     let mut buffer = [0u8; 65536];
     while remaining > 0 {
@@ -207,7 +207,7 @@ impl Journal {
             .tempdir_in(&self.root)?;
         let mut reader = ArchiveReader {
             file,
-            hash: blake3::Hasher::new(),
+            hash: alt_hash::blake3::Hasher::new(),
             bytes: 0,
         };
         let mut files = Vec::new();
@@ -285,7 +285,7 @@ impl BlobSource for Journal {
 
 struct ArchiveReader {
     file: File,
-    hash: blake3::Hasher,
+    hash: alt_hash::blake3::Hasher,
     bytes: u64,
 }
 impl Read for ArchiveReader {

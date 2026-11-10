@@ -7,10 +7,10 @@ use rand_core::{OsRng, RngCore};
 use std::{collections::BTreeMap, io::Read};
 
 pub(super) fn credential(key: &ed25519_dalek::SigningKey, device_digest: &str) -> String {
-    let key = blake3::derive_key("alt device credential v1", &key.to_bytes());
+    let key = alt_hash::blake3::derive_key("alt device credential v1", &key.to_bytes());
     format!(
         "alt1_{}",
-        blake3::keyed_hash(&key, device_digest.as_bytes()).to_hex()
+        alt_hash::blake3::keyed_hash(&key, device_digest.as_bytes()).to_hex()
     )
 }
 fn failure(error: DeviceError) -> Response<ResponseBody> {

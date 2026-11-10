@@ -171,7 +171,9 @@ pub fn token() -> String {
     format!("alt1_{}", secret())
 }
 pub fn digest(value: &str) -> String {
-    blake3::hash(value.as_bytes()).to_hex().to_string()
+    alt_hash::blake3::hash(value.as_bytes())
+        .to_hex()
+        .to_string()
 }
 pub fn digest_matches(value: &str, expected: &str) -> bool {
     if validate_secret(expected).is_err() {
@@ -183,7 +185,7 @@ pub fn digest_matches(value: &str, expected: &str) -> bool {
         let digit = |b: u8| if b <= b'9' { b - b'0' } else { b - b'a' + 10 };
         bytes[index] = digit(pair[0]) * 16 + digit(pair[1]);
     }
-    blake3::hash(value.as_bytes()) == blake3::Hash::from(bytes)
+    alt_hash::blake3::hash(value.as_bytes()) == alt_hash::blake3::Hash::from(bytes)
 }
 
 fn argon() -> Result<Argon2<'static>> {

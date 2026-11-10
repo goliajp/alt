@@ -8,7 +8,7 @@ fn chunked(request: &str) -> Payload {
         .map(|(i, bytes)| Chunk {
             offset: (i * 31) as u64,
             bytes: bytes.len() as u64,
-            blake3: blake3::hash(bytes).to_hex().to_string(),
+            blake3: alt_hash::blake3::hash(bytes).to_hex().to_string(),
         })
         .collect();
     payload.publication.content_manifest = payload.manifest.id(limits()).unwrap();

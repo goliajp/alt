@@ -47,7 +47,7 @@ pub(crate) fn encode(entries: &[Entry], limit: usize) -> Result<Vec<u8>> {
         }
         out.extend(&e.attributes);
     }
-    let id = blake3::hash(&out);
+    let id = alt_hash::blake3::hash(&out);
     out.extend(id.as_bytes());
     Ok(out)
 }
@@ -70,7 +70,7 @@ pub(crate) fn decode(bytes: &[u8], expected: &Digest, limits: Limits) -> Result<
         return Err(Error::Limit("encoded bytes"));
     }
     let end = bytes.len() - 32;
-    if &bytes[end..] != expected || blake3::hash(&bytes[..end]).as_bytes() != expected {
+    if &bytes[end..] != expected || alt_hash::blake3::hash(&bytes[..end]).as_bytes() != expected {
         return Err(Error::Format("block identity"));
     }
     let mut input = Cursor(&bytes[..end]);

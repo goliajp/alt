@@ -283,7 +283,7 @@ fn browser_browsing_observes_only_published_bytes_and_current_repository_grants(
             (ContentKind::Commit, p.commit),
         ])
         .map(|(bytes, (kind, oid))| {
-            let digest = blake3::hash(bytes).to_hex().to_string();
+            let digest = alt_hash::blake3::hash(bytes).to_hex().to_string();
             ContentEntry {
                 kind,
                 blake3: digest.clone(),
@@ -493,7 +493,7 @@ fn migration_payload() -> Payload {
             (ContentKind::Commit, commit),
         ])
         .map(|(bytes, (kind, oid))| {
-            let blake3 = blake3::hash(bytes).to_hex().to_string();
+            let blake3 = alt_hash::blake3::hash(bytes).to_hex().to_string();
             ContentEntry {
                 kind,
                 git_oid: Some(oid.to_string()),

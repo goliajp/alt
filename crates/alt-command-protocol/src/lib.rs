@@ -135,7 +135,7 @@ pub fn validate_completion(
         return Err(Error::Invalid("intent/completion binding or encoding"));
     }
     if completion.response_bytes != response.len() as u64
-        || completion.response_digest != blake3::hash(response).to_hex().as_str()
+        || completion.response_digest != alt_hash::blake3::hash(response).to_hex().as_str()
     {
         return Err(Error::Invalid("response content identity"));
     }

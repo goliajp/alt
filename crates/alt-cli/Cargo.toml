@@ -22,6 +22,7 @@ name = "altd-server"
 path = "src/bin/altd_server.rs"
 
 [dependencies]
+alt-hash.workspace = true
 golia-change-link.workspace = true
 alt-provenance.workspace = true
 alt-portable.workspace = true
@@ -53,7 +54,6 @@ alt-sign.workspace = true
 alt-treediff.workspace = true
 alt-wire.workspace = true
 alt-wire-http.workspace = true
-blake3.workspace = true
 ed25519-dalek.workspace = true
 tempfile.workspace = true
 tiny_http.workspace = true

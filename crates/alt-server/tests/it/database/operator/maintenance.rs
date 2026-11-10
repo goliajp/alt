@@ -28,7 +28,7 @@ fn cloud_backup_restores_with_fresh_binding_and_rejects_old_credentials() {
             audience,
             runtime_credential_file: credential,
             provision_digest: Some(
-                blake3::hash(format!("spec-{generation}").as_bytes())
+                alt_hash::blake3::hash(format!("spec-{generation}").as_bytes())
                     .to_hex()
                     .to_string(),
             ),

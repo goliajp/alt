@@ -397,7 +397,7 @@ impl Config {
     }
     fn volume_identity(&self) -> Result<serde_json::Value> {
         Ok(
-            serde_json::json!({"version":1,"installation_id":self.instance.installation_id,"workspace_id":self.instance.workspace_id,"deployment_mode":self.instance.deployment_mode,"receipt_key_id":blake3::hash(self.signing_key()?.verifying_key().as_bytes()).to_hex().to_string()}),
+            serde_json::json!({"version":1,"installation_id":self.instance.installation_id,"workspace_id":self.instance.workspace_id,"deployment_mode":self.instance.deployment_mode,"receipt_key_id":alt_hash::blake3::hash(self.signing_key()?.verifying_key().as_bytes()).to_hex().to_string()}),
         )
     }
     pub(super) fn check_volume(&self) -> Result<()> {

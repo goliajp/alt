@@ -25,7 +25,7 @@ pub(super) fn task_limits() -> TaskLimits {
 }
 fn add(payload: &mut Payload, kind: ContentKind, raw: Vec<u8>) -> alt_task::Artifact {
     let artifact = alt_task::Artifact {
-        blake3: blake3::hash(&raw).to_hex().to_string(),
+        blake3: alt_hash::blake3::hash(&raw).to_hex().to_string(),
         bytes: raw.len() as u64,
     };
     if payload
@@ -109,7 +109,7 @@ pub(super) fn task_payload_with_source(
         request_id: intent.request_id.clone(),
         binding_digest: intent.binding_digest.clone(),
         finished_ms: 2,
-        response_digest: blake3::hash(&response).to_hex().to_string(),
+        response_digest: alt_hash::blake3::hash(&response).to_hex().to_string(),
         response_bytes: response.len() as u64,
         operations: vec![],
         outcome: "applied".into(),
@@ -429,7 +429,7 @@ fn completed_source(
         request_id: request.clone(),
         binding_digest: intent.binding_digest.clone(),
         finished_ms: 2,
-        response_digest: blake3::hash(&response).to_hex().to_string(),
+        response_digest: alt_hash::blake3::hash(&response).to_hex().to_string(),
         response_bytes: response.len() as u64,
         operations: operation.iter().map(|(id, _)| id.clone()).collect(),
         outcome: "applied".into(),
@@ -485,7 +485,7 @@ fn integration_payload(base: &Payload, omit_output: bool, recover: bool) -> Inte
     );
     let output_bytes = b"original successful validation".to_vec();
     let output = alt_task::Artifact {
-        blake3: blake3::hash(&output_bytes).to_hex().to_string(),
+        blake3: alt_hash::blake3::hash(&output_bytes).to_hex().to_string(),
         bytes: output_bytes.len() as u64,
     };
     if !omit_output {
@@ -730,7 +730,9 @@ fn integration_payload(base: &Payload, omit_output: bool, recover: bool) -> Inte
     }
     let signing = SigningKey::from_bytes(&[9; 32]);
     let public = signing.verifying_key();
-    let key = blake3::hash(public.as_bytes()).to_hex().to_string();
+    let key = alt_hash::blake3::hash(public.as_bytes())
+        .to_hex()
+        .to_string();
     let mut attestation = CollectorAttestation {
         schema_version: 1,
         evidence: evidence.id().unwrap(),

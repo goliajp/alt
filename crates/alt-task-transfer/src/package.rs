@@ -79,14 +79,14 @@ impl Draft {
         }
         let content = self.directory.path().join("content");
         let mut temporary = tempfile::NamedTempFile::new_in(&content)?;
-        let mut hash = blake3::Hasher::new();
+        let mut hash = alt_hash::blake3::Hasher::new();
         let mut chunks = Vec::new();
         let mut offset = 0;
         let mut buffer = [0u8; 65536];
         while offset < bytes {
             let count = self.limits.chunk_bytes.min(bytes - offset);
             let mut remaining = count;
-            let mut chunk_hash = blake3::Hasher::new();
+            let mut chunk_hash = alt_hash::blake3::Hasher::new();
             while remaining > 0 {
                 let n = source.read(&mut buffer[..remaining.min(65536) as usize])?;
                 if n == 0 {
@@ -365,11 +365,11 @@ fn verify_file(path: &Path, entry: &ContentEntry) -> Result<()> {
     if file.metadata()?.len() != entry.bytes {
         return Err(Error::Invalid("content size"));
     }
-    let mut hash = blake3::Hasher::new();
+    let mut hash = alt_hash::blake3::Hasher::new();
     let mut buffer = [0u8; 65536];
     for chunk in &entry.chunks {
         let mut remaining = chunk.bytes;
-        let mut chunk_hash = blake3::Hasher::new();
+        let mut chunk_hash = alt_hash::blake3::Hasher::new();
         while remaining > 0 {
             let n = file.read(&mut buffer[..remaining.min(65536) as usize])?;
             if n == 0 {

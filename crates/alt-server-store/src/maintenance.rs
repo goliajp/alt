@@ -245,7 +245,7 @@ impl<'a> MaintenanceSnapshot<'a> {
                 let expected = unsigned(row.get(2))?;
                 let mut file = std::fs::File::open(crate::packs::segment_file(bytes.root(), &repository, &segment)?)
                     .map_err(|_| Error::Integrity("published pack segment unavailable"))?;
-                let mut hasher = blake3::Hasher::new();
+                let mut hasher = alt_hash::blake3::Hasher::new();
                 let actual = std::io::copy(&mut file, &mut hasher)?;
                 if actual != expected {
                     return Err(Error::Integrity("published pack segment size"));

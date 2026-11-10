@@ -218,7 +218,9 @@ pub fn detail(
     }
     let mut raw = Vec::new();
     file.take(bytes + 1).read_to_end(&mut raw)?;
-    if raw.len() as u64 != bytes || blake3::hash(&raw).to_hex().as_str() != bundle_entry.blake3 {
+    if raw.len() as u64 != bytes
+        || alt_hash::blake3::hash(&raw).to_hex().as_str() != bundle_entry.blake3
+    {
         return Err(Error::Integrity("bundle bytes"));
     }
     let bundle = TaskBundle::decode(&raw, limits)?;

@@ -63,7 +63,7 @@ fn source(target: &str) -> RepairSource {
 #[test]
 fn old_task_encoding_and_identity_remain_byte_compatible() {
     // The canonical identity input was frozen before adding repair_source.
-    let expected = blake3::hash(include_bytes!("fixtures/task-v1-identity.bin"))
+    let expected = alt_hash::blake3::hash(include_bytes!("fixtures/task-v1-identity.bin"))
         .to_hex()
         .to_string();
     let task = legacy();

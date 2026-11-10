@@ -25,8 +25,8 @@ dependencies = [
 name = "alt-browser-auth"
 version = "0.1.0"
 dependencies = [
+ "alt-hash",
  "argon2",
- "blake3",
  "rand_core 0.6.4",
  "url",
 ]
@@ -35,14 +35,14 @@ dependencies = [
 name = "alt-byte-segment"
 version = "0.1.0"
 dependencies = [
- "blake3",
+ "alt-hash",
 ]
 
 [[package]]
 name = "alt-catalog-block"
 version = "0.1.0"
 dependencies = [
- "blake3",
+ "alt-hash",
 ]
 
 [[package]]
@@ -67,6 +67,7 @@ dependencies = [
  "alt-git-config",
  "alt-git-index",
  "alt-git-pack",
+ "alt-hash",
  "alt-import",
  "alt-inflate",
  "alt-input",
@@ -92,7 +93,6 @@ dependencies = [
  "alt-wire",
  "alt-wire-http",
  "alt-worktree",
- "blake3",
  "bstr",
  "clap",
  "criterion",
@@ -113,8 +113,8 @@ dependencies = [
 name = "alt-cloud-client"
 version = "0.1.0"
 dependencies = [
+ "alt-hash",
  "base64 0.22.1",
- "blake3",
  "chacha20poly1305",
  "golia-platform-contract",
  "rand_core 0.6.4",
@@ -128,7 +128,7 @@ dependencies = [
 name = "alt-command-protocol"
 version = "0.1.0"
 dependencies = [
- "blake3",
+ "alt-hash",
  "serde",
  "serde_json",
 ]
@@ -150,12 +150,12 @@ dependencies = [
  "alt-git-index",
  "alt-git-pack",
  "alt-git-refs",
+ "alt-hash",
  "alt-import",
  "alt-input",
  "alt-odb",
  "alt-refs",
  "alt-repo",
- "blake3",
  "bstr",
  "libc",
  "serde",
@@ -283,7 +283,7 @@ dependencies = [
 name = "alt-input"
 version = "0.1.0"
 dependencies = [
- "blake3",
+ "alt-hash",
  "libc",
  "serde",
  "serde_json",
@@ -314,13 +314,13 @@ version = "0.1.0"
 dependencies = [
  "alt-git-codec",
  "alt-git-pack",
+ "alt-hash",
  "alt-prism",
  "alt-prism-deflate",
  "alt-prism-png",
  "alt-prism-zip",
  "alt-store",
  "alt-testutil",
- "blake3",
  "libc",
  "tempfile",
 ]
@@ -329,7 +329,7 @@ dependencies = [
 name = "alt-oplog"
 version = "0.1.0"
 dependencies = [
- "blake3",
+ "alt-hash",
  "libc",
  "tempfile",
 ]
@@ -342,7 +342,6 @@ dependencies = [
  "alt-git-pack",
  "alt-hash",
  "alt-inflate",
- "blake3",
  "memmap2",
  "rayon",
  "tempfile",
@@ -353,12 +352,12 @@ name = "alt-portable"
 version = "0.1.0"
 dependencies = [
  "alt-git-codec",
+ "alt-hash",
  "alt-provenance",
  "alt-remote-protocol",
  "alt-repository-service",
  "alt-task",
  "alt-task-service",
- "blake3",
  "ed25519-dalek",
  "golia-change-link",
  "serde",
@@ -392,10 +391,10 @@ name = "alt-prism-store"
 version = "0.1.0"
 dependencies = [
  "alt-deflate",
+ "alt-hash",
  "alt-prism",
  "alt-prism-deflate",
  "alt-store",
- "blake3",
  "tempfile",
 ]
 
@@ -412,8 +411,8 @@ dependencies = [
 name = "alt-provenance"
 version = "0.1.0"
 dependencies = [
+ "alt-hash",
  "alt-remote-protocol",
- "blake3",
  "ed25519-dalek",
  "serde_json",
 ]
@@ -423,8 +422,8 @@ name = "alt-refs"
 version = "0.1.0"
 dependencies = [
  "alt-git-codec",
+ "alt-hash",
  "alt-oplog",
- "blake3",
  "tempfile",
 ]
 
@@ -432,7 +431,7 @@ dependencies = [
 name = "alt-remote-protocol"
 version = "0.1.0"
 dependencies = [
- "blake3",
+ "alt-hash",
  "golia-change-link",
  "serde",
  "serde_json",
@@ -469,9 +468,9 @@ dependencies = [
 name = "alt-runner"
 version = "0.1.0"
 dependencies = [
+ "alt-hash",
  "alt-input",
  "alt-task",
- "blake3",
  "libc",
  "serde",
  "serde_json",
@@ -489,6 +488,7 @@ dependencies = [
  "alt-deflate",
  "alt-git-codec",
  "alt-git-pack",
+ "alt-hash",
  "alt-inflate",
  "alt-pack-segment",
  "alt-portable",
@@ -502,7 +502,6 @@ dependencies = [
  "alt-wire",
  "alt-wire-http",
  "base64 0.22.1",
- "blake3",
  "bytes",
  "clap",
  "ed25519-dalek",
@@ -537,6 +536,7 @@ dependencies = [
  "alt-command-protocol",
  "alt-delivery",
  "alt-git-codec",
+ "alt-hash",
  "alt-input",
  "alt-pack-segment",
  "alt-portable",
@@ -547,7 +547,6 @@ dependencies = [
  "alt-server-telemetry",
  "alt-task",
  "alt-task-service",
- "blake3",
  "ed25519-dalek",
  "golia-change-link",
  "golia-platform-contract",
@@ -589,8 +588,8 @@ dependencies = [
  "alt-cdc",
  "alt-git-codec",
  "alt-git-pack",
+ "alt-hash",
  "alt-testutil",
- "blake3",
  "criterion",
  "memmap2",
  "tempfile",
@@ -601,9 +600,9 @@ dependencies = [
 name = "alt-task"
 version = "0.1.0"
 dependencies = [
+ "alt-hash",
  "alt-input",
  "alt-store",
- "blake3",
  "ed25519-dalek",
  "golia-change-link",
  "libc",
@@ -621,13 +620,13 @@ dependencies = [
  "alt-delivery",
  "alt-git-codec",
  "alt-git-config",
+ "alt-hash",
  "alt-input",
  "alt-oplog",
  "alt-refs",
  "alt-remote-protocol",
  "alt-repository-service",
  "alt-task",
- "blake3",
  "ed25519-dalek",
  "serde",
  "serde_json",
@@ -640,12 +639,12 @@ version = "0.1.0"
 dependencies = [
  "alt-command-protocol",
  "alt-git-codec",
+ "alt-hash",
  "alt-input",
  "alt-remote-protocol",
  "alt-repository-service",
  "alt-task",
  "alt-task-service",
- "blake3",
  "libc",
  "serde",
  "serde_json",
@@ -706,10 +705,10 @@ dependencies = [
 name = "alt-wire-http"
 version = "0.1.0"
 dependencies = [
+ "alt-hash",
  "alt-portable",
  "alt-remote-protocol",
  "alt-wire",
- "blake3",
  "ed25519-dalek",
  "golia-change-link",
  "serde",
@@ -909,7 +908,6 @@ dependencies = [
  "cfg-if",
  "constant_time_eq",
  "cpufeatures 0.3.0",
- "rayon-core",
 ]
 
 [[package]]

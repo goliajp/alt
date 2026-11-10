@@ -95,7 +95,7 @@ pub struct ChunkId(pub [u8; 32]);
 
 impl ChunkId {
     pub fn of(data: &[u8]) -> Self {
-        Self(*blake3::hash(data).as_bytes())
+        Self(*alt_hash::blake3::hash(data).as_bytes())
     }
 }
 
@@ -119,21 +119,10 @@ impl fmt::Debug for ChunkId {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct BlobId(pub [u8; 32]);
 
-/// Above this size the rayon-parallel hasher wins; below it, plain BLAKE3.
-const RAYON_HASH_THRESHOLD: usize = 128 * 1024;
-
 impl BlobId {
     pub fn of(data: &[u8]) -> Self {
-        if data.len() >= RAYON_HASH_THRESHOLD {
-            Self(
-                *blake3::Hasher::new()
-                    .update_rayon(data)
-                    .finalize()
-                    .as_bytes(),
-            )
-        } else {
-            Self(*blake3::hash(data).as_bytes())
-        }
+        // large inputs are spread over the thread pool; small ones stay on this thread
+        Self(*alt_hash::blake3::hash_threads(data).as_bytes())
     }
 }
 

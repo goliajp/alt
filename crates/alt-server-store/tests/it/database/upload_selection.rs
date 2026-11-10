@@ -4,7 +4,7 @@ fn chunk(bytes: &[u8], offset: u64) -> Chunk {
     Chunk {
         offset,
         bytes: bytes.len() as u64,
-        blake3: blake3::hash(bytes).to_hex().to_string(),
+        blake3: alt_hash::blake3::hash(bytes).to_hex().to_string(),
     }
 }
 fn with_shared_roles(request: &str, parent: Option<ObjectId>) -> Payload {
@@ -12,7 +12,7 @@ fn with_shared_roles(request: &str, parent: Option<ObjectId>) -> Payload {
     let raw = b"abcdef".to_vec();
     let attachment = ContentEntry {
         kind: ContentKind::Attachment,
-        blake3: blake3::hash(&raw).to_hex().to_string(),
+        blake3: alt_hash::blake3::hash(&raw).to_hex().to_string(),
         bytes: raw.len() as u64,
         git_oid: None,
         chunks: vec![chunk(b"abc", 0), chunk(b"def", 3)],
@@ -23,7 +23,7 @@ fn with_shared_roles(request: &str, parent: Option<ObjectId>) -> Payload {
     let short = b"abc".to_vec();
     let shared_chunk = ContentEntry {
         kind: ContentKind::Attachment,
-        blake3: blake3::hash(&short).to_hex().to_string(),
+        blake3: alt_hash::blake3::hash(&short).to_hex().to_string(),
         bytes: short.len() as u64,
         git_oid: None,
         chunks: vec![chunk(&short, 0)],
@@ -94,7 +94,7 @@ fn indexed_selection_preserves_equal_bytes_in_multiple_roles_and_exact_chunks() 
         ))
     ));
     for bytes in [b"abc", b"def"] {
-        let digest = blake3::hash(bytes).to_hex().to_string();
+        let digest = alt_hash::blake3::hash(bytes).to_hex().to_string();
         f.store
             .upload_chunk(&f.credential, key, &digest, &mut Cursor::new(bytes))
             .unwrap();
@@ -221,7 +221,7 @@ fn indexed_selection_cloud_ingress_counts_shared_roots_once_and_chunks_only_when
         .begin(&f.credential, &p.publication, &p.manifest, 60_000)
         .unwrap();
     for raw in [b"abc", b"def"] {
-        let digest = blake3::hash(raw).to_hex().to_string();
+        let digest = alt_hash::blake3::hash(raw).to_hex().to_string();
         f.store
             .upload_chunk(
                 &f.credential,

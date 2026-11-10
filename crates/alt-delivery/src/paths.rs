@@ -48,7 +48,7 @@ pub fn validate_files(entries: &BTreeMap<String, FileEntry>, odb: &NativeOdb) ->
             },
             executable: entry.mode == 0o100755,
             len: object.data.len() as u64,
-            content: blake3::hash(&object.data).to_hex().to_string(),
+            content: alt_hash::blake3::hash(&object.data).to_hex().to_string(),
             link_target: link.then(|| alt_input::hex(&object.data)),
         };
         node.validate(path)?;
@@ -118,7 +118,7 @@ pub fn verify_checkout(
             .get(&ObjectId::from_hex(entry.oid.as_bytes())?)?
             .ok_or("missing checkout object")?
             .data;
-        if node.content != blake3::hash(&bytes).to_hex().as_str()
+        if node.content != alt_hash::blake3::hash(&bytes).to_hex().as_str()
             || node.len != bytes.len() as u64
             || node.executable != (entry.mode == 0o100755)
             || (node.kind == alt_input::EntryKind::Symlink) != (entry.mode == 0o120000)

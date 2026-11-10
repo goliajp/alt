@@ -6,13 +6,13 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+alt-hash.workspace = true
 alt-remote-protocol.workspace = true
 alt-repository-service.workspace = true
 alt-task-service.workspace = true
 alt-task.workspace = true
 alt-input.workspace = true
 alt-git-codec.workspace = true
-blake3.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true

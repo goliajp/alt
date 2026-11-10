@@ -64,7 +64,7 @@ impl Root {
         if !before.is_file() {
             return Err(Error::Unsupported(format!("not a regular file: {path}")));
         }
-        let mut hash = blake3::Hasher::new();
+        let mut hash = alt_hash::blake3::Hasher::new();
         let mut len = 0;
         let mut buffer = [0u8; 65536];
         let mut remaining = before.len().saturating_add(1);
@@ -154,7 +154,7 @@ impl Tree for Root {
                     kind: EntryKind::Symlink,
                     executable: false,
                     len: bytes.len() as u64,
-                    content: blake3::hash(&bytes).to_hex().to_string(),
+                    content: alt_hash::blake3::hash(&bytes).to_hex().to_string(),
                     link_target: Some(crate::hex(&bytes)),
                 })
             }

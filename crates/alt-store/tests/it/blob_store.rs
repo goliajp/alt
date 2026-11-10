@@ -150,7 +150,7 @@ fn blob_ids_are_plain_blake3_of_content() {
 
 fn blake3_reference(data: &[u8]) -> [u8; 32] {
     // independent path through the public crate API (non-rayon)
-    let mut hasher = blake3::Hasher::new();
+    let mut hasher = alt_hash::blake3::Hasher::new();
     hasher.update(data);
     *hasher.finalize().as_bytes()
 }

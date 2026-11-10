@@ -49,7 +49,9 @@ pub fn write(
             }
         }
     }
-    let check: [u8; 8] = blake3::hash(&buf).as_bytes()[..8].try_into().unwrap();
+    let check: [u8; 8] = alt_hash::blake3::hash(&buf).as_bytes()[..8]
+        .try_into()
+        .unwrap();
     buf.extend_from_slice(&check);
 
     let tmp = path.with_extension("tmp");
@@ -68,7 +70,7 @@ pub fn read(path: &Path) -> Option<(OpId, BTreeMap<String, RefTarget>)> {
         return None;
     }
     let (body, check) = data.split_at(data.len() - 8);
-    if blake3::hash(body).as_bytes()[..8] != *check {
+    if alt_hash::blake3::hash(body).as_bytes()[..8] != *check {
         return None;
     }
 

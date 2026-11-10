@@ -50,7 +50,7 @@ pub(crate) fn locations(
             if state != "stored" || expected.as_ref() != Some(&index) {
                 return Err(Error::Integrity("segment location is not stored"));
             }
-            let hash = blake3::Hash::from_hex(&index)
+            let hash = alt_hash::blake3::Hash::from_hex(&index)
                 .map_err(|_| Error::Integrity("segment index digest"))?;
             result.insert(
                 row.get(0),
@@ -238,7 +238,7 @@ impl Store {
                 .filter(|input| new_selection.contains_key(input.digest))
                 .map(|input| {
                     Ok(alt_byte_segment::Input {
-                        digest: *blake3::Hash::from_hex(input.digest)
+                        digest: *alt_hash::blake3::Hash::from_hex(input.digest)
                             .map_err(|_| Error::Integrity("segment digest"))?
                             .as_bytes(),
                         bytes: input.bytes,
@@ -319,7 +319,7 @@ pub(crate) fn register_locations(
             .1
             .segment_checksum()
             .ok_or(Error::Integrity("missing segment encoding proof"))?;
-        let encoded = blake3::Hash::from(index).to_hex().to_string();
+        let encoded = alt_hash::blake3::Hash::from(index).to_hex().to_string();
         if members.iter().any(|(_, proof)| {
             proof.location().unwrap().index_digest != index
                 || proof.segment_checksum() != Some(checksum)

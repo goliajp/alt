@@ -85,7 +85,7 @@ impl ImportIntent {
         if raw.len() > limits.metadata_bytes {
             return Err(Error::Limit("import intent bytes"));
         }
-        let mut hash = blake3::Hasher::new();
+        let mut hash = alt_hash::blake3::Hasher::new();
         hash.update(b"jp.golia.alt.portable-import-intent.v1\0");
         hash.update(&raw);
         Ok(hash.finalize().to_hex().to_string())

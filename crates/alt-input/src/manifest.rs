@@ -25,7 +25,7 @@ impl Node {
             kind: EntryKind::Directory,
             executable: false,
             len: 0,
-            content: blake3::hash(b"").to_hex().to_string(),
+            content: alt_hash::blake3::hash(b"").to_hex().to_string(),
             link_target: None,
         }
     }
@@ -48,7 +48,7 @@ impl Node {
                 checked_link(path, &target)?;
                 if self.executable
                     || self.len != target.len() as u64
-                    || self.content != blake3::hash(&target).to_hex().as_str()
+                    || self.content != alt_hash::blake3::hash(&target).to_hex().as_str()
                 {
                     return Err(Error::Integrity(format!("invalid link: {path}")));
                 }

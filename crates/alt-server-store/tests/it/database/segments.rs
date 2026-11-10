@@ -64,7 +64,7 @@ fn sparse() -> Payload {
     let mut p = Payload::new("segment-sparse", None);
     for n in 0..8 {
         let data = vec![n; 32_000];
-        let hash = blake3::hash(&data).to_hex().to_string();
+        let hash = alt_hash::blake3::hash(&data).to_hex().to_string();
         p.manifest.entries.push(ContentEntry {
             kind: ContentKind::Blob,
             blake3: hash.clone(),
@@ -967,7 +967,7 @@ fn mixed_segment_upload_writes_only_new_members_and_revalidates_existing_inputs(
     let mut p = Payload::new("mixed-segment", None);
     let first = upload(&mut f, &p);
     let extra = b"one additional canonical member".to_vec();
-    let digest = blake3::hash(&extra).to_hex().to_string();
+    let digest = alt_hash::blake3::hash(&extra).to_hex().to_string();
     p.manifest.entries.push(ContentEntry {
         kind: ContentKind::Blob,
         blake3: digest.clone(),
@@ -1080,7 +1080,7 @@ fn packed_batches_and_compaction_bound_open_descriptors() {
     let mut keep = Vec::new();
     for n in 0u32..300 {
         let data = n.to_le_bytes().repeat(64);
-        let digest = blake3::hash(&data).to_hex().to_string();
+        let digest = alt_hash::blake3::hash(&data).to_hex().to_string();
         if n < 100 {
             keep.push(digest.clone());
         }
@@ -1181,7 +1181,7 @@ fn legacy_loose_reuse_bounds_open_descriptors() {
     let mut p = Payload::new("legacy-descriptors", None);
     for n in 0u32..100 {
         let data = n.to_le_bytes().repeat(64);
-        let digest = blake3::hash(&data).to_hex().to_string();
+        let digest = alt_hash::blake3::hash(&data).to_hex().to_string();
         p.manifest.entries.push(ContentEntry {
             kind: ContentKind::Blob,
             blake3: digest.clone(),

@@ -100,7 +100,7 @@ pub fn credential_id(token: &str) -> Result<String> {
         "agent token",
     )?;
     Ok(
-        blake3::derive_key("jp.golia.alt.server-token.v1", token.as_bytes())
+        alt_hash::blake3::derive_key("jp.golia.alt.server-token.v1", token.as_bytes())
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect(),

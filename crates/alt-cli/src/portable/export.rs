@@ -39,7 +39,7 @@ fn file_digest(file: &mut File) -> Res<alt_portable::Blob> {
     file.rewind()?;
     let bytes = file.metadata()?.len();
     let mut remaining = bytes;
-    let mut hash = blake3::Hasher::new();
+    let mut hash = alt_hash::blake3::Hasher::new();
     let mut buffer = [0u8; 65536];
     while remaining > 0 {
         let count = file.read(&mut buffer[..remaining.min(65536) as usize])?;

@@ -249,7 +249,7 @@ impl Transport {
             .set("Content-Length", &blob.bytes.to_string());
         let mut reader = HashReader {
             input,
-            hash: blake3::Hasher::new(),
+            hash: alt_hash::blake3::Hasher::new(),
             count: 0,
         };
         let response = match request.send(&mut reader) {
@@ -297,7 +297,7 @@ impl Transport {
 }
 struct HashReader<'a> {
     input: &'a mut dyn Read,
-    hash: blake3::Hasher,
+    hash: alt_hash::blake3::Hasher,
     count: u64,
 }
 impl Read for HashReader<'_> {

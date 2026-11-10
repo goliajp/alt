@@ -481,7 +481,9 @@ fn altd_server_basic_auth_blocks_unauthenticated_and_allows_correct_token() {
 
     // users file: alice carries BLAKE3("alice-token-123")
     let token = "alice-token-123";
-    let hash = blake3::hash(token.as_bytes()).to_hex().to_ascii_lowercase();
+    let hash = alt_hash::blake3::hash(token.as_bytes())
+        .to_hex()
+        .to_ascii_lowercase();
     std::fs::write(root.join("users"), format!("alice\t{hash}\n")).unwrap();
 
     let server = spawn_server_with_env(&[("ALT_SERVER_ROOT", root.to_str().unwrap())]);
@@ -584,7 +586,9 @@ fn altd_server_acl_scopes_user_to_listed_repos_and_actions() {
     }
 
     let token = "alice-w11c-token";
-    let hash = blake3::hash(token.as_bytes()).to_hex().to_ascii_lowercase();
+    let hash = alt_hash::blake3::hash(token.as_bytes())
+        .to_hex()
+        .to_ascii_lowercase();
     std::fs::write(
         root.join("users"),
         format!("alice\t{hash}\talpha:rw beta:r\n"),
@@ -672,7 +676,9 @@ fn altd_server_acl_wildcard_grants_all_repos() {
         ok(alt(&dir, &["commit", "-m", "seed"]));
     }
     let token = "ops-token";
-    let hash = blake3::hash(token.as_bytes()).to_hex().to_ascii_lowercase();
+    let hash = alt_hash::blake3::hash(token.as_bytes())
+        .to_hex()
+        .to_ascii_lowercase();
     std::fs::write(root.join("users"), format!("ops\t{hash}\t*:rw\n")).unwrap();
 
     let server = spawn_server_with_env(&[("ALT_SERVER_ROOT", root.to_str().unwrap())]);
@@ -719,7 +725,9 @@ fn altd_server_a6_policy_denies_push_to_protected_ref() {
     // users file: alice is trusted (2 columns) so she can reach the
     // server; the server then runs her through the per-repo policy.
     let token = "alice-w12-token";
-    let hash = blake3::hash(token.as_bytes()).to_hex().to_ascii_lowercase();
+    let hash = alt_hash::blake3::hash(token.as_bytes())
+        .to_hex()
+        .to_ascii_lowercase();
     std::fs::write(root.join("users"), format!("alice\t{hash}\n")).unwrap();
 
     let server = spawn_server_with_env(&[("ALT_SERVER_ROOT", root.to_str().unwrap())]);

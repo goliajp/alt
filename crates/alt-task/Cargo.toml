@@ -6,10 +6,10 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+alt-hash.workspace = true
 golia-change-link.workspace = true
 alt-input.workspace = true
 alt-store.workspace = true
-blake3.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true

@@ -622,7 +622,7 @@ impl Store {
         let signature = self.signing_key.sign(&body.signing_bytes(self.limits)?);
         let receipt = Receipt {
             body,
-            signing_key_id: blake3::hash(self.signing_key.verifying_key().as_bytes())
+            signing_key_id: alt_hash::blake3::hash(self.signing_key.verifying_key().as_bytes())
                 .to_hex()
                 .to_string(),
             signature: signature

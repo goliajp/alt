@@ -139,7 +139,7 @@ pub fn execute(
                         .ok_or(Error::Unauthorized)?;
                     let mut input = export.open(blob)?;
                     let mut file = tempfile::NamedTempFile::new()?;
-                    let mut hash = blake3::Hasher::new();
+                    let mut hash = alt_hash::blake3::Hasher::new();
                     let mut remaining = blob.bytes;
                     let mut buffer = [0u8; 65536];
                     while remaining > 0 {

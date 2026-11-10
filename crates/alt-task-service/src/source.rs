@@ -23,7 +23,7 @@ pub(crate) fn read_artifact(
         .take(artifact.bytes.saturating_add(1))
         .read_to_end(&mut bytes)?;
     if bytes.len() as u64 != artifact.bytes
-        || blake3::hash(&bytes).to_hex().as_str() != artifact.blake3
+        || alt_hash::blake3::hash(&bytes).to_hex().as_str() != artifact.blake3
     {
         return Err(Error::Integrity("artifact bytes"));
     }
@@ -39,7 +39,7 @@ pub(crate) fn verify_artifact(
         return Err(Error::Limit("artifact bytes"));
     }
     let mut reader = source.open(artifact)?;
-    let mut hash = blake3::Hasher::new();
+    let mut hash = alt_hash::blake3::Hasher::new();
     let mut remaining = artifact.bytes;
     let mut buffer = [0u8; 65536];
     while remaining > 0 {

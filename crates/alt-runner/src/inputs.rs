@@ -53,7 +53,7 @@ pub(crate) fn restore_root_auxiliary(root: &Path, manifest: &Manifest) -> Result
                 .join(&entry.node.content),
         )?;
         if bytes.len() as u64 != entry.node.len
-            || blake3::hash(&bytes).to_hex().as_str() != entry.node.content
+            || alt_hash::blake3::hash(&bytes).to_hex().as_str() != entry.node.content
         {
             return Err(Error::Invalid("auxiliary transfer blob mismatch".into()));
         }
@@ -171,7 +171,7 @@ pub fn materialize(
             EntryKind::File => {
                 let bytes = blob(&entry.node.content, entry.node.len)?;
                 if bytes.len() as u64 != entry.node.len
-                    || blake3::hash(&bytes).to_hex().as_str() != entry.node.content
+                    || alt_hash::blake3::hash(&bytes).to_hex().as_str() != entry.node.content
                 {
                     return Err(Error::Invalid(format!(
                         "blob identity mismatch: {}",

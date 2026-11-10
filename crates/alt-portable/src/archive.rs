@@ -8,7 +8,7 @@ const END: &[u8; 16] = b"ALT-COMPLETE-V1\0";
 fn copy_blob(reader: &mut dyn Read, writer: &mut dyn Write, blob: &Blob) -> Result<()> {
     let mut remaining = blob.bytes;
     let mut buffer = [0u8; 65536];
-    let mut hash = blake3::Hasher::new();
+    let mut hash = alt_hash::blake3::Hasher::new();
     while remaining > 0 {
         let length = remaining.min(buffer.len() as u64) as usize;
         let count = reader.read(&mut buffer[..length])?;

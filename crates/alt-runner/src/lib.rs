@@ -122,7 +122,7 @@ fn record_bytes(
     captures: &mut BTreeMap<String, String>,
 ) -> Result<Artifact> {
     let artifact = Artifact {
-        blake3: blake3::hash(bytes).to_hex().to_string(),
+        blake3: alt_hash::blake3::hash(bytes).to_hex().to_string(),
         bytes: bytes.len() as u64,
     };
     let path = format!("captures/{}", artifact.blake3);
@@ -154,7 +154,8 @@ pub(crate) fn capture_file(
     if destination.exists() {
         // Never trust a preexisting capture just because its name is a digest.
         let bytes = fs::read(&destination)?;
-        if blake3::hash(&bytes).to_hex().as_str() != node.content || bytes.len() as u64 != node.len
+        if alt_hash::blake3::hash(&bytes).to_hex().as_str() != node.content
+            || bytes.len() as u64 != node.len
         {
             return Err(Error::Invalid(
                 "capture digest collision or corruption".into(),
@@ -388,7 +389,7 @@ pub fn execute(root: &Path, spec: &Spec, authentication_key: &[u8; 32]) -> Resul
         .map_err(|error| error.error)?;
     let mut mac = tempfile::NamedTempFile::new_in(&control)?;
     mac.write_all(
-        blake3::keyed_hash(authentication_key, &report_bytes)
+        alt_hash::blake3::keyed_hash(authentication_key, &report_bytes)
             .to_hex()
             .as_bytes(),
     )?;

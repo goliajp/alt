@@ -132,7 +132,7 @@ pub fn build(
                 if bytes.len() > task_limits.structured_bytes {
                     return Err(Error::Limit("source proof bytes"));
                 }
-                let digest = blake3::hash(&bytes).to_hex().to_string();
+                let digest = alt_hash::blake3::hash(&bytes).to_hex().to_string();
                 if !draft
                     .entries()
                     .iter()

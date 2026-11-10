@@ -497,7 +497,7 @@ fn tagged_payload() -> Payload {
     for (name, kind) in [("inner", "commit"), ("outer", "tag")] {
         let data = format!("object {target}\ntype {kind}\ntag {name}\ntagger A <a@example.test> 1 +0000\n\n{name}\n").into_bytes();
         target = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Tag, &data);
-        let digest = blake3::hash(&data).to_hex().to_string();
+        let digest = alt_hash::blake3::hash(&data).to_hex().to_string();
         p.manifest.entries.push(ContentEntry {
             kind: ContentKind::Tag,
             blake3: digest.clone(),

@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+alt-hash.workspace = true
 alt-input.workspace = true
 alt-git-codec.workspace = true
 alt-git-index.workspace = true
@@ -16,7 +17,6 @@ alt-odb.workspace = true
 alt-refs.workspace = true
 alt-repo.workspace = true
 alt-import.workspace = true
-blake3.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 bstr.workspace = true

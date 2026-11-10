@@ -242,7 +242,7 @@ impl Process {
         config.portable = Some(bounds());
         config.validate().unwrap();
         // Explicit fixture volume binding; initialization is covered separately.
-        let marker = serde_json::json!({"version":1,"installation_id":f.spec.installation_id,"workspace_id":f.spec.workspace_id,"deployment_mode":f.spec.deployment_mode,"receipt_key_id":blake3::hash(SigningKey::from_bytes(&[f.key_seed;32]).verifying_key().as_bytes()).to_hex().to_string()});
+        let marker = serde_json::json!({"version":1,"installation_id":f.spec.installation_id,"workspace_id":f.spec.workspace_id,"deployment_mode":f.spec.deployment_mode,"receipt_key_id":alt_hash::blake3::hash(SigningKey::from_bytes(&[f.key_seed;32]).verifying_key().as_bytes()).to_hex().to_string()});
         alt_server::operator::create_private(
             &root.join("bytes/instance.json"),
             &serde_json::to_vec(&marker).unwrap(),

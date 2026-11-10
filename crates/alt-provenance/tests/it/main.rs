@@ -73,7 +73,7 @@ fn original() -> (Publication, Receipt) {
                 .sign(&body.signing_bytes(limits()).unwrap())
                 .to_bytes(),
         ),
-        signing_key_id: blake3::hash(signer.verifying_key().as_bytes())
+        signing_key_id: alt_hash::blake3::hash(signer.verifying_key().as_bytes())
             .to_hex()
             .to_string(),
         body,

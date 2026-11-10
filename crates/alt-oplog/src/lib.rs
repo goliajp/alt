@@ -118,7 +118,7 @@ impl Op {
         }
         let mut body = encode_body(&self.parent, self.timestamp_ms, &self.actor, &self.payload);
         body[32..64].copy_from_slice(&self.change_id);
-        if blake3::hash(&body).as_bytes() != &self.id.0 {
+        if alt_hash::blake3::hash(&body).as_bytes() != &self.id.0 {
             return Err(OpLogError::Format(
                 "operation body differs from its identity",
             ));
@@ -163,7 +163,7 @@ fn parse_body(body: &[u8]) -> Result<Op, OpLogError> {
         return Err(OpLogError::Format("op payload length mismatch"));
     }
     Ok(Op {
-        id: OpId(*blake3::hash(body).as_bytes()),
+        id: OpId(*alt_hash::blake3::hash(body).as_bytes()),
         parent: OpId(parent),
         change_id,
         timestamp_ms,
@@ -231,7 +231,7 @@ fn replay_records(
             break; // torn record at EOF
         };
         let (body, check) = rec.split_at(body_len);
-        let hash = blake3::hash(body);
+        let hash = alt_hash::blake3::hash(body);
         if hash.as_bytes()[..CHECKSUM_LEN] != *check {
             if at + 4 + body_len + CHECKSUM_LEN == data.len() {
                 break; // torn final record: caller truncates
@@ -521,7 +521,7 @@ impl OpLog {
     ) -> Result<OpId, OpLogError> {
         let parent = self.head().unwrap_or(ROOT);
         let body = encode_body(&parent, timestamp_ms, actor, payload);
-        let hash = blake3::hash(&body);
+        let hash = alt_hash::blake3::hash(&body);
 
         let mut rec = Vec::with_capacity(4 + body.len() + CHECKSUM_LEN);
         rec.extend_from_slice(&(body.len() as u32).to_le_bytes());

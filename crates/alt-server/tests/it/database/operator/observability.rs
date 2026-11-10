@@ -110,7 +110,7 @@ fn publish_large_stream(
             .map(|(kind, oid, bytes)| ContentEntry {
                 kind: *kind,
                 git_oid: Some(oid.to_string()),
-                blake3: blake3::hash(bytes).to_hex().to_string(),
+                blake3: alt_hash::blake3::hash(bytes).to_hex().to_string(),
                 bytes: bytes.len() as u64,
                 chunks: bytes
                     .chunks(limits.chunk_bytes as usize)
@@ -118,7 +118,7 @@ fn publish_large_stream(
                     .map(|(i, chunk)| Chunk {
                         offset: i as u64 * limits.chunk_bytes,
                         bytes: chunk.len() as u64,
-                        blake3: blake3::hash(chunk).to_hex().to_string(),
+                        blake3: alt_hash::blake3::hash(chunk).to_hex().to_string(),
                     })
                     .collect(),
             })

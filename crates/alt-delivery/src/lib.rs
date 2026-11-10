@@ -128,7 +128,7 @@ pub fn object_identity(odb: &NativeOdb, oid: ObjectId) -> Result<ObjectIdentity>
     Ok(ObjectIdentity {
         kind: format!("{}", object.kind),
         bytes: object.data.len() as u64,
-        blake3: blake3::hash(&object.data).to_hex().to_string(),
+        blake3: alt_hash::blake3::hash(&object.data).to_hex().to_string(),
     })
 }
 pub fn snapshot(

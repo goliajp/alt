@@ -203,7 +203,7 @@ impl Local {
             request_id: original.request_id.clone(),
             binding_digest: original.binding_digest.clone(),
             finished_ms: 2,
-            response_digest: blake3::hash(&response).to_hex().to_string(),
+            response_digest: alt_hash::blake3::hash(&response).to_hex().to_string(),
             response_bytes: response.len() as u64,
             operations: vec![],
             outcome: "applied".into(),
@@ -214,7 +214,7 @@ impl Local {
             response,
         ];
         let artifact = |bytes: &Vec<u8>| alt_task::Artifact {
-            blake3: blake3::hash(bytes).to_hex().to_string(),
+            blake3: alt_hash::blake3::hash(bytes).to_hex().to_string(),
             bytes: bytes.len() as u64,
         };
         let proof = alt_task_service::SourceCompletion {

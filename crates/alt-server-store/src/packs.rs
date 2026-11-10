@@ -67,7 +67,7 @@ pub(crate) fn segment_file(
     }
     Ok(root
         .join("packs")
-        .join(&blake3::hash(repository.as_bytes()).to_hex()[..32])
+        .join(&alt_hash::blake3::hash(repository.as_bytes()).to_hex()[..32])
         .join(format!("{segment}.seg")))
 }
 
@@ -91,7 +91,7 @@ impl crate::ByteStore {
             .create_new(true)
             .mode(0o600)
             .open(&path)?;
-        let mut hasher = blake3::Hasher::new();
+        let mut hasher = alt_hash::blake3::Hasher::new();
         let mut buffer = vec![0u8; 1 << 16];
         let mut written = 0u64;
         loop {
@@ -258,7 +258,7 @@ impl Store {
     /// directory holding one repository's segments, created on first use
     pub fn pack_directory(&self, repository: &str) -> Result<PathBuf> {
         let packs = self.bytes().root().join("packs");
-        let path = packs.join(&blake3::hash(repository.as_bytes()).to_hex()[..32]);
+        let path = packs.join(&alt_hash::blake3::hash(repository.as_bytes()).to_hex()[..32]);
         if !path.is_dir() {
             std::fs::create_dir_all(&path)?;
             std::fs::File::open(&packs)?.sync_all()?;
@@ -364,7 +364,7 @@ impl Store {
                 != Some(integer(self.spec.runtime_generation)?)
             || text(&instance, "signing_key_id").as_deref()
                 != Some(
-                    blake3::hash(self.signing_key.verifying_key().as_bytes())
+                    alt_hash::blake3::hash(self.signing_key.verifying_key().as_bytes())
                         .to_hex()
                         .as_str(),
                 )
@@ -553,7 +553,7 @@ impl Store {
         let signature = self.signing_key.sign(&body.signing_bytes(self.limits)?);
         let receipt = Receipt {
             body,
-            signing_key_id: blake3::hash(self.signing_key.verifying_key().as_bytes())
+            signing_key_id: alt_hash::blake3::hash(self.signing_key.verifying_key().as_bytes())
                 .to_hex()
                 .to_string(),
             signature: signature

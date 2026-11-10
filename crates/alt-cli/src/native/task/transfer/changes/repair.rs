@@ -43,7 +43,7 @@ fn read(path: &Path) -> Res<(Creation, Vec<u8>, usize)> {
             8192,
         )?;
         let previous: Creation = serde_json::from_slice(&bytes)?;
-        if blake3::hash(&bytes).to_hex().as_str() != prior.digest
+        if alt_hash::blake3::hash(&bytes).to_hex().as_str() != prior.digest
             || previous.creator_request != prior.request
         {
             return Err(refused("repair creation predecessor changed"));
@@ -142,7 +142,7 @@ impl NativeRepo<'_> {
         }
         spec.repair_source = Some(Box::new(source));
         spec.validate()?;
-        let intent = blake3::hash(&serde_json::to_vec(&(&binding.scope, &spec, target))?)
+        let intent = alt_hash::blake3::hash(&serde_json::to_vec(&(&binding.scope, &spec, target))?)
             .to_hex()
             .to_string();
         let scope = self.task_scope()?;
@@ -199,7 +199,7 @@ impl NativeRepo<'_> {
                 ));
             }
             let prior = Predecessor {
-                digest: blake3::hash(&raw).to_hex().to_string(),
+                digest: alt_hash::blake3::hash(&raw).to_hex().to_string(),
                 request: previous.creator_request,
             };
             let history = path.parent().expect("creation parent").join("history");

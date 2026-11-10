@@ -116,7 +116,7 @@ impl Store {
                 .zip(readers.iter_mut())
                 .map(|((digest, size), source)| {
                     Ok(alt_byte_segment::Input {
-                        digest: *blake3::Hash::from_hex(digest)
+                        digest: *alt_hash::blake3::Hash::from_hex(digest)
                             .map_err(|_| Error::Integrity("compaction digest"))?
                             .as_bytes(),
                         bytes: *size,
@@ -128,14 +128,14 @@ impl Store {
             // Compaction has no upload-registration step. Verify the installed
             // container against its encoder proof before changing any location.
             self.bytes.check_segment_proof(&proof)?;
-            let index = blake3::Hash::from(*proof.index().digest())
+            let index = alt_hash::blake3::Hash::from(*proof.index().digest())
                 .to_hex()
                 .to_string();
             tx.execute("UPDATE alt_segments SET state='stored',index_digest=$3,selection=$4,member_count=$5,payload_bytes=$6 WHERE repository=$1 AND segment_id=$2", &[&repository,&id,&index,&serde_json::to_value(&members)?,&integer(members.len() as u64)?,&integer(proof.index().bytes())?])?;
             let offsets: Vec<_> = members
                 .keys()
                 .map(|digest| {
-                    let hash = blake3::Hash::from_hex(digest)
+                    let hash = alt_hash::blake3::Hash::from_hex(digest)
                         .map_err(|_| Error::Integrity("compaction digest"))?;
                     integer(
                         proof

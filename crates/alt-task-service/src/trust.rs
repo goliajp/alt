@@ -22,7 +22,7 @@ impl CollectorPolicy {
         for (id, collector) in &self.keys {
             alt_task::check_id(id)?;
             let key = decode_key(&collector.public_key_hex)?;
-            if blake3::hash(key.as_bytes()).to_hex().as_str() != id
+            if alt_hash::blake3::hash(key.as_bytes()).to_hex().as_str() != id
                 || collector.runners.is_empty()
                 || collector.runners.iter().any(|r| r.trim().is_empty())
                 || collector.expires_unix_ms == 0

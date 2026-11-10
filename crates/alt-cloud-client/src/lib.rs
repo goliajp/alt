@@ -211,7 +211,7 @@ impl GrantSealer {
         {
             return Err(Error::Invalid);
         }
-        let key = blake3::derive_key(
+        let key = alt_hash::blake3::derive_key(
             "alt Cloud platform grant encryption v1",
             credential.expose().as_bytes(),
         );

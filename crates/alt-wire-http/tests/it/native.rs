@@ -110,7 +110,7 @@ fn native_bounds_json_and_checks_response_scope() {
 }
 #[test]
 fn native_download_rejects_corrupt_bytes_despite_matching_headers() {
-    let hash = blake3::hash(b"right").to_hex().to_string();
+    let hash = alt_hash::blake3::hash(b"right").to_hex().to_string();
     let bytes = format!("HTTP/1.1 200 OK\r\nContent-Length: 5\r\nAlt-Content-Blake3: {hash}\r\nConnection: close\r\n\r\nwrong").into_bytes();
     response(bytes, |client| {
         let mut staged = Vec::new();

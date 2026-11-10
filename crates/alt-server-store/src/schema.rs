@@ -35,7 +35,9 @@ pub(crate) fn check_rows(rows: &[postgres::Row], expected: usize) -> Result<()> 
         || rows.iter().enumerate().any(|(index, row)| {
             row.get::<_, i32>(0) != (index + 1) as i32
                 || row.get::<_, String>(1)
-                    != blake3::hash(MIGRATIONS[index].as_bytes()).to_hex().as_str()
+                    != alt_hash::blake3::hash(MIGRATIONS[index].as_bytes())
+                        .to_hex()
+                        .as_str()
         })
     {
         return Err(Error::Precondition(
@@ -101,7 +103,7 @@ fn apply(client: &mut impl GenericClient, version: usize) -> Result<()> {
         "INSERT INTO alt_schema VALUES($1,$2)",
         &[
             &(version as i32),
-            &blake3::hash(MIGRATIONS[version - 1].as_bytes())
+            &alt_hash::blake3::hash(MIGRATIONS[version - 1].as_bytes())
                 .to_hex()
                 .to_string(),
         ],

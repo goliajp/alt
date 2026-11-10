@@ -193,7 +193,7 @@ impl Store {
         let mut raw = Vec::new();
         file.take(max_bytes as u64 + 1).read_to_end(&mut raw)?;
         if raw.len() as u64 != payload.bytes
-            || blake3::hash(&raw).to_hex().as_str() != payload.blake3
+            || alt_hash::blake3::hash(&raw).to_hex().as_str() != payload.blake3
         {
             return Err(Error::Integrity("record projection payload"));
         }

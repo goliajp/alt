@@ -90,7 +90,7 @@ impl alt_input::Tree for IndexTree<'_> {
             kind,
             executable: *mode == 0o100755,
             len: bytes.len() as u64,
-            content: blake3::hash(&bytes).to_hex().to_string(),
+            content: alt_hash::blake3::hash(&bytes).to_hex().to_string(),
         })
     }
     fn children(&self, _: &str) -> alt_input::Result<Vec<String>> {

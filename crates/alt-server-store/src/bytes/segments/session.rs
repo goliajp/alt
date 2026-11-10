@@ -49,8 +49,8 @@ impl ReadSession {
             return self.store.read_payload(&self.scope, digest, bytes, None);
         };
         check_digest(digest)?;
-        let digest =
-            blake3::Hash::from_hex(digest).map_err(|_| Error::Integrity("segment digest"))?;
+        let digest = alt_hash::blake3::Hash::from_hex(digest)
+            .map_err(|_| Error::Integrity("segment digest"))?;
         let mut file = open_segment(&self.store.segment_path(&self.scope, &location.segment_id)?)?;
         let stamp = Stamp::read(&file)?;
         let mut indexes = self
@@ -161,7 +161,7 @@ mod tests {
                 &scope(),
                 &format!("{id:032x}"),
                 &mut [Input {
-                    digest: *blake3::hash(b"original").as_bytes(),
+                    digest: *alt_hash::blake3::hash(b"original").as_bytes(),
                     bytes: 8,
                     source: &mut source,
                 }],
@@ -169,7 +169,7 @@ mod tests {
             .unwrap()
     }
     fn read(session: &ReadSession, proof: &DurableSegment) -> Result<Vec<u8>> {
-        let digest = blake3::hash(b"original");
+        let digest = alt_hash::blake3::hash(b"original");
         let mut reader = session.read(
             &digest.to_hex(),
             8,
@@ -179,7 +179,7 @@ mod tests {
         reader.read_to_end(&mut data)?;
         // The session returns a bounded raw reader, just like ObjectSource.
         // A caller must verify canonical bytes before accepting a result.
-        if blake3::hash(&data) != digest {
+        if alt_hash::blake3::hash(&data) != digest {
             return Err(Error::Integrity("test canonical content changed"));
         }
         Ok(data)
@@ -289,7 +289,7 @@ mod tests {
                 .contains_key(first.id())
         );
         assert_eq!(read(&session, &first).unwrap(), b"original");
-        let digest = blake3::hash(b"original");
+        let digest = alt_hash::blake3::hash(b"original");
         let mut location = first.location(digest.as_bytes()).unwrap();
         location.offset += 1;
         assert!(session.read(&digest.to_hex(), 8, Some(&location)).is_err());
@@ -306,7 +306,7 @@ mod tests {
         let values: Vec<_> = (0..alt_byte_segment::MAX_MEMBERS as u64)
             .map(|n| n.to_le_bytes())
             .collect();
-        let digest = blake3::hash(&values[0]);
+        let digest = alt_hash::blake3::hash(&values[0]);
         let mut first = None;
         for id in 1..=24 {
             let mut sources: Vec<_> = values.iter().map(|v| Cursor::new(v.as_slice())).collect();
@@ -314,7 +314,7 @@ mod tests {
                 .iter()
                 .zip(&mut sources)
                 .map(|(v, source)| Input {
-                    digest: *blake3::hash(v).as_bytes(),
+                    digest: *alt_hash::blake3::hash(v).as_bytes(),
                     bytes: 8,
                     source,
                 })

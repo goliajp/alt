@@ -72,7 +72,7 @@ impl Store {
         if raw.len() as u64 != bytes || ObjectId::hash_object(HashAlgo::Sha1, kind, &raw) != oid {
             return Err(Error::Integrity("change-link commit bytes"));
         }
-        let native_commit = blake3::hash(&raw).to_hex().to_string();
+        let native_commit = alt_hash::blake3::hash(&raw).to_hex().to_string();
         let publication = selected.publication;
         let original = &publication.publication.key.scope;
         Ok(Delivery {
@@ -84,11 +84,13 @@ impl Store {
             // Canonical decoded records are used consistently here. These
             // digests name the statements, not an arbitrary JSON whitespace
             // rendering and never an unsigned replacement of the receipt.
-            provenance_digest: blake3::hash(&serde_json::to_vec(&publication.provenance)?)
-                .to_hex()
-                .to_string(),
+            provenance_digest: alt_hash::blake3::hash(&serde_json::to_vec(
+                &publication.provenance,
+            )?)
+            .to_hex()
+            .to_string(),
             publication_digest: publication.publication.digest(self.limits)?,
-            receipt_digest: blake3::hash(&serde_json::to_vec(&publication.receipt)?)
+            receipt_digest: alt_hash::blake3::hash(&serde_json::to_vec(&publication.receipt)?)
                 .to_hex()
                 .to_string(),
             task: delivery.task,

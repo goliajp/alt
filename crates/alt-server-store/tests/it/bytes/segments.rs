@@ -9,7 +9,7 @@ fn put(store: &ByteStore, payloads: &[&[u8]]) -> alt_server_store::Result<Durabl
         .iter_mut()
         .zip(payloads)
         .map(|(source, bytes)| Input {
-            digest: *blake3::hash(bytes).as_bytes(),
+            digest: *alt_hash::blake3::hash(bytes).as_bytes(),
             bytes: bytes.len() as u64,
             source,
         })
@@ -26,7 +26,7 @@ fn mixed_loose_and_segment_reads_retain_bytes_empty_members_and_independent_curs
     let store = ByteStore::open(temp.path()).unwrap();
     let data = [b"first".as_slice(), b"second", b""];
     let proof = put(&store, &data).unwrap();
-    let hash = blake3::hash(data[0]);
+    let hash = alt_hash::blake3::hash(data[0]);
     store
         .put(
             &scope("segment"),
@@ -39,7 +39,7 @@ fn mixed_loose_and_segment_reads_retain_bytes_empty_members_and_independent_curs
     store.verify(&scope("segment"), &hash.to_hex(), 5).unwrap();
     let mut a = store.read_durable_segment(&proof, hash.as_bytes()).unwrap();
     let mut b = store
-        .read_durable_segment(&proof, blake3::hash(data[1]).as_bytes())
+        .read_durable_segment(&proof, alt_hash::blake3::hash(data[1]).as_bytes())
         .unwrap();
     let mut one = [0; 1];
     a.read_exact(&mut one).unwrap();
@@ -54,7 +54,7 @@ fn mixed_loose_and_segment_reads_retain_bytes_empty_members_and_independent_curs
     a.seek(SeekFrom::End(0)).unwrap();
     assert_eq!(a.read(&mut one).unwrap(), 0);
     for bytes in data {
-        let digest = blake3::hash(bytes);
+        let digest = alt_hash::blake3::hash(bytes);
         let location = proof.location(digest.as_bytes()).unwrap();
         let mut actual = Vec::new();
         store
@@ -125,7 +125,7 @@ fn repeated_reads_do_not_hide_missing_replaced_or_corrupt_originals() {
         let temp = tempfile::tempdir().unwrap();
         let store = ByteStore::open(temp.path()).unwrap();
         let proof = put(&store, &[b"original"]).unwrap();
-        let digest = blake3::hash(b"original");
+        let digest = alt_hash::blake3::hash(b"original");
         let location = proof.location(digest.as_bytes()).unwrap();
         store
             .verify_segment_member(proof.scope(), &digest.to_hex(), 8, &location)
@@ -172,7 +172,7 @@ fn database_location_mismatch_and_truncated_open_reader_are_rejected() {
     let temp = tempfile::tempdir().unwrap();
     let store = ByteStore::open(temp.path()).unwrap();
     let proof = put(&store, &[b"original"]).unwrap();
-    let digest = blake3::hash(b"original");
+    let digest = alt_hash::blake3::hash(b"original");
     let location = proof.location(digest.as_bytes()).unwrap();
     for fault in 0..4 {
         let mut bad = location.clone();
@@ -227,7 +227,7 @@ fn pending_owner_is_exclusive_and_fenced_removal_is_idempotent() {
 fn bad_input_never_installs_a_segment_and_metadata_limits_do_not_read_sources() {
     let temp = tempfile::tempdir().unwrap();
     let store = ByteStore::open(temp.path()).unwrap();
-    let digest = *blake3::hash(b"abc").as_bytes();
+    let digest = *alt_hash::blake3::hash(b"abc").as_bytes();
     for bytes in [b"ab".as_slice(), b"abcd", b"xyz"] {
         let mut source = Cursor::new(bytes);
         assert!(

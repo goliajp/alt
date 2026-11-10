@@ -6,9 +6,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+alt-hash.workspace = true
 alt-prism.workspace = true
 alt-store.workspace = true
-blake3.workspace = true
 
 [dev-dependencies]
 alt-deflate.workspace = true

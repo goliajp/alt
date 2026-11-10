@@ -375,7 +375,7 @@ impl Transport {
         digest(&chunk.blake3)?;
         if bytes.len() as u64 != chunk.bytes
             || chunk.bytes > self.options.chunk_bytes
-            || blake3::hash(bytes).to_hex().as_str() != chunk.blake3
+            || alt_hash::blake3::hash(bytes).to_hex().as_str() != chunk.blake3
         {
             return Err(Error::Invalid("upload chunk bytes"));
         }
@@ -525,7 +525,7 @@ impl Transport {
             return Err(Error::Invalid("download identity headers"));
         }
         let mut input = response.into_reader();
-        let mut hash = blake3::Hasher::new();
+        let mut hash = alt_hash::blake3::Hasher::new();
         let mut remaining = bytes;
         let mut buffer = [0u8; 65536];
         while remaining > 0 {
@@ -570,7 +570,7 @@ pub fn verify_receipt(
 ) -> Result<()> {
     receipt.validate(limits)?;
     if receipt.body.request_digest != publication.digest(limits)?
-        || receipt.signing_key_id != blake3::hash(public_key).to_hex().as_str()
+        || receipt.signing_key_id != alt_hash::blake3::hash(public_key).to_hex().as_str()
     {
         return Err(Error::Invalid("receipt intent or signing identity"));
     }

@@ -67,7 +67,7 @@ fn regular(path: &Path) -> Result<File> {
 }
 fn digest(file: &mut (impl Read + Seek)) -> Result<FileDigest> {
     file.rewind().map_err(|_| Error::File)?;
-    let mut hash = blake3::Hasher::new();
+    let mut hash = alt_hash::blake3::Hasher::new();
     let mut bytes = 0u64;
     let mut buffer = [0u8; 65536];
     loop {
@@ -525,7 +525,7 @@ pub fn verify(
     std::fs::remove_file(saved_identity).map_err(|_| Error::File)?;
     Ok(VerifiedBackup {
         manifest,
-        manifest_digest: blake3::hash(&encoded).to_hex().to_string(),
+        manifest_digest: alt_hash::blake3::hash(&encoded).to_hex().to_string(),
         directory,
     })
 }

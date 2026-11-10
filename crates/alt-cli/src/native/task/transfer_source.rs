@@ -28,7 +28,7 @@ pub(super) fn bounded(path: &Path, maximum: usize) -> Result<Vec<u8>> {
 }
 fn artifact(bytes: &[u8]) -> Artifact {
     Artifact {
-        blake3: blake3::hash(bytes).to_hex().to_string(),
+        blake3: alt_hash::blake3::hash(bytes).to_hex().to_string(),
         bytes: bytes.len() as u64,
     }
 }
@@ -40,7 +40,7 @@ impl ArtifactSource for ProofBytes {
             .iter()
             .find(|bytes| {
                 bytes.len() as u64 == artifact.bytes
-                    && blake3::hash(bytes).to_hex().as_str() == artifact.blake3
+                    && alt_hash::blake3::hash(bytes).to_hex().as_str() == artifact.blake3
             })
             .ok_or(alt_task_service::Error::Integrity("local proof artifact"))?;
         Ok(Box::new(Cursor::new(bytes)))

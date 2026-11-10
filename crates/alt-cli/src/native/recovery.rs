@@ -101,7 +101,7 @@ pub(super) fn canonical_index(mut index: Index, algo: HashAlgo) -> Vec<u8> {
 }
 
 pub(super) fn hash(bytes: &[u8]) -> String {
-    blake3::hash(bytes).to_hex().to_string()
+    alt_hash::blake3::hash(bytes).to_hex().to_string()
 }
 
 pub(super) fn durable_write(path: &Path, bytes: &[u8]) -> Res<()> {

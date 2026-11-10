@@ -14,7 +14,7 @@ fn bounded_streaming_ingestion_is_durable_and_idempotent() {
     let temporary = tempfile::tempdir().unwrap();
     let store = ByteStore::open(&temporary.path().join("bytes")).unwrap();
     let bytes = vec![31u8; 200_000];
-    let hash = blake3::hash(&bytes).to_hex().to_string();
+    let hash = alt_hash::blake3::hash(&bytes).to_hex().to_string();
     for _ in 0..2 {
         let proof = store
             .put(
@@ -44,7 +44,7 @@ fn bounded_streaming_ingestion_is_durable_and_idempotent() {
 fn bad_size_hash_short_read_and_limits_leave_no_content() {
     let temporary = tempfile::tempdir().unwrap();
     let store = ByteStore::open(&temporary.path().join("bytes")).unwrap();
-    let hash = blake3::hash(b"abc").to_hex().to_string();
+    let hash = alt_hash::blake3::hash(b"abc").to_hex().to_string();
     for (data, size, limit) in [
         (b"abc".as_slice(), 3, 2),
         (b"ab", 3, 3),
@@ -70,7 +70,7 @@ fn symlink_and_corrupted_incumbent_are_not_reused() {
     let temporary = tempfile::tempdir().unwrap();
     let root = temporary.path().join("bytes");
     let store = ByteStore::open(&root).unwrap();
-    let hash = blake3::hash(b"abc").to_hex().to_string();
+    let hash = alt_hash::blake3::hash(b"abc").to_hex().to_string();
     store
         .put(&scope("one"), &hash, 3, 3, &mut Cursor::new(b"abc"))
         .unwrap();
@@ -109,7 +109,7 @@ fn mid_stream_io_failure_does_not_publish_partial_bytes() {
     let temporary = tempfile::tempdir().unwrap();
     let root = temporary.path().join("bytes");
     let store = ByteStore::open(&root).unwrap();
-    let hash = blake3::hash(b"abc").to_hex().to_string();
+    let hash = alt_hash::blake3::hash(b"abc").to_hex().to_string();
     assert!(
         store
             .put(&scope("one"), &hash, 3, 3, &mut Broken(false))
@@ -144,7 +144,7 @@ fn batch_persistence_preserves_order_duplicates_empty_objects_and_retry_identity
     let payloads = [b"abc".as_slice(), b"", b"abc", b"different"];
     let hashes: Vec<_> = payloads
         .iter()
-        .map(|p| blake3::hash(p).to_hex().to_string())
+        .map(|p| alt_hash::blake3::hash(p).to_hex().to_string())
         .collect();
     for _ in 0..2 {
         let mut sources: Vec<_> = payloads.iter().map(Cursor::new).collect();
@@ -180,7 +180,7 @@ fn invalid_late_batch_input_never_installs_earlier_staged_bytes() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("bytes");
     let store = ByteStore::open(&root).unwrap();
-    let hash = blake3::hash(b"abc").to_hex().to_string();
+    let hash = alt_hash::blake3::hash(b"abc").to_hex().to_string();
     for data in [b"ab".as_slice(), b"abcd", b"xyz"] {
         let mut good = Cursor::new(b"abc");
         let mut bad = Cursor::new(data);
@@ -244,7 +244,7 @@ fn batch_metadata_limits_are_checked_before_reading_or_creating_scope_directorie
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("bytes");
     let store = ByteStore::open(&root).unwrap();
-    let hash = blake3::hash(b"abc").to_hex().to_string();
+    let hash = alt_hash::blake3::hash(b"abc").to_hex().to_string();
     for (size, limit, digest) in [
         (3, 2, hash.as_str()),
         (MAX_PUT_BYTES + 1, u64::MAX, &hash),
@@ -308,8 +308,8 @@ fn late_corrupt_or_symlink_incumbent_returns_no_batch_proofs_and_retry_verifies_
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("bytes");
         let store = ByteStore::open(&root).unwrap();
-        let first = blake3::hash(b"first").to_hex().to_string();
-        let last = blake3::hash(b"last").to_hex().to_string();
+        let first = alt_hash::blake3::hash(b"first").to_hex().to_string();
+        let last = alt_hash::blake3::hash(b"last").to_hex().to_string();
         store
             .put(&scope("batch"), &last, 4, 10, &mut Cursor::new(b"last"))
             .unwrap();

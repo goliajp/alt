@@ -10,7 +10,7 @@ struct Memory(BTreeMap<String, Vec<u8>>);
 impl Memory {
     fn put(&mut self, bytes: Vec<u8>) -> alt_task::Artifact {
         let artifact = alt_task::Artifact {
-            blake3: blake3::hash(&bytes).to_hex().to_string(),
+            blake3: alt_hash::blake3::hash(&bytes).to_hex().to_string(),
             bytes: bytes.len() as u64,
         };
         self.0.insert(artifact.blake3.clone(), bytes);
@@ -198,7 +198,7 @@ fn source_proof_binds_original_scope_command_and_returned_record() {
         request_id: intent.request_id.clone(),
         binding_digest: intent.binding_digest.clone(),
         finished_ms: 2,
-        response_digest: blake3::hash(&response).to_hex().to_string(),
+        response_digest: alt_hash::blake3::hash(&response).to_hex().to_string(),
         response_bytes: response.len() as u64,
         operations: vec![],
         outcome: "applied".into(),
@@ -328,7 +328,7 @@ fn candidate_checks_complete_source_bytes_modes_and_task_scope() {
                 kind: alt_input::EntryKind::File,
                 executable: false,
                 len: 1,
-                content: blake3::hash(b"x").to_hex().to_string(),
+                content: alt_hash::blake3::hash(b"x").to_hex().to_string(),
                 link_target: None,
             },
         }],
@@ -358,7 +358,7 @@ fn candidate_checks_complete_source_bytes_modes_and_task_scope() {
     );
     task.spec.allowed_paths = vec![".".into()];
     candidate.task = task.id().unwrap();
-    manifest.entries[0].node.content = blake3::hash(b"y").to_hex().to_string();
+    manifest.entries[0].node.content = alt_hash::blake3::hash(b"y").to_hex().to_string();
     candidate.manifest = manifest.id().unwrap();
     assert!(
         verify_candidate_inputs(&candidate, &task, &manifest, &graph, &objects, limits()).is_err()
@@ -406,7 +406,7 @@ fn baseline_inventory_requires_exact_bytes_complete_closure_and_public_refs() {
                     alt_delivery::ObjectIdentity {
                         kind: kind.to_string(),
                         bytes: bytes.len() as u64,
-                        blake3: blake3::hash(bytes).to_hex().to_string(),
+                        blake3: alt_hash::blake3::hash(bytes).to_hex().to_string(),
                     },
                 )
             })
@@ -434,7 +434,7 @@ fn baseline_inventory_requires_exact_bytes_complete_closure_and_public_refs() {
         .refs
         .insert("refs/heads/main".into(), head.to_string());
     snapshot.objects.get_mut(&blob.to_string()).unwrap().blake3 =
-        blake3::hash(b"y").to_hex().to_string();
+        alt_hash::blake3::hash(b"y").to_hex().to_string();
     assert!(verify_baseline_snapshot(&snapshot, &graph, &objects, limits()).is_err());
     objects.0.get_mut(&blob).unwrap().1 = b"y".to_vec();
     assert!(verify_baseline_snapshot(&snapshot, &graph, &objects, limits()).is_err());
@@ -527,7 +527,9 @@ fn collector_signature_is_bound_to_current_key_runner_and_exact_source() {
     use ed25519_dalek::{Signer, SigningKey};
     let signing = SigningKey::from_bytes(&[7; 32]);
     let public = signing.verifying_key();
-    let key_id = blake3::hash(public.as_bytes()).to_hex().to_string();
+    let key_id = alt_hash::blake3::hash(public.as_bytes())
+        .to_hex()
+        .to_string();
     let mut attestation = CollectorAttestation {
         schema_version: 1,
         evidence: "a".repeat(64),
@@ -693,7 +695,7 @@ fn source_completion(
         request_id: request.clone(),
         binding_digest: intent.binding_digest.clone(),
         finished_ms: 2,
-        response_digest: blake3::hash(&response).to_hex().to_string(),
+        response_digest: alt_hash::blake3::hash(&response).to_hex().to_string(),
         response_bytes: response.len() as u64,
         operations: vec![],
         outcome: "applied".into(),
@@ -893,7 +895,9 @@ fn observed_history_needs_trusted_collector_complete_attachments_and_current_tar
     assert_eq!(untrusted.reasons, vec!["collector_not_trusted"]);
     let signing = SigningKey::from_bytes(&[9; 32]);
     let public = signing.verifying_key();
-    let key = blake3::hash(public.as_bytes()).to_hex().to_string();
+    let key = alt_hash::blake3::hash(public.as_bytes())
+        .to_hex()
+        .to_string();
     let proof = bundle
         .sources
         .iter()
@@ -978,7 +982,7 @@ fn delivery_report_rejects_extra_objects_refs_files_and_config_changes() {
         alt_delivery::ObjectIdentity {
             kind: kind.to_string(),
             bytes: bytes.len() as u64,
-            blake3: blake3::hash(bytes).to_hex().to_string(),
+            blake3: alt_hash::blake3::hash(bytes).to_hex().to_string(),
         }
     };
     let baseline = alt_delivery::Snapshot {

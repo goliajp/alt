@@ -153,7 +153,7 @@ pub(super) fn run(
             attribution: Attribution {
                 kind: ActorKind::Agent,
                 on_behalf_of: Some(human.principal.actor_id.clone()),
-                delegation_id: Some(blake3::hash(&entropy).to_hex().to_string()),
+                delegation_id: Some(alt_hash::blake3::hash(&entropy).to_hex().to_string()),
                 agent_session: Some(plan.agent_session),
             },
             expires_at_unix_ms: expires,
@@ -168,7 +168,7 @@ pub(super) fn run(
                 origin: human.origin.clone(),
                 installation_id: human.installation_id.clone(),
                 receipt_public_key: human.receipt_public_key.clone(),
-                parent_digest: blake3::hash(human.access_token.as_bytes())
+                parent_digest: alt_hash::blake3::hash(human.access_token.as_bytes())
                     .to_hex()
                     .to_string(),
                 request,
@@ -182,7 +182,7 @@ pub(super) fn run(
         || pending.installation_id != human.installation_id
         || pending.receipt_public_key != human.receipt_public_key
         || pending.parent_digest
-            != blake3::hash(human.access_token.as_bytes())
+            != alt_hash::blake3::hash(human.access_token.as_bytes())
                 .to_hex()
                 .as_str()
         || pending.request.attribution.on_behalf_of.as_deref() != Some(&human.principal.actor_id)

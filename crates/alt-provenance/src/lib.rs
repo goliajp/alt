@@ -78,7 +78,7 @@ pub fn verify_receipt(
 ) -> Result<()> {
     receipt.validate(limits)?;
     if receipt.body.request_digest != publication.digest(limits)?
-        || receipt.signing_key_id != blake3::hash(public_key).to_hex().as_str()
+        || receipt.signing_key_id != alt_hash::blake3::hash(public_key).to_hex().as_str()
     {
         return Err(Error::Invalid("receipt intent or signing identity"));
     }

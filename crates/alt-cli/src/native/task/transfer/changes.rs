@@ -267,7 +267,7 @@ impl NativeRepo<'_> {
         if bytes.len() > link::MAX_BYTES {
             return Err(refused("association intent exceeds the supported size"));
         }
-        let id = blake3::hash(&bytes).to_hex().to_string();
+        let id = alt_hash::blake3::hash(&bytes).to_hex().to_string();
         let parent = self.store.alt_dir.join("task-changes");
         std::fs::create_dir_all(&parent)?;
         crate::durable::write(parent.join(format!("{id}.json")), bytes)?;
@@ -296,7 +296,7 @@ impl NativeRepo<'_> {
                 .join(format!("{id}.json")),
             link::MAX_BYTES,
         )?;
-        if blake3::hash(&bytes).to_hex().as_str() != id {
+        if alt_hash::blake3::hash(&bytes).to_hex().as_str() != id {
             return Err(refused("saved association intent changed"));
         }
         let saved: Saved = serde_json::from_slice(&bytes)?;

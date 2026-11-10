@@ -338,7 +338,7 @@ pub(crate) fn check_key(
 pub(crate) fn upload_pin(key: &RequestKey) -> String {
     format!(
         "upload:{}",
-        blake3::hash(&serde_json::to_vec(key).expect("closed key schema")).to_hex()
+        alt_hash::blake3::hash(&serde_json::to_vec(key).expect("closed key schema")).to_hex()
     )
 }
 pub(crate) fn pin(

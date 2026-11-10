@@ -7,7 +7,7 @@ fn fixture(values: &[Vec<u8>]) -> Vec<u8> {
         .iter()
         .zip(&mut sources)
         .map(|(data, source)| Input {
-            digest: *blake3::hash(data).as_bytes(),
+            digest: *alt_hash::blake3::hash(data).as_bytes(),
             bytes: data.len() as u64,
             source,
         })
@@ -24,12 +24,12 @@ fn fixture(values: &[Vec<u8>]) -> Vec<u8> {
 
 fn repair_index(bytes: &mut [u8]) {
     let count = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
-    let digest = blake3::hash(&bytes[64..64 + 48 * count]);
+    let digest = alt_hash::blake3::hash(&bytes[64..64 + 48 * count]);
     bytes[32..64].copy_from_slice(digest.as_bytes());
 }
 fn repair_complete(bytes: &mut [u8]) {
     let end = bytes.len() - 32;
-    let digest = blake3::hash(&bytes[..end]);
+    let digest = alt_hash::blake3::hash(&bytes[..end]);
     bytes[end..].copy_from_slice(digest.as_bytes());
 }
 
@@ -69,7 +69,7 @@ fn deterministic_original_bytes_and_bounded_random_access() {
     assert_eq!(bytes, fixture(&reversed));
     let mut segment = Segment::open(Cursor::new(&bytes), Limits::default()).unwrap();
     for value in &values {
-        let digest = blake3::hash(value);
+        let digest = alt_hash::blake3::hash(value);
         let mut reader = segment.member(digest.as_bytes()).unwrap().unwrap();
         let mut actual = Vec::new();
         reader.read_to_end(&mut actual).unwrap();
@@ -91,7 +91,7 @@ fn deterministic_original_bytes_and_bounded_random_access() {
     }
     assert!(segment.member(&[0xff; 32]).unwrap().is_none());
     let mut owned = segment
-        .into_member(blake3::hash(&values[0]).as_bytes())
+        .into_member(alt_hash::blake3::hash(&values[0]).as_bytes())
         .unwrap()
         .unwrap();
     let mut actual = Vec::new();
@@ -186,7 +186,7 @@ fn input_lengths_hashes_duplicates_and_limits_fail_before_completion() {
     for case in 0..6 {
         let mut source = Cursor::new(b"hello");
         let mut input = Input {
-            digest: *blake3::hash(b"hello").as_bytes(),
+            digest: *alt_hash::blake3::hash(b"hello").as_bytes(),
             bytes: 5,
             source: &mut source,
         };
@@ -224,7 +224,7 @@ fn input_lengths_hashes_duplicates_and_limits_fail_before_completion() {
     let mut inputs: Vec<_> = sources
         .iter_mut()
         .map(|source| Input {
-            digest: *blake3::hash(b"same").as_bytes(),
+            digest: *alt_hash::blake3::hash(b"same").as_bytes(),
             bytes: 4,
             source,
         })
@@ -266,7 +266,7 @@ fn member_count_boundary_is_enforced_independently_of_bytes() {
         .iter()
         .zip(&mut sources)
         .map(|(value, source)| Input {
-            digest: *blake3::hash(value).as_bytes(),
+            digest: *alt_hash::blake3::hash(value).as_bytes(),
             bytes: value.len() as u64,
             source,
         })
@@ -295,7 +295,7 @@ fn write_errors_never_produce_a_completed_encoding() {
     for limit in [0, 1, 63, 64, 100, 112, 115, 119, 130, 150] {
         let mut source = Cursor::new(b"payload");
         let mut inputs = [Input {
-            digest: *blake3::hash(b"payload").as_bytes(),
+            digest: *alt_hash::blake3::hash(b"payload").as_bytes(),
             bytes: 7,
             source: &mut source,
         }];
@@ -328,7 +328,7 @@ fn changed_extent_and_read_failures_are_not_successful_end_of_input() {
     assert!(segment.verify().is_err());
     shared.0.borrow_mut().get_mut().pop();
     let mut member = segment
-        .into_member(blake3::hash(b"original").as_bytes())
+        .into_member(alt_hash::blake3::hash(b"original").as_bytes())
         .unwrap()
         .unwrap();
     shared.0.borrow_mut().get_mut().truncate(113);

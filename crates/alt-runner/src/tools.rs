@@ -126,14 +126,14 @@ pub fn probe(
 ) -> Result<ToolIdentity> {
     let path = resolve(root, binding)?;
     let bytes = fs::read(&path)?;
-    let digest = blake3::hash(&bytes).to_hex().to_string();
+    let digest = alt_hash::blake3::hash(&bytes).to_hex().to_string();
     let identity = ToolIdentity {
         name: binding.name.clone(),
         version: version(root, &path, binding, environment, &digest, None)?,
         binary_blake3: Some(digest.clone()),
     };
     let current = fs::read(resolve(root, binding)?)?;
-    if blake3::hash(&current).to_hex().as_str() != digest {
+    if alt_hash::blake3::hash(&current).to_hex().as_str() != digest {
         return Err(Error::Invalid("tool changed during version probe".into()));
     }
     Ok(identity)

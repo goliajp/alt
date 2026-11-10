@@ -79,7 +79,7 @@ impl VerifiedPublication {
                 .take(selected.bytes.saturating_add(1))
                 .read_to_end(&mut raw)?;
             if raw.len() as u64 != selected.bytes
-                || blake3::hash(&raw).to_hex().as_str() != selected.blake3
+                || alt_hash::blake3::hash(&raw).to_hex().as_str() != selected.blake3
             {
                 return Err(Error::Integrity("task bundle bytes"));
             }

@@ -173,7 +173,7 @@ pub fn encode(
         members,
         bytes,
         file_bytes: offset + TRAILER,
-        digest: *blake3::hash(&encoded).as_bytes(),
+        digest: *alt_hash::blake3::hash(&encoded).as_bytes(),
     };
     let mut header = [0; HEADER as usize];
     header[..8].copy_from_slice(MAGIC);
@@ -181,7 +181,7 @@ pub fn encode(
     header[16..24].copy_from_slice(&(encoded.len() as u64).to_le_bytes());
     header[24..32].copy_from_slice(&bytes.to_le_bytes());
     header[32..64].copy_from_slice(&index.digest);
-    let mut all = blake3::Hasher::new();
+    let mut all = alt_hash::blake3::Hasher::new();
     for chunk in [&header[..], &encoded] {
         output.write_all(chunk)?;
         all.update(chunk);
@@ -190,7 +190,7 @@ pub fn encode(
     for i in order {
         let item = &mut inputs[i];
         let mut remaining = item.bytes;
-        let mut hash = blake3::Hasher::new();
+        let mut hash = alt_hash::blake3::Hasher::new();
         while remaining > 0 {
             let cap = remaining.min(buffer.len() as u64) as usize;
             let n = item.source.read(&mut buffer[..cap])?;
@@ -237,7 +237,7 @@ impl<R: Read + Seek> Segment<R> {
         }
         let mut encoded = vec![0; index_bytes as usize];
         source.read_exact(&mut encoded)?;
-        let digest = *blake3::hash(&encoded).as_bytes();
+        let digest = *alt_hash::blake3::hash(&encoded).as_bytes();
         if header[32..64] != digest {
             return Err(Error::Format("index checksum"));
         }
@@ -311,7 +311,7 @@ impl<R: Read + Seek> Segment<R> {
         let mut buffer = [0; 65536];
         for member in &self.index.members {
             let mut reader = MemberReader::new(&mut self.source, member.clone())?;
-            let mut hash = blake3::Hasher::new();
+            let mut hash = alt_hash::blake3::Hasher::new();
             loop {
                 let n = reader.read(&mut buffer)?;
                 if n == 0 {
@@ -338,7 +338,7 @@ impl<R: Read + Seek> Segment<R> {
         }
         self.source.seek(SeekFrom::Start(0))?;
         let mut remaining = self.index.file_bytes - TRAILER;
-        let mut hash = blake3::Hasher::new();
+        let mut hash = alt_hash::blake3::Hasher::new();
         let mut buffer = [0; 65536];
         while remaining > 0 {
             let cap = remaining.min(buffer.len() as u64) as usize;

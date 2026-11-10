@@ -7,12 +7,12 @@ license.workspace = true
 
 [dependencies]
 alt-git-codec.workspace = true
+alt-hash.workspace = true
 alt-prism.workspace = true
 alt-prism-deflate.workspace = true
 alt-prism-png.workspace = true
 alt-prism-zip.workspace = true
 alt-store.workspace = true
-blake3.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

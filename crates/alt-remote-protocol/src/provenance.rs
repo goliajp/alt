@@ -128,7 +128,7 @@ impl TransferProof {
     pub fn digest(&self) -> Result<String> {
         self.validate()?;
         Ok(
-            blake3::hash(&signing_bytes(b"alt-publication-proof-v1\0", self)?)
+            alt_hash::blake3::hash(&signing_bytes(b"alt-publication-proof-v1\0", self)?)
                 .to_hex()
                 .to_string(),
         )

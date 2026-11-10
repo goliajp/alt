@@ -21,7 +21,11 @@ fn manifest() -> alt_input::Manifest {
             tools: vec![alt_input::ToolIdentity {
                 name: "test-tool".into(),
                 version: "1".into(),
-                binary_blake3: Some(blake3::hash(b"full raw output\0\xff").to_hex().to_string()),
+                binary_blake3: Some(
+                    alt_hash::blake3::hash(b"full raw output\0\xff")
+                        .to_hex()
+                        .to_string(),
+                ),
             }],
             external: vec![],
             validation: serde_json::json!({"required":"test-tool"}),

@@ -22,8 +22,8 @@ impl WebOptions {
     }
 }
 fn csrf(token: &str, key: &ed25519_dalek::SigningKey) -> String {
-    let secret = blake3::derive_key("alt browser CSRF key v1", &key.to_bytes());
-    blake3::keyed_hash(&secret, token.as_bytes())
+    let secret = alt_hash::blake3::derive_key("alt browser CSRF key v1", &key.to_bytes());
+    alt_hash::blake3::keyed_hash(&secret, token.as_bytes())
         .to_hex()
         .to_string()
 }

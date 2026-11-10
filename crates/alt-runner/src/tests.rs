@@ -105,7 +105,10 @@ fn complete_run_preserves_binary_logs_and_rejects_same_nonce_reexecution() {
                 .join(&report.captures[&artifact.blake3]),
         )
         .unwrap();
-        assert_eq!(blake3::hash(&bytes).to_hex().as_str(), artifact.blake3);
+        assert_eq!(
+            alt_hash::blake3::hash(&bytes).to_hex().as_str(),
+            artifact.blake3
+        );
         assert_eq!(bytes.len() as u64, artifact.bytes);
     }
     assert!(execute(&f.root, &f.spec, &[7; 32]).is_err());
@@ -263,7 +266,7 @@ fn root_auxiliary_bundle_restores_only_missing_verified_auxiliary_files() {
             f.root
                 .join(CONTROL)
                 .join("auxiliary")
-                .join(blake3::hash(bytes).to_hex().as_str()),
+                .join(alt_hash::blake3::hash(bytes).to_hex().as_str()),
             bytes,
         )
         .unwrap();

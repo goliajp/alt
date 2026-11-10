@@ -435,7 +435,9 @@ fn mapping_projects_verified_delivery_and_receipts_cannot_regress_latest_mapping
         .unwrap();
     assert_eq!(
         mapping.delivery.native_commit,
-        blake3::hash(&payload.contents[index]).to_hex().as_str()
+        alt_hash::blake3::hash(&payload.contents[index])
+            .to_hex()
+            .as_str()
     );
     assert_eq!(mapping.delivery.delivery, id);
     assert_eq!(

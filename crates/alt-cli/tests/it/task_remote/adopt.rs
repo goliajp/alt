@@ -446,7 +446,7 @@ fn interrupted_received_task_adoption_can_be_explicitly_reauthorized() {
         );
         assert_eq!(result["adopted_task_id"], id);
         assert_eq!(result["supersedes"]["request"], old);
-        let digest = blake3::hash(&previous).to_hex().to_string();
+        let digest = alt_hash::blake3::hash(&previous).to_hex().to_string();
         assert_eq!(result["supersedes"]["digest"], digest);
         assert_eq!(
             std::fs::read(parent.join("history").join(format!("{digest}.json"))).unwrap(),
@@ -458,7 +458,7 @@ fn interrupted_received_task_adoption_can_be_explicitly_reauthorized() {
             "old intent/response must remain unchanged"
         );
         assert_eq!(snapshot(&first_request), first_files);
-        let first_digest = blake3::hash(&first_marker).to_hex().to_string();
+        let first_digest = alt_hash::blake3::hash(&first_marker).to_hex().to_string();
         assert_eq!(
             std::fs::read(parent.join("history").join(format!("{first_digest}.json"))).unwrap(),
             first_marker

@@ -71,7 +71,7 @@ impl MemberSet {
         out.extend(self.block);
         out.extend((self.count as u32).to_le_bytes());
         out.extend(&self.bits);
-        let hash = blake3::hash(&out);
+        let hash = alt_hash::blake3::hash(&out);
         out.extend(hash.as_bytes());
         out
     }
@@ -83,7 +83,7 @@ impl MemberSet {
             return Err(Error::Format("member set length"));
         }
         let end = bytes.len() - 32;
-        if blake3::hash(&bytes[..end]).as_bytes() != &bytes[end..] {
+        if alt_hash::blake3::hash(&bytes[..end]).as_bytes() != &bytes[end..] {
             return Err(Error::Format("member set checksum"));
         }
         let mut input = Cursor(&bytes[..end]);

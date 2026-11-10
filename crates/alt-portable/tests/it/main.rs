@@ -110,7 +110,7 @@ fn fixture() -> (Catalog, Bytes) {
                 .sign(&body.signing_bytes(limits().protocol).unwrap())
                 .to_bytes(),
         ),
-        signing_key_id: blake3::hash(key().verifying_key().as_bytes())
+        signing_key_id: alt_hash::blake3::hash(key().verifying_key().as_bytes())
             .to_hex()
             .to_string(),
         body,
@@ -532,7 +532,7 @@ fn authentic_publication_and_intact_bytes_do_not_replace_task_closure_validation
                 .sign(&body.signing_bytes(limits().protocol).unwrap())
                 .to_bytes(),
         ),
-        signing_key_id: blake3::hash(key().verifying_key().as_bytes())
+        signing_key_id: alt_hash::blake3::hash(key().verifying_key().as_bytes())
             .to_hex()
             .to_string(),
         body,
@@ -578,7 +578,7 @@ fn source_signed_manifest_with_false_chunk_claims_is_rejected() {
                 .sign(&body.signing_bytes(limits().protocol).unwrap())
                 .to_bytes(),
         ),
-        signing_key_id: blake3::hash(key().verifying_key().as_bytes())
+        signing_key_id: alt_hash::blake3::hash(key().verifying_key().as_bytes())
             .to_hex()
             .to_string(),
         body,

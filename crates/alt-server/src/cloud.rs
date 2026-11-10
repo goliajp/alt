@@ -17,7 +17,7 @@ pub(crate) fn clock() -> u64 {
 }
 impl Runtime {
     pub fn new(audience: Audience, credential: Secret) -> alt_cloud_client::Result<Self> {
-        let key_digest = blake3::hash(credential.expose().as_bytes())
+        let key_digest = alt_hash::blake3::hash(credential.expose().as_bytes())
             .to_hex()
             .to_string();
         Ok(Self {
@@ -43,7 +43,11 @@ impl Runtime {
             && self
                 .key_digest
                 .as_bytes()
-                .ct_eq(blake3::hash(credential.as_bytes()).to_hex().as_bytes())
+                .ct_eq(
+                    alt_hash::blake3::hash(credential.as_bytes())
+                        .to_hex()
+                        .as_bytes(),
+                )
                 .into()
     }
     pub fn readiness(

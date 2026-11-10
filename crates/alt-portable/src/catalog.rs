@@ -48,7 +48,7 @@ pub struct Blob {
 impl Blob {
     pub fn of(bytes: &[u8]) -> Self {
         Self {
-            blake3: blake3::hash(bytes).to_hex().to_string(),
+            blake3: alt_hash::blake3::hash(bytes).to_hex().to_string(),
             bytes: bytes.len() as u64,
         }
     }
@@ -302,7 +302,7 @@ impl Catalog {
         Ok(bytes)
     }
     pub fn digest(&self, limits: PackageLimits) -> Result<String> {
-        let mut hash = blake3::Hasher::new_derive_key("jp.golia.alt.portable-catalog.v1");
+        let mut hash = alt_hash::blake3::Hasher::new_derive_key("jp.golia.alt.portable-catalog.v1");
         hash.update(&self.canonical_bytes(limits)?);
         Ok(hash.finalize().to_hex().to_string())
     }
@@ -516,10 +516,10 @@ fn verify_chunks(
         bytes: entry.bytes,
     };
     let mut reader = source.open(&blob)?;
-    let mut whole = blake3::Hasher::new();
+    let mut whole = alt_hash::blake3::Hasher::new();
     let mut buffer = [0; 65536];
     for chunk in &entry.chunks {
-        let mut hash = blake3::Hasher::new();
+        let mut hash = alt_hash::blake3::Hasher::new();
         let mut remaining = chunk.bytes;
         while remaining > 0 {
             let n = reader.read(&mut buffer[..remaining.min(65536) as usize])?;

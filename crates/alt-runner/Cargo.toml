@@ -5,9 +5,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+alt-hash.workspace = true
 alt-input.workspace = true
 alt-task.workspace = true
-blake3.workspace = true
 libc.workspace = true
 serde.workspace = true
 serde_json.workspace = true

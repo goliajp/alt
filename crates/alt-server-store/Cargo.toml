@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 alt-byte-segment.workspace = true
+alt-hash.workspace = true
 alt-pack-segment.workspace = true
 alt-server-telemetry.workspace = true
 golia-change-link.workspace = true
@@ -18,7 +19,6 @@ alt-task-service.workspace = true
 alt-git-codec.workspace = true
 alt-remote-protocol.workspace = true
 alt-repository-service.workspace = true
-blake3.workspace = true
 ed25519-dalek.workspace = true
 rand_core.workspace = true
 serde.workspace = true

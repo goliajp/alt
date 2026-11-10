@@ -59,7 +59,7 @@ pub(crate) fn tree_files(
 }
 struct DigestReader<'a> {
     reader: Box<dyn Read + 'a>,
-    hash: &'a mut blake3::Hasher,
+    hash: &'a mut alt_hash::blake3::Hasher,
 }
 impl Read for DigestReader<'_> {
     fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
@@ -144,7 +144,7 @@ pub(crate) fn verify_candidate_inputs_bounded(
         if total > limits.total_bytes {
             return Err(Error::Limit("candidate source bytes"));
         }
-        let mut hash = blake3::Hasher::new();
+        let mut hash = alt_hash::blake3::Hasher::new();
         verify_object(
             *id,
             ObjectReader {
@@ -195,7 +195,7 @@ pub(crate) fn object_identity(
         .ok_or(Error::Integrity("selected Git object missing"))?;
     let kind = object.kind.to_string();
     let bytes = object.bytes;
-    let mut hash = blake3::Hasher::new();
+    let mut hash = alt_hash::blake3::Hasher::new();
     verify_object(
         id,
         ObjectReader {

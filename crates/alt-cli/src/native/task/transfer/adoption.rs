@@ -48,7 +48,7 @@ impl NativeRepo<'_> {
                 || marker.destination != scope
                 || marker.publication != current.publication
                 || !requests.insert(marker.creator_request.clone())
-                || !digests.insert(blake3::hash(&raw).to_hex().to_string())
+                || !digests.insert(alt_hash::blake3::hash(&raw).to_hex().to_string())
             {
                 return Err(refused("task adoption history or destination mismatch"));
             }
@@ -61,7 +61,7 @@ impl NativeRepo<'_> {
                 &history.join(format!("{}.json", prior.digest)),
                 MARKER_BYTES,
             )?;
-            if blake3::hash(&raw).to_hex().as_str() != prior.digest {
+            if alt_hash::blake3::hash(&raw).to_hex().as_str() != prior.digest {
                 return Err(refused("task adoption predecessor bytes changed"));
             }
             let previous: Adoption = serde_json::from_slice(&raw)?;

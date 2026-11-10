@@ -138,7 +138,7 @@ impl VerifiedSnapshot {
         // that a destination sink successfully retained those bytes afterward.
         for blob in &catalog.blobs {
             let mut reader = BlobSource::open(&bounded, blob)?;
-            let mut hash = blake3::Hasher::new();
+            let mut hash = alt_hash::blake3::Hasher::new();
             let mut remaining = blob.bytes;
             let mut buffer = [0u8; 65536];
             while remaining > 0 {

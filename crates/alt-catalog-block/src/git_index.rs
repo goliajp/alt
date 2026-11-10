@@ -54,7 +54,7 @@ impl GitIndexBlock {
             encoded.push(e.kind as u8);
             encoded.extend(e.digest);
         }
-        let id = *blake3::hash(&encoded).as_bytes();
+        let id = *alt_hash::blake3::hash(&encoded).as_bytes();
         encoded.extend(id);
         Ok(Self {
             id,
@@ -68,7 +68,8 @@ impl GitIndexBlock {
             return Err(Error::Limit("Git index bytes"));
         }
         let end = bytes.len() - 32;
-        if &bytes[end..] != expected || blake3::hash(&bytes[..end]).as_bytes() != expected {
+        if &bytes[end..] != expected || alt_hash::blake3::hash(&bytes[..end]).as_bytes() != expected
+        {
             return Err(Error::Format("Git index identity"));
         }
         let mut cursor = codec::Cursor(&bytes[..end]);

@@ -59,7 +59,7 @@ pub(crate) fn integration(credential: &Credential, channel: &ChangeChannel) -> R
 fn mapping_entity(release: &link::Release) -> Result<String> {
     Ok(format!(
         "mapping-{}",
-        blake3::hash(&serde_json::to_vec(&(
+        alt_hash::blake3::hash(&serde_json::to_vec(&(
             &release.application,
             &release.release,
             &release.environment
@@ -232,7 +232,7 @@ impl Store {
         {
             return Err(Error::Unauthorized);
         }
-        let intent = blake3::hash(&serde_json::to_vec(request)?)
+        let intent = alt_hash::blake3::hash(&serde_json::to_vec(request)?)
             .to_hex()
             .to_string();
         let history = append_outbox(
@@ -655,7 +655,7 @@ impl Store {
         if auth.actor_id != request.key.actor_id {
             return Err(Error::Unauthorized);
         }
-        let intent = blake3::hash(&serde_json::to_vec(request)?)
+        let intent = alt_hash::blake3::hash(&serde_json::to_vec(request)?)
             .to_hex()
             .to_string();
         if let Some(value) = queued_request(&mut tx, &request.key, &intent)? {
@@ -739,7 +739,7 @@ impl Store {
         {
             return Err(Error::Unauthorized);
         }
-        let intent = blake3::hash(&serde_json::to_vec(request)?)
+        let intent = alt_hash::blake3::hash(&serde_json::to_vec(request)?)
             .to_hex()
             .to_string();
         let history = append_outbox(

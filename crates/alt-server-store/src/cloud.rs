@@ -256,7 +256,7 @@ impl Store {
         }
         self.bytes.readiness(
             &self.spec,
-            blake3::hash(self.signing_key.verifying_key().as_bytes())
+            alt_hash::blake3::hash(self.signing_key.verifying_key().as_bytes())
                 .to_hex()
                 .as_str(),
         )?;

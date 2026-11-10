@@ -113,7 +113,7 @@ pub fn inspect(
             .take(review.changes.bytes + 1)
             .read_to_end(&mut bytes)?;
         if bytes.len() as u64 != review.changes.bytes
-            || blake3::hash(&bytes).to_hex().as_str() != review.changes.blake3
+            || alt_hash::blake3::hash(&bytes).to_hex().as_str() != review.changes.blake3
         {
             return Err(Error::Integrity("review original bytes"));
         }

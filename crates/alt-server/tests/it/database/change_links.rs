@@ -9,7 +9,7 @@ use std::net::{IpAddr, Ipv4Addr};
 
 fn add(payload: &mut Payload, kind: ContentKind, raw: Vec<u8>) -> alt_task::Artifact {
     let artifact = alt_task::Artifact {
-        blake3: blake3::hash(&raw).to_hex().to_string(),
+        blake3: alt_hash::blake3::hash(&raw).to_hex().to_string(),
         bytes: raw.len() as u64,
     };
     if payload
@@ -90,7 +90,7 @@ pub(super) fn task_payload_with_source(
         request_id: intent.request_id.clone(),
         binding_digest: intent.binding_digest.clone(),
         finished_ms: 2,
-        response_digest: blake3::hash(&response).to_hex().to_string(),
+        response_digest: alt_hash::blake3::hash(&response).to_hex().to_string(),
         response_bytes: response.len() as u64,
         operations: vec![],
         outcome: "applied".into(),

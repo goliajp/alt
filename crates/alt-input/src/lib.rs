@@ -90,7 +90,7 @@ pub fn identity<T: serde::Serialize>(domain: &str, value: &T) -> Result<String> 
         sorted(value)
     }
     let bytes = serde_json::to_vec(&sorted_value(serde_json::to_value(value)?))?;
-    let mut hash = blake3::Hasher::new();
+    let mut hash = alt_hash::blake3::Hasher::new();
     hash.update(b"alt-input-v1\0");
     hash.update(domain.as_bytes());
     hash.update(b"\0");

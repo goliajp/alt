@@ -39,7 +39,7 @@ pub(super) fn shared_payload() -> Payload {
         (ContentKind::Attachment, b"abcdef".to_vec()),
         (ContentKind::Blob, vec![]),
     ] {
-        let digest = blake3::hash(&bytes).to_hex().to_string();
+        let digest = alt_hash::blake3::hash(&bytes).to_hex().to_string();
         p.manifest.entries.push(ContentEntry {
             kind,
             blake3: digest.clone(),

@@ -91,7 +91,7 @@ fn read(package: &Package, artifact: &Artifact, maximum: usize) -> Result<Vec<u8
         .take(artifact.bytes.saturating_add(1))
         .read_to_end(&mut bytes)?;
     if bytes.len() as u64 != artifact.bytes
-        || blake3::hash(&bytes).to_hex().as_str() != artifact.blake3
+        || alt_hash::blake3::hash(&bytes).to_hex().as_str() != artifact.blake3
     {
         return Err(Error::Invalid("received artifact identity"));
     }

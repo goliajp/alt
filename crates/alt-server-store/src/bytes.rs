@@ -262,7 +262,7 @@ impl ByteStore {
     pub fn verify(&self, scope: &Scope, digest: &str, bytes: u64) -> Result<File> {
         use std::io::Seek;
         let mut file = self.read(scope, digest, bytes)?;
-        let mut hash = blake3::Hasher::new();
+        let mut hash = alt_hash::blake3::Hasher::new();
         let mut buffer = [0u8; 65536];
         let mut remaining = bytes;
         while remaining > 0 {
@@ -283,10 +283,10 @@ impl ByteStore {
     /// Both identities matter: chunks describe this request, while the payload
     /// digest identifies the immutable stored object (including empty objects).
     pub(crate) fn verify_chunk_reader(mut file: impl Read, entry: &ContentEntry) -> Result<()> {
-        let mut payload = blake3::Hasher::new();
+        let mut payload = alt_hash::blake3::Hasher::new();
         let mut buffer = [0u8; 65536];
         for chunk in &entry.chunks {
-            let mut hash = blake3::Hasher::new();
+            let mut hash = alt_hash::blake3::Hasher::new();
             let mut remaining = chunk.bytes;
             while remaining > 0 {
                 let n = file.read(&mut buffer[..remaining.min(65536) as usize])?;
@@ -333,7 +333,7 @@ fn stage(
     source: &mut dyn Read,
 ) -> Result<tempfile::NamedTempFile> {
     let mut temp = tempfile::NamedTempFile::new_in(parent)?;
-    let mut hash = blake3::Hasher::new();
+    let mut hash = alt_hash::blake3::Hasher::new();
     let mut remaining = bytes;
     let mut buffer = [0u8; 65536];
     while remaining > 0 {

@@ -883,7 +883,7 @@ impl NativeRepo<'_> {
                 ));
             }
             let predecessor = Predecessor {
-                digest: blake3::hash(&raw).to_hex().to_string(),
+                digest: alt_hash::blake3::hash(&raw).to_hex().to_string(),
                 request: original_request.into(),
             };
             self.preserve_adoption(id, &raw, &predecessor)?;

@@ -23,7 +23,7 @@ pub fn run(op: &RunnerOp, out: &mut impl Write) -> Res<()> {
                 .map(|binding| alt_runner::probe(&root, binding, &environment))
                 .collect::<alt_runner::Result<Vec<_>>>()?;
             let observer = std::fs::read(std::env::current_exe()?)?;
-            json!({"schema_version":1,"runner":alt_runner::host_identity()?,"tools":tools,"observer_blake3":blake3::hash(&observer).to_hex().to_string()})
+            json!({"schema_version":1,"runner":alt_runner::host_identity()?,"tools":tools,"observer_blake3":alt_hash::blake3::hash(&observer).to_hex().to_string()})
         }
         RunnerOp::Execute { spec } => {
             let spec: alt_runner::Spec = serde_json::from_slice(&std::fs::read(spec)?)?;

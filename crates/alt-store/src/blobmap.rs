@@ -24,7 +24,9 @@ fn file_header() -> [u8; HEADER_LEN] {
 }
 
 fn checksum(checked: &[u8]) -> [u8; 8] {
-    blake3::hash(checked).as_bytes()[..8].try_into().unwrap()
+    alt_hash::blake3::hash(checked).as_bytes()[..8]
+        .try_into()
+        .unwrap()
 }
 
 pub struct BlobMap {

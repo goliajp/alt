@@ -396,7 +396,7 @@ fn cloud_paid_write_suspension_preserves_authorized_reads() {
     assert!(f.store.refresh_cloud_service(&service(5, 1, true)).is_err());
 }
 fn crate_digest(token: &str) -> String {
-    blake3::derive_key("jp.golia.alt.server-token.v1", token.as_bytes())
+    alt_hash::blake3::derive_key("jp.golia.alt.server-token.v1", token.as_bytes())
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect()

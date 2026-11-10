@@ -68,7 +68,7 @@ fn real_disk_full_never_publishes_bytes_or_refs() {
     let _mount = Mount(directory);
     let mut p = Payload::new("first", None);
     let bytes = vec![19u8; 512_000];
-    let digest = blake3::hash(&bytes).to_hex().to_string();
+    let digest = alt_hash::blake3::hash(&bytes).to_hex().to_string();
     p.manifest.entries.push(ContentEntry {
         kind: ContentKind::Blob,
         blake3: digest.clone(),

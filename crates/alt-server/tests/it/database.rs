@@ -525,7 +525,7 @@ impl Payload {
             .iter()
             .zip([(ContentKind::Tree, tree), (ContentKind::Commit, commit)])
             .map(|(bytes, (kind, oid))| {
-                let digest = blake3::hash(bytes).to_hex().to_string();
+                let digest = alt_hash::blake3::hash(bytes).to_hex().to_string();
                 ContentEntry {
                     kind,
                     blake3: digest.clone(),

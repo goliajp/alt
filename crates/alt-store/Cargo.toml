@@ -7,7 +7,7 @@ license.workspace = true
 
 [dependencies]
 alt-cdc.workspace = true
-blake3.workspace = true
+alt-hash.workspace = true
 memmap2.workspace = true
 zstd.workspace = true
 

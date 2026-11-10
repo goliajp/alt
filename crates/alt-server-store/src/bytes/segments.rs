@@ -71,7 +71,9 @@ impl DurableSegment {
             .map(|member| DurableBytes {
                 file: DurableFile::Installed(self.file.clone()),
                 scope: self.scope.clone(),
-                blake3: blake3::Hash::from(*member.digest()).to_hex().to_string(),
+                blake3: alt_hash::blake3::Hash::from(*member.digest())
+                    .to_hex()
+                    .to_string(),
                 bytes: member.bytes(),
                 location: self.location(member.digest()),
                 segment_checksum: Some(self.checksum),
@@ -218,7 +220,9 @@ impl ByteStore {
             .iter()
             .map(|member| {
                 (
-                    blake3::Hash::from(*member.digest()).to_hex().to_string(),
+                    alt_hash::blake3::Hash::from(*member.digest())
+                        .to_hex()
+                        .to_string(),
                     member.bytes(),
                 )
             })
@@ -276,7 +280,7 @@ impl ByteStore {
         let mut actual = [0; 65536];
         let mut supplied = [0; 65536];
         let mut remaining = input.bytes;
-        let mut hash = blake3::Hasher::new();
+        let mut hash = alt_hash::blake3::Hasher::new();
         while remaining != 0 {
             let n = remaining.min(actual.len() as u64) as usize;
             reader.read_exact(&mut actual[..n])?;
@@ -517,8 +521,8 @@ impl ByteStore {
         location: &SegmentLocation,
     ) -> Result<StoredReader> {
         check_digest(digest)?;
-        let digest =
-            blake3::Hash::from_hex(digest).map_err(|_| Error::Integrity("segment digest"))?;
+        let digest = alt_hash::blake3::Hash::from_hex(digest)
+            .map_err(|_| Error::Integrity("segment digest"))?;
         let path = self.segment_path(scope, &location.segment_id)?;
         let mut file = open_segment(&path)?;
         let index = Segment::open(&mut file, Limits::default())
@@ -550,7 +554,7 @@ impl ByteStore {
         location: &SegmentLocation,
     ) -> Result<StoredReader> {
         let mut reader = self.read_segment(scope, digest, bytes, location)?;
-        let mut hash = blake3::Hasher::new();
+        let mut hash = alt_hash::blake3::Hasher::new();
         let mut buffer = [0; 65536];
         loop {
             let n = reader.read(&mut buffer)?;
@@ -640,7 +644,7 @@ mod tests {
         for stage in STAGES {
             let temp = tempfile::tempdir().unwrap();
             let store = ByteStore::open(temp.path()).unwrap();
-            let digest = *blake3::hash(b"original").as_bytes();
+            let digest = *alt_hash::blake3::hash(b"original").as_bytes();
             let mut source = io::Cursor::new(b"original");
             let result = store.put_segment_inner(
                 &scope(),
@@ -696,7 +700,7 @@ mod tests {
             .parse()
             .unwrap();
         let store = ByteStore::open(Path::new(&root)).unwrap();
-        let digest = *blake3::hash(b"original").as_bytes();
+        let digest = *alt_hash::blake3::hash(b"original").as_bytes();
         let mut source = io::Cursor::new(b"original");
         let _ = store.put_segment_inner(
             &scope(),
@@ -753,7 +757,7 @@ mod tests {
             // Simulates the coordinator after it commits the deleting fence.
             store.remove_segment(&scope(), ID).unwrap();
             assert!(!path.exists() && !pending.exists());
-            let digest = *blake3::hash(b"original").as_bytes();
+            let digest = *alt_hash::blake3::hash(b"original").as_bytes();
             let mut source = io::Cursor::new(b"original");
             let proof = store
                 .put_segment(

@@ -841,7 +841,7 @@ fn portable_registration_rechecks_current_authority_selected_bytes_and_store_ori
         .bytes()
         .put(
             &intent.key.scope,
-            blake3::hash(unknown).to_hex().as_str(),
+            alt_hash::blake3::hash(unknown).to_hex().as_str(),
             unknown.len() as u64,
             unknown.len() as u64,
             &mut Cursor::new(unknown),

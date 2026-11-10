@@ -52,7 +52,7 @@ impl NativeRepo<'_> {
             schema_version: 1,
             evidence: id.into(),
             source_proof: proof.id()?,
-            signing_key_id: blake3::hash(signer.verifying_key().as_bytes())
+            signing_key_id: alt_hash::blake3::hash(signer.verifying_key().as_bytes())
                 .to_hex()
                 .to_string(),
             signature: String::new(),
@@ -123,7 +123,7 @@ impl NativeRepo<'_> {
                         .take(review.changes.bytes.saturating_add(1))
                         .read_to_end(&mut bytes)?;
                     if bytes.len() as u64 != review.changes.bytes
-                        || blake3::hash(&bytes).to_hex().as_str() != review.changes.blake3
+                        || alt_hash::blake3::hash(&bytes).to_hex().as_str() != review.changes.blake3
                     {
                         return Err(refused(
                             "review changes no longer match their original content",

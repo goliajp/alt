@@ -124,7 +124,7 @@ fn git_command(git: &Path, root: &Path, args: &[&str]) -> Result<std::process::O
         .output()?)
 }
 pub fn git_check(git: &Path, root: &Path) -> Result<GitCheck> {
-    let before = blake3::hash(&fs::read(git)?).to_hex().to_string();
+    let before = alt_hash::blake3::hash(&fs::read(git)?).to_hex().to_string();
     let version = git_command(git, root, &["--version"])?;
     if !version.status.success() {
         return Err(format!(
@@ -136,7 +136,7 @@ pub fn git_check(git: &Path, root: &Path) -> Result<GitCheck> {
         .into());
     }
     let fsck = git_command(git, root, &["fsck", "--strict", "--full"])?;
-    if blake3::hash(&fs::read(git)?).to_hex().as_str() != before {
+    if alt_hash::blake3::hash(&fs::read(git)?).to_hex().as_str() != before {
         return Err("Git verifier changed during execution".into());
     }
     let report = GitCheck {
@@ -173,7 +173,9 @@ fn fingerprint(root: &Path) -> Result<BTreeMap<String, String>> {
             } else {
                 result.insert(
                     alt_input::hex(path.strip_prefix(root)?.as_os_str().as_encoded_bytes()),
-                    blake3::hash(&fs::read(path)?).to_hex().to_string(),
+                    alt_hash::blake3::hash(&fs::read(path)?)
+                        .to_hex()
+                        .to_string(),
                 );
             }
         }
@@ -569,7 +571,7 @@ fn verify_repository(
             .read_object(&oid)?
             .ok_or("exported object missing")?;
         if ObjectId::hash_object(oid.algo(), object.kind, &object.data) != oid
-            || blake3::hash(&object.data).to_hex().as_str() != identity.blake3
+            || alt_hash::blake3::hash(&object.data).to_hex().as_str() != identity.blake3
         {
             return Err("exported canonical object differs".into());
         }

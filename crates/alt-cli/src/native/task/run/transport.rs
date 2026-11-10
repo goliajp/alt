@@ -318,7 +318,7 @@ pub(super) fn collect(
         .try_into()
         .map_err(|_| refused("invalid observer authentication key"))?;
     let mac = fs::read_to_string(read("report.mac")?)?;
-    if blake3::keyed_hash(&key, &bytes).to_hex().as_str() != mac.trim() {
+    if alt_hash::blake3::keyed_hash(&key, &bytes).to_hex().as_str() != mac.trim() {
         return Err(refused("observer report authentication failed"));
     }
     let report: alt_runner::Report = serde_json::from_slice(&bytes)?;

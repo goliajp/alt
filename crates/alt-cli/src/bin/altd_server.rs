@@ -1876,7 +1876,7 @@ fn check_auth(req: &tiny_http::Request, users_path: &Path) -> AuthOutcome {
     let Some((user, token)) = decoded_str.split_once(':') else {
         return AuthOutcome::Reject("Authorization missing ':' separator".into());
     };
-    let token_hash = blake3::hash(token.as_bytes());
+    let token_hash = alt_hash::blake3::hash(token.as_bytes());
     let token_hex = token_hash.to_hex();
     let table = match read_users(users_path) {
         Ok(t) => t,
