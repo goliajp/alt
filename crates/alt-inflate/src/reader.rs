@@ -59,10 +59,6 @@ impl<R: Read> Reader<R> {
     }
 }
 
-fn invalid(error: Error) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, error)
-}
-
 impl<R: Read> Read for Reader<R> {
     fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
         if output.is_empty() {
@@ -86,7 +82,7 @@ impl<R: Read> Read for Reader<R> {
             let step = self
                 .inflater
                 .inflate(&self.buffer[self.start..], output)
-                .map_err(invalid)?;
+                .map_err(io::Error::from)?;
             self.start += step.consumed;
             self.done = step.done;
             if step.produced != 0 || (step.done && !self.members) {

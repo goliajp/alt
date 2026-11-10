@@ -133,3 +133,16 @@ impl IndexedPack {
         Ok(PackedObject { kind, data })
     }
 }
+
+/// Inflates the zlib stream at the start of `input` into exactly `output` and returns
+/// how many bytes the stream occupied.
+pub(crate) fn inflate_entry(input: &[u8], output: &mut [u8]) -> Result<usize, PackError> {
+    alt_inflate::inflate_exact(alt_inflate::Format::Zlib, input, output).map_err(
+        |error| match error {
+            alt_inflate::Error::TooLong | alt_inflate::Error::TooShort => {
+                PackError::Format("inflated size does not match entry header")
+            }
+            other => PackError::from(std::io::Error::from(other)),
+        },
+    )
+}

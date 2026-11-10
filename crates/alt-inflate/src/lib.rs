@@ -52,6 +52,16 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+impl From<Error> for std::io::Error {
+    fn from(error: Error) -> Self {
+        let kind = match error {
+            Error::Truncated => std::io::ErrorKind::UnexpectedEof,
+            _ => std::io::ErrorKind::InvalidData,
+        };
+        Self::new(kind, error)
+    }
+}
+
 thread_local! {
     /// The decoder the functions below reuse: its tables are larger than most of the
     /// streams they are called for.

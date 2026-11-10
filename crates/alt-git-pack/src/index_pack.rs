@@ -47,12 +47,11 @@
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
-use flate2::read::ZlibDecoder;
 use memmap2::Mmap;
 
 use crate::PackError;
@@ -242,17 +241,8 @@ fn read_entry(
         _ => return Err(PackError::Format("invalid pack entry type")),
     };
 
-    // inflate the zlib stream; ZlibDecoder::total_in() tells us how many
-    // compressed bytes we consumed
-    let mut decoder = ZlibDecoder::new(&map[pos..body_end as usize]);
-    let mut payload = Vec::with_capacity(size as usize);
-    decoder.read_to_end(&mut payload)?;
-    if payload.len() as u64 != size {
-        return Err(PackError::Format(
-            "inflated size does not match entry header",
-        ));
-    }
-    let compressed_len = decoder.total_in() as usize;
+    let mut payload = vec![0; size as usize];
+    let compressed_len = crate::inflate_entry(&map[pos..body_end as usize], &mut payload)?;
     let next_offset = (pos + compressed_len) as u64;
     if next_offset > body_end {
         return Err(PackError::Format("entry runs past pack body"));

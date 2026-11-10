@@ -1,9 +1,7 @@
 use std::fs::File;
-use std::io::Read;
 use std::path::Path;
 
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
-use flate2::read::ZlibDecoder;
 use memmap2::Mmap;
 
 use crate::PackError;
@@ -129,14 +127,8 @@ impl Pack {
 
     /// Inflates the zlib stream starting at `data_at` into exactly `size` bytes.
     pub fn inflate(&self, data_at: u64, size: u64) -> Result<Vec<u8>, PackError> {
-        let mut out = Vec::with_capacity(size as usize);
-        let mut decoder = ZlibDecoder::new(&self.map[data_at as usize..]);
-        decoder.read_to_end(&mut out)?;
-        if out.len() as u64 != size {
-            return Err(PackError::Format(
-                "inflated size does not match entry header",
-            ));
-        }
+        let mut out = vec![0; size as usize];
+        crate::inflate_entry(&self.map[data_at as usize..], &mut out)?;
         Ok(out)
     }
 }

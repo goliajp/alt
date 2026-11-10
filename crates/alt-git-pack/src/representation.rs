@@ -4,7 +4,6 @@
 use std::sync::Arc;
 
 use alt_git_codec::{ObjectId, ObjectKind};
-use flate2::{Decompress, FlushDecompress, Status};
 
 /// Optional retention bounds while ingesting a pack. Zero disables retention.
 /// `bytes` bounds compressed payloads, `objects` bounds entry metadata, and
@@ -66,32 +65,24 @@ impl PlainRepresentation {
         if self.oid != oid || self.kind != kind || self.bytes != data.len() {
             return false;
         }
-        let mut decoder = Decompress::new(true);
+        let mut decoder = alt_inflate::Inflater::new(alt_inflate::Format::Zlib);
         let mut chunk = [0u8; 65536];
+        let (mut read, mut compared) = (0, 0);
         loop {
-            let before_in = decoder.total_in() as usize;
-            let before_out = decoder.total_out() as usize;
-            let Some(remaining) = data.len().checked_sub(before_out) else {
+            // one byte more than is left, so that a longer content shows
+            let room = (data.len() - compared + 1).min(chunk.len());
+            let Ok(step) = decoder.inflate(&self.encoded[read..], &mut chunk[..room]) else {
                 return false;
             };
-            let cap = remaining.saturating_add(1).min(chunk.len());
-            let Some(input) = self.encoded.get(before_in..) else {
-                return false;
-            };
-            let Ok(status) = decoder.decompress(input, &mut chunk[..cap], FlushDecompress::None)
-            else {
-                return false;
-            };
-            let after_out = decoder.total_out() as usize;
-            let made = after_out - before_out;
-            if data.get(before_out..after_out) != Some(&chunk[..made]) {
+            read += step.consumed;
+            if data.get(compared..compared + step.produced) != Some(&chunk[..step.produced]) {
                 return false;
             }
-            if status == Status::StreamEnd {
-                return after_out == data.len()
-                    && decoder.total_in() as usize == self.encoded.len();
+            compared += step.produced;
+            if step.done {
+                return compared == data.len() && read == self.encoded.len();
             }
-            if before_in == decoder.total_in() as usize && made == 0 {
+            if step.consumed == 0 && step.produced == 0 {
                 return false;
             }
         }

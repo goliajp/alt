@@ -1,7 +1,6 @@
 //! Bounded network pack decoding. No refs or filesystem catalog are mutated.
 use crate::{PackError, PlainRepresentation, RepresentationLimits, delta};
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
-use flate2::{Decompress, FlushDecompress, Status};
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::Read,
@@ -141,44 +140,20 @@ fn header(bytes: &[u8], pos: &mut usize, algo: HashAlgo) -> Result<(Kind, u64), 
     Ok((kind, size))
 }
 fn inflate(bytes: &[u8], size: u64) -> Result<(Vec<u8>, usize), PackError> {
-    let mut decoder = Decompress::new(true);
-    let mut output = Vec::new();
-    let mut chunk = [0u8; 65536];
-    loop {
-        let before_in = decoder.total_in();
-        let before_out = decoder.total_out();
-        let remaining = size
-            .checked_sub(before_out)
-            .ok_or_else(|| fail("pack expansion exceeds header"))?;
-        let cap = remaining.saturating_add(1).min(chunk.len() as u64) as usize;
-        let input = usize::try_from(before_in).map_err(|_| fail("pack compressed range"))?;
-        let status = decoder
-            .decompress(
-                bytes
-                    .get(input..)
-                    .ok_or_else(|| fail("pack compressed offset"))?,
-                &mut chunk[..cap],
-                FlushDecompress::None,
-            )
-            .map_err(|_| fail("invalid pack zlib stream"))?;
-        let made = (decoder.total_out() - before_out) as usize;
-        if decoder.total_out() > size {
-            return Err(fail("pack expansion exceeds header"));
-        }
-        output.extend_from_slice(&chunk[..made]);
-        if status == Status::StreamEnd {
-            if decoder.total_out() != size {
-                return Err(fail("pack inflated size mismatch"));
-            }
-            return Ok((
-                output,
-                usize::try_from(decoder.total_in()).map_err(|_| fail("pack compressed range"))?,
-            ));
-        }
-        if decoder.total_in() == before_in && decoder.total_out() == before_out {
-            return Err(fail("truncated pack zlib stream"));
-        }
+    let size = usize::try_from(size).map_err(|_| fail("pack expansion exceeds header"))?;
+    // the output grows with what the stream really holds, not with what the header claims
+    let (output, consumed) =
+        alt_inflate::inflate(alt_inflate::Format::Zlib, bytes, size).map_err(|error| {
+            fail(match error {
+                alt_inflate::Error::TooLong => "pack expansion exceeds header",
+                alt_inflate::Error::Truncated => "truncated pack zlib stream",
+                _ => "invalid pack zlib stream",
+            })
+        })?;
+    if output.len() != size {
+        return Err(fail("pack inflated size mismatch"));
     }
+    Ok((output, consumed))
 }
 fn checksum(bytes: &[u8], algo: HashAlgo) -> Vec<u8> {
     match algo {

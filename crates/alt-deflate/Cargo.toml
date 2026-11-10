@@ -1,0 +1,11 @@
+[package]
+name = "alt-deflate"
+description = "DEFLATE compression whose output is byte-identical with zlib, with no dependencies"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+libz-sys = "1"
