@@ -9,7 +9,7 @@ use std::{
     panic::{AssertUnwindSafe, catch_unwind, resume_unwind},
     sync::{
         Arc, Condvar, Mutex, OnceLock,
-        atomic::{AtomicU8, Ordering},
+        atomic::{AtomicU8, AtomicUsize, Ordering},
     },
 };
 
@@ -36,6 +36,8 @@ unsafe impl Sync for Job {}
 
 struct Pool {
     queue: Mutex<VecDeque<Arc<Job>>>,
+    /// how many jobs the queue holds, readable without its lock
+    queued: AtomicUsize,
     work: Condvar,
 }
 
@@ -44,6 +46,7 @@ fn pool() -> &'static Pool {
     POOL.get_or_init(|| {
         let pool: &'static Pool = Box::leak(Box::new(Pool {
             queue: Mutex::new(VecDeque::new()),
+            queued: AtomicUsize::new(0),
             work: Condvar::new(),
         }));
         // the calling thread works too, so one fewer than there are processors
@@ -58,18 +61,42 @@ fn pool() -> &'static Pool {
     })
 }
 
+/// how often an idle thread looks at the queue again before it goes to sleep: waking
+/// a sleeping thread takes longer than most jobs do
+const SPINS: u32 = 2_000;
+
 impl Pool {
+    /// the oldest job, which is the largest piece of work still unclaimed
+    fn take(&self) -> Option<Arc<Job>> {
+        // idle threads ask this in a loop: only touch the lock when there is something
+        if self.queued.load(Ordering::Relaxed) == 0 {
+            return None;
+        }
+        let job = self.queue.lock().unwrap().pop_front();
+        if job.is_some() {
+            self.queued.fetch_sub(1, Ordering::Relaxed);
+        }
+        job
+    }
+
     fn work(&self) -> ! {
-        let mut queue = self.queue.lock().unwrap();
         loop {
-            // the oldest job is the largest piece of work still unclaimed
-            match queue.pop_front() {
-                Some(job) => {
-                    drop(queue);
-                    job.attempt();
-                    queue = self.queue.lock().unwrap();
+            let mut idle = 0;
+            while idle < SPINS {
+                match self.take() {
+                    Some(job) => {
+                        job.attempt();
+                        idle = 0;
+                    }
+                    None => {
+                        std::hint::spin_loop();
+                        idle += 1;
+                    }
                 }
-                None => queue = self.work.wait(queue).unwrap(),
+            }
+            let mut queue = self.queue.lock().unwrap();
+            while queue.is_empty() {
+                queue = self.work.wait(queue).unwrap();
             }
         }
     }
@@ -131,11 +158,26 @@ where
         wake: Condvar::new(),
     });
     pool.queue.lock().unwrap().push_back(job.clone());
+    pool.queued.fetch_add(1, Ordering::Relaxed);
     pool.work.notify_one();
 
     let first = catch_unwind(AssertUnwindSafe(first));
     // take the job back if no worker has started it; the queue's copy then finds it taken
     job.attempt();
+    // a worker has it: do other queued work meanwhile, then wait for a moment, then sleep
+    let mut idle = 0;
+    while job.state.load(Ordering::Acquire) != DONE && idle < SPINS {
+        match pool.take() {
+            Some(other) => {
+                other.attempt();
+                idle = 0;
+            }
+            None => {
+                std::hint::spin_loop();
+                idle += 1;
+            }
+        }
+    }
     let mut guard = job.finished.lock().unwrap();
     while job.state.load(Ordering::Acquire) != DONE {
         guard = job.wake.wait(guard).unwrap();
