@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: feat
+summary: a general deflate compressor built for speed beside the zlib-identical one
+author-type: human
+author: doracawl
+touched: crates/alt-deflate/src/bits.rs
+touched: crates/alt-deflate/src/block.rs
+touched: crates/alt-deflate/src/quick.rs
