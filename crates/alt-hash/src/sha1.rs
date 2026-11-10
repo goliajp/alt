@@ -217,60 +217,142 @@ pub fn portable(state: &mut [u32; 5], blocks: &[u8]) {
 #[cfg(target_arch = "aarch64")]
 mod arm {
     use super::K;
-    use std::arch::aarch64::*;
 
-    /// Four rounds. `$m` holds this group's schedule words; when `$extend` is set it is
-    /// replaced by the words needed four groups later.
-    macro_rules! group {
-        ($abcd:ident, $e:ident, $f:ident, $k:expr, $m:ident, $n1:ident, $n2:ident, $n3:ident, $extend:expr) => {
-            let input = vaddq_u32($m, $k);
-            let next = vsha1h_u32(vgetq_lane_u32($abcd, 0));
-            $abcd = $f($abcd, $e, input);
-            $e = next;
-            if $extend {
-                $m = vsha1su1q_u32(vsha1su0q_u32($m, $n1, $n2), $n3);
-            }
-        };
-    }
-
-    /// SHA-1 with the ARMv8 cryptography extension: four rounds per instruction
+    /// SHA-1 with the ARMv8 cryptography extension: four rounds per instruction.
+    ///
+    /// Written as assembly so that the rotated `e` never leaves the vector registers
+    /// and each group's message-plus-constant is ready two groups ahead.
+    /// v0: a b c d, s1 / s2: e (alternating), v4-v7: schedule, v16-v19: constants,
+    /// v20 / v21: message plus constant, v22 / v23: state at block entry.
     #[target_feature(enable = "sha2")]
     pub(super) unsafe fn compress(state: &mut [u32; 5], blocks: &[u8]) {
+        let count = blocks.len() / 64;
+        if count == 0 {
+            return;
+        }
         unsafe {
-            let k = K.map(|value| vdupq_n_u32(value));
-            let mut abcd = vld1q_u32(state.as_ptr());
-            let mut e = state[4];
-            for block in blocks.as_chunks::<64>().0 {
-                let (saved_abcd, saved_e) = (abcd, e);
-                let mut m0 = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(block.as_ptr())));
-                let mut m1 = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(block.as_ptr().add(16))));
-                let mut m2 = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(block.as_ptr().add(32))));
-                let mut m3 = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(block.as_ptr().add(48))));
-                group!(abcd, e, vsha1cq_u32, k[0], m0, m1, m2, m3, true);
-                group!(abcd, e, vsha1cq_u32, k[0], m1, m2, m3, m0, true);
-                group!(abcd, e, vsha1cq_u32, k[0], m2, m3, m0, m1, true);
-                group!(abcd, e, vsha1cq_u32, k[0], m3, m0, m1, m2, true);
-                group!(abcd, e, vsha1cq_u32, k[0], m0, m1, m2, m3, true);
-                group!(abcd, e, vsha1pq_u32, k[1], m1, m2, m3, m0, true);
-                group!(abcd, e, vsha1pq_u32, k[1], m2, m3, m0, m1, true);
-                group!(abcd, e, vsha1pq_u32, k[1], m3, m0, m1, m2, true);
-                group!(abcd, e, vsha1pq_u32, k[1], m0, m1, m2, m3, true);
-                group!(abcd, e, vsha1pq_u32, k[1], m1, m2, m3, m0, true);
-                group!(abcd, e, vsha1mq_u32, k[2], m2, m3, m0, m1, true);
-                group!(abcd, e, vsha1mq_u32, k[2], m3, m0, m1, m2, true);
-                group!(abcd, e, vsha1mq_u32, k[2], m0, m1, m2, m3, true);
-                group!(abcd, e, vsha1mq_u32, k[2], m1, m2, m3, m0, true);
-                group!(abcd, e, vsha1mq_u32, k[2], m2, m3, m0, m1, true);
-                group!(abcd, e, vsha1pq_u32, k[3], m3, m0, m1, m2, true);
-                group!(abcd, e, vsha1pq_u32, k[3], m0, m1, m2, m3, false);
-                group!(abcd, e, vsha1pq_u32, k[3], m1, m2, m3, m0, false);
-                group!(abcd, e, vsha1pq_u32, k[3], m2, m3, m0, m1, false);
-                group!(abcd, e, vsha1pq_u32, k[3], m3, m0, m1, m2, false);
-                abcd = vaddq_u32(abcd, saved_abcd);
-                e = e.wrapping_add(saved_e);
-            }
-            vst1q_u32(state.as_mut_ptr(), abcd);
-            state[4] = e;
+            std::arch::asm!(
+                "ld1 {{v0.4s}}, [x0]",
+                "ldr s1, [x0, #16]",
+                "ld1r {{v16.4s}}, [x3], #4",
+                "ld1r {{v17.4s}}, [x3], #4",
+                "ld1r {{v18.4s}}, [x3], #4",
+                "ld1r {{v19.4s}}, [x3]",
+                "2:",
+                "ld1 {{v4.16b, v5.16b, v6.16b, v7.16b}}, [x1], #64",
+                "rev32 v4.16b, v4.16b",
+                "rev32 v5.16b, v5.16b",
+                "rev32 v6.16b, v6.16b",
+                "rev32 v7.16b, v7.16b",
+                "mov v22.16b, v0.16b",
+                "mov v23.16b, v1.16b",
+                "add v20.4s, v4.4s, v16.4s",
+                "add v21.4s, v5.4s, v16.4s",
+                "sha1h s2, s0",
+                "sha1c q0, s1, v20.4s",
+                "add v20.4s, v6.4s, v16.4s",
+                "sha1su0 v4.4s, v5.4s, v6.4s",
+                "sha1h s1, s0",
+                "sha1c q0, s2, v21.4s",
+                "add v21.4s, v7.4s, v16.4s",
+                "sha1su1 v4.4s, v7.4s",
+                "sha1su0 v5.4s, v6.4s, v7.4s",
+                "sha1h s2, s0",
+                "sha1c q0, s1, v20.4s",
+                "add v20.4s, v4.4s, v16.4s",
+                "sha1su1 v5.4s, v4.4s",
+                "sha1su0 v6.4s, v7.4s, v4.4s",
+                "sha1h s1, s0",
+                "sha1c q0, s2, v21.4s",
+                "add v21.4s, v5.4s, v17.4s",
+                "sha1su1 v6.4s, v5.4s",
+                "sha1su0 v7.4s, v4.4s, v5.4s",
+                "sha1h s2, s0",
+                "sha1c q0, s1, v20.4s",
+                "add v20.4s, v6.4s, v17.4s",
+                "sha1su1 v7.4s, v6.4s",
+                "sha1su0 v4.4s, v5.4s, v6.4s",
+                "sha1h s1, s0",
+                "sha1p q0, s2, v21.4s",
+                "add v21.4s, v7.4s, v17.4s",
+                "sha1su1 v4.4s, v7.4s",
+                "sha1su0 v5.4s, v6.4s, v7.4s",
+                "sha1h s2, s0",
+                "sha1p q0, s1, v20.4s",
+                "add v20.4s, v4.4s, v17.4s",
+                "sha1su1 v5.4s, v4.4s",
+                "sha1su0 v6.4s, v7.4s, v4.4s",
+                "sha1h s1, s0",
+                "sha1p q0, s2, v21.4s",
+                "add v21.4s, v5.4s, v17.4s",
+                "sha1su1 v6.4s, v5.4s",
+                "sha1su0 v7.4s, v4.4s, v5.4s",
+                "sha1h s2, s0",
+                "sha1p q0, s1, v20.4s",
+                "add v20.4s, v6.4s, v18.4s",
+                "sha1su1 v7.4s, v6.4s",
+                "sha1su0 v4.4s, v5.4s, v6.4s",
+                "sha1h s1, s0",
+                "sha1p q0, s2, v21.4s",
+                "add v21.4s, v7.4s, v18.4s",
+                "sha1su1 v4.4s, v7.4s",
+                "sha1su0 v5.4s, v6.4s, v7.4s",
+                "sha1h s2, s0",
+                "sha1m q0, s1, v20.4s",
+                "add v20.4s, v4.4s, v18.4s",
+                "sha1su1 v5.4s, v4.4s",
+                "sha1su0 v6.4s, v7.4s, v4.4s",
+                "sha1h s1, s0",
+                "sha1m q0, s2, v21.4s",
+                "add v21.4s, v5.4s, v18.4s",
+                "sha1su1 v6.4s, v5.4s",
+                "sha1su0 v7.4s, v4.4s, v5.4s",
+                "sha1h s2, s0",
+                "sha1m q0, s1, v20.4s",
+                "add v20.4s, v6.4s, v18.4s",
+                "sha1su1 v7.4s, v6.4s",
+                "sha1su0 v4.4s, v5.4s, v6.4s",
+                "sha1h s1, s0",
+                "sha1m q0, s2, v21.4s",
+                "add v21.4s, v7.4s, v19.4s",
+                "sha1su1 v4.4s, v7.4s",
+                "sha1su0 v5.4s, v6.4s, v7.4s",
+                "sha1h s2, s0",
+                "sha1m q0, s1, v20.4s",
+                "add v20.4s, v4.4s, v19.4s",
+                "sha1su1 v5.4s, v4.4s",
+                "sha1su0 v6.4s, v7.4s, v4.4s",
+                "sha1h s1, s0",
+                "sha1p q0, s2, v21.4s",
+                "add v21.4s, v5.4s, v19.4s",
+                "sha1su1 v6.4s, v5.4s",
+                "sha1su0 v7.4s, v4.4s, v5.4s",
+                "sha1h s2, s0",
+                "sha1p q0, s1, v20.4s",
+                "add v20.4s, v6.4s, v19.4s",
+                "sha1su1 v7.4s, v6.4s",
+                "sha1h s1, s0",
+                "sha1p q0, s2, v21.4s",
+                "add v21.4s, v7.4s, v19.4s",
+                "sha1h s2, s0",
+                "sha1p q0, s1, v20.4s",
+                "sha1h s1, s0",
+                "sha1p q0, s2, v21.4s",
+                "add v0.4s, v0.4s, v22.4s",
+                "add v1.4s, v1.4s, v23.4s",
+                "subs x2, x2, #1",
+                "b.ne 2b",
+                "st1 {{v0.4s}}, [x0]",
+                "str s1, [x0, #16]",
+                in("x0") state.as_mut_ptr(),
+                inout("x1") blocks.as_ptr() => _,
+                inout("x2") count => _,
+                inout("x3") K.as_ptr() => _,
+                out("v0") _, out("v1") _, out("v2") _, out("v4") _, out("v5") _, out("v6") _, out("v7") _,
+                out("v16") _, out("v17") _, out("v18") _, out("v19") _,
+                out("v20") _, out("v21") _, out("v22") _, out("v23") _,
+                options(nostack),
+            );
         }
     }
 }
