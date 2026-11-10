@@ -1,0 +1,22 @@
+schema: alt-meta/1
+type: feat
+summary: serve Git push and fetch from verified pack segments
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/send.rs
+touched: crates/alt-repository-service/src/graph.rs
+touched: crates/alt-repository-service/src/publication.rs
+touched: crates/alt-server-store/Cargo.toml
+touched: crates/alt-server-store/src/bytes.rs
+touched: crates/alt-server-store/src/lib.rs
+touched: crates/alt-server-store/src/packs.rs
+touched: crates/alt-server-store/src/schema-v18.sql
+touched: crates/alt-server-store/src/schema.rs
+touched: crates/alt-server-store/src/store.rs
+touched: crates/alt-server/Cargo.toml
+touched: crates/alt-server/src/git.rs
+touched: crates/alt-server/src/git_packs.rs
+touched: crates/alt-server/src/git_receive.rs
+touched: crates/alt-server/src/git_representations.rs
+touched: crates/alt-server/src/http.rs
+touched: crates/alt-server/src/lib.rs
