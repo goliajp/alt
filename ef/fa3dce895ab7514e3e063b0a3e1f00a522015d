@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: feat
+summary: alt-threads, a worker pool for work that splits in two; blake3 over it for large inputs
+author-type: human
+author: doracawl
+touched: Cargo.lock
+touched: Cargo.toml
+touched: crates/alt-hash/Cargo.toml
+touched: crates/alt-hash/src/blake3.rs
+touched: crates/alt-hash/src/blake3/tree.rs
+touched: crates/alt-hash/tests/it/blake3.rs
+touched: crates/alt-threads/Cargo.toml
+touched: crates/alt-threads/src/lib.rs
+touched: crates/alt-threads/tests/it/main.rs
