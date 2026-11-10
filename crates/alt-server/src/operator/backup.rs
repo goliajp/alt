@@ -157,6 +157,9 @@ fn append<W: Write>(
 fn blob_path(blob: &alt_server_store::SnapshotBlob) -> String {
     format!("bytes/{}/{}", blob.repository, blob.blake3)
 }
+fn segment_path(segment: &alt_server_store::SnapshotPackSegment) -> String {
+    format!("packs/{}/{}", segment.repository, segment.segment)
+}
 /// Physical access to the configuration, receipt key and database is required;
 /// an HTTP administrator token alone cannot export passwords or signing keys.
 /// The recipient is a public age key. Keep its private identity off the server.
@@ -287,6 +290,18 @@ fn create_inner(
         }
         files.insert(name, description);
     }
+    for segment in &snapshot.catalog().pack_segments {
+        let name = segment_path(segment);
+        let description = append(
+            &mut archive,
+            &name,
+            &mut snapshot.read_pack_segment(segment)?,
+        )?;
+        if description.blake3 != segment.blake3 || description.bytes != segment.bytes {
+            return Err(Error::Config("snapshot bytes changed"));
+        }
+        files.insert(name, description);
+    }
     archive.finish().map_err(|_| Error::File)?;
     drop(archive);
     checked(&mut encrypt)?;
@@ -379,6 +394,28 @@ pub fn verify(
             .ok_or(Error::Config("backup blob missing from manifest"))?;
         if entry.bytes != blob.bytes || entry.blake3 != blob.blake3 {
             return Err(Error::Config("backup blob manifest mismatch"));
+        }
+    }
+    for segment in &manifest.catalog.pack_segments {
+        alt_remote_protocol::Scope {
+            installation_id: manifest.catalog.instance.installation_id.clone(),
+            repository_instance_id: segment.repository.clone(),
+            recovery_epoch: 1,
+        }
+        .validate()
+        .map_err(|_| Error::Config("backup repository identity"))?;
+        if segment.segment.len() != 32
+            || !segment.segment.bytes().all(|b| b.is_ascii_hexdigit())
+            || !expected.insert(segment_path(segment))
+        {
+            return Err(Error::Config("backup pack segment identity"));
+        }
+        let entry = manifest
+            .files
+            .get(&segment_path(segment))
+            .ok_or(Error::Config("backup pack segment missing from manifest"))?;
+        if entry.bytes != segment.bytes || entry.blake3 != segment.blake3 {
+            return Err(Error::Config("backup pack segment manifest mismatch"));
         }
     }
     if expected != manifest.files.keys().cloned().collect() {
@@ -578,6 +615,15 @@ pub fn restore(
                 blob.bytes,
                 blob.bytes,
                 &mut regular(&backup.path().join(blob_path(blob)))?,
+            )?;
+        }
+        for segment in &original.pack_segments {
+            bytes.restore_pack_segment(
+                &segment.repository,
+                &segment.segment,
+                segment.bytes,
+                &segment.blake3,
+                &mut regular(&backup.path().join(segment_path(segment)))?,
             )?;
         }
         stage = "database archive";

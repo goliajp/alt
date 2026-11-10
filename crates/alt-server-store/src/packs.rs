@@ -56,6 +56,65 @@ pub struct NewSegment<'a> {
     pub inline: Option<&'a [u8]>,
 }
 
+/// where a repository's segment lives inside a byte volume
+pub(crate) fn segment_file(
+    root: &std::path::Path,
+    repository: &str,
+    segment: &str,
+) -> Result<PathBuf> {
+    if segment.len() != 32 || !segment.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(Error::Integrity("segment id"));
+    }
+    Ok(root
+        .join("packs")
+        .join(&blake3::hash(repository.as_bytes()).to_hex()[..32])
+        .join(format!("{segment}.seg")))
+}
+
+impl crate::ByteStore {
+    /// Writes one segment file of a verified backup into a fresh volume. The row that
+    /// makes it live comes from the restored database.
+    pub fn restore_pack_segment(
+        &self,
+        repository: &str,
+        segment: &str,
+        bytes: u64,
+        digest: &str,
+        source: &mut impl std::io::Read,
+    ) -> Result<()> {
+        use std::{io::Write, os::unix::fs::OpenOptionsExt};
+        let path = segment_file(self.root(), repository, segment)?;
+        let directory = path.parent().expect("segment directory");
+        std::fs::create_dir_all(directory)?;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)?;
+        let mut hasher = blake3::Hasher::new();
+        let mut buffer = vec![0u8; 1 << 16];
+        let mut written = 0u64;
+        loop {
+            let count = source.read(&mut buffer)?;
+            if count == 0 {
+                break;
+            }
+            hasher.update(&buffer[..count]);
+            file.write_all(&buffer[..count])?;
+            written += count as u64;
+        }
+        if written != bytes || hasher.finalize().to_hex().as_str() != digest {
+            drop(file);
+            let _ = std::fs::remove_file(&path);
+            return Err(Error::Integrity("restored pack segment bytes"));
+        }
+        file.sync_all()?;
+        std::fs::File::open(directory)?.sync_all()?;
+        std::fs::File::open(self.root().join("packs"))?.sync_all()?;
+        Ok(())
+    }
+}
+
 pub(crate) fn object_kind(kind: Kind) -> ObjectKind {
     match kind {
         Kind::Commit => ObjectKind::Commit,
@@ -209,12 +268,8 @@ impl Store {
     }
 
     pub fn pack_path(&self, repository: &str, segment: &str) -> Result<PathBuf> {
-        if segment.len() != 32 || !segment.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-            return Err(Error::Integrity("segment id"));
-        }
-        Ok(self
-            .pack_directory(repository)?
-            .join(format!("{segment}.seg")))
+        self.pack_directory(repository)?;
+        segment_file(self.bytes().root(), repository, segment)
     }
 
     /// makes a segment this process just wrote available to later requests

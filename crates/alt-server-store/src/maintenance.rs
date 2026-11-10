@@ -138,6 +138,15 @@ impl Store {
     }
 }
 
+/// one file-backed pack segment; segments stored with their row travel in the database dump
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SnapshotPackSegment {
+    pub repository: String,
+    pub segment: String,
+    pub bytes: u64,
+    pub blake3: String,
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SnapshotBlob {
@@ -160,6 +169,8 @@ pub struct SnapshotCatalog {
     pub instance: InstanceSpec,
     pub repositories: Vec<SnapshotRepository>,
     pub blobs: Vec<SnapshotBlob>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pack_segments: Vec<SnapshotPackSegment>,
 }
 
 pub struct MaintenanceSnapshot<'a> {
@@ -227,6 +238,21 @@ impl<'a> MaintenanceSnapshot<'a> {
             crate::bytes::check_digest(&blob.blake3)?;
             blobs.push(blob);
         }
+        let mut pack_segments = Vec::new();
+        if schema >= 18 {
+            for row in tx.query("SELECT repository,segment_id,bytes FROM alt_pack_segments WHERE state='live' AND inline IS NULL ORDER BY repository,sequence", &[])? {
+                let (repository, segment): (String, String) = (row.get(0), row.get(1));
+                let expected = unsigned(row.get(2))?;
+                let mut file = std::fs::File::open(crate::packs::segment_file(bytes.root(), &repository, &segment)?)
+                    .map_err(|_| Error::Integrity("published pack segment unavailable"))?;
+                let mut hasher = blake3::Hasher::new();
+                let actual = std::io::copy(&mut file, &mut hasher)?;
+                if actual != expected {
+                    return Err(Error::Integrity("published pack segment size"));
+                }
+                pack_segments.push(SnapshotPackSegment { repository, segment, bytes: expected, blake3: hasher.finalize().to_hex().to_string() });
+            }
+        }
         let mut locations = BTreeMap::new();
         if schema >= 16 {
             for repository in &repositories {
@@ -252,6 +278,7 @@ impl<'a> MaintenanceSnapshot<'a> {
                 instance: spec.clone(),
                 repositories,
                 blobs,
+                pack_segments,
             },
         })
     }
@@ -299,6 +326,19 @@ impl<'a> MaintenanceSnapshot<'a> {
     }
     pub fn exported_snapshot(&self) -> &str {
         &self.exported_snapshot
+    }
+    /// the file of a segment listed in this snapshot; the caller checks the bytes it reads
+    pub fn read_pack_segment(&self, segment: &SnapshotPackSegment) -> Result<std::fs::File> {
+        if !self.catalog.pack_segments.contains(segment) {
+            return Err(Error::Precondition(
+                "pack segment is not part of this snapshot",
+            ));
+        }
+        Ok(std::fs::File::open(crate::packs::segment_file(
+            self.bytes.root(),
+            &segment.repository,
+            &segment.segment,
+        )?)?)
     }
     pub fn read_verified(&self, blob: &SnapshotBlob) -> Result<crate::StoredReader> {
         if self
