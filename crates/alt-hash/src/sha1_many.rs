@@ -64,6 +64,9 @@ mod avx2 {
             if self.stage == 0 {
                 if self.part < self.parts.len() && self.parts[self.part].len() - self.offset >= 64 {
                     let block = self.parts[self.part][self.offset..].as_ptr();
+                    // eight messages are read side by side, too many short runs for the
+                    // processor to fetch ahead on its own; an address past the end is harmless
+                    unsafe { _mm_prefetch::<_MM_HINT_T0>(block.wrapping_add(128).cast()) };
                     self.offset += 64;
                     if self.offset == self.parts[self.part].len() {
                         self.part += 1;
@@ -407,7 +410,7 @@ mod avx2 {
                 .collect();
             let mut order: Vec<usize> = (0..messages.len()).collect();
             order.sort_unstable_by_key(|job| std::cmp::Reverse(lengths[*job]));
-            let mut queue = order.into_iter();
+            let mut queue = order.into_iter().peekable();
             let mut context = Context {
                 state: [[0; 8]; 5],
                 words: [[0; 8]; 80],
@@ -442,6 +445,11 @@ mod avx2 {
                             blocks[index] = idle.as_ptr();
                             break;
                         };
+                        // the message after this one starts in some lane soon
+                        if let Some(part) = queue.peek().and_then(|next| messages[*next].first()) {
+                            _mm_prefetch::<_MM_HINT_T0>(part.as_ptr().cast());
+                            _mm_prefetch::<_MM_HINT_T0>(part.as_ptr().wrapping_add(64).cast());
+                        }
                         // start the next message in this lane from the initial state
                         for (row, initial) in context.state.iter_mut().zip(INITIAL) {
                             row[index] = initial;
