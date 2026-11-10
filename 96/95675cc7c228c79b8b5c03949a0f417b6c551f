@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: perf
+summary: cheaper huffman code lengths for the general deflate compressor
+author-type: human
+author: doracawl
+touched: crates/alt-deflate/src/block.rs
+touched: crates/alt-deflate/src/codes.rs
+touched: crates/alt-deflate/src/lib.rs
+touched: crates/alt-deflate/src/quick.rs
+touched: crates/alt-deflate/src/trees.rs
