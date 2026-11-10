@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: ARMv8 SHA-1 compression in assembly, on par with OpenSSL
+author-type: human
+author: doracawl
+touched: crates/alt-hash/src/sha1.rs
