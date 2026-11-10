@@ -182,10 +182,10 @@ impl Backend {
     ) -> [u32; 8] {
         match self.0 {
             #[cfg(target_arch = "x86_64")]
-            // either value only exists after sse4.1 was detected
-            Kind::Sse41 | Kind::Avx2 => unsafe {
-                sse41::compress(cv, block, block_len, counter, flags)
-            },
+            // each value only exists after its features were detected
+            Kind::Sse41 => unsafe { sse41::compress(cv, block, block_len, counter, flags) },
+            #[cfg(target_arch = "x86_64")]
+            Kind::Avx2 => unsafe { sse41::compress_vex(cv, block, block_len, counter, flags) },
             _ => portable::compress(cv, block, block_len, counter, flags),
         }
     }
@@ -202,10 +202,10 @@ impl Backend {
     ) {
         match self.0 {
             #[cfg(target_arch = "x86_64")]
-            // either value only exists after sse4.1 was detected
-            Kind::Sse41 | Kind::Avx2 => unsafe {
-                sse41::absorb(cv, blocks, counter, flags, flags_start)
-            },
+            // each value only exists after its features were detected
+            Kind::Sse41 => unsafe { sse41::absorb(cv, blocks, counter, flags, flags_start) },
+            #[cfg(target_arch = "x86_64")]
+            Kind::Avx2 => unsafe { sse41::absorb_vex(cv, blocks, counter, flags, flags_start) },
             _ => portable::absorb(cv, blocks, counter, flags, flags_start),
         }
     }

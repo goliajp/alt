@@ -157,20 +157,41 @@ unsafe fn half<const FIRST: bool>(rows: &mut [__m128i; 4], m: __m128i) {
     }
 }
 
-/// the chaining value that follows `cv` after one block
-#[target_feature(enable = "sse4.1")]
-pub(super) unsafe fn compress(
+/// The chaining value that follows `cv` after one block. Inlined into a function for
+/// each instruction set: with AVX the same code needs no register copies.
+#[inline(always)]
+unsafe fn compress_body(
     cv: &[u32; 8],
     block: &[u8; 64],
     block_len: u32,
     counter: u64,
     flags: u32,
 ) -> [u32; 8] {
+    // unaligned loads and stores on references that are as long as what is accessed
+    unsafe {
+        let value = [load(cv.as_ptr().cast()), load(cv.as_ptr().add(4).cast())];
+        let value = compress_rows(value, block, block_len, counter, flags);
+        let mut out = [0u32; 8];
+        _mm_storeu_si128(out.as_mut_ptr().cast(), value[0]);
+        _mm_storeu_si128(out.as_mut_ptr().add(4).cast(), value[1]);
+        out
+    }
+}
+
+/// `compress_body` on a chaining value that is already in two registers
+#[inline(always)]
+unsafe fn compress_rows(
+    value: [__m128i; 2],
+    block: &[u8; 64],
+    block_len: u32,
+    counter: u64,
+    flags: u32,
+) -> [__m128i; 2] {
     // unaligned loads from references that are as long as what is read
     unsafe {
         let mut rows = [
-            load(cv.as_ptr().cast()),
-            load(cv.as_ptr().add(4).cast()),
+            value[0],
+            value[1],
             load(IV.as_ptr().cast()),
             _mm_set_epi32(
                 flags as i32,
@@ -214,31 +235,64 @@ pub(super) unsafe fn compress(
                 _mm_shuffle_epi32::<{ pick(0, 2, 3, 1) }>(pair::<{ pick(1, 0, 2, 3) }>(c, d));
             (a, b, c, d) = (next_a, next_b, next_c, next_d);
         }
-        let mut out = [0u32; 8];
-        _mm_storeu_si128(out.as_mut_ptr().cast(), rows[0].xor(rows[2]));
-        _mm_storeu_si128(out.as_mut_ptr().add(4).cast(), rows[1].xor(rows[3]));
-        out
+        [rows[0].xor(rows[2]), rows[1].xor(rows[3])]
     }
 }
 
 /// advances `cv` over whole blocks of one chunk; the first one also gets `flags_start`
-#[target_feature(enable = "sse4.1")]
-pub(super) unsafe fn absorb(
+#[inline(always)]
+unsafe fn absorb_body(
     cv: &mut [u32; 8],
     blocks: &[[u8; 64]],
     counter: u64,
     flags: u32,
     flags_start: u32,
 ) {
-    let mut state = *cv;
     let mut block_flags = flags | flags_start;
-    for block in blocks {
-        // sse4.1 is enabled for this function
-        state = unsafe { compress(&state, block, 64, counter, block_flags) };
-        block_flags = flags;
+    // the caller has the features enabled; the value stays in registers between blocks
+    unsafe {
+        let mut value = [load(cv.as_ptr().cast()), load(cv.as_ptr().add(4).cast())];
+        for block in blocks {
+            value = compress_rows(value, block, 64, counter, block_flags);
+            block_flags = flags;
+        }
+        _mm_storeu_si128(cv.as_mut_ptr().cast(), value[0]);
+        _mm_storeu_si128(cv.as_mut_ptr().add(4).cast(), value[1]);
     }
-    *cv = state;
 }
+
+macro_rules! instances {
+    ($feature:literal, $compress:ident, $absorb:ident) => {
+        /// the chaining value that follows `cv` after one block
+        #[target_feature(enable = $feature)]
+        pub(super) unsafe fn $compress(
+            cv: &[u32; 8],
+            block: &[u8; 64],
+            block_len: u32,
+            counter: u64,
+            flags: u32,
+        ) -> [u32; 8] {
+            // the feature is enabled for this function
+            unsafe { compress_body(cv, block, block_len, counter, flags) }
+        }
+
+        /// advances `cv` over whole blocks of one chunk; the first also gets `flags_start`
+        #[target_feature(enable = $feature)]
+        pub(super) unsafe fn $absorb(
+            cv: &mut [u32; 8],
+            blocks: &[[u8; 64]],
+            counter: u64,
+            flags: u32,
+            flags_start: u32,
+        ) {
+            // the feature is enabled for this function
+            unsafe { absorb_body(cv, blocks, counter, flags, flags_start) }
+        }
+    };
+}
+
+instances!("sse4.1", compress, absorb);
+instances!("avx2", compress_vex, absorb_vex);
 
 /// Compresses the nodes in `input` four at a time and returns what is left of the
 /// input and of `out`, and the counter of the next node.
