@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: perf
+summary: defer the big sigma of a to the next sha-256 round on x86
+author-type: human
+author: doracawl
+touched: crates/alt-hash/examples/sha1_speed.rs
+touched: crates/alt-hash/src/sha256/x86/avx2.rs
