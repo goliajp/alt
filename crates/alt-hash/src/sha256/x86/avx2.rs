@@ -154,10 +154,16 @@ macro_rules! extend {
 /// leaves holding a ^ b for the next round: the majority is b where a and b agree
 /// and c where they differ. Sums of two registers are written as `lea`, which only
 /// runs on two of the four integer units and so leaves the other two to the six
-/// rotations of a round, which can run nowhere else.
+/// rotations of a round, which can run nowhere else. The big sigma of a is left in
+/// ebx and added at the start of the next round, off the path that produces e.
 macro_rules! round {
     ($a:literal, $b:literal, $c:literal, $d:literal, $e:literal, $f:literal, $g:literal, $h:literal, $y:literal, $z:literal, $at:literal) => {
         concat!(
+            "lea ",
+            $a,
+            ", [",
+            $a,
+            " + ebx]\n",
             "add ",
             $h,
             ", dword ptr [r15 + ",
@@ -234,22 +240,17 @@ macro_rules! round {
             " + ",
             $y,
             "]\n",
-            "rorx r11d, ",
+            "rorx ebx, ",
             $a,
             ", 22\n",
             "rorx r12d, ",
             $a,
             ", 13\n",
-            "xor r11d, r12d\n",
+            "xor ebx, r12d\n",
             "rorx r12d, ",
             $a,
             ", 2\n",
-            "xor r11d, r12d\n",
-            "lea ",
-            $h,
-            ", [",
-            $h,
-            " + r11d]\n",
+            "xor ebx, r12d\n",
         )
     };
 }
@@ -278,6 +279,8 @@ pub(in super::super) unsafe fn compress(state: &mut [u32; 8], blocks: &[u8]) {
     // is the plain eight-round loop.
     unsafe {
         std::arch::asm!(
+            // rbx is not available as an operand, so it is saved and restored by hand
+            "push rbx\n",
             "sub rsp, 48\n",
             "mov qword ptr [rsp + 8], r12\n",
             "mov qword ptr [rsp + 32], r11\n",
@@ -311,6 +314,7 @@ pub(in super::super) unsafe fn compress(state: &mut [u32; 8], blocks: &[u8]) {
             "mov r10d, dword ptr [r12 + 28]\n",
             "mov r13d, ecx\n",
             "xor r13d, edx\n",
+            "xor ebx, ebx\n",
             "8:\n",
             round!("eax", "ecx", "edx", "esi", "edi", "r8d", "r9d", "r10d", "r13d", "r14d", 0),
             round!("r10d", "eax", "ecx", "edx", "esi", "edi", "r8d", "r9d", "r14d", "r13d", 4),
@@ -347,6 +351,7 @@ pub(in super::super) unsafe fn compress(state: &mut [u32; 8], blocks: &[u8]) {
             "add r15, 64\n",
             "cmp r15, qword ptr [rsp]\n",
             "jne 7b\n",
+            "add eax, ebx\n",
             "mov r12, qword ptr [rsp + 8]\n",
             "add eax, dword ptr [r12 + 0]\n",
             "mov dword ptr [r12 + 0], eax\n",
@@ -384,6 +389,7 @@ pub(in super::super) unsafe fn compress(state: &mut [u32; 8], blocks: &[u8]) {
             "mov r10d, dword ptr [r12 + 28]\n",
             "mov r13d, ecx\n",
             "xor r13d, edx\n",
+            "xor ebx, ebx\n",
             "jmp 7b\n",
             "5:\n",
             "mov r14, qword ptr [rsp + 16]\n",
@@ -392,6 +398,7 @@ pub(in super::super) unsafe fn compress(state: &mut [u32; 8], blocks: &[u8]) {
             "jmp 2b\n",
             "4:\n",
             "add rsp, 48\n",
+            "pop rbx\n",
             "vzeroupper\n",
             inout("r11") words.0.as_mut_ptr() => _,
             inout("r12") state.as_mut_ptr() => _,
