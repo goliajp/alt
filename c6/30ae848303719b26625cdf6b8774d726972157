@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: refactor
+summary: inflate pack segment entries with alt-inflate
+author-type: human
+author: doracawl
+touched: Cargo.lock
+touched: crates/alt-inflate/src/lib.rs
+touched: crates/alt-inflate/tests/it/main.rs
+touched: crates/alt-pack-segment/Cargo.toml
+touched: crates/alt-pack-segment/src/ingest.rs
+touched: crates/alt-pack-segment/src/scan.rs
+touched: crates/alt-pack-segment/src/set.rs
