@@ -323,9 +323,7 @@ fn interposer(root: &Path) -> PathBuf {
 #include <string.h>
 #include <unistd.h>
 static _Atomic int fired = 0;
-ssize_t read(int fd, void *buffer, size_t size) {
-    ssize_t (*original)(int, void *, size_t) = dlsym(RTLD_NEXT, "read");
-    ssize_t result = original(fd, buffer, size);
+static void pause_selected(int fd, ssize_t result) {
     const char *selected = getenv("ALT_PORTABLE_PAUSE_FILE");
     if (selected && result > 0 && !atomic_load(&fired)) {
         char link[64], path[4096];
@@ -336,6 +334,23 @@ ssize_t read(int fd, void *buffer, size_t size) {
             if (!strcmp(path, selected) && !atomic_exchange(&fired, 1)) raise(SIGSTOP);
         }
     }
+}
+ssize_t read(int fd, void *buffer, size_t size) {
+    ssize_t (*original)(int, void *, size_t) = dlsym(RTLD_NEXT, "read");
+    ssize_t result = original(fd, buffer, size);
+    pause_selected(fd, result);
+    return result;
+}
+ssize_t pread(int fd, void *buffer, size_t size, off_t offset) {
+    ssize_t (*original)(int, void *, size_t, off_t) = dlsym(RTLD_NEXT, "pread");
+    ssize_t result = original(fd, buffer, size, offset);
+    pause_selected(fd, result);
+    return result;
+}
+ssize_t pread64(int fd, void *buffer, size_t size, off64_t offset) {
+    ssize_t (*original)(int, void *, size_t, off64_t) = dlsym(RTLD_NEXT, "pread64");
+    ssize_t result = original(fd, buffer, size, offset);
+    pause_selected(fd, result);
     return result;
 }
 "#,

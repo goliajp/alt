@@ -116,6 +116,45 @@ class GateTests(unittest.TestCase):
         self.assertTrue(all(c["args"][0] == "tree" for c in calls[2:]))
         self.assertGreater(len(calls), 2)
 
+    def test_isolation_scan_errors_fail_the_gate(self):
+        for directory in ("crates", "vendor", "fuzz"):
+            with self.subTest(directory=directory):
+                (self.root / directory).rmdir()
+                try:
+                    result, _ = self.run_gate("lint", "-p", "alt-cli")
+                    self.assertNotEqual(result.returncode, 0, result.stderr)
+                    self.assertNotIn(": OK", result.stdout)
+                finally:
+                    (self.root / directory).mkdir()
+
+    def test_isolation_scan_rejects_forbidden_source_in_each_tree(self):
+        for directory in ("crates", "vendor", "fuzz"):
+            with self.subTest(directory=directory):
+                source = self.root / directory / "forbidden.rs"
+                source.write_text("use openai::Client;\n")
+                try:
+                    result, _ = self.run_gate("lint", "-p", "alt-cli")
+                    self.assertNotEqual(result.returncode, 0, result.stderr)
+                    self.assertIn("LLM reference in core source", result.stderr)
+                    self.assertNotIn(": OK", result.stdout)
+                finally:
+                    source.unlink()
+
+    def test_isolation_scan_execution_error_is_not_a_clean_result(self):
+        real_grep = shutil.which("grep")
+        self.assertIsNotNone(real_grep)
+        grep = self.root / "bin/grep"
+        grep.write_text(
+            "#!/usr/bin/env python3\nimport os,sys\n"
+            "if sys.argv[1:2] == ['-rniE']: sys.exit(2)\n"
+            f"os.execv({real_grep!r}, [{real_grep!r}, *sys.argv[1:]])\n"
+        )
+        grep.chmod(0o755)
+        result, _ = self.run_gate("lint", "-p", "alt-cli")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("source scan failed (exit 2)", result.stderr)
+        self.assertNotIn(": OK", result.stdout)
+
     def test_server_transport_is_allowed_but_core_http_and_server_llm_are_denied(self):
         self.env["GATE_HTTP_OWNER"] = "alt-server"
         result, _ = self.run_gate("lint", "-p", "alt-server")
@@ -161,6 +200,15 @@ class GateTests(unittest.TestCase):
         result, calls = self.run_gate("corpus", "-p", "alt-cli", "--test", "it")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(calls[0]["corpus"], str(self.root.resolve() / "custom corpus"))
+
+    def test_corpus_filter_covers_ignored_library_tests_without_target(self):
+        result, calls = self.run_gate("corpus", "-p", "alt-server-store",
+                                      "--filter", "catalog::blocks::", "--release")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([c["args"] for c in calls], [
+            ["test", "--package", "alt-server-store", "--tests", "--release",
+             "--", "--ignored", "catalog::blocks::"],
+        ])
 
     def test_missing_corpus_fails_before_cargo(self):
         self.env["ALT_CORPUS"] = "missing corpus"

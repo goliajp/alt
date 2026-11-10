@@ -1,9 +1,7 @@
-use crate::requests::{active, check_key, request_row, upload_pin};
+use crate::requests::{active, check_key, upload_pin, upload_request_row, upload_selection};
 use crate::store::{authorize, instance, integer, now, snapshot};
 use crate::{ByteStore, Credential, Error, Result, Store};
-use alt_remote_protocol::{
-    Chunk, ContentEntry, ContentKind, Manifest, Publication, RequestKey, Scope,
-};
+use alt_remote_protocol::{Chunk, ContentEntry, ContentKind, Publication, RequestKey, Scope};
 use std::collections::BTreeMap;
 use std::io::Read;
 
@@ -19,18 +17,13 @@ impl Store {
         let current = snapshot(&mut tx, &self.spec, &key.scope.repository_instance_id)?;
         let auth = authorize(&mut tx, &self.spec, credential, &current)?;
         check_key(key, &current.scope, &auth.actor_id)?;
-        let row = request_row(&mut tx, key)?.ok_or(Error::Unauthorized)?;
+        let row = upload_request_row(&mut tx, key)?.ok_or(Error::Unauthorized)?;
         let time = now(&mut tx)?;
         active(&row, time)?;
         let publication: Publication = serde_json::from_value(row.get("publication"))?;
         alt_repository_service::authorize_intent(&publication, &current, &auth, self.limits, time)?;
-        let manifest: Manifest = serde_json::from_value(row.get("manifest"))?;
-        let chunks: BTreeMap<_, _> = manifest
-            .entries
-            .iter()
-            .flat_map(|e| &e.chunks)
-            .map(|c| (c.blake3.clone(), c.bytes))
-            .collect();
+        let chunks: BTreeMap<String, u64> = tx.query("SELECT blake3,chunk_bytes FROM alt_request_content WHERE repository=$1 AND epoch=$2 AND actor_id=$3 AND request_id=$4 AND chunk_bytes IS NOT NULL ORDER BY blake3", &[&key.scope.repository_instance_id,&integer(key.scope.recovery_epoch)?,&key.actor_id,&key.request_id])?
+            .into_iter().map(|row| Ok((row.get(0), crate::store::unsigned(row.get(1))?))).collect::<Result<_>>()?;
         let rows = tx.query("SELECT c.blake3 FROM alt_request_content c JOIN alt_blobs b ON b.repository=c.repository AND b.blake3=c.blake3 JOIN alt_pins p ON p.repository=c.repository AND p.blake3=c.blake3 WHERE c.repository=$1 AND c.epoch=$2 AND c.actor_id=$3 AND c.request_id=$4 AND c.verified AND b.state='stored' AND p.pin_id=$5 AND p.expires_at>$6 ORDER BY c.blake3", &[&key.scope.repository_instance_id,&integer(key.scope.recovery_epoch)?,&key.actor_id,&key.request_id,&upload_pin(key),&integer(time)?])?;
         let mut verified: Vec<_> = rows
             .into_iter()
@@ -55,8 +48,22 @@ impl Store {
         key: &RequestKey,
         digest: &str,
     ) -> Result<u64> {
-        let (chunks, _) = self.upload_chunks(credential, key)?;
-        chunks.get(digest).copied().ok_or(Error::Unauthorized)
+        alt_task::check_id(digest).map_err(|_| Error::Unauthorized)?;
+        let mut tx = self.client.transaction()?;
+        instance(&mut tx, &self.spec, &self.signing_key)?;
+        let current = snapshot(&mut tx, &self.spec, &key.scope.repository_instance_id)?;
+        let auth = authorize(&mut tx, &self.spec, credential, &current)?;
+        check_key(key, &current.scope, &auth.actor_id)?;
+        let row = upload_request_row(&mut tx, key)?.ok_or(Error::Unauthorized)?;
+        let time = now(&mut tx)?;
+        active(&row, time)?;
+        let publication: Publication = serde_json::from_value(row.get("publication"))?;
+        alt_repository_service::authorize_intent(&publication, &current, &auth, self.limits, time)?;
+        let bytes = upload_selection(&mut tx, key, digest)?
+            .and_then(|s| s.chunk_bytes)
+            .ok_or(Error::Unauthorized)?;
+        tx.commit()?;
+        Ok(bytes)
     }
     pub fn upload_chunk(
         &mut self,
@@ -105,6 +112,15 @@ impl Store {
             scope: key.scope.clone(),
             chunks: entry.chunks.clone().into_iter(),
             current: None,
+            locations: self.selected_locations(
+                credential,
+                key,
+                &entry
+                    .chunks
+                    .iter()
+                    .map(|chunk| chunk.blake3.as_str())
+                    .collect::<Vec<_>>(),
+            )?,
         };
         let proof = self.bytes.put(
             &key.scope,
@@ -123,7 +139,8 @@ struct ChunkReader {
     bytes: ByteStore,
     scope: Scope,
     chunks: std::vec::IntoIter<Chunk>,
-    current: Option<std::fs::File>,
+    current: Option<crate::StoredReader>,
+    locations: crate::segments::Locations,
 }
 impl Read for ChunkReader {
     fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
@@ -143,7 +160,12 @@ impl Read for ChunkReader {
             };
             self.current = Some(
                 self.bytes
-                    .read(&self.scope, &chunk.blake3, chunk.bytes)
+                    .read_payload(
+                        &self.scope,
+                        &chunk.blake3,
+                        chunk.bytes,
+                        self.locations.get(&chunk.blake3),
+                    )
                     .map_err(std::io::Error::other)?,
             );
         }

@@ -5,10 +5,13 @@
 
 mod cache;
 pub mod delta;
+mod delta_encode;
+mod delta_window;
 mod idx;
 mod index_pack;
 mod ingress;
 mod pack;
+mod representation;
 mod write;
 
 use std::path::Path;
@@ -17,10 +20,12 @@ use std::sync::{Arc, Mutex};
 use alt_git_codec::{ObjectId, ObjectKind, RawObject};
 
 use cache::DeltaBaseCache;
+pub use delta_window::DeltaOptions;
 pub use idx::PackIndex;
 pub use index_pack::{IndexedPackOnDisk, index_pack};
 pub use ingress::*;
 pub use pack::{EntryInfo, EntryKind, Pack};
+pub use representation::{PlainRepresentation, RepresentationLimits};
 pub use write::{PackWriter, WrittenPack};
 
 #[derive(Debug, thiserror::Error)]

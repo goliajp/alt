@@ -114,7 +114,7 @@ async fn inner(
     let factory = state.factory.clone();
     let outcome = tokio::time::timeout(
         state.options.work_timeout,
-        tokio::task::spawn_blocking(move || {
+        crate::http::spawn_blocking(move || {
             let _permit = permit;
             let mut source = source;
             source

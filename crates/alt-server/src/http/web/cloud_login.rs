@@ -136,7 +136,7 @@ pub(super) async fn handle(
     let factory = state.factory.clone();
     let result = tokio::time::timeout(
         state.options.work_timeout,
-        tokio::task::spawn_blocking(move || {
+        crate::http::spawn_blocking(move || {
             let _permit = permit;
             let mut store = factory.open()?;
             store.check_browser_binding(Some(&browser.origin))?;

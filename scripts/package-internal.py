@@ -30,8 +30,26 @@ PAYLOAD = {
     "docs/internal-install.md": "docs/internal-install.md",
     "docs/recovery.md": "docs/recovery.md",
     "docs/task-walkthrough.md": "docs/task-walkthrough.md",
+    "docs/task-remote.md": "docs/task-remote.md",
+    "docs/change-links.md": "docs/change-links.md",
+    "server-operator.md": "crates/alt-server/README.md",
+    "example-config.json": "crates/alt-server/example-config.json",
     "examples/task-workflow.py": "examples/task-workflow.py",
 }
+
+
+def document_bytes(source, raw):
+    """Keep the same guide text, with local links for the offline layout."""
+    text = raw.decode("utf-8")
+    if source == "README.md":
+        text = text.replace("(crates/alt-server/README.md", "(server-operator.md")
+    elif source == "self-hosted/README.md":
+        text = text.replace("(../crates/alt-server/README.md", "(server-operator.md")
+    elif source == "crates/alt-server/README.md":
+        text = text.replace("(../../docs/", "(docs/")
+    elif source == "docs/task-remote.md":
+        text = text.replace("(../crates/alt-server/README.md", "(../server-operator.md")
+    return text.encode("utf-8")
 
 
 def command(argv):
@@ -154,7 +172,10 @@ def build(output):
         for relative, source in sorted(sources.items()):
             destination = package / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(ROOT / source, destination)
+            if relative.endswith(".md"):
+                destination.write_bytes(document_bytes(source, (ROOT / source).read_bytes()))
+            else:
+                shutil.copyfile(ROOT / source, destination)
             mode = 0o755 if relative.startswith("bin/") else 0o644
             destination.chmod(mode)
             inventory[relative] = {"sha256": MANAGER["sha"](destination), "bytes": destination.stat().st_size, "mode": mode}

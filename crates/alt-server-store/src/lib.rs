@@ -1,5 +1,6 @@
 //! PostgreSQL publication authority and a durable immutable POSIX byte store.
 mod bytes;
+mod database;
 mod gc;
 mod portable;
 mod portable_import;
@@ -8,10 +9,13 @@ pub use portable_import::*;
 mod provenance;
 mod publication;
 mod read;
+mod registration;
 mod requests;
 pub use publication::*;
 pub use read::*;
+pub use registration::MAX_REGISTER_CONTENTS;
 mod schema;
+mod segments;
 mod store;
 mod tasks;
 pub use bytes::*;
@@ -61,7 +65,7 @@ pub use tasks::CurrentReviewAssessment;
 pub use workbench::*;
 
 /// Current persisted schema; runtime open validates all migration checksums.
-pub const SCHEMA_VERSION: u32 = 13;
+pub const SCHEMA_VERSION: u32 = 17;
 
 mod change_channel;
 mod link_history;
@@ -95,3 +99,6 @@ pub use change_repair::RepairTaskClaim;
 
 mod change_queries;
 pub use change_queries::*;
+
+/// Operational observations never replace durable audit or authorization.
+pub mod telemetry;

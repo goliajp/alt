@@ -392,7 +392,7 @@ fn schema_ten_upgrade_preserves_the_original_signed_export() {
         )
         .unwrap();
     let original = export.envelope().encode(portable_limits().package).unwrap();
-    source.client().batch_execute("DROP TABLE alt_link_task_claims,alt_link_current,alt_link_inbox,alt_link_outbox,alt_link_channels; DROP TABLE alt_link_history; ALTER TABLE alt_repositories DROP COLUMN link_bytes; DELETE FROM alt_schema WHERE version>=11").unwrap();
+    source.client().batch_execute("DROP TABLE alt_link_task_claims,alt_link_current,alt_link_inbox,alt_link_outbox,alt_link_channels; DROP TABLE alt_link_history; ALTER TABLE alt_repositories DROP COLUMN link_bytes; ALTER TABLE alt_request_content DROP COLUMN selected_entries, DROP COLUMN chunk_bytes; DROP TABLE alt_blob_locations,alt_segments; DROP INDEX alt_pins_permanent_content; DELETE FROM alt_schema WHERE version>=11").unwrap();
     assert!(
         Store::open(
             source.client(),

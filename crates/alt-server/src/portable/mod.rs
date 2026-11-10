@@ -160,7 +160,10 @@ pub fn execute(
                     Ok(Output::File {
                         bytes: blob.bytes,
                         digest,
-                        file: file.into_file(),
+                        file: alt_server_store::StoredReader::from_file(
+                            file.into_file(),
+                            blob.bytes,
+                        )?,
                     })
                 }
             }

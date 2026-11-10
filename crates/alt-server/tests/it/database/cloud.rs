@@ -179,6 +179,12 @@ fn cloud_http_refresh_outage_revocation_and_browser_identity() {
         Some(runtime.clone()),
     );
     assert_eq!(server.command("GET", "/v1/capabilities", &token).0, 200);
+    assert_eq!(
+        server
+            .send("GET", "/v1/instance/metrics", Some(&token), b"")
+            .status(),
+        200
+    );
     assert_eq!(calls.load(Ordering::SeqCst), 2);
     let cookie = origin
         .set_cookie(&token, 3600)
@@ -204,8 +210,20 @@ fn cloud_http_refresh_outage_revocation_and_browser_identity() {
     assert_eq!(server.command("GET", "/v1/capabilities", &token).0, 200);
     f.client().execute("UPDATE alt_cloud_credentials SET claims=jsonb_set(claims,'{lease,expires_at_unix_ms}',to_jsonb($1::text))", &[&time().to_string()]).unwrap();
     assert_eq!(server.command("GET", "/v1/capabilities", &token).0, 503);
+    assert_eq!(
+        server
+            .send("GET", "/v1/instance/metrics", Some(&token), b"")
+            .status(),
+        503
+    );
     mode.store(2, Ordering::SeqCst);
     assert_eq!(server.command("GET", "/v1/capabilities", &token).0, 403);
+    assert_eq!(
+        server
+            .send("GET", "/v1/instance/metrics", Some(&token), b"")
+            .status(),
+        403
+    );
     assert!(
         f.store.cloud_refresh(&token).is_err(),
         "definitive refusal persists"

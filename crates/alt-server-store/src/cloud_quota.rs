@@ -4,11 +4,11 @@
 //! resumable chunks do not add a second ingress charge for the same root.
 //! replays of already verified content do not consume the allowance twice.
 use crate::cloud::service;
+use crate::database::Transaction;
 use crate::store::{integer, unsigned};
 use crate::{Error, InstanceSpec, Result};
 use alt_remote_protocol::RequestKey;
 use golia_platform_contract::AltServiceAuthorization;
-use postgres::Transaction;
 
 fn month(tx: &mut Transaction<'_>) -> Result<String> {
     Ok(tx

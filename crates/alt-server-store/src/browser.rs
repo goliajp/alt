@@ -1,10 +1,10 @@
 //! Local browser identities and sessions. They share the same credential and
 //! repository authorization checks as CLI/Git. Cloud cannot create local users.
+use crate::database::Transaction;
 use crate::store::{credential_row, instance, integer, now, require_admin, token_digest, unsigned};
 use crate::{Credential, Error, Result, Store};
 use alt_browser_auth::{PublicOrigin, password_hash, password_verify};
 use alt_remote_protocol::{ActorKind, Attribution, DeploymentMode};
-use postgres::Transaction;
 use serde::Serialize;
 
 #[derive(Clone, Serialize)]

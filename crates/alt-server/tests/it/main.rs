@@ -1,4 +1,5 @@
 use alt_server::{RequestAction, Route, parse_route};
+mod cloud_settings;
 mod database;
 
 #[test]

@@ -12,6 +12,15 @@ import sys
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = runpy.run_path(str(ROOT / 'scripts/package-internal.py'))
+IMAGES = runpy.run_path(str(ROOT / 'self-hosted/image_identity.py'))
+DOCUMENTS = {
+    'README.md': 'self-hosted/README.md',
+    'server-operator.md': 'crates/alt-server/README.md',
+    'docs/task-remote.md': 'docs/task-remote.md',
+    'docs/change-links.md': 'docs/change-links.md',
+    'example-config.json': 'crates/alt-server/example-config.json',
+}
+
 
 
 def run(*args, capture=False):
@@ -66,23 +75,28 @@ def build(args):
         raise ValueError('source changed during image build; no bundle published')
     output.mkdir(mode=0o700)
     run('docker', 'image', 'save', '--output', str(output / 'images.tar'), *[image['reference'] for image in images])
+    with IMAGES['Archive'](output / 'images.tar') as archive:
+        for image in images:
+            identity = archive.for_reference(image['reference'], args.architecture)
+            if archive.for_id(image['id'], args.architecture) != identity:
+                raise ValueError('saved image identity differs from built image')
+            image['config_digest'] = identity['config_digest']
     files = {'images.tar': sha(output / 'images.tar')}
-    for name in ['compose.yaml', 'Caddyfile', 'manage.py', 'README.md', 'dependencies.json']:
-        if name == 'README.md':
-            (output / name).write_text((ROOT / 'self-hosted' / name).read_text().replace('../crates/alt-server/README.md', 'server-operator.md'))
-        else:
-            shutil.copyfile(ROOT / 'self-hosted' / name, output / name)
+    for name in ['compose.yaml', 'Caddyfile', 'manage.py', 'image_identity.py', 'dependencies.json']:
+        shutil.copyfile(ROOT / 'self-hosted' / name, output / name)
         files[name] = sha(output / name)
-    shutil.copyfile(ROOT / 'crates/alt-server/README.md', output / 'server-operator.md')
-    files['server-operator.md'] = sha(output / 'server-operator.md')
+    for name, source in DOCUMENTS.items():
+        destination = output / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        raw = (ROOT / source).read_bytes()
+        destination.write_bytes(SOURCE['document_bytes'](source, raw) if name.endswith('.md') else raw)
+        files[name] = sha(destination)
     for name in ['LICENSE-MIT', 'LICENSE-APACHE']:
         shutil.copyfile(ROOT / name, output / name)
         files[name] = sha(output / name)
-    shutil.copyfile(ROOT / 'crates/alt-server/example-config.json', output / 'example-config.json')
-    files['example-config.json'] = sha(output / 'example-config.json')
     if SOURCE['inputs']() != before:
         raise ValueError('source changed during bundle creation; no completion manifest published')
-    manifest = {'format': 1, 'product': 'alt-server', 'architecture': args.architecture,
+    manifest = {'format': 3, 'product': 'alt-server', 'architecture': args.architecture,
                 'source_digest': digest, 'build_id': build_id, 'native_build_info_checked': runtime_checked,
                 **named, 'images': images, 'files': files}
     # The completion manifest is last; a half-written directory is not a bundle.

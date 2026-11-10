@@ -36,7 +36,7 @@ contains the archive SHA-256, release identity, version and target. Run builds o
 your normal build host and respect its resource/benchmark scheduling rules.
 
 The archive contains only `alt`, `altd`, `altd-server`, two licenses, README,
-three guides, the example, the installer and `manifest.json`. It contains no
+five guides and the server operator guide, the example, the installer and `manifest.json`. It contains no
 repository, task records, validation logs or deployment configuration. The
 manifest identifies the source inputs, lockfile, actual binaries, toolchain and
 selected build settings. It does not claim that the build was hermetic or

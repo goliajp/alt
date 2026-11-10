@@ -65,7 +65,7 @@ fn regular(path: &Path) -> Result<File> {
     }
     Ok(file)
 }
-fn digest(file: &mut File) -> Result<FileDigest> {
+fn digest(file: &mut (impl Read + Seek)) -> Result<FileDigest> {
     file.rewind().map_err(|_| Error::File)?;
     let mut hash = blake3::Hasher::new();
     let mut bytes = 0u64;
@@ -141,7 +141,7 @@ fn postgres_command(config: &Config, program: &str) -> Result<Command> {
 fn append<W: Write>(
     archive: &mut tar::Builder<W>,
     name: &str,
-    file: &mut File,
+    file: &mut (impl Read + Seek),
 ) -> Result<FileDigest> {
     let description = digest(file)?;
     let mut header = tar::Header::new_gnu();
@@ -601,6 +601,7 @@ pub fn restore(
         checked(&mut restore)?;
         stage = "restored snapshot verification";
         let key = target.signing_key()?;
+        MaintenanceSnapshot::normalize_restored_locations(&mut client, &bytes, original, &key)?;
         {
             let snapshot = MaintenanceSnapshot::begin(
                 &mut client,
@@ -649,6 +650,27 @@ pub fn restore(
                 target.limits,
             )?,
             5 => alt_server_store::Store::migrate_v5(
+                client,
+                bytes,
+                original.instance.clone(),
+                key,
+                target.limits,
+            )?,
+            13 => alt_server_store::Store::migrate_v13(
+                client,
+                bytes,
+                original.instance.clone(),
+                key,
+                target.limits,
+            )?,
+            14 => alt_server_store::Store::migrate_v14(
+                client,
+                bytes,
+                original.instance.clone(),
+                key,
+                target.limits,
+            )?,
+            15 => alt_server_store::Store::migrate_v15(
                 client,
                 bytes,
                 original.instance.clone(),

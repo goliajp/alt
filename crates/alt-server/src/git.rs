@@ -2,12 +2,11 @@
 //! in the same repository domain and SQL transaction as native requests.
 use crate::{Output, Route};
 use alt_git_codec::{HashAlgo, ObjectId};
-use alt_repository_service::{Node, ObjectReader, ObjectSource, VerifiedGraph, verify_graph};
-use alt_server_store::{Credential, Error, ReadSnapshot, Result, Store};
+use alt_repository_service::{Node, ObjectSource, VerifiedGraph, verify_graph, verify_object};
+use alt_server_store::{Credential, Error, ReadSnapshot, Result, SnapshotObjects, Store};
 use alt_wire::pkt::{self, Frame};
 use std::{
-    cell::RefCell,
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     io::{Cursor, Read, Seek, SeekFrom, Write},
 };
 
@@ -17,27 +16,6 @@ pub(crate) fn pack_error(error: alt_git_pack::PackError) -> Error {
         alt_git_pack::PackError::Io(error) => Error::Io(error),
         alt_git_pack::PackError::Limit(reason) => Error::Limit(reason),
         alt_git_pack::PackError::Format(reason) => Error::Integrity(reason),
-    }
-}
-struct SnapshotSource<'a> {
-    store: RefCell<&'a mut Store>,
-    credential: &'a Credential,
-    snapshot: &'a ReadSnapshot,
-}
-impl ObjectSource for SnapshotSource<'_> {
-    fn open(&self, oid: ObjectId) -> alt_repository_service::Result<Option<ObjectReader<'_>>> {
-        let (kind, bytes, file) = self
-            .store
-            .borrow_mut()
-            .open_snapshot_object(self.credential, self.snapshot, oid)
-            .map_err(|_| {
-                alt_repository_service::Error::Integrity("authorized snapshot object unavailable")
-            })?;
-        Ok(Some(ObjectReader {
-            kind,
-            bytes,
-            reader: Box::new(file),
-        }))
     }
 }
 fn closure(
@@ -167,12 +145,122 @@ fn validate_command(raw: &[u8], max_lines: usize) -> Result<(String, bool)> {
     }
     Ok((command, unborn))
 }
+enum Command {
+    Advertisement,
+    Refs(alt_wire::ls_refs::LsRefsRequest, bool),
+    Fetch(alt_wire::fetch::FetchRequest),
+}
+fn command(
+    source: &mut dyn Read,
+    advertisement: bool,
+    limits: alt_remote_protocol::Limits,
+) -> Result<Command> {
+    if advertisement {
+        if source.read(&mut [0u8; 1])? != 0 {
+            return Err(Error::Integrity("unexpected advertisement body"));
+        }
+        return Ok(Command::Advertisement);
+    }
+    let mut raw = Vec::new();
+    source
+        .take((limits.request_bytes as u64).saturating_add(1))
+        .read_to_end(&mut raw)?;
+    if raw.len() > limits.request_bytes {
+        return Err(Error::Limit("Git command body"));
+    }
+    let (name, unborn) = validate_command(
+        &raw,
+        limits.graph_objects.saturating_mul(2).saturating_add(100),
+    )?;
+    if name == "ls-refs" {
+        let (request, _) = alt_wire::ls_refs::parse_ls_refs_request(&mut Cursor::new(&raw))
+            .map_err(|_| Error::Integrity("Git ls-refs request"))?;
+        Ok(Command::Refs(request, unborn))
+    } else {
+        let (request, _) = alt_wire::fetch::parse_fetch_request(&mut Cursor::new(&raw))
+            .map_err(|_| Error::Integrity("Git fetch request"))?;
+        Ok(Command::Fetch(request))
+    }
+}
+
+fn reference_tags(
+    objects: &SnapshotObjects<'_>,
+    snapshot: &ReadSnapshot,
+    limits: alt_remote_protocol::Limits,
+) -> Result<BTreeMap<ObjectId, Node>> {
+    let metadata: BTreeMap<_, _> = snapshot
+        .objects()
+        .map(|(id, kind, size)| (id, (kind, size)))
+        .collect();
+    let mut result = BTreeMap::new();
+    let mut remaining = limits.total_bytes;
+    for (id, (kind, size)) in &metadata {
+        if *kind != alt_git_codec::ObjectKind::Tag {
+            continue;
+        }
+        remaining = remaining
+            .checked_sub(*size)
+            .ok_or(Error::Limit("reference tag bytes"))?;
+        let object = objects
+            .open(*id)?
+            .ok_or(Error::Integrity("reference tag missing"))?;
+        let node = verify_object(*id, object, limits.into())?;
+        let Node::Tag { target, kind } = &node else {
+            return Err(Error::Integrity("reference tag kind"));
+        };
+        if metadata.get(target).map(|(actual, _)| actual) != Some(kind) {
+            return Err(Error::Integrity("reference tag target kind"));
+        }
+        result.insert(*id, node);
+    }
+    Ok(result)
+}
+fn peeled_reference(
+    tags: &BTreeMap<ObjectId, Node>,
+    mut id: ObjectId,
+    remaining: &mut usize,
+) -> Result<ObjectId> {
+    while let Some(Node::Tag { target, .. }) = tags.get(&id) {
+        *remaining = remaining
+            .checked_sub(1)
+            .ok_or(Error::Limit("tag peel walk"))?;
+        id = *target;
+    }
+    Ok(id)
+}
+
 pub fn execute_git(
     store: &mut Store,
     credential: &Credential,
     route: Route,
     protocol_v2: bool,
     source: &mut dyn Read,
+) -> Result<Output> {
+    execute_git_with_refresh(store, credential, route, protocol_v2, source, &mut |_| {
+        Ok(credential.clone())
+    })
+}
+/// Refresh external authority after buffered read work and before its final
+/// current-permission transaction. Receive publication keeps its own checks.
+pub fn execute_git_with_refresh(
+    store: &mut Store,
+    credential: &Credential,
+    route: Route,
+    protocol_v2: bool,
+    source: &mut dyn Read,
+    refresh: &mut dyn FnMut(&mut Store) -> Result<Credential>,
+) -> Result<Output> {
+    execute_git_with_cache(store, credential, route, protocol_v2, source, refresh, None)
+}
+
+pub(crate) fn execute_git_with_cache(
+    store: &mut Store,
+    credential: &Credential,
+    route: Route,
+    protocol_v2: bool,
+    source: &mut dyn Read,
+    refresh: &mut dyn FnMut(&mut Store) -> Result<Credential>,
+    representations: Option<crate::git_representations::Context<'_>>,
 ) -> Result<Output> {
     let (repository, receive, advertisement) = match &route {
         Route::GitAdvertise(repository, receive) => (repository.clone(), *receive, true),
@@ -184,29 +272,57 @@ pub fn execute_git(
         return Err(Error::Precondition("Git fetch protocol v2 is required"));
     }
     if receive && !advertisement {
-        return crate::git_receive::receive(store, credential, &repository, source);
+        return crate::git_receive::receive(
+            store,
+            credential,
+            &repository,
+            source,
+            representations,
+        );
     }
     let limits = store.limits();
-    let snapshot = store.read_snapshot(credential, &repository, 300_000, limits.graph_objects)?;
-    let result = read(store, credential, &snapshot, receive, advertisement, source);
+    let command = command(source, advertisement, limits)?;
+    let snapshot = match &command {
+        Command::Advertisement => store.read_metadata_snapshot(credential, &repository, 300_000)?,
+        Command::Refs(request, _) if !request.peel => {
+            store.read_metadata_snapshot(credential, &repository, 300_000)?
+        }
+        Command::Refs(request, _) => {
+            store.read_ref_snapshot(credential, &repository, 300_000, &request.ref_prefixes)?
+        }
+        Command::Fetch(_) => {
+            store.read_snapshot(credential, &repository, 300_000, limits.graph_objects)?
+        }
+    };
+    let result = store.with_snapshot_objects(
+        credential,
+        &snapshot,
+        |objects| {
+            read(
+                objects,
+                limits,
+                &snapshot,
+                receive,
+                &command,
+                representations.map(|context| context.scope(&snapshot.scope)),
+            )
+        },
+        refresh,
+    );
     // Cleanup cannot change an already-known result. A failed release leaves
     // only this bounded temporary read pin, which expires normally.
     let _ = store.release_snapshot(credential, snapshot);
     result
 }
 fn read(
-    store: &mut Store,
-    credential: &Credential,
+    objects: &SnapshotObjects<'_>,
+    limits: alt_remote_protocol::Limits,
     snapshot: &ReadSnapshot,
     receive: bool,
-    advertisement: bool,
-    source: &mut dyn Read,
+    command: &Command,
+    representations: Option<crate::git_representations::Scoped<'_>>,
 ) -> Result<Output> {
-    let limits = store.limits();
-    if advertisement {
-        if source.read(&mut [0u8; 1])? != 0 {
-            return Err(Error::Integrity("unexpected advertisement body"));
-        }
+    if matches!(command, Command::Advertisement) {
         let mut output = Vec::new();
         if receive {
             let refs: Vec<_> = snapshot
@@ -251,32 +367,13 @@ fn read(
         pkt::write_flush(&mut output)?;
         return Ok(bytes("application/x-git-upload-pack-advertisement", output));
     }
-    let mut raw = Vec::new();
-    source
-        .take((limits.request_bytes as u64).saturating_add(1))
-        .read_to_end(&mut raw)?;
-    if raw.len() > limits.request_bytes {
-        return Err(Error::Limit("Git command body"));
-    }
-    let (command, unborn) = validate_command(
-        &raw,
-        limits.graph_objects.saturating_mul(2).saturating_add(100),
-    )?;
-    let roots: Vec<_> = snapshot.refs.values().copied().collect();
-    let graph = verify_graph(
-        &SnapshotSource {
-            store: RefCell::new(&mut *store),
-            credential,
-            snapshot,
-        },
-        HashAlgo::Sha1,
-        &roots,
-        limits.into(),
-    )?;
     let mut remaining = limits.walk_steps;
-    if command == "ls-refs" {
-        let (request, _) = alt_wire::ls_refs::parse_ls_refs_request(&mut Cursor::new(&raw))
-            .map_err(|_| Error::Integrity("Git ls-refs request"))?;
+    if let Command::Refs(request, unborn) = command {
+        let tags = if request.peel {
+            reference_tags(objects, snapshot, limits)?
+        } else {
+            BTreeMap::new()
+        };
         let mut refs = snapshot.refs.clone();
         if let Some(oid) = refs.get(&snapshot.default_branch).copied() {
             refs.insert("HEAD".into(), oid);
@@ -295,14 +392,17 @@ fn read(
             if request.symrefs && name == "HEAD" {
                 line.push_str(&format!(" symref-target:{}", snapshot.default_branch));
             }
-            if request.peel && matches!(graph.node(oid)?, Node::Tag { .. }) {
-                line.push_str(&format!(" peeled:{}", peeled(&graph, oid, &mut remaining)?));
+            if request.peel && tags.contains_key(&oid) {
+                line.push_str(&format!(
+                    " peeled:{}",
+                    peeled_reference(&tags, oid, &mut remaining)?
+                ));
             }
             line.push('\n');
             pkt::write_data(&mut output, line.as_bytes())?;
         }
         if !snapshot.refs.contains_key(&snapshot.default_branch)
-            && unborn
+            && *unborn
             && (request.ref_prefixes.is_empty()
                 || request
                     .ref_prefixes
@@ -317,8 +417,11 @@ fn read(
         pkt::write_flush(&mut output)?;
         return Ok(bytes(UPLOAD_RESULT, output));
     }
-    let (request, _) = alt_wire::fetch::parse_fetch_request(&mut Cursor::new(&raw))
-        .map_err(|_| Error::Integrity("Git fetch request"))?;
+    let Command::Fetch(request) = command else {
+        return Err(Error::Integrity("Git command dispatch"));
+    };
+    let roots: Vec<_> = snapshot.refs.values().copied().collect();
+    let graph = verify_graph(objects, HashAlgo::Sha1, &roots, limits.into())?;
     if request.wants.is_empty() {
         return Err(Error::Integrity("empty Git wants"));
     }
@@ -346,7 +449,7 @@ fn read(
         return Ok(bytes(UPLOAD_RESULT, output));
     }
     let known = closure(&graph, haves, &mut remaining)?;
-    let mut selected = closure(&graph, request.wants, &mut remaining)?;
+    let mut selected = closure(&graph, request.wants.iter().copied(), &mut remaining)?;
     if request.include_tag {
         for (name, oid) in &snapshot.refs {
             if name.starts_with("refs/tags/")
@@ -358,25 +461,36 @@ fn read(
     }
     selected.retain(|oid| !known.contains(oid));
     let temp = tempfile::tempdir()?;
-    let mut writer = alt_git_pack::PackWriter::create(
+    let mut writer = alt_git_pack::PackWriter::create_with_deltas(
         temp.path(),
         HashAlgo::Sha1,
         u32::try_from(selected.len()).map_err(|_| Error::Limit("Git output count"))?,
+        alt_git_pack::DeltaOptions::default(),
     )
     .map_err(pack_error)?;
     for oid in selected {
-        let (kind, size, mut file) = store.open_snapshot_object(credential, snapshot, oid)?;
+        let mut object = objects
+            .open(oid)?
+            .ok_or(Error::Integrity("selected read object unavailable"))?;
+        let kind = object.kind;
+        let size = object.bytes;
         if size > limits.object_bytes {
             return Err(Error::Limit("Git output object"));
         }
         let mut data = Vec::new();
-        Read::by_ref(&mut file)
+        Read::by_ref(&mut object.reader)
             .take(size.saturating_add(1))
             .read_to_end(&mut data)?;
         if data.len() as u64 != size || ObjectId::hash_object(HashAlgo::Sha1, kind, &data) != oid {
             return Err(Error::Integrity("Git output object identity"));
         }
-        writer.add(oid, kind, &data).map_err(pack_error)?;
+        if let Some(representation) = representations.and_then(|cache| cache.get(oid, &data)) {
+            writer
+                .add_reusing(oid, kind, &data, &representation)
+                .map_err(pack_error)?;
+        } else {
+            writer.add(oid, kind, &data).map_err(pack_error)?;
+        }
     }
     let pack = writer.finish().map_err(pack_error)?;
     let mut pack = std::fs::File::open(pack.pack_path)?;

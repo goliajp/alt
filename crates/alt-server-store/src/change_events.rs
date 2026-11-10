@@ -1,12 +1,12 @@
 //! Transactional product events. Network I/O belongs outside these transactions.
 use crate::change_channel::{authority, endpoint, installed};
+use crate::database::Transaction;
 use crate::link_history;
 use crate::store::{instance, integer, now, snapshot, unsigned};
 use crate::{ChangeChannel, Credential, Error, InstanceSpec, Result, Store};
 use alt_remote_protocol::{RequestKey, Scope};
 use alt_repository_service::{Authorization, RepositorySnapshot};
 use golia_change_link as link;
-use postgres::Transaction;
 
 const RECEIPT_RESERVATION: u64 = 4096;
 pub use alt_remote_protocol::change_links::ChangeMappingRequest;

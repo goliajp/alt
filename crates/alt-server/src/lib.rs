@@ -9,7 +9,8 @@ mod http;
 pub use http::*;
 mod git;
 mod git_receive;
-pub use git::execute_git;
+mod git_representations;
+pub use git::{execute_git, execute_git_with_refresh};
 pub mod operator;
 
 mod browse;

@@ -1,7 +1,4 @@
-//! Pack/idx writing (version 2), plain entries only: a pack without
-//! deltas is a fully valid git pack, and L1 fidelity needs identity, not
-//! layout — delta'ing the export is a volume optimization that belongs to
-//! a later batch.
+//! Version-2 pack/idx writing, with optional bounded in-pack REF deltas.
 //!
 //! The pack streams through a hashing writer (the trailer is the running
 //! digest) with a per-entry crc32 for the idx; both files are written to
@@ -17,7 +14,7 @@ use flate2::write::ZlibEncoder;
 use sha1::{Digest, Sha1};
 use sha2::Sha256;
 
-use crate::PackError;
+use crate::{DeltaOptions, PackError, PlainRepresentation, delta_window::Window};
 
 enum Hasher {
     Sha1(Sha1),
@@ -91,6 +88,7 @@ pub struct PackWriter {
     tmp_pack: PathBuf,
     entries: Vec<(ObjectId, u64, u32)>,
     declared: u32,
+    deltas: Option<Window>,
 }
 
 impl PackWriter {
@@ -114,24 +112,122 @@ impl PackWriter {
             tmp_pack,
             entries: Vec::with_capacity(count as usize),
             declared: count,
+            deltas: None,
         })
     }
 
-    /// Writes one plain entry (`kind` + zlib payload). The caller vouches
-    /// that `oid` is the object's id; export computes it structurally.
-    pub fn add(&mut self, oid: ObjectId, kind: ObjectKind, data: &[u8]) -> Result<(), PackError> {
-        let offset = self.out.written;
-        self.out.crc = Some(flate2::Crc::new());
+    /// Enables bounded delta selection against previously emitted objects.
+    /// Ordinary `create` retains its plain-entry behavior. REF deltas require
+    /// no ofs-delta negotiation and the resulting pack remains self-contained.
+    pub fn create_with_deltas(
+        pack_dir: &Path,
+        algo: HashAlgo,
+        count: u32,
+        options: DeltaOptions,
+    ) -> Result<Self, PackError> {
+        let window = Window::new(options)?;
+        let mut writer = Self::create(pack_dir, algo, count)?;
+        writer.deltas = Some(window);
+        Ok(writer)
+    }
 
-        // entry header: 3-bit type + size varint (low 4 bits first)
-        let type_id: u8 = match kind {
+    /// Writes one object. The caller vouches that `oid` is the canonical
+    /// object's id. Delta representation never changes its resolved kind/id.
+    pub fn add(&mut self, oid: ObjectId, kind: ObjectKind, data: &[u8]) -> Result<(), PackError> {
+        let choice = self
+            .deltas
+            .as_ref()
+            .and_then(|window| window.choose(oid, kind, data));
+        let type_id = if choice.is_some() {
+            7
+        } else {
+            match kind {
+                ObjectKind::Commit => 1,
+                ObjectKind::Tree => 2,
+                ObjectKind::Blob => 3,
+                ObjectKind::Tag => 4,
+            }
+        };
+        let payload = choice
+            .as_ref()
+            .map(|choice| choice.delta.as_slice())
+            .unwrap_or(data);
+        self.entry(
+            oid,
+            type_id,
+            choice.as_ref().map(|choice| choice.base),
+            payload,
+        )?;
+        if let Some(window) = &mut self.deltas {
+            window.remember(
+                oid,
+                kind,
+                data,
+                choice.as_ref().map_or(0, |choice| choice.depth),
+            );
+        }
+        Ok(())
+    }
+
+    /// Reuse a plain representation only after comparing its complete decoded
+    /// bytes with this input. A mismatching, truncated or damaged representation
+    /// falls back to ordinary bounded encoding before any entry is written.
+    /// Valid reuse keeps the supplied representation rather than seeking a new
+    /// delta; its raw bytes remain available as a base for subsequent entries.
+    /// Returns whether the supplied representation was reused.
+    pub fn add_reusing(
+        &mut self,
+        oid: ObjectId,
+        kind: ObjectKind,
+        data: &[u8],
+        representation: &PlainRepresentation,
+    ) -> Result<bool, PackError> {
+        if !representation.matches(oid, kind, data) {
+            self.add(oid, kind, data)?;
+            return Ok(false);
+        }
+        let type_id = match kind {
             ObjectKind::Commit => 1,
             ObjectKind::Tree => 2,
             ObjectKind::Blob => 3,
             ObjectKind::Tag => 4,
         };
+        let offset = self.start_entry(type_id, None, data.len())?;
+        self.out.write_all(representation.encoded())?;
+        self.finish_entry(oid, offset);
+        if let Some(window) = &mut self.deltas {
+            window.remember(oid, kind, data, 0);
+        }
+        Ok(true)
+    }
+
+    fn entry(
+        &mut self,
+        oid: ObjectId,
+        type_id: u8,
+        base: Option<ObjectId>,
+        data: &[u8],
+    ) -> Result<(), PackError> {
+        let offset = self.start_entry(type_id, base, data.len())?;
+        let mut encoder = ZlibEncoder::new(&mut self.out, Compression::default());
+        encoder.write_all(data)?;
+        encoder.finish()?;
+        self.finish_entry(oid, offset);
+        Ok(())
+    }
+
+    fn start_entry(
+        &mut self,
+        type_id: u8,
+        base: Option<ObjectId>,
+        bytes: usize,
+    ) -> Result<u64, PackError> {
+        let offset = self.out.written;
+        self.out.crc = Some(flate2::Crc::new());
+
+        // entry header: 3-bit type + size varint (low 4 bits first)
         let mut header = Vec::with_capacity(10);
-        let mut size = data.len() as u64;
+        let mut size = bytes as u64;
         let mut byte = (type_id << 4) | (size & 0xf) as u8;
         size >>= 4;
         while size > 0 {
@@ -141,14 +237,16 @@ impl PackWriter {
         }
         header.push(byte);
         self.out.write_all(&header)?;
+        if let Some(base) = base {
+            self.out.write_all(base.as_bytes())?;
+        }
 
-        let mut encoder = ZlibEncoder::new(&mut self.out, Compression::default());
-        encoder.write_all(data)?;
-        encoder.finish()?;
+        Ok(offset)
+    }
 
+    fn finish_entry(&mut self, oid: ObjectId, offset: u64) {
         let crc = self.out.crc.take().expect("entry crc active").sum();
         self.entries.push((oid, offset, crc));
-        Ok(())
     }
 
     /// Seals the pack (trailer digest), writes the idx, and renames both

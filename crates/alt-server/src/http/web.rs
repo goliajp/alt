@@ -112,6 +112,7 @@ async fn handle_inner(
         Ok(route) => route,
         Err(error) => return store_failure(error, None),
     };
+    observation::web(&route);
     let writing = matches!(*request.method(), hyper::Method::POST | hyper::Method::PUT);
     let binary_upload = matches!(
         &route,
@@ -237,7 +238,7 @@ async fn handle_inner(
         let options = state.options.native.clone();
         let prepared = tokio::time::timeout(
             state.options.work_timeout,
-            tokio::task::spawn_blocking(move || {
+            crate::http::spawn_observed(Phase::Execute, move || {
                 let mut store = factory.open()?;
                 let token = token?;
                 let credential = factory.authenticate(&mut store, &token)?;
@@ -306,7 +307,7 @@ async fn handle_inner(
         };
     let factory = state.factory.clone();
     let options = state.options.native.clone();
-    let outcome = tokio::time::timeout(state.options.work_timeout, tokio::task::spawn_blocking(move || {
+    let outcome = tokio::time::timeout(state.options.work_timeout, crate::http::spawn_observed(Phase::Execute, move || {
         let _permit = permit;
         let _password_permit = password_permit;
         let mut source = source;

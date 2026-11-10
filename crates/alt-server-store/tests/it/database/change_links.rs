@@ -127,6 +127,73 @@ fn request(
 
 #[test]
 #[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
+fn restored_mapping_queue_is_reported_as_recovery_work_and_cannot_dispatch() {
+    let mut f = Fixture::new();
+    let (id, _) = super::tasks::published_delivery(&mut f);
+    let channel = setup(&mut f);
+    let original_scope = scope(&f);
+    let req = request(&f, &channel, &id, "before-restore", None);
+    let queued = f.store.enqueue_change_mapping(&f.credential, &req).unwrap();
+    let digest = queued.statement.digest().unwrap();
+    let original: Vec<u8> = f
+        .client()
+        .query_one(
+            "SELECT history FROM alt_link_history WHERE event_digest=$1",
+            &[&digest],
+        )
+        .unwrap()
+        .get(0);
+    let origin = alt_browser_auth::PublicOrigin::parse("https://alt.example.test").unwrap();
+    let password = "test restore queue administrator password";
+    f.store.enable_browser(&f.credential, &origin).unwrap();
+    f.store
+        .create_local_user(&f.credential, "owner", "owner", "Owner", password, true)
+        .unwrap();
+    let status = f.store.instance_status(&f.credential).unwrap();
+    assert_eq!(status.pending_change_links, "1");
+    assert_eq!(status.recovery_change_links, "0");
+    f.store.activate_restored(10, &"a".repeat(64)).unwrap();
+    assert!(f.store.instance_status(&f.credential).is_err());
+    let session = f
+        .store
+        .browser_login(
+            &origin,
+            "owner",
+            password,
+            "127.0.0.1".parse().unwrap(),
+            60_000,
+        )
+        .unwrap()
+        .unwrap();
+    let current = f.store.authenticate(&session.token).unwrap();
+    let status = f.store.instance_status(&current).unwrap();
+    assert_eq!(status.pending_change_links, "0");
+    assert_eq!(status.recovery_change_links, "1");
+    assert_eq!(status.reserved_bytes, "0");
+    assert!(
+        f.store
+            .change_dispatch(
+                &current,
+                &original_scope,
+                &channel.channel,
+                &channel.configuration_digest,
+                &digest,
+            )
+            .is_err()
+    );
+    let stored: Vec<u8> = f
+        .client()
+        .query_one(
+            "SELECT history FROM alt_link_history WHERE event_digest=$1",
+            &[&digest],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(stored, original);
+}
+
+#[test]
+#[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
 fn installed_pairing_requires_current_content_authority_and_cannot_resurrect_after_disable() {
     let mut f = Fixture::new();
     let c = setup(&mut f);
@@ -910,7 +977,7 @@ fn explicit_schema_eleven_upgrade_retains_history_without_fabricating_current_ch
     let s = scope(&f);
     let digest = signed.digest().unwrap();
     let original = f.store.change_event(&f.credential, &s, &digest).unwrap();
-    f.client().batch_execute("DROP TABLE alt_link_task_claims,alt_link_current,alt_link_inbox,alt_link_outbox,alt_link_channels; DELETE FROM alt_schema WHERE version>=12").unwrap();
+    f.client().batch_execute("DROP TABLE alt_link_task_claims,alt_link_current,alt_link_inbox,alt_link_outbox,alt_link_channels; ALTER TABLE alt_request_content DROP COLUMN selected_entries, DROP COLUMN chunk_bytes; DROP TABLE alt_blob_locations,alt_segments; DROP INDEX alt_pins_permanent_content; DELETE FROM alt_schema WHERE version>=12").unwrap();
     assert!(
         Store::open(
             f.client(),

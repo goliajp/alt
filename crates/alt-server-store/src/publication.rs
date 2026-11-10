@@ -1,12 +1,14 @@
-use crate::requests::{active, check_key, pin, request_row, upload_pin};
+mod refs;
+
+use crate::database::Transaction;
+use crate::requests::{active, check_key, pin_many, request_row, upload_pin};
 use crate::store::{authorize, instance, integer, now, snapshot, unsigned};
 use crate::{ByteStore, Credential, Error, Result, Store};
 use alt_git_codec::{ObjectId, ObjectKind};
 use alt_remote_protocol::{Manifest, Publication, Receipt, ReceiptBody, RequestKey, RequestState};
 use alt_repository_service::{ObjectReader, ObjectSource, VerifiedGraph, validate_publication};
 use ed25519_dalek::Signer;
-use postgres::Transaction;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// A leased worker snapshot. The fence is rechecked for every transition; a
 /// stale worker can leave orphan bytes but cannot publish or change a result.
@@ -23,6 +25,11 @@ impl PublicationWork {
     }
     pub fn source(&self) -> &impl ObjectSource {
         &self.source
+    }
+    /// Finish physical index verification before exposing a buffered review.
+    /// This grants no authority; callers still need current store checks.
+    pub fn check_read_integrity(&self) -> Result<()> {
+        self.source.bytes.finish()
     }
     pub fn manifest(&self) -> &Manifest {
         &self.manifest
@@ -44,10 +51,10 @@ impl PublicationWork {
     }
 }
 pub(crate) struct PinnedSource {
-    bytes: ByteStore,
-    scope: alt_remote_protocol::Scope,
+    bytes: crate::bytes::ReadSession,
     pub(crate) objects: BTreeMap<ObjectId, (ObjectKind, String, u64)>,
     artifacts: BTreeMap<String, u64>,
+    locations: crate::segments::Locations,
 }
 impl alt_task_service::ArtifactSource for PinnedSource {
     fn open(
@@ -61,7 +68,11 @@ impl alt_task_service::ArtifactSource for PinnedSource {
         }
         let file = self
             .bytes
-            .read(&self.scope, &artifact.blake3, artifact.bytes)
+            .read(
+                &artifact.blake3,
+                artifact.bytes,
+                self.locations.get(&artifact.blake3),
+            )
             .map_err(|_| alt_task_service::Error::Integrity("selected artifact unavailable"))?;
         Ok(Box::new(file))
     }
@@ -73,7 +84,7 @@ impl ObjectSource for PinnedSource {
         };
         let file = self
             .bytes
-            .read(&self.scope, digest, *bytes)
+            .read(digest, *bytes, self.locations.get(digest))
             .map_err(|e| match e {
                 Error::Io(error) => alt_repository_service::Error::Io(error),
                 _ => alt_repository_service::Error::Integrity("pinned bytes unavailable"),
@@ -154,37 +165,52 @@ impl Store {
         let manifest: Manifest = serde_json::from_value(row.get("manifest"))?;
         manifest.validate(self.limits)?;
         let repository = &key.scope.repository_instance_id;
-        for entry in &manifest.entries {
-            if tx.query_opt("SELECT 1 FROM alt_request_content WHERE repository=$1 AND epoch=$2 AND actor_id=$3 AND request_id=$4 AND blake3=$5 AND verified", &[repository,&integer(key.scope.recovery_epoch)?,&key.actor_id,&key.request_id,&entry.blake3])?.is_none() {
-                return Err(Error::Precondition("selected content not uploaded or published"));
-            }
-            if let Some(oid) = &entry.git_oid {
-                let object = tx
-                    .query_opt(
-                        "SELECT kind,blake3 FROM alt_objects WHERE repository=$1 AND oid=$2",
-                        &[repository, oid],
-                    )?
-                    .ok_or(Error::Precondition("Git mapping not uploaded"))?;
-                let kind = match entry.kind {
-                    alt_remote_protocol::ContentKind::Blob => "blob",
-                    alt_remote_protocol::ContentKind::Tree => "tree",
-                    alt_remote_protocol::ContentKind::Commit => "commit",
-                    alt_remote_protocol::ContentKind::Tag => "tag",
-                    _ => return Err(Error::Integrity("Git mapping kind")),
-                };
-                if object.get::<_, String>(0) != kind || object.get::<_, String>(1) != entry.blake3
-                {
-                    return Err(Error::Integrity("Git mapping selection"));
-                }
-            }
-            let blob = tx
-                .query_opt(
-                    "SELECT bytes,state FROM alt_blobs WHERE repository=$1 AND blake3=$2",
-                    &[repository, &entry.blake3],
+        for batch in manifest.entries.chunks(crate::database::BATCH_ROWS) {
+            let digests: Vec<_> = batch.iter().map(|entry| entry.blake3.as_str()).collect();
+            let content: BTreeMap<String, postgres::Row> = tx.query("SELECT c.blake3,c.verified,b.bytes,b.state FROM alt_request_content c LEFT JOIN alt_blobs b ON b.repository=c.repository AND b.blake3=c.blake3 WHERE c.repository=$1 AND c.epoch=$2 AND c.actor_id=$3 AND c.request_id=$4 AND c.blake3=ANY($5)", &[repository,&integer(key.scope.recovery_epoch)?,&key.actor_id,&key.request_id,&digests])?
+                .into_iter().map(|row| (row.get(0), row)).collect();
+            let oids: Vec<_> = batch
+                .iter()
+                .filter_map(|entry| entry.git_oid.as_deref())
+                .collect();
+            let mappings: BTreeMap<String, (String, String)> = tx
+                .query(
+                    "SELECT oid,kind,blake3 FROM alt_objects WHERE repository=$1 AND oid=ANY($2)",
+                    &[repository, &oids],
                 )?
-                .ok_or(Error::Precondition("upload incomplete"))?;
-            if unsigned(blob.get(0))? != entry.bytes || blob.get::<_, String>(1) != "stored" {
-                return Err(Error::Precondition("upload incomplete"));
+                .into_iter()
+                .map(|row| (row.get(0), (row.get(1), row.get(2))))
+                .collect();
+            for entry in batch {
+                let row = content
+                    .get(&entry.blake3)
+                    .filter(|row| row.get::<_, bool>(1))
+                    .ok_or(Error::Precondition(
+                        "selected content not uploaded or published",
+                    ))?;
+                if let Some(oid) = &entry.git_oid {
+                    let (actual_kind, actual_digest) = mappings
+                        .get(oid)
+                        .ok_or(Error::Precondition("Git mapping not uploaded"))?;
+                    let kind = match entry.kind {
+                        alt_remote_protocol::ContentKind::Blob => "blob",
+                        alt_remote_protocol::ContentKind::Tree => "tree",
+                        alt_remote_protocol::ContentKind::Commit => "commit",
+                        alt_remote_protocol::ContentKind::Tag => "tag",
+                        _ => return Err(Error::Integrity("Git mapping kind")),
+                    };
+                    if actual_kind != kind || actual_digest != &entry.blake3 {
+                        return Err(Error::Integrity("Git mapping selection"));
+                    }
+                }
+                let bytes = row
+                    .get::<_, Option<i64>>(2)
+                    .ok_or(Error::Precondition("upload incomplete"))?;
+                if unsigned(bytes)? != entry.bytes
+                    || row.get::<_, Option<String>>(3).as_deref() != Some("stored")
+                {
+                    return Err(Error::Precondition("upload incomplete"));
+                }
             }
         }
         let expires = unsigned(row.get("expires_at"))?;
@@ -209,15 +235,25 @@ impl Store {
             let kind = kind
                 .parse()
                 .map_err(|_| Error::Integrity("catalog object kind"))?;
-            pin(&mut tx, repository, &pin_id, &digest, Some(expires))?;
             objects.insert(oid, (kind, digest, bytes));
         }
+        let digests: Vec<_> = objects
+            .values()
+            .map(|(_, digest, _)| digest.as_str())
+            .collect();
+        pin_many(&mut tx, repository, &pin_id, &digests, Some(expires))?;
         let fence=unsigned(tx.query_one("UPDATE alt_requests SET fence=fence+1,worker_lease_until=$5 WHERE repository=$1 AND epoch=$2 AND actor_id=$3 AND request_id=$4 RETURNING fence",&[repository,&integer(key.scope.recovery_epoch)?,&key.actor_id,&key.request_id,&integer(lease_until)?])?.get(0))?;
-        let artifacts = manifest
+        let artifacts: BTreeMap<String, u64> = manifest
             .entries
             .iter()
             .map(|e| (e.blake3.clone(), e.bytes))
             .collect();
+        let all_digests: Vec<_> = objects
+            .values()
+            .map(|(_, digest, _)| digest.as_str())
+            .chain(artifacts.keys().map(String::as_str))
+            .collect();
+        let locations = crate::segments::locations(&mut tx, repository, &all_digests)?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)?;
         Ok(PublicationWork {
             key: key.clone(),
@@ -225,10 +261,10 @@ impl Store {
             publication,
             manifest,
             source: PinnedSource {
-                bytes: self.bytes.clone(),
-                scope: key.scope.clone(),
+                bytes: crate::bytes::ReadSession::new(&self.bytes, &key.scope),
                 objects,
                 artifacts,
+                locations,
             },
         })
     }
@@ -322,8 +358,14 @@ impl Store {
         // Reusing published bytes skips upload registration, but it must not
         // skip this request's chunk claims. Do the bounded I/O before SQL locks.
         for entry in &work.manifest.entries {
-            self.bytes.verify_content_chunks(&work.key.scope, entry)?;
+            let reader = work.source.bytes.read(
+                &entry.blake3,
+                entry.bytes,
+                work.source.locations.get(&entry.blake3),
+            )?;
+            ByteStore::verify_chunk_reader(reader, entry)?;
         }
+        work.source.bytes.finish()?;
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         let current = snapshot(&mut tx, &self.spec, &work.key.scope.repository_instance_id)?;
@@ -370,6 +412,23 @@ impl Store {
         graph: &VerifiedGraph,
         tasks: Option<&alt_task_service::VerifiedTaskGraph>,
     ) -> Result<Receipt> {
+        crate::telemetry::request(&work.key);
+        crate::telemetry::observe(alt_server_telemetry::Phase::Commit, || {
+            let receipt = self.publish_checked_inner(credential, work, graph, tasks)?;
+            crate::telemetry::committed(&receipt);
+            Ok(receipt)
+        })
+    }
+    fn publish_checked_inner(
+        &mut self,
+        credential: &Credential,
+        work: &PublicationWork,
+        graph: &VerifiedGraph,
+        tasks: Option<&alt_task_service::VerifiedTaskGraph>,
+    ) -> Result<Receipt> {
+        // Recheck before taking SQL locks. A durable committed receipt remains
+        // replayable even if its formerly selected byte files are unavailable.
+        let read_integrity = work.check_read_integrity();
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         let mut current = snapshot(&mut tx, &self.spec, &work.key.scope.repository_instance_id)?;
@@ -385,6 +444,7 @@ impl Store {
             }
             return Err(Error::Integrity("committed request result"));
         }
+        read_integrity?;
         let _ = worker(&mut tx, work)?;
         if row.get::<_, String>("state") != "ready" {
             return Err(Error::Precondition("request not ready"));
@@ -440,29 +500,7 @@ impl Store {
             &row.get::<_, String>("digest"),
         )?;
         let repository = &work.key.scope.repository_instance_id;
-        for update in &validated.updates {
-            let ref_pin = format!("ref:{}", update.name);
-            tx.execute(
-                "DELETE FROM alt_pins WHERE repository=$1 AND pin_id=$2",
-                &[repository, &ref_pin],
-            )?;
-            if let Some(oid) = update.new {
-                for reachable in graph.reachable(oid)? {
-                    let (_, digest, _) = work
-                        .source
-                        .objects
-                        .get(&reachable)
-                        .ok_or(Error::Integrity("object outside worker source"))?;
-                    pin(&mut tx, repository, &ref_pin, digest, None)?;
-                }
-                tx.execute("INSERT INTO alt_refs(repository,name,oid) VALUES($1,$2,$3) ON CONFLICT(repository,name) DO UPDATE SET oid=excluded.oid",&[repository,&update.name,&oid.to_string()])?;
-            } else {
-                tx.execute(
-                    "DELETE FROM alt_refs WHERE repository=$1 AND name=$2",
-                    &[repository, &update.name],
-                )?;
-            }
-        }
+        refs::replace(&mut tx, work, graph, &validated.updates)?;
         let sequence=unsigned(tx.query_one("UPDATE alt_repositories SET transaction_sequence=transaction_sequence+1 WHERE id=$1 RETURNING transaction_sequence",&[repository])?.get(0))?;
         crate::tasks::retain(&mut tx, work, graph, tasks, sequence, &validated.digest)?;
         let body = ReceiptBody {
@@ -529,15 +567,37 @@ pub(crate) fn check_graph_pins(
     let repository = &work.key.scope.repository_instance_id;
     let pin_id = upload_pin(&work.key);
     let time = now(tx)?;
-    for oid in graph.objects() {
-        let (_, digest, bytes) = work
-            .source
-            .objects
-            .get(&oid)
-            .ok_or(Error::Integrity("graph outside authorized source"))?;
-        let present=tx.query_opt("SELECT b.bytes FROM alt_blobs b JOIN alt_pins p ON p.repository=b.repository AND p.blake3=b.blake3 WHERE b.repository=$1 AND b.blake3=$2 AND b.state='stored' AND p.pin_id=$3 AND p.expires_at>$4",&[repository,digest,&pin_id,&integer(time)?])?.ok_or(Error::Precondition("object pin expired or fenced"))?;
-        if unsigned(present.get(0))? != *bytes {
-            return Err(Error::Integrity("pinned object size"));
+    let objects: Vec<_> = graph.objects().collect();
+    for batch in objects.chunks(crate::database::BATCH_ROWS) {
+        let selected: Vec<_> = batch
+            .iter()
+            .map(|oid| {
+                work.source
+                    .objects
+                    .get(oid)
+                    .ok_or(Error::Integrity("graph outside authorized source"))
+            })
+            .collect::<Result<_>>()?;
+        let digests: Vec<_> = selected
+            .iter()
+            .map(|(_, digest, _)| digest.as_str())
+            .collect();
+        // Keep each lookup bounded independently. A join planned against a
+        // freshly populated catalog can repeatedly scan this request's entire
+        // pin set for each digest. Both observations use the same repository
+        // lock and transaction as the caller's current publication checks.
+        let present: BTreeMap<String, i64> = tx.query("SELECT blake3,bytes FROM alt_blobs WHERE repository=$1 AND blake3=ANY($2) AND state='stored'", &[repository,&digests])?
+            .into_iter().map(|row| (row.get(0),row.get(1))).collect();
+        let pinned: BTreeSet<String> = tx.query("SELECT blake3 FROM alt_pins WHERE repository=$1 AND pin_id=$2 AND blake3=ANY($3) AND expires_at>$4", &[repository,&pin_id,&digests,&integer(time)?])?
+            .into_iter().map(|row| row.get(0)).collect();
+        for (_, digest, bytes) in selected {
+            let actual = present
+                .get(digest)
+                .filter(|_| pinned.contains(digest))
+                .ok_or(Error::Precondition("object pin expired or fenced"))?;
+            if unsigned(*actual)? != *bytes {
+                return Err(Error::Integrity("pinned object size"));
+            }
         }
     }
     Ok(())

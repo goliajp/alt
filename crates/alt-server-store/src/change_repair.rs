@@ -1,13 +1,13 @@
 //! A repair request can name one published native Task. A claim is not a
 //! candidate, execution result, review or Delivery; those retain their own graph.
 use crate::change_channel::{authority, endpoint, installed};
+use crate::database::Transaction;
 use crate::store::{authorize, instance, integer, snapshot};
 use crate::{Credential, Error, InstanceSpec, PublicationWork, Result, Store};
 use alt_remote_protocol::Scope;
 use alt_repository_service::{Authorization, RepositorySnapshot};
 use alt_task_service::{TaskRecord, VerifiedTaskGraph};
 use golia_change_link as link;
-use postgres::Transaction;
 
 pub use alt_remote_protocol::change_links::RepairTaskClaim;
 

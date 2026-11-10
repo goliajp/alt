@@ -3,7 +3,7 @@ use alt_remote_protocol::Limits;
 use ed25519_dalek::SigningKey;
 use postgres::{Client, GenericClient};
 
-const MIGRATIONS: [&str; 13] = [
+const MIGRATIONS: [&str; 17] = [
     include_str!("schema.sql"),
     include_str!("schema-v2.sql"),
     include_str!("schema-v3.sql"),
@@ -17,12 +17,19 @@ const MIGRATIONS: [&str; 13] = [
     include_str!("schema-v11.sql"),
     include_str!("schema-v12.sql"),
     include_str!("schema-v13.sql"),
+    include_str!("schema-v14.sql"),
+    include_str!("schema-v15.sql"),
+    include_str!("schema-v16.sql"),
+    include_str!("schema-v17.sql"),
 ];
 pub(crate) fn check(client: &mut impl GenericClient, expected: usize) -> Result<()> {
     let rows = client.query(
         "SELECT version,checksum FROM alt_schema ORDER BY version",
         &[],
     )?;
+    check_rows(&rows, expected)
+}
+pub(crate) fn check_rows(rows: &[postgres::Row], expected: usize) -> Result<()> {
     if rows.len() != expected
         || rows.iter().enumerate().any(|(index, row)| {
             row.get::<_, i32>(0) != (index + 1) as i32
@@ -71,6 +78,18 @@ pub(crate) fn apply_v12(client: &mut impl GenericClient) -> Result<()> {
 }
 pub(crate) fn apply_v13(client: &mut impl GenericClient) -> Result<()> {
     apply(client, 13)
+}
+pub(crate) fn apply_v14(client: &mut impl GenericClient) -> Result<()> {
+    apply(client, 14)
+}
+pub(crate) fn apply_v15(client: &mut impl GenericClient) -> Result<()> {
+    apply(client, 15)
+}
+pub(crate) fn apply_v16(client: &mut impl GenericClient) -> Result<()> {
+    apply(client, 16)
+}
+pub(crate) fn apply_v17(client: &mut impl GenericClient) -> Result<()> {
+    apply(client, 17)
 }
 fn apply(client: &mut impl GenericClient, version: usize) -> Result<()> {
     client.batch_execute(MIGRATIONS[version - 1])?;
@@ -198,6 +217,42 @@ impl Store {
     ) -> Result<Self> {
         Self::migrate_from(client, bytes, spec, signing_key, limits, 12)
     }
+    pub fn migrate_v13(
+        client: Client,
+        bytes: ByteStore,
+        spec: InstanceSpec,
+        signing_key: SigningKey,
+        limits: Limits,
+    ) -> Result<Self> {
+        Self::migrate_from(client, bytes, spec, signing_key, limits, 13)
+    }
+    pub fn migrate_v14(
+        client: Client,
+        bytes: ByteStore,
+        spec: InstanceSpec,
+        signing_key: SigningKey,
+        limits: Limits,
+    ) -> Result<Self> {
+        Self::migrate_from(client, bytes, spec, signing_key, limits, 14)
+    }
+    pub fn migrate_v15(
+        client: Client,
+        bytes: ByteStore,
+        spec: InstanceSpec,
+        signing_key: SigningKey,
+        limits: Limits,
+    ) -> Result<Self> {
+        Self::migrate_from(client, bytes, spec, signing_key, limits, 15)
+    }
+    pub fn migrate_v16(
+        client: Client,
+        bytes: ByteStore,
+        spec: InstanceSpec,
+        signing_key: SigningKey,
+        limits: Limits,
+    ) -> Result<Self> {
+        Self::migrate_from(client, bytes, spec, signing_key, limits, 16)
+    }
     fn migrate_from(
         mut client: Client,
         bytes: ByteStore,
@@ -207,9 +262,9 @@ impl Store {
         from: usize,
     ) -> Result<Self> {
         limits.validate()?;
-        let mut tx = client.transaction()?;
+        let mut tx = crate::database::Transaction::uncached(client.transaction()?);
         tx.query_one("SELECT pg_advisory_xact_lock(715071909111)", &[])?;
-        check(&mut tx, from)?;
+        check(tx.raw_mut(), from)?;
         tx.query_one(
             "SELECT singleton FROM alt_instance WHERE singleton FOR UPDATE",
             &[],
@@ -217,7 +272,7 @@ impl Store {
         crate::store::instance(&mut tx, &spec, &signing_key)?;
         tx.batch_execute("LOCK TABLE alt_repositories,alt_requests IN ACCESS EXCLUSIVE MODE")?;
         for version in from + 1..=MIGRATIONS.len() {
-            apply(&mut tx, version)?;
+            apply(tx.raw_mut(), version)?;
         }
         crate::provenance::backfill_legacy(&mut tx, &spec, &signing_key, limits)?;
         tx.execute("UPDATE alt_requests SET fence=fence+1,worker_lease_until=0 WHERE state IN ('receiving','ready')", &[])?;

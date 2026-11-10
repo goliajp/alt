@@ -15,6 +15,7 @@ use std::{
 };
 
 pub mod backup;
+mod change_links;
 pub mod provision;
 
 #[derive(Debug, thiserror::Error)]
@@ -135,6 +136,7 @@ impl Config {
                 .unwrap_or_else(|| Path::new(".")),
         )
         .map_err(|_| Error::File)?;
+        change_links::load(&mut config, &parent)?;
         for item in [&mut config.bytes_directory, &mut config.receipt_key_file] {
             if item.is_relative() {
                 *item = parent.join(&*item);
@@ -161,6 +163,15 @@ impl Config {
             }
         }
         config.validate()?;
+        // Backups serialize the effective configuration, including separately
+        // loaded Cloud settings and resolved paths, into a bounded archive entry.
+        if serde_json::to_vec(&config)
+            .map_err(|_| Error::Config("configuration encoding"))?
+            .len()
+            > 65536
+        {
+            return Err(Error::Config("effective configuration size"));
+        }
         Ok(config)
     }
     pub fn validate(&self) -> Result<()> {
@@ -535,6 +546,10 @@ impl Config {
             7 => Store::migrate_v7(client, bytes, self.instance.clone(), key, self.limits),
             8 => Store::migrate_v8(client, bytes, self.instance.clone(), key, self.limits),
             9 => Store::migrate_v9(client, bytes, self.instance.clone(), key, self.limits),
+            13 => Store::migrate_v13(client, bytes, self.instance.clone(), key, self.limits),
+            14 => Store::migrate_v14(client, bytes, self.instance.clone(), key, self.limits),
+            15 => Store::migrate_v15(client, bytes, self.instance.clone(), key, self.limits),
+            16 => Store::migrate_v16(client, bytes, self.instance.clone(), key, self.limits),
             12 => Store::migrate_v12(client, bytes, self.instance.clone(), key, self.limits),
             11 => Store::migrate_v11(client, bytes, self.instance.clone(), key, self.limits),
             10 => Store::migrate_v10(client, bytes, self.instance.clone(), key, self.limits),
@@ -586,7 +601,7 @@ impl Config {
 pub fn read_regular(path: &Path, limit: usize, private: bool) -> Result<Vec<u8>> {
     let file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK)
         .open(path)
         .map_err(|_| Error::File)?;
     let meta = file.metadata().map_err(|_| Error::File)?;

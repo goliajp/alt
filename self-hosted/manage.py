@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import runpy
 import secrets
 import ssl
 import subprocess
@@ -14,6 +15,7 @@ import time
 from urllib.parse import urlsplit
 
 HERE = Path(__file__).resolve().parent
+IMAGES = runpy.run_path(str(HERE / 'image_identity.py'))
 
 
 def regular(path):
@@ -29,18 +31,40 @@ def sha(path):
 
 def bundle(directory):
     manifest = json.loads(regular(directory / 'bundle.json').read_text())
-    if manifest['format'] != 1 or manifest['product'] != 'alt-server':
+    if manifest['format'] not in (1, 2, 3) or manifest['product'] != 'alt-server':
         raise ValueError('unsupported server bundle')
     required = {'images.tar', 'compose.yaml', 'Caddyfile', 'manage.py', 'example-config.json', 'README.md', 'dependencies.json', 'LICENSE-MIT', 'LICENSE-APACHE', 'server-operator.md'}
+    if manifest['format'] >= 2:
+        required |= {'docs/task-remote.md', 'docs/change-links.md'}
+    if manifest['format'] >= 3:
+        required.add('image_identity.py')
     if set(manifest['files']) != required:
         raise ValueError('bundle file set is incomplete')
+    for name in required:
+        for parent in (directory / name).parents:
+            if parent == directory:
+                break
+            if parent.is_symlink() or not parent.is_dir():
+                raise ValueError('bundle document directory is not a regular directory')
     for name, digest in manifest['files'].items():
-        if name not in {'images.tar', 'compose.yaml', 'Caddyfile', 'manage.py', 'example-config.json', 'README.md', 'dependencies.json', 'LICENSE-MIT', 'LICENSE-APACHE', 'server-operator.md'}:
+        if name not in required:
             raise ValueError('unexpected bundle path')
         if sha(directory / name) != digest:
             raise ValueError(f'bundle file changed: {name}')
-    if not re.fullmatch(r'sha256:[a-f0-9]{64}', manifest['application_image']):
-        raise ValueError('bundle application identity must be an exact image ID')
+    if manifest['architecture'] not in ('amd64', 'arm64') or len(manifest['images']) != 3:
+        raise ValueError('unsupported bundle platform or image count')
+    roles = [manifest[field] for field in ['application_image', 'database_image', 'edge_image']]
+    if len(set(roles)) != 3:
+        raise ValueError('bundle requires three distinct image roles')
+    for value in roles:
+        IMAGES['digest'](value)
+    if {image['id'] for image in manifest['images']} != set(roles):
+        raise ValueError('bundle images do not match their roles')
+    for image in manifest['images']:
+        if not isinstance(image['reference'], str) or not re.fullmatch(r'[a-z0-9][A-Za-z0-9._:/@-]{0,254}', image['reference']):
+            raise ValueError('invalid bundle image reference')
+        if manifest['format'] >= 3:
+            IMAGES['digest'](image['config_digest'])
     return manifest
 
 
@@ -78,6 +102,7 @@ def prepare(args):
     private_key = regular(args.private_key).read_bytes()
     # Verify that the supplied certificate/key pair can actually serve TLS.
     ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER).load_cert_chain(args.certificate, args.private_key)
+    local_images = IMAGES['resolve_loaded'](source, manifest)
     target.mkdir(mode=0o700)
     for name in ['config', 'secrets', 'operator', 'tls', 'data']:
         path = target / name
@@ -101,8 +126,8 @@ def prepare(args):
     config['receipt_key_file'] = '/run/alt/receipt.key'
     config['browser'] = {'public_origin': public_origin, 'assets_directory': '/opt/alt/workbench', 'session_ttl_ms': 3_600_000}
     write(target / 'config/config.json', json.dumps(config, indent=2) + '\n', uid, gid)
-    write(target / '.env', f'COMPOSE_PROJECT_NAME={args.project}\nALT_IMAGE={manifest["application_image"]}\nALT_DATABASE_IMAGE={manifest["database_image"]}\nALT_EDGE_IMAGE={manifest["edge_image"]}\nALT_UID={uid}\nALT_GID={gid}\nALT_BIND_ADDRESS={args.bind}\nALT_HTTPS_PORT={origin.port or 443}\n', uid, gid)
-    write(target / 'bundle-identity.json', json.dumps({'source_digest': manifest['source_digest'], 'architecture': manifest['architecture'], 'application_image': manifest['application_image']}, indent=2) + '\n', uid, gid)
+    write(target / '.env', f'COMPOSE_PROJECT_NAME={args.project}\nALT_IMAGE={local_images["application_image"]}\nALT_DATABASE_IMAGE={local_images["database_image"]}\nALT_EDGE_IMAGE={local_images["edge_image"]}\nALT_UID={uid}\nALT_GID={gid}\nALT_BIND_ADDRESS={args.bind}\nALT_HTTPS_PORT={origin.port or 443}\n', uid, gid)
+    write(target / 'bundle-identity.json', json.dumps({'source_digest': manifest['source_digest'], 'architecture': manifest['architecture'], 'bundle_manifest_sha256': sha(source / 'bundle.json'), **local_images}, indent=2) + '\n', uid, gid)
     if os.geteuid() == 0:
         os.chown(target, uid, gid)
     print(json.dumps({'prepared': str(target), 'initialized': False, 'installation_id': config['instance']['installation_id'], 'login': 'owner', 'password_file': str(target / 'operator/initial-password')}))
@@ -165,12 +190,10 @@ def main():
         architecture = {'x86_64': 'amd64', 'aarch64': 'arm64', 'amd64': 'amd64', 'arm64': 'arm64'}.get(machine)
         if architecture != manifest['architecture']:
             raise ValueError('bundle architecture does not match Docker host')
+        IMAGES['bundle_identities'](args.bundle / 'images.tar', manifest)
         subprocess.run(['docker', 'load', '--input', str(args.bundle / 'images.tar')], check=True)
-        for image in manifest['images']:
-            found = json.loads(subprocess.check_output(['docker', 'image', 'inspect', image['reference']], text=True))[0]
-            if found['Id'] != image['id'] or found['Architecture'] != manifest['architecture']:
-                raise ValueError('loaded image identity differs from bundle')
-        print(json.dumps({'loaded': True, 'application_image': manifest['application_image']}))
+        local_images = IMAGES['resolve_loaded'](args.bundle, manifest)
+        print(json.dumps({'loaded': True, **local_images}))
     elif args.command == 'prepare':
         prepare(args)
     elif args.command == 'initialize':

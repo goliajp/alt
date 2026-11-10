@@ -12,6 +12,19 @@ impl Store {
         repository: &str,
         limit: u32,
     ) -> Result<usize> {
+        if let Some(trace) = alt_server_telemetry::Trace::current() {
+            trace.identity(alt_server_telemetry::Id::new(repository), None, None);
+        }
+        crate::telemetry::observe(alt_server_telemetry::Phase::GarbageCollect, || {
+            self.collect_orphans_inner(admin, repository, limit)
+        })
+    }
+    fn collect_orphans_inner(
+        &mut self,
+        admin: &Credential,
+        repository: &str,
+        limit: u32,
+    ) -> Result<usize> {
         if limit == 0 || limit > 1000 {
             return Err(Error::Limit("GC batch size"));
         }
@@ -65,6 +78,9 @@ impl Store {
             if row.get::<_, String>(0) != "deleting" {
                 return Err(Error::Precondition("GC marker changed"));
             }
+            // A logical member never owns the whole segment. Removing its
+            // location via the blob FK leaves other members intact. Remove any
+            // redundant loose upload too, which never changes the chosen map.
             self.bytes.remove(&current.scope, &digest)?;
             tx.execute(
                 "DELETE FROM alt_objects WHERE repository=$1 AND blake3=$2",
@@ -83,6 +99,8 @@ impl Store {
             tx.commit().map_err(|_| Error::OutcomeUnknown)?;
             removed += 1;
         }
+        self.compact_segments(admin, repository, limit.min(8))?;
+        self.collect_segments(admin, repository, limit)?;
         Ok(removed)
     }
 }

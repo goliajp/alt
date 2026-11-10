@@ -1,4 +1,4 @@
-use crate::requests::{active, check_key, request_row};
+use crate::requests::{active, check_key, request_row, upload_request_row, upload_selection};
 use crate::store::{authorize, credential_row, instance, integer, now, snapshot, unsigned};
 use crate::{Credential, Error, InstanceSpec, PublicationWork, Result, Store};
 use alt_remote_protocol::{ContentEntry, Manifest, Publication, RequestKey, Scope};
@@ -68,7 +68,7 @@ impl Store {
         credential: &Credential,
         key: &RequestKey,
         digest: &str,
-    ) -> Result<(u64, std::fs::File)> {
+    ) -> Result<(u64, crate::StoredReader)> {
         alt_task::check_id(digest).map_err(|_| Error::Unauthorized)?;
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
@@ -81,7 +81,11 @@ impl Store {
             .ok_or(Error::Unauthorized)?;
         let time = integer(now(&mut tx)?)?;
         if tx.query_opt("SELECT 1 FROM alt_pins p JOIN alt_blobs b ON b.repository=p.repository AND b.blake3=p.blake3 WHERE p.repository=$1 AND p.pin_id=$2 AND p.blake3=$3 AND p.expires_at>$4 AND b.state='stored' AND b.bytes=$5", &[&key.scope.repository_instance_id,&crate::requests::upload_pin(key),&digest,&time,&integer(entry.bytes)?])?.is_none() {return Err(Error::Precondition("review content pin expired"));}
-        let file = self.bytes.read(&key.scope, digest, entry.bytes)?;
+        let location =
+            crate::segments::location(&mut tx, &key.scope.repository_instance_id, digest)?;
+        let file = self
+            .bytes
+            .read_payload(&key.scope, digest, entry.bytes, location.as_ref())?;
         tx.commit()?;
         Ok((entry.bytes, file))
     }
@@ -205,7 +209,7 @@ impl Store {
         let current = snapshot(&mut tx, &self.spec, &key.scope.repository_instance_id)?;
         let auth = authorize(&mut tx, &self.spec, credential, &current)?;
         check_key(key, &current.scope, &auth.actor_id)?;
-        let row = request_row(&mut tx, key)?.ok_or(Error::Unauthorized)?;
+        let row = upload_request_row(&mut tx, key)?.ok_or(Error::Unauthorized)?;
         active(&row, now(&mut tx)?)?;
         let publication: Publication = serde_json::from_value(row.get("publication"))?;
         alt_repository_service::authorize_intent(
@@ -215,12 +219,9 @@ impl Store {
             self.limits,
             now(&mut tx)?,
         )?;
-        let manifest: Manifest = serde_json::from_value(row.get("manifest"))?;
-        let entries: Vec<_> = manifest
-            .entries
-            .into_iter()
-            .filter(|entry| entry.blake3 == digest)
-            .collect();
+        let entries = upload_selection(&mut tx, key, digest)?
+            .ok_or(Error::Unauthorized)?
+            .entries;
         if entries.is_empty() {
             return Err(Error::Unauthorized);
         }
@@ -257,7 +258,7 @@ impl Store {
         credential: &Credential,
         scope: &Scope,
         digest: &str,
-    ) -> Result<(u64, std::fs::File)> {
+    ) -> Result<(u64, crate::StoredReader)> {
         alt_task::check_id(digest).map_err(|_| Error::Unauthorized)?;
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
@@ -268,7 +269,10 @@ impl Store {
         }
         let row = tx.query_opt("SELECT b.bytes FROM alt_blobs b WHERE b.repository=$1 AND b.blake3=$2 AND b.state='stored' AND EXISTS(SELECT 1 FROM alt_pins p WHERE p.repository=b.repository AND p.blake3=b.blake3 AND p.expires_at IS NULL)", &[&scope.repository_instance_id,&digest])?.ok_or(Error::Unauthorized)?;
         let size = unsigned(row.get(0))?;
-        let file = self.bytes.read(scope, digest, size)?;
+        let location = crate::segments::location(&mut tx, &scope.repository_instance_id, digest)?;
+        let file = self
+            .bytes
+            .read_payload(scope, digest, size, location.as_ref())?;
         tx.commit()?;
         Ok((size, file))
     }
@@ -336,7 +340,7 @@ impl Store {
     }
 }
 fn review_request(
-    tx: &mut postgres::Transaction<'_>,
+    tx: &mut crate::database::Transaction<'_>,
     spec: &InstanceSpec,
     credential: &Credential,
     key: &RequestKey,

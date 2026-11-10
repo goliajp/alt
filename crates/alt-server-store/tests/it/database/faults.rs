@@ -107,6 +107,55 @@ fn real_disk_full_never_publishes_bytes_or_refs() {
             .is_err()
     );
     assert_eq!(f.counts(), (0, 0, 0));
+    let mut source = Cursor::new(vec![19u8; 512_000]);
+    let error = f
+        .store
+        .persist_contents(
+            &f.credential,
+            &p.publication.key,
+            &mut [alt_server_store::ByteInput {
+                digest: &digest,
+                bytes: 512_000,
+                source: &mut source,
+            }],
+        )
+        .err()
+        .expect("segment ENOSPC");
+    assert!(
+        matches!(&error,alt_server_store::Error::Io(error) if error.kind()==std::io::ErrorKind::StorageFull),
+        "expected segment ENOSPC, got {error:?}"
+    );
+    assert_eq!(
+        f.client()
+            .query_one("SELECT count(*) FROM alt_blob_locations", &[])
+            .unwrap()
+            .get::<_, i64>(0),
+        0
+    );
+    assert_eq!(
+        f.client()
+            .query_one(
+                "SELECT count(*) FROM alt_segments WHERE state='uploading'",
+                &[]
+            )
+            .unwrap()
+            .get::<_, i64>(0),
+        1
+    );
+    f.client()
+        .batch_execute("UPDATE alt_requests SET expires_at=1; UPDATE alt_segments SET expires_at=1")
+        .unwrap();
+    f.store
+        .collect_orphans(&f.credential, "repository", 100)
+        .unwrap();
+    assert_eq!(
+        f.client()
+            .query_one("SELECT count(*) FROM alt_segments", &[])
+            .unwrap()
+            .get::<_, i64>(0),
+        0
+    );
+    assert_eq!(f.counts(), (0, 0, 0));
 }
 
 #[test]
@@ -388,6 +437,23 @@ fn read_snapshot_pins_survive_ref_deletion_and_gc() {
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes).unwrap();
     assert_eq!(bytes, p.contents[1]);
+    let credential = f.credential.clone();
+    let buffered = f
+        .store
+        .with_snapshot_objects(
+            &credential,
+            &read,
+            |objects| {
+                use alt_repository_service::ObjectSource;
+                let mut object = objects.open(p.commit)?.unwrap();
+                let mut bytes = Vec::new();
+                object.reader.read_to_end(&mut bytes)?;
+                Ok(bytes)
+            },
+            |_| Ok(credential.clone()),
+        )
+        .unwrap();
+    assert_eq!(buffered, p.contents[1]);
     f.store.release_snapshot(&f.credential, read).unwrap();
     assert_eq!(
         f.store

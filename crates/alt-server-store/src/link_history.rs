@@ -1,9 +1,9 @@
 //! Portable signed facts, never current connector state or grants. Callers
 //! authorize and hold the repository snapshot lock before accessing this table.
+use crate::database::Transaction;
 use crate::store::{integer, unsigned};
 use crate::{Error, Result};
 use golia_change_link::HistoricalEvent;
-use postgres::Transaction;
 
 fn decode(raw: &[u8], digest: &str) -> Result<HistoricalEvent> {
     let history = HistoricalEvent::from_bytes(raw)

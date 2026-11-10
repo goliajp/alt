@@ -300,7 +300,7 @@ remove that exact directory. Do not expose scratch or backup directories through
 the web server.
 
 A historical schema backup requires an explicit `--schema` (supported source
-schemas: 1–9). Stop the old service, save and verify its backup, then upgrade:
+schemas: 1–14). Stop the old service, save and verify its backup, then upgrade:
 
 ```sh
 alt-server --config server.json migrate --from-schema 3 --output-config server-next.json

@@ -12,6 +12,7 @@ struct Source {
     bytes: crate::ByteStore,
     target: Scope,
     blobs: BTreeMap<String, Blob>,
+    locations: crate::segments::Locations,
 }
 impl BlobSource for Source {
     fn open(&self, blob: &Blob) -> alt_portable::Result<Box<dyn Read + '_>> {
@@ -22,7 +23,12 @@ impl BlobSource for Source {
         }
         Ok(Box::new(
             self.bytes
-                .read(&self.target, &blob.blake3, blob.bytes)
+                .read_payload(
+                    &self.target,
+                    &blob.blake3,
+                    blob.bytes,
+                    self.locations.get(&blob.blake3),
+                )
                 .map_err(|e| std::io::Error::other(e.to_string()))?,
         ))
     }
@@ -41,13 +47,21 @@ pub struct PortableImportWork {
     verified: VerifiedSnapshot,
     history: Vec<History>,
     stamps: Vec<Stamp>,
+    locations: crate::segments::Locations,
     limits: PackageLimits,
 }
-fn stamps(bytes: &crate::ByteStore, scope: &Scope, blobs: &[Blob]) -> Result<Vec<Stamp>> {
+fn stamps(
+    bytes: &crate::ByteStore,
+    scope: &Scope,
+    blobs: &[Blob],
+    locations: &crate::segments::Locations,
+) -> Result<Vec<Stamp>> {
     blobs
         .iter()
         .map(|b| {
-            let m = bytes.read(scope, &b.blake3, b.bytes)?.metadata()?;
+            let m = bytes
+                .read_payload(scope, &b.blake3, b.bytes, locations.get(&b.blake3))?
+                .metadata()?;
             Ok((
                 m.dev(),
                 m.ino(),
@@ -93,96 +107,111 @@ impl Store {
         intent: &ImportIntent,
         limits: VerificationLimits,
     ) -> Result<PortableImportWork> {
-        let key = &intent.key;
-        let mut tx = self.client.transaction()?;
-        instance(&mut tx, &self.spec, &self.signing_key)?;
-        let (current, auth) = authorize_read(&mut tx, &self.spec, credential, key)?;
-        authorize_write(
-            &mut tx,
-            &self.spec,
-            key,
-            &current,
-            &auth,
-            Some(&key.request_id),
-        )?;
-        let row = row(&mut tx, key)?.ok_or(Error::Precondition("portable import not found"))?;
-        same(&row, intent, limits.package)?;
-        let time = now(&mut tx)?;
-        active(&row, key, time)?;
-        empty(&mut tx, &key.scope.repository_instance_id)?;
-        mappings(&mut tx, intent)?;
-        let envelope: Envelope = serde_json::from_value(row.get("envelope"))?;
-        intent.validate_envelope(&envelope, limits.package)?;
-        complete(
-            &mut tx,
-            key,
-            &row.get::<_, String>("digest"),
-            &envelope,
-            time,
-        )?;
-        crate::cloud_quota::check_publication(&mut tx, &self.spec)?;
-        tx.commit()?;
-        let before = stamps(&self.bytes, &key.scope, &envelope.catalog.blobs)?;
-        let source = Source {
-            bytes: self.bytes.clone(),
-            target: key.scope.clone(),
-            blobs: envelope
+        crate::telemetry::request(&intent.key);
+        crate::telemetry::observe(alt_server_telemetry::Phase::Validate, || {
+            let key = &intent.key;
+            let mut tx = self.client.transaction()?;
+            instance(&mut tx, &self.spec, &self.signing_key)?;
+            let (current, auth) = authorize_read(&mut tx, &self.spec, credential, key)?;
+            authorize_write(
+                &mut tx,
+                &self.spec,
+                key,
+                &current,
+                &auth,
+                Some(&key.request_id),
+            )?;
+            let row = row(&mut tx, key)?.ok_or(Error::Precondition("portable import not found"))?;
+            same(&row, intent, limits.package)?;
+            let time = now(&mut tx)?;
+            active(&row, key, time)?;
+            empty(&mut tx, &key.scope.repository_instance_id)?;
+            mappings(&mut tx, intent)?;
+            let envelope: Envelope = serde_json::from_value(row.get("envelope"))?;
+            intent.validate_envelope(&envelope, limits.package)?;
+            complete(
+                &mut tx,
+                key,
+                &row.get::<_, String>("digest"),
+                &envelope,
+                time,
+            )?;
+            crate::cloud_quota::check_publication(&mut tx, &self.spec)?;
+            let locations = crate::segments::locations(
+                &mut tx,
+                &key.scope.repository_instance_id,
+                &envelope
+                    .catalog
+                    .blobs
+                    .iter()
+                    .map(|b| b.blake3.as_str())
+                    .collect::<Vec<_>>(),
+            )?;
+            tx.commit()?;
+            let before = stamps(&self.bytes, &key.scope, &envelope.catalog.blobs, &locations)?;
+            let source = Source {
+                locations: locations.clone(),
+                bytes: self.bytes.clone(),
+                target: key.scope.clone(),
+                blobs: envelope
+                    .catalog
+                    .blobs
+                    .iter()
+                    .map(|b| (b.blake3.clone(), b.clone()))
+                    .collect(),
+            };
+            let public_key = alt_provenance::decode_hex(&intent.source_public_key)
+                .map_err(|_| Error::Integrity("portable source key"))?;
+            let verified =
+                VerifiedSnapshot::verify(&envelope, &intent.source, &public_key, &source, limits)?;
+            let history = envelope
                 .catalog
-                .blobs
+                .publications
                 .iter()
-                .map(|b| (b.blake3.clone(), b.clone()))
-                .collect(),
-        };
-        let public_key = alt_provenance::decode_hex(&intent.source_public_key)
-            .map_err(|_| Error::Integrity("portable source key"))?;
-        let verified =
-            VerifiedSnapshot::verify(&envelope, &intent.source, &public_key, &source, limits)?;
-        let history = envelope
-            .catalog
-            .publications
-            .iter()
-            .map(|item| {
-                let publication = Publication::decode(
-                    &alt_portable::read_metadata(
+                .map(|item| {
+                    let publication = Publication::decode(
+                        &alt_portable::read_metadata(
+                            &source,
+                            &item.publication,
+                            limits.package.metadata_bytes,
+                        )?,
+                        limits.package.protocol,
+                    )?;
+                    let manifest = Manifest::decode(
+                        &alt_portable::read_metadata(
+                            &source,
+                            &item.manifest,
+                            limits.package.metadata_bytes,
+                        )?,
+                        limits.package.protocol,
+                    )?;
+                    let receipt = serde_json::from_slice(&alt_portable::read_metadata(
                         &source,
-                        &item.publication,
+                        &item.receipt,
                         limits.package.metadata_bytes,
-                    )?,
-                    limits.package.protocol,
-                )?;
-                let manifest = Manifest::decode(
-                    &alt_portable::read_metadata(
-                        &source,
-                        &item.manifest,
-                        limits.package.metadata_bytes,
-                    )?,
-                    limits.package.protocol,
-                )?;
-                let receipt = serde_json::from_slice(&alt_portable::read_metadata(
-                    &source,
-                    &item.receipt,
-                    limits.package.metadata_bytes,
-                )?)?;
-                Ok(History {
-                    original: item.clone(),
-                    publication,
-                    manifest,
-                    receipt,
+                    )?)?;
+                    Ok(History {
+                        original: item.clone(),
+                        publication,
+                        manifest,
+                        receipt,
+                    })
                 })
+                .collect::<Result<Vec<_>>>()?;
+            if before != stamps(&self.bytes, &key.scope, &envelope.catalog.blobs, &locations)? {
+                return Err(Error::Precondition(
+                    "portable content changed during validation",
+                ));
+            }
+            Ok(PortableImportWork {
+                intent: intent.clone(),
+                envelope,
+                verified,
+                history,
+                stamps: before,
+                locations,
+                limits: limits.package,
             })
-            .collect::<Result<Vec<_>>>()?;
-        if before != stamps(&self.bytes, &key.scope, &envelope.catalog.blobs)? {
-            return Err(Error::Precondition(
-                "portable content changed during validation",
-            ));
-        }
-        Ok(PortableImportWork {
-            intent: intent.clone(),
-            envelope,
-            verified,
-            history,
-            stamps: before,
-            limits: limits.package,
         })
     }
 
@@ -230,7 +259,14 @@ impl Store {
             return Err(Error::Integrity("portable verified work binding"));
         }
         complete(&mut tx, key, &digest, &envelope, time)?;
-        if work.stamps != stamps(&self.bytes, &key.scope, &envelope.catalog.blobs)? {
+        if work.stamps
+            != stamps(
+                &self.bytes,
+                &key.scope,
+                &envelope.catalog.blobs,
+                &work.locations,
+            )?
+        {
             return Err(Error::Precondition("portable verified content changed"));
         }
         crate::cloud_quota::check_publication(&mut tx, &self.spec)?;

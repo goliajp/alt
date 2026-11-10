@@ -7,6 +7,7 @@ use crate::{
 };
 use alt_remote_protocol::Scope;
 use alt_server_store::{ChangeChannel, Error, RepairBindingRequest, Result};
+use alt_server_telemetry::{Id, Metrics, Outcome, Phase, Route, Trace};
 use golia_change_link as link;
 use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, sync::Arc, time::Duration};
@@ -137,10 +138,11 @@ async fn run_channel(
     factory: StoreFactory,
     channel: ChannelRuntime,
     after: Cursors,
+    metrics: Arc<Metrics>,
 ) -> Result<Cursors> {
     let f = factory.clone();
     let c = channel.clone();
-    let (pending, claims) = tokio::task::spawn_blocking(move || {
+    let (pending, claims) = crate::http::spawn_observed(Phase::Queue, move || {
         let mut store = f.open()?;
         let integration = f.authenticate(&mut store, &c.local_token)?;
         // Notification is derived from a committed native Task; it carries no
@@ -169,7 +171,9 @@ async fn run_channel(
                 configuration_digest: c.digest.clone(),
                 repair_request_digest: digest,
             };
-            let _ = store.enqueue_repair_binding(&integration, &request);
+            let _ = alt_server_store::telemetry::observe(Phase::Queue, || {
+                store.enqueue_repair_binding(&integration, &request)
+            });
         }
         let pending = store.pending_change_page(
             &integration,
@@ -188,49 +192,14 @@ async fn run_channel(
         None
     };
     for digest in pending {
-        let f = factory.clone();
-        let c = channel.clone();
-        let outgoing = tokio::task::spawn_blocking(move || {
-            let mut store = f.open()?;
-            let credential = f.authenticate(&mut store, &c.local_token)?;
-            store.change_dispatch(
-                &credential,
-                &c.config.scope,
-                &c.config.channel,
-                &c.digest,
-                &digest,
-            )
-        })
-        .await;
-        let Ok(Ok(outgoing)) = outgoing else { continue };
-        let key = ed25519_dalek::VerifyingKey::from_bytes(
-            &alt_provenance::decode_hex::<32>(&channel.config.peer_public_key)
-                .map_err(|_| Error::Unauthorized)?,
+        let trace = background_trace(&factory, &channel, metrics.clone());
+        trace.event_identity(Id::new(&digest).expect("stored event digest"));
+        // Each event attempt has its own identity, so a later event cannot
+        // overwrite the identity of an earlier detached blocking worker.
+        let _ = crate::http::trace_scope(
+            trace.clone(),
+            dispatch(factory.clone(), channel.clone(), digest, trace),
         )
-        .map_err(|_| Error::Unauthorized)?;
-        let Ok(receipt) = golia_change_link_http::send(
-            &channel.config.target,
-            &channel.peer_token,
-            &outgoing.statement,
-            &key,
-        )
-        .await
-        else {
-            continue;
-        };
-        let f = factory.clone();
-        let c = channel.clone();
-        let _ = tokio::task::spawn_blocking(move || {
-            let mut store = f.open()?;
-            let credential = f.authenticate(&mut store, &c.local_token)?;
-            store.acknowledge_change_event(
-                &credential,
-                &c.config.scope,
-                &c.config.channel,
-                &c.digest,
-                &receipt,
-            )
-        })
         .await;
     }
     Ok(Cursors {
@@ -239,9 +208,101 @@ async fn run_channel(
     })
 }
 
+fn background_trace(
+    factory: &StoreFactory,
+    channel: &ChannelRuntime,
+    metrics: Arc<Metrics>,
+) -> Trace {
+    let trace = Trace::background(
+        metrics,
+        Id::new(&factory.instance.installation_id).expect("validated instance identity"),
+        Route::ChangeLink,
+    );
+    trace.identity(
+        Id::new(&channel.config.scope.repository_instance_id),
+        None,
+        None,
+    );
+    trace
+}
+
+async fn dispatch(
+    factory: StoreFactory,
+    channel: ChannelRuntime,
+    digest: String,
+    trace: Trace,
+) -> Result<()> {
+    let f = factory.clone();
+    let c = channel.clone();
+    let outgoing = crate::http::spawn_observed(Phase::Authority, move || {
+        let mut store = f.open()?;
+        let credential = f.authenticate(&mut store, &c.local_token)?;
+        store.change_dispatch(
+            &credential,
+            &c.config.scope,
+            &c.config.channel,
+            &c.digest,
+            &digest,
+        )
+    })
+    .await
+    .map_err(|_| Error::AuthorityUnavailable)??;
+    let phase = trace.phase(Phase::Dispatch);
+    let key = ed25519_dalek::VerifyingKey::from_bytes(
+        &alt_provenance::decode_hex::<32>(&channel.config.peer_public_key)
+            .map_err(|_| Error::Unauthorized)?,
+    )
+    .map_err(|_| Error::Unauthorized)?;
+    let receipt = match golia_change_link_http::send(
+        &channel.config.target,
+        &channel.peer_token,
+        &outgoing.statement,
+        &key,
+    )
+    .await
+    {
+        Ok(receipt) => {
+            phase.finish(Outcome::Ok);
+            receipt
+        }
+        Err(failure) => {
+            // An HTTP rejection or invalid response can follow a remote commit.
+            // Preserve uncertainty; no raw error/URL/credential enters the log.
+            phase.finish(if failure.may_have_sent {
+                Outcome::Unknown
+            } else {
+                match failure.code {
+                    golia_change_link_http::Code::Configuration
+                    | golia_change_link_http::Code::AddressPolicy => Outcome::Invalid,
+                    _ => Outcome::Unavailable,
+                }
+            });
+            return Err(if failure.may_have_sent {
+                Error::OutcomeUnknown
+            } else {
+                Error::AuthorityUnavailable
+            });
+        }
+    };
+    crate::http::spawn_observed(Phase::Acknowledge, move || {
+        let mut store = factory.open()?;
+        let credential = factory.authenticate(&mut store, &channel.local_token)?;
+        store.acknowledge_change_event(
+            &credential,
+            &channel.config.scope,
+            &channel.config.channel,
+            &channel.digest,
+            &receipt,
+        )
+    })
+    .await
+    .map_err(|_| Error::AuthorityUnavailable)??;
+    Ok(())
+}
+
 /// Serve owns this task and cancels it at shutdown. No DB transaction spans a
 /// network request; a stopped sender retries the same signed event on restart.
-pub(crate) async fn worker(factory: StoreFactory) {
+pub(crate) async fn worker(factory: StoreFactory, metrics: Arc<Metrics>) {
     let semaphore = Arc::new(tokio::sync::Semaphore::new(4));
     let mut cursors = vec![Cursors::default(); factory.change_links.len()];
     loop {
@@ -250,15 +311,17 @@ pub(crate) async fn worker(factory: StoreFactory) {
             let factory = factory.clone();
             let semaphore = semaphore.clone();
             let cursor = cursors[index].clone();
+            let metrics = metrics.clone();
             jobs.spawn(async move {
                 let Ok(_permit) = semaphore.acquire_owned().await else {
                     return (index, Cursors::default());
                 };
                 // Errors leave durable pending state; later independent events
                 // still get a turn. No secrets or peer response text are logged.
+                let trace = background_trace(&factory, &channel, metrics.clone());
                 (
                     index,
-                    run_channel(factory, channel, cursor)
+                    crate::http::trace_scope(trace, run_channel(factory, channel, cursor, metrics))
                         .await
                         .unwrap_or_default(),
                 )

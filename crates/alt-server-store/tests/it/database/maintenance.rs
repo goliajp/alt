@@ -257,6 +257,13 @@ fn instance_audit_pagination_and_status_require_current_administrator() {
     f.store
         .record_backup_event(&operation, alt_server_store::BackupEvent::Started)
         .unwrap();
+    assert!(
+        f.store
+            .instance_status(&f.credential)
+            .unwrap()
+            .last_backup
+            .is_none()
+    );
     f.store
         .record_backup_event(&operation, alt_server_store::BackupEvent::Created)
         .unwrap();
@@ -275,6 +282,34 @@ fn instance_audit_pagination_and_status_require_current_administrator() {
     let serialized = serde_json::to_string(&first.items).unwrap();
     assert!(!serialized.contains("details"));
     assert!(!serialized.contains(&f.token));
+    let created = f
+        .store
+        .instance_status(&f.credential)
+        .unwrap()
+        .last_backup
+        .unwrap();
+    let failed_operation = "c".repeat(64);
+    f.store
+        .record_backup_event(&failed_operation, alt_server_store::BackupEvent::Started)
+        .unwrap();
+    f.store
+        .record_backup_event(
+            &failed_operation,
+            alt_server_store::BackupEvent::Unconfirmed,
+        )
+        .unwrap();
+    let after_failure = f
+        .store
+        .instance_status(&f.credential)
+        .unwrap()
+        .last_backup
+        .unwrap();
+    assert_eq!(after_failure.sequence, created.sequence);
+    assert_eq!(
+        after_failure.occurred_at_unix_ms,
+        created.occurred_at_unix_ms
+    );
+    assert_eq!(after_failure.subject_id, operation);
     f.store
         .revoke(&f.credential.clone(), &f.token.clone())
         .unwrap();

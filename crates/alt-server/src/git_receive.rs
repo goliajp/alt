@@ -1,6 +1,9 @@
 use crate::Output;
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
-use alt_git_pack::{BaseReader, BaseSource, IngressLimits, IngressObject, PackError, ingest_pack};
+use alt_git_pack::{
+    BaseReader, BaseSource, IngressLimits, IngressObject, PackError, RepresentationLimits,
+    ingest_pack_with_representations,
+};
 use alt_remote_protocol::{
     Chunk, ContentEntry, ContentKind, Manifest, ObjectFormat, Publication, RefUpdate, RequestKey,
     VERSION,
@@ -100,6 +103,7 @@ pub(crate) fn receive(
     credential: &Credential,
     repository: &str,
     source: &mut dyn Read,
+    representations: Option<crate::git_representations::Context<'_>>,
 ) -> Result<Output> {
     store.check_git_receive_access(credential, repository)?;
     let limits = store.limits();
@@ -130,7 +134,14 @@ pub(crate) fn receive(
         }
     }
     let snapshot = store.read_snapshot(credential, repository, 300_000, limits.graph_objects)?;
-    let result = receive_selected(store, credential, &snapshot, head, source);
+    let result = receive_selected(
+        store,
+        credential,
+        &snapshot,
+        head,
+        source,
+        representations.map(|context| context.scope(&snapshot.scope)),
+    );
     // A later cleanup/revocation failure must not replace a known committed
     // receipt with an apparent push failure. Temporary pins expire normally.
     let _ = store.release_snapshot(credential, snapshot);
@@ -142,6 +153,7 @@ fn receive_selected(
     snapshot: &ReadSnapshot,
     head: alt_wire::push::PushHead,
     source: &mut dyn Read,
+    representations: Option<crate::git_representations::Scoped<'_>>,
 ) -> Result<Output> {
     let limits = store.limits();
     let mut prefix = [0u8; 1];
@@ -153,23 +165,33 @@ fn receive_selected(
         allowed: snapshot.objects().map(|(oid, _, _)| oid).collect(),
     };
     let mut objects = BTreeMap::new();
+    let mut encoded = Vec::new();
     if count != 0 {
         let mut input = Cursor::new(&prefix[..count]).chain(source);
-        let pack = ingest_pack(
-            &mut input,
-            HashAlgo::Sha1,
-            IngressLimits {
-                wire_bytes: limits.total_bytes,
-                objects: limits.graph_objects,
-                object_bytes: limits.object_bytes,
-                inflated_bytes: limits.total_bytes,
-                resolved_bytes: limits.total_bytes,
-                delta_depth: 64,
-                steps: limits.walk_steps,
-            },
-            &mut existing,
-        )
-        .map_err(crate::git::pack_error)?;
+        let pack =
+            alt_server_store::telemetry::observe(alt_server_telemetry::Phase::Decode, || {
+                ingest_pack_with_representations(
+                    &mut input,
+                    HashAlgo::Sha1,
+                    IngressLimits {
+                        wire_bytes: limits.total_bytes,
+                        objects: limits.graph_objects,
+                        object_bytes: limits.object_bytes,
+                        inflated_bytes: limits.total_bytes,
+                        resolved_bytes: limits.total_bytes,
+                        delta_depth: 64,
+                        steps: limits.walk_steps,
+                    },
+                    &mut existing,
+                    if representations.is_some() {
+                        crate::git_representations::RETENTION
+                    } else {
+                        RepresentationLimits::default()
+                    },
+                )
+                .map_err(crate::git::pack_error)
+            })?;
+        encoded = pack.representations;
         for object in pack.objects {
             objects.insert(object.oid, object);
         }
@@ -184,7 +206,10 @@ fn receive_selected(
         existing: RefCell::new(existing),
         incoming: &objects,
     };
-    let graph = verify_graph(&overlay, HashAlgo::Sha1, &roots, limits.into())?;
+    let graph =
+        alt_server_store::telemetry::observe(alt_server_telemetry::Phase::Validate, || {
+            verify_graph(&overlay, HashAlgo::Sha1, &roots, limits.into()).map_err(Error::from)
+        })?;
     let mut refs = Vec::new();
     let mut remaining = limits.walk_steps;
     for update in &head.updates {
@@ -263,27 +288,93 @@ fn receive_selected(
     // Git has no native durable client request ID. This generated ID records
     // the server transaction and is returned for inspection, not auto-replay.
     store.begin(credential, &publication, &manifest, 60_000)?;
-    for entry in &manifest.entries {
-        let oid = entry
-            .git_oid
-            .as_ref()
-            .unwrap()
-            .parse()
-            .map_err(|_| Error::Integrity("Git manifest oid"))?;
-        let object = &objects[&oid];
-        let proof = store.bytes().put(
-            &key.scope,
-            &entry.blake3,
-            entry.bytes,
-            limits.object_bytes,
-            &mut Cursor::new(object.data.as_slice()),
-        )?;
-        store.register_content(credential, &key, entry, &proof)?;
+    let mut offset = 0;
+    while offset < manifest.entries.len() {
+        let entry = &manifest.entries[offset];
+        if entry.bytes > alt_byte_segment::MAX_BYTES {
+            let oid = entry
+                .git_oid
+                .as_ref()
+                .unwrap()
+                .parse()
+                .map_err(|_| Error::Integrity("Git manifest oid"))?;
+            let proof = store.bytes().put(
+                &key.scope,
+                &entry.blake3,
+                entry.bytes,
+                limits.object_bytes,
+                &mut Cursor::new(objects[&oid].data.as_slice()),
+            )?;
+            store.register_contents(credential, &key, &[(entry, &proof)])?;
+            offset += 1;
+            continue;
+        }
+        let mut end = offset;
+        let mut bytes = 0;
+        while end < manifest.entries.len()
+            && end - offset < alt_server_store::MAX_REGISTER_CONTENTS
+            && manifest.entries[end].bytes <= alt_byte_segment::MAX_BYTES - bytes
+        {
+            bytes += manifest.entries[end].bytes;
+            end += 1;
+        }
+        let batch = &manifest.entries[offset..end];
+        let mut distinct = std::collections::BTreeMap::new();
+        for entry in batch {
+            let oid = entry
+                .git_oid
+                .as_ref()
+                .unwrap()
+                .parse()
+                .map_err(|_| Error::Integrity("Git manifest oid"))?;
+            let data = objects[&oid].data.as_slice();
+            if let Some((previous, size)) =
+                distinct.insert(entry.blake3.as_str(), (data, entry.bytes))
+                && (previous != data || size != entry.bytes)
+            {
+                return Err(Error::Integrity("Git canonical digest collision"));
+            }
+        }
+        let mut sources: Vec<_> = distinct
+            .values()
+            .map(|(data, _)| Cursor::new(*data))
+            .collect();
+        let mut inputs: Vec<_> = distinct
+            .iter()
+            .zip(sources.iter_mut())
+            .map(
+                |((digest, (_, bytes)), source)| alt_server_store::ByteInput {
+                    digest,
+                    bytes: *bytes,
+                    source,
+                },
+            )
+            .collect();
+        let proofs = store.persist_contents(credential, &key, &mut inputs)?;
+        let proofs: std::collections::BTreeMap<_, _> =
+            proofs.iter().map(|proof| (proof.blake3(), proof)).collect();
+        let selected: Vec<_> = batch
+            .iter()
+            .map(|entry| (entry, proofs[entry.blake3.as_str()]))
+            .collect();
+        store.register_contents(credential, &key, &selected)?;
+        offset = end;
     }
     let work = store.acquire_publication(credential, &key, 30_000, limits.graph_objects)?;
     let graph = verify_graph(work.source(), HashAlgo::Sha1, &work.roots()?, limits.into())?;
     store.mark_ready(credential, &work, &graph)?;
     let result = store.publish(credential, &work, &graph);
+    // The cache records only successfully published, canonical originals. It
+    // carries no publication proof, and is never used to authorize a read.
+    if result.is_ok()
+        && let Some(cache) = representations
+    {
+        for representation in encoded {
+            if let Some(object) = objects.get(&representation.oid()) {
+                cache.remember(&object.data, representation);
+            }
+        }
+    }
     let message = match &result {
         Ok(_) => None,
         Err(Error::OutcomeUnknown) => {

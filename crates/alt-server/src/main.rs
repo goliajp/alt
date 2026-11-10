@@ -677,6 +677,20 @@ fn execute(args: &Args) -> Result<Value> {
 }
 fn main() -> ExitCode {
     let args = Args::parse();
+    let _logging = if matches!(args.command, Action::Serve) {
+        match alt_server_telemetry::install_logging(std::io::stderr(), 4096) {
+            Ok(logging) => Some(logging),
+            Err(_) => {
+                eprintln!(
+                    "{}",
+                    json!({"error":{"message":"Operational logging could not be initialized","outcome":"not_applied"}})
+                );
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        None
+    };
     match execute(&args) {
         Ok(value) => {
             println!("{value}");

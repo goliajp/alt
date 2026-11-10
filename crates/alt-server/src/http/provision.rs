@@ -83,14 +83,15 @@ pub(super) async fn handle(
     let factory = state.factory.clone();
     match tokio::time::timeout(
         state.options.work_timeout,
-        tokio::task::spawn_blocking(move || {
+        crate::http::spawn_blocking(move || {
             let _permit = permit;
             let mut source = source;
             source.as_file_mut().rewind()?;
             let mut bytes = Vec::new();
             source.as_file_mut().read_to_end(&mut bytes)?;
             let probe: Probe = serde_json::from_slice(&bytes)?;
-            let result = cloud.readiness(&mut factory.open()?, probe)?;
+            let mut store = factory.open()?;
+            let result = cloud.readiness(&mut store, probe)?;
             serde_json::to_vec(&result).map_err(Error::from)
         }),
     )

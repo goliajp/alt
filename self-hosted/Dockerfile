@@ -22,7 +22,7 @@ RUN --mount=type=cache,id=alt-server-registry,target=/usr/local/cargo/registry,s
     CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=x86_64-linux-gnu-gcc CC_x86_64_unknown_linux_gnu=x86_64-linux-gnu-gcc \
     ALT_BUILD_ID="$ALT_BUILD_ID" cargo build --release --locked --target "$target" -p alt-server --bin alt-server && \
-    mkdir /out && cp "target/$target/release/alt-server" /out/alt-server
+    install -d -m 0700 /out/directories/alt-cloud && cp "target/$target/release/alt-server" /out/alt-server
 RUN case "$TARGETARCH" in \
       amd64) digest=cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10;; \
       arm64) digest=6b8dc4333c53a5a57c9e5834e3a48f92605d7154014cd07269ff3327db5d37f4;; *) exit 2;; esac && \
@@ -39,7 +39,8 @@ COPY --from=build /out/age/age /out/age/age-keygen /usr/local/bin/
 COPY --from=web /build/workbench/dist /opt/alt/workbench
 COPY self-hosted/entrypoint.sh /usr/local/bin/alt-entrypoint
 COPY LICENSE-MIT LICENSE-APACHE /opt/alt/licenses/
-RUN mkdir -p /var/lib/alt-cloud && chown 9000:9000 /var/lib/alt-cloud && chmod 0700 /var/lib/alt-cloud
+# Keep the target stage executable-free so cross builds need no emulation.
+COPY --from=build --chown=9000:9000 /out/directories/ /var/lib/
 ENV TMPDIR=/tmp HOME=/tmp
 USER 9000:9000
 WORKDIR /opt/alt

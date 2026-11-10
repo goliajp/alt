@@ -1,4 +1,5 @@
 //! Logical, authenticated snapshots. Physical disaster backups stay separate.
+use crate::database::Transaction;
 use crate::store::{authorize, instance, integer, now, require_admin, snapshot, unsigned};
 use crate::{ByteStore, Credential, Error, Result, Store};
 use alt_portable::{
@@ -6,7 +7,6 @@ use alt_portable::{
     Reference, VerificationLimits, VerifiedSnapshot,
 };
 use alt_remote_protocol::{ContentKind, Publication, RequestKey, RequestState, Scope};
-use postgres::Transaction;
 
 use std::{collections::BTreeMap, io::Read, os::unix::fs::MetadataExt};
 
@@ -19,6 +19,7 @@ pub struct PortableExport {
     envelope: Envelope,
     documents: BTreeMap<String, Vec<u8>>,
     bytes: ByteStore,
+    locations: crate::segments::Locations,
 }
 /// Completed byte validation, bound to immutable intent and byte-store inodes.
 /// This grants no authority; completion rechecks current permissions and epoch.
@@ -39,7 +40,12 @@ impl PortableExport {
             .filter(|b| !self.documents.contains_key(&b.blake3))
             .map(|b| {
                 let m = bytes
-                    .read(&self.envelope.catalog.source, &b.blake3, b.bytes)?
+                    .read_payload(
+                        &self.envelope.catalog.source,
+                        &b.blake3,
+                        b.bytes,
+                        self.locations.get(&b.blake3),
+                    )?
                     .metadata()?;
                 Ok((
                     m.dev(),
@@ -73,12 +79,28 @@ impl BlobSource for PortableExport {
         }
         Ok(Box::new(
             self.bytes
-                .read(&self.envelope.catalog.source, &blob.blake3, blob.bytes)
+                .read_payload(
+                    &self.envelope.catalog.source,
+                    &blob.blake3,
+                    blob.bytes,
+                    self.locations.get(&blob.blake3),
+                )
                 .map_err(|e| std::io::Error::other(e.to_string()))?,
         ))
     }
 }
 
+fn export_locations(
+    tx: &mut Transaction<'_>,
+    scope: &Scope,
+    blobs: &[Blob],
+) -> Result<crate::segments::Locations> {
+    crate::segments::locations(
+        tx,
+        &scope.repository_instance_id,
+        &blobs.iter().map(|b| b.blake3.as_str()).collect::<Vec<_>>(),
+    )
+}
 fn export_key(scope: &Scope, actor: &str, id: &str) -> Result<()> {
     RequestKey {
         scope: scope.clone(),
@@ -170,26 +192,32 @@ impl Store {
         id: &str,
         limits: VerificationLimits,
     ) -> Result<PortableExportWork> {
-        let (result, ready) = self.capture_portable_export(credential, scope, id, limits)?;
-        let before = result.stamps(&self.bytes)?;
-        if !ready {
-            VerifiedSnapshot::verify(
-                &result.envelope,
-                scope,
-                self.signing_key.verifying_key().as_bytes(),
-                &result,
+        crate::telemetry::scope(scope);
+        if let Some(trace) = alt_server_telemetry::Trace::current() {
+            trace.identity(None, alt_server_telemetry::Id::new(id), None);
+        }
+        crate::telemetry::observe(alt_server_telemetry::Phase::Validate, || {
+            let (result, ready) = self.capture_portable_export(credential, scope, id, limits)?;
+            let before = result.stamps(&self.bytes)?;
+            if !ready {
+                VerifiedSnapshot::verify(
+                    &result.envelope,
+                    scope,
+                    self.signing_key.verifying_key().as_bytes(),
+                    &result,
+                    limits,
+                )?;
+            }
+            if before != result.stamps(&self.bytes)? {
+                return Err(Error::Precondition(
+                    "portable export bytes changed during validation",
+                ));
+            }
+            Ok(PortableExportWork {
+                export: result,
+                stamps: before,
                 limits,
-            )?;
-        }
-        if before != result.stamps(&self.bytes)? {
-            return Err(Error::Precondition(
-                "portable export bytes changed during validation",
-            ));
-        }
-        Ok(PortableExportWork {
-            export: result,
-            stamps: before,
-            limits,
+            })
         })
     }
     /// Expose only the original verified snapshot under current authority.
@@ -307,7 +335,9 @@ impl Store {
             }
             let envelope: Envelope = serde_json::from_value(row.get(1))?;
             envelope.verify(scope, self.signing_key.verifying_key().as_bytes(), limits.package)?;
+            let locations = export_locations(&mut tx, scope, &envelope.catalog.blobs)?;
             let result = PortableExport {
+                locations,
                 envelope,
                 documents: serde_json::from_value(row.get(2))?,
                 bytes: self.bytes.clone(),
@@ -524,7 +554,9 @@ impl Store {
         catalog.import_receipts = receipts.into_values().collect();
         catalog.blobs = blobs.into_values().collect();
         catalog.identities = identities.into_values().collect();
+        let locations = export_locations(&mut tx, scope, &catalog.blobs)?;
         let result = PortableExport {
+            locations,
             envelope: Envelope::sign(catalog, &self.signing_key, limits.package)?,
             documents,
             bytes: self.bytes.clone(),
@@ -566,7 +598,9 @@ impl Store {
         let row = tx.query_opt("SELECT envelope,documents FROM alt_portable_exports WHERE repository=$1 AND export_id=$2 AND NOT retired AND verified_at IS NOT NULL", &[&scope.repository_instance_id,&id])?.ok_or(Error::Precondition("active portable export not found"))?;
         let envelope: Envelope = serde_json::from_value(row.get(0))?;
         envelope.verify(scope, self.signing_key.verifying_key().as_bytes(), limits)?;
+        let locations = export_locations(&mut tx, scope, &envelope.catalog.blobs)?;
         let result = PortableExport {
+            locations,
             envelope,
             documents: serde_json::from_value(row.get(1))?,
             bytes: self.bytes.clone(),

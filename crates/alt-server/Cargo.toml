@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 [dependencies]
+alt-byte-segment.workspace = true
+alt-server-telemetry.workspace = true
 golia-change-link.workspace = true
 golia-change-link-http.workspace = true
 alt-portable.workspace = true
@@ -38,6 +40,7 @@ base64 = "0.22"
 clap.workspace = true
 libc.workspace = true
 futures-util = "0.3"
+flate2.workspace = true
 tar = "0.4"
 tokio-util = {version="0.7",features=["io"]}
 

@@ -165,6 +165,7 @@ pub fn inspect(
             };
             projected.push(json!({"path":change.path,"kind":if change.before.is_none(){"added"}else if change.after.is_none(){"deleted"}else{"modified"},"before":change.before.as_ref().map(|v|&v.oid),"after":change.after.as_ref().map(|v|&v.oid),"before_mode":change.before.as_ref().map(|v|v.mode),"after_mode":change.after.as_ref().map(|v|v.mode),"patch":patch}));
         }
+        work.check_read_integrity()?;
         let original_url = format!(
             "/web/repositories/{}/epochs/{}/requests/{}/{}/content/{}/download",
             key.scope.repository_instance_id,

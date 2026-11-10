@@ -1,11 +1,16 @@
 mod browser;
+mod buffered_read;
+mod bulk_publication;
 mod change_links;
 mod cloud;
 mod delegation;
 mod faults;
 mod maintenance;
 mod provenance;
+mod registration;
+mod segments;
 mod tasks;
+mod upload_selection;
 
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
 use alt_remote_protocol::*;

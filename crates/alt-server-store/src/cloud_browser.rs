@@ -1,9 +1,9 @@
 //! Product browser sessions retain platform identity without local accounts.
+use crate::database::Transaction;
 use crate::store::{credential_row, instance, integer, now, unsigned};
 use crate::{ActiveBrowserSession, BrowserSession, Credential, Error, LocalUser, Result, Store};
 use alt_browser_auth::PublicOrigin;
 use golia_platform_contract::AccountAuthorization;
-use postgres::Transaction;
 
 fn browser(tx: &mut Transaction<'_>, digest: &str) -> Result<postgres::Row> {
     tx.query_opt("SELECT p.claims,p.created_at,c.actor_id,c.expires_at,c.administrator FROM alt_cloud_credentials p JOIN alt_credentials c USING(token_digest) WHERE p.token_digest=$1 AND p.browser", &[&digest])?

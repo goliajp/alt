@@ -457,6 +457,14 @@ fn background_worker_notifies_actual_task_once_and_retries_same_event_after_rest
     });
     portable::publish(&portable::client(&server, &f.token), &payload);
     let digest = seen_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+    server.wait_metric(
+        &f.token,
+        "alt_operation_outcomes_total{outcome=\"unknown\",phase=\"dispatch\"} 1",
+    );
+    let metrics = server.metrics(&f.token);
+    assert!(!metrics.contains("phase=\"acknowledge\""));
+    assert!(metrics.contains("alt_change_link_events_pending 1"));
+    assert!(!metrics.contains(&digest) && !metrics.contains(&f.token));
     drop(server);
     assert!(
         f.store
@@ -490,4 +498,17 @@ fn background_worker_notifies_actual_task_once_and_retries_same_event_after_rest
         receipt.body.entity.strip_prefix("task-").unwrap()
     );
     assert_eq!(restarted.command("GET", &key, &f.token).0, 200);
+    restarted.wait_metric(
+        &f.token,
+        "alt_operation_outcomes_total{outcome=\"ok\",phase=\"dispatch\"} 1",
+    );
+    restarted.wait_metric(
+        &f.token,
+        "alt_operation_outcomes_total{outcome=\"ok\",phase=\"acknowledge\"} 1",
+    );
+    assert!(
+        restarted
+            .metrics(&f.token)
+            .contains("alt_change_link_events_pending 0")
+    );
 }

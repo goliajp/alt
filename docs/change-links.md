@@ -14,7 +14,7 @@ operator channel. Alt uses its instance receipt key; Sentori uses the private
 Ed25519 seed configured by its change-link runtime. Keep credential and seed files
 private. The receiving product independently authenticates its own credential.
 
-Add a `change_links` array to the Alt instance configuration. For example:
+For self-hosted Alt, add a `change_links` array to the instance configuration. For example:
 
 ```json
 {
@@ -53,6 +53,38 @@ contains the Sentori API token. Credentials remain subject to expiry, revocation
 and Cloud authorization. A public HTTPS destination rejects private DNS answers,
 redirects and ambient proxy routing. An explicitly pinned private destination is
 an operator configuration, never an input from an event or repository.
+
+For Cloud Alt, keep the generated `config.json` unchanged. Write a private
+`change-links.json` beside it (mode `0600`, directory not writable by group or
+others), using this envelope and the same channel objects shown above:
+
+```json
+{
+  "version": 1,
+  "instance": {
+    "installation_id": "ALT_INSTALLATION_ID",
+    "workspace_id": "ALT_WORKSPACE_ID",
+    "deployment_mode": "cloud",
+    "runtime_generation": 1
+  },
+  "channels": []
+}
+```
+
+Copy the exact `instance` object from the generated configuration, then populate
+`channels`. The envelope's `runtime_generation` is a JSON number; channel epochs
+remain decimal strings. A missing file disables this optional configuration;
+a present malformed file, wrong instance/generation, symlink, or simultaneous
+inline channels causes startup to fail. Relative credential paths resolve beside
+the configuration. Install the database pairing explicitly as below and restart.
+Cloud restarts preserve the generated provision/config/key bytes. The effective
+configuration, after merging channels and resolving relative paths, must fit
+within 64 KiB so that its backup configuration remains readable.
+
+After disaster recovery, establish new credentials and pairings for the new
+runtime generation and repository epochs. Copying an old settings file does not
+reactivate it. Backups retain the effective configuration as historical metadata,
+but do not copy credential files into the new runtime.
 
 Configure Sentori's reciprocal connection with the same channel and application,
 its own local endpoint and current API credential, Alt's endpoint/key/credential,

@@ -6,6 +6,7 @@ mod browser;
 mod change_links;
 mod chunks;
 mod cloud;
+mod connections;
 mod git;
 mod native_client;
 mod operator;
@@ -56,6 +57,15 @@ impl Running {
         cloud: Option<std::sync::Arc<alt_server::cloud::Runtime>>,
         links: Vec<alt_server::change_links::ChannelRuntime>,
     ) -> Self {
+        Self::start_with_shutdown(f, browser, cloud, links, false)
+    }
+    fn start_with_shutdown(
+        f: &Fixture,
+        browser: Option<alt_server::WebOptions>,
+        cloud: Option<std::sync::Arc<alt_server::cloud::Runtime>>,
+        links: Vec<alt_server::change_links::ChannelRuntime>,
+        abort: bool,
+    ) -> Self {
         let mut database: postgres::Config = f.admin_dsn.parse().unwrap();
         database.dbname(&f.database);
         let signing_key = SigningKey::from_bytes(&[f.key_seed; 32]);
@@ -98,11 +108,24 @@ impl Running {
             rt.block_on(async {
                 let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
                 address_tx.send(listener.local_addr().unwrap()).unwrap();
-                alt_server::serve_with_browser(listener, factory, options, browser, async {
+                if abort {
+                    let serving = tokio::spawn(alt_server::serve_with_browser(
+                        listener,
+                        factory,
+                        options,
+                        browser,
+                        std::future::pending(),
+                    ));
                     let _ = shutdown_rx.await;
-                })
-                .await
-                .unwrap();
+                    serving.abort();
+                    assert!(serving.await.unwrap_err().is_cancelled());
+                } else {
+                    alt_server::serve_with_browser(listener, factory, options, browser, async {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+                    .unwrap();
+                }
             });
         });
         let address = address_rx.recv().unwrap();
@@ -150,6 +173,25 @@ impl Running {
             status,
             serde_json::from_reader(response.into_reader()).unwrap(),
         )
+    }
+    fn metrics(&self, token: &str) -> String {
+        let response = self.send("GET", "/v1/instance/metrics", Some(token), b"");
+        assert_eq!(response.status(), 200);
+        response.into_string().unwrap()
+    }
+    fn wait_metric(&self, token: &str, sample: &str) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let text = self.metrics(token);
+            if text.lines().any(|line| line == sample) {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "missing metric {sample}: {text}"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
     fn command(&self, method: &str, path: &str, token: &str) -> (u16, serde_json::Value) {
         let response = self.send(method, path, Some(token), b"");

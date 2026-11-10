@@ -230,6 +230,16 @@ fn portable_http_transfers_immutable_snapshot_with_lost_activation_response_and_
         b.repository("repository").unwrap().refs["refs/heads/main"],
         next.commit.to_string()
     );
+    // Native publication validation and portable validation are distinct real
+    // work attempts. The replay above must not revalidate the imported archive.
+    source_server.wait_metric(
+        &source.token,
+        "alt_operation_outcomes_total{outcome=\"ok\",phase=\"validate\"} 3",
+    );
+    target_server.wait_metric(
+        &target.token,
+        "alt_operation_outcomes_total{outcome=\"ok\",phase=\"validate\"} 3",
+    );
     drop(target_server);
     let target_server = Running::start(&target);
     let b = client(&target_server, &target.token);

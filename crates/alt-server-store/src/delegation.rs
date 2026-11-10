@@ -1,4 +1,5 @@
 //! Agent capabilities always remain attached to a live human credential.
+use crate::database::Transaction;
 use crate::store::{
     authorize, credential_row, instance, integer, now, snapshot, token_digest, unsigned,
 };
@@ -9,7 +10,6 @@ use alt_remote_protocol::{
     delegation::{AgentScope, DelegationInfo, DelegationRequest, MAX_LIFETIME_MS},
 };
 use alt_repository_service::Authorization;
-use postgres::Transaction;
 
 fn contains_ref(parent: &RefSelector, child: &RefSelector) -> bool {
     match (parent, child) {

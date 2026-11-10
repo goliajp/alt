@@ -1,8 +1,9 @@
+use crate::database::Transaction;
 use crate::{ByteStore, Error, Result};
 use alt_remote_protocol::{Attribution, DeploymentMode, Limits, ObjectFormat, Scope};
 use alt_repository_service::{Authorization, Grant, RefPolicy, RepositorySnapshot};
 use ed25519_dalek::SigningKey;
-use postgres::{Client, Transaction};
+use postgres::Client;
 use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -46,7 +47,7 @@ impl Credential {
 }
 
 pub struct Store {
-    pub(crate) client: Client,
+    pub(crate) client: crate::database::Connection,
     pub(crate) bytes: ByteStore,
     pub(crate) spec: InstanceSpec,
     pub(crate) signing_key: SigningKey,
@@ -79,7 +80,7 @@ impl Store {
     ) -> Result<Self> {
         spec.validate()?;
         limits.validate()?;
-        let mut tx = client.transaction()?;
+        let mut tx = Transaction::uncached(client.transaction()?);
         tx.query_one("SELECT pg_advisory_xact_lock(715071909111)", &[])?;
         tx.batch_execute("CREATE TABLE IF NOT EXISTS alt_schema(version integer PRIMARY KEY, checksum text NOT NULL)")?;
         if !tx.query("SELECT version FROM alt_schema", &[])?.is_empty() {
@@ -96,18 +97,22 @@ impl Store {
             .to_hex()
             .to_string();
         tx.execute("INSERT INTO alt_instance(singleton,installation_id,workspace_id,deployment_mode,runtime_generation,signing_key_id) VALUES(true,$1,$2,$3,$4,$5)", &[&spec.installation_id,&spec.workspace_id,&spec.mode(),&integer(spec.runtime_generation)?,&key_id])?;
-        crate::schema::apply_v2(&mut tx)?;
-        crate::schema::apply_v3(&mut tx)?;
-        crate::schema::apply_v4(&mut tx)?;
-        crate::schema::apply_v5(&mut tx)?;
-        crate::schema::apply_v6(&mut tx)?;
-        crate::schema::apply_v7(&mut tx)?;
-        crate::schema::apply_v8(&mut tx)?;
-        crate::schema::apply_v9(&mut tx)?;
-        crate::schema::apply_v10(&mut tx)?;
-        crate::schema::apply_v11(&mut tx)?;
-        crate::schema::apply_v12(&mut tx)?;
-        crate::schema::apply_v13(&mut tx)?;
+        crate::schema::apply_v2(tx.raw_mut())?;
+        crate::schema::apply_v3(tx.raw_mut())?;
+        crate::schema::apply_v4(tx.raw_mut())?;
+        crate::schema::apply_v5(tx.raw_mut())?;
+        crate::schema::apply_v6(tx.raw_mut())?;
+        crate::schema::apply_v7(tx.raw_mut())?;
+        crate::schema::apply_v8(tx.raw_mut())?;
+        crate::schema::apply_v9(tx.raw_mut())?;
+        crate::schema::apply_v10(tx.raw_mut())?;
+        crate::schema::apply_v11(tx.raw_mut())?;
+        crate::schema::apply_v12(tx.raw_mut())?;
+        crate::schema::apply_v13(tx.raw_mut())?;
+        crate::schema::apply_v14(tx.raw_mut())?;
+        crate::schema::apply_v15(tx.raw_mut())?;
+        crate::schema::apply_v16(tx.raw_mut())?;
+        crate::schema::apply_v17(tx.raw_mut())?;
         if let Some((audience, digest, provision_digest)) = cloud {
             crate::cloud::initialize_binding(&mut tx, &spec, audience, digest, provision_digest)?;
         }
@@ -124,11 +129,11 @@ impl Store {
         spec.validate()?;
         limits.validate()?;
         crate::schema::check(&mut client, crate::SCHEMA_VERSION as usize)?;
-        let mut tx = client.transaction()?;
+        let mut tx = Transaction::uncached(client.transaction()?);
         instance(&mut tx, &spec, &signing_key)?;
         tx.commit()?;
         Ok(Self {
-            client,
+            client: crate::database::Connection::new(client),
             bytes,
             spec,
             signing_key,
@@ -137,6 +142,20 @@ impl Store {
     }
     pub fn spec(&self) -> &InstanceSpec {
         &self.spec
+    }
+    /// Revalidate a retained connection before reuse. No schema, instance or
+    /// Cloud authority decision is cached; operations still check credentials
+    /// and repository state in their own transactions.
+    pub fn check_connection(&mut self) -> Result<()> {
+        let mut tx = self.client.transaction()?;
+        let rows = tx.query(
+            "SELECT version,checksum FROM alt_schema ORDER BY version",
+            &[],
+        )?;
+        crate::schema::check_rows(&rows, crate::SCHEMA_VERSION as usize)?;
+        instance(&mut tx, &self.spec, &self.signing_key)?;
+        tx.commit()?;
+        Ok(())
     }
     pub fn bytes(&self) -> &ByteStore {
         &self.bytes
@@ -565,6 +584,7 @@ pub(crate) fn credential_row(
     }
     let delegated = crate::delegation::check(tx, spec, credential, &row)?;
     if delegated {
+        crate::telemetry::authenticated(&row);
         return Ok(row);
     }
     if spec.deployment_mode == DeploymentMode::Cloud {
@@ -572,6 +592,7 @@ pub(crate) fn credential_row(
     } else {
         crate::browser::check_credential(tx, credential, &row.get::<_, String>("actor_id"))?;
     }
+    crate::telemetry::authenticated(&row);
     Ok(row)
 }
 pub(crate) fn require_admin(
@@ -590,20 +611,79 @@ pub(crate) fn authorize(
     credential: &Credential,
     snapshot: &RepositorySnapshot,
 ) -> Result<Authorization> {
+    authorize_scope(
+        tx,
+        spec,
+        credential,
+        &snapshot.scope,
+        snapshot.revocation_generation,
+    )
+}
+
+/// Current repository authority, without a ref or publication-policy view.
+/// It cannot be passed to domain publication validation as a partial snapshot.
+pub(crate) struct RepositoryAuthority {
+    pub(crate) scope: Scope,
+    revocation_generation: u64,
+}
+impl RepositoryAuthority {
+    pub(crate) fn authorize(
+        &self,
+        tx: &mut Transaction<'_>,
+        spec: &InstanceSpec,
+        credential: &Credential,
+    ) -> Result<Authorization> {
+        authorize_scope(
+            tx,
+            spec,
+            credential,
+            &self.scope,
+            self.revocation_generation,
+        )
+    }
+}
+pub(crate) fn repository_authority(
+    tx: &mut Transaction<'_>,
+    spec: &InstanceSpec,
+    repository: &str,
+) -> Result<RepositoryAuthority> {
+    let row = tx.query_opt(
+        "SELECT recovery_epoch,object_format,revocation_generation FROM alt_repositories WHERE id=$1 FOR UPDATE",
+        &[&repository],
+    )?.ok_or(Error::Unauthorized)?;
+    if row.get::<_, String>(1) != "sha1" {
+        return Err(Error::Precondition("unsupported repository object format"));
+    }
+    Ok(RepositoryAuthority {
+        scope: Scope {
+            installation_id: spec.installation_id.clone(),
+            repository_instance_id: repository.into(),
+            recovery_epoch: unsigned(row.get(0))?,
+        },
+        revocation_generation: unsigned(row.get(2))?,
+    })
+}
+fn authorize_scope(
+    tx: &mut Transaction<'_>,
+    spec: &InstanceSpec,
+    credential: &Credential,
+    scope: &Scope,
+    revocation_generation: u64,
+) -> Result<Authorization> {
     let row = credential_row(tx, spec, credential)?;
     let actor: String = row.get(0);
-    let grant=tx.query_opt("SELECT can_read,publish_records,grants FROM alt_grants WHERE actor_id=$1 AND repository=$2",&[&actor,&snapshot.scope.repository_instance_id])?.ok_or(Error::Unauthorized)?;
+    let grant=tx.query_opt("SELECT can_read,publish_records,grants FROM alt_grants WHERE actor_id=$1 AND repository=$2",&[&actor,&scope.repository_instance_id])?.ok_or(Error::Unauthorized)?;
     // Administrators do not get implicit access to repository contents.
     if !grant.get::<_, bool>(0) {
         return Err(Error::Unauthorized);
     }
     let mut auth = Authorization {
-        scope: snapshot.scope.clone(),
+        scope: scope.clone(),
         runtime_generation: spec.runtime_generation,
         actor_id: actor,
         attribution: serde_json::from_value(row.get(1))?,
         expires_at: unsigned(row.get(3))?,
-        revocation_generation: snapshot.revocation_generation,
+        revocation_generation,
         grants: serde_json::from_value(grant.get(2))?,
         publish_records: grant.get(1),
     };

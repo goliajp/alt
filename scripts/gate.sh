@@ -6,7 +6,7 @@
 #          + the LLM isolation check
 #   unit   per-crate library tests (--lib)        after every change
 #   it     integration test binaries              before finishing a feature
-#   corpus ignored corpus sweeps (.dev/corpus)    at checkpoint exits
+#   corpus ignored library/integration tests     at checkpoint exits
 #   package internal installer boundaries        after packaging changes
 #   all    everything above                       at checkpoint exits
 #
@@ -35,6 +35,8 @@ Scoped lint formats and compiles only the selected package; the read-only
 LLM isolation policy still checks the whole repository. Unknown arguments
 are errors. The package class takes no scope/profile options and does not build
 Rust code. Workspace/release checks belong on a remote runner.
+Corpus runs ignored library and integration tests; --test restricts it to that
+integration target. Filters apply to both kinds when no target is selected.
 EOF
 }
 
@@ -126,6 +128,14 @@ dependents() {
 
 run_isolation() {
     fail=0
+    # A partial source tree cannot establish the repository-wide policy.
+    # Some grep versions silently skip missing paths with --include filters.
+    for source_root in crates vendor fuzz; do
+        if [ ! -d "$source_root" ]; then
+            echo "llm isolation: missing source directory: $source_root" >&2
+            return 1
+        fi
+    done
     # probe: the one known HTTP edge must show up, or cargo tree itself
     # failed and every check below would pass vacuously
     if ! dependents ureq 1 | grep -qx alt-wire-http; then
@@ -150,6 +160,12 @@ run_isolation() {
         --exclude-dir=alt-llm-bridge --exclude-dir=target >&2; then
         echo "llm isolation: LLM reference in core source (above)" >&2
         fail=1
+    else
+        scan_status=$?
+        if [ "$scan_status" -ne 1 ]; then
+            echo "llm isolation: source scan failed (exit $scan_status)" >&2
+            fail=1
+        fi
     fi
     [ "$fail" = 0 ]
 }

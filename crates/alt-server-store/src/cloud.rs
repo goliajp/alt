@@ -1,5 +1,6 @@
 //! Persisted platform authority. HTTP and encryption belong to the caller; this
 //! module validates leases again against the database clock inside each use.
+use crate::database::Transaction;
 use crate::store::{instance, integer, now, token_digest, unsigned};
 use crate::{ByteStore, Credential, Error, InstanceSpec, Result, Store};
 use alt_remote_protocol::{ActorKind, Attribution, DeploymentMode, Limits};
@@ -7,7 +8,7 @@ use ed25519_dalek::SigningKey;
 use golia_platform_contract::{
     AccountAuthorization, AltServiceAuthorization, Audience, Capability, Product,
 };
-use postgres::{Client, Transaction};
+use postgres::Client;
 
 /// Authenticated ciphertext, never the upstream bearer grant. No Debug output.
 pub struct CloudRefresh {

@@ -316,21 +316,33 @@ fn publish(store: &mut Store, token: &str) -> Payload {
     store
         .begin(&credential, &p.publication, &p.manifest, 60_000)
         .unwrap();
-    for (entry, bytes) in p.manifest.entries.iter().zip(&p.contents) {
-        let proof = store
-            .bytes()
-            .put(
-                &p.publication.key.scope,
-                &entry.blake3,
-                entry.bytes,
-                limits().object_bytes,
-                &mut std::io::Cursor::new(bytes),
-            )
-            .unwrap();
-        store
-            .register_content(&credential, &p.publication.key, entry, &proof)
-            .unwrap();
-    }
+    let mut sources: Vec<_> = p.contents.iter().map(std::io::Cursor::new).collect();
+    let mut inputs: Vec<_> = p
+        .manifest
+        .entries
+        .iter()
+        .zip(sources.iter_mut())
+        .map(|(entry, source)| alt_server_store::ByteInput {
+            digest: &entry.blake3,
+            bytes: entry.bytes,
+            source,
+        })
+        .collect();
+    let proofs = store
+        .persist_contents(&credential, &p.publication.key, &mut inputs)
+        .unwrap();
+    assert!(proofs.iter().all(|proof| proof.segment_id().is_some()));
+    let mapped: std::collections::BTreeMap<_, _> =
+        proofs.iter().map(|proof| (proof.blake3(), proof)).collect();
+    let entries: Vec<_> = p
+        .manifest
+        .entries
+        .iter()
+        .map(|entry| (entry, mapped[entry.blake3.as_str()]))
+        .collect();
+    store
+        .register_contents(&credential, &p.publication.key, &entries)
+        .unwrap();
     let work = store
         .acquire_publication(&credential, &p.publication.key, 60_000, 1000)
         .unwrap();
@@ -511,7 +523,7 @@ fn migration_persists_next_config_and_reconciles_same_generation_after_lost_resp
     let (_store, _admin, _password) = prepare(&db);
     // Separate real-old-binary upgrade acceptance also runs before release.
     // This focused test freezes the historical schema-3 checksum/layout.
-    Client::connect(&db.dsn, NoTls).unwrap().batch_execute("DROP TABLE alt_link_task_claims,alt_link_current,alt_link_inbox,alt_link_outbox,alt_link_channels; DROP TABLE alt_link_history; ALTER TABLE alt_repositories DROP COLUMN link_bytes; DROP TABLE alt_archived_records,alt_archived_publications; DROP TABLE alt_cloud_portable_reservations,alt_portable_import_content,alt_portable_imports; ALTER TABLE alt_repositories DROP COLUMN portable_import; DROP TABLE alt_portable_exports; ALTER TABLE alt_repositories DROP COLUMN portable_freeze; DROP TABLE alt_publication_provenance; DROP TABLE alt_device_authorizations,alt_client_credentials,alt_cloud_logins,alt_delegations,alt_cloud_reservations,alt_cloud_ingress,alt_cloud_credentials,alt_cloud_accounts,alt_cloud_binding; DROP TABLE alt_browser_binding,alt_web_sessions,alt_web_accounts,alt_login_budgets,alt_instance_audit; DELETE FROM alt_schema WHERE version>=4").unwrap();
+    Client::connect(&db.dsn, NoTls).unwrap().batch_execute("DROP TABLE alt_blob_locations,alt_segments; DROP TABLE alt_link_task_claims,alt_link_current,alt_link_inbox,alt_link_outbox,alt_link_channels; DROP TABLE alt_link_history; ALTER TABLE alt_repositories DROP COLUMN link_bytes; DROP TABLE alt_archived_records,alt_archived_publications; DROP TABLE alt_cloud_portable_reservations,alt_portable_import_content,alt_portable_imports; ALTER TABLE alt_repositories DROP COLUMN portable_import; DROP TABLE alt_portable_exports; ALTER TABLE alt_repositories DROP COLUMN portable_freeze; DROP TABLE alt_publication_provenance; DROP TABLE alt_device_authorizations,alt_client_credentials,alt_cloud_logins,alt_delegations,alt_cloud_reservations,alt_cloud_ingress,alt_cloud_credentials,alt_cloud_accounts,alt_cloud_binding; DROP TABLE alt_browser_binding,alt_web_sessions,alt_web_accounts,alt_login_budgets,alt_instance_audit; ALTER TABLE alt_request_content DROP COLUMN selected_entries, DROP COLUMN chunk_bytes; DROP INDEX alt_pins_permanent_content; DELETE FROM alt_schema WHERE version>=4").unwrap();
     assert!(!db.run(&["health"]).status.success());
     let next = db.path("next.json");
     let migrated = db.ok(&["migrate", "--from-schema", "3", "--output-config", &next]);

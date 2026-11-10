@@ -16,14 +16,17 @@ import sys
 import tempfile
 
 
-FORMAT = "alt-internal-package-v1"
+FORMAT = "alt-internal-package-v2"
 OWNER = {"format": "alt-internal-install-v1"}
-FILES = {
+LEGACY_FILES = {
     "bin/alt", "bin/altd", "bin/altd-server", "install.py", "README.md",
     "LICENSE-MIT", "LICENSE-APACHE", "docs/internal-install.md",
     "docs/recovery.md", "docs/task-walkthrough.md",
     "examples/task-workflow.py",
 }
+FILES = LEGACY_FILES | {"docs/task-remote.md", "docs/change-links.md",
+                        "server-operator.md", "example-config.json"}
+PAYLOAD_FORMATS = {"alt-internal-package-v1": LEGACY_FILES, FORMAT: FILES}
 TARGETS = {("Darwin", "arm64"): "aarch64-apple-darwin",
            ("Linux", "x86_64"): "x86_64-unknown-linux-gnu"}
 
@@ -62,14 +65,15 @@ def verify_package(root, check_platform=True):
     if root.is_symlink() or not root.is_dir():
         fail("package root must be a real directory")
     manifest = read_json(root / "manifest.json")
-    if manifest.get("format") != FORMAT or set(manifest.get("files", {})) != FILES:
+    files = PAYLOAD_FORMATS.get(manifest.get("format"))
+    if files is None or set(manifest.get("files", {})) != files:
         fail("unsupported package format or payload inventory")
     if not re.fullmatch(r"0\.1\.0-internal\.[1-9][0-9]*", manifest.get("version", "")):
         fail("unsupported internal package version")
     target = TARGETS.get((platform.system(), platform.machine()))
     if check_platform and (target is None or manifest.get("target") != target):
         fail("package target does not match this operating system and architecture")
-    expected = FILES | {"manifest.json"}
+    expected = files | {"manifest.json"}
     directories = {"bin", "docs", "examples"}
     for path in root.rglob("*"):
         name = path.relative_to(root).as_posix()
@@ -78,7 +82,7 @@ def verify_package(root, check_platform=True):
             continue
         if name not in expected or not stat.S_ISREG(mode):
             fail(f"unexpected package entry: {name}")
-    for name in sorted(FILES):
+    for name in sorted(files):
         path = root / name
         regular(path)
         item = manifest["files"][name]
@@ -185,7 +189,7 @@ def install(package, prefix):
     with tempfile.TemporaryDirectory(prefix=".alt-install-", dir=prefix.parent) as tmp:
         stage = Path(tmp) / "release"
         stage.mkdir()
-        for name in sorted(FILES | {"manifest.json"}):
+        for name in sorted(set(manifest["files"]) | {"manifest.json"}):
             dst = stage / name
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(package / name, dst)

@@ -5,7 +5,14 @@ use std::{
     io::{Read, Write},
     os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
+    sync::Arc,
 };
+
+mod batch;
+pub use batch::{ByteInput, MAX_PUT_BYTES, MAX_PUT_INPUTS};
+mod segments;
+pub(crate) use segments::ReadSession;
+pub use segments::{DurableSegment, SegmentLocation, StoredReader};
 
 /// A dedicated, service-owned POSIX volume. The adapter never derives a path
 /// from a repository display name, ref, URL or arbitrary client filename.
@@ -13,15 +20,38 @@ use std::{
 pub struct ByteStore {
     root: PathBuf,
 }
-/// Proof that this adapter synced both bytes and directory entry. Publication
-/// additionally requires a matching, non-deleting DB row and a live pin.
+/// Capacity of the byte-store filesystem, which can be shared with other data.
+#[derive(Clone, Copy, Debug)]
+pub struct VolumeCapacity {
+    pub total_bytes: u64,
+    pub available_bytes: u64,
+}
+/// Verified bytes backed by a synchronized installation, or an existing stored
+/// database record. Publication rechecks that record, current location and pin.
 pub struct DurableBytes {
-    file: File,
+    file: DurableFile,
+    location: Option<SegmentLocation>,
+    segment_checksum: Option<[u8; 32]>,
     scope: Scope,
     blake3: String,
     bytes: u64,
 }
+enum DurableFile {
+    Installed(Arc<File>),
+    // This is a validated observation of an already stored DB member, not a
+    // claim that metadata itself proves durability or payload integrity.
+    Existing(segments::Stamp),
+}
 impl DurableBytes {
+    pub(crate) fn existing(&self) -> bool {
+        matches!(self.file, DurableFile::Existing(_))
+    }
+    fn installed_file(&self) -> Result<&Arc<File>> {
+        match &self.file {
+            DurableFile::Installed(file) => Ok(file),
+            DurableFile::Existing(_) => Err(Error::Integrity("expected installed byte proof")),
+        }
+    }
     pub fn scope(&self) -> &Scope {
         &self.scope
     }
@@ -31,6 +61,17 @@ impl DurableBytes {
     pub fn bytes(&self) -> u64 {
         self.bytes
     }
+    pub fn segment_id(&self) -> Option<&str> {
+        self.location
+            .as_ref()
+            .map(|location| location.segment_id.as_str())
+    }
+    pub(crate) fn location(&self) -> Option<&SegmentLocation> {
+        self.location.as_ref()
+    }
+    pub(crate) fn segment_checksum(&self) -> Option<&[u8; 32]> {
+        self.segment_checksum.as_ref()
+    }
 }
 impl ByteStore {
     /// The parent is provisioned by the operator. New directories are private;
@@ -39,6 +80,36 @@ impl ByteStore {
         directory(root)?;
         Ok(Self {
             root: root.to_path_buf(),
+        })
+    }
+    /// Read through a directory descriptor so replacing the final component by
+    /// a symlink cannot redirect this observation to an unrelated volume.
+    pub fn capacity(&self) -> Result<VolumeCapacity> {
+        use std::os::fd::AsRawFd;
+        let directory = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_DIRECTORY | libc::O_CLOEXEC)
+            .open(&self.root)?;
+        let mut value = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+        // SAFETY: fstatvfs initializes the pointed-to structure on success; the
+        // descriptor is owned and remains open through this call.
+        if unsafe { libc::fstatvfs(directory.as_raw_fd(), value.as_mut_ptr()) } != 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+        // SAFETY: the successful call above initialized every output field.
+        let value = unsafe { value.assume_init() };
+        let scale = |blocks| {
+            u64::try_from((value.f_frsize as u128) * blocks)
+                .map_err(|_| Error::Limit("volume capacity"))
+        };
+        let total_bytes = scale(value.f_blocks as u128)?;
+        let available_bytes = scale(value.f_bavail as u128)?;
+        if available_bytes > total_bytes {
+            return Err(Error::Integrity("volume capacity"));
+        }
+        Ok(VolumeCapacity {
+            total_bytes,
+            available_bytes,
         })
     }
     /// Probe only service-owned temporary data, after checking the mounted
@@ -99,6 +170,29 @@ impl ByteStore {
         limit: u64,
         source: &mut dyn Read,
     ) -> Result<DurableBytes> {
+        crate::telemetry::scope(scope);
+        let mut phase =
+            alt_server_telemetry::PhaseGuard::current(alt_server_telemetry::Phase::Persist);
+        let result = self.put_inner(scope, digest, bytes, limit, source);
+        if result.is_ok() {
+            phase.add_bytes(bytes);
+        }
+        phase.finish(
+            result
+                .as_ref()
+                .map(|_| alt_server_telemetry::Outcome::Ok)
+                .unwrap_or_else(crate::telemetry::outcome),
+        );
+        result
+    }
+    fn put_inner(
+        &self,
+        scope: &Scope,
+        digest: &str,
+        bytes: u64,
+        limit: u64,
+        source: &mut dyn Read,
+    ) -> Result<DurableBytes> {
         if bytes > limit {
             return Err(Error::Limit("payload bytes"));
         }
@@ -106,25 +200,7 @@ impl ByteStore {
         let parent = destination
             .parent()
             .ok_or(Error::Integrity("storage parent"))?;
-        let mut temp = tempfile::NamedTempFile::new_in(parent)?;
-        let mut hash = blake3::Hasher::new();
-        let mut remaining = bytes;
-        let mut buffer = [0u8; 65536];
-        while remaining > 0 {
-            let n = source.read(&mut buffer[..remaining.min(65536) as usize])?;
-            if n == 0 {
-                return Err(Error::Integrity("truncated payload"));
-            }
-            hash.update(&buffer[..n]);
-            temp.write_all(&buffer[..n])?;
-            remaining -= n as u64;
-        }
-        if source.read(&mut buffer[..1])? != 0 {
-            return Err(Error::Integrity("payload longer than declared"));
-        }
-        if hash.finalize().to_hex().as_str() != digest {
-            return Err(Error::Integrity("payload hash"));
-        }
+        let temp = stage(parent, digest, bytes, source)?;
         temp.as_file().sync_all()?;
         match temp.persist_noclobber(&destination) {
             Ok(file) => {
@@ -139,17 +215,30 @@ impl ByteStore {
         }
         File::open(parent)?.sync_all()?;
         Ok(DurableBytes {
-            file: self.read(scope, digest, bytes)?,
+            file: DurableFile::Installed(Arc::new(self.read(scope, digest, bytes)?)),
+            location: None,
+            segment_checksum: None,
             scope: scope.clone(),
             blake3: digest.into(),
             bytes,
         })
     }
     pub(crate) fn check_proof(&self, proof: &DurableBytes) -> Result<()> {
+        if proof.existing() {
+            return self.existing_reader(proof).map(|_| ());
+        }
+        if proof.location.is_some() {
+            return self.check_segment_member_identity(proof);
+        }
         let current = self
-            .read(&proof.scope, &proof.blake3, proof.bytes)?
+            .read_payload(
+                &proof.scope,
+                &proof.blake3,
+                proof.bytes,
+                proof.location.as_ref(),
+            )?
             .metadata()?;
-        let original = proof.file.metadata()?;
+        let original = proof.installed_file()?.metadata()?;
         if current.dev() != original.dev() || current.ino() != original.ino() {
             return Err(Error::Precondition("durable object was replaced"));
         }
@@ -190,8 +279,7 @@ impl ByteStore {
     /// The caller validates the manifest's contiguous chunk ranges first.
     /// Both identities matter: chunks describe this request, while the payload
     /// digest identifies the immutable stored object (including empty objects).
-    pub(crate) fn verify_content_chunks(&self, scope: &Scope, entry: &ContentEntry) -> Result<()> {
-        let mut file = self.read(scope, &entry.blake3, entry.bytes)?;
+    pub(crate) fn verify_chunk_reader(mut file: impl Read, entry: &ContentEntry) -> Result<()> {
         let mut payload = blake3::Hasher::new();
         let mut buffer = [0u8; 65536];
         for chunk in &entry.chunks {
@@ -234,6 +322,33 @@ impl ByteStore {
         .sync_all()?;
         Ok(())
     }
+}
+fn stage(
+    parent: &Path,
+    digest: &str,
+    bytes: u64,
+    source: &mut dyn Read,
+) -> Result<tempfile::NamedTempFile> {
+    let mut temp = tempfile::NamedTempFile::new_in(parent)?;
+    let mut hash = blake3::Hasher::new();
+    let mut remaining = bytes;
+    let mut buffer = [0u8; 65536];
+    while remaining > 0 {
+        let n = source.read(&mut buffer[..remaining.min(65536) as usize])?;
+        if n == 0 {
+            return Err(Error::Integrity("truncated payload"));
+        }
+        hash.update(&buffer[..n]);
+        temp.write_all(&buffer[..n])?;
+        remaining -= n as u64;
+    }
+    if source.read(&mut buffer[..1])? != 0 {
+        return Err(Error::Integrity("payload longer than declared"));
+    }
+    if hash.finalize().to_hex().as_str() != digest {
+        return Err(Error::Integrity("payload hash"));
+    }
+    Ok(temp)
 }
 fn directory(path: &Path) -> Result<()> {
     match fs::DirBuilder::new().mode(0o700).create(path) {

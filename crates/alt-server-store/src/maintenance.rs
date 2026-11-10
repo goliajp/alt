@@ -1,13 +1,14 @@
 //! Physical-operator maintenance primitives. A snapshot owns the instance row
 //! lock until all metadata and immutable bytes have been exported. Publication,
 //! credential changes and GC take the shared side of this same barrier.
+use crate::database::Transaction;
 use crate::store::{instance, integer, unsigned};
 use crate::{ByteStore, Error, InstanceSpec, Result, Store};
 use alt_remote_protocol::Scope;
 use ed25519_dalek::SigningKey;
-use postgres::{Client, Transaction};
+use postgres::Client;
 use serde::{Deserialize, Serialize};
-use std::fs::File;
+use std::collections::BTreeMap;
 
 /// Counters are decimal strings to preserve the full database integer range in
 /// browser clients. This is a read-only database observation, not a byte scrub
@@ -25,6 +26,9 @@ pub struct InstanceStatus {
     pub recovery_gaps: String,
     pub pending_events: String,
     pub last_restore: Option<InstanceAuditEntry>,
+    pub last_backup: Option<InstanceAuditEntry>,
+    pub pending_change_links: String,
+    pub recovery_change_links: String,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct InstanceAuditEntry {
@@ -81,8 +85,11 @@ impl Store {
             (SELECT COALESCE(sum(reserved_bytes),0)::text FROM alt_repositories), \
             (SELECT count(*) FROM alt_requests q JOIN alt_repositories r ON q.repository=r.id WHERE q.state IN ('receiving','ready') AND q.epoch=r.recovery_epoch), \
             (SELECT count(*) FROM alt_requests q JOIN alt_repositories r ON q.repository=r.id WHERE q.state IN ('receiving','ready') AND q.epoch<>r.recovery_epoch), \
-            (SELECT count(*) FROM alt_outbox WHERE NOT delivered)", &[])?;
+            (SELECT count(*) FROM alt_outbox WHERE NOT delivered), \
+            (SELECT count(*) FROM alt_link_outbox o JOIN alt_repositories r ON o.repository=r.id WHERE o.delivered_at IS NULL AND o.epoch=r.recovery_epoch), \
+            (SELECT count(*) FROM alt_link_outbox o JOIN alt_repositories r ON o.repository=r.id WHERE o.delivered_at IS NULL AND o.epoch<>r.recovery_epoch)", &[])?;
         let last_restore = tx.query_opt("SELECT sequence,actor_id,action,subject_id,occurred_at FROM alt_instance_audit WHERE action='instance.restore' ORDER BY sequence DESC LIMIT 1", &[])?.map(audit_entry).transpose()?;
+        let last_backup = tx.query_opt("SELECT sequence,actor_id,action,subject_id,occurred_at FROM alt_instance_audit WHERE action='backup.created' ORDER BY sequence DESC LIMIT 1", &[])?.map(audit_entry).transpose()?;
         let result = InstanceStatus {
             installation_id: self.spec.installation_id.clone(),
             runtime_generation: self.spec.runtime_generation.to_string(),
@@ -95,6 +102,9 @@ impl Store {
             recovery_gaps: unsigned(row.get(5))?.to_string(),
             pending_events: unsigned(row.get(6))?.to_string(),
             last_restore,
+            last_backup,
+            pending_change_links: unsigned(row.get(7))?.to_string(),
+            recovery_change_links: unsigned(row.get(8))?.to_string(),
         };
         tx.commit()?;
         Ok(result)
@@ -157,6 +167,7 @@ pub struct MaintenanceSnapshot<'a> {
     bytes: ByteStore,
     catalog: SnapshotCatalog,
     exported_snapshot: String,
+    locations: BTreeMap<(String, String), crate::SegmentLocation>,
 }
 impl<'a> MaintenanceSnapshot<'a> {
     /// Supports precisely the checksummed historical layouts, so the current
@@ -172,11 +183,11 @@ impl<'a> MaintenanceSnapshot<'a> {
         if !(1..=crate::SCHEMA_VERSION).contains(&schema) {
             return Err(Error::Precondition("unsupported snapshot schema"));
         }
-        let mut tx = client.transaction()?;
+        let mut tx = Transaction::uncached(client.transaction()?);
         // This lock is also used by migrations. Take it before inspecting the
         // schema to prevent a concurrent migration changing our table set.
         tx.query_one("SELECT pg_advisory_xact_lock(715071909111)", &[])?;
-        crate::schema::check(&mut tx, schema as usize)?;
+        crate::schema::check(tx.raw_mut(), schema as usize)?;
         tx.query_one(
             "SELECT singleton FROM alt_instance WHERE singleton FOR UPDATE",
             &[],
@@ -216,10 +227,26 @@ impl<'a> MaintenanceSnapshot<'a> {
             crate::bytes::check_digest(&blob.blake3)?;
             blobs.push(blob);
         }
+        let mut locations = BTreeMap::new();
+        if schema >= 16 {
+            for repository in &repositories {
+                let digests: Vec<_> = blobs
+                    .iter()
+                    .filter(|b| b.repository == repository.repository)
+                    .map(|b| b.blake3.as_str())
+                    .collect();
+                for (digest, location) in
+                    crate::segments::locations(&mut tx, &repository.repository, &digests)?
+                {
+                    locations.insert((repository.repository.clone(), digest), location);
+                }
+            }
+        }
         Ok(Self {
             _transaction: tx,
             bytes,
             exported_snapshot,
+            locations,
             catalog: SnapshotCatalog {
                 schema,
                 instance: spec.clone(),
@@ -228,13 +255,52 @@ impl<'a> MaintenanceSnapshot<'a> {
             },
         })
     }
+    /// The physical restore operator has written the signed logical originals
+    /// into a fresh isolated volume. Convert only derived locations, under the
+    /// instance barrier, before the normal snapshot/epoch activation checks.
+    pub fn normalize_restored_locations(
+        client: &mut Client,
+        bytes: &ByteStore,
+        catalog: &SnapshotCatalog,
+        signing_key: &SigningKey,
+    ) -> Result<()> {
+        if catalog.schema < 16 {
+            return Ok(());
+        }
+        let mut tx = Transaction::uncached(client.transaction()?);
+        tx.query_one("SELECT pg_advisory_xact_lock(715071909111)", &[])?;
+        crate::schema::check(tx.raw_mut(), catalog.schema as usize)?;
+        tx.query_one(
+            "SELECT singleton FROM alt_instance WHERE singleton FOR UPDATE",
+            &[],
+        )?;
+        instance(&mut tx, &catalog.instance, signing_key)?;
+        let actual: Vec<SnapshotBlob> = tx.query("SELECT repository,blake3,bytes FROM alt_blobs WHERE state='stored' ORDER BY repository,blake3", &[])?.into_iter().map(|row| Ok(SnapshotBlob { repository: row.get(0), blake3: row.get(1), bytes: unsigned(row.get(2))? })).collect::<Result<_>>()?;
+        if actual != catalog.blobs {
+            return Err(Error::Integrity("restored logical inventory differs"));
+        }
+        for blob in &actual {
+            bytes.verify(
+                &Scope {
+                    installation_id: catalog.instance.installation_id.clone(),
+                    repository_instance_id: blob.repository.clone(),
+                    recovery_epoch: 1,
+                },
+                &blob.blake3,
+                blob.bytes,
+            )?;
+        }
+        tx.execute("DELETE FROM alt_blob_locations", &[])?;
+        tx.execute("DELETE FROM alt_segments", &[])?;
+        tx.commit().map_err(|_| Error::OutcomeUnknown)
+    }
     pub fn catalog(&self) -> &SnapshotCatalog {
         &self.catalog
     }
     pub fn exported_snapshot(&self) -> &str {
         &self.exported_snapshot
     }
-    pub fn read_verified(&self, blob: &SnapshotBlob) -> Result<File> {
+    pub fn read_verified(&self, blob: &SnapshotBlob) -> Result<crate::StoredReader> {
         if self
             .catalog
             .blobs
@@ -246,7 +312,7 @@ impl<'a> MaintenanceSnapshot<'a> {
         {
             return Err(Error::Precondition("blob is not part of this snapshot"));
         }
-        self.bytes.verify(
+        self.bytes.verify_payload(
             &Scope {
                 installation_id: self.catalog.instance.installation_id.clone(),
                 repository_instance_id: blob.repository.clone(),
@@ -254,6 +320,8 @@ impl<'a> MaintenanceSnapshot<'a> {
             },
             &blob.blake3,
             blob.bytes,
+            self.locations
+                .get(&(blob.repository.clone(), blob.blake3.clone())),
         )
     }
 }

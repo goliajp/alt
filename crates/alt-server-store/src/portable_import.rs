@@ -1,12 +1,13 @@
 //! Receiving a portable snapshot never creates a current publication, grant or
 //! public object. Immutable intent, quota and temporary roots survive restart.
+use crate::database::Transaction;
 use crate::store::{authorize, instance, integer, now, require_admin, snapshot, unsigned};
 use crate::{Credential, DurableBytes, Error, InstanceSpec, Result, Store};
 pub use alt_portable::http::ImportState as PortableImportState;
 use alt_portable::{Blob, Envelope, ImportIntent, ImportReceipt, PackageLimits};
 use alt_remote_protocol::{ActorKind, RequestKey, Scope};
 use alt_repository_service::{Authorization, RepositorySnapshot};
-use postgres::{Row, Transaction};
+use postgres::Row;
 fn pin_id(digest: &str) -> String {
     format!("portable-import:{digest}")
 }
@@ -267,6 +268,9 @@ impl Store {
         key: &RequestKey,
         proof: &DurableBytes,
     ) -> Result<()> {
+        if proof.location().is_some() {
+            return Err(Error::Precondition("portable ingress requires loose proof"));
+        }
         if proof.scope() != &key.scope {
             return Err(Error::Integrity("portable upload scope"));
         }

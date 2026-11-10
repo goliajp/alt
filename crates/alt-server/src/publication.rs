@@ -11,6 +11,16 @@ pub struct ValidatedWork {
 }
 impl ValidatedWork {
     pub fn verify(work: PublicationWork, limits: Limits, task_limits: TaskLimits) -> Result<Self> {
+        alt_server_store::telemetry::request(&work.publication().key);
+        alt_server_store::telemetry::observe(alt_server_telemetry::Phase::Validate, || {
+            Self::verify_inner(work, limits, task_limits)
+        })
+    }
+    fn verify_inner(
+        work: PublicationWork,
+        limits: Limits,
+        task_limits: TaskLimits,
+    ) -> Result<Self> {
         let verified = VerifiedPublication::verify(
             work.publication(),
             work.manifest(),

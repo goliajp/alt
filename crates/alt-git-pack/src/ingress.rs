@@ -1,5 +1,5 @@
 //! Bounded network pack decoding. No refs or filesystem catalog are mutated.
-use crate::{PackError, delta};
+use crate::{PackError, PlainRepresentation, RepresentationLimits, delta};
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
 use flate2::{Decompress, FlushDecompress, Status};
 use std::{
@@ -45,11 +45,14 @@ pub struct IngressObject {
 pub struct IngressPack {
     pub objects: Vec<IngressObject>,
     pub wire_bytes: u64,
+    /// Optional derived plain encodings, separately bounded from decoded data.
+    pub representations: Vec<PlainRepresentation>,
 }
 struct Raw {
     offset: usize,
     kind: Kind,
     payload: Vec<u8>,
+    encoded: Option<Vec<u8>>,
 }
 enum Kind {
     Plain(ObjectKind),
@@ -194,6 +197,18 @@ pub fn ingest_pack(
     limits: IngressLimits,
     bases: &mut impl BaseSource,
 ) -> Result<IngressPack, PackError> {
+    ingest_pack_with_representations(source, algo, limits, bases, RepresentationLimits::default())
+}
+
+/// Decode with the same integrity/resource rules as `ingest_pack`, optionally
+/// retaining bounded plain zlib streams for later verified encoding reuse.
+pub fn ingest_pack_with_representations(
+    source: &mut dyn Read,
+    algo: HashAlgo,
+    limits: IngressLimits,
+    bases: &mut impl BaseSource,
+    retention: RepresentationLimits,
+) -> Result<IngressPack, PackError> {
     if limits.wire_bytes > usize::MAX as u64
         || limits.object_bytes > usize::MAX as u64
         || limits.objects == 0
@@ -227,6 +242,8 @@ pub fn ingest_pack(
     let mut inflated = limits.inflated_bytes;
     let mut canonical = limits.resolved_bytes;
     let mut entries = Vec::new();
+    let mut retained_bytes = 0usize;
+    let mut retained_objects = 0usize;
     let mut pos = 12;
     for _ in 0..count {
         step(&mut steps)?;
@@ -237,6 +254,18 @@ pub fn ingest_pack(
         }
         spend(&mut inflated, size)?;
         let (payload, used) = inflate(&bytes[pos..end], size)?;
+        let encoded = if matches!(kind, Kind::Plain(_))
+            && size <= retention.object_bytes as u64
+            && used <= retention.object_bytes
+            && retained_objects < retention.objects
+            && used <= retention.bytes.saturating_sub(retained_bytes)
+        {
+            retained_bytes += used;
+            retained_objects += 1;
+            Some(bytes[pos..pos + used].to_vec())
+        } else {
+            None
+        };
         pos = pos
             .checked_add(used)
             .ok_or_else(|| fail("pack offset overflow"))?;
@@ -244,6 +273,7 @@ pub fn ingest_pack(
             offset,
             kind,
             payload,
+            encoded,
         });
     }
     if pos != end {
@@ -362,12 +392,28 @@ pub fn ingest_pack(
             return Err(fail("pack delta base missing or cycle"));
         }
     }
+    let objects: Vec<_> = resolved
+        .into_iter()
+        .map(|v| v.expect("all entries resolved").object)
+        .collect();
+    let representations = entries
+        .into_iter()
+        .zip(&objects)
+        .filter_map(|(entry, object)| {
+            entry.encoded.map(|encoded| {
+                PlainRepresentation::from_ingress(
+                    object.oid,
+                    object.kind,
+                    object.data.len(),
+                    encoded,
+                )
+            })
+        })
+        .collect();
     Ok(IngressPack {
-        objects: resolved
-            .into_iter()
-            .map(|v| v.expect("all entries resolved").object)
-            .collect(),
+        objects,
         wire_bytes: bytes.len() as u64,
+        representations,
     })
 }
 fn insert(map: &mut BTreeMap<ObjectId, Resolved>, value: Resolved) -> Result<(), PackError> {

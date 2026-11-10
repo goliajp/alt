@@ -159,6 +159,33 @@ fn cloud_provision_interrupt_resume_and_storage_binding() {
     assert!(!initialize().output().unwrap().status.success());
     std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
     let config = state.join("config.json");
+    // Pairing settings survive the exact initializer used by cloud-serve;
+    // frozen provision/config/key bytes retain their original identities.
+    let frozen: alt_server::operator::Config = serde_json::from_slice(&saved[3]).unwrap();
+    let mut channel = crate::cloud_settings::channel();
+    channel["scope"]["installation_id"] = serde_json::json!(frozen.instance.installation_id);
+    alt_server::operator::create_private(
+        &state.join("local.key"),
+        format!("alt1_{}", "ab".repeat(32)).as_bytes(),
+    )
+    .unwrap();
+    alt_server::operator::create_private(&state.join("peer.key"), b"peer-token").unwrap();
+    let settings = serde_json::json!({"version":1,"instance":frozen.instance,"channels":[channel]});
+    alt_server::operator::create_private(
+        &state.join("change-links.json"),
+        &serde_json::to_vec(&settings).unwrap(),
+    )
+    .unwrap();
+    for _ in 0..2 {
+        assert!(initialize().output().unwrap().status.success());
+        assert_eq!(std::fs::read(&config).unwrap(), saved[3]);
+        let loaded = alt_server::operator::Config::read(&config).unwrap();
+        assert_eq!(loaded.change_links.len(), 1);
+        assert_eq!(
+            loaded.change_links[0].scope.installation_id,
+            spec.audience.installation_id.as_str()
+        );
+    }
     let mut child = ServerProcess(
         Command::new(env!("CARGO_BIN_EXE_alt-server"))
             .args(["--config", config.to_str().unwrap(), "serve"])

@@ -32,7 +32,7 @@ pub enum Output {
     File {
         bytes: u64,
         digest: String,
-        file: std::fs::File,
+        file: alt_server_store::StoredReader,
     },
 }
 pub(crate) fn json(value: &impl Serialize) -> Result<Output> {
@@ -71,6 +71,7 @@ pub fn execute_native(
         Route::GitAdvertise(..) | Route::GitUpload(..) | Route::GitReceive(..) => {
             Err(Error::Precondition("Git route requires Git dispatch"))
         }
+        Route::Metrics => Err(Error::Precondition("metrics require process dispatch")),
         Route::Health => Err(Error::Precondition(
             "health handled before authenticated dispatch",
         )),

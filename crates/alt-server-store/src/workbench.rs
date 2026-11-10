@@ -150,7 +150,7 @@ impl Store {
         credential: &Credential,
         repository: &str,
         oid: ObjectId,
-    ) -> Result<(ObjectKind, u64, std::fs::File)> {
+    ) -> Result<(ObjectKind, u64, crate::StoredReader)> {
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         let current = snapshot(&mut tx, &self.spec, repository)?;
@@ -162,7 +162,11 @@ impl Store {
         if bytes > self.limits.object_bytes {
             return Err(Error::Limit("published object read bytes"));
         }
-        let file = self.bytes.read(&current.scope, &digest, bytes)?;
+        let location =
+            crate::segments::location(&mut tx, &current.scope.repository_instance_id, &digest)?;
+        let file = self
+            .bytes
+            .read_payload(&current.scope, &digest, bytes, location.as_ref())?;
         let kind = kind
             .parse()
             .map_err(|_| Error::Integrity("published object kind"))?;
@@ -217,7 +221,11 @@ impl Store {
         if payload.bytes > max_bytes as u64 {
             return Err(Error::Limit("record projection bytes"));
         }
-        let file = self.bytes.read(scope, &payload.blake3, payload.bytes)?;
+        let location =
+            crate::segments::location(&mut tx, &scope.repository_instance_id, &payload.blake3)?;
+        let file =
+            self.bytes
+                .read_payload(scope, &payload.blake3, payload.bytes, location.as_ref())?;
         let publication: Publication = serde_json::from_value(row.get(2))?;
         let manifest = serde_json::from_value(row.get(3))?;
         let receipt: alt_remote_protocol::Receipt = serde_json::from_value(row.get(4))?;

@@ -1,9 +1,9 @@
+use crate::database::Transaction;
 use crate::requests::{pin, upload_pin};
 use crate::store::{authorize, instance, integer, now, require_admin, snapshot, unsigned};
 use crate::{Credential, Error, InstanceSpec, PublicationWork, Result, Store};
 use alt_repository_service::{RepositorySnapshot, VerifiedGraph};
 use alt_task_service::{CollectorPolicy, RecordKey, RecordKind, TaskRecord, VerifiedTaskGraph};
-use postgres::Transaction;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) fn check_selection(
@@ -309,6 +309,7 @@ impl Store {
         }
         check_selection(work, Some(tasks))?;
         let review = integration_review(work, tasks, integration_id)?;
+        work.check_read_integrity()?;
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         let current = snapshot(&mut tx, &self.spec, &work.key.scope.repository_instance_id)?;
@@ -431,6 +432,7 @@ impl Store {
     ) -> Result<CurrentReviewAssessment> {
         check_selection(work, Some(tasks))?;
         let review = integration_review(work, tasks, integration_id)?;
+        work.check_read_integrity()?;
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         let mut current = snapshot(&mut tx, &self.spec, &work.key.scope.repository_instance_id)?;

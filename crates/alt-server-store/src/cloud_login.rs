@@ -1,8 +1,8 @@
+use crate::database::Transaction;
 use crate::store::{instance, integer, now, unsigned};
 use crate::{Error, Result, Store};
 use alt_remote_protocol::DeploymentMode;
 use golia_platform_contract::AccountAuthorization;
-use postgres::Transaction;
 
 pub enum CloudLoginClaim {
     Exchange { credential_expires_at: u64 },

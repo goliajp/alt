@@ -1,10 +1,11 @@
 //! Durable device consent and credential issuance. Human CLI credentials use the
 //! same current account checks as browser sessions; agent delegation is separate.
+use crate::database::Transaction;
 use crate::store::{credential_row, instance, integer, now, token_digest, unsigned};
 use crate::{Credential, Error, Result, Store};
 use alt_browser_auth::PublicOrigin;
 use alt_remote_protocol::{ActorKind, Attribution, DeploymentMode, login::*};
-use postgres::{Row, Transaction};
+use postgres::Row;
 use serde::Serialize;
 
 #[derive(Serialize)]

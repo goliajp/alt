@@ -18,6 +18,7 @@ pub enum Route {
     ChangeLink(crate::change_links::route::ChangeRoute),
     Portable(crate::PortableRoute),
     Health,
+    Metrics,
     Capabilities,
     Principal,
     Delegations(Option<String>),
@@ -121,6 +122,7 @@ pub fn parse_route(
             ("GET", ["", "v1", "portable", "capabilities"]) => {
                 return Some(Route::Portable(crate::PortableRoute::Capabilities));
             }
+            ("GET", ["", "v1", "instance", "metrics"]) => return Some(Route::Metrics),
             ("GET", ["", "healthz"]) => return Some(Route::Health),
             ("GET", ["", "v1", "capabilities"]) => return Some(Route::Capabilities),
             ("GET", ["", "v1", "principal"]) => return Some(Route::Principal),

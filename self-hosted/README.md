@@ -11,7 +11,7 @@ python3 scripts/package-server.py --architecture amd64 --output /tmp/alt-server-
 python3 scripts/package-server.py --architecture arm64 --output /tmp/alt-server-arm64
 ```
 
-Each invocation builds one architecture from the same sources, checks that the inputs did not change, and exports the app, PostgreSQL and HTTPS edge in `images.tar`. `dependencies.json` fixes upstream versions and multi-platform manifest digests. The bundle records the source digest, actual image IDs, architecture and file hashes. Cross-built images explicitly record that native execution has not yet been checked; this must be covered by target-host acceptance.
+Each invocation builds one architecture from the same sources, checks that the inputs did not change, and exports the app, PostgreSQL and HTTPS edge in `images.tar`. `dependencies.json` fixes upstream versions and multi-platform manifest digests. The bundle records the source digest, origin image handles, portable OCI configuration digests, architecture and file hashes. On import, the installer verifies the exact serialized image configuration and ordered layer identities, then pins the corresponding immutable local Docker handles. This supports both classic and containerd image stores, whose displayed image IDs differ for the same content. Cross-built images explicitly record that native execution has not yet been checked; this must be covered by target-host acceptance.
 
 The Dockerfile builds the Rust binary and workbench from this checkout, including the licensed, versioned shared UI archive. It never clones a moving branch or fetches a private package. The runtime includes matching PostgreSQL clients and age 1.3.2 for encrypted backups. Building requires network access; loading and operating the completed bundle do not.
 
@@ -31,7 +31,7 @@ python3 /path/to/bundle/manage.py prepare \
 python3 /path/to/bundle/manage.py initialize --directory /srv/alt
 ```
 
-The destination must not exist. Preparation generates a unique installation/workspace identity, a receipt key, database password, short-lived operator credential and initial browser password. It prints paths, never their contents. The application and edge run with the preparing user's nonzero UID/GID; root preparation uses 9000:9000 unless explicitly overridden. Keep the installation directory private.
+Load the bundle into the destination Docker engine before preparation. Both commands verify the loaded content; preparation refuses missing or mismatched images and records the verified local handles in `bundle-identity.json`. The destination must not exist. Preparation generates a unique installation/workspace identity, a receipt key, database password, short-lived operator credential and initial browser password. It prints paths, never their contents. The application and edge run with the preparing user's nonzero UID/GID; root preparation uses 9000:9000 unless explicitly overridden. Keep the installation directory private.
 
 Initialization explicitly creates the database schema, claims the first local administrator and enables the configured browser origin. Sign in as `owner` using the password in `/srv/alt/operator/initial-password`. The operator token expires after one hour. These bootstrap files are mounted only into explicit operator jobs, not the running application. Password changes and administrator recovery use the same server operator; see [server operator guide](../crates/alt-server/README.md).
 

@@ -1,10 +1,10 @@
 //! Persisted operational installation, independent from historical public keys.
+use crate::database::Transaction;
 use crate::store::{authorize, instance, integer, now, require_admin, snapshot};
 use crate::{Credential, Error, InstanceSpec, Result, Store};
 use alt_remote_protocol::{ActorKind, RequestKey, Scope};
 use alt_repository_service::{Authorization, RepositorySnapshot};
 use golia_change_link::{Counter, Endpoint, Product};
-use postgres::Transaction;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

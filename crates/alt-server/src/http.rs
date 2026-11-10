@@ -1,4 +1,16 @@
 mod device;
+mod encoding;
+mod file_body;
+mod observation;
+use alt_server_telemetry::{Outcome, Phase};
+pub(crate) use observation::{scope as trace_scope, spawn_blocking};
+pub(crate) fn spawn_observed<T: Send + 'static>(
+    phase: Phase,
+    work: impl FnOnce() -> alt_server_store::Result<T> + Send + 'static,
+) -> tokio::task::JoinHandle<alt_server_store::Result<T>> {
+    spawn_blocking(move || alt_server_store::telemetry::observe(phase, work))
+}
+mod pool;
 mod provision;
 mod web;
 use crate::{NativeOptions, Output, RequestAction, Route, execute_native, parse_route};
@@ -6,15 +18,8 @@ use alt_remote_protocol::{ErrorCode, Failure, Limits, RequestKey, Retry};
 use alt_server_store::{ByteStore, Error, InstanceSpec, Store};
 use base64::Engine;
 use bytes::Bytes;
-use futures_util::TryStreamExt;
-use http_body_util::{BodyExt, Full, StreamBody, combinators::UnsyncBoxBody};
-use hyper::{
-    Request, Response,
-    body::{Frame, Incoming},
-    header,
-    server::conn::http1,
-    service::service_fn,
-};
+use http_body_util::{BodyExt, Full, combinators::UnsyncBoxBody};
+use hyper::{Request, Response, body::Incoming, header, server::conn::http1, service::service_fn};
 use hyper_util::rt::{TokioIo, TokioTimer};
 use std::{
     convert::Infallible,
@@ -61,12 +66,16 @@ impl StoreFactory {
             self.signing_key.clone(),
             self.limits,
         )?;
+        self.check_mode(&mut store)?;
+        Ok(store)
+    }
+    fn check_mode(&self, store: &mut Store) -> alt_server_store::Result<()> {
         match (&self.cloud, self.instance.deployment_mode) {
-            (Some(cloud), alt_remote_protocol::DeploymentMode::Cloud) => cloud.check(&mut store)?,
+            (Some(cloud), alt_remote_protocol::DeploymentMode::Cloud) => cloud.check(store)?,
             (None, alt_remote_protocol::DeploymentMode::SelfHosted) => (),
             _ => return Err(Error::Unauthorized),
         }
-        Ok(store)
+        Ok(())
     }
     pub fn authenticate(
         &self,
@@ -92,11 +101,13 @@ pub struct HttpOptions {
     pub native: NativeOptions,
 }
 struct State {
-    factory: StoreFactory,
+    metrics: Arc<alt_server_telemetry::Metrics>,
+    factory: pool::Pool,
     options: HttpOptions,
     workers: Arc<Semaphore>,
     browser: Option<WebOptions>,
     passwords: Arc<Semaphore>,
+    git_representations: Arc<crate::git_representations::RepresentationCache>,
 }
 fn full(bytes: impl Into<Bytes>) -> ResponseBody {
     Full::new(bytes.into())
@@ -337,7 +348,7 @@ async fn handle(
         let factory = state.factory.clone();
         return match tokio::time::timeout(
             state.options.work_timeout,
-            tokio::task::spawn_blocking(move || {
+            spawn_observed(Phase::Authority, move || {
                 let _permit = permit;
                 factory.open().map(|_| ())
             }),
@@ -363,7 +374,21 @@ async fn handle(
             Retry::Never,
         );
     };
-    if request.headers().contains_key(header::CONTENT_ENCODING) {
+    let gzip = request.headers().contains_key(header::CONTENT_ENCODING);
+    if gzip
+        && (!matches!(route, Route::GitUpload(_))
+            || request
+                .headers()
+                .get_all(header::CONTENT_ENCODING)
+                .iter()
+                .count()
+                != 1
+            || request
+                .headers()
+                .get(header::CONTENT_ENCODING)
+                .and_then(|value| value.to_str().ok())
+                .is_none_or(|value| !value.trim().eq_ignore_ascii_case("gzip")))
+    {
         return failure(
             415,
             ErrorCode::InvalidRequest,
@@ -404,7 +429,7 @@ async fn handle(
     let request_token = token.clone();
     let prepared = tokio::time::timeout(
         state.options.work_timeout,
-        tokio::task::spawn_blocking(move || {
+        spawn_observed(Phase::Authority, move || {
             let mut store = factory.open()?;
             let credential = factory.authenticate(&mut store, &request_token)?;
             let size = match &selected_route {
@@ -523,15 +548,21 @@ async fn handle(
     };
     let options = state.options.native.clone();
     let factory = state.factory.clone();
+    let metrics = state.metrics.clone();
+    let git_representations = state.git_representations.clone();
     let result = tokio::time::timeout(
         state.options.work_timeout,
-        tokio::task::spawn_blocking(move || {
+        spawn_observed(Phase::Execute, move || {
             // This permit remains held if the HTTP waiter times out. Dropping a
             // response cannot start unlimited detached database/validation work.
             let _permit = permit;
+            if gzip {
+                source = encoding::decode(source, size)?;
+            }
             let mut store = factory.open()?;
             source.as_file_mut().seek(SeekFrom::Start(0))?;
             match route {
+                Route::Metrics => observation::metrics(&mut store, &credential, &metrics),
                 Route::ChangeLink(route) => {
                     let current = factory.authenticate(&mut store, &token)?;
                     crate::change_links::api::execute(
@@ -554,12 +585,17 @@ async fn handle(
                     )
                 }
                 Route::GitAdvertise(..) | Route::GitUpload(..) | Route::GitReceive(..) => {
-                    crate::execute_git(
+                    crate::git::execute_git_with_cache(
                         &mut store,
                         &credential,
                         route,
                         protocol_v2,
                         source.as_file_mut(),
+                        &mut |store| factory.authenticate(store, &token),
+                        Some(crate::git_representations::Context {
+                            cache: &git_representations,
+                            generation: factory.instance.runtime_generation,
+                        }),
                     )
                 }
                 _ => execute_native(
@@ -613,13 +649,10 @@ fn render_output(
             bytes,
             file,
         }) => {
-            let stream = tokio_util::io::ReaderStream::with_capacity(
-                tokio::fs::File::from_std(file.into_file()),
-                65536,
-            )
-            .map_ok(Frame::data)
-            .map_err(|e| -> BoxError { Box::new(e) });
-            let mut output = response(200, content_type, StreamBody::new(stream).boxed_unsync());
+            let body = file_body::FileBody::new(tokio::fs::File::from_std(file.into_file()), bytes)
+                .map_err(|e| -> BoxError { Box::new(e) })
+                .boxed_unsync();
+            let mut output = response(200, content_type, body);
             output
                 .headers_mut()
                 .insert(header::CONTENT_LENGTH, bytes.into());
@@ -640,15 +673,14 @@ fn render_output(
             digest,
             file,
         }) => {
-            let stream =
-                tokio_util::io::ReaderStream::with_capacity(tokio::fs::File::from_std(file), 65536)
-                    .map_ok(Frame::data)
-                    .map_err(|e| -> BoxError { Box::new(e) });
-            let mut output = response(
-                200,
-                "application/octet-stream",
-                StreamBody::new(stream).boxed_unsync(),
-            );
+            let file = match file.into_file() {
+                Ok(file) => file,
+                Err(error) => return store_failure(error.into(), request_key),
+            };
+            let body = file_body::FileBody::new(tokio::fs::File::from_std(file), bytes)
+                .map_err(|e| -> BoxError { Box::new(e) })
+                .boxed_unsync();
+            let mut output = response(200, "application/octet-stream", body);
             output
                 .headers_mut()
                 .insert(header::CONTENT_LENGTH, bytes.into());
@@ -672,13 +704,33 @@ impl From<std::io::Error> for BodyError {
         Self::Storage
     }
 }
-async fn spool(mut body: Incoming, max: u64) -> Result<tempfile::NamedTempFile, BodyError> {
+async fn spool(body: Incoming, max: u64) -> Result<tempfile::NamedTempFile, BodyError> {
+    let mut guard = observation::current().map(|trace| trace.phase(Phase::Upload));
+    let result = spool_inner(body, max, guard.as_mut()).await;
+    if let Some(guard) = guard {
+        guard.finish(match &result {
+            Ok(_) => Outcome::Ok,
+            Err(BodyError::Limit) => Outcome::Limit,
+            Err(BodyError::Storage) => Outcome::Unavailable,
+            Err(BodyError::Malformed) => Outcome::Invalid,
+        });
+    }
+    result
+}
+async fn spool_inner(
+    mut body: Incoming,
+    max: u64,
+    mut guard: Option<&mut alt_server_telemetry::PhaseGuard>,
+) -> Result<tempfile::NamedTempFile, BodyError> {
     let temp = tempfile::NamedTempFile::new()?;
     let mut file = tokio::fs::File::from_std(temp.as_file().try_clone()?);
     let mut remaining = max;
     while let Some(frame) = body.frame().await {
         let frame = frame.map_err(|_| BodyError::Malformed)?;
         let data = frame.into_data().map_err(|_| BodyError::Malformed)?;
+        if let Some(guard) = &mut guard {
+            guard.add_bytes(data.len() as u64);
+        }
         remaining = remaining
             .checked_sub(data.len() as u64)
             .ok_or(BodyError::Limit)?;
@@ -715,12 +767,10 @@ pub async fn serve_with_browser(
     }
     let check_factory = factory.clone();
     let origin = browser.as_ref().map(|b| b.origin.clone());
-    tokio::task::spawn_blocking(move || {
-        check_factory.open()?.check_browser_binding(origin.as_ref())
-    })
-    .await
-    .map_err(|_| std::io::Error::other("browser binding check unavailable"))?
-    .map_err(|_| std::io::Error::other("browser binding does not match configuration"))?;
+    spawn_blocking(move || check_factory.open()?.check_browser_binding(origin.as_ref()))
+        .await
+        .map_err(|_| std::io::Error::other("browser binding check unavailable"))?
+        .map_err(|_| std::io::Error::other("browser binding does not match configuration"))?;
     if options.connections == 0
         || options.workers == 0
         || options.header_bytes < 8192
@@ -736,24 +786,41 @@ pub async fn serve_with_browser(
         return Err(std::io::Error::other("invalid HTTP limits"));
     }
     let mut background = tokio::task::JoinSet::new();
-    if !factory.change_links.is_empty() {
-        background.spawn(crate::change_links::worker(factory.clone()));
-    }
     let connections = Arc::new(Semaphore::new(options.connections));
     let state = Arc::new(State {
-        factory,
+        metrics: alt_server_telemetry::Metrics::new(alt_server_telemetry::process_log_losses())
+            .map_err(|_| std::io::Error::other("metrics initialization unavailable"))?,
+        factory: pool::Pool::new(factory, options.workers),
         workers: Arc::new(Semaphore::new(options.workers)),
         options,
         browser,
         passwords: Arc::new(Semaphore::new(2)),
+        git_representations: Arc::new(crate::git_representations::RepresentationCache::default()),
     });
+    if !state.factory.change_links.is_empty() {
+        background.spawn(crate::change_links::worker(
+            (*state.factory).clone(),
+            state.metrics.clone(),
+        ));
+    }
     tokio::pin!(shutdown);
     loop {
-        let (socket, peer) = tokio::select! { _ = &mut shutdown => return Ok(()), accepted = listener.accept() => accepted? };
+        let (socket, peer) = tokio::select! {
+            _ = &mut shutdown => {
+                state.factory.shutdown().await?;
+                return Ok(());
+            },
+            accepted = listener.accept() => accepted?,
+        };
         let Ok(permit) = connections.clone().try_acquire_owned() else {
             drop(socket);
             continue;
         };
+        // File bodies can become ready after the response headers are sent.
+        // Do not hold their final small frame until the peer's delayed ACK.
+        if socket.set_nodelay(true).is_err() {
+            continue;
+        }
         let state = state.clone();
         tokio::spawn(async move {
             let _permit = permit;
@@ -766,7 +833,7 @@ pub async fn serve_with_browser(
             let lifetime = state.options.connection_timeout;
             let service = service_fn(move |request| {
                 let state = state.clone();
-                async move { Ok::<_, Infallible>(handle(request, state, peer.ip()).await) }
+                async move { Ok::<_, Infallible>(observation::handle(request, state, peer.ip()).await) }
             });
             let _ = tokio::time::timeout(
                 lifetime,

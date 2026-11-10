@@ -319,7 +319,7 @@ fn schema_twelve_upgrade_preserves_accepted_request_but_does_not_invent_a_task_c
     let digest = signed.digest().unwrap();
     let s = scope(&f);
     f.client()
-        .batch_execute("DROP TABLE alt_link_task_claims; DELETE FROM alt_schema WHERE version=13")
+        .batch_execute("DROP TABLE alt_link_task_claims; ALTER TABLE alt_request_content DROP COLUMN selected_entries, DROP COLUMN chunk_bytes; DROP TABLE alt_blob_locations,alt_segments; DROP INDEX alt_pins_permanent_content; DELETE FROM alt_schema WHERE version>=13")
         .unwrap();
     assert!(
         Store::open(
