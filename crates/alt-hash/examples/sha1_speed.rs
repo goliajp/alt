@@ -1,5 +1,6 @@
-//! throughput of the single-stream and the many-at-once SHA-1
-//! (single stream on an in-cache 16 KiB buffer, like `openssl speed -bytes 16384 sha1`)
+//! throughput of the single-stream and the many-at-once SHA-1, and with the argument
+//! `sha256` of SHA-256 (single stream on an in-cache 16 KiB buffer, like
+//! `openssl speed -bytes 16384 sha1`)
 
 use alt_hash::{sha1, sha1_many};
 use std::time::Instant;
@@ -10,6 +11,20 @@ fn main() {
     let mut rounds = 0u64;
     let mut sink = 0u8;
     let start = Instant::now();
+    if mode.as_deref() == Some("sha256") {
+        while start.elapsed().as_secs_f64() < 1.0 {
+            for _ in 0..256 {
+                sink ^= alt_hash::sha256(std::hint::black_box(&buffer))[0];
+            }
+            rounds += 256;
+        }
+        println!(
+            "sha-256 single stream ({}), 16 KiB in cache: {:.0} MiB/s ({sink:02x})",
+            alt_hash::sha256::implementation(),
+            rounds as f64 * 16384.0 / (1 << 20) as f64 / start.elapsed().as_secs_f64()
+        );
+        return;
+    }
     while mode.as_deref() != Some("many") && start.elapsed().as_secs_f64() < 1.0 {
         for _ in 0..256 {
             sink ^= sha1(std::hint::black_box(&buffer))[0];

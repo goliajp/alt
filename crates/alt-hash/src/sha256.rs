@@ -106,6 +106,9 @@ fn select() -> (&'static str, Compress) {
         if detected!("sha") && detected!("ssse3") && detected!("sse4.1") {
             return ("sha instructions", x86::sha::compress);
         }
+        if detected!("avx2") && detected!("bmi1") && detected!("bmi2") {
+            return ("avx2", x86::avx2::compress);
+        }
     }
     ("portable", portable)
 }
