@@ -1,0 +1,16 @@
+schema: alt-meta/1
+type: perf
+summary: one statement per Git read request, small segments stored with their row
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/database.rs
+touched: crates/alt-server-store/src/packs.rs
+touched: crates/alt-server-store/src/schema-v18.sql
+touched: crates/alt-server-store/src/store.rs
+touched: crates/alt-server-store/src/telemetry.rs
+touched: crates/alt-server-store/src/transport.rs
+touched: crates/alt-server/src/git.rs
+touched: crates/alt-server/src/git_packs.rs
+touched: crates/alt-server/src/http.rs
+touched: crates/alt-server/src/http/pool.rs
+touched: crates/alt-server/src/lib.rs
