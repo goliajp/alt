@@ -168,9 +168,10 @@ mod avx2 {
     /// One round with the working variables in the given roles; only `e` and `b` change.
     macro_rules! round {
         ($a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:expr, $k:expr, $word:expr) => {
+            // `$a` is the value that arrives last: everything else is summed first
             $e = _mm256_add_epi32(
-                _mm256_add_epi32($e, rotate::<5, 27>($a)),
-                _mm256_add_epi32(_mm256_add_epi32($f, $k), $word),
+                _mm256_add_epi32($e, _mm256_add_epi32(_mm256_add_epi32($f, $k), $word)),
+                rotate::<5, 27>($a),
             );
             $b = rotate::<30, 2>($b);
         };
