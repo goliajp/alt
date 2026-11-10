@@ -1,0 +1,18 @@
+[package]
+name = "alt-pack-segment"
+description = "Immutable verified Git pack segments: one-pass ingest, oid lookup, verbatim resend"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+alt-git-pack.workspace = true
+blake3.workspace = true
+flate2.workspace = true
+memmap2.workspace = true
+rayon.workspace = true
+sha1.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

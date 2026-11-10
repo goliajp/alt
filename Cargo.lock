@@ -333,6 +333,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "alt-pack-segment"
+version = "0.1.0-internal.1"
+dependencies = [
+ "alt-git-pack",
+ "blake3",
+ "flate2",
+ "memmap2",
+ "rayon",
+ "sha1",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "alt-portable"
 version = "0.1.0-internal.1"
 dependencies = [
