@@ -7,6 +7,7 @@
 
 mod bits;
 mod block;
+mod codes;
 mod encoder;
 mod quick;
 mod tables;

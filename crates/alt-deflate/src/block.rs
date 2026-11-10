@@ -7,7 +7,7 @@ use crate::tables::{
     LITERALS, MIN_MATCH, REP_3_6, REPZ_3_10, REPZ_11_138, STATIC_DCODE, STATIC_DLEN, STATIC_LCODE,
     STATIC_LLEN, dist_code,
 };
-use crate::trees::{BIT_LENGTH, Cost, DISTANCE, LITERAL, Tree, build};
+use crate::trees::{Alphabet, BIT_LENGTH, Cost, DISTANCE, LITERAL, Tree, build};
 
 /// a block is flushed when it holds this many symbols, as in zlib with memLevel 8
 const SYMBOL_LIMIT: usize = (1 << 14) - 1;
@@ -23,15 +23,28 @@ pub struct Block {
     literals: Tree,
     distances: Tree,
     bit_lengths: Tree,
+    /// how code lengths are chosen: zlib's way, or the cheaper one
+    build: fn(&mut Tree, &Alphabet, &mut Cost),
 }
 
 impl Block {
+    /// a block whose codes are exactly zlib's
     pub fn new() -> Self {
+        Self::with(build)
+    }
+
+    /// a block whose codes are chosen the cheap way
+    pub fn quick() -> Self {
+        Self::with(crate::codes::build)
+    }
+
+    fn with(build: fn(&mut Tree, &Alphabet, &mut Cost)) -> Self {
         let mut block = Self {
             symbols: Vec::with_capacity(SYMBOL_LIMIT + 8),
             literals: Tree::new(),
             distances: Tree::new(),
             bit_lengths: Tree::new(),
+            build,
         };
         block.reset();
         block
@@ -65,8 +78,8 @@ impl Block {
     /// symbols stand for, or `None` when it is no longer available.
     pub fn flush(&mut self, out: &mut BitWriter, raw: Option<&[u8]>, last: bool) {
         let mut cost = Cost::default();
-        build(&mut self.literals, &LITERAL, &mut cost);
-        build(&mut self.distances, &DISTANCE, &mut cost);
+        (self.build)(&mut self.literals, &LITERAL, &mut cost);
+        (self.build)(&mut self.distances, &DISTANCE, &mut cost);
         let bl_codes = self.build_bit_lengths(&mut cost);
 
         let fixed_bytes = (cost.fixed + 3 + 7) >> 3;
@@ -114,7 +127,7 @@ impl Block {
         code_length_runs(&distances.len[..=distances.max_code], |symbol, _, _| {
             freq[symbol] += 1;
         });
-        build(&mut self.bit_lengths, &BIT_LENGTH, cost);
+        (self.build)(&mut self.bit_lengths, &BIT_LENGTH, cost);
 
         let mut count = BL_CODES;
         while count > 4 && self.bit_lengths.len[BL_ORDER[count - 1] as usize] == 0 {

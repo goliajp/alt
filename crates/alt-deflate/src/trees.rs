@@ -28,11 +28,11 @@ impl Tree {
 
 /// What distinguishes the literal, distance and bit length alphabets.
 pub struct Alphabet {
-    fixed_len: Option<&'static [u8]>,
-    extra: &'static [u8],
-    extra_base: usize,
-    symbols: usize,
-    max_len: u8,
+    pub fixed_len: Option<&'static [u8]>,
+    pub extra: &'static [u8],
+    pub extra_base: usize,
+    pub symbols: usize,
+    pub max_len: u8,
 }
 
 pub const LITERAL: Alphabet = Alphabet {

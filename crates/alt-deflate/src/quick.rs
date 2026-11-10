@@ -60,7 +60,7 @@ thread_local! {
     static SCRATCH: RefCell<Scratch> = RefCell::new(Scratch {
         head: Vec::new(),
         previous: vec![0; WINDOW],
-        block: Block::new(),
+        block: Block::quick(),
     });
 }
 
