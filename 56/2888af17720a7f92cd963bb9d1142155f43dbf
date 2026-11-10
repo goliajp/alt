@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: perf
+summary: prefetch ahead of the eight sha-1 lanes; time hot and cold batches
+author-type: human
+author: doracawl
+touched: crates/alt-hash/examples/sha1_speed.rs
+touched: crates/alt-hash/src/sha1_many.rs
