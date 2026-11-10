@@ -479,3 +479,29 @@ fn blake3_hash_compares_and_converts_like_its_bytes() {
     assert_eq!(set.len(), 2);
     assert!(set.contains(&blake3::hash(b"abc")));
 }
+
+#[test]
+fn blake3_on_threads_is_the_same_hash() {
+    let data: Vec<u8> = (0..9_000_000u32)
+        .map(|i| (i.wrapping_mul(2_654_435_761) >> 24) as u8)
+        .collect();
+    for len in [
+        0usize,
+        1,
+        1024,
+        1025,
+        300_000,
+        524_288,
+        524_289,
+        1 << 20,
+        3_000_001,
+        8 << 20,
+        9_000_000,
+    ] {
+        assert_eq!(
+            alt_hash::blake3::hash_threads(&data[..len]),
+            alt_hash::blake3::hash(&data[..len]),
+            "length {len}"
+        );
+    }
+}

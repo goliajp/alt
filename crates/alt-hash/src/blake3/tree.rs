@@ -204,3 +204,54 @@ pub(super) fn root(input: &[u8], key: &[u32; 8], flags: u32, backend: Backend) -
     }
     parent(&pair(input, key, 0, flags, backend), key, flags).root(backend)
 }
+
+/// below this a subtree is not worth handing to another thread
+const THREAD_LEN: usize = 128 << 10;
+
+/// The hash of a whole input, with the upper levels of the tree spread over the
+/// thread pool: each split offers the right half to another thread, `depth` times over.
+pub(super) fn root_threads(
+    input: &[u8],
+    key: &[u32; 8],
+    flags: u32,
+    backend: Backend,
+    depth: u32,
+) -> Hash {
+    if input.len() <= CHUNK_LEN {
+        return chunk(input, key, 0, flags, backend).root(backend);
+    }
+    parent(
+        &pair_threads(input, key, 0, flags, backend, depth),
+        key,
+        flags,
+    )
+    .root(backend)
+}
+
+/// `pair`, splitting across threads while `depth` and the length allow
+fn pair_threads(
+    input: &[u8],
+    key: &[u32; 8],
+    counter: u64,
+    flags: u32,
+    backend: Backend,
+    depth: u32,
+) -> [u8; 64] {
+    // the right half is the shorter one, and may be as short as a byte
+    let (left, right) = input.split_at(left_len(input.len()));
+    if depth == 0 || right.len() < THREAD_LEN {
+        return pair(input, key, counter, flags, backend);
+    }
+    let right_counter = counter + (left.len() / CHUNK_LEN) as u64;
+    // both halves are longer than a chunk here, so each has a pair under its top node
+    let value = |half: &[u8], counter: u64| {
+        let children = pair_threads(half, key, counter, flags, backend, depth - 1);
+        parent(&children, key, flags).chaining_value(backend)
+    };
+    let (left_value, right_value) =
+        alt_threads::join(|| value(left, counter), || value(right, right_counter));
+    let mut children = [0; 64];
+    children[..32].copy_from_slice(&left_value);
+    children[32..].copy_from_slice(&right_value);
+    children
+}

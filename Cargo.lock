@@ -252,6 +252,9 @@ dependencies = [
 [[package]]
 name = "alt-hash"
 version = "0.1.0"
+dependencies = [
+ "alt-threads",
+]
 
 [[package]]
 name = "alt-import"
@@ -656,6 +659,10 @@ dependencies = [
  "alt-deflate",
  "alt-git-codec",
 ]
+
+[[package]]
+name = "alt-threads"
+version = "0.1.0"
 
 [[package]]
 name = "alt-treediff"

@@ -249,6 +249,17 @@ pub fn hash(input: &[u8]) -> Hash {
     hash_with(Backend::detect(), input)
 }
 
+/// BLAKE3 of one buffer, computed on several threads when the buffer is large enough
+/// for that to pay: the same value as [`hash`].
+pub fn hash_threads(input: &[u8]) -> Hash {
+    static DEPTH: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    // two leaves of the split per processor, so that an uneven one does not idle the rest
+    let depth = *DEPTH.get_or_init(|| {
+        std::thread::available_parallelism().map_or(0, |count| count.get().ilog2() + 1)
+    });
+    tree::root_threads(input, &IV, 0, Backend::detect(), depth)
+}
+
 /// BLAKE3 of one buffer under a 32-byte key
 #[inline]
 pub fn keyed_hash(key: &[u8; KEY_LEN], input: &[u8]) -> Hash {
