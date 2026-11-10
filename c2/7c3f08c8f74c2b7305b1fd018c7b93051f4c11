@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: perf
+summary: x86-64 SHA-1 rounds in assembly with a vectorised schedule; split per-architecture files
+author-type: human
+author: doracawl
+touched: crates/alt-hash/src/sha1.rs
+touched: crates/alt-hash/src/sha1/arm.rs
+touched: crates/alt-hash/src/sha1/x86.rs
+touched: crates/alt-hash/src/sha1_many.rs
