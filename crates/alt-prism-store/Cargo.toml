@@ -12,6 +12,6 @@ blake3.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+alt-deflate.workspace = true
 alt-prism-deflate.workspace = true
-libz-sys = "1"
 tempfile.workspace = true

@@ -2,7 +2,7 @@
 //! remain bounded, and decoding holds the same worker permit as execution.
 use alt_server_store::{Error, Result};
 use alt_server_telemetry::Phase;
-use std::io::{BufReader, Read, Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 
 pub(super) fn decode(
     mut source: tempfile::NamedTempFile,
@@ -10,9 +10,9 @@ pub(super) fn decode(
 ) -> Result<tempfile::NamedTempFile> {
     alt_server_store::telemetry::observe(Phase::Decode, || {
         source.as_file_mut().seek(SeekFrom::Start(0))?;
-        // MultiGzDecoder checks every member's checksum and refuses malformed
-        // trailing input. A valid concatenation is one HTTP decoded body.
-        let mut decoder = flate2::read::MultiGzDecoder::new(BufReader::new(source.as_file_mut()));
+        // Every member's checksum is checked and malformed trailing input is
+        // refused. A valid concatenation is one HTTP decoded body.
+        let mut decoder = alt_inflate::Reader::gzip_members(source.as_file_mut());
         let mut output = tempfile::NamedTempFile::new()?;
         let mut bytes = 0u64;
         let mut buffer = [0u8; 16 * 1024];

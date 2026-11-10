@@ -3,10 +3,9 @@ use alt_git_pack::{
     DeltaOptions, IngressLimits, NoBases, PackWriter, RepresentationLimits, ingest_pack,
     ingest_pack_with_representations,
 };
-use flate2::{Compression, write::ZlibEncoder};
 use std::{
     fs::File,
-    io::{Cursor, Write},
+    io::Cursor,
     process::{Command, Stdio},
 };
 
@@ -45,9 +44,7 @@ fn plain_pack(algo: HashAlgo, objects: &[Vec<u8>]) -> Vec<u8> {
         }
         pack.push(byte);
         // A non-default encoding proves that output preserves supplied bytes.
-        let mut zlib = ZlibEncoder::new(Vec::new(), Compression::none());
-        zlib.write_all(data).unwrap();
-        pack.extend_from_slice(&zlib.finish().unwrap());
+        pack.extend_from_slice(&alt_deflate::compress(data, 0, alt_deflate::Format::Zlib));
     }
     let trailer = match algo {
         HashAlgo::Sha1 => alt_hash::sha1(&pack).to_vec(),

@@ -6,6 +6,6 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+alt-deflate.workspace = true
+alt-inflate.workspace = true
 alt-prism.workspace = true
-flate2.workspace = true
-libz-sys = "1"

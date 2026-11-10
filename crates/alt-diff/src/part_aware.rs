@@ -202,7 +202,6 @@ pub fn zip_member_bodies(
 }
 
 fn extract_lfh(data: &[u8], off: usize, max_member: usize) -> Option<Vec<u8>> {
-    use std::io::Read as _;
     if off + 30 > data.len() {
         return None;
     }
@@ -228,12 +227,8 @@ fn extract_lfh(data: &[u8], off: usize, max_member: usize) -> Option<Vec<u8>> {
     match method {
         0 => Some(stream.to_vec()),
         8 => {
-            let mut decoder = flate2::read::DeflateDecoder::new(stream).take(max_member as u64 + 1);
-            let mut out = Vec::with_capacity(uncomp_size.min(max_member));
-            decoder.read_to_end(&mut out).ok()?;
-            if out.len() > max_member {
-                return None;
-            }
+            let (out, _) =
+                alt_inflate::inflate(alt_inflate::Format::Raw, stream, max_member).ok()?;
             Some(out)
         }
         _ => None,

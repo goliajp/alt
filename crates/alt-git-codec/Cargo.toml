@@ -7,10 +7,11 @@ license.workspace = true
 
 [dependencies]
 alt-hash.workspace = true
+alt-inflate.workspace = true
 bstr.workspace = true
-flate2.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+alt-deflate.workspace = true
 alt-testutil.workspace = true
 tempfile.workspace = true

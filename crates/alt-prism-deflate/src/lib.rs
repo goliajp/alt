@@ -7,16 +7,14 @@
 //!
 //! The catch is bit-exact reproduction: recompressing must reproduce the
 //! original stream verbatim. Measured on real inputs,
-//! **the producer decides reproducibility** and the recompressor must be C
-//! libz (zlib-rs makes different choices). So this prism inflates, then
+//! **the producer decides reproducibility** and the recompressor must make
+//! libz's choices byte for byte (zlib-rs makes different ones). So this prism inflates, then
 //! finds the libz parameters that reproduce the input exactly, recording a
 //! tiny parameter byte; if none in the tried grid match, it declines
 //! (Tier 0) rather than ever diffing against a foreign encoder.
 //!
 //! Discipline: bounds its inflate output (decompression bomb) and
 //! never panics on adversarial input.
-
-use std::io::Read;
 
 use alt_prism::{Decomposition, Prism, PrismId};
 
@@ -68,43 +66,23 @@ impl Prism for DeflatePrism {
 /// Inflates a zlib stream, bounded by [`MAX_INFLATED`]. `None` on malformed
 /// input or a bomb.
 fn zlib_inflate(input: &[u8]) -> Option<Vec<u8>> {
-    let mut out = Vec::new();
-    flate2::read::ZlibDecoder::new(input)
-        .take(MAX_INFLATED as u64 + 1)
-        .read_to_end(&mut out)
-        .ok()?;
-    if out.len() > MAX_INFLATED {
-        return None; // expanded past the ceiling — treat as a bomb
-    }
+    // content past the ceiling is treated as a bomb
+    let (out, _) = alt_inflate::inflate(alt_inflate::Format::Zlib, input, MAX_INFLATED).ok()?;
     Some(out)
 }
 
-/// Compresses with the C libz encoder (stock zlib's compression decisions
-/// are the de-facto standard the producers used). `compress2` uses the same
-/// `deflateInit` defaults (windowBits 15, memLevel 8, default strategy) git
-/// and most tools do, so a level match reproduces their stream.
+/// Compresses the way stock zlib's `compress2` does (windowBits 15, memLevel 8,
+/// default strategy), which is what git and most tools use, so a level match
+/// reproduces their stream.
 fn zlib_deflate(data: &[u8], level: i32) -> Option<Vec<u8>> {
     if !(0..=9).contains(&level) {
         return None;
     }
-    // SAFETY: compress2 writes at most `dest_len` bytes (initialized to the
-    // compressBound upper bound) and updates `dest_len` to the actual size.
-    unsafe {
-        let mut dest_len = libz_sys::compressBound(data.len() as libz_sys::uLong);
-        let mut dest = vec![0u8; dest_len as usize];
-        let rc = libz_sys::compress2(
-            dest.as_mut_ptr(),
-            &mut dest_len,
-            data.as_ptr(),
-            data.len() as libz_sys::uLong,
-            level,
-        );
-        if rc != libz_sys::Z_OK {
-            return None;
-        }
-        dest.truncate(dest_len as usize);
-        Some(dest)
-    }
+    Some(alt_deflate::compress_as_zlib(
+        data,
+        level as u8,
+        alt_deflate::Format::Zlib,
+    ))
 }
 
 #[cfg(test)]
@@ -112,8 +90,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ffi_round_trips_arbitrary_data() {
-        // proves the libz FFI deflate + inflate path works at all
+    fn deflate_round_trips_arbitrary_data() {
         let data = b"the quick brown fox".repeat(100);
         let z = zlib_deflate(&data, 6).unwrap();
         assert_eq!(zlib_inflate(&z).unwrap(), data);

@@ -42,6 +42,7 @@ alt-export.workspace = true
 alt-flow.workspace = true
 alt-git-pack.workspace = true
 alt-import.workspace = true
+alt-inflate.workspace = true
 alt-lfs.workspace = true
 alt-merge.workspace = true
 alt-odb.workspace = true
@@ -60,7 +61,6 @@ alt-worktree.workspace = true
 bstr.workspace = true
 clap.workspace = true
 encoding_rs.workspace = true
-flate2.workspace = true
 regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -73,6 +73,7 @@ libc.workspace = true
 
 [dev-dependencies]
 alt-browser-auth.workspace = true
+alt-deflate.workspace = true
 alt-server.workspace = true
 alt-server-store.workspace = true
 postgres = {version="0.19",features=["with-serde_json-1"]}
@@ -80,7 +81,6 @@ tokio = {version="1",features=["rt-multi-thread","net","sync"]}
 alt-sign.workspace = true
 alt-testutil.workspace = true
 criterion.workspace = true
-flate2.workspace = true
 tempfile.workspace = true
 
 [[bench]]

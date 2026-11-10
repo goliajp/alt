@@ -173,8 +173,6 @@ fn semantic_diff_falls_back_to_line_diff_for_unsupported_languages() {
 /// PNG chunks, takes the IDAT bytes, inflates and fingerprints — no CRC
 /// check, no IHDR parsing required.
 fn build_minimal_png(width: u32, height: u32, pixels: &[u8]) -> Vec<u8> {
-    use flate2::{Compression, write::ZlibEncoder};
-    use std::io::Write;
     assert_eq!(pixels.len() as u32, width * height);
 
     fn chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
@@ -199,9 +197,8 @@ fn build_minimal_png(width: u32, height: u32, pixels: &[u8]) -> Vec<u8> {
         let start = row * width as usize;
         raw.extend_from_slice(&pixels[start..start + width as usize]);
     }
-    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::new(6));
-    encoder.write_all(&raw).unwrap();
-    chunk(&mut out, b"IDAT", &encoder.finish().unwrap());
+    let stream = alt_deflate::compress(&raw, 6, alt_deflate::Format::Zlib);
+    chunk(&mut out, b"IDAT", &stream);
     chunk(&mut out, b"IEND", &[]);
     out
 }

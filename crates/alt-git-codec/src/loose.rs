@@ -1,8 +1,6 @@
 use std::fs::File;
-use std::io::{self, BufReader, Read};
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-
-use flate2::read::ZlibDecoder;
 
 use crate::{ObjectId, ObjectKind};
 
@@ -51,7 +49,7 @@ impl LooseStore {
             io::ErrorKind::NotFound => LooseError::NotFound(*oid),
             _ => LooseError::Io { oid: *oid, source },
         })?;
-        let mut decoder = ZlibDecoder::new(BufReader::new(file));
+        let mut decoder = alt_inflate::Reader::new(alt_inflate::Format::Zlib, file);
 
         let (kind, size) = parse_header(&mut decoder, oid)?;
         let mut data = Vec::with_capacity(size);
@@ -125,10 +123,6 @@ pub enum LooseError {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::io::Write;
-
-    use flate2::Compression;
-    use flate2::write::ZlibEncoder;
 
     use super::*;
     use crate::HashAlgo;
@@ -138,9 +132,8 @@ mod tests {
         let store = LooseStore::new(dir);
         let path = store.path_of(oid);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
-        enc.write_all(raw).unwrap();
-        fs::write(path, enc.finish().unwrap()).unwrap();
+        let encoded = alt_deflate::compress(raw, 6, alt_deflate::Format::Zlib);
+        fs::write(path, encoded).unwrap();
         store
     }
 

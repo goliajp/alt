@@ -10,8 +10,6 @@ use std::path::{Path, PathBuf};
 
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
 use alt_hash::{Sha1, Sha256};
-use flate2::Compression;
-use flate2::write::ZlibEncoder;
 
 use crate::{DeltaOptions, PackError, PlainRepresentation, delta_window::Window};
 
@@ -208,9 +206,8 @@ impl PackWriter {
         data: &[u8],
     ) -> Result<(), PackError> {
         let offset = self.start_entry(type_id, base, data.len())?;
-        let mut encoder = ZlibEncoder::new(&mut self.out, Compression::default());
-        encoder.write_all(data)?;
-        encoder.finish()?;
+        self.out
+            .write_all(&alt_deflate::compress(data, 6, alt_deflate::Format::Zlib))?;
         self.finish_entry(oid, offset);
         Ok(())
     }

@@ -1,6 +1,5 @@
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
 use alt_git_pack::*;
-use flate2::{Compression, write::ZlibEncoder};
 use std::{
     collections::BTreeMap,
     io::{Cursor, Write},
@@ -39,9 +38,7 @@ fn entry_header(kind: u8, mut size: u64) -> Vec<u8> {
     b
 }
 fn zlib(bytes: &[u8]) -> Vec<u8> {
-    let mut z = ZlibEncoder::new(vec![], Compression::default());
-    z.write_all(bytes).unwrap();
-    z.finish().unwrap()
+    alt_deflate::compress(bytes, 6, alt_deflate::Format::Zlib)
 }
 fn plain(data: &[u8]) -> Vec<u8> {
     let mut b = pack_header(1);

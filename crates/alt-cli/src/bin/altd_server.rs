@@ -321,7 +321,7 @@ fn read_body_capped(
     if gzipped {
         // Decompress under the same cap so a 100 KiB gzip bomb that
         // expands to 10 GiB still bounces.
-        let mut decoder = flate2::read::GzDecoder::new(limited);
+        let mut decoder = alt_inflate::Reader::new(alt_inflate::Format::Gzip, limited);
         let mut decoded_cap = (&mut decoder).take(max + 1);
         decoded_cap.read_to_end(body)?;
     } else {
@@ -1134,7 +1134,10 @@ fn handle_receive_pack(
     let pack_tmp_path = pack_tmp_dir.path().join("incoming.pack");
     let parse_outcome: Result<(alt_wire::push::PushHead, u64), String> = {
         let mut reader: Box<dyn Read> = if gzipped {
-            Box::new(flate2::read::GzDecoder::new(req.as_reader().take(max + 1)))
+            Box::new(alt_inflate::Reader::new(
+                alt_inflate::Format::Gzip,
+                req.as_reader().take(max + 1),
+            ))
         } else {
             Box::new(req.as_reader().take(max + 1))
         };

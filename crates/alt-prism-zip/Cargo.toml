@@ -1,12 +1,11 @@
 [package]
 name = "alt-prism-zip"
-description = "ZIP container prism: split a ZIP/OOXML/JAR/EPUB into its envelope + inflated member bodies, record per-entry deflate parameters, recompose bit-exactly via C libz raw-deflate."
+description = "ZIP container prism: split a ZIP/OOXML/JAR/EPUB into its envelope + inflated member bodies, record per-entry deflate parameters, recompose bit-exactly as libz raw-deflate would."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
+alt-deflate.workspace = true
+alt-inflate.workspace = true
 alt-prism.workspace = true
-flate2.workspace = true
-libc.workspace = true
-libz-sys = "1"

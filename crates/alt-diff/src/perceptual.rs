@@ -17,8 +17,6 @@
 //! decompression (inherits the deflate prism's ceiling). Returns `None`
 //! when the input isn't a format we recognise.
 
-use std::io::Read;
-
 /// Inflation ceiling per file — matches the deflate prism's bomb guard so
 /// an attacker-crafted PNG header pointing at a 4 GiB zlib stream can't
 /// exhaust memory.
@@ -131,12 +129,7 @@ fn png_idat(data: &[u8]) -> Option<Vec<u8>> {
 
 /// Bomb-bounded zlib inflate; gives up over [`MAX_INFLATED`].
 fn inflate(stream: &[u8]) -> Option<Vec<u8>> {
-    let mut decoder = flate2::read::ZlibDecoder::new(stream).take(MAX_INFLATED as u64 + 1);
-    let mut out = Vec::new();
-    decoder.read_to_end(&mut out).ok()?;
-    if out.len() > MAX_INFLATED {
-        return None;
-    }
+    let (out, _) = alt_inflate::inflate(alt_inflate::Format::Zlib, stream, MAX_INFLATED).ok()?;
     Some(out)
 }
 
@@ -175,8 +168,6 @@ mod tests {
     /// per scanline. Good enough for a unit test; intentionally not a
     /// general PNG encoder.
     fn build_png(width: u32, height: u32, pixels: &[u8]) -> Vec<u8> {
-        use flate2::{Compression, write::ZlibEncoder};
-        use std::io::Write;
         assert_eq!(pixels.len() as u32, width * height);
 
         let mut out = Vec::new();
@@ -200,9 +191,7 @@ mod tests {
             let start = row * width as usize;
             raw.extend_from_slice(&pixels[start..start + width as usize]);
         }
-        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::new(6));
-        encoder.write_all(&raw).unwrap();
-        let stream = encoder.finish().unwrap();
+        let stream = alt_deflate::compress(&raw, 6, alt_deflate::Format::Zlib);
         write_chunk(&mut out, b"IDAT", &stream);
 
         write_chunk(&mut out, b"IEND", &[]);

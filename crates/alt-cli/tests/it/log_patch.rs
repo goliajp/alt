@@ -3,7 +3,6 @@
 //! chunk-diff summary + a perceptual hint when the content is a kind we
 //! recognise — so a binary-asset history doesn't blow up the terminal.
 
-use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Output};
 
@@ -28,8 +27,6 @@ fn ok(o: Output) -> String {
 }
 
 fn build_minimal_png(width: u32, height: u32, pixels: &[u8]) -> Vec<u8> {
-    use flate2::{Compression, write::ZlibEncoder};
-
     fn chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
         out.extend_from_slice(&(data.len() as u32).to_be_bytes());
         out.extend_from_slice(kind);
@@ -52,9 +49,8 @@ fn build_minimal_png(width: u32, height: u32, pixels: &[u8]) -> Vec<u8> {
         let start = row * width as usize;
         raw.extend_from_slice(&pixels[start..start + width as usize]);
     }
-    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::new(6));
-    encoder.write_all(&raw).unwrap();
-    chunk(&mut out, b"IDAT", &encoder.finish().unwrap());
+    let stream = alt_deflate::compress(&raw, 6, alt_deflate::Format::Zlib);
+    chunk(&mut out, b"IDAT", &stream);
     chunk(&mut out, b"IEND", &[]);
     out
 }

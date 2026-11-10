@@ -7,8 +7,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+alt-deflate.workspace = true
 alt-git-codec.workspace = true
-flate2.workspace = true
 
 [[bin]]
 name = "build-large-corpus"

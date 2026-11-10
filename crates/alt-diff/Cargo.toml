@@ -7,4 +7,7 @@ license.workspace = true
 
 [dependencies]
 alt-cdc.workspace = true
-flate2.workspace = true
+alt-inflate.workspace = true
+
+[dev-dependencies]
+alt-deflate.workspace = true

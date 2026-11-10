@@ -21,12 +21,8 @@
 //! `.dev/corpus/large-files`.
 
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-
-use flate2::Compression;
-use flate2::write::ZlibEncoder;
 
 const IMAGE_RAW_BYTES: usize = 2 * 1024 * 1024;
 const DATASET_BYTES: usize = 15 * 1024 * 1024;
@@ -124,9 +120,7 @@ fn write_image(path: &Path, seed: u32, generation: u32) {
     // perceptual diff tests.
     let mut raw = vec![0u8; IMAGE_RAW_BYTES];
     fill_pixels(&mut raw, seed, generation);
-    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::new(1));
-    encoder.write_all(&raw).unwrap();
-    let stream = encoder.finish().unwrap();
+    let stream = alt_deflate::compress(&raw, 1, alt_deflate::Format::Zlib);
 
     let mut out = Vec::with_capacity(stream.len() + 32);
     out.extend_from_slice(b"\x89PNG\r\n\x1a\n");
@@ -198,9 +192,7 @@ fn write_archive(path: &Path, seed: u32, generation: u32) {
         };
         let mut raw = vec![0u8; ARCHIVE_STREAM_BYTES];
         fill_pixels(&mut raw, stream_seed, stream_gen);
-        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::new(1));
-        encoder.write_all(&raw).unwrap();
-        let stream = encoder.finish().unwrap();
+        let stream = alt_deflate::compress(&raw, 1, alt_deflate::Format::Zlib);
         out.extend_from_slice(&(stream.len() as u32).to_be_bytes());
         out.extend_from_slice(&stream);
     }

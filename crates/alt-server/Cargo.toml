@@ -23,6 +23,7 @@ alt-task-service.workspace = true
 alt-task.workspace = true
 alt-git-codec.workspace = true
 alt-git-pack.workspace = true
+alt-inflate.workspace = true
 alt-wire.workspace = true
 blake3.workspace = true
 rand_core.workspace = true
@@ -41,12 +42,12 @@ base64 = "0.22"
 clap.workspace = true
 libc.workspace = true
 futures-util = "0.3"
-flate2.workspace = true
 tar = "0.4"
 tokio-util = {version="0.7",features=["io"]}
 
 [dev-dependencies]
 alt-command-protocol.workspace = true
+alt-deflate.workspace = true
 tiny_http = "0.12"
 alt-wire-http.workspace = true
 ureq.workspace = true

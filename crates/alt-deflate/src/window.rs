@@ -45,7 +45,8 @@ impl<'a> Window<'a> {
     pub fn new(input: &'a [u8]) -> Self {
         Self {
             input,
-            bytes: vec![0; 2 * W_SIZE],
+            // eight spare bytes let the match search read whole words
+            bytes: vec![0; 2 * W_SIZE + 8],
             head: vec![0; HASH_SIZE],
             prev: vec![0; W_SIZE],
             hash: 0,
@@ -94,7 +95,10 @@ impl<'a> Window<'a> {
     }
 
     fn slide_hash(&mut self) {
-        for slot in self.head.iter_mut().chain(self.prev.iter_mut()) {
+        for slot in self.head.iter_mut() {
+            *slot = slot.saturating_sub(W_SIZE as u16);
+        }
+        for slot in self.prev.iter_mut() {
             *slot = slot.saturating_sub(W_SIZE as u16);
         }
     }
@@ -130,7 +134,6 @@ impl<'a> Window<'a> {
         search: &Search,
     ) -> usize {
         let scan = self.strstart;
-        let bytes = &self.bytes[..];
         let mut chain = search.max_chain;
         if prev_length >= search.good_length {
             chain >>= 2;
@@ -138,48 +141,76 @@ impl<'a> Window<'a> {
         let nice = search.nice_length.min(self.lookahead);
         let limit = scan.saturating_sub(MAX_DIST);
         let mut best = prev_length;
-        let mut end = [bytes[scan + best - 1], bytes[scan + best]];
-
-        loop {
-            if bytes[candidate + best] == end[1]
-                && bytes[candidate + best - 1] == end[0]
-                && bytes[candidate] == bytes[scan]
-                && bytes[candidate + 1] == bytes[scan + 1]
-            {
-                // the third byte is equal because the hashes are
-                let len = MIN_MATCH + common_prefix(bytes, candidate + MIN_MATCH, scan + MIN_MATCH);
-                if len > best {
-                    self.match_start = candidate;
-                    best = len;
-                    if len >= nice {
-                        break;
+        debug_assert!(scan + MAX_MATCH + 8 <= self.bytes.len() && candidate < scan);
+        // Every candidate is a position before `scan`, and `scan` is at least
+        // MIN_LOOKAHEAD before the end of the window, which is followed by eight
+        // spare bytes: all reads below stay inside `bytes`. A chain index is masked
+        // to the length of `prev`.
+        unsafe {
+            let base = self.bytes.as_ptr();
+            let here = base.add(scan);
+            let prev = self.prev.as_ptr();
+            loop {
+                let there = base.add(candidate);
+                // a longer match must agree on the bytes up to `best` and on the
+                // first ones; comparing them by words discards most candidates
+                let plausible = if best >= 8 {
+                    word::<u64>(there.add(best - 7)) == word::<u64>(here.add(best - 7))
+                        && word::<u64>(there) == word::<u64>(here)
+                } else if best >= 4 {
+                    word::<u32>(there.add(best - 3)) == word::<u32>(here.add(best - 3))
+                        && word::<u32>(there) == word::<u32>(here)
+                } else {
+                    word::<u16>(there.add(best - 1)) == word::<u16>(here.add(best - 1))
+                        && word::<u16>(there) == word::<u16>(here)
+                };
+                if plausible {
+                    let len = common_prefix(there, here);
+                    if len > best {
+                        self.match_start = candidate;
+                        best = len;
+                        if len >= nice {
+                            break;
+                        }
                     }
-                    end = [bytes[scan + best - 1], bytes[scan + best]];
                 }
-            }
-            candidate = self.prev[candidate & W_MASK] as usize;
-            chain -= 1;
-            if candidate <= limit || chain == 0 {
-                break;
+                candidate = *prev.add(candidate & W_MASK) as usize;
+                chain -= 1;
+                if candidate <= limit || chain == 0 {
+                    break;
+                }
             }
         }
         best.min(self.lookahead)
     }
 }
 
-/// Number of equal bytes at `a` and `b`, at most MAX_MATCH - MIN_MATCH.
-fn common_prefix(bytes: &[u8], a: usize, b: usize) -> usize {
-    const SPAN: usize = MAX_MATCH - MIN_MATCH;
-    let x = &bytes[a..a + SPAN];
-    let y = &bytes[b..b + SPAN];
-    let (x_words, x_tail) = x.as_chunks::<8>();
-    let (y_words, y_tail) = y.as_chunks::<8>();
-    for (n, (wx, wy)) in x_words.iter().zip(y_words).enumerate() {
-        let diff = u64::from_le_bytes(*wx) ^ u64::from_le_bytes(*wy);
-        if diff != 0 {
-            return n * 8 + (diff.trailing_zeros() / 8) as usize;
+/// reads a possibly unaligned word
+#[inline(always)]
+unsafe fn word<T: Copy>(at: *const u8) -> T {
+    unsafe { at.cast::<T>().read_unaligned() }
+}
+
+/// Number of equal bytes at `a` and `b`, at most MAX_MATCH. Both must have
+/// MAX_MATCH + 6 readable bytes.
+#[inline(always)]
+unsafe fn common_prefix(a: *const u8, b: *const u8) -> usize {
+    unsafe {
+        let mut equal = 0;
+        while equal < MAX_MATCH - 2 {
+            let diff = word::<u64>(a.add(equal)) ^ word::<u64>(b.add(equal));
+            if diff != 0 {
+                return equal + (diff.to_le().trailing_zeros() / 8) as usize;
+            }
+            equal += 8;
+        }
+        // 256 bytes are equal; the longest match has two more
+        if *a.add(equal) != *b.add(equal) {
+            equal
+        } else if *a.add(equal + 1) != *b.add(equal + 1) {
+            equal + 1
+        } else {
+            MAX_MATCH
         }
     }
-    let equal_tail = x_tail.iter().zip(y_tail).take_while(|(p, q)| p == q);
-    x_words.len() * 8 + equal_tail.count()
 }

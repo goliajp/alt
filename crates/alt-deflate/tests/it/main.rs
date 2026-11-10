@@ -279,8 +279,8 @@ fn gzip_and_the_writer_wrap_the_same_stream() {
         .flat_map(|n| (n % 251).to_le_bytes())
         .collect();
     for level in [0u8, 1, 6, 9] {
-        let raw = alt_deflate::compress(&data, level, alt_deflate::Format::Raw);
-        let gzip = alt_deflate::compress(&data, level, alt_deflate::Format::Gzip);
+        let raw = alt_deflate::compress_as_zlib(&data, level, alt_deflate::Format::Raw);
+        let gzip = alt_deflate::compress_as_zlib(&data, level, alt_deflate::Format::Gzip);
         assert_eq!(&gzip[10..gzip.len() - 8], raw, "level {level}");
         let (content, consumed) =
             alt_inflate::inflate(alt_inflate::Format::Gzip, &gzip, data.len()).unwrap();
@@ -297,5 +297,78 @@ fn gzip_and_the_writer_wrap_the_same_stream() {
             alt_deflate::compress(&data, level, alt_deflate::Format::Zlib),
             "level {level}"
         );
+    }
+}
+
+/// the general compressor is free in what it emits, so it is checked by decoding
+#[test]
+fn the_general_compressor_round_trips() {
+    let mut state = 0x2545_f491_4f6c_dd1du64;
+    let mut noise = |len: usize, alphabet: u64| -> Vec<u8> {
+        (0..len)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                ((state >> 24) % alphabet) as u8
+            })
+            .collect()
+    };
+    let source = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/src/trees.rs")).unwrap();
+    let mut inputs: Vec<Vec<u8>> = vec![
+        Vec::new(),
+        vec![1],
+        vec![1, 2, 3],
+        vec![9; 4],
+        vec![0; 300_000],
+        b"abcdefghij".repeat(30_000),
+        noise(200_000, 256),
+        noise(200_000, 4),
+        source.repeat(40),
+    ];
+    for len in [
+        2usize, 4, 5, 7, 8, 9, 257, 258, 259, 4096, 32767, 32768, 32769, 65536, 100_000,
+    ] {
+        inputs.push(source.iter().cycle().take(len).copied().collect());
+    }
+    let mut mixed = Vec::new();
+    for round in 0..60 {
+        mixed.extend(noise(1500 + round * 13, 256));
+        mixed.extend(&source[round * 31..round * 31 + 2500]);
+        mixed.extend(vec![round as u8; 400]);
+        // a repeat from just inside and just outside the window
+        let back = if round % 2 == 0 { 32768 } else { 32769 };
+        if mixed.len() > back + 300 {
+            let from = mixed.len() - back;
+            let copy = mixed[from..from + 300].to_vec();
+            mixed.extend(copy);
+        }
+    }
+    inputs.push(mixed);
+    for (index, data) in inputs.iter().enumerate() {
+        for level in 0..=9u8 {
+            for (ours, theirs) in [
+                (alt_deflate::Format::Raw, alt_inflate::Format::Raw),
+                (alt_deflate::Format::Zlib, alt_inflate::Format::Zlib),
+                (alt_deflate::Format::Gzip, alt_inflate::Format::Gzip),
+            ] {
+                let stream = alt_deflate::compress(data, level, ours);
+                let what = format!(
+                    "input {index} ({} bytes), level {level}, {ours:?}",
+                    data.len()
+                );
+                let (content, consumed) =
+                    alt_inflate::inflate(theirs, &stream, data.len()).expect(&what);
+                assert!(content == *data, "{what}: content differs");
+                assert_eq!(consumed, stream.len(), "{what}");
+            }
+            // never much larger than what zlib makes of it at its fastest level
+            let reference = alt_deflate::compress_as_zlib(data, 1, alt_deflate::Format::Raw).len();
+            let ours = alt_deflate::compress(data, level.max(1), alt_deflate::Format::Raw).len();
+            assert!(
+                ours <= reference + reference / 4 + 64,
+                "input {index}, level {level}: {ours} bytes against {reference}"
+            );
+        }
     }
 }

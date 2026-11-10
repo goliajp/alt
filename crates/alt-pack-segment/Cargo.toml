@@ -6,11 +6,11 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+alt-deflate.workspace = true
 alt-git-pack.workspace = true
 alt-hash.workspace = true
 alt-inflate.workspace = true
 blake3.workspace = true
-flate2.workspace = true
 memmap2.workspace = true
 rayon.workspace = true
 thiserror.workspace = true

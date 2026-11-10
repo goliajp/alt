@@ -1,12 +1,14 @@
-//! DEFLATE compression whose output is byte-identical with zlib.
+//! DEFLATE compression, in two kinds: a general compressor built for speed, and one
+//! whose output is byte-identical with zlib.
 //!
-//! The reference is zlib 1.3.2 with window bits 15, memLevel 8 and the
-//! default strategy, compressing the whole input in one call into a buffer
-//! of `deflateBound` / `compressBound` size.
+//! The reference for the second is zlib 1.3.2 with window bits 15, memLevel 8 and
+//! the default strategy, compressing the whole input in one call into a buffer of
+//! `deflateBound` / `compressBound` size.
 
 mod bits;
 mod block;
 mod encoder;
+mod quick;
 mod tables;
 mod trees;
 mod window;
@@ -28,12 +30,33 @@ pub enum Format {
 /// largest stored block
 const MAX_STORED: usize = 65535;
 
-/// Compresses `data` in one shot at `level` (0..=9).
+/// Compresses `data` in one shot at `level` (0..=9), as fast as that level's
+/// compression allows. The output is a valid stream but not the bytes zlib would
+/// produce; [`compress_as_zlib`] is for that.
 ///
 /// # Panics
 ///
 /// If `level` is greater than 9.
 pub fn compress(data: &[u8], level: u8, format: Format) -> Vec<u8> {
+    wrap(data, level, format, quick::deflate)
+}
+
+/// Compresses `data` in one shot at `level` (0..=9) into exactly the bytes that zlib
+/// produces for it with its default window, memory level and strategy.
+///
+/// # Panics
+///
+/// If `level` is greater than 9.
+pub fn compress_as_zlib(data: &[u8], level: u8, format: Format) -> Vec<u8> {
+    wrap(data, level, format, encoder::deflate)
+}
+
+fn wrap(
+    data: &[u8],
+    level: u8,
+    format: Format,
+    deflate: fn(&[u8], u8, Vec<u8>) -> Vec<u8>,
+) -> Vec<u8> {
     assert!(level <= 9, "deflate level {level} out of range");
     let mut out = Vec::new();
     match format {
@@ -44,7 +67,7 @@ pub fn compress(data: &[u8], level: u8, format: Format) -> Vec<u8> {
     let mut out = if level == 0 {
         store(data, out)
     } else {
-        encoder::deflate(data, level, out)
+        deflate(data, level, out)
     };
     match format {
         Format::Raw => {}

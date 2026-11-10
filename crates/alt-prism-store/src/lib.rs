@@ -168,23 +168,9 @@ mod tests {
     use super::*;
     use alt_prism_deflate::DeflatePrism;
 
-    /// A real git-style zlib stream (level 1) built with C libz.
+    /// a git-style zlib stream
     fn zlib(data: &[u8], level: i32) -> Vec<u8> {
-        // SAFETY: compress2 writes at most `dl` bytes and updates it.
-        unsafe {
-            let mut dl = libz_sys::compressBound(data.len() as libz_sys::uLong);
-            let mut out = vec![0u8; dl as usize];
-            let rc = libz_sys::compress2(
-                out.as_mut_ptr(),
-                &mut dl,
-                data.as_ptr(),
-                data.len() as libz_sys::uLong,
-                level,
-            );
-            assert_eq!(rc, libz_sys::Z_OK);
-            out.truncate(dl as usize);
-            out
-        }
+        alt_deflate::compress_as_zlib(data, level as u8, alt_deflate::Format::Zlib)
     }
 
     fn deflate_registry() -> Registry {

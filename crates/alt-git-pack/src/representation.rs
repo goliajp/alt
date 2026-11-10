@@ -93,13 +93,9 @@ impl PlainRepresentation {
 mod tests {
     use super::*;
     use alt_git_codec::HashAlgo;
-    use flate2::{Compression, write::ZlibEncoder};
-    use std::io::Write;
 
     fn encoded(data: &[u8]) -> Vec<u8> {
-        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
-        encoder.write_all(data).unwrap();
-        encoder.finish().unwrap()
+        alt_deflate::compress(data, 6, alt_deflate::Format::Zlib)
     }
 
     #[test]

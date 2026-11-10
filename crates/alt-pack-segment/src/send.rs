@@ -56,9 +56,7 @@ pub fn build_pack<'a>(
     let mut pack = pack_header(objects.len() as u64)?.to_vec();
     for (kind, data) in objects {
         pack.extend_from_slice(&entry_header(kind as u8, data.len() as u64));
-        let mut encoder = flate2::write::ZlibEncoder::new(pack, flate2::Compression::fast());
-        encoder.write_all(data)?;
-        pack = encoder.finish()?;
+        pack.extend_from_slice(&alt_deflate::compress(data, 1, alt_deflate::Format::Zlib));
     }
     let trailer = alt_hash::sha1(&pack);
     pack.extend_from_slice(&trailer);
@@ -314,11 +312,8 @@ impl SegmentSet {
                 continue;
             }
             let (kind, data) = self.read(oid)?;
-            let mut encoder =
-                flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
-            encoder.write_all(&data)?;
             out.put(&entry_header(kind as u8, data.len() as u64))?;
-            out.put(&encoder.finish()?)?;
+            out.put(&alt_deflate::compress(&data, 1, alt_deflate::Format::Zlib))?;
         }
         out.finish()
     }

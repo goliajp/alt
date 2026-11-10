@@ -35,12 +35,10 @@
 //!
 //! Walk the recipe entries, splicing each segment + body in order. A
 //! stored entry copies its part verbatim into the output stream; a
-//! deflate entry re-deflates the part with the recorded level via C
-//! libz (raw deflate, windowBits = -15). The envelope's central
+//! deflate entry re-deflates the part with the recorded level the way
+//! libz does (raw deflate, windowBits = -15). The envelope's central
 //! directory / EOCD never need rewriting — bodies must be byte-equal
 //! by construction or the prism would have declined at ingest.
-
-use std::io::Read;
 
 use alt_prism::{Decomposition, Prism, PrismId};
 
@@ -368,90 +366,26 @@ fn find_eocd(data: &[u8]) -> Option<usize> {
 
 fn raw_inflate(input: &[u8], max: usize) -> Option<Vec<u8>> {
     // Empty member body is legal — a zero-byte "stored" inside a deflate
-    // stream produces an empty inflated payload (flate2 wants a valid
-    // deflate stream though; an empty input would error). Short-circuit.
+    // stream produces an empty inflated payload, while an empty input is
+    // not a valid deflate stream. Short-circuit.
     if input.is_empty() {
         return Some(Vec::new());
     }
-    let mut out = Vec::new();
-    flate2::read::DeflateDecoder::new(input)
-        .take(max as u64 + 1)
-        .read_to_end(&mut out)
-        .ok()?;
-    if out.len() > max {
-        return None;
-    }
+    let (out, _) = alt_inflate::inflate(alt_inflate::Format::Raw, input, max).ok()?;
     Some(out)
 }
 
-/// libz's alloc shim. `deflateInit2_` rejects NULL function pointers
-/// the Rust type system anyway can't express; we route alloc/free
-/// through libc (the same allocator zlib's default uses), so behaviour
-/// matches `Z_NULL` exactly without the null-fn-pointer UB.
-unsafe extern "C" fn alt_zalloc(
-    _opaque: libz_sys::voidpf,
-    items: libz_sys::uInt,
-    size: libz_sys::uInt,
-) -> libz_sys::voidpf {
-    let total = (items as usize).saturating_mul(size as usize);
-    unsafe { libc::malloc(total) as libz_sys::voidpf }
-}
-
-unsafe extern "C" fn alt_zfree(_opaque: libz_sys::voidpf, address: libz_sys::voidpf) {
-    unsafe { libc::free(address as *mut _) }
-}
-
+/// raw deflate, no zlib header / trailer, with stock zlib's default
+/// window / memLevel / strategy
 fn raw_deflate(data: &[u8], level: i32) -> Option<Vec<u8>> {
     if !(0..=9).contains(&level) {
         return None;
     }
-    unsafe {
-        let mut strm = libz_sys::z_stream {
-            next_in: std::ptr::null_mut(),
-            avail_in: 0,
-            total_in: 0,
-            next_out: std::ptr::null_mut(),
-            avail_out: 0,
-            total_out: 0,
-            msg: std::ptr::null_mut(),
-            state: std::ptr::null_mut(),
-            zalloc: alt_zalloc,
-            zfree: alt_zfree,
-            opaque: std::ptr::null_mut(),
-            data_type: 0,
-            adler: 0,
-            reserved: 0,
-        };
-        let version = libz_sys::zlibVersion();
-        let rc = libz_sys::deflateInit2_(
-            &mut strm,
-            level,
-            libz_sys::Z_DEFLATED,
-            -15, // raw deflate, no zlib header / trailer
-            8,   // memLevel default
-            libz_sys::Z_DEFAULT_STRATEGY,
-            version,
-            std::mem::size_of::<libz_sys::z_stream>() as i32,
-        );
-        if rc != libz_sys::Z_OK {
-            return None;
-        }
-        let bound = libz_sys::deflateBound(&mut strm, data.len() as libz_sys::uLong) as usize;
-        let mut out = vec![0u8; bound.max(1)];
-        strm.next_in = data.as_ptr() as *mut _;
-        strm.avail_in = data.len() as libz_sys::uInt;
-        strm.next_out = out.as_mut_ptr();
-        strm.avail_out = out.len() as libz_sys::uInt;
-        let rc = libz_sys::deflate(&mut strm, libz_sys::Z_FINISH);
-        if rc != libz_sys::Z_STREAM_END {
-            libz_sys::deflateEnd(&mut strm);
-            return None;
-        }
-        let total_out = strm.total_out as usize;
-        libz_sys::deflateEnd(&mut strm);
-        out.truncate(total_out);
-        Some(out)
-    }
+    Some(alt_deflate::compress_as_zlib(
+        data,
+        level as u8,
+        alt_deflate::Format::Raw,
+    ))
 }
 
 #[cfg(test)]

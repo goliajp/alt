@@ -248,7 +248,7 @@ fn real_git_protected_branch_rejects_entire_atomic_push_and_force_without_review
 #[test]
 #[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
 fn real_git_many_refs_clone_and_bounded_gzip_requests() {
-    use std::io::{Read, Write};
+    use std::io::Read;
     let f = Fixture::new();
     let server = Running::start(&f);
     let temp = tempfile::tempdir().unwrap();
@@ -289,11 +289,7 @@ fn real_git_many_refs_clone_and_bounded_gzip_requests() {
     alt_wire::pkt::write_delim(&mut command).unwrap();
     alt_wire::pkt::write_data(&mut command, b"ref-prefix refs/heads/\n").unwrap();
     alt_wire::pkt::write_flush(&mut command).unwrap();
-    let gzip = |bytes: &[u8]| {
-        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-        encoder.write_all(bytes).unwrap();
-        encoder.finish().unwrap()
-    };
+    let gzip = |bytes: &[u8]| alt_deflate::compress(bytes, 6, alt_deflate::Format::Gzip);
     let send = |path: &str, encoding: &str, body: &[u8], authorized: bool| {
         let mut request = ureq::post(&format!("{}{path}", server.url))
             .timeout(Duration::from_secs(15))

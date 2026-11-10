@@ -30,8 +30,6 @@
 //! prism's value is the libz-produced PNG that ~every authoring tool
 //! emits by default.
 
-use std::io::Read;
-
 use alt_prism::{Decomposition, Prism, PrismId};
 
 pub const PNG_PRISM: PrismId = PrismId(3);
@@ -627,42 +625,22 @@ fn zlib_inflate(input: &[u8], max: usize) -> Option<Vec<u8>> {
     if input.is_empty() {
         return None; // an IDAT zlib stream is never empty
     }
-    let mut out = Vec::new();
-    flate2::read::ZlibDecoder::new(input)
-        .take(max as u64 + 1)
-        .read_to_end(&mut out)
-        .ok()?;
-    if out.len() > max {
-        return None;
-    }
+    let (out, _) = alt_inflate::inflate(alt_inflate::Format::Zlib, input, max).ok()?;
     Some(out)
 }
 
-/// libz `compress2` produces a zlib-wrapped stream with the default
-/// window / memLevel / strategy — exactly what every libpng-using
-/// encoder does, so a level match reproduces the producer's stream
-/// when the producer is also stock libz. No alloc shim needed (the
-/// high-level helper allocates internally).
+/// A zlib-wrapped stream with the default window / memLevel / strategy,
+/// exactly what every libpng-using encoder writes, so a level match
+/// reproduces the producer's stream when the producer is stock libz.
 fn zlib_deflate(data: &[u8], level: i32) -> Option<Vec<u8>> {
     if !(0..=9).contains(&level) {
         return None;
     }
-    unsafe {
-        let mut dest_len = libz_sys::compressBound(data.len() as libz_sys::uLong);
-        let mut dest = vec![0u8; dest_len as usize];
-        let rc = libz_sys::compress2(
-            dest.as_mut_ptr(),
-            &mut dest_len,
-            data.as_ptr(),
-            data.len() as libz_sys::uLong,
-            level,
-        );
-        if rc != libz_sys::Z_OK {
-            return None;
-        }
-        dest.truncate(dest_len as usize);
-        Some(dest)
-    }
+    Some(alt_deflate::compress_as_zlib(
+        data,
+        level as u8,
+        alt_deflate::Format::Zlib,
+    ))
 }
 
 #[cfg(test)]
