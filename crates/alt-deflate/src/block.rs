@@ -17,10 +17,9 @@ const FIXED: u32 = 1;
 const DYNAMIC: u32 = 2;
 
 pub struct Block {
-    /// match distance per symbol, 0 for a literal
-    dists: Vec<u16>,
-    /// literal byte, or match length minus MIN_MATCH
-    lits: Vec<u8>,
+    /// per symbol: the match distance in the upper half (0 for a literal), and the
+    /// literal byte or the match length minus MIN_MATCH in the lower
+    symbols: Vec<u32>,
     literals: Tree,
     distances: Tree,
     bit_lengths: Tree,
@@ -29,8 +28,7 @@ pub struct Block {
 impl Block {
     pub fn new() -> Self {
         let mut block = Self {
-            dists: Vec::with_capacity(SYMBOL_LIMIT),
-            lits: Vec::with_capacity(SYMBOL_LIMIT),
+            symbols: Vec::with_capacity(SYMBOL_LIMIT + 8),
             literals: Tree::new(),
             distances: Tree::new(),
             bit_lengths: Tree::new(),
@@ -40,8 +38,7 @@ impl Block {
     }
 
     fn reset(&mut self) {
-        self.dists.clear();
-        self.lits.clear();
+        self.symbols.clear();
         self.literals.freq.fill(0);
         self.distances.freq.fill(0);
         self.bit_lengths.freq.fill(0);
@@ -50,20 +47,18 @@ impl Block {
 
     /// Returns true when the block is full and must be flushed.
     pub fn tally_literal(&mut self, byte: u8) -> bool {
-        self.dists.push(0);
-        self.lits.push(byte);
+        self.symbols.push(u32::from(byte));
         self.literals.freq[byte as usize] += 1;
-        self.dists.len() == SYMBOL_LIMIT
+        self.symbols.len() == SYMBOL_LIMIT
     }
 
     /// Returns true when the block is full and must be flushed.
     pub fn tally_match(&mut self, dist: usize, len: usize) -> bool {
         let lc = len - MIN_MATCH;
-        self.dists.push(dist as u16);
-        self.lits.push(lc as u8);
+        self.symbols.push((dist as u32) << 16 | lc as u32);
         self.literals.freq[LENGTH_CODE[lc] as usize + LITERALS + 1] += 1;
         self.distances.freq[dist_code(dist - 1)] += 1;
-        self.dists.len() == SYMBOL_LIMIT
+        self.symbols.len() == SYMBOL_LIMIT
     }
 
     /// Writes the block in its smallest encoding. `raw` is the input the
@@ -157,25 +152,30 @@ impl Block {
         (lcode, llen): (&[u16], &[u8]),
         (dcode, dlen): (&[u16], &[u8]),
     ) {
-        for (&dist, &lc) in self.dists.iter().zip(&self.lits) {
-            let lc = lc as usize;
-            if dist == 0 {
-                out.put(u32::from(lcode[lc]), u32::from(llen[lc]));
-                continue;
-            }
-            let code = LENGTH_CODE[lc] as usize;
-            let symbol = code + LITERALS + 1;
-            out.put(u32::from(lcode[symbol]), u32::from(llen[symbol]));
-            let extra = u32::from(EXTRA_LBITS[code]);
-            if extra != 0 {
-                out.put((lc - BASE_LENGTH[code] as usize) as u32, extra);
-            }
-            let dist = dist as usize - 1;
-            let code = dist_code(dist);
-            out.put(u32::from(dcode[code]), u32::from(dlen[code]));
-            let extra = u32::from(EXTRA_DBITS[code]);
-            if extra != 0 {
-                out.put((dist - BASE_DIST[code] as usize) as u32, extra);
+        // a symbol is at most 48 bits: a length and a distance with their extra bits
+        out.reserve(self.symbols.len() * 6 + 8);
+        for symbol in &self.symbols {
+            let (dist, lc) = (symbol >> 16, (symbol & 0xffff) as usize);
+            // room for every symbol of the block was reserved above
+            unsafe {
+                if dist == 0 {
+                    out.put_reserved(u32::from(lcode[lc]), u32::from(llen[lc]));
+                    continue;
+                }
+                // a code and its extra bits go out together: at most 20 and 28 bits;
+                // the longest length has its own code, whose base the table leaves at zero
+                let code = LENGTH_CODE[lc] as usize;
+                let symbol = code + LITERALS + 1;
+                let bits = u32::from(llen[symbol]);
+                let extra_bits = u32::from(EXTRA_LBITS[code]);
+                let extra = (lc - BASE_LENGTH[code] as usize) as u32 & ((1 << extra_bits) - 1);
+                out.put_reserved(u32::from(lcode[symbol]) | extra << bits, bits + extra_bits);
+                let dist = dist as usize - 1;
+                let code = dist_code(dist);
+                let bits = u32::from(dlen[code]);
+                let extra_bits = u32::from(EXTRA_DBITS[code]);
+                let extra = (dist - BASE_DIST[code] as usize) as u32;
+                out.put_reserved(u32::from(dcode[code]) | extra << bits, bits + extra_bits);
             }
         }
         out.put(u32::from(lcode[END_BLOCK]), u32::from(llen[END_BLOCK]));
