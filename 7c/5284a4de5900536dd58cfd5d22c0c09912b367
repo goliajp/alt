@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: tolerate a busy script file in the failed git probe test
+author-type: human
+author: doracawl
+touched: crates/alt-delivery/src/tests.rs
