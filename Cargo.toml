@@ -35,7 +35,9 @@ alt-git-config = { path = "crates/alt-git-config" }
 alt-store = { path = "crates/alt-store" }
 alt-git-index = { path = "crates/alt-git-index" }
 alt-git-pack = { path = "crates/alt-git-pack" }
+alt-deflate = { path = "crates/alt-deflate" }
 alt-hash = { path = "crates/alt-hash" }
+alt-inflate = { path = "crates/alt-inflate" }
 alt-export = { path = "crates/alt-export" }
 alt-flow = { path = "crates/alt-flow" }
 alt-git-refs = { path = "crates/alt-git-refs" }

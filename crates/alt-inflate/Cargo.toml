@@ -1,0 +1,12 @@
+[package]
+name = "alt-inflate"
+description = "DEFLATE, zlib and gzip decompression, with no dependencies"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+alt-hash.workspace = true
+
+[dev-dependencies]
+flate2.workspace = true

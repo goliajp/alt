@@ -257,3 +257,26 @@ fn crc32_matches_the_definition_at_every_length_and_split() {
         );
     }
 }
+
+#[test]
+fn adler32_matches_the_definition() {
+    assert_eq!(alt_hash::adler32(1, b""), 1);
+    assert_eq!(alt_hash::adler32(1, b"Wikipedia"), 0x11e6_0398);
+    let data = noise(200_000, 99);
+    for len in [1usize, 15, 16, 17, 5551, 5552, 5553, 70_000, 200_000] {
+        let (mut low, mut high) = (1u64, 0u64);
+        for byte in &data[..len] {
+            low = (low + *byte as u64) % 65521;
+            high = (high + low) % 65521;
+        }
+        let expected = (high << 16 | low) as u32;
+        assert_eq!(alt_hash::adler32(1, &data[..len]), expected, "length {len}");
+        let cut = len / 3;
+        let first = alt_hash::adler32(1, &data[..cut]);
+        assert_eq!(
+            alt_hash::adler32(first, &data[cut..len]),
+            expected,
+            "split {len}"
+        );
+    }
+}
