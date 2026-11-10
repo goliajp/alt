@@ -1,0 +1,19 @@
+schema: alt-meta/1
+type: chore
+summary: format, drop unused upgrade test helper, keep dead connections out of the pool
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/examples/ingest.rs
+touched: crates/alt-pack-segment/src/format.rs
+touched: crates/alt-pack-segment/src/ingest.rs
+touched: crates/alt-pack-segment/src/scan.rs
+touched: crates/alt-pack-segment/src/send.rs
+touched: crates/alt-pack-segment/src/set.rs
+touched: crates/alt-pack-segment/tests/it/main.rs
+touched: crates/alt-server-store/src/packs.rs
+touched: crates/alt-server-store/src/publication.rs
+touched: crates/alt-server/src/git.rs
+touched: crates/alt-server/src/git_packs.rs
+touched: crates/alt-server/src/http.rs
+touched: crates/alt-server/tests/it/database/git.rs
+touched: crates/alt-server/tests/it/database/operator/maintenance.rs
