@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: build self-hosted bundles with the classic Docker image store in the release workflow
+author-type: human
+author: doracawl
+touched: self-hosted/README.md
+touched: self-hosted/ci/selfhosted-image.yml
