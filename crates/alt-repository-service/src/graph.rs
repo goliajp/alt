@@ -395,8 +395,8 @@ pub fn verify_object(
         return Err(Error::Integrity("object size mismatch"));
     }
     let actual = match oid.algo() {
-        HashAlgo::Sha1 => ObjectId::Sha1(sha1.finalize().into()),
-        HashAlgo::Sha256 => ObjectId::Sha256(sha256.finalize().into()),
+        HashAlgo::Sha1 => ObjectId::Sha1(sha1.finalize()),
+        HashAlgo::Sha256 => ObjectId::Sha256(sha256.finalize()),
     };
     if actual != oid {
         return Err(Error::Integrity("object hash mismatch"));
