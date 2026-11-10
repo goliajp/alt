@@ -219,38 +219,53 @@ mod arm {
     use super::K;
     use std::arch::aarch64::*;
 
+    /// Four rounds. `$m` holds this group's schedule words; when `$extend` is set it is
+    /// replaced by the words needed four groups later.
+    macro_rules! group {
+        ($abcd:ident, $e:ident, $f:ident, $k:expr, $m:ident, $n1:ident, $n2:ident, $n3:ident, $extend:expr) => {
+            let input = vaddq_u32($m, $k);
+            let next = vsha1h_u32(vgetq_lane_u32($abcd, 0));
+            $abcd = $f($abcd, $e, input);
+            $e = next;
+            if $extend {
+                $m = vsha1su1q_u32(vsha1su0q_u32($m, $n1, $n2), $n3);
+            }
+        };
+    }
+
     /// SHA-1 with the ARMv8 cryptography extension: four rounds per instruction
     #[target_feature(enable = "sha2")]
     pub(super) unsafe fn compress(state: &mut [u32; 5], blocks: &[u8]) {
         unsafe {
+            let k = K.map(|value| vdupq_n_u32(value));
             let mut abcd = vld1q_u32(state.as_ptr());
             let mut e = state[4];
             for block in blocks.as_chunks::<64>().0 {
                 let (saved_abcd, saved_e) = (abcd, e);
-                let mut m = [
-                    vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(block.as_ptr()))),
-                    vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(block.as_ptr().add(16)))),
-                    vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(block.as_ptr().add(32)))),
-                    vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(block.as_ptr().add(48)))),
-                ];
-                for group in 0..20 {
-                    let slot = group % 4;
-                    let input = vaddq_u32(m[slot], vdupq_n_u32(K[group / 5]));
-                    let next_e = vsha1h_u32(vgetq_lane_u32(abcd, 0));
-                    abcd = match group / 5 {
-                        0 => vsha1cq_u32(abcd, e, input),
-                        2 => vsha1mq_u32(abcd, e, input),
-                        _ => vsha1pq_u32(abcd, e, input),
-                    };
-                    e = next_e;
-                    if group < 16 {
-                        // the four schedule words used four groups from now
-                        m[slot] = vsha1su1q_u32(
-                            vsha1su0q_u32(m[slot], m[(slot + 1) % 4], m[(slot + 2) % 4]),
-                            m[(slot + 3) % 4],
-                        );
-                    }
-                }
+                let mut m0 = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(block.as_ptr())));
+                let mut m1 = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(block.as_ptr().add(16))));
+                let mut m2 = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(block.as_ptr().add(32))));
+                let mut m3 = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(block.as_ptr().add(48))));
+                group!(abcd, e, vsha1cq_u32, k[0], m0, m1, m2, m3, true);
+                group!(abcd, e, vsha1cq_u32, k[0], m1, m2, m3, m0, true);
+                group!(abcd, e, vsha1cq_u32, k[0], m2, m3, m0, m1, true);
+                group!(abcd, e, vsha1cq_u32, k[0], m3, m0, m1, m2, true);
+                group!(abcd, e, vsha1cq_u32, k[0], m0, m1, m2, m3, true);
+                group!(abcd, e, vsha1pq_u32, k[1], m1, m2, m3, m0, true);
+                group!(abcd, e, vsha1pq_u32, k[1], m2, m3, m0, m1, true);
+                group!(abcd, e, vsha1pq_u32, k[1], m3, m0, m1, m2, true);
+                group!(abcd, e, vsha1pq_u32, k[1], m0, m1, m2, m3, true);
+                group!(abcd, e, vsha1pq_u32, k[1], m1, m2, m3, m0, true);
+                group!(abcd, e, vsha1mq_u32, k[2], m2, m3, m0, m1, true);
+                group!(abcd, e, vsha1mq_u32, k[2], m3, m0, m1, m2, true);
+                group!(abcd, e, vsha1mq_u32, k[2], m0, m1, m2, m3, true);
+                group!(abcd, e, vsha1mq_u32, k[2], m1, m2, m3, m0, true);
+                group!(abcd, e, vsha1mq_u32, k[2], m2, m3, m0, m1, true);
+                group!(abcd, e, vsha1pq_u32, k[3], m3, m0, m1, m2, true);
+                group!(abcd, e, vsha1pq_u32, k[3], m0, m1, m2, m3, false);
+                group!(abcd, e, vsha1pq_u32, k[3], m1, m2, m3, m0, false);
+                group!(abcd, e, vsha1pq_u32, k[3], m2, m3, m0, m1, false);
+                group!(abcd, e, vsha1pq_u32, k[3], m3, m0, m1, m2, false);
                 abcd = vaddq_u32(abcd, saved_abcd);
                 e = e.wrapping_add(saved_e);
             }

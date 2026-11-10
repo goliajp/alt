@@ -78,13 +78,13 @@ pub fn hex(oid: &Oid) -> String {
     oid.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
+pub(crate) fn object_header(kind: Kind, len: usize) -> String {
+    format!("{} {len}\0", kind.name())
+}
+
 pub(crate) fn object_id(kind: Kind, data: &[u8]) -> Oid {
-    use sha1::Digest;
-    let mut hasher = sha1::Sha1::new();
-    hasher.update(kind.name().as_bytes());
-    hasher.update(b" ");
-    hasher.update(data.len().to_string().as_bytes());
-    hasher.update([0]);
+    let mut hasher = alt_hash::Sha1::new();
+    hasher.update(object_header(kind, data.len()).as_bytes());
     hasher.update(data);
-    hasher.finalize().into()
+    hasher.finalize()
 }

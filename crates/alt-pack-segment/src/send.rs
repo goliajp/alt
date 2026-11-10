@@ -7,7 +7,6 @@ use crate::{
     object::{self, Parsed},
     scan::{self, Form},
 };
-use sha1::Digest;
 use std::{
     collections::{BinaryHeap, HashMap, HashSet},
     io::Write,
@@ -15,7 +14,7 @@ use std::{
 
 struct Hashing<'a, W: Write> {
     inner: &'a mut W,
-    hasher: sha1::Sha1,
+    hasher: alt_hash::Sha1,
 }
 
 impl<W: Write> Hashing<'_, W> {
@@ -61,7 +60,7 @@ pub fn build_pack<'a>(
         encoder.write_all(data)?;
         pack = encoder.finish()?;
     }
-    let trailer = sha1::Sha1::digest(&pack);
+    let trailer = alt_hash::sha1(&pack);
     pack.extend_from_slice(&trailer);
     Ok(pack)
 }
@@ -127,7 +126,7 @@ impl SegmentSet {
         }
         let mut out = Hashing {
             inner: out,
-            hasher: sha1::Sha1::new(),
+            hasher: alt_hash::Sha1::new(),
         };
         out.put(&pack_header(self.objects())?)?;
         for segment in self.segments() {
@@ -291,7 +290,7 @@ impl SegmentSet {
         let chosen: HashSet<&Oid> = selection.objects.iter().collect();
         let mut out = Hashing {
             inner: out,
-            hasher: sha1::Sha1::new(),
+            hasher: alt_hash::Sha1::new(),
         };
         out.put(&pack_header(selection.objects.len() as u64)?)?;
         for oid in &selection.objects {

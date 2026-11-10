@@ -157,9 +157,8 @@ fn descend(
 
 /// `pack` is the complete received pack including its trailer
 pub fn ingest(pack: &[u8], existing: &SegmentSet, limits: &Limits) -> Result<Ingested, Error> {
-    use sha1::Digest;
     let (trailer, scanned) = rayon::join(
-        || -> Oid { sha1::Sha1::digest(&pack[..pack.len().saturating_sub(20)]).into() },
+        || -> Oid { alt_hash::sha1(&pack[..pack.len().saturating_sub(20)]) },
         || {
             let mut large = HashMap::new();
             scan::scan(pack, limits, KEEP, |index, kind, data| {
@@ -198,35 +197,60 @@ pub fn ingest(pack: &[u8], existing: &SegmentSet, limits: &Limits) -> Result<Ing
         limits,
     };
 
-    // plain entries: hash and parse in parallel
-    let plain: Vec<(usize, Meta)> = entries
-        .par_iter()
+    // Plain entries: object ids for a batch of objects are computed together, several
+    // messages per step of the hash; batches run in parallel.
+    let plain_indexes: Vec<usize> = entries
+        .iter()
         .enumerate()
-        .filter_map(|(index, raw)| {
-            let Form::Plain(kind) = raw.form else {
-                return None;
-            };
-            Some(match &raw.data {
-                Some(data) => object::parse(kind, data).map(|parsed| {
-                    let (oid, blake3) = digest(kind, data);
-                    (
-                        index,
-                        Meta {
-                            oid,
-                            blake3,
-                            kind,
-                            size: raw.size,
-                            depth: 0,
-                            base: None,
-                            outside: false,
-                            parsed,
-                        },
-                    )
-                }),
-                None => {
-                    let (kind, (oid, blake3), size) = large[&index];
-                    Ok((
-                        index,
+        .filter(|(_, raw)| matches!(raw.form, Form::Plain(_)))
+        .map(|(index, _)| index)
+        .collect();
+    let plain: Vec<(usize, Meta)> = plain_indexes
+        .par_chunks(256)
+        .map(|batch| -> Result<Vec<(usize, Meta)>, Error> {
+            let kept: Vec<(usize, Kind, &[u8])> = batch
+                .iter()
+                .filter_map(|index| {
+                    let raw = &entries[*index];
+                    let Form::Plain(kind) = raw.form else {
+                        return None;
+                    };
+                    raw.data.as_deref().map(|data| (*index, kind, data))
+                })
+                .collect();
+            let headers: Vec<String> = kept
+                .iter()
+                .map(|(_, kind, data)| crate::object_header(*kind, data.len()))
+                .collect();
+            let parts: Vec<[&[u8]; 2]> = headers
+                .iter()
+                .zip(&kept)
+                .map(|(header, (_, _, data))| [header.as_bytes(), *data])
+                .collect();
+            let messages: Vec<&[&[u8]]> = parts.iter().map(|pair| pair.as_slice()).collect();
+            let oids = alt_hash::sha1_many(&messages);
+            let mut out = Vec::with_capacity(batch.len());
+            for ((index, kind, data), oid) in kept.iter().zip(oids) {
+                out.push((
+                    *index,
+                    Meta {
+                        oid,
+                        blake3: *blake3::hash(data).as_bytes(),
+                        kind: *kind,
+                        size: data.len() as u64,
+                        depth: 0,
+                        base: None,
+                        outside: false,
+                        parsed: object::parse(*kind, data)?,
+                    },
+                ));
+            }
+            for index in batch {
+                // large blobs were hashed during the scan and are not kept in memory
+                if entries[*index].data.is_none() {
+                    let (kind, (oid, blake3), size) = large[index];
+                    out.push((
+                        *index,
                         Meta {
                             oid,
                             blake3,
@@ -237,11 +261,15 @@ pub fn ingest(pack: &[u8], existing: &SegmentSet, limits: &Limits) -> Result<Ing
                             outside: false,
                             parsed: Parsed::Blob,
                         },
-                    ))
+                    ));
                 }
-            })
+            }
+            Ok(out)
         })
-        .collect::<Result<_, Error>>()?;
+        .collect::<Result<Vec<_>, Error>>()?
+        .into_iter()
+        .flatten()
+        .collect();
     let mut metas: Vec<Option<Meta>> = (0..entries.len()).map(|_| None).collect();
     let mut roots = Vec::new();
     for (index, meta) in plain {

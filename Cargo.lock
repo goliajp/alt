@@ -341,11 +341,11 @@ name = "alt-pack-segment"
 version = "0.1.0"
 dependencies = [
  "alt-git-pack",
+ "alt-hash",
  "blake3",
  "flate2",
  "memmap2",
  "rayon",
- "sha1",
  "tempfile",
  "thiserror",
 ]

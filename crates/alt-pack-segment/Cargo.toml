@@ -7,11 +7,11 @@ license.workspace = true
 
 [dependencies]
 alt-git-pack.workspace = true
+alt-hash.workspace = true
 blake3.workspace = true
 flate2.workspace = true
 memmap2.workspace = true
 rayon.workspace = true
-sha1.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
