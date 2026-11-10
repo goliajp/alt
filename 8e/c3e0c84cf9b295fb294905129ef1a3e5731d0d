@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: idle pool threads look for work for a moment before sleeping, and waiters help
+author-type: human
+author: doracawl
+touched: crates/alt-threads/src/lib.rs
