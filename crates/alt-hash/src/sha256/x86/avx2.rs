@@ -33,10 +33,11 @@ static TABLE: Table = Table({
     table
 });
 
-/// schedule words plus round constant: sixteen groups of four, first block in the low
-/// half of each group and second block in the high half
+/// Schedule words plus round constant: sixteen groups of four, first block in the low
+/// half of each group and second block in the high half. A copy of the round constants
+/// follows, so that one cursor reaches both.
 #[repr(C, align(32))]
-struct Words(std::mem::MaybeUninit<[u8; 512]>);
+struct Words(std::mem::MaybeUninit<[u8; 1024]>);
 
 /// loads one group of four words of both blocks
 macro_rules! load {
@@ -61,7 +62,7 @@ macro_rules! load {
             ", ymm13\n",
             "vpaddd ymm8, ",
             $y,
-            ", ymmword ptr [r13 + ",
+            ", ymmword ptr [r11 + 512 + ",
             $g,
             "*32]\n",
             "vmovdqa ymmword ptr [r11 + ",
@@ -71,7 +72,8 @@ macro_rules! load {
     };
 }
 
-/// The next group of four schedule words. `$x0` holds the group sixteen words back and
+/// The next group of four schedule words, written 128 bytes ahead of the round cursor
+/// in r15. `$x0` holds the group sixteen words back and
 /// receives the new one; `$x1`..`$x3` are the groups after it. The small sigma of the
 /// two newest words is needed by the last two words of the same group, so it is taken
 /// in two halves; a rotation of a word is a shift of the word doubled into 64 bits.
@@ -137,10 +139,10 @@ macro_rules! extend {
             ", ymm8\n",
             "vpaddd ymm8, ",
             $x0,
-            ", ymmword ptr [r13 + rax + ",
+            ", ymmword ptr [r15 + 640 + ",
             $i,
             "*32]\n",
-            "vmovdqa ymmword ptr [r11 + rax + ",
+            "vmovdqa ymmword ptr [r15 + 128 + ",
             $i,
             "*32], ymm8\n",
         )
@@ -246,15 +248,25 @@ pub(in super::super) unsafe fn compress(state: &mut [u32; 8], blocks: &[u8]) {
         return;
     }
     let mut words = Words(std::mem::MaybeUninit::uninit());
+    // the table is 560 bytes and the buffer 1024: the constants fit behind the words
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            (&raw const TABLE).cast::<u8>(),
+            words.0.as_mut_ptr().cast::<u8>().add(512),
+            512,
+        );
+    }
     // The rounds need every general register, so the pointers wait on the stack:
-    // [rsp] end of the words of the block being processed, [rsp + 8] state,
-    // [rsp + 16] input, [rsp + 24] blocks left, [rsp + 32] words, [rsp + 40] table.
+    // [rsp] where the plain rounds of the current block end, [rsp + 8] state,
+    // [rsp + 16] input, [rsp + 24] blocks left, [rsp + 32] words, [rsp + 40] where the
+    // rounds that carry the schedule end. The first block's rounds 0..48 compute the
+    // schedule of both blocks one loop pass ahead of its use; everything after that
+    // is the plain eight-round loop.
     unsafe {
         std::arch::asm!(
             "sub rsp, 48\n",
             "mov qword ptr [rsp + 8], r12\n",
             "mov qword ptr [rsp + 32], r11\n",
-            "mov qword ptr [rsp + 40], r13\n",
             "vbroadcasti128 ymm13, xmmword ptr [r13 + 512]\n",
             "vbroadcasti128 ymm14, xmmword ptr [r13 + 528]\n",
             "vbroadcasti128 ymm15, xmmword ptr [r13 + 544]\n",
@@ -267,21 +279,13 @@ pub(in super::super) unsafe fn compress(state: &mut [u32; 8], blocks: &[u8]) {
             load!(1, "ymm1", "xmm1"),
             load!(2, "ymm2", "xmm2"),
             load!(3, "ymm3", "xmm3"),
-            "mov eax, 128\n",
-            "6:\n",
-            extend!(0, "ymm0", "ymm1", "ymm2", "ymm3"),
-            extend!(1, "ymm1", "ymm2", "ymm3", "ymm0"),
-            extend!(2, "ymm2", "ymm3", "ymm0", "ymm1"),
-            extend!(3, "ymm3", "ymm0", "ymm1", "ymm2"),
-            "add eax, 128\n",
-            "cmp eax, 512\n",
-            "jne 6b\n",
             "mov qword ptr [rsp + 16], r14\n",
             "mov qword ptr [rsp + 24], r15\n",
             "mov r15, r11\n",
+            "lea rax, [r11 + 384]\n",
+            "mov qword ptr [rsp + 40], rax\n",
             "lea rax, [r11 + 512]\n",
             "mov qword ptr [rsp], rax\n",
-            "3:\n",
             "mov r12, qword ptr [rsp + 8]\n",
             "mov eax, dword ptr [r12 + 0]\n",
             "mov ecx, dword ptr [r12 + 4]\n",
@@ -293,6 +297,30 @@ pub(in super::super) unsafe fn compress(state: &mut [u32; 8], blocks: &[u8]) {
             "mov r10d, dword ptr [r12 + 28]\n",
             "mov r13d, ecx\n",
             "xor r13d, edx\n",
+            "8:\n",
+            round!("eax", "ecx", "edx", "esi", "edi", "r8d", "r9d", "r10d", "r13d", "r14d", 0),
+            round!("r10d", "eax", "ecx", "edx", "esi", "edi", "r8d", "r9d", "r14d", "r13d", 4),
+            round!("r9d", "r10d", "eax", "ecx", "edx", "esi", "edi", "r8d", "r13d", "r14d", 8),
+            round!("r8d", "r9d", "r10d", "eax", "ecx", "edx", "esi", "edi", "r14d", "r13d", 12),
+            extend!(0, "ymm0", "ymm1", "ymm2", "ymm3"),
+            round!("edi", "r8d", "r9d", "r10d", "eax", "ecx", "edx", "esi", "r13d", "r14d", 32),
+            round!("esi", "edi", "r8d", "r9d", "r10d", "eax", "ecx", "edx", "r14d", "r13d", 36),
+            round!("edx", "esi", "edi", "r8d", "r9d", "r10d", "eax", "ecx", "r13d", "r14d", 40),
+            round!("ecx", "edx", "esi", "edi", "r8d", "r9d", "r10d", "eax", "r14d", "r13d", 44),
+            extend!(1, "ymm1", "ymm2", "ymm3", "ymm0"),
+            round!("eax", "ecx", "edx", "esi", "edi", "r8d", "r9d", "r10d", "r13d", "r14d", 64),
+            round!("r10d", "eax", "ecx", "edx", "esi", "edi", "r8d", "r9d", "r14d", "r13d", 68),
+            round!("r9d", "r10d", "eax", "ecx", "edx", "esi", "edi", "r8d", "r13d", "r14d", 72),
+            round!("r8d", "r9d", "r10d", "eax", "ecx", "edx", "esi", "edi", "r14d", "r13d", 76),
+            extend!(2, "ymm2", "ymm3", "ymm0", "ymm1"),
+            round!("edi", "r8d", "r9d", "r10d", "eax", "ecx", "edx", "esi", "r13d", "r14d", 96),
+            round!("esi", "edi", "r8d", "r9d", "r10d", "eax", "ecx", "edx", "r14d", "r13d", 100),
+            round!("edx", "esi", "edi", "r8d", "r9d", "r10d", "eax", "ecx", "r13d", "r14d", 104),
+            round!("ecx", "edx", "esi", "edi", "r8d", "r9d", "r10d", "eax", "r14d", "r13d", 108),
+            extend!(3, "ymm3", "ymm0", "ymm1", "ymm2"),
+            "add r15, 128\n",
+            "cmp r15, qword ptr [rsp + 40]\n",
+            "jne 8b\n",
             "7:\n",
             round!("eax", "ecx", "edx", "esi", "edi", "r8d", "r9d", "r10d", "r13d", "r14d", 0),
             round!("r10d", "eax", "ecx", "edx", "esi", "edi", "r8d", "r9d", "r14d", "r13d", 4),
@@ -331,9 +359,19 @@ pub(in super::super) unsafe fn compress(state: &mut [u32; 8], blocks: &[u8]) {
             "lea r15, [r11 + 16]\n",
             "lea r12, [r11 + 528]\n",
             "mov qword ptr [rsp], r12\n",
-            "jmp 3b\n",
+            "mov r12, qword ptr [rsp + 8]\n",
+            "mov eax, dword ptr [r12 + 0]\n",
+            "mov ecx, dword ptr [r12 + 4]\n",
+            "mov edx, dword ptr [r12 + 8]\n",
+            "mov esi, dword ptr [r12 + 12]\n",
+            "mov edi, dword ptr [r12 + 16]\n",
+            "mov r8d, dword ptr [r12 + 20]\n",
+            "mov r9d, dword ptr [r12 + 24]\n",
+            "mov r10d, dword ptr [r12 + 28]\n",
+            "mov r13d, ecx\n",
+            "xor r13d, edx\n",
+            "jmp 7b\n",
             "5:\n",
-            "mov r13, qword ptr [rsp + 40]\n",
             "mov r14, qword ptr [rsp + 16]\n",
             "mov r15, qword ptr [rsp + 24]\n",
             "add r14, 128\n",
