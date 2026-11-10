@@ -7,7 +7,7 @@
 //! read straight from memory.
 
 use super::IV;
-use super::lanes::Batch;
+use super::lanes::{Batch, Lanes};
 use super::sse41;
 use std::arch::x86_64::*;
 
@@ -201,6 +201,117 @@ unsafe fn compress_group(batch: &Batch, input: &[u8], counter: u64, out: &mut [u
     }
 }
 
+#[repr(C, align(16))]
+struct Quarter<const N: usize>([__m128i; N]);
+
+/// Compresses the four nodes in `input`, the first of which counts `counter`, and
+/// writes their chaining values to `out`: the same rounds in the lower halves of the
+/// registers.
+#[target_feature(enable = "avx2")]
+unsafe fn compress_four(batch: &Batch, input: &[u8], counter: u64, out: &mut [u8]) {
+    assert!(input.len() == 4 * batch.node_len && out.len() == 4 * 32);
+    let (mut low, mut high) = ([0u32; 8], [0u32; 8]);
+    for lane in 0..4 {
+        let count = counter + if batch.increment { lane as u64 } else { 0 };
+        low[lane] = count as u32;
+        high[lane] = (count >> 32) as u32;
+    }
+    let blocks = batch.node_len / 64;
+    // every load stays inside `input` and the store inside `out`, whose lengths were
+    // just checked; the assembly reads and writes only the three arrays it is given
+    unsafe {
+        let key = batch.key;
+        let mut h = Quarter(std::array::from_fn(|word| _mm_set1_epi32(key[word] as i32)));
+        let (low, high) = (
+            <__m128i as Lanes>::words(&low),
+            <__m128i as Lanes>::words(&high),
+        );
+        let mut flags = batch.flags | batch.flags_start;
+        for block in 0..blocks {
+            if block + 1 == blocks {
+                flags |= batch.flags_end;
+            }
+            let message = Quarter(<__m128i as Lanes>::load(
+                input.as_ptr().add(block * 64),
+                batch.node_len,
+            ));
+            let mut rest = Quarter([
+                _mm_set1_epi32(IV[0] as i32),
+                _mm_set1_epi32(IV[1] as i32),
+                _mm_set1_epi32(IV[2] as i32),
+                _mm_set1_epi32(IV[3] as i32),
+                low,
+                high,
+                _mm_set1_epi32(64),
+                _mm_set1_epi32(flags as i32),
+            ]);
+            std::arch::asm!(
+                "vmovdqa xmm0, xmmword ptr [rsi]\n",
+                "vmovdqa xmm1, xmmword ptr [rsi + 16]\n",
+                "vmovdqa xmm2, xmmword ptr [rsi + 32]\n",
+                "vmovdqa xmm3, xmmword ptr [rsi + 48]\n",
+                "vmovdqa xmm4, xmmword ptr [rsi + 64]\n",
+                "vmovdqa xmm5, xmmword ptr [rsi + 80]\n",
+                "vmovdqa xmm6, xmmword ptr [rsi + 96]\n",
+                "vmovdqa xmm7, xmmword ptr [rsi + 112]\n",
+                "vmovdqa xmm9, xmmword ptr [rdx + 16]\n",
+                "vmovdqa xmm10, xmmword ptr [rdx + 32]\n",
+                "vmovdqa xmm11, xmmword ptr [rdx + 48]\n",
+                "vmovdqa xmm12, xmmword ptr [rdx + 64]\n",
+                "vmovdqa xmm13, xmmword ptr [rdx + 80]\n",
+                "vmovdqa xmm14, xmmword ptr [rdx + 96]\n",
+                "vmovdqa xmm15, xmmword ptr [rdx + 112]\n",
+                round_four!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15),
+                round_four!(2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8),
+                round_four!(3, 4, 10, 12, 13, 2, 7, 14, 6, 5, 9, 0, 11, 15, 8, 1),
+                round_four!(10, 7, 12, 9, 14, 3, 13, 15, 4, 0, 11, 2, 5, 8, 1, 6),
+                round_four!(12, 13, 9, 11, 15, 10, 14, 8, 7, 2, 5, 3, 0, 1, 6, 4),
+                round_four!(9, 14, 11, 5, 8, 12, 15, 1, 13, 3, 0, 10, 2, 6, 4, 7),
+                round_four!(11, 15, 5, 0, 1, 9, 8, 6, 14, 10, 2, 12, 3, 4, 7, 13),
+                "vpxor xmm0, xmm0, xmmword ptr [rdx]\n",
+                "vpxor xmm1, xmm1, xmm9\n",
+                "vpxor xmm2, xmm2, xmm10\n",
+                "vpxor xmm3, xmm3, xmm11\n",
+                "vpxor xmm4, xmm4, xmm12\n",
+                "vpxor xmm5, xmm5, xmm13\n",
+                "vpxor xmm6, xmm6, xmm14\n",
+                "vpxor xmm7, xmm7, xmm15\n",
+                "vmovdqa xmmword ptr [rsi], xmm0\n",
+                "vmovdqa xmmword ptr [rsi + 16], xmm1\n",
+                "vmovdqa xmmword ptr [rsi + 32], xmm2\n",
+                "vmovdqa xmmword ptr [rsi + 48], xmm3\n",
+                "vmovdqa xmmword ptr [rsi + 64], xmm4\n",
+                "vmovdqa xmmword ptr [rsi + 80], xmm5\n",
+                "vmovdqa xmmword ptr [rsi + 96], xmm6\n",
+                "vmovdqa xmmword ptr [rsi + 112], xmm7\n",
+                in("rdi") message.0.as_ptr(),
+                in("rsi") h.0.as_mut_ptr(),
+                in("rdx") rest.0.as_mut_ptr(),
+                in("rcx") &raw const ROTATIONS,
+                out("ymm0") _,
+                out("ymm1") _,
+                out("ymm2") _,
+                out("ymm3") _,
+                out("ymm4") _,
+                out("ymm5") _,
+                out("ymm6") _,
+                out("ymm7") _,
+                out("ymm8") _,
+                out("ymm9") _,
+                out("ymm10") _,
+                out("ymm11") _,
+                out("ymm12") _,
+                out("ymm13") _,
+                out("ymm14") _,
+                out("ymm15") _,
+                options(nostack),
+            );
+            flags = batch.flags;
+        }
+        <__m128i as Lanes>::store(&h.0, out.as_mut_ptr());
+    }
+}
+
 /// Compresses the nodes in `input` eight at a time, then four at a time, and
 /// returns what is left of the input and of `out`, and the counter of the next node.
 #[target_feature(enable = "avx2")]
@@ -219,6 +330,14 @@ pub(super) unsafe fn hash_many<'a, 'b>(
         for (group, out) in wide.zip(wide_out.as_chunks_mut::<{ 8 * 32 }>().0) {
             compress_group(batch, group, counter, out);
             counter += 8 * batch.increment as u64;
+        }
+        let (mut rest, mut rest_out) = (rest, rest_out);
+        if rest.len() >= 4 * batch.node_len {
+            let (four, after) = rest.split_at(4 * batch.node_len);
+            let (four_out, after_out) = rest_out.split_at_mut(4 * 32);
+            compress_four(batch, four, counter, four_out);
+            counter += 4 * batch.increment as u64;
+            (rest, rest_out) = (after, after_out);
         }
         sse41::hash_many(batch, rest, counter, rest_out)
     }
