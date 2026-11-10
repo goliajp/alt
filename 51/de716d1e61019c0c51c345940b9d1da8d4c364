@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: perf
+summary: sha-1 on x86 with the schedule spread over both blocks and shorter paths behind the newest value
+author-type: human
+author: doracawl
+touched: crates/alt-hash/src/sha1/x86/avx2.rs
+touched: crates/alt-hash/src/sha1/x86/avx2/schedule.rs
