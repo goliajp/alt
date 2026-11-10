@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: perf
+summary: four blake3 lanes in assembly on avx2 processors
+author-type: human
+author: doracawl
+touched: crates/alt-hash/src/blake3/avx2.rs
+touched: crates/alt-hash/src/blake3/avx2/rounds.rs
