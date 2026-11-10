@@ -176,6 +176,9 @@ unsafe fn streams<const N: usize>(register: u32, mut data: &[u8], mixed: bool) -
             while data.len() >= mixed_bytes(16) {
                 mixed_chunk::<16>(v, &mut data);
             }
+            while data.len() >= mixed_bytes(8) {
+                mixed_chunk::<8>(v, &mut data);
+            }
             while data.len() >= mixed_bytes(4) {
                 mixed_chunk::<4>(v, &mut data);
             }
