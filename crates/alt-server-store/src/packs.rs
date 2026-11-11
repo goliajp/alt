@@ -128,6 +128,51 @@ pub(crate) fn object_kind(kind: Kind) -> ObjectKind {
     }
 }
 
+/// The objects of a repository's segments as a graph: commits from the stored commit
+/// graph, everything else read on demand.
+pub struct SegmentGraph<'a> {
+    pub set: &'a SegmentSet,
+    pub limits: alt_repository_service::GraphLimits,
+}
+
+impl Graph for SegmentGraph<'_> {
+    fn node(
+        &self,
+        oid: ObjectId,
+    ) -> alt_repository_service::Result<std::borrow::Cow<'_, alt_repository_service::Node>> {
+        use alt_repository_service::{Error as E, Node, parse_node};
+        let key: [u8; 20] = oid.as_bytes().try_into().map_err(|_| E::Missing(oid))?;
+        let id = |oid: &[u8; 20]| {
+            ObjectId::from_bytes(alt_git_codec::HashAlgo::Sha1, oid).expect("sha1 object id")
+        };
+        if let Some(commit) = self.set.commit(&key) {
+            return Ok(std::borrow::Cow::Owned(Node::Commit {
+                tree: id(&commit.tree),
+                parents: commit.parents.iter().map(id).collect(),
+            }));
+        }
+        let kind = match self.set.kind(&key) {
+            Ok(Some(Kind::Blob)) => return Ok(std::borrow::Cow::Owned(Node::Blob)),
+            Ok(Some(Kind::Tree)) => ObjectKind::Tree,
+            Ok(Some(Kind::Tag)) => ObjectKind::Tag,
+            Ok(Some(Kind::Commit)) => {
+                return Err(E::Integrity("commit missing from the commit graph"));
+            }
+            Ok(None) => return Err(E::Missing(oid)),
+            Err(_) => return Err(E::Integrity("pack segment record")),
+        };
+        let (_, data) = self
+            .set
+            .read(&key)
+            .map_err(|_| E::Integrity("pack segment object"))?;
+        parse_node(kind, &data, alt_git_codec::HashAlgo::Sha1).map(std::borrow::Cow::Owned)
+    }
+
+    fn graph_limits(&self) -> alt_repository_service::GraphLimits {
+        self.limits
+    }
+}
+
 /// a segment built from natively uploaded Git objects, not yet published
 pub(crate) struct Materialized {
     pub(crate) id: String,

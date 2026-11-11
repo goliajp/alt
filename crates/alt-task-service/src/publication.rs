@@ -2,7 +2,7 @@ use crate::{
     ArtifactSource, Error, PreparedTaskGraph, Result, TaskBundle, TaskLimits, VerifiedTaskGraph,
 };
 use alt_remote_protocol::{ContentKind, Limits, Manifest, Publication};
-use alt_repository_service::{ObjectSource, VerifiedGraph, verify_graph};
+use alt_repository_service::{ObjectSource, VerifiedGraph, verify_graph, verify_new_graph};
 use std::{cell::Cell, io::Read};
 
 /// Immutable byte validation shared by the client preview and server worker.
@@ -94,7 +94,13 @@ impl VerifiedPublication {
             alt_remote_protocol::ObjectFormat::Sha1 => alt_git_codec::HashAlgo::Sha1,
             alt_remote_protocol::ObjectFormat::Sha256 => alt_git_codec::HashAlgo::Sha256,
         };
-        let graph = verify_graph(objects, algo, &roots, limits.into())?;
+        // A task graph is bound to exactly the objects its publication carries, so it is
+        // read whole. A plain publication is read down to what the repository holds.
+        let graph = if has_tasks {
+            verify_graph(objects, algo, &roots, limits.into())?
+        } else {
+            verify_new_graph(objects, algo, &roots, limits.into())?
+        };
         let tasks = if has_tasks {
             Some(VerifiedTaskGraph::verify(
                 publication,

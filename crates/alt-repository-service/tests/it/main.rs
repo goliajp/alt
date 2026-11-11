@@ -382,3 +382,99 @@ fn malformed_policy_and_shared_traversal_budget_fail_closed() {
     });
     assert!(!accepts(&p, &s, &a, &graph));
 }
+
+/// a repository that already holds `held`; reading one of those objects is a failure
+struct Settled<'a> {
+    new: &'a Objects,
+    held: &'a Objects,
+}
+impl ObjectSource for Settled<'_> {
+    fn open(&self, oid: ObjectId) -> Result<Option<ObjectReader<'_>>> {
+        assert!(!self.held.0.contains_key(&oid), "a settled object was read");
+        self.new.open(oid)
+    }
+    fn settled(&self, oid: ObjectId) -> Result<Option<ObjectKind>> {
+        Ok(self.held.0.get(&oid).map(|(kind, _)| *kind))
+    }
+}
+impl Graph for Objects {
+    fn node(&self, oid: ObjectId) -> Result<std::borrow::Cow<'_, Node>> {
+        let (kind, bytes) = self.0.get(&oid).ok_or(Error::Missing(oid))?;
+        parse_node(*kind, bytes, HashAlgo::Sha1).map(std::borrow::Cow::Owned)
+    }
+    fn graph_limits(&self) -> GraphLimits {
+        graph_limits()
+    }
+}
+
+#[test]
+fn verification_stops_at_settled_objects_and_checks_walk_on_below_them() {
+    let mut held = Objects::default();
+    let old_blob = held.put(ObjectKind::Blob, b"old");
+    let old_tree = held.tree(&[("100644", b"kept", old_blob)]);
+    let root = held.commit(old_tree, &[]);
+    let tip = held.commit(old_tree, &[root]);
+    let mut new = Objects::default();
+    let new_blob = new.put(ObjectKind::Blob, b"new");
+    let new_tree = new.tree(&[
+        ("100644", b"added", new_blob),
+        ("100644", b"kept", old_blob),
+    ]);
+    let next = new.commit(new_tree, &[tip]);
+    let source = Settled {
+        new: &new,
+        held: &held,
+    };
+    let graph = verify_new_graph(&source, HashAlgo::Sha1, &[tip, next], graph_limits()).unwrap();
+    let read: BTreeSet<_> = graph.objects().collect();
+    assert_eq!(read, BTreeSet::from([new_blob, new_tree, next]));
+    assert!(graph.holds(tip) && graph.holds(old_blob) && graph.holds(next));
+    // below the boundary nothing was looked at
+    assert!(!graph.holds(root) && !graph.holds(old_tree));
+    assert_eq!(graph.reachable(next).unwrap().len(), 3);
+    assert!(graph.reachable(tip).unwrap().is_empty());
+
+    // a fast-forward from a commit two below the boundary: the walk has to continue
+    // in what the repository holds
+    let (p, s, a) = setup(Some(root), Some(next));
+    let layered = Layered {
+        verified: &graph,
+        settled: &held,
+    };
+    assert!(validate_publication(&p, &s, &a, &layered, wire_limits(), 10).is_ok());
+    assert!(validate_publication(&p, &s, &a, &graph, wire_limits(), 10).is_err());
+    // and it is still a real ancestry check
+    let mut other = Objects::default();
+    let other_tree = other.tree(&[("100644", b"elsewhere", old_blob)]);
+    let unrelated = other.commit(other_tree, &[]);
+    held.0.extend(other.0);
+    let source = Settled {
+        new: &new,
+        held: &held,
+    };
+    let graph =
+        verify_new_graph(&source, HashAlgo::Sha1, &[unrelated, next], graph_limits()).unwrap();
+    let (p, s, a) = setup(Some(unrelated), Some(next));
+    let layered = Layered {
+        verified: &graph,
+        settled: &held,
+    };
+    assert!(validate_publication(&p, &s, &a, &layered, wire_limits(), 10).is_err());
+
+    // a settled object named with the wrong type is refused like a read one
+    let confused = new.tree(&[("40000", b"kept", old_blob)]);
+    let bad = new.commit(confused, &[tip]);
+    let source = Settled {
+        new: &new,
+        held: &held,
+    };
+    assert!(matches!(
+        verify_new_graph(&source, HashAlgo::Sha1, &[bad], graph_limits()),
+        Err(Error::Integrity("dependency type mismatch"))
+    ));
+    // the full verification reads everything
+    let mut all = Objects::default();
+    all.0.extend(held.0.clone());
+    all.0.extend(new.0.clone());
+    assert_eq!(all.graph(&[next]).unwrap().objects().count(), 7);
+}

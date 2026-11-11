@@ -5,11 +5,10 @@ use crate::{Output, git::Command};
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
 use alt_pack_segment::{Kind, Limits, Oid, Segment, SegmentSet, ingest};
 use alt_remote_protocol::{Manifest, ObjectFormat, Publication, RefUpdate, RequestKey, VERSION};
-use alt_repository_service::{Graph, GraphLimits, Node, parse_node};
+use alt_repository_service::{Node, parse_node};
 use alt_server_store::{Credential, Error, NewSegment, PackView, Result, Store};
 use alt_wire::pkt;
 use std::{
-    borrow::Cow,
     collections::{BTreeSet, HashSet},
     io::{Read, Write},
     os::unix::fs::OpenOptionsExt,
@@ -40,44 +39,6 @@ fn segment_error(error: alt_pack_segment::Error) -> Error {
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
-/// loads commits from the stored commit graph and other objects on demand
-struct PackGraph<'a> {
-    set: &'a SegmentSet,
-    limits: GraphLimits,
-}
-
-impl Graph for PackGraph<'_> {
-    fn node(&self, oid: ObjectId) -> alt_repository_service::Result<Cow<'_, Node>> {
-        use alt_repository_service::Error as E;
-        let key = raw(oid);
-        if let Some(commit) = self.set.commit(&key) {
-            return Ok(Cow::Owned(Node::Commit {
-                tree: id(&commit.tree),
-                parents: commit.parents.iter().map(id).collect(),
-            }));
-        }
-        let kind = match self.set.kind(&key) {
-            Ok(Some(Kind::Blob)) => return Ok(Cow::Owned(Node::Blob)),
-            Ok(Some(Kind::Tree)) => ObjectKind::Tree,
-            Ok(Some(Kind::Tag)) => ObjectKind::Tag,
-            Ok(Some(Kind::Commit)) => {
-                return Err(E::Integrity("commit missing from the commit graph"));
-            }
-            Ok(None) => return Err(E::Missing(oid)),
-            Err(_) => return Err(E::Integrity("pack segment record")),
-        };
-        let (_, data) = self
-            .set
-            .read(&key)
-            .map_err(|_| E::Integrity("pack segment object"))?;
-        parse_node(kind, &data, HashAlgo::Sha1).map(Cow::Owned)
-    }
-
-    fn graph_limits(&self) -> GraphLimits {
-        self.limits
-    }
 }
 
 /// whether `old` is an ancestor of `new`; generations prune everything older than `old`
@@ -446,7 +407,7 @@ fn publish(
         record_roots: vec![],
         content_manifest: manifest.id(limits)?,
     };
-    let graph = PackGraph {
+    let graph = alt_server_store::SegmentGraph {
         set: &set,
         limits: limits.into(),
     };

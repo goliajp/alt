@@ -8,6 +8,11 @@ use std::io::Read;
 /// Readers must enforce timeouts/cancellation; graph limits bound bytes and work.
 pub trait ObjectSource {
     fn open(&self, oid: ObjectId) -> Result<Option<ObjectReader<'_>>>;
+    /// The kind of an object the repository already holds verified, together with
+    /// everything it references. Such an object is not read again.
+    fn settled(&self, _oid: ObjectId) -> Result<Option<ObjectKind>> {
+        Ok(None)
+    }
 }
 pub struct ObjectReader<'a> {
     pub kind: ObjectKind,
@@ -208,8 +213,28 @@ fn paths(
 /// about a pinned snapshot, not a capability to publish without a transaction.
 pub struct VerifiedGraph {
     nodes: BTreeMap<ObjectId, Node>,
+    /// objects the walk stopped at because the repository already holds them verified
+    settled: BTreeMap<ObjectId, ObjectKind>,
     limits: GraphLimits,
     pub bytes: u64,
+}
+/// A graph verified down to what the repository already holds, continued there:
+/// ancestry and path checks walk on into `settled` where verification stopped.
+pub struct Layered<'a, G: Graph> {
+    pub verified: &'a VerifiedGraph,
+    pub settled: &'a G,
+}
+impl<G: Graph> Graph for Layered<'_, G> {
+    fn node(&self, oid: ObjectId) -> Result<std::borrow::Cow<'_, Node>> {
+        match self.verified.nodes.get(&oid) {
+            Some(node) => Ok(std::borrow::Cow::Borrowed(node)),
+            // a settled object, or one below it: there everything is settled
+            None => self.settled.node(oid),
+        }
+    }
+    fn graph_limits(&self) -> GraphLimits {
+        self.verified.limits
+    }
 }
 pub(crate) struct WalkBudget(usize);
 impl WalkBudget {
@@ -228,15 +253,24 @@ impl VerifiedGraph {
     pub fn node(&self, oid: ObjectId) -> Result<&Node> {
         self.nodes.get(&oid).ok_or(Error::Missing(oid))
     }
+    /// the objects this verification read: not those it found settled
     pub fn objects(&self) -> impl Iterator<Item = ObjectId> + '_ {
         self.nodes.keys().copied()
     }
+    /// whether the object was verified here or found settled
+    pub fn holds(&self, oid: ObjectId) -> bool {
+        self.nodes.contains_key(&oid) || self.settled.contains_key(&oid)
+    }
+    /// the objects this verification read that `root` reaches
     pub fn reachable(&self, root: ObjectId) -> Result<Vec<ObjectId>> {
         let mut seen = BTreeSet::new();
         let mut pending = vec![root];
         let mut budget = self.budget();
         while let Some(oid) = pending.pop() {
             budget.step()?;
+            if self.settled.contains_key(&oid) {
+                continue;
+            }
             if seen.insert(oid) {
                 pending.extend(self.node(oid)?.edges().into_iter().map(|(id, _)| id));
             }
@@ -273,11 +307,31 @@ impl VerifiedGraph {
     }
 }
 
+/// Reads and verifies every object reachable from `roots`.
 pub fn verify_graph(
     source: &impl ObjectSource,
     algo: HashAlgo,
     roots: &[ObjectId],
     limits: GraphLimits,
+) -> Result<VerifiedGraph> {
+    verify(source, algo, roots, limits, false)
+}
+/// Reads and verifies what `roots` reach down to the objects the source reports as
+/// settled, so the work follows what is new and not the history behind it.
+pub fn verify_new_graph(
+    source: &impl ObjectSource,
+    algo: HashAlgo,
+    roots: &[ObjectId],
+    limits: GraphLimits,
+) -> Result<VerifiedGraph> {
+    verify(source, algo, roots, limits, true)
+}
+fn verify(
+    source: &impl ObjectSource,
+    algo: HashAlgo,
+    roots: &[ObjectId],
+    limits: GraphLimits,
+    stop_at_settled: bool,
 ) -> Result<VerifiedGraph> {
     if limits.objects == 0
         || limits.edges == 0
@@ -291,6 +345,7 @@ pub fn verify_graph(
         return Err(Error::Limit("invalid graph limits"));
     }
     let mut nodes = BTreeMap::new();
+    let mut settled = BTreeMap::new();
     let mut pending: VecDeque<_> = roots.iter().copied().collect();
     let mut queued: BTreeSet<_> = roots.iter().copied().collect();
     if queued.len() > limits.objects || roots.len() > limits.edges {
@@ -299,10 +354,14 @@ pub fn verify_graph(
     let mut bytes = 0u64;
     let mut edges = 0usize;
     while let Some(oid) = pending.pop_front() {
-        if nodes.contains_key(&oid) {
+        if nodes.contains_key(&oid) || settled.contains_key(&oid) {
             continue;
         }
         check_oid(oid, algo)?;
+        if stop_at_settled && let Some(kind) = source.settled(oid)? {
+            settled.insert(oid, kind);
+            continue;
+        }
         let object = source.open(oid)?.ok_or(Error::Missing(oid))?;
         bytes = bytes
             .checked_add(object.bytes)
@@ -332,13 +391,18 @@ pub fn verify_graph(
     // An object reused at a different edge must still have the required type.
     for node in nodes.values() {
         for (oid, kind) in node.edges() {
-            if nodes.get(&oid).map(Node::kind) != Some(kind) {
+            let found = nodes
+                .get(&oid)
+                .map(Node::kind)
+                .or(settled.get(&oid).copied());
+            if found != Some(kind) {
                 return Err(Error::Integrity("dependency type mismatch"));
             }
         }
     }
     Ok(VerifiedGraph {
         nodes,
+        settled,
         limits,
         bytes,
     })

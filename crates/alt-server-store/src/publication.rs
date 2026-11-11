@@ -79,6 +79,19 @@ impl alt_task_service::ArtifactSource for PinnedSource {
     }
 }
 impl ObjectSource for PinnedSource {
+    /// What a live segment holds was verified when the segment was written, and the
+    /// segments of a repository hold everything their objects reference.
+    fn settled(&self, oid: ObjectId) -> alt_repository_service::Result<Option<ObjectKind>> {
+        let Ok(key) = <[u8; 20]>::try_from(oid.as_bytes()) else {
+            return Ok(None);
+        };
+        match self.segments.kind(&key) {
+            Ok(kind) => Ok(kind.map(crate::packs::object_kind)),
+            Err(_) => Err(alt_repository_service::Error::Integrity(
+                "pack segment record",
+            )),
+        }
+    }
     fn open(&self, oid: ObjectId) -> alt_repository_service::Result<Option<ObjectReader<'_>>> {
         let Some((kind, digest, bytes)) = self.objects.get(&oid) else {
             let Ok(key) = <[u8; 20]>::try_from(oid.as_bytes()) else {
@@ -391,7 +404,9 @@ impl Store {
         let row = worker(&mut tx, work)?;
         crate::requests::check_request_attribution(&row, &auth)?;
         for root in work.roots()? {
-            graph.node(root)?;
+            if !graph.holds(root) {
+                return Err(alt_repository_service::Error::Missing(root).into());
+            }
         }
         // Graph validation must have used this worker's authorized object set.
         check_graph_pins(&mut tx, work, graph)?;
@@ -541,11 +556,21 @@ impl Store {
         crate::tasks::check_selection(work, tasks)?;
         crate::tasks::check_pins(&mut tx, work, graph, tasks)?;
         crate::tasks::approve_current(&mut tx, &self.spec, work, tasks, &mut current, self.limits)?;
+        // verification stopped at what the segments already hold; ancestry and path
+        // checks walk on there
+        let published = crate::packs::SegmentGraph {
+            set: &work.source.segments,
+            limits: self.limits.into(),
+        };
+        let layered = alt_repository_service::Layered {
+            verified: graph,
+            settled: &published,
+        };
         let validated = match validate_publication(
             &work.publication,
             &current,
             &auth,
-            graph,
+            &layered,
             self.limits,
             now(&mut tx)?,
         ) {
