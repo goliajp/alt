@@ -1,0 +1,17 @@
+schema: alt-meta/1
+type: fix
+summary: read snapshots select and read git objects from the pack segments
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/pack_compaction.rs
+touched: crates/alt-server-store/src/portable/capture.rs
+touched: crates/alt-server-store/src/portable/lifecycle.rs
+touched: crates/alt-server-store/src/portable/objects.rs
+touched: crates/alt-server-store/src/read.rs
+touched: crates/alt-server-store/src/read/references.rs
+touched: crates/alt-server-store/src/segments.rs
+touched: crates/alt-server-store/tests/it/database.rs
+touched: crates/alt-server-store/tests/it/database/buffered_read.rs
+touched: crates/alt-server-store/tests/it/database/bulk_publication.rs
+touched: crates/alt-server-store/tests/it/database/faults.rs
+touched: crates/alt-server-store/tests/it/database/segments.rs
