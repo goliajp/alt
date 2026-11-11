@@ -1,4 +1,5 @@
 mod golden;
+mod limits;
 mod text;
 
 use std::sync::OnceLock;
