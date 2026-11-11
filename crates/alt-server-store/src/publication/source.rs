@@ -84,13 +84,13 @@ impl ObjectSource for PinnedSource {
             let Ok(key) = <[u8; 20]>::try_from(oid.as_bytes()) else {
                 return Ok(None);
             };
-            return match self.segments.read(&key) {
-                Ok((kind, data)) => Ok(Some(ObjectReader {
+            return match self.segments.open(&key) {
+                Ok(Some((kind, bytes, stream))) => Ok(Some(ObjectReader {
                     kind: crate::packs::object_kind(kind),
-                    bytes: data.len() as u64,
-                    reader: Box::new(std::io::Cursor::new(data)),
+                    bytes,
+                    reader: Box::new(stream),
                 })),
-                Err(alt_pack_segment::Error::NotFound(_)) => Ok(None),
+                Ok(None) => Ok(None),
                 Err(_) => Err(alt_repository_service::Error::Integrity(
                     "pack segment object",
                 )),

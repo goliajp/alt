@@ -46,7 +46,7 @@ be retained without changing refs, including explicitly omitted attachments;
 that history cannot silently become accepted evidence.
 
 Schema versions have immutable checksums. Opening requires the current schema;
-`Store::migrate_v1` explicitly upgrades the original v1 layout in one transaction,
+`Store::migrate` explicitly upgrades an older schema in one transaction,
 preserves existing data, advances the runtime generation and fences old upload
 workers. Callers must reopen with the returned instance specification. An old
 process or worker cannot continue writes after migration.

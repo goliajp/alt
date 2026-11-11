@@ -8,6 +8,7 @@ impl Store {
         &mut self,
         work: &PublicationWork,
         graph: &VerifiedGraph,
+        live: &alt_pack_segment::SegmentSet,
     ) -> Result<Option<crate::packs::Materialized>> {
         let mut wanted: BTreeSet<ObjectId> = graph
             .objects()
@@ -19,16 +20,14 @@ impl Store {
             }
         }
         wanted.retain(|oid| {
-            <[u8; 20]>::try_from(oid.as_bytes())
-                .is_ok_and(|key| !work.source.segments.locate_any(&key))
+            <[u8; 20]>::try_from(oid.as_bytes()).is_ok_and(|key| !live.locate_any(&key))
         });
         if wanted.is_empty() {
             return Ok(None);
         }
-        let existing = work.source.segments.clone();
         let mut segment = self.materialize(
             &work.key.scope.repository_instance_id,
-            &existing,
+            live,
             wanted.len() as u64,
         )?;
         for oid in wanted {

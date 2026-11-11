@@ -1,8 +1,8 @@
 //! Capturing one immutable snapshot: the catalog, its documents and its retention.
 use super::*;
 use alt_crypto::ed25519::SigningKey;
-use alt_portable::{Catalog, HistoricalPublication, Object, PackageLimits, Reference};
-use alt_remote_protocol::{ContentKind, Publication, RequestState};
+use alt_portable::{Catalog, HistoricalPublication, PackageLimits, Reference};
+use alt_remote_protocol::{Publication, RequestState};
 
 type Segments = (Vec<(String, bool)>, SegmentSet);
 
@@ -68,44 +68,6 @@ fn stored_content(
         blobs.insert(blob.blake3.clone(), blob);
     }
     Ok(blobs)
-}
-
-fn object_kind(kind: &str) -> Result<ContentKind> {
-    Ok(match kind {
-        "blob" => ContentKind::Blob,
-        "tree" => ContentKind::Tree,
-        "commit" => ContentKind::Commit,
-        "tag" => ContentKind::Tag,
-        _ => return Err(Error::Integrity("portable Git kind")),
-    })
-}
-
-/// Git objects the content store retains. Publications from before Git objects moved
-/// to the pack segments left some there that no segment holds: what a task
-/// publication carried outside its graph.
-fn stored_objects(
-    tx: &mut Transaction<'_>,
-    repository: &str,
-    limits: PackageLimits,
-    blobs: &BTreeMap<String, Blob>,
-) -> Result<Vec<Object>> {
-    let bound = integer((limits.entries as u64).saturating_add(1))?;
-    let rows = tx.query("SELECT o.oid,o.kind,o.blake3 FROM alt_objects o WHERE o.repository=$1 AND EXISTS(SELECT 1 FROM alt_pins p WHERE p.repository=o.repository AND p.blake3=o.blake3 AND p.expires_at IS NULL AND p.pin_id NOT LIKE 'portable-export:%') ORDER BY o.oid LIMIT $2", &[&repository,&bound])?;
-    if rows.len() > limits.entries {
-        return Err(Error::Limit("portable Git inventory"));
-    }
-    rows.iter()
-        .map(|row| {
-            Ok(Object {
-                oid: row.get(0),
-                kind: object_kind(&row.get::<_, String>(1))?,
-                payload: blobs
-                    .get(&row.get::<_, String>(2))
-                    .ok_or(Error::Integrity("portable object payload"))?
-                    .clone(),
-            })
-        })
-        .collect()
 }
 
 fn source_identities(
@@ -393,7 +355,7 @@ impl Store {
             identities: source_identities(&mut tx, scope, limits.package)?,
             budget: limits.package.metadata_bytes,
         };
-        let mut objects = objects::git_objects(&opened.1, limits.package.entries)?;
+        let objects = objects::git_objects(&opened.1, limits.package.entries)?;
         for object in objects.values() {
             let payload = &object.payload;
             if let Some(old) = inventory
@@ -403,12 +365,6 @@ impl Store {
             {
                 return Err(Error::Integrity("portable object payload"));
             }
-        }
-        for object in stored_objects(&mut tx, repository, limits.package, &inventory.blobs)? {
-            objects.entry(object.oid.clone()).or_insert(object);
-        }
-        if objects.len() > limits.package.entries {
-            return Err(Error::Limit("portable Git inventory"));
         }
         catalog.objects = objects.into_values().collect();
         catalog.publications = committed_publications(

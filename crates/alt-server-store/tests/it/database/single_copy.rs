@@ -73,7 +73,7 @@ fn git_rows(f: &Fixture, payload: &Payload) -> (i64, i64, i64) {
 /// the bytes counted against the quota, and what they should be: the live pack
 /// segments and the content the content store still retains
 fn accounting(f: &Fixture) -> (i64, i64) {
-    let row = f.client().query_one("SELECT (SELECT stored_bytes FROM alt_repositories WHERE id='repository'),(SELECT COALESCE(sum(bytes),0) FROM alt_pack_segments WHERE state='live')::bigint+(SELECT COALESCE(sum(bytes),0) FROM alt_blobs b WHERE EXISTS(SELECT 1 FROM alt_pins p WHERE p.repository=b.repository AND p.blake3=b.blake3))::bigint", &[]).unwrap();
+    let row = f.client().query_one("SELECT (SELECT stored_bytes FROM alt_repositories WHERE id='repository'),(SELECT COALESCE(sum(bytes),0) FROM alt_pack_segments WHERE state='live')::bigint+(SELECT COALESCE(sum(bytes),0) FROM alt_blobs b WHERE b.state='stored' AND EXISTS(SELECT 1 FROM alt_pins p WHERE p.repository=b.repository AND p.blake3=b.blake3))::bigint", &[]).unwrap();
     (row.get(0), row.get(1))
 }
 fn assert_accounted(f: &Fixture) {
@@ -380,4 +380,5 @@ fn a_selected_git_object_that_refers_to_nothing_published_rejects_the_request() 
     );
 }
 
-mod before;
+mod migrate;
+mod shared;

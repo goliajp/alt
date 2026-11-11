@@ -300,7 +300,7 @@ remove that exact directory. Do not expose scratch or backup directories through
 the web server.
 
 A historical schema backup requires an explicit `--schema` (supported source
-schemas: 1–14). Stop the old service, save and verify its backup, then upgrade:
+schemas: 1–18). Stop the old service, save and verify its backup, then upgrade:
 
 ```sh
 alt-server --config server.json migrate --from-schema 3 --output-config server-next.json
@@ -313,6 +313,14 @@ lost response. It does not advance the generation twice. Keep the old binary
 and config for diagnosis; the old binary is fenced after migration and cannot
 open the new schema. An upgrade rollback restores a backup into an isolated
 instance, rather than pointing an old binary at the upgraded database.
+
+From schema 18 or older the same transaction moves published Git objects out of
+the content store: objects no pack segment holds are written to a new segment
+per repository, every content-store copy of a published Git object is released,
+and each repository's stored bytes are counted again from its pack segments and
+retained content. Uploads in progress keep their content and continue under the
+new generation. The released copies leave the disk with the next garbage
+collection.
 
 For disaster recovery, externally stop and fence the old service first. Create
 a dedicated empty PostgreSQL database and a new config pointing to **absent**

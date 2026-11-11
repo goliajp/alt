@@ -6,7 +6,7 @@ use super::*;
 #[test]
 #[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
 fn git_pushes_and_native_publications_take_turns_on_one_branch() {
-    let f = Fixture::new();
+    let mut f = Fixture::new();
     let server = Running::start(&f);
     let native = portable::client(&server, &f.token);
     let temp = alt_os::temp::tempdir().unwrap();
@@ -17,7 +17,8 @@ fn git_pushes_and_native_publications_take_turns_on_one_branch() {
     identity(&work, &f.token);
     let mut payloads = Vec::new();
     let mut pushed = Vec::new();
-    for round in 0..3 {
+    let rounds = 6;
+    for round in 0..rounds {
         if round > 0 {
             // take the native commit that now heads the branch
             ok(&work, &f.token, &["fetch", "-q", &url, "main"]);
@@ -34,18 +35,32 @@ fn git_pushes_and_native_publications_take_turns_on_one_branch() {
         portable::publish(&native, &payload);
         payloads.push(payload);
     }
-    // the content store holds no Git object and no retention for one
-    let row = f.client().query_one("SELECT (SELECT count(*) FROM alt_blobs WHERE state='stored'),(SELECT count(*) FROM alt_objects),(SELECT count(*) FROM alt_pins),(SELECT stored_bytes FROM alt_repositories WHERE id='repository'),(SELECT sum(bytes) FROM alt_pack_segments WHERE state='live')::bigint,(SELECT count(*) FROM alt_pack_segments WHERE state='live')", &[]).unwrap();
-    assert_eq!(
-        (
-            row.get::<_, i64>(0),
-            row.get::<_, i64>(1),
-            row.get::<_, i64>(2)
-        ),
-        (0, 0, 0)
-    );
-    assert_eq!(row.get::<_, i64>(3), row.get::<_, i64>(4));
-    assert_eq!(row.get::<_, i64>(5), 6);
+    // the content store holds no Git object and no retention for one, and what is
+    // counted is the live segments, before the twelve segments are merged and after
+    let settled = |f: &Fixture| {
+        let row = f.client().query_one("SELECT (SELECT count(*) FROM alt_blobs WHERE state='stored' OR accounted),(SELECT count(*) FROM alt_objects),(SELECT count(*) FROM alt_pins),(SELECT stored_bytes FROM alt_repositories WHERE id='repository'),(SELECT sum(bytes) FROM alt_pack_segments WHERE state='live')::bigint", &[]).unwrap();
+        assert_eq!(
+            (
+                row.get::<_, i64>(0),
+                row.get::<_, i64>(1),
+                row.get::<_, i64>(2)
+            ),
+            (0, 0, 0)
+        );
+        assert_eq!(row.get::<_, i64>(3), row.get::<_, i64>(4));
+    };
+    settled(&f);
+    while f.store.compact_packs("repository").unwrap() {}
+    let segments = f
+        .client()
+        .query_one(
+            "SELECT count(*) FILTER (WHERE state='live'),count(*) FILTER (WHERE state='retired') FROM alt_pack_segments",
+            &[],
+        )
+        .unwrap();
+    assert!(segments.get::<_, i64>(0) < 2 * rounds);
+    assert!(segments.get::<_, i64>(1) > 0);
+    settled(&f);
 
     // every object is there for a Git client
     let clone = temp.path().join("clone");
@@ -57,11 +72,11 @@ fn git_pushes_and_native_publications_take_turns_on_one_branch() {
     ok(&clone, &f.token, &["fsck", "--strict", "--full"]);
     assert_eq!(
         text(ok(&clone, &f.token, &["rev-parse", "HEAD"])),
-        payloads[2].commit.to_string()
+        payloads.last().unwrap().commit.to_string()
     );
     assert_eq!(
         text(ok(&clone, &f.token, &["rev-list", "--count", "HEAD"])),
-        "6"
+        (2 * rounds).to_string()
     );
     // and for a native client, by the digest of its content
     let download = |bytes: &[u8]| {

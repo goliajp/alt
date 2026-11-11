@@ -50,7 +50,7 @@ pub(super) fn retain_history(
             &[&repository, &pin, &batch],
         )?;
     }
-    crate::pack_native::release_git_content(tx, repository, &released)
+    crate::pack_native::release_content(tx, repository, &released)
 }
 
 impl Store {

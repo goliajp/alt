@@ -55,6 +55,8 @@ impl PublicationWork {
             .collect()
     }
 }
+/// the live segments were not the ones the request's objects were packed against
+const SEGMENTS_MOVED: &str = "repository segments changed during publication; publish again";
 /// what became of packing the request's Git objects
 enum Packed {
     Ready(Option<crate::packs::Materialized>),
@@ -227,32 +229,47 @@ impl Store {
         graph: &VerifiedGraph,
         tasks: Option<&alt_task_service::VerifiedTaskGraph>,
     ) -> Result<Receipt> {
-        // Recheck before taking SQL locks. A durable committed receipt remains
-        // replayable even if its formerly selected byte files are unavailable.
-        let read_integrity = work.check_read_integrity();
-        // a failure here must not hide the receipt of an already committed request
-        let packed = match self.materialize_publication(work, graph) {
-            Ok(segment) => Packed::Ready(segment),
-            Err(Error::Integrity(crate::pack_native::INVALID_SEGMENT)) => Packed::Invalid,
-            Err(_) => Packed::Unavailable,
-        };
-        let result =
-            self.publish_transaction(credential, work, graph, tasks, read_integrity, &packed);
-        match (&result, packed) {
-            (Ok(_), Packed::Ready(Some(segment))) => self.adopt_segment(
-                &work.key.scope.repository_instance_id,
-                &segment.id,
-                segment.segment,
-            )?,
-            // the transaction may have committed: the sweep removes the file if it did not
-            (Err(Error::OutcomeUnknown), _) => {}
-            (Err(_), Packed::Ready(Some(segment))) => {
-                // nothing references an unpublished segment
-                let _ = std::fs::remove_file(&segment.path);
+        let repository = &work.key.scope.repository_instance_id;
+        // What has to be packed depends on the segments that are live when the
+        // transaction runs: another publication can add one, with some of the same
+        // objects, after this request was leased. Pack against the current list, and
+        // again if the list has moved by the time the repository is locked.
+        for _ in 0..8 {
+            // Recheck before taking SQL locks. A durable committed receipt remains
+            // replayable even if its formerly selected byte files are unavailable.
+            let read_integrity = work.check_read_integrity();
+            let (ids, live) = self.live_segments(repository)?;
+            // a failure here must not hide the receipt of an already committed request
+            let packed = match self.materialize_publication(work, graph, &live) {
+                Ok(segment) => Packed::Ready(segment),
+                Err(Error::Integrity(crate::pack_native::INVALID_SEGMENT)) => Packed::Invalid,
+                Err(_) => Packed::Unavailable,
+            };
+            let result = self.publish_transaction(
+                credential,
+                work,
+                graph,
+                tasks,
+                read_integrity,
+                (&packed, &ids),
+            );
+            match (&result, packed) {
+                (Ok(_), Packed::Ready(Some(segment))) => {
+                    self.adopt_segment(repository, &segment.id, segment.segment)?
+                }
+                // the transaction may have committed: the sweep removes the file if it did not
+                (Err(Error::OutcomeUnknown), _) => {}
+                (Err(_), Packed::Ready(Some(segment))) => {
+                    // nothing references an unpublished segment
+                    let _ = std::fs::remove_file(&segment.path);
+                }
+                _ => {}
             }
-            _ => {}
+            if !matches!(result, Err(Error::Precondition(SEGMENTS_MOVED))) {
+                return result;
+            }
         }
-        result
+        Err(Error::Precondition(SEGMENTS_MOVED))
     }
     fn publish_transaction(
         &mut self,
@@ -261,7 +278,8 @@ impl Store {
         graph: &VerifiedGraph,
         tasks: Option<&alt_task_service::VerifiedTaskGraph>,
         read_integrity: Result<()>,
-        packed: &Packed,
+        // what became of packing, and the live segments it was packed against
+        (packed, packed_against): (&Packed, &[(String, bool)]),
     ) -> Result<Receipt> {
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
@@ -277,6 +295,11 @@ impl Store {
                 return Ok(*receipt);
             }
             return Err(Error::Integrity("committed request result"));
+        }
+        if Self::live_segment_ids(&mut tx, &work.key.scope.repository_instance_id)?
+            != packed_against
+        {
+            return Err(Error::Precondition(SEGMENTS_MOVED));
         }
         read_integrity?;
         if matches!(packed, Packed::Unavailable) {
@@ -410,19 +433,22 @@ impl Store {
             &result,
             unsigned(row.get("reserved_bytes"))?,
         )?;
-        // With the upload pins gone, the Git objects of this request leave the content
-        // store; the segment that holds them now is counted in their place.
-        let git: BTreeSet<&str> = work
+        // With the upload pins gone, what this request uploaded and nothing retains
+        // leaves the content store: its Git objects, which the segments hold now, and
+        // the chunks its content was assembled from. The new segment is counted instead.
+        let uploaded: BTreeSet<&str> = work
             .manifest
             .entries
             .iter()
-            .filter(|entry| entry.git_oid.is_some())
-            .map(|entry| entry.blake3.as_str())
+            .flat_map(|entry| {
+                std::iter::once(entry.blake3.as_str())
+                    .chain(entry.chunks.iter().map(|chunk| chunk.blake3.as_str()))
+            })
             .collect();
-        crate::pack_native::release_git_content(
+        crate::pack_native::release_content(
             &mut tx,
             repository,
-            &git.into_iter().collect::<Vec<_>>(),
+            &uploaded.into_iter().collect::<Vec<_>>(),
         )?;
         if let Some(segment) = materialized {
             crate::pack_native::account_segment(&mut tx, repository, segment.bytes)?;

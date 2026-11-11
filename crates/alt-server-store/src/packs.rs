@@ -173,6 +173,18 @@ impl Graph for SegmentGraph<'_> {
     }
 }
 
+/// directory holding one repository's segments, created on first use
+pub(crate) fn pack_directory_at(root: &std::path::Path, repository: &str) -> Result<PathBuf> {
+    let packs = root.join("packs");
+    let path = packs.join(&alt_hash::blake3::hash(repository.as_bytes()).to_hex()[..32]);
+    if !path.is_dir() {
+        std::fs::create_dir_all(&path)?;
+        std::fs::File::open(&packs)?.sync_all()?;
+        std::fs::File::open(root)?.sync_all()?;
+    }
+    Ok(path)
+}
+
 /// a segment built from natively uploaded Git objects, not yet published
 pub(crate) struct Materialized {
     pub(crate) id: String,
@@ -205,26 +217,18 @@ impl Store {
         credential: &Credential,
         repository: &str,
         oid: ObjectId,
-    ) -> Result<(ObjectKind, u64, std::io::Cursor<Vec<u8>>)> {
+    ) -> Result<(ObjectKind, u64, alt_pack_segment::ObjectStream)> {
         let view = self.pack_view(credential, repository)?;
         let key: [u8; 20] = oid.as_bytes().try_into().map_err(|_| Error::Unauthorized)?;
-        let record = view
+        let (kind, size, stream) = view
             .segments
-            .record(&key)
-            .map_err(|_| Error::Integrity("pack segment record"))?
+            .open(&key)
+            .map_err(|_| Error::Integrity("published object bytes"))?
             .ok_or(Error::Unauthorized)?;
-        if record.size > self.limits.object_bytes {
+        if size > self.limits.object_bytes {
             return Err(Error::Limit("published object read bytes"));
         }
-        let (kind, data) = view
-            .segments
-            .read(&key)
-            .map_err(|_| Error::Integrity("published object bytes"))?;
-        Ok((
-            object_kind(kind),
-            data.len() as u64,
-            std::io::Cursor::new(data),
-        ))
+        Ok((object_kind(kind), size, stream))
     }
 
     /// live segments of a repository, read inside the caller's transaction
@@ -239,16 +243,8 @@ impl Store {
             .collect())
     }
 
-    /// directory holding one repository's segments, created on first use
     pub fn pack_directory(&self, repository: &str) -> Result<PathBuf> {
-        let packs = self.bytes().root().join("packs");
-        let path = packs.join(&alt_hash::blake3::hash(repository.as_bytes()).to_hex()[..32]);
-        if !path.is_dir() {
-            std::fs::create_dir_all(&path)?;
-            std::fs::File::open(&packs)?.sync_all()?;
-            std::fs::File::open(self.bytes().root())?.sync_all()?;
-        }
-        Ok(path)
+        pack_directory_at(self.bytes().root(), repository)
     }
 
     pub fn pack_path(&self, repository: &str, segment: &str) -> Result<PathBuf> {

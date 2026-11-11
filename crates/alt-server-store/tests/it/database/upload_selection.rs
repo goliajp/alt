@@ -174,12 +174,13 @@ fn schema_thirteen_conflicting_original_sizes_leave_no_partial_index() {
         .unwrap();
     let original = original_requests(&f);
     assert!(
-        Store::migrate_v13(
+        Store::migrate(
             f.client(),
             f.store.bytes().clone(),
             f.spec.clone(),
             SigningKey::from_bytes(&f.signing_seed),
-            limits()
+            limits(),
+            13
         )
         .is_err()
     );

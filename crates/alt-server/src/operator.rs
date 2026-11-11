@@ -554,25 +554,7 @@ impl Config {
         let client = self.client()?;
         let bytes = ByteStore::open(&self.bytes_directory)?;
         let key = self.signing_key()?;
-        let migrated = match from {
-            1 => Store::migrate_v1(client, bytes, self.instance.clone(), key, self.limits),
-            2 => Store::migrate_v2(client, bytes, self.instance.clone(), key, self.limits),
-            3 => Store::migrate_v3(client, bytes, self.instance.clone(), key, self.limits),
-            4 => Store::migrate_v4(client, bytes, self.instance.clone(), key, self.limits),
-            5 => Store::migrate_v5(client, bytes, self.instance.clone(), key, self.limits),
-            7 => Store::migrate_v7(client, bytes, self.instance.clone(), key, self.limits),
-            8 => Store::migrate_v8(client, bytes, self.instance.clone(), key, self.limits),
-            9 => Store::migrate_v9(client, bytes, self.instance.clone(), key, self.limits),
-            13 => Store::migrate_v13(client, bytes, self.instance.clone(), key, self.limits),
-            14 => Store::migrate_v14(client, bytes, self.instance.clone(), key, self.limits),
-            15 => Store::migrate_v15(client, bytes, self.instance.clone(), key, self.limits),
-            16 => Store::migrate_v16(client, bytes, self.instance.clone(), key, self.limits),
-            12 => Store::migrate_v12(client, bytes, self.instance.clone(), key, self.limits),
-            11 => Store::migrate_v11(client, bytes, self.instance.clone(), key, self.limits),
-            10 => Store::migrate_v10(client, bytes, self.instance.clone(), key, self.limits),
-            6 => Store::migrate_v6(client, bytes, self.instance.clone(), key, self.limits),
-            _ => unreachable!(),
-        };
+        let migrated = Store::migrate(client, bytes, self.instance.clone(), key, self.limits, from);
         match migrated {
             Ok(store) if store.spec() == &next.instance => Ok(next),
             Err(alt_server_store::Error::OutcomeUnknown) if next.open().is_ok() => Ok(next),

@@ -447,7 +447,7 @@ fn cloud_unpaid_owner_exports_with_current_account_but_billing_authority_alone_c
     );
 }
 
-fn import_fixture(
+pub(super) fn import_fixture(
     target: &Fixture,
 ) -> (
     Fixture,
@@ -1238,7 +1238,7 @@ pub(super) fn stage_import(
         stage_blob(target, export, intent, &blob);
     }
 }
-fn verify_import(
+pub(super) fn verify_import(
     target: &mut Fixture,
     intent: &alt_portable::ImportIntent,
 ) -> alt_server_store::PortableImportWork {

@@ -120,41 +120,59 @@ fn invalid(error: alt_pack_segment::Error) -> Error {
     }
 }
 
+/// Starts a segment of `objects` Git objects in the byte volume at `root`. The file
+/// is written as they are added; the row that makes it live is the caller's to insert.
+pub(crate) fn materialize_at<'a>(
+    root: &std::path::Path,
+    repository: &str,
+    existing: &'a SegmentSet,
+    objects: u64,
+) -> Result<Materializing<'a>> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut nonce = [0u8; 16];
+    alt_os::random::fill(&mut nonce);
+    let id: String = nonce.iter().map(|byte| format!("{byte:02x}")).collect();
+    crate::packs::pack_directory_at(root, repository)?;
+    let path = crate::packs::segment_file(root, repository, &id)?;
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&path)?;
+    let mut writing = Materializing {
+        builder: None,
+        id,
+        path,
+    };
+    writing.builder = Some(Builder::new(file, existing, objects).map_err(invalid)?);
+    Ok(writing)
+}
+
 impl Store {
-    /// Starts a segment of `objects` Git objects. The file is written as they are
-    /// added; the row that makes it live is the caller's to insert.
     pub(crate) fn materialize<'a>(
         &mut self,
         repository: &str,
         existing: &'a SegmentSet,
         objects: u64,
     ) -> Result<Materializing<'a>> {
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut nonce = [0u8; 16];
-        alt_os::random::fill(&mut nonce);
-        let id: String = nonce.iter().map(|byte| format!("{byte:02x}")).collect();
-        let path = self.pack_path(repository, &id)?;
-        let file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&path)?;
-        let mut writing = Materializing {
-            builder: None,
-            id,
-            path,
-        };
-        writing.builder = Some(Builder::new(file, existing, objects).map_err(invalid)?);
-        Ok(writing)
+        materialize_at(self.bytes().root(), repository, existing, objects)
     }
 
     /// the live segments of a repository as of now, for a caller that has yet to
     /// authorize whatever it decides from them
     pub(crate) fn published_segments(&mut self, repository: &str) -> Result<SegmentSet> {
+        Ok(self.live_segments(repository)?.1)
+    }
+
+    /// the live segments with the list they were opened from
+    pub(crate) fn live_segments(
+        &mut self,
+        repository: &str,
+    ) -> Result<(Vec<(String, bool)>, SegmentSet)> {
         let mut tx = self.client.transaction()?;
         let ids = Self::live_segment_ids(&mut tx, repository)?;
         tx.commit()?;
-        Ok(self.open_listed_segments(repository, ids)?.1)
+        self.open_listed_segments(repository, ids)
     }
 }
 
@@ -174,11 +192,13 @@ pub(crate) fn account_segment(
     Ok(())
 }
 
-/// Lets go of content-store copies of Git objects the segments hold. Only content
-/// nothing else retains goes: a pin of any kind keeps it, as bytes that are also an
-/// attachment or another upload in flight have. What is released is an unregistered
-/// placeholder again, no longer counted, and collected like an abandoned upload.
-pub(crate) fn release_git_content(
+/// Lets go of content the content store holds for nothing any more: copies of Git
+/// objects the segments hold, and the chunks an upload was assembled from. Only
+/// content nothing retains goes: a pin of any kind keeps it, as bytes that are also
+/// an attachment or another upload in flight have. What is released is an
+/// unregistered placeholder again, no longer counted, and collected like an
+/// abandoned upload. A Git mapping goes with its content, or once no upload uses it.
+pub(crate) fn release_content(
     tx: &mut Transaction<'_>,
     repository: &str,
     digests: &[&str],
@@ -199,12 +219,12 @@ pub(crate) fn release_git_content(
             released.push(row.get::<_, String>(0));
         }
         tx.execute(
-            "DELETE FROM alt_objects WHERE repository=$1 AND blake3=ANY($2)",
+            "DELETE FROM alt_blob_locations WHERE repository=$1 AND blake3=ANY($2)",
             &[&repository, &released],
         )?;
         tx.execute(
-            "DELETE FROM alt_blob_locations WHERE repository=$1 AND blake3=ANY($2)",
-            &[&repository, &released],
+            "DELETE FROM alt_objects o WHERE o.repository=$1 AND o.blake3=ANY($2) AND NOT EXISTS(SELECT 1 FROM alt_pins p WHERE p.repository=o.repository AND p.blake3=o.blake3 AND p.pin_id LIKE 'upload:%')",
+            &[&repository, &batch],
         )?;
     }
     tx.execute(
