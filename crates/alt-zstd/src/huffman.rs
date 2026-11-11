@@ -3,8 +3,6 @@
 
 use crate::Error;
 use crate::bits::{BackReader, load64};
-#[cfg(target_arch = "x86_64")]
-use crate::huffman_x86::{pair_round_bmi2, round_bmi2};
 use crate::weights::read_weights;
 
 /// Longest code the format allows.
@@ -24,10 +22,12 @@ const PAIRS_MIN: usize = 8 << 10;
 
 /// Lookup tables indexed by the next `log` bits of a stream.
 pub(crate) struct HufTable {
-    /// the symbol in the low byte, its code length above it
+    /// the code length in the low byte, the symbol above it: a shift by
+    /// the whole entry then moves a stream on, as shifts only look at the
+    /// low six bits of their count
     entries: [u16; 1 << MAX_BITS],
-    /// up to two symbols at once: the symbols in the low two bytes (first
-    /// one lowest), then the bits they take, then how many they are
+    /// up to two symbols at once: the bits they take in the low byte, then
+    /// the symbols (first one lowest), then how many they are
     pairs: [u32; 1 << MAX_BITS],
     /// whether `pairs` matches `entries`
     pairs_ready: bool,
@@ -50,13 +50,13 @@ impl HufTable {
         let size = 1usize << self.log;
         for index in 0..size {
             let first = self.entries[index] as u32;
-            let first_len = first >> 8;
+            let first_len = first & 0xFF;
             let second = self.entries[(index << first_len) & (size - 1)] as u32;
-            let both = first_len + (second >> 8);
+            let both = first_len + (second & 0xFF);
             self.pairs[index] = if both <= self.log {
-                (first & 0xFF) | (second & 0xFF) << 8 | both << 16 | 2 << 24
+                both | (first & 0xFF00) | (second & 0xFF00) << 8 | 2 << 24
             } else {
-                (first & 0xFF) | first_len << 16 | 1 << 24
+                first | 1 << 24
             };
         }
         self.pairs_ready = true;
@@ -105,7 +105,7 @@ impl HufTable {
                 continue;
             }
             let span = 1usize << (weight - 1);
-            let entry = ((log + 1 - weight as u32) << 8) as u16 | symbol as u16;
+            let entry = (log + 1 - weight as u32) as u16 | (symbol as u16) << 8;
             let from = start[weight as usize];
             self.entries[from..from + span].fill(entry);
             start[weight as usize] += span;
@@ -150,8 +150,8 @@ impl HufTable {
                 // caller provides room for every symbol written
                 unsafe {
                     let entry = *self.entries.get_unchecked(index);
-                    reader.skip((entry >> 8) as u32);
-                    dst.write(entry as u8);
+                    reader.skip((entry & 0xFF) as u32);
+                    dst.write((entry >> 8) as u8);
                     dst = dst.add(1);
                 }
             }
@@ -237,7 +237,7 @@ impl HufTable {
             return unsafe { self.burst_4x_bmi2(streams, dst, lens, pairs, done, readers) };
         }
         // safety: forwarded from the caller
-        unsafe { self.burst_4x_any::<false>(streams, dst, lens, pairs, done, readers) }
+        unsafe { self.burst_4x_any(streams, dst, lens, pairs, done, readers) }
     }
 
     /// The same loop compiled for processors with BMI2, where the variable
@@ -257,13 +257,13 @@ impl HufTable {
         readers: &mut [Option<BackReader<'a>>; 4],
     ) {
         // safety: forwarded from the caller
-        unsafe { self.burst_4x_any::<true>(streams, dst, lens, pairs, done, readers) }
+        unsafe { self.burst_4x_any(streams, dst, lens, pairs, done, readers) }
     }
 
     /// # Safety
     /// As for [`HufTable::burst_4x`].
     #[inline(always)]
-    unsafe fn burst_4x_any<'a, const BMI2: bool>(
+    unsafe fn burst_4x_any<'a>(
         &self,
         streams: [&'a [u8]; 4],
         dst: *mut u8,
@@ -298,26 +298,13 @@ impl HufTable {
             // a pair lookup always stores two bytes, so it needs room for
             // two per lookup, or it would spill into the next segment
             while pairs && (0..4).all(|i| ip[i] >= floor[i] && left[i] >= 2 * BURST) {
-                #[cfg(target_arch = "x86_64")]
-                if BMI2 {
-                    pair_round_bmi2(&mut bits, &mut op, pair_table, shift as u64);
-                } else {
-                    for _ in 0..BURST {
-                        for i in 0..4 {
-                            let entry = *pair_table.add((bits[i] >> shift) as usize);
-                            op[i].cast::<u16>().write_unaligned((entry as u16).to_le());
-                            op[i] = op[i].add((entry >> 24) as usize);
-                            bits[i] <<= (entry >> 16) & 0xFF;
-                        }
-                    }
-                }
-                #[cfg(not(target_arch = "x86_64"))]
                 for _ in 0..BURST {
                     for i in 0..4 {
                         let entry = *pair_table.add((bits[i] >> shift) as usize);
-                        op[i].cast::<u16>().write_unaligned((entry as u16).to_le());
+                        bits[i] = bits[i].wrapping_shl(entry);
+                        let symbols = (entry >> 8) as u16;
+                        op[i].cast::<u16>().write_unaligned(symbols.to_le());
                         op[i] = op[i].add((entry >> 24) as usize);
-                        bits[i] <<= (entry >> 16) & 0xFF;
                     }
                 }
                 for i in 0..4 {
@@ -328,29 +315,12 @@ impl HufTable {
                 }
             }
             while (0..4).all(|i| ip[i] >= floor[i] && left[i] >= BURST) {
-                #[cfg(target_arch = "x86_64")]
-                if BMI2 {
-                    round_bmi2(&mut bits, &op, table, shift as u64);
-                    for at in &mut op {
-                        *at = at.add(BURST);
-                    }
-                } else {
-                    for _ in 0..BURST {
-                        for i in 0..4 {
-                            let entry = *table.add((bits[i] >> shift) as usize);
-                            op[i].write(entry as u8);
-                            op[i] = op[i].add(1);
-                            bits[i] <<= entry >> 8;
-                        }
-                    }
-                }
-                #[cfg(not(target_arch = "x86_64"))]
                 for _ in 0..BURST {
                     for i in 0..4 {
                         let entry = *table.add((bits[i] >> shift) as usize);
-                        op[i].write(entry as u8);
+                        bits[i] = bits[i].wrapping_shl(entry as u32);
+                        op[i].write((entry >> 8) as u8);
                         op[i] = op[i].add(1);
-                        bits[i] <<= entry >> 8;
                     }
                 }
                 for i in 0..4 {

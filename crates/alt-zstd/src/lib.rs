@@ -12,8 +12,6 @@ mod execute;
 mod frame;
 mod fse;
 mod huffman;
-#[cfg(target_arch = "x86_64")]
-mod huffman_x86;
 mod literals;
 mod sequences;
 mod weights;
