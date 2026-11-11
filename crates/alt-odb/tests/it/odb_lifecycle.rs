@@ -9,7 +9,7 @@ use alt_odb::{NativeOdb, OdbError};
 
 #[test]
 fn reopen_sees_flushed_objects() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let data = b"persistent object".to_vec();
     let oid = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, &data);
     {
@@ -24,7 +24,7 @@ fn reopen_sees_flushed_objects() {
 
 #[test]
 fn torn_map_tail_is_dropped_and_reput_heals() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let data = b"healed object".to_vec();
     let oid = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, &data);
     {
@@ -50,7 +50,7 @@ fn torn_map_tail_is_dropped_and_reput_heals() {
 
 #[test]
 fn corrupt_map_record_mid_file_refuses_to_open() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     {
         let mut odb = NativeOdb::open(dir.path()).unwrap();
         for i in 0..3u8 {
@@ -74,7 +74,7 @@ fn corrupt_map_record_mid_file_refuses_to_open() {
 
 #[test]
 fn torn_map_append_partial_record_is_truncated() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let data = b"survivor".to_vec();
     let oid = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, &data);
     {
@@ -100,10 +100,10 @@ fn torn_map_append_partial_record_is_truncated() {
 
 #[test]
 fn sha256_repository_objects_round_trip() {
-    let repo = tempfile::tempdir().unwrap();
+    let repo = alt_os::temp::tempdir().unwrap();
     alt_testutil::make_repo(repo.path(), "sha256");
 
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let mut odb = NativeOdb::open(dir.path()).unwrap();
     let mut oids = Vec::new();
     let count = alt_testutil::for_each_loose(repo.path(), |oid, raw| {

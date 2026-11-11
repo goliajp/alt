@@ -1,7 +1,6 @@
 use alt_remote_protocol::{ActorKind, Attribution};
 use alt_server::operator::{self, Config, Error, Result};
 use clap::{Parser, Subcommand, ValueEnum};
-use rand_core::{OsRng, RngCore};
 use serde_json::{Value, json};
 use std::{
     io::Write,
@@ -382,7 +381,7 @@ fn execute(args: &Args) -> Result<Value> {
     }
     if let Action::Secret { kind, output } = &args.command {
         let mut seed = [0u8; 32];
-        OsRng.fill_bytes(&mut seed);
+        alt_os::random::fill(&mut seed);
         let bytes = match kind {
             SecretKind::ReceiptKey => seed.to_vec(),
             SecretKind::Token => format!("alt1_{}\n", hex(&seed)).into_bytes(),

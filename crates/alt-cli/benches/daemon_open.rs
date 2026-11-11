@@ -15,8 +15,8 @@ use criterion::{Criterion, criterion_group, criterion_main};
 
 /// Builds a repo with `commits` commits via the real `alt` binary (setup runs
 /// once, outside the timed loop), returning the live tempdir and its `.alt`.
-fn fixture(commits: usize) -> (tempfile::TempDir, std::path::PathBuf) {
-    let dir = tempfile::tempdir().unwrap();
+fn fixture(commits: usize) -> (alt_os::temp::TempDir, std::path::PathBuf) {
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     run(root, &["init", "."]);
     for i in 0..commits {

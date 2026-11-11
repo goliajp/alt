@@ -13,7 +13,7 @@ fn log_path(dir: &Path) -> std::path::PathBuf {
 
 #[test]
 fn reopen_replays_the_chain() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let (a, b) = {
         let mut log = OpLog::open(dir.path()).unwrap();
         let a = log.append("alice", 1, b"first").unwrap();
@@ -33,7 +33,7 @@ fn reopen_replays_the_chain() {
 
 #[test]
 fn torn_tail_is_truncated_and_log_keeps_accepting() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let a = {
         let mut log = OpLog::open(dir.path()).unwrap();
         let a = log.append("alice", 1, b"durable").unwrap();
@@ -62,7 +62,7 @@ fn torn_tail_is_truncated_and_log_keeps_accepting() {
 
 #[test]
 fn corrupt_record_mid_file_refuses_to_open() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     {
         let mut log = OpLog::open(dir.path()).unwrap();
         log.append("a", 1, b"one").unwrap();
@@ -83,8 +83,8 @@ fn corrupt_record_mid_file_refuses_to_open() {
 
 #[test]
 fn spliced_foreign_record_breaks_the_chain() {
-    let dir_a = tempfile::tempdir().unwrap();
-    let dir_b = tempfile::tempdir().unwrap();
+    let dir_a = alt_os::temp::tempdir().unwrap();
+    let dir_b = alt_os::temp::tempdir().unwrap();
     {
         let mut log = OpLog::open(dir_a.path()).unwrap();
         log.append("a", 1, b"a1").unwrap();

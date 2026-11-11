@@ -3,7 +3,6 @@
 use super::*;
 use alt_remote_protocol::login::*;
 use alt_server_store::DevicePoll;
-use rand_core::{OsRng, RngCore};
 use std::{collections::BTreeMap, io::Read};
 
 pub(super) fn credential(key: &ed25519_dalek::SigningKey, device_digest: &str) -> String {
@@ -155,7 +154,7 @@ async fn inner(
                 let code = alt_browser_auth::secret();
                 let digest = alt_browser_auth::digest(&code);
                 let mut random = [0u8; 8];
-                OsRng.fill_bytes(&mut random);
+                alt_os::random::fill(&mut random);
                 let human: String = random
                     .iter()
                     .map(|b| USER_CODE_ALPHABET[(b & 31) as usize] as char)

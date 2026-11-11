@@ -53,8 +53,8 @@ fn build_git_source(src: &Path) {
 
 #[test]
 fn import_into_fresh_dir_materialises_head_tree() {
-    let src_tmp = tempfile::tempdir().unwrap();
-    let dst_tmp = tempfile::tempdir().unwrap();
+    let src_tmp = alt_os::temp::tempdir().unwrap();
+    let dst_tmp = alt_os::temp::tempdir().unwrap();
     let src = src_tmp.path();
     let dst = dst_tmp.path();
     build_git_source(src);
@@ -78,8 +78,8 @@ fn import_into_fresh_dir_materialises_head_tree() {
 
 #[test]
 fn import_into_existing_work_tree_does_not_clobber_files() {
-    let src_tmp = tempfile::tempdir().unwrap();
-    let dst_tmp = tempfile::tempdir().unwrap();
+    let src_tmp = alt_os::temp::tempdir().unwrap();
+    let dst_tmp = alt_os::temp::tempdir().unwrap();
     let src = src_tmp.path();
     let dst = dst_tmp.path();
     build_git_source(src);
@@ -104,9 +104,9 @@ fn import_into_existing_work_tree_does_not_clobber_files() {
 
 #[test]
 fn a_sha256_repository_imports_and_keeps_working() {
-    let src_tmp = tempfile::tempdir().unwrap();
-    let dst_tmp = tempfile::tempdir().unwrap();
-    let exp_tmp = tempfile::tempdir().unwrap();
+    let src_tmp = alt_os::temp::tempdir().unwrap();
+    let dst_tmp = alt_os::temp::tempdir().unwrap();
+    let exp_tmp = alt_os::temp::tempdir().unwrap();
     let (src, dst) = (src_tmp.path(), dst_tmp.path());
     git(src, &["init", "-q", "-b", "main", "--object-format=sha256"]);
     fs::create_dir(src.join("d")).unwrap();

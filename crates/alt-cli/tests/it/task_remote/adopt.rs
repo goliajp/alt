@@ -123,8 +123,8 @@ fn refusal_with_deadline(work: &Path, token: &str, args: &[&str], log: &Path) ->
 fn interrupted_received_task_adoption_can_be_explicitly_reauthorized() {
     let server = Server::new();
     std::fs::create_dir_all(env!("CARGO_TARGET_TMPDIR")).unwrap();
-    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
-    let scratch = tempfile::tempdir_in(std::env::var_os("HOME").unwrap()).unwrap();
+    let root = alt_os::temp::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let scratch = alt_os::temp::tempdir_in(std::env::var_os("HOME").unwrap()).unwrap();
     let alice = root.path().join("alice");
     let bob = root.path().join("bob");
     let aw = root.path().join("alice-work");
@@ -349,12 +349,7 @@ fn interrupted_received_task_adoption_can_be_explicitly_reauthorized() {
             .write(true)
             .open(request.join("lock"))
             .unwrap();
-        use std::os::fd::AsRawFd;
-        // SAFETY: this test owns the live original-request file descriptor.
-        assert_eq!(
-            unsafe { libc::flock(active.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
-            0
-        );
+        alt_os::sys::flock(&active, alt_os::sys::LOCK_EX | alt_os::sys::LOCK_NB).unwrap();
         let active_args = arguments(&old);
         let active_result = refusal_with_deadline(
             &work,

@@ -8,8 +8,8 @@ use alt_git_codec::{HashAlgo, ObjectId, RawObject};
 use alt_git_pack::{IndexedPack, PackWriter};
 
 /// All loose objects of a fresh fixture repo (every kind, both algos).
-fn fixture_objects(object_format: &str) -> (tempfile::TempDir, Vec<(ObjectId, RawObject)>) {
-    let repo = tempfile::tempdir().unwrap();
+fn fixture_objects(object_format: &str) -> (alt_os::temp::TempDir, Vec<(ObjectId, RawObject)>) {
+    let repo = alt_os::temp::tempdir().unwrap();
     alt_testutil::make_repo(repo.path(), object_format);
     let mut objects = Vec::new();
     alt_testutil::for_each_loose(repo.path(), |oid, raw| objects.push((oid, raw)));
@@ -33,7 +33,7 @@ fn write_fixture_pack(
 fn written_pack_round_trips_through_own_reader() {
     for (format, algo) in [("sha1", HashAlgo::Sha1), ("sha256", HashAlgo::Sha256)] {
         let (_repo, objects) = fixture_objects(format);
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let written = write_fixture_pack(dir.path(), algo, &objects);
         assert_eq!(written.objects as usize, objects.len());
 
@@ -53,7 +53,7 @@ fn written_pack_round_trips_through_own_reader() {
 fn git_accepts_written_packs() {
     for (format, algo) in [("sha1", HashAlgo::Sha1), ("sha256", HashAlgo::Sha256)] {
         let (repo, objects) = fixture_objects(format);
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let written = write_fixture_pack(dir.path(), algo, &objects);
 
         // git is the referee; run it inside the fixture repo so the
@@ -95,7 +95,7 @@ fn git_accepts_written_packs() {
 #[test]
 fn empty_pack_is_rejected_only_by_count_mismatch() {
     // a pack declaring 1 object but given none must refuse to finish
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let writer = PackWriter::create(dir.path(), HashAlgo::Sha1, 1).unwrap();
     assert!(writer.finish().is_err());
 }

@@ -112,7 +112,7 @@ pub fn execute(
                 ExportAction::Archive => {
                     let export =
                         store.open_portable_export(credential, &scope, &id, limits.package)?;
-                    let mut file = tempfile::NamedTempFile::new()?;
+                    let mut file = alt_os::temp::NamedTempFile::new()?;
                     alt_portable::write_archive(
                         file.as_file_mut(),
                         export.envelope(),
@@ -138,7 +138,7 @@ pub fn execute(
                         .find(|b| b.blake3 == digest)
                         .ok_or(Error::Unauthorized)?;
                     let mut input = export.open(blob)?;
-                    let mut file = tempfile::NamedTempFile::new()?;
+                    let mut file = alt_os::temp::NamedTempFile::new()?;
                     let mut hash = alt_hash::blake3::Hasher::new();
                     let mut remaining = blob.bytes;
                     let mut buffer = [0u8; 65536];

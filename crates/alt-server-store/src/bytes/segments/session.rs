@@ -188,7 +188,7 @@ mod tests {
     #[test]
     fn warm_index_does_not_hide_missing_replaced_or_modified_files() {
         for fault in 0..5 {
-            let temp = tempfile::tempdir().unwrap();
+            let temp = alt_os::temp::tempdir().unwrap();
             let store = ByteStore::open(temp.path()).unwrap();
             let proof = put(&store, 1);
             let session = ReadSession::new(&store, &scope());
@@ -230,7 +230,7 @@ mod tests {
     #[test]
     fn finish_and_eviction_rehash_even_if_metadata_comparison_passes() {
         for eviction in [false, true] {
-            let temp = tempfile::tempdir().unwrap();
+            let temp = alt_os::temp::tempdir().unwrap();
             let store = ByteStore::open(temp.path()).unwrap();
             let session = ReadSession::new(&store, &scope());
             let first = put(&store, 1);
@@ -266,7 +266,7 @@ mod tests {
 
     #[test]
     fn bounded_indexes_reopen_evicted_members_and_reject_changed_locations() {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = alt_os::temp::tempdir().unwrap();
         let store = ByteStore::open(temp.path()).unwrap();
         let session = ReadSession::new(&store, &scope());
         let first = put(&store, 1);
@@ -300,7 +300,7 @@ mod tests {
     }
     #[test]
     fn large_indexes_hit_byte_budget_before_file_budget() {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = alt_os::temp::tempdir().unwrap();
         let store = ByteStore::open(temp.path()).unwrap();
         let session = ReadSession::new(&store, &scope());
         let values: Vec<_> = (0..alt_byte_segment::MAX_MEMBERS as u64)

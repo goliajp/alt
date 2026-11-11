@@ -265,7 +265,7 @@ pub fn intake(source: &Path, target: &Path, git: &Path) -> Result<IntakeReport> 
     let before = fingerprint(&source.join(".git"))?;
     let git_report = git_check(git, &source)?;
     let repo = alt_repo::Repository::discover(&source)?;
-    let staging = tempfile::tempdir_in(target.parent().ok_or("target parent missing")?)?;
+    let staging = alt_os::temp::tempdir_in(target.parent().ok_or("target parent missing")?)?;
     let alt_dir = staging.path().join(".alt");
     alt_import::import_git(&repo, &alt_dir, "task-intake", 0)?;
     let odb = NativeOdb::open(&alt_dir)?;
@@ -347,7 +347,7 @@ pub fn prepare_export(
     exported.config_hex = alt_input::hex(&config);
     exported.validate(odb)?;
     let entries = files(odb, resolve(&exported.refs, "HEAD")?)?;
-    let staging = tempfile::tempdir_in(target.parent().ok_or("missing destination parent")?)?;
+    let staging = alt_os::temp::tempdir_in(target.parent().ok_or("missing destination parent")?)?;
     preflight_paths(staging.path(), &entries, odb)?;
     super::paths::probe_names(staging.path(), exported.refs.keys().map(String::as_str))?;
     let dir = staging.path().join(".git");
@@ -483,7 +483,7 @@ fn portable_config(bytes: &[u8]) -> Result<Vec<u8>> {
 }
 
 pub struct PreparedExport {
-    staging: tempfile::TempDir,
+    staging: alt_os::temp::TempDir,
     target: PathBuf,
     pub report: ExportReport,
 }
@@ -600,7 +600,7 @@ mod config_tests {
     fn files_backend_conversion_preserves_independent_git_config_semantics() {
         let original=b"[core]\n bare = false\n fileMode\n[extensions] # retained semantics, physical backend changes\n refStorage = reftable\n[remote \"Origin\"]\n url = https://example.invalid/repo.git\n fetch = +refs/heads/*:refs/remotes/Origin/*\n[user]\n name = \"quoted\\\" tab\\t slash\\\\ line\\nend\"\n";
         let portable = portable_config(original).unwrap();
-        let temp = tempfile::tempdir().unwrap();
+        let temp = alt_os::temp::tempdir().unwrap();
         let git = std::env::split_paths(&std::env::var_os("PATH").unwrap())
             .map(|p| p.join("git"))
             .find(|p| p.is_file())

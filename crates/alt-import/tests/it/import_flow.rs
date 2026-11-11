@@ -28,9 +28,9 @@ fn assert_objects_migrated(repo_dir: &Path, alt_dir: &Path) -> usize {
 
 #[test]
 fn full_import_migrates_objects_refs_head_and_config() {
-    let repo_dir = tempfile::tempdir().unwrap();
+    let repo_dir = alt_os::temp::tempdir().unwrap();
     alt_testutil::make_repo(repo_dir.path(), "sha1");
-    let alt_root = tempfile::tempdir().unwrap();
+    let alt_root = alt_os::temp::tempdir().unwrap();
     let alt_dir = alt_root.path().join(".alt");
 
     let report = import_here(repo_dir.path(), &alt_dir);
@@ -78,9 +78,9 @@ fn full_import_migrates_objects_refs_head_and_config() {
 
 #[test]
 fn reimport_of_unchanged_source_is_a_no_op() {
-    let repo_dir = tempfile::tempdir().unwrap();
+    let repo_dir = alt_os::temp::tempdir().unwrap();
     alt_testutil::make_repo(repo_dir.path(), "sha1");
-    let alt_root = tempfile::tempdir().unwrap();
+    let alt_root = alt_os::temp::tempdir().unwrap();
     let alt_dir = alt_root.path().join(".alt");
 
     let first = import_here(repo_dir.path(), &alt_dir);
@@ -96,9 +96,9 @@ fn reimport_of_unchanged_source_is_a_no_op() {
 
 #[test]
 fn reimport_after_upstream_moves_updates_only_what_moved() {
-    let repo_dir = tempfile::tempdir().unwrap();
+    let repo_dir = alt_os::temp::tempdir().unwrap();
     alt_testutil::make_repo(repo_dir.path(), "sha1");
-    let alt_root = tempfile::tempdir().unwrap();
+    let alt_root = alt_os::temp::tempdir().unwrap();
     let alt_dir = alt_root.path().join(".alt");
     import_here(repo_dir.path(), &alt_dir);
 
@@ -127,9 +127,9 @@ fn reimport_after_upstream_moves_updates_only_what_moved() {
 
 #[test]
 fn import_completes_from_a_partial_object_state() {
-    let repo_dir = tempfile::tempdir().unwrap();
+    let repo_dir = alt_os::temp::tempdir().unwrap();
     alt_testutil::make_repo(repo_dir.path(), "sha1");
-    let alt_root = tempfile::tempdir().unwrap();
+    let alt_root = alt_os::temp::tempdir().unwrap();
     let alt_dir = alt_root.path().join(".alt");
 
     // simulate an import that died after migrating some objects but
@@ -158,7 +158,7 @@ fn import_completes_from_a_partial_object_state() {
 
 #[test]
 fn import_delta_encodes_same_path_history() {
-    let repo_dir = tempfile::tempdir().unwrap();
+    let repo_dir = alt_os::temp::tempdir().unwrap();
     alt_testutil::make_repo(repo_dir.path(), "sha1");
 
     // a file evolving across commits: each version shares most content
@@ -173,7 +173,7 @@ fn import_delta_encodes_same_path_history() {
         );
     }
 
-    let alt_root = tempfile::tempdir().unwrap();
+    let alt_root = alt_os::temp::tempdir().unwrap();
     let alt_dir = alt_root.path().join(".alt");
     let report = import_here(repo_dir.path(), &alt_dir);
     assert!(

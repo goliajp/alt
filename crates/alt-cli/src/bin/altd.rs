@@ -194,12 +194,12 @@ mod unix {
         timeout_ms: i32,
     ) -> io::Result<Option<UnixStream>> {
         loop {
-            let mut fds = [libc::pollfd {
+            let mut fds = [alt_os::sys::pollfd {
                 fd: listener.as_raw_fd(),
-                events: libc::POLLIN,
+                events: alt_os::sys::POLLIN,
                 revents: 0,
             }];
-            let rc = unsafe { libc::poll(fds.as_mut_ptr(), 1, timeout_ms) };
+            let rc = unsafe { alt_os::sys::poll(fds.as_mut_ptr(), 1, timeout_ms) };
             if rc < 0 {
                 let e = io::Error::last_os_error();
                 if e.kind() == io::ErrorKind::Interrupted {

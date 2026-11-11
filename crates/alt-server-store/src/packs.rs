@@ -220,7 +220,7 @@ impl Store {
         let mut content = pack;
         ingested.write_index(&mut content).map_err(failed)?;
         let mut nonce = [0u8; 16];
-        rand_core::RngCore::fill_bytes(&mut rand_core::OsRng, &mut nonce);
+        alt_os::random::fill(&mut nonce);
         let id: String = nonce.iter().map(|byte| format!("{byte:02x}")).collect();
         let path = self.pack_path(repository, &id)?;
         let inline = content.len() <= INLINE_SEGMENT_BYTES;

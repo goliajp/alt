@@ -37,7 +37,7 @@ fn ok(o: Output) -> String {
 
 #[test]
 fn init_add_commit_status_then_export_is_git_clean() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
 
@@ -58,7 +58,7 @@ fn init_add_commit_status_then_export_is_git_clean() {
     assert!(ok(alt(root, &["log", "--pretty=oneline"])).contains("first"));
 
     // export to a git repo and let git judge it
-    let out = tempfile::tempdir().unwrap();
+    let out = alt_os::temp::tempdir().unwrap();
     let target = out.path().join("exported");
     ok(alt(root, &["export", target.to_str().unwrap()]));
     assert!(

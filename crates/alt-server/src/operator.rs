@@ -615,7 +615,7 @@ impl Config {
 pub fn read_regular(path: &Path, limit: usize, private: bool) -> Result<Vec<u8>> {
     let file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK)
+        .custom_flags(alt_os::sys::O_NOFOLLOW | alt_os::sys::O_CLOEXEC | alt_os::sys::O_NONBLOCK)
         .open(path)
         .map_err(|_| Error::File)?;
     let meta = file.metadata().map_err(|_| Error::File)?;
@@ -657,7 +657,7 @@ pub fn create_private(path: &Path, bytes: &[u8]) -> Result<()> {
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(|_| Error::File)?;
+    let mut temporary = alt_os::temp::NamedTempFile::new_in(parent).map_err(|_| Error::File)?;
     temporary
         .as_file()
         .set_permissions(std::fs::Permissions::from_mode(0o600))

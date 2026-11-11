@@ -28,8 +28,8 @@ fn value(root: &Path, args: &[&str]) -> Value {
     serde_json::from_slice(&ok(root, args).stdout).unwrap()
 }
 struct Fixture {
-    _dir: tempfile::TempDir,
-    scratch: tempfile::TempDir,
+    _dir: alt_os::temp::TempDir,
+    scratch: alt_os::temp::TempDir,
     main: PathBuf,
     workspace: PathBuf,
     candidate: String,
@@ -37,9 +37,9 @@ struct Fixture {
 }
 fn fixture(script: &str) -> Fixture {
     std::fs::create_dir_all(env!("CARGO_TARGET_TMPDIR")).unwrap();
-    let directory = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let directory = alt_os::temp::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     // This must be on a supported disk and outside every repository ancestor.
-    let scratch = tempfile::tempdir_in(std::env::var_os("HOME").unwrap()).unwrap();
+    let scratch = alt_os::temp::tempdir_in(std::env::var_os("HOME").unwrap()).unwrap();
     let main = directory.path().join("main");
     let workspace = directory.path().join("task");
     std::fs::create_dir(&main).unwrap();

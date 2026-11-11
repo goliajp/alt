@@ -25,7 +25,7 @@ fn write_workflow(repo: &Path, name: &str, body: &str) {
 
 #[test]
 fn alt_ci_validate_accepts_well_formed_workflow() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     let repo = tmp.path();
     std::fs::create_dir_all(repo.join(".alt").join("ci")).unwrap();
     write_workflow(
@@ -66,7 +66,7 @@ build_out = "target/release/alt"
 
 #[test]
 fn alt_ci_validate_rejects_undefined_needs() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     let repo = tmp.path();
     write_workflow(
         repo,
@@ -99,7 +99,7 @@ needs = ["does-not-exist"]
 
 #[test]
 fn alt_ci_validate_emits_json_when_asked() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     let repo = tmp.path();
     write_workflow(
         repo,
@@ -145,7 +145,7 @@ needs = ["a"]
 
 #[test]
 fn alt_ci_validate_handles_empty_ci_dir_gracefully() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     let repo = tmp.path();
     let out = alt(repo, &["ci", "validate"]);
     assert!(
@@ -162,7 +162,7 @@ fn alt_ci_validate_handles_empty_ci_dir_gracefully() {
 
 #[test]
 fn alt_ci_validate_accepts_explicit_path_argument() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     let path = tmp.path().join("workflow.toml");
     std::fs::write(
         &path,

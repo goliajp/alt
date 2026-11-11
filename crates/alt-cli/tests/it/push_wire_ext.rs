@@ -152,7 +152,7 @@ fn write_pkt(out: &mut Vec<u8>, payload: &[u8]) {
 #[test]
 #[ignore = "requires system git; run with --include-ignored locally"]
 fn alt_push_attaches_alt_principal_and_sig_caps_when_signing_enabled() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
 
     ok("alt init", alt(root, &["init", "."]));
@@ -226,7 +226,7 @@ fn alt_push_attaches_alt_principal_and_sig_caps_when_signing_enabled() {
 #[test]
 #[ignore = "requires system git; run with --include-ignored locally"]
 fn alt_push_does_not_attach_caps_when_signing_disabled() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok("alt init", alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "hello\n").unwrap();

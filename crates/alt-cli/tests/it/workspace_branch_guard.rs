@@ -49,8 +49,8 @@ fn tip(root: &Path, branch: &str) -> String {
 
 #[test]
 fn finishing_into_a_branch_checked_out_elsewhere_is_refused() {
-    let repo = tempfile::tempdir().unwrap();
-    let trees = tempfile::tempdir().unwrap();
+    let repo = alt_os::temp::tempdir().unwrap();
+    let trees = alt_os::temp::tempdir().unwrap();
     let root = repo.path();
     seed(root);
     ok(alt(root, &["flow", "init"]));
@@ -81,8 +81,8 @@ fn finishing_into_a_branch_checked_out_elsewhere_is_refused() {
 
 #[test]
 fn a_branch_cannot_be_checked_out_twice_or_deleted_from_elsewhere() {
-    let repo = tempfile::tempdir().unwrap();
-    let trees = tempfile::tempdir().unwrap();
+    let repo = alt_os::temp::tempdir().unwrap();
+    let trees = alt_os::temp::tempdir().unwrap();
     let root = repo.path();
     seed(root);
     ok(alt(root, &["branch", "feat"]));
@@ -122,8 +122,8 @@ fn a_branch_cannot_be_checked_out_twice_or_deleted_from_elsewhere() {
 
 #[test]
 fn workspace_add_without_a_branch_makes_its_own() {
-    let repo = tempfile::tempdir().unwrap();
-    let trees = tempfile::tempdir().unwrap();
+    let repo = alt_os::temp::tempdir().unwrap();
+    let trees = alt_os::temp::tempdir().unwrap();
     let root = repo.path();
     seed(root);
     let main = tip(root, "main");

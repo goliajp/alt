@@ -77,7 +77,7 @@ impl Assets {
                 };
                 let file = fs::OpenOptions::new()
                     .read(true)
-                    .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+                    .custom_flags(alt_os::sys::O_NOFOLLOW | alt_os::sys::O_CLOEXEC)
                     .open(&path)?;
                 if !file.metadata()?.is_file() {
                     return Err(io::Error::other("workbench asset changed type"));

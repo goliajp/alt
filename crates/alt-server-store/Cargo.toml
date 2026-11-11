@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 alt-byte-segment.workspace = true
 alt-hash.workspace = true
+alt-os.workspace = true
 alt-pack-segment.workspace = true
 alt-server-telemetry.workspace = true
 golia-change-link.workspace = true
@@ -20,11 +21,8 @@ alt-git-codec.workspace = true
 alt-remote-protocol.workspace = true
 alt-repository-service.workspace = true
 ed25519-dalek.workspace = true
-rand_core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tempfile.workspace = true
-libc.workspace = true
 postgres = { version = "0.19.14", features = ["with-serde_json-1"] }
 
 [dev-dependencies]
@@ -32,4 +30,3 @@ alt-input.workspace = true
 alt-delivery.workspace = true
 alt-refs.workspace = true
 alt-command-protocol.workspace = true
-tempfile.workspace = true

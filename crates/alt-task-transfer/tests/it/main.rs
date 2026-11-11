@@ -74,7 +74,7 @@ fn objects() -> (ObjectId, ObjectId, Vec<u8>) {
 }
 #[test]
 fn sealed_package_rejects_missing_closure_corruption_symlinks_and_existing_destination() {
-    let root = tempfile::tempdir().unwrap();
+    let root = alt_os::temp::tempdir().unwrap();
     let (tree, commit, raw) = objects();
     let mut draft = Draft::new(root.path(), limits()).unwrap();
     draft
@@ -282,7 +282,7 @@ impl Source for Local {
 #[test]
 fn selection_preserves_exact_source_encoding_and_scope_without_local_execution_claims() {
     let source = Local::new();
-    let root = tempfile::tempdir().unwrap();
+    let root = alt_os::temp::tempdir().unwrap();
     let selection = Selection {
         roots: vec![RecordRoot {
             kind: RecordKind::Task,

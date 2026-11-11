@@ -23,7 +23,7 @@ fn credential() -> SavedCredential {
 }
 #[test]
 fn auth_private_credentials_reject_links_shared_permissions_and_other_origins() {
-    let root = tempfile::tempdir().unwrap();
+    let root = alt_os::temp::tempdir().unwrap();
     let file = root.path().join("credential.json");
     std::fs::write(&file, serde_json::to_vec(&credential()).unwrap()).unwrap();
     std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
@@ -45,7 +45,7 @@ fn auth_private_credentials_reject_links_shared_permissions_and_other_origins() 
 }
 #[test]
 fn auth_is_repository_independent_and_refuses_to_overwrite_credentials() {
-    let root = tempfile::tempdir().unwrap();
+    let root = alt_os::temp::tempdir().unwrap();
     let file = root.path().join("saved.json");
     let sentinel = b"existing private content";
     std::fs::write(&file, sentinel).unwrap();
@@ -89,7 +89,7 @@ fn auth_resumes_after_process_death_with_issued_token_and_expired_device_request
     }
     let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
     let origin = format!("http://{}", server.server_addr());
-    let root = tempfile::tempdir().unwrap();
+    let root = alt_os::temp::tempdir().unwrap();
     let file = root.path().join("credential.json");
     let journal = root.path().join("credential.json.login");
     let start = |resume: bool| {
@@ -223,7 +223,7 @@ fn auth_delegate_reuses_exact_private_intent_after_process_death_during_registra
             }
         }
     }
-    let root = tempfile::tempdir().unwrap();
+    let root = alt_os::temp::tempdir().unwrap();
     let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
     let origin = format!("http://{}", server.server_addr());
     let mut parent = credential();

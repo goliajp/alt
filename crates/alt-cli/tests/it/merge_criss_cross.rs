@@ -128,7 +128,10 @@ fn crossed_disagreement(v: &dyn Vcs) {
 
 #[test]
 fn a_crossed_disagreement_conflicts_as_in_git() {
-    let (a, g) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (a, g) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
     ok(alt(a.path(), &["init", "."]));
     ok(git(g.path(), &["init", "-q", "-b", "main"]));
     crossed_disagreement(&Alt(a.path()));
@@ -151,7 +154,10 @@ fn a_crossed_disagreement_conflicts_as_in_git() {
 
 #[test]
 fn a_clean_criss_cross_merge_matches_git() {
-    let (a, g) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (a, g) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
     ok(alt(a.path(), &["init", "."]));
     ok(git(g.path(), &["init", "-q", "-b", "main"]));
     for v in [&Alt(a.path()) as &dyn Vcs, &Git(g.path())] {
@@ -183,7 +189,7 @@ fn a_clean_criss_cross_merge_matches_git() {
 
 #[test]
 fn a_resolved_conflict_commits_as_a_merge() {
-    let a = tempfile::tempdir().unwrap();
+    let a = alt_os::temp::tempdir().unwrap();
     let root = a.path();
     ok(alt(root, &["init", "."]));
     let v = Alt(root);

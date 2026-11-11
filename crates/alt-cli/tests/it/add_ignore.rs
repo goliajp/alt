@@ -28,7 +28,7 @@ fn ok(o: Output) -> String {
 
 #[test]
 fn alt_add_dot_skips_gitignored_paths_at_root() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
 
@@ -99,8 +99,8 @@ fn scratch_tree(root: &Path) {
 
 #[test]
 fn the_global_excludes_file_under_xdg_config_home_applies() {
-    let repo = tempfile::tempdir().unwrap();
-    let config = tempfile::tempdir().unwrap();
+    let repo = alt_os::temp::tempdir().unwrap();
+    let config = alt_os::temp::tempdir().unwrap();
     std::fs::create_dir(config.path().join("git")).unwrap();
     std::fs::write(config.path().join("git/ignore"), ".scratch/\n*.out\n").unwrap();
     scratch_tree(repo.path());
@@ -113,8 +113,8 @@ fn the_global_excludes_file_under_xdg_config_home_applies() {
 
 #[test]
 fn without_xdg_config_home_the_file_under_home_applies() {
-    let repo = tempfile::tempdir().unwrap();
-    let home = tempfile::tempdir().unwrap();
+    let repo = alt_os::temp::tempdir().unwrap();
+    let home = alt_os::temp::tempdir().unwrap();
     std::fs::create_dir_all(home.path().join(".config/git")).unwrap();
     std::fs::write(home.path().join(".config/git/ignore"), "*.out\n").unwrap();
     scratch_tree(repo.path());
@@ -126,8 +126,8 @@ fn without_xdg_config_home_the_file_under_home_applies() {
 
 #[test]
 fn a_repository_gitignore_overrides_the_global_excludes() {
-    let repo = tempfile::tempdir().unwrap();
-    let config = tempfile::tempdir().unwrap();
+    let repo = alt_os::temp::tempdir().unwrap();
+    let config = alt_os::temp::tempdir().unwrap();
     std::fs::create_dir(config.path().join("git")).unwrap();
     std::fs::write(config.path().join("git/ignore"), "*.out\n").unwrap();
     scratch_tree(repo.path());
@@ -169,7 +169,10 @@ fn tracked_then_ignored(root: &Path, run: &dyn Fn(&[&str]) -> Output) {
 
 #[test]
 fn ignore_rules_do_not_hide_tracked_files() {
-    let (a, g) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (a, g) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
     let (a, g) = (a.path(), g.path());
     ok(alt(a, &["init", "."]));
     ok(git(g, &["init", "-q", "-b", "main"]));

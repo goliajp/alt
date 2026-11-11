@@ -72,7 +72,7 @@ fn grants() -> Vec<Grant> {
 struct Fixture {
     admin_dsn: String,
     database: String,
-    root: tempfile::TempDir,
+    root: alt_os::temp::TempDir,
     spec: InstanceSpec,
     signing_seed: [u8; 32],
     store: Store,
@@ -100,7 +100,7 @@ impl Fixture {
         client
             .batch_execute(&format!("CREATE DATABASE {database}"))
             .unwrap();
-        let root = tempfile::tempdir().unwrap();
+        let root = alt_os::temp::tempdir().unwrap();
         let spec = InstanceSpec {
             installation_id: installation.into(),
             workspace_id: "workspace".into(),

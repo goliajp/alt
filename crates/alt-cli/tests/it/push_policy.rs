@@ -46,8 +46,8 @@ fn git(repo: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
-fn empty_server_repo() -> tempfile::TempDir {
-    let dir = tempfile::tempdir().unwrap();
+fn empty_server_repo() -> alt_os::temp::TempDir {
+    let dir = alt_os::temp::tempdir().unwrap();
     let repo = dir.path();
     git(repo, &["init", "-q", "--bare", "-b", "main", "."]);
     git(repo, &["config", "receive.denyCurrentBranch", "ignore"]);
@@ -55,8 +55,8 @@ fn empty_server_repo() -> tempfile::TempDir {
     dir
 }
 
-fn build_local_alt_with_one_commit() -> tempfile::TempDir {
-    let dir = tempfile::tempdir().unwrap();
+fn build_local_alt_with_one_commit() -> alt_os::temp::TempDir {
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok("alt init", alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "hello\n").unwrap();
@@ -127,7 +127,7 @@ fn push_rejected_when_branch_allow_excludes_target() {
 fn push_non_fast_forward_requires_force_flag() {
     // server pre-seeded with a different history at refs/heads/main so
     // our local tip is NOT an ancestor
-    let server = tempfile::tempdir().unwrap();
+    let server = alt_os::temp::tempdir().unwrap();
     let server_path = server.path();
     git(server_path, &["init", "-q", "--bare", "-b", "main", "."]);
     git(
@@ -141,7 +141,7 @@ fn push_non_fast_forward_requires_force_flag() {
 
     // seed the server: clone, commit, push back so refs/heads/main has
     // history we don't share
-    let seed = tempfile::tempdir().unwrap();
+    let seed = alt_os::temp::tempdir().unwrap();
     git(seed.path(), &["init", "-q", "-b", "main", "."]);
     git(seed.path(), &["config", "user.email", "s@e"]);
     git(seed.path(), &["config", "user.name", "seed"]);
@@ -195,7 +195,7 @@ fn push_non_fast_forward_requires_force_flag() {
 #[ignore = "requires system git; run with --include-ignored locally"]
 fn forbid_force_cap_blocks_push_even_with_force_flag() {
     // same shape as above: server pre-seeded with foreign history
-    let server = tempfile::tempdir().unwrap();
+    let server = alt_os::temp::tempdir().unwrap();
     let server_path = server.path();
     git(server_path, &["init", "-q", "--bare", "-b", "main", "."]);
     git(
@@ -206,7 +206,7 @@ fn forbid_force_cap_blocks_push_even_with_force_flag() {
         server_path,
         &["config", "receive.denyNonFastForwards", "false"],
     );
-    let seed = tempfile::tempdir().unwrap();
+    let seed = alt_os::temp::tempdir().unwrap();
     git(seed.path(), &["init", "-q", "-b", "main", "."]);
     git(seed.path(), &["config", "user.email", "s@e"]);
     git(seed.path(), &["config", "user.name", "seed"]);

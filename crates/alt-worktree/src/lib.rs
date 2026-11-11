@@ -810,7 +810,7 @@ mod tests {
 
     #[test]
     fn scan_reads_files_exec_symlink_and_skips_control_dirs() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let root = dir.path();
         std::fs::write(root.join("a.txt"), b"hello").unwrap();
         std::fs::create_dir(root.join("sub")).unwrap();
@@ -853,7 +853,7 @@ mod tests {
         // a submodule worktree carries a .git entry (file or dir); scan
         // must not descend into it — the inner files belong to another
         // repo, not the parent's worktree.
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let root = dir.path();
         std::fs::write(root.join("top.txt"), b"hi").unwrap();
         let sub = root.join("submod");
@@ -891,7 +891,7 @@ mod tests {
 
     #[test]
     fn flatten_recurses_subtrees_with_full_paths() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let mut odb = NativeOdb::open(dir.path()).unwrap();
         let (oid_a, oid_b) = (oid(0xAA), oid(0xBB));
 

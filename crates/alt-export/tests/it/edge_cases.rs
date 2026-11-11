@@ -75,13 +75,13 @@ fn init(dir: &Path) {
 /// HEAD, same history, same full object inventory, and a clean `git fsck`
 /// (plain, not `--strict` — see corpus_roundtrip.rs ③). Returns the
 /// exported `.git` root for any fixture-specific extra assertions.
-fn round_trip(source: &Path) -> tempfile::TempDir {
-    let alt_root = tempfile::tempdir().unwrap();
+fn round_trip(source: &Path) -> alt_os::temp::TempDir {
+    let alt_root = alt_os::temp::tempdir().unwrap();
     let alt_dir = alt_root.path().join(".alt");
     let repo = Repository::discover(source).unwrap();
     alt_import::import_git(&repo, &alt_dir, "test/edge", 1).unwrap();
 
-    let out_root = tempfile::tempdir().unwrap();
+    let out_root = alt_os::temp::tempdir().unwrap();
     let target = out_root.path().join("exported");
     let report = export_git(&alt_dir, &target).unwrap();
     assert!(report.head, "{source:?}: export wrote no HEAD");
@@ -151,16 +151,16 @@ fn blob(repo: &Path, content: &[u8]) -> String {
 
 #[test]
 fn empty_repo_with_unborn_head() {
-    let source = tempfile::tempdir().unwrap();
+    let source = alt_os::temp::tempdir().unwrap();
     init(source.path());
     // unborn HEAD: a symbolic HEAD pointing at a branch with no commit,
     // zero objects, zero refs
-    let alt_root = tempfile::tempdir().unwrap();
+    let alt_root = alt_os::temp::tempdir().unwrap();
     let alt_dir = alt_root.path().join(".alt");
     let repo = Repository::discover(source.path()).unwrap();
     alt_import::import_git(&repo, &alt_dir, "test/edge", 1).unwrap();
 
-    let out_root = tempfile::tempdir().unwrap();
+    let out_root = alt_os::temp::tempdir().unwrap();
     let target = out_root.path().join("exported");
     let report = export_git(&alt_dir, &target).unwrap();
     assert_eq!(report.objects, 0, "empty repo exports no objects");
@@ -180,7 +180,7 @@ fn empty_repo_with_unborn_head() {
 
 #[test]
 fn empty_tree_object() {
-    let source = tempfile::tempdir().unwrap();
+    let source = alt_os::temp::tempdir().unwrap();
     init(source.path());
     // the empty-tree commit: its tree is git's well-known empty tree
     git_ok(
@@ -207,7 +207,7 @@ fn empty_tree_object() {
 
 #[test]
 fn nested_annotated_tag_chain_and_orphan() {
-    let source = tempfile::tempdir().unwrap();
+    let source = alt_os::temp::tempdir().unwrap();
     init(source.path());
     git_ok(
         source.path(),
@@ -257,7 +257,7 @@ fn nested_annotated_tag_chain_and_orphan() {
 
 #[test]
 fn non_utf8_path_name() {
-    let source = tempfile::tempdir().unwrap();
+    let source = alt_os::temp::tempdir().unwrap();
     init(source.path());
     let oid = blob(source.path(), b"bytes\n");
 
@@ -293,7 +293,7 @@ fn non_utf8_path_name() {
 
 #[test]
 fn symlink_gitlink_exec_modes() {
-    let source = tempfile::tempdir().unwrap();
+    let source = alt_os::temp::tempdir().unwrap();
     init(source.path());
     let regular = blob(source.path(), b"plain\n");
     let exec = blob(source.path(), b"#!/bin/sh\n");

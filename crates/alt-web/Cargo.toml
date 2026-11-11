@@ -15,4 +15,4 @@ tiny_http.workspace = true
 
 [dev-dependencies]
 alt-import.workspace = true
-tempfile.workspace = true
+alt-os.workspace = true

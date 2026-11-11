@@ -46,7 +46,7 @@ fn hunk_body(diff: &str) -> String {
 
 #[test]
 fn diff_unstaged_and_cached_match_git_hunks() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("f.txt"), "line1\nline2\nline3\n").unwrap();
@@ -66,7 +66,7 @@ fn diff_unstaged_and_cached_match_git_hunks() {
     assert!(unstaged.contains("--- a/f.txt"), "{unstaged}");
 
     // cross-check the hunk body against real git on the same edit
-    let gdir = tempfile::tempdir().unwrap();
+    let gdir = alt_os::temp::tempdir().unwrap();
     let groot = gdir.path();
     ok(git(groot, &["init", "-q", "."]));
     ok(git(groot, &["config", "user.email", "t@e"]));
@@ -127,7 +127,7 @@ fn diff_unstaged_and_cached_match_git_hunks() {
 /// the function whose body moved, other items silent.
 #[test]
 fn semantic_diff_for_rust_shows_one_logical_change_per_item() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("lib.rs"), "fn keep() {}\nfn touch() { 1 }\n").unwrap();
@@ -153,7 +153,7 @@ fn semantic_diff_for_rust_shows_one_logical_change_per_item() {
 /// is a refinement, not a contract — signal is never lost).
 #[test]
 fn semantic_diff_falls_back_to_line_diff_for_unsupported_languages() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("notes.txt"), "v1\n").unwrap();
@@ -212,7 +212,7 @@ fn build_minimal_png(width: u32, height: u32, pixels: &[u8]) -> Vec<u8> {
 /// pixel-block tweak rewrites the entire zlib stream).
 #[test]
 fn diff_png_change_reports_perceptual_hint() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
 
@@ -308,7 +308,7 @@ fn diff_png_change_reports_perceptual_hint() {
 /// false signal on generic binary blobs.
 #[test]
 fn diff_generic_binary_omits_perceptual_hint() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.bin"), b"\x00\x01\x02first\x00").unwrap();
@@ -335,7 +335,7 @@ fn diff_generic_binary_omits_perceptual_hint() {
 /// for `.rs` files (the field is additive, not always-on).
 #[test]
 fn semantic_diff_json_carries_ast_diff_field() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.rs"), "fn keep() {}\nfn touch() { 1 }\n").unwrap();
@@ -421,7 +421,7 @@ fn build_minimal_zip(entries: &[(&str, u32, u32)]) -> Vec<u8> {
 /// instead of an opaque chunk-diff ratio.
 #[test]
 fn diff_zip_change_reports_part_aware_summary() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
 
@@ -481,7 +481,7 @@ fn diff_zip_change_reports_part_aware_summary() {
 /// still runs (the default path is unchanged).
 #[test]
 fn diff_semantic_json_reports_path_level_changes_only() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
 
@@ -536,7 +536,7 @@ fn diff_semantic_json_reports_path_level_changes_only() {
 /// canonicalises whitespace away from the diff.
 #[test]
 fn diff_semantic_json_collapses_pure_reformat_to_no_change() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
 
@@ -577,7 +577,7 @@ fn diff_semantic_json_collapses_pure_reformat_to_no_change() {
 /// dogfood path for `cargo` config edits.
 #[test]
 fn diff_semantic_toml_reports_section_path_changes() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
 

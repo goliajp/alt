@@ -135,7 +135,7 @@ pub fn export(
         let parent = output
             .parent()
             .ok_or_else(|| refused("archive output parent"))?;
-        let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+        let mut temporary = alt_os::temp::NamedTempFile::new_in(parent)?;
         alt_portable::write_archive(
             temporary.as_file_mut(),
             &envelope,
@@ -152,7 +152,7 @@ pub fn export(
                 use std::os::unix::fs::OpenOptionsExt;
                 let mut existing = std::fs::OpenOptions::new()
                     .read(true)
-                    .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+                    .custom_flags(alt_os::sys::O_NOFOLLOW | alt_os::sys::O_CLOEXEC)
                     .open(&output)?;
                 if existing.metadata()?.len() != archive.bytes
                     || file_digest(&mut existing)? != archive

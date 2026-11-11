@@ -74,7 +74,7 @@ fn large_files_bench_volume_and_throughput() {
     let working_bytes = dir_bytes(&corpus) - dir_bytes(&corpus.join(".git"));
 
     let repo = Repository::discover(&corpus).unwrap();
-    let alt_root = tempfile::tempdir().unwrap();
+    let alt_root = alt_os::temp::tempdir().unwrap();
     let alt_dir = alt_root.path().join(".alt");
 
     let t0 = Instant::now();
@@ -116,7 +116,7 @@ fn large_files_bench_volume_and_throughput() {
     // ---- "modify + re-import" pass: append to dataset01 + re-import ----
     // Clone the corpus to a tempdir so we don't pollute the canonical
     // fixture, then add a fresh commit that modifies one dataset.
-    let work_root = tempfile::tempdir().unwrap();
+    let work_root = alt_os::temp::tempdir().unwrap();
     let work = work_root.path().join("large-files");
     let cp = Command::new("cp")
         .args(["-R", corpus.to_str().unwrap(), work.to_str().unwrap()])

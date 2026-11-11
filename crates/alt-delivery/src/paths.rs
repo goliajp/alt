@@ -166,16 +166,17 @@ pub fn publish_directory(staging: &Path, target: &Path) -> Result<()> {
     let to = CString::new(target.as_os_str().as_bytes())?;
     #[cfg(target_os = "linux")]
     let result = unsafe {
-        libc::renameat2(
-            libc::AT_FDCWD,
+        alt_os::sys::renameat2(
+            alt_os::sys::AT_FDCWD,
             from.as_ptr(),
-            libc::AT_FDCWD,
+            alt_os::sys::AT_FDCWD,
             to.as_ptr(),
-            libc::RENAME_NOREPLACE,
+            alt_os::sys::RENAME_NOREPLACE,
         )
     };
     #[cfg(target_os = "macos")]
-    let result = unsafe { libc::renamex_np(from.as_ptr(), to.as_ptr(), libc::RENAME_EXCL) };
+    let result =
+        unsafe { alt_os::sys::renamex_np(from.as_ptr(), to.as_ptr(), alt_os::sys::RENAME_EXCL) };
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     let result = -1;
     if result != 0 {
@@ -189,7 +190,7 @@ pub(super) fn probe_names<'a>(
     parent: &Path,
     paths: impl IntoIterator<Item = &'a str>,
 ) -> Result<()> {
-    let probe = tempfile::tempdir_in(parent)?;
+    let probe = alt_os::temp::tempdir_in(parent)?;
     let mut directories = BTreeSet::new();
     for path in paths {
         alt_input::checked_path(path.as_bytes())?;

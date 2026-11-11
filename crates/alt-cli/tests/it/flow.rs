@@ -47,7 +47,7 @@ fn seed(root: &Path) {
 
 #[test]
 fn feature_cycle_fast_forward_then_undo() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     seed(root);
     assert!(ok(alt(root, &["branch"])).contains("* develop"));
@@ -79,7 +79,7 @@ fn feature_cycle_fast_forward_then_undo() {
     );
 
     // exported repo is git-clean and develop carries the feature work
-    let out = tempfile::tempdir().unwrap();
+    let out = alt_os::temp::tempdir().unwrap();
     let target = out.path().join("exported");
     ok(alt(root, &["export", target.to_str().unwrap()]));
     assert!(git(&target, &["fsck", "--strict"]).status.success());
@@ -96,7 +96,7 @@ fn feature_cycle_fast_forward_then_undo() {
 
 #[test]
 fn finish_with_diverged_develop_makes_a_merge_commit() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     seed(root);
 
@@ -133,7 +133,7 @@ fn finish_with_diverged_develop_makes_a_merge_commit() {
     assert!(root.join("fa.txt").exists() && root.join("fd.txt").exists());
 
     // export and confirm the develop tip is a two-parent merge over git-clean
-    let out = tempfile::tempdir().unwrap();
+    let out = alt_os::temp::tempdir().unwrap();
     let target = out.path().join("exported");
     ok(alt(root, &["export", target.to_str().unwrap()]));
     assert!(git(&target, &["fsck", "--strict"]).status.success());

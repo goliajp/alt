@@ -22,7 +22,7 @@ fn path(root: &std::path::Path) -> std::path::PathBuf {
 }
 #[test]
 fn mixed_loose_and_segment_reads_retain_bytes_empty_members_and_independent_cursors() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = alt_os::temp::tempdir().unwrap();
     let store = ByteStore::open(temp.path()).unwrap();
     let data = [b"first".as_slice(), b"second", b""];
     let proof = put(&store, &data).unwrap();
@@ -87,7 +87,7 @@ fn mixed_loose_and_segment_reads_retain_bytes_empty_members_and_independent_curs
 #[test]
 fn incumbent_conflict_corruption_and_symlink_never_get_overwritten() {
     for kind in 0..3 {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = alt_os::temp::tempdir().unwrap();
         let store = ByteStore::open(temp.path()).unwrap();
         let proof = put(&store, &[b"original"]).unwrap();
         let destination = path(temp.path());
@@ -122,7 +122,7 @@ fn incumbent_conflict_corruption_and_symlink_never_get_overwritten() {
 #[test]
 fn repeated_reads_do_not_hide_missing_replaced_or_corrupt_originals() {
     for fault in 0..5 {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = alt_os::temp::tempdir().unwrap();
         let store = ByteStore::open(temp.path()).unwrap();
         let proof = put(&store, &[b"original"]).unwrap();
         let digest = alt_hash::blake3::hash(b"original");
@@ -169,7 +169,7 @@ fn repeated_reads_do_not_hide_missing_replaced_or_corrupt_originals() {
 }
 #[test]
 fn database_location_mismatch_and_truncated_open_reader_are_rejected() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = alt_os::temp::tempdir().unwrap();
     let store = ByteStore::open(temp.path()).unwrap();
     let proof = put(&store, &[b"original"]).unwrap();
     let digest = alt_hash::blake3::hash(b"original");
@@ -206,7 +206,7 @@ fn database_location_mismatch_and_truncated_open_reader_are_rejected() {
 }
 #[test]
 fn pending_owner_is_exclusive_and_fenced_removal_is_idempotent() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = alt_os::temp::tempdir().unwrap();
     let store = ByteStore::open(temp.path()).unwrap();
     let proof = put(&store, &[b"original"]).unwrap();
     let p = path(temp.path());
@@ -225,7 +225,7 @@ fn pending_owner_is_exclusive_and_fenced_removal_is_idempotent() {
 }
 #[test]
 fn bad_input_never_installs_a_segment_and_metadata_limits_do_not_read_sources() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = alt_os::temp::tempdir().unwrap();
     let store = ByteStore::open(temp.path()).unwrap();
     let digest = *alt_hash::blake3::hash(b"abc").as_bytes();
     for bytes in [b"ab".as_slice(), b"abcd", b"xyz"] {

@@ -402,7 +402,7 @@ impl ByteStore {
             .read(true)
             .create_new(true)
             .mode(0o600)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .custom_flags(alt_os::sys::O_NOFOLLOW | alt_os::sys::O_CLOEXEC)
             .open(&pending)?;
         // No automatic reuse of a partial pending file. Drop cleans ordinary
         // failures; process death leaves the exact registered ID for recovery.
@@ -606,7 +606,7 @@ fn check_segment_id(id: &str) -> Result<()> {
 fn open_segment(path: &Path) -> Result<File> {
     let file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .custom_flags(alt_os::sys::O_NOFOLLOW | alt_os::sys::O_CLOEXEC)
         .open(path)?;
     Stamp::read(&file)?;
     Ok(file)
@@ -642,7 +642,7 @@ mod tests {
     #[test]
     fn persistence_error_never_returns_proof_and_retry_checks_the_installed_file() {
         for stage in STAGES {
-            let temp = tempfile::tempdir().unwrap();
+            let temp = alt_os::temp::tempdir().unwrap();
             let store = ByteStore::open(temp.path()).unwrap();
             let digest = *alt_hash::blake3::hash(b"original").as_bytes();
             let mut source = io::Cursor::new(b"original");
@@ -723,7 +723,7 @@ mod tests {
     #[test]
     fn interrupted_files_remain_owned_and_fenced_cleanup_recovers_every_boundary() {
         for stage in STAGES {
-            let root = tempfile::tempdir().unwrap();
+            let root = alt_os::temp::tempdir().unwrap();
             let output = std::process::Command::new(std::env::current_exe().unwrap())
                 .args([
                     "--exact",

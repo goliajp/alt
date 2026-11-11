@@ -610,7 +610,7 @@ fn integration_payload(base: &Payload, omit_output: bool, recover: bool) -> Inte
         notes_after: notes.commit.to_string(),
         creator_request: "original-integration".into(),
     };
-    let directory = tempfile::tempdir().unwrap();
+    let directory = alt_os::temp::tempdir().unwrap();
     let mut refs = alt_refs::RefStore::open(directory.path()).unwrap();
     refs.commit(
         "original",

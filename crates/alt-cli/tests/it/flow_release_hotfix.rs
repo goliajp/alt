@@ -39,7 +39,7 @@ fn seed_repo(root: &Path) {
 
 #[test]
 fn release_start_branches_off_develop_and_switches_head() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     seed_repo(root);
 
@@ -56,7 +56,7 @@ fn release_start_branches_off_develop_and_switches_head() {
 
 #[test]
 fn release_finish_merges_into_main_back_merges_into_develop_and_switches_to_develop() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     seed_repo(root);
 
@@ -92,7 +92,7 @@ fn release_finish_merges_into_main_back_merges_into_develop_and_switches_to_deve
 
 #[test]
 fn hotfix_finish_lands_on_main_and_develop_atomically() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     seed_repo(root);
 
@@ -128,7 +128,7 @@ fn hotfix_finish_lands_on_main_and_develop_atomically() {
 
 #[test]
 fn release_finish_is_a_single_op_in_the_log() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     seed_repo(root);
 

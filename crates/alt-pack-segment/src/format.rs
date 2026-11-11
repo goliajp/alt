@@ -11,7 +11,7 @@
 //! All integers are little-endian. The footer checksum covers fanout through parents.
 
 use crate::{Error, Kind, Oid};
-use memmap2::Mmap;
+use alt_os::map::Mmap;
 use std::{fs::File, io::Write, path::Path};
 
 pub(crate) const RECORD: usize = 88;

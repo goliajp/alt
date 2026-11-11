@@ -77,7 +77,10 @@ fn subject(cat: &str) -> String {
 
 #[test]
 fn bisect_run_finds_the_same_commit_as_git() {
-    let (a, g) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (a, g) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
     let (a, g) = (a.path(), g.path());
     ok(alt(a, &["init", "."]));
     ok(git(g, &["init", "-q", "-b", "main"]));
@@ -99,7 +102,7 @@ fn bisect_run_finds_the_same_commit_as_git() {
 
 #[test]
 fn stepping_by_hand_narrows_to_the_first_bad_commit() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     history(root, &|args| alt(root, args));
@@ -129,7 +132,7 @@ fn stepping_by_hand_narrows_to_the_first_bad_commit() {
 
 #[test]
 fn reset_returns_to_the_branch_and_other_commands_wait_meanwhile() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     history(root, &|args| alt(root, args));
@@ -153,7 +156,7 @@ fn reset_returns_to_the_branch_and_other_commands_wait_meanwhile() {
 
 #[test]
 fn skipped_commits_are_stepped_around() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     history(root, &|args| alt(root, args));

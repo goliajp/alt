@@ -36,7 +36,7 @@ fn credential_helper_supplies_username_and_token_to_basic_auth() {
     // but its error chain carries the URL we'd try with — when the
     // helper ran, that URL ends up Authorization-decorated, and the
     // alt-wire-http transport's error includes the host we hit.
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     let shim_dir = tmp.path().join("bin");
     fs::create_dir_all(&shim_dir).unwrap();
     let shim = shim_dir.join("git");
@@ -93,7 +93,7 @@ fn alt_no_credential_helper_env_var_disables_the_helper_lookup() {
     // and `ALT_NO_CREDENTIAL_HELPER=1` should keep alt from calling
     // it. We don't have a server, so fetch fails; what matters is
     // that the failure mode is "network" not "shim crashed".
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     let shim_dir = tmp.path().join("bin");
     fs::create_dir_all(&shim_dir).unwrap();
     let shim = shim_dir.join("git");

@@ -24,8 +24,8 @@ pub fn check_execution_platform(root: &Path) -> Result<()> {
     {
         use std::os::fd::AsRawFd;
         let file = std::fs::File::open(&root)?;
-        let mut stat = std::mem::MaybeUninit::<libc::statfs>::uninit();
-        if unsafe { libc::fstatfs(file.as_raw_fd(), stat.as_mut_ptr()) } != 0 {
+        let mut stat = std::mem::MaybeUninit::<alt_os::sys::statfs>::uninit();
+        if unsafe { alt_os::sys::fstatfs(file.as_raw_fd(), stat.as_mut_ptr()) } != 0 {
             return Err(std::io::Error::last_os_error().into());
         }
         if unsafe { stat.assume_init() }.f_type != 0xef53 {
@@ -86,13 +86,13 @@ pub fn check_execution_platform(root: &Path) -> Result<()> {
     {
         use std::os::fd::AsRawFd;
         let file = std::fs::File::open(&root)?;
-        let mut stat = std::mem::MaybeUninit::<libc::statfs>::uninit();
-        if unsafe { libc::fstatfs(file.as_raw_fd(), stat.as_mut_ptr()) } != 0 {
+        let mut stat = std::mem::MaybeUninit::<alt_os::sys::statfs>::uninit();
+        if unsafe { alt_os::sys::fstatfs(file.as_raw_fd(), stat.as_mut_ptr()) } != 0 {
             return Err(std::io::Error::last_os_error().into());
         }
         let stat = unsafe { stat.assume_init() };
         let kind = unsafe { std::ffi::CStr::from_ptr(stat.f_fstypename.as_ptr()) }.to_bytes();
-        if kind != b"apfs" || stat.f_flags & libc::MNT_LOCAL as u32 == 0 {
+        if kind != b"apfs" || stat.f_flags & alt_os::sys::MNT_LOCAL as u32 == 0 {
             return Err(Error::Unsupported(
                 "task execution requires local APFS on macOS arm64".into(),
             ));

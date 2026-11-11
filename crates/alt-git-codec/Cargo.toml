@@ -12,5 +12,5 @@ bstr.workspace = true
 
 [dev-dependencies]
 alt-deflate.workspace = true
+alt-os.workspace = true
 alt-testutil.workspace = true
-tempfile.workspace = true

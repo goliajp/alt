@@ -2,7 +2,6 @@ use crate::{Artifact, Error, Record, Result, check_id};
 use std::{
     fs::{self, File, OpenOptions},
     io::{Read, Seek, Write},
-    os::fd::AsRawFd,
     path::{Path, PathBuf},
 };
 
@@ -42,12 +41,10 @@ impl Store {
             .write(true)
             .open(directory.join("lock"))?;
         loop {
-            if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) } == 0 {
-                break;
-            }
-            let error = std::io::Error::last_os_error();
-            if error.kind() != std::io::ErrorKind::Interrupted {
-                return Err(error.into());
+            match alt_os::sys::flock(&lock, alt_os::sys::LOCK_EX) {
+                Ok(()) => break,
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(error) => return Err(error.into()),
             }
         }
         fs::create_dir_all(directory.join("records"))?;
@@ -73,14 +70,14 @@ impl Store {
     /// Spool mutable input into a private file before mapping it. Never mmap a
     /// caller's live file, which could be truncated while CDC reads it.
     pub fn capture(&mut self, input: &mut dyn Read) -> Result<Artifact> {
-        let mut temporary = tempfile::tempfile_in(&self.directory)?;
+        let mut temporary = alt_os::temp::tempfile_in(&self.directory)?;
         let bytes = std::io::copy(input, &mut temporary)?;
         temporary.flush()?;
         temporary.rewind()?;
         if bytes == 0 {
             return self.put_blob(b"");
         }
-        let map = unsafe { memmap2::Mmap::map(&temporary)? };
+        let map = unsafe { alt_os::map::Mmap::map(&temporary)? };
         self.put_blob(&map)
     }
     pub fn blob(&self, artifact: &Artifact) -> Result<Vec<u8>> {
@@ -131,7 +128,7 @@ impl Store {
             return Ok(id.into());
         }
         self.blobs.fsync()?;
-        let mut file = tempfile::NamedTempFile::new_in(&directory)?;
+        let mut file = alt_os::temp::NamedTempFile::new_in(&directory)?;
         file.write_all(bytes)?;
         file.as_file().sync_all()?;
         file.persist_noclobber(&destination)

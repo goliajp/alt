@@ -73,7 +73,7 @@ fn add_load_refs(repo: &Path, n: usize) {
 }
 
 fn reftable_matches_git(algo: HashAlgo, object_format: &str) {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     let repo = tmp.path();
     common::make_repo_opts(repo, object_format, "reftable");
 

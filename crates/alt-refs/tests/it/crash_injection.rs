@@ -91,7 +91,7 @@ fn wait_for_growth(log: &Path, beyond: u64, deadline: Duration) {
 
 #[test]
 fn kill_dash_nine_leaves_state_transactional() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let log = dir.path().join("oplog/log");
     let deadline = Duration::from_secs(30);
 

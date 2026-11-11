@@ -75,9 +75,9 @@ fn git_lfs_repo(src: &Path) -> Vec<u8> {
 #[test]
 fn import_checks_out_contents_and_export_keeps_the_pointers() {
     let (s, d, e) = (
-        tempfile::tempdir().unwrap(),
-        tempfile::tempdir().unwrap(),
-        tempfile::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
     );
     let content = git_lfs_repo(s.path());
     ok(alt(s.path(), &["import", &d.path().display().to_string()]));
@@ -104,7 +104,10 @@ fn import_checks_out_contents_and_export_keeps_the_pointers() {
 
 #[test]
 fn contents_arrive_later_from_the_source_repository() {
-    let (s, d) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (s, d) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
     let content = git_lfs_repo(s.path());
     let lfs = s.path().join(".git/lfs");
     fs::rename(&lfs, s.path().join("lfs-aside")).unwrap();
@@ -130,7 +133,10 @@ fn contents_arrive_later_from_the_source_repository() {
 
 #[test]
 fn adding_an_lfs_path_commits_the_pointer_git_lfs_would() {
-    let (a, g) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (a, g) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
     let content = vec![9u8; 50_000];
     ok(alt(a.path(), &["init", "."]));
     fs::write(a.path().join(".gitattributes"), ATTRS).unwrap();
@@ -201,7 +207,10 @@ fn serve(objects: HashMap<String, Vec<u8>>) -> String {
 
 #[test]
 fn fetch_downloads_from_the_remotes_lfs_server() {
-    let (s, d) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (s, d) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
     let content = git_lfs_repo(s.path());
     fs::remove_dir_all(s.path().join(".git/lfs")).unwrap();
     ok(alt(s.path(), &["import", &d.path().display().to_string()]));

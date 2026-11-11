@@ -60,7 +60,7 @@ fn fails_with(o: Output, needle: &str) -> String {
 
 /// One-shot fixture: init repo, write base file, stage + commit once as the
 /// unrestricted operator. Returns the repo path (kept alive by the tempdir).
-fn fixture(tmp: &tempfile::TempDir) -> &Path {
+fn fixture(tmp: &alt_os::temp::TempDir) -> &Path {
     let repo = tmp.path();
     ok(alt(repo, &["init", "."]));
     std::fs::write(repo.join("a.txt"), "base\n").unwrap();
@@ -80,7 +80,7 @@ fn write_policy(repo: &Path, body: &str) {
 /// silent on reads (separate test below).
 #[test]
 fn read_only_denies_every_write() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     let repo = fixture(&tmp);
     write_policy(repo, "agent:* -> read-only\n");
 
@@ -100,7 +100,7 @@ fn read_only_denies_every_write() {
 /// through for the restricted principal.
 #[test]
 fn read_only_does_not_gate_reads() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     let repo = fixture(&tmp);
     write_policy(repo, "agent:* -> read-only\n");
     ok(alt_as(repo, &["status"], "rover"));
@@ -113,7 +113,7 @@ fn read_only_does_not_gate_reads() {
 /// no entry (the gate fires inside the append lock, before validate).
 #[test]
 fn branch_allow_denies_out_of_namespace() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     let repo = fixture(&tmp);
     write_policy(repo, "agent:* -> branch=refs/heads/feature/agent-bot/**\n");
 
@@ -134,7 +134,7 @@ fn branch_allow_denies_out_of_namespace() {
 /// being overwritten.
 #[test]
 fn forbid_force_blocks_delete_and_keeps_creations_free() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     let repo = fixture(&tmp);
     // first put a branch in place under the unrestricted operator
     ok(alt(repo, &["branch", "scratch"]));
@@ -162,7 +162,7 @@ fn forbid_force_blocks_delete_and_keeps_creations_free() {
 /// inside `commit` (so an index-from-before-policy can't sneak past).
 #[test]
 fn path_allow_denies_out_of_tree_paths() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     let repo = fixture(&tmp);
     std::fs::create_dir_all(repo.join("src")).unwrap();
     std::fs::create_dir_all(repo.join("scripts")).unwrap();
@@ -186,7 +186,7 @@ fn path_allow_denies_out_of_tree_paths() {
 /// could touch — must succeed for any principal.
 #[test]
 fn missing_policy_is_a_full_capabilities_default() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     let repo = fixture(&tmp);
     assert!(
         !repo.join(".alt/policy").exists(),
@@ -206,7 +206,7 @@ fn missing_policy_is_a_full_capabilities_default() {
 /// without parsing the human "fatal: …" string. Exit code is non-zero.
 #[test]
 fn json_invocation_surfaces_capability_denied_as_structured_error() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     let repo = fixture(&tmp);
     write_policy(repo, "agent:* -> read-only\n");
 
@@ -238,7 +238,7 @@ fn json_invocation_surfaces_capability_denied_as_structured_error() {
 /// wired and lookup is per-request, not cached against a stale principal).
 #[test]
 fn specific_rule_above_catch_all_wins_per_principal() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     let repo = fixture(&tmp);
     write_policy(
         repo,

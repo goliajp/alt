@@ -77,7 +77,7 @@ fn corpus_repos_import_fully_and_idempotently() {
         if !repo_dir.join(".git").is_dir() {
             continue;
         }
-        let alt_root = tempfile::tempdir().unwrap();
+        let alt_root = alt_os::temp::tempdir().unwrap();
         let alt_dir = alt_root.path().join(".alt");
 
         let repo = Repository::discover(&repo_dir).unwrap();
@@ -124,7 +124,7 @@ fn killed_import_recovers_and_converges() {
         .find(|p| p.join(".git").is_dir())
         .expect("corpus has at least one repo");
 
-    let alt_root = tempfile::tempdir().unwrap();
+    let alt_root = alt_os::temp::tempdir().unwrap();
     let alt_dir = alt_root.path().join(".alt");
     let deadline = Duration::from_secs(60);
 

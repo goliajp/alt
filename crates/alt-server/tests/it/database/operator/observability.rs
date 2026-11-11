@@ -63,12 +63,13 @@ impl ObservedServer {
         response.into_string().unwrap()
     }
     fn stop(&mut self) {
-        // SAFETY: this unreaped child is owned by this fixture; its PID cannot
-        // have been reused while the Child remains unreaped.
-        assert_eq!(
-            unsafe { libc::kill(self.process.0.id() as libc::pid_t, libc::SIGTERM) },
-            0
-        );
+        // this unreaped child is owned by this fixture; its PID cannot have
+        // been reused while the Child remains unreaped
+        alt_os::sys::kill(
+            self.process.0.id() as alt_os::sys::pid_t,
+            alt_os::sys::SIGTERM,
+        )
+        .unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             if let Some(status) = self.process.0.try_wait().unwrap() {
@@ -161,18 +162,18 @@ fn disconnect_stream(server: &ObservedServer, token: &str, digest: &str) -> Stri
     socket
         .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
-    let size: libc::c_int = 4096;
+    let size: alt_os::sys::c_int = 4096;
     // SAFETY: the owned live socket and pointer to an initialized integer are
     // valid for the complete setsockopt call. A small window keeps the 16MiB
     // response pending while the real client closes after receiving headers.
     assert_eq!(
         unsafe {
-            libc::setsockopt(
+            alt_os::sys::setsockopt(
                 socket.as_raw_fd(),
-                libc::SOL_SOCKET,
-                libc::SO_RCVBUF,
-                &size as *const _ as *const libc::c_void,
-                std::mem::size_of_val(&size) as libc::socklen_t,
+                alt_os::sys::SOL_SOCKET,
+                alt_os::sys::SO_RCVBUF,
+                &size as *const _ as *const alt_os::sys::c_void,
+                std::mem::size_of_val(&size) as alt_os::sys::socklen_t,
             )
         },
         0

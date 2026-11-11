@@ -50,8 +50,8 @@ fn commit_file(root: &Path, file: &str, body: &str, args: &[&str], env: &[(&str,
     ok(alt_env(root, &[&["commit"][..], args].concat(), env));
 }
 
-fn init() -> tempfile::TempDir {
-    let dir = tempfile::tempdir().unwrap();
+fn init() -> alt_os::temp::TempDir {
+    let dir = alt_os::temp::tempdir().unwrap();
     ok(alt(dir.path(), &["init", "."]));
     dir
 }
@@ -200,7 +200,7 @@ fn git_reads_the_notes_after_export_and_the_ids_match() {
         &[],
     );
     let tip = ok(alt(root, &["rev-parse", "HEAD"]));
-    let out = tempfile::tempdir().unwrap();
+    let out = alt_os::temp::tempdir().unwrap();
     let exported = out.path().join("g");
     ok(alt(root, &["export", exported.to_str().unwrap()]));
     ok(git(&exported, &["fsck", "--strict"]));

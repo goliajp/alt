@@ -26,7 +26,7 @@ fn plan() -> InputPlan {
 }
 #[test]
 fn all_selected_inputs_and_directory_members_change_identity() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     std::fs::create_dir(dir.path().join(".ignored")).unwrap();
     for path in [
         "src.rs",
@@ -86,8 +86,8 @@ fn all_selected_inputs_and_directory_members_change_identity() {
 #[test]
 fn symlink_parents_and_escape_are_refused_without_reading_outside() {
     use std::os::unix::fs::symlink;
-    let dir = tempfile::tempdir().unwrap();
-    let outside = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
+    let outside = alt_os::temp::tempdir().unwrap();
     std::fs::write(outside.path().join("secret"), b"never capture").unwrap();
     symlink(outside.path(), dir.path().join("linked")).unwrap();
     let root = Root::open(dir.path()).unwrap();
@@ -99,7 +99,7 @@ fn symlink_parents_and_escape_are_refused_without_reading_outside() {
 #[test]
 fn bytes_modes_and_path_validation_are_lossless() {
     use std::os::unix::fs::PermissionsExt;
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     std::fs::write(dir.path().join("日本語"), [0, 255, 10]).unwrap();
     let root = Root::open(dir.path()).unwrap();
     let before = root.inspect("日本語").unwrap();
@@ -135,7 +135,7 @@ fn canonical_identity_does_not_depend_on_json_map_order() {
 #[test]
 fn link_chain_cannot_hide_a_non_directory_behind_parent_components() {
     use std::os::unix::fs::symlink;
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     std::fs::create_dir(dir.path().join("sub")).unwrap();
     symlink("sub", dir.path().join("link")).unwrap();
     symlink("link/../other", dir.path().join("indirect")).unwrap();
@@ -150,7 +150,7 @@ fn link_chain_cannot_hide_a_non_directory_behind_parent_components() {
 
 #[test]
 fn explicit_corpus_may_contain_git_metadata_as_fixture_data() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("corpus/repo/.git")).unwrap();
     std::fs::write(dir.path().join("corpus/repo/.git/HEAD"), b"fixture bytes").unwrap();
     let root = Root::open(dir.path()).unwrap();

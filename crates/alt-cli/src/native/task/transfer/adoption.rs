@@ -114,7 +114,7 @@ impl NativeRepo<'_> {
             .join("history");
         std::fs::create_dir_all(&directory)?;
         let path = directory.join(format!("{}.json", prior.digest));
-        let mut temporary = tempfile::NamedTempFile::new_in(&directory)?;
+        let mut temporary = alt_os::temp::NamedTempFile::new_in(&directory)?;
         temporary.write_all(raw)?;
         temporary.as_file().sync_all()?;
         match temporary.persist_noclobber(&path) {

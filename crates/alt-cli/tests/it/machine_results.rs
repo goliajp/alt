@@ -31,8 +31,8 @@ fn ok(root: &Path, args: &[&str]) -> Output {
     );
     output
 }
-fn fixture() -> tempfile::TempDir {
-    let directory = tempfile::tempdir().unwrap();
+fn fixture() -> alt_os::temp::TempDir {
+    let directory = alt_os::temp::tempdir().unwrap();
     ok(directory.path(), &["init", "."]);
     std::fs::write(directory.path().join("a.txt"), "base\n").unwrap();
     ok(directory.path(), &["add", "."]);
@@ -178,7 +178,7 @@ fn pending_and_corrupt_receipts_never_reexecute() {
 #[test]
 fn request_binding_rejects_another_workspace_or_principal() {
     let root = fixture();
-    let workspace = tempfile::tempdir().unwrap();
+    let workspace = alt_os::temp::tempdir().unwrap();
     ok(root.path(), &["branch", "other"]);
     ok(
         root.path(),

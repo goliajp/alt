@@ -16,7 +16,7 @@ use std::{
 
 /// A private unpublished draft. Only explicitly captured input is included.
 pub struct Draft {
-    directory: tempfile::TempDir,
+    directory: alt_os::temp::TempDir,
     entries: Vec<ContentEntry>,
     limits: Limits,
     total: u64,
@@ -41,7 +41,7 @@ impl ArtifactSource for Draft {
 impl Draft {
     pub fn new(parent: &Path, limits: Limits) -> Result<Self> {
         limits.validate()?;
-        let directory = tempfile::Builder::new()
+        let directory = alt_os::temp::Builder::new()
             .prefix("alt-transfer-")
             .tempdir_in(parent)?;
         std::fs::create_dir(directory.path().join("content"))?;
@@ -78,7 +78,7 @@ impl Draft {
             return Err(Error::Limit("structured payload"));
         }
         let content = self.directory.path().join("content");
-        let mut temporary = tempfile::NamedTempFile::new_in(&content)?;
+        let mut temporary = alt_os::temp::NamedTempFile::new_in(&content)?;
         let mut hash = alt_hash::blake3::Hasher::new();
         let mut chunks = Vec::new();
         let mut offset = 0;
@@ -353,7 +353,7 @@ impl ObjectSource for Package {
 fn regular(path: &Path) -> Result<File> {
     let file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .custom_flags(alt_os::sys::O_NOFOLLOW | alt_os::sys::O_CLOEXEC)
         .open(path)?;
     if !file.metadata()?.is_file() {
         return Err(Error::Invalid("package content type"));

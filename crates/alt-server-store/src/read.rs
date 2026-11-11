@@ -6,7 +6,6 @@ use crate::{Credential, Error, Result, Store};
 use alt_git_codec::{ObjectId, ObjectKind};
 use alt_remote_protocol::Scope;
 use alt_repository_service::{ObjectReader, ObjectSource};
-use rand_core::{OsRng, RngCore};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Snapshot metadata and protected immutable bytes. IDs identify this read;
@@ -112,7 +111,7 @@ impl Store {
             .checked_add(ttl_ms)
             .ok_or(Error::Limit("read expiry"))?;
         let mut nonce = [0u8; 16];
-        OsRng.fill_bytes(&mut nonce);
+        alt_os::random::fill(&mut nonce);
         let pin_id = format!(
             "read:{}",
             nonce.iter().map(|b| format!("{b:02x}")).collect::<String>()

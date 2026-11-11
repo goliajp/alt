@@ -29,7 +29,7 @@ fn setup(root: &Path) {
 
 #[test]
 fn scan_worktree_skips_gitignored_paths() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     setup(dir.path());
 
     let entries = scan_worktree(dir.path(), HashAlgo::Sha1).unwrap();
@@ -59,7 +59,7 @@ fn scan_worktree_skips_gitignored_paths() {
 
 #[test]
 fn scan_worktree_respects_nested_gitignore() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     // root keeps it simple; the nested .gitignore adds a rule scoped to its subtree
     std::fs::write(dir.path().join(".gitignore"), "").unwrap();
     std::fs::write(dir.path().join("Cargo.toml"), "[workspace]\n").unwrap();

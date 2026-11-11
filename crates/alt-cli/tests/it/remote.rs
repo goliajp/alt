@@ -31,7 +31,7 @@ fn ok(o: Output) -> String {
 /// fetch refspec routes the remote's branches into `refs/remotes/<name>/*`.
 #[test]
 fn remote_add_persists_to_disk_with_default_fetch_refspec() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     ok(alt(
@@ -58,7 +58,7 @@ fn remote_add_persists_to_disk_with_default_fetch_refspec() {
 /// what's on disk. With `--json`, the parallel schema agents consume.
 #[test]
 fn remote_list_human_and_json_match_persisted_state() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     ok(alt(
@@ -104,7 +104,7 @@ fn remote_list_human_and_json_match_persisted_state() {
 /// an error. JSON path returns an empty array.
 #[test]
 fn remote_list_on_fresh_repo_is_empty_not_error() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     assert!(ok(alt(root, &["remote", "list"])).is_empty());
@@ -116,7 +116,7 @@ fn remote_list_on_fresh_repo_is_empty_not_error() {
 /// should not silently rewire an existing remote.
 #[test]
 fn remote_add_rejects_duplicates() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     ok(alt(
@@ -139,7 +139,7 @@ fn remote_add_rejects_duplicates() {
 /// removing the config doesn't pretend ingested history never happened.
 #[test]
 fn remote_remove_drops_config_only() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     ok(alt(
@@ -161,7 +161,7 @@ fn remote_remove_drops_config_only() {
 /// point so a hostile name can't escape the `<alt-dir>/remotes/` dir.
 #[test]
 fn invalid_remote_names_are_rejected() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     for bad in ["..", ".hidden", "with/slash", "with space", ""] {

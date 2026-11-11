@@ -301,11 +301,8 @@ impl Process {
         }
     }
     fn resume(&self) {
-        // SAFETY: this is the live process owned by this Child handle.
-        assert_eq!(
-            unsafe { libc::kill(self.child.id() as libc::pid_t, libc::SIGCONT) },
-            0
-        );
+        // this is the live process owned by this Child handle
+        alt_os::sys::kill(self.child.id() as alt_os::sys::pid_t, alt_os::sys::SIGCONT).unwrap();
     }
 }
 fn interposer(root: &Path) -> PathBuf {
@@ -397,7 +394,7 @@ fn expire(f: &Fixture) {
 #[test]
 #[ignore = "requires isolated PostgreSQL, Linux read interposer and actual HTTP server processes; Cloud lease expiry during semantic validation"]
 fn portable_cloud_validation_refreshes_current_authority_before_completion() {
-    let scratch = tempfile::tempdir().unwrap();
+    let scratch = alt_os::temp::tempdir().unwrap();
     let library = interposer(scratch.path());
     let source = Fixture::new();
     let source_server = Running::start(&source);

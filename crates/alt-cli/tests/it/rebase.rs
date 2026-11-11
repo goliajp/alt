@@ -47,14 +47,17 @@ fn ok(o: Output) -> String {
 }
 
 struct Pair {
-    _dirs: (tempfile::TempDir, tempfile::TempDir),
+    _dirs: (alt_os::temp::TempDir, alt_os::temp::TempDir),
     a: PathBuf,
     g: PathBuf,
 }
 
 impl Pair {
     fn new() -> Pair {
-        let dirs = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let dirs = (
+            alt_os::temp::tempdir().unwrap(),
+            alt_os::temp::tempdir().unwrap(),
+        );
         let (a, g) = (dirs.0.path().to_owned(), dirs.1.path().to_owned());
         ok(alt_env(&a, &["init", "."], &[]));
         ok(git_env(&g, &["init", "-q", "-b", "main"], &[]));
@@ -163,7 +166,7 @@ fn rebasing_a_branch_onto_another_matches_git() {
 
 #[test]
 fn squash_fixup_reword_and_drop_match_git() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     for (line, action, expect) in [
         (2, "squash", vec!["t1\n\nt2\n", "m1\n"]),
         (2, "fixup", vec!["t1\n", "m1\n"]),
@@ -232,7 +235,7 @@ fn skip_drops_the_stopped_commit_as_in_git() {
 
 #[test]
 fn abort_and_undo_both_take_the_rebase_back() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     let alt = |args: &[&str]| alt_env(root, args, &[]);
     ok(alt(&["init", "."]));

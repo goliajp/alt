@@ -338,7 +338,7 @@ fn read_body_capped(
 }
 
 #[cfg(unix)]
-extern "C" fn shutdown_handler(_sig: libc::c_int) {
+extern "C" fn shutdown_handler(_sig: alt_os::sys::c_int) {
     // Async-signal-safe: relaxed atomic store is the only thing we do
     // inside the handler. The main thread does the actual work.
     SHUTDOWN.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -346,10 +346,10 @@ extern "C" fn shutdown_handler(_sig: libc::c_int) {
 
 #[cfg(unix)]
 fn install_signal_handlers() {
-    let handler = shutdown_handler as *const () as libc::sighandler_t;
+    let handler = shutdown_handler as *const () as alt_os::sys::sighandler_t;
     unsafe {
-        libc::signal(libc::SIGINT, handler);
-        libc::signal(libc::SIGTERM, handler);
+        alt_os::sys::signal(alt_os::sys::SIGINT, handler);
+        alt_os::sys::signal(alt_os::sys::SIGTERM, handler);
     }
 }
 
@@ -924,7 +924,7 @@ fn build_pack_for_fetch(
     // first cut handles `blob:none` / `blob:limit=<n>` / `tree:0` —
     // git's three common partial-clone filters.
     let filter = parse_filter_spec(req.filter.as_deref());
-    let dir = tempfile::tempdir()?;
+    let dir = alt_os::temp::tempdir()?;
     // Two-pass: first decide which objects survive the filter (needs
     // `read_object` for the `blob:limit` size check), then write them.
     let mut surviving: Vec<(
@@ -1130,7 +1130,7 @@ fn handle_receive_pack(
     // ends *before* the response is sent. The outcome carries
     // everything downstream needs (head + tempfile path + on-wire
     // bytes streamed) so the response phase is owned-only.
-    let pack_tmp_dir = tempfile::tempdir()?;
+    let pack_tmp_dir = alt_os::temp::tempdir()?;
     let pack_tmp_path = pack_tmp_dir.path().join("incoming.pack");
     let parse_outcome: Result<(alt_wire::push::PushHead, u64), String> = {
         let mut reader: Box<dyn Read> = if gzipped {

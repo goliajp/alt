@@ -718,7 +718,7 @@ impl From<std::io::Error> for BodyError {
         Self::Storage
     }
 }
-async fn spool(body: Incoming, max: u64) -> Result<tempfile::NamedTempFile, BodyError> {
+async fn spool(body: Incoming, max: u64) -> Result<alt_os::temp::NamedTempFile, BodyError> {
     let mut guard = observation::current().map(|trace| trace.phase(Phase::Upload));
     let result = spool_inner(body, max, guard.as_mut()).await;
     if let Some(guard) = guard {
@@ -735,8 +735,8 @@ async fn spool_inner(
     mut body: Incoming,
     max: u64,
     mut guard: Option<&mut alt_server_telemetry::PhaseGuard>,
-) -> Result<tempfile::NamedTempFile, BodyError> {
-    let temp = tempfile::NamedTempFile::new()?;
+) -> Result<alt_os::temp::NamedTempFile, BodyError> {
+    let temp = alt_os::temp::NamedTempFile::new()?;
     let mut file = tokio::fs::File::from_std(temp.as_file().try_clone()?);
     let mut remaining = max;
     while let Some(frame) = body.frame().await {

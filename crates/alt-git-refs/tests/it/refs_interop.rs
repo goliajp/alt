@@ -85,7 +85,7 @@ fn assert_matches_git(repo: &Path, algo: HashAlgo, expect_packed_peel: bool) {
 }
 
 fn refs_match_in_all_states(algo: HashAlgo, object_format: &str) {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     let repo = tmp.path();
     common::make_repo(repo, object_format);
 

@@ -23,10 +23,7 @@ fn kill_workload(child: &mut std::process::Child) {
     // This exact process group was created above. Killing only the launcher
     // can leave its current alt subprocess running and miss the crash window.
     #[cfg(unix)]
-    assert_eq!(
-        unsafe { libc::kill(-(child.id() as i32), libc::SIGKILL) },
-        0
-    );
+    alt_os::sys::kill(-(child.id() as i32), alt_os::sys::SIGKILL).unwrap();
     #[cfg(not(unix))]
     child.kill().unwrap();
 }
@@ -134,7 +131,7 @@ fn flow_child_workload() {
 #[test]
 #[ignore = "spawns a child workload; lives next to the import kill test"]
 fn killed_flow_feature_recovers_and_converges() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     // bring the store into a flow-ready shape: main has a commit; develop
     // exists (flow init wires HEAD → develop).
@@ -224,7 +221,7 @@ fn killed_flow_feature_recovers_and_converges() {
 #[test]
 #[ignore = "spawns a child workload; cousin of killed_flow_feature_recovers"]
 fn killed_flow_release_recovers_and_converges() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("seed.txt"), "seed\n").unwrap();
@@ -302,7 +299,7 @@ fn release_child_workload() {
 #[test]
 #[ignore = "spawns child workloads; bounded iteration of the kill test"]
 fn repeated_kills_keep_the_store_consistent() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("seed.txt"), "seed\n").unwrap();

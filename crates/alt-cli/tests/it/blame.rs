@@ -29,7 +29,7 @@ fn ok(o: Output) -> String {
 
 #[test]
 fn blame_single_commit_attributes_every_line_to_that_commit() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     ok(alt(tmp.path(), &["init"]));
     fs::write(tmp.path().join("a.txt"), "one\ntwo\nthree\n").unwrap();
     ok(alt(tmp.path(), &["add", "a.txt"]));
@@ -52,7 +52,7 @@ fn blame_single_commit_attributes_every_line_to_that_commit() {
 
 #[test]
 fn blame_assigns_lines_to_the_commits_that_introduced_them() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     ok(alt(tmp.path(), &["init"]));
     fs::write(tmp.path().join("f.txt"), "alpha\nbeta\n").unwrap();
     ok(alt(tmp.path(), &["add", "f.txt"]));
@@ -81,7 +81,7 @@ fn blame_assigns_lines_to_the_commits_that_introduced_them() {
 
 #[test]
 fn blame_missing_file_fails_clearly() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     ok(alt(tmp.path(), &["init"]));
     fs::write(tmp.path().join("a.txt"), "x\n").unwrap();
     ok(alt(tmp.path(), &["add", "a.txt"]));
@@ -95,7 +95,7 @@ fn blame_missing_file_fails_clearly() {
 
 #[test]
 fn blame_follows_renames_with_dash_m() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     ok(alt(tmp.path(), &["init"]));
     fs::write(
         tmp.path().join("old.txt"),
@@ -151,7 +151,7 @@ fn blame_follows_renames_with_dash_m() {
 fn blame_at_revision_uses_that_history_only() {
     // Build a 2-commit history; blame at <c1> must attribute lines to
     // c1 only — never reaches forward to c2's later edits.
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     ok(alt(tmp.path(), &["init"]));
     fs::write(tmp.path().join("g.txt"), "a\nb\n").unwrap();
     ok(alt(tmp.path(), &["add", "g.txt"]));

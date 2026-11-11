@@ -46,7 +46,7 @@ fn ok(o: Output) -> String {
 /// — the audit trail is complete either way.
 #[test]
 fn op_log_lists_recent_ops_newest_first_with_parsed_principal() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "v1\n").unwrap();
@@ -82,7 +82,7 @@ fn op_log_lists_recent_ops_newest_first_with_parsed_principal() {
 /// `-n` caps the count, newest first.
 #[test]
 fn op_log_n_limits_the_entry_count() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "x\n").unwrap();
@@ -103,7 +103,7 @@ fn op_log_n_limits_the_entry_count() {
 /// principal, verb, and the ref_changes array (null when not a ref tx).
 #[test]
 fn op_log_json_carries_structured_audit_entries() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "x\n").unwrap();

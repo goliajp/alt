@@ -205,14 +205,11 @@ impl StoreSink {
         let _barrier = std::fs::File::open(&self.odb_lock)?;
         #[cfg(unix)]
         {
-            use std::os::fd::AsRawFd;
             loop {
-                if unsafe { libc::flock(_barrier.as_raw_fd(), libc::LOCK_SH) } == 0 {
-                    break;
-                }
-                let error = std::io::Error::last_os_error();
-                if error.kind() != std::io::ErrorKind::Interrupted {
-                    return Err(error.into());
+                match alt_os::sys::flock(&_barrier, alt_os::sys::LOCK_SH) {
+                    Ok(()) => break,
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                    Err(error) => return Err(error.into()),
                 }
             }
         }
@@ -4776,7 +4773,7 @@ mod tests {
         use std::sync::mpsc;
         use std::time::Duration;
 
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         init(Some(dir.path().to_owned()), &mut Vec::new()).unwrap();
         let mut store = Store::open(dir.path().join(".alt")).unwrap();
         store.set_defer_durability(true);
@@ -4892,7 +4889,7 @@ mod tests {
     /// other.
     #[test]
     fn workspaces_isolate_head_index_and_working_tree() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = alt_os::temp::tempdir().unwrap();
         let root = tmp.path();
         let mut sink = Vec::new();
 
@@ -4908,7 +4905,7 @@ mod tests {
             .unwrap();
 
         // a second workspace on `feat`, in its own working tree outside the repo
-        let wt_tmp = tempfile::tempdir().unwrap();
+        let wt_tmp = alt_os::temp::tempdir().unwrap();
         let wt = wt_tmp.path().join("ws2-tree");
         repo.create_workspace("ws2", &wt, "feat").unwrap();
         drop(repo); // end the mutating command view before opening another
@@ -4959,7 +4956,7 @@ mod tests {
 
     #[test]
     fn the_default_workspace_cannot_be_removed_and_bad_names_are_rejected() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = alt_os::temp::tempdir().unwrap();
         let root = tmp.path();
         let mut sink = Vec::new();
         init(Some(root.to_path_buf()), &mut sink).unwrap();

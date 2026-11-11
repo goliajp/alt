@@ -11,7 +11,7 @@ fn oid(n: u8) -> ObjectId {
 
 #[test]
 fn written_refs_read_back_identically() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let refs: Vec<(BString, RefTarget)> = vec![
         ("refs/heads/main".into(), RefTarget::Direct(oid(1))),
         (
@@ -42,7 +42,7 @@ fn written_refs_read_back_identically() {
 
 #[test]
 fn detached_head_is_a_bare_oid_line() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     write_loose(dir.path(), Some(&RefTarget::Direct(oid(7))), &[]).unwrap();
     let head_bytes = std::fs::read(dir.path().join("HEAD")).unwrap();
     assert_eq!(head_bytes, format!("{}\n", oid(7)).into_bytes());
@@ -50,7 +50,7 @@ fn detached_head_is_a_bare_oid_line() {
 
 #[test]
 fn path_shaped_ref_names_are_rejected() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     for bad in ["refs/../escape", "/abs", "refs//double", "refs/x/", ""] {
         let refs = vec![(BString::from(bad), RefTarget::Direct(oid(1)))];
         assert!(

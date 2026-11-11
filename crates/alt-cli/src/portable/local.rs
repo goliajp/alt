@@ -6,10 +6,7 @@ use serde::{Serialize, de::DeserializeOwned};
 use std::{
     fs::{File, OpenOptions},
     io::{Read, Write},
-    os::{
-        fd::AsRawFd,
-        unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt},
-    },
+    os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
 };
 
@@ -18,8 +15,7 @@ pub struct Journal {
     _lock: File,
 }
 fn uid() -> u32 {
-    // SAFETY: geteuid has no pointer or lifetime requirements.
-    unsafe { libc::geteuid() }
+    alt_os::sys::geteuid()
 }
 fn directory(path: &Path) -> Res<()> {
     match std::fs::DirBuilder::new().mode(0o700).create(path) {
@@ -43,7 +39,7 @@ fn directory(path: &Path) -> Res<()> {
 fn regular(path: &Path, maximum: u64) -> Res<File> {
     let file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .custom_flags(alt_os::sys::O_NOFOLLOW | alt_os::sys::O_CLOEXEC)
         .open(path)?;
     let meta = file.metadata()?;
     if !meta.is_file() || meta.uid() != uid() || meta.mode() & 0o077 != 0 || meta.len() > maximum {
@@ -106,15 +102,15 @@ impl Journal {
             .create(true)
             .truncate(false)
             .mode(0o600)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .custom_flags(alt_os::sys::O_NOFOLLOW | alt_os::sys::O_CLOEXEC)
             .open(root.join("lock"))?;
         let meta = lock.metadata()?;
         if !meta.is_file() || meta.uid() != uid() || meta.mode() & 0o077 != 0 {
             return Err(refused("migration journal lock must be private"));
         }
-        // SAFETY: a live owned file descriptor; no pointers. Never block an
-        // interactive process behind another invocation of the same journal.
-        if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        // Never block an interactive process behind another invocation of
+        // the same journal.
+        if alt_os::sys::flock(&lock, alt_os::sys::LOCK_EX | alt_os::sys::LOCK_NB).is_err() {
             return Err(refused("another process is using this migration journal"));
         }
         directory(&root.join("content"))?;
@@ -170,7 +166,7 @@ impl Journal {
                     .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound) => {}
             Err(error) => return Err(error),
         }
-        let mut temp = tempfile::NamedTempFile::new_in(&self.root)?;
+        let mut temp = alt_os::temp::NamedTempFile::new_in(&self.root)?;
         temp.as_file()
             .set_permissions(std::fs::Permissions::from_mode(0o600))?;
         temp.write_all(&bytes)?;
@@ -190,7 +186,7 @@ impl Journal {
     ) -> Res<(alt_portable::Envelope, Blob)> {
         let file = OpenOptions::new()
             .read(true)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .custom_flags(alt_os::sys::O_NOFOLLOW | alt_os::sys::O_CLOEXEC)
             .open(path)?;
         let maximum = limits
             .total_bytes
@@ -202,7 +198,7 @@ impl Journal {
                 "archive exceeds its budget or is not a regular file",
             ));
         }
-        let staging = tempfile::Builder::new()
+        let staging = alt_os::temp::Builder::new()
             .prefix("archive-stage-")
             .tempdir_in(&self.root)?;
         let mut reader = ArchiveReader {
@@ -218,7 +214,7 @@ impl Journal {
             if has {
                 return Ok(Box::new(std::io::sink()));
             }
-            let temporary = tempfile::NamedTempFile::new_in(staging.path())?;
+            let temporary = alt_os::temp::NamedTempFile::new_in(staging.path())?;
             let writer = temporary.as_file().try_clone()?;
             files.push((blob.clone(), temporary.into_temp_path()));
             Ok(Box::new(writer))
@@ -263,7 +259,7 @@ impl Journal {
             return Ok(());
         }
         let dir = self.root.join("content");
-        let mut temp = tempfile::NamedTempFile::new_in(&dir)?;
+        let mut temp = alt_os::temp::NamedTempFile::new_in(&dir)?;
         temp.as_file()
             .set_permissions(std::fs::Permissions::from_mode(0o600))?;
         write(temp.as_file_mut())?;
@@ -309,7 +305,7 @@ mod tests {
 
     #[test]
     fn private_journal_rejects_aliases_conflicts_and_modified_content() {
-        let root = tempfile::tempdir().unwrap();
+        let root = alt_os::temp::tempdir().unwrap();
         let path = root.path().join("journal");
         let journal = Journal::open(&path).unwrap();
         assert_eq!(
@@ -381,7 +377,7 @@ mod tests {
                 .unwrap();
             unreachable!();
         }
-        let root = tempfile::tempdir().unwrap();
+        let root = alt_os::temp::tempdir().unwrap();
         let path = root.path().join("journal");
         let mut child=Command::new(std::env::current_exe().unwrap())
             .args(["--exact","portable::local::tests::killed_writer_releases_journal_without_exposing_partial_content","--nocapture"])
@@ -443,12 +439,15 @@ mod tests {
         }
         // SAFETY: only this dedicated test subprocess is affected. The pointer
         // names a live initialized rlimit for the duration of the syscall.
-        let limit = libc::rlimit {
+        let limit = alt_os::sys::rlimit {
             rlim_cur: 64,
             rlim_max: 64,
         };
-        assert_eq!(unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &limit) }, 0);
-        let root = tempfile::tempdir().unwrap();
+        assert_eq!(
+            unsafe { alt_os::sys::setrlimit(alt_os::sys::RLIMIT_NOFILE, &limit) },
+            0
+        );
+        let root = alt_os::temp::tempdir().unwrap();
         let source = Journal::open(&root.path().join("source")).unwrap();
         let mut blobs = Vec::new();
         for i in 0..128 {

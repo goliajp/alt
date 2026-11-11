@@ -43,8 +43,8 @@ fn ok(o: Output) -> String {
 
 /// A repo with one commit and a dirty working tree (so status/diff have content
 /// and branch lists `main`).
-fn repo_with_changes() -> tempfile::TempDir {
-    let dir = tempfile::tempdir().unwrap();
+fn repo_with_changes() -> alt_os::temp::TempDir {
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."], false));
     std::fs::write(root.join("a.txt"), "one\n").unwrap();
@@ -220,7 +220,7 @@ fn client_write_retries_with_same_id_when_response_is_lost_after_send() {
 /// client's request, not from whatever environment the daemon started with.
 #[test]
 fn commit_metadata_through_the_daemon_takes_the_callers_controlling() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."], false));
     let commit_as = |file: &str, controlling: &str| {

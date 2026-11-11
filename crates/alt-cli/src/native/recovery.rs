@@ -107,7 +107,7 @@ pub(super) fn hash(bytes: &[u8]) -> String {
 pub(super) fn durable_write(path: &Path, bytes: &[u8]) -> Res<()> {
     let parent = path.parent().ok_or("state path has no parent")?;
     std::fs::create_dir_all(parent)?;
-    let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
+    let mut tmp = alt_os::temp::NamedTempFile::new_in(parent)?;
     tmp.write_all(bytes)?;
     tmp.as_file().sync_all()?;
     tmp.persist(path)?;
@@ -130,7 +130,7 @@ pub(super) fn workspace_identity_at(index_path: &Path, name: &str) -> Res<Worksp
             std::fs::File::open("/dev/urandom")?.read_exact(&mut random)?;
             let id = hash(&random);
             let parent = path.parent().ok_or("workspace has no control directory")?;
-            let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
+            let mut tmp = alt_os::temp::NamedTempFile::new_in(parent)?;
             tmp.write_all(id.as_bytes())?;
             tmp.as_file().sync_all()?;
             match tmp.persist_noclobber(&path) {
@@ -165,14 +165,11 @@ impl NativeRepo<'_> {
                 .open(path)?;
             #[cfg(unix)]
             {
-                use std::os::fd::AsRawFd;
                 loop {
-                    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } == 0 {
-                        break;
-                    }
-                    let e = std::io::Error::last_os_error();
-                    if e.kind() != std::io::ErrorKind::Interrupted {
-                        return Err(e.into());
+                    match alt_os::sys::flock(&file, alt_os::sys::LOCK_EX) {
+                        Ok(()) => break,
+                        Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                        Err(e) => return Err(e.into()),
                     }
                 }
             }
@@ -670,7 +667,7 @@ mod tests {
 
     #[test]
     fn durable_state_write_supports_relative_control_directories() {
-        let dir = tempfile::tempdir_in(".").unwrap();
+        let dir = alt_os::temp::tempdir_in(".").unwrap();
         let relative = Path::new(dir.path().file_name().unwrap()).join("state");
         assert!(!relative.is_absolute());
         durable_write(&relative, b"durable state").unwrap();

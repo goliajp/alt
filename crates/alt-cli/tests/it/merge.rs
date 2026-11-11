@@ -41,7 +41,7 @@ fn ok(o: Output) -> String {
 
 #[test]
 fn fast_forward_merge() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "one\n").unwrap();
@@ -74,7 +74,7 @@ fn clean_three_way_merge_matches_git() {
     };
 
     // --- alt ---
-    let adir = tempfile::tempdir().unwrap();
+    let adir = alt_os::temp::tempdir().unwrap();
     let aroot = adir.path();
     scenario(&|r, a| alt(r, a), aroot, &["init", "."]);
     ok(alt(aroot, &["branch", "feat"]));
@@ -90,7 +90,7 @@ fn clean_three_way_merge_matches_git() {
     assert!(mout.contains("Merge made"), "{mout}");
 
     // --- git, same moves ---
-    let gdir = tempfile::tempdir().unwrap();
+    let gdir = alt_os::temp::tempdir().unwrap();
     let groot = gdir.path();
     scenario(&|r, a| git(r, a), groot, &["init", "-q", "-b", "main", "."]);
     ok(git(groot, &["branch", "feat"]));
@@ -116,7 +116,7 @@ fn clean_three_way_merge_matches_git() {
 
     // export the alt repo and let git confirm the merge commit's tree equals
     // git's own merge tree (semantic L1 equivalence) and the two parents
-    let out = tempfile::tempdir().unwrap();
+    let out = alt_os::temp::tempdir().unwrap();
     let target = out.path().join("exported");
     ok(alt(aroot, &["export", target.to_str().unwrap()]));
     assert!(git(&target, &["fsck", "--strict"]).status.success());
@@ -133,7 +133,7 @@ fn clean_three_way_merge_matches_git() {
 
 #[test]
 fn conflict_then_resolve_and_commit() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("f.txt"), "line1\nline2\nline3\n").unwrap();
@@ -171,7 +171,7 @@ fn conflict_then_resolve_and_commit() {
     assert!(ok(alt(root, &["status"])).contains("working tree clean"));
 
     // exported repo is git-clean
-    let out = tempfile::tempdir().unwrap();
+    let out = alt_os::temp::tempdir().unwrap();
     let target = out.path().join("exported");
     ok(alt(root, &["export", target.to_str().unwrap()]));
     assert!(git(&target, &["fsck", "--strict"]).status.success());

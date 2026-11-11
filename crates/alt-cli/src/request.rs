@@ -75,10 +75,7 @@ pub fn claim(
         .open(directory.join("lock"))?;
     #[cfg(unix)]
     {
-        use std::os::fd::AsRawFd;
-        if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) } != 0 {
-            return Err(std::io::Error::last_os_error().into());
-        }
+        alt_os::sys::flock(&lock, alt_os::sys::LOCK_EX)?;
     }
     let binding_digest = digest(&serde_json::to_vec(binding)?);
     let intent_path = directory.join("intent.json");
@@ -195,7 +192,7 @@ pub fn read_completion(directory: &Path, intent: &Intent) -> Res<Option<(Complet
 
 fn durable_write(path: &Path, bytes: &[u8]) -> Res<()> {
     let parent = path.parent().ok_or("missing state directory")?;
-    let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
+    let mut tmp = alt_os::temp::NamedTempFile::new_in(parent)?;
     tmp.write_all(bytes)?;
     tmp.as_file().sync_all()?;
     tmp.persist(path)?;
@@ -215,7 +212,7 @@ pub fn repository_identity(alt_dir: &Path) -> Res<String> {
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             let id = hex(&new_id()?);
-            let mut tmp = tempfile::NamedTempFile::new_in(alt_dir)?;
+            let mut tmp = alt_os::temp::NamedTempFile::new_in(alt_dir)?;
             tmp.write_all(id.as_bytes())?;
             tmp.as_file().sync_all()?;
             match tmp.persist_noclobber(&path) {
@@ -238,7 +235,7 @@ pub fn record_submission(alt_dir: &Path, id: RequestId, binding: &Value) -> Res<
     let bytes = serde_json::to_vec(
         &json!({"version":1, "request_id":hex(&id), "binding_digest":digest(&serde_json::to_vec(binding)?)}),
     )?;
-    let mut tmp = tempfile::NamedTempFile::new_in(&directory)?;
+    let mut tmp = alt_os::temp::NamedTempFile::new_in(&directory)?;
     tmp.write_all(&bytes)?;
     tmp.as_file().sync_all()?;
     match tmp.persist_noclobber(&path) {
@@ -370,7 +367,7 @@ pub fn query(
 /// wait for another request whose executor could be waiting for that mutex.
 /// The returned guard does not change the original intent or result files.
 pub(crate) fn try_lock_existing(alt_dir: &Path, request: &str) -> Res<File> {
-    use std::os::{fd::AsRawFd, unix::fs::OpenOptionsExt};
+    use std::os::unix::fs::OpenOptionsExt;
     let id = parse_id(request)?;
     if hex(&id) != request {
         return Err(
@@ -381,7 +378,7 @@ pub(crate) fn try_lock_existing(alt_dir: &Path, request: &str) -> Res<File> {
     let lock = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .custom_flags(alt_os::sys::O_NOFOLLOW | alt_os::sys::O_CLOEXEC)
         .open(path)?;
     if !lock.metadata()?.is_file() {
         return Err(Failure::refusal(
@@ -390,9 +387,7 @@ pub(crate) fn try_lock_existing(alt_dir: &Path, request: &str) -> Res<File> {
         )
         .into());
     }
-    // SAFETY: fd belongs to the live local File; LOCK_NB cannot block.
-    if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-        let error = std::io::Error::last_os_error();
+    if let Err(error) = alt_os::sys::flock(&lock, alt_os::sys::LOCK_EX | alt_os::sys::LOCK_NB) {
         if error.kind() == std::io::ErrorKind::WouldBlock {
             return Err(Failure::refusal(
                 "request_active",
@@ -415,7 +410,7 @@ mod tests {
 
     #[test]
     fn completed_failure_replays_the_entire_response() {
-        let root = tempfile::tempdir().unwrap();
+        let root = alt_os::temp::tempdir().unwrap();
         let binding = json!({"command": "commit", "arguments": ["日本語"]});
         let Claimed::Execute(claim) = acquire(root.path(), binding.clone()).unwrap() else {
             panic!("new request must execute");
@@ -443,7 +438,7 @@ mod tests {
 
     #[test]
     fn interrupted_intent_is_unknown_even_if_response_bytes_exist() {
-        let root = tempfile::tempdir().unwrap();
+        let root = alt_os::temp::tempdir().unwrap();
         let binding = json!({"command": "switch"});
         let Claimed::Execute(claim) = acquire(root.path(), binding.clone()).unwrap() else {
             panic!("new request must execute");
@@ -458,7 +453,7 @@ mod tests {
 
     #[test]
     fn corrupt_completed_response_is_never_reexecuted() {
-        let root = tempfile::tempdir().unwrap();
+        let root = alt_os::temp::tempdir().unwrap();
         let binding = json!({"command": "add"});
         let Claimed::Execute(claim) = acquire(root.path(), binding.clone()).unwrap() else {
             panic!("new request must execute");

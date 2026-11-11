@@ -62,7 +62,7 @@ struct Server {
     admin: Credential,
     admin_dsn: String,
     database: String,
-    _root: tempfile::TempDir,
+    _root: alt_os::temp::TempDir,
     factory: StoreFactory,
     options: HttpOptions,
     browser: alt_server::WebOptions,
@@ -82,7 +82,7 @@ impl Server {
             .unwrap()
             .batch_execute(&format!("CREATE DATABASE {database}"))
             .unwrap();
-        let root = tempfile::tempdir().unwrap();
+        let root = alt_os::temp::tempdir().unwrap();
         let spec = InstanceSpec {
             installation_id: "installation".into(),
             workspace_id: "workspace".into(),
@@ -403,8 +403,8 @@ fn two_clients_continue_original_task_revalidate_review_publish_and_export_witho
     use std::os::unix::fs::PermissionsExt;
     let mut server = Server::new();
     std::fs::create_dir_all(env!("CARGO_TARGET_TMPDIR")).unwrap();
-    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
-    let scratch = tempfile::tempdir_in(std::env::var_os("HOME").unwrap()).unwrap();
+    let root = alt_os::temp::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let scratch = alt_os::temp::tempdir_in(std::env::var_os("HOME").unwrap()).unwrap();
     let alice = root.path().join("alice");
     let bob = root.path().join("bob");
     let aw = root.path().join("alice-work");
@@ -947,8 +947,8 @@ fn browser_request(
     body: Option<Value>,
 ) -> (u16, String, Value) {
     use std::io::Write;
-    let headers = tempfile::NamedTempFile::new().unwrap();
-    let output = tempfile::NamedTempFile::new().unwrap();
+    let headers = alt_os::temp::NamedTempFile::new().unwrap();
+    let output = alt_os::temp::NamedTempFile::new().unwrap();
     let mut command = Command::new("curl");
     command
         .args([

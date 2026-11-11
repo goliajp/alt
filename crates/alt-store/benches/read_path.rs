@@ -51,7 +51,7 @@ fn build_chain(store: &mut ChunkStore, depth: usize, seed: u64) -> ChunkId {
 }
 
 fn bench(c: &mut Criterion) {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let mut store = ChunkStore::open(dir.path()).unwrap();
 
     // a plain chunk (no delta) and chain tails at depth 4 / 8 / 12 (the
@@ -93,7 +93,7 @@ fn bench(c: &mut Criterion) {
     // the win: a multi-chunk blob read. Tiered verification assembles the
     // chunks unverified and hashes once at the blob boundary with the
     // parallel hasher, instead of one single-threaded hash per chunk.
-    let blob_dir = tempfile::tempdir().unwrap();
+    let blob_dir = alt_os::temp::tempdir().unwrap();
     let mut blobs = BlobStore::open(blob_dir.path()).unwrap();
     let big = fill(4 << 20, 0xE5); // ~64 chunks
     let blob = blobs.put(&big).unwrap();

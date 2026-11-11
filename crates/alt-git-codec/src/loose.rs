@@ -155,7 +155,7 @@ mod tests {
 
     #[test]
     fn reads_back_what_it_stores() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let payload = b"hello world\n";
         let oid = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, payload);
         let store = store_with(dir.path(), &oid, b"blob 12\0hello world\n");
@@ -172,7 +172,7 @@ mod tests {
 
     #[test]
     fn missing_object_is_not_found() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let store = LooseStore::new(dir.path());
         let oid = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, b"");
         assert!(!store.contains(&oid));
@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn corrupt_headers_are_rejected() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let oid = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, b"x");
         for raw in [
             &b"blob12\0x"[..],                             // no space

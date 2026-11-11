@@ -69,7 +69,7 @@ fn corpus_cli_matches_git() {
         println!("{}: full-history log byte-exact (.git)", repo.display());
 
         // the same matrix re-run on the native backend
-        let alt_root = tempfile::tempdir().unwrap();
+        let alt_root = alt_os::temp::tempdir().unwrap();
         let import = run(
             env!("CARGO_BIN_EXE_alt"),
             &repo,

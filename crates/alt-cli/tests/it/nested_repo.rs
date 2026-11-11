@@ -30,7 +30,7 @@ fn ok(o: Output) -> String {
 
 #[test]
 fn commands_inside_a_nested_git_repo_read_that_repo() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let outer = dir.path();
     let alt = env!("CARGO_BIN_EXE_alt");
     ok(run(alt, outer, &["init", "."]));

@@ -29,7 +29,7 @@ fn value(root: &Path, args: &[&str]) -> Value {
     serde_json::from_slice(&ok(root, args).stdout).unwrap()
 }
 struct Fixture {
-    _dir: tempfile::TempDir,
+    _dir: alt_os::temp::TempDir,
     main: std::path::PathBuf,
     workspace: std::path::PathBuf,
     task: String,
@@ -38,7 +38,7 @@ fn fixture() -> Fixture {
     // Task execution requires a supported disk filesystem; runner /tmp may
     // be tmpfs. Cargo's test scratch directory shares the build filesystem.
     std::fs::create_dir_all(env!("CARGO_TARGET_TMPDIR")).unwrap();
-    let directory = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let directory = alt_os::temp::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let main = directory.path().join("main");
     let workspace = directory.path().join("task");
     std::fs::create_dir(&main).unwrap();

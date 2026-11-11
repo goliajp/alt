@@ -57,7 +57,7 @@ fn build_minimal_png(width: u32, height: u32, pixels: &[u8]) -> Vec<u8> {
 
 #[test]
 fn log_patch_emits_text_unified_diff() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "one\ntwo\n").unwrap();
@@ -80,7 +80,7 @@ fn log_patch_emits_text_unified_diff() {
 
 #[test]
 fn log_patch_compacts_binary_blobs_with_chunk_and_perceptual_lines() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
 
@@ -142,7 +142,7 @@ fn log_patch_compacts_binary_blobs_with_chunk_and_perceptual_lines() {
 
 #[test]
 fn log_patch_first_commit_shows_all_files_as_additions() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("hello.txt"), "hello\n").unwrap();

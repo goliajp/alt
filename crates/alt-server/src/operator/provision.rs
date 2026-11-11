@@ -66,7 +66,7 @@ pub fn initialize(
         .read(true)
         .write(true)
         .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .custom_flags(alt_os::sys::O_NOFOLLOW | alt_os::sys::O_CLOEXEC)
         .open(directory.join("initialize.lock"))
         .map_err(|_| Error::File)?;
     lock.try_lock()

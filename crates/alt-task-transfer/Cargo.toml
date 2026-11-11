@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 alt-hash.workspace = true
+alt-os.workspace = true
 alt-remote-protocol.workspace = true
 alt-repository-service.workspace = true
 alt-task-service.workspace = true
@@ -15,8 +16,6 @@ alt-input.workspace = true
 alt-git-codec.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tempfile.workspace = true
-libc.workspace = true
 
 [dev-dependencies]
 alt-command-protocol.workspace = true

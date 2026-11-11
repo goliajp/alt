@@ -454,7 +454,7 @@ mod tests {
 
     #[test]
     fn round_trips_blobs_of_every_shape() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let mut store = BlobStore::open(dir.path()).unwrap();
         let cases: Vec<Vec<u8>> = vec![
             Vec::new(),
@@ -473,7 +473,7 @@ mod tests {
 
     #[test]
     fn manifest_tree_grows_levels_under_small_fanout() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let opts = BlobOptions {
             fanout: 3,
             ..BlobOptions::default()
@@ -487,7 +487,7 @@ mod tests {
 
     #[test]
     fn shifted_blob_shares_most_chunks() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let mut store = BlobStore::open(dir.path()).unwrap();
         let data = random_bytes(4 << 20, 4);
         store.put(&data).unwrap();
@@ -509,7 +509,7 @@ mod tests {
 
     #[test]
     fn identical_blob_is_not_rewritten() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let mut store = BlobStore::open(dir.path()).unwrap();
         let data = random_bytes(2 << 20, 5);
         let a = store.put(&data).unwrap();
@@ -521,7 +521,7 @@ mod tests {
 
     #[test]
     fn checkpoint_then_rewind_undoes_appended_blobs() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let mut store = BlobStore::open(dir.path()).unwrap();
         let before = b"before checkpoint".to_vec();
         let multi = random_bytes(2 << 20, 11); // multi-chunk: writes blobmap too
@@ -555,7 +555,7 @@ mod tests {
 
     #[test]
     fn rewind_to_empty_checkpoint_yields_empty_store() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let mut store = BlobStore::open(dir.path()).unwrap();
         let ckpt = store.checkpoint();
         let data = random_bytes(1 << 20, 13);
@@ -570,7 +570,7 @@ mod tests {
 
     #[test]
     fn missing_blob_is_not_found() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let store = BlobStore::open(dir.path()).unwrap();
         let err = store.get(BlobId([7u8; 32])).unwrap_err();
         assert!(matches!(err, StoreError::BlobNotFound(_)));

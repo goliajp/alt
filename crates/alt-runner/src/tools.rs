@@ -69,8 +69,8 @@ fn version(
         return Ok(format!("input:{digest}"));
     }
     use std::os::unix::process::CommandExt;
-    let mut stdout = tempfile::NamedTempFile::new()?;
-    let mut stderr = tempfile::NamedTempFile::new()?;
+    let mut stdout = alt_os::temp::NamedTempFile::new()?;
+    let mut stderr = alt_os::temp::NamedTempFile::new()?;
     let mut child = Command::new(path)
         .args(&binding.version_args)
         .current_dir(root)
@@ -200,8 +200,8 @@ pub(crate) fn observe_external(
             && let Some(program) = argv.first().and_then(|name| bindings.get(name))
         {
             use std::os::unix::process::CommandExt;
-            let stdout = tempfile::NamedTempFile::new_in(control)?;
-            let stderr = tempfile::NamedTempFile::new_in(control)?;
+            let stdout = alt_os::temp::NamedTempFile::new_in(control)?;
+            let stderr = alt_os::temp::NamedTempFile::new_in(control)?;
             let mut child = Command::new(program)
                 .args(&argv[1..])
                 .current_dir(root)

@@ -2,9 +2,8 @@
 //! admission belong to the instance adapter; this crate performs no network I/O.
 use argon2::{
     Algorithm, Argon2, Params, PasswordHash, PasswordHasher, PasswordVerifier, Version,
-    password_hash::SaltString,
+    password_hash::{Salt, SaltString},
 };
-use rand_core::{OsRng, RngCore};
 use std::net::IpAddr;
 use url::{Host, Url};
 
@@ -164,7 +163,7 @@ pub fn validate_token(value: &str) -> Result<()> {
 }
 pub fn secret() -> String {
     let mut raw = [0u8; 32];
-    OsRng.fill_bytes(&mut raw);
+    alt_os::random::fill(&mut raw);
     raw.iter().map(|b| format!("{b:02x}")).collect()
 }
 pub fn token() -> String {
@@ -199,8 +198,11 @@ pub fn password_hash(password: &str) -> Result<String> {
     if password.chars().count() < 12 || password.len() > 1024 {
         return Err(Error::Password);
     }
+    let mut salt = [0u8; Salt::RECOMMENDED_LENGTH];
+    alt_os::random::fill(&mut salt);
+    let salt = SaltString::encode_b64(&salt).map_err(|_| Error::PasswordOperation)?;
     argon()?
-        .hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng))
+        .hash_password(password.as_bytes(), &salt)
         .map(|value| value.to_string())
         .map_err(|_| Error::PasswordOperation)
 }

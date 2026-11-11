@@ -7,7 +7,7 @@ use alt_git_codec::{Commit, HashAlgo, ObjectKind, Tag, Tree};
 use alt_testutil as common;
 
 fn roundtrip_repo(algo: HashAlgo, object_format: &str) {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     common::make_repo(tmp.path(), object_format);
 
     let (mut commits, mut trees, mut tags) = (0, 0, 0);

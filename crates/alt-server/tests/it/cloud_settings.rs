@@ -39,7 +39,7 @@ fn settings(c: &Value) -> Value {
 
 #[test]
 fn cloud_settings_survive_reads_without_changing_frozen_intent() {
-    let root = tempfile::tempdir().unwrap();
+    let root = alt_os::temp::tempdir().unwrap();
     let c = fixture(root.path());
     let path = root.path().join("config.json");
     let frozen = fs::read(&path).unwrap();
@@ -62,7 +62,7 @@ fn cloud_settings_survive_reads_without_changing_frozen_intent() {
 
 #[test]
 fn cloud_settings_reject_wrong_generation_scope_version_and_ambiguity() {
-    let root = tempfile::tempdir().unwrap();
+    let root = alt_os::temp::tempdir().unwrap();
     let c = fixture(root.path());
     let path = root.path().join("config.json");
     let sidecar = root.path().join("change-links.json");
@@ -87,7 +87,7 @@ fn cloud_settings_reject_wrong_generation_scope_version_and_ambiguity() {
 
 #[test]
 fn cloud_settings_fail_closed_for_unsafe_or_malformed_present_files() {
-    let root = tempfile::tempdir().unwrap();
+    let root = alt_os::temp::tempdir().unwrap();
     fixture(root.path());
     let path = root.path().join("config.json");
     let sidecar = root.path().join("change-links.json");
@@ -109,7 +109,7 @@ fn cloud_settings_fail_closed_for_unsafe_or_malformed_present_files() {
 
 #[test]
 fn cloud_settings_keep_effective_configuration_within_backup_read_limit() {
-    let root = tempfile::tempdir().unwrap();
+    let root = alt_os::temp::tempdir().unwrap();
     let config = fixture(root.path());
     let path = root.path().join("config.json");
     let sidecar = root.path().join("change-links.json");

@@ -70,8 +70,8 @@ fn git(repo: &Path, args: &[&str]) -> String {
 /// Build a small server repo: two commits on `main`, one on `feat`, plus
 /// an annotated tag. Repack everything so the response packfile exercises
 /// the delta-resolution path in `index_pack`.
-fn build_server_repo() -> tempfile::TempDir {
-    let dir = tempfile::tempdir().unwrap();
+fn build_server_repo() -> alt_os::temp::TempDir {
+    let dir = alt_os::temp::tempdir().unwrap();
     let repo = dir.path();
     git(repo, &["init", "-q", "-b", "main", "."]);
     git(repo, &["config", "user.email", "srv@example.com"]);
@@ -124,7 +124,7 @@ fn alt_fetch_round_trips_against_git_upload_pack() {
     let server_repo = build_server_repo();
     let url = wire_test_server::spawn(server_repo.path().to_owned());
 
-    let alt_root = tempfile::tempdir().unwrap();
+    let alt_root = alt_os::temp::tempdir().unwrap();
     let root = alt_root.path();
     ok("alt init", alt(root, &["init", "."]));
     ok(
@@ -178,7 +178,7 @@ fn alt_fetch_is_idempotent_when_remote_is_unchanged() {
     let server_repo = build_server_repo();
     let url = wire_test_server::spawn(server_repo.path().to_owned());
 
-    let alt_root = tempfile::tempdir().unwrap();
+    let alt_root = alt_os::temp::tempdir().unwrap();
     let root = alt_root.path();
     ok("alt init", alt(root, &["init", "."]));
     ok(

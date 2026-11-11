@@ -504,7 +504,7 @@ fn execute(
         }
         WebRoute::Object(repository, oid, true) => {
             let (_, bytes, mut file) = store.open_published_object(credential, &repository, oid)?;
-            let mut copy = tempfile::NamedTempFile::new()?;
+            let mut copy = alt_os::temp::NamedTempFile::new()?;
             std::io::copy(&mut file, copy.as_file_mut())?;
             copy.as_file_mut().rewind()?;
             Ok(Output::Temporary {

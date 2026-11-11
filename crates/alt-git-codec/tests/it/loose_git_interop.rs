@@ -6,7 +6,7 @@ use alt_git_codec::{HashAlgo, ObjectId};
 use alt_testutil as common;
 
 fn verify_all_loose(algo: HashAlgo, object_format: &str) {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     common::make_repo(tmp.path(), object_format);
     let n = common::for_each_loose(tmp.path(), |oid, raw| {
         assert_eq!(oid.algo(), algo);

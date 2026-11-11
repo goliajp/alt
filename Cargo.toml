@@ -47,6 +47,7 @@ alt-import = { path = "crates/alt-import" }
 alt-merge = { path = "crates/alt-merge" }
 alt-odb = { path = "crates/alt-odb" }
 alt-oplog = { path = "crates/alt-oplog" }
+alt-os = { path = "crates/alt-os" }
 alt-pack-segment = { path = "crates/alt-pack-segment" }
 alt-prism = { path = "crates/alt-prism" }
 alt-prism-deflate = { path = "crates/alt-prism-deflate" }
@@ -67,15 +68,11 @@ clap = { version = "4", features = ["derive"] }
 criterion = "0.5"
 ed25519-dalek = { version = "2", default-features = false, features = ["std", "rand_core"] }
 encoding_rs = "0.8"
-libc = "0.2"
-memmap2 = "0.9"
-rand_core = { version = "0.6", default-features = false, features = ["std", "getrandom"] }
 rayon = "1"
 syn = { version = "2", features = ["full", "extra-traits"] }
 proc-macro2 = "1"
 url = "2"
 ureq = { version = "2", default-features = false, features = ["tls"] }
-tempfile = "3"
 tiny_http = { version = "0.12", default-features = false }
 thiserror = "2"
 regex = "1"

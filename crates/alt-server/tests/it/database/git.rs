@@ -48,7 +48,7 @@ pub(super) fn text(bytes: Vec<u8>) -> String {
 fn real_git_atomic_push_clone_incremental_fetch_notes_tags_and_default_branch() {
     let f = Fixture::new();
     let server = Running::start(&f);
-    let temp = tempfile::tempdir().unwrap();
+    let temp = alt_os::temp::tempdir().unwrap();
     let first = temp.path().join("first");
     std::fs::create_dir(&first).unwrap();
     let url = format!("{}/git/repository", server.url);
@@ -155,7 +155,7 @@ fn real_git_atomic_push_clone_incremental_fetch_notes_tags_and_default_branch() 
 fn real_git_protected_branch_rejects_entire_atomic_push_and_force_without_review() {
     let mut f = Fixture::new();
     let server = Running::start(&f);
-    let temp = tempfile::tempdir().unwrap();
+    let temp = alt_os::temp::tempdir().unwrap();
     ok(
         temp.path(),
         &f.token,
@@ -251,7 +251,7 @@ fn real_git_many_refs_clone_and_bounded_gzip_requests() {
     use std::io::Read;
     let f = Fixture::new();
     let server = Running::start(&f);
-    let temp = tempfile::tempdir().unwrap();
+    let temp = alt_os::temp::tempdir().unwrap();
     let first = temp.path().join("first");
     std::fs::create_dir(&first).unwrap();
     ok(&first, &f.token, &["init", "-q", "--initial-branch=main"]);
@@ -357,7 +357,7 @@ fn real_git_many_refs_clone_and_bounded_gzip_requests() {
 fn real_git_default_client_pushes_a_pack_larger_than_its_post_buffer() {
     let f = Fixture::new();
     let server = Running::start(&f);
-    let temp = tempfile::tempdir().unwrap();
+    let temp = alt_os::temp::tempdir().unwrap();
     let first = temp.path().join("first");
     std::fs::create_dir(&first).unwrap();
     let url = format!("{}/git/repository", server.url);

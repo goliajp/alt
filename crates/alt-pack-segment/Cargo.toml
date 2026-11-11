@@ -10,8 +10,5 @@ alt-deflate.workspace = true
 alt-git-pack.workspace = true
 alt-hash.workspace = true
 alt-inflate.workspace = true
-memmap2.workspace = true
+alt-os.workspace = true
 rayon.workspace = true
-
-[dev-dependencies]
-tempfile.workspace = true

@@ -115,7 +115,7 @@ fn err_str(r: &Response) -> String {
 /// The daemon serves native read and write commands against its held store.
 #[test]
 fn daemon_serves_commands_over_the_socket() {
-    let repo = tempfile::tempdir().unwrap();
+    let repo = alt_os::temp::tempdir().unwrap();
     let root = repo.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "hello\n").unwrap();
@@ -149,7 +149,7 @@ fn daemon_serves_commands_over_the_socket() {
 /// committed by other processes since it opened — never a stale read.
 #[test]
 fn daemon_sees_external_writes_via_per_request_refresh() {
-    let repo = tempfile::tempdir().unwrap();
+    let repo = alt_os::temp::tempdir().unwrap();
     let root = repo.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "base\n").unwrap();
@@ -250,7 +250,7 @@ fn stage_one(root: &Path) {
 /// re-running — exactly one commit lands.
 #[test]
 fn a_keyed_write_sent_twice_to_one_daemon_applies_once() {
-    let repo = tempfile::tempdir().unwrap();
+    let repo = alt_os::temp::tempdir().unwrap();
     let root = repo.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "base\n").unwrap();
@@ -287,7 +287,7 @@ fn a_keyed_write_sent_twice_to_one_daemon_applies_once() {
 /// rebuilt by replay on open, so a fresh daemon sees the prior write as applied.
 #[test]
 fn a_keyed_write_retried_after_the_daemon_dies_does_not_double_apply() {
-    let repo = tempfile::tempdir().unwrap();
+    let repo = alt_os::temp::tempdir().unwrap();
     let root = repo.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "base\n").unwrap();
@@ -338,8 +338,8 @@ fn a_keyed_write_retried_after_the_daemon_dies_does_not_double_apply() {
 /// must not bleed between concurrent threads.
 #[test]
 fn daemon_serves_concurrent_requests_without_identity_bleed() {
-    let repo = tempfile::tempdir().unwrap();
-    let trees = tempfile::tempdir().unwrap();
+    let repo = alt_os::temp::tempdir().unwrap();
+    let trees = alt_os::temp::tempdir().unwrap();
     let root = repo.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("f.txt"), "base\n").unwrap();
@@ -412,8 +412,8 @@ fn daemon_routes_structured_principal_to_oplog_per_request() {
     use alt_cli::native::{Principal, PrincipalKind};
     use alt_oplog::OpLog;
 
-    let repo = tempfile::tempdir().unwrap();
-    let trees = tempfile::tempdir().unwrap();
+    let repo = alt_os::temp::tempdir().unwrap();
+    let trees = alt_os::temp::tempdir().unwrap();
     let root = repo.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("f.txt"), "base\n").unwrap();
@@ -498,8 +498,8 @@ fn daemon_routes_structured_principal_to_oplog_per_request() {
 /// commits, no stale/failed daemon read.
 #[test]
 fn daemon_reads_stay_coherent_under_concurrent_external_writers() {
-    let repo = tempfile::tempdir().unwrap();
-    let trees = tempfile::tempdir().unwrap();
+    let repo = alt_os::temp::tempdir().unwrap();
+    let trees = alt_os::temp::tempdir().unwrap();
     let root = repo.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("f.txt"), "base\n").unwrap();
@@ -631,8 +631,8 @@ fn daemon_reads_stay_coherent_under_concurrent_external_writers() {
 /// base + ROUNDS commits, and the whole store must read back cleanly afterward.
 #[test]
 fn daemon_group_commit_loses_no_concurrent_writes() {
-    let repo = tempfile::tempdir().unwrap();
-    let trees = tempfile::tempdir().unwrap();
+    let repo = alt_os::temp::tempdir().unwrap();
+    let trees = alt_os::temp::tempdir().unwrap();
     let root = repo.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("f.txt"), "base\n").unwrap();
@@ -719,8 +719,8 @@ fn daemon_commit_throughput() {
     // never contend on the same branch (that would serialize on a ref conflict,
     // not on fsync — we want to measure the fsync coalescing)
     fn measure(concurrency: usize, rounds: usize) -> f64 {
-        let repo = tempfile::tempdir().unwrap();
-        let trees = tempfile::tempdir().unwrap();
+        let repo = alt_os::temp::tempdir().unwrap();
+        let trees = alt_os::temp::tempdir().unwrap();
         let root = repo.path();
         ok(alt(root, &["init", "."]));
         std::fs::write(root.join("f.txt"), "base\n").unwrap();
@@ -789,7 +789,7 @@ fn daemon_commit_throughput() {
 /// — same daemon process, same socket, just policy bytes changing.
 #[test]
 fn daemon_picks_up_policy_edits_on_the_next_request() {
-    let repo = tempfile::tempdir().unwrap();
+    let repo = alt_os::temp::tempdir().unwrap();
     let root = repo.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("f.txt"), "base\n").unwrap();
@@ -833,7 +833,7 @@ fn daemon_picks_up_policy_edits_on_the_next_request() {
 fn daemon_enforces_capability_policy_for_restricted_agent() {
     use alt_oplog::OpLog;
 
-    let repo = tempfile::tempdir().unwrap();
+    let repo = alt_os::temp::tempdir().unwrap();
     let root = repo.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("f.txt"), "base\n").unwrap();
@@ -879,8 +879,8 @@ fn daemon_enforces_capability_policy_for_restricted_agent() {
 /// in the requesting workspace, not the daemon's default one.
 #[test]
 fn daemon_history_reads_follow_the_requesting_workspace() {
-    let repo = tempfile::tempdir().unwrap();
-    let trees = tempfile::tempdir().unwrap();
+    let repo = alt_os::temp::tempdir().unwrap();
+    let trees = alt_os::temp::tempdir().unwrap();
     let root = repo.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "main\n").unwrap();
@@ -908,7 +908,7 @@ fn daemon_history_reads_follow_the_requesting_workspace() {
 
 #[test]
 fn lost_response_after_execution_replays_the_durable_bytes_after_restart() {
-    let root = tempfile::tempdir().unwrap();
+    let root = alt_os::temp::tempdir().unwrap();
     ok(alt(root.path(), &["init", "."]));
     std::fs::write(root.path().join("a.txt"), "staged\n").unwrap();
     ok(alt(root.path(), &["add", "."]));
@@ -968,7 +968,7 @@ fn lost_response_after_execution_replays_the_durable_bytes_after_restart() {
 
 #[test]
 fn concurrent_same_id_waits_for_the_receipt_without_holding_the_store_mutex() {
-    let root = tempfile::tempdir().unwrap();
+    let root = alt_os::temp::tempdir().unwrap();
     ok(alt(root.path(), &["init", "."]));
     std::fs::write(root.path().join("a.txt"), "staged\n").unwrap();
     ok(alt(root.path(), &["add", "."]));
@@ -1001,7 +1001,7 @@ fn concurrent_same_id_waits_for_the_receipt_without_holding_the_store_mutex() {
 
 #[test]
 fn protected_override_is_per_request_in_a_warm_daemon() {
-    let root = tempfile::tempdir().unwrap();
+    let root = alt_os::temp::tempdir().unwrap();
     ok(alt(root.path(), &["init", "."]));
     std::fs::write(root.path().join("a.txt"), "base\n").unwrap();
     ok(alt(root.path(), &["add", "."]));

@@ -50,7 +50,7 @@ fn bounded_delta_packs_resolve_and_pass_independent_git_for_both_hashes() {
             .into_iter()
             .map(|data| (ObjectId::hash_object(algo, ObjectKind::Blob, &data), data))
             .collect();
-        let output = tempfile::tempdir().unwrap();
+        let output = alt_os::temp::tempdir().unwrap();
         let options = DeltaOptions {
             window: 1,
             max_depth: 2,
@@ -98,7 +98,7 @@ fn bounded_delta_packs_resolve_and_pass_independent_git_for_both_hashes() {
 
         // A fresh Git repo has neither our idx nor external bases. Git builds
         // its own index, verifies the delta chain, then resolves every byte.
-        let repo = tempfile::tempdir().unwrap();
+        let repo = alt_os::temp::tempdir().unwrap();
         let init = Command::new("git")
             .arg("init")
             .arg("--bare")
@@ -183,7 +183,7 @@ fn exceeded_or_disabled_delta_limits_keep_plain_entries() {
             ..DeltaOptions::default()
         },
     ] {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let objects = versions();
         let mut writer = PackWriter::create_with_deltas(
             dir.path(),
@@ -234,7 +234,7 @@ fn mixed_candidate_filter_keeps_shifted_objects_for_independent_git() {
         let mut shifted = b"unaligned insertion".to_vec();
         shifted.extend_from_slice(&inputs[7][31..]);
         inputs.push(shifted);
-        let output = tempfile::tempdir().unwrap();
+        let output = alt_os::temp::tempdir().unwrap();
         let mut writer = PackWriter::create_with_deltas(
             output.path(),
             algo,
@@ -260,7 +260,7 @@ fn mixed_candidate_filter_keeps_shifted_objects_for_independent_git() {
             )
             .unwrap();
         assert!(matches!(entry.kind, EntryKind::RefDelta { .. }));
-        let repo = tempfile::tempdir().unwrap();
+        let repo = alt_os::temp::tempdir().unwrap();
         let init = Command::new("git")
             .args(["init", "--bare", &format!("--object-format={format}")])
             .arg(repo.path())

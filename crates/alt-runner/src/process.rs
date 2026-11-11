@@ -31,11 +31,9 @@ pub(crate) fn wait(child: &mut Child, timeout: Duration) -> Result<(Termination,
         if let Some(status) = child.try_wait()? {
             // A shell that leaves children running has not finished validation.
             // Only this recorded child's newly created process group is touched.
-            let descendants = unsafe { libc::kill(-group, 0) } == 0;
+            let descendants = alt_os::sys::kill(-group, 0).is_ok();
             if descendants {
-                unsafe {
-                    libc::kill(-group, libc::SIGKILL);
-                }
+                let _ = alt_os::sys::kill(-group, alt_os::sys::SIGKILL);
             }
             let termination = if descendants {
                 Termination::Unknown
@@ -49,9 +47,7 @@ pub(crate) fn wait(child: &mut Child, timeout: Duration) -> Result<(Termination,
             return Ok((termination, descendants));
         }
         if start.elapsed() >= timeout {
-            unsafe {
-                libc::kill(-group, libc::SIGKILL);
-            }
+            let _ = alt_os::sys::kill(-group, alt_os::sys::SIGKILL);
             child.wait()?;
             return Ok((Termination::Timeout, false));
         }

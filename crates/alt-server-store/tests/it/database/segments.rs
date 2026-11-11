@@ -411,7 +411,7 @@ fn maintenance_exports_segment_members_and_restored_locations_normalize_only_ver
     )
     .unwrap();
     let catalog = snapshot.catalog().clone();
-    let target = tempfile::tempdir().unwrap();
+    let target = alt_os::temp::tempdir().unwrap();
     let bytes = ByteStore::open(target.path()).unwrap();
     for blob in &catalog.blobs {
         bytes
@@ -1068,13 +1068,16 @@ fn packed_batches_and_compaction_bound_open_descriptors() {
         );
         return;
     }
-    let limit = libc::rlimit {
+    let limit = alt_os::sys::rlimit {
         rlim_cur: 64,
         rlim_max: 64,
     };
     // SAFETY: this is a dedicated test subprocess; the pointer is valid and
     // the process exits after this one exact test.
-    assert_eq!(unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &limit) }, 0);
+    assert_eq!(
+        unsafe { alt_os::sys::setrlimit(alt_os::sys::RLIMIT_NOFILE, &limit) },
+        0
+    );
     let mut f = Fixture::new();
     let mut p = Payload::new("descriptor-bound", None);
     let mut keep = Vec::new();
@@ -1171,12 +1174,15 @@ fn legacy_loose_reuse_bounds_open_descriptors() {
         );
         return;
     }
-    let limit = libc::rlimit {
+    let limit = alt_os::sys::rlimit {
         rlim_cur: 64,
         rlim_max: 64,
     };
     // SAFETY: this dedicated child runs only this test, and the pointer is valid.
-    assert_eq!(unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &limit) }, 0);
+    assert_eq!(
+        unsafe { alt_os::sys::setrlimit(alt_os::sys::RLIMIT_NOFILE, &limit) },
+        0
+    );
     let mut f = Fixture::new();
     let mut p = Payload::new("legacy-descriptors", None);
     for n in 0u32..100 {

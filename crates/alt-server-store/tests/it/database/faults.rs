@@ -42,7 +42,7 @@ fn real_disk_full_never_publishes_bytes_or_refs() {
     impl Drop for Mount {
         fn drop(&mut self) {
             assert_eq!(
-                unsafe { libc::umount2(self.0.as_ptr(), libc::MNT_DETACH) },
+                unsafe { alt_os::sys::umount2(self.0.as_ptr(), alt_os::sys::MNT_DETACH) },
                 0,
                 "unmount own disk-full fixture"
             );
@@ -51,11 +51,11 @@ fn real_disk_full_never_publishes_bytes_or_refs() {
     let mut f = Fixture::new();
     let directory = CString::new(f.root.path().join("bytes").as_os_str().as_bytes()).unwrap();
     let mounted = unsafe {
-        libc::mount(
+        alt_os::sys::mount(
             c"tmpfs".as_ptr(),
             directory.as_ptr(),
             c"tmpfs".as_ptr(),
-            libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC,
+            alt_os::sys::MS_NOSUID | alt_os::sys::MS_NODEV | alt_os::sys::MS_NOEXEC,
             c"size=65536,mode=0700".as_ptr().cast(),
         )
     };

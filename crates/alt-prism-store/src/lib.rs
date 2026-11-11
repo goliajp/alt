@@ -211,7 +211,7 @@ mod tests {
 
     #[test]
     fn tier1_round_trips_a_zlib_stream() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let stream = zlib(&noise(200_000, 1), 1);
         let mut s = PrismStore::open(dir.path(), deflate_registry()).unwrap();
         let id = s.put(&stream).unwrap();
@@ -221,7 +221,7 @@ mod tests {
 
     #[test]
     fn non_zlib_falls_back_to_tier0() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let data = b"plain bytes, not a compressed stream".to_vec();
         let mut s = PrismStore::open(dir.path(), deflate_registry()).unwrap();
         let id = s.put(&data).unwrap();
@@ -231,7 +231,7 @@ mod tests {
 
     #[test]
     fn tier1_survives_reopen() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let stream = zlib(&noise(120_000, 7), 1);
         let id = {
             let mut s = PrismStore::open(dir.path(), deflate_registry()).unwrap();
@@ -261,7 +261,7 @@ mod tests {
             .collect();
 
         let stored = |reg: Registry| -> u64 {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = alt_os::temp::tempdir().unwrap();
             let mut s = PrismStore::open(dir.path(), reg).unwrap();
             for stream in &streams {
                 s.put(stream).unwrap();

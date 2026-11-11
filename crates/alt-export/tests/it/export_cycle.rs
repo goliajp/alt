@@ -31,12 +31,12 @@ fn git_ok(repo: &Path, args: &[&str]) -> Vec<u8> {
 /// import → export, then compare the exported repo against the source
 /// through git's own eyes.
 fn cycle(source: &Path) {
-    let alt_root = tempfile::tempdir().unwrap();
+    let alt_root = alt_os::temp::tempdir().unwrap();
     let alt_dir = alt_root.path().join(".alt");
     let repo = Repository::discover(source).unwrap();
     alt_import::import_git(&repo, &alt_dir, "test/cycle", 1).unwrap();
 
-    let out_root = tempfile::tempdir().unwrap();
+    let out_root = alt_os::temp::tempdir().unwrap();
     let target = out_root.path().join("exported");
     let report = export_git(&alt_dir, &target).unwrap();
     eprintln!("cycle {source:?}: {report:?}");
@@ -87,7 +87,7 @@ fn fixture_cycles_across_formats() {
     for (object_format, ref_format) in
         [("sha1", "files"), ("sha256", "files"), ("sha1", "reftable")]
     {
-        let source = tempfile::tempdir().unwrap();
+        let source = alt_os::temp::tempdir().unwrap();
         alt_testutil::make_repo_opts(source.path(), object_format, ref_format);
         cycle(source.path());
         // and again from a fully packed source
@@ -98,14 +98,14 @@ fn fixture_cycles_across_formats() {
 
 #[test]
 fn export_refuses_a_non_empty_target() {
-    let source = tempfile::tempdir().unwrap();
+    let source = alt_os::temp::tempdir().unwrap();
     alt_testutil::make_repo(source.path(), "sha1");
-    let alt_root = tempfile::tempdir().unwrap();
+    let alt_root = alt_os::temp::tempdir().unwrap();
     let alt_dir = alt_root.path().join(".alt");
     let repo = Repository::discover(source.path()).unwrap();
     alt_import::import_git(&repo, &alt_dir, "test/cycle", 1).unwrap();
 
-    let out_root = tempfile::tempdir().unwrap();
+    let out_root = alt_os::temp::tempdir().unwrap();
     std::fs::write(out_root.path().join("occupied"), "x").unwrap();
     let err = match export_git(&alt_dir, out_root.path()) {
         Ok(_) => panic!("non-empty target must be refused"),

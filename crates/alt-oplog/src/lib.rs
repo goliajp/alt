@@ -328,29 +328,17 @@ fn scan_and_repair(file: &mut File) -> Result<Scan, OpLogError> {
 /// cross-process lock yet — single-writer there (documented limitation).
 #[cfg(unix)]
 fn lock_exclusive(file: &File) -> std::io::Result<()> {
-    use std::os::unix::io::AsRawFd;
-    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(())
+    alt_os::sys::flock(file, alt_os::sys::LOCK_EX)
 }
 
 #[cfg(unix)]
 fn lock_shared(file: &File) -> std::io::Result<()> {
-    use std::os::unix::io::AsRawFd;
-    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH) } != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(())
+    alt_os::sys::flock(file, alt_os::sys::LOCK_SH)
 }
 
 #[cfg(unix)]
 fn unlock(file: &File) -> std::io::Result<()> {
-    use std::os::unix::io::AsRawFd;
-    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) } != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(())
+    alt_os::sys::flock(file, alt_os::sys::LOCK_UN)
 }
 
 #[cfg(not(unix))]
@@ -696,7 +684,7 @@ mod tests {
 
     #[test]
     fn appends_chain_and_replays() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let mut log = OpLog::open(dir.path()).unwrap();
         assert!(log.is_empty());
         assert_eq!(log.head(), None);
@@ -712,8 +700,8 @@ mod tests {
 
     #[test]
     fn ids_are_content_addressed_and_chain_dependent() {
-        let dir1 = tempfile::tempdir().unwrap();
-        let dir2 = tempfile::tempdir().unwrap();
+        let dir1 = alt_os::temp::tempdir().unwrap();
+        let dir2 = alt_os::temp::tempdir().unwrap();
         let mut log1 = OpLog::open(dir1.path()).unwrap();
         let mut log2 = OpLog::open(dir2.path()).unwrap();
 
@@ -731,7 +719,7 @@ mod tests {
 
     #[test]
     fn empty_actor_and_payload_are_valid() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let mut log = OpLog::open(dir.path()).unwrap();
         let id = log.append("", 0, b"").unwrap();
         assert_eq!(log.get(&id).unwrap().actor, "");
@@ -742,7 +730,7 @@ mod tests {
     fn catches_up_on_a_concurrently_grown_log() {
         // two independent openers of the same log: one appends, the other must
         // see it (catch-up) and chain onto it rather than fork the chain.
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let mut a = OpLog::open(dir.path()).unwrap();
         let mut b = OpLog::open(dir.path()).unwrap();
 
@@ -765,7 +753,7 @@ mod tests {
     fn concurrent_writers_keep_the_chain_linear_and_complete() {
         use std::sync::{Arc, Barrier};
 
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         OpLog::open(dir.path()).unwrap(); // create the file up front
 
         const WRITERS: usize = 8;
@@ -829,7 +817,7 @@ mod tests {
         // a writer mid-append holds the exclusive lock with half its record
         // on disk; an open must not mistake that for a crashed writer's torn
         // tail and cut it off
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         OpLog::open(dir.path())
             .unwrap()
             .append("a", 1, b"first")
@@ -838,7 +826,7 @@ mod tests {
         let before = std::fs::read(&path).unwrap();
 
         // the exact bytes the next append would write, built on a copy
-        let scratch = tempfile::tempdir().unwrap();
+        let scratch = alt_os::temp::tempdir().unwrap();
         std::fs::write(scratch.path().join("log"), &before).unwrap();
         OpLog::open(scratch.path())
             .unwrap()

@@ -36,7 +36,7 @@ fn assert_matches(repo: &Path, algo: HashAlgo) -> Index {
 }
 
 fn index_matches_git(algo: HashAlgo, object_format: &str) {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     let repo = tmp.path();
     common::make_repo(repo, object_format);
 
@@ -85,7 +85,7 @@ fn index_matches_git(algo: HashAlgo, object_format: &str) {
 
 #[test]
 fn serialize_round_trips_and_git_reads_it() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     let repo = tmp.path();
     common::make_repo(repo, "sha1");
     let algo = HashAlgo::Sha1;

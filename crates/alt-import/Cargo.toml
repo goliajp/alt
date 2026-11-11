@@ -15,5 +15,5 @@ alt-repo.workspace = true
 bstr.workspace = true
 
 [dev-dependencies]
+alt-os.workspace = true
 alt-testutil.workspace = true
-tempfile.workspace = true

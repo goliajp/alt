@@ -100,11 +100,11 @@ struct Workspaces {
     alt: PathBuf,
     git: PathBuf,
     // hold the tempdir so it's not cleaned up under our feet
-    _temp: tempfile::TempDir,
+    _temp: alt_os::temp::TempDir,
 }
 
 fn setup(corpus: &Path) -> Workspaces {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = alt_os::temp::tempdir().unwrap();
     let git_work = temp.path().join("git-work");
     let alt_work = temp.path().join("alt-work");
     std::fs::create_dir_all(&git_work).unwrap();

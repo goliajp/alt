@@ -36,7 +36,6 @@
 use ed25519_dalek::{
     SECRET_KEY_LENGTH, SIGNATURE_LENGTH, Signature, Signer, SigningKey, Verifier, VerifyingKey,
 };
-use rand_core::OsRng;
 
 /// A public Ed25519 verification key. Cheaply cloneable; matches one
 /// principal in the trust store.
@@ -112,7 +111,9 @@ impl SecretKey {
     /// `(secret_key, public_key)` so the caller can write the `.pub` file
     /// without re-deriving.
     pub fn generate() -> (Self, PublicKey) {
-        let signing = SigningKey::generate(&mut OsRng);
+        let mut seed = [0u8; SECRET_KEY_LENGTH];
+        alt_os::random::fill(&mut seed);
+        let signing = SigningKey::from_bytes(&seed);
         let verifying = signing.verifying_key();
         (SecretKey(signing), PublicKey(verifying))
     }
@@ -207,7 +208,7 @@ fn decode_with_prefix(expected_kind: &str, text: &str) -> Result<Vec<u8>, SignEr
 
 /// Tiny URL-safe Base64 encoder, no padding — RFC 4648 §5 alphabet
 /// (`-` and `_` in place of `+` and `/`). Inlined so this crate's only
-/// real dependency is `ed25519-dalek` plus `rand_core`.
+/// third-party dependency is `ed25519-dalek`.
 fn base64url_encode(bytes: &[u8]) -> String {
     const ALPHA: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);

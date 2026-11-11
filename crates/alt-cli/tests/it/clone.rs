@@ -42,8 +42,8 @@ fn git(repo: &Path, args: &[&str]) -> String {
 }
 
 /// Build a non-empty server repo with `main` (default HEAD) + `feat`.
-fn build_server_repo() -> tempfile::TempDir {
-    let dir = tempfile::tempdir().unwrap();
+fn build_server_repo() -> alt_os::temp::TempDir {
+    let dir = alt_os::temp::tempdir().unwrap();
     let repo = dir.path();
     git(repo, &["init", "-q", "-b", "main", "."]);
     git(repo, &["config", "user.email", "srv@example.com"]);
@@ -73,7 +73,7 @@ fn alt_clone_round_trips_init_fetch_switch() {
     let server = build_server_repo();
     let url = wire_test_server::spawn(server.path().to_owned());
 
-    let parent = tempfile::tempdir().unwrap();
+    let parent = alt_os::temp::tempdir().unwrap();
     let target_name = "myrepo";
     ok(
         "alt clone",
@@ -111,7 +111,7 @@ fn alt_clone_refuses_to_overwrite_a_non_empty_dir() {
     let server = build_server_repo();
     let url = wire_test_server::spawn(server.path().to_owned());
 
-    let parent = tempfile::tempdir().unwrap();
+    let parent = alt_os::temp::tempdir().unwrap();
     let target = parent.path().join("there");
     std::fs::create_dir(&target).unwrap();
     std::fs::write(target.join("user-work.txt"), "important\n").unwrap();

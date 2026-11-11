@@ -16,5 +16,5 @@ bstr.workspace = true
 
 [dev-dependencies]
 alt-import.workspace = true
+alt-os.workspace = true
 alt-testutil.workspace = true
-tempfile.workspace = true

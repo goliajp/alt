@@ -60,11 +60,7 @@ pub fn default_registry() -> Registry {
 /// yet — single-writer there (documented limitation, like the op log).
 #[cfg(unix)]
 fn lock_exclusive(file: &File) -> std::io::Result<()> {
-    use std::os::unix::io::AsRawFd;
-    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(())
+    alt_os::sys::flock(file, alt_os::sys::LOCK_EX)
 }
 
 /// Shared (read) lock — taken while opening, so the open's reads + crash
@@ -72,20 +68,12 @@ fn lock_exclusive(file: &File) -> std::io::Result<()> {
 /// Multiple opens share it; an exclusive writer waits for them and vice versa.
 #[cfg(unix)]
 fn lock_shared(file: &File) -> std::io::Result<()> {
-    use std::os::unix::io::AsRawFd;
-    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH) } != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(())
+    alt_os::sys::flock(file, alt_os::sys::LOCK_SH)
 }
 
 #[cfg(unix)]
 fn unlock(file: &File) -> std::io::Result<()> {
-    use std::os::unix::io::AsRawFd;
-    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) } != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(())
+    alt_os::sys::flock(file, alt_os::sys::LOCK_UN)
 }
 
 #[cfg(not(unix))]
@@ -767,7 +755,7 @@ mod tests {
 
     #[test]
     fn round_trips_all_kinds_under_both_algos() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let mut odb = NativeOdb::open(dir.path()).unwrap();
         let blob = b"file contents\n".to_vec();
         // a minimal valid-shape tree entry is not required for storage: the
@@ -800,7 +788,7 @@ mod tests {
 
     #[test]
     fn content_without_git_identity_stays_out_of_the_map() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let mut odb = NativeOdb::open(dir.path()).unwrap();
         let data = vec![5u8; 300_000];
         let id = odb.put_content(&data).unwrap();
@@ -815,7 +803,7 @@ mod tests {
 
     #[test]
     fn wrong_claimed_oid_is_rejected_at_write() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let mut odb = NativeOdb::open(dir.path()).unwrap();
         let oid = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, b"other content");
         let err = odb
@@ -829,7 +817,7 @@ mod tests {
     fn empty_tree_is_a_first_class_object() {
         // native trees may be empty (empty-directory model lands here);
         // export degrades per git semantics, storage does not special-case
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let mut odb = NativeOdb::open(dir.path()).unwrap();
         let (oid, _) = put_one(&mut odb, HashAlgo::Sha1, ObjectKind::Tree, b"");
         assert_eq!(
@@ -844,7 +832,7 @@ mod tests {
 
     #[test]
     fn identical_payload_under_two_kinds_keeps_both_identities() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let mut odb = NativeOdb::open(dir.path()).unwrap();
         let data = b"";
         let (blob_oid, blob_alt) = put_one(&mut odb, HashAlgo::Sha1, ObjectKind::Blob, data);
@@ -858,7 +846,7 @@ mod tests {
 
     #[test]
     fn duplicate_put_is_idempotent() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let mut odb = NativeOdb::open(dir.path()).unwrap();
         let (oid, a) = put_one(&mut odb, HashAlgo::Sha1, ObjectKind::Blob, b"dup");
         let b = odb.put(oid, ObjectKind::Blob, b"dup").unwrap();
@@ -868,7 +856,7 @@ mod tests {
 
     #[test]
     fn missing_object_reads_as_none() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let odb = NativeOdb::open(dir.path()).unwrap();
         let oid = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, b"absent");
         assert!(odb.get(&oid).unwrap().is_none());
@@ -879,7 +867,7 @@ mod tests {
     fn concurrent_writers_store_everything_without_corruption() {
         use std::sync::{Arc, Barrier};
 
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         NativeOdb::open(dir.path()).unwrap(); // create the store up front
 
         const WRITERS: usize = 6;
@@ -949,7 +937,7 @@ mod tests {
         // store parts + record → reopen → get → recompose → byte-equal.
         // Uses the deflate prism's own recompose to synthesise the
         // libz-shaped stream without a libz dev-dep.
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         // a payload long enough to survive deflate's overhead; non-trivial
         // content so dedup is meaningful for follow-on assets
         let payload = b"hello world, this is a binary asset wrapped in zlib".repeat(8);
@@ -980,7 +968,7 @@ mod tests {
         // `alt` id is not actually stored in the chunk store) too, or the
         // exported pack ends up with fewer objects than its declared
         // header count.
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let payload = b"asset bytes wrapped in libz".repeat(6);
         let stream = alt_prism_deflate::DeflatePrism
             .recompose(&[1], &[&payload])
@@ -1016,7 +1004,7 @@ mod tests {
     fn non_prism_blob_falls_through_tier0_unchanged() {
         // Anything that isn't a libz stream (text, random bytes) must
         // fall through to Tier 0 unchanged — no spurious recipe entries.
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let data = b"plain text, definitely not a zlib stream\n".repeat(4);
         let oid = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, &data);
         {
@@ -1033,7 +1021,7 @@ mod tests {
     fn concurrent_writers_through_pack_seals_and_rolls() {
         use std::sync::{Arc, Barrier};
 
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         // a tiny seal threshold so writers roll packs constantly, exercising
         // the seq-set-change reload and the seal-roll create-race fallback
         let mut opts = BlobOptions::default();
@@ -1101,7 +1089,7 @@ mod tests {
 
     #[test]
     fn checkpoint_then_rewind_restores_pre_batch_state() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let mut odb = NativeOdb::open(dir.path()).unwrap();
         let (a_oid, _) = put_one(&mut odb, HashAlgo::Sha1, ObjectKind::Blob, b"alpha");
         let (b_oid, _) = put_one(&mut odb, HashAlgo::Sha256, ObjectKind::Commit, b"beta");
@@ -1131,7 +1119,7 @@ mod tests {
 
     #[test]
     fn rewind_to_fresh_checkpoint_empties_the_odb() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let mut odb = NativeOdb::open(dir.path()).unwrap();
         let ckpt = odb.checkpoint().unwrap();
         let (oid, _) = put_one(&mut odb, HashAlgo::Sha1, ObjectKind::Blob, b"orphan");
@@ -1149,7 +1137,7 @@ mod tests {
     fn rewind_preserves_alt_aliases_for_kept_entries() {
         // an alt blob can back several git oids (same content, different kind).
         // rewinding past one alias must leave the surviving alias intact.
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let mut odb = NativeOdb::open(dir.path()).unwrap();
         let data = b"";
         let (blob_oid, alt) = put_one(&mut odb, HashAlgo::Sha1, ObjectKind::Blob, data);

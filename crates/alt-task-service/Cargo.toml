@@ -21,4 +21,4 @@ alt-oplog.workspace = true
 alt-refs.workspace = true
 
 [dev-dependencies]
-tempfile.workspace = true
+alt-os.workspace = true

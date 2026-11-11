@@ -41,7 +41,7 @@ fn bootstrap(tmp: &Path) {
 
 #[test]
 fn commit_on_develop_is_refused_with_escape_paths_in_the_error() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     bootstrap(tmp.path());
 
     fs::write(tmp.path().join("b.txt"), "beta\n").unwrap();
@@ -65,7 +65,7 @@ fn commit_on_develop_is_refused_with_escape_paths_in_the_error() {
 
 #[test]
 fn commit_on_main_suggests_hotfix_path() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     bootstrap(tmp.path());
     // Bounce back to main; flow init left us on develop.
     ok(alt(tmp.path(), &["switch", "main"], &[]));
@@ -80,7 +80,7 @@ fn commit_on_main_suggests_hotfix_path() {
 
 #[test]
 fn commit_on_feature_branch_passes() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     bootstrap(tmp.path());
 
     // Stage on develop, then switch -c into a feature branch carrying
@@ -95,7 +95,7 @@ fn commit_on_feature_branch_passes() {
 
 #[test]
 fn alt_protected_override_unlocks_the_guard() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     bootstrap(tmp.path());
     fs::write(tmp.path().join("e.txt"), "epsilon\n").unwrap();
     ok(alt(tmp.path(), &["add", "e.txt"], &[]));
@@ -116,7 +116,7 @@ fn unborn_main_initial_commit_is_allowed() {
     // The very first `alt commit` after `alt init` lands on an unborn
     // `main` — the guard must not block it. This is what bootstrap()
     // relies on in every test above.
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     ok(alt(tmp.path(), &["init"], &[]));
     fs::write(tmp.path().join("a.txt"), "first\n").unwrap();
     ok(alt(tmp.path(), &["add", "a.txt"], &[]));

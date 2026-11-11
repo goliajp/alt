@@ -32,7 +32,7 @@ fn rewrites_apply_during_fetch_when_url_starts_with_insteadof_trigger() {
     // exist; we just want to confirm the URL we end up trying to hit
     // is the rewritten one, not the SSH original. alt-wire-http
     // surfaces the URL it tried in its error chain.
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     ok(alt(tmp.path(), &["init"]));
     let cfg_dir = tmp.path().join(".alt").join("git-import");
     fs::create_dir_all(&cfg_dir).unwrap();
@@ -66,7 +66,7 @@ fn rewrites_apply_during_fetch_when_url_starts_with_insteadof_trigger() {
 fn builtin_ssh_to_https_rewrites_well_known_hosts() {
     // No insteadOf rule configured — the built-in fallback should
     // still rewrite `git@github.com:foo/bar.git` to HTTPS.
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     ok(alt(tmp.path(), &["init"]));
     ok(alt(
         tmp.path(),
@@ -98,7 +98,7 @@ fn builtin_ssh_to_https_rewrites_well_known_hosts() {
 fn explicit_insteadof_wins_over_builtin_fallback() {
     // When the user writes their own insteadOf, the built-in
     // SSH→HTTPS mapping must not override it.
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     ok(alt(tmp.path(), &["init"]));
     let cfg_dir = tmp.path().join(".alt").join("git-import");
     fs::create_dir_all(&cfg_dir).unwrap();
@@ -130,7 +130,7 @@ fn longest_matching_insteadof_wins() {
     // Two insteadOf rules pointing at different replacements; the
     // more specific one (`git@github.com:`) is longer than the
     // catch-all (`git@`) and must win.
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     ok(alt(tmp.path(), &["init"]));
     let cfg_dir = tmp.path().join(".alt").join("git-import");
     fs::create_dir_all(&cfg_dir).unwrap();

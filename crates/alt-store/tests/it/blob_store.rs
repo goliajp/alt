@@ -23,7 +23,7 @@ fn random_bytes(len: usize, seed: u64) -> Vec<u8> {
 
 #[test]
 fn reopen_sees_flushed_blobs() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let small = b"single chunk".to_vec();
     let big = random_bytes(2 << 20, 1);
 
@@ -41,7 +41,7 @@ fn reopen_sees_flushed_blobs() {
 
 #[test]
 fn torn_blobmap_tail_is_dropped_and_reput_heals_cheaply() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let big = random_bytes(2 << 20, 2);
     let id = {
         let mut store = BlobStore::open(dir.path()).unwrap();
@@ -87,7 +87,7 @@ fn torn_blobmap_tail_is_dropped_and_reput_heals_cheaply() {
 
 #[test]
 fn corrupt_blobmap_record_mid_file_is_an_error() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     {
         let mut store = BlobStore::open(dir.path()).unwrap();
         store.put(&random_bytes(2 << 20, 3)).unwrap();
@@ -110,7 +110,7 @@ fn corrupt_blobmap_record_mid_file_is_an_error() {
 
 #[test]
 fn flipped_data_chunk_surfaces_through_blob_get() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let big = random_bytes(2 << 20, 5);
     let id = {
         let mut store = BlobStore::open(dir.path()).unwrap();

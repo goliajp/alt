@@ -40,7 +40,7 @@ fn repository_matches_git() {
         (HashAlgo::Sha256, "sha256", "files"),
         (HashAlgo::Sha1, "sha1", "reftable"),
     ] {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = alt_os::temp::tempdir().unwrap();
         common::make_repo_opts(tmp.path(), object_format, ref_format);
         // loose state, then fully packed state
         assert_repo_matches(tmp.path(), algo);
@@ -51,7 +51,7 @@ fn repository_matches_git() {
 
 #[test]
 fn discovers_from_subdirectory_and_dot_git_file() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     common::make_repo(tmp.path(), "sha1");
     let repo = Repository::discover(&tmp.path().join("sub")).unwrap();
     assert_eq!(

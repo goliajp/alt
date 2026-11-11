@@ -54,7 +54,7 @@ fn corpus_bench_volume_and_throughput() {
         let git_bytes = dir_bytes(&repo_dir.join(".git/objects"));
 
         // --- import throughput (fresh store) ---
-        let alt_root = tempfile::tempdir().unwrap();
+        let alt_root = alt_os::temp::tempdir().unwrap();
         let alt_dir = alt_root.path().join(".alt");
         let repo = Repository::discover(&repo_dir).unwrap();
         let t0 = Instant::now();

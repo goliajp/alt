@@ -3,13 +3,13 @@ use alt_input::{Environment, InputPlan, InputRoot, Root};
 use std::path::PathBuf;
 
 struct Fixture {
-    _directory: tempfile::TempDir,
+    _directory: alt_os::temp::TempDir,
     root: PathBuf,
     spec: Spec,
 }
 fn fixture(script: &str) -> Fixture {
     // /tmp is often tmpfs on Linux; the product support contract is local disk.
-    let directory = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+    let directory = alt_os::temp::tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
     let source = directory.path().join("source");
     let root = directory.path().join("run");
     fs::create_dir_all(source.join(".ignored")).unwrap();
@@ -142,7 +142,7 @@ fn nonzero_signal_and_timeout_keep_their_distinct_termination() {
         (
             "printf signaled; kill -TERM $$\n",
             Termination::Signal {
-                number: libc::SIGTERM,
+                number: alt_os::sys::SIGTERM,
             },
         ),
         (

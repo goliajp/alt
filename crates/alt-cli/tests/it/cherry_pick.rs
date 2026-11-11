@@ -52,7 +52,7 @@ fn diverged(tmp: &Path) -> (String, String) {
 
 #[test]
 fn cherry_pick_non_conflicting_change_applies_on_top_of_head() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     let (feature_oid, main_before) = diverged(tmp.path());
 
     let out = ok(alt(tmp.path(), &["cherry-pick", &feature_oid]));
@@ -85,7 +85,7 @@ fn cherry_pick_non_conflicting_change_applies_on_top_of_head() {
 
 #[test]
 fn cherry_pick_records_only_one_parent() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     let (feature_oid, main_before) = diverged(tmp.path());
     ok(alt(tmp.path(), &["cherry-pick", &feature_oid]));
     let head = ok(alt(tmp.path(), &["rev-parse", "HEAD"]));
@@ -98,7 +98,7 @@ fn cherry_pick_records_only_one_parent() {
 #[test]
 fn cherry_pick_conflict_returns_exit_code_one() {
     // Both branches edit the same line of the same file → conflict.
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     ok(alt(tmp.path(), &["init"]));
     fs::write(tmp.path().join("x"), "one\n").unwrap();
     ok(alt(tmp.path(), &["add", "x"]));
@@ -125,7 +125,7 @@ fn cherry_pick_conflict_returns_exit_code_one() {
 
 #[test]
 fn cherry_pick_unknown_rev_fails() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     diverged(tmp.path());
     let out = alt(tmp.path(), &["cherry-pick", "nonexistent"]);
     assert!(!out.status.success());
@@ -135,7 +135,7 @@ fn cherry_pick_unknown_rev_fails() {
 
 #[test]
 fn cherry_pick_root_commit_fails() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     diverged(tmp.path());
     // The root commit on main is `c1` (HEAD~ from main moves a).
     let root_oid = ok(alt(tmp.path(), &["rev-parse", "main~"]))

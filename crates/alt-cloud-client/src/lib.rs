@@ -10,7 +10,6 @@ use golia_platform_contract::{
     AccountAuthorization, AltServiceAuthorization, Audience, Product, Secret, TicketExchange,
     VERSION,
 };
-use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{io::Read, time::Duration};
 
@@ -234,7 +233,7 @@ impl GrantSealer {
     pub fn seal(&self, grant: &Secret, local_credential_digest: &str) -> Result<String> {
         let aad = self.aad(local_credential_digest)?;
         let mut nonce = [0; 24];
-        OsRng.fill_bytes(&mut nonce);
+        alt_os::random::fill(&mut nonce);
         let ciphertext = self
             .cipher
             .encrypt(

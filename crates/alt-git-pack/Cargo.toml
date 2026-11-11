@@ -10,12 +10,11 @@ alt-deflate.workspace = true
 alt-hash.workspace = true
 alt-inflate.workspace = true
 alt-git-codec.workspace = true
-memmap2.workspace = true
+alt-os.workspace = true
 
 [dev-dependencies]
 alt-testutil.workspace = true
 criterion.workspace = true
-tempfile.workspace = true
 
 [[bench]]
 name = "delta_apply"

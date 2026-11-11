@@ -49,8 +49,8 @@ fn git(repo: &Path, args: &[&str]) -> String {
 
 /// Spin up a bare git repo to act as the push target. `--bare` so it can
 /// receive pushes without checking out a working tree.
-fn empty_server_repo() -> tempfile::TempDir {
-    let dir = tempfile::tempdir().unwrap();
+fn empty_server_repo() -> alt_os::temp::TempDir {
+    let dir = alt_os::temp::tempdir().unwrap();
     let repo = dir.path();
     git(repo, &["init", "-q", "--bare", "-b", "main", "."]);
     // a bare repo refuses receive-pack-with-no-config by default; allow
@@ -63,8 +63,8 @@ fn empty_server_repo() -> tempfile::TempDir {
 
 /// Make a small alt repo with two commits on `main`. Returns the working
 /// directory of the alt repo (also its `--root` for `alt …`).
-fn build_local_alt_repo() -> tempfile::TempDir {
-    let dir = tempfile::tempdir().unwrap();
+fn build_local_alt_repo() -> alt_os::temp::TempDir {
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok("alt init", alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "hello\n").unwrap();

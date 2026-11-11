@@ -29,8 +29,8 @@ fn invoke_input(
     input: Option<&[u8]>,
 ) -> Res<Capture> {
     let directory = logs(root)?;
-    let stdout = tempfile::NamedTempFile::new_in(&directory)?;
-    let stderr = tempfile::NamedTempFile::new_in(&directory)?;
+    let stdout = alt_os::temp::NamedTempFile::new_in(&directory)?;
+    let stderr = alt_os::temp::NamedTempFile::new_in(&directory)?;
     let mut child = command
         .stdin(if input.is_some() {
             Stdio::piped()

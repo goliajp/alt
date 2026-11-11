@@ -34,7 +34,7 @@ fn setup(tmp: &Path) -> String {
 
 #[test]
 fn tag_create_lightweight_at_head_then_list() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     let head = setup(tmp.path());
 
     let create = ok(alt(tmp.path(), &["tag", "v1.0"]));
@@ -52,7 +52,7 @@ fn tag_create_lightweight_at_head_then_list() {
 
 #[test]
 fn tag_create_at_revision() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     let c1 = setup(tmp.path());
     fs::write(tmp.path().join("readme.txt"), "second\n").unwrap();
     ok(alt(tmp.path(), &["add", "readme.txt"]));
@@ -67,7 +67,7 @@ fn tag_create_at_revision() {
 
 #[test]
 fn tag_delete_removes_the_ref() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     setup(tmp.path());
     ok(alt(tmp.path(), &["tag", "v1.0"]));
     ok(alt(tmp.path(), &["tag", "-d", "v1.0"]));
@@ -86,7 +86,7 @@ fn tag_delete_removes_the_ref() {
 
 #[test]
 fn tag_duplicate_create_fails() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     setup(tmp.path());
     ok(alt(tmp.path(), &["tag", "v1.0"]));
     let out = alt(tmp.path(), &["tag", "v1.0"]);
@@ -97,7 +97,7 @@ fn tag_duplicate_create_fails() {
 
 #[test]
 fn annotated_tag_writes_a_tag_object_pointing_at_the_commit() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     let head = setup(tmp.path());
 
     let out = ok(alt(tmp.path(), &["tag", "-a", "v1.0", "-m", "release one"]));
@@ -121,7 +121,7 @@ fn annotated_tag_writes_a_tag_object_pointing_at_the_commit() {
 #[test]
 fn annotated_tag_short_m_without_a_still_creates_an_annotated_tag() {
     // git accepts `-m` without `-a` and treats it as implicit `-a`.
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     let head = setup(tmp.path());
 
     ok(alt(tmp.path(), &["tag", "v0.2", "-m", "short"]));
@@ -136,7 +136,7 @@ fn annotated_tag_short_m_without_a_still_creates_an_annotated_tag() {
 
 #[test]
 fn annotated_tag_dash_a_without_message_fails() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     setup(tmp.path());
     let out = alt(tmp.path(), &["tag", "-a", "v1.0"]);
     assert!(!out.status.success());
@@ -146,7 +146,7 @@ fn annotated_tag_dash_a_without_message_fails() {
 
 #[test]
 fn tag_list_json_emits_sorted_array() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     setup(tmp.path());
     ok(alt(tmp.path(), &["tag", "v0.2"]));
     ok(alt(tmp.path(), &["tag", "v0.1"]));

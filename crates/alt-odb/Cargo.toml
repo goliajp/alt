@@ -15,9 +15,8 @@ alt-prism-zip.workspace = true
 alt-store.workspace = true
 
 [target.'cfg(unix)'.dependencies]
-libc.workspace = true
+alt-os.workspace = true
 
 [dev-dependencies]
 alt-git-pack.workspace = true
 alt-testutil.workspace = true
-tempfile.workspace = true

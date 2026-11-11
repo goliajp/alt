@@ -64,7 +64,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 pub fn host_identity() -> Result<String> {
     let mut name = [0u8; 256];
-    if unsafe { libc::gethostname(name.as_mut_ptr().cast(), name.len()) } != 0 {
+    if unsafe { alt_os::sys::gethostname(name.as_mut_ptr().cast(), name.len()) } != 0 {
         return Err(std::io::Error::last_os_error().into());
     }
     let end = name
@@ -146,7 +146,7 @@ pub(crate) fn capture_file(
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| Error::Invalid("non-UTF-8 artifact path".into()))?;
-    let mut file = tempfile::NamedTempFile::new_in(control.join("captures"))?;
+    let mut file = alt_os::temp::NamedTempFile::new_in(control.join("captures"))?;
     let node = root.copy(name, file.as_file_mut())?;
     file.flush()?;
     let relative = format!("captures/{}", node.content);
@@ -381,13 +381,13 @@ pub fn execute(root: &Path, spec: &Spec, authentication_key: &[u8; 32]) -> Resul
             creator_request: String::new(),
         },
     };
-    let mut file = tempfile::NamedTempFile::new_in(&control)?;
+    let mut file = alt_os::temp::NamedTempFile::new_in(&control)?;
     let report_bytes = serde_json::to_vec(&report)?;
     file.write_all(&report_bytes)?;
     file.as_file().sync_all()?;
     file.persist_noclobber(control.join("report.json"))
         .map_err(|error| error.error)?;
-    let mut mac = tempfile::NamedTempFile::new_in(&control)?;
+    let mut mac = alt_os::temp::NamedTempFile::new_in(&control)?;
     mac.write_all(
         alt_hash::blake3::keyed_hash(authentication_key, &report_bytes)
             .to_hex()

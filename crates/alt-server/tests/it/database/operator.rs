@@ -21,7 +21,7 @@ impl Drop for ServerProcess {
 struct OperatorDb {
     admin: String,
     name: String,
-    root: tempfile::TempDir,
+    root: alt_os::temp::TempDir,
     config: PathBuf,
     dsn: String,
 }
@@ -46,7 +46,7 @@ impl OperatorDb {
             .batch_execute(&format!("CREATE DATABASE {name}"))
             .unwrap();
         let dsn = admin.replace("dbname=postgres", &format!("dbname={name}"));
-        let root = tempfile::tempdir().unwrap();
+        let root = alt_os::temp::tempdir().unwrap();
         let config = root.path().join("server.json");
         let spec = Config {
             change_links: Vec::new(),

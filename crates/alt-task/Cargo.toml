@@ -7,15 +7,12 @@ license.workspace = true
 
 [dependencies]
 alt-hash.workspace = true
+alt-os.workspace = true
 golia-change-link.workspace = true
 alt-input.workspace = true
 alt-store.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tempfile.workspace = true
-libc.workspace = true
-memmap2.workspace = true
 
 [dev-dependencies]
 ed25519-dalek.workspace = true
-tempfile.workspace = true

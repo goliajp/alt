@@ -26,8 +26,8 @@ name = "alt-browser-auth"
 version = "0.1.0"
 dependencies = [
  "alt-hash",
+ "alt-os",
  "argon2",
- "rand_core 0.6.4",
  "url",
 ]
 
@@ -75,6 +75,7 @@ dependencies = [
  "alt-merge",
  "alt-odb",
  "alt-oplog",
+ "alt-os",
  "alt-portable",
  "alt-provenance",
  "alt-refs",
@@ -99,12 +100,10 @@ dependencies = [
  "ed25519-dalek",
  "encoding_rs",
  "golia-change-link",
- "libc",
  "postgres",
  "regex",
  "serde",
  "serde_json",
- "tempfile",
  "tiny_http",
  "tokio",
 ]
@@ -114,10 +113,10 @@ name = "alt-cloud-client"
 version = "0.1.0"
 dependencies = [
  "alt-hash",
+ "alt-os",
  "base64 0.22.1",
  "chacha20poly1305",
  "golia-platform-contract",
- "rand_core 0.6.4",
  "serde",
  "serde_json",
  "tiny_http",
@@ -154,13 +153,12 @@ dependencies = [
  "alt-import",
  "alt-input",
  "alt-odb",
+ "alt-os",
  "alt-refs",
  "alt-repo",
  "bstr",
- "libc",
  "serde",
  "serde_json",
- "tempfile",
 ]
 
 [[package]]
@@ -182,11 +180,11 @@ dependencies = [
  "alt-git-refs",
  "alt-import",
  "alt-odb",
+ "alt-os",
  "alt-refs",
  "alt-repo",
  "alt-testutil",
  "bstr",
- "tempfile",
 ]
 
 [[package]]
@@ -200,18 +198,18 @@ dependencies = [
  "alt-deflate",
  "alt-hash",
  "alt-inflate",
+ "alt-os",
  "alt-testutil",
  "bstr",
- "tempfile",
 ]
 
 [[package]]
 name = "alt-git-config"
 version = "0.1.0"
 dependencies = [
+ "alt-os",
  "alt-testutil",
  "bstr",
- "tempfile",
 ]
 
 [[package]]
@@ -220,9 +218,9 @@ version = "0.1.0"
 dependencies = [
  "alt-git-codec",
  "alt-hash",
+ "alt-os",
  "alt-testutil",
  "bstr",
- "tempfile",
 ]
 
 [[package]]
@@ -233,10 +231,9 @@ dependencies = [
  "alt-git-codec",
  "alt-hash",
  "alt-inflate",
+ "alt-os",
  "alt-testutil",
  "criterion",
- "memmap2",
- "tempfile",
 ]
 
 [[package]]
@@ -244,9 +241,9 @@ name = "alt-git-refs"
 version = "0.1.0"
 dependencies = [
  "alt-git-codec",
+ "alt-os",
  "alt-testutil",
  "bstr",
- "tempfile",
 ]
 
 [[package]]
@@ -264,11 +261,11 @@ dependencies = [
  "alt-git-pack",
  "alt-git-refs",
  "alt-odb",
+ "alt-os",
  "alt-refs",
  "alt-repo",
  "alt-testutil",
  "bstr",
- "tempfile",
 ]
 
 [[package]]
@@ -284,10 +281,9 @@ name = "alt-input"
 version = "0.1.0"
 dependencies = [
  "alt-hash",
- "libc",
+ "alt-os",
  "serde",
  "serde_json",
- "tempfile",
 ]
 
 [[package]]
@@ -315,14 +311,13 @@ dependencies = [
  "alt-git-codec",
  "alt-git-pack",
  "alt-hash",
+ "alt-os",
  "alt-prism",
  "alt-prism-deflate",
  "alt-prism-png",
  "alt-prism-zip",
  "alt-store",
  "alt-testutil",
- "libc",
- "tempfile",
 ]
 
 [[package]]
@@ -330,9 +325,12 @@ name = "alt-oplog"
 version = "0.1.0"
 dependencies = [
  "alt-hash",
- "libc",
- "tempfile",
+ "alt-os",
 ]
+
+[[package]]
+name = "alt-os"
+version = "0.1.0"
 
 [[package]]
 name = "alt-pack-segment"
@@ -342,9 +340,8 @@ dependencies = [
  "alt-git-pack",
  "alt-hash",
  "alt-inflate",
- "memmap2",
+ "alt-os",
  "rayon",
- "tempfile",
 ]
 
 [[package]]
@@ -392,10 +389,10 @@ version = "0.1.0"
 dependencies = [
  "alt-deflate",
  "alt-hash",
+ "alt-os",
  "alt-prism",
  "alt-prism-deflate",
  "alt-store",
- "tempfile",
 ]
 
 [[package]]
@@ -424,7 +421,7 @@ dependencies = [
  "alt-git-codec",
  "alt-hash",
  "alt-oplog",
- "tempfile",
+ "alt-os",
 ]
 
 [[package]]
@@ -447,10 +444,10 @@ dependencies = [
  "alt-git-refs",
  "alt-import",
  "alt-odb",
+ "alt-os",
  "alt-refs",
  "alt-testutil",
  "bstr",
- "tempfile",
 ]
 
 [[package]]
@@ -470,11 +467,10 @@ version = "0.1.0"
 dependencies = [
  "alt-hash",
  "alt-input",
+ "alt-os",
  "alt-task",
- "libc",
  "serde",
  "serde_json",
- "tempfile",
 ]
 
 [[package]]
@@ -490,6 +486,7 @@ dependencies = [
  "alt-git-pack",
  "alt-hash",
  "alt-inflate",
+ "alt-os",
  "alt-pack-segment",
  "alt-portable",
  "alt-provenance",
@@ -512,14 +509,11 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
- "libc",
  "postgres",
- "rand_core 0.6.4",
  "serde",
  "serde_json",
  "subtle",
  "tar",
- "tempfile",
  "tiny_http",
  "tokio",
  "tokio-util",
@@ -538,6 +532,7 @@ dependencies = [
  "alt-git-codec",
  "alt-hash",
  "alt-input",
+ "alt-os",
  "alt-pack-segment",
  "alt-portable",
  "alt-provenance",
@@ -550,22 +545,19 @@ dependencies = [
  "ed25519-dalek",
  "golia-change-link",
  "golia-platform-contract",
- "libc",
  "postgres",
- "rand_core 0.6.4",
  "serde",
  "serde_json",
- "tempfile",
 ]
 
 [[package]]
 name = "alt-server-telemetry"
 version = "0.1.0"
 dependencies = [
+ "alt-os",
  "bytes",
  "http-body",
  "prometheus",
- "rand_core 0.6.4",
  "serde_json",
  "tracing",
  "tracing-appender",
@@ -576,9 +568,8 @@ dependencies = [
 name = "alt-sign"
 version = "0.1.0"
 dependencies = [
+ "alt-os",
  "ed25519-dalek",
- "rand_core 0.6.4",
- "tempfile",
 ]
 
 [[package]]
@@ -589,10 +580,9 @@ dependencies = [
  "alt-git-codec",
  "alt-git-pack",
  "alt-hash",
+ "alt-os",
  "alt-testutil",
  "criterion",
- "memmap2",
- "tempfile",
  "zstd",
 ]
 
@@ -602,14 +592,12 @@ version = "0.1.0"
 dependencies = [
  "alt-hash",
  "alt-input",
+ "alt-os",
  "alt-store",
  "ed25519-dalek",
  "golia-change-link",
- "libc",
- "memmap2",
  "serde",
  "serde_json",
- "tempfile",
 ]
 
 [[package]]
@@ -623,6 +611,7 @@ dependencies = [
  "alt-hash",
  "alt-input",
  "alt-oplog",
+ "alt-os",
  "alt-refs",
  "alt-remote-protocol",
  "alt-repository-service",
@@ -630,7 +619,6 @@ dependencies = [
  "ed25519-dalek",
  "serde",
  "serde_json",
- "tempfile",
 ]
 
 [[package]]
@@ -641,14 +629,13 @@ dependencies = [
  "alt-git-codec",
  "alt-hash",
  "alt-input",
+ "alt-os",
  "alt-remote-protocol",
  "alt-repository-service",
  "alt-task",
  "alt-task-service",
- "libc",
  "serde",
  "serde_json",
- "tempfile",
 ]
 
 [[package]]
@@ -688,9 +675,9 @@ dependencies = [
  "alt-git-codec",
  "alt-import",
  "alt-odb",
+ "alt-os",
  "alt-repo",
  "alt-store",
- "tempfile",
  "tiny_http",
 ]
 
@@ -725,10 +712,10 @@ dependencies = [
  "alt-git-index",
  "alt-import",
  "alt-odb",
+ "alt-os",
  "alt-repo",
  "alt-testutil",
  "bstr",
- "tempfile",
 ]
 
 [[package]]
@@ -1434,12 +1421,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4443176a9f2c162692bd3d352d745ef9413eec5782a80d8fd6f8a1ac692a07f7"
 
 [[package]]
-name = "fastrand"
-version = "2.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
-
-[[package]]
 name = "fiat-crypto"
 version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2042,15 +2023,6 @@ name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
-
-[[package]]
-name = "memmap2"
-version = "0.9.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d1219ed1b7f229ee7104d281dd01d6802fe28bb6e95d292942c4daacdeb798c0"
-dependencies = [
- "libc",
-]
 
 [[package]]
 name = "mio"
@@ -2955,19 +2927,6 @@ dependencies = [
  "filetime",
  "libc",
  "xattr",
-]
-
-[[package]]
-name = "tempfile"
-version = "3.27.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
-dependencies = [
- "fastrand",
- "getrandom 0.4.3",
- "once_cell",
- "rustix",
- "windows-sys 0.61.2",
 ]
 
 [[package]]

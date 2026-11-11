@@ -38,7 +38,7 @@ fn for_each_object(repo: &Path, mut f: impl FnMut(ObjectId, RawObject)) {
 #[ignore = "needs $ALT_CORPUS pointing at a directory of git repos"]
 fn corpus_objects_round_trip_through_native_odb() {
     let corpus = std::env::var("ALT_CORPUS").expect("set ALT_CORPUS to the corpus directory");
-    let store_dir = tempfile::tempdir().unwrap();
+    let store_dir = alt_os::temp::tempdir().unwrap();
     let mut odb = NativeOdb::open(store_dir.path()).unwrap();
 
     let mut objects = 0u64;

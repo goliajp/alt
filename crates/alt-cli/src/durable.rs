@@ -23,7 +23,7 @@ pub fn write(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> io::Result<()> 
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
-    let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
+    let mut tmp = alt_os::temp::NamedTempFile::new_in(parent)?;
     // Replacement preserves an existing regular file's mode. A new state
     // file remains private (0600); worktree materialization sets its mode.
     if let Ok(metadata) = fs::symlink_metadata(path)

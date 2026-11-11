@@ -34,7 +34,7 @@ fn staged_paths(repo: &Path) -> String {
 
 #[test]
 fn undo_unstages_a_single_alt_add() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "alpha\n").unwrap();
@@ -62,7 +62,7 @@ fn undo_unstages_a_single_alt_add() {
 
 #[test]
 fn undo_undoes_only_the_last_add_when_there_are_two() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "alpha\n").unwrap();
@@ -88,7 +88,7 @@ fn undo_undoes_only_the_last_add_when_there_are_two() {
 
 #[test]
 fn undo_of_undo_redoes_the_add() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "alpha\n").unwrap();
@@ -106,7 +106,7 @@ fn undo_of_undo_redoes_the_add() {
 
 #[test]
 fn undo_after_commit_still_inverts_the_ref_tx_not_the_index() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "alpha\n").unwrap();
@@ -133,7 +133,7 @@ fn index_bytes(root: &Path) -> Vec<u8> {
 
 #[test]
 fn recovery_rejects_cross_workspace_without_touching_either_index() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path().join("repo");
     let peer = dir.path().join("peer");
     std::fs::create_dir(&root).unwrap();
@@ -169,7 +169,7 @@ fn recovery_rejects_cross_workspace_without_touching_either_index() {
 fn recovery_refuses_modified_worktree_and_index_without_partial_changes() {
     use alt_git_codec::HashAlgo;
     use alt_git_index::Index;
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("f"), "staged").unwrap();
@@ -190,7 +190,7 @@ fn recovery_refuses_modified_worktree_and_index_without_partial_changes() {
 
 #[test]
 fn recovery_reads_frozen_legacy_record_but_refuses_automatic_undo() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     let payload = include_bytes!("fixtures/legacy-index-v1.bin");
@@ -212,7 +212,7 @@ fn recovery_reads_frozen_legacy_record_but_refuses_automatic_undo() {
 
 #[test]
 fn commit_undo_preserves_untracked_collision_without_a_checkout() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("f"), "baseline").unwrap();
@@ -234,7 +234,7 @@ fn commit_undo_preserves_untracked_collision_without_a_checkout() {
 
 #[test]
 fn recovery_missing_completion_survives_restart_and_blocks_mutation() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("f"), "staged").unwrap();
@@ -268,7 +268,7 @@ fn recovery_missing_completion_survives_restart_and_blocks_mutation() {
 
 #[test]
 fn recovery_workspace_name_reuse_cannot_claim_the_old_instance() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path().join("root");
     let peer = dir.path().join("peer");
     let recreated = dir.path().join("recreated");
@@ -316,7 +316,7 @@ fn recovery_workspace_name_reuse_cannot_claim_the_old_instance() {
 fn recovery_add_preserves_unrelated_conflict_stages_and_undo_restores_them() {
     use alt_git_codec::HashAlgo;
     use alt_git_index::Index;
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("conflict"), "conflicted").unwrap();
@@ -355,7 +355,7 @@ fn remove_final_log_frame(root: &Path) {
 #[test]
 fn recovery_ref_intent_precedes_files_and_survives_missing_completion() {
     for restore_old_file in [false, true] {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let root = dir.path();
         ok(alt(root, &["init", "."]));
         std::fs::write(root.join("f"), "before").unwrap();
@@ -388,7 +388,7 @@ fn recovery_ref_intent_precedes_files_and_survives_missing_completion() {
 
 #[test]
 fn recovery_prepared_index_without_replacement_is_not_reported_as_success() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     let initial = index_bytes(root);
@@ -428,7 +428,7 @@ fn recover_pending(root: &Path) {
 
 #[test]
 fn recovery_pending_operation_refuses_an_unrecorded_third_state() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("f"), "recorded").unwrap();
@@ -451,7 +451,7 @@ fn recovery_reads_the_frozen_legacy_frame_chain_without_rewriting_it() {
     // Captured from the pre-fix product (c355232, Linux, 2026-10-17).
     // These are the original ALTL frames, not frames generated by this test.
     let bytes = include_bytes!("fixtures/legacy-oplog-v1.bin");
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let oplog_dir = dir.path().join("oplog");
     std::fs::create_dir(&oplog_dir).unwrap();
     std::fs::write(oplog_dir.join("log"), bytes).unwrap();
@@ -470,7 +470,7 @@ fn recovery_reads_the_frozen_legacy_frame_chain_without_rewriting_it() {
 #[test]
 fn recovery_resumes_each_file_and_index_boundary_without_touching_untracked_data() {
     for boundary in 0..4 {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let root = dir.path();
         ok(alt(root, &["init", "."]));
         for path in ["a", "b"] {
@@ -513,7 +513,7 @@ fn recovery_resumes_each_file_and_index_boundary_without_touching_untracked_data
 fn commit_and_amend_undo_preserve_exact_index_files_modes_links_and_later_edits() {
     use std::os::unix::fs::{PermissionsExt, symlink};
     for kind in ["first", "commit", "amend"] {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let root = dir.path();
         ok(alt(root, &["init", "."]));
         if kind != "first" {
@@ -580,7 +580,7 @@ fn commit_and_amend_undo_preserve_exact_index_files_modes_links_and_later_edits(
 #[test]
 fn ref_undo_refuses_legacy_missing_or_unknown_effects_without_mutation() {
     for effects in [None, Some("unknown"), Some("checkout")] {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let root = dir.path();
         ok(alt(root, &["init", "."]));
         std::fs::write(root.join("f"), "precious").unwrap();
@@ -628,7 +628,7 @@ fn ref_undo_refuses_legacy_missing_or_unknown_effects_without_mutation() {
 
 #[test]
 fn commit_undo_request_replay_never_applies_a_second_inverse() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("f"), "precious").unwrap();
@@ -658,7 +658,7 @@ fn commit_undo_request_replay_never_applies_a_second_inverse() {
 
 #[test]
 fn switch_undo_checks_recorded_poststate_before_changing_any_ref() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("f"), "before").unwrap();
@@ -690,7 +690,7 @@ fn switch_undo_checks_recorded_poststate_before_changing_any_ref() {
 
 #[test]
 fn revert_undo_restores_recorded_workspace_delta() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("f"), "before").unwrap();

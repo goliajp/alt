@@ -92,7 +92,7 @@ fn http_get(addr: &str, path: &str) -> (u16, String) {
 
 #[test]
 fn endpoints_serve_version_repos_refs_log() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     build_fixture_alt(tmp.path(), "alt");
     build_fixture_alt(tmp.path(), "playground");
 

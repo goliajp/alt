@@ -44,14 +44,17 @@ fn ok(o: Output) -> String {
 
 /// A pair of repositories driven through the same steps.
 struct Pair {
-    _dirs: (tempfile::TempDir, tempfile::TempDir),
+    _dirs: (alt_os::temp::TempDir, alt_os::temp::TempDir),
     a: std::path::PathBuf,
     g: std::path::PathBuf,
 }
 
 impl Pair {
     fn new() -> Pair {
-        let dirs = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let dirs = (
+            alt_os::temp::tempdir().unwrap(),
+            alt_os::temp::tempdir().unwrap(),
+        );
         let (a, g) = (dirs.0.path().to_owned(), dirs.1.path().to_owned());
         ok(alt(&a, &["init", "."]));
         ok(git(&g, &["init", "-q", "-b", "main"]));
@@ -179,7 +182,7 @@ fn a_conflicting_revert_stops_and_continues_as_in_git() {
 
 #[test]
 fn abort_puts_everything_back() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     for (body, msg) in [
@@ -211,7 +214,7 @@ fn abort_puts_everything_back() {
 
 #[test]
 fn a_commit_mid_sequence_concludes_one_revert_and_continue_does_the_rest() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     for (file, body, msg) in [

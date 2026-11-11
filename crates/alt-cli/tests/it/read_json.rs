@@ -51,7 +51,7 @@ fn assert_valid_json(json: &str) {
 
 #[test]
 fn diff_json_carries_structured_hunks() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("f.txt"), "a\nb\nc\n").unwrap();
@@ -81,7 +81,7 @@ fn diff_json_carries_structured_hunks() {
 
 #[test]
 fn diff_json_flags_binary_files() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("data.bin"), b"\x00\x01\x02first\n").unwrap();
@@ -112,7 +112,7 @@ fn diff_json_flags_binary_files() {
 /// agents a clean negative-space check.
 #[test]
 fn diff_json_chunk_diff_is_null_for_text_files() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "v1\n").unwrap();
@@ -131,7 +131,7 @@ fn diff_json_chunk_diff_is_null_for_text_files() {
 
 #[test]
 fn diff_json_cached_shows_added_status() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("new.txt"), "fresh\n").unwrap();
@@ -147,7 +147,7 @@ fn diff_json_cached_shows_added_status() {
 
 #[test]
 fn branch_json_lists_branches_with_current_flag() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "x\n").unwrap();
@@ -174,7 +174,7 @@ fn branch_json_lists_branches_with_current_flag() {
 
 #[test]
 fn log_json_carries_commit_fields_and_parents() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "one\n").unwrap();

@@ -190,9 +190,7 @@ mod imp {
     /// wait for its socket to disappear, then proceed to spawn fresh.
     fn connect_or_spawn(alt_dir: &Path, sock: &Path) -> Option<UnixStream> {
         if let Some(stale_pid) = stale_daemon_pid(alt_dir) {
-            unsafe {
-                libc::kill(stale_pid as i32, libc::SIGTERM);
-            }
+            let _ = alt_os::sys::kill(stale_pid as i32, alt_os::sys::SIGTERM);
             let deadline = Instant::now() + Duration::from_secs(2);
             while Instant::now() < deadline {
                 if !sock.exists() {

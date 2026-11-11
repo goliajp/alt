@@ -13,9 +13,9 @@ fn imported(repo_dir: &Path, alt_root: &Path) {
 
 #[test]
 fn discovery_finds_and_prefers_alt() {
-    let repo_dir = tempfile::tempdir().unwrap();
+    let repo_dir = alt_os::temp::tempdir().unwrap();
     alt_testutil::make_repo(repo_dir.path(), "sha1");
-    let alt_root = tempfile::tempdir().unwrap();
+    let alt_root = alt_os::temp::tempdir().unwrap();
     imported(repo_dir.path(), alt_root.path());
 
     // a nested working directory discovers upward to .alt
@@ -28,9 +28,9 @@ fn discovery_finds_and_prefers_alt() {
 
 #[test]
 fn read_api_is_equivalent_across_backends() {
-    let repo_dir = tempfile::tempdir().unwrap();
+    let repo_dir = alt_os::temp::tempdir().unwrap();
     alt_testutil::make_repo(repo_dir.path(), "sha1");
-    let alt_root = tempfile::tempdir().unwrap();
+    let alt_root = alt_os::temp::tempdir().unwrap();
     imported(repo_dir.path(), alt_root.path());
 
     let git = Repository::discover(repo_dir.path()).unwrap();

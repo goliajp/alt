@@ -57,7 +57,7 @@ fn checked(process: &mut Process) -> Result<()> {
 fn regular(path: &Path) -> Result<File> {
     let file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .custom_flags(alt_os::sys::O_NOFOLLOW | alt_os::sys::O_CLOEXEC)
         .open(path)
         .map_err(|_| Error::File)?;
     if !file.metadata().map_err(|_| Error::File)?.is_file() {
@@ -210,7 +210,7 @@ fn create_inner(
         .mode(0o700)
         .create(output)
         .map_err(|_| Error::Config("backup output must be a new directory"))?;
-    let work = tempfile::tempdir().map_err(|_| Error::File)?;
+    let work = alt_os::temp::tempdir().map_err(|_| Error::File)?;
     let mut client = config.client()?;
     let signing_key = config.signing_key()?;
     let snapshot = MaintenanceSnapshot::begin(
@@ -334,7 +334,7 @@ fn create_inner(
 pub struct VerifiedBackup {
     pub manifest: Manifest,
     pub manifest_digest: String,
-    directory: tempfile::TempDir,
+    directory: alt_os::temp::TempDir,
 }
 impl VerifiedBackup {
     pub fn path(&self) -> &Path {
@@ -443,7 +443,7 @@ pub fn verify(
             "backup requires a private age X25519 identity file",
         ));
     }
-    let directory = tempfile::tempdir().map_err(|_| Error::File)?;
+    let directory = alt_os::temp::tempdir().map_err(|_| Error::File)?;
     let saved_identity = directory.path().join("age.identity");
     create_private(&saved_identity, &secret)?;
     let mut payload = regular(&input.join("payload.tar.age"))?;

@@ -19,7 +19,7 @@ fn packed_fixture(dir: &Path, object_format: &str) -> PathBuf {
 }
 
 fn verify_pack(algo: HashAlgo, object_format: &str) {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     let pack_path = packed_fixture(tmp.path(), object_format);
     let indexed = IndexedPack::open(&pack_path, algo).unwrap();
     let (idx, pack) = (indexed.idx(), indexed.pack());

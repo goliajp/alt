@@ -136,11 +136,11 @@ fn corpus_roundtrip_l1_fidelity() {
         let repo = Repository::discover(&repo_dir).unwrap();
         let algo = repo.algo();
 
-        let alt_root = tempfile::tempdir().unwrap();
+        let alt_root = alt_os::temp::tempdir().unwrap();
         let alt_dir = alt_root.path().join(".alt");
         alt_import::import_git(&repo, &alt_dir, "test/roundtrip", 1).unwrap();
 
-        let out_root = tempfile::tempdir().unwrap();
+        let out_root = alt_os::temp::tempdir().unwrap();
         let target = out_root.path().join("exported");
         let report = export_git(&alt_dir, &target).unwrap();
         assert!(report.head, "{repo_dir:?}: export wrote no HEAD");

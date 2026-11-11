@@ -57,7 +57,7 @@ fn install_trust(repo: &Path, principal: &str, pubkey: &alt_sign::PublicKey) {
 
 #[test]
 fn alt_verify_reports_signed_ok_when_trust_present() {
-    let repo_dir = tempfile::tempdir().unwrap();
+    let repo_dir = alt_os::temp::tempdir().unwrap();
     let repo = repo_dir.path();
     ok(alt(repo, &["init", "."]));
     let pubkey = enable_signed_commits(repo, "alice");
@@ -77,7 +77,7 @@ fn alt_verify_reports_signed_ok_when_trust_present() {
 
 #[test]
 fn alt_verify_reports_unsigned_when_no_alt_sig_header() {
-    let repo_dir = tempfile::tempdir().unwrap();
+    let repo_dir = alt_os::temp::tempdir().unwrap();
     let repo = repo_dir.path();
     ok(alt(repo, &["init", "."]));
     // No sign-policy = no alt-sig header on the commit object.
@@ -95,7 +95,7 @@ fn alt_verify_reports_unsigned_when_no_alt_sig_header() {
 
 #[test]
 fn alt_verify_reports_untrusted_when_trust_missing() {
-    let repo_dir = tempfile::tempdir().unwrap();
+    let repo_dir = alt_os::temp::tempdir().unwrap();
     let repo = repo_dir.path();
     ok(alt(repo, &["init", "."]));
     // sign but don't install the pubkey into trust/
@@ -114,7 +114,7 @@ fn alt_verify_reports_untrusted_when_trust_missing() {
 
 #[test]
 fn alt_verify_walks_head_chain_when_no_oid_given() {
-    let repo_dir = tempfile::tempdir().unwrap();
+    let repo_dir = alt_os::temp::tempdir().unwrap();
     let repo = repo_dir.path();
     ok(alt(repo, &["init", "."]));
     let pubkey = enable_signed_commits(repo, "alice");
@@ -140,7 +140,7 @@ fn alt_verify_walks_head_chain_when_no_oid_given() {
 
 #[test]
 fn alt_verify_json_carries_the_same_verdict() {
-    let repo_dir = tempfile::tempdir().unwrap();
+    let repo_dir = alt_os::temp::tempdir().unwrap();
     let repo = repo_dir.path();
     ok(alt(repo, &["init", "."]));
     let pubkey = enable_signed_commits(repo, "alice");

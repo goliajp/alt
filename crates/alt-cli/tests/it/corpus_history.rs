@@ -108,7 +108,7 @@ fn corpus_history_edits_match_git() {
         2,
         "need two usable repositories under {corpus}"
     );
-    let seq = tempfile::tempdir().unwrap();
+    let seq = alt_os::temp::tempdir().unwrap();
     let squash = seq.path().join("squash-second");
     std::fs::write(
         &squash,
@@ -120,7 +120,7 @@ fn corpus_history_edits_match_git() {
     std::fs::set_permissions(&squash, perm).unwrap();
 
     for repo in repos {
-        let work = tempfile::tempdir().unwrap();
+        let work = alt_os::temp::tempdir().unwrap();
         let (a, g) = (work.path().join("alt"), work.path().join("git"));
         ok(
             run(

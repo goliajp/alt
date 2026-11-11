@@ -38,7 +38,7 @@ fn ok(o: Output) -> String {
 
 #[test]
 fn branch_switch_materializes_tree_and_exports_clean() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
 
@@ -104,7 +104,7 @@ fn branch_switch_materializes_tree_and_exports_clean() {
     assert!(!alt(root, &["branch", "-d", "main"]).status.success());
 
     // export and let git judge both branches
-    let out = tempfile::tempdir().unwrap();
+    let out = alt_os::temp::tempdir().unwrap();
     let target = out.path().join("exported");
     ok(alt(root, &["export", target.to_str().unwrap()]));
     assert!(
@@ -125,7 +125,7 @@ fn branch_switch_materializes_tree_and_exports_clean() {
 
 #[test]
 fn remote_tracking_branches_delete_with_r_and_undo_back() {
-    let dirs: Vec<_> = (0..4).map(|_| tempfile::tempdir().unwrap()).collect();
+    let dirs: Vec<_> = (0..4).map(|_| alt_os::temp::tempdir().unwrap()).collect();
     let (up, clone, dst, exp) = (
         dirs[0].path(),
         dirs[1].path(),

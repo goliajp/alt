@@ -28,7 +28,7 @@ fn ok(o: Output) -> String {
 /// `alt-…-ed25519:` prefixes, in the right directory; `.sec` is 0600.
 #[test]
 fn identity_init_writes_pub_and_sec_with_secret_perms() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     ok(alt(root, &["identity", "init", "alice"]));
@@ -56,7 +56,7 @@ fn identity_init_writes_pub_and_sec_with_secret_perms() {
 /// must not silently swap a principal's key.
 #[test]
 fn identity_init_refuses_to_overwrite_existing() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     ok(alt(root, &["identity", "init", "alice"]));
@@ -70,7 +70,7 @@ fn identity_init_refuses_to_overwrite_existing() {
 /// flags `trusted` for ones whose pubkey also lives in the trust store.
 #[test]
 fn identity_list_and_trust_round_trip() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     ok(alt(root, &["identity", "init", "alice"]));
@@ -102,7 +102,7 @@ fn identity_list_and_trust_round_trip() {
 /// typo path doesn't silently install garbage into the trust store.
 #[test]
 fn identity_trust_rejects_non_pubkey_file() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     let bogus = root.join("not-a-key.txt");
@@ -124,7 +124,7 @@ fn identity_trust_rejects_non_pubkey_file() {
 /// the verdict to `bad-sig`.
 #[test]
 fn op_log_verify_round_trips_signing_and_detects_tampering() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     ok(alt(root, &["identity", "init", "alice"]));
@@ -219,7 +219,7 @@ fn op_log_verify_round_trips_signing_and_detects_tampering() {
 /// created, and `op-log --verify` reports every op as `unsigned`.
 #[test]
 fn op_log_verify_is_unsigned_by_default() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "hi\n").unwrap();
@@ -245,7 +245,7 @@ fn op_log_verify_is_unsigned_by_default() {
 /// name can't escape the `<alt-dir>/identity/` directory.
 #[test]
 fn identity_init_rejects_invalid_principal_ids() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     for bad in ["..", ".hidden", "with/slash", "with space"] {

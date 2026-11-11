@@ -5,8 +5,8 @@ edition.workspace = true
 license.workspace = true
 [dependencies]
 alt-hash.workspace = true
+alt-os.workspace = true
 argon2 = "0.5"
-rand_core.workspace = true
 url.workspace = true
 [[test]]
 name = "it"

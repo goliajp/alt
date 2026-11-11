@@ -742,7 +742,7 @@ impl NativeRepo<'_> {
         } else {
             let mut draft = alt_task_transfer::Draft::new(&parent, limits())?;
             for entry in &selected.manifest.entries {
-                let mut file = tempfile::tempfile_in(&parent)?;
+                let mut file = alt_os::temp::tempfile_in(&parent)?;
                 client.download(&binding.scope, &entry.blake3, entry.bytes, &mut file)?;
                 file.rewind()?;
                 draft.capture_selected(entry, &mut file)?;

@@ -535,7 +535,7 @@ mod tests {
 
     #[test]
     fn transactions_apply_atomically() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let mut store = RefStore::open(dir.path()).unwrap();
         store
             .commit(
@@ -567,7 +567,7 @@ mod tests {
 
     #[test]
     fn cas_conflict_applies_nothing_and_records_nothing() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let mut store = RefStore::open(dir.path()).unwrap();
         store
             .commit("a", 1, &[set("refs/heads/main", None, oid(1))])
@@ -592,7 +592,7 @@ mod tests {
 
     #[test]
     fn idempotency_key_is_indexed_and_survives_reopen() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let key: IdemKey = [7u8; 16];
         let other: IdemKey = [8u8; 16];
         let op = {
@@ -632,7 +632,7 @@ mod tests {
 
     #[test]
     fn delete_and_recreate() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let mut store = RefStore::open(dir.path()).unwrap();
         store
             .commit("a", 1, &[set("refs/tags/v1", None, oid(1))])
@@ -657,7 +657,7 @@ mod tests {
 
     #[test]
     fn symrefs_resolve_with_depth_limit() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let mut store = RefStore::open(dir.path()).unwrap();
         store
             .commit(
@@ -705,7 +705,7 @@ mod tests {
     fn concurrent_distinct_branches_all_apply() {
         use std::sync::{Arc, Barrier};
 
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         RefStore::open(dir.path()).unwrap(); // create the log up front
         const N: usize = 8;
         let barrier = Arc::new(Barrier::new(N));
@@ -749,7 +749,7 @@ mod tests {
     fn concurrent_create_same_branch_exactly_one_wins() {
         use std::sync::{Arc, Barrier};
 
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         RefStore::open(dir.path()).unwrap();
         const N: usize = 8;
         let barrier = Arc::new(Barrier::new(N));
@@ -789,7 +789,7 @@ mod tests {
 
     #[test]
     fn non_ref_ops_pass_through_replay() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         {
             let mut store = RefStore::open(dir.path()).unwrap();
             store

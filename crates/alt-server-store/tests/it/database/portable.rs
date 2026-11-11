@@ -2161,8 +2161,8 @@ ssize_t pread64(int fd, void *buffer, size_t size, off64_t offset) {
     let changed = stopped
         .then(|| control.set_grants(&f.credential, "repository", "owner", false, false, &[]));
     if stopped {
-        // SAFETY: pid belongs to the live child handle created above.
-        assert_eq!(unsafe { libc::kill(pid as libc::pid_t, libc::SIGCONT) }, 0);
+        // pid belongs to the live child handle created above
+        alt_os::sys::kill(pid as alt_os::sys::pid_t, alt_os::sys::SIGCONT).unwrap();
     }
     let deadline = Instant::now() + Duration::from_secs(15);
     while child.try_wait().unwrap().is_none() && Instant::now() < deadline {

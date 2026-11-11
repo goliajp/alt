@@ -21,7 +21,7 @@ fn set(name: &str, old: Option<RefTarget>, new: ObjectId) -> RefChange {
 
 #[test]
 fn reopen_replays_to_the_same_state() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     {
         let mut store = RefStore::open(dir.path()).unwrap();
         store
@@ -42,7 +42,7 @@ fn reopen_replays_to_the_same_state() {
 
 #[test]
 fn snapshot_is_pure_cache() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     {
         let mut store = RefStore::open(dir.path()).unwrap();
         store
@@ -84,7 +84,7 @@ fn snapshot_is_pure_cache() {
 
 #[test]
 fn torn_oplog_tail_rolls_back_to_the_previous_transaction() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     {
         let mut store = RefStore::open(dir.path()).unwrap();
         store
@@ -123,8 +123,8 @@ fn torn_oplog_tail_rolls_back_to_the_previous_transaction() {
 
 #[test]
 fn snapshot_from_a_foreign_log_is_orphaned_and_ignored() {
-    let dir_a = tempfile::tempdir().unwrap();
-    let dir_b = tempfile::tempdir().unwrap();
+    let dir_a = alt_os::temp::tempdir().unwrap();
+    let dir_b = alt_os::temp::tempdir().unwrap();
     {
         let mut store = RefStore::open(dir_a.path()).unwrap();
         store

@@ -37,7 +37,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-use memmap2::Mmap;
+use alt_os::map::Mmap;
 
 use pack::{ENC_DELTA, ENC_RAW, ENC_ZSTD, REC_HEADER_LEN, RecordHeader};
 
@@ -1255,7 +1255,7 @@ mod tests {
 
     #[test]
     fn put_get_round_trip() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let mut store = ChunkStore::open(dir.path()).unwrap();
         let cases: Vec<Vec<u8>> = vec![
             Vec::new(),
@@ -1274,7 +1274,7 @@ mod tests {
 
     #[test]
     fn dedup_stores_identical_content_once() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let mut store = ChunkStore::open(dir.path()).unwrap();
         let data = random_bytes(10_000, 2);
         let a = store.put(&data).unwrap();
@@ -1290,7 +1290,7 @@ mod tests {
 
     #[test]
     fn encoding_choices() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let mut store = ChunkStore::open(dir.path()).unwrap();
 
         // below the raw threshold: stored raw without trying zstd
@@ -1312,7 +1312,7 @@ mod tests {
 
     #[test]
     fn missing_chunk_is_not_found() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let store = ChunkStore::open(dir.path()).unwrap();
         let err = store.get(ChunkId([0u8; 32])).unwrap_err();
         assert!(matches!(err, StoreError::NotFound(_)));
@@ -1333,7 +1333,7 @@ mod tests {
 
     #[test]
     fn lineage_delta_reencodes_and_round_trips() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let mut store = ChunkStore::open(dir.path()).unwrap();
         let vs = versions(2, 10);
         let old = store.put(&vs[0]).unwrap();
@@ -1360,7 +1360,7 @@ mod tests {
 
     #[test]
     fn lineage_delta_refuses_cycles_and_useless_deltas() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let mut store = ChunkStore::open(dir.path()).unwrap();
         let vs = versions(2, 11);
         let a = store.put(&vs[0]).unwrap();
@@ -1383,7 +1383,7 @@ mod tests {
 
     #[test]
     fn lineage_delta_chains_respect_the_depth_cap() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = alt_os::temp::tempdir().unwrap();
         let mut store = ChunkStore::open(dir.path()).unwrap();
         let vs = versions(MAX_DELTA_DEPTH + 5, 12);
         let ids: Vec<ChunkId> = vs.iter().map(|v| store.put(v).unwrap()).collect();

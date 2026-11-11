@@ -41,7 +41,7 @@ impl NativeRepo<'_> {
                                 }
                                 alt_input::InputRole::Auxiliary => {
                                     use std::io::Seek;
-                                    let mut file = tempfile::tempfile()?;
+                                    let mut file = alt_os::temp::tempfile()?;
                                     if root.copy(&entry.path, &mut file)? != entry.node {
                                         return Err(refused(
                                             "auxiliary input changed while snapshotting",

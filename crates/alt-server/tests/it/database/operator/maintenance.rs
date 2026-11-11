@@ -76,7 +76,7 @@ fn cloud_backup_restores_with_fresh_binding_and_rejects_old_credentials() {
         .as_str()
         .unwrap()
         .to_owned();
-    let external = tempfile::tempdir().unwrap();
+    let external = alt_os::temp::tempdir().unwrap();
     let (identity, recipient) = encryption_key(external.path());
     let backup = external.path().join("cloud-backup");
     let input = backup.to_str().unwrap();
@@ -392,7 +392,7 @@ fn encrypted_backup_authenticates_every_entry_and_restores_refs_with_new_epoch()
         .as_str()
         .unwrap()
         .to_owned();
-    let offsite = tempfile::tempdir().unwrap();
+    let offsite = alt_os::temp::tempdir().unwrap();
     let (identity, recipient) = encryption_key(offsite.path());
     let backup = source.path("backup");
     let result = source.ok(&["backup", "--recipient", &recipient, "--output", &backup]);
@@ -522,13 +522,11 @@ fn tool_path(name: &str) -> PathBuf {
         .find(|path| path.is_file())
         .unwrap_or_else(|| panic!("missing test tool {name}"))
 }
-struct StoppedTool(libc::pid_t);
+struct StoppedTool(alt_os::sys::pid_t);
 impl Drop for StoppedTool {
     fn drop(&mut self) {
         // Exact PID written by our own child, never a process-name search.
-        unsafe {
-            libc::kill(self.0, libc::SIGKILL);
-        }
+        let _ = alt_os::sys::kill(self.0, alt_os::sys::SIGKILL);
     }
 }
 fn interrupted_tool(
@@ -578,7 +576,7 @@ fn interrupted_tool(
     let deadline = std::time::Instant::now() + Duration::from_secs(20);
     loop {
         if let Ok(pid) = std::fs::read_to_string(&marker)
-            && let Ok(pid) = pid.trim().parse::<libc::pid_t>()
+            && let Ok(pid) = pid.trim().parse::<alt_os::sys::pid_t>()
         {
             return (child, StoppedTool(pid));
         }
@@ -608,7 +606,7 @@ fn interrupted_backup_is_incomplete_and_interrupted_restore_cannot_serve_old_cre
         .as_str()
         .unwrap()
         .to_owned();
-    let external = tempfile::tempdir().unwrap();
+    let external = alt_os::temp::tempdir().unwrap();
     let (identity, recipient) = encryption_key(external.path());
     let interrupted = source.path("interrupted-backup");
     let (mut process, stopped) = interrupted_tool(

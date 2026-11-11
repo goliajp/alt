@@ -38,7 +38,7 @@ fn setup(tmp: &Path) {
 
 #[test]
 fn show_head_emits_header_and_unified_diff() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     setup(tmp.path());
     let out = ok(alt(tmp.path(), &["show", "HEAD"]));
     // header
@@ -52,7 +52,7 @@ fn show_head_emits_header_and_unified_diff() {
 
 #[test]
 fn show_default_argument_is_head() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     setup(tmp.path());
     let with = ok(alt(tmp.path(), &["show", "HEAD"]));
     let without = ok(alt(tmp.path(), &["show"]));
@@ -61,7 +61,7 @@ fn show_default_argument_is_head() {
 
 #[test]
 fn show_emits_a_single_commit() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     setup(tmp.path());
     let out = ok(alt(tmp.path(), &["show", "HEAD"]));
     // Only one "commit " header line — the wrapper caps -n 1.
@@ -74,7 +74,7 @@ fn show_emits_a_single_commit() {
 
 #[test]
 fn show_resolves_tilde_ancestor() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     setup(tmp.path());
     let head = ok(alt(tmp.path(), &["rev-parse", "HEAD"]));
     let parent = ok(alt(tmp.path(), &["rev-parse", "HEAD~"]));
@@ -89,7 +89,7 @@ fn show_resolves_tilde_ancestor() {
 
 #[test]
 fn rev_parse_supports_tilde_and_caret() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     setup(tmp.path());
     let by_tilde = ok(alt(tmp.path(), &["rev-parse", "HEAD~1"]));
     let by_caret = ok(alt(tmp.path(), &["rev-parse", "HEAD^"]));
@@ -98,7 +98,7 @@ fn rev_parse_supports_tilde_and_caret() {
 
 #[test]
 fn rev_parse_tilde_past_root_returns_error() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     setup(tmp.path());
     // Two commits; HEAD~3 walks past the root.
     let out = alt(tmp.path(), &["rev-parse", "HEAD~3"]);
@@ -111,7 +111,7 @@ fn rev_parse_tilde_past_root_returns_error() {
 
 #[test]
 fn rev_parse_resolves_short_oid_prefix() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     setup(tmp.path());
     let head = ok(alt(tmp.path(), &["rev-parse", "HEAD"]))
         .trim()
@@ -130,7 +130,7 @@ fn rev_parse_resolves_short_oid_prefix() {
 
 #[test]
 fn rev_parse_short_oid_below_four_chars_is_unknown() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     setup(tmp.path());
     let head = ok(alt(tmp.path(), &["rev-parse", "HEAD"]))
         .trim()
@@ -146,7 +146,7 @@ fn rev_parse_short_oid_below_four_chars_is_unknown() {
 
 #[test]
 fn show_rev_colon_path_prints_blob_at_that_revision() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     setup(tmp.path());
     // After setup, HEAD is the second commit and readme.txt is "second\n".
     let out = ok(alt(tmp.path(), &["show", "HEAD:readme.txt"]));
@@ -159,7 +159,7 @@ fn show_rev_colon_path_prints_blob_at_that_revision() {
 
 #[test]
 fn show_rev_colon_path_handles_subdirs() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     ok(alt(tmp.path(), &["init"]));
     std::fs::create_dir_all(tmp.path().join("sub/dir")).unwrap();
     std::fs::write(tmp.path().join("sub/dir/leaf"), "buried\n").unwrap();
@@ -171,7 +171,7 @@ fn show_rev_colon_path_handles_subdirs() {
 
 #[test]
 fn show_rev_colon_path_unknown_fails_clearly() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     setup(tmp.path());
     let out = alt(tmp.path(), &["show", "HEAD:no/such/file"]);
     assert!(!out.status.success());
@@ -181,7 +181,7 @@ fn show_rev_colon_path_unknown_fails_clearly() {
 
 #[test]
 fn show_rev_colon_tree_path_rejected() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     ok(alt(tmp.path(), &["init"]));
     std::fs::create_dir_all(tmp.path().join("d")).unwrap();
     std::fs::write(tmp.path().join("d/x"), "x\n").unwrap();
@@ -195,7 +195,7 @@ fn show_rev_colon_tree_path_rejected() {
 
 #[test]
 fn show_json_returns_a_single_commit_object() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     setup(tmp.path());
     let out = ok(alt(tmp.path(), &["show", "HEAD", "--json"]));
     // Don't deserialise structurally; the field shape is shared with

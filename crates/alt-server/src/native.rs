@@ -27,7 +27,7 @@ pub enum Output {
     Temporary {
         content_type: &'static str,
         bytes: u64,
-        file: tempfile::NamedTempFile,
+        file: alt_os::temp::NamedTempFile,
     },
     File {
         bytes: u64,

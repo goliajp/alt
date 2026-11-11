@@ -36,8 +36,7 @@ struct Issued {
     expires_at_unix_ms: u64,
 }
 fn effective_uid() -> u32 {
-    // SAFETY: geteuid takes no pointers and has no caller preconditions.
-    unsafe { libc::geteuid() }
+    alt_os::sys::geteuid()
 }
 fn unconfirmed(message: &str) -> Box<dyn std::error::Error> {
     let mut failure = Failure::unknown(message);
@@ -62,7 +61,7 @@ fn private_file(path: &Path, write: bool) -> Res<File> {
     let file = OpenOptions::new()
         .read(true)
         .write(write)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .custom_flags(alt_os::sys::O_NOFOLLOW | alt_os::sys::O_CLOEXEC)
         .open(path)?;
     let meta = file.metadata()?;
     // Credentials are never accepted through a symlink or a shared file.
@@ -86,7 +85,7 @@ fn read<T: serde::de::DeserializeOwned>(file: &mut File) -> Res<T> {
     Ok(serde_json::from_slice(&bytes)?)
 }
 fn save(path: &Path, value: &impl Serialize) -> Res<()> {
-    let mut temp = tempfile::NamedTempFile::new_in(parent(path))?;
+    let mut temp = alt_os::temp::NamedTempFile::new_in(parent(path))?;
     temp.as_file()
         .set_permissions(std::fs::Permissions::from_mode(0o600))?;
     serde_json::to_writer(&mut temp, value)?;

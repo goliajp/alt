@@ -2,7 +2,7 @@ use std::fs::File;
 use std::path::Path;
 
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
-use memmap2::Mmap;
+use alt_os::map::Mmap;
 
 use crate::PackError;
 use crate::idx::read_u32;

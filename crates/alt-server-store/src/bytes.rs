@@ -91,12 +91,14 @@ impl ByteStore {
         use std::os::fd::AsRawFd;
         let directory = OpenOptions::new()
             .read(true)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_DIRECTORY | libc::O_CLOEXEC)
+            .custom_flags(
+                alt_os::sys::O_NOFOLLOW | alt_os::sys::O_DIRECTORY | alt_os::sys::O_CLOEXEC,
+            )
             .open(&self.root)?;
-        let mut value = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+        let mut value = std::mem::MaybeUninit::<alt_os::sys::statvfs>::uninit();
         // SAFETY: fstatvfs initializes the pointed-to structure on success; the
         // descriptor is owned and remains open through this call.
-        if unsafe { libc::fstatvfs(directory.as_raw_fd(), value.as_mut_ptr()) } != 0 {
+        if unsafe { alt_os::sys::fstatvfs(directory.as_raw_fd(), value.as_mut_ptr()) } != 0 {
             return Err(std::io::Error::last_os_error().into());
         }
         // SAFETY: the successful call above initialized every output field.
@@ -120,7 +122,7 @@ impl ByteStore {
     pub(crate) fn readiness(&self, spec: &crate::InstanceSpec, key_id: &str) -> Result<()> {
         let mut marker = OpenOptions::new()
             .read(true)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .custom_flags(alt_os::sys::O_NOFOLLOW | alt_os::sys::O_CLOEXEC)
             .open(self.root.join("instance.json"))?;
         let meta = marker.metadata()?;
         if !meta.is_file() || meta.len() > 4096 || meta.permissions().mode() & 0o077 != 0 {
@@ -137,9 +139,9 @@ impl ByteStore {
         {
             return Err(Error::Integrity("volume identity"));
         }
-        let mut probe = tempfile::NamedTempFile::new_in(&self.root)?;
+        let mut probe = alt_os::temp::NamedTempFile::new_in(&self.root)?;
         let mut random = [0u8; 32];
-        rand_core::RngCore::fill_bytes(&mut rand_core::OsRng, &mut random);
+        alt_os::random::fill(&mut random);
         probe.write_all(&random)?;
         probe.as_file().sync_all()?;
         File::open(&self.root)?.sync_all()?;
@@ -251,7 +253,7 @@ impl ByteStore {
         let path = self.destination(scope, digest)?;
         let file = OpenOptions::new()
             .read(true)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .custom_flags(alt_os::sys::O_NOFOLLOW | alt_os::sys::O_CLOEXEC)
             .open(path)?;
         let metadata = file.metadata()?;
         if !metadata.is_file() || metadata.len() != bytes {
@@ -331,8 +333,8 @@ fn stage(
     digest: &str,
     bytes: u64,
     source: &mut dyn Read,
-) -> Result<tempfile::NamedTempFile> {
-    let mut temp = tempfile::NamedTempFile::new_in(parent)?;
+) -> Result<alt_os::temp::NamedTempFile> {
+    let mut temp = alt_os::temp::NamedTempFile::new_in(parent)?;
     let mut hash = alt_hash::blake3::Hasher::new();
     let mut remaining = bytes;
     let mut buffer = [0u8; 65536];

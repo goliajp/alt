@@ -139,7 +139,7 @@ fn alt_fetch_resolves_corpus_packs_byte_exact() {
         let server_root = repo.clone();
         let url = wire_test_server::spawn(server_root);
 
-        let alt_root = tempfile::tempdir().unwrap();
+        let alt_root = alt_os::temp::tempdir().unwrap();
         let target = alt_root.path();
         ok("alt init", alt(target, &["init", "."]));
         ok(
@@ -192,7 +192,7 @@ fn alt_clone_materialises_corpus_repos() {
         let server_root = repo.clone();
         let url = wire_test_server::spawn(server_root);
 
-        let parent = tempfile::tempdir().unwrap();
+        let parent = alt_os::temp::tempdir().unwrap();
         let target_name = "clone-target";
         let out = alt(parent.path(), &["clone", &url, target_name]);
         if !out.status.success() {

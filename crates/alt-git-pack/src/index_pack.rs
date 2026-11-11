@@ -52,7 +52,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
-use memmap2::Mmap;
+use alt_os::map::Mmap;
 
 use crate::PackError;
 use crate::delta;
@@ -427,7 +427,7 @@ fn build_idx(algo: HashAlgo, entries: &mut [(ObjectId, u64, u32)], trailer: &[u8
 mod tests {
     use super::*;
     use crate::{IndexedPack, PackWriter};
-    use tempfile::TempDir;
+    use alt_os::temp::TempDir;
 
     fn put(writer: &mut PackWriter, kind: ObjectKind, data: &[u8]) -> ObjectId {
         let oid = ObjectId::hash_object(HashAlgo::Sha1, kind, data);

@@ -36,7 +36,7 @@ fn store_files(dir: &Path, suffix: &str) -> Vec<String> {
 
 #[test]
 fn reopen_sees_flushed_chunks() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let cases: Vec<Vec<u8>> = vec![
         b"small".to_vec(),
         vec![7u8; 50_000],
@@ -59,7 +59,7 @@ fn reopen_sees_flushed_chunks() {
 
 #[test]
 fn torn_tail_is_dropped_on_reopen() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let a_data = random_bytes(10_000, 2);
     let b_data = random_bytes(10_000, 3);
     let (a, b) = {
@@ -91,7 +91,7 @@ fn torn_tail_is_dropped_on_reopen() {
 
 #[test]
 fn truncation_mid_record_drops_only_the_tail_record() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let a_data = random_bytes(10_000, 5);
     let b_data = random_bytes(10_000, 6);
     let (a, b) = {
@@ -118,7 +118,7 @@ fn truncation_mid_record_drops_only_the_tail_record() {
 
 #[test]
 fn flipped_payload_byte_is_detected() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     // incompressible -> stored raw -> the flip hits the re-hash check
     let data = random_bytes(100, 7);
     let id = {
@@ -143,7 +143,7 @@ fn flipped_payload_byte_is_detected() {
 
 #[test]
 fn flipped_compressed_payload_is_detected() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     // compressible -> stored zstd -> the flip breaks decode or the re-hash
     let data: Vec<u8> = (0..50_000u32).map(|i| (i % 251) as u8).collect();
     let id = {
@@ -165,7 +165,7 @@ fn flipped_compressed_payload_is_detected() {
 
 #[test]
 fn sealing_rolls_to_new_packs_and_all_chunks_stay_readable() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let opts = Options {
         seal_threshold: 16 * 1024,
         ..Options::default()
@@ -200,7 +200,7 @@ fn sealing_rolls_to_new_packs_and_all_chunks_stay_readable() {
 
 #[test]
 fn missing_idx_is_rebuilt_from_the_pack() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let opts = Options {
         seal_threshold: 16 * 1024,
         ..Options::default()
@@ -228,7 +228,7 @@ fn missing_idx_is_rebuilt_from_the_pack() {
 
 #[test]
 fn lineage_deltas_survive_reopen_and_pack_seals() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let opts = Options {
         seal_threshold: 16 * 1024,
         ..Options::default()
@@ -270,7 +270,7 @@ fn lineage_deltas_survive_reopen_and_pack_seals() {
 
 #[test]
 fn flipped_delta_payload_is_detected() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let body = random_bytes(4096, 60);
     let mut v1 = body.clone();
     v1[7] ^= 0x55;
@@ -307,7 +307,7 @@ fn reading_a_tail_detects_corruption_in_its_base() {
     // the requested address. Corruption in a *base* (never hashed directly
     // when reading the tail) must still surface, caught by the tail's
     // boundary hash — and a deep scrub must localize it to the base.
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let base_data = random_bytes(4096, 71); // incompressible -> stored raw
     let mut tail_data = base_data.clone();
     tail_data[9] ^= 0x33;
@@ -379,7 +379,7 @@ fn store_with_dead_weight(dir: &Path) -> (Vec<ChunkId>, Vec<Vec<u8>>) {
 
 #[test]
 fn compact_reclaims_dead_weight_and_preserves_reads() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let (ids, datas) = store_with_dead_weight(dir.path());
     let before = total_pack_bytes(dir.path());
 
@@ -412,7 +412,7 @@ fn compact_reclaims_dead_weight_and_preserves_reads() {
 
 #[test]
 fn compact_is_idempotent_on_a_clean_store() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let (ids, datas) = store_with_dead_weight(dir.path());
 
     let mut store = ChunkStore::open(dir.path()).unwrap();
@@ -432,7 +432,7 @@ fn compact_is_idempotent_on_a_clean_store() {
 
 #[test]
 fn for_each_decoded_yields_every_chunk_once_and_correct() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let (ids, datas) = store_with_dead_weight(dir.path()); // base + 30 delta tails
 
     let store = ChunkStore::open(dir.path()).unwrap();
@@ -454,7 +454,7 @@ fn for_each_decoded_yields_every_chunk_once_and_correct() {
 fn an_orphan_compaction_tmp_pack_is_ignored() {
     // crash before the rename: a leftover `pack-<n>.altpack.tmp` must not be
     // mistaken for a real pack — the store opens cleanly from the old packs
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let id = {
         let mut store = ChunkStore::open(dir.path()).unwrap();
         let id = store.put(b"survivor").unwrap();
@@ -482,7 +482,7 @@ fn compact_child_workload() {
 #[test]
 #[ignore = "spawns a child and kill -9s it mid-compaction"]
 fn killed_compaction_leaves_a_readable_store() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     // a store large enough that compaction outlasts the poll+kill latency
     let (ids, datas) = {
         let mut ids = Vec::new();

@@ -118,7 +118,7 @@ fn check_objects(dir: &Path, set: &SegmentSet, ids: &[String]) {
 
 #[test]
 fn whole_repository_round_trips() {
-    let work = tempfile::tempdir().unwrap();
+    let work = alt_os::temp::tempdir().unwrap();
     let source = work.path().join("source");
     fs::create_dir(&source).unwrap();
     repository(&source, 40);
@@ -177,7 +177,7 @@ fn whole_repository_round_trips() {
 
 #[test]
 fn thin_increment_and_fetch_selection() {
-    let work = tempfile::tempdir().unwrap();
+    let work = alt_os::temp::tempdir().unwrap();
     let source = work.path().join("source");
     fs::create_dir(&source).unwrap();
     repository(&source, 10);
@@ -265,7 +265,7 @@ fn thin_increment_and_fetch_selection() {
 
 #[test]
 fn corruption_is_detected() {
-    let work = tempfile::tempdir().unwrap();
+    let work = alt_os::temp::tempdir().unwrap();
     let source = work.path().join("source");
     fs::create_dir(&source).unwrap();
     repository(&source, 3);
@@ -304,7 +304,7 @@ fn corruption_is_detected() {
 
 #[test]
 fn selection_with_nested_tags_notes_and_symlinks() {
-    let work = tempfile::tempdir().unwrap();
+    let work = alt_os::temp::tempdir().unwrap();
     let source = work.path().join("source");
     fs::create_dir(&source).unwrap();
     repository(&source, 2);

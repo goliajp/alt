@@ -259,7 +259,7 @@ fn ofs_delta_depth_and_entry_offsets_are_checked() {
 #[test]
 fn real_git_thin_pack_resolves_only_authorized_published_bases() {
     use std::process::{Command, Stdio};
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let git = |args: &[&str], input: Option<&[u8]>| {
         let mut child = Command::new("git")
             .args(args)

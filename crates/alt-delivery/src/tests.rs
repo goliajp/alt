@@ -27,8 +27,8 @@ fn git(root: &Path, args: &[&str]) -> Vec<u8> {
     );
     output.stdout
 }
-fn temp() -> tempfile::TempDir {
-    tempfile::tempdir_in(std::env::var_os("HOME").unwrap()).unwrap()
+fn temp() -> alt_os::temp::TempDir {
+    alt_os::temp::tempdir_in(std::env::var_os("HOME").unwrap()).unwrap()
 }
 fn source(root: &Path, algo: &str, backend: &str) -> PathBuf {
     let source = root.join("source");

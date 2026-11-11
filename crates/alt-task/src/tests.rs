@@ -68,7 +68,7 @@ fn evidence(candidate: &Candidate, manifest: &alt_input::Manifest, blob: Artifac
 }
 #[test]
 fn only_complete_matching_observations_are_eligible() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = alt_os::temp::tempdir().unwrap();
     let mut store = Store::open(directory.path()).unwrap();
     let raw = store.put_blob(b"full raw output\0\xff").unwrap();
     let manifest = manifest();
@@ -134,7 +134,7 @@ fn only_complete_matching_observations_are_eligible() {
 }
 #[test]
 fn immutable_records_and_large_raw_logs_survive_reopen_and_detect_corruption() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = alt_os::temp::tempdir().unwrap();
     let mut store = Store::open(directory.path()).unwrap();
     let bytes: Vec<u8> = (0..2_000_000).map(|n| (n % 251) as u8).collect();
     let raw = store.capture(&mut bytes.as_slice()).unwrap();

@@ -87,7 +87,10 @@ fn write(root: &Path, name: &str, body: &str) {
 
 #[test]
 fn amending_matches_git() {
-    let (a, g) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (a, g) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
     let (a, g) = (a.path(), g.path());
     ok(alt(a, &["init", "."]));
     ok(git(g, &["init", "-q", "-b", "main"]));
@@ -124,7 +127,7 @@ fn amending_matches_git() {
 
 #[test]
 fn amend_keeps_the_author_and_takes_a_new_committer() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     write(root, "a.txt", "a\n");
@@ -142,7 +145,7 @@ fn amend_keeps_the_author_and_takes_a_new_committer() {
 
 #[test]
 fn the_replaced_commit_is_in_the_op_log_and_undo_restores_it() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     write(root, "a.txt", "a\n");
@@ -163,7 +166,7 @@ fn the_replaced_commit_is_in_the_op_log_and_undo_restores_it() {
 
 #[test]
 fn amending_a_merge_keeps_both_parents() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     write(root, "a.txt", "a\n");
@@ -191,7 +194,7 @@ fn amending_a_merge_keeps_both_parents() {
 
 #[test]
 fn amend_is_refused_where_git_refuses_it_and_on_protected_branches() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     write(root, "a.txt", "a\n");

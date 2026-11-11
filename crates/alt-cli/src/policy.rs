@@ -594,7 +594,7 @@ mod tests {
 
     #[test]
     fn missing_file_yields_empty_policy_not_error() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = alt_os::temp::tempdir().unwrap();
         let p = Policy::load(tmp.path()).unwrap();
         // empty policy → full capabilities for everyone
         assert_eq!(
@@ -605,7 +605,7 @@ mod tests {
 
     #[test]
     fn loads_from_disk() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = alt_os::temp::tempdir().unwrap();
         std::fs::write(tmp.path().join("policy"), "agent:* -> read-only\n").unwrap();
         let p = Policy::load(tmp.path()).unwrap();
         assert!(p.lookup(&principal(PrincipalKind::Agent, "x")).read_only);

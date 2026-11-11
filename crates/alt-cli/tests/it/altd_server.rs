@@ -117,7 +117,7 @@ fn spawn_server_with_env(env: &[(&str, &str)]) -> Server {
 
 #[test]
 fn altd_server_info_refs_serves_what_git_ls_remote_expects() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "alpha\n").unwrap();
@@ -170,7 +170,7 @@ fn altd_server_serves_git_clone_end_to_end() {
     // with the upload-pack POST wired, a real `git clone http://…/`
     // should walk the server, pull the packfile, and reconstruct the
     // working tree byte-exact against what the alt store holds.
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "alpha\n").unwrap();
@@ -184,7 +184,7 @@ fn altd_server_serves_git_clone_end_to_end() {
     let server = spawn_server(root);
     let url = format!("http://{}/", server.addr);
 
-    let clone_root = tempfile::tempdir().unwrap();
+    let clone_root = alt_os::temp::tempdir().unwrap();
     let target = clone_root.path().join("clone-target");
     let out = Command::new("git")
         .args(["clone", &url, target.to_str().unwrap()])
@@ -236,7 +236,7 @@ fn altd_server_accepts_git_push_end_to_end() {
     // commits the ref update as one tx, and the alt-side ref appears
     // afterwards. We build the source as a git repo (since `git push`
     // is what we're testing) and serve an alt-backed receiver.
-    let receiver_root_dir = tempfile::tempdir().unwrap();
+    let receiver_root_dir = alt_os::temp::tempdir().unwrap();
     let receiver_root = receiver_root_dir.path();
     ok(alt(receiver_root, &["init", "."]));
     std::fs::write(receiver_root.join("seed.txt"), "seed\n").unwrap();
@@ -247,7 +247,7 @@ fn altd_server_accepts_git_push_end_to_end() {
     let url = format!("http://{}/", server.addr);
 
     // build a git source repo with the commit we'll push
-    let src_dir = tempfile::tempdir().unwrap();
+    let src_dir = alt_os::temp::tempdir().unwrap();
     let src = src_dir.path();
     let git_init = Command::new("git")
         .args(["init", "-q", "-b", "main", src.to_str().unwrap()])
@@ -339,7 +339,7 @@ fn altd_server_accepts_git_push_end_to_end() {
 
 #[test]
 fn altd_server_rejects_unknown_service() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "alpha\n").unwrap();
@@ -365,7 +365,7 @@ fn altd_server_multi_repo_routes_url_to_named_repo() {
     // under ALT_SERVER_ROOT=<dir>, URL `/<name>/...` picks
     // <dir>/<name> as the alt repo. Two side-by-side repos should
     // serve distinct histories without contamination.
-    let root_dir = tempfile::tempdir().unwrap();
+    let root_dir = alt_os::temp::tempdir().unwrap();
     let root = root_dir.path();
     let alpha = root.join("alpha");
     let beta = root.join("beta");
@@ -391,7 +391,7 @@ fn altd_server_multi_repo_routes_url_to_named_repo() {
         ("beta", "b.txt", "beta-only\n", "beta-commit"),
     ] {
         let url = format!("http://{}/{name}", server.addr);
-        let clone_root = tempfile::tempdir().unwrap();
+        let clone_root = alt_os::temp::tempdir().unwrap();
         let target = clone_root.path().join(format!("clone-{name}"));
         let out = Command::new("git")
             .args(["clone", &url, target.to_str().unwrap()])
@@ -440,7 +440,7 @@ fn altd_server_multi_repo_routes_url_to_named_repo() {
 
 #[test]
 fn altd_server_multi_repo_returns_404_for_unknown_name() {
-    let root_dir = tempfile::tempdir().unwrap();
+    let root_dir = alt_os::temp::tempdir().unwrap();
     let root = root_dir.path();
     let alpha = root.join("alpha");
     std::fs::create_dir(&alpha).unwrap();
@@ -470,7 +470,7 @@ fn altd_server_basic_auth_blocks_unauthenticated_and_allows_correct_token() {
     // with a `users` file under ALT_SERVER_ROOT, every request
     // must carry Basic auth. Without it → 401; with the correct user +
     // token → the request flows as in single-repo mode.
-    let root_dir = tempfile::tempdir().unwrap();
+    let root_dir = alt_os::temp::tempdir().unwrap();
     let root = root_dir.path();
     let alpha = root.join("alpha");
     std::fs::create_dir(&alpha).unwrap();
@@ -546,7 +546,7 @@ fn altd_server_basic_auth_blocks_unauthenticated_and_allows_correct_token() {
 
     // 4. a real `git clone` with credentials embedded should walk
     // through the same gate and produce the full working tree.
-    let target_root = tempfile::tempdir().unwrap();
+    let target_root = alt_os::temp::tempdir().unwrap();
     let target = target_root.path().join("with-auth");
     let clone_url = format!("http://alice:{token}@{}/alpha", server.addr);
     let out = Command::new("git")
@@ -574,7 +574,7 @@ fn altd_server_acl_scopes_user_to_listed_repos_and_actions() {
     // a 3-column users line scopes the user to listed
     // `repo:perm` rules. alice has `alpha:rw beta:r` → can do anything
     // on alpha, read-only on beta, no access to anything else.
-    let root_dir = tempfile::tempdir().unwrap();
+    let root_dir = alt_os::temp::tempdir().unwrap();
     let root = root_dir.path();
     for name in ["alpha", "beta", "gamma"] {
         let dir = root.join(name);
@@ -599,7 +599,7 @@ fn altd_server_acl_scopes_user_to_listed_repos_and_actions() {
 
     // 1. alpha read (clone) — allowed
     let url = format!("http://alice:{token}@{}/alpha", server.addr);
-    let target = tempfile::tempdir().unwrap();
+    let target = alt_os::temp::tempdir().unwrap();
     let dst = target.path().join("alpha-clone");
     let out = Command::new("git")
         .args(["clone", &url, dst.to_str().unwrap()])
@@ -665,7 +665,7 @@ fn altd_server_acl_scopes_user_to_listed_repos_and_actions() {
 #[test]
 fn altd_server_acl_wildcard_grants_all_repos() {
     // operator with `*:rw` → every repo, every action.
-    let root_dir = tempfile::tempdir().unwrap();
+    let root_dir = alt_os::temp::tempdir().unwrap();
     let root = root_dir.path();
     for name in ["one", "two"] {
         let dir = root.join(name);
@@ -706,7 +706,7 @@ fn altd_server_a6_policy_denies_push_to_protected_ref() {
     // and assert that a `git push` to refs/heads/main fails (server
     // returns `ng` for that ref) while a push to refs/heads/feature/x
     // is accepted.
-    let root_dir = tempfile::tempdir().unwrap();
+    let root_dir = alt_os::temp::tempdir().unwrap();
     let root = root_dir.path();
     let alpha = root.join("alpha");
     std::fs::create_dir(&alpha).unwrap();
@@ -733,7 +733,7 @@ fn altd_server_a6_policy_denies_push_to_protected_ref() {
     let server = spawn_server_with_env(&[("ALT_SERVER_ROOT", root.to_str().unwrap())]);
 
     // build a tiny git source repo with a commit to push.
-    let src_dir = tempfile::tempdir().unwrap();
+    let src_dir = alt_os::temp::tempdir().unwrap();
     let src = src_dir.path();
     let st = Command::new("git")
         .args(["init", "-q", "-b", "main", src.to_str().unwrap()])
@@ -834,7 +834,7 @@ fn altd_server_alt_to_alt_clone_push_clone_round_trip() {
     // Byte-exact == log oneline matches commit-for-commit AND the
     // checked-out file contents survive the trip.
 
-    let origin_dir = tempfile::tempdir().unwrap();
+    let origin_dir = alt_os::temp::tempdir().unwrap();
     let origin = origin_dir.path();
     ok(alt(origin, &["init", "."]));
     std::fs::write(origin.join("a.txt"), "alpha\n").unwrap();
@@ -849,7 +849,7 @@ fn altd_server_alt_to_alt_clone_push_clone_round_trip() {
     let url = format!("http://{}/", server.addr);
 
     // ---- B: alt clone http://altd-server/ B ----
-    let bc = tempfile::tempdir().unwrap();
+    let bc = alt_os::temp::tempdir().unwrap();
     let bdir = bc.path().join("B");
     let r = alt(bc.path(), &["clone", url.as_str(), bdir.to_str().unwrap()]);
     assert!(
@@ -901,7 +901,7 @@ fn altd_server_alt_to_alt_clone_push_clone_round_trip() {
     );
 
     // ---- C: clone again, must see B's commit ----
-    let cc = tempfile::tempdir().unwrap();
+    let cc = alt_os::temp::tempdir().unwrap();
     let cdir = cc.path().join("C");
     let r = alt(cc.path(), &["clone", url.as_str(), cdir.to_str().unwrap()]);
     assert!(
@@ -958,7 +958,7 @@ fn altd_server_verifies_signed_push_and_accepts_it() {
     // `.alt/trust/<id>.pub` and the ref-update goes through. With the
     // pubkey present we expect a clean accept; the negative-path tests
     // below cover the rejections.
-    let origin_dir = tempfile::tempdir().unwrap();
+    let origin_dir = alt_os::temp::tempdir().unwrap();
     let origin = origin_dir.path();
     ok(alt(origin, &["init", "."]));
     std::fs::write(origin.join("seed.txt"), "seed\n").unwrap();
@@ -969,7 +969,7 @@ fn altd_server_verifies_signed_push_and_accepts_it() {
     let url = format!("http://{}/", server.addr);
 
     // alt clone → make a signing client out of the clone
-    let cdir = tempfile::tempdir().unwrap();
+    let cdir = alt_os::temp::tempdir().unwrap();
     let client = cdir.path().join("B");
     ok(alt(cdir.path(), &["clone", &url, client.to_str().unwrap()]));
     enable_signed_push(&client, origin, "alice");
@@ -1003,7 +1003,7 @@ fn altd_server_rejects_unsigned_push_when_policy_requires_signing() {
     // (single-repo mode has no Basic auth, so the wire path falls
     // through to the `anonymous` principal). A plain git push with no
     // `alt-sig` cap must be refused before objects land in odb.
-    let origin_dir = tempfile::tempdir().unwrap();
+    let origin_dir = alt_os::temp::tempdir().unwrap();
     let origin = origin_dir.path();
     ok(alt(origin, &["init", "."]));
     std::fs::write(origin.join("seed.txt"), "seed\n").unwrap();
@@ -1017,7 +1017,7 @@ fn altd_server_rejects_unsigned_push_when_policy_requires_signing() {
     let server = spawn_server(origin);
     let url = format!("http://{}/", server.addr);
 
-    let src_dir = tempfile::tempdir().unwrap();
+    let src_dir = alt_os::temp::tempdir().unwrap();
     let src = src_dir.path();
     let st = std::process::Command::new("git")
         .args(["init", "-q", "-b", "main", src.to_str().unwrap()])
@@ -1084,7 +1084,7 @@ fn altd_server_rejects_signed_push_from_unknown_principal() {
     // client attaches a valid Ed25519 signature, but the
     // server's `.alt/trust/` doesn't list the principal — the gate
     // returns `principal '<id>' not in trust store`.
-    let origin_dir = tempfile::tempdir().unwrap();
+    let origin_dir = alt_os::temp::tempdir().unwrap();
     let origin = origin_dir.path();
     ok(alt(origin, &["init", "."]));
     std::fs::write(origin.join("seed.txt"), "seed\n").unwrap();
@@ -1105,7 +1105,7 @@ fn altd_server_rejects_signed_push_from_unknown_principal() {
 
     // configure signing on the client, but *don't* publish the pubkey to
     // the server's trust dir
-    let cdir = tempfile::tempdir().unwrap();
+    let cdir = alt_os::temp::tempdir().unwrap();
     let client = cdir.path().join("B");
     ok(alt(cdir.path(), &["clone", &url, client.to_str().unwrap()]));
 
@@ -1154,7 +1154,7 @@ fn altd_server_round_trips_signed_commit_through_push() {
     //  (b) the alt-sig header is byte-preserved on the server,
     //  (c) a fresh clone receives the same signed bytes (so the
     //      signature stays verifiable on the third hop).
-    let origin_dir = tempfile::tempdir().unwrap();
+    let origin_dir = alt_os::temp::tempdir().unwrap();
     let origin = origin_dir.path();
     ok(alt(origin, &["init", "."]));
     std::fs::write(origin.join("seed.txt"), "seed\n").unwrap();
@@ -1164,7 +1164,7 @@ fn altd_server_round_trips_signed_commit_through_push() {
     let server = spawn_server(origin);
     let url = format!("http://{}/", server.addr);
 
-    let cdir = tempfile::tempdir().unwrap();
+    let cdir = alt_os::temp::tempdir().unwrap();
     let client = cdir.path().join("B");
     ok(alt(cdir.path(), &["clone", &url, client.to_str().unwrap()]));
     enable_signed_push(&client, origin, "alice");
@@ -1198,7 +1198,7 @@ fn altd_server_round_trips_signed_commit_through_push() {
     );
 
     // A subsequent clone fetches the same signed bytes.
-    let cdir2 = tempfile::tempdir().unwrap();
+    let cdir2 = alt_os::temp::tempdir().unwrap();
     let downstream = cdir2.path().join("C");
     ok(alt(
         cdir2.path(),
@@ -1217,7 +1217,7 @@ fn altd_server_rejects_unsigned_commit_when_policy_requires_signed_commits() {
     // require-signed-commits`. A git push that brings in an unsigned
     // commit must be rejected by the new commit-level gate, even
     // though the push itself is allowed (no `require-signed` flag).
-    let origin_dir = tempfile::tempdir().unwrap();
+    let origin_dir = alt_os::temp::tempdir().unwrap();
     let origin = origin_dir.path();
     ok(alt(origin, &["init", "."]));
     std::fs::write(origin.join("seed.txt"), "seed\n").unwrap();
@@ -1232,7 +1232,7 @@ fn altd_server_rejects_unsigned_commit_when_policy_requires_signed_commits() {
     let server = spawn_server(origin);
     let url = format!("http://{}/", server.addr);
 
-    let src_dir = tempfile::tempdir().unwrap();
+    let src_dir = alt_os::temp::tempdir().unwrap();
     let src = src_dir.path();
     let st = std::process::Command::new("git")
         .args(["init", "-q", "-b", "main", src.to_str().unwrap()])
@@ -1308,7 +1308,7 @@ fn altd_server_honors_git_clone_filter_blob_none() {
     //       silent server-sent full pack)
     //   (c) `git cat-file -e <blob>` returns failure for one of those
     //       blobs in the partial clone
-    let origin_dir = tempfile::tempdir().unwrap();
+    let origin_dir = alt_os::temp::tempdir().unwrap();
     let origin = origin_dir.path();
     ok(alt(origin, &["init", "."]));
     std::fs::write(origin.join("a.txt"), "alpha\n").unwrap();
@@ -1353,7 +1353,7 @@ fn altd_server_honors_git_clone_filter_blob_none() {
         .expect("at least one blob in the origin's head tree");
 
     // git clone --filter=blob:none against altd-server
-    let clone_root = tempfile::tempdir().unwrap();
+    let clone_root = alt_os::temp::tempdir().unwrap();
     let target = clone_root.path().join("partial");
     let out = std::process::Command::new("git")
         .args([
@@ -1413,7 +1413,7 @@ fn altd_server_branch_deny_protects_main_while_allowing_features() {
     //   `human:alice -> branch=refs/heads/* branch_deny=refs/heads/main`
     // Alice may push to any feature branch, but a push to main is
     // blocked by the deny gate even though the allow glob matches it.
-    let origin_dir = tempfile::tempdir().unwrap();
+    let origin_dir = alt_os::temp::tempdir().unwrap();
     let origin = origin_dir.path();
     ok(alt(origin, &["init", "."]));
     std::fs::write(origin.join("seed.txt"), "seed\n").unwrap();
@@ -1430,7 +1430,7 @@ fn altd_server_branch_deny_protects_main_while_allowing_features() {
     // build a git source repo with one commit; push it twice — once
     // at refs/heads/main (must be refused), once at refs/heads/feature/x
     // (must succeed).
-    let src_dir = tempfile::tempdir().unwrap();
+    let src_dir = alt_os::temp::tempdir().unwrap();
     let src = src_dir.path();
     let st = std::process::Command::new("git")
         .args(["init", "-q", "-b", "main", src.to_str().unwrap()])
@@ -1526,7 +1526,7 @@ fn altd_server_emits_jsonl_access_log_per_request() {
     // duration_ms, bytes_in, principal, repo}. We drive a ls-remote
     // (one info/refs GET) and a fetch + clone (info/refs + POST
     // upload-pack), drain stderr, parse, and assert.
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "alpha\n").unwrap();
@@ -1606,7 +1606,7 @@ fn altd_server_handles_concurrent_clones_in_parallel() {
     // every one completed cleanly. With the worker pool sized
     // at 4 by default, none of these requests should be waiting on
     // one another's response.
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "alpha\n").unwrap();
@@ -1617,7 +1617,7 @@ fn altd_server_handles_concurrent_clones_in_parallel() {
     let server = spawn_server(root);
     let url = format!("http://{}/", server.addr);
 
-    let clone_root = tempfile::tempdir().unwrap();
+    let clone_root = alt_os::temp::tempdir().unwrap();
     let n_clones = 4;
     let mut handles = Vec::with_capacity(n_clones);
     for i in 0..n_clones {
@@ -1657,7 +1657,7 @@ fn altd_server_drains_cleanly_on_sigterm() {
     //     the flag), and
     // (b) prints the final "all workers stopped" line and exits with
     //     code 0 (proves graceful join, not SIGKILL).
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "alpha\n").unwrap();
@@ -1667,13 +1667,11 @@ fn altd_server_drains_cleanly_on_sigterm() {
     let mut server = spawn_server(root);
     let pid = server.child.id();
 
-    // Send SIGTERM via libc (Stdlib doesn't expose it portably). On
+    // Send SIGTERM with kill (Stdlib doesn't expose it portably). On
     // unix this is the same path systemd / docker stop use.
     #[cfg(unix)]
-    unsafe {
-        let rc = libc::kill(pid as libc::pid_t, libc::SIGTERM);
-        assert_eq!(rc, 0, "kill(SIGTERM) failed");
-    }
+    alt_os::sys::kill(pid as alt_os::sys::pid_t, alt_os::sys::SIGTERM)
+        .expect("kill(SIGTERM) failed");
 
     // Wait for the server to exit on its own — should take well under
     // a second since no in-flight requests are holding workers.
@@ -1722,7 +1720,7 @@ fn altd_server_rejects_push_exceeding_max_body_size() {
     // than `max + 1` bytes. We assert the rejection via the git
     // client surfacing the upstream error, plus the access log row
     // recording status=413 in the server's stderr.
-    let origin_dir = tempfile::tempdir().unwrap();
+    let origin_dir = alt_os::temp::tempdir().unwrap();
     let origin = origin_dir.path();
     ok(alt(origin, &["init", "."]));
     std::fs::write(origin.join("seed.txt"), "seed\n").unwrap();
@@ -1737,7 +1735,7 @@ fn altd_server_rejects_push_exceeding_max_body_size() {
 
     // Build a git source repo and try to push — even an empty-tree
     // commit pushes a pack body that easily clears 100 B.
-    let src_dir = tempfile::tempdir().unwrap();
+    let src_dir = alt_os::temp::tempdir().unwrap();
     let src = src_dir.path();
     let st = std::process::Command::new("git")
         .args(["init", "-q", "-b", "main", src.to_str().unwrap()])
@@ -1808,7 +1806,7 @@ fn altd_server_two_concurrent_pushes_to_distinct_branches_both_land() {
     // must both succeed and leave the server with both refs pointing
     // at their respective pushed commits — no torn state, no lost
     // update.
-    let origin_dir = tempfile::tempdir().unwrap();
+    let origin_dir = alt_os::temp::tempdir().unwrap();
     let origin = origin_dir.path();
     ok(alt(origin, &["init", "."]));
     std::fs::write(origin.join("seed.txt"), "seed\n").unwrap();
@@ -1864,7 +1862,7 @@ fn altd_server_two_concurrent_pushes_to_distinct_branches_both_land() {
         src
     }
 
-    let src_root = tempfile::tempdir().unwrap();
+    let src_root = alt_os::temp::tempdir().unwrap();
     let alice_src = build_src("alice", src_root.path());
     let bob_src = build_src("bob", src_root.path());
 
@@ -1932,7 +1930,7 @@ fn altd_server_two_concurrent_pushes_to_same_ref_serialize_with_one_winner() {
     // each as an atomic transaction. Exactly one wins — origin's
     // refs/heads/contested ends up at one of the two pushed oids,
     // never half-applied, and the other push surfaces an error.
-    let origin_dir = tempfile::tempdir().unwrap();
+    let origin_dir = alt_os::temp::tempdir().unwrap();
     let origin = origin_dir.path();
     ok(alt(origin, &["init", "."]));
     std::fs::write(origin.join("seed.txt"), "seed\n").unwrap();
@@ -1983,7 +1981,7 @@ fn altd_server_two_concurrent_pushes_to_same_ref_serialize_with_one_winner() {
         src
     }
 
-    let src_root = tempfile::tempdir().unwrap();
+    let src_root = alt_os::temp::tempdir().unwrap();
     let alice_src = build_src("alice", src_root.path());
     let bob_src = build_src("bob", src_root.path());
 
@@ -2052,7 +2050,7 @@ fn altd_server_n_clients_m_iters_stress_harness() {
     const N_CLIENTS: usize = 6;
     const M_ITERS: usize = 4;
 
-    let origin_dir = tempfile::tempdir().unwrap();
+    let origin_dir = alt_os::temp::tempdir().unwrap();
     let origin = origin_dir.path();
     ok(alt(origin, &["init", "."]));
     std::fs::write(origin.join("seed.txt"), "seed\n").unwrap();
@@ -2066,7 +2064,7 @@ fn altd_server_n_clients_m_iters_stress_harness() {
     // its own clone target. The barrier lines all threads up at the
     // start so the first request from every client hits the server
     // at roughly the same moment.
-    let work_root = tempfile::tempdir().unwrap();
+    let work_root = alt_os::temp::tempdir().unwrap();
     let barrier = std::sync::Arc::new(std::sync::Barrier::new(N_CLIENTS));
     let mut handles = Vec::with_capacity(N_CLIENTS);
     for client in 0..N_CLIENTS {
@@ -2255,7 +2253,7 @@ fn altd_server_n_clients_m_iters_stress_harness() {
 #[test]
 fn altd_server_streaming_push_keeps_rss_bounded() {
     use std::time::Duration;
-    let origin_dir = tempfile::tempdir().unwrap();
+    let origin_dir = alt_os::temp::tempdir().unwrap();
     let origin = origin_dir.path();
     ok(alt(origin, &["init", "."]));
     std::fs::write(origin.join("seed.txt"), "seed\n").unwrap();
@@ -2273,7 +2271,7 @@ fn altd_server_streaming_push_keeps_rss_bounded() {
     // the pack body crosses well past the head-only watermark. We
     // generate uncompressible bytes so the pack stays close to the
     // raw size (gzip / pack delta don't collapse it).
-    let src_dir = tempfile::tempdir().unwrap();
+    let src_dir = alt_os::temp::tempdir().unwrap();
     let src = src_dir.path();
     let st = std::process::Command::new("git")
         .args(["init", "-q", "-b", "main", src.to_str().unwrap()])
@@ -2380,7 +2378,7 @@ fn altd_server_policy_hot_reload_takes_effect_without_restart() {
     // `require-signed` rule into the same policy file, push again
     // without signing, and expect the second push to be refused — all
     // against the same server process.
-    let origin_dir = tempfile::tempdir().unwrap();
+    let origin_dir = alt_os::temp::tempdir().unwrap();
     let origin = origin_dir.path();
     ok(alt(origin, &["init", "."]));
     std::fs::write(origin.join("seed.txt"), "seed\n").unwrap();
@@ -2397,7 +2395,7 @@ fn altd_server_policy_hot_reload_takes_effect_without_restart() {
     // tiny helper: a git source repo with one new commit per call,
     // pushing to its own ref name so neither half conflicts with main.
     fn drive_push(target: &str, url: &str) -> std::process::Output {
-        let src = tempfile::tempdir().unwrap();
+        let src = alt_os::temp::tempdir().unwrap();
         let src_path = src.path();
         let st = std::process::Command::new("git")
             .args(["init", "-q", "-b", "main", src_path.to_str().unwrap()])
@@ -2493,7 +2491,7 @@ fn altd_server_shutdown_deadline_force_exits_when_workers_stuck() {
     // "graceful shutdown timed out" line is *available* as a path —
     // we test it directly by setting the deadline absurdly short and
     // confirming the timeout line fires when the deadline trips.
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "alpha\n").unwrap();
@@ -2511,10 +2509,8 @@ fn altd_server_shutdown_deadline_force_exits_when_workers_stuck() {
     let pid = server.child.id();
 
     #[cfg(unix)]
-    unsafe {
-        let rc = libc::kill(pid as libc::pid_t, libc::SIGTERM);
-        assert_eq!(rc, 0, "kill(SIGTERM) failed");
-    }
+    alt_os::sys::kill(pid as alt_os::sys::pid_t, alt_os::sys::SIGTERM)
+        .expect("kill(SIGTERM) failed");
 
     let deadline = Instant::now() + Duration::from_secs(5);
     let exit_status = loop {
@@ -2551,7 +2547,7 @@ fn altd_server_require_auth_refuses_to_start_without_users_file() {
     // an absent or unreadable `users` file is a hard startup error.
     // This catches the common ops slip — `mv users users.bak` quietly
     // turning every repo into a no-auth surface.
-    let root_dir = tempfile::tempdir().unwrap();
+    let root_dir = alt_os::temp::tempdir().unwrap();
     let root = root_dir.path();
 
     let bin = env!("CARGO_BIN_EXE_altd-server");
@@ -2613,7 +2609,7 @@ fn altd_server_require_auth_refuses_to_start_without_users_file() {
 /// client "no such route" and erase the real signal.
 #[test]
 fn altd_server_returns_405_with_allow_header_on_wrong_method() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "alpha\n").unwrap();
@@ -2645,7 +2641,7 @@ fn altd_server_returns_405_with_allow_header_on_wrong_method() {
 /// config stays off the open-CORS attack surface.
 #[test]
 fn altd_server_options_returns_204_with_allow_and_no_cors_by_default() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "alpha\n").unwrap();
@@ -2680,7 +2676,7 @@ fn altd_server_options_returns_204_with_allow_and_no_cors_by_default() {
 /// preflights carry the standard four CORS response headers.
 #[test]
 fn altd_server_options_emits_cors_headers_when_env_set() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "alpha\n").unwrap();
@@ -2728,7 +2724,7 @@ fn altd_server_concurrent_pushes_are_all_durable() {
     // N concurrent pushes through the receive-pack path all
     // become durable through the group-commit coordinator. The access log
     // carries the group's `fsync_count()` snapshot per receive-pack request.
-    let origin_dir = tempfile::tempdir().unwrap();
+    let origin_dir = alt_os::temp::tempdir().unwrap();
     let origin = origin_dir.path();
     ok(alt(origin, &["init", "."]));
     std::fs::write(origin.join("seed.txt"), "seed\n").unwrap();
@@ -2780,7 +2776,7 @@ fn altd_server_concurrent_pushes_are_all_durable() {
     }
 
     const N: usize = 8;
-    let src_root = tempfile::tempdir().unwrap();
+    let src_root = alt_os::temp::tempdir().unwrap();
     let mut srcs = Vec::with_capacity(N);
     for i in 0..N {
         srcs.push(build_src(&format!("c{i}"), src_root.path()));
@@ -2859,7 +2855,7 @@ fn altd_server_advertises_alt_nonce_and_signed_push_consumes_it() {
     // inside the bin (they verify `consume()` is false on the second
     // call with the same value).
     use std::io::{Read, Write};
-    let origin_dir = tempfile::tempdir().unwrap();
+    let origin_dir = alt_os::temp::tempdir().unwrap();
     let origin = origin_dir.path();
     ok(alt(origin, &["init", "."]));
     std::fs::write(origin.join("seed.txt"), "seed\n").unwrap();
@@ -2895,7 +2891,7 @@ fn altd_server_advertises_alt_nonce_and_signed_push_consumes_it() {
 
     // 2) a signed alt push succeeds end-to-end (the client picked up
     // the nonce, signed with it, and the server verified + consumed).
-    let cdir = tempfile::tempdir().unwrap();
+    let cdir = alt_os::temp::tempdir().unwrap();
     let client = cdir.path().join("B");
     ok(alt(cdir.path(), &["clone", &url, client.to_str().unwrap()]));
     enable_signed_push(&client, origin, "alice");
@@ -2925,7 +2921,7 @@ fn altd_server_rejected_push_does_not_leave_orphan_objects() {
     // the failed push made. We compare the origin's odb object count
     // (NativeOdb::len) and on-disk append-file sizes before vs. after
     // a rejected push: both must be byte-for-byte identical.
-    let origin_dir = tempfile::tempdir().unwrap();
+    let origin_dir = alt_os::temp::tempdir().unwrap();
     let origin = origin_dir.path();
     ok(alt(origin, &["init", "."]));
     std::fs::write(origin.join("seed.txt"), "seed\n").unwrap();
@@ -2966,7 +2962,7 @@ fn altd_server_rejected_push_does_not_leave_orphan_objects() {
     let url = format!("http://{}/", server.addr);
 
     // Build a git source with an unsigned commit and try to push.
-    let src_dir = tempfile::tempdir().unwrap();
+    let src_dir = alt_os::temp::tempdir().unwrap();
     let src = src_dir.path();
     let st = std::process::Command::new("git")
         .args(["init", "-q", "-b", "main", src.to_str().unwrap()])

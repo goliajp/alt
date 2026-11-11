@@ -26,12 +26,12 @@ fn make_small_repo(dir: &Path) {
 
 #[test]
 fn flatten_matches_git_ls_tree_and_status_is_clean() {
-    let src = tempfile::tempdir().unwrap();
+    let src = alt_os::temp::tempdir().unwrap();
     make_small_repo(src.path());
 
     let repo = Repository::discover(src.path()).unwrap();
     let algo = HashAlgo::Sha1;
-    let alt_root = tempfile::tempdir().unwrap();
+    let alt_root = alt_os::temp::tempdir().unwrap();
     let alt_dir = alt_root.path().join(".alt");
     alt_import::import_git(&repo, &alt_dir, "test/worktree", 1).unwrap();
 
@@ -61,7 +61,7 @@ fn flatten_matches_git_ls_tree_and_status_is_clean() {
 
 #[test]
 fn write_tree_matches_git_write_tree() {
-    let src = tempfile::tempdir().unwrap();
+    let src = alt_os::temp::tempdir().unwrap();
     common::git(src.path(), &["init", "-q", "-b", "main"]);
     std::fs::write(src.path().join("a.txt"), "hello\n").unwrap();
     std::fs::create_dir(src.path().join("sub")).unwrap();
@@ -71,7 +71,7 @@ fn write_tree_matches_git_write_tree() {
 
     let algo = HashAlgo::Sha1;
     let scan = scan_worktree(src.path(), algo).unwrap();
-    let alt = tempfile::tempdir().unwrap();
+    let alt = alt_os::temp::tempdir().unwrap();
     let mut odb = NativeOdb::open(alt.path()).unwrap();
     let tree = write_tree(&mut odb, &scan, algo).unwrap();
     odb.flush().unwrap();
@@ -80,7 +80,7 @@ fn write_tree_matches_git_write_tree() {
 
 #[test]
 fn write_commit_matches_git_commit_tree() {
-    let src = tempfile::tempdir().unwrap();
+    let src = alt_os::temp::tempdir().unwrap();
     common::git(src.path(), &["init", "-q"]);
     std::fs::write(src.path().join("f"), "x").unwrap();
     common::git(src.path(), &["add", "f"]);
@@ -103,7 +103,7 @@ fn write_commit_matches_git_commit_tree() {
 
     let algo = HashAlgo::Sha1;
     let tree = ObjectId::from_hex(tree_hex.as_bytes()).unwrap();
-    let alt = tempfile::tempdir().unwrap();
+    let alt = alt_os::temp::tempdir().unwrap();
     let mut odb = NativeOdb::open(alt.path()).unwrap();
     let sig = Sig {
         name: "A",

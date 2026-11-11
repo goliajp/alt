@@ -736,8 +736,7 @@ impl NativeRepo<'_> {
             .read(true)
             .write(true)
             .open(path)?;
-        use std::os::fd::AsRawFd;
-        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        if alt_os::sys::flock(&file, alt_os::sys::LOCK_EX | alt_os::sys::LOCK_NB).is_err() {
             return Err(refused(
                 "integration request is still active; query it before abandonment",
             ));

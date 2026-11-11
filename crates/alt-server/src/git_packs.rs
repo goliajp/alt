@@ -8,7 +8,6 @@ use alt_remote_protocol::{Manifest, ObjectFormat, Publication, RefUpdate, Reques
 use alt_repository_service::{Graph, GraphLimits, Node, parse_node};
 use alt_server_store::{Credential, Error, NewSegment, PackView, Result, Store};
 use alt_wire::pkt;
-use rand_core::{OsRng, RngCore};
 use std::{
     borrow::Cow,
     collections::{BTreeSet, HashSet},
@@ -261,7 +260,7 @@ fn publish(
         return Ok(None);
     }
     let mut nonce = [0u8; 40];
-    OsRng.fill_bytes(&mut nonce);
+    alt_os::random::fill(&mut nonce);
     let mut segments = view.segments.segments().to_vec();
     let mut stored = None;
     if !pack.is_empty() {

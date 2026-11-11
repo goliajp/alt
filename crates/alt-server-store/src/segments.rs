@@ -9,7 +9,6 @@ use crate::{
 };
 use alt_remote_protocol::{ContentEntry, Limits, Publication, RequestKey};
 use ed25519_dalek::SigningKey;
-use rand_core::{OsRng, RngCore};
 use std::collections::BTreeMap;
 
 pub(crate) type Locations = BTreeMap<String, SegmentLocation>;
@@ -93,7 +92,7 @@ fn upload_authority(
 }
 pub(crate) fn new_id() -> String {
     let mut bytes = [0; 16];
-    OsRng.fill_bytes(&mut bytes);
+    alt_os::random::fill(&mut bytes);
     bytes.iter().map(|v| format!("{v:02x}")).collect()
 }
 impl Store {

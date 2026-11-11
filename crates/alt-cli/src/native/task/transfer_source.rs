@@ -14,7 +14,7 @@ pub(super) fn bounded(path: &Path, maximum: usize) -> Result<Vec<u8>> {
     use std::os::unix::fs::OpenOptionsExt;
     let file = std::fs::OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
+        .custom_flags(alt_os::sys::O_NOFOLLOW)
         .open(path)?;
     if !file.metadata()?.is_file() || file.metadata()?.len() > maximum as u64 {
         return Err(Error::Limit("local structured file"));

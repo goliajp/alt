@@ -1,0 +1,8 @@
+[package]
+name = "alt-os"
+description = "The operating system interface alt uses: random bytes, file mappings, temporary files and a small set of system calls, with no dependencies"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

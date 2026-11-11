@@ -23,6 +23,7 @@ path = "src/bin/altd_server.rs"
 
 [dependencies]
 alt-hash.workspace = true
+alt-os.workspace = true
 golia-change-link.workspace = true
 alt-provenance.workspace = true
 alt-portable.workspace = true
@@ -55,7 +56,6 @@ alt-treediff.workspace = true
 alt-wire.workspace = true
 alt-wire-http.workspace = true
 ed25519-dalek.workspace = true
-tempfile.workspace = true
 tiny_http.workspace = true
 alt-worktree.workspace = true
 bstr.workspace = true
@@ -64,12 +64,6 @@ encoding_rs.workspace = true
 regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-
-[target.'cfg(unix)'.dependencies]
-libc.workspace = true
-
-[target.'cfg(unix)'.dev-dependencies]
-libc.workspace = true
 
 [dev-dependencies]
 alt-browser-auth.workspace = true
@@ -81,7 +75,6 @@ tokio = {version="1",features=["rt-multi-thread","net","sync"]}
 alt-sign.workspace = true
 alt-testutil.workspace = true
 criterion.workspace = true
-tempfile.workspace = true
 
 [[bench]]
 name = "daemon_open"

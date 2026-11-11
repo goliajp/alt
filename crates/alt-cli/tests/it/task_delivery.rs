@@ -28,8 +28,8 @@ fn value(root: &Path, args: &[&str]) -> Value {
     serde_json::from_slice(&ok(root, args).stdout).unwrap()
 }
 struct Fixture {
-    _dir: tempfile::TempDir,
-    scratch: tempfile::TempDir,
+    _dir: alt_os::temp::TempDir,
+    scratch: alt_os::temp::TempDir,
     main: PathBuf,
     workspace: PathBuf,
     task: String,
@@ -41,9 +41,9 @@ fn fixture(script: &str) -> Fixture {
 }
 fn fixture_with_paths(script: &str, allowed_paths: &[&str]) -> Fixture {
     std::fs::create_dir_all(env!("CARGO_TARGET_TMPDIR")).unwrap();
-    let directory = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let directory = alt_os::temp::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     // This must be on a supported disk and outside every repository ancestor.
-    let scratch = tempfile::tempdir_in(std::env::var_os("HOME").unwrap()).unwrap();
+    let scratch = alt_os::temp::tempdir_in(std::env::var_os("HOME").unwrap()).unwrap();
     let main = directory.path().join("main");
     let workspace = directory.path().join("task");
     std::fs::create_dir(&main).unwrap();
@@ -514,7 +514,7 @@ fn prepared_but_unapplied_integration_can_be_abandoned_without_moving_refs() {
 
 #[test]
 fn independent_intake_preserves_dirty_source_and_reports_unsupported_forms() {
-    let temp = tempfile::tempdir_in(std::env::var_os("HOME").unwrap()).unwrap();
+    let temp = alt_os::temp::tempdir_in(std::env::var_os("HOME").unwrap()).unwrap();
     let source = temp.path().join("source");
     std::fs::create_dir(&source).unwrap();
     git(&source, &["init", "-b", "main"]);
@@ -628,9 +628,7 @@ impl ChildGroup {
 impl Drop for ChildGroup {
     fn drop(&mut self) {
         if let Some(mut child) = self.0.take() {
-            unsafe {
-                libc::kill(-(child.id() as i32), libc::SIGKILL);
-            }
+            let _ = alt_os::sys::kill(-(child.id() as i32), alt_os::sys::SIGKILL);
             let _ = child.wait();
         }
     }
@@ -656,7 +654,7 @@ fn interrupted_git_verification_keeps_queries_available_and_never_publishes_part
     let marker = f.scratch.path().join("verifier-started");
     let fifo = f.scratch.path().join("verifier-release");
     let fifo_c = std::ffi::CString::new(fifo.as_os_str().as_encoded_bytes()).unwrap();
-    assert_eq!(unsafe { libc::mkfifo(fifo_c.as_ptr(), 0o600) }, 0);
+    assert_eq!(unsafe { alt_os::sys::mkfifo(fifo_c.as_ptr(), 0o600) }, 0);
     let quote = |p: &Path| format!("'{}'", p.to_str().unwrap().replace('\'', "'\\''"));
     let wrapper = f.scratch.path().join("git-verifier");
     std::fs::write(&wrapper, format!("#!/bin/sh\ncase \" $* \" in *' fsck '*)\n printf ready > {}\n read release < {}\n ;;\nesac\nexec {} \"$@\"\n", quote(&marker), quote(&fifo), quote(&git_path()))).unwrap();

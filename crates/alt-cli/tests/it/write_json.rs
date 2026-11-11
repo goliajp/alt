@@ -51,7 +51,7 @@ fn assert_valid_json(json: &str) {
 
 #[test]
 fn add_and_commit_json_report_counts_and_oids() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "x\n").unwrap();
@@ -71,7 +71,7 @@ fn add_and_commit_json_report_counts_and_oids() {
 
 #[test]
 fn switch_json_reports_result() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "x\n").unwrap();
@@ -92,7 +92,7 @@ fn switch_json_reports_result() {
 
 #[test]
 fn merge_json_clean_and_conflict() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("f.txt"), "l1\nl2\nl3\n").unwrap();
@@ -138,7 +138,7 @@ fn merge_json_clean_and_conflict() {
 
 #[test]
 fn flow_and_undo_json_report_effects() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "x\n").unwrap();

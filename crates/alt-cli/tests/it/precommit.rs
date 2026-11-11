@@ -31,8 +31,8 @@ fn fake_key() -> String {
     format!("{}{}", "AK", "IAQWERTYUIOPASDFGH")
 }
 
-fn repo() -> tempfile::TempDir {
-    let dir = tempfile::tempdir().unwrap();
+fn repo() -> alt_os::temp::TempDir {
+    let dir = alt_os::temp::tempdir().unwrap();
     ok(alt(dir.path(), &["init", "."]));
     std::fs::write(dir.path().join("readme.txt"), "hi\n").unwrap();
     ok(alt(dir.path(), &["add", "."]));

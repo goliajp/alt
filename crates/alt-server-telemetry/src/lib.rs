@@ -9,7 +9,6 @@ use prometheus::{
     Encoder, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge, Opts, Registry,
     TextEncoder,
 };
-use rand_core::{OsRng, RngCore};
 pub use snapshot::Snapshot;
 use std::{
     cell::RefCell,
@@ -198,8 +197,7 @@ impl Metrics {
             registry.register(collector)?;
         }
         let mut boot = [0u8; 16];
-        OsRng
-            .try_fill_bytes(&mut boot)
+        alt_os::random::try_fill(&mut boot)
             .map_err(|_| io::Error::other("trace identity unavailable"))?;
         Ok(Arc::new(Self {
             registry,

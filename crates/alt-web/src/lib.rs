@@ -164,7 +164,7 @@ mod tests {
 
     #[test]
     fn list_finds_dot_alt_dirs_skips_others() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = alt_os::temp::tempdir().unwrap();
         let root = tmp.path();
         std::fs::create_dir_all(root.join("repo-a/.alt")).unwrap();
         std::fs::create_dir_all(root.join("repo-b/.alt")).unwrap();
@@ -179,7 +179,7 @@ mod tests {
 
     #[test]
     fn open_reports_repo_not_found_for_missing_and_unsafe_names() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = alt_os::temp::tempdir().unwrap();
         let m = MultiRepo::new(tmp.path());
         // Repository doesn't impl Debug, so unwrap_err panics format —
         // pattern-match instead.

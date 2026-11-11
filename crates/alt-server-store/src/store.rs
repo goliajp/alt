@@ -4,7 +4,6 @@ use alt_remote_protocol::{Attribution, DeploymentMode, Limits, ObjectFormat, Sco
 use alt_repository_service::{Authorization, Grant, RefPolicy, RepositorySnapshot};
 use ed25519_dalek::SigningKey;
 use postgres::Client;
-use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -513,7 +512,7 @@ fn insert_token(
     administrator: bool,
 ) -> Result<String> {
     let mut secret = [0u8; 32];
-    OsRng.fill_bytes(&mut secret);
+    alt_os::random::fill(&mut secret);
     let token = format!(
         "alt1_{}",
         secret

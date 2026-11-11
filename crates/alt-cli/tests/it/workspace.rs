@@ -42,8 +42,8 @@ fn alt_fast(cwd: &Path, args: &[&str]) -> Output {
 
 #[test]
 fn workspaces_isolate_and_share_the_store() {
-    let repo = tempfile::tempdir().unwrap();
-    let trees = tempfile::tempdir().unwrap(); // worktrees live outside the repo
+    let repo = alt_os::temp::tempdir().unwrap();
+    let trees = alt_os::temp::tempdir().unwrap(); // worktrees live outside the repo
     let root = repo.path();
 
     ok(alt(root, &["init", "."]));
@@ -101,8 +101,8 @@ fn workspaces_isolate_and_share_the_store() {
 
 #[test]
 fn commands_infer_the_workspace_from_the_working_tree() {
-    let repo = tempfile::tempdir().unwrap();
-    let trees = tempfile::tempdir().unwrap();
+    let repo = alt_os::temp::tempdir().unwrap();
+    let trees = alt_os::temp::tempdir().unwrap();
     let root = repo.path();
 
     ok(alt(root, &["init", "."]));
@@ -140,8 +140,8 @@ fn concurrent_commits_under_relaxed_durability_dont_corrupt_the_store() {
     // every round of N concurrent commits exercises the window. Pre-fix this
     // lost/corrupted commits (`fatal: store` on read); the shared open lock
     // closes it.
-    let repo = tempfile::tempdir().unwrap();
-    let trees = tempfile::tempdir().unwrap();
+    let repo = alt_os::temp::tempdir().unwrap();
+    let trees = alt_os::temp::tempdir().unwrap();
     let root = repo.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("f.txt"), "base\n").unwrap();
@@ -200,8 +200,8 @@ fn concurrent_commits_under_relaxed_durability_dont_corrupt_the_store() {
 fn two_workspaces_commit_concurrently_as_separate_processes() {
     use std::sync::{Arc, Barrier};
 
-    let repo = tempfile::tempdir().unwrap();
-    let trees = tempfile::tempdir().unwrap();
+    let repo = alt_os::temp::tempdir().unwrap();
+    let trees = alt_os::temp::tempdir().unwrap();
     let root = repo.path();
 
     ok(alt(root, &["init", "."]));
@@ -268,8 +268,8 @@ fn two_workspaces_commit_concurrently_as_separate_processes() {
 fn history_commands_read_the_workspaces_own_head() {
     // log / rev-parse / show are git-layer commands; inside a named workspace
     // their HEAD must be that workspace's HEAD, not the default workspace's
-    let repo = tempfile::tempdir().unwrap();
-    let trees = tempfile::tempdir().unwrap();
+    let repo = alt_os::temp::tempdir().unwrap();
+    let trees = alt_os::temp::tempdir().unwrap();
     let root = repo.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "main\n").unwrap();

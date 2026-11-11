@@ -1098,7 +1098,7 @@ fn source_integration_requires_exact_attributed_ref_operation_and_completion() {
     let before = "1".repeat(40).parse().unwrap();
     let commit = "2".repeat(40).parse().unwrap();
     let notes = "3".repeat(40).parse().unwrap();
-    let directory = tempfile::tempdir().unwrap();
+    let directory = alt_os::temp::tempdir().unwrap();
     let mut refs = RefStore::open(directory.path()).unwrap();
     refs.commit(
         "source",

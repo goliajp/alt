@@ -36,7 +36,7 @@ fn ours(config: &Config) -> Vec<(String, Option<String>)> {
 
 #[test]
 fn torture_syntax_matches_git() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     let file = tmp.path().join("cfg");
     fs::write(
         &file,
@@ -101,7 +101,7 @@ fn torture_syntax_matches_git() {
 
 #[test]
 fn includes_and_include_if_match_git() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = alt_os::temp::tempdir().unwrap();
     let repo = tmp.path();
     common::make_repo(repo, "sha1");
 

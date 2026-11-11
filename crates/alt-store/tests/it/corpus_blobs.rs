@@ -43,7 +43,7 @@ fn for_each_blob(repo: &Path, mut f: impl FnMut(&[u8])) {
 #[ignore = "needs $ALT_CORPUS pointing at a directory of git repos"]
 fn corpus_blobs_round_trip_through_blob_store() {
     let corpus = std::env::var("ALT_CORPUS").expect("set ALT_CORPUS to the corpus directory");
-    let store_dir = tempfile::tempdir().unwrap();
+    let store_dir = alt_os::temp::tempdir().unwrap();
     let mut store = BlobStore::open(store_dir.path()).unwrap();
 
     let mut blobs = 0u64;

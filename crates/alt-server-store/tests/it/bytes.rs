@@ -11,7 +11,7 @@ fn scope(repo: &str) -> Scope {
 }
 #[test]
 fn bounded_streaming_ingestion_is_durable_and_idempotent() {
-    let temporary = tempfile::tempdir().unwrap();
+    let temporary = alt_os::temp::tempdir().unwrap();
     let store = ByteStore::open(&temporary.path().join("bytes")).unwrap();
     let bytes = vec![31u8; 200_000];
     let hash = alt_hash::blake3::hash(&bytes).to_hex().to_string();
@@ -42,7 +42,7 @@ fn bounded_streaming_ingestion_is_durable_and_idempotent() {
 }
 #[test]
 fn bad_size_hash_short_read_and_limits_leave_no_content() {
-    let temporary = tempfile::tempdir().unwrap();
+    let temporary = alt_os::temp::tempdir().unwrap();
     let store = ByteStore::open(&temporary.path().join("bytes")).unwrap();
     let hash = alt_hash::blake3::hash(b"abc").to_hex().to_string();
     for (data, size, limit) in [
@@ -67,7 +67,7 @@ fn bad_size_hash_short_read_and_limits_leave_no_content() {
 #[test]
 fn symlink_and_corrupted_incumbent_are_not_reused() {
     use std::os::unix::fs::symlink;
-    let temporary = tempfile::tempdir().unwrap();
+    let temporary = alt_os::temp::tempdir().unwrap();
     let root = temporary.path().join("bytes");
     let store = ByteStore::open(&root).unwrap();
     let hash = alt_hash::blake3::hash(b"abc").to_hex().to_string();
@@ -106,7 +106,7 @@ fn mid_stream_io_failure_does_not_publish_partial_bytes() {
             Ok(1)
         }
     }
-    let temporary = tempfile::tempdir().unwrap();
+    let temporary = alt_os::temp::tempdir().unwrap();
     let root = temporary.path().join("bytes");
     let store = ByteStore::open(&root).unwrap();
     let hash = alt_hash::blake3::hash(b"abc").to_hex().to_string();
@@ -125,7 +125,7 @@ fn mid_stream_io_failure_does_not_publish_partial_bytes() {
 
 #[test]
 fn volume_capacity_observes_the_owned_directory_and_rejects_a_replaced_symlink() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = alt_os::temp::tempdir().unwrap();
     let path = temp.path().join("volume");
     let bytes = alt_server_store::ByteStore::open(&path).unwrap();
     let capacity = bytes.capacity().unwrap();
@@ -139,7 +139,7 @@ fn volume_capacity_observes_the_owned_directory_and_rejects_a_replaced_symlink()
 #[test]
 fn batch_persistence_preserves_order_duplicates_empty_objects_and_retry_identity() {
     use alt_server_store::ByteInput;
-    let temp = tempfile::tempdir().unwrap();
+    let temp = alt_os::temp::tempdir().unwrap();
     let store = ByteStore::open(&temp.path().join("bytes")).unwrap();
     let payloads = [b"abc".as_slice(), b"", b"abc", b"different"];
     let hashes: Vec<_> = payloads
@@ -177,7 +177,7 @@ fn batch_persistence_preserves_order_duplicates_empty_objects_and_retry_identity
 #[test]
 fn invalid_late_batch_input_never_installs_earlier_staged_bytes() {
     use alt_server_store::ByteInput;
-    let temp = tempfile::tempdir().unwrap();
+    let temp = alt_os::temp::tempdir().unwrap();
     let root = temp.path().join("bytes");
     let store = ByteStore::open(&root).unwrap();
     let hash = alt_hash::blake3::hash(b"abc").to_hex().to_string();
@@ -241,7 +241,7 @@ fn batch_metadata_limits_are_checked_before_reading_or_creating_scope_directorie
             panic!("invalid batch must not read a source")
         }
     }
-    let temp = tempfile::tempdir().unwrap();
+    let temp = alt_os::temp::tempdir().unwrap();
     let root = temp.path().join("bytes");
     let store = ByteStore::open(&root).unwrap();
     let hash = alt_hash::blake3::hash(b"abc").to_hex().to_string();
@@ -305,7 +305,7 @@ fn late_corrupt_or_symlink_incumbent_returns_no_batch_proofs_and_retry_verifies_
     use alt_server_store::ByteInput;
     use std::os::unix::fs::symlink;
     for symlink_fault in [false, true] {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = alt_os::temp::tempdir().unwrap();
         let root = temp.path().join("bytes");
         let store = ByteStore::open(&root).unwrap();
         let first = alt_hash::blake3::hash(b"first").to_hex().to_string();

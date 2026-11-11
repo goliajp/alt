@@ -24,10 +24,10 @@ fn open_at(parent: &File, name: &str, flags: i32) -> Result<File> {
     let name = cstr(name)?;
     // SAFETY: name is NUL terminated, and a successful descriptor is owned.
     let fd = unsafe {
-        libc::openat(
+        alt_os::sys::openat(
             parent.as_raw_fd(),
             name.as_ptr(),
-            flags | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+            flags | alt_os::sys::O_CLOEXEC | alt_os::sys::O_NOFOLLOW,
         )
     };
     if fd < 0 {
@@ -41,7 +41,9 @@ impl Root {
         Ok(Self(
             std::fs::OpenOptions::new()
                 .read(true)
-                .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+                .custom_flags(
+                    alt_os::sys::O_DIRECTORY | alt_os::sys::O_NOFOLLOW | alt_os::sys::O_CLOEXEC,
+                )
                 .open(path)?,
         ))
     }
@@ -53,13 +55,21 @@ impl Root {
             if parts.peek().is_none() {
                 return Ok((directory, part.to_owned()));
             }
-            directory = open_at(&directory, part, libc::O_RDONLY | libc::O_DIRECTORY)?;
+            directory = open_at(
+                &directory,
+                part,
+                alt_os::sys::O_RDONLY | alt_os::sys::O_DIRECTORY,
+            )?;
         }
         unreachable!("checked nonempty path")
     }
     pub fn copy(&self, path: &str, output: &mut dyn Write) -> Result<Node> {
         let (parent, name) = self.parent(path)?;
-        let mut file = open_at(&parent, &name, libc::O_RDONLY | libc::O_NONBLOCK)?;
+        let mut file = open_at(
+            &parent,
+            &name,
+            alt_os::sys::O_RDONLY | alt_os::sys::O_NONBLOCK,
+        )?;
         let before = file.metadata()?;
         if !before.is_file() {
             return Err(Error::Unsupported(format!("not a regular file: {path}")));
@@ -83,7 +93,12 @@ impl Root {
             remaining -= n as u64;
         }
         let after = file.metadata()?;
-        let current = open_at(&parent, &name, libc::O_RDONLY | libc::O_NONBLOCK)?.metadata()?;
+        let current = open_at(
+            &parent,
+            &name,
+            alt_os::sys::O_RDONLY | alt_os::sys::O_NONBLOCK,
+        )?
+        .metadata()?;
         let signature = |m: &std::fs::Metadata| {
             (
                 m.dev(),
@@ -116,26 +131,26 @@ impl Tree for Root {
     fn inspect(&self, path: &str) -> Result<Node> {
         let (parent, name) = self.parent(path)?;
         let name_c = cstr(&name)?;
-        let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
+        let mut stat = std::mem::MaybeUninit::<alt_os::sys::stat>::uninit();
         let result = unsafe {
-            libc::fstatat(
+            alt_os::sys::fstatat(
                 parent.as_raw_fd(),
                 name_c.as_ptr(),
                 stat.as_mut_ptr(),
-                libc::AT_SYMLINK_NOFOLLOW,
+                alt_os::sys::AT_SYMLINK_NOFOLLOW,
             )
         };
         if result != 0 {
             return Err(std::io::Error::last_os_error().into());
         }
         let stat = unsafe { stat.assume_init() };
-        match stat.st_mode & libc::S_IFMT {
-            libc::S_IFREG => self.copy(path, &mut std::io::sink()),
-            libc::S_IFDIR => Ok(Node::directory()),
-            libc::S_IFLNK => {
+        match stat.st_mode & alt_os::sys::S_IFMT {
+            alt_os::sys::S_IFREG => self.copy(path, &mut std::io::sink()),
+            alt_os::sys::S_IFDIR => Ok(Node::directory()),
+            alt_os::sys::S_IFLNK => {
                 let mut bytes = vec![0u8; 65536];
                 let len = unsafe {
-                    libc::readlinkat(
+                    alt_os::sys::readlinkat(
                         parent.as_raw_fd(),
                         name_c.as_ptr(),
                         bytes.as_mut_ptr().cast(),
@@ -163,32 +178,29 @@ impl Tree for Root {
     }
     fn children(&self, path: &str) -> Result<Vec<String>> {
         let (parent, name) = self.parent(path)?;
-        let directory = open_at(&parent, &name, libc::O_RDONLY | libc::O_DIRECTORY)?;
+        let directory = open_at(
+            &parent,
+            &name,
+            alt_os::sys::O_RDONLY | alt_os::sys::O_DIRECTORY,
+        )?;
         use std::os::fd::IntoRawFd;
         let fd = directory.into_raw_fd();
-        let stream = unsafe { libc::fdopendir(fd) };
+        let stream = unsafe { alt_os::sys::fdopendir(fd) };
         if stream.is_null() {
-            unsafe { libc::close(fd) };
+            unsafe { alt_os::sys::close(fd) };
             return Err(std::io::Error::last_os_error().into());
         }
-        struct Directory(*mut libc::DIR);
+        struct Directory(*mut alt_os::sys::DIR);
         impl Drop for Directory {
             fn drop(&mut self) {
-                unsafe { libc::closedir(self.0) };
+                unsafe { alt_os::sys::closedir(self.0) };
             }
         }
         let directory = Directory(stream);
         let mut children = Vec::new();
         loop {
-            #[cfg(target_os = "linux")]
-            unsafe {
-                *libc::__errno_location() = 0;
-            }
-            #[cfg(target_os = "macos")]
-            unsafe {
-                *libc::__error() = 0;
-            }
-            let entry = unsafe { libc::readdir(directory.0) };
+            alt_os::sys::clear_errno();
+            let entry = unsafe { alt_os::sys::readdir(directory.0) };
             if entry.is_null() {
                 let error = std::io::Error::last_os_error();
                 if error.raw_os_error() != Some(0) {

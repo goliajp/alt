@@ -51,7 +51,7 @@ fn assert_valid_json(json: &str) {
 
 #[test]
 fn clean_tree_reports_clean_with_empty_sections() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("a.txt"), "hello\n").unwrap();
@@ -79,7 +79,7 @@ fn clean_tree_reports_clean_with_empty_sections() {
 /// drives the new env vars — kind, id, and the optional session correlator.
 #[test]
 fn agent_principal_surfaces_via_status_json() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("f.txt"), "x\n").unwrap();
@@ -110,7 +110,7 @@ fn agent_principal_surfaces_via_status_json() {
 
 #[test]
 fn dirty_tree_classifies_staged_unstaged_untracked() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("tracked.txt"), "v1\n").unwrap();
@@ -142,7 +142,7 @@ fn dirty_tree_classifies_staged_unstaged_untracked() {
 
 #[test]
 fn conflict_surfaces_unmerged_paths() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("f.txt"), "line1\nline2\nline3\n").unwrap();

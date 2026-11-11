@@ -5,15 +5,15 @@ use alt_server_telemetry::Phase;
 use std::io::{Read, Seek, SeekFrom, Write};
 
 pub(super) fn decode(
-    mut source: tempfile::NamedTempFile,
+    mut source: alt_os::temp::NamedTempFile,
     max: u64,
-) -> Result<tempfile::NamedTempFile> {
+) -> Result<alt_os::temp::NamedTempFile> {
     alt_server_store::telemetry::observe(Phase::Decode, || {
         source.as_file_mut().seek(SeekFrom::Start(0))?;
         // Every member's checksum is checked and malformed trailing input is
         // refused. A valid concatenation is one HTTP decoded body.
         let mut decoder = alt_inflate::Reader::gzip_members(source.as_file_mut());
-        let mut output = tempfile::NamedTempFile::new()?;
+        let mut output = alt_os::temp::NamedTempFile::new()?;
         let mut bytes = 0u64;
         let mut buffer = [0u8; 16 * 1024];
         loop {

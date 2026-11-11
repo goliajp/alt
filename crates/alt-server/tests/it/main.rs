@@ -106,7 +106,7 @@ fn cloud_configuration_requires_exact_explicit_audience_and_private_runtime_key(
             .unwrap(),
         control_origin: "https://cloud.example.test".to_string().try_into().unwrap(),
     };
-    let dir = tempfile::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
     let key = dir.path().join("runtime.key");
     alt_server::operator::create_private(&key, "ab".repeat(32).as_bytes()).unwrap();
     config.cloud = Some(alt_server::operator::CloudConfig {

@@ -87,7 +87,7 @@ fn matrix_matches_git() {
     for (object_format, ref_format) in
         [("sha1", "files"), ("sha256", "files"), ("sha1", "reftable")]
     {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = alt_os::temp::tempdir().unwrap();
         common::make_repo_opts(tmp.path(), object_format, ref_format);
         matrix(tmp.path());
         common::pack_repo(tmp.path());
@@ -96,7 +96,7 @@ fn matrix_matches_git() {
         // the same matrix over the native backend: import via the real
         // CLI into a clean directory, then alt reads .alt while git
         // still reads the original repository
-        let alt_root = tempfile::tempdir().unwrap();
+        let alt_root = alt_os::temp::tempdir().unwrap();
         let import = run(
             env!("CARGO_BIN_EXE_alt"),
             tmp.path(),

@@ -392,14 +392,14 @@ impl NativeRepo<'_> {
                 let parent = abs.parent().ok_or("checkout path has no parent")?;
                 std::fs::create_dir_all(parent)?;
                 if state.mode == 0o120000 {
-                    let temp = tempfile::tempdir_in(parent)?;
+                    let temp = alt_os::temp::tempdir_in(parent)?;
                     let link = temp.path().join("link");
                     symlink_to(&bytes, &link)?;
                     crate::durable::rename(link, &abs)?;
                     std::fs::File::open(parent)?.sync_all()?;
                 } else {
                     use std::os::unix::fs::PermissionsExt;
-                    let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
+                    let mut tmp = alt_os::temp::NamedTempFile::new_in(parent)?;
                     tmp.write_all(&bytes)?;
                     tmp.as_file()
                         .set_permissions(std::fs::Permissions::from_mode(

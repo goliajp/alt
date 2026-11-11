@@ -72,7 +72,7 @@ fn retained_representations_preserve_wire_bytes_and_pass_independent_git() {
         )
         .unwrap();
         assert_eq!(decoded.representations.len(), data.len());
-        let output = tempfile::tempdir().unwrap();
+        let output = alt_os::temp::tempdir().unwrap();
         let mut writer = PackWriter::create_with_deltas(
             output.path(),
             algo,
@@ -89,7 +89,7 @@ fn retained_representations_preserve_wire_bytes_and_pass_independent_git() {
         }
         let written = writer.finish().unwrap();
         assert_eq!(std::fs::read(&written.pack_path).unwrap(), raw);
-        let repository = tempfile::tempdir().unwrap();
+        let repository = alt_os::temp::tempdir().unwrap();
         let init = Command::new("git")
             .args(["init", "--bare"])
             .arg(format!("--object-format={format}"))
@@ -126,7 +126,7 @@ fn retained_representations_preserve_wire_bytes_and_pass_independent_git() {
         }
         // Reuse failure must occur before any header/data is emitted, so the
         // original caller can still write a valid different object.
-        let output = tempfile::tempdir().unwrap();
+        let output = alt_os::temp::tempdir().unwrap();
         let mut writer = PackWriter::create(output.path(), algo, 1).unwrap();
         let different = b"current bytes changed";
         let oid = ObjectId::hash_object(algo, ObjectKind::Blob, different);
@@ -202,7 +202,7 @@ fn retention_bounds_never_change_decoded_objects_and_do_not_retain_deltas() {
             assert_eq!(object.data.as_slice(), original);
         }
     }
-    let output = tempfile::tempdir().unwrap();
+    let output = alt_os::temp::tempdir().unwrap();
     let mut writer =
         PackWriter::create_with_deltas(output.path(), HashAlgo::Sha1, 2, DeltaOptions::default())
             .unwrap();

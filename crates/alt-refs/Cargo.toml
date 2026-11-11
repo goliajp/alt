@@ -11,4 +11,4 @@ alt-hash.workspace = true
 alt-oplog.workspace = true
 
 [dev-dependencies]
-tempfile.workspace = true
+alt-os.workspace = true
