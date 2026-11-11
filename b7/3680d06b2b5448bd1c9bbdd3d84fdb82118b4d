@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: refactor
+summary: alt-lfs reads and writes json with alt-json
+author-type: human
+author: doracawl
+touched: Cargo.lock
+touched: crates/alt-lfs/Cargo.toml
+touched: crates/alt-lfs/src/fixtures/batch.txt
+touched: crates/alt-lfs/src/lib.rs
+touched: crates/alt-lfs/src/wire_tests.rs
+touched: crates/alt-lfs/tests/it/download.rs
