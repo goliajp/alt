@@ -1,7 +1,6 @@
 //! Device authorization wire values (RFC 8628). A client ID is a public label,
 //! never proof that a caller is trusted. Consent grants current account access.
 use crate::{Error, Result};
-use serde::{Deserialize, Serialize};
 
 pub const CLI_CLIENT_ID: &str = "alt-cli";
 pub const CLI_SCOPE: &str = "account";
@@ -32,8 +31,7 @@ pub fn user_code(value: &str) -> Result<String> {
     Ok(format!("{}-{}", &upper[..4], &upper[4..]))
 }
 
-#[derive(Deserialize, Serialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct DeviceAuthorizationRequest {
     pub client_id: String,
@@ -47,8 +45,7 @@ impl DeviceAuthorizationRequest {
         Ok(())
     }
 }
-#[derive(Deserialize, Serialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct DeviceAuthorizationResponse {
     pub device_code: String,
@@ -58,8 +55,7 @@ pub struct DeviceAuthorizationResponse {
     pub expires_in: u64,
     pub interval: u64,
 }
-#[derive(Deserialize, Serialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct DeviceTokenRequest {
     pub grant_type: String,
@@ -74,8 +70,7 @@ impl DeviceTokenRequest {
         device_secret(&self.device_code)
     }
 }
-#[derive(Deserialize, Serialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct DeviceTokenResponse {
     pub access_token: String,
@@ -83,10 +78,7 @@ pub struct DeviceTokenResponse {
     pub expires_in: u64,
     pub scope: String,
 }
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(rename_all = "snake_case")]
 pub enum DeviceError {
     InvalidRequest,
@@ -100,16 +92,14 @@ pub enum DeviceError {
     ExpiredToken,
     TemporarilyUnavailable,
 }
-#[derive(Deserialize, Serialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct DeviceFailure {
     pub error: DeviceError,
 }
 
 /// Private file envelope, bound to one origin/installation. No Debug output.
-#[derive(Deserialize, Serialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct SavedCredential {
     pub version: u32,

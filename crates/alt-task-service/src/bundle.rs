@@ -1,25 +1,21 @@
 use crate::{Error, RecordKey, Result, SourceCompletion};
 use alt_task::Artifact;
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct RecordSelection {
     pub record: RecordKey,
     pub payload: Artifact,
 }
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct AttachmentOmission {
     pub owner: RecordKey,
     pub artifact: Artifact,
     pub reason: String,
 }
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct CollectorAttestation {
     pub schema_version: u32,
@@ -46,8 +42,7 @@ impl CollectorAttestation {
 /// The content manifest selects exactly one bundle. Its raw digest binds the
 /// record inventory, companion selection, origin proofs and omission reasons
 /// into the same publication intent as refs and immutable root IDs.
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct TaskBundle {
     pub schema_version: u32,
@@ -59,8 +54,7 @@ pub struct TaskBundle {
     pub omissions: Vec<AttachmentOmission>,
     pub attestations: Vec<CollectorAttestation>,
 }
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Copy, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct TaskLimits {
     pub objects: usize,

@@ -18,7 +18,6 @@ mod change_links;
 pub mod provision;
 
 #[derive(Debug)]
-
 pub enum Error {
     Config(&'static str),
     File,

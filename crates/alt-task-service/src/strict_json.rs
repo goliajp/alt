@@ -1,8 +1,5 @@
 use alt_json::{Decoder, FromJson, Kind, Map, Value};
 
-#[cfg(test)]
-mod reference;
-
 // Duplicate fields in maps and arbitrary context JSON are otherwise silently
 // overwritten by Value/BTreeMap, even if the enclosing struct denies unknown
 // fields. Reject them before decoding any record or computing its identity.
@@ -40,4 +37,30 @@ pub(crate) fn decode(bytes: &[u8], limit: usize) -> crate::Result<Value> {
     }
     let Strict(value) = alt_json::from_slice(bytes)?;
     Ok(value)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn repeated_keys_are_rejected_at_any_depth() {
+        for (text, accepted) in [
+            (&br#"{"a":1,"a":1}"#[..], false),
+            (br#"{"a":{"b":1,"b":2}}"#, false),
+            (br#"[{"a":1,"a":2}]"#, false),
+            (br#"{"a":1,"a":2}"#, false),
+            (br#"{"":1,"":2}"#, false),
+            (br#"{"a":[{"x":1},{"x":2}]}"#, true),
+            (br#"{"a":1,"A":2}"#, true),
+            (b"1 2", false),
+            (b"", false),
+            (b"{} x", false),
+        ] {
+            assert_eq!(
+                super::decode(text, usize::MAX).is_ok(),
+                accepted,
+                "{}",
+                String::from_utf8_lossy(text)
+            );
+        }
+    }
 }

@@ -1,7 +1,6 @@
 use crate::{Error, Result, capture_file};
 use alt_input::ToolIdentity;
 use alt_task::{Artifact, Termination};
-use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     fs,
@@ -10,8 +9,7 @@ use std::{
     time::Duration,
 };
 
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct ToolBinding {
     pub name: String,

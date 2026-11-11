@@ -1,7 +1,6 @@
 use alt_remote_protocol::{RecordKind, RecordRoot, RequestKey, Scope};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-
 pub enum RequestAction {
     Query,
     Upload(String),
@@ -15,7 +14,6 @@ pub enum RequestAction {
     ReviewContent(String),
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-
 pub enum Route {
     ChangeLink(crate::change_links::route::ChangeRoute),
     Portable(crate::PortableRoute),

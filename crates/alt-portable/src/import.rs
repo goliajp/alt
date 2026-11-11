@@ -4,12 +4,8 @@ use crate::{Envelope, Error, PackageLimits, Result};
 use alt_crypto::ed25519::{Signature, SigningKey, VerifyingKey};
 use alt_provenance::{decode_hex, encode_hex};
 use alt_remote_protocol::{RequestKey, Scope};
-use serde::{Deserialize, Serialize};
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct IdentityMapping {
     pub installation_id: String,
@@ -19,10 +15,7 @@ pub struct IdentityMapping {
     pub target_actor: Option<String>,
 }
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct ImportIntent {
     pub version: u32,
@@ -125,18 +118,13 @@ impl ImportIntent {
     }
 }
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct ImportReceiptBody {
     pub version: u32,
     pub intent: ImportIntent,
-    #[serde(with = "crate::decimal")]
     #[json(with = "alt_json::with::decimal_u64")]
     pub transaction_sequence: u64,
-    #[serde(with = "crate::decimal")]
     #[json(with = "alt_json::with::decimal_u64")]
     pub committed_at_unix_ms: u64,
 }
@@ -155,10 +143,7 @@ impl ImportReceiptBody {
     }
 }
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct ImportReceipt {
     pub body: ImportReceiptBody,

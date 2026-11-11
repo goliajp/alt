@@ -2,13 +2,9 @@ use crate::{
     Attribution, Error, Limits, ObjectFormat, RequestKey, Result, VERSION, hex, validate_ref_name,
     version,
 };
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct RefUpdate {
     pub name: String,
@@ -31,19 +27,8 @@ impl RefUpdate {
 }
 
 #[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-    alt_json::ToJson,
-    alt_json::FromJson,
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, alt_json::ToJson, alt_json::FromJson,
 )]
-#[serde(rename_all = "snake_case")]
 #[json(rename_all = "snake_case")]
 pub enum RecordKind {
     Task,
@@ -67,19 +52,7 @@ impl RecordKind {
     }
 }
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-    alt_json::ToJson,
-    alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct RecordRoot {
     pub kind: RecordKind,
@@ -93,10 +66,7 @@ impl RecordRoot {
 
 /// The selected roots are explicit. Ordinary Git push has no such selection
 /// and never implicitly uploads a local private task store.
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct Publication {
     pub protocol_version: u32,
@@ -174,19 +144,8 @@ impl Publication {
 }
 
 #[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-    alt_json::ToJson,
-    alt_json::FromJson,
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, alt_json::ToJson, alt_json::FromJson,
 )]
-#[serde(rename_all = "snake_case")]
 #[json(rename_all = "snake_case")]
 pub enum ContentKind {
     Commit,
@@ -211,41 +170,29 @@ impl ContentKind {
     }
 }
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct Chunk {
-    #[serde(with = "crate::decimal")]
     #[json(with = "alt_json::with::decimal_u64")]
     pub offset: u64,
-    #[serde(with = "crate::decimal")]
     #[json(with = "alt_json::with::decimal_u64")]
     pub bytes: u64,
     pub blake3: String,
 }
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct ContentEntry {
     pub kind: ContentKind,
     /// BLAKE3 of the payload bytes, independent of a Git object's header.
     pub blake3: String,
-    #[serde(with = "crate::decimal")]
     #[json(with = "alt_json::with::decimal_u64")]
     pub bytes: u64,
     /// Git kinds require their Git object ID; task/attachment bytes have none.
     pub git_oid: Option<String>,
     pub chunks: Vec<Chunk>,
 }
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct Manifest {
     pub protocol_version: u32,

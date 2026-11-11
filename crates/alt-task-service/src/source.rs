@@ -1,6 +1,5 @@
 use crate::{Error, RecordKey, RecordKind, Result, TaskRecord, strict_json};
 use alt_task::Artifact;
-use serde::{Deserialize, Serialize};
 use std::io::Read;
 
 /// Implementations expose only repository-authorized, pinned, selected bytes.
@@ -55,8 +54,7 @@ pub(crate) fn verify_artifact(
     }
     Ok(())
 }
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct SourceCompletion {
     pub schema_version: u32,

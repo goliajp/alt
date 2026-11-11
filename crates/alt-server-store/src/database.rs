@@ -7,7 +7,6 @@ const STATEMENT_LIMIT: usize = 256;
 pub(crate) const BATCH_ROWS: usize = 1024;
 
 #[derive(Default)]
-
 struct Statements {
     values: HashMap<String, Statement>,
     order: VecDeque<String>,

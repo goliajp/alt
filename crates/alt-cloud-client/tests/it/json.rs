@@ -151,35 +151,38 @@ fn contract_types_through_the_bridge() {
     total.report("bridge, platform contract types in total");
 }
 
-/// what the client sends, and the associated data a sealed grant is bound
-/// to, built the old way and the new way
-#[test]
-fn request_bodies_and_sealing_input_are_the_same_bytes() {
+/// What the client sends, and the associated data a sealed grant is bound
+/// to, one line per round.
+fn request_bodies(rounds: u64) -> String {
     let mut rng = Rng::new(0xab);
-    for _ in 0..20_000 {
+    let mut lines = String::new();
+    for _ in 0..rounds {
         let audience = audience(&mut rng);
         let grant = secret(&mut rng);
         let digest = format!("{:064x}", rng.next_u64());
-        assert_eq!(
-            alt_json::to_vec(&alt_json::json!({"version": VERSION, "audience": Serde(&audience), "grant": Serde(&grant)}))
-                .unwrap(),
-            serde_json::to_vec(&serde_json::json!({"version": VERSION, "audience": audience, "grant": grant})).unwrap()
-        );
-        assert_eq!(
-            alt_json::to_vec(&alt_json::json!({"version": VERSION, "audience": Serde(&audience)}))
-                .unwrap(),
-            serde_json::to_vec(&serde_json::json!({"version": VERSION, "audience": audience}))
-                .unwrap()
-        );
-        assert_eq!(
-            alt_json::to_vec(&(VERSION, Serde(&audience), digest.as_str())).unwrap(),
-            serde_json::to_vec(&(VERSION, &audience, digest.as_str())).unwrap()
-        );
         let exchange = ticket_exchange(&mut rng);
-        assert_eq!(
+        let parts = [
+            alt_json::to_vec(&alt_json::json!({"version": VERSION, "audience": Serde(&audience), "grant": Serde(&grant)})).unwrap(),
+            alt_json::to_vec(&alt_json::json!({"version": VERSION, "audience": Serde(&audience)})).unwrap(),
+            alt_json::to_vec(&(VERSION, Serde(&audience), digest.as_str())).unwrap(),
             alt_json::to_vec(&Serde(&exchange)).unwrap(),
-            serde_json::to_vec(&exchange).unwrap()
-        );
+        ];
+        for part in parts {
+            lines += std::str::from_utf8(&part).unwrap();
+            lines.push('\t');
+        }
+        lines.push('\n');
     }
-    println!("alt-cloud-client request bodies: 80000 comparisons");
+    lines
+}
+
+#[test]
+fn request_bodies_and_sealing_input_are_the_recorded_bytes() {
+    alt_json_testkit::fixtures::assert_stored(
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/it/fixtures/request-bodies.txt"
+        ),
+        &request_bodies(40),
+    );
 }

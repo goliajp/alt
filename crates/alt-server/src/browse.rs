@@ -345,7 +345,7 @@ mod json_tests {
                         path: any(rng),
                         display_path: any(rng),
                         oid: any(rng),
-                        kind: *rng.pick(&["tree", "blob", "commit"]),
+                        kind: rng.pick(&["tree", "blob", "commit"]),
                         bytes: any(rng),
                     })
                     .collect(),

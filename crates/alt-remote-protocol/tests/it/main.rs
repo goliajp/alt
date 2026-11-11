@@ -100,9 +100,9 @@ fn rejects_duplicate_refs_roots_and_ignored_extensions() {
         .record_roots
         .push(duplicate.record_roots[0].clone());
     assert!(duplicate.digest(limits()).is_err());
-    let mut json = serde_json::to_value(&p).unwrap();
+    let mut json = alt_json::to_value(&p).unwrap();
     json["ignored_option"] = true.into();
-    assert!(Publication::decode(&serde_json::to_vec(&json).unwrap(), limits()).is_err());
+    assert!(Publication::decode(&alt_json::to_vec(&json).unwrap(), limits()).is_err());
     let mut future = p;
     future.protocol_version = 2;
     assert_eq!(future.digest(limits()), Err(Error::Version(2)));
@@ -158,7 +158,7 @@ fn invalid_ref_paths_never_reach_a_storage_adapter() {
 #[test]
 fn request_limits_apply_before_json_parse_and_canonical_output() {
     let p = publication();
-    let bytes = serde_json::to_vec(&p).unwrap();
+    let bytes = alt_json::to_vec(&p).unwrap();
     let mut l = limits();
     l.request_bytes = bytes.len() - 1;
     assert_eq!(
@@ -251,12 +251,12 @@ fn receipt_authenticates_the_exact_publication_and_transaction() {
 }
 #[test]
 fn unknown_is_observation_and_cannot_be_persisted_as_a_terminal_decision() {
-    assert!(serde_json::from_str::<RequestState>(r#"{"state":"unknown"}"#).is_err());
+    assert!(alt_json::from_str::<RequestState>(r#"{"state":"unknown"}"#).is_err());
     let value = RequestObservation::Unknown {
         key: publication().key,
     };
     assert_eq!(
-        serde_json::from_slice::<RequestObservation>(&serde_json::to_vec(&value).unwrap()).unwrap(),
+        alt_json::from_slice::<RequestObservation>(&alt_json::to_vec(&value).unwrap()).unwrap(),
         value
     );
     assert!(
@@ -339,21 +339,21 @@ fn counters_round_trip_above_javascript_integer_precision_without_coercion() {
     let mut p = publication();
     p.key.scope.recovery_epoch = u64::MAX;
     let bytes = p.canonical_bytes(limits()).unwrap();
-    let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let value: alt_json::Value = alt_json::from_slice(&bytes).unwrap();
     assert_eq!(
         value["key"]["scope"]["recovery_epoch"],
         u64::MAX.to_string()
     );
     assert_eq!(Publication::decode(&bytes, limits()).unwrap(), p);
     for invalid in [
-        serde_json::json!(1),
-        serde_json::json!("01"),
-        serde_json::json!("+1"),
-        serde_json::json!("18446744073709551616"),
+        alt_json::json!(1),
+        alt_json::json!("01"),
+        alt_json::json!("+1"),
+        alt_json::json!("18446744073709551616"),
     ] {
         let mut bad = value.clone();
         bad["key"]["scope"]["recovery_epoch"] = invalid;
-        assert!(Publication::decode(&serde_json::to_vec(&bad).unwrap(), limits()).is_err());
+        assert!(Publication::decode(&alt_json::to_vec(&bad).unwrap(), limits()).is_err());
     }
 }
 

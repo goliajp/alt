@@ -30,7 +30,6 @@ pub use bytes::*;
 pub use store::*;
 
 #[derive(Debug)]
-
 pub enum Error {
     Portable(alt_portable::Error),
     Io(std::io::Error),

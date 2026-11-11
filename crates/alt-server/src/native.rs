@@ -7,7 +7,6 @@ use std::io::Read;
 
 pub use alt_remote_protocol::{ApprovalRequest, BeginRequest};
 #[derive(Clone)]
-
 pub struct NativeOptions {
     pub portable: Option<alt_portable::http::Bounds>,
     pub task_limits: TaskLimits,

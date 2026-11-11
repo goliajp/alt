@@ -2,23 +2,19 @@
 //! These facts do not grant permissions or describe ordinary publications.
 use crate::{Blob, Envelope, ImportIntent, ImportReceipt};
 use alt_remote_protocol::{RequestKey, Scope};
-use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct BeginImport {
     pub intent: ImportIntent,
     pub envelope: Envelope,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ImportState {
     Receiving {
         digest: String,
-        #[serde(with = "crate::decimal")]
         #[json(with = "alt_json::with::decimal_u64")]
         expires_at_unix_ms: u64,
         missing: Vec<Blob>,
@@ -37,15 +33,13 @@ pub enum ImportState {
     },
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ExportState {
     Preparing {
         scope: Scope,
         export_id: String,
         catalog_digest: String,
-        #[serde(with = "crate::decimal")]
         #[json(with = "alt_json::with::decimal_u64")]
         snapshot_sequence: u64,
     },
@@ -71,24 +65,19 @@ pub enum ExportState {
 
 /// Explicit operator limits. The sender cannot enlarge destination budgets.
 /// Decimal strings keep byte counts exact in browser clients.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Copy, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct Bounds {
     pub metadata_bytes: usize,
     pub entries: usize,
     pub publications: usize,
-    #[serde(with = "crate::decimal")]
     #[json(with = "alt_json::with::decimal_u64")]
     pub blob_bytes: u64,
-    #[serde(with = "crate::decimal")]
     #[json(with = "alt_json::with::decimal_u64")]
     pub total_bytes: u64,
-    #[serde(with = "crate::decimal")]
     #[json(with = "alt_json::with::decimal_u64")]
     pub work_bytes: u64,
     pub reads: usize,
-    #[serde(with = "crate::decimal")]
     #[json(with = "alt_json::with::decimal_u64")]
     pub import_ttl_ms: u64,
 }
@@ -123,8 +112,7 @@ impl Bounds {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct Capabilities {
     pub version: u32,
@@ -135,16 +123,14 @@ pub struct Capabilities {
 
 /// Inspection authenticates the exact canonical archive header against a
 /// separately supplied source identity and key. It never stages or activates.
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct InspectArchive {
     pub source: Scope,
     pub source_public_key: String,
     pub metadata: String,
 }
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct InspectedArchive {
     pub envelope: Envelope,

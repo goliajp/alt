@@ -9,7 +9,6 @@ use input::{DeviceDecision, Empty, Login, NewUser, UserState};
 use std::{io::Read, net::IpAddr};
 
 #[derive(Clone)]
-
 pub struct WebOptions {
     pub origin: PublicOrigin,
     pub assets: crate::WebAssets,

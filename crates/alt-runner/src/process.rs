@@ -1,7 +1,6 @@
 use crate::{Error, Result, now_ns};
 use alt_input::Context;
 use alt_task::Termination;
-use serde::{Deserialize, Serialize};
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::{
     collections::BTreeMap,
@@ -11,8 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct CommandObservation {
     pub argv: Vec<String>,

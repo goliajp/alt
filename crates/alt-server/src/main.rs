@@ -26,7 +26,6 @@ struct Args {
     command: Action,
 }
 #[derive(Subcommand)]
-
 enum Action {
     /// Restore or reconcile one frozen Cloud recovery into a new incarnation
     CloudRestore {
@@ -238,7 +237,6 @@ enum Action {
     },
 }
 #[derive(Clone, ValueEnum)]
-
 enum SecretKind {
     ReceiptKey,
     Token,

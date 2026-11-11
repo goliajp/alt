@@ -1,10 +1,7 @@
 //! Shared capability syntax; only an authority adapter can grant it.
 use crate::{Error, Result};
 
-#[derive(
-    Clone, Debug, serde::Serialize, serde::Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct Grant {
     pub refs: RefSelector,
@@ -16,10 +13,7 @@ pub struct Grant {
     /// raw Git bytes, matched at component boundaries, never lossy UTF-8.
     pub paths: Option<Vec<Vec<u8>>>,
 }
-#[derive(
-    Clone, Debug, serde::Serialize, serde::Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub enum RefSelector {
     Exact(String),

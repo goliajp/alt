@@ -2,10 +2,8 @@
 //! contain no operator secrets and confer no current authority by themselves.
 use crate::RequestKey;
 use golia_change_link as link;
-use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct ChangeMappingRequest {
     pub key: RequestKey,
@@ -19,8 +17,7 @@ pub struct ChangeMappingRequest {
     pub expected_previous: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct ChangeWithdrawalRequest {
     pub key: RequestKey,
@@ -31,8 +28,7 @@ pub struct ChangeWithdrawalRequest {
     pub reason: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct RepairBindingRequest {
     pub key: RequestKey,
@@ -41,7 +37,7 @@ pub struct RepairBindingRequest {
     pub repair_request_digest: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 pub struct ChangeChannelStatus {
     pub channel: String,
     pub application: String,
@@ -49,12 +45,11 @@ pub struct ChangeChannelStatus {
     pub peer: link::Endpoint,
     pub configuration_digest: String,
     pub enabled: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[json(default, skip_serializing_if = "Option::is_none")]
     pub peer_browser_origin: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 pub struct ChangeEventSummary {
     pub digest: String,
     pub channel: String,
@@ -70,16 +65,13 @@ pub struct ChangeEventSummary {
     pub can_reauthorize: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 pub struct ChangeEventPage {
     pub entries: Vec<ChangeEventSummary>,
     pub next: Option<String>,
 }
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct RepairTaskClaim {
     pub repair_request_digest: String,

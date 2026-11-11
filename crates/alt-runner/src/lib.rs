@@ -7,7 +7,6 @@ mod tools;
 use alt_input::{Context, Manifest};
 use alt_task::{Artifact, Evidence, Provenance, Termination};
 pub use inputs::{InputObservation, materialize, observe_inputs, output_roots};
-use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, path::Path};
 pub use tools::{ToolBinding, probe};
 
@@ -80,8 +79,7 @@ pub fn host_identity() -> Result<String> {
     ))
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct Spec {
     pub schema_version: u32,
@@ -93,8 +91,7 @@ pub struct Spec {
     pub runner: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct Report {
     pub schema_version: u32,

@@ -1,23 +1,19 @@
 //! Versioned native HTTP payloads shared by transports and storage adapters.
 use crate::{Attribution, Capabilities, Manifest, Publication, Receipt, Scope};
-use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct CapabilityResponse {
     pub capabilities: Capabilities,
     pub receipt_public_key: String,
 }
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct BeginRequest {
     pub publication: Publication,
     pub manifest: Manifest,
 }
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct ApprovalRequest {
     pub integration_id: String,
@@ -25,10 +21,7 @@ pub struct ApprovalRequest {
 }
 /// Exact state shown to the reviewer. The approving transaction compares this
 /// with current authority; it cannot silently adopt a later policy or target.
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct ApprovalContext {
     pub request_digest: String,
@@ -38,21 +31,18 @@ pub struct ApprovalContext {
     pub revocation_generation: String,
     pub target_refs: std::collections::BTreeMap<String, Option<String>>,
 }
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct UploadStatus {
     pub verified_chunks: Vec<String>,
 }
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct PrincipalInfo {
     pub actor_id: String,
     pub attribution: Attribution,
 }
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct RepositoryInfo {
     pub scope: Scope,
@@ -62,19 +52,16 @@ pub struct RepositoryInfo {
     pub policy_version: String,
     pub revocation_generation: String,
 }
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct PublishedBundle {
     pub publication: Publication,
     pub manifest: Manifest,
     pub receipt: Receipt,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[json(default, skip_serializing_if = "Vec::is_empty")]
     pub provenance: Vec<crate::TransferProof>,
 }
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct ReviewSelection {
     pub publication: Publication,

@@ -1,7 +1,6 @@
 use alt_remote_protocol::{RequestKey, Scope};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-
 pub enum ExportAction {
     Prepare,
     Query,
@@ -12,7 +11,6 @@ pub enum ExportAction {
     Retire,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-
 pub enum ImportAction {
     Begin,
     Query,
@@ -21,7 +19,6 @@ pub enum ImportAction {
     Abandon,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-
 pub enum PortableRoute {
     Capabilities,
     Inspect(Scope),

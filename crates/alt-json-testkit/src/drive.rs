@@ -4,8 +4,9 @@
 use alt_json::{Map, Value};
 
 use crate::generate;
+use crate::oneway::read;
 use crate::rng::Rng;
-use crate::support::{Both, Comparable, Tally, input, output, read};
+use crate::support::{Both, Comparable, Tally, input, output};
 
 /// bytes that matter to the grammar, for damaging a document
 pub const INTERESTING: &[u8] =

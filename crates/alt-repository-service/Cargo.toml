@@ -10,8 +10,6 @@ alt-json.workspace = true
 alt-git-codec.workspace = true
 alt-remote-protocol.workspace = true
 alt-bytes.workspace = true
-serde.workspace = true
 
 [dev-dependencies]
 alt-json-testkit.workspace = true
-serde_json.workspace = true

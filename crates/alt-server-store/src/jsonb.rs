@@ -9,7 +9,6 @@ type Failure = Box<dyn std::error::Error + Sync + Send>;
 
 /// A `json` or `jsonb` parameter or column.
 #[derive(Clone, Debug, PartialEq, Eq)]
-
 pub struct Jsonb(pub Value);
 
 /// The binary form of `jsonb` is this version byte followed by the text.

@@ -6,7 +6,7 @@ use golia_change_link::{
 };
 
 pub(super) fn legacy() -> Task {
-    serde_json::from_slice(include_bytes!("fixtures/task-v1.json")).unwrap()
+    alt_json::from_slice(include_bytes!("fixtures/task-v1.json")).unwrap()
 }
 fn source(target: &str) -> RepairSource {
     let sender = SigningKey::from_bytes(&[3; 32]);
@@ -69,9 +69,9 @@ fn old_task_encoding_and_identity_remain_byte_compatible() {
     let task = legacy();
     assert!(task.spec.repair_source.is_none());
     assert_eq!(task.id().unwrap(), expected);
-    let old: serde_json::Value =
-        serde_json::from_slice(include_bytes!("fixtures/task-v1.json")).unwrap();
-    assert_eq!(serde_json::to_value(&task).unwrap(), old);
+    let old: alt_json::Value =
+        alt_json::from_slice(include_bytes!("fixtures/task-v1.json")).unwrap();
+    assert_eq!(alt_json::to_value(&task).unwrap(), old);
 }
 
 #[test]
@@ -81,9 +81,9 @@ fn source_is_bound_to_the_task_identity_and_its_exact_integration_target() {
     task.spec.repair_source = Some(Box::new(source("refs/heads/main")));
     let linked = task.id().unwrap();
     assert_ne!(plain, linked);
-    let raw = serde_json::to_vec(&task).unwrap();
+    let raw = alt_json::to_vec(&task).unwrap();
     assert_eq!(
-        serde_json::from_slice::<Task>(&raw).unwrap().id().unwrap(),
+        alt_json::from_slice::<Task>(&raw).unwrap().id().unwrap(),
         linked
     );
     // Even a valid original source/receiver signature cannot be reinterpreted

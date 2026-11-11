@@ -17,7 +17,6 @@ impl Entry {
     }
 }
 #[derive(Default)]
-
 struct Indexes {
     entries: BTreeMap<String, Entry>,
     bytes: usize,

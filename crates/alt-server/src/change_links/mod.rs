@@ -102,7 +102,6 @@ impl ChannelConfig {
     }
 }
 #[derive(Clone)]
-
 pub struct ChannelRuntime {
     pub(crate) config: ChannelConfig,
     pub(crate) digest: String,
@@ -136,7 +135,6 @@ impl ChannelRuntime {
 }
 
 #[derive(Clone, Default)]
-
 struct Cursors {
     claims: Option<String>,
     events: Option<String>,

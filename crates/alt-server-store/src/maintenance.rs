@@ -39,7 +39,6 @@ pub struct InstanceAuditEntry {
     pub occurred_at_unix_ms: String,
 }
 #[derive(Clone, Copy)]
-
 pub enum BackupEvent {
     Started,
     Created,

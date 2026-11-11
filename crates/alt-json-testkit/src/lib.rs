@@ -11,6 +11,7 @@ pub mod check;
 pub mod drive;
 pub mod fixtures;
 pub mod generate;
+pub mod oneway;
 pub mod rng;
 pub mod support;
 

@@ -1,13 +1,11 @@
 use crate::route::{digest, id};
 use alt_remote_protocol::{RequestKey, Scope};
 #[derive(Clone, Debug, PartialEq, Eq)]
-
 pub enum ChangeRoute {
     Inbox,
     Scoped(Scope, Action),
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-
 pub enum Action {
     Channels,
     Events(Option<String>),

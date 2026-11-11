@@ -16,7 +16,6 @@ alt-base64.workspace = true
 alt-json-testkit.workspace = true
 alt-json.workspace = true
 alt-json-serde.workspace = true
-serde_json.workspace = true
 tiny_http.workspace = true
 [[test]]
 name = "it"

@@ -33,7 +33,6 @@ impl InstanceSpec {
 /// An authenticated handle contains no token secret and cannot be constructed
 /// by callers. Every operation rechecks the credential in the DB transaction.
 #[derive(Clone)]
-
 pub struct Credential {
     pub(crate) digest: String,
 }

@@ -1,20 +1,17 @@
 use crate::{CollectorAttestation, Error, Result};
 use alt_crypto::ed25519::{Signature, VerifyingKey};
-use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Supplied by the repository's current policy adapter, never by the bundle.
 /// The adapter must recheck its generation at the publishing transaction.
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct TrustedCollector {
     pub public_key_hex: String,
     pub runners: BTreeSet<String>,
     pub expires_unix_ms: u64,
 }
-#[derive(Clone, Debug, Default, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Default, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct CollectorPolicy {
     pub keys: BTreeMap<String, TrustedCollector>,
@@ -46,8 +43,7 @@ fn decode_key(hex: &str) -> Result<VerifyingKey> {
     }
     Ok(key)
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, alt_json::ToJson)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson)]
 #[json(rename_all = "snake_case")]
 pub enum CollectorTrust {
     Trusted,

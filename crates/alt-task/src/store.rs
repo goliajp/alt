@@ -12,8 +12,7 @@ pub struct Store {
     blobs: alt_store::BlobStore,
     _lock: File,
 }
-#[derive(serde::Serialize, serde::Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 struct Envelope<T> {
     schema_version: u32,

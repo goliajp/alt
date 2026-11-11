@@ -8,8 +8,9 @@
 use alt_json::{FromJson, ToJson};
 
 use crate::drive::{duplicate_key, edit};
+use crate::oneway::{read, written};
 use crate::rng::Rng;
-use crate::support::{Comparable, Tally, input, output, read, written};
+use crate::support::{Comparable, Tally, input, output};
 
 /// Builds the fixture of `T` from `samples` values, checking alt-json
 /// against serde on every line it records.
