@@ -9,16 +9,18 @@ use std::{
     path::{Path, PathBuf},
 };
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 struct ExportRequest {
     version: u32,
     binding: Binding,
     key: RequestKey,
     output: PathBuf,
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 struct ArchiveFact {
     version: u32,
     catalog_digest: String,
@@ -223,4 +225,11 @@ pub fn control(
     serde_json::to_writer(&mut *out, &result)?;
     out.write_all(b"\n")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod json_tests {
+    use super::*;
+
+    alt_json_testkit::module_tests!("portable-export", 0xc10b; ExportRequest, ArchiveFact);
 }

@@ -1,7 +1,8 @@
 use super::*;
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 struct ReviewContext {
     binding: Binding,
     selection: protocol::ReviewSelection,
@@ -215,4 +216,11 @@ impl NativeRepo<'_> {
             json!({"request":key,"request_digest":digest,"integration_id":integration,"approved":true}),
         )
     }
+}
+
+#[cfg(test)]
+mod json_tests {
+    use super::*;
+
+    alt_json_testkit::module_tests!("native-task-transfer-current_review", 0xc10a; ReviewContext);
 }

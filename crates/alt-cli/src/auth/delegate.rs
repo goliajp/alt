@@ -4,16 +4,18 @@ use alt_remote_protocol::{
     delegation::{AgentScope, DelegationInfo, DelegationRequest, MAX_LIFETIME_MS},
 };
 
-#[derive(Deserialize)]
+#[derive(Deserialize, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 struct Plan {
     purpose: String,
     agent_session: String,
     lifetime_seconds: u64,
     scope: AgentScope,
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 struct PendingAgent {
     version: u32,
     origin: String,
@@ -241,4 +243,11 @@ pub(super) fn run(
     result["purpose"] = json!(pending.request.purpose);
     result["pending_state_removed"] = json!(clean(&directory));
     Ok(result)
+}
+
+#[cfg(test)]
+mod json_tests {
+    use super::*;
+
+    alt_json_testkit::module_tests!("auth-delegate", 0xc101; PendingAgent);
 }

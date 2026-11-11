@@ -67,8 +67,10 @@ regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 alt-json.workspace = true
+alt-json-serde.workspace = true
 
 [dev-dependencies]
+alt-json-testkit.workspace = true
 alt-browser-auth.workspace = true
 alt-deflate.workspace = true
 alt-server.workspace = true

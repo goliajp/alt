@@ -4,8 +4,9 @@ use alt_remote_protocol::{RequestKey, Scope};
 use serde::{Deserialize, Serialize};
 use std::{io::Write, path::Path};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 struct ImportRequest {
     version: u32,
     binding: Binding,
@@ -238,4 +239,11 @@ pub fn control(
             super::uncertain(error, &request.intent.key, journal_path)
         }
     })
+}
+
+#[cfg(test)]
+mod json_tests {
+    use super::*;
+
+    alt_json_testkit::module_tests!("portable-import", 0xc10c; ImportRequest);
 }

@@ -73,6 +73,8 @@ dependencies = [
  "alt-inflate",
  "alt-input",
  "alt-json",
+ "alt-json-serde",
+ "alt-json-testkit",
  "alt-lfs",
  "alt-merge",
  "alt-odb",

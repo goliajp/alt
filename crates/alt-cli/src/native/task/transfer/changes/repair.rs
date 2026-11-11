@@ -1,8 +1,9 @@
 use super::*;
 use std::collections::BTreeSet;
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 struct Creation {
     version: u32,
     repair: String,
@@ -244,4 +245,11 @@ impl NativeRepo<'_> {
         drop(original_lock);
         Ok(())
     }
+}
+
+#[cfg(test)]
+mod json_tests {
+    use super::*;
+
+    alt_json_testkit::module_tests!("native-task-transfer-changes-repair", 0xc109; Creation);
 }

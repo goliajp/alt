@@ -16,8 +16,9 @@ mod transfer_source;
 
 pub(super) const TASK_OPERATION: u8 = 0x34;
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub(super) struct TaskOperation {
     pub version: u32,
     pub workspace: recovery::WorkspaceIdentity,
@@ -289,4 +290,11 @@ impl NativeRepo<'_> {
         }
         Ok(())
     }
+}
+
+#[cfg(test)]
+mod json_tests {
+    use super::*;
+
+    alt_json_testkit::module_tests!("native-task", 0xc104; TaskOperation);
 }

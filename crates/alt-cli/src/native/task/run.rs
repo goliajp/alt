@@ -8,8 +8,9 @@ use std::{
 
 mod transport;
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, alt_json::FromJson)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[json(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(super) enum Profile {
     Local {
         scratch: PathBuf,

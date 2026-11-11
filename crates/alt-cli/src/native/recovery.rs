@@ -7,8 +7,11 @@ use serde::{Deserialize, Serialize};
 pub(super) const PREPARE: u8 = 0x30;
 pub(super) const COMPLETE: u8 = 0x31;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub(super) struct WorkspaceIdentity {
     pub name: String,
     pub instance: String,
@@ -16,8 +19,20 @@ pub(super) struct WorkspaceIdentity {
 
 /// Recovery semantics are written by the operation, never inferred from an
 /// actor label or from the absence of a checkout in historical records.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    alt_json::ToJson,
+    alt_json::FromJson,
+)]
 #[serde(rename_all = "snake_case")]
+#[json(rename_all = "snake_case")]
 pub(super) enum RefEffects {
     #[default]
     Unknown,
@@ -25,33 +40,42 @@ pub(super) enum RefEffects {
     Checkout,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub(super) struct RefContext {
     pub version: u32,
     #[serde(default)]
+    #[json(default)]
     pub effects: RefEffects,
     pub workspace: WorkspaceIdentity,
     pub inverse_of: Option<String>,
     #[serde(default)]
+    #[json(default)]
     pub checkout: Option<checkout_recovery::CheckoutIntent>,
     #[serde(default)]
+    #[json(default)]
     pub request_id: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 struct PathGuard {
     path: Vec<u8>,
     state: Option<(u32, String)>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub(super) struct IndexIntent {
     version: u32,
     pub(super) workspace: WorkspaceIdentity,
     #[serde(default)]
+    #[json(default)]
     pub(super) request_id: Option<String>,
     before: String,
     after: String,
@@ -59,12 +83,14 @@ pub(super) struct IndexIntent {
     inverse_of: Option<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 struct Completion {
     version: u32,
     prepared: String,
     #[serde(default)]
+    #[json(default)]
     request_id: Option<String>,
 }
 
@@ -673,4 +699,11 @@ mod tests {
         durable_write(&relative, b"durable state").unwrap();
         assert_eq!(std::fs::read(relative).unwrap(), b"durable state");
     }
+}
+
+#[cfg(test)]
+mod json_tests {
+    use super::*;
+
+    alt_json_testkit::module_tests!("native-recovery", 0xc103; WorkspaceIdentity, RefEffects, RefContext, PathGuard, IndexIntent, Completion);
 }

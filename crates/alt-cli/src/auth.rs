@@ -18,8 +18,9 @@ use std::{
 };
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 struct Pending {
     version: u32,
     origin: String,
@@ -27,8 +28,9 @@ struct Pending {
     started_at_unix_ms: u64,
     authorization: DeviceAuthorizationResponse,
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 struct Issued {
     version: u32,
     device_digest: String,
@@ -475,4 +477,11 @@ fn login(
     let mut result = summary(&value, path);
     result["pending_state_removed"] = json!(clean_journal(&directory));
     Ok(result)
+}
+
+#[cfg(test)]
+mod json_tests {
+    use super::*;
+
+    alt_json_testkit::module_tests!("auth", 0xc100; Pending, Issued);
 }

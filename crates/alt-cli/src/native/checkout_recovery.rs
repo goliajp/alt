@@ -8,27 +8,33 @@ use serde::{Deserialize, Serialize};
 pub(super) const PREPARE_CHECKOUT: u8 = 0x32;
 pub(super) const COMPLETE_CHECKOUT: u8 = 0x33;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 struct FileState {
     mode: u32,
     contents: String,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 struct FileChange {
     path: Vec<u8>,
     before: Option<FileState>,
     after: Option<FileState>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub(super) struct CheckoutIntent {
     version: u32,
     pub(super) workspace: WorkspaceIdentity,
     #[serde(default)]
+    #[json(default)]
     pub(super) request_id: Option<String>,
     index_before: String,
     index_after: String,
@@ -37,8 +43,9 @@ pub(super) struct CheckoutIntent {
 
 /// A complete tracked prestate for a multi-step operation such as rebase.
 /// Stored by content identity so a restarted command cannot invent a prestate.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 struct WorkspaceSnapshot {
     version: u32,
     workspace: WorkspaceIdentity,
@@ -46,12 +53,14 @@ struct WorkspaceSnapshot {
     files: Vec<(Vec<u8>, Option<FileState>)>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub(super) struct CheckoutDone {
     pub(super) version: u32,
     pub(super) prepared: String,
     #[serde(default)]
+    #[json(default)]
     request_id: Option<String>,
 }
 
@@ -560,4 +569,11 @@ impl NativeRepo<'_> {
         )?;
         Ok(())
     }
+}
+
+#[cfg(test)]
+mod json_tests {
+    use super::*;
+
+    alt_json_testkit::module_tests!("native-checkout_recovery", 0xc102; FileState, FileChange, CheckoutIntent, WorkspaceSnapshot, CheckoutDone);
 }

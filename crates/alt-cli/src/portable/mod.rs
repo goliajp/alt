@@ -13,8 +13,9 @@ type Res<T> = Result<T, Box<dyn std::error::Error>>;
 fn refused(message: &str) -> Box<dyn std::error::Error> {
     crate::machine::Failure::refusal("portable_refused", message).into()
 }
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 struct Binding {
     origin: String,
     installation_id: String,
@@ -247,4 +248,11 @@ pub fn run(op: &crate::cli::PortableOp, out: &mut impl std::io::Write) -> Res<()
             out,
         ),
     }
+}
+
+#[cfg(test)]
+mod json_tests {
+    use super::*;
+
+    alt_json_testkit::module_tests!("portable-mod", 0xc10d; Binding);
 }

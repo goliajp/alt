@@ -41,8 +41,9 @@ fn task_limits() -> TaskLimits {
         walk_steps: 10_000_000,
     }
 }
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 struct Binding {
     version: u32,
     origin: String,
@@ -73,20 +74,24 @@ fn negotiated_limits(remote: protocol::Limits) -> protocol::Limits {
     );
     local
 }
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 struct PublishedOrigin {
     version: u32,
     binding: Binding,
     receipt: protocol::Receipt,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[json(default, skip_serializing_if = "Vec::is_empty")]
     provenance: Vec<protocol::TransferProof>,
 }
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 struct Plan {
     selection: alt_task_transfer::Selection,
     #[serde(default)]
+    #[json(default)]
     refs: Vec<protocol::RefUpdate>,
 }
 
@@ -918,4 +923,11 @@ impl NativeRepo<'_> {
         drop(original_lock);
         Ok(())
     }
+}
+
+#[cfg(test)]
+mod json_tests {
+    use super::*;
+
+    alt_json_testkit::module_tests!("native-task-transfer", 0xc106; Binding, PublishedOrigin);
 }

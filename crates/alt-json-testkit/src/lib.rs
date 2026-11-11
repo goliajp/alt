@@ -30,3 +30,44 @@ macro_rules! same_as_serde {
         total
     }};
 }
+
+/// For types private to a module: generates, inside that module, the
+/// comparison with serde and the recording of one fixture per type under
+/// `tests/fixtures/json/<prefix>-<Type>.txt` of the calling crate.
+#[macro_export]
+macro_rules! module_tests {
+    ($prefix:literal, $seed:expr; $($ty:ident),* $(,)?) => {
+        #[test]
+        fn same_as_serde() {
+            $crate::same_as_serde!($seed, 300; $($ty),*).report(concat!("module ", $prefix));
+        }
+
+        #[test]
+        fn recorded_bytes_and_verdicts() {
+            let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/json");
+            $(
+                $crate::fixtures::check::<$ty>(
+                    dir,
+                    concat!($prefix, "-", stringify!($ty)),
+                    $seed ^ (stringify!($ty).len() as u64) << 16,
+                    15,
+                );
+            )*
+        }
+    };
+}
+
+/// What [`module_tests`] becomes once the types no longer have serde
+/// implementations: the stored fixtures alone.
+#[macro_export]
+macro_rules! module_fixture_tests {
+    ($prefix:literal; $($ty:ident),* $(,)?) => {
+        #[test]
+        fn recorded_bytes_and_verdicts() {
+            let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/json");
+            $(
+                $crate::fixtures::verify_file::<$ty>(dir, concat!($prefix, "-", stringify!($ty)));
+            )*
+        }
+    };
+}

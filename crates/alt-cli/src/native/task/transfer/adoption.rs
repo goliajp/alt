@@ -1,14 +1,25 @@
 use super::*;
 use std::collections::BTreeSet;
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    alt_json::ToJson,
+    alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub(super) struct Predecessor {
     pub digest: String,
     pub request: String,
 }
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub(super) struct Adoption {
     pub version: u32,
     pub task: String,
@@ -16,6 +27,7 @@ pub(super) struct Adoption {
     pub destination: Scope,
     pub creator_request: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[json(default, skip_serializing_if = "Option::is_none")]
     pub supersedes: Option<Predecessor>,
 }
 const MARKER_BYTES: usize = 8192;
@@ -131,4 +143,11 @@ impl NativeRepo<'_> {
         }
         Ok(())
     }
+}
+
+#[cfg(test)]
+mod json_tests {
+    use super::*;
+
+    alt_json_testkit::module_tests!("native-task-transfer-adoption", 0xc107; Predecessor, Adoption);
 }
