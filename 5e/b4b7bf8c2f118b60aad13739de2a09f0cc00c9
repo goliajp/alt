@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: back up and restore a pack segment stored as a file
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/operator/maintenance.rs
