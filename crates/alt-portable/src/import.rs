@@ -6,8 +6,11 @@ use alt_provenance::{decode_hex, encode_hex};
 use alt_remote_protocol::{RequestKey, Scope};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct IdentityMapping {
     pub installation_id: String,
     pub actor_id: String,
@@ -16,8 +19,11 @@ pub struct IdentityMapping {
     pub target_actor: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct ImportIntent {
     pub version: u32,
     pub key: RequestKey,
@@ -81,7 +87,7 @@ impl ImportIntent {
             return Err(Error::Limit("import identity mappings"));
         }
         self.validate()?;
-        let raw = serde_json::to_vec(self)?;
+        let raw = alt_json::to_vec(self)?;
         if raw.len() > limits.metadata_bytes {
             return Err(Error::Limit("import intent bytes"));
         }
@@ -119,14 +125,19 @@ impl ImportIntent {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct ImportReceiptBody {
     pub version: u32,
     pub intent: ImportIntent,
     #[serde(with = "crate::decimal")]
+    #[json(with = "alt_json::with::decimal_u64")]
     pub transaction_sequence: u64,
     #[serde(with = "crate::decimal")]
+    #[json(with = "alt_json::with::decimal_u64")]
     pub committed_at_unix_ms: u64,
 }
 impl ImportReceiptBody {
@@ -136,7 +147,7 @@ impl ImportReceiptBody {
             return Err(Error::Invalid("import receipt version or sequence"));
         }
         let mut bytes = b"jp.golia.alt.portable-import-receipt.v1\0".to_vec();
-        bytes.extend(serde_json::to_vec(self)?);
+        bytes.extend(alt_json::to_vec(self)?);
         if bytes.len() > limits.metadata_bytes {
             return Err(Error::Limit("import receipt bytes"));
         }
@@ -144,8 +155,11 @@ impl ImportReceiptBody {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct ImportReceipt {
     pub body: ImportReceiptBody,
     pub signature: String,
@@ -198,7 +212,7 @@ pub(crate) fn verify_history(
     let mut receipts = BTreeMap::new();
     for blob in &catalog.import_receipts {
         let receipt: ImportReceipt =
-            serde_json::from_slice(&crate::read_metadata(source, blob, limits.metadata_bytes)?)?;
+            alt_json::from_slice(&crate::read_metadata(source, blob, limits.metadata_bytes)?)?;
         let intent = &receipt.body.intent;
         receipt.verify(intent, &decode_hex(&intent.target_public_key)?, limits)?;
         let target = intent.key.scope.installation_id.as_str();

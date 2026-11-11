@@ -3,11 +3,13 @@
 //! object/task validation; they do not authorize a destination transaction.
 mod archive;
 mod catalog;
+mod envelope;
 pub mod http;
 mod import;
 mod semantic;
 pub use archive::*;
 pub use catalog::*;
+pub use envelope::*;
 pub use import::*;
 pub use semantic::*;
 
@@ -17,7 +19,7 @@ pub enum Error {
     Task(alt_task_service::Error),
     Protocol(alt_remote_protocol::Error),
     Provenance(alt_provenance::Error),
-    Json(serde_json::Error),
+    Json(alt_json::Error),
     Io(std::io::Error),
     Invalid(&'static str),
     Limit(&'static str),
@@ -76,8 +78,8 @@ impl From<alt_provenance::Error> for Error {
     }
 }
 
-impl From<serde_json::Error> for Error {
-    fn from(e: serde_json::Error) -> Self {
+impl From<alt_json::Error> for Error {
+    fn from(e: alt_json::Error) -> Self {
         Self::Json(e)
     }
 }

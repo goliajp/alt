@@ -76,7 +76,7 @@ pub fn read_archive(
     }
     let mut raw = vec![0; length as usize];
     reader.read_exact(&mut raw)?;
-    let envelope: Envelope = serde_json::from_slice(&raw)?;
+    let envelope: Envelope = alt_json::from_slice(&raw)?;
     let digest = envelope.verify(expected, pinned_key, limits)?;
     // One canonical representation also rejects duplicate JSON map fields and
     // alternate encodings before any staging callback receives payload bytes.

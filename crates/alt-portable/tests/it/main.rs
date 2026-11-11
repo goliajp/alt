@@ -117,9 +117,9 @@ fn fixture() -> (Catalog, Bytes) {
     };
     let historical = HistoricalPublication {
         digest,
-        publication: data.put(serde_json::to_vec_pretty(&publication).unwrap()),
-        manifest: data.put(serde_json::to_vec(&manifest).unwrap()),
-        receipt: data.put(serde_json::to_vec_pretty(&receipt).unwrap()),
+        publication: data.put(alt_json::to_vec_pretty(&publication).unwrap()),
+        manifest: data.put(alt_json::to_vec(&manifest).unwrap()),
+        receipt: data.put(alt_json::to_vec_pretty(&receipt).unwrap()),
         proofs: vec![],
     };
     let blobs = data
@@ -319,9 +319,9 @@ fn catalog_rejects_duplicate_refs_aliases_missing_objects_and_active_secret_exte
     let mut bad = catalog.clone();
     bad.version += 1;
     assert!(bad.validate(limits()).is_err());
-    let mut value = serde_json::to_value(catalog).unwrap();
-    value["credentials"] = serde_json::json!(["token"]);
-    assert!(serde_json::from_value::<Catalog>(value).is_err());
+    let mut value = alt_json::to_value(catalog).unwrap();
+    value["credentials"] = alt_json::json!(["token"]);
+    assert!(alt_json::from_value::<Catalog>(value).is_err());
 }
 
 #[test]
@@ -488,9 +488,8 @@ fn authentic_publication_and_intact_bytes_do_not_replace_task_closure_validation
     let (mut catalog, mut data) = fixture();
     let original = &catalog.publications[0];
     let mut publication: Publication =
-        serde_json::from_slice(&data.0[&original.publication.blake3]).unwrap();
-    let mut manifest: Manifest =
-        serde_json::from_slice(&data.0[&original.manifest.blake3]).unwrap();
+        alt_json::from_slice(&data.0[&original.publication.blake3]).unwrap();
+    let mut manifest: Manifest = alt_json::from_slice(&data.0[&original.manifest.blake3]).unwrap();
     publication.record_roots = vec![RecordRoot {
         kind: RecordKind::Task,
         id: "a".repeat(64),
@@ -505,7 +504,7 @@ fn authentic_publication_and_intact_bytes_do_not_replace_task_closure_validation
         omissions: vec![],
         attestations: vec![],
     };
-    let payload = data.put(serde_json::to_vec(&bundle).unwrap());
+    let payload = data.put(alt_json::to_vec(&bundle).unwrap());
     manifest.entries.push(ContentEntry {
         kind: ContentKind::TaskBundle,
         blake3: payload.blake3.clone(),
@@ -539,9 +538,9 @@ fn authentic_publication_and_intact_bytes_do_not_replace_task_closure_validation
     };
     catalog.publications = vec![HistoricalPublication {
         digest,
-        publication: data.put(serde_json::to_vec(&publication).unwrap()),
-        manifest: data.put(serde_json::to_vec(&manifest).unwrap()),
-        receipt: data.put(serde_json::to_vec(&receipt).unwrap()),
+        publication: data.put(alt_json::to_vec(&publication).unwrap()),
+        manifest: data.put(alt_json::to_vec(&manifest).unwrap()),
+        receipt: data.put(alt_json::to_vec(&receipt).unwrap()),
         proofs: vec![],
     }];
     catalog.blobs = data
@@ -559,9 +558,8 @@ fn source_signed_manifest_with_false_chunk_claims_is_rejected() {
     let (mut catalog, mut data) = fixture();
     let original = &catalog.publications[0];
     let mut publication: Publication =
-        serde_json::from_slice(&data.0[&original.publication.blake3]).unwrap();
-    let mut manifest: Manifest =
-        serde_json::from_slice(&data.0[&original.manifest.blake3]).unwrap();
+        alt_json::from_slice(&data.0[&original.publication.blake3]).unwrap();
+    let mut manifest: Manifest = alt_json::from_slice(&data.0[&original.manifest.blake3]).unwrap();
     manifest.entries[0].chunks[0].blake3 = "f".repeat(64);
     publication.content_manifest = manifest.id(limits().protocol).unwrap();
     let digest = publication.digest(limits().protocol).unwrap();
@@ -585,9 +583,9 @@ fn source_signed_manifest_with_false_chunk_claims_is_rejected() {
     };
     catalog.publications = vec![HistoricalPublication {
         digest,
-        publication: data.put(serde_json::to_vec(&publication).unwrap()),
-        manifest: data.put(serde_json::to_vec(&manifest).unwrap()),
-        receipt: data.put(serde_json::to_vec(&receipt).unwrap()),
+        publication: data.put(alt_json::to_vec(&publication).unwrap()),
+        manifest: data.put(alt_json::to_vec(&manifest).unwrap()),
+        receipt: data.put(alt_json::to_vec(&receipt).unwrap()),
         proofs: vec![],
     }];
     catalog.blobs = data
@@ -738,21 +736,21 @@ fn import_acceptance_signs_full_intent_and_exact_decimal_sequence() {
     receipt
         .verify(&intent, target.verifying_key().as_bytes(), limits())
         .unwrap();
-    let encoded = serde_json::to_value(&receipt).unwrap();
+    let encoded = alt_json::to_value(&receipt).unwrap();
     assert_eq!(
         encoded["body"]["transaction_sequence"],
         u64::MAX.to_string()
     );
     assert_eq!(
-        serde_json::from_value::<ImportReceipt>(encoded.clone()).unwrap(),
+        alt_json::from_value::<ImportReceipt>(encoded.clone()).unwrap(),
         receipt
     );
     let mut numeric = encoded.clone();
-    numeric["body"]["transaction_sequence"] = serde_json::json!(1);
-    assert!(serde_json::from_value::<ImportReceipt>(numeric).is_err());
+    numeric["body"]["transaction_sequence"] = alt_json::json!(1);
+    assert!(alt_json::from_value::<ImportReceipt>(numeric).is_err());
     let mut unknown = encoded;
-    unknown["body"]["intent"]["credentials"] = serde_json::json!([]);
-    assert!(serde_json::from_value::<ImportReceipt>(unknown).is_err());
+    unknown["body"]["intent"]["credentials"] = alt_json::json!([]);
+    assert!(alt_json::from_value::<ImportReceipt>(unknown).is_err());
     let mut forged = receipt.clone();
     forged.body.intent.mappings[0].target_actor = Some("different-user".into());
     assert!(
@@ -834,7 +832,7 @@ fn migrated(
     // Preserve the actual original bytes, including whitespace.
     catalog
         .import_receipts
-        .push(data.put(serde_json::to_vec_pretty(&receipt).unwrap()));
+        .push(data.put(alt_json::to_vec_pretty(&receipt).unwrap()));
     catalog
         .import_receipts
         .sort_by(|a, b| a.blake3.cmp(&b.blake3));
@@ -892,7 +890,7 @@ fn two_migrations_preserve_original_identity_dispositions_and_receipt_bytes() {
             .iter()
             .any(|b| data.0[&b.blake3] == original)
     );
-    let receipt: ImportReceipt = serde_json::from_slice(&original).unwrap();
+    let receipt: ImportReceipt = alt_json::from_slice(&original).unwrap();
     assert_eq!(
         receipt.body.intent.mappings[0].target_actor.as_deref(),
         Some("importer")
@@ -925,11 +923,11 @@ fn migration_cannot_drop_or_rewrite_mapping_preimages_even_with_valid_source_sig
     ));
     let mut changed = catalog.clone();
     let mut receipt: ImportReceipt =
-        serde_json::from_slice(&data.0[&catalog.import_receipts[0].blake3]).unwrap();
+        alt_json::from_slice(&data.0[&catalog.import_receipts[0].blake3]).unwrap();
     receipt.body.intent.mappings[0].target_actor = None;
     // Even a newly valid target signature cannot replace the historical intent.
     let receipt = ImportReceipt::sign(receipt.body, &target, limits()).unwrap();
-    changed.import_receipts = vec![data.put(serde_json::to_vec(&receipt).unwrap())];
+    changed.import_receipts = vec![data.put(alt_json::to_vec(&receipt).unwrap())];
     changed.blobs = data.0.values().map(|v| alt_portable::Blob::of(v)).collect();
     assert!(matches!(
         check_migrated(changed.clone(), &data, &target),
@@ -941,7 +939,7 @@ fn migration_cannot_drop_or_rewrite_mapping_preimages_even_with_valid_source_sig
     let mut wrong = receipt.body.clone();
     wrong.intent.catalog_digest = "f".repeat(64);
     let wrong = ImportReceipt::sign(wrong, &target, limits()).unwrap();
-    changed.import_receipts = vec![data.put(serde_json::to_vec(&wrong).unwrap())];
+    changed.import_receipts = vec![data.put(alt_json::to_vec(&wrong).unwrap())];
     changed.blobs = data.0.values().map(|v| alt_portable::Blob::of(v)).collect();
     let mut hop = changed.publications[0].proofs[0].body.clone();
     hop.operation_id = wrong.body.intent.digest(limits()).unwrap();
@@ -962,9 +960,9 @@ fn refs_only_import_receipts_remain_signed_history_without_current_grants() {
     let mut catalog = migrated(catalog, &mut data, &key(), &target, "target");
     check_migrated(catalog.clone(), &data, &target).unwrap();
     let receipt_blob = catalog.import_receipts[0].clone();
-    let mut receipt: ImportReceipt = serde_json::from_slice(&data.0[&receipt_blob.blake3]).unwrap();
+    let mut receipt: ImportReceipt = alt_json::from_slice(&data.0[&receipt_blob.blake3]).unwrap();
     receipt.signature.replace_range(..2, "00");
-    catalog.import_receipts = vec![data.put(serde_json::to_vec(&receipt).unwrap())];
+    catalog.import_receipts = vec![data.put(alt_json::to_vec(&receipt).unwrap())];
     catalog.blobs = data.0.values().map(|v| alt_portable::Blob::of(v)).collect();
     assert!(check_migrated(catalog, &data, &target).is_err());
 }
@@ -994,11 +992,11 @@ fn archive_inspection_binds_external_source_trust_and_exact_canonical_header() {
         encode_hex(SigningKey::from_bytes(&[8; 32]).verifying_key().as_bytes());
     assert!(request.verify(limits()).is_err());
     request.source_public_key = encode_hex(key().verifying_key().as_bytes());
-    request.metadata = serde_json::to_string_pretty(&envelope).unwrap();
+    request.metadata = alt_json::to_string_pretty(&envelope).unwrap();
     assert!(request.verify(limits()).is_err());
     request.metadata = format!(
         "{{\"catalog\":{},{}",
-        serde_json::to_string(&envelope.catalog).unwrap(),
+        alt_json::to_string(&envelope.catalog).unwrap(),
         &String::from_utf8(envelope.encode(limits()).unwrap()).unwrap()[1..]
     );
     assert!(request.verify(limits()).is_err());
@@ -1012,3 +1010,4 @@ fn archive_inspection_binds_external_source_trust_and_exact_canonical_header() {
 }
 
 mod change_links;
+mod json;

@@ -63,9 +63,9 @@ fn signed_history_survives_archive_without_becoming_live_configuration() {
         verify_publications(&restored.catalog, &data, limits()).unwrap();
         // A valid outer signer cannot smuggle operational data into this
         // closed historical structure or replace an original source signature.
-        let mut raw = serde_json::to_value(&restored.catalog).unwrap();
+        let mut raw = alt_json::to_value(&restored.catalog).unwrap();
         raw["change_links"][0]["credential"] = "live-token".into();
-        assert!(serde_json::from_value::<Catalog>(raw).is_err());
+        assert!(alt_json::from_value::<Catalog>(raw).is_err());
         let mut changed = restored.catalog;
         changed.change_links[0].statement.event.entity = "different-request".into();
         assert!(Envelope::sign(changed, &key(), limits()).is_err());
@@ -77,7 +77,9 @@ fn history_has_separate_size_and_unique_identity_budgets() {
     let (mut catalog, _) = fixture();
     let history = signed_history(true);
     catalog.change_links.push(history.clone());
-    let metadata_bytes = serde_json::to_vec(&history).unwrap().len() as u64;
+    let metadata_bytes = alt_json::to_vec(&alt_json_serde::Serde(&history))
+        .unwrap()
+        .len() as u64;
     assert_eq!(catalog.change_link_bytes().unwrap(), metadata_bytes);
     let blobs: u64 = catalog.blobs.iter().map(|b| b.bytes).sum();
     let mut budget = limits();
@@ -100,7 +102,7 @@ fn legacy_catalog_encoding_omits_empty_history_and_keeps_signature() {
             .unwrap()
             .contains("change_links")
     );
-    let decoded: Envelope = serde_json::from_slice(&original).unwrap();
+    let decoded: Envelope = alt_json::from_slice(&original).unwrap();
     decoded
         .verify(
             &envelope.catalog.source,
