@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: refactor
+summary: alt-server-telemetry reads and writes json with alt-json
+author-type: human
+author: doracawl
+touched: crates/alt-server-telemetry/Cargo.toml
+touched: crates/alt-server-telemetry/tests/it/mod.rs
