@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: perf
+summary: huffman table entries carry the code length in the low byte
+author-type: human
+author: doracawl
+touched: crates/alt-zstd/src/huffman.rs
+touched: crates/alt-zstd/src/huffman_x86.rs
+touched: crates/alt-zstd/src/lib.rs
