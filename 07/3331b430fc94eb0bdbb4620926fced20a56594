@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: refactor
+summary: alt-provenance tests read and write json with alt-json
+author-type: human
+author: doracawl
+touched: crates/alt-provenance/Cargo.toml
+touched: crates/alt-provenance/tests/it/main.rs
