@@ -95,7 +95,7 @@ pub fn destination(target: &Path) -> Result<PathBuf> {
     }
     Ok(target)
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, ToJson, FromJson)]
 pub struct GitCheck {
     pub program: String,
     pub binary_blake3: String,
@@ -149,11 +149,7 @@ pub fn git_check(git: &Path, root: &Path) -> Result<GitCheck> {
         fsck_exit: fsck.status.code().unwrap_or(-1),
     };
     if !fsck.status.success() {
-        return Err(format!(
-            "Git verification failed: {}",
-            serde_json::to_string(&report)?
-        )
-        .into());
+        return Err(format!("Git verification failed: {}", alt_json::to_string(&report)?).into());
     }
     Ok(report)
 }
@@ -252,7 +248,7 @@ fn source_preflight(source: &Path) -> Result<()> {
     fingerprint(&dir)?;
     Ok(())
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, ToJson, FromJson)]
 pub struct IntakeReport {
     pub baseline: Snapshot,
     pub source_metadata_blake3: String,
@@ -292,16 +288,16 @@ pub fn intake(source: &Path, target: &Path, git: &Path) -> Result<IntakeReport> 
     }
     let report = IntakeReport {
         baseline,
-        source_metadata_blake3: alt_input::identity("source-git-metadata", &before)?,
+        source_metadata_blake3: alt_input::identity_json("source-git-metadata", &before)?,
         git: git_report,
     };
     fs::write(
         alt_dir.join("delivery-origin.json"),
-        serde_json::to_vec(&report.baseline)?,
+        alt_json::to_vec(&report.baseline)?,
     )?;
     fs::write(
         alt_dir.join("intake-report.json"),
-        serde_json::to_vec(&report)?,
+        alt_json::to_vec(&report)?,
     )?;
     // Attach the native index in the staging directory before publication.
     // Intake's canonical checkout and index construction stay in Rust.
@@ -316,7 +312,7 @@ pub fn intake(source: &Path, target: &Path, git: &Path) -> Result<IntakeReport> 
     Ok(report)
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, ToJson, FromJson)]
 pub struct ExportReport {
     pub baseline_id: String,
     pub exported: Snapshot,

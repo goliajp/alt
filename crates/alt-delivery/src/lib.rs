@@ -1,6 +1,7 @@
 //! Canonical, independently checked Git boundaries. No private task records
 //! or workspace refs are implicitly selected for delivery.
 use alt_git_codec::{Commit, HashAlgo, ObjectId, ObjectKind, Tag, Tree};
+use alt_json::{FromJson, ToJson};
 use alt_odb::NativeOdb;
 use alt_refs::RefTarget;
 use serde::{Deserialize, Serialize};
@@ -18,8 +19,9 @@ pub use git::{
 pub use paths::{materialize, preflight_paths, publish_directory, validate_files, verify_checkout};
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToJson, FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct Snapshot {
     pub schema_version: u32,
     pub object_format: String,
@@ -29,22 +31,24 @@ pub struct Snapshot {
     pub refs: BTreeMap<String, String>,
     pub config_hex: String,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToJson, FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct ObjectIdentity {
     pub kind: String,
     pub bytes: u64,
     pub blake3: String,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToJson, FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct FileEntry {
     pub mode: u32,
     pub oid: String,
 }
 impl Snapshot {
     pub fn id(&self) -> Result<String> {
-        Ok(alt_input::identity("delivery-baseline", self)?)
+        Ok(alt_input::identity_json("delivery-baseline", self)?)
     }
     pub fn algo(&self) -> Result<HashAlgo> {
         match self.object_format.as_str() {
