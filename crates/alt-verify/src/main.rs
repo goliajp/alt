@@ -14,7 +14,6 @@ use std::time::Instant;
 
 use alt_git_codec::{Commit, HashAlgo, LooseStore, ObjectId, ObjectKind, RawObject, Tag, Tree};
 use alt_git_pack::IndexedPack;
-use rayon::prelude::*;
 
 /// Read ↔ export pairing: every parsed object must serialize back to the
 /// exact bytes it was read from.
@@ -49,7 +48,7 @@ fn verify_repo(repo: &Path) {
     // loose objects, in parallel
     let store = LooseStore::new(&objects);
     let loose = list_loose(&objects);
-    loose.par_iter().for_each(|oid| {
+    alt_threads::for_each(&loose, 1, |oid| {
         let raw = store.read(oid).unwrap();
         assert_eq!(
             ObjectId::hash_object(algo, raw.kind, &raw.data),
@@ -72,7 +71,7 @@ fn verify_repo(repo: &Path) {
             .map(|i| (idx.offset_at(i).unwrap(), i))
             .collect();
         order.sort_unstable();
-        order.par_iter().for_each(|&(offset, i)| {
+        alt_threads::for_each(&order, 8, |&(offset, i)| {
             let oid = idx.oid_at(i);
             let obj = indexed.read_at(offset).unwrap();
             assert_eq!(

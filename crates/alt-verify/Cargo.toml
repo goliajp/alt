@@ -9,4 +9,4 @@ license.workspace = true
 [dependencies]
 alt-git-codec.workspace = true
 alt-git-pack.workspace = true
-rayon.workspace = true
+alt-threads.workspace = true

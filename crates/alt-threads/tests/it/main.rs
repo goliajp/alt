@@ -1,3 +1,5 @@
+mod slices;
+
 use alt_threads::join;
 use std::sync::atomic::{AtomicUsize, Ordering};
 

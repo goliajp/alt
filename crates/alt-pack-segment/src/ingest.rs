@@ -7,7 +7,6 @@ use crate::{
     object_id,
     scan::{self, Form, Raw},
 };
-use rayon::prelude::*;
 use std::{collections::HashMap, io::Write};
 
 #[derive(Debug, Clone, Copy)]
@@ -160,7 +159,7 @@ fn descend(
 
 /// `pack` is the complete received pack including its trailer
 pub fn ingest(pack: &[u8], existing: &SegmentSet, limits: &Limits) -> Result<Ingested, Error> {
-    let (trailer, scanned) = rayon::join(
+    let (trailer, scanned) = alt_threads::join(
         || -> Oid { alt_hash::sha1(&pack[..pack.len().saturating_sub(20)]) },
         || {
             let mut large = HashMap::new();
@@ -208,9 +207,10 @@ pub fn ingest(pack: &[u8], existing: &SegmentSet, limits: &Limits) -> Result<Ing
         .filter(|(_, raw)| matches!(raw.form, Form::Plain(_)))
         .map(|(index, _)| index)
         .collect();
-    let plain: Vec<(usize, Meta)> = plain_indexes
-        .par_chunks(32)
-        .map(|batch| -> Result<Vec<(usize, Meta)>, Error> {
+    let batches: Vec<&[usize]> = plain_indexes.chunks(32).collect();
+    let plain: Vec<(usize, Meta)> =
+        alt_threads::map(&batches, 1, |batch| -> Result<Vec<(usize, Meta)>, Error> {
+            let batch = *batch;
             let kept: Vec<(usize, Kind, &[u8])> = batch
                 .iter()
                 .filter_map(|index| {
@@ -269,6 +269,7 @@ pub fn ingest(pack: &[u8], existing: &SegmentSet, limits: &Limits) -> Result<Ing
             }
             Ok(out)
         })
+        .into_iter()
         .collect::<Result<Vec<_>, Error>>()?
         .into_iter()
         .flatten()
@@ -290,10 +291,10 @@ pub fn ingest(pack: &[u8], existing: &SegmentSet, limits: &Limits) -> Result<Ing
         engine_roots.push((index, kind, children));
     }
     let resolve = |roots: Vec<Frame>| -> Result<Vec<(usize, Meta)>, Error> {
-        let parts: Vec<Vec<(usize, Meta)>> = roots
-            .into_par_iter()
-            .map(|root| descend(&shared, &offset_children, root))
-            .collect::<Result<_, Error>>()?;
+        let parts: Vec<Vec<(usize, Meta)>> =
+            alt_threads::map_owned(roots, 1, |root| descend(&shared, &offset_children, root))
+                .into_iter()
+                .collect::<Result<_, Error>>()?;
         Ok(parts.into_iter().flatten().collect())
     };
     let inside = engine_roots
@@ -375,7 +376,7 @@ pub fn ingest(pack: &[u8], existing: &SegmentSet, limits: &Limits) -> Result<Ing
             Err(Error::Dangling(*from, *to))
         }
     };
-    kept.par_iter().try_for_each(|index| {
+    alt_threads::try_for_each(&kept, 1024, |index| {
         let meta = &metas[*index];
         match &meta.parsed {
             Parsed::Blob => Ok(()),
@@ -391,10 +392,9 @@ pub fn ingest(pack: &[u8], existing: &SegmentSet, limits: &Limits) -> Result<Ing
             Parsed::Tag { object, kind } => check(&meta.oid, object, *kind),
         }
     })?;
-    if kept
-        .par_iter()
-        .any(|index| existing.locate(&metas[*index].oid).is_some())
-    {
+    if alt_threads::any(&kept, 1024, |index| {
+        existing.locate(&metas[*index].oid).is_some()
+    }) {
         flags |= FLAG_OVERLAP;
     }
 

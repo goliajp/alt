@@ -11,4 +11,4 @@ alt-git-pack.workspace = true
 alt-hash.workspace = true
 alt-inflate.workspace = true
 alt-os.workspace = true
-rayon.workspace = true
+alt-threads.workspace = true

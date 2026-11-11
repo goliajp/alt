@@ -350,7 +350,7 @@ dependencies = [
  "alt-hash",
  "alt-inflate",
  "alt-os",
- "rayon",
+ "alt-threads",
 ]
 
 [[package]]
@@ -674,7 +674,7 @@ version = "0.1.0"
 dependencies = [
  "alt-git-codec",
  "alt-git-pack",
- "rayon",
+ "alt-threads",
 ]
 
 [[package]]

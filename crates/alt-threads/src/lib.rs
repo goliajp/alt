@@ -2,6 +2,12 @@
 //!
 //! [`join`] runs two closures, the second one on another thread when one is free. The
 //! threads are started once and kept, so a split costs a queue operation, not a thread.
+//! [`for_each`], [`try_for_each`], [`map`], [`map_owned`] and [`any`] split a slice
+//! this way.
+
+mod slices;
+
+pub use slices::{any, for_each, map, map_owned, try_for_each};
 
 use std::{
     any::Any,
