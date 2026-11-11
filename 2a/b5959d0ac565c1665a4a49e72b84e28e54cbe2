@@ -1,0 +1,21 @@
+schema: alt-meta/1
+type: test
+summary: read what an earlier alt stored on disk the way serde did
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/checkout_recovery.rs
+touched: crates/alt-cli/src/native/recovery.rs
+touched: crates/alt-cli/src/native/task.rs
+touched: crates/alt-cli/src/request.rs
+touched: crates/alt-cli/src/runner.rs
+touched: crates/alt-cli/tests/fixtures/json-read/state-checkout-CheckoutDone.txt
+touched: crates/alt-cli/tests/fixtures/json-read/state-checkout-WorkspaceSnapshot.txt
+touched: crates/alt-cli/tests/fixtures/json-read/state-recovery-Completion.txt
+touched: crates/alt-cli/tests/fixtures/json-read/state-recovery-IndexIntent.txt
+touched: crates/alt-cli/tests/fixtures/json-read/state-recovery-RefContext.txt
+touched: crates/alt-cli/tests/fixtures/json-read/state-request-Completion.txt
+touched: crates/alt-cli/tests/fixtures/json-read/state-request-Intent.txt
+touched: crates/alt-cli/tests/fixtures/json-read/state-run-Report.txt
+touched: crates/alt-cli/tests/fixtures/json-read/state-run-Spec.txt
+touched: crates/alt-cli/tests/fixtures/json-read/state-task-DeliveryOrigin.txt
+touched: crates/alt-cli/tests/fixtures/json-read/state-task-TaskOperation.txt
