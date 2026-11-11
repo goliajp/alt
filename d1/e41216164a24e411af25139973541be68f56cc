@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: refuse a segment merge that does not hold every object of its parts
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/merge.rs
