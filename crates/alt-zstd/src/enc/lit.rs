@@ -26,6 +26,15 @@ pub(crate) fn min_gain(len: usize) -> usize {
 }
 
 fn histogram(src: &[u8]) -> [u32; 256] {
+    // which of the two is faster differs by architecture
+    if cfg!(target_arch = "aarch64") {
+        histogram_by_words(src)
+    } else {
+        histogram_by_bytes(src)
+    }
+}
+
+fn histogram_by_bytes(src: &[u8]) -> [u32; 256] {
     // four tables keep consecutive equal bytes from waiting on each other
     let mut parts = [[0u32; 256]; 4];
     let (groups, rest) = src.as_chunks::<4>();
@@ -39,6 +48,22 @@ fn histogram(src: &[u8]) -> [u32; 256] {
         parts[0][byte as usize] += 1;
     }
     std::array::from_fn(|i| parts[0][i] + parts[1][i] + parts[2][i] + parts[3][i])
+}
+
+fn histogram_by_words(src: &[u8]) -> [u32; 256] {
+    // a table per byte of the word, and one load feeds eight counts
+    let mut parts = [[0u32; 256]; 8];
+    let (words, rest) = src.as_chunks::<8>();
+    for word in words {
+        let word = u64::from_le_bytes(*word);
+        for (lane, part) in parts.iter_mut().enumerate() {
+            part[(word >> (8 * lane)) as u8 as usize] += 1;
+        }
+    }
+    for &byte in rest {
+        parts[0][byte as usize] += 1;
+    }
+    std::array::from_fn(|i| parts.iter().map(|part| part[i]).sum())
 }
 
 /// Section header for raw (kind 0) or single-byte (kind 1) literals.
@@ -171,6 +196,31 @@ impl LiteralCoder {
         if !reuse {
             self.codes = fresh;
             self.valid = true;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{histogram_by_bytes, histogram_by_words};
+
+    #[test]
+    fn both_histograms_count_alike() {
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let data: Vec<u8> = (0..5000)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                ((state >> 56) as u8).min((state >> 48) as u8)
+            })
+            .collect();
+        for len in [0, 1, 7, 8, 9, 63, 64, 4099, 5000] {
+            let part = &data[..len];
+            assert!(
+                histogram_by_bytes(part) == histogram_by_words(part),
+                "{len} bytes"
+            );
         }
     }
 }

@@ -4,6 +4,7 @@
 use super::fse::{CTable, normalize, table_log, write_distribution};
 use crate::bits::BitWriter;
 use crate::huffman::MAX_BITS;
+use std::hint::select_unpredictable;
 
 /// A complete prefix code over bytes.
 #[derive(Clone)]
@@ -43,48 +44,99 @@ impl Codes {
     }
 }
 
-/// Builds the code for a histogram with at least two symbols present, no
-/// code longer than `limit` bits.
-pub(crate) fn build(counts: &[u32; 256], limit: u32) -> Codes {
-    // leaves in ascending order of count
-    let mut order = [0u32; 256];
-    let mut leaves = 0;
-    for (symbol, &count) in counts.iter().enumerate() {
-        if count != 0 {
-            order[leaves] = (count << 8) | symbol as u32;
-            leaves += 1;
-        }
-    }
-    let order = &mut order[..leaves];
-    order.sort_unstable();
+/// Counts below this have a bucket each when the leaves are sorted; larger
+/// ones share a bucket per power of two.
+const EXACT: u32 = 165;
+const BUCKETS: usize = EXACT as usize + 32 - 7;
 
-    // with sorted leaves the internal nodes come out sorted too, so the two
-    // lightest nodes are always at the head of one of two queues
-    let mut weight = [0u32; 512];
-    let mut parent = [0u16; 512];
+#[inline(always)]
+fn bucket(count: u32) -> usize {
+    let shared = EXACT - 7 + (count | 1).ilog2();
+    select_unpredictable(count < EXACT, count, shared) as usize
+}
+
+/// Writes the symbols present as `count << 8 | symbol` in ascending order
+/// and returns how many there are.
+fn sorted_leaves(counts: &[u32; 256], order: &mut [u32; 256]) -> usize {
+    // a comparison sort of everything mispredicts a branch for every other
+    // leaf; buckets leave it only the few leaves that share one
+    let mut at = [0u16; BUCKETS + 1];
+    for &count in counts {
+        at[bucket(count) + 1] += 1;
+    }
+    let leaves = 256 - at[1] as usize;
+    // absent symbols land behind the leaves
+    at[0] = leaves as u16;
+    at[1] = 0;
+    for n in 1..BUCKETS {
+        at[n + 1] += at[n];
+    }
+    for (symbol, &count) in counts.iter().enumerate() {
+        let slot = &mut at[bucket(count)];
+        order[*slot as usize & 255] = (count << 8) | symbol as u32;
+        *slot += 1;
+    }
+    // each slot has moved on to the end of its bucket
+    let mut start = at[EXACT as usize - 1] as usize;
+    for &end in &at[EXACT as usize..BUCKETS] {
+        let end = end as usize;
+        if end - start > 1 {
+            order[start..end].sort_unstable();
+        }
+        start = end;
+    }
+    leaves
+}
+
+/// Depth of every leaf in the Huffman tree over `order`, and the weights
+/// of the leaves, both in the order of the leaves.
+fn tree(order: &[u32]) -> ([u8; 514], [u32; 514]) {
+    // leaves, then a barrier, then the inner nodes in the order they are
+    // made, which is ascending as well: the two lightest nodes are always
+    // at the head of the leaves or of the inner nodes. an inner node not
+    // made yet outweighs every real node, and the barrier outweighs it
+    let leaves = order.len();
+    let mut weight = [0u32; 514];
+    let mut parent = [0u16; 514];
     for (node, &leaf) in order.iter().enumerate() {
         weight[node] = leaf >> 8;
     }
-    let (mut leaf, mut inner) = (0, leaves);
-    for node in leaves..2 * leaves - 1 {
-        let mut lightest = || {
-            if leaf < leaves && (inner >= node || weight[leaf] <= weight[inner]) {
-                leaf += 1;
-                leaf - 1
-            } else {
-                inner += 1;
-                inner - 1
-            }
-        };
-        let (a, b) = (lightest(), lightest());
-        weight[node] = weight[a] + weight[b];
-        parent[a] = node as u16;
-        parent[b] = node as u16;
+    weight[leaves] = 1 << 31;
+    let first = leaves + 1;
+    let root = first + leaves - 2;
+    weight[first..=root].fill(1 << 30);
+    let (mut leaf, mut inner) = (0, first);
+    for node in first..=root {
+        let mut sum = 0;
+        for _ in 0..2 {
+            // which head is lighter cannot be predicted, so both are
+            // marked as children: the one left behind is marked again,
+            // for good, when its turn comes
+            let (of_leaf, of_inner) = (weight[leaf], weight[inner]);
+            let take = of_leaf <= of_inner;
+            parent[leaf] = node as u16;
+            parent[inner] = node as u16;
+            sum += of_leaf.min(of_inner);
+            leaf += take as usize;
+            inner += !take as usize;
+        }
+        weight[node] = sum;
     }
-    let mut depth = [0u8; 512];
-    for node in (0..2 * leaves - 2).rev() {
+    parent[leaves] = root as u16;
+    let mut depth = [0u8; 514];
+    for node in (0..root).rev() {
         depth[node] = depth[parent[node] as usize] + 1;
     }
+    (depth, weight)
+}
+
+/// Builds the code for a histogram with at least two symbols present, no
+/// code longer than `limit` bits.
+pub(crate) fn build(counts: &[u32; 256], limit: u32) -> Codes {
+    let mut order = [0u32; 256];
+    let leaves = sorted_leaves(counts, &mut order);
+    let order = &order[..leaves];
+    let (depth, weight) = tree(order);
 
     // the lightest leaf lies deepest
     let limit = limit as usize;
@@ -112,18 +164,19 @@ pub(crate) fn build(counts: &[u32; 256], limit: u32) -> Codes {
     // length in symbol order
     let mut codes = Codes::new();
     codes.log = log;
-    let mut at = [0u32; MAX_BITS as usize + 2];
+    let mut at = [0u32; 16];
     let mut start = 0;
     for len in (1..=log).rev() {
         at[len as usize] = start;
         start += per_len[len as usize] << (log - len);
     }
-    for (symbol, &len) in lens.iter().enumerate() {
-        if len != 0 {
-            let len = len as u32;
-            codes.packed[symbol] = (len << 16) | (at[len as usize] >> (log - len));
-            at[len as usize] += 1 << (log - len);
-        }
+    // absent symbols go through the same arithmetic and come out as zero
+    for (packed, &len) in codes.packed.iter_mut().zip(&lens) {
+        let len = len as u32;
+        let slot = &mut at[len as usize & 15];
+        let shift = (log - len) & 31;
+        *packed = ((len << 16) | (*slot >> shift)) * (len != 0) as u32;
+        *slot = slot.wrapping_add(1 << shift);
     }
     codes
 }
