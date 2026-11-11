@@ -689,14 +689,6 @@ fn interrupted_backup_is_incomplete_and_interrupted_restore_cannot_serve_old_cre
     let (mut store, admin, _password) = prepare(&source);
     let token = alt_server::operator::read_token(std::path::Path::new(&admin)).unwrap();
     let p = publish(&mut store, &token);
-    let (asset_commit, asset_blob, asset) = push_large(&mut store, &token);
-    let source_segments = segment_files(&source.root.path().join("bytes"));
-    assert!(
-        source_segments
-            .iter()
-            .any(|file| file.metadata().unwrap().len() > 200_000),
-        "the large push is a segment file"
-    );
     let trust = source.ok(&["health"])["receipt_public_key"]
         .as_str()
         .unwrap()

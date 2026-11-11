@@ -4,7 +4,7 @@ The server contains the native/Git data plane and the complete workbench. It use
 
 ## Build an offline bundle
 
-Use Docker Engine with Buildx and Compose, Python 3.11 or newer, and an Internet connection for the build. Build with Docker's classic image store; an engine that uses the containerd image store cannot build a bundle yet, although it can load and run one. Build from an explicit source checkout. On a shared runner, follow its build-lock policy; the image compiles Rust and must not overlap a performance measurement.
+Use Docker Engine with Buildx and Compose, Python 3.11 or newer, and an Internet connection for the build. Docker's classic image store and its containerd image store both work. Build from an explicit source checkout. On a shared runner, follow its build-lock policy; the image compiles Rust and must not overlap a performance measurement.
 
 ```sh
 python3 scripts/package-server.py --architecture amd64 --output /tmp/alt-server-amd64

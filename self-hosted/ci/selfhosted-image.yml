@@ -43,15 +43,6 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
-      - name: Use the classic Docker image store
-        run: |
-          # bundles are assembled from `docker image save` archives of the classic store
-          sudo mkdir -p /etc/docker
-          current='{}'
-          if [ -s /etc/docker/daemon.json ]; then current="$(sudo cat /etc/docker/daemon.json)"; fi
-          printf '%s' "$current" | jq '. + {features: ((.features // {}) + {"containerd-snapshotter": false})}' | sudo tee /etc/docker/daemon.json > /dev/null
-          sudo systemctl restart docker
-          test "$(docker info --format '{{.Driver}}')" = overlay2
       - uses: docker/setup-buildx-action@v3
         with:
           driver: docker
