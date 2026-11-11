@@ -1,0 +1,126 @@
+$ [repo] alt init .
+exit 0
+$ [repo] alt add .
+exit 0
+$ [repo] alt commit -m base
+exit 0
+$ [repo] alt switch --does-not-exist --json
+exit 2
+err| {"error":{"details":{},"kind":"usage","message":"error: unexpected argument '--does-not-exist' found\n\n  tip: to pass '--does-not-exist' as a value, use '-- --does-not-exist'\n\nUsage: alt switch [OPTIONS] <NAME>\n\nFor more information, try '--help'.\n","next_action":"Correct the arguments and submit a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [repo] alt --request-id bad add . --json
+exit 2
+err| {"error":{"details":{},"kind":"usage","message":"request id must be 32 hexadecimal digits","next_action":"Correct the arguments and submit a new request","operation_id":null,"outcome":"not_applied","request_id":"bad","retryable":false},"schema_version":1}
+$ [repo] alt commit --json
+exit 2
+err| {"error":{"details":{},"kind":"usage","message":"error: the following required arguments were not provided:\n  -m <MESSAGE>\n\nUsage: alt commit --json -m <MESSAGE>\n\nFor more information, try '--help'.\n","next_action":"Correct the arguments and submit a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [repo] alt commit --no-edit -m x --json
+exit 2
+err| {"error":{"details":{},"kind":"usage","message":"error: the following required arguments were not provided:\n  --amend\n\nUsage: alt commit --amend --no-edit -m <MESSAGE> --json\n\nFor more information, try '--help'.\n","next_action":"Correct the arguments and submit a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [repo] alt rebase --json
+exit 2
+err| {"error":{"details":{},"kind":"usage","message":"error: the following required arguments were not provided:\n  <UPSTREAM>\n\nUsage: alt rebase --json <UPSTREAM>\n\nFor more information, try '--help'.\n","next_action":"Correct the arguments and submit a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [repo] alt rebase main --abort --json
+exit 2
+err| {"error":{"details":{},"kind":"usage","message":"error: the argument '[UPSTREAM]' cannot be used with '--abort'\n\nUsage: alt rebase --json <UPSTREAM>\n\nFor more information, try '--help'.\n","next_action":"Correct the arguments and submit a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [repo] alt tag -a v1 --json
+exit 75
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"annotated tag (-a) needs a message (-m \"…\")","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:0>","retryable":false},"schema_version":1}
+$ [repo] alt meta set --meta novalue --json
+exit 2
+err| {"error":{"details":{},"kind":"usage","message":"error: unexpected argument '--json' found\n\n  tip: to pass '--json' as a value, use '-- --json'\n\nUsage: alt meta set --meta <KEY=VALUE> [REV]\n\nFor more information, try '--help'.\n","next_action":"Correct the arguments and submit a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [repo] alt nonesuch --json
+exit 2
+err| {"error":{"details":{},"kind":"usage","message":"error: unrecognized subcommand 'nonesuch'\n\nUsage: alt [OPTIONS] <COMMAND>\n\nFor more information, try '--help'.\n","next_action":"Correct the arguments and submit a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [repo] alt --json
+exit 2
+err| {"error":{"details":{},"kind":"usage","message":"error: unexpected argument '--json' found\n\nUsage: alt [OPTIONS] <COMMAND>\n\nFor more information, try '--help'.\n","next_action":"Correct the arguments and submit a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [repo] alt task create --definition { --target refs/heads/main --json
+exit 1
+err| {"error":{"details":{"operation_ids":[]},"kind":"precondition_failed","message":"task creation requires a named isolated workspace; create one with alt workspace add","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:1>","retryable":false},"schema_version":1}
+$ [repo] alt task create --definition {"purpose":1} --target refs/heads/main --json
+exit 1
+err| {"error":{"details":{"operation_ids":[]},"kind":"precondition_failed","message":"task creation requires a named isolated workspace; create one with alt workspace add","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:2>","retryable":false},"schema_version":1}
+$ [repo] alt runner probe --bindings [{"name":1}] --environment {} --json
+exit 2
+err| {"error":{"details":{},"kind":"usage","message":"invalid type: integer `1`, expected a string at line 1 column 10","next_action":"Correct the arguments and submit a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [repo] alt runner probe --bindings [] --environment [1] --json
+exit 2
+err| {"error":{"details":{},"kind":"usage","message":"invalid type: sequence, expected a map at line 1 column 0","next_action":"Correct the arguments and submit a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [repo] alt evidence log x nostream --json
+exit 2
+err| {"error":{"details":{},"kind":"usage","message":"error: invalid value 'nostream' for '<STREAM>'\n  [possible values: stdout, stderr, original-report]\n\nFor more information, try '--help'.\n","next_action":"Correct the arguments and submit a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [repo] alt show absent --json
+exit 128
+err| {"error":{"details":{"operation_ids":[]},"kind":"execution_error","message":"bad revision 'absent'","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [repo] alt show 不存在-日本語 --json
+exit 128
+err| {"error":{"details":{"operation_ids":[]},"kind":"execution_error","message":"bad revision '不存在-日本語'","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [repo] alt switch 不存在-日本語 --json
+exit 1
+err| {"error":{"details":{"operation_ids":[]},"kind":"precondition_failed","message":"invalid reference: 不存在-日本語","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:3>","retryable":false},"schema_version":1}
+$ [repo] alt merge absent --json
+exit 75
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"merge: absent - not something we can merge","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:4>","retryable":false},"schema_version":1}
+$ [repo] alt cherry-pick absent --json
+exit 75
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"bad revision 'absent'","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:5>","retryable":false},"schema_version":1}
+$ [repo] alt branch -d absent --json
+exit 75
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"branch 'absent' not found","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:6>","retryable":false},"schema_version":1}
+$ [repo] alt branch -d main --json
+exit 75
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"cannot delete branch 'main': it is the current branch","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:7>","retryable":false},"schema_version":1}
+$ [repo] alt tag -d absent --json
+exit 75
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"tag 'absent' not found","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:8>","retryable":false},"schema_version":1}
+$ [repo] alt log --json absent
+exit 128
+err| {"error":{"details":{"operation_ids":[]},"kind":"execution_error","message":"bad revision 'absent'","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [repo] alt operation status absent --json
+exit 2
+err| {"error":{"details":{"operation_ids":[]},"kind":"usage","message":"operation id must be 64 hexadecimal digits","next_action":"Correct the arguments and submit a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [repo] alt operation recover 1 --json
+exit 2
+err| {"error":{"details":{"operation_ids":[]},"kind":"usage","message":"operation id must be 64 hexadecimal digits","next_action":"Correct the arguments and submit a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:9>","retryable":false},"schema_version":1}
+$ [repo] alt request status bad --json
+exit 2
+err| {"error":{"details":{"operation_ids":[]},"kind":"usage","message":"request id must be 32 hexadecimal digits","next_action":"Correct the arguments and submit a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [repo] alt request result <id32:10> --json
+exit 1
+err| {"error":{"details":{"operation_ids":[]},"kind":"request_not_found","message":"no durable request intent or submission was found","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [repo] alt workspace remove absent --json
+exit 75
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"no such workspace 'absent'","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:11>","retryable":false},"schema_version":1}
+$ [repo] alt remote remove absent --json
+exit 75
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"no such remote 'absent'","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:12>","retryable":false},"schema_version":1}
+$ [repo] alt fetch absent --json
+exit 75
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"no such remote 'absent'","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:13>","retryable":false},"schema_version":1}
+$ [repo] alt push absent --json
+exit 75
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"no such remote 'absent'","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:14>","retryable":false},"schema_version":1}
+$ [repo] alt identity trust bob absent.pub --json
+exit 75
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"No such file or directory (os error 2)","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:15>","retryable":false},"schema_version":1}
+$ [repo] alt task show absent --json
+exit 1
+err| {"error":{"details":{"operation_ids":[]},"kind":"precondition_failed","message":"repository has no task records","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [repo] alt task abandon absent --reason r --json
+exit 1
+err| {"error":{"details":{"operation_ids":[]},"kind":"precondition_failed","message":"repository has no task records","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:16>","retryable":false},"schema_version":1}
+$ [repo] alt candidate create absent --json
+exit 1
+err| {"error":{"details":{"operation_ids":[]},"kind":"precondition_failed","message":"repository has no task records","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:17>","retryable":false},"schema_version":1}
+$ [repo] alt evidence check absent --json
+exit 1
+err| {"error":{"details":{"operation_ids":[]},"kind":"precondition_failed","message":"repository has no task records","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [repo] alt auth status --credential-file absent.json --json
+exit 128
+err| {"error":{"details":{},"kind":"execution_error","message":"No such file or directory (os error 2)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [repo] alt auth logout --credential-file absent.json --json
+exit 128
+err| {"error":{"details":{},"kind":"execution_error","message":"No such file or directory (os error 2)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [repo] alt portable export-status --json
+exit 2
+err| {"error":{"details":{},"kind":"usage","message":"error: the following required arguments were not provided:\n  --credential-file <CREDENTIAL_FILE>\n  --journal <JOURNAL>\n\nUsage: alt portable export-status --credential-file <CREDENTIAL_FILE> --journal <JOURNAL> --json\n\nFor more information, try '--help'.\n","next_action":"Correct the arguments and submit a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}

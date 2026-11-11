@@ -1,0 +1,99 @@
+$ [repo] alt init .
+exit 0
+$ [repo] alt add a.txt
+exit 0
+$ [repo] alt commit -m chore: base
+exit 0
+$ [repo] alt flow feature start early --json
+exit 75
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"develop branch missing; run 'alt flow init' first","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:0>","retryable":false},"schema_version":1}
+$ [repo] alt flow init --json
+exit 0
+out| {"already_initialized":false,"commit":"<id40:1>","develop":"develop","operation_ids":["<id64:2>"],"request_id":"<id32:3>","schema_version":1}
+$ [repo] alt flow init --json
+exit 0
+out| {"already_initialized":true,"develop":"develop","operation_ids":[],"request_id":"<id32:4>","schema_version":1}
+$ [repo] alt flow feature start login --json
+exit 0
+out| {"base":"develop","branch":"feature/login","commit":"<id40:1>","operation_ids":["<id64:5>","<id64:6>"],"request_id":"<id32:7>","schema_version":1}
+$ [repo] alt add login.txt
+exit 0
+$ [repo] alt commit -m feat: add login
+exit 0
+$ [repo] alt flow feature finish login --json
+exit 0
+out| {"commit":"<id40:8>","deleted":"feature/login","operation_ids":["<id64:9>","<id64:10>"],"request_id":"<id32:11>","schema_version":1,"target":"develop"}
+$ [repo] alt flow release start 1.0 --json
+exit 0
+out| {"base":"develop","branch":"release/1.0","commit":"<id40:8>","operation_ids":["<id64:12>","<id64:13>"],"request_id":"<id32:14>","schema_version":1}
+$ [repo] alt add ver.txt
+exit 0
+$ [repo] alt commit -m chore: bump version
+exit 0
+$ [repo] alt flow release finish 1.0 --json
+exit 0
+out| {"back":"develop","back_commit":"<id40:15>","deleted":"release/1.0","kind":"release","operation_ids":["<id64:16>","<id64:17>"],"request_id":"<id32:18>","schema_version":1,"target":"main","target_commit":"<id40:15>"}
+$ [repo] alt flow hotfix start fix-crash --json
+exit 0
+out| {"base":"main","branch":"hotfix/fix-crash","commit":"<id40:15>","operation_ids":["<id64:19>","<id64:20>"],"request_id":"<id32:21>","schema_version":1}
+$ [repo] alt add fix.txt
+exit 0
+$ [repo] alt commit -m fix: crash
+exit 0
+$ [repo] alt flow hotfix finish fix-crash --json
+exit 0
+out| {"back":"develop","back_commit":"<id40:22>","deleted":"hotfix/fix-crash","kind":"hotfix","operation_ids":["<id64:23>","<id64:24>"],"request_id":"<id32:25>","schema_version":1,"target":"main","target_commit":"<id40:22>"}
+$ [repo] alt flow feature finish absent --json
+exit 75
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"no such feature branch 'feature/absent'","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:26>","retryable":false},"schema_version":1}
+$ [repo] alt commit -m direct --allow-empty --json
+exit 1
+err| {"error":{"details":{"operation_ids":[]},"kind":"precondition_failed","message":"refusing to commit directly on protected branch 'develop'.\nalt's collaboration model is git-flow; topic branches are how work merges back. To carry your staged changes onto a topic branch right now:\n\n  alt switch -c feature/<name>\n\nOr formally via flow (requires a clean index first):\n  alt flow feature start <name>\n\n(override with ALT_PROTECTED_OVERRIDE=1 only for emergency recovery — not for normal work.)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:27>","retryable":false},"schema_version":1}
+$ [repo] alt branch --json
+exit 0
+out| {"schema_version":1,"current":"develop","branches":[{"name":"develop","current":true,"oid":"<id40:22>"},{"name":"main","current":false,"oid":"<id40:22>"}]}
+$ [repo] alt tag --json
+exit 0
+out| {"schema_version":1,"tags":[]}
+$ [repo] alt workspace add side <root>/repo/../side --json
+exit 0
+out| {"branch":"side","operation_ids":["<id64:28>","<id64:29>","<id64:30>"],"path":"<root>/repo/../side","request_id":"<id32:31>","schema_version":1,"workspace":"side"}
+$ [repo] alt workspace add side <root>/repo/../side --json
+exit 75
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"a workspace named 'side' already exists","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:32>","retryable":false},"schema_version":1}
+$ [repo] alt workspace list --json
+exit 0
+out| {"schema_version":1,"workspaces":[{"name":"default","path":"<root>/repo","current":true},{"name":"side","path":"<root>/side","current":false}]}
+$ [repo] alt --workspace side status --json
+exit 0
+out| {"schema_version":1,"branch":"side","principal":{"kind":"human","id":"json-test","session":null},"staged":[],"unstaged":[],"untracked":[],"unmerged":[],"clean":true}
+$ [repo] alt --workspace side switch develop --json
+exit 1
+err| {"error":{"details":{"operation_ids":[]},"kind":"precondition_failed","message":"branch 'develop' is checked out in workspace 'default'","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:33>","retryable":false},"schema_version":1}
+$ [side] alt status --json
+exit 0
+out| {"schema_version":1,"branch":"side","principal":{"kind":"human","id":"json-test","session":null},"staged":[],"unstaged":[],"untracked":[],"unmerged":[],"clean":true}
+$ [side] alt flow feature start inside --json
+exit 0
+out| {"base":"develop","branch":"feature/inside","commit":"<id40:22>","operation_ids":["<id64:34>","<id64:35>"],"request_id":"<id32:36>","schema_version":1}
+$ [side] alt add . --json
+exit 0
+out| {"operation_ids":["<id64:37>","<id64:38>"],"request_id":"<id32:39>","schema_version":1,"staged":5}
+$ [side] alt commit -m feat: in the workspace --json
+exit 0
+out| {"branch":"feature/inside","commit":"<id40:40>","operation_ids":["<id64:41>"],"request_id":"<id32:42>","schema_version":1,"tree":"<id40:43>"}
+$ [side] alt op-log -n 2 --json
+exit 0
+out| {"schema_version":1,"ops":[{"id":"<id64:41>","request_id":"<id32:42>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"commit","ref_changes":[{"name":"refs/heads/feature/inside","old":"<id40:22>","new":"<id40:40>"},{"name":"refs/notes/alt/meta","old":"<id40:44>","new":"<id40:45>"}],"workspace":{"name":"side","instance":"<id64:46>"},"inverse_of":null},{"id":"<id64:38>","request_id":"<id32:39>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"add","ref_changes":null,"recovery":{"phase":"completed","prepared":"<id64:37>"}}]}
+$ [repo] alt workspace list --json
+exit 0
+out| {"schema_version":1,"workspaces":[{"name":"default","path":"<root>/repo","current":true},{"name":"side","path":"<root>/side","current":false}]}
+$ [repo] alt workspace remove side --json
+exit 0
+out| {"operation_ids":["<id64:47>"],"removed":"side","request_id":"<id32:48>","schema_version":1}
+$ [repo] alt workspace remove side --json
+exit 75
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"no such workspace 'side'","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:49>","retryable":false},"schema_version":1}
+$ [repo] alt workspace list --json
+exit 0
+out| {"schema_version":1,"workspaces":[{"name":"default","path":"<root>/repo","current":true}]}

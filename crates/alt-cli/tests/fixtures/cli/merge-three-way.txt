@@ -1,0 +1,42 @@
+$ [repo] alt init .
+exit 0
+$ [repo] alt add .
+exit 0
+$ [repo] alt commit -m base
+exit 0
+$ [repo] alt branch apart
+exit 0
+$ [repo] alt switch -c feat
+exit 0
+$ [repo] alt add .
+exit 0
+$ [repo] alt commit -m feat: change line two
+exit 0
+$ [repo] alt add .
+exit 0
+$ [repo] alt commit -m feat: later
+exit 0
+$ [repo] alt switch main
+exit 0
+$ [repo] alt add .
+exit 0
+$ [repo] alt commit -m main: change line two
+exit 0
+$ [repo] alt switch apart
+exit 0
+$ [repo] alt add .
+exit 0
+$ [repo] alt commit -m apart
+exit 0
+$ [repo] alt merge main --json
+exit 0
+out| {"commit":"<id40:0>","conflicts":[],"operation_ids":["<id64:1>","<id64:2>"],"request_id":"<id32:3>","result":"merged","schema_version":1}
+$ [repo] alt show --json
+exit 0
+out| {"schema_version":1,"commits":[{"oid":"<id40:0>","tree":"<id40:4>","parents":["<id40:5>","<id40:6>"],"author":"json-test <json@test> <digits> +0000","committer":"json-test <json@test> <digits> +0000","message":"Merge branch 'main'\n","note_message":null}]}
+$ [repo] alt undo --json
+exit 0
+out| {"operation_ids":["<id64:7>","<id64:8>"],"refs":["refs/heads/apart"],"request_id":"<id32:9>","schema_version":1,"undone":true}
+$ [repo] alt merge absent --json
+exit 75
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"merge: absent - not something we can merge","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:10>","retryable":false},"schema_version":1}

@@ -6,12 +6,14 @@ use golia_change_link as link;
 mod repair;
 
 #[derive(alt_json::FromJson)]
+#[cfg_attr(test, derive(alt_json::ToJson))]
 #[json(deny_unknown_fields)]
 struct Plan {
     channel: String,
     action: Action,
 }
 #[derive(alt_json::FromJson)]
+#[cfg_attr(test, derive(alt_json::ToJson))]
 #[json(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum Action {
     Mapping {
@@ -337,4 +339,5 @@ mod json_tests {
     use super::*;
 
     alt_json_testkit::module_fixture_tests!("native-task-transfer-changes"; Saved);
+    alt_json_testkit::module_read_tests!("native-task-transfer-changes"; Plan: Plan, Action: Action);
 }

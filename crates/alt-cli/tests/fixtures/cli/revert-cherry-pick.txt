@@ -1,0 +1,76 @@
+$ [repo] alt init .
+exit 0
+$ [repo] alt add .
+exit 0
+$ [repo] alt commit -m base
+exit 0
+$ [repo] alt branch apart
+exit 0
+$ [repo] alt switch -c feat
+exit 0
+$ [repo] alt add .
+exit 0
+$ [repo] alt commit -m feat: change line two
+exit 0
+$ [repo] alt add .
+exit 0
+$ [repo] alt commit -m feat: later
+exit 0
+$ [repo] alt switch main
+exit 0
+$ [repo] alt add .
+exit 0
+$ [repo] alt commit -m main: change line two
+exit 0
+$ [repo] alt cherry-pick feat --json
+exit 0
+out| {"commit":"<id40:0>","operation_ids":["<id64:1>","<id64:2>"],"request_id":"<id32:3>","result":"applied","schema_version":1,"source":"<id40:4>"}
+$ [repo] alt show --json
+exit 0
+out| {"schema_version":1,"commits":[{"oid":"<id40:0>","tree":"<id40:5>","parents":["<id40:6>"],"author":"json-test <json@test> <digits> +0000","committer":"json-test <json@test> <digits> +0000","message":"feat: later\n\n(cherry picked from commit <id40:4>)\n","note_message":null}]}
+$ [repo] alt cherry-pick feat~1 --json
+exit 1
+err| {"error":{"details":{"command_output":{"encoding":"utf-8","text":"{\"schema_version\":1,\"result\":\"conflicted\",\"commit\":null,\"conflicts\":[\"f.txt\"]}\n","truncated":false},"operation_ids":[]},"kind":"conflict","message":"command reported a conflict or failed validation","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"partial","request_id":"<id32:7>","retryable":false},"schema_version":1}
+$ [repo] alt status --json
+exit 0
+out| {"schema_version":1,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[{"path":"only-feat.txt","change":"added"}],"unstaged":[],"untracked":[],"unmerged":["f.txt"],"clean":false}
+$ [repo] alt add .
+exit 0
+$ [repo] alt commit -m picked by hand --json
+exit 0
+out| {"branch":"main","commit":"<id40:8>","operation_ids":["<id64:9>"],"request_id":"<id32:10>","schema_version":1,"tree":"<id40:11>"}
+$ [repo] alt revert HEAD~2 --json
+exit 1
+err| {"error":{"details":{"command_output":{"encoding":"utf-8","text":"{\"schema_version\":1,\"result\":\"conflicted\",\"commit\":null,\"conflicts\":[\"f.txt\"]}\n","truncated":false},"operation_ids":[]},"kind":"conflict","message":"command reported a conflict or failed validation","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"partial","request_id":"<id32:12>","retryable":false},"schema_version":1}
+$ [repo] alt status --json
+exit 0
+out| {"schema_version":1,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[],"unstaged":[],"untracked":[],"unmerged":["f.txt"],"clean":false}
+$ [repo] alt revert --continue --json
+exit 75
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"revert --continue: resolve the conflicts and `alt add` them first","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:13>","retryable":false},"schema_version":1}
+$ [repo] alt revert --abort --json
+exit 0
+out| {"command_output":{"encoding":"utf-8","text":"Revert aborted.\n","truncated":false},"operation_ids":["<id64:14>","<id64:15>"],"request_id":"<id32:16>","schema_version":1}
+$ [repo] alt revert --abort --json
+exit 75
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"revert --abort: no revert in progress","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:17>","retryable":false},"schema_version":1}
+$ [repo] alt revert HEAD~2 --json
+exit 1
+err| {"error":{"details":{"command_output":{"encoding":"utf-8","text":"{\"schema_version\":1,\"result\":\"conflicted\",\"commit\":null,\"conflicts\":[\"f.txt\"]}\n","truncated":false},"operation_ids":[]},"kind":"conflict","message":"command reported a conflict or failed validation","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"partial","request_id":"<id32:18>","retryable":false},"schema_version":1}
+$ [repo] alt add .
+exit 0
+$ [repo] alt revert --continue --json
+exit 0
+out| {"branch":"main","commit":"<id40:19>","operation_ids":["<id64:20>"],"request_id":"<id32:21>","schema_version":1}
+$ [repo] alt revert HEAD --json
+exit 0
+out| {"branch":"main","commit":"<id40:22>","operation_ids":["<id64:23>","<id64:24>"],"request_id":"<id32:25>","schema_version":1}
+$ [repo] alt revert HEAD HEAD~1 --no-edit --json
+exit 0
+out| {"command_output":{"encoding":"utf-8","text":"{\"schema_version\":1,\"branch\":\"main\",\"commit\":\"<id40:26>\"}\n{\"schema_version\":1,\"branch\":\"main\",\"commit\":\"<id40:27>\"}\n","truncated":false},"operation_ids":["<id64:28>","<id64:29>","<id64:30>","<id64:31>"],"request_id":"<id32:32>","schema_version":1}
+$ [repo] alt revert absent --json
+exit 75
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"bad revision 'absent'","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:33>","retryable":false},"schema_version":1}
+$ [repo] alt log --json -n 3
+exit 0
+out| {"schema_version":1,"commits":[{"oid":"<id40:27>","tree":"<id40:11>","parents":["<id40:26>"],"author":"json-test <json@test> <digits> +0000","committer":"json-test <json@test> <digits> +0000","message":"Reapply \"main: change line two\"\n\nThis reverts commit <id40:19>.\n","note_message":null},{"oid":"<id40:26>","tree":"<id40:34>","parents":["<id40:22>"],"author":"json-test <json@test> <digits> +0000","committer":"json-test <json@test> <digits> +0000","message":"Revert \"Reapply \"main: change line two\"\"\n\nThis reverts commit <id40:22>.\n","note_message":null},{"oid":"<id40:22>","tree":"<id40:11>","parents":["<id40:19>"],"author":"json-test <json@test> <digits> +0000","committer":"json-test <json@test> <digits> +0000","message":"Reapply \"main: change line two\"\n\nThis reverts commit <id40:19>.\n","note_message":null}]}

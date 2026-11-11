@@ -83,6 +83,7 @@ struct PublishedOrigin {
     provenance: Vec<protocol::TransferProof>,
 }
 #[derive(alt_json::FromJson)]
+#[cfg_attr(test, derive(alt_json::ToJson))]
 #[json(deny_unknown_fields)]
 struct Plan {
     selection: alt_task_transfer::Selection,
@@ -923,6 +924,5 @@ impl NativeRepo<'_> {
 #[cfg(test)]
 mod json_tests {
     use super::*;
-
     alt_json_testkit::module_fixture_tests!("native-task-transfer"; Binding, PublishedOrigin);
 }

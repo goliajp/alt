@@ -9,6 +9,7 @@ use std::{
 mod transport;
 
 #[derive(alt_json::FromJson)]
+#[cfg_attr(test, derive(alt_json::ToJson))]
 #[json(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(super) enum Profile {
     Local {
@@ -394,4 +395,11 @@ impl NativeRepo<'_> {
         }
         emit(out, json_mode, result)
     }
+}
+
+#[cfg(test)]
+mod json_tests {
+    use super::*;
+
+    alt_json_testkit::module_read_tests!("native-task-run"; Profile: Profile);
 }

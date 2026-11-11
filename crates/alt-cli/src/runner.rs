@@ -39,3 +39,8 @@ pub fn run(op: &RunnerOp, out: &mut impl Write) -> Res<()> {
     writeln!(out)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod json_tests {
+    alt_json_testkit::module_read_tests!("runner"; ToolBindings: Vec<alt_runner::ToolBinding>, Environment: std::collections::BTreeMap<String, String>, Spec: alt_runner::Spec);
+}

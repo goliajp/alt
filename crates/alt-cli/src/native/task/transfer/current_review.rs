@@ -222,4 +222,5 @@ mod json_tests {
     use super::*;
 
     alt_json_testkit::module_fixture_tests!("native-task-transfer-current_review"; ReviewContext);
+    alt_json_testkit::module_read_tests!("native-task-transfer"; Plan: Plan);
 }

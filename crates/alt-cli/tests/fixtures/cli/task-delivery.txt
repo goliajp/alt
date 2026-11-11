@@ -1,0 +1,177 @@
+$ [main] alt init .
+exit 0
+$ [main] alt add .
+exit 0
+$ [main] alt commit -m base
+exit 0
+$ [main] alt workspace add task <root>/main/../task
+exit 0
+$ [scratch] alt runner probe --bindings [{"name":"bash","path":"/bin/bash","version_args":["--version"]}] --environment {"PATH":"/usr/bin:/bin"} --json
+exit 0
+out| {"observer_blake3":"<id64:0>","runner":<volatile>,"schema_version":1,"tools":[{"binary_blake3":"<id64:1>","name":"bash","version":<volatile>}]}
+$ [task] alt task create --definition {"purpose":"validate isolated snapshot","authority":"test-owner","allowed_paths":["source.txt"],"auxiliary":[{"path":".ignored","purpose":"private probe"},{"path":"probe.txt","purpose":"root probe"}],"exclusions":[],"validation":{"commands":[["bash","gate.sh"]],"cwd":".","environment":{"values":{"PATH":"/usr/bin:/bin"},"complete":true},"tools":[{"binary_blake3":"<id64:1>","name":"bash","version":<volatile>}],"external":[],"validation":{"outputs":["target"]}}} --target refs/heads/main --json
+exit 0
+out| {"baseline_id":"<id64:2>","operation_id":"<id64:3>","operation_ids":["<id64:3>"],"request_id":"<id32:4>","schema_version":1,"task":{"baseline":{"head":"<id40:5>","refs":{"refs/heads/main":"<id40:5>","refs/heads/task":"<id40:5>","refs/notes/alt/meta":"<id40:6>"},"tree":"<id40:7>"},"creator_request":"<id32:4>","schema_version":1,"scope":{"repository":"<id32:8>","workspace":"<id64:9>"},"spec":{"allowed_paths":["source.txt"],"authority":"test-owner","auxiliary":[{"path":".ignored","purpose":"private probe"},{"path":"probe.txt","purpose":"root probe"}],"exclusions":[],"purpose":"validate isolated snapshot","validation":{"commands":[["bash","gate.sh"]],"cwd":".","environment":{"complete":true,"values":{"PATH":"/usr/bin:/bin"}},"external":[],"tools":[{"binary_blake3":"<id64:1>","name":"bash","version":<volatile>}],"validation":{"outputs":["target"]}}},"target_expected":{"refs/heads/main":"<id40:5>"}},"task_id":"<id64:10>"}
+$ [task] alt task list --json
+exit 0
+out| {"schema_version":1,"tasks":[{"creation_state":"completed","state":"active","task":{"baseline":{"head":"<id40:5>","refs":{"refs/heads/main":"<id40:5>","refs/heads/task":"<id40:5>","refs/notes/alt/meta":"<id40:6>"},"tree":"<id40:7>"},"creator_request":"<id32:4>","schema_version":1,"scope":{"repository":"<id32:8>","workspace":"<id64:9>"},"spec":{"allowed_paths":["source.txt"],"authority":"test-owner","auxiliary":[{"path":".ignored","purpose":"private probe"},{"path":"probe.txt","purpose":"root probe"}],"exclusions":[],"purpose":"validate isolated snapshot","validation":{"commands":[["bash","gate.sh"]],"cwd":".","environment":{"complete":true,"values":{"PATH":"/usr/bin:/bin"}},"external":[],"tools":[{"binary_blake3":"<id64:1>","name":"bash","version":<volatile>}],"validation":{"outputs":["target"]}}},"target_expected":{"refs/heads/main":"<id40:5>"}},"task_id":"<id64:10>"}]}
+$ [task] alt task show <id64:10> --json
+exit 0
+out| {"creation_state":"completed","events":[],"schema_version":1,"state":"active","task":{"baseline":{"head":"<id40:5>","refs":{"refs/heads/main":"<id40:5>","refs/heads/task":"<id40:5>","refs/notes/alt/meta":"<id40:6>"},"tree":"<id40:7>"},"creator_request":"<id32:4>","schema_version":1,"scope":{"repository":"<id32:8>","workspace":"<id64:9>"},"spec":{"allowed_paths":["source.txt"],"authority":"test-owner","auxiliary":[{"path":".ignored","purpose":"private probe"},{"path":"probe.txt","purpose":"root probe"}],"exclusions":[],"purpose":"validate isolated snapshot","validation":{"commands":[["bash","gate.sh"]],"cwd":".","environment":{"complete":true,"values":{"PATH":"/usr/bin:/bin"}},"external":[],"tools":[{"binary_blake3":"<id64:1>","name":"bash","version":<volatile>}],"validation":{"outputs":["target"]}}},"target_expected":{"refs/heads/main":"<id40:5>"}},"task_id":"<id64:10>"}
+$ [task] alt task show <id64:10>
+exit 0
+out| {
+out|   "creation_state": "completed",
+out|   "events": [],
+out|   "state": "active",
+out|   "task": {
+out|     "baseline": {
+out|       "head": "<id40:5>",
+out|       "refs": {
+out|         "refs/heads/main": "<id40:5>",
+out|         "refs/heads/task": "<id40:5>",
+out|         "refs/notes/alt/meta": "<id40:6>"
+out|       },
+out|       "tree": "<id40:7>"
+out|     },
+out|     "creator_request": "<id32:4>",
+out|     "schema_version": 1,
+out|     "scope": {
+out|       "repository": "<id32:8>",
+out|       "workspace": "<id64:9>"
+out|     },
+out|     "spec": {
+out|       "allowed_paths": [
+out|         "source.txt"
+out|       ],
+out|       "authority": "test-owner",
+out|       "auxiliary": [
+out|         {
+out|           "path": ".ignored",
+out|           "purpose": "private probe"
+out|         },
+out|         {
+out|           "path": "probe.txt",
+out|           "purpose": "root probe"
+out|         }
+out|       ],
+out|       "exclusions": [],
+out|       "purpose": "validate isolated snapshot",
+out|       "validation": {
+out|         "commands": [
+out|           [
+out|             "bash",
+out|             "gate.sh"
+out|           ]
+out|         ],
+out|         "cwd": ".",
+out|         "environment": {
+out|           "complete": true,
+out|           "values": {
+out|             "PATH": "/usr/bin:/bin"
+out|           }
+out|         },
+out|         "external": [],
+out|         "tools": [
+out|           {
+out|             "binary_blake3": "<id64:1>",
+out|             "name": "bash",
+out|             "version": <volatile>
+out|           }
+out|         ],
+out|         "validation": {
+out|           "outputs": [
+out|             "target"
+out|           ]
+out|         }
+out|       }
+out|     },
+out|     "target_expected": {
+out|       "refs/heads/main": "<id40:5>"
+out|     }
+out|   },
+out|   "task_id": "<id64:10>"
+out| }
+$ [task] alt add source.txt
+exit 0
+$ [task] alt candidate create <id64:10> --json
+exit 0
+out| {"candidate":{"creator_request":"<id32:11>","manifest":"<id64:12>","parent":null,"schema_version":1,"source_selection":"index","target_expected":{"refs/heads/main":"<id40:5>"},"task":"<id64:10>","tree":"<id40:13>"},"candidate_id":"<id64:14>","operation_id":"<id64:15>","operation_ids":["<id64:15>"],"request_id":"<id32:11>","schema_version":1}
+$ [task] alt candidate show <id64:14> --json
+exit 0
+out| {"candidate":{"creator_request":"<id32:11>","manifest":"<id64:12>","parent":null,"schema_version":1,"source_selection":"index","target_expected":{"refs/heads/main":"<id40:5>"},"task":"<id64:10>","tree":"<id40:13>"},"candidate_id":"<id64:14>","creation_state":"completed","input_manifest":{"context":{"commands":[["bash","gate.sh"]],"cwd":".","environment":{"complete":true,"values":{"PATH":"/usr/bin:/bin"}},"external":[],"tools":[{"binary_blake3":"<id64:1>","name":"bash","version":<volatile>}],"validation":{"outputs":["target"]}},"entries":[{"node":{"content":"<id64:16>","executable":false,"kind":"file","len":28,"link_target":null},"path":".gitignore","path_bytes_hex":"<id20:17>","role":"source"},{"node":{"content":"<id64:18>","executable":false,"kind":"directory","len":0,"link_target":null},"path":".ignored","path_bytes_hex":"<id16:19>","role":"auxiliary"},{"node":{"content":"<id64:20>","executable":false,"kind":"file","len":14,"link_target":null},"path":".ignored/probe","path_bytes_hex":"<id28:21>","role":"auxiliary"},{"node":{"content":"<id64:22>","executable":false,"kind":"file","len":83,"link_target":null},"path":"gate.sh","path_bytes_hex":"676174652e7368","role":"source"},{"node":{"content":"<id64:23>","executable":false,"kind":"file","len":11,"link_target":null},"path":"probe.txt","path_bytes_hex":"<id18:24>","role":"auxiliary"},{"node":{"content":"<id64:25>","executable":false,"kind":"file","len":9,"link_target":null},"path":"source.txt","path_bytes_hex":"<id20:26>","role":"source"}],"hash_algorithm":"blake3","plan":{"auxiliary":[{"path":".ignored","purpose":"private probe"},{"path":"probe.txt","purpose":"root probe"}],"exclusions":[],"source":[".gitignore","gate.sh","source.txt"]},"schema_version":1},"schema_version":1}
+$ [task] alt candidate check <id64:14> --json
+exit 0
+out| {"candidate_id":"<id64:14>","creation_complete":true,"current":true,"current_manifest_id":"<id64:12>","current_target":{"refs/heads/main":"<id40:5>"},"recorded_manifest_id":"<id64:12>","schema_version":1}
+$ [task] alt evidence run <id64:14> --profile {"kind":"local","scratch":"<root>/task/../scratch","tools":[{"name":"bash","path":"/bin/bash","version_args":["--version"]}],"timeout_ms":20000} --json
+exit 0
+out| {"attempt_id":"<id64:27>","evidence":{"actual_context":{"commands":[["bash","gate.sh"]],"cwd":".","environment":{"complete":true,"values":{"PATH":"/usr/bin:/bin"}},"external":[],"tools":[{"binary_blake3":"<id64:1>","name":"bash","version":<volatile>}],"validation":{"outputs":["target"]}},"after":"<id64:12>","artifacts":{"command_observations":{"blake3":"<id64:28>","bytes":<volatile>},"input_observations":{"blake3":"<id64:29>","bytes":<volatile>},"observer_binary":{"blake3":"<id64:0>","bytes":<volatile>},"observer_spec":{"blake3":"<id64:30>","bytes":<volatile>},"output_inventory":{"blake3":"<id64:31>","bytes":<volatile>},"tool-probe:after:bash:stderr":{"blake3":"<id64:18>","bytes":<volatile>},"tool-probe:after:bash:stdout":{"blake3":"<id64:32>","bytes":<volatile>},"tool-probe:after:bash:termination":{"blake3":"<id64:33>","bytes":<volatile>},"tool-probe:before:bash:stderr":{"blake3":"<id64:18>","bytes":<volatile>},"tool-probe:before:bash:stdout":{"blake3":"<id64:32>","bytes":<volatile>},"tool-probe:before:bash:termination":{"blake3":"<id64:33>","bytes":<volatile>}},"before":"<id64:12>","binaries":{"bash":{"blake3":"<id64:1>","bytes":<volatile>}},"candidate":"<id64:14>","creator_request":"<id32:34>","finished_unix_ns":<digits>,"manifest":"<id64:12>","original_report":{"blake3":"<id64:35>","bytes":<volatile>},"provenance":"observed","runner":<volatile>,"schema_version":1,"started_unix_ns":<digits>,"stderr":{"blake3":"<id64:36>","bytes":<volatile>},"stdout":{"blake3":"<id64:37>","bytes":<volatile>},"termination":{"code":0,"kind":"exit"}},"evidence_id":"<id64:38>","operation_id":"<id64:39>","operation_ids":["<id64:40>","<id64:39>"],"receipt_id":"<id64:41>","request_id":"<id32:34>","schema_version":1,"validity":{"eligible":true,"reasons":[]}}
+$ [task] alt evidence show <id64:38> --json
+exit 0
+out| {"creation_state":"completed","evidence":{"actual_context":{"commands":[["bash","gate.sh"]],"cwd":".","environment":{"complete":true,"values":{"PATH":"/usr/bin:/bin"}},"external":[],"tools":[{"binary_blake3":"<id64:1>","name":"bash","version":<volatile>}],"validation":{"outputs":["target"]}},"after":"<id64:12>","artifacts":{"command_observations":{"blake3":"<id64:28>","bytes":<volatile>},"input_observations":{"blake3":"<id64:29>","bytes":<volatile>},"observer_binary":{"blake3":"<id64:0>","bytes":<volatile>},"observer_spec":{"blake3":"<id64:30>","bytes":<volatile>},"output_inventory":{"blake3":"<id64:31>","bytes":<volatile>},"tool-probe:after:bash:stderr":{"blake3":"<id64:18>","bytes":<volatile>},"tool-probe:after:bash:stdout":{"blake3":"<id64:32>","bytes":<volatile>},"tool-probe:after:bash:termination":{"blake3":"<id64:33>","bytes":<volatile>},"tool-probe:before:bash:stderr":{"blake3":"<id64:18>","bytes":<volatile>},"tool-probe:before:bash:stdout":{"blake3":"<id64:32>","bytes":<volatile>},"tool-probe:before:bash:termination":{"blake3":"<id64:33>","bytes":<volatile>}},"before":"<id64:12>","binaries":{"bash":{"blake3":"<id64:1>","bytes":<volatile>}},"candidate":"<id64:14>","creator_request":"<id32:34>","finished_unix_ns":<digits>,"manifest":"<id64:12>","original_report":{"blake3":"<id64:35>","bytes":<volatile>},"provenance":"observed","runner":<volatile>,"schema_version":1,"started_unix_ns":<digits>,"stderr":{"blake3":"<id64:36>","bytes":<volatile>},"stdout":{"blake3":"<id64:37>","bytes":<volatile>},"termination":{"code":0,"kind":"exit"}},"evidence_id":"<id64:38>","schema_version":1}
+$ [task] alt evidence check <id64:38> --json
+exit 0
+out| {"candidate_id":"<id64:14>","evidence_id":"<id64:38>","schema_version":1,"validity":{"eligible":true,"reasons":[]}}
+$ [task] alt evidence log <id64:38> stdout --json
+exit 0
+out| {"artifact":{"blake3":"<id64:37>","bytes":<volatile>},"bytes_hex":"<id22:42>","encoding":"hex","evidence_id":"<id64:38>","schema_version":1,"stream":"stdout","truncated":false}
+$ [task] alt evidence log <id64:38> stderr
+exit 0
+out| diagnostic
+out ends without a newline
+$ [task] alt evidence run-status <id64:27> --json
+exit 0
+out| {"attempt":{"authentication_key":{"blake3":"<id64:43>","bytes":<volatile>},"candidate":"<id64:14>","creator_request":"<id32:34>","local_directory":"<root>/scratch/alt-run-<id32:44>","manifest":"<id64:12>","nonce":"<id32:44>","observer":{"blake3":"<id64:0>","bytes":<volatile>},"observer_path":"<alt>","remote":null,"schema_version":1,"spec":{"blake3":"<id64:30>","bytes":<volatile>},"task":"<id64:10>"},"attempt_id":"<id64:27>","next_action":"Collect only an existing observer report; never re-execute this nonce","receipts":[{"collection_complete":true,"receipt":{"attempt":"<id64:27>","creator_request":"<id32:34>","evidence":"<id64:38>","schema_version":1},"receipt_id":"<id64:41>"}],"schema_version":1}
+$ [task] alt evidence collect <id64:27> --json
+exit 0
+out| {"attempt_id":"<id64:27>","evidence":{"actual_context":{"commands":[["bash","gate.sh"]],"cwd":".","environment":{"complete":true,"values":{"PATH":"/usr/bin:/bin"}},"external":[],"tools":[{"binary_blake3":"<id64:1>","name":"bash","version":<volatile>}],"validation":{"outputs":["target"]}},"after":"<id64:12>","artifacts":{"command_observations":{"blake3":"<id64:28>","bytes":<volatile>},"input_observations":{"blake3":"<id64:29>","bytes":<volatile>},"observer_binary":{"blake3":"<id64:0>","bytes":<volatile>},"observer_spec":{"blake3":"<id64:30>","bytes":<volatile>},"output_inventory":{"blake3":"<id64:31>","bytes":<volatile>},"tool-probe:after:bash:stderr":{"blake3":"<id64:18>","bytes":<volatile>},"tool-probe:after:bash:stdout":{"blake3":"<id64:32>","bytes":<volatile>},"tool-probe:after:bash:termination":{"blake3":"<id64:33>","bytes":<volatile>},"tool-probe:before:bash:stderr":{"blake3":"<id64:18>","bytes":<volatile>},"tool-probe:before:bash:stdout":{"blake3":"<id64:32>","bytes":<volatile>},"tool-probe:before:bash:termination":{"blake3":"<id64:33>","bytes":<volatile>}},"before":"<id64:12>","binaries":{"bash":{"blake3":"<id64:1>","bytes":<volatile>}},"candidate":"<id64:14>","creator_request":"<id32:45>","finished_unix_ns":<digits>,"manifest":"<id64:12>","original_report":{"blake3":"<id64:35>","bytes":<volatile>},"provenance":"observed","runner":<volatile>,"schema_version":1,"started_unix_ns":<digits>,"stderr":{"blake3":"<id64:36>","bytes":<volatile>},"stdout":{"blake3":"<id64:37>","bytes":<volatile>},"termination":{"code":0,"kind":"exit"}},"evidence_id":"<id64:46>","operation_id":"<id64:47>","operation_ids":["<id64:47>"],"receipt_id":"<id64:48>","request_id":"<id32:45>","schema_version":1,"validity":{"eligible":true,"reasons":[]}}
+$ [task] alt task changes <id64:14> --json
+exit 0
+out| {"candidate_id":"<id64:14>","diff":{"changes":[{"after":{"bytes_hex":"<id18:49>","mode":33188,"oid":"<id40:50>","utf8":"reviewed\n"},"before":{"bytes_hex":"626173650a","mode":33188,"oid":"<id40:51>","utf8":"base\n"},"path":"source.txt","path_bytes_hex":"<id20:26>"}],"truncated":false},"schema_version":1,"target_expected":{"refs/heads/main":"<id40:5>"}}
+$ [task] alt task review <id64:14> --evidence <id64:38> --reviewer fixture-owner --reason inspected full change -m fix: deliver reviewed source --json
+exit 0
+out| {"operation_id":"<id64:52>","operation_ids":["<id64:52>"],"request_id":"<id32:53>","review":{"baseline":"<id64:2>","candidate":"<id64:14>","changes":{"blake3":"<id64:54>","bytes":<volatile>},"commit_message":"fix: deliver reviewed source","creator_request":"<id32:53>","evidence":"<id64:38>","reason":"inspected full change","reviewer":"fixture-owner","schema_version":1,"target_expected":{"refs/heads/main":"<id40:5>"},"task":"<id64:10>"},"review_id":"<id64:55>","schema_version":1}
+$ [task] alt task review-show <id64:55> --json
+exit 0
+out| {"creation_complete":true,"diff":{"changes":[{"after":{"bytes_hex":"<id18:49>","mode":33188,"oid":"<id40:50>","utf8":"reviewed\n"},"before":{"bytes_hex":"626173650a","mode":33188,"oid":"<id40:51>","utf8":"base\n"},"path":"source.txt","path_bytes_hex":"<id20:26>"}],"truncated":false},"review":{"baseline":"<id64:2>","candidate":"<id64:14>","changes":{"blake3":"<id64:54>","bytes":<volatile>},"commit_message":"fix: deliver reviewed source","creator_request":"<id32:53>","evidence":"<id64:38>","reason":"inspected full change","reviewer":"fixture-owner","schema_version":1,"target_expected":{"refs/heads/main":"<id40:5>"},"task":"<id64:10>"},"review_id":"<id64:55>","schema_version":1}
+$ [task] alt task integrate <id64:55> --json
+exit 1
+err| {"error":{"details":{"operation_ids":[]},"kind":"precondition_failed","message":"branch 'main' is checked out in workspace 'default'","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:56>","retryable":false},"schema_version":1}
+$ [main] alt switch -c target-hold
+exit 0
+$ [task] alt --request-id <id32:57> task integrate <id64:55> --json
+exit 0
+out| {"event_id":"<id64:58>","integration":{"before":"<id40:5>","commit":"<id40:59>","creator_request":"<id32:57>","notes_after":"<id40:60>","notes_before":"<id40:6>","review":"<id64:55>","schema_version":1,"target":"refs/heads/main","task":"<id64:10>"},"integration_id":"<id64:61>","operation_id":"<id64:62>","operation_ids":["<id64:63>","<id64:64>","<id64:62>"],"ref_operation_id":"<id64:64>","request_id":"<id32:57>","schema_version":1}
+$ [task] alt --request-id <id32:57> task integrate <id64:55> --json
+exit 0
+out| {"event_id":"<id64:58>","integration":{"before":"<id40:5>","commit":"<id40:59>","creator_request":"<id32:57>","notes_after":"<id40:60>","notes_before":"<id40:6>","review":"<id64:55>","schema_version":1,"target":"refs/heads/main","task":"<id64:10>"},"integration_id":"<id64:61>","operation_id":"<id64:62>","operation_ids":["<id64:63>","<id64:64>","<id64:62>"],"ref_operation_id":"<id64:64>","request_id":"<id32:57>","schema_version":1}
+$ [task] alt task integration-show <id64:61> --json
+exit 0
+out| {"creation_complete":true,"current_target":"<id40:59>","integration":{"before":"<id40:5>","commit":"<id40:59>","creator_request":"<id32:57>","notes_after":"<id40:60>","notes_before":"<id40:6>","review":"<id64:55>","schema_version":1,"target":"refs/heads/main","task":"<id64:10>"},"integration_id":"<id64:61>","next_action":"export the immutable integration","operation_ids":["<id64:63>","<id64:64>","<id64:62>"],"schema_version":1,"state":"integrated"}
+$ [task] alt task integration-collect <id64:61> --json
+exit 0
+out| {"executed_again":false,"integration_id":"<id64:61>","operation_id":"<id64:65>","operation_ids":["<id64:65>"],"receipt":{"creator_request":"<id32:66>","integration":"<id64:61>","ref_operation":"<id64:64>","schema_version":1},"receipt_id":"<id64:67>","request_id":"<id32:66>","schema_version":1,"state":"integrated"}
+$ [task] alt task show <id64:10> --json
+exit 0
+out| {"creation_state":"completed","events":[{"event":{"creator_request":"<id32:57>","previous":null,"reason":"review <id64:55>; integration <id64:61>","schema_version":1,"state":"integrated","task":"<id64:10>"},"event_id":"<id64:58>","request_state":"completed"}],"schema_version":1,"state":"integrated","task":{"baseline":{"head":"<id40:5>","refs":{"refs/heads/main":"<id40:5>","refs/heads/task":"<id40:5>","refs/notes/alt/meta":"<id40:6>"},"tree":"<id40:7>"},"creator_request":"<id32:4>","schema_version":1,"scope":{"repository":"<id32:8>","workspace":"<id64:9>"},"spec":{"allowed_paths":["source.txt"],"authority":"test-owner","auxiliary":[{"path":".ignored","purpose":"private probe"},{"path":"probe.txt","purpose":"root probe"}],"exclusions":[],"purpose":"validate isolated snapshot","validation":{"commands":[["bash","gate.sh"]],"cwd":".","environment":{"complete":true,"values":{"PATH":"/usr/bin:/bin"}},"external":[],"tools":[{"binary_blake3":"<id64:1>","name":"bash","version":<volatile>}],"validation":{"outputs":["target"]}}},"target_expected":{"refs/heads/main":"<id40:5>"}},"task_id":"<id64:10>"}
+$ [task] alt task export <id64:61> <root>/task/../delivered --json
+exit 0
+out| {"delivery":{"creator_request":"<id32:68>","destination":"<root>/delivered","integration":"<id64:61>","report":{"blake3":"<id64:69>","bytes":<volatile>},"schema_version":1,"task":"<id64:10>"},"delivery_id":"<id64:70>","operation_id":"<id64:71>","operation_ids":["<id64:72>","<id64:73>","<id64:71>"],"report":{"baseline_id":"<id64:74>","config_transform":"files refs; extensions.refstorage removed","exported":{"config_hex":"<id122:75>","object_format":"sha1","objects":<volatile>,"refs":{"HEAD":"ref: refs/heads/main","refs/heads/main":"<id40:59>","refs/notes/alt/meta":"<id40:60>"},"schema_version":1},"files":{".gitignore":{"mode":33188,"oid":"<id40:76>"},"gate.sh":{"mode":33188,"oid":"<id40:77>"},"source.txt":{"mode":33188,"oid":"<id40:50>"}},"git":{"binary_blake3":"<id64:78>","fsck_exit":0,"fsck_stderr_hex":"","fsck_stdout_hex":"","program":"/usr/bin/git","version_stderr_hex":"","version_stdout_hex":"<id38:79>"}},"request_id":"<id32:68>","schema_version":1}
+$ [task] alt task delivery-show <id64:70> --json
+exit 0
+out| {"creation_complete":true,"delivery":{"creator_request":"<id32:68>","destination":"<root>/delivered","integration":"<id64:61>","report":{"blake3":"<id64:69>","bytes":<volatile>},"schema_version":1,"task":"<id64:10>"},"delivery_id":"<id64:70>","report":{"baseline_id":"<id64:74>","config_transform":"files refs; extensions.refstorage removed","exported":{"config_hex":"<id122:75>","object_format":"sha1","objects":<volatile>,"refs":{"HEAD":"ref: refs/heads/main","refs/heads/main":"<id40:59>","refs/notes/alt/meta":"<id40:60>"},"schema_version":1},"files":{".gitignore":{"mode":33188,"oid":"<id40:76>"},"gate.sh":{"mode":33188,"oid":"<id40:77>"},"source.txt":{"mode":33188,"oid":"<id40:50>"}},"git":{"binary_blake3":"<id64:78>","fsck_exit":0,"fsck_stderr_hex":"","fsck_stdout_hex":"","program":"/usr/bin/git","version_stderr_hex":"","version_stdout_hex":"<id38:79>"}},"schema_version":1}
+$ [task] alt task delivery-collect <id64:70> --json
+exit 0
+out| {"delivery_id":"<id64:70>","exported_again":false,"operation_id":"<id64:80>","operation_ids":["<id64:80>"],"receipt":{"creator_request":"<id32:81>","delivery":"<id64:70>","schema_version":1,"verification":{"blake3":"<id64:82>","bytes":<volatile>}},"receipt_id":"<id64:83>","request_id":"<id32:81>","schema_version":1,"verification":{"binary_blake3":"<id64:78>","fsck_exit":0,"fsck_stderr_hex":"","fsck_stdout_hex":"","program":"/usr/bin/git","version_stderr_hex":"","version_stdout_hex":"<id38:79>"}}
+$ [task] alt task list --json
+exit 0
+out| {"schema_version":1,"tasks":[{"creation_state":"completed","state":"integrated","task":{"baseline":{"head":"<id40:5>","refs":{"refs/heads/main":"<id40:5>","refs/heads/task":"<id40:5>","refs/notes/alt/meta":"<id40:6>"},"tree":"<id40:7>"},"creator_request":"<id32:4>","schema_version":1,"scope":{"repository":"<id32:8>","workspace":"<id64:9>"},"spec":{"allowed_paths":["source.txt"],"authority":"test-owner","auxiliary":[{"path":".ignored","purpose":"private probe"},{"path":"probe.txt","purpose":"root probe"}],"exclusions":[],"purpose":"validate isolated snapshot","validation":{"commands":[["bash","gate.sh"]],"cwd":".","environment":{"complete":true,"values":{"PATH":"/usr/bin:/bin"}},"external":[],"tools":[{"binary_blake3":"<id64:1>","name":"bash","version":<volatile>}],"validation":{"outputs":["target"]}}},"target_expected":{"refs/heads/main":"<id40:5>"}},"task_id":"<id64:10>"}]}
+$ [task] alt request pending --json
+exit 0
+out| {"requests":[],"schema_version":1}
+$ [task] alt request result <id32:57> --json
+exit 0
+out| {"request":{"exit_code":0,"finished_ms":<digits>,"operation_ids":["<id64:63>","<id64:64>","<id64:62>"],"outcome":"applied","recorded_operation_ids":["<id64:63>","<id64:64>","<id64:62>"],"repository":"<id32:8>","request_id":"<id32:57>","response_bytes":1111,"response_digest":"<id64:84>","started_ms":<digits>,"state":"completed","stderr":{"encoding":"utf-8","text":"","truncated":false},"stdout":{"encoding":"utf-8","text":"{\"event_id\":\"<id64:58>\",\"integration\":{\"before\":\"<id40:5>\",\"commit\":\"<id40:59>\",\"creator_request\":\"<id32:57>\",\"notes_after\":\"<id40:60>\",\"notes_before\":\"<id40:6>\",\"review\":\"<id64:55>\",\"schema_version\":1,\"target\":\"refs/heads/main\",\"task\":\"<id64:10>\"},\"integration_id\":\"<id64:61>\",\"operation_id\":\"<id64:62>\",\"operation_ids\":[\"<id64:63>\",\"<id64:64>\",\"<id64:62>\"],\"ref_operation_id\":\"<id64:64>\",\"request_id\":\"<id32:57>\",\"schema_version\":1}\n","truncated":false},"workspace":"<id64:9>"},"schema_version":1}
+$ [task] alt op-log --json
+exit 0
+out| {"schema_version":1,"ops":[{"id":"<id64:80>","request_id":"<id32:81>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"task-delivery-collect","ref_changes":null,"task_id":"<id64:10>","record_id":"<id64:83>","workspace":{"name":"task","instance":"<id64:9>"}},{"id":"<id64:71>","request_id":"<id32:68>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"task-export","ref_changes":null,"task_id":"<id64:10>","record_id":"<id64:70>","workspace":{"name":"task","instance":"<id64:9>"}},{"id":"<id64:73>","request_id":"<id32:68>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"task-export-ready","ref_changes":null,"task_id":"<id64:10>","record_id":"<id64:70>","workspace":{"name":"task","instance":"<id64:9>"}},{"id":"<id64:72>","request_id":"<id32:68>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"task-export-prepare","ref_changes":null,"task_id":"<id64:10>","record_id":"<id64:85>","workspace":{"name":"task","instance":"<id64:9>"}},{"id":"<id64:65>","request_id":"<id32:66>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"task-integration-collect","ref_changes":null,"task_id":"<id64:10>","record_id":"<id64:67>","workspace":{"name":"task","instance":"<id64:9>"}},{"id":"<id64:62>","request_id":"<id32:57>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"task-integrate-complete","ref_changes":null,"task_id":"<id64:10>","record_id":"<id64:61>","workspace":{"name":"task","instance":"<id64:9>"}},{"id":"<id64:64>","request_id":"<id32:57>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"task-integrate","ref_changes":[{"name":"refs/heads/main","old":"<id40:5>","new":"<id40:59>"},{"name":"refs/notes/alt/meta","old":"<id40:6>","new":"<id40:60>"}],"workspace":{"name":"task","instance":"<id64:9>"},"inverse_of":null},{"id":"<id64:63>","request_id":"<id32:57>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"task-integrate-prepare","ref_changes":null,"task_id":"<id64:10>","record_id":"<id64:61>","workspace":{"name":"task","instance":"<id64:9>"}},{"id":"<id64:86>","request_id":"<id32:87>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"switch","ref_changes":[{"name":"HEAD","old":"@refs/heads/main","new":"@refs/heads/target-hold"}],"workspace":{"name":"default","instance":"<id64:88>"},"inverse_of":null},{"id":"<id64:89>","request_id":"<id32:87>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"branch","ref_changes":[{"name":"refs/heads/target-hold","old":null,"new":"<id40:5>"}],"workspace":{"name":"default","instance":"<id64:88>"},"inverse_of":null},{"id":"<id64:52>","request_id":"<id32:53>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"task-review","ref_changes":null,"task_id":"<id64:10>","record_id":"<id64:55>","workspace":{"name":"task","instance":"<id64:9>"}},{"id":"<id64:47>","request_id":"<id32:45>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"evidence-run-collect","ref_changes":null,"task_id":"<id64:10>","record_id":"<id64:48>","workspace":{"name":"task","instance":"<id64:9>"}},{"id":"<id64:39>","request_id":"<id32:34>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"evidence-run-collect","ref_changes":null,"task_id":"<id64:10>","record_id":"<id64:41>","workspace":{"name":"task","instance":"<id64:9>"}},{"id":"<id64:40>","request_id":"<id32:34>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"evidence-run-start","ref_changes":null,"task_id":"<id64:10>","record_id":"<id64:27>","workspace":{"name":"task","instance":"<id64:9>"}},{"id":"<id64:15>","request_id":"<id32:11>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"candidate-create","ref_changes":null,"task_id":"<id64:10>","record_id":"<id64:14>","workspace":{"name":"task","instance":"<id64:9>"}},{"id":"<id64:90>","request_id":"<id32:91>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"add","ref_changes":null,"recovery":{"phase":"completed","prepared":"<id64:92>"}},{"id":"<id64:92>","request_id":"<id32:91>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"add","ref_changes":null,"recovery":{"phase":"prepared","before":"<id64:93>","after":"<id64:94>","workspace":{"name":"task","instance":"<id64:9>"}}},{"id":"<id64:3>","request_id":"<id32:4>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"task-create","ref_changes":null,"task_id":"<id64:10>","record_id":"<id64:10>","workspace":{"name":"task","instance":"<id64:9>"}},{"id":"<id64:95>","request_id":"<id32:96>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"checkout","ref_changes":null,"recovery":{"phase":"completed","prepared":"<id64:97>"}},{"id":"<id64:97>","request_id":"<id32:96>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"checkout","ref_changes":null,"recovery":{"phase":"prepared","index_before":"<id64:98>","index_after":"<id64:93>","workspace":{"name":"task","instance":"<id64:9>"}}},{"id":"<id64:99>","request_id":"<id32:96>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"workspace","ref_changes":[{"name":"refs/heads/task","old":null,"new":"<id40:5>"},{"name":"workspaces/task/HEAD","old":null,"new":"@refs/heads/task"}],"workspace":{"name":"default","instance":"<id64:88>"},"inverse_of":null},{"id":"<id64:100>","request_id":"<id32:101>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"commit","ref_changes":[{"name":"refs/heads/main","old":null,"new":"<id40:5>"},{"name":"refs/notes/alt/meta","old":null,"new":"<id40:6>"}],"workspace":{"name":"default","instance":"<id64:88>"},"inverse_of":null},{"id":"<id64:102>","request_id":"<id32:103>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"add","ref_changes":null,"recovery":{"phase":"completed","prepared":"<id64:104>"}},{"id":"<id64:104>","request_id":"<id32:103>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"add","ref_changes":null,"recovery":{"phase":"prepared","before":"<id64:98>","after":"<id64:93>","workspace":{"name":"default","instance":"<id64:88>"}}},{"id":"<id64:105>","request_id":null,"timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"init","ref_changes":[{"name":"HEAD","old":null,"new":"@refs/heads/main"}],"workspace":{"name":"default","instance":"<id64:88>"},"inverse_of":null}]}
