@@ -260,13 +260,15 @@ pub fn ingest_holding(
                 .collect();
             let messages: Vec<&[&[u8]]> = parts.iter().map(|pair| pair.as_slice()).collect();
             let oids = alt_hash::sha1_many(&messages);
+            let contents: Vec<&[u8]> = kept.iter().map(|(_, _, data)| *data).collect();
+            let digests = alt_hash::blake3::hash_many(&contents);
             let mut out = Vec::with_capacity(batch.len());
-            for ((index, kind, data), oid) in kept.iter().zip(oids) {
+            for (((index, kind, data), oid), digest) in kept.iter().zip(oids).zip(digests) {
                 out.push((
                     *index,
                     Meta {
                         oid,
-                        blake3: *alt_hash::blake3::hash(data).as_bytes(),
+                        blake3: *digest.as_bytes(),
                         kind: *kind,
                         size: data.len() as u64,
                         depth: 0,

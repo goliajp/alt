@@ -1,6 +1,7 @@
 //! four lanes in 128-bit NEON vectors
 
-use super::lanes::{Batch, Lanes, in_groups};
+use super::MAX_LANES;
+use super::lanes::{Batch, Lanes, Short, compress_ragged, in_groups};
 use std::arch::aarch64::*;
 
 // The `unsafe` blocks below only wrap vector instructions. Those on registers are
@@ -106,6 +107,27 @@ impl Lanes for uint32x4_t {
     }
 
     #[inline(always)]
+    unsafe fn gather(blocks: &[*const u8; MAX_LANES]) -> [Self; 16] {
+        unsafe {
+            let quarter = |at: usize| {
+                transpose(
+                    load(blocks[0].add(at)),
+                    load(blocks[1].add(at)),
+                    load(blocks[2].add(at)),
+                    load(blocks[3].add(at)),
+                )
+            };
+            let [m0, m1, m2, m3] = quarter(0);
+            let [m4, m5, m6, m7] = quarter(16);
+            let [m8, m9, m10, m11] = quarter(32);
+            let [m12, m13, m14, m15] = quarter(48);
+            [
+                m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15,
+            ]
+        }
+    }
+
+    #[inline(always)]
     unsafe fn store(h: &[Self; 8], out: *mut u8) {
         unsafe {
             let low = transpose(h[0], h[1], h[2], h[3]);
@@ -203,4 +225,12 @@ pub(super) unsafe fn hash_many_paired<'a, 'b>(
         let (rest, counter, out) = in_groups::<Pair>(batch, input, counter, out);
         in_groups::<uint32x4_t>(batch, rest, counter, out)
     }
+}
+
+/// Compresses at most four chunks of any lengths side by side; `out` gets 32 bytes
+/// for each.
+#[target_feature(enable = "neon")]
+pub(super) unsafe fn ragged(key: &[u32; 8], flags: u32, chunks: &[Short], out: &mut [u8]) {
+    // neon is enabled for this function
+    unsafe { compress_ragged::<uint32x4_t>(key, flags, chunks, out) }
 }
