@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: perf
+summary: one paired-probe zstd level 1 loop for every input, branchless on small windows
+author-type: human
+author: doracawl
+touched: crates/alt-zstd/src/enc/fast.rs
+touched: crates/alt-zstd/src/enc/matcher.rs
+touched: crates/alt-zstd/src/enc/mod.rs
+touched: crates/alt-zstd/src/enc/pairs.rs
+touched: crates/alt-zstd/src/enc/params.rs
+touched: crates/alt-zstd/src/enc/search.rs
+touched: crates/alt-zstd/tests/it/frames/own.sha256
