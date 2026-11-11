@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: perf
+summary: bucketed huffman code building, per-symbol fse table fill, a prefix index no larger than the data needs
+author-type: human
+author: doracawl
+touched: crates/alt-zstd/src/enc/huf.rs
+touched: crates/alt-zstd/src/enc/lit.rs
+touched: crates/alt-zstd/src/enc/params.rs
+touched: crates/alt-zstd/src/fse.rs
+touched: crates/alt-zstd/tests/it/frames/own.sha256
