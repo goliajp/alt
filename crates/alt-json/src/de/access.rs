@@ -37,25 +37,7 @@ pub struct MapAccess<'d, 'a> {
 
 impl<'a> MapAccess<'_, 'a> {
     fn has_next_key(&mut self) -> Result<bool> {
-        loop {
-            let more = match &mut self.d.source {
-                Source::Text(p) => p.has_next_key(&mut self.first)?,
-                Source::Tree(t) => t.has_next_key(),
-            };
-            let (true, false, Source::Text(p)) = (more, self.hidden.is_empty(), &mut self.d.source)
-            else {
-                return Ok(more);
-            };
-            // look at the key without consuming it
-            let start = p.index;
-            p.eat();
-            if !self.hidden.contains(&&*p.parse_str()?) {
-                p.index = start;
-                return Ok(true);
-            }
-            p.object_colon()?;
-            p.ignore_value()?;
-        }
+        self.d.next_visible_key(&mut self.first, &self.hidden)
     }
 
     /// The next key, passed through `f`; `None` at the end of the object.

@@ -53,6 +53,9 @@ impl<'a> Decoder<'a> {
     /// Follow with [`Decoder::enum_name`], the data if there is any, and
     /// [`Decoder::enum_end`].
     pub fn enum_begin(&mut self) -> Result<bool> {
+        if let (false, Source::Text(_)) = (self.hidden.is_empty(), &self.source) {
+            return self.enum_begin_without_tags();
+        }
         let buffered = self.buffered;
         let shape = match &mut self.source {
             Source::Text(p) => {
@@ -63,7 +66,35 @@ impl<'a> Decoder<'a> {
             }
             Source::Tree(t) => t.begin_enum()?,
         };
+        self.open_enums.push(Vec::new());
         Ok(matches!(shape, Shape::Map))
+    }
+
+    /// An enum as the content of a variant of an internally tagged enum:
+    /// what is left of the object without the tags must be one member.
+    fn enum_begin_without_tags(&mut self) -> Result<bool> {
+        let hidden = std::mem::take(&mut self.hidden);
+        if hidden.elements != 0 {
+            return Err(Error::invalid_type("sequence", "string or map"));
+        }
+        self.begin(b"{", "string or map")?;
+        let mut first = true;
+        let found = self.next_visible_key(&mut first, &hidden.keys);
+        match found {
+            Ok(true) => {
+                self.open_enums.push(hidden.keys);
+                Ok(true)
+            }
+            Ok(false) => self.finish_object(Err(single_key())),
+            Err(error) => self.finish_object(Err(error)),
+        }
+    }
+
+    fn finish_object<T>(&mut self, inner: Result<T>) -> Result<T> {
+        match &mut self.source {
+            Source::Text(p) => p.finish_map(inner),
+            Source::Tree(t) => t.finish(inner),
+        }
     }
 
     /// Reads the variant name and, when the variant has data, moves to it.
@@ -81,6 +112,15 @@ impl<'a> Decoder<'a> {
     /// Leaves an enum entered with [`Decoder::enum_begin`]; `inner` is the
     /// outcome of everything read since.
     pub fn enum_end<T>(&mut self, has_data: bool, inner: Result<T>) -> Result<T> {
+        let hidden = self.open_enums.pop().unwrap_or_default();
+        if !hidden.is_empty() {
+            let inner =
+                inner.and_then(|value| match self.next_visible_key(&mut false, &hidden)? {
+                    true => Err(single_key()),
+                    false => Ok(value),
+                });
+            return self.finish_object(inner);
+        }
         if !has_data {
             return inner;
         }
@@ -103,4 +143,8 @@ impl<'a> Decoder<'a> {
             _ => self.structure(expected, seq, map),
         }
     }
+}
+
+fn single_key() -> Error {
+    Error::invalid_value("map", "map with a single key")
 }

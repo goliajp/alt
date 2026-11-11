@@ -278,6 +278,45 @@ fn as_fields_of_derived_types() {
     exercise_with(0xc2, 3000, tagged).report("bridge, vendored fields in a tagged enum");
 }
 
+/// A type with serde implementations only, in each form an enum variant
+/// can take.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SerdeOnly {
+    Unit,
+    One(u8),
+    Pair(u8, String),
+    Fields { left: i8, right: Option<String> },
+}
+
+/// One of our enums with a tag, whose variants hold serde types directly.
+#[derive(Debug, Serialize, Deserialize, ToJson, FromJson)]
+#[serde(tag = "t", rename_all = "snake_case")]
+#[json(tag = "t", rename_all = "snake_case")]
+enum Nested {
+    Inner(#[json(with = "alt_json_serde::bridge")] SerdeOnly),
+    Decision(#[json(with = "alt_json_serde::bridge")] Decision),
+    Release(#[json(with = "alt_json_serde::bridge")] Release),
+    Plain { x: u8 },
+}
+
+#[test]
+fn serde_enums_inside_a_tagged_variant() {
+    let nested = |rng: &mut Rng| match rng.below(7) {
+        0 => Nested::Inner(SerdeOnly::Unit),
+        1 => Nested::Inner(SerdeOnly::One(any(rng))),
+        2 => Nested::Inner(SerdeOnly::Pair(any(rng), any(rng))),
+        3 => Nested::Inner(SerdeOnly::Fields {
+            left: any(rng),
+            right: any(rng),
+        }),
+        4 => Nested::Decision(decision(rng)),
+        5 => Nested::Release(release(rng)),
+        _ => Nested::Plain { x: any(rng) },
+    };
+    exercise_with(0xc4, 6000, nested).report("bridge, serde enums inside a tagged variant");
+}
+
 #[test]
 fn trees_of_either_library() {
     let mut rng = Rng::new(0xc3);

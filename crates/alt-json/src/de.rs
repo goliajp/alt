@@ -41,6 +41,8 @@ pub struct Decoder<'a> {
     /// reading content that was scanned ahead to find an enum tag
     buffered: bool,
     hidden: Hidden,
+    /// tags hidden from each enum that is being read step by step
+    open_enums: Vec<Vec<&'static str>>,
 }
 
 enum Source<'a> {
@@ -69,6 +71,7 @@ impl<'a> Decoder<'a> {
             source: Source::Text(Parser::new(input)),
             buffered: false,
             hidden: Hidden::default(),
+            open_enums: Vec::new(),
         }
     }
 
@@ -77,6 +80,7 @@ impl<'a> Decoder<'a> {
             source: Source::Tree(Tree::new(value)),
             buffered: false,
             hidden: Hidden::default(),
+            open_enums: Vec::new(),
         }
     }
 
@@ -237,6 +241,29 @@ impl<'a> Decoder<'a> {
         }
     }
 
+    /// Moves to the next key of the open object that is not in `hidden`;
+    /// false at the end of the object.
+    fn next_visible_key(&mut self, first: &mut bool, hidden: &[&'static str]) -> Result<bool> {
+        loop {
+            let more = match &mut self.source {
+                Source::Text(p) => p.has_next_key(first)?,
+                Source::Tree(t) => t.has_next_key(),
+            };
+            let (true, false, Source::Text(p)) = (more, hidden.is_empty(), &mut self.source) else {
+                return Ok(more);
+            };
+            // look at the key without consuming it
+            let start = p.index;
+            p.eat();
+            if !hidden.contains(&&*p.parse_str()?) {
+                p.index = start;
+                return Ok(true);
+            }
+            p.object_colon()?;
+            p.ignore_value()?;
+        }
+    }
+
     fn begin(&mut self, accept: &[u8], expected: &str) -> Result<Shape> {
         match &mut self.source {
             Source::Text(p) => p.begin(accept, expected),
@@ -348,37 +375,11 @@ impl<'a> Decoder<'a> {
         lookup: impl FnOnce(&str) -> Result<usize>,
         f: impl FnOnce(Variant<'_, 'a>, usize) -> Result<T>,
     ) -> Result<T> {
-        if let (false, Source::Text(_)) = (self.hidden.is_empty(), &self.source) {
-            return self.enumeration_without_tags(lookup, f);
-        }
         let has_data = self.enum_begin()?;
         let inner = self
             .enum_name(has_data, lookup)
             .and_then(|index| f(Variant { d: self, has_data }, index));
         self.enum_end(has_data, inner)
-    }
-
-    /// An enum as the content of a variant of an internally tagged enum:
-    /// what is left of the object without the tags must be one member.
-    fn enumeration_without_tags<T>(
-        &mut self,
-        lookup: impl FnOnce(&str) -> Result<usize>,
-        f: impl FnOnce(Variant<'_, 'a>, usize) -> Result<T>,
-    ) -> Result<T> {
-        let single = || Error::invalid_value("map", "map with a single key");
-        if self.hidden.elements != 0 {
-            self.hidden = Hidden::default();
-            return Err(Error::invalid_type("sequence", "string or map"));
-        }
-        self.map("string or map", |m| {
-            let index = m.next_key(lookup)?.ok_or_else(single)?;
-            let variant = |d: &mut Decoder<'a>| f(Variant { d, has_data: true }, index);
-            let value = m.next_value_with(variant)?;
-            match m.next_key(|_| Ok(()))? {
-                Some(()) => Err(single()),
-                None => Ok(value),
-            }
-        })
     }
 
     fn identifier(&mut self, lookup: impl FnOnce(&str) -> Result<usize>) -> Result<usize> {
