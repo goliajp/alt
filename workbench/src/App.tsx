@@ -12,6 +12,7 @@ import { DocumentView } from './views';
 import { CloudProducts } from './products';
 import { DeviceAuthorization } from './device';
 import { captureDeviceEntry } from './device-location';
+import { About } from './about';
 
 function savedPreference<T extends string>(key: string, choices: readonly T[], fallback: T): T {
   try { const value = localStorage.getItem(key); return choices.includes(value as T) ? value as T : fallback; } catch { return fallback; }
@@ -26,7 +27,7 @@ function title(document: Document, t: Text) {
 }
 function Login({ t, done }: { t: Text; done: (session: Session) => void }) {
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
-  return <main className="login"><form onSubmit={async event => {
+  return <main className="login login-visitor"><form onSubmit={async event => {
     event.preventDefault();
     const form = event.currentTarget;
     const fields = new FormData(form);
@@ -44,7 +45,7 @@ function Login({ t, done }: { t: Text; done: (session: Session) => void }) {
     <Field label={t.password}><Input name="password" type="password" autoComplete="current-password" required maxLength={1024}/></Field>
     {error && <p role="alert" className="failure">{error}</p>}
     <Button type="submit" variant="primary" busy={busy}>{t.signIn}</Button>
-  </form></main>;
+  </form><About t={t}/></main>;
 }
 export function App() {
   const [device,setDevice]=useState(captureDeviceEntry);
