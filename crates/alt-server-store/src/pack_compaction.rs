@@ -26,18 +26,23 @@ pub const PACK_RETIRED_GRACE_MS: u64 = 600_000;
 /// which writes its file before its transaction.
 const UNKNOWN_FILE_AGE: Duration = Duration::from_secs(3600);
 
-/// Where the run to merge starts: the newest segments, taken while each one is no
-/// more than twice as large as all the newer ones together.
+/// Where the run to merge starts: the longest stretch of the newest segments whose
+/// oldest member is no more than twice as large as all the newer ones together.
+/// What stays out then at least doubles from each segment to the next older one, so
+/// the segments a repository keeps grow with the logarithm of its size.
 fn run_start(bytes: &[u64]) -> Option<usize> {
     let mut start = bytes.len();
     let mut total = 0u64;
-    while start > 0 {
-        let next = bytes[start - 1];
-        if (start < bytes.len() && next > total.saturating_mul(2)) || total + next > MERGE_BYTES {
+    for (at, &next) in bytes.iter().enumerate().rev() {
+        if total + next > MERGE_BYTES {
             break;
         }
+        // a larger segment does not end the search: older small ones still fit under
+        // the sum that includes it
+        if at + 1 == bytes.len() || next <= total.saturating_mul(2) {
+            start = at;
+        }
         total += next;
-        start -= 1;
     }
     (bytes.len() - start >= RUN).then_some(start)
 }
@@ -230,6 +235,20 @@ mod tests {
         assert_eq!(run_start(&[1, 10, 10, 10, 10, 10, 10, 10, 10]), Some(0));
         // seven are not a run, however the eighth compares
         assert_eq!(run_start(&[1000, 10, 10, 10, 10, 10, 10, 10]), None);
+        // a small newest segment does not hide the run behind a larger one
+        assert_eq!(run_start(&[1000, 4, 4, 4, 4, 4, 4, 4, 90, 3]), Some(1));
+        assert_eq!(
+            run_start(&[
+                18166956, 37852, 28907, 51359, 10622, 321048, 31993, 406481, 940165, 1106760,
+                571621, 1785647, 70351
+            ]),
+            Some(1)
+        );
+        // each segment more than twice all the newer ones: nothing to merge
+        assert_eq!(
+            run_start(&[19683, 6561, 2187, 729, 243, 81, 27, 9, 3, 1]),
+            None
+        );
         assert_eq!(
             run_start(&[1 << 30, 10, 10, 10, 10, 10, 10, 10, 10]),
             Some(1)
