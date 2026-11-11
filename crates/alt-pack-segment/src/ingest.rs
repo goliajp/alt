@@ -441,70 +441,19 @@ pub fn ingest_holding(
         flags |= FLAG_OVERLAP;
     }
 
-    // generation numbers: one more than the largest parent generation
-    let commit_indexes: Vec<usize> = kept
+    let mut commits: Vec<CommitRow> = kept
         .iter()
-        .copied()
-        .filter(|index| metas[*index].kind == Kind::Commit)
-        .collect();
-    let slot: HashMap<Oid, usize> = commit_indexes
-        .iter()
-        .enumerate()
-        .map(|(at, index)| (metas[*index].oid, at))
-        .collect();
-    let mut generation = vec![0u32; commit_indexes.len()];
-    for start in 0..commit_indexes.len() {
-        let mut stack = vec![start];
-        while let Some(at) = stack.last().copied() {
-            if generation[at] != 0 {
-                stack.pop();
-                continue;
-            }
-            let Parsed::Commit { parents, .. } = &metas[commit_indexes[at]].parsed else {
-                unreachable!()
-            };
-            let mut highest = 0;
-            let mut waiting = false;
-            for parent in parents {
-                match slot.get(parent) {
-                    Some(parent_at) if generation[*parent_at] == 0 => {
-                        if stack.contains(parent_at) {
-                            return Err(Error::Format("commit ancestry cycle"));
-                        }
-                        stack.push(*parent_at);
-                        waiting = true;
-                    }
-                    Some(parent_at) => highest = highest.max(generation[*parent_at]),
-                    None => {
-                        highest = highest.max(
-                            existing
-                                .commit(parent)
-                                .map_or(0, |commit| commit.generation),
-                        )
-                    }
-                }
-            }
-            if !waiting {
-                generation[at] = highest + 1;
-                stack.pop();
-            }
-        }
-    }
-    let commits = commit_indexes
-        .iter()
-        .zip(&generation)
-        .map(|(index, generation)| {
-            let Parsed::Commit { tree, parents } = &metas[*index].parsed else {
-                unreachable!()
-            };
-            CommitRow {
+        .filter_map(|index| match &metas[*index].parsed {
+            Parsed::Commit { tree, parents } => Some(CommitRow {
                 oid: metas[*index].oid,
                 tree: *tree,
-                generation: *generation,
+                generation: 0,
                 parents: parents.clone(),
-            }
+            }),
+            _ => None,
         })
         .collect();
+    crate::generation::assign(&mut commits, existing)?;
     let records = kept
         .iter()
         .map(|index| {
