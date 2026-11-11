@@ -12,4 +12,4 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["json"] }
 tracing-appender = "0.2"
 [dev-dependencies]
-serde_json.workspace = true
+alt-json.workspace = true

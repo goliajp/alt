@@ -67,10 +67,10 @@ fn lost_response_and_later_work_outcome_are_separate_correlated_facts() {
     .unwrap();
     // Repeated cleanup cannot produce two terminal observations or negative inflight.
     t.transport(200, 100, Transport::Complete);
-    let lines: Vec<serde_json::Value> = String::from_utf8(capture.0.lock().unwrap().clone())
+    let lines: Vec<alt_json::Value> = String::from_utf8(capture.0.lock().unwrap().clone())
         .unwrap()
         .lines()
-        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .map(|line| alt_json::from_str::<alt_json::Value>(line).unwrap())
         .filter(|v| v["fields"]["trace_id"] == t.id())
         .collect();
     let terminal: Vec<_> = lines
@@ -289,7 +289,7 @@ fn bounded_writer_child() {
     assert!(text.contains("alt_server_telemetry"));
     assert!(!text.contains("secret-sentinel-do-not-log"));
     for line in text.lines() {
-        serde_json::from_str::<serde_json::Value>(line).unwrap();
+        alt_json::from_str::<alt_json::Value>(line).unwrap();
     }
 }
 
@@ -353,10 +353,10 @@ fn background_attempts_keep_event_identity_without_inventing_http_responses() {
     assert!(
         text.contains("alt_operation_outcomes_total{outcome=\"unknown\",phase=\"dispatch\"} 1")
     );
-    let rows: Vec<serde_json::Value> = String::from_utf8(capture.0.lock().unwrap().clone())
+    let rows: Vec<alt_json::Value> = String::from_utf8(capture.0.lock().unwrap().clone())
         .unwrap()
         .lines()
-        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .map(|line| alt_json::from_str::<alt_json::Value>(line).unwrap())
         .filter(|v| v["fields"]["trace_id"] == t.id())
         .collect();
     let work = rows
