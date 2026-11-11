@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: keep the single-copy tests in two files
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/tests/it/database/single_copy.rs
+touched: crates/alt-server-store/tests/it/database/single_copy/before.rs
