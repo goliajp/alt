@@ -3,7 +3,6 @@
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::fmt::Debug;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -19,16 +18,12 @@ pub trait Arbitrary: Sized {
 
 /// Everything a type needs to be compared through both libraries.
 pub trait Comparable:
-    alt_json::ToJson + alt_json::FromJson + serde::Serialize + serde::de::DeserializeOwned + Debug
+    alt_json::ToJson + alt_json::FromJson + serde::Serialize + serde::de::DeserializeOwned
 {
 }
 
 impl<T> Comparable for T where
-    T: alt_json::ToJson
-        + alt_json::FromJson
-        + serde::Serialize
-        + serde::de::DeserializeOwned
-        + Debug
+    T: alt_json::ToJson + alt_json::FromJson + serde::Serialize + serde::de::DeserializeOwned
 {
 }
 
@@ -325,11 +320,16 @@ impl Tally {
     }
 }
 
+/// The value as serde writes it, for failure messages.
+fn described<T: serde::Serialize>(value: &T) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| "a value serde cannot write".to_owned())
+}
+
 /// A form that does not depend on hash map iteration order.
 fn canonical<T: Comparable>(value: &T) -> String {
     match serde_json::to_value(value) {
         Ok(tree) => tree.to_string(),
-        Err(_) => format!("{value:?}"),
+        Err(_) => described(value),
     }
 }
 
@@ -351,7 +351,12 @@ fn category(error: &serde_json::Error) -> alt_json::Category {
 pub fn output<T: Comparable>(value: &T) -> Option<Vec<u8>> {
     let compact = match (alt_json::to_vec(value), serde_json::to_vec(value)) {
         (Ok(ours), Ok(theirs)) => {
-            assert_eq!(show(&ours), show(&theirs), "compact output of {value:?}");
+            assert_eq!(
+                show(&ours),
+                show(&theirs),
+                "compact output of {}",
+                described(value)
+            );
             assert_eq!(ours, theirs);
             ours
         }
@@ -360,17 +365,24 @@ pub fn output<T: Comparable>(value: &T) -> Option<Vec<u8>> {
             assert!(serde_json::to_value(value).is_err());
             return None;
         }
-        (ours, theirs) => panic!("write verdict differs for {value:?}: {ours:?} vs {theirs:?}"),
+        (ours, theirs) => panic!(
+            "write verdict differs for {}: {ours:?} vs {theirs:?}",
+            described(value)
+        ),
     };
     assert_eq!(
         alt_json::to_vec_pretty(value).unwrap(),
         serde_json::to_vec_pretty(value).unwrap(),
-        "indented output of {value:?}"
+        "indented output of {}",
+        described(value)
     );
     match (alt_json::to_value(value), serde_json::to_value(value)) {
-        (Ok(ours), Ok(theirs)) => assert!(same(&ours, &theirs), "tree of {value:?}"),
+        (Ok(ours), Ok(theirs)) => assert!(same(&ours, &theirs), "tree of {}", described(value)),
         (Err(_), Err(_)) => {}
-        (ours, theirs) => panic!("tree verdict differs for {value:?}: {ours:?} vs {theirs:?}"),
+        (ours, theirs) => panic!(
+            "tree verdict differs for {}: {ours:?} vs {theirs:?}",
+            described(value)
+        ),
     }
     Some(compact)
 }

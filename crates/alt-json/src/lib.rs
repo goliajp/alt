@@ -72,6 +72,14 @@ pub fn from_value<T: FromJson>(value: Value) -> Result<T> {
     T::from_json(&mut Decoder::tree(value))
 }
 
+/// Reads a tree with `f`, for readers that are not a [`FromJson`] type.
+pub fn from_value_with<T>(
+    value: Value,
+    f: impl FnOnce(&mut Decoder<'_>) -> Result<T>,
+) -> Result<T> {
+    f(&mut Decoder::tree(value))
+}
+
 /// Builds the tree a value would parse to if it were written and read
 /// back, without the rounding that reading number text involves.
 pub fn to_value<T: ToJson>(value: T) -> Result<Value> {

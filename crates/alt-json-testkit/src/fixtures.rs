@@ -58,12 +58,25 @@ pub fn record<T: Comparable>(seed: u64, samples: u64, make: impl Fn(&mut Rng) ->
 /// implementation. With `ALT_JSON_RECORD` set, writes the file instead.
 pub fn check_recorded(path: &str, recorded: &str) {
     if std::env::var_os("ALT_JSON_RECORD").is_some() {
+        std::fs::create_dir_all(std::path::Path::new(path).parent().unwrap()).unwrap();
         std::fs::write(path, recorded).unwrap();
     }
     let stored = std::fs::read_to_string(path).unwrap();
-    assert!(
-        stored == recorded,
-        "{path} differs from what serde produces now"
+    let differing = stored
+        .lines()
+        .zip(recorded.lines())
+        .position(|(a, b)| a != b);
+    if let Some(line) = differing {
+        let (old, new) = (stored.lines().nth(line), recorded.lines().nth(line));
+        panic!(
+            "{path} line {}: stored {old:?} but serde now gives {new:?}",
+            line + 1
+        );
+    }
+    assert_eq!(
+        stored.len(),
+        recorded.len(),
+        "{path} has a different length"
     );
 }
 
@@ -98,5 +111,24 @@ pub fn verify<T: ToJson + FromJson>(fixture: &str) -> Counts {
             _ => panic!("malformed fixture line: {line}"),
         }
     }
+    counts
+}
+
+/// Records or checks the fixture `<dir>/<name>.txt` of a type that still
+/// has its serde implementation, with values generated from it, and then
+/// holds the alt-json implementation to the stored file.
+pub fn check<T: Comparable>(dir: &str, name: &str, seed: u64, samples: u64) -> Counts {
+    let path = format!("{dir}/{name}.txt");
+    check_recorded(
+        &path,
+        &record(seed, samples, crate::arbitrary::from_serde::<T>),
+    );
+    verify_file::<T>(dir, name)
+}
+
+/// Holds `T` to the stored fixture `<dir>/<name>.txt`.
+pub fn verify_file<T: ToJson + FromJson>(dir: &str, name: &str) -> Counts {
+    let counts = verify::<T>(&std::fs::read_to_string(format!("{dir}/{name}.txt")).unwrap());
+    assert!(counts.written > 0, "{name}: nothing recorded");
     counts
 }

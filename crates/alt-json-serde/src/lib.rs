@@ -57,6 +57,14 @@ pub fn to_value<T: Serialize>(value: &T) -> Result<Value> {
     alt_json::to_value(Serde(value))
 }
 
+/// Runs a serde seed over a tree.
+pub fn deserialize_seed<'de, S: serde::de::DeserializeSeed<'de>>(
+    value: Value,
+    seed: S,
+) -> Result<S::Value> {
+    alt_json::from_value_with(value, |d| Ok(seed.deserialize(de::De(d))?))
+}
+
 /// Reads any serde type, a `serde_json::Value` included, out of a tree.
 pub fn from_value<T: DeserializeOwned>(value: Value) -> Result<T> {
     alt_json::from_value::<Serde<T>>(value).map(|Serde(value)| value)

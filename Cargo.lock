@@ -478,6 +478,9 @@ name = "alt-remote-protocol"
 version = "0.1.0"
 dependencies = [
  "alt-hash",
+ "alt-json",
+ "alt-json-serde",
+ "alt-json-testkit",
  "golia-change-link",
  "serde",
  "serde_json",
@@ -506,8 +509,11 @@ dependencies = [
  "alt-bytes",
  "alt-git-codec",
  "alt-hash",
+ "alt-json",
+ "alt-json-testkit",
  "alt-remote-protocol",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -516,6 +522,8 @@ version = "0.1.0"
 dependencies = [
  "alt-hash",
  "alt-input",
+ "alt-json",
+ "alt-json-testkit",
  "alt-os",
  "alt-task",
  "serde",
@@ -643,6 +651,9 @@ version = "0.1.0"
 dependencies = [
  "alt-hash",
  "alt-input",
+ "alt-json",
+ "alt-json-serde",
+ "alt-json-testkit",
  "alt-os",
  "alt-store",
  "ed25519-dalek",
@@ -662,6 +673,7 @@ dependencies = [
  "alt-git-config",
  "alt-hash",
  "alt-input",
+ "alt-json",
  "alt-oplog",
  "alt-os",
  "alt-refs",
@@ -680,6 +692,7 @@ dependencies = [
  "alt-git-codec",
  "alt-hash",
  "alt-input",
+ "alt-json",
  "alt-os",
  "alt-remote-protocol",
  "alt-repository-service",

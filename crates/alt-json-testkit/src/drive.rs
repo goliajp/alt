@@ -169,7 +169,7 @@ pub fn exercise<T: Both>(seed: u64, rounds: u64) -> Tally {
 /// the alt-json bridge.
 pub fn exercise_bridged<T>(seed: u64, rounds: u64, make: impl Fn(&mut Rng) -> T) -> Tally
 where
-    T: serde::Serialize + serde::de::DeserializeOwned + std::fmt::Debug,
+    T: serde::Serialize + serde::de::DeserializeOwned,
 {
     exercise_with(seed, rounds, |rng| alt_json_serde::Serde(make(rng)))
 }
