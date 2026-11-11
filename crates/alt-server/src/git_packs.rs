@@ -156,26 +156,51 @@ pub(crate) fn receive(
             return Err(Error::Integrity("invalid or duplicate Git update"));
         }
     }
+    // A pack that fits with its row is handled in memory. A larger one goes straight
+    // into its segment file and is read back through a mapping, so its size is never
+    // held on the heap.
     let mut pack = Vec::new();
-    source
-        .take(limits.total_bytes.saturating_add(1))
+    let inline = alt_server_store::INLINE_SEGMENT_BYTES;
+    (&mut *source)
+        .take(inline as u64 + 1)
         .read_to_end(&mut pack)?;
-    if pack.len() as u64 > limits.total_bytes {
-        return Err(Error::Limit("Git pack bytes"));
+    let mut spooled = None;
+    if pack.len() > inline {
+        spooled = Some(spool(store, repository, &pack, source, limits.total_bytes)?);
+        pack = Vec::new();
     }
-    let mut created = None;
-    let result = publish(
-        store,
-        credential,
-        repository,
-        &view,
-        &head,
-        &pack,
-        &mut created,
-    );
-    if result.is_err()
-        && let Some(path) = &created
-    {
+    let mut created = spooled.as_ref().map(|spooled| spooled.path.clone());
+    let mut published = false;
+    let result = match &mut spooled {
+        Some(Spooled {
+            id,
+            path,
+            file,
+            pack,
+        }) => publish(
+            store,
+            credential,
+            repository,
+            &view,
+            &head,
+            pack,
+            Some((id, path, file)),
+            &mut created,
+            &mut published,
+        ),
+        None => publish(
+            store,
+            credential,
+            repository,
+            &view,
+            &head,
+            &pack,
+            None,
+            &mut created,
+            &mut published,
+        ),
+    };
+    if !published && let Some(path) = &created {
         // nothing references an unpublished segment
         let _ = std::fs::remove_file(path);
     }
@@ -238,6 +263,60 @@ pub(crate) fn receive(
     }
 }
 
+/// a pack that was written to its segment file as it arrived
+struct Spooled {
+    id: String,
+    path: std::path::PathBuf,
+    file: std::fs::File,
+    pack: alt_os::map::Mmap,
+}
+
+/// Writes `first` and the rest of `source` to a new segment file and maps it.
+fn spool(
+    store: &Store,
+    repository: &str,
+    first: &[u8],
+    source: &mut dyn Read,
+    limit: u64,
+) -> Result<Spooled> {
+    let mut nonce = [0u8; 16];
+    alt_os::random::fill(&mut nonce);
+    let id = hex(&nonce);
+    let path = store.pack_path(repository, &id)?;
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&path)?;
+    let mut written = || -> Result<Spooled> {
+        file.write_all(first)?;
+        let rest = limit.saturating_add(1).saturating_sub(first.len() as u64);
+        let copied = std::io::copy(&mut source.take(rest), &mut file)?;
+        if first.len() as u64 + copied > limit {
+            return Err(Error::Limit("Git pack bytes"));
+        }
+        // the file is new and only this request writes to it; the index it gets
+        // later lies behind what is mapped here
+        let pack = unsafe { alt_os::map::Mmap::map(&file) }?;
+        Ok(Spooled {
+            id: id.clone(),
+            path: path.clone(),
+            file: file.try_clone()?,
+            pack,
+        })
+    };
+    let spooled = written();
+    if spooled.is_err() {
+        let _ = std::fs::remove_file(&path);
+    }
+    spooled
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one caller; the parts of one request"
+)]
 fn publish(
     store: &mut Store,
     credential: &Credential,
@@ -245,7 +324,9 @@ fn publish(
     view: &PackView,
     head: &alt_wire::push::PushHead,
     pack: &[u8],
+    spooled: Option<(&String, &std::path::PathBuf, &mut std::fs::File)>,
     created: &mut Option<std::path::PathBuf>,
+    published: &mut bool,
 ) -> Result<Option<RequestKey>> {
     let limits = store.limits();
     // A client may list refs it does not change. They take no part in the publication,
@@ -281,24 +362,41 @@ fn publish(
                 .map_err(segment_error)
             })?;
         if ingested.objects() > 0 {
-            let segment_id = hex(&nonce[..16]);
-            let path = store.pack_path(repository, &segment_id)?;
-            let mut file = std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .open(&path)?;
-            *created = Some(path.clone());
-            let mut content = Vec::with_capacity(pack.len() + ingested.objects() * 96 + 2048);
-            content.extend_from_slice(pack);
-            ingested.write_index(&mut content).map_err(segment_error)?;
-            file.write_all(&content)?;
-            let bytes = content.len() as u64;
-            let inline = content.len() <= alt_server_store::INLINE_SEGMENT_BYTES;
-            if !inline {
-                file.sync_all()?;
-                std::fs::File::open(path.parent().expect("segment directory"))?.sync_all()?;
-            }
+            let (segment_id, path, bytes, inline) = match spooled {
+                Some((id, path, file)) => {
+                    // the pack is in its file already; the index goes behind it
+                    let mut index = Vec::with_capacity(ingested.objects() * 96 + 2048);
+                    ingested.write_index(&mut index).map_err(segment_error)?;
+                    file.write_all(&index)?;
+                    file.sync_all()?;
+                    std::fs::File::open(path.parent().expect("segment directory"))?.sync_all()?;
+                    let bytes = (pack.len() + index.len()) as u64;
+                    (id.clone(), path.clone(), bytes, None)
+                }
+                None => {
+                    let segment_id = hex(&nonce[..16]);
+                    let path = store.pack_path(repository, &segment_id)?;
+                    let mut file = std::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .mode(0o600)
+                        .open(&path)?;
+                    *created = Some(path.clone());
+                    let mut content =
+                        Vec::with_capacity(pack.len() + ingested.objects() * 96 + 2048);
+                    content.extend_from_slice(pack);
+                    ingested.write_index(&mut content).map_err(segment_error)?;
+                    file.write_all(&content)?;
+                    let bytes = content.len() as u64;
+                    let inline = content.len() <= alt_server_store::INLINE_SEGMENT_BYTES;
+                    if !inline {
+                        file.sync_all()?;
+                        std::fs::File::open(path.parent().expect("segment directory"))?
+                            .sync_all()?;
+                    }
+                    (segment_id, path, bytes, inline.then_some(content))
+                }
+            };
             let segment = Arc::new(Segment::open(&path).map_err(segment_error)?);
             segments.push(segment.clone());
             stored = Some((
@@ -306,7 +404,7 @@ fn publish(
                 ingested.objects() as u64,
                 ingested.flags(),
                 segment,
-                if inline { Some(content) } else { None },
+                inline,
                 bytes,
             ));
         }
@@ -366,6 +464,7 @@ fn publish(
     alt_server_store::telemetry::observe(alt_server_telemetry::Phase::Commit, || {
         store.pack_publish(credential, &publication, &graph, segment)
     })?;
+    *published = stored.is_some();
     if let Some((id, _, _, segment, _, _)) = stored {
         store.adopt_segment(repository, &id, segment)?;
     }
