@@ -1,0 +1,15 @@
+schema: alt-meta/1
+type: perf
+summary: compress short blake3 chunks of unequal lengths side by side and hash ingested objects in batches
+author-type: human
+author: doracawl
+touched: crates/alt-hash/examples/blake3_small.rs
+touched: crates/alt-hash/src/blake3.rs
+touched: crates/alt-hash/src/blake3/lanes.rs
+touched: crates/alt-hash/src/blake3/many.rs
+touched: crates/alt-hash/src/blake3/neon.rs
+touched: crates/alt-hash/src/blake3/sse41.rs
+touched: crates/alt-hash/src/blake3/tree.rs
+touched: crates/alt-hash/tests/it/blake3_many.rs
+touched: crates/alt-hash/tests/it/main.rs
+touched: crates/alt-pack-segment/src/ingest.rs
