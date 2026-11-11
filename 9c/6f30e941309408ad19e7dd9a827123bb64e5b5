@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: refactor
+summary: alt-delivery reads and writes json with alt-json
+author-type: human
+author: doracawl
+touched: crates/alt-delivery/Cargo.toml
+touched: crates/alt-delivery/src/git.rs
+touched: crates/alt-delivery/src/lib.rs
+touched: crates/alt-delivery/tests/it/fixtures/export_report.txt
+touched: crates/alt-delivery/tests/it/fixtures/identities.txt
+touched: crates/alt-delivery/tests/it/fixtures/intake_report.txt
+touched: crates/alt-delivery/tests/it/fixtures/snapshot.txt
+touched: crates/alt-delivery/tests/it/json.rs
+touched: crates/alt-delivery/tests/it/main.rs
