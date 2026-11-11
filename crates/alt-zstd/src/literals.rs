@@ -34,6 +34,12 @@ impl LiteralDecoder {
         self.table_valid = false;
     }
 
+    /// Bytes held by the buffer literals decode into.
+    #[cfg(test)]
+    pub(crate) fn capacity(&self) -> usize {
+        self.buf.capacity()
+    }
+
     /// Start of a scratch area with room for `len + LIT_SLACK` bytes.
     fn scratch(&mut self, len: usize) -> *mut u8 {
         if self.buf.capacity() < len + LIT_SLACK {

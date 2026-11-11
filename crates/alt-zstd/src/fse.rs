@@ -163,6 +163,25 @@ pub(crate) fn spread(norm: &[i16], log: u32, slots: &mut [u8]) {
     }
     let step = (size >> 1) + (size >> 3) + 3;
     let mask = size - 1;
+    if high == size {
+        // nothing is reserved, so the walk visits every slot once: lay the
+        // symbols out in order, eight at a time, then scatter them
+        let mut ordered = [0u8; (1 << LL_MAX_LOG) + 8];
+        let mut filled = 0;
+        for (symbol, &count) in norm.iter().enumerate() {
+            let pattern = [symbol as u8; 8];
+            for chunk in (0..count as usize).step_by(8) {
+                ordered[filled + chunk..filled + chunk + 8].copy_from_slice(&pattern);
+            }
+            filled += count as usize;
+        }
+        let mut at = 0;
+        for &symbol in &ordered[..size] {
+            slots[at] = symbol;
+            at = (at + step) & mask;
+        }
+        return;
+    }
     let mut at = 0;
     for (symbol, &count) in norm.iter().enumerate() {
         for _ in 0..count.max(0) {

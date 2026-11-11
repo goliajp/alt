@@ -15,6 +15,9 @@ pub(crate) struct Params {
     pub short_log: u32,
     pub width: u32,
     pub double: bool,
+    /// single-table matching probes positions in pairs: it finds a little
+    /// more on long inputs and costs a little on short ones
+    pub paired: bool,
 }
 
 impl Params {
@@ -49,6 +52,7 @@ impl Params {
             short_log: short_log.min(total_log.max(6) + 1),
             width,
             double,
+            paired: !double && prefix_len == 0 && data_len > 128 << 10,
         };
         if prefix_len != 0 {
             // the window must reach all of the prefix, and the tables must

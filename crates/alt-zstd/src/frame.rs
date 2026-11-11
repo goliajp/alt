@@ -280,3 +280,33 @@ thread_local! {
     /// for each. A frame resets what it needs.
     static KEPT: Cell<Option<Box<Decoder>>> = const { Cell::new(None) };
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{BLOCK_MAX, Decoder, KEPT};
+    use crate::literals::LIT_SLACK;
+
+    /// What a thread keeps after decoding does not grow with the frames it
+    /// has seen: the tables are fixed, the literal buffer serves one block.
+    #[test]
+    fn kept_decoder_is_bounded() {
+        // a few megabytes of skewed noise: many blocks, each mostly literals
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let data: Vec<u8> = (0..4usize << 20)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                ((state >> 56) as u8).min((state >> 48) as u8)
+            })
+            .collect();
+        let frame = crate::encode_all(&data, 1);
+        assert!(crate::decode_all(&frame).as_ref() == Ok(&data));
+        let kept = KEPT.take().unwrap();
+        let fixed = std::mem::size_of::<Decoder>();
+        let buffer = kept.literals.capacity();
+        println!("kept: {fixed} bytes of tables, {buffer} bytes of literal buffer");
+        assert!(fixed < 32 << 10);
+        assert!(buffer <= BLOCK_MAX + LIT_SLACK);
+    }
+}
