@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: refactor
+summary: alt-wire-http reads and writes json with alt-json
+author-type: human
+author: doracawl
+touched: crates/alt-wire-http/Cargo.toml
+touched: crates/alt-wire-http/src/device.rs
+touched: crates/alt-wire-http/src/native.rs
+touched: crates/alt-wire-http/src/native/change_links.rs
+touched: crates/alt-wire-http/src/native/portable.rs
+touched: crates/alt-wire-http/tests/it/change_links.rs
+touched: crates/alt-wire-http/tests/it/device.rs
+touched: crates/alt-wire-http/tests/it/native.rs
