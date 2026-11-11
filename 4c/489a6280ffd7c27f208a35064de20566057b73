@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: write a large pushed pack straight to its segment file
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/git_packs.rs
