@@ -466,3 +466,34 @@ fn real_git_small_pushes_are_merged_and_stay_readable() {
         text(ok(&first, &f.token, &["rev-parse", "HEAD"]))
     );
 }
+
+#[test]
+#[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
+fn real_git_push_over_a_limit_is_told_which_limit() {
+    let f = Fixture::new();
+    let server = Running::start(&f);
+    let temp = alt_os::temp::tempdir().unwrap();
+    let first = temp.path().join("first");
+    std::fs::create_dir(&first).unwrap();
+    let url = format!("{}/git/repository", server.url);
+    ok(&first, &f.token, &["init", "-q", "--initial-branch=main"]);
+    identity(&first, &f.token);
+    // more objects than the configured bound of one publication
+    for index in 0..1100 {
+        std::fs::write(
+            first.join(format!("file-{index}.txt")),
+            format!("{index}\n"),
+        )
+        .unwrap();
+    }
+    ok(&first, &f.token, &["add", "."]);
+    ok(&first, &f.token, &["commit", "-qm", "too many objects"]);
+    let pushed = git(&first, &f.token, &["push", &url, "main"]);
+    assert!(!pushed.status.success());
+    let stderr = String::from_utf8_lossy(&pushed.stderr);
+    assert!(
+        stderr.contains("server limit exceeded: objects"),
+        "{stderr}"
+    );
+    assert_eq!(f.counts().0, 0);
+}

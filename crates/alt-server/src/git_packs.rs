@@ -186,10 +186,12 @@ pub(crate) fn receive(
     let message = match &outcome {
         Ok(()) => None,
         Err(Error::OutcomeUnknown) => {
-            Some("outcome unknown; inspect remote refs and the server request")
+            Some("outcome unknown; inspect remote refs and the server request".to_owned())
         }
-        Err(Error::Unauthorized) => Some("access revoked"),
-        Err(_) => Some("publication rejected; inspect current refs and policy"),
+        Err(Error::Unauthorized) => Some("access revoked".to_owned()),
+        // the operator can raise a limit; the pusher has to know which one it was
+        Err(Error::Limit(what)) => Some(format!("server limit exceeded: {what}")),
+        Err(_) => Some("publication rejected; inspect current refs and policy".to_owned()),
     };
     if !head.capabilities.iter().any(|cap| cap == "report-status") {
         outcome?;
@@ -201,10 +203,10 @@ pub(crate) fn receive(
     let commands: Vec<_> = head
         .updates
         .iter()
-        .map(|update| match message {
+        .map(|update| match &message {
             Some(message) => alt_wire::push::CommandStatus::Ng {
                 name: update.name.clone(),
-                reason: message.into(),
+                reason: message.clone(),
             },
             None => alt_wire::push::CommandStatus::Ok(update.name.clone()),
         })
