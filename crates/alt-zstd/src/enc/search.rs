@@ -3,7 +3,7 @@
 
 use super::matcher::{PROBE, SeqStore, Window, hash};
 use super::params::Params;
-use super::{dfast, fast, pairs};
+use super::{dfast, fast};
 
 /// Hash tables and the two latest offsets, for one frame.
 pub(crate) struct Matcher<'t> {
@@ -168,10 +168,10 @@ impl Matcher<'_> {
                     width: self.params.width,
                     low,
                 };
-                if self.params.paired {
-                    pairs::run::<PREFIX>(search, window, start, end, reps, store)
+                if self.params.likely {
+                    fast::run::<PREFIX, true>(search, window, start, end, reps, store)
                 } else {
-                    fast::run::<PREFIX>(search, window, start, end, reps, store)
+                    fast::run::<PREFIX, false>(search, window, start, end, reps, store)
                 }
             }
         }

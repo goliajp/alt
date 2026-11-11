@@ -143,18 +143,8 @@ impl<'a> Window<'a> {
         let usable = self.usable::<PREFIX>(index, low);
         // safety: a usable candidate has 8 readable bytes, as does a stand-in
         unsafe {
-            if cfg!(target_arch = "x86_64") {
-                let nowhere = NOWHERE[(here as u8 == 0xFF) as usize].as_ptr();
-                let from = select_unpredictable(usable, self.at::<PREFIX>(index), nowhere);
-                load32(from) == here
-            } else {
-                let from = if usable {
-                    self.at::<PREFIX>(index)
-                } else {
-                    NOWHERE[0].as_ptr()
-                };
-                (load32(from) == here) & usable
-            }
+            let from = select_unpredictable(usable, self.at::<PREFIX>(index), NOWHERE[0].as_ptr());
+            ((load32(from) ^ here) | !usable as u32) == 0
         }
     }
 
