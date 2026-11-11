@@ -128,6 +128,8 @@ name = "alt-command-protocol"
 version = "0.1.0"
 dependencies = [
  "alt-hash",
+ "alt-json",
+ "alt-json-testkit",
  "serde",
  "serde_json",
 ]
@@ -161,6 +163,8 @@ dependencies = [
  "alt-hash",
  "alt-import",
  "alt-input",
+ "alt-json",
+ "alt-json-testkit",
  "alt-odb",
  "alt-os",
  "alt-refs",
@@ -289,6 +293,8 @@ name = "alt-input"
 version = "0.1.0"
 dependencies = [
  "alt-hash",
+ "alt-json",
+ "alt-json-testkit",
  "alt-os",
  "serde",
  "serde_json",
@@ -322,8 +328,7 @@ name = "alt-lfs"
 version = "0.1.0"
 dependencies = [
  "alt-hash",
- "serde",
- "serde_json",
+ "alt-json",
  "tiny_http",
  "ureq",
 ]
@@ -587,11 +592,11 @@ dependencies = [
 name = "alt-server-telemetry"
 version = "0.1.0"
 dependencies = [
+ "alt-json",
  "alt-os",
  "bytes",
  "http-body",
  "prometheus",
- "serde_json",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",

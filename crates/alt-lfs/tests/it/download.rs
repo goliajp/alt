@@ -19,24 +19,24 @@ fn serve(objects: HashMap<String, Vec<u8>>, lie: Option<String>) -> String {
             if url.ends_with("/objects/batch") {
                 let mut body = String::new();
                 req.as_reader().read_to_string(&mut body).unwrap();
-                let asked: serde_json::Value = serde_json::from_str(&body).unwrap();
-                let answers: Vec<serde_json::Value> = asked["objects"]
+                let asked: alt_json::Value = alt_json::from_str(&body).unwrap();
+                let answers: Vec<alt_json::Value> = asked["objects"]
                     .as_array()
                     .unwrap()
                     .iter()
                     .map(|o| {
                         let oid = o["oid"].as_str().unwrap();
                         if objects.contains_key(oid) {
-                            serde_json::json!({"oid": oid, "size": o["size"],
+                            alt_json::json!({"oid": oid, "size": o["size"],
                                 "actions": {"download": {"href": format!("{base}/content/{oid}"),
                                     "header": {"X-Test": "yes"}}}})
                         } else {
-                            serde_json::json!({"oid": oid, "size": o["size"],
+                            alt_json::json!({"oid": oid, "size": o["size"],
                                 "error": {"code": 404, "message": "Object does not exist"}})
                         }
                     })
                     .collect();
-                let resp = serde_json::json!({"transfer": "basic", "objects": answers});
+                let resp = alt_json::json!({"transfer": "basic", "objects": answers});
                 req.respond(tiny_http::Response::from_string(resp.to_string()))
                     .unwrap();
             } else if let Some(oid) = url.strip_prefix("/content/") {

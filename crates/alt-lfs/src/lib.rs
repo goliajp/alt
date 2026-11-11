@@ -12,7 +12,7 @@
 use std::collections::BTreeMap;
 use std::io::Read;
 
-use serde::{Deserialize, Serialize};
+use alt_json::{FromJson, ToJson};
 
 pub const SPEC: &str = "https://git-lfs.github.com/spec/v1";
 
@@ -159,46 +159,46 @@ pub struct Client {
     auth: Option<(String, String)>,
 }
 
-#[derive(Serialize)]
+#[derive(ToJson)]
 struct BatchRequest<'a> {
     operation: &'a str,
     transfers: [&'a str; 1],
     objects: Vec<BatchObject<'a>>,
 }
 
-#[derive(Serialize)]
+#[derive(ToJson)]
 struct BatchObject<'a> {
     oid: &'a str,
     size: u64,
 }
 
-#[derive(Deserialize)]
+#[derive(FromJson)]
 struct BatchResponse {
     objects: Vec<ResponseObject>,
 }
 
-#[derive(Deserialize)]
+#[derive(FromJson)]
 struct ResponseObject {
     oid: String,
-    #[serde(default)]
+    #[json(default)]
     actions: Option<Actions>,
-    #[serde(default)]
+    #[json(default)]
     error: Option<ObjectError>,
 }
 
-#[derive(Deserialize)]
+#[derive(FromJson)]
 struct Actions {
     download: Option<Action>,
 }
 
-#[derive(Deserialize)]
+#[derive(FromJson)]
 struct Action {
     href: String,
-    #[serde(default)]
+    #[json(default)]
     header: BTreeMap<String, String>,
 }
 
-#[derive(Deserialize)]
+#[derive(FromJson)]
 struct ObjectError {
     message: String,
 }
@@ -220,7 +220,7 @@ impl Client {
             return Ok(Vec::new());
         }
         let url = format!("{}/objects/batch", self.endpoint);
-        let body = serde_json::to_string(&BatchRequest {
+        let body = alt_json::to_string(&BatchRequest {
             operation: "download",
             transfers: ["basic"],
             objects: pointers
@@ -243,7 +243,7 @@ impl Client {
         let resp = req.send_string(&body).map_err(|e| http(&url, e))?;
         let text = resp.into_string()?;
         let batch: BatchResponse =
-            serde_json::from_str(&text).map_err(|e| Error::Response(e.to_string()))?;
+            alt_json::from_str(&text).map_err(|e| Error::Response(e.to_string()))?;
 
         let mut out = Vec::with_capacity(pointers.len());
         for p in pointers {
@@ -318,6 +318,9 @@ fn basic(user: &str, token: &str) -> String {
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
+
+#[cfg(test)]
+mod wire_tests;
 
 #[cfg(test)]
 mod tests {
