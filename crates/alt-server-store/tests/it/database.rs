@@ -573,7 +573,6 @@ fn unpublished_bytes_require_this_requests_upload_proof() {
         .read_snapshot(&f.credential, "repository", 60_000, 1000)
         .unwrap();
     assert_eq!(read.objects().count(), 0);
-    f.store.release_snapshot(&f.credential, read).unwrap();
     for (entry, bytes) in p.manifest.entries.iter().zip(&p.contents) {
         let proof = f
             .store

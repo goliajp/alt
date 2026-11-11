@@ -284,7 +284,7 @@ impl Store {
                     ready,
                     ids,
                 } => {
-                    let (_, segments) = self.export_segments(repository, ids)?;
+                    let (_, segments) = self.open_listed_segments(repository, ids)?;
                     let export = PortableExport {
                         envelope,
                         documents,
@@ -294,7 +294,7 @@ impl Store {
                     };
                     return Ok((export, ready));
                 }
-                Capture::Moved(ids) => opened = self.export_segments(repository, ids)?,
+                Capture::Moved(ids) => opened = self.open_listed_segments(repository, ids)?,
             }
         }
     }

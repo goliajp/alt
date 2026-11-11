@@ -48,6 +48,26 @@ fn run_start(bytes: &[u64]) -> Option<usize> {
 }
 
 impl Store {
+    /// Opens the segments a reader listed as live, with the list that was opened.
+    /// If a merge retired some of them and their time on disk ran out in between,
+    /// the current live segments are opened instead: a merge keeps every object.
+    pub(crate) fn open_listed_segments(
+        &mut self,
+        repository: &str,
+        ids: Vec<(String, bool)>,
+    ) -> Result<(Vec<(String, bool)>, SegmentSet)> {
+        match self.open_segments(repository, &ids) {
+            Err(Error::Integrity("pack segment unavailable")) => {
+                let mut tx = self.client.transaction()?;
+                let ids = Self::live_segment_ids(&mut tx, repository)?;
+                tx.commit()?;
+                let segments = self.open_segments(repository, &ids)?;
+                Ok((ids, segments))
+            }
+            segments => Ok((ids, segments?)),
+        }
+    }
+
     /// Merges the newest live segments of `repository` into one if enough have
     /// gathered. True when a merge was published; the caller asks again, because the
     /// merged segment can complete the next tier.

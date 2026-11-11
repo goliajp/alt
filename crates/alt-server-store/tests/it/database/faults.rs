@@ -398,7 +398,7 @@ fn crash_child(phase: &str, tasks: bool) {
 
 #[test]
 #[ignore = "requires explicitly isolated PostgreSQL; exercised by server acceptance and the full closing gate"]
-fn read_snapshot_pins_survive_ref_deletion_and_gc() {
+fn read_snapshot_survives_ref_deletion_and_gc() {
     use std::io::Read;
     let mut f = Fixture::new();
     let p = Payload::new("first", None);
@@ -423,11 +423,12 @@ fn read_snapshot_pins_survive_ref_deletion_and_gc() {
     };
     deletion.upload(&mut f.store, &f.credential);
     deletion.publish(&mut f.store, &f.credential);
+    // the content store lets go of both objects; the snapshot reads its segments
     assert_eq!(
         f.store
             .collect_orphans(&f.credential, "repository", 100)
             .unwrap(),
-        0
+        2
     );
     let (kind, _, mut file) = f
         .store
@@ -454,12 +455,5 @@ fn read_snapshot_pins_survive_ref_deletion_and_gc() {
         )
         .unwrap();
     assert_eq!(buffered, p.contents[1]);
-    f.store.release_snapshot(&f.credential, read).unwrap();
-    assert_eq!(
-        f.store
-            .collect_orphans(&f.credential, "repository", 100)
-            .unwrap(),
-        2
-    );
     assert_eq!(f.counts(), (0, 2, 2));
 }

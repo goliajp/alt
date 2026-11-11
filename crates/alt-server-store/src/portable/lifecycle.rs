@@ -27,7 +27,7 @@ impl Store {
         let documents = serde_json::from_value(row.get(1))?;
         let ids = Self::live_segment_ids(&mut tx, &scope.repository_instance_id)?;
         tx.commit()?;
-        let (_, segments) = self.export_segments(&scope.repository_instance_id, ids)?;
+        let (_, segments) = self.open_listed_segments(&scope.repository_instance_id, ids)?;
         Ok(PortableExport {
             locations,
             envelope,

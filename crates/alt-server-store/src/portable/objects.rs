@@ -161,24 +161,3 @@ impl BlobSource for PortableExport {
         ))
     }
 }
-
-impl Store {
-    /// The segments named by `ids`, or the current live ones when a merge retired
-    /// some of them and their time on disk ran out before they were opened.
-    pub(super) fn export_segments(
-        &mut self,
-        repository: &str,
-        ids: Vec<(String, bool)>,
-    ) -> Result<(Vec<(String, bool)>, SegmentSet)> {
-        match self.open_segments(repository, &ids) {
-            Err(Error::Integrity("pack segment unavailable")) => {
-                let mut tx = self.client.transaction()?;
-                let ids = Self::live_segment_ids(&mut tx, repository)?;
-                tx.commit()?;
-                let segments = self.open_segments(repository, &ids)?;
-                Ok((ids, segments))
-            }
-            segments => Ok((ids, segments?)),
-        }
-    }
-}

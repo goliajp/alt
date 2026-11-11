@@ -1,5 +1,5 @@
 //! Physical segment ownership and locations. All mutations share the repository
-//! barrier with logical publication, read pins, and garbage collection.
+//! barrier with logical publication and garbage collection.
 use crate::database::Transaction;
 use crate::requests::{active, check_key, upload_request_row};
 use crate::store::{authorize, instance, integer, now, snapshot, unsigned};

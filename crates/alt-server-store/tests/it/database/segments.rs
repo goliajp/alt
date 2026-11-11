@@ -91,6 +91,20 @@ fn path(f: &Fixture, id: &str) -> std::path::PathBuf {
         .join("repository")
         .join(format!("segment-{id}"))
 }
+/// a live expiring pin on the commit, as an upload in flight holds: compaction waits for it
+fn hold(f: &Fixture, p: &Payload) {
+    f.client()
+        .execute(
+            "INSERT INTO alt_pins(repository,pin_id,blake3,expires_at) VALUES('repository','hold',$1,9223372036854775807)",
+            &[&p.manifest.entries[1].blake3],
+        )
+        .unwrap();
+}
+fn release(f: &Fixture) {
+    f.client()
+        .execute("DELETE FROM alt_pins WHERE pin_id='hold'", &[])
+        .unwrap();
+}
 fn state(f: &Fixture) -> serde_json::Value {
     f.client().query_one("SELECT jsonb_build_object('segments',(SELECT jsonb_agg(to_jsonb(s) ORDER BY segment_id) FROM alt_segments s),'locations',(SELECT jsonb_agg(to_jsonb(l) ORDER BY blake3) FROM alt_blob_locations l),'blobs',(SELECT jsonb_agg(to_jsonb(b) ORDER BY blake3) FROM alt_blobs b),'request',(SELECT jsonb_agg(to_jsonb(q) ORDER BY request_id) FROM alt_requests q),'repository',(SELECT jsonb_agg(to_jsonb(r) ORDER BY id) FROM alt_repositories r),'objects',(SELECT jsonb_agg(to_jsonb(o) ORDER BY oid) FROM alt_objects o),'content',(SELECT jsonb_agg(to_jsonb(c) ORDER BY blake3) FROM alt_request_content c))", &[]).unwrap().get(0)
 }
@@ -166,7 +180,6 @@ fn segment_registration_publication_and_duplicate_locations_preserve_originals()
                 .unwrap();
             assert_eq!(data, p.contents[i]);
         }
-        f.store.release_snapshot(&f.credential, read).unwrap();
         f.store
             .collect_orphans(&f.credential, "repository", 100)
             .unwrap();
@@ -281,22 +294,19 @@ fn gc_and_compaction_preserve_live_snapshots_and_reclaim_sparse_segments() {
                 )
                 .unwrap()
         });
-        if portable {
-            f.store.release_snapshot(&f.credential, read).unwrap();
-        } else {
+        if !portable {
+            // a snapshot reads the pack segments and holds nothing back here
             assert_eq!(
                 f.store
                     .collect_orphans(&f.credential, "repository", 100)
                     .unwrap(),
                 8
             );
-            assert!(path(&f, segment.id()).exists());
             let (_, _, mut lazy) = f
                 .store
                 .open_snapshot_object(&f.credential, &read, p.commit)
                 .unwrap();
             assert!(lazy.read_to_end(&mut Vec::new()).unwrap() > 0);
-            f.store.release_snapshot(&f.credential, read).unwrap();
         }
         if let Some(export) = export {
             assert_eq!(
@@ -343,14 +353,11 @@ fn compaction_rollback_keeps_old_locations_and_reclaims_failed_replacement() {
     let p = sparse();
     let segment = upload(&mut f, &p);
     p.publish(&mut f.store, &f.credential);
-    let read = f
-        .store
-        .read_snapshot(&f.credential, "repository", 60_000, 1000)
-        .unwrap();
+    hold(&f, &p);
     f.store
         .collect_orphans(&f.credential, "repository", 100)
         .unwrap();
-    f.store.release_snapshot(&f.credential, read).unwrap();
+    release(&f);
     f.client().batch_execute("CREATE FUNCTION compact_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected compaction failure'; END $$; CREATE TRIGGER compact_fail BEFORE UPDATE ON alt_blob_locations FOR EACH ROW EXECUTE FUNCTION compact_fail()").unwrap();
     assert!(
         f.store
@@ -571,14 +578,11 @@ fn segment_process_interruption_preserves_owned_files_and_atomic_locations() {
         let old = if compaction {
             let segment = upload(&mut f, &p);
             p.publish(&mut f.store, &f.credential);
-            let read = f
-                .store
-                .read_snapshot(&f.credential, "repository", 60_000, 1000)
-                .unwrap();
+            hold(&f, &p);
             f.store
                 .collect_orphans(&f.credential, "repository", 100)
                 .unwrap();
-            f.store.release_snapshot(&f.credential, read).unwrap();
+            release(&f);
             Some(segment.id().to_owned())
         } else {
             None
@@ -1304,8 +1308,8 @@ fn reused_content_registration_reopens_actual_originals_and_rechecks_stored_stat
 }
 
 #[test]
-#[ignore = "requires isolated PostgreSQL; buffered segment reads must reject changes after the last object read"]
-fn buffered_segment_results_do_not_escape_after_index_changes() {
+#[ignore = "requires isolated PostgreSQL; buffered snapshot reads come from the pack segments, not the uploaded byte segment"]
+fn buffered_snapshot_results_do_not_depend_on_the_uploaded_byte_segment() {
     use alt_repository_service::ObjectSource;
     use std::sync::{
         Arc,
@@ -1355,9 +1359,8 @@ fn buffered_segment_results_do_not_escape_after_index_changes() {
             },
             |_| Ok(credential.clone()),
         );
-        assert!(result.is_err(), "{fault}");
-        assert!(dropped.load(Ordering::SeqCst), "{fault}");
-        f.store.release_snapshot(&credential, read).unwrap();
+        assert!(result.is_ok(), "{fault}");
+        assert!(!dropped.load(Ordering::SeqCst), "{fault}");
     }
 }
 
@@ -1400,8 +1403,8 @@ fn publication_rechecks_indexes_without_breaking_committed_receipt_replay() {
 }
 
 #[test]
-#[ignore = "requires isolated PostgreSQL; current segment state/index and failed-snapshot pin rollback"]
-fn segment_snapshot_selection_preserves_current_catalog_checks() {
+#[ignore = "requires isolated PostgreSQL; snapshot selection is independent of byte segment state and writes no pins"]
+fn snapshot_selection_does_not_consult_the_uploaded_byte_segment() {
     let mut f = Fixture::new();
     let p = super::registration::shared_payload();
     let uploaded = upload(&mut f, &p);
@@ -1435,7 +1438,6 @@ fn segment_snapshot_selection_preserves_current_catalog_checks() {
     let expected_oids: std::collections::BTreeSet<_> =
         initial.objects().map(|(oid, _, _)| oid).collect();
     assert!(!expected_oids.is_empty());
-    f.store.release_snapshot(&f.credential, initial).unwrap();
     for changed_index in [false, true] {
         if changed_index {
             f.client().execute(
@@ -1457,17 +1459,8 @@ fn segment_snapshot_selection_preserves_current_catalog_checks() {
                 f.store
                     .read_snapshot(&f.credential, "repository", 60_000, 1000)
             };
-            assert!(matches!(
-                result,
-                Err(alt_server_store::Error::Integrity(
-                    "segment location is not stored"
-                ))
-            ));
-            assert_eq!(
-                pins(&f),
-                before,
-                "failed selection must roll back temporary pins (refs={references})"
-            );
+            assert!(result.is_ok(), "refs={references}");
+            assert_eq!(pins(&f), before, "refs={references}");
         }
         f.client().execute(
             "UPDATE alt_segments SET state='stored',index_digest=$2 WHERE repository='repository' AND segment_id=$1",
@@ -1492,7 +1485,6 @@ fn segment_snapshot_selection_preserves_current_catalog_checks() {
             object.read_to_end(&mut actual).unwrap();
             assert_eq!(&actual, expected[&oid.to_string()]);
         }
-        f.store.release_snapshot(&f.credential, read).unwrap();
         assert_eq!(pins(&f), before);
     }
 }
