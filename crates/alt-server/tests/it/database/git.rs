@@ -497,3 +497,94 @@ fn real_git_push_over_a_limit_is_told_which_limit() {
     );
     assert_eq!(f.counts().0, 0);
 }
+
+#[test]
+#[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
+fn real_git_push_with_unknown_capabilities_and_unchanged_refs() {
+    use std::io::{Read, Write};
+    let f = Fixture::new();
+    let server = Running::start(&f);
+    let temp = alt_os::temp::tempdir().unwrap();
+    let first = temp.path().join("first");
+    std::fs::create_dir(&first).unwrap();
+    let url = format!("{}/git/repository", server.url);
+    ok(&first, &f.token, &["init", "-q", "--initial-branch=main"]);
+    identity(&first, &f.token);
+    std::fs::write(first.join("file"), "one\n").unwrap();
+    ok(&first, &f.token, &["add", "file"]);
+    ok(&first, &f.token, &["commit", "-qm", "one"]);
+    let one = text(ok(&first, &f.token, &["rev-parse", "HEAD"]));
+    ok(&first, &f.token, &["branch", "keep"]);
+    ok(&first, &f.token, &["push", "-q", &url, "main", "keep"]);
+    std::fs::write(first.join("file"), "two\n").unwrap();
+    ok(&first, &f.token, &["commit", "-qam", "two"]);
+    let two = text(ok(&first, &f.token, &["rev-parse", "HEAD"]));
+    let mut packing = Command::new("git")
+        .args(["pack-objects", "--stdout", "-q", "--revs"])
+        .current_dir(&first)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    packing
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(format!("{two}\n^{one}\n").as_bytes())
+        .unwrap();
+    let pack = packing.wait_with_output().unwrap().stdout;
+
+    // what a client newer than this server may send: capabilities the server has
+    // never heard of, and refs listed although they do not change
+    let request = |kept: &str| {
+        let mut body = Vec::new();
+        alt_wire::pkt::write_data(
+            &mut body,
+            format!(
+                "{one} {two} refs/heads/main\0report-status alt-capability-from-the-future=1 another-one\n"
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        alt_wire::pkt::write_data(
+            &mut body,
+            format!("{kept} {kept} refs/heads/keep\n").as_bytes(),
+        )
+        .unwrap();
+        alt_wire::pkt::write_flush(&mut body).unwrap();
+        body.extend_from_slice(&pack);
+        let response = match ureq::post(&format!("{url}/git-receive-pack"))
+            .timeout(Duration::from_secs(15))
+            .set("Content-Type", "application/x-git-receive-pack-request")
+            .set("Authorization", &format!("Bearer {}", f.token))
+            .send_bytes(&body)
+        {
+            Ok(response) | Err(ureq::Error::Status(_, response)) => response,
+            Err(error) => panic!("push request failed: {error}"),
+        };
+        let status = response.status();
+        let mut bytes = Vec::new();
+        response.into_reader().read_to_end(&mut bytes).unwrap();
+        (status, String::from_utf8_lossy(&bytes).into_owned())
+    };
+    let refs = || text(ok(&first, &f.token, &["ls-remote", "--refs", &url]));
+
+    // the unchanged ref is still an expectation: a stale one refuses the whole push
+    let (status, report) = request(&two);
+    assert_eq!(status, 200);
+    assert!(report.contains("ng refs/heads/main"), "{report}");
+    assert!(refs().contains(&format!("{one}\trefs/heads/main")));
+
+    let (status, report) = request(&one);
+    assert_eq!(status, 200);
+    assert!(report.contains("ok refs/heads/main"), "{report}");
+    let listed = refs();
+    assert!(listed.contains(&format!("{two}\trefs/heads/main")));
+    assert!(listed.contains(&format!("{one}\trefs/heads/keep")));
+    ok(temp.path(), &f.token, &["clone", "--quiet", &url, "second"]);
+    ok(
+        &temp.path().join("second"),
+        &f.token,
+        &["fsck", "--strict", "--full"],
+    );
+}
