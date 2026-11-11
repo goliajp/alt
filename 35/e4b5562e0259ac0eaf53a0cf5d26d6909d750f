@@ -1,0 +1,27 @@
+schema: alt-meta/1
+type: test
+summary: read the state the server commands stored the way serde did
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/auth.rs
+touched: crates/alt-cli/src/auth/delegate.rs
+touched: crates/alt-cli/src/native/task/transfer/adoption.rs
+touched: crates/alt-cli/src/native/task/transfer/changes.rs
+touched: crates/alt-cli/src/native/task/transfer/changes/repair.rs
+touched: crates/alt-cli/src/native/task/transfer/current_review.rs
+touched: crates/alt-cli/tests/fixtures/json-read/state-auth-Issued.txt
+touched: crates/alt-cli/tests/fixtures/json-read/state-auth-Pending.txt
+touched: crates/alt-cli/tests/fixtures/json-read/state-auth-PendingAgent.txt
+touched: crates/alt-cli/tests/fixtures/json-read/state-auth-Plan.txt
+touched: crates/alt-cli/tests/fixtures/json-read/state-auth-SavedCredential.txt
+touched: crates/alt-cli/tests/fixtures/json-read/state-remote-Adoption.txt
+touched: crates/alt-cli/tests/fixtures/json-read/state-remote-Binding.txt
+touched: crates/alt-cli/tests/fixtures/json-read/state-remote-ChangePlan.txt
+touched: crates/alt-cli/tests/fixtures/json-read/state-remote-Creation.txt
+touched: crates/alt-cli/tests/fixtures/json-read/state-remote-Plan.txt
+touched: crates/alt-cli/tests/fixtures/json-read/state-remote-PublicationBinding.txt
+touched: crates/alt-cli/tests/fixtures/json-read/state-remote-PublishedOrigin.txt
+touched: crates/alt-cli/tests/fixtures/json-read/state-remote-Receipt.txt
+touched: crates/alt-cli/tests/fixtures/json-read/state-remote-ReviewContext.txt
+touched: crates/alt-cli/tests/fixtures/json-read/state-remote-Saved.txt
+touched: crates/alt-cli/tests/fixtures/json-read/state-run-Report.txt
