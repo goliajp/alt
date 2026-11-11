@@ -44,7 +44,9 @@ fn flock_excludes_a_second_descriptor() {
     sys::flock(&second, sys::LOCK_SH | sys::LOCK_NB).unwrap();
     sys::flock(&first, sys::LOCK_SH | sys::LOCK_NB).unwrap();
     assert!(busy(sys::flock(&first, sys::LOCK_EX | sys::LOCK_NB)));
-    drop(second);
+    // unlocked, not closed: a child another test forks may hold a copy of the
+    // descriptor until it execs, and the lock lives as long as any copy
+    sys::flock(&second, sys::LOCK_UN).unwrap();
     sys::flock(&first, sys::LOCK_EX | sys::LOCK_NB).unwrap();
 }
 
