@@ -2,6 +2,7 @@
 
 use crate::{
     Error, FLAG_DUPLICATES, FLAG_OVERLAP, Kind, Oid, Record, SegmentSet,
+    carried::Carried,
     format::{self, CommitRow, Delta, NO_BASE},
     object::{self, Parsed},
     object_id,
@@ -401,39 +402,14 @@ pub fn ingest_holding(
         }
         position[index] = (kept.len() - 1) as u32;
     }
-    let lookup = |oid: &Oid| {
-        kept.binary_search_by(|index| metas[*index].oid.cmp(oid))
-            .ok()
-            .map(|at| &metas[kept[at]])
-    };
-
     // every reference resolves inside the pack or in the segments already present
-    let check = |from: &Oid, to: &Oid, kind: Kind| -> Result<(), Error> {
-        let found = match lookup(to) {
-            Some(meta) => Some(meta.kind),
-            None => existing.kind(to)?,
-        };
-        if found == Some(kind) {
-            Ok(())
-        } else {
-            Err(Error::Dangling(*from, *to))
-        }
-    };
+    let carried = Carried::new(
+        kept.iter()
+            .map(|index| (metas[*index].oid, metas[*index].kind)),
+    );
     alt_threads::try_for_each(&kept, 1024, |index| {
         let meta = &metas[*index];
-        match &meta.parsed {
-            Parsed::Blob => Ok(()),
-            Parsed::Commit { tree, parents } => {
-                check(&meta.oid, tree, Kind::Tree)?;
-                parents
-                    .iter()
-                    .try_for_each(|parent| check(&meta.oid, parent, Kind::Commit))
-            }
-            Parsed::Tree(entries) => entries
-                .iter()
-                .try_for_each(|(oid, kind)| check(&meta.oid, oid, *kind)),
-            Parsed::Tag { object, kind } => check(&meta.oid, object, *kind),
-        }
+        carried.check(existing, &meta.oid, &meta.parsed)
     })?;
     if alt_threads::any(&kept, 1024, |index| {
         existing.locate(&metas[*index].oid).is_some()

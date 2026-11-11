@@ -261,16 +261,8 @@ impl Segment {
             u32::from_le_bytes(self.map[at..at + 4].try_into().unwrap()) as usize
         };
         let first = oid[0] as usize;
-        let (mut low, mut high) = (if first == 0 { 0 } else { slot(first - 1) }, slot(first));
-        while low < high {
-            let middle = (low + high) / 2;
-            match self.oid_at(middle).cmp(oid.as_slice()) {
-                std::cmp::Ordering::Less => low = middle + 1,
-                std::cmp::Ordering::Greater => high = middle,
-                std::cmp::Ordering::Equal => return Some(middle),
-            }
-        }
-        None
+        let (low, high) = (if first == 0 { 0 } else { slot(first - 1) }, slot(first));
+        crate::search::find(low, high, oid, |index| self.oid_at(index))
     }
 
     pub fn commit(&self, oid: &Oid) -> Option<CommitInfo> {
