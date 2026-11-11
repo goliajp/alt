@@ -20,7 +20,7 @@ pub use format::{CommitInfo, Record, Segment};
 pub use ingest::{Ingested, Limits, ingest};
 pub use merge::merge;
 pub use select::Selection;
-pub use send::build_pack;
+pub use send::{Piece, build_pack};
 pub use set::SegmentSet;
 
 pub type Oid = [u8; 20];

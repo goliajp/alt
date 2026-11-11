@@ -2,12 +2,12 @@
 //! whose compressed entries are copied without recompression.
 
 use crate::{
-    Error, Kind, Oid, SegmentSet,
+    Error, Kind, Oid, Segment, SegmentSet,
     format::Delta,
     scan::{self, Form},
     select::Selection,
 };
-use std::{collections::HashSet, io::Write};
+use std::{collections::HashSet, io::Write, sync::Arc};
 
 struct Hashing<'a, W: Write> {
     inner: &'a mut W,
@@ -60,28 +60,59 @@ pub fn build_pack<'a>(
     Ok(pack)
 }
 
+/// a stretch of a pack that is sent as it is stored
+pub enum Piece {
+    Owned(Vec<u8>),
+    Stored(Arc<Segment>, std::ops::Range<usize>),
+}
+
+impl Piece {
+    pub fn bytes(&self) -> &[u8] {
+        match self {
+            Self::Owned(bytes) => bytes,
+            Self::Stored(segment, range) => &segment.pack()[range.clone()],
+        }
+    }
+}
+
 impl SegmentSet {
     /// every segment can be sent as stored: no duplicate objects within or across segments
     pub fn verbatim(&self) -> bool {
         self.segments().iter().all(|segment| segment.flags() == 0)
     }
 
+    /// All objects of all segments as one pack, as the stretches of stored bytes it
+    /// consists of, and whether the pack checksum has to be computed over them and
+    /// sent last: a single segment is its own pack, checksum included.
+    pub fn whole(&self) -> Result<(Vec<Piece>, bool), Error> {
+        if let [only] = self.segments() {
+            return Ok((
+                vec![Piece::Stored(only.clone(), 0..only.pack().len())],
+                false,
+            ));
+        }
+        let mut pieces = vec![Piece::Owned(pack_header(self.objects())?.to_vec())];
+        for segment in self.segments() {
+            let entries = 12..segment.pack().len() - 20;
+            pieces.push(Piece::Stored(segment.clone(), entries));
+        }
+        Ok((pieces, true))
+    }
+
     /// all objects of all segments as one pack; entries are copied as stored
     pub fn write_all(&self, out: &mut impl Write) -> Result<(), Error> {
-        if let [only] = self.segments() {
-            out.write_all(only.pack())?;
-            return Ok(());
+        let (pieces, checksum) = self.whole()?;
+        let mut hasher = alt_hash::Sha1::new();
+        for piece in &pieces {
+            if checksum {
+                hasher.update(piece.bytes());
+            }
+            out.write_all(piece.bytes())?;
         }
-        let mut out = Hashing {
-            inner: out,
-            hasher: alt_hash::Sha1::new(),
-        };
-        out.put(&pack_header(self.objects())?)?;
-        for segment in self.segments() {
-            let pack = segment.pack();
-            out.put(&pack[12..pack.len() - 20])?;
+        if checksum {
+            out.write_all(&hasher.finalize())?;
         }
-        out.finish()
+        Ok(())
     }
 
     /// writes `selection` as one pack; with `thin`, deltas may rest on objects the client holds

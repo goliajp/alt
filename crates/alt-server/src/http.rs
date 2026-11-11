@@ -2,6 +2,7 @@ mod device;
 mod encoding;
 mod file_body;
 mod observation;
+mod pack_body;
 use alt_server_telemetry::{Outcome, Phase};
 pub(crate) use observation::{scope as trace_scope, spawn_blocking};
 pub(crate) fn spawn_observed<T: Send + 'static>(
@@ -676,6 +677,13 @@ fn render_output(
             );
             output
         }
+        Ok(Output::WholePack(pieces, checksum)) => response(
+            200,
+            "application/x-git-upload-pack-result",
+            pack_body::PackBody::new(pieces, checksum)
+                .map_err(|e| -> BoxError { Box::new(e) })
+                .boxed_unsync(),
+        ),
         Ok(Output::Temporary {
             content_type,
             bytes,

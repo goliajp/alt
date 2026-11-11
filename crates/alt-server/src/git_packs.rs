@@ -507,35 +507,36 @@ pub(crate) fn read(
         pkt::write_flush(&mut output)?;
         return bytes(UPLOAD_RESULT, output);
     }
-    let mut pack = Vec::new();
     let everything = haves.is_empty()
         && !view.unreachable
         && set.verbatim()
         && tips.iter().all(|tip| wants.contains(tip));
     if everything {
-        set.write_all(&mut pack).map_err(segment_error)?;
-    } else {
-        let mut selection = set.select(&wants, &haves).map_err(segment_error)?;
-        if request.include_tag {
-            let chosen: HashSet<&Oid> = selection.objects().iter().collect();
-            let mut more = wants.clone();
-            for (name, oid) in &view.refs {
-                let tag = raw(*oid);
-                if name.starts_with("refs/tags/")
-                    && !chosen.contains(&tag)
-                    && let Some(target) = peel(set, tag, &mut remaining)?
-                    && chosen.contains(&target)
-                {
-                    more.push(tag);
-                }
-            }
-            if more.len() > wants.len() {
-                selection = set.select(&more, &haves).map_err(segment_error)?;
+        // nothing is computed per object: the stored bytes go out as they are read
+        let (pieces, checksum) = set.whole().map_err(segment_error)?;
+        return Ok(Output::WholePack(pieces, checksum));
+    }
+    let mut selection = set.select(&wants, &haves).map_err(segment_error)?;
+    if request.include_tag {
+        let chosen: HashSet<&Oid> = selection.objects().iter().collect();
+        let mut more = wants.clone();
+        for (name, oid) in &view.refs {
+            let tag = raw(*oid);
+            if name.starts_with("refs/tags/")
+                && !chosen.contains(&tag)
+                && let Some(target) = peel(set, tag, &mut remaining)?
+                && chosen.contains(&target)
+            {
+                more.push(tag);
             }
         }
-        set.write_selected(&selection, request.thin_pack, &mut pack)
-            .map_err(segment_error)?;
+        if more.len() > wants.len() {
+            selection = set.select(&more, &haves).map_err(segment_error)?;
+        }
     }
+    let mut pack = Vec::new();
+    set.write_selected(&selection, request.thin_pack, &mut pack)
+        .map_err(segment_error)?;
     output.reserve(pack.len() + pack.len() / 65515 * 5 + 64);
     pkt::write_data(&mut output, b"packfile\n")?;
     for chunk in pack.chunks(65515) {

@@ -24,6 +24,9 @@ pub enum Output {
         content_type: &'static str,
         bytes: Vec<u8>,
     },
+    /// a whole repository as one Git pack: the stretches of stored bytes it consists
+    /// of, and whether the pack checksum has to be computed over them and sent last
+    WholePack(Vec<alt_pack_segment::Piece>, bool),
     Temporary {
         content_type: &'static str,
         bytes: u64,
