@@ -2,8 +2,8 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use super::drive::exercise;
-use super::support::{Tally, types};
+use super::drive::{exercise, exercise_bridged};
+use super::support::{Arbitrary, Tally, types};
 
 pub mod decimal {
     pub use alt_json::with::decimal_u64::{from_json, to_json};
@@ -214,6 +214,9 @@ macro_rules! exercise_all {
             let tally = exercise::<$ty>(0x5ea9e ^ stringify!($ty).len() as u64, $rounds);
             tally.report(concat!("derive shapes, ", stringify!($ty)));
             total.add(&tally);
+            let bridged = exercise_bridged::<$ty>(0x5ea9e ^ stringify!($ty).len() as u64, $rounds / 4, Arbitrary::arbitrary);
+            bridged.report(concat!("bridge, derive shapes, ", stringify!($ty)));
+            total.add(&bridged);
         )*
         total
     }};

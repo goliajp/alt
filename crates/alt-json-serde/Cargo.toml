@@ -1,0 +1,16 @@
+[package]
+name = "alt-json-serde"
+description = "Transitional bridge: reads and writes serde types through alt-json"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+alt-json.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+golia-change-link.workspace = true
+alt-json-testkit.workspace = true
+serde_json.workspace = true

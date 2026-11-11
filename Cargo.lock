@@ -315,10 +315,22 @@ name = "alt-json-derive"
 version = "0.1.0"
 
 [[package]]
+name = "alt-json-serde"
+version = "0.1.0"
+dependencies = [
+ "alt-json",
+ "alt-json-testkit",
+ "golia-change-link",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "alt-json-testkit"
 version = "0.1.0"
 dependencies = [
  "alt-json",
+ "alt-json-serde",
  "serde",
  "serde_json",
 ]

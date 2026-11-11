@@ -46,6 +46,10 @@ impl Tree {
             .ok_or_else(|| Error::custom("value is missing"))
     }
 
+    pub(super) fn peek(&self) -> Option<&Value> {
+        self.current.as_ref()
+    }
+
     pub(super) fn put(&mut self, value: Value) {
         self.current = Some(value);
     }

@@ -2,6 +2,7 @@
 
 mod access;
 mod impls;
+mod raw;
 mod tagged;
 mod text;
 mod tree;
@@ -11,6 +12,7 @@ use std::borrow::Cow;
 use crate::parse::Parser;
 use crate::{Error, Number, Result, Value};
 pub use access::{MapAccess, SeqAccess, Variant};
+pub use raw::Kind;
 use text::Shape;
 use tree::Tree;
 
@@ -346,36 +348,14 @@ impl<'a> Decoder<'a> {
         lookup: impl FnOnce(&str) -> Result<usize>,
         f: impl FnOnce(Variant<'_, 'a>, usize) -> Result<T>,
     ) -> Result<T> {
-        let buffered = self.buffered;
         if let (false, Source::Text(_)) = (self.hidden.is_empty(), &self.source) {
             return self.enumeration_without_tags(lookup, f);
         }
-        let shape = match &mut self.source {
-            Source::Text(p) => {
-                if buffered {
-                    p.check_enum_shape()?;
-                }
-                p.begin_enum()?
-            }
-            Source::Tree(t) => t.begin_enum()?,
-        };
-        let has_data = matches!(shape, Shape::Map);
-        let inner = self.identifier(lookup).and_then(|index| {
-            if has_data {
-                match &mut self.source {
-                    Source::Text(p) => p.object_colon()?,
-                    Source::Tree(t) => t.object_colon(),
-                }
-            }
-            f(Variant { d: self, has_data }, index)
-        });
-        if !has_data {
-            return inner;
-        }
-        match &mut self.source {
-            Source::Text(p) => p.finish_enum(inner),
-            Source::Tree(t) => t.finish_enum(inner),
-        }
+        let has_data = self.enum_begin()?;
+        let inner = self
+            .enum_name(has_data, lookup)
+            .and_then(|index| f(Variant { d: self, has_data }, index));
+        self.enum_end(has_data, inner)
     }
 
     /// An enum as the content of a variant of an internally tagged enum:

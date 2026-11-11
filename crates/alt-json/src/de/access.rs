@@ -75,8 +75,17 @@ impl<'a> MapAccess<'_, 'a> {
 
     /// The next key as a typed value.
     pub fn next_key_as<K: FromJson>(&mut self) -> Result<Option<K>> {
+        self.next_key_with(K::from_json_key)
+    }
+
+    /// The next key, read by `f` from the decoder standing on it; `f` must
+    /// consume the key through one of the key-reading methods.
+    pub fn next_key_with<T>(
+        &mut self,
+        f: impl FnOnce(&mut Decoder<'a>) -> Result<T>,
+    ) -> Result<Option<T>> {
         if self.has_next_key()? {
-            K::from_json_key(self.d).map(Some)
+            f(self.d).map(Some)
         } else {
             Ok(None)
         }
@@ -153,9 +162,6 @@ impl<'a> Variant<'_, 'a> {
         map: impl FnOnce(&mut MapAccess<'_, 'a>) -> Result<T>,
     ) -> Result<T> {
         self.data("struct variant")?;
-        match (&self.d.source, self.d.buffered) {
-            (Source::Tree(_), false) => self.d.map(expected, map),
-            _ => self.d.structure(expected, seq, map),
-        }
+        self.d.variant_structure(expected, seq, map)
     }
 }

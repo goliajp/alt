@@ -33,7 +33,7 @@ mod write;
 use std::io;
 
 pub use alt_json_derive::{FromJson, ToJson};
-pub use de::{Decoder, FromJson, MapAccess, SeqAccess, Variant};
+pub use de::{Decoder, FromJson, Kind, MapAccess, SeqAccess, Variant};
 pub use error::{Category, Error};
 pub use map::Map;
 pub use number::Number;

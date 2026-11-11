@@ -165,6 +165,15 @@ pub fn exercise<T: Both>(seed: u64, rounds: u64) -> Tally {
     exercise_with(seed, rounds, T::arbitrary)
 }
 
+/// Compares serde_json with the same serde implementation driven through
+/// the alt-json bridge.
+pub fn exercise_bridged<T>(seed: u64, rounds: u64, make: impl Fn(&mut Rng) -> T) -> Tally
+where
+    T: serde::Serialize + serde::de::DeserializeOwned + std::fmt::Debug,
+{
+    exercise_with(seed, rounds, |rng| alt_json_serde::Serde(make(rng)))
+}
+
 /// Same, with the values coming from `make`.
 pub fn exercise_with<T: Comparable>(seed: u64, rounds: u64, make: impl Fn(&mut Rng) -> T) -> Tally {
     let mut rng = Rng::new(seed);

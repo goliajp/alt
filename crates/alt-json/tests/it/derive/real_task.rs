@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use alt_json::{Decoder, FromJson, ToJson, Writer};
 
-use super::drive::exercise;
+use super::drive::{exercise, exercise_bridged};
 use super::support::{Arbitrary, Tally, types};
 use crate::check::{from_serde, to_serde};
 use crate::rng::Rng;
@@ -258,6 +258,9 @@ macro_rules! exercise_all {
             let tally = exercise::<$ty>(0x7a5c ^ stringify!($ty).len() as u64, $rounds);
             tally.report(concat!("derive real task types, ", stringify!($ty)));
             total.add(&tally);
+            let bridged = exercise_bridged::<$ty>(0x7a5c ^ stringify!($ty).len() as u64, $rounds / 4, Arbitrary::arbitrary);
+            bridged.report(concat!("bridge, derive real task types, ", stringify!($ty)));
+            total.add(&bridged);
         )*
         total
     }};
