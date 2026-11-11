@@ -73,7 +73,7 @@ fn repair() -> link::RepairSource {
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
-fn response(path: String, body: Option<serde_json::Value>, run: impl FnOnce(&Transport)) {
+fn response(path: String, body: Option<alt_json::Value>, run: impl FnOnce(&Transport)) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let worker = std::thread::spawn(move || {
@@ -105,7 +105,7 @@ fn response(path: String, body: Option<serde_json::Value>, run: impl FnOnce(&Tra
         let mut bytes = vec![0; len];
         stream.read_exact(&mut bytes).unwrap();
         if let Some(body) = body {
-            let bytes = serde_json::to_vec(&body).unwrap();
+            let bytes = alt_json::to_vec(&body).unwrap();
             write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",bytes.len()).unwrap();
             stream.write_all(&bytes).unwrap();
         }
@@ -133,12 +133,12 @@ fn repair_source_requires_pinned_acceptance_and_exact_current_scope() {
     let path = format!("/v1/repositories/repo/epochs/7/changes/repairs/{digest}/source");
     response(
         path.clone(),
-        Some(serde_json::to_value(&proof).unwrap()),
+        Some(alt_json_serde::to_value(&proof).unwrap()),
         |c| assert_eq!(c.repair_source(&scope(), &digest, &pinned).unwrap(), proof),
     );
     response(
         path.clone(),
-        Some(serde_json::to_value(&proof).unwrap()),
+        Some(alt_json_serde::to_value(&proof).unwrap()),
         |c| {
             assert!(
                 c.repair_source(
@@ -152,7 +152,7 @@ fn repair_source_requires_pinned_acceptance_and_exact_current_scope() {
     );
     let mut wrong = scope();
     wrong.installation_id = "other".into();
-    response(path, Some(serde_json::to_value(&proof).unwrap()), |c| {
+    response(path, Some(alt_json_serde::to_value(&proof).unwrap()), |c| {
         assert!(c.repair_source(&wrong, &digest, &pinned).is_err())
     });
 }
@@ -163,13 +163,13 @@ fn repair_claim_cannot_substitute_another_request_and_pages_cannot_repeat() {
     response(
         path,
         Some(
-            serde_json::json!({"repair_request_digest":"b".repeat(64),"task":"c".repeat(64),"publication_digest":"d".repeat(64)}),
+            alt_json::json!({"repair_request_digest":"b".repeat(64),"task":"c".repeat(64),"publication_digest":"d".repeat(64)}),
         ),
         |c| assert!(c.repair_claim(&scope(), &d).is_err()),
     );
     response(
         format!("/v1/repositories/repo/epochs/7/changes/events?after={d}"),
-        Some(serde_json::json!({"entries":[],"next":d})),
+        Some(alt_json::json!({"entries":[],"next":d})),
         |c| assert!(c.change_events(&scope(), Some(&d)).is_err()),
     );
 }

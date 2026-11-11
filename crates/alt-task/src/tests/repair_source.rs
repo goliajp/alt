@@ -5,7 +5,7 @@ use golia_change_link::{
     SignedEvent,
 };
 
-fn legacy() -> Task {
+pub(super) fn legacy() -> Task {
     serde_json::from_slice(include_bytes!("fixtures/task-v1.json")).unwrap()
 }
 fn source(target: &str) -> RepairSource {

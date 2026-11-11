@@ -1,14 +1,13 @@
 use crate::{ArtifactSource, Error, Result, SourceCompletion};
 use alt_task::Record;
-use serde::Deserialize;
 
-#[derive(Deserialize)]
+#[derive(alt_json::FromJson)]
 struct Context {
     version: u32,
     workspace: Workspace,
     request_id: Option<String>,
 }
-#[derive(Deserialize)]
+#[derive(alt_json::FromJson)]
 struct Workspace {
     instance: String,
 }
@@ -61,7 +60,7 @@ pub(crate) fn verify_attributed_operation(
     let context = tx
         .context
         .ok_or(Error::Integrity("source operation attribution missing"))?;
-    let context: Context = serde_json::from_value(crate::strict_json::decode(&context, limit)?)?;
+    let context: Context = alt_json::from_value(crate::strict_json::decode(&context, limit)?)?;
     if !matches!(context.version, 1 | 2)
         || context.workspace.instance != origin.workspace
         || context.request_id.as_deref() != Some(integration.creator_request.as_str())

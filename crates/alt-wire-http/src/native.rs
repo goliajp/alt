@@ -3,8 +3,8 @@
 pub mod change_links;
 pub mod portable;
 use alt_crypto::ed25519::{Signature, VerifyingKey};
+use alt_json::{FromJson, ToJson};
 use alt_remote_protocol::*;
-use serde::{Serialize, de::DeserializeOwned};
 use std::{
     io::{Read, Write},
     time::Duration,
@@ -206,7 +206,7 @@ impl Transport {
     }
     pub fn revoke_agent(&self, credential_id: &str) -> Result<()> {
         digest(credential_id)?;
-        let value: serde_json::Value = self.json(
+        let value: alt_json::Value = self.json(
             "POST",
             &format!("/v1/delegations/{credential_id}/revoke"),
             &[],
@@ -249,7 +249,7 @@ impl Transport {
             let status = response.status();
             let failure = bounded(response, self.options.response_bytes)
                 .ok()
-                .and_then(|b| serde_json::from_slice::<Failure>(&b).ok())
+                .and_then(|b| alt_json::from_slice::<Failure>(&b).ok())
                 .map(Box::new);
             return Err(Error::Rejected { status, failure });
         }
@@ -258,7 +258,7 @@ impl Transport {
         }
         Ok(response)
     }
-    fn json<T: DeserializeOwned>(
+    fn json<T: FromJson>(
         &self,
         method: &str,
         path: &str,
@@ -275,7 +275,7 @@ impl Transport {
                 return Err(Error::Invalid("response media type"));
             }
             let bytes = bounded(response, self.options.response_bytes)?;
-            serde_json::from_slice(&bytes).map_err(|_| Error::Invalid("response JSON"))
+            alt_json::from_slice(&bytes).map_err(|_| Error::Invalid("response JSON"))
         };
         decode().map_err(|error| match key {
             Some(key) => Error::OutcomeUnknown {
@@ -284,8 +284,8 @@ impl Transport {
             None => error,
         })
     }
-    fn encode(&self, value: &impl Serialize) -> Result<Vec<u8>> {
-        let bytes = serde_json::to_vec(value).map_err(|_| Error::Invalid("request JSON"))?;
+    fn encode(&self, value: &impl ToJson) -> Result<Vec<u8>> {
+        let bytes = alt_json::to_vec(value).map_err(|_| Error::Invalid("request JSON"))?;
         if bytes.len() > self.options.response_bytes {
             return Err(Error::Limit("request JSON bytes"));
         }
@@ -381,8 +381,8 @@ impl Transport {
         }
         let path = format!("{}/chunks/{}", request_path(key)?, chunk.blake3);
         let response = self.request("PUT", &path, "application/octet-stream", bytes, Some(key))?;
-        let value: serde_json::Value =
-            serde_json::from_slice(&bounded(response, self.options.response_bytes)?)
+        let value: alt_json::Value =
+            alt_json::from_slice(&bounded(response, self.options.response_bytes)?)
                 .map_err(|_| Error::Invalid("upload response"))?;
         if value["blake3"] != chunk.blake3 || value["verified"] != true {
             return Err(Error::Invalid("upload response identity"));
@@ -391,7 +391,7 @@ impl Transport {
     }
     pub fn assemble(&self, key: &RequestKey, content: &str) -> Result<()> {
         digest(content)?;
-        let value: serde_json::Value = self.json(
+        let value: alt_json::Value = self.json(
             "POST",
             &format!("{}/content/{content}/assemble", request_path(key)?),
             b"",
@@ -421,7 +421,7 @@ impl Transport {
             integration_id: integration.into(),
             inspected: inspected.clone(),
         };
-        let value: serde_json::Value = self.json(
+        let value: alt_json::Value = self.json(
             "POST",
             &format!("{}/approve", request_path(key)?),
             &self.encode(&body)?,
@@ -430,7 +430,7 @@ impl Transport {
         if value["integration_id"] != integration
             || value["approved"] != true
             || value["request"]
-                != serde_json::to_value(key).map_err(|_| Error::Invalid("request identity"))?
+                != alt_json::to_value(key).map_err(|_| Error::Invalid("request identity"))?
         {
             return Err(Error::Invalid("approval response identity"));
         }

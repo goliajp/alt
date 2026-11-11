@@ -33,7 +33,7 @@ fn fixture(script: &str) -> Fixture {
         environment,
         tools: vec![identity],
         external: Vec::new(),
-        validation: serde_json::json!({"outputs":["target"]}),
+        validation: alt_json::json!({"outputs":["target"]}),
     };
     let tree = Root::open(&source).unwrap();
     let manifest = alt_input::scan(
@@ -179,11 +179,11 @@ fn stale_tool_and_unknown_environment_prevent_execution() {
 fn declared_outputs_cannot_hide_input_changes() {
     let mut f = fixture("printf ok\n");
     for outputs in [
-        serde_json::json!([".ignored"]),
-        serde_json::json!(["source.txt"]),
-        serde_json::json!(["."]),
-        serde_json::json!([CONTROL]),
-        serde_json::json!(["target", "target/nested"]),
+        alt_json::json!([".ignored"]),
+        alt_json::json!(["source.txt"]),
+        alt_json::json!(["."]),
+        alt_json::json!([CONTROL]),
+        alt_json::json!(["target", "target/nested"]),
     ] {
         f.spec.manifest.context.validation["outputs"] = outputs;
         assert!(output_roots(&f.spec.manifest).is_err());
@@ -213,7 +213,7 @@ fn external_versions_require_an_observation_in_the_acceptance_definition() {
             });
         if probe_defined {
             f.spec.manifest.context.validation["external_probes"] =
-                serde_json::json!({"registry-snapshot":["bash","-c","printf v1"]});
+                alt_json::json!({"registry-snapshot":["bash","-c","printf v1"]});
         }
         let report = execute(&f.root, &f.spec, &[7; 32]).unwrap();
         if probe_defined {

@@ -1,4 +1,5 @@
 use alt_remote_protocol::*;
+mod json;
 mod login;
 
 fn limits() -> Limits {

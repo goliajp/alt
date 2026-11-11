@@ -10,7 +10,7 @@ pub enum Error {
     Repository(alt_repository_service::Error),
     Integrity(&'static str),
     Limit(&'static str),
-    Json(serde_json::Error),
+    Json(alt_json::Error),
     Io(std::io::Error),
     Task(alt_task::Error),
     Input(alt_input::Error),
@@ -49,8 +49,8 @@ impl From<alt_repository_service::Error> for Error {
     }
 }
 
-impl From<serde_json::Error> for Error {
-    fn from(e: serde_json::Error) -> Self {
+impl From<alt_json::Error> for Error {
+    fn from(e: alt_json::Error) -> Self {
         Self::Json(e)
     }
 }

@@ -11,7 +11,7 @@ use std::sync::Arc;
 use alt_json::{FromJson, ToJson};
 use serde::{Deserialize, Serialize};
 
-use super::drive::exercise;
+use super::drive::{exercise, exercise_bridged};
 use super::shapes::{Adjacent, External, Internal, InternalLoose, Plain, Strict};
 use super::support::{Arbitrary, Tally, types};
 use crate::rng::Rng;
@@ -196,6 +196,9 @@ macro_rules! exercise_all {
             let tally = exercise::<$ty>(0x57d ^ stringify!($ty).len() as u64, $rounds);
             tally.report(concat!("derive std types, ", stringify!($ty)));
             total.add(&tally);
+            let bridged = exercise_bridged::<$ty>(0x57d ^ stringify!($ty).len() as u64, $rounds / 4, Arbitrary::arbitrary);
+            bridged.report(concat!("bridge, derive std types, ", stringify!($ty)));
+            total.add(&bridged);
         )*
         total
     }};

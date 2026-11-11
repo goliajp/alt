@@ -143,19 +143,26 @@ impl<'a> Window<'a> {
         let usable = self.usable::<PREFIX>(index, low);
         // safety: a usable candidate has 8 readable bytes, as does a stand-in
         unsafe {
-            if cfg!(target_arch = "x86_64") {
-                let nowhere = NOWHERE[(here as u8 == 0xFF) as usize].as_ptr();
-                let from = select_unpredictable(usable, self.at::<PREFIX>(index), nowhere);
-                load32(from) == here
-            } else {
-                let from = if usable {
-                    self.at::<PREFIX>(index)
-                } else {
-                    NOWHERE[0].as_ptr()
-                };
-                (load32(from) == here) & usable
-            }
+            let from = select_unpredictable(usable, self.at::<PREFIX>(index), NOWHERE[0].as_ptr());
+            ((load32(from) ^ here) | !usable as u32) == 0
         }
+    }
+
+    /// As [`Window::hits32`], with the usability test as a plain branch.
+    /// On a long input unusable candidates are rare, the branch predicts
+    /// well, and the candidate can be read without waiting for the test.
+    ///
+    /// # Safety
+    /// `index` must be below a data position that has 8 bytes ahead of it.
+    #[inline(always)]
+    pub(crate) unsafe fn hits32_likely<const PREFIX: bool>(
+        &self,
+        index: usize,
+        low: usize,
+        here: u32,
+    ) -> bool {
+        // safety: a usable candidate has 8 readable bytes
+        self.usable::<PREFIX>(index, low) && unsafe { load32(self.at::<PREFIX>(index)) } == here
     }
 
     /// As [`Window::hits32`], for the eight bytes `here`.

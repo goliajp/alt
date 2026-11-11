@@ -12,8 +12,8 @@ alt-git-codec.workspace = true
 alt-remote-protocol.workspace = true
 alt-repository-service.workspace = true
 alt-delivery.workspace = true
+alt-json.workspace = true
 serde.workspace = true
-serde_json.workspace = true
 alt-crypto.workspace = true
 alt-command-protocol.workspace = true
 alt-git-config.workspace = true
@@ -21,4 +21,6 @@ alt-oplog.workspace = true
 alt-refs.workspace = true
 
 [dev-dependencies]
+alt-json-testkit.workspace = true
+serde_json.workspace = true
 alt-os.workspace = true

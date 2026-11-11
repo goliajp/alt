@@ -12,8 +12,9 @@ pub struct Store {
     blobs: alt_store::BlobStore,
     _lock: File,
 }
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 struct Envelope<T> {
     schema_version: u32,
     hash_algorithm: String,
@@ -21,7 +22,7 @@ struct Envelope<T> {
     record: T,
 }
 fn decode<T: Record>(bytes: &[u8]) -> Result<T> {
-    let envelope: Envelope<T> = serde_json::from_slice(bytes)?;
+    let envelope: Envelope<T> = alt_json::from_slice(bytes)?;
     if envelope.schema_version != 1
         || envelope.hash_algorithm != "blake3"
         || envelope.kind != T::KIND
@@ -95,7 +96,7 @@ impl Store {
         self.blob(artifact).map(|_| ())
     }
     pub fn publish<T: Record>(&mut self, record: &T) -> Result<String> {
-        let bytes = serde_json::to_vec(&Envelope {
+        let bytes = alt_json::to_vec(&Envelope {
             schema_version: 1,
             hash_algorithm: "blake3".into(),
             kind: T::KIND.into(),

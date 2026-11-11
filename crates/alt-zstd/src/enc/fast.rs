@@ -1,4 +1,6 @@
-//! Single-table greedy match finder (the fast strength).
+//! Single-table greedy match finder (the fast strength). Positions are
+//! probed in pairs, with the table lookup of each issued one position
+//! ahead of its use.
 
 use super::matcher::{PROBE, SKIP_SPAN, SeqStore, Window, hash};
 
@@ -15,13 +17,18 @@ pub(crate) struct Search<'t> {
 /// Finds matches in `start..end` and returns the index where the trailing
 /// literals begin. `reps` holds the two latest offsets, zero when unusable.
 ///
+/// Positions are probed in adjacent pairs, with the table lookup of each
+/// issued one position ahead of its use; the repeat offset is tried once
+/// per pair.
+///
 /// # Safety
 /// `window.split <= start <= end <= window.end`, `search.low >= window.first`,
 /// every nonzero rep at most `start - search.low`, the table at least
 /// `1 << search.log` entries long with all entries below `start`, `PREFIX`
-/// true if the window has a prefix, and `store` started for this block.
+/// true if the window has a prefix, `LIKELY` set only where candidates are
+/// rarely unusable (a long input), and `store` started for this block.
 #[inline(always)]
-pub(crate) unsafe fn run<const PREFIX: bool>(
+pub(crate) unsafe fn run<const PREFIX: bool, const LIKELY: bool>(
     search: Search<'_>,
     window: &Window<'_>,
     start: usize,
@@ -29,7 +36,7 @@ pub(crate) unsafe fn run<const PREFIX: bool>(
     reps: &mut [usize; 2],
     store: &mut SeqStore,
 ) -> usize {
-    if end - start < PROBE + 1 {
+    if end - start < PROBE + 4 {
         return start;
     }
     let Search {
@@ -41,55 +48,120 @@ pub(crate) unsafe fn run<const PREFIX: bool>(
     let table = table.as_mut_ptr();
     let drop = 64 - 8 * width;
     let shift = 64 - log;
-    // a position past `last` cannot be hashed
-    let last = end - PROBE;
+    // a position past `limit` cannot be hashed
+    let limit = end - PROBE;
     let [mut rep0, mut rep1] = *reps;
     let mut anchor = start;
-    let mut ip = start;
+    let mut ip0 = start;
 
     // safety (whole block): `ip <= last` before every 8-byte read of the
     // data; candidates come from the table, so they are below `ip`, and
     // `probe` yields a readable address for any of them; hashes are below
     // 1 << log
     unsafe {
-        while ip <= last {
-            let here = window.data64(ip);
-            let slot = table.add(hash(here, drop, shift));
-            let candidate = *slot as usize;
-            *slot = ip as u32;
-            let found = ip;
-            let match_len;
-
-            if window.repeats::<PREFIX>(ip + 1, rep0) {
-                ip += 1;
-                match_len = 4 + window.common::<PREFIX>(ip + 4, ip + 4 - rep0, end);
-                store.push(window, anchor, ip, match_len, 1);
-            } else if window.hits32::<PREFIX>(candidate, low, here as u32) {
-                let mut from = candidate;
-                let forward = 4 + window.common::<PREFIX>(ip + 4, from + 4, end);
-                match_len = forward + window.extend_back::<PREFIX>(&mut ip, &mut from, anchor, low);
-                rep1 = rep0;
-                rep0 = ip - from;
-                store.push(window, anchor, ip, match_len, rep0 + 3);
+        let slot_of = |ip: usize| table.add(hash(window.data64(ip), drop, shift));
+        let hit = |ip: usize, candidate: usize| {
+            let here = window.data64(ip) as u32;
+            if LIKELY {
+                window.hits32_likely::<PREFIX>(candidate, low, here)
             } else {
-                ip += 1 + ((ip - anchor) / SKIP_SPAN);
-                continue;
+                window.hits32::<PREFIX>(candidate, low, here)
             }
-            ip += match_len;
-            anchor = ip;
+        };
+        'search: loop {
+            // the gap between pairs; pairs are (ip0, ip1) then (ip2, ip3)
+            let mut step = 2;
+            let mut next_step = ip0 + SKIP_SPAN / 2;
+            let mut ip1 = ip0 + 1;
+            let mut ip2 = ip0 + step;
+            let mut ip3 = ip2 + 1;
+            if ip3 >= limit {
+                break;
+            }
+            let mut slot0 = slot_of(ip0);
+            let mut slot1 = slot_of(ip1);
+            let mut candidate = *slot0 as usize;
+            // last position whose slot was written
+            let mut indexed;
+            let mut from;
+            let mut match_len;
+            let code;
+            loop {
+                let repeat = window.repeats::<PREFIX>(ip2, rep0);
+                *slot0 = ip0 as u32;
+                indexed = ip0;
+                if repeat {
+                    *slot1 = ip1 as u32;
+                    ip0 = ip2;
+                    from = ip0 - rep0;
+                    // ip2 is at least two past the anchor, so one step back
+                    // still leaves a literal in front of the match
+                    let back =
+                        (window.byte::<false>(ip0 - 1) == window.byte::<PREFIX>(from - 1)) as usize;
+                    ip0 -= back;
+                    from -= back;
+                    match_len = 4 + back;
+                    code = 1;
+                    break;
+                }
+                if hit(ip0, candidate) {
+                    *slot1 = ip1 as u32;
+                } else {
+                    candidate = *slot1 as usize;
+                    slot0 = slot1;
+                    slot1 = slot_of(ip2);
+                    ip0 = ip1;
+                    ip1 = ip2;
+                    ip2 = ip3;
+                    *slot0 = ip0 as u32;
+                    indexed = ip0;
+                    if hit(ip0, candidate) {
+                        // only if it stays below where the search resumes
+                        if step <= 4 {
+                            *slot1 = ip1 as u32;
+                        }
+                    } else {
+                        candidate = *slot1 as usize;
+                        slot0 = slot1;
+                        slot1 = slot_of(ip2);
+                        ip0 = ip1;
+                        ip1 = ip2;
+                        ip2 = ip0 + step;
+                        ip3 = ip1 + step;
+                        if ip2 >= next_step {
+                            step += 1;
+                            next_step += SKIP_SPAN / 2;
+                        }
+                        if ip3 >= limit {
+                            break 'search;
+                        }
+                        continue;
+                    }
+                }
+                from = candidate;
+                match_len = 4 + window.extend_back::<PREFIX>(&mut ip0, &mut from, anchor, low);
+                rep1 = rep0;
+                rep0 = ip0 - from;
+                code = rep0 + 3;
+                break;
+            }
+            match_len += window.common::<PREFIX>(ip0 + match_len, from + match_len, end);
+            store.push(window, anchor, ip0, match_len, code);
+            ip0 += match_len;
+            anchor = ip0;
 
-            if ip <= last {
+            if ip0 <= limit {
                 // index two positions the match jumped over
-                *table.add(hash(window.data64(found + 2), drop, shift)) = (found + 2) as u32;
-                *table.add(hash(window.data64(ip - 2), drop, shift)) = (ip - 2) as u32;
+                *slot_of(indexed + 2) = (indexed + 2) as u32;
+                *slot_of(ip0 - 2) = (ip0 - 2) as u32;
                 // a match right behind another often repeats the older offset
-                while ip <= last && window.repeats::<PREFIX>(ip, rep1) {
-                    let len = 4 + window.common::<PREFIX>(ip + 4, ip + 4 - rep1, end);
+                while ip0 <= limit && window.repeats::<PREFIX>(ip0, rep1) {
+                    let len = 4 + window.common::<PREFIX>(ip0 + 4, ip0 + 4 - rep1, end);
                     std::mem::swap(&mut rep0, &mut rep1);
-                    *table.add(hash(window.data64(ip), drop, shift)) = ip as u32;
-                    store.push(window, ip, ip, len, 1);
-                    ip += len;
-                    anchor = ip;
+                    *slot_of(ip0) = ip0 as u32;
+                    store.push(window, ip0, ip0, len, 1);
+                    ip0 += len;
+                    anchor = ip0;
                 }
             }
         }

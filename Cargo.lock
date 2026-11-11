@@ -72,6 +72,7 @@ dependencies = [
  "alt-import",
  "alt-inflate",
  "alt-input",
+ "alt-json",
  "alt-lfs",
  "alt-merge",
  "alt-odb",
@@ -115,9 +116,11 @@ dependencies = [
  "alt-base64",
  "alt-crypto",
  "alt-hash",
+ "alt-json",
+ "alt-json-serde",
+ "alt-json-testkit",
  "alt-os",
  "golia-platform-contract",
- "serde",
  "serde_json",
  "tiny_http",
  "ureq",
@@ -315,10 +318,22 @@ name = "alt-json-derive"
 version = "0.1.0"
 
 [[package]]
+name = "alt-json-serde"
+version = "0.1.0"
+dependencies = [
+ "alt-json",
+ "alt-json-testkit",
+ "golia-change-link",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "alt-json-testkit"
 version = "0.1.0"
 dependencies = [
  "alt-json",
+ "alt-json-serde",
  "serde",
  "serde_json",
 ]
@@ -387,6 +402,9 @@ dependencies = [
  "alt-crypto",
  "alt-git-codec",
  "alt-hash",
+ "alt-json",
+ "alt-json-serde",
+ "alt-json-testkit",
  "alt-provenance",
  "alt-remote-protocol",
  "alt-repository-service",
@@ -447,8 +465,8 @@ version = "0.1.0"
 dependencies = [
  "alt-crypto",
  "alt-hash",
+ "alt-json",
  "alt-remote-protocol",
- "serde_json",
 ]
 
 [[package]]
@@ -466,6 +484,9 @@ name = "alt-remote-protocol"
 version = "0.1.0"
 dependencies = [
  "alt-hash",
+ "alt-json",
+ "alt-json-serde",
+ "alt-json-testkit",
  "golia-change-link",
  "serde",
  "serde_json",
@@ -494,8 +515,11 @@ dependencies = [
  "alt-bytes",
  "alt-git-codec",
  "alt-hash",
+ "alt-json",
+ "alt-json-testkit",
  "alt-remote-protocol",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -504,6 +528,8 @@ version = "0.1.0"
 dependencies = [
  "alt-hash",
  "alt-input",
+ "alt-json",
+ "alt-json-testkit",
  "alt-os",
  "alt-task",
  "serde",
@@ -631,6 +657,9 @@ version = "0.1.0"
 dependencies = [
  "alt-hash",
  "alt-input",
+ "alt-json",
+ "alt-json-serde",
+ "alt-json-testkit",
  "alt-os",
  "alt-store",
  "ed25519-dalek",
@@ -650,6 +679,8 @@ dependencies = [
  "alt-git-config",
  "alt-hash",
  "alt-input",
+ "alt-json",
+ "alt-json-testkit",
  "alt-oplog",
  "alt-os",
  "alt-refs",
@@ -668,6 +699,8 @@ dependencies = [
  "alt-git-codec",
  "alt-hash",
  "alt-input",
+ "alt-json",
+ "alt-json-testkit",
  "alt-os",
  "alt-remote-protocol",
  "alt-repository-service",
@@ -734,13 +767,13 @@ dependencies = [
  "alt-base64",
  "alt-crypto",
  "alt-hash",
+ "alt-json",
+ "alt-json-serde",
  "alt-portable",
  "alt-remote-protocol",
  "alt-wire",
  "ed25519-dalek",
  "golia-change-link",
- "serde",
- "serde_json",
  "ureq",
  "url",
 ]

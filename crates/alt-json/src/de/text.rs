@@ -28,7 +28,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn peek_value(&mut self) -> Result<u8> {
+    pub(super) fn peek_value(&mut self) -> Result<u8> {
         self.skip_whitespace()
             .ok_or_else(|| self.peek_error(ErrorCode::EofWhileParsingValue))
     }

@@ -1,6 +1,8 @@
+mod json;
+
+use alt_json::json;
 use alt_task::Record;
 use alt_task_service::*;
-use serde_json::json;
 use std::{
     collections::BTreeMap,
     io::{Cursor, Read},
@@ -62,7 +64,7 @@ fn task() -> alt_task::Task {
     }
 }
 fn encoded<T: Record>(record: &T) -> Vec<u8> {
-    serde_json::to_vec(
+    alt_json::to_vec(
         &json!({"schema_version":1,"hash_algorithm":"blake3","kind":T::KIND,"record":record}),
     )
     .unwrap()
@@ -97,8 +99,7 @@ fn original_record_identity_survives_whitespace_but_duplicate_maps_fail() {
         key.id
     );
     let pretty =
-        serde_json::to_vec_pretty(&serde_json::from_slice::<serde_json::Value>(&bytes).unwrap())
-            .unwrap();
+        alt_json::to_vec_pretty(&alt_json::from_slice::<alt_json::Value>(&bytes).unwrap()).unwrap();
     assert!(TaskRecord::decode(&key, &pretty, 100_000).is_ok());
     let duplicate = String::from_utf8(bytes.clone()).unwrap().replace(
         "\"mode\":\"strict\"",
@@ -188,7 +189,7 @@ fn source_proof_binds_original_scope_command_and_returned_record() {
     };
     let response = alt_command_protocol::Response {
         exit_code: 0,
-        stdout: serde_json::to_vec(&json!({"task_id":key.id})).unwrap(),
+        stdout: alt_json::to_vec(&json!({"task_id":key.id})).unwrap(),
         stderr: vec![],
     }
     .encode();
@@ -208,8 +209,8 @@ fn source_proof_binds_original_scope_command_and_returned_record() {
         record: key,
         origin: task.scope.clone(),
         request_id: task.creator_request.clone(),
-        intent: memory.put(serde_json::to_vec(&intent).unwrap()),
-        completion: memory.put(serde_json::to_vec(&completion).unwrap()),
+        intent: memory.put(alt_json::to_vec(&intent).unwrap()),
+        completion: memory.put(alt_json::to_vec(&completion).unwrap()),
         response: memory.put(response),
         ref_operation: None,
     };
@@ -236,10 +237,10 @@ fn failed_validation_source_result_requires_applied_bound_machine_details() {
     let request = "a".repeat(32);
     let details = json!({"evidence_id":"b".repeat(64),"receipt_id":"c".repeat(64)});
     let mut error = json!({"schema_version":1,"error":{"kind":"validation_not_eligible","outcome":"applied","request_id":request,"details":details}});
-    let response = |value: &serde_json::Value| alt_command_protocol::Response {
+    let response = |value: &alt_json::Value| alt_command_protocol::Response {
         exit_code: 1,
         stdout: vec![],
-        stderr: serde_json::to_vec(value).unwrap(),
+        stderr: alt_json::to_vec(value).unwrap(),
     };
     assert_eq!(
         command_record_result(&response(&error), &request, 100_000).unwrap(),
@@ -632,7 +633,7 @@ fn historical_review_diff_must_cover_binary_bytes_modes_and_all_changed_paths() 
         reviewer: "original reviewer".into(),
         reason: "binary change reviewed".into(),
         commit_message: "change bytes".into(),
-        changes: memory.put(serde_json::to_vec(&changes).unwrap()),
+        changes: memory.put(alt_json::to_vec(&changes).unwrap()),
         creator_request: "f".repeat(32),
     };
     assert!(verify_review_changes(&review, &task, &candidate, &graph, &memory, limits()).is_ok());
@@ -647,7 +648,7 @@ fn historical_review_diff_must_cover_binary_bytes_modes_and_all_changed_paths() 
             "truncated" => value["truncated"] = json!(true),
             _ => unreachable!(),
         }
-        review.changes = memory.put(serde_json::to_vec(&value).unwrap());
+        review.changes = memory.put(alt_json::to_vec(&value).unwrap());
         assert!(
             verify_review_changes(&review, &task, &candidate, &graph, &memory, limits()).is_err(),
             "{modification}"
@@ -685,7 +686,7 @@ fn source_completion(
     };
     let response = alt_command_protocol::Response {
         exit_code: 0,
-        stdout: serde_json::to_vec(&json!({field:key.id})).unwrap(),
+        stdout: alt_json::to_vec(&json!({field:key.id})).unwrap(),
         stderr: vec![],
     }
     .encode();
@@ -705,8 +706,8 @@ fn source_completion(
         record: key,
         origin,
         request_id: request,
-        intent: memory.put(serde_json::to_vec(&intent).unwrap()),
-        completion: memory.put(serde_json::to_vec(&completion).unwrap()),
+        intent: memory.put(alt_json::to_vec(&intent).unwrap()),
+        completion: memory.put(alt_json::to_vec(&completion).unwrap()),
         response: memory.put(response),
         ref_operation: None,
     }
@@ -1111,7 +1112,7 @@ fn source_integration_requires_exact_attributed_ref_operation_and_completion() {
     )
     .unwrap();
     let request_id = "4".repeat(32);
-    let context = serde_json::to_vec(&json!({"version":2,"effects":"refs_only","workspace":{"name":"source","instance":"source-worktree"},"inverse_of":null,"checkout":null,"request_id":request_id})).unwrap();
+    let context = alt_json::to_vec(&json!({"version":2,"effects":"refs_only","workspace":{"name":"source","instance":"source-worktree"},"inverse_of":null,"checkout":null,"request_id":request_id})).unwrap();
     let operation = refs
         .commit_scoped(
             "original actor",
@@ -1285,7 +1286,7 @@ fn delivery_recovery_requires_original_intent_completed_collection_and_successfu
     let mut receipt = alt_task::DeliveryReceipt {
         schema_version: 1,
         delivery: delivery.id().unwrap(),
-        verification: memory.put(serde_json::to_vec(&check).unwrap()),
+        verification: memory.put(alt_json::to_vec(&check).unwrap()),
         creator_request: "2".repeat(32),
     };
     let record = TaskRecord::DeliveryReceipt(receipt.clone());
@@ -1302,7 +1303,7 @@ fn delivery_recovery_requires_original_intent_completed_collection_and_successfu
     assert!(check_source_recovery(&recovery, &delivery, &record, &proof, &memory, 100_000).is_ok());
     let mut failed = check;
     failed.fsck_exit = 1;
-    receipt.verification = memory.put(serde_json::to_vec(&failed).unwrap());
+    receipt.verification = memory.put(alt_json::to_vec(&failed).unwrap());
     let record = TaskRecord::DeliveryReceipt(receipt);
     let proof = source_completion(&record, origin, &mut memory);
     recovery.receipt = proof.record.clone();
@@ -1366,7 +1367,7 @@ fn complete_task_validation_binds_manifest_selection_objects_sources_and_work_bu
         omissions: vec![],
         attestations: vec![],
     };
-    let inventory = memory.put(serde_json::to_vec(&bundle).unwrap());
+    let inventory = memory.put(alt_json::to_vec(&bundle).unwrap());
     let entry = |digest: &String, bytes: u64, kind| wire::ContentEntry {
         kind,
         blake3: digest.clone(),

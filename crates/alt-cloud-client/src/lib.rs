@@ -3,11 +3,12 @@
 #![forbid(unsafe_code)]
 use alt_base64::URL_SAFE_NO_PAD;
 use alt_crypto::aead;
+use alt_json::{FromJson, ToJson};
+use alt_json_serde::Serde;
 use golia_platform_contract::{
     AccountAuthorization, AltServiceAuthorization, Audience, Product, Secret, TicketExchange,
     VERSION,
 };
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{io::Read, time::Duration};
 
 #[derive(Debug)]
@@ -55,11 +56,13 @@ pub struct Client {
     credential: Secret,
     agent: ureq::Agent,
 }
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, FromJson)]
+#[json(deny_unknown_fields)]
 pub struct Exchange {
     pub version: u32,
+    #[json(with = "alt_json_serde::bridge")]
     pub grant: Secret,
+    #[json(with = "alt_json_serde::bridge")]
     pub account: AccountAuthorization,
 }
 impl Client {
@@ -89,14 +92,14 @@ impl Client {
     pub fn audience(&self) -> &Audience {
         &self.audience
     }
-    fn post<T: DeserializeOwned>(&self, action: &str, body: &impl Serialize) -> Result<T> {
+    fn post<T: FromJson>(&self, action: &str, body: &impl ToJson) -> Result<T> {
         let url = format!(
             "{}/cloud/internal/platform/v1/installations/{}/{}",
             self.audience.control_origin.as_str(),
             self.audience.installation_id.as_str(),
             action
         );
-        let bytes = serde_json::to_vec(body).map_err(|_| Error::Invalid)?;
+        let bytes = alt_json::to_vec(body).map_err(|_| Error::Invalid)?;
         if bytes.len() > 16 * 1024 {
             return Err(Error::Invalid);
         }
@@ -132,7 +135,7 @@ impl Client {
         if bytes.len() as u64 > MAX_RESPONSE {
             return Err(Error::Invalid);
         }
-        serde_json::from_slice(&bytes).map_err(|_| Error::Invalid)
+        alt_json::from_slice(&bytes).map_err(|_| Error::Invalid)
     }
     pub fn exchange(
         &self,
@@ -142,12 +145,12 @@ impl Client {
     ) -> Result<Exchange> {
         let response: Exchange = self.post(
             "exchange",
-            &TicketExchange {
+            &Serde(TicketExchange {
                 version: VERSION,
                 audience: self.audience.clone(),
                 ticket,
                 verifier,
-            },
+            }),
         )?;
         if response.version != VERSION {
             return Err(Error::Invalid);
@@ -160,9 +163,9 @@ impl Client {
         grant: &Secret,
         clock: impl FnOnce() -> u64,
     ) -> Result<AccountAuthorization> {
-        let response: AccountAuthorization = self.post(
+        let Serde(response): Serde<AccountAuthorization> = self.post(
             "introspect",
-            &serde_json::json!({"version":VERSION,"audience":self.audience,"grant":grant}),
+            &alt_json::json!({"version":VERSION,"audience":Serde(&self.audience),"grant":Serde(grant)}),
         )?;
         response.check(&self.audience, clock())?;
         Ok(response)
@@ -173,17 +176,17 @@ impl Client {
         account: &golia_platform_contract::Id,
         clock: impl FnOnce() -> u64,
     ) -> Result<golia_platform_contract::navigation::Navigation> {
-        let response: golia_platform_contract::navigation::Navigation = self.post(
+        let Serde(response): Serde<golia_platform_contract::navigation::Navigation> = self.post(
             "navigation",
-            &serde_json::json!({"version":VERSION,"audience":self.audience,"grant":grant}),
+            &alt_json::json!({"version":VERSION,"audience":Serde(&self.audience),"grant":Serde(grant)}),
         )?;
         response.check(&self.audience, account, clock())?;
         Ok(response)
     }
     pub fn service(&self, clock: impl FnOnce() -> u64) -> Result<AltServiceAuthorization> {
-        let response: AltServiceAuthorization = self.post(
+        let Serde(response): Serde<AltServiceAuthorization> = self.post(
             "service",
-            &serde_json::json!({"version":VERSION,"audience":self.audience}),
+            &alt_json::json!({"version":VERSION,"audience":Serde(&self.audience)}),
         )?;
         response.check(&self.audience, clock())?;
         Ok(response)
@@ -224,7 +227,7 @@ impl GrantSealer {
         {
             return Err(Error::SealedGrant);
         }
-        serde_json::to_vec(&(VERSION, &self.audience, local_credential_digest))
+        alt_json::to_vec(&(VERSION, Serde(&self.audience), local_credential_digest))
             .map_err(|_| Error::SealedGrant)
     }
     pub fn seal(&self, grant: &Secret, local_credential_digest: &str) -> Result<String> {

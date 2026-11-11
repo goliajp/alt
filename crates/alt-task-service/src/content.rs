@@ -73,7 +73,7 @@ impl PreparedTaskGraph {
                         &baseline.snapshot,
                         self.limits.structured_bytes,
                     )?;
-                    let snapshot: alt_delivery::Snapshot = serde_json::from_value(
+                    let snapshot: alt_delivery::Snapshot = alt_json::from_value(
                         crate::strict_json::decode(&raw, self.limits.structured_bytes)?,
                     )?;
                     crate::snapshot::verify_baseline_snapshot_bounded(
@@ -185,7 +185,7 @@ impl PreparedTaskGraph {
                         &baseline.snapshot,
                         self.limits.structured_bytes,
                     )?;
-                    let snapshot: alt_delivery::Snapshot = serde_json::from_value(
+                    let snapshot: alt_delivery::Snapshot = alt_json::from_value(
                         crate::strict_json::decode(&raw, self.limits.structured_bytes)?,
                     )?;
                     let raw = crate::source::read_artifact(
@@ -193,7 +193,7 @@ impl PreparedTaskGraph {
                         &delivery.report,
                         self.limits.structured_bytes,
                     )?;
-                    let report: alt_delivery::ExportReport = serde_json::from_value(
+                    let report: alt_delivery::ExportReport = alt_json::from_value(
                         crate::strict_json::decode(&raw, self.limits.structured_bytes)?,
                     )?;
                     crate::delivery::verify_delivery_report_bounded(
@@ -212,7 +212,7 @@ impl PreparedTaskGraph {
                         &receipt.verification,
                         self.limits.structured_bytes,
                     )?;
-                    let check: alt_delivery::GitCheck = serde_json::from_value(
+                    let check: alt_delivery::GitCheck = alt_json::from_value(
                         crate::strict_json::decode(&raw, self.limits.structured_bytes)?,
                     )?;
                     crate::verify_git_check(&check)?;

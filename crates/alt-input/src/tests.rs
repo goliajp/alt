@@ -11,7 +11,7 @@ fn context() -> Context {
         },
         tools: vec![],
         external: vec![],
-        validation: serde_json::json!({"required":"gate"}),
+        validation: alt_json::json!({"required":"gate"}),
     }
 }
 fn plan() -> InputPlan {
@@ -64,7 +64,7 @@ fn all_selected_inputs_and_directory_members_change_identity() {
         before.id().unwrap()
     );
     let mut changed = before.clone();
-    changed.context.validation = serde_json::json!({"required":"another gate"});
+    changed.context.validation = alt_json::json!({"required":"another gate"});
     assert_ne!(changed.id().unwrap(), before.id().unwrap());
     changed = before.clone();
     changed
@@ -121,15 +121,15 @@ fn bytes_modes_and_path_validation_are_lossless() {
 }
 #[test]
 fn canonical_identity_does_not_depend_on_json_map_order() {
-    let left: serde_json::Value = serde_json::from_str(r#"{"z":{"b":2,"a":1},"a":0}"#).unwrap();
-    let right: serde_json::Value = serde_json::from_str(r#"{"a":0,"z":{"a":1,"b":2}}"#).unwrap();
+    let left: alt_json::Value = alt_json::from_str(r#"{"z":{"b":2,"a":1},"a":0}"#).unwrap();
+    let right: alt_json::Value = alt_json::from_str(r#"{"a":0,"z":{"a":1,"b":2}}"#).unwrap();
     assert_eq!(
-        identity("example", &left).unwrap(),
-        identity("example", &right).unwrap()
+        identity_json("example", &left).unwrap(),
+        identity_json("example", &right).unwrap()
     );
     assert_ne!(
-        identity("example", &left).unwrap(),
-        identity("different domain", &left).unwrap()
+        identity_json("example", &left).unwrap(),
+        identity_json("different domain", &left).unwrap()
     );
 }
 #[test]

@@ -31,8 +31,9 @@ pub trait Source: ArtifactSource + ObjectSource {
         maximum: usize,
     ) -> Result<Provenance>;
 }
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct Selection {
     pub roots: Vec<RecordRoot>,
     pub companions: Vec<RecordKey>,
@@ -203,7 +204,7 @@ pub fn build(
             &mut object.reader,
         )?;
     }
-    draft.capture_bytes(ContentKind::TaskBundle, None, &serde_json::to_vec(&bundle)?)?;
+    draft.capture_bytes(ContentKind::TaskBundle, None, &alt_json::to_vec(&bundle)?)?;
     publication.record_roots = bundle.roots;
     publication.content_manifest = draft.manifest()?.id(limits)?;
     draft

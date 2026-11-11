@@ -1,3 +1,5 @@
+mod json;
+
 use alt_cloud_client::{Client, GrantSealer};
 use golia_platform_contract::{
     AccountAuthorization, Audience, Capability, Counter, Lease, Product, Secret, VERSION,
@@ -84,8 +86,16 @@ fn transport_validates_exact_claims_bounds_and_refuses_redirected_credentials() 
     let redirect_target = Server::http("127.0.0.1:0").unwrap();
     let target = format!("http://{}/capture", redirect_target.server_addr());
     let replies = vec![
-        (200, serde_json::to_string(&correct).unwrap(), None),
-        (200, serde_json::to_string(&other).unwrap(), None),
+        (
+            200,
+            alt_json::to_string(&alt_json_serde::Serde(&correct)).unwrap(),
+            None,
+        ),
+        (
+            200,
+            alt_json::to_string(&alt_json_serde::Serde(&other)).unwrap(),
+            None,
+        ),
         (200, "x".repeat(65537), None),
         (307, "{}".into(), Some(target)),
         (200, "{\"lease\":".into(), None),

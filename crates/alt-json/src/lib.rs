@@ -33,7 +33,7 @@ mod write;
 use std::io;
 
 pub use alt_json_derive::{FromJson, ToJson};
-pub use de::{Decoder, FromJson, MapAccess, SeqAccess, Variant};
+pub use de::{Decoder, FromJson, Kind, MapAccess, SeqAccess, Variant};
 pub use error::{Category, Error};
 pub use map::Map;
 pub use number::Number;
@@ -70,6 +70,14 @@ pub fn from_reader<R: io::Read, T: FromJson>(mut reader: R) -> Result<T> {
 /// Reads a typed value out of a tree. Errors carry no position.
 pub fn from_value<T: FromJson>(value: Value) -> Result<T> {
     T::from_json(&mut Decoder::tree(value))
+}
+
+/// Reads a tree with `f`, for readers that are not a [`FromJson`] type.
+pub fn from_value_with<T>(
+    value: Value,
+    f: impl FnOnce(&mut Decoder<'_>) -> Result<T>,
+) -> Result<T> {
+    f(&mut Decoder::tree(value))
 }
 
 /// Builds the tree a value would parse to if it were written and read

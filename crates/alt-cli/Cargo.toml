@@ -66,6 +66,7 @@ encoding_rs.workspace = true
 regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+alt-json.workspace = true
 
 [dev-dependencies]
 alt-browser-auth.workspace = true

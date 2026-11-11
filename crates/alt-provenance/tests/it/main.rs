@@ -185,7 +185,7 @@ fn original_receipt_requires_exact_current_scope_key_and_intent() {
 #[test]
 fn recovery_binds_original_signature_to_explicit_advanced_epoch() {
     let (_, receipt) = original();
-    let before = serde_json::to_vec(&receipt).unwrap();
+    let before = alt_json::to_vec(&receipt).unwrap();
     let proof = recovery(scope("a", 1), scope("a", 10), &key(1), None);
     assert!(verify(
         std::slice::from_ref(&proof),
@@ -197,7 +197,7 @@ fn recovery_binds_original_signature_to_explicit_advanced_epoch() {
         &scope("a", 11),
         &key(1)
     ));
-    assert_eq!(serde_json::to_vec(&receipt).unwrap(), before);
+    assert_eq!(alt_json::to_vec(&receipt).unwrap(), before);
     let mut changed = proof;
     changed.body.reason = TransferReason::Recovery {
         backup_digest: "7".repeat(64),
@@ -292,9 +292,9 @@ fn recovery_cannot_rotate_identity_or_key_or_move_epoch_backwards() {
 #[test]
 fn wire_rejects_extensions_and_future_versions_and_preserves_full_width_counters() {
     let proof = migration(scope("a", 1), scope("b", 1), &key(1), &key(2), None);
-    let mut value = serde_json::to_value(&proof).unwrap();
+    let mut value = alt_json::to_value(&proof).unwrap();
     value["body"]["ignored_authority"] = true.into();
-    assert!(serde_json::from_value::<TransferProof>(value).is_err());
+    assert!(alt_json::from_value::<TransferProof>(value).is_err());
     let mut body = proof.body;
     body.version = 2;
     assert!(body.validate().is_err());
@@ -303,10 +303,10 @@ fn wire_rejects_extensions_and_future_versions_and_preserves_full_width_counters
         unreachable!()
     };
     export.body.snapshot_sequence = u64::MAX;
-    let value = serde_json::to_value(&export.body).unwrap();
+    let value = alt_json::to_value(&export.body).unwrap();
     assert_eq!(value["snapshot_sequence"], u64::MAX.to_string());
     assert_eq!(
-        serde_json::from_value::<ExportCertificateBody>(value).unwrap(),
+        alt_json::from_value::<ExportCertificateBody>(value).unwrap(),
         export.body
     );
 }

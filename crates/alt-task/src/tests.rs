@@ -1,5 +1,6 @@
 use super::*;
 use std::collections::BTreeMap;
+mod identities;
 mod repair_source;
 
 fn manifest() -> alt_input::Manifest {
@@ -28,7 +29,7 @@ fn manifest() -> alt_input::Manifest {
                 ),
             }],
             external: vec![],
-            validation: serde_json::json!({"required":"test-tool"}),
+            validation: alt_json::json!({"required":"test-tool"}),
         },
         entries: vec![],
     }

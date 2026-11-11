@@ -5,15 +5,17 @@ use std::collections::{BTreeMap, BTreeSet};
 
 /// Supplied by the repository's current policy adapter, never by the bundle.
 /// The adapter must recheck its generation at the publishing transaction.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct TrustedCollector {
     pub public_key_hex: String,
     pub runners: BTreeSet<String>,
     pub expires_unix_ms: u64,
 }
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct CollectorPolicy {
     pub keys: BTreeMap<String, TrustedCollector>,
 }
@@ -44,8 +46,9 @@ fn decode_key(hex: &str) -> Result<VerifyingKey> {
     }
     Ok(key)
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, alt_json::ToJson)]
 #[serde(rename_all = "snake_case")]
+#[json(rename_all = "snake_case")]
 pub enum CollectorTrust {
     Trusted,
     UnknownKey,

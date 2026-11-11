@@ -7,7 +7,6 @@ mod fse;
 mod huf;
 mod lit;
 mod matcher;
-mod pairs;
 mod params;
 mod search;
 mod seq;
@@ -285,7 +284,7 @@ mod tests {
         let digests = [
             (
                 1,
-                "12064fe040632cfce8ee767f98c1ac590b89b257c41d3926bf61e8dc51900ca7",
+                "7ed24f5e76130f996b1650ad50a35ea6402e53d98473d15e6669f42a344c3abe",
             ),
             (
                 3,

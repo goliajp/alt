@@ -11,8 +11,11 @@ alt-os.workspace = true
 golia-change-link.workspace = true
 alt-input.workspace = true
 alt-store.workspace = true
+alt-json.workspace = true
+alt-json-serde.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+alt-json-testkit.workspace = true
 ed25519-dalek.workspace = true

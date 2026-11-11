@@ -1,9 +1,9 @@
 //! Copies of the wire types of the remote protocol: the ones whose bytes
 //! are signed or digested. Definitions follow the originals field for field.
 
-use super::drive::exercise;
+use super::drive::{exercise, exercise_bridged};
 use super::shapes::decimal;
-use super::support::{Tally, types};
+use super::support::{Arbitrary, Tally, types};
 
 types! {
     #[derive(PartialEq, Eq, PartialOrd, Ord)]
@@ -159,6 +159,9 @@ macro_rules! exercise_all {
             let tally = exercise::<$ty>(0x9e0 ^ stringify!($ty).len() as u64, $rounds);
             tally.report(concat!("derive real protocol types, ", stringify!($ty)));
             total.add(&tally);
+            let bridged = exercise_bridged::<$ty>(0x9e0 ^ stringify!($ty).len() as u64, $rounds / 4, Arbitrary::arbitrary);
+            bridged.report(concat!("bridge, derive real protocol types, ", stringify!($ty)));
+            total.add(&bridged);
         )*
         total
     }};

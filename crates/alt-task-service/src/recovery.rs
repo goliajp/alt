@@ -4,8 +4,9 @@ use serde::{Deserialize, Serialize};
 
 /// Original intent plus a separately completed collection request. The
 /// interrupted request has no fabricated completion or response at the receiver.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct SourceRecovery {
     pub schema_version: u32,
     pub record: RecordKey,
@@ -68,7 +69,7 @@ pub fn check_source_recovery(
     {
         return Err(Error::Integrity("recovery original request"));
     }
-    let intent: alt_command_protocol::Intent = serde_json::from_value(crate::strict_json::decode(
+    let intent: alt_command_protocol::Intent = alt_json::from_value(crate::strict_json::decode(
         &crate::source::read_artifact(source, &recovery.intent, limit)?,
         limit,
     )?)?;
@@ -110,7 +111,7 @@ pub fn check_source_recovery(
             }
             let raw = crate::source::read_artifact(source, &receipt.verification, limit)?;
             let check: alt_delivery::GitCheck =
-                serde_json::from_value(crate::strict_json::decode(&raw, limit)?)?;
+                alt_json::from_value(crate::strict_json::decode(&raw, limit)?)?;
             crate::verify_git_check(&check)?;
             None
         }

@@ -9,5 +9,9 @@ alt-hash.workspace = true
 alt-input.workspace = true
 alt-os.workspace = true
 alt-task.workspace = true
+alt-json.workspace = true
 serde.workspace = true
+
+[dev-dependencies]
+alt-json-testkit.workspace = true
 serde_json.workspace = true

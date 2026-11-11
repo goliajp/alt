@@ -2,7 +2,9 @@ use crate::{Artifact, Candidate, Evidence, Provenance, Record, Result, Terminati
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 pub struct Validity {
     pub eligible: bool,
     pub reasons: Vec<String>,

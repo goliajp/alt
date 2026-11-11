@@ -16,7 +16,7 @@ pub enum Error {
     Io(std::io::Error),
     Invalid(&'static str),
     Limit(&'static str),
-    Json(serde_json::Error),
+    Json(alt_json::Error),
 }
 
 impl std::fmt::Display for Error {
@@ -78,8 +78,8 @@ impl From<std::io::Error> for Error {
     }
 }
 
-impl From<serde_json::Error> for Error {
-    fn from(e: serde_json::Error) -> Self {
+impl From<alt_json::Error> for Error {
+    fn from(e: alt_json::Error) -> Self {
         Self::Json(e)
     }
 }

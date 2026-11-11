@@ -44,15 +44,15 @@ fn serve(reply: impl FnOnce(&str) -> String + Send + 'static, call: impl FnOnce(
     call(&Client::new(&origin, true).unwrap());
     worker.join().unwrap();
 }
-fn json(status: u16, value: serde_json::Value) -> String {
+fn json(status: u16, value: alt_json::Value) -> String {
     let body = value.to_string();
     format!(
         "HTTP/1.1 {status} Response\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     )
 }
-fn authorization(origin: &str) -> serde_json::Value {
-    serde_json::json!({"device_code":"a".repeat(64),"user_code":"ABCD-2345","verification_uri":format!("{origin}/#device"),"verification_uri_complete":format!("{origin}/#device?user_code=ABCD-2345"),"expires_in":300,"interval":5})
+fn authorization(origin: &str) -> alt_json::Value {
+    alt_json::json!({"device_code":"a".repeat(64),"user_code":"ABCD-2345","verification_uri":format!("{origin}/#device"),"verification_uri_complete":format!("{origin}/#device?user_code=ABCD-2345"),"expires_in":300,"interval":5})
 }
 #[test]
 fn device_transport_binds_confirmation_origin_and_refuses_redirects_and_unbounded_bodies() {
@@ -73,7 +73,7 @@ fn device_transport_binds_confirmation_origin_and_refuses_redirects_and_unbounde
     serve(
         |origin| {
             let mut reply = authorization(origin);
-            reply["verification_uri_complete"] = serde_json::json!("https://other.example/#device");
+            reply["verification_uri_complete"] = alt_json::json!("https://other.example/#device");
             json(200, reply)
         },
         |client| assert!(matches!(client.begin(), Err(Error::Invalid))),
@@ -85,7 +85,7 @@ fn device_transport_binds_confirmation_origin_and_refuses_redirects_and_unbounde
         |client| assert!(matches!(client.begin(), Err(Error::Invalid))),
     );
     serve(
-        |_| json(200, serde_json::json!({"padding":"x".repeat(20_000)})),
+        |_| json(200, alt_json::json!({"padding":"x".repeat(20_000)})),
         |client| assert!(matches!(client.begin(), Err(Error::Invalid))),
     );
 }
@@ -98,7 +98,7 @@ fn device_poll_retains_standard_pending_and_slow_down_semantics() {
         DeviceError::ExpiredToken,
     ] {
         serve(
-            move |_| json(400, serde_json::to_value(DeviceFailure { error }).unwrap()),
+            move |_| json(400, alt_json::to_value(DeviceFailure { error }).unwrap()),
             |client| {
                 assert!(
                     matches!(client.poll(&"a".repeat(64)),Err(Error::Rejected(actual)) if actual==error)
@@ -110,7 +110,7 @@ fn device_poll_retains_standard_pending_and_slow_down_semantics() {
         |_| {
             json(
                 200,
-                serde_json::json!({"access_token":format!("alt1_{}","b".repeat(64)),"token_type":"Bearer","scope":"account","expires_in":3600}),
+                alt_json::json!({"access_token":format!("alt1_{}","b".repeat(64)),"token_type":"Bearer","scope":"account","expires_in":3600}),
             )
         },
         |client| assert_eq!(client.poll(&"a".repeat(64)).unwrap().expires_in, 3600),

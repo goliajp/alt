@@ -97,8 +97,8 @@ fn native_bounds_json_and_checks_response_scope() {
     });
     let mut other = key();
     other.actor_id = "other".into();
-    let body = serde_json::to_vec(&alt_remote_protocol::RequestObservation::NotSeen { key: other })
-        .unwrap();
+    let body =
+        alt_json::to_vec(&alt_remote_protocol::RequestObservation::NotSeen { key: other }).unwrap();
     let mut bytes = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",body.len()).into_bytes();
     bytes.extend(body);
     response(bytes, |client| {

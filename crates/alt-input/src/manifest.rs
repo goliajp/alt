@@ -144,8 +144,8 @@ pub struct Context {
     pub tools: Vec<ToolIdentity>,
     pub external: Vec<ExternalDependency>,
     /// Immutable acceptance definition; this is part of the input identity.
-    #[json(with = "crate::serde_value")]
-    pub validation: serde_json::Value,
+    #[serde(with = "crate::serde_value")]
+    pub validation: alt_json::Value,
 }
 impl Context {
     pub fn uncertainty(&self) -> Vec<String> {

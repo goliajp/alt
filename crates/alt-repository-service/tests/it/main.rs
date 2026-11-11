@@ -1,3 +1,5 @@
+mod json;
+
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
 use alt_remote_protocol::*;
 use alt_repository_service::*;

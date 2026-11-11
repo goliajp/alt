@@ -16,7 +16,7 @@ pub const CONTROL: &str = ".alt-runner";
 #[derive(Debug)]
 pub enum Error {
     Io(std::io::Error),
-    Json(serde_json::Error),
+    Json(alt_json::Error),
     Input(alt_input::Error),
     Invalid(String),
 }
@@ -49,8 +49,8 @@ impl From<std::io::Error> for Error {
     }
 }
 
-impl From<serde_json::Error> for Error {
-    fn from(e: serde_json::Error) -> Self {
+impl From<alt_json::Error> for Error {
+    fn from(e: alt_json::Error) -> Self {
         Self::Json(e)
     }
 }
@@ -80,8 +80,9 @@ pub fn host_identity() -> Result<String> {
     ))
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct Spec {
     pub schema_version: u32,
     pub candidate: String,
@@ -92,8 +93,9 @@ pub struct Spec {
     pub runner: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct Report {
     pub schema_version: u32,
     pub nonce: String,
@@ -196,9 +198,9 @@ pub fn execute(root: &Path, spec: &Spec, authentication_key: &[u8; 32]) -> Resul
         .create_new(true)
         .open(control.join("started.json"))?;
     use std::io::Write;
-    serde_json::to_writer(
+    alt_json::to_writer(
         &mut marker,
-        &serde_json::json!({"nonce":spec.nonce,"pid":std::process::id(),"started_unix_ns":now_ns()}),
+        &alt_json::json!({"nonce":spec.nonce,"pid":std::process::id(),"started_unix_ns":now_ns()}),
     )?;
     marker.write_all(b"\n")?;
     marker.sync_all()?;
@@ -331,13 +333,13 @@ pub fn execute(root: &Path, spec: &Spec, authentication_key: &[u8; 32]) -> Resul
         "input_observations".into(),
         record_bytes(
             &control,
-            &serde_json::to_vec(&(&before, &after))?,
+            &alt_json::to_vec(&(&before, &after))?,
             &mut captures,
         )?,
     );
     artifacts.insert(
         "command_observations".into(),
-        record_bytes(&control, &serde_json::to_vec(&commands)?, &mut captures)?,
+        record_bytes(&control, &alt_json::to_vec(&commands)?, &mut captures)?,
     );
     let output_inventory =
         inputs::capture_outputs(root, &control, &outputs, &mut captures, &mut artifacts)?;
@@ -345,7 +347,7 @@ pub fn execute(root: &Path, spec: &Spec, authentication_key: &[u8; 32]) -> Resul
         "output_inventory".into(),
         record_bytes(
             &control,
-            &serde_json::to_vec(&output_inventory)?,
+            &alt_json::to_vec(&output_inventory)?,
             &mut captures,
         )?,
     );
@@ -382,7 +384,7 @@ pub fn execute(root: &Path, spec: &Spec, authentication_key: &[u8; 32]) -> Resul
         },
     };
     let mut file = alt_os::temp::NamedTempFile::new_in(&control)?;
-    let report_bytes = serde_json::to_vec(&report)?;
+    let report_bytes = alt_json::to_vec(&report)?;
     file.write_all(&report_bytes)?;
     file.as_file().sync_all()?;
     file.persist_noclobber(control.join("report.json"))

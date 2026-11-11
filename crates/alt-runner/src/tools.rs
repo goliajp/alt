@@ -10,8 +10,9 @@ use std::{
     time::Duration,
 };
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct ToolBinding {
     pub name: String,
     /// Absolute installed tool or relative executable from the selected input.
@@ -90,7 +91,7 @@ fn version(
                 artifact,
             );
         }
-        let bytes = serde_json::to_vec(&status)?;
+        let bytes = alt_json::to_vec(&status)?;
         let artifact = crate::record_bytes(capture.control, &bytes, capture.captures)?;
         capture.artifacts.insert(
             format!("tool-probe:{}:{}:termination", capture.phase, binding.name),
@@ -189,7 +190,7 @@ pub(crate) fn observe_external(
     let probes: BTreeMap<String, Vec<String>> = context
         .validation
         .get("external_probes")
-        .map(|value| serde_json::from_value(value.clone()))
+        .map(|value| alt_json::from_value(value.clone()))
         .transpose()?
         .unwrap_or_default();
     let mut observed = Vec::new();
@@ -230,8 +231,8 @@ pub(crate) fn observe_external(
                 format!("external:{phase}:{}:stderr", expected.provider),
                 diagnostics,
             );
-            let record = serde_json::to_vec(
-                &serde_json::json!({"provider":expected.provider,"argv":argv,"termination":termination,"observed_version":dependency.version}),
+            let record = alt_json::to_vec(
+                &alt_json::json!({"provider":expected.provider,"argv":argv,"termination":termination,"observed_version":dependency.version}),
             )?;
             artifacts.insert(
                 format!("external:{phase}:{}:observation", expected.provider),
