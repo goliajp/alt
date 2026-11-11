@@ -111,54 +111,6 @@ fn repeated_recovery_preserves_original_receipts_and_chains_to_current_identity(
     }
 }
 #[test]
-#[ignore = "requires isolated PostgreSQL; missing legacy evidence must roll back schema activation"]
-fn legacy_backfill_refuses_missing_or_wrong_epoch_audit_without_partial_migration() {
-    for replace in [
-        "DELETE FROM alt_instance_audit WHERE action='instance.restore'",
-        "UPDATE alt_instance_audit SET details=jsonb_set(details,'{generation}','9') WHERE action='instance.restore'",
-    ] {
-        let mut f = Fixture::new();
-        let (payload, receipt) = publish(&mut f);
-        f.store.activate_restored(10, &"b".repeat(64)).unwrap();
-        f.client()
-            .batch_execute(
-                "DROP TABLE alt_link_task_claims,alt_link_current,alt_link_inbox,alt_link_outbox,alt_link_channels; DROP TABLE alt_link_history; ALTER TABLE alt_repositories DROP COLUMN link_bytes; DROP TABLE alt_archived_records,alt_archived_publications; DROP TABLE alt_cloud_portable_reservations,alt_portable_import_content,alt_portable_imports; ALTER TABLE alt_repositories DROP COLUMN portable_import; DROP TABLE alt_portable_exports; ALTER TABLE alt_repositories DROP COLUMN portable_freeze; DROP TABLE alt_publication_provenance; ALTER TABLE alt_request_content DROP COLUMN selected_entries, DROP COLUMN chunk_bytes; DROP TABLE alt_blob_locations,alt_segments; DROP INDEX alt_pins_permanent_content; DELETE FROM alt_schema WHERE version>=6",
-            )
-            .unwrap();
-        f.client().batch_execute(replace).unwrap();
-        assert!(
-            Store::migrate(
-                f.client(),
-                f.store.bytes().clone(),
-                f.store.spec().clone(),
-                SigningKey::from_bytes(&[7; 32]),
-                limits(),
-                5
-            )
-            .is_err()
-        );
-        let row=f.client().query_one("SELECT (SELECT max(version) FROM alt_schema),(SELECT runtime_generation FROM alt_instance),to_regclass('alt_publication_provenance')::text",&[]).unwrap();
-        assert_eq!(row.get::<_, i32>(0), 5);
-        assert_eq!(row.get::<_, i64>(1), 10);
-        assert_eq!(row.get::<_, Option<String>>(2), None);
-        let result: alt_json::Value = f
-            .client()
-            .query_one(
-                "SELECT result FROM alt_requests WHERE digest=$1",
-                &[&payload.publication.digest(limits()).unwrap()],
-            )
-            .unwrap()
-            .get::<_, alt_server_store::Jsonb>(0)
-            .0;
-        assert_eq!(
-            alt_json::from_value::<RequestState>(result).unwrap(),
-            RequestState::Committed {
-                receipt: Box::new(receipt)
-            }
-        );
-    }
-}
-#[test]
 #[ignore = "requires isolated PostgreSQL; injected transaction failure after lineage insertion"]
 fn recovery_proof_and_epoch_and_revocation_commit_atomically() {
     let mut f = Fixture::new();

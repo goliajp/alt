@@ -527,8 +527,8 @@ impl Config {
             ));
         }
         self.check_volume()?;
-        if !(1..alt_server_store::SCHEMA_VERSION).contains(&from) {
-            return Err(Error::Config("unsupported source schema"));
+        if !(alt_server_store::OLDEST_SCHEMA..alt_server_store::SCHEMA_VERSION).contains(&from) {
+            return Err(Error::Config(alt_server_store::UNSUPPORTED_SOURCE_SCHEMA));
         }
         let mut next = self.clone();
         next.instance.runtime_generation = next

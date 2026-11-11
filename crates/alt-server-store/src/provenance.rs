@@ -81,58 +81,6 @@ fn publications(
     Ok(())
 }
 
-/// Schema-five recovery already retained the exact backup identity in a
-/// durable audit event. Only that matching same-installation/key/epoch evidence
-/// permits conversion of a historical receipt into the explicit format.
-pub(crate) fn backfill_legacy(
-    tx: &mut Transaction<'_>,
-    spec: &InstanceSpec,
-    key: &SigningKey,
-    limits: Limits,
-) -> Result<()> {
-    publications(tx, spec, |tx, scope, publication, receipt| {
-        let digest = publication.digest(limits)?;
-        let mut proofs = stored(tx, &scope, &digest)?;
-        if proofs.is_empty() && publication.key.scope != scope {
-            let row = tx.query_opt("SELECT details FROM alt_instance_audit WHERE action='instance.restore' AND subject_id=$1 AND details @> $2 ORDER BY sequence DESC LIMIT 1", &[&spec.installation_id,&Jsonb(alt_json::json!({"generation":scope.recovery_epoch}))])?
-                .ok_or(Error::Integrity("historical recovery audit absent"))?;
-            let Jsonb(details) = row.get(0);
-            let backup = details
-                .get("backup_digest")
-                .and_then(|v| v.as_str())
-                .ok_or(Error::Integrity("historical recovery backup identity"))?;
-            // sign_transfer enforces same installation/repository/key and a
-            // strictly increasing epoch. It cannot invent a migration proof.
-            let public_key = alt_provenance::encode_hex(key.verifying_key().as_bytes());
-            proofs.push(evidence(alt_provenance::sign_transfer(
-                TransferBody {
-                    version: 1,
-                    publication_digest: digest.clone(),
-                    source: publication.key.scope.clone(),
-                    target: scope.clone(),
-                    source_public_key: public_key.clone(),
-                    target_public_key: public_key,
-                    operation_id: format!("legacy-restore-{}", scope.recovery_epoch),
-                    previous_proof: None,
-                    reason: TransferReason::Recovery {
-                        backup_digest: backup.into(),
-                    },
-                },
-                key,
-            ))?);
-        }
-        evidence(alt_provenance::verify_origin(
-            &publication,
-            &receipt,
-            &proofs,
-            &scope,
-            key.verifying_key().as_bytes(),
-            limits,
-        ))?;
-        save(tx, &scope, &digest, &proofs)
-    })
-}
-
 pub(crate) fn append_recovery(
     tx: &mut Transaction<'_>,
     spec: &InstanceSpec,

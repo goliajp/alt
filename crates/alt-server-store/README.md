@@ -45,10 +45,14 @@ the repository lock, then consumes the approval atomically. Received history can
 be retained without changing refs, including explicitly omitted attachments;
 that history cannot silently become accepted evidence.
 
-Schema versions have immutable checksums. Opening requires the current schema;
-`Store::migrate` explicitly upgrades an older schema in one transaction,
-preserves existing data, advances the runtime generation and fences old upload
-workers. Callers must reopen with the returned instance specification. An old
+Schema versions have immutable checksums. A new database is created at the
+current schema in one step and records the checksum of every version up to it,
+exactly as a database that was upgraded version by version does. Opening
+requires the current schema and checks every recorded checksum.
+`Store::migrate` explicitly upgrades schema 18, the one before the current
+schema, in one transaction, preserves existing data, advances the runtime
+generation and fences old upload workers. Older schemas are refused: the
+previous release upgrades them to schema 18 first. Callers must reopen with the returned instance specification. An old
 process or worker cannot continue writes after migration.
 
 Cloud identity issuance, task transport/UI, portable backup/operator workflows

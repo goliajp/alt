@@ -87,16 +87,11 @@ impl Store {
                 "instance already initialized; use open",
             ));
         }
-        tx.batch_execute(include_str!("schema.sql"))?;
-        let checksum = alt_hash::blake3::hash(include_bytes!("schema.sql"))
-            .to_hex()
-            .to_string();
-        tx.execute("INSERT INTO alt_schema VALUES (1,$1)", &[&checksum])?;
+        crate::schema::create(tx.raw_mut())?;
         let key_id = alt_hash::blake3::hash(signing_key.verifying_key().as_bytes())
             .to_hex()
             .to_string();
         tx.execute("INSERT INTO alt_instance(singleton,installation_id,workspace_id,deployment_mode,runtime_generation,signing_key_id) VALUES(true,$1,$2,$3,$4,$5)", &[&spec.installation_id,&spec.workspace_id,&spec.mode(),&integer(spec.runtime_generation)?,&key_id])?;
-        crate::schema::apply_later(tx.raw_mut())?;
         if let Some((audience, digest, provision_digest)) = cloud {
             crate::cloud::initialize_binding(&mut tx, &spec, audience, digest, provision_digest)?;
         }

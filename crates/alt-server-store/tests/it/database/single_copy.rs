@@ -456,5 +456,6 @@ fn a_segment_that_does_not_read_back_fails_the_publication_and_keeps_the_uploade
     assert_accounted(&f);
 }
 
+mod baseline;
 mod migrate;
 mod shared;

@@ -22,6 +22,7 @@ pub use publication::*;
 pub use read::*;
 pub use registration::MAX_REGISTER_CONTENTS;
 mod schema;
+pub use schema::{OLDEST_SCHEMA, UNSUPPORTED_SOURCE_SCHEMA, check_backup_schema};
 mod schema_v19;
 mod segments;
 mod store;
