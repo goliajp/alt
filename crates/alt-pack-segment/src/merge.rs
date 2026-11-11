@@ -103,6 +103,15 @@ pub fn merge(parts: &[Arc<Segment>], older: &SegmentSet) -> Result<Vec<u8>, Erro
         delta_depth: u16::MAX,
     };
     let ingested = ingest(&pack, older, &limits)?;
+    // the parts are deleted once the merge is published, and ingesting only proves
+    // that what is in the pack is sound, not that everything is in it
+    for part in parts {
+        for index in 0..part.len() {
+            if !ingested.contains(&part.record(index)?.oid) {
+                return Err(Error::Corrupt("merge lost an object"));
+            }
+        }
+    }
     ingested.write_index(&mut pack)?;
     Ok(pack)
 }
