@@ -1,4 +1,5 @@
 mod fetch;
+mod merge;
 
 use alt_pack_segment::{Limits, Segment, SegmentSet, ingest};
 use std::{fs, io::Write, path::Path, process::Command, sync::Arc};
@@ -7,7 +8,7 @@ const LIMITS: Limits = Limits {
     objects: 1 << 20,
     object_bytes: 1 << 30,
     inflated_bytes: 1 << 32,
-    delta_depth: 64,
+    delta_depth: 4095,
 };
 
 fn git(dir: &Path, args: &[&str]) -> Vec<u8> {

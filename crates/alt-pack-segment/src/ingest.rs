@@ -328,10 +328,15 @@ pub fn ingest(pack: &[u8], existing: &SegmentSet, limits: &Limits) -> Result<Ing
             continue;
         }
         let (kind, data) = existing.read(base).map_err(|_| Error::MissingBase(*base))?;
+        // the chain goes on below the base, in the segment that holds it
+        let depth = existing
+            .record(base)?
+            .ok_or(Error::MissingBase(*base))?
+            .depth;
         outside.push(Frame {
             data,
             kind,
-            depth: 0,
+            depth,
             index: None,
             children: children.clone(),
             next: 0,

@@ -28,14 +28,14 @@ impl<W: Write> Hashing<'_, W> {
     }
 }
 
-fn pack_header(count: u64) -> Result<[u8; 12], Error> {
+pub(crate) fn pack_header(count: u64) -> Result<[u8; 12], Error> {
     let count = u32::try_from(count).map_err(|_| Error::Limit("objects in one pack"))?;
     let mut header = *b"PACK\0\0\0\x02\0\0\0\0";
     header[8..].copy_from_slice(&count.to_be_bytes());
     Ok(header)
 }
 
-fn entry_header(code: u8, mut size: u64) -> Vec<u8> {
+pub(crate) fn entry_header(code: u8, mut size: u64) -> Vec<u8> {
     let mut out = vec![code << 4 | (size & 15) as u8];
     size >>= 4;
     while size != 0 {
