@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: merge the small segments a larger newer one was hiding
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/pack_compaction.rs
