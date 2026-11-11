@@ -12,7 +12,7 @@
 
 use crate::{Error, Kind, Oid};
 use alt_os::map::Mmap;
-use std::{fs::File, io::Write, path::Path};
+use std::{fs::File, io::Write, path::Path, sync::OnceLock};
 
 pub(crate) const RECORD: usize = 88;
 pub(crate) const COMMIT: usize = 52;
@@ -160,6 +160,8 @@ pub struct Segment {
     parents_at: usize,
     parent_count: usize,
     flags: u32,
+    /// record indexes ordered by content digest, built when one is first asked for
+    by_blake3: OnceLock<Vec<u32>>,
 }
 
 impl Segment {
@@ -198,6 +200,7 @@ impl Segment {
             commits_at,
             parents_at,
             parent_count,
+            by_blake3: OnceLock::new(),
         })
     }
 
@@ -220,6 +223,28 @@ impl Segment {
     fn oid_at(&self, index: usize) -> &[u8] {
         let at = self.records_at + index * RECORD;
         &self.map[at..at + 20]
+    }
+
+    fn blake3_at(&self, index: usize) -> &[u8] {
+        let at = self.records_at + index * RECORD + 20;
+        &self.map[at..at + 32]
+    }
+
+    /// The record of an object whose content has this BLAKE3 digest. The index on disk
+    /// is ordered by object id; the order by digest is worked out on first use and
+    /// kept, which costs a sort once per opened segment and four bytes an object.
+    pub fn find_blake3(&self, digest: &[u8; 32]) -> Option<usize> {
+        let order = self.by_blake3.get_or_init(|| {
+            let mut order: Vec<u32> = (0..self.records as u32).collect();
+            order.sort_unstable_by(|a, b| {
+                self.blake3_at(*a as usize).cmp(self.blake3_at(*b as usize))
+            });
+            order
+        });
+        order
+            .binary_search_by(|index| self.blake3_at(*index as usize).cmp(digest))
+            .ok()
+            .map(|at| order[at] as usize)
     }
 
     pub fn record(&self, index: usize) -> Result<Record, Error> {

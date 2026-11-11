@@ -58,6 +58,20 @@ impl SegmentSet {
             .find_map(|segment| segment.commit(oid))
     }
 
+    /// the object whose content has this BLAKE3 digest, with its canonical bytes
+    pub fn read_blake3(&self, digest: &[u8; 32]) -> Result<Option<(Oid, Kind, Vec<u8>)>, Error> {
+        let found = self.segments.iter().rev().find_map(|segment| {
+            segment
+                .find_blake3(digest)
+                .map(|index| segment.record(index))
+        });
+        let Some(record) = found.transpose()? else {
+            return Ok(None);
+        };
+        let (kind, data) = self.read(&record.oid)?;
+        Ok(Some((record.oid, kind, data)))
+    }
+
     /// the canonical bytes of an object, resolving its delta chain
     pub fn read(&self, oid: &Oid) -> Result<(Kind, Vec<u8>), Error> {
         let mut deltas = Vec::new();

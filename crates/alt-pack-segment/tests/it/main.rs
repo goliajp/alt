@@ -111,6 +111,10 @@ fn objects(dir: &Path, range: &[&str]) -> Vec<String> {
 fn check_objects(dir: &Path, set: &SegmentSet, ids: &[String]) {
     for id in ids {
         let (kind, data) = set.read(&oid(id)).unwrap();
+        // the same object is found by the digest of its content
+        let digest = *alt_hash::blake3::hash(&data).as_bytes();
+        let (_, _, by_digest) = set.read_blake3(&digest).unwrap().unwrap();
+        assert_eq!(by_digest, data, "object {id} by digest");
         assert_eq!(kind.name(), text(git(dir, &["cat-file", "-t", id])));
         assert_eq!(
             data,
@@ -156,6 +160,7 @@ fn whole_repository_round_trips() {
     let head = oid(&text(git(&source, &["rev-parse", "HEAD"])));
     assert_eq!(set.commit(&head).unwrap().generation, 40);
     let tag = oid(&text(git(&source, &["rev-parse", "v1"])));
+    assert!(set.read_blake3(&[0x5a; 32]).unwrap().is_none());
     let selection = set.select(&[tag], &[]).unwrap();
     assert_eq!(selection.len(), ids.len());
     let mut sent = Vec::new();
