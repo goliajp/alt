@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: feat
+summary: describe the instance to signed-out visitors on the sign-in page
+author-type: human
+author: doracawl
+touched: workbench/src/App.tsx
+touched: workbench/src/about-copy.ts
+touched: workbench/src/about.tsx
+touched: workbench/src/i18n.ts
+touched: workbench/src/style.css
