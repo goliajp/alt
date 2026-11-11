@@ -95,7 +95,7 @@ pub fn destination(target: &Path) -> Result<PathBuf> {
     }
     Ok(target)
 }
-#[derive(Clone, Debug, Serialize, Deserialize, ToJson, FromJson)]
+#[derive(Clone, Debug, ToJson, FromJson)]
 pub struct GitCheck {
     pub program: String,
     pub binary_blake3: String,
@@ -248,7 +248,7 @@ fn source_preflight(source: &Path) -> Result<()> {
     fingerprint(&dir)?;
     Ok(())
 }
-#[derive(Clone, Debug, Serialize, Deserialize, ToJson, FromJson)]
+#[derive(Clone, Debug, ToJson, FromJson)]
 pub struct IntakeReport {
     pub baseline: Snapshot,
     pub source_metadata_blake3: String,
@@ -288,7 +288,7 @@ pub fn intake(source: &Path, target: &Path, git: &Path) -> Result<IntakeReport> 
     }
     let report = IntakeReport {
         baseline,
-        source_metadata_blake3: alt_input::identity_json("source-git-metadata", &before)?,
+        source_metadata_blake3: alt_input::identity("source-git-metadata", &before)?,
         git: git_report,
     };
     fs::write(
@@ -312,7 +312,7 @@ pub fn intake(source: &Path, target: &Path, git: &Path) -> Result<IntakeReport> 
     Ok(report)
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, ToJson, FromJson)]
+#[derive(Clone, Debug, ToJson, FromJson)]
 pub struct ExportReport {
     pub baseline_id: String,
     pub exported: Snapshot,

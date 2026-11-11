@@ -1,3 +1,4 @@
+use crate::Jsonb;
 use crate::database::Transaction;
 use crate::store::{authorize, instance, integer, now, snapshot, unsigned};
 use crate::{Credential, DurableBytes, Error, Result, Store};
@@ -23,6 +24,9 @@ impl Store {
         if ttl_ms == 0 || ttl_ms > 86_400_000 {
             return Err(Error::Limit("upload lifetime"));
         }
+        // Git objects the segments hold need no upload. Segments only gain objects, so
+        // a set opened before the transaction grants nothing a later one would not.
+        let segments = self.published_segments(&publication.key.scope.repository_instance_id)?;
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         let snapshot = snapshot(
@@ -40,12 +44,12 @@ impl Store {
                     "request ID reused with different parameters",
                 ));
             }
-            return Ok(serde_json::from_value(row.get("result"))?);
+            return Ok(row.get::<_, Jsonb>("result").read()?);
         }
         let expires = time
             .checked_add(ttl_ms)
             .ok_or(Error::Limit("upload lifetime"))?;
-        let contents = selected_contents(manifest)?;
+        let contents = selected_contents(manifest, &segments)?;
         let repository = &publication.key.scope.repository_instance_id;
         let mut reservation = 0u64;
         let selected: Vec<_> = contents.iter().collect();
@@ -75,7 +79,7 @@ impl Store {
                         false
                     }
                 };
-                if !stored {
+                if !stored && !content.settled() {
                     reservation = reservation
                         .checked_add(content.bytes)
                         .ok_or(Error::Limit("upload reservation"))?;
@@ -90,7 +94,7 @@ impl Store {
             digest: digest.clone(),
             expires_at_unix_ms: expires,
         };
-        tx.execute("INSERT INTO alt_requests(repository,epoch,actor_id,request_id,digest,publication,manifest,state,result,expires_at,reserved_bytes) VALUES($1,$2,$3,$4,$5,$6,$7,'receiving',$8,$9,$10)",&[repository,&integer(publication.key.scope.recovery_epoch)?,&publication.key.actor_id,&publication.key.request_id,&digest,&serde_json::to_value(publication)?,&serde_json::to_value(manifest)?,&serde_json::to_value(&state)?,&integer(expires)?,&integer(reservation)?])?;
+        tx.execute("INSERT INTO alt_requests(repository,epoch,actor_id,request_id,digest,publication,manifest,state,result,expires_at,reserved_bytes) VALUES($1,$2,$3,$4,$5,$6,$7,'receiving',$8,$9,$10)",&[repository,&integer(publication.key.scope.recovery_epoch)?,&publication.key.actor_id,&publication.key.request_id,&digest,&Jsonb::from(&publication)?,&Jsonb::from(&manifest)?,&Jsonb::from(&state)?,&integer(expires)?,&integer(reservation)?])?;
         let mut ingress_reservation = 0u64;
         let pin_id = upload_pin(&publication.key);
         for batch in selected.chunks(crate::database::BATCH_ROWS) {
@@ -101,14 +105,14 @@ impl Store {
             let mut entries = Vec::with_capacity(batch.len());
             let mut chunk_sizes = Vec::with_capacity(batch.len());
             for (digest, content) in batch {
-                let present = published.contains(digest.as_str());
+                let present = published.contains(digest.as_str()) || content.settled();
                 if !present && !content.entries.is_empty() {
                     ingress_reservation = ingress_reservation
                         .checked_add(content.bytes)
                         .ok_or(Error::Limit("Cloud ingress reservation"))?;
                 }
                 verified.push(present);
-                entries.push(serde_json::to_value(&content.entries)?);
+                entries.push(Jsonb::from(&content.entries)?);
                 chunk_sizes.push(content.chunk.then(|| integer(content.bytes)).transpose()?);
             }
             tx.execute("INSERT INTO alt_request_content(repository,epoch,actor_id,request_id,blake3,verified,selected_entries,chunk_bytes) SELECT $1,$2,$3,$4,digest,verified,entries,bytes FROM unnest($5::text[],$6::boolean[],$7::jsonb[],$8::bigint[]) AS content(digest,verified,entries,bytes)", &[repository,&integer(publication.key.scope.recovery_epoch)?,&publication.key.actor_id,&publication.key.request_id,&digests,&verified,&entries,&chunk_sizes])?;
@@ -149,7 +153,7 @@ impl Store {
             }
             Some(row) => RequestObservation::Recorded {
                 key: key.clone(),
-                result: Box::new(serde_json::from_value(row.get("result"))?),
+                result: Box::new(row.get::<_, Jsonb>("result").read()?),
             },
             None if key.scope.recovery_epoch == current.scope.recovery_epoch => {
                 RequestObservation::NotSeen { key: key.clone() }
@@ -240,7 +244,7 @@ impl Store {
             .ok_or(Error::Precondition("request not registered"))?;
         let time = now(&mut tx)?;
         active(&row, time)?;
-        let publication: Publication = serde_json::from_value(row.get("publication"))?;
+        let publication: Publication = row.get::<_, Jsonb>("publication").read()?;
         authorize_intent(&publication, &current, &auth, self.limits, time)?;
         let selection = upload_selection(&mut tx, key, &entry.blake3)?
             .ok_or(Error::Precondition("request content selection missing"))?;
@@ -338,7 +342,7 @@ pub(crate) fn check_key(
 pub(crate) fn upload_pin(key: &RequestKey) -> String {
     format!(
         "upload:{}",
-        alt_hash::blake3::hash(&serde_json::to_vec(key).expect("closed key schema")).to_hex()
+        alt_hash::blake3::hash(&alt_json::to_vec(key).expect("closed key schema")).to_hex()
     )
 }
 pub(crate) fn pin(
@@ -386,7 +390,7 @@ pub(crate) fn check_request_attribution(
     auth: &alt_repository_service::Authorization,
 ) -> Result<()> {
     if auth.attribution.kind == alt_remote_protocol::ActorKind::Agent {
-        let publication: Publication = serde_json::from_value(row.get("publication"))?;
+        let publication: Publication = row.get::<_, Jsonb>("publication").read()?;
         if publication.attribution != auth.attribution {
             return Err(Error::Unauthorized);
         }
@@ -400,33 +404,46 @@ struct SelectedContent<'a> {
     bytes: u64,
     entries: Vec<&'a ContentEntry>,
     chunk: bool,
+    /// some entry with these bytes, or made of this chunk, is not a Git object the
+    /// segments already hold
+    needed: bool,
 }
-fn selected_contents(manifest: &Manifest) -> Result<BTreeMap<String, SelectedContent<'_>>> {
+impl SelectedContent<'_> {
+    /// nothing has to be uploaded for these bytes
+    fn settled(&self) -> bool {
+        !self.needed
+    }
+}
+fn selected_contents<'a>(
+    manifest: &'a Manifest,
+    segments: &alt_pack_segment::SegmentSet,
+) -> Result<BTreeMap<String, SelectedContent<'a>>> {
     let mut selected = BTreeMap::new();
+    let blank = |bytes| SelectedContent {
+        bytes,
+        entries: Vec::new(),
+        chunk: false,
+        needed: false,
+    };
     for entry in &manifest.entries {
+        let needed = !crate::pack_native::holds_entry(segments, entry)?;
         let item = selected
             .entry(entry.blake3.clone())
-            .or_insert_with(|| SelectedContent {
-                bytes: entry.bytes,
-                entries: Vec::new(),
-                chunk: false,
-            });
+            .or_insert_with(|| blank(entry.bytes));
         if item.bytes != entry.bytes {
             return Err(Error::Integrity("conflicting content sizes"));
         }
         item.entries.push(entry);
+        item.needed |= needed;
         for chunk in &entry.chunks {
             let item = selected
                 .entry(chunk.blake3.clone())
-                .or_insert_with(|| SelectedContent {
-                    bytes: chunk.bytes,
-                    entries: Vec::new(),
-                    chunk: false,
-                });
+                .or_insert_with(|| blank(chunk.bytes));
             if item.bytes != chunk.bytes {
                 return Err(Error::Integrity("conflicting content sizes"));
             }
             item.chunk = true;
+            item.needed |= needed;
         }
     }
     Ok(selected)
@@ -452,7 +469,7 @@ pub(crate) fn upload_selection(
 ) -> Result<Option<UploadSelection>> {
     tx.query_opt("SELECT selected_entries,chunk_bytes,verified FROM alt_request_content WHERE repository=$1 AND epoch=$2 AND actor_id=$3 AND request_id=$4 AND blake3=$5", &[&key.scope.repository_instance_id,&integer(key.scope.recovery_epoch)?,&key.actor_id,&key.request_id,&digest])?
         .map(|row| Ok(UploadSelection {
-            entries: serde_json::from_value(row.get(0))?,
+            entries: row.get::<_, Jsonb>(0).read()?,
             chunk_bytes: row.get::<_, Option<i64>>(1).map(unsigned).transpose()?,
             verified: row.get(2),
         })).transpose()

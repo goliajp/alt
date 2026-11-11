@@ -1,5 +1,6 @@
 //! Bounded authenticated discovery. Public projections never expose installed
 //! credential digests, operator destinations or secret-file configuration.
+use crate::Jsonb;
 use crate::change_events::{binding, integration};
 use crate::store::{authorize, instance, integer, snapshot};
 use crate::{Credential, Error, Result, Store};
@@ -25,7 +26,7 @@ impl Store {
         let rows=tx.query("SELECT specification,enabled FROM alt_link_channels WHERE repository=$1 AND epoch=$2 ORDER BY created_at DESC,channel LIMIT 100",&[&scope.repository_instance_id,&integer(scope.recovery_epoch)?])?;
         rows.into_iter()
             .map(|row| {
-                let channel: crate::ChangeChannel = serde_json::from_value(row.get(0))?;
+                let channel: crate::ChangeChannel = row.get::<_, Jsonb>(0).read()?;
                 Ok(ChangeChannelStatus {
                     peer_browser_origin: None,
                     channel: channel.channel,

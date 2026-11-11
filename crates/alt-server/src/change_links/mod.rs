@@ -5,26 +5,28 @@ use crate::{
     StoreFactory,
     operator::{self, Config},
 };
+use alt_json_serde::Serde;
 use alt_remote_protocol::Scope;
 use alt_server_store::{ChangeChannel, Error, RepairBindingRequest, Result};
 use alt_server_telemetry::{Id, Metrics, Outcome, Phase, Route, Trace};
 use golia_change_link as link;
-use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 pub(crate) mod api;
 pub mod route;
 
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, alt_json::ToJson, alt_json::FromJson)]
+#[json(deny_unknown_fields)]
 pub struct ChannelConfig {
     pub scope: Scope,
     pub channel: String,
     pub application: String,
+    #[json(with = "alt_json_serde::bridge")]
     pub peer: link::Endpoint,
     pub peer_public_key: String,
+    #[json(with = "alt_json_serde::bridge")]
     pub target: link::transport::Target,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[json(default, skip_serializing_if = "Option::is_none")]
     pub peer_browser_origin: Option<String>,
     pub local_credential_file: PathBuf,
     pub peer_credential_file: PathBuf,
@@ -75,13 +77,13 @@ impl ChannelConfig {
         if peer_token.is_empty() || !peer_token.bytes().all(|b| b.is_ascii_graphic()) {
             return Err(operator::Error::Config("change-link peer credential"));
         }
-        let identity = serde_json::to_vec(&(
+        let identity = alt_json::to_vec(&(
             &self.scope,
             &self.channel,
             &self.application,
-            &self.peer,
+            Serde(&self.peer),
             &self.peer_public_key,
-            &self.target,
+            Serde(&self.target),
             &self.peer_browser_origin,
             alt_hash::blake3::hash(local_token.as_bytes())
                 .to_hex()

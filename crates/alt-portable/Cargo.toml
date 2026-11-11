@@ -17,9 +17,7 @@ alt-task-service.workspace = true
 alt-crypto.workspace = true
 alt-json.workspace = true
 alt-json-serde.workspace = true
-serde.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
 alt-json-testkit.workspace = true
 ed25519-dalek.workspace = true

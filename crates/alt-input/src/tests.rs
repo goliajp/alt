@@ -124,12 +124,12 @@ fn canonical_identity_does_not_depend_on_json_map_order() {
     let left: alt_json::Value = alt_json::from_str(r#"{"z":{"b":2,"a":1},"a":0}"#).unwrap();
     let right: alt_json::Value = alt_json::from_str(r#"{"a":0,"z":{"a":1,"b":2}}"#).unwrap();
     assert_eq!(
-        identity_json("example", &left).unwrap(),
-        identity_json("example", &right).unwrap()
+        identity("example", &left).unwrap(),
+        identity("example", &right).unwrap()
     );
     assert_ne!(
-        identity_json("example", &left).unwrap(),
-        identity_json("different domain", &left).unwrap()
+        identity("example", &left).unwrap(),
+        identity("different domain", &left).unwrap()
     );
 }
 #[test]

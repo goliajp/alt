@@ -1,6 +1,6 @@
 use super::*;
 use alt_browser_auth::PublicOrigin;
-use serde_json::{Value, json};
+use alt_json::{Value, json};
 const ORIGIN: &str = "https://workbench.example.test";
 const PASSWORD: &str = "a private browser acceptance password";
 fn start(f: &mut Fixture) -> Running {
@@ -50,7 +50,7 @@ fn send(
     let response = if let Some(body) = body {
         request
             .set("Content-Type", "application/json")
-            .send_bytes(&serde_json::to_vec(&body).unwrap())
+            .send_bytes(&alt_json::to_vec(&body).unwrap())
     } else {
         request.call()
     };
@@ -84,17 +84,14 @@ fn login(server: &Running, actor: &str) -> (String, Value) {
     );
     assert!(!cookie.contains("Domain="));
     let cookie = cookie.split(';').next().unwrap().to_owned();
-    let session: Value = serde_json::from_reader(response.into_reader()).unwrap();
+    let session: Value = crate::database::json::body(response);
     assert_eq!(session["user"]["actor_id"], actor);
-    assert!(!serde_json::to_string(&session).unwrap().contains("alt1_"));
+    assert!(!alt_json::to_string(&session).unwrap().contains("alt1_"));
     (cookie, session)
 }
 fn get(server: &Running, path: &str, cookie: &str) -> (u16, Value) {
     let response = send(server, "GET", path, Some(cookie), None, None, None);
-    (
-        response.status(),
-        serde_json::from_reader(response.into_reader()).unwrap(),
-    )
+    (response.status(), crate::database::json::body(response))
 }
 #[test]
 #[ignore = "requires isolated PostgreSQL and loopback HTTP; exercised by browser acceptance and closing gate"]
@@ -572,9 +569,7 @@ fn browser_migration_requires_current_cookie_origin_and_csrf_for_binary_uploads(
         b"",
     );
     assert_eq!(response.status(), 200);
-    let ExportState::Available { envelope, .. } =
-        serde_json::from_reader(response.into_reader()).unwrap()
-    else {
+    let ExportState::Available { envelope, .. } = crate::database::json::body(response) else {
         panic!("export available")
     };
     let package = super::portable::bounds()
@@ -624,7 +619,7 @@ fn browser_migration_requires_current_cookie_origin_and_csrf_for_binary_uploads(
             Some(&target_cookie),
             Some(ORIGIN),
             Some(target_csrf),
-            &serde_json::to_vec(&inspect).unwrap()
+            &alt_json::to_vec(&inspect).unwrap()
         )
         .status(),
         422
@@ -637,10 +632,10 @@ fn browser_migration_requires_current_cookie_origin_and_csrf_for_binary_uploads(
         Some(&target_cookie),
         Some(ORIGIN),
         Some(target_csrf),
-        &serde_json::to_vec(&inspect).unwrap(),
+        &alt_json::to_vec(&inspect).unwrap(),
     );
     assert_eq!(checked.status(), 200);
-    let checked: InspectedArchive = serde_json::from_reader(checked.into_reader()).unwrap();
+    let checked: InspectedArchive = crate::database::json::body(checked);
     let intent = alt_portable::ImportIntent {
         version: 1,
         key: RequestKey {
@@ -681,7 +676,7 @@ fn browser_migration_requires_current_cookie_origin_and_csrf_for_binary_uploads(
             Some(&target_cookie),
             Some(ORIGIN),
             Some(target_csrf),
-            &serde_json::to_vec(&begin).unwrap()
+            &alt_json::to_vec(&begin).unwrap()
         )
         .status(),
         200
@@ -704,7 +699,7 @@ fn browser_migration_requires_current_cookie_origin_and_csrf_for_binary_uploads(
             migration_rejected_before_body(&b, &path, cookie, origin, csrf, bytes.len());
             let (status, current) = get(&b, import_path, &target_cookie);
             assert_eq!(status, 200, "{current}");
-            let current: ImportState = serde_json::from_value(current).unwrap();
+            let current: ImportState = alt_json::from_value(current).unwrap();
             let ImportState::Receiving { missing, .. } = current else {
                 panic!("rejection cannot activate the import")
             };
@@ -735,10 +730,10 @@ fn browser_migration_requires_current_cookie_origin_and_csrf_for_binary_uploads(
         Some(&target_cookie),
         Some(ORIGIN),
         Some(target_csrf),
-        &serde_json::to_vec(&intent).unwrap(),
+        &alt_json::to_vec(&intent).unwrap(),
     );
     assert_eq!(response.status(), 200);
-    let state: ImportState = serde_json::from_reader(response.into_reader()).unwrap();
+    let state: ImportState = crate::database::json::body(response);
     assert!(matches!(state, ImportState::Committed { .. }));
     assert_eq!(
         target
@@ -769,7 +764,7 @@ fn browser_migration_requires_current_cookie_origin_and_csrf_for_binary_uploads(
             Some(&target_cookie),
             Some(ORIGIN),
             Some(target_csrf),
-            &serde_json::to_vec(&intent).unwrap()
+            &alt_json::to_vec(&intent).unwrap()
         )
         .status(),
         403
@@ -843,7 +838,7 @@ fn change_links_use_current_browser_scope_and_csrf() {
                 "POST",
                 golia_change_link_http::INBOX_PATH,
                 &f.token,
-                &request
+                &alt_json_serde::Serde(&request)
             )
             .0,
         200
@@ -853,7 +848,7 @@ fn change_links_use_current_browser_scope_and_csrf() {
     assert_eq!(status, 200);
     assert_eq!(
         history["statement"],
-        serde_json::to_value(&request).unwrap()
+        alt_json_serde::to_value(&&request).unwrap()
     );
     let mapping = format!("{path}/mappings");
     assert_eq!(

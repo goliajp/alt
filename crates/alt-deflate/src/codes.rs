@@ -44,27 +44,22 @@ pub fn build(tree: &mut Tree, alphabet: &Alphabet, cost: &mut Cost) {
     // codes per length, with the longer ones cut down to the limit
     let limit = alphabet.max_len as usize;
     let mut count = [0u32; MAX_BITS + 1];
-    let mut too_long = 0i32;
     for bits in &depth[..used] {
         count[(*bits as usize).min(limit)] += 1;
-        too_long += i32::from(*bits as usize > limit);
     }
-    // Cutting down takes more code space than there is. Give it back the way zlib
-    // does: a code just below the limit becomes a prefix of two codes, itself and one
-    // of those that were cut.
-    while too_long > 0 {
+    // Cutting down takes more code space than there is, counted here in codes of the
+    // limit's length. Each step gives one of them back: a code just below the limit
+    // becomes a prefix of two codes, itself and one of those that were cut.
+    let space = |count: &[u32; MAX_BITS + 1]| -> u32 {
+        (1..=limit).map(|bits| count[bits] << (limit - bits)).sum()
+    };
+    for _ in 0..space(&count) - (1 << limit) {
         let bits = (1..limit).rev().find(|bits| count[*bits] != 0).unwrap();
         count[bits] -= 1;
         count[bits + 1] += 2;
         count[limit] -= 1;
-        too_long -= 2;
     }
-    debug_assert_eq!(
-        (1..=limit)
-            .map(|bits| count[bits] << (limit - bits))
-            .sum::<u32>(),
-        1 << limit
-    );
+    assert_eq!(space(&count), 1 << limit);
 
     // the longest lengths go to the least frequent symbols
     let mut next = order.iter();

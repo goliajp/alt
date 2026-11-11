@@ -121,7 +121,6 @@ dependencies = [
  "alt-json-testkit",
  "alt-os",
  "golia-platform-contract",
- "serde_json",
  "tiny_http",
  "ureq",
 ]
@@ -133,8 +132,6 @@ dependencies = [
  "alt-hash",
  "alt-json",
  "alt-json-testkit",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -172,8 +169,6 @@ dependencies = [
  "alt-os",
  "alt-refs",
  "alt-repo",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -299,8 +294,6 @@ dependencies = [
  "alt-json",
  "alt-json-testkit",
  "alt-os",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -412,8 +405,6 @@ dependencies = [
  "alt-task-service",
  "ed25519-dalek",
  "golia-change-link",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -488,8 +479,6 @@ dependencies = [
  "alt-json-serde",
  "alt-json-testkit",
  "golia-change-link",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -518,8 +507,6 @@ dependencies = [
  "alt-json",
  "alt-json-testkit",
  "alt-remote-protocol",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -532,8 +519,6 @@ dependencies = [
  "alt-json-testkit",
  "alt-os",
  "alt-task",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -551,6 +536,9 @@ dependencies = [
  "alt-git-pack",
  "alt-hash",
  "alt-inflate",
+ "alt-json",
+ "alt-json-serde",
+ "alt-json-testkit",
  "alt-os",
  "alt-pack-segment",
  "alt-portable",
@@ -574,8 +562,6 @@ dependencies = [
  "hyper",
  "hyper-util",
  "postgres",
- "serde",
- "serde_json",
  "tar",
  "tiny_http",
  "tokio",
@@ -596,6 +582,9 @@ dependencies = [
  "alt-git-codec",
  "alt-hash",
  "alt-input",
+ "alt-json",
+ "alt-json-serde",
+ "alt-json-testkit",
  "alt-os",
  "alt-pack-segment",
  "alt-portable",
@@ -610,8 +599,6 @@ dependencies = [
  "golia-change-link",
  "golia-platform-contract",
  "postgres",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -664,8 +651,6 @@ dependencies = [
  "alt-store",
  "ed25519-dalek",
  "golia-change-link",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -687,8 +672,6 @@ dependencies = [
  "alt-remote-protocol",
  "alt-repository-service",
  "alt-task",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -706,8 +689,6 @@ dependencies = [
  "alt-repository-service",
  "alt-task",
  "alt-task-service",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -2243,8 +2224,6 @@ dependencies = [
  "bytes",
  "fallible-iterator",
  "postgres-protocol",
- "serde_core",
- "serde_json",
 ]
 
 [[package]]

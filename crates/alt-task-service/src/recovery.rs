@@ -1,11 +1,9 @@
 use crate::{ArtifactSource, Error, RecordKey, RecordKind, Result, SourceCompletion, TaskRecord};
 use alt_task::Artifact;
-use serde::{Deserialize, Serialize};
 
 /// Original intent plus a separately completed collection request. The
 /// interrupted request has no fabricated completion or response at the receiver.
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct SourceRecovery {
     pub schema_version: u32,

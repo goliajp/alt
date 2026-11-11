@@ -21,6 +21,9 @@ fn snapshot_barrier_blocks_gc_and_publication_until_every_byte_is_verified() {
     .unwrap();
     f.store.mark_ready(&f.credential, &work, &graph).unwrap();
     f.store.publish(&f.credential, &work, &graph).unwrap();
+    // Git objects are backed up with their pack segment; a task leaves content in
+    // the content store for the snapshot to verify
+    super::portable::publish_task(&mut f, "snapshot-task");
     let mut gc = f.reopen();
     let mut writer = f.reopen();
     let mut client = f.client();
@@ -36,8 +39,8 @@ fn snapshot_barrier_blocks_gc_and_publication_until_every_byte_is_verified() {
         snapshot.catalog().repositories[0].refs["refs/heads/main"],
         payload.commit.to_string()
     );
-    assert_eq!(snapshot.catalog().repositories[0].transaction_sequence, 1);
-    assert_eq!(snapshot.catalog().blobs.len(), 2);
+    assert_eq!(snapshot.catalog().repositories[0].transaction_sequence, 2);
+    assert_eq!(snapshot.catalog().blobs.len(), 5);
     let credential = f.credential.clone();
     let credential2 = f.credential.clone();
     let (started_tx, started_rx) = std::sync::mpsc::channel();
@@ -159,13 +162,13 @@ fn restored_activation_revokes_old_authority_preserves_receipts_and_marks_old_ga
     assert_eq!(status.last_restore.unwrap().action, "instance.restore");
     assert!(f.store.instance_status(&f.credential).is_err());
     assert_eq!(
-        serde_json::to_value(
+        alt_json::to_value(
             f.store
                 .query(&credential, &payload.publication.key)
                 .unwrap()
         )
         .unwrap(),
-        serde_json::to_value(committed).unwrap()
+        alt_json::to_value(committed).unwrap()
     );
     assert!(matches!(
         f.store
@@ -279,7 +282,7 @@ fn instance_audit_pagination_and_status_require_current_administrator() {
     assert_eq!(second.items[0].action, "backup.started");
     assert_ne!(second.items[0].sequence, first.items[0].sequence);
     assert!(f.store.instance_audit(&f.credential, Some(0), 1).is_err());
-    let serialized = serde_json::to_string(&first.items).unwrap();
+    let serialized = alt_json::to_string(&first.items).unwrap();
     assert!(!serialized.contains("details"));
     assert!(!serialized.contains(&f.token));
     let created = f

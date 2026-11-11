@@ -84,13 +84,11 @@ impl Store {
             // Canonical decoded records are used consistently here. These
             // digests name the statements, not an arbitrary JSON whitespace
             // rendering and never an unsigned replacement of the receipt.
-            provenance_digest: alt_hash::blake3::hash(&serde_json::to_vec(
-                &publication.provenance,
-            )?)
-            .to_hex()
-            .to_string(),
+            provenance_digest: alt_hash::blake3::hash(&alt_json::to_vec(&publication.provenance)?)
+                .to_hex()
+                .to_string(),
             publication_digest: publication.publication.digest(self.limits)?,
-            receipt_digest: alt_hash::blake3::hash(&serde_json::to_vec(&publication.receipt)?)
+            receipt_digest: alt_hash::blake3::hash(&alt_json::to_vec(&publication.receipt)?)
                 .to_hex()
                 .to_string(),
             task: delivery.task,

@@ -5,7 +5,6 @@ use super::{Config, Error, Result, create_private, read_regular};
 use alt_base64::STANDARD;
 use alt_crypto::ed25519::{Signature, VerifyingKey};
 use alt_server_store::{ByteStore, MaintenanceSnapshot, SnapshotCatalog};
-use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     fs::{File, OpenOptions},
@@ -16,26 +15,26 @@ use std::{
 };
 
 const MANIFEST_LIMIT: usize = 64 * 1024 * 1024;
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
+#[json(deny_unknown_fields)]
 pub struct FileDigest {
     pub bytes: u64,
     pub blake3: String,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
+#[json(deny_unknown_fields)]
 pub struct Manifest {
     pub format: u32,
     pub kind: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[json(default, skip_serializing_if = "Option::is_none")]
     pub operation_id: Option<String>,
     pub catalog: SnapshotCatalog,
     pub files: BTreeMap<String, FileDigest>,
     pub payload: FileDigest,
 }
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SignedManifest {
+#[derive(alt_json::ToJson, alt_json::FromJson)]
+#[json(deny_unknown_fields)]
+pub(crate) struct SignedManifest {
     manifest: Manifest,
     signature: String,
 }
@@ -272,7 +271,7 @@ fn create_inner(
     );
     create_private(
         &work.path().join("config.json"),
-        &serde_json::to_vec(config).map_err(|_| Error::File)?,
+        &alt_json::to_vec(config).map_err(|_| Error::File)?,
     )?;
     files.insert(
         "config.json".into(),
@@ -316,12 +315,12 @@ fn create_inner(
         files,
         payload: digest(&mut regular(&payload_path)?)?,
     };
-    let encoded = serde_json::to_vec(&manifest).map_err(|_| Error::File)?;
+    let encoded = alt_json::to_vec(&manifest).map_err(|_| Error::File)?;
     let signed = SignedManifest {
         signature: STANDARD.encode(signing_key.sign(&encoded).to_bytes()),
         manifest: manifest.clone(),
     };
-    let completed = serde_json::to_vec_pretty(&signed).map_err(|_| Error::File)?;
+    let completed = alt_json::to_vec_pretty(&signed).map_err(|_| Error::File)?;
     if completed.len() > MANIFEST_LIMIT {
         return Err(Error::Config("backup manifest exceeds supported size"));
     }
@@ -349,8 +348,8 @@ pub fn verify(
 ) -> Result<VerifiedBackup> {
     let bytes = read_regular(&input.join("manifest.json"), MANIFEST_LIMIT, false)?;
     let signed: SignedManifest =
-        serde_json::from_slice(&bytes).map_err(|_| Error::Config("backup manifest"))?;
-    let encoded = serde_json::to_vec(&signed.manifest).map_err(|_| Error::File)?;
+        alt_json::from_slice(&bytes).map_err(|_| Error::Config("backup manifest"))?;
+    let encoded = alt_json::to_vec(&signed.manifest).map_err(|_| Error::File)?;
     let signature: [u8; 64] = STANDARD
         .decode(&signed.signature)
         .map_err(|_| Error::Config("backup signature"))?
@@ -512,7 +511,7 @@ pub fn verify(
     {
         return Err(Error::Config("backup contains another receipt key"));
     }
-    let source: Config = serde_json::from_slice(&read_regular(
+    let source: Config = alt_json::from_slice(&read_regular(
         &directory.path().join("config.json"),
         65536,
         true,
@@ -601,7 +600,7 @@ pub fn restore(
         let bytes = ByteStore::open(&target.bytes_directory)?;
         create_private(
             &target.bytes_directory.join("instance.json"),
-            &serde_json::to_vec(&target.volume_identity()?).map_err(|_| Error::File)?,
+            &alt_json::to_vec(&target.volume_identity()?).map_err(|_| Error::File)?,
         )?;
         for blob in &original.blobs {
             let scope = alt_remote_protocol::Scope {
@@ -666,119 +665,23 @@ pub fn restore(
             }
         }
         stage = "schema migration";
-        let mut store = match original.schema {
-            1 => alt_server_store::Store::migrate_v1(
+        let mut store = if original.schema == alt_server_store::SCHEMA_VERSION {
+            alt_server_store::Store::open(
                 client,
                 bytes,
                 original.instance.clone(),
                 key,
                 target.limits,
-            )?,
-            2 => alt_server_store::Store::migrate_v2(
+            )?
+        } else {
+            alt_server_store::Store::migrate(
                 client,
                 bytes,
                 original.instance.clone(),
                 key,
                 target.limits,
-            )?,
-            3 => alt_server_store::Store::migrate_v3(
-                client,
-                bytes,
-                original.instance.clone(),
-                key,
-                target.limits,
-            )?,
-            4 => alt_server_store::Store::migrate_v4(
-                client,
-                bytes,
-                original.instance.clone(),
-                key,
-                target.limits,
-            )?,
-            5 => alt_server_store::Store::migrate_v5(
-                client,
-                bytes,
-                original.instance.clone(),
-                key,
-                target.limits,
-            )?,
-            13 => alt_server_store::Store::migrate_v13(
-                client,
-                bytes,
-                original.instance.clone(),
-                key,
-                target.limits,
-            )?,
-            14 => alt_server_store::Store::migrate_v14(
-                client,
-                bytes,
-                original.instance.clone(),
-                key,
-                target.limits,
-            )?,
-            15 => alt_server_store::Store::migrate_v15(
-                client,
-                bytes,
-                original.instance.clone(),
-                key,
-                target.limits,
-            )?,
-            12 => alt_server_store::Store::migrate_v12(
-                client,
-                bytes,
-                original.instance.clone(),
-                key,
-                target.limits,
-            )?,
-            11 => alt_server_store::Store::migrate_v11(
-                client,
-                bytes,
-                original.instance.clone(),
-                key,
-                target.limits,
-            )?,
-            10 => alt_server_store::Store::migrate_v10(
-                client,
-                bytes,
-                original.instance.clone(),
-                key,
-                target.limits,
-            )?,
-            9 => alt_server_store::Store::migrate_v9(
-                client,
-                bytes,
-                original.instance.clone(),
-                key,
-                target.limits,
-            )?,
-            8 => alt_server_store::Store::migrate_v8(
-                client,
-                bytes,
-                original.instance.clone(),
-                key,
-                target.limits,
-            )?,
-            7 => alt_server_store::Store::migrate_v7(
-                client,
-                bytes,
-                original.instance.clone(),
-                key,
-                target.limits,
-            )?,
-            6 => alt_server_store::Store::migrate_v6(
-                client,
-                bytes,
-                original.instance.clone(),
-                key,
-                target.limits,
-            )?,
-            _ => alt_server_store::Store::open(
-                client,
-                bytes,
-                original.instance.clone(),
-                key,
-                target.limits,
-            )?,
+                original.schema,
+            )?
         };
         stage = "recovery activation";
         if let Some(cloud) = &cloud {

@@ -8,9 +8,11 @@ mod chunks;
 mod cloud;
 mod connections;
 mod git;
+mod json;
 mod native_client;
 mod operator;
 mod portable;
+mod single_copy;
 use alt_crypto::ed25519::SigningKey;
 use alt_server_store::{ByteStore, Credential, InstanceSpec, Store};
 use postgres::{Client, NoTls};
@@ -183,19 +185,11 @@ impl Running {
         method: &str,
         path: &str,
         token: &str,
-        body: &impl serde::Serialize,
-    ) -> (u16, serde_json::Value) {
-        let response = self.send(
-            method,
-            path,
-            Some(token),
-            &serde_json::to_vec(body).unwrap(),
-        );
+        body: &impl alt_json::ToJson,
+    ) -> (u16, alt_json::Value) {
+        let response = self.send(method, path, Some(token), &alt_json::to_vec(body).unwrap());
         let status = response.status();
-        (
-            status,
-            serde_json::from_reader(response.into_reader()).unwrap(),
-        )
+        (status, crate::database::json::body(response))
     }
     fn metrics(&self, token: &str) -> String {
         let response = self.send("GET", "/v1/instance/metrics", Some(token), b"");
@@ -216,13 +210,10 @@ impl Running {
             std::thread::sleep(Duration::from_millis(20));
         }
     }
-    fn command(&self, method: &str, path: &str, token: &str) -> (u16, serde_json::Value) {
+    fn command(&self, method: &str, path: &str, token: &str) -> (u16, alt_json::Value) {
         let response = self.send(method, path, Some(token), b"");
         let status = response.status();
-        (
-            status,
-            serde_json::from_reader(response.into_reader()).unwrap(),
-        )
+        (status, crate::database::json::body(response))
     }
 }
 impl Drop for Running {

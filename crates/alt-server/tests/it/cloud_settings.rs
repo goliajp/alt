@@ -1,5 +1,5 @@
+use alt_json::{Value, json};
 use alt_server::operator::{Config, create_private};
-use serde_json::{Value, json};
 use std::{
     fs,
     os::unix::fs::{PermissionsExt, symlink},
@@ -7,7 +7,7 @@ use std::{
 };
 
 fn fixture(root: &Path) -> Value {
-    let mut c: Value = serde_json::from_str(include_str!("../../example-config.json")).unwrap();
+    let mut c: Value = alt_json::from_str(include_str!("../../example-config.json")).unwrap();
     c["instance"] = json!({"installation_id":"installation", "workspace_id":"workspace",
         "runtime_generation":1,"deployment_mode":"cloud"});
     c["browser"] = json!({"public_origin":"https://alt.example.test",
@@ -16,7 +16,7 @@ fn fixture(root: &Path) -> Value {
         "installation_id":"installation","generation":"1","product":"alt",
         "origin":"https://alt.example.test","control_origin":"https://cloud.example.test"},
         "runtime_credential_file":"runtime.key"});
-    fs::write(root.join("config.json"), serde_json::to_vec(&c).unwrap()).unwrap();
+    fs::write(root.join("config.json"), alt_json::to_vec(&c).unwrap()).unwrap();
     c
 }
 pub(super) fn channel() -> Value {
@@ -46,7 +46,7 @@ fn cloud_settings_survive_reads_without_changing_frozen_intent() {
     assert!(Config::read(&path).unwrap().change_links.is_empty());
     create_private(
         &root.path().join("change-links.json"),
-        &serde_json::to_vec(&settings(&c)).unwrap(),
+        &alt_json::to_vec(&settings(&c)).unwrap(),
     )
     .unwrap();
     for _ in 0..2 {
@@ -71,17 +71,17 @@ fn cloud_settings_reject_wrong_generation_scope_version_and_ambiguity() {
     for pointer in ["/instance/runtime_generation", "/version"] {
         let mut bad = original.clone();
         *bad.pointer_mut(pointer).unwrap() = json!(2);
-        fs::write(&sidecar, serde_json::to_vec(&bad).unwrap()).unwrap();
+        fs::write(&sidecar, alt_json::to_vec(&bad).unwrap()).unwrap();
         assert!(Config::read(&path).is_err(), "{pointer}");
     }
     let mut bad = original.clone();
     bad["channels"][0]["scope"]["installation_id"] = json!("other");
-    fs::write(&sidecar, serde_json::to_vec(&bad).unwrap()).unwrap();
+    fs::write(&sidecar, alt_json::to_vec(&bad).unwrap()).unwrap();
     assert!(Config::read(&path).is_err());
-    fs::write(&sidecar, serde_json::to_vec(&original).unwrap()).unwrap();
+    fs::write(&sidecar, alt_json::to_vec(&original).unwrap()).unwrap();
     let mut inline = c;
     inline["change_links"] = json!([channel()]);
-    fs::write(&path, serde_json::to_vec(&inline).unwrap()).unwrap();
+    fs::write(&path, alt_json::to_vec(&inline).unwrap()).unwrap();
     assert!(Config::read(&path).is_err());
 }
 
@@ -132,7 +132,7 @@ fn cloud_settings_keep_effective_configuration_within_backup_read_limit() {
             c["local_credential_file"] = json!(long);
             c["peer_credential_file"] = json!(long);
         }
-        encoded = serde_json::to_vec(&value).unwrap();
+        encoded = alt_json::to_vec(&value).unwrap();
         if encoded.len() >= 65000 {
             break;
         }

@@ -1,5 +1,6 @@
 //! Runtime control credential is separate from human and agent credentials.
 use super::*;
+use alt_json_serde::Serde;
 use golia_platform_contract::lifecycle::Probe;
 use std::io::Read;
 fn unavailable() -> Response<ResponseBody> {
@@ -89,10 +90,10 @@ pub(super) async fn handle(
             source.as_file_mut().rewind()?;
             let mut bytes = Vec::new();
             source.as_file_mut().read_to_end(&mut bytes)?;
-            let probe: Probe = serde_json::from_slice(&bytes)?;
+            let Serde(probe): Serde<Probe> = alt_json::from_slice(&bytes)?;
             let mut store = factory.open()?;
             let result = cloud.readiness(&mut store, probe)?;
-            serde_json::to_vec(&result).map_err(Error::from)
+            alt_json::to_vec(&Serde(&result)).map_err(Error::from)
         }),
     )
     .await

@@ -1,20 +1,7 @@
 use crate::{Error, Result, strict_json};
 use alt_task::Record;
-use serde::{Deserialize, Serialize};
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-    alt_json::ToJson,
-    alt_json::FromJson,
-)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, alt_json::ToJson, alt_json::FromJson)]
 #[json(rename_all = "kebab-case")]
 pub enum RecordKind {
     Task,
@@ -46,19 +33,7 @@ impl RecordKind {
         }
     }
 }
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-    alt_json::ToJson,
-    alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct RecordKey {
     pub kind: RecordKind,

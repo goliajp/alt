@@ -1,3 +1,4 @@
+use crate::Jsonb;
 use crate::requests::{active, check_key, upload_pin, upload_request_row, upload_selection};
 use crate::store::{authorize, instance, integer, now, snapshot};
 use crate::{ByteStore, Credential, Error, Result, Store};
@@ -20,11 +21,11 @@ impl Store {
         let row = upload_request_row(&mut tx, key)?.ok_or(Error::Unauthorized)?;
         let time = now(&mut tx)?;
         active(&row, time)?;
-        let publication: Publication = serde_json::from_value(row.get("publication"))?;
+        let publication: Publication = row.get::<_, Jsonb>("publication").read()?;
         alt_repository_service::authorize_intent(&publication, &current, &auth, self.limits, time)?;
         let chunks: BTreeMap<String, u64> = tx.query("SELECT blake3,chunk_bytes FROM alt_request_content WHERE repository=$1 AND epoch=$2 AND actor_id=$3 AND request_id=$4 AND chunk_bytes IS NOT NULL ORDER BY blake3", &[&key.scope.repository_instance_id,&integer(key.scope.recovery_epoch)?,&key.actor_id,&key.request_id])?
             .into_iter().map(|row| Ok((row.get(0), crate::store::unsigned(row.get(1))?))).collect::<Result<_>>()?;
-        let rows = tx.query("SELECT c.blake3 FROM alt_request_content c JOIN alt_blobs b ON b.repository=c.repository AND b.blake3=c.blake3 JOIN alt_pins p ON p.repository=c.repository AND p.blake3=c.blake3 WHERE c.repository=$1 AND c.epoch=$2 AND c.actor_id=$3 AND c.request_id=$4 AND c.verified AND b.state='stored' AND p.pin_id=$5 AND p.expires_at>$6 ORDER BY c.blake3", &[&key.scope.repository_instance_id,&integer(key.scope.recovery_epoch)?,&key.actor_id,&key.request_id,&upload_pin(key),&integer(time)?])?;
+        let rows = tx.query("SELECT c.blake3 FROM alt_request_content c JOIN alt_blobs b ON b.repository=c.repository AND b.blake3=c.blake3 JOIN alt_pins p ON p.repository=c.repository AND p.blake3=c.blake3 WHERE c.repository=$1 AND c.epoch=$2 AND c.actor_id=$3 AND c.request_id=$4 AND c.verified AND b.state<>'deleting' AND p.pin_id=$5 AND p.expires_at>$6 ORDER BY c.blake3", &[&key.scope.repository_instance_id,&integer(key.scope.recovery_epoch)?,&key.actor_id,&key.request_id,&upload_pin(key),&integer(time)?])?;
         let mut verified: Vec<_> = rows
             .into_iter()
             .map(|r| r.get::<_, String>(0))
@@ -57,7 +58,7 @@ impl Store {
         let row = upload_request_row(&mut tx, key)?.ok_or(Error::Unauthorized)?;
         let time = now(&mut tx)?;
         active(&row, time)?;
-        let publication: Publication = serde_json::from_value(row.get("publication"))?;
+        let publication: Publication = row.get::<_, Jsonb>("publication").read()?;
         alt_repository_service::authorize_intent(&publication, &current, &auth, self.limits, time)?;
         let bytes = upload_selection(&mut tx, key, digest)?
             .and_then(|s| s.chunk_bytes)
@@ -97,7 +98,19 @@ impl Store {
         key: &RequestKey,
         digest: &str,
     ) -> Result<()> {
-        let entries = self.selected_upload(credential, key, digest)?;
+        let (entries, verified) = self.selected_upload_state(credential, key, digest)?;
+        if verified {
+            // Git objects the segments hold were granted when the request began:
+            // there are no chunks to assemble them from
+            let segments = self.published_segments(&key.scope.repository_instance_id)?;
+            let mut held = true;
+            for entry in &entries {
+                held &= crate::pack_native::holds_entry(&segments, entry)?;
+            }
+            if held {
+                return Ok(());
+            }
+        }
         let (_, verified) = self.upload_chunks(credential, key)?;
         let entry = &entries[0];
         if entry

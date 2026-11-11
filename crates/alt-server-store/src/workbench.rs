@@ -1,15 +1,15 @@
 //! Authorized workbench projections over the publication authority.
+use crate::Jsonb;
 use crate::store::{authorize, credential_row, instance, integer, now, snapshot, unsigned};
 use crate::{Credential, Error, Result, Store};
 use alt_remote_protocol::{Publication, RequestKey, Scope};
-use serde::Serialize;
 
-#[derive(Serialize)]
+#[derive(alt_json::ToJson)]
 pub struct Page<T> {
     pub items: Vec<T>,
     pub next: Option<String>,
 }
-#[derive(Serialize)]
+#[derive(alt_json::ToJson)]
 pub struct WorkbenchRepository {
     pub scope: Scope,
     pub default_branch: String,
@@ -17,7 +17,7 @@ pub struct WorkbenchRepository {
     pub can_review: bool,
     pub can_publish: bool,
 }
-#[derive(Serialize)]
+#[derive(alt_json::ToJson)]
 pub struct WorkbenchRequest {
     pub key: RequestKey,
     pub state: String,
@@ -125,7 +125,7 @@ impl Store {
                     },
                     state: "ready".into(),
                     digest: row.get(4),
-                    roots: serde_json::from_value(row.get(5))?,
+                    roots: row.get::<_, Jsonb>(5).read()?,
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -154,7 +154,7 @@ impl Store {
         if max_bytes == 0 || max_bytes > 16 * 1024 * 1024 {
             return Err(Error::Limit("record projection bytes"));
         }
-        let kind = serde_json::to_value(root.kind)?
+        let kind = alt_json::to_value(root.kind)?
             .as_str()
             .ok_or(Error::Integrity("record kind"))?
             .to_owned();
@@ -178,9 +178,9 @@ impl Store {
         let file =
             self.bytes
                 .read_payload(scope, &payload.blake3, payload.bytes, location.as_ref())?;
-        let publication: Publication = serde_json::from_value(row.get(2))?;
-        let manifest = serde_json::from_value(row.get(3))?;
-        let receipt: alt_remote_protocol::Receipt = serde_json::from_value(row.get(4))?;
+        let publication: Publication = row.get::<_, Jsonb>(2).read()?;
+        let manifest = row.get::<_, Jsonb>(3).read()?;
+        let receipt: alt_remote_protocol::Receipt = row.get::<_, Jsonb>(4).read()?;
         let provenance = crate::provenance::load(
             &mut tx,
             scope,
@@ -198,7 +198,7 @@ impl Store {
             return Err(Error::Integrity("record projection payload"));
         }
         let key = alt_task_service::RecordKey {
-            kind: serde_json::from_value(serde_json::Value::String(kind))?,
+            kind: alt_json::from_value(alt_json::Value::String(kind))?,
             id: root.id.clone(),
         };
         let record = alt_task_service::TaskRecord::decode(&key, &raw, max_bytes)?;

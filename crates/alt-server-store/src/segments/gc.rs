@@ -1,4 +1,5 @@
 use super::*;
+use crate::Jsonb;
 use crate::store::require_admin;
 
 impl Store {
@@ -131,7 +132,7 @@ impl Store {
             let index = alt_hash::blake3::Hash::from(*proof.index().digest())
                 .to_hex()
                 .to_string();
-            tx.execute("UPDATE alt_segments SET state='stored',index_digest=$3,selection=$4,member_count=$5,payload_bytes=$6 WHERE repository=$1 AND segment_id=$2", &[&repository,&id,&index,&serde_json::to_value(&members)?,&integer(members.len() as u64)?,&integer(proof.index().bytes())?])?;
+            tx.execute("UPDATE alt_segments SET state='stored',index_digest=$3,selection=$4,member_count=$5,payload_bytes=$6 WHERE repository=$1 AND segment_id=$2", &[&repository,&id,&index,&Jsonb::from(&members)?,&integer(members.len() as u64)?,&integer(proof.index().bytes())?])?;
             let offsets: Vec<_> = members
                 .keys()
                 .map(|digest| {

@@ -142,12 +142,12 @@ impl BlobSource for PortableExport {
             return Ok(Box::new(std::io::Cursor::new(document)));
         }
         let digest = alt_provenance::decode_hex::<32>(&blob.blake3)?;
-        if let Some((_, _, data)) = self
+        if let Some((_, _, _, stream)) = self
             .segments
-            .read_blake3(&digest)
+            .open_blake3(&digest)
             .map_err(|e| std::io::Error::other(e.to_string()))?
         {
-            return Ok(Box::new(std::io::Cursor::new(data)));
+            return Ok(Box::new(stream));
         }
         Ok(Box::new(
             self.bytes

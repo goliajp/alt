@@ -17,7 +17,7 @@ pub(super) fn portable_limits() -> VerificationLimits {
         reads: 100_000,
     }
 }
-fn publish_task(f: &mut Fixture, name: &str) -> (Payload, Receipt) {
+pub(super) fn publish_task(f: &mut Fixture, name: &str) -> (Payload, Receipt) {
     let payload = super::tasks::task_payload(name);
     payload.upload(&mut f.store, &f.credential);
     let work = f
@@ -50,7 +50,7 @@ fn logical_export_preserves_original_task_bytes_receipt_and_excludes_credentials
     assert_eq!(envelope.catalog.publications.len(), 1);
     let original = &envelope.catalog.publications[0];
     let raw = alt_portable::read_metadata(&export, &original.receipt, 1_000_000).unwrap();
-    assert_eq!(serde_json::from_slice::<Receipt>(&raw).unwrap(), receipt);
+    assert_eq!(alt_json::from_slice::<Receipt>(&raw).unwrap(), receipt);
     for (entry, expected) in payload.manifest.entries.iter().zip(&payload.contents) {
         let mut actual = Vec::new();
         export
@@ -80,13 +80,13 @@ fn logical_export_preserves_original_task_bytes_receipt_and_excludes_credentials
             .any(|w| w == f.token.as_bytes())
     );
     assert!(!archive.windows(32).any(|w| w == [7; 32]));
-    let encoded = serde_json::to_value(envelope).unwrap();
+    let encoded = alt_json::to_value(envelope).unwrap();
     let mut restarted = f.reopen();
     let credential = restarted.authenticate(&f.token).unwrap();
     let resumed = restarted
         .prepare_portable_export(&credential, scope, "first-export", portable_limits())
         .unwrap();
-    assert_eq!(serde_json::to_value(resumed.envelope()).unwrap(), encoded);
+    assert_eq!(alt_json::to_value(resumed.envelope()).unwrap(), encoded);
     assert_eq!(
         f.client()
             .query_one("SELECT count(*) FROM alt_portable_exports", &[])
@@ -240,8 +240,7 @@ fn changed_source_refuses_old_cutover_and_old_export_keeps_its_original_bytes() 
         .prepare_portable_export(&f.credential, scope, "new-snapshot", portable_limits())
         .unwrap();
     // The replaced commit is still held by its segment and so still exported.
-    // What an old export alone keeps in the content store must not be retained
-    // again by every later one.
+    // Neither export retains a Git object in the content store.
     assert!(
         current
             .envelope()
@@ -262,7 +261,7 @@ fn changed_source_refuses_old_cutover_and_old_export_keeps_its_original_bytes() 
             .unwrap()
             .get(0)
     };
-    assert_eq!((pins("old-snapshot"), pins("new-snapshot")), (1, 0));
+    assert_eq!((pins("old-snapshot"), pins("new-snapshot")), (0, 0));
     f.store
         .freeze_portable_export(
             &f.credential,
@@ -448,7 +447,7 @@ fn cloud_unpaid_owner_exports_with_current_account_but_billing_authority_alone_c
     );
 }
 
-fn import_fixture(
+pub(super) fn import_fixture(
     target: &Fixture,
 ) -> (
     Fixture,
@@ -1239,7 +1238,7 @@ pub(super) fn stage_import(
         stage_blob(target, export, intent, &blob);
     }
 }
-fn verify_import(
+pub(super) fn verify_import(
     target: &mut Fixture,
     intent: &alt_portable::ImportIntent,
 ) -> alt_server_store::PortableImportWork {
@@ -1275,11 +1274,11 @@ fn portable_activation_preserves_history_and_replay_never_overwrites_new_work() 
     let mut target = Fixture::new();
     let (source, export, intent) = import_fixture(&target);
     let original = &export.envelope().catalog.publications[0];
-    let publication: Publication = serde_json::from_slice(
+    let publication: Publication = alt_json::from_slice(
         &alt_portable::read_metadata(&export, &original.publication, 1_000_000).unwrap(),
     )
     .unwrap();
-    let receipt: Receipt = serde_json::from_slice(
+    let receipt: Receipt = alt_json::from_slice(
         &alt_portable::read_metadata(&export, &original.receipt, 1_000_000).unwrap(),
     )
     .unwrap();
@@ -1391,8 +1390,8 @@ fn portable_activation_preserves_history_and_replay_never_overwrites_new_work() 
         .repository_info(&target.credential, "repository")
         .unwrap();
     assert_eq!(
-        serde_json::to_value(before).unwrap(),
-        serde_json::to_value(after).unwrap()
+        alt_json::to_value(before).unwrap(),
+        alt_json::to_value(after).unwrap()
     );
     assert_eq!(source.counts(), (0, 1, 1));
 }
@@ -1569,7 +1568,7 @@ fn portable_return_migration_and_recovery_preserve_refs_original_bytes_and_all_m
     let mut middle = Fixture::new();
     let (mut source, first, mut intent) = import_fixture(&middle);
     let original = first.envelope().catalog.publications[0].clone();
-    let original_receipt: Receipt = serde_json::from_slice(
+    let original_receipt: Receipt = alt_json::from_slice(
         &alt_portable::read_metadata(&first, &original.receipt, 1_000_000).unwrap(),
     )
     .unwrap();
@@ -1608,7 +1607,7 @@ fn portable_return_migration_and_recovery_preserve_refs_original_bytes_and_all_m
         .unwrap();
     assert_eq!(next.envelope().catalog.refs, export.envelope().catalog.refs);
     assert_eq!(next.envelope().catalog.import_receipts.len(), 1);
-    let imported_receipt: alt_portable::ImportReceipt = serde_json::from_slice(
+    let imported_receipt: alt_portable::ImportReceipt = alt_json::from_slice(
         &alt_portable::read_metadata(
             &next,
             &next.envelope().catalog.import_receipts[0],
@@ -1801,7 +1800,7 @@ fn portable_import_reexports_exact_original_metadata_bytes() {
     }
     let mut target = Fixture::new();
     let (_source, export, mut intent) = import_fixture(&target);
-    let receipt: Receipt = serde_json::from_slice(
+    let receipt: Receipt = alt_json::from_slice(
         &alt_portable::read_metadata(
             &export,
             &export.envelope().catalog.publications[0].receipt,
@@ -1810,7 +1809,7 @@ fn portable_import_reexports_exact_original_metadata_bytes() {
         .unwrap(),
     )
     .unwrap();
-    let raw = serde_json::to_vec_pretty(&receipt).unwrap();
+    let raw = alt_json::to_vec_pretty(&receipt).unwrap();
     let blob = alt_portable::Blob::of(&raw);
     let mut catalog = export.envelope().catalog.clone();
     catalog.publications[0].receipt = blob.clone();
@@ -1901,12 +1900,12 @@ fn portable_import_process_crash_boundaries() {
         std::fs::create_dir(&input).unwrap();
         std::fs::write(
             input.join("intent.json"),
-            serde_json::to_vec(&intent).unwrap(),
+            alt_json::to_vec(&intent).unwrap(),
         )
         .unwrap();
         std::fs::write(
             input.join("envelope.json"),
-            serde_json::to_vec(export.envelope()).unwrap(),
+            alt_json::to_vec(export.envelope()).unwrap(),
         )
         .unwrap();
         for blob in &export.envelope().catalog.blobs {
@@ -2039,9 +2038,9 @@ fn portable_crash_child(phase: &str) {
     let token = std::env::var("ALT_PORTABLE_FAULT_TOKEN").unwrap();
     let input = root.join("portable-input");
     let intent: alt_portable::ImportIntent =
-        serde_json::from_slice(&std::fs::read(input.join("intent.json")).unwrap()).unwrap();
+        alt_json::from_slice(&std::fs::read(input.join("intent.json")).unwrap()).unwrap();
     let envelope: alt_portable::Envelope =
-        serde_json::from_slice(&std::fs::read(input.join("envelope.json")).unwrap()).unwrap();
+        alt_json::from_slice(&std::fs::read(input.join("envelope.json")).unwrap()).unwrap();
     let spec = InstanceSpec {
         installation_id: "installation".into(),
         workspace_id: "workspace".into(),

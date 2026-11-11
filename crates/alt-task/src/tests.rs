@@ -161,7 +161,7 @@ fn immutable_records_and_large_raw_logs_survive_reopen_and_detect_corruption() {
         .join(format!("{passed}.json"));
     let original = std::fs::read(&source_path).unwrap();
     let pretty =
-        serde_json::to_vec_pretty(&serde_json::from_slice::<serde_json::Value>(&original).unwrap())
+        alt_json::to_vec_pretty(&alt_json::from_slice::<alt_json::Value>(&original).unwrap())
             .unwrap();
     std::fs::write(&source_path, &pretty).unwrap();
     let (record, source) = store.source_record::<Evidence>(&passed).unwrap();
@@ -174,7 +174,7 @@ fn immutable_records_and_large_raw_logs_survive_reopen_and_detect_corruption() {
             .path()
             .join("records/evidence")
             .join(format!("{passed}.json")),
-        serde_json::to_vec(&store.load::<Evidence>(&failed).unwrap()).unwrap(),
+        alt_json::to_vec(&store.load::<Evidence>(&failed).unwrap()).unwrap(),
     )
     .unwrap();
     assert!(store.load::<Evidence>(&passed).is_err());

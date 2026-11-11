@@ -15,9 +15,7 @@ alt-task.workspace = true
 alt-input.workspace = true
 alt-git-codec.workspace = true
 alt-json.workspace = true
-serde.workspace = true
 
 [dev-dependencies]
 alt-json-testkit.workspace = true
-serde_json.workspace = true
 alt-command-protocol.workspace = true

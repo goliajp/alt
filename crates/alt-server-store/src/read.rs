@@ -33,13 +33,13 @@ impl ObjectSource for SnapshotObjects<'_> {
         let Some((kind, bytes)) = self.read.objects.get(&oid) else {
             return Ok(None);
         };
-        let data = self.read.bytes(oid).map_err(|_| {
+        let stream = self.read.bytes(oid).map_err(|_| {
             alt_repository_service::Error::Integrity("snapshot object bytes unavailable")
         })?;
         Ok(Some(ObjectReader {
             kind: *kind,
             bytes: *bytes,
-            reader: Box::new(std::io::Cursor::new(data)),
+            reader: Box::new(stream),
         }))
     }
 }
@@ -62,12 +62,13 @@ impl ReadSnapshot {
             .map_err(|_| Error::Integrity("pack segment record"))?
             .map(|record| (crate::packs::object_kind(record.kind), record.size)))
     }
-    fn bytes(&self, oid: ObjectId) -> Result<Vec<u8>> {
-        let (_, data) = self
+    fn bytes(&self, oid: ObjectId) -> Result<alt_pack_segment::ObjectStream> {
+        let (_, _, stream) = self
             .segments
-            .read(&segment_key(oid)?)
-            .map_err(|_| Error::Integrity("snapshot object bytes"))?;
-        Ok(data)
+            .open(&segment_key(oid)?)
+            .map_err(|_| Error::Integrity("snapshot object bytes"))?
+            .ok_or(Error::Integrity("snapshot object bytes"))?;
+        Ok(stream)
     }
     fn select_all(&mut self, max_objects: usize) -> Result<()> {
         for segment in self.segments.segments() {
@@ -251,9 +252,9 @@ impl Store {
         credential: &Credential,
         read: &ReadSnapshot,
         oid: ObjectId,
-    ) -> Result<(ObjectKind, u64, std::io::Cursor<Vec<u8>>)> {
+    ) -> Result<(ObjectKind, u64, alt_pack_segment::ObjectStream)> {
         let (kind, bytes) = read.objects.get(&oid).ok_or(Error::Unauthorized)?;
         self.check_read_snapshot(credential, read)?;
-        Ok((*kind, *bytes, std::io::Cursor::new(read.bytes(oid)?)))
+        Ok((*kind, *bytes, read.bytes(oid)?))
     }
 }

@@ -1,4 +1,5 @@
 use super::*;
+use crate::Jsonb;
 use alt_portable::{
     BlobSource, HistoricalPublication, ImportReceiptBody, VerificationLimits, VerifiedSnapshot,
 };
@@ -6,6 +7,8 @@ use alt_remote_protocol::{
     Manifest, Publication, Receipt, TransferBody, TransferProof, TransferReason,
 };
 use std::{collections::BTreeMap, io::Read, os::unix::fs::MetadataExt};
+
+mod settle;
 
 type Stamp = (u64, u64, u64, i64, i64, i64, i64);
 struct Source {
@@ -127,7 +130,7 @@ impl Store {
             active(&row, key, time)?;
             empty(&mut tx, &key.scope.repository_instance_id)?;
             mappings(&mut tx, intent)?;
-            let envelope: Envelope = serde_json::from_value(row.get("envelope"))?;
+            let envelope: Envelope = row.get::<_, Jsonb>("envelope").read()?;
             intent.validate_envelope(&envelope, limits.package)?;
             complete(
                 &mut tx,
@@ -185,7 +188,7 @@ impl Store {
                         )?,
                         limits.package.protocol,
                     )?;
-                    let receipt = serde_json::from_slice(&alt_portable::read_metadata(
+                    let receipt = alt_json::from_slice(&alt_portable::read_metadata(
                         &source,
                         &item.receipt,
                         limits.package.metadata_bytes,
@@ -239,39 +242,6 @@ impl Store {
         }
         result.map(|(receipt, _)| receipt)
     }
-    /// The snapshot's Git objects as one pack segment: where Git clients and every
-    /// reader of published objects look for them.
-    fn materialize_import(
-        &mut self,
-        work: &PortableImportWork,
-    ) -> Result<Option<crate::packs::Materialized>> {
-        let scope = &work.intent.key.scope;
-        let mut objects = Vec::with_capacity(work.envelope.catalog.objects.len());
-        for object in &work.envelope.catalog.objects {
-            let kind = match object.kind {
-                alt_remote_protocol::ContentKind::Blob => alt_pack_segment::Kind::Blob,
-                alt_remote_protocol::ContentKind::Tree => alt_pack_segment::Kind::Tree,
-                alt_remote_protocol::ContentKind::Commit => alt_pack_segment::Kind::Commit,
-                alt_remote_protocol::ContentKind::Tag => alt_pack_segment::Kind::Tag,
-                _ => return Err(Error::Integrity("portable object kind")),
-            };
-            let mut data = Vec::with_capacity(object.payload.bytes as usize);
-            self.bytes
-                .read_payload(
-                    scope,
-                    &object.payload.blake3,
-                    object.payload.bytes,
-                    work.locations.get(&object.payload.blake3),
-                )?
-                .read_to_end(&mut data)?;
-            objects.push((kind, data));
-        }
-        self.materialize(
-            &scope.repository_instance_id,
-            &alt_pack_segment::SegmentSet::new(Vec::new()),
-            objects,
-        )
-    }
     /// the receipt, and whether this call was the one that activated the import
     fn activate_transaction(
         &mut self,
@@ -306,7 +276,7 @@ impl Store {
         active(&row, key, time)?;
         empty(&mut tx, repository)?;
         mappings(&mut tx, intent)?;
-        let envelope: Envelope = serde_json::from_value(row.get("envelope"))?;
+        let envelope: Envelope = row.get::<_, Jsonb>("envelope").read()?;
         intent.validate_envelope(&envelope, work.limits)?;
         if work.verified.catalog_digest() != intent.catalog_digest
             || envelope.catalog.digest(work.limits)? != work.envelope.catalog.digest(work.limits)?
@@ -327,21 +297,7 @@ impl Store {
             return Err(Error::Precondition("portable verified content changed"));
         }
         crate::cloud_quota::check_publication(&mut tx, &self.spec)?;
-        for object in &envelope.catalog.objects {
-            let kind = match object.kind {
-                alt_remote_protocol::ContentKind::Blob => "blob",
-                alt_remote_protocol::ContentKind::Tree => "tree",
-                alt_remote_protocol::ContentKind::Commit => "commit",
-                alt_remote_protocol::ContentKind::Tag => "tag",
-                _ => return Err(Error::Integrity("portable object kind")),
-            };
-            tx.execute("INSERT INTO alt_objects(repository,oid,kind,blake3) VALUES($1,$2,$3,$4) ON CONFLICT(repository,oid) DO UPDATE SET kind=excluded.kind,blake3=excluded.blake3", &[repository,&object.oid,&kind,&object.payload.blake3])?;
-        }
-        // Permanent historical roots preserve the exact original snapshot,
-        // including metadata and explicitly selected unreachable Git objects.
-        for blob in &envelope.catalog.blobs {
-            crate::requests::pin(&mut tx, repository, &pin_id(&digest), &blob.blake3, None)?;
-        }
+        settle::retain_history(&mut tx, repository, &pin_id(&digest), work)?;
         for reference in &envelope.catalog.refs {
             tx.execute(
                 "INSERT INTO alt_refs(repository,name,oid) VALUES($1,$2,$3)",
@@ -386,7 +342,7 @@ impl Store {
                 work.limits.protocol,
             )
             .map_err(|_| Error::Integrity("portable migration chain"))?;
-            tx.execute("INSERT INTO alt_archived_publications(repository,digest,publication,manifest,receipt,original) VALUES($1,$2,$3,$4,$5,$6)", &[repository,&original.digest,&serde_json::to_value(&history.publication)?,&serde_json::to_value(&history.manifest)?,&serde_json::to_value(&history.receipt)?,&serde_json::to_value(original)?])?;
+            tx.execute("INSERT INTO alt_archived_publications(repository,digest,publication,manifest,receipt,original) VALUES($1,$2,$3,$4,$5,$6)", &[repository,&original.digest,&Jsonb::from(&history.publication)?,&Jsonb::from(&history.manifest)?,&Jsonb::from(&history.receipt)?,&Jsonb::from(&original)?])?;
             crate::provenance::save(&mut tx, &key.scope, &original.digest, &proofs)?;
             let verified = &work
                 .verified
@@ -401,7 +357,7 @@ impl Store {
                     tx.execute("INSERT INTO alt_archived_records(repository,digest,kind,record_id,payload_blake3) VALUES($1,$2,$3,$4,$5)", &[repository,&original.digest,&selection.record.kind.as_str(),&selection.record.id,&selection.payload.blake3])?;
                 }
                 for root in tasks.roots() {
-                    let kind = serde_json::to_value(root.kind)?
+                    let kind = alt_json::to_value(root.kind)?
                         .as_str()
                         .ok_or(Error::Integrity("portable root kind"))?
                         .to_owned();
@@ -410,6 +366,7 @@ impl Store {
             }
         }
         if let Some(segment) = materialized {
+            crate::pack_native::account_segment(&mut tx, repository, segment.bytes)?;
             crate::packs::insert_segment(
                 &mut tx,
                 repository,
@@ -429,7 +386,7 @@ impl Store {
             &envelope.catalog,
             unsigned(row.get("reserved_bytes"))?,
         )?;
-        tx.execute("UPDATE alt_repositories SET transaction_sequence=1,policy_version=policy_version+1,policies=$2,default_branch=$3,reserved_bytes=reserved_bytes-$4,portable_import=NULL WHERE id=$1", &[repository,&serde_json::to_value(&envelope.catalog.protections)?,&envelope.catalog.default_branch,&row.get::<_,i64>("reserved_bytes")])?;
+        tx.execute("UPDATE alt_repositories SET transaction_sequence=1,policy_version=policy_version+1,policies=$2,default_branch=$3,reserved_bytes=reserved_bytes-$4,portable_import=NULL WHERE id=$1", &[repository,&Jsonb::from(&envelope.catalog.protections)?,&envelope.catalog.default_branch,&row.get::<_,i64>("reserved_bytes")])?;
         crate::cloud_quota::release_portable(&mut tx, key)?;
         let receipt = ImportReceipt::sign(
             ImportReceiptBody {
@@ -441,8 +398,8 @@ impl Store {
             &self.signing_key,
             work.limits,
         )?;
-        tx.execute("UPDATE alt_portable_imports SET state='committed',receipt=$3,reserved_bytes=0 WHERE repository=$1 AND import_id=$2", &[repository,&key.request_id,&serde_json::to_value(&receipt)?])?;
-        let event = serde_json::json!({"kind":"portable_import_committed","receipt":receipt});
+        tx.execute("UPDATE alt_portable_imports SET state='committed',receipt=$3,reserved_bytes=0 WHERE repository=$1 AND import_id=$2", &[repository,&key.request_id,&Jsonb::from(&receipt)?])?;
+        let event = Jsonb(alt_json::json!({"kind":"portable_import_committed","receipt":receipt}));
         tx.execute(
             "INSERT INTO alt_audit(repository,sequence,actor_id,event) VALUES($1,1,$2,$3)",
             &[repository, &auth.actor_id, &event],

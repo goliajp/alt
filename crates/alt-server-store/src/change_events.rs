@@ -1,9 +1,11 @@
 //! Transactional product events. Network I/O belongs outside these transactions.
+use crate::Jsonb;
 use crate::change_channel::{authority, endpoint, installed};
 use crate::database::Transaction;
 use crate::link_history;
 use crate::store::{instance, integer, now, snapshot, unsigned};
 use crate::{ChangeChannel, Credential, Error, InstanceSpec, Result, Store};
+use alt_json_serde::Serde;
 use alt_remote_protocol::{RequestKey, Scope};
 use alt_repository_service::{Authorization, RepositorySnapshot};
 use golia_change_link as link;
@@ -63,7 +65,7 @@ pub(crate) fn integration(credential: &Credential, channel: &ChangeChannel) -> R
 fn mapping_entity(release: &link::Release) -> Result<String> {
     Ok(format!(
         "mapping-{}",
-        alt_hash::blake3::hash(&serde_json::to_vec(&(
+        alt_hash::blake3::hash(&alt_json::to_vec(&(
             &release.application,
             &release.release,
             &release.environment
@@ -204,7 +206,7 @@ fn append_outbox(
         &key.actor_id,
         "change_link.queued",
         &scope.repository_instance_id,
-        &serde_json::json!({"event_digest":digest,"channel":channel.channel}),
+        &Jsonb(alt_json::json!({"event_digest":digest,"channel":channel.channel})),
     )?;
     Ok(history)
 }
@@ -236,7 +238,7 @@ impl Store {
         {
             return Err(Error::Unauthorized);
         }
-        let intent = alt_hash::blake3::hash(&serde_json::to_vec(request)?)
+        let intent = alt_hash::blake3::hash(&alt_json::to_vec(request)?)
             .to_hex()
             .to_string();
         let history = append_outbox(
@@ -365,12 +367,12 @@ impl Store {
         }
         history.acknowledgement = Some(ack);
         let reserve = unsigned(row.get(1))?;
-        let delta = serde_json::to_vec(&history)?.len().saturating_sub(
-            serde_json::to_vec(&link_history::get(
+        let delta = alt_json::to_vec(&Serde(&history))?.len().saturating_sub(
+            alt_json::to_vec(&Serde(link_history::get(
                 &mut tx,
                 &scope.repository_instance_id,
                 digest,
-            )?)?
+            )?))?
             .len(),
         ) as u64;
         if delta > reserve {
@@ -490,7 +492,7 @@ impl Store {
             &auth.actor_id,
             "change_link.received",
             &scope.repository_instance_id,
-            &serde_json::json!({"event_digest":digest,"decision":decision}),
+            &Jsonb(alt_json::json!({"event_digest":digest,"decision":Serde(&decision)})),
         )?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)?;
         Ok(receipt)
@@ -608,7 +610,7 @@ impl Store {
                 &auth.actor_id,
                 "change_link.reauthorized",
                 &scope.repository_instance_id,
-                &serde_json::json!({"event_digest":digest,"channel":channel}),
+                &Jsonb(alt_json::json!({"event_digest":digest,"channel":channel})),
             )?;
         }
         tx.commit().map_err(|_| Error::OutcomeUnknown)
@@ -659,7 +661,7 @@ impl Store {
         if auth.actor_id != request.key.actor_id {
             return Err(Error::Unauthorized);
         }
-        let intent = alt_hash::blake3::hash(&serde_json::to_vec(request)?)
+        let intent = alt_hash::blake3::hash(&alt_json::to_vec(request)?)
             .to_hex()
             .to_string();
         if let Some(value) = queued_request(&mut tx, &request.key, &intent)? {
@@ -743,7 +745,7 @@ impl Store {
         {
             return Err(Error::Unauthorized);
         }
-        let intent = alt_hash::blake3::hash(&serde_json::to_vec(request)?)
+        let intent = alt_hash::blake3::hash(&alt_json::to_vec(request)?)
             .to_hex()
             .to_string();
         let history = append_outbox(

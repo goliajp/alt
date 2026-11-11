@@ -1,10 +1,6 @@
 use crate::{Error, Limits, Publication, RequestKey, Result, hex};
-use serde::{Deserialize, Serialize};
 
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(rename_all = "snake_case")]
 pub enum ErrorCode {
     Unauthenticated,
@@ -18,10 +14,7 @@ pub enum ErrorCode {
     InvalidRequest,
     RequestIdConflict,
 }
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(rename_all = "snake_case")]
 pub enum Retry {
     Never,
@@ -32,10 +25,7 @@ pub enum Retry {
     /// A rejected precondition requires a new intent and a fresh request ID.
     NewIntent,
 }
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct Failure {
     pub code: ErrorCode,
@@ -44,21 +34,15 @@ pub struct Failure {
     pub retry: Retry,
 }
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct ReceiptBody {
     pub publication: Publication,
     pub request_digest: String,
-    #[serde(with = "crate::decimal")]
     #[json(with = "alt_json::with::decimal_u64")]
     pub transaction_sequence: u64,
-    #[serde(with = "crate::decimal")]
     #[json(with = "alt_json::with::decimal_u64")]
     pub policy_version: u64,
-    #[serde(with = "crate::decimal")]
     #[json(with = "alt_json::with::decimal_u64")]
     pub committed_at_unix_ms: u64,
 }
@@ -93,10 +77,7 @@ impl ReceiptBody {
         Ok(bytes)
     }
 }
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct Receipt {
     pub body: ReceiptBody,
@@ -115,15 +96,11 @@ impl Receipt {
 
 /// Durable states. Unknown is deliberately absent: it describes a client's
 /// inability to observe the authority, not a server decision to replay a write.
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RequestState {
     Receiving {
         digest: String,
-        #[serde(with = "crate::decimal")]
         #[json(with = "alt_json::with::decimal_u64")]
         expires_at_unix_ms: u64,
     },
@@ -159,10 +136,7 @@ impl RequestState {
     }
 }
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(tag = "observation", rename_all = "snake_case", deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(tag = "observation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RequestObservation {
     Recorded {

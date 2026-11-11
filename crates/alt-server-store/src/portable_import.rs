@@ -1,5 +1,6 @@
 //! Receiving a portable snapshot never creates a current publication, grant or
 //! public object. Immutable intent, quota and temporary roots survive restart.
+use crate::Jsonb;
 use crate::database::Transaction;
 use crate::store::{authorize, instance, integer, now, require_admin, snapshot, unsigned};
 use crate::{Credential, DurableBytes, Error, InstanceSpec, Result, Store};
@@ -93,7 +94,7 @@ fn mappings(tx: &mut Transaction<'_>, intent: &ImportIntent) -> Result<()> {
     Ok(())
 }
 fn same(row: &Row, intent: &ImportIntent, limits: PackageLimits) -> Result<()> {
-    let recorded: ImportIntent = serde_json::from_value(row.get("intent"))?;
+    let recorded: ImportIntent = row.get::<_, Jsonb>("intent").read()?;
     if recorded != *intent || row.get::<_, String>("digest") != intent.digest(limits)? {
         return Err(Error::Precondition(
             "import ID reused with different parameters",
@@ -117,19 +118,19 @@ fn state(
     key: &RequestKey,
     current: &Scope,
 ) -> Result<PortableImportState> {
-    let recorded: ImportIntent = serde_json::from_value(row.get("intent"))?;
+    let recorded: ImportIntent = row.get::<_, Jsonb>("intent").read()?;
     if recorded.key != *key {
         return Err(Error::Precondition("portable import identity mismatch"));
     }
     let digest: String = row.get("digest");
     Ok(match row.get::<_, String>("state").as_str() {
         "committed" => PortableImportState::Committed {
-            receipt: Box::new(serde_json::from_value(row.get("receipt"))?),
+            receipt: Box::new(row.get::<_, Jsonb>("receipt").read()?),
         },
         "abandoned" => PortableImportState::Abandoned { digest },
         "receiving" if key.scope != *current => PortableImportState::Unknown { key: key.clone() },
         "receiving" => {
-            let envelope: Envelope = serde_json::from_value(row.get("envelope"))?;
+            let envelope: Envelope = row.get::<_, Jsonb>("envelope").read()?;
             let verified: std::collections::BTreeSet<String> = tx.query("SELECT c.blake3 FROM alt_portable_import_content c JOIN alt_blobs b ON b.repository=c.repository AND b.blake3=c.blake3 WHERE c.repository=$1 AND c.import_id=$2 AND c.verified AND b.state='stored'", &[&key.scope.repository_instance_id,&key.request_id])?.iter().map(|r| r.get(0)).collect();
             PortableImportState::Receiving {
                 digest,
@@ -216,7 +217,7 @@ impl Store {
         if tx.execute("UPDATE alt_repositories SET reserved_bytes=reserved_bytes+$2,portable_import=$3 WHERE id=$1 AND $2<=quota_bytes-stored_bytes-reserved_bytes-link_bytes", &[repository,&integer(reservation)?,&key.request_id])? != 1 {
             return Err(Error::Limit("repository quota"));
         }
-        tx.execute("INSERT INTO alt_portable_imports(repository,import_id,actor_id,epoch,digest,intent,envelope,state,expires_at,reserved_bytes,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,'receiving',$8,$9,$10)", &[repository,&key.request_id,&key.actor_id,&integer(key.scope.recovery_epoch)?,&digest,&serde_json::to_value(intent)?,&serde_json::to_value(envelope)?,&integer(expires)?,&integer(reservation)?,&integer(time)?])?;
+        tx.execute("INSERT INTO alt_portable_imports(repository,import_id,actor_id,epoch,digest,intent,envelope,state,expires_at,reserved_bytes,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,'receiving',$8,$9,$10)", &[repository,&key.request_id,&key.actor_id,&integer(key.scope.recovery_epoch)?,&digest,&Jsonb::from(&intent)?,&Jsonb::from(&envelope)?,&integer(expires)?,&integer(reservation)?,&integer(time)?])?;
         for blob in &envelope.catalog.blobs {
             tx.execute("INSERT INTO alt_portable_import_content(repository,import_id,blake3) VALUES($1,$2,$3)", &[repository,&key.request_id,&blob.blake3])?;
             crate::requests::pin(
@@ -236,7 +237,9 @@ impl Store {
             &key.actor_id,
             "portable.import.started",
             repository,
-            &serde_json::json!({"intent_digest":digest,"source":intent.source,"import_id":key.request_id}),
+            &Jsonb(
+                alt_json::json!({"intent_digest":digest,"source":intent.source,"import_id":key.request_id}),
+            ),
         )?;
         let result = PortableImportState::Receiving {
             digest,
@@ -288,7 +291,7 @@ impl Store {
         let row = row(&mut tx, key)?.ok_or(Error::Precondition("portable import not found"))?;
         let time = now(&mut tx)?;
         active(&row, key, time)?;
-        let envelope: Envelope = serde_json::from_value(row.get("envelope"))?;
+        let envelope: Envelope = row.get::<_, Jsonb>("envelope").read()?;
         let selected = envelope
             .catalog
             .blobs
@@ -335,7 +338,7 @@ impl Store {
             return Err(Error::Unauthorized);
         }
         let row = row(&mut tx, key)?.ok_or(Error::Precondition("portable import not found"))?;
-        let recorded: ImportIntent = serde_json::from_value(row.get("intent"))?;
+        let recorded: ImportIntent = row.get::<_, Jsonb>("intent").read()?;
         if recorded.key != *key {
             return Err(Error::Unauthorized);
         }
@@ -374,7 +377,7 @@ impl Store {
             &key.actor_id,
             "portable.import.abandoned",
             repository,
-            &serde_json::json!({"import_id":key.request_id}),
+            &Jsonb(alt_json::json!({"import_id":key.request_id})),
         )?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)
     }
@@ -405,7 +408,7 @@ impl Store {
         )?;
         let row = row(&mut tx, key)?.ok_or(Error::Precondition("portable import not found"))?;
         active(&row, key, now(&mut tx)?)?;
-        let envelope: Envelope = serde_json::from_value(row.get("envelope"))?;
+        let envelope: Envelope = row.get::<_, Jsonb>("envelope").read()?;
         let blob = envelope
             .catalog
             .blobs

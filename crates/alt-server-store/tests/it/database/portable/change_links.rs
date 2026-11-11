@@ -59,7 +59,7 @@ fn linked_fixture(
 ) {
     let (mut source, _, mut intent) = import_fixture(target);
     let history = signed_history(true);
-    let raw = serde_json::to_vec(&history).unwrap();
+    let raw = alt_json::to_vec(&alt_json_serde::Serde(&history)).unwrap();
     let digest = history.statement.digest().unwrap();
     // The fixture supplies already-committed historical facts, without any
     // installed connector. Production intake/current authorization is tested
@@ -201,6 +201,14 @@ fn link_history_reservation_and_activation_are_atomic_with_the_native_snapshot()
         .unwrap();
     stage_import(&mut target, &export, &intent);
     let work = verify_import(&mut target, &intent);
+    // activation publishes the Git objects as a pack segment, which is counted too
+    target
+        .client()
+        .execute(
+            "UPDATE alt_repositories SET quota_bytes=quota_bytes+1000000",
+            &[],
+        )
+        .unwrap();
     target.client().batch_execute("CREATE FUNCTION reject_link_activation() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected activation failure'; END $$; CREATE TRIGGER reject_link_activation BEFORE INSERT ON alt_outbox FOR EACH ROW EXECUTE FUNCTION reject_link_activation()").unwrap();
     assert!(
         target
@@ -217,8 +225,24 @@ fn link_history_reservation_and_activation_are_atomic_with_the_native_snapshot()
         .unwrap();
     assert_eq!(history_state(&target), (metadata as i64, 0, 1));
     let status = target.store.instance_status(&target.credential).unwrap();
-    assert_eq!(status.stored_bytes, (blobs + metadata).to_string());
+    // what the content store still retains, the pack segment, and the link history
+    let held: i64 = target
+        .client()
+        .query_one(
+            "SELECT (SELECT COALESCE(sum(bytes),0) FROM alt_blobs b WHERE EXISTS(SELECT 1 FROM alt_pins p WHERE p.repository=b.repository AND p.blake3=b.blake3))::bigint+(SELECT sum(bytes) FROM alt_pack_segments WHERE state='live')::bigint",
+            &[],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(status.stored_bytes, (held as u64 + metadata).to_string());
     assert_eq!(status.reserved_bytes, "0");
+    target
+        .client()
+        .execute(
+            "UPDATE alt_repositories SET quota_bytes=$1",
+            &[&(held + metadata as i64)],
+        )
+        .unwrap();
     // New native uploads must see the history charge too.
     let mut native = Payload::new("quota-after-links", None);
     native.publication.key.scope = intent.key.scope.clone();
@@ -320,7 +344,8 @@ fn cloud_history_counts_in_aggregate_storage_and_ingress_once() {
     ));
     policy = super::super::cloud::service(9, 5, true);
     policy.limits.monthly_ingress_bytes = golia_platform_contract::Counter(blobs + metadata);
-    policy.limits.stored_bytes = golia_platform_contract::Counter(blobs + metadata);
+    // room for the pack segment the activation publishes
+    policy.limits.stored_bytes = golia_platform_contract::Counter(blobs + metadata + 1_000_000);
     target.store.refresh_cloud_service(&policy).unwrap();
     target
         .store

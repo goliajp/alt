@@ -1,6 +1,7 @@
 //! Git objects as verified pack segments: one database row per segment, refs and the
 //! segment published in one transaction, reads without any per-object row.
 
+use crate::Jsonb;
 use crate::{
     Credential, Error, Result, Store,
     store::{authorize, credential_row, instance, integer, now, snapshot, unsigned},
@@ -173,6 +174,18 @@ impl Graph for SegmentGraph<'_> {
     }
 }
 
+/// directory holding one repository's segments, created on first use
+pub(crate) fn pack_directory_at(root: &std::path::Path, repository: &str) -> Result<PathBuf> {
+    let packs = root.join("packs");
+    let path = packs.join(&alt_hash::blake3::hash(repository.as_bytes()).to_hex()[..32]);
+    if !path.is_dir() {
+        std::fs::create_dir_all(&path)?;
+        std::fs::File::open(&packs)?.sync_all()?;
+        std::fs::File::open(root)?.sync_all()?;
+    }
+    Ok(path)
+}
+
 /// a segment built from natively uploaded Git objects, not yet published
 pub(crate) struct Materialized {
     pub(crate) id: String,
@@ -205,26 +218,18 @@ impl Store {
         credential: &Credential,
         repository: &str,
         oid: ObjectId,
-    ) -> Result<(ObjectKind, u64, std::io::Cursor<Vec<u8>>)> {
+    ) -> Result<(ObjectKind, u64, alt_pack_segment::ObjectStream)> {
         let view = self.pack_view(credential, repository)?;
         let key: [u8; 20] = oid.as_bytes().try_into().map_err(|_| Error::Unauthorized)?;
-        let record = view
+        let (kind, size, stream) = view
             .segments
-            .record(&key)
-            .map_err(|_| Error::Integrity("pack segment record"))?
+            .open(&key)
+            .map_err(|_| Error::Integrity("published object bytes"))?
             .ok_or(Error::Unauthorized)?;
-        if record.size > self.limits.object_bytes {
+        if size > self.limits.object_bytes {
             return Err(Error::Limit("published object read bytes"));
         }
-        let (kind, data) = view
-            .segments
-            .read(&key)
-            .map_err(|_| Error::Integrity("published object bytes"))?;
-        Ok((
-            object_kind(kind),
-            data.len() as u64,
-            std::io::Cursor::new(data),
-        ))
+        Ok((object_kind(kind), size, stream))
     }
 
     /// live segments of a repository, read inside the caller's transaction
@@ -239,81 +244,8 @@ impl Store {
             .collect())
     }
 
-    /// Packs the Git objects a native publication uploaded into one segment, so that Git
-    /// clients can fetch them. The file is written; the row is the caller's to insert.
-    pub(crate) fn materialize(
-        &mut self,
-        repository: &str,
-        existing: &SegmentSet,
-        objects: Vec<(Kind, Vec<u8>)>,
-    ) -> Result<Option<Materialized>> {
-        if objects.is_empty() {
-            return Ok(None);
-        }
-        let failed = |_| Error::Integrity("native Git objects do not form a valid segment");
-        let pack = alt_pack_segment::build_pack(
-            objects.iter().map(|(kind, data)| (*kind, data.as_slice())),
-        )
-        .map_err(failed)?;
-        let ingested = alt_pack_segment::ingest(
-            &pack,
-            existing,
-            &alt_pack_segment::Limits {
-                objects: self.limits.graph_objects as u64,
-                object_bytes: self.limits.object_bytes,
-                inflated_bytes: self.limits.total_bytes,
-                delta_depth: 1,
-            },
-        )
-        .map_err(failed)?;
-        let mut content = pack;
-        ingested.write_index(&mut content).map_err(failed)?;
-        let mut nonce = [0u8; 16];
-        alt_os::random::fill(&mut nonce);
-        let id: String = nonce.iter().map(|byte| format!("{byte:02x}")).collect();
-        let path = self.pack_path(repository, &id)?;
-        let inline = content.len() <= INLINE_SEGMENT_BYTES;
-        {
-            use std::{io::Write, os::unix::fs::OpenOptionsExt};
-            let mut file = std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .open(&path)?;
-            file.write_all(&content)?;
-            if !inline {
-                file.sync_all()?;
-                std::fs::File::open(path.parent().expect("segment directory"))?.sync_all()?;
-            }
-        }
-        let segment = match Segment::open(&path) {
-            Ok(segment) => Arc::new(segment),
-            Err(_) => {
-                let _ = std::fs::remove_file(&path);
-                return Err(Error::Integrity("materialized segment"));
-            }
-        };
-        Ok(Some(Materialized {
-            id,
-            objects: ingested.objects() as u64,
-            bytes: content.len() as u64,
-            flags: ingested.flags(),
-            inline: inline.then_some(content),
-            segment,
-            path,
-        }))
-    }
-
-    /// directory holding one repository's segments, created on first use
     pub fn pack_directory(&self, repository: &str) -> Result<PathBuf> {
-        let packs = self.bytes().root().join("packs");
-        let path = packs.join(&alt_hash::blake3::hash(repository.as_bytes()).to_hex()[..32]);
-        if !path.is_dir() {
-            std::fs::create_dir_all(&path)?;
-            std::fs::File::open(&packs)?.sync_all()?;
-            std::fs::File::open(self.bytes().root())?.sync_all()?;
-        }
-        Ok(path)
+        pack_directory_at(self.bytes().root(), repository)
     }
 
     pub fn pack_path(&self, repository: &str, segment: &str) -> Result<PathBuf> {
@@ -407,11 +339,11 @@ impl Store {
         credential: &Credential,
         repository: &str,
     ) -> Result<Option<PackView>> {
-        use serde_json::Value;
+        use alt_json::Value;
         let row = self
             .client
             .query_one(VIEW, &[&credential.digest, &repository])?;
-        let field = |index: usize| row.get::<_, Option<Value>>(index);
+        let field = |index: usize| row.get::<_, Option<Jsonb>>(index).map(|json| json.0);
         let text =
             |value: &Value, key: &str| value.get(key).and_then(Value::as_str).map(str::to_owned);
         let number = |value: &Value, key: &str| value.get(key).and_then(Value::as_i64);
@@ -469,7 +401,7 @@ impl Store {
             return Err(Error::Unauthorized);
         }
         let grants: Vec<alt_repository_service::Grant> =
-            serde_json::from_value(grant.get("grants").cloned().unwrap_or(Value::Null))?;
+            alt_json::from_value(grant.get("grants").cloned().unwrap_or(Value::Null))?;
         let mut refs = BTreeMap::new();
         for pair in field(7)
             .and_then(|value| value.as_array().cloned())
@@ -487,7 +419,7 @@ impl Store {
                     .map_err(|_| Error::Integrity("stored reference object id"))?,
             );
         }
-        let ids: Vec<(String, bool)> = serde_json::from_value(field(8).unwrap_or(Value::Null))?;
+        let ids: Vec<(String, bool)> = alt_json::from_value(field(8).unwrap_or(Value::Null))?;
         Ok(Some(PackView {
             scope: Scope {
                 installation_id: self.spec.installation_id.clone(),
@@ -507,7 +439,7 @@ impl Store {
                     .any(|grant| grant.create || grant.update || grant.delete),
             actor_id: text(&credential_row, "actor_id")
                 .ok_or(Error::Integrity("credential actor"))?,
-            attribution: serde_json::from_value(attribution)?,
+            attribution: alt_json::from_value(attribution)?,
             segments: self.open_segments(repository, &ids)?,
         }))
     }
@@ -622,7 +554,7 @@ impl Store {
                 .map(|byte| format!("{byte:02x}"))
                 .collect(),
         };
-        let event = serde_json::json!({"kind":"publication_committed","receipt":receipt});
+        let event = Jsonb(alt_json::json!({"kind":"publication_committed","receipt":receipt}));
         tx.execute(
             "INSERT INTO alt_audit(repository,sequence,actor_id,event) VALUES($1,$2,$3,$4)",
             &[repository, &integer(sequence)?, &auth.actor_id, &event],
@@ -642,9 +574,9 @@ impl Store {
                 &publication.key.actor_id,
                 &publication.key.request_id,
                 &validated.digest,
-                &serde_json::to_value(publication)?,
-                &serde_json::json!({"pack_segment": segment.as_ref().map(|segment| segment.id)}),
-                &serde_json::to_value(&result)?,
+                &Jsonb::from(&publication)?,
+                &Jsonb(alt_json::json!({"pack_segment": segment.as_ref().map(|segment| segment.id)})),
+                &Jsonb::from(&result)?,
             ],
         )?;
         // lock waits can outlive a lease checked on entry

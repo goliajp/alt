@@ -1,5 +1,6 @@
 //! Physical segment ownership and locations. All mutations share the repository
 //! barrier with logical publication and garbage collection.
+use crate::Jsonb;
 use crate::database::Transaction;
 use crate::requests::{active, check_key, upload_request_row};
 use crate::store::{authorize, instance, integer, now, snapshot, unsigned};
@@ -86,7 +87,7 @@ fn upload_authority(
         upload_request_row(tx, key)?.ok_or(Error::Precondition("segment request missing"))?;
     let time = now(tx)?;
     active(&request, time)?;
-    let publication: Publication = serde_json::from_value(request.get("publication"))?;
+    let publication: Publication = request.get::<_, Jsonb>("publication").read()?;
     alt_repository_service::authorize_intent(&publication, &current, &auth, limits, time)?;
     Ok(request)
 }
@@ -161,7 +162,7 @@ impl Store {
         }
         for row in rows {
             let digest: String = row.get(0);
-            let entries: Vec<ContentEntry> = serde_json::from_value(row.get(1))?;
+            let entries: Vec<ContentEntry> = row.get::<_, Jsonb>(1).read()?;
             if row.get::<_, String>(3) == "deleting"
                 || unsigned(row.get(2))? != selection[&digest]
                 || !entries
@@ -175,7 +176,7 @@ impl Store {
         if pending >= 8 {
             return Err(Error::Limit("pending segment attempts"));
         }
-        tx.execute("INSERT INTO alt_segments(repository,segment_id,owner_kind,epoch,actor_id,request_id,state,expires_at,member_count,payload_bytes,selection) VALUES($1,$2,'upload',$3,$4,$5,'uploading',$6,$7,$8,$9)", &[repository,&id,&integer(key.scope.recovery_epoch)?,&key.actor_id,&key.request_id,&request.get::<_, i64>("expires_at"),&integer(selection.len() as u64)?,&integer(total)?,&serde_json::to_value(&selection)?])?;
+        tx.execute("INSERT INTO alt_segments(repository,segment_id,owner_kind,epoch,actor_id,request_id,state,expires_at,member_count,payload_bytes,selection) VALUES($1,$2,'upload',$3,$4,$5,'uploading',$6,$7,$8,$9)", &[repository,&id,&integer(key.scope.recovery_epoch)?,&key.actor_id,&key.request_id,&request.get::<_, i64>("expires_at"),&integer(selection.len() as u64)?,&integer(total)?,&Jsonb::from(&selection)?])?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)?;
 
         let mut tx = self.client.transaction()?;
@@ -231,7 +232,7 @@ impl Store {
             )?;
         } else {
             let total: u64 = new_selection.values().sum();
-            tx.execute("UPDATE alt_segments SET selection=$3,member_count=$4,payload_bytes=$5 WHERE repository=$1 AND segment_id=$2", &[repository,&id,&serde_json::to_value(&new_selection)?,&integer(new_selection.len() as u64)?,&integer(total)?])?;
+            tx.execute("UPDATE alt_segments SET selection=$3,member_count=$4,payload_bytes=$5 WHERE repository=$1 AND segment_id=$2", &[repository,&id,&Jsonb::from(&new_selection)?,&integer(new_selection.len() as u64)?,&integer(total)?])?;
             let mut streams: Vec<_> = inputs
                 .iter_mut()
                 .filter(|input| new_selection.contains_key(input.digest))
@@ -305,7 +306,7 @@ pub(crate) fn register_locations(
         {
             return Err(Error::Precondition("segment owner or lease changed"));
         }
-        let expected: BTreeMap<String, u64> = serde_json::from_value(row.get(6))?;
+        let expected: BTreeMap<String, u64> = row.get::<_, Jsonb>(6).read()?;
         let actual: BTreeMap<String, u64> = members
             .iter()
             .map(|(entry, _)| (entry.blake3.clone(), entry.bytes))

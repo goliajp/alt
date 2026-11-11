@@ -677,6 +677,6 @@ mod tests {
 #[cfg(test)]
 mod json_tests {
     use super::*;
-
     alt_json_testkit::module_fixture_tests!("native-recovery"; WorkspaceIdentity, RefEffects, RefContext, PathGuard, IndexIntent, Completion);
+    alt_json_testkit::module_read_tests!("state-recovery"; RefContext: RefContext, IndexIntent: IndexIntent, Completion: Completion);
 }

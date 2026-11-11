@@ -1,11 +1,9 @@
 //! Bounded agent credentials. Requests contain secrets and deliberately lack Debug.
 use crate::{ActorKind, Attribution, Error, Result, Scope, authorization::Grant};
-use serde::{Deserialize, Serialize};
 
 pub const MAX_LIFETIME_MS: u64 = 3_600_000;
 
-#[derive(Clone, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct AgentScope {
     pub repository: Scope,
@@ -35,14 +33,12 @@ impl AgentScope {
         Ok(())
     }
 }
-#[derive(Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct DelegationRequest {
     pub version: u32,
     pub access_token: String,
     pub attribution: Attribution,
-    #[serde(with = "crate::decimal")]
     #[json(with = "alt_json::with::decimal_u64")]
     pub expires_at_unix_ms: u64,
     pub purpose: String,
@@ -71,25 +67,21 @@ impl DelegationRequest {
         self.scope.validate()
     }
 }
-#[derive(Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct DelegationInfo {
     pub credential_id: String,
     pub attribution: Attribution,
     pub scope: AgentScope,
     pub purpose: String,
-    #[serde(with = "crate::decimal")]
     #[json(with = "alt_json::with::decimal_u64")]
     pub created_at_unix_ms: u64,
-    #[serde(with = "crate::decimal")]
     #[json(with = "alt_json::with::decimal_u64")]
     pub expires_at_unix_ms: u64,
     pub revoked: bool,
 }
 
-#[derive(Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct DelegationPage {
     pub items: Vec<DelegationInfo>,

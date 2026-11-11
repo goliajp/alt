@@ -4,7 +4,6 @@ use alt_remote_protocol::{
     ContentKind, DeploymentMode, Limits, MAX_TRANSFER_PROOFS, Manifest, Publication, Receipt,
     RequestKey, Scope, TransferProof,
 };
-use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::Read,
@@ -37,14 +36,10 @@ impl PackageLimits {
     }
 }
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct Blob {
     pub blake3: String,
-    #[serde(with = "crate::decimal")]
     #[json(with = "alt_json::with::decimal_u64")]
     pub bytes: u64,
 }
@@ -57,20 +52,14 @@ impl Blob {
     }
 }
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct Object {
     pub kind: ContentKind,
     pub oid: String,
     pub payload: Blob,
 }
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct Reference {
     pub name: String,
@@ -79,10 +68,7 @@ pub struct Reference {
 
 /// The exact raw metadata payloads remain addressable. Decoding and re-encoding
 /// these documents during import would lose the original byte representation.
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct HistoricalPublication {
     pub digest: String,
@@ -94,8 +80,7 @@ pub struct HistoricalPublication {
 
 /// Source permissions explain which identities need an explicit disposition.
 /// They are historical requirements, not grants to install on the target.
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct IdentityRequirement {
     pub installation_id: String,
@@ -109,8 +94,7 @@ pub struct IdentityRequirement {
 /// Closed allowlist. There are no arbitrary SQL tables or configuration maps.
 /// Repository content may itself contain secrets; the export permission and
 /// content selection are the caller's responsibility.
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct Catalog {
     pub version: u32,
@@ -118,7 +102,6 @@ pub struct Catalog {
     pub source_mode: DeploymentMode,
     pub source_public_key: String,
     pub export_id: String,
-    #[serde(with = "crate::decimal")]
     #[json(with = "alt_json::with::decimal_u64")]
     pub snapshot_sequence: u64,
     pub object_format: alt_remote_protocol::ObjectFormat,
@@ -129,12 +112,10 @@ pub struct Catalog {
     pub publications: Vec<HistoricalPublication>,
     /// Original signed import receipts preserve previous identity dispositions.
     /// These are historical evidence, never current target authorization.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[json(default, skip_serializing_if = "Vec::is_empty")]
     pub import_receipts: Vec<Blob>,
     /// Signed cross-product history only. Embedded public keys never install a
     /// live channel, credential, task claim, or current approval on the target.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[json(
         default,
         skip_serializing_if = "Vec::is_empty",

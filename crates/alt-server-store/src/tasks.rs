@@ -1,3 +1,4 @@
+use crate::Jsonb;
 use crate::database::Transaction;
 use crate::requests::{pin, upload_pin};
 use crate::store::{authorize, instance, integer, now, require_admin, snapshot, unsigned};
@@ -70,6 +71,10 @@ pub(crate) fn check_pins(
     // pinned, not just the subset needed to validate today's task roots.
     let time = integer(now(tx)?)?;
     for entry in &work.manifest.entries {
+        // a Git object a segment holds needs no copy in the content store
+        if work.source.settled_entry(entry)? {
+            continue;
+        }
         let row = tx.query_opt("SELECT b.bytes FROM alt_blobs b JOIN alt_pins p ON p.repository=b.repository AND p.blake3=b.blake3 WHERE b.repository=$1 AND b.blake3=$2 AND b.state='stored' AND p.pin_id=$3 AND p.expires_at>$4", &[repository,&entry.blake3,&pin_id,&time])?.ok_or(Error::Precondition("task selection pin expired"))?;
         if unsigned(row.get(0))? != entry.bytes {
             return Err(Error::Integrity("task selection size"));
@@ -92,7 +97,6 @@ fn in_segment(work: &PublicationWork, oid: &alt_git_codec::ObjectId) -> bool {
 pub(crate) fn retain(
     tx: &mut Transaction<'_>,
     work: &PublicationWork,
-    graph: &VerifiedGraph,
     tasks: Option<&VerifiedTaskGraph>,
     sequence: u64,
     digest: &str,
@@ -103,24 +107,18 @@ pub(crate) fn retain(
     let repository = &work.key.scope.repository_instance_id;
     let bundle = &tasks.bundle_artifact().blake3;
     let pin_id = format!("task-bundle:{bundle}");
+    // Records, attachments and the bundle stay in the content store for good. The
+    // Git objects the manifest selects are held by the pack segments instead.
     for entry in &work.manifest.entries {
-        pin(tx, repository, &pin_id, &entry.blake3, None)?;
-    }
-    // The original publication also names its old/new ref graphs. Keep those
-    // historical inputs even after current refs advance or disappear.
-    for oid in graph.objects() {
-        match work.source.objects.get(&oid) {
-            Some((_, digest, _)) => pin(tx, repository, &pin_id, digest, None)?,
-            // a segment keeps what it holds; there is no content to pin
-            None if in_segment(work, &oid) => {}
-            None => return Err(Error::Integrity("task object mapping")),
+        if entry.git_oid.is_none() {
+            pin(tx, repository, &pin_id, &entry.blake3, None)?;
         }
     }
     for selection in tasks.records() {
         tx.execute("INSERT INTO alt_task_records(repository,kind,record_id,payload_blake3) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING", &[repository,&selection.record.kind.as_str(),&selection.record.id,&selection.payload.blake3])?;
     }
     for root in tasks.roots() {
-        let kind = serde_json::to_value(root.kind)?
+        let kind = alt_json::to_value(root.kind)?
             .as_str()
             .ok_or(Error::Integrity("task root kind"))?
             .to_owned();
@@ -131,7 +129,7 @@ pub(crate) fn retain(
         tx.execute("INSERT INTO alt_task_bundle_records(repository,epoch,actor_id,request_id,kind,record_id,payload_blake3) VALUES($1,$2,$3,$4,$5,$6,$7)", &[repository,&integer(work.key.scope.recovery_epoch)?,&work.key.actor_id,&work.key.request_id,&selection.record.kind.as_str(),&selection.record.id,&selection.payload.blake3])?;
     }
     for root in tasks.roots() {
-        let kind = serde_json::to_value(root.kind)?
+        let kind = alt_json::to_value(root.kind)?
             .as_str()
             .ok_or(Error::Integrity("task root kind"))?
             .to_owned();
@@ -149,7 +147,7 @@ pub(crate) fn collector_policy(
         "SELECT generation,policy FROM alt_collector_policies WHERE repository=$1",
         &[&repository],
     )? {
-        Some(row) => Ok((unsigned(row.get(0))?, serde_json::from_value(row.get(1))?)),
+        Some(row) => Ok((unsigned(row.get(0))?, row.get::<_, Jsonb>(1).read()?)),
         None => Ok((0, CollectorPolicy::default())),
     }
 }
@@ -264,7 +262,7 @@ impl Store {
             admin,
             "repository.review_grant",
             repository,
-            serde_json::json!({"actor_id":actor,"can_review":can_review}),
+            Jsonb(alt_json::json!({"actor_id":actor,"can_review":can_review})),
         )?;
         tx.commit()?;
         Ok(())
@@ -276,21 +274,21 @@ impl Store {
         policy: &CollectorPolicy,
     ) -> Result<()> {
         policy.validate()?;
-        if serde_json::to_vec(policy)?.len() > self.limits.request_bytes {
+        if alt_json::to_vec(policy)?.len() > self.limits.request_bytes {
             return Err(Error::Limit("collector policy bytes"));
         }
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         snapshot(&mut tx, &self.spec, repository)?;
         require_admin(&mut tx, &self.spec, admin)?;
-        tx.execute("INSERT INTO alt_collector_policies VALUES($1,1,$2) ON CONFLICT(repository) DO UPDATE SET generation=alt_collector_policies.generation+1,policy=excluded.policy", &[&repository,&serde_json::to_value(policy)?])?;
+        tx.execute("INSERT INTO alt_collector_policies VALUES($1,1,$2) ON CONFLICT(repository) DO UPDATE SET generation=alt_collector_policies.generation+1,policy=excluded.policy", &[&repository,&Jsonb::from(&policy)?])?;
         crate::browser::audit_admin(
             &mut tx,
             &self.spec,
             admin,
             "repository.collector_policy",
             repository,
-            serde_json::json!({"policy":policy}),
+            Jsonb(alt_json::json!({"policy":policy})),
         )?;
         tx.commit()?;
         Ok(())
@@ -417,7 +415,7 @@ pub(crate) fn approve_current(
     Ok(())
 }
 
-#[derive(serde::Serialize)]
+#[derive(alt_json::ToJson)]
 pub struct CurrentReviewAssessment {
     pub approved: bool,
     pub selection: alt_remote_protocol::ReviewSelection,

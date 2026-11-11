@@ -2,7 +2,7 @@
 //! as four rows of four words
 
 use super::IV;
-use super::lanes::{Batch, Lanes, in_groups};
+use super::lanes::{Batch, Lanes, Short, compress_ragged, in_groups};
 use std::arch::x86_64::*;
 
 mod vex;
@@ -331,4 +331,12 @@ pub(super) unsafe fn hash_many<'a, 'b>(
 ) -> (&'a [u8], u64, &'b mut [u8]) {
     // sse4.1 is enabled for this function
     unsafe { in_groups::<__m128i>(batch, input, counter, out) }
+}
+
+/// Compresses at most four chunks of any lengths side by side; `out` gets 32 bytes
+/// for each.
+#[target_feature(enable = "sse4.1")]
+pub(super) unsafe fn ragged(key: &[u32; 8], flags: u32, chunks: &[Short], out: &mut [u8]) {
+    // sse4.1 is enabled for this function
+    unsafe { compress_ragged::<__m128i>(key, flags, chunks, out) }
 }

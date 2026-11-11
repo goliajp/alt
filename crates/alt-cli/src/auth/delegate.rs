@@ -5,6 +5,7 @@ use alt_remote_protocol::{
 };
 
 #[derive(alt_json::FromJson)]
+#[cfg_attr(test, derive(alt_json::ToJson))]
 #[json(deny_unknown_fields)]
 struct Plan {
     purpose: String,
@@ -248,4 +249,9 @@ mod json_tests {
     use super::*;
 
     alt_json_testkit::module_fixture_tests!("auth-delegate"; PendingAgent);
+    mod reads {
+        use super::*;
+        alt_json_testkit::module_read_tests!("auth-delegate"; Plan: Plan);
+    }
+    alt_json_testkit::module_read_tests!("state-auth"; PendingAgent: PendingAgent, Plan: Plan);
 }

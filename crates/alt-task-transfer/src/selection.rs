@@ -31,8 +31,7 @@ pub trait Source: ArtifactSource + ObjectSource {
         maximum: usize,
     ) -> Result<Provenance>;
 }
-#[derive(Clone, serde::Serialize, serde::Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct Selection {
     pub roots: Vec<RecordRoot>,

@@ -166,7 +166,7 @@ fn portable_http_transfers_immutable_snapshot_with_lost_activation_response_and_
         ExportState::Available { frozen: true, .. }
     ));
     // Send the complete mutation but deliberately discard its HTTP response.
-    let body = serde_json::to_vec(&intent).unwrap();
+    let body = alt_json::to_vec(&intent).unwrap();
     let address = target_server.url.strip_prefix("http://").unwrap();
     let path = format!(
         "/v1/repositories/repository/epochs/1/portable/imports/owner/{}/activate",

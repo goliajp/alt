@@ -1,7 +1,6 @@
 use crate::{CONTROL, Error, Result, capture_file};
 use alt_input::{EntryKind, Manifest, Node, Root, Tree};
 use alt_task::Artifact;
-use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
@@ -219,8 +218,7 @@ pub fn materialize(
     Ok(())
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct InputObservation {
     pub identity: Option<String>,

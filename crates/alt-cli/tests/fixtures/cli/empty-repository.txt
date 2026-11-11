@@ -1,0 +1,65 @@
+$ [repo] alt init .
+exit 0
+$ [repo] alt status --json
+exit 0
+out| {"schema_version":1,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[],"unstaged":[],"untracked":[],"unmerged":[],"clean":true}
+$ [repo] alt branch --json
+exit 0
+out| {"schema_version":1,"current":"main","branches":[]}
+$ [repo] alt tag --json
+exit 0
+out| {"schema_version":1,"tags":[]}
+$ [repo] alt log --json
+exit 128
+err| {"error":{"details":{"operation_ids":[]},"kind":"execution_error","message":"bad revision 'HEAD'","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [repo] alt diff --json
+exit 0
+out| {"schema_version":1,"files":[]}
+$ [repo] alt diff --cached --json
+exit 0
+out| {"schema_version":1,"files":[]}
+$ [repo] alt show --json
+exit 128
+err| {"error":{"details":{"operation_ids":[]},"kind":"execution_error","message":"bad revision 'HEAD'","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [repo] alt op-log --json
+exit 0
+out| {"schema_version":1,"ops":[{"id":"<id64:0>","request_id":null,"timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"init","ref_changes":[{"name":"HEAD","old":null,"new":"@refs/heads/main"}],"workspace":{"name":"default","instance":"<id64:1>"},"inverse_of":null}]}
+$ [repo] alt op-log --verify --json
+exit 0
+out| {"schema_version":1,"ops":[{"id":"<id64:0>","request_id":null,"timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"init","ref_changes":[{"name":"HEAD","old":null,"new":"@refs/heads/main"}],"workspace":{"name":"default","instance":"<id64:1>"},"inverse_of":null,"sig":{"status":"unsigned","principal":null}}]}
+$ [repo] alt remote list --json
+exit 0
+out| {"schema_version":1,"remotes":[]}
+$ [repo] alt workspace list --json
+exit 0
+out| {"schema_version":1,"workspaces":[{"name":"default","path":"<root>/repo","current":true}]}
+$ [repo] alt identity list --json
+exit 0
+out| {"schema_version":1,"identities":[]}
+$ [repo] alt operation pending --json
+exit 0
+out| {"schema_version":1,"operations":[]}
+$ [repo] alt request pending --json
+exit 0
+out| {"requests":[],"schema_version":1}
+$ [repo] alt task list --json
+exit 0
+out| {"schema_version":1,"tasks":[]}
+$ [repo] alt meta show --json
+exit 128
+err| {"error":{"details":{"operation_ids":[]},"kind":"execution_error","message":"bad revision 'HEAD'","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [repo] alt verify --json
+exit 0
+out| {"schema_version":1,"commits":[]}
+$ [repo] alt undo --json
+exit 1
+err| {"error":{"details":{"operation_ids":[]},"kind":"unsupported_record","message":"unknown or incomplete recovery effects; automatic undo refused","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:2>","retryable":false},"schema_version":1}
+$ [repo] alt add . --json
+exit 0
+out| {"operation_ids":[],"request_id":"<id32:3>","schema_version":1,"staged":0}
+$ [repo] alt commit -m nothing --json
+exit 1
+err| {"error":{"details":{"operation_ids":[]},"kind":"precondition_failed","message":"nothing to commit (empty index)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:4>","retryable":false},"schema_version":1}
+$ [repo] alt ci validate --json
+exit 0
+out| no workflow.toml files found under .alt/ci/<name>/workflow.toml

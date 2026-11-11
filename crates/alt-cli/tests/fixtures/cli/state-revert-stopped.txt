@@ -1,0 +1,37 @@
+$ [repo] alt init .
+exit 0
+$ [repo] alt add .
+exit 0
+$ [repo] alt commit -m base
+exit 0
+$ [repo] alt branch apart
+exit 0
+$ [repo] alt switch -c feat
+exit 0
+$ [repo] alt add .
+exit 0
+$ [repo] alt commit -m feat: change line two
+exit 0
+$ [repo] alt add .
+exit 0
+$ [repo] alt commit -m feat: later
+exit 0
+$ [repo] alt switch main
+exit 0
+$ [repo] alt add .
+exit 0
+$ [repo] alt commit -m main: change line two
+exit 0
+$ [repo] alt add .
+exit 0
+$ [repo] alt commit -m main: again
+exit 0
+$ [repo] alt revert HEAD~1 --json
+exit 1
+err| {"error":{"details":{"command_output":{"encoding":"utf-8","text":"{\"schema_version\":1,\"result\":\"conflicted\",\"commit\":null,\"conflicts\":[\"f.txt\"]}\n","truncated":false},"operation_ids":[]},"kind":"conflict","message":"command reported a conflict or failed validation","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"partial","request_id":"<id32:0>","retryable":false},"schema_version":1}
+$ [repo] alt status --json
+exit 0
+out| {"schema_version":1,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[],"unstaged":[],"untracked":[],"unmerged":["f.txt"],"clean":false}
+$ [repo] alt operation pending --json
+exit 0
+out| {"schema_version":1,"operations":[]}

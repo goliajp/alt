@@ -5,10 +5,12 @@ mod change_links;
 mod cloud;
 mod delegation;
 mod faults;
+mod json;
 mod maintenance;
 mod provenance;
 mod registration;
 mod segments;
+mod single_copy;
 mod tasks;
 mod upload_selection;
 
@@ -318,11 +320,12 @@ fn durable_commit_replay_restart_and_signed_receipt() {
         matches!(observed,RequestObservation::Recorded {result,..} if *result==RequestState::Committed {receipt:Box::new(receipt)})
     );
     assert_eq!(f.counts(), (1, 1, 1));
+    // the content-store copies of the two published Git objects
     assert_eq!(
         f.store
             .collect_orphans(&f.credential, "repository", 100)
             .unwrap(),
-        0
+        2
     );
 }
 #[test]
@@ -625,7 +628,9 @@ fn corrupt_policy_is_rejected_without_stale_fallback() {
     f.client()
         .execute(
             "UPDATE alt_repositories SET policies=$1",
-            &[&serde_json::json!({"corrupted":true})],
+            &[&alt_server_store::Jsonb(
+                alt_json::json!({"corrupted":true}),
+            )],
         )
         .unwrap();
     assert!(f.store.publish(&f.credential, &work, &graph).is_err());

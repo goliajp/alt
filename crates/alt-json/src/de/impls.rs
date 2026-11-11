@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::hash::{BuildHasher, Hash};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -110,6 +111,12 @@ impl FromJson for char {
 impl FromJson for PathBuf {
     fn from_json(d: &mut Decoder<'_>) -> Result<Self> {
         d.str("path string", |s| Ok(PathBuf::from(s.into_owned())))
+    }
+}
+
+impl FromJson for SocketAddr {
+    fn from_json(d: &mut Decoder<'_>) -> Result<Self> {
+        d.str("socket address", |s| s.parse().map_err(Error::custom))
     }
 }
 
@@ -278,6 +285,14 @@ tuples! {
     (6 A 0 B 1 C 2 D 3 E 4 F 5)
     (7 A 0 B 1 C 2 D 3 E 4 F 5 G 6)
     (8 A 0 B 1 C 2 D 3 E 4 F 5 G 6 H 7)
+    (9 A 0 B 1 C 2 D 3 E 4 F 5 G 6 H 7 I 8)
+    (10 A 0 B 1 C 2 D 3 E 4 F 5 G 6 H 7 I 8 J 9)
+    (11 A 0 B 1 C 2 D 3 E 4 F 5 G 6 H 7 I 8 J 9 K 10)
+    (12 A 0 B 1 C 2 D 3 E 4 F 5 G 6 H 7 I 8 J 9 K 10 L 11)
+    (13 A 0 B 1 C 2 D 3 E 4 F 5 G 6 H 7 I 8 J 9 K 10 L 11 M 12)
+    (14 A 0 B 1 C 2 D 3 E 4 F 5 G 6 H 7 I 8 J 9 K 10 L 11 M 12 N 13)
+    (15 A 0 B 1 C 2 D 3 E 4 F 5 G 6 H 7 I 8 J 9 K 10 L 11 M 12 N 13 O 14)
+    (16 A 0 B 1 C 2 D 3 E 4 F 5 G 6 H 7 I 8 J 9 K 10 L 11 M 12 N 13 O 14 P 15)
 }
 
 impl FromJson for Value {

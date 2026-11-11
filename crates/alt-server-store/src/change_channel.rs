@@ -1,16 +1,17 @@
 //! Persisted operational installation, independent from historical public keys.
+use crate::Jsonb;
 use crate::database::Transaction;
 use crate::store::{authorize, instance, integer, now, require_admin, snapshot};
 use crate::{Credential, Error, InstanceSpec, Result, Store};
 use alt_remote_protocol::{ActorKind, RequestKey, Scope};
 use alt_repository_service::{Authorization, RepositorySnapshot};
 use golia_change_link::{Counter, Endpoint, Product};
-use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
+#[json(deny_unknown_fields)]
 pub struct ChangeChannel {
     pub channel: String,
+    #[json(with = "alt_json_serde::bridge")]
     pub peer: Endpoint,
     /// One exact Sentori application within the paired project.
     pub application: String,
@@ -79,7 +80,7 @@ pub(crate) fn installed(
     if !row.get::<_, bool>(1) {
         return Err(Error::Unauthorized);
     }
-    let value: ChangeChannel = serde_json::from_value(row.get(0))?;
+    let value: ChangeChannel = row.get::<_, Jsonb>(0).read()?;
     value.validate(scope)?;
     if value.channel != channel {
         return Err(Error::Integrity("change-link channel binding"));
@@ -133,8 +134,7 @@ impl Store {
         )?;
         let existing=tx.query_opt("SELECT specification,enabled FROM alt_link_channels WHERE repository=$1 AND epoch=$2 AND channel=$3", &[&scope.repository_instance_id,&integer(scope.recovery_epoch)?,&channel.channel])?;
         if let Some(row) = existing {
-            if !row.get::<_, bool>(1)
-                || serde_json::from_value::<ChangeChannel>(row.get(0))? != *channel
+            if !row.get::<_, bool>(1) || row.get::<_, Jsonb>(0).read::<ChangeChannel>()? != *channel
             {
                 return Err(Error::Precondition(
                     "change-link pairing is immutable; install a new channel",
@@ -148,13 +148,15 @@ impl Store {
             return Err(Error::Limit("active change-link channels"));
         }
         let time = integer(now(&mut tx)?)?;
-        tx.execute("INSERT INTO alt_link_channels(repository,epoch,channel,specification,enabled,created_at) VALUES($1,$2,$3,$4,true,$5)", &[&scope.repository_instance_id,&integer(scope.recovery_epoch)?,&channel.channel,&serde_json::to_value(channel)?,&time])?;
+        tx.execute("INSERT INTO alt_link_channels(repository,epoch,channel,specification,enabled,created_at) VALUES($1,$2,$3,$4,true,$5)", &[&scope.repository_instance_id,&integer(scope.recovery_epoch)?,&channel.channel,&Jsonb::from(&channel)?,&time])?;
         crate::browser::audit_details(
             &mut tx,
             &owner.actor_id,
             "change_link.installed",
             &scope.repository_instance_id,
-            &serde_json::json!({"channel":channel.channel,"configuration_digest":channel.configuration_digest}),
+            &Jsonb(
+                alt_json::json!({"channel":channel.channel,"configuration_digest":channel.configuration_digest}),
+            ),
         )?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)
     }
@@ -175,7 +177,7 @@ impl Store {
         let owner = authority(&mut tx, &self.spec, admin, &current, false)?;
         let time = integer(now(&mut tx)?)?;
         if tx.execute("UPDATE alt_link_channels SET enabled=false,disabled_at=$4 WHERE repository=$1 AND epoch=$2 AND channel=$3 AND enabled", &[&scope.repository_instance_id,&integer(scope.recovery_epoch)?,&channel,&time])?==1 {
-            crate::browser::audit_details(&mut tx,&owner.actor_id,"change_link.disabled",&scope.repository_instance_id,&serde_json::json!({"channel":channel}))?;
+            crate::browser::audit_details(&mut tx,&owner.actor_id,"change_link.disabled",&scope.repository_instance_id,&Jsonb(alt_json::json!({"channel":channel})))?;
         }
         tx.commit().map_err(|_| Error::OutcomeUnknown)
     }

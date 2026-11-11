@@ -90,22 +90,3 @@ impl From<std::io::Error> for Error {
     }
 }
 pub type Result<T> = std::result::Result<T, Error>;
-
-mod decimal {
-    use serde::{Deserialize, Deserializer, Serializer};
-    pub fn serialize<S: Serializer>(value: &u64, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(&value.to_string())
-    }
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
-        let value = String::deserialize(d)?;
-        if value.is_empty()
-            || (value.len() > 1 && value.starts_with('0'))
-            || !value.bytes().all(|b| b.is_ascii_digit())
-        {
-            return Err(serde::de::Error::custom(
-                "canonical unsigned decimal required",
-            ));
-        }
-        value.parse().map_err(serde::de::Error::custom)
-    }
-}

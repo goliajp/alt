@@ -84,10 +84,7 @@ fn chunks_resume_after_restart_verify_assembly_and_release_temporary_storage() {
     let server = Running::start(&f);
     let (status, uploaded) = server.command("GET", &format!("{request}/uploads"), &f.token);
     assert_eq!(status, 200);
-    assert_eq!(
-        uploaded["verified_chunks"],
-        serde_json::json!([first.blake3])
-    );
+    assert_eq!(uploaded["verified_chunks"], alt_json::json!([first.blake3]));
     for chunk in &entry.chunks[1..] {
         let start = chunk.offset as usize;
         assert_eq!(
@@ -112,11 +109,12 @@ fn chunks_resume_after_restart_verify_assembly_and_release_temporary_storage() {
     assert_eq!(status, 200, "{result}");
     assert_eq!(result["result"]["state"], "committed");
     assert_eq!(f.counts(), (1, 1, 1));
+    // the chunks, and the copies of the Git objects the publication let go of
     assert_eq!(
         f.store
             .collect_orphans(&f.credential, "repository", 1000)
             .unwrap(),
-        entry.chunks.len()
+        entry.chunks.len() + payload.manifest.entries.len()
     );
     let row = f
         .client()
@@ -125,7 +123,16 @@ fn chunks_resume_after_restart_verify_assembly_and_release_temporary_storage() {
             &[],
         )
         .unwrap();
-    assert_eq!(row.get::<_, i64>(0) as u64, entry.bytes);
+    // what is counted is the pack segment that holds the published objects
+    let segment: i64 = f
+        .client()
+        .query_one(
+            "SELECT sum(bytes)::bigint FROM alt_pack_segments WHERE state='live'",
+            &[],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(row.get::<_, i64>(0), segment);
     assert_eq!(row.get::<_, i64>(1), 0);
     assert_eq!(
         server

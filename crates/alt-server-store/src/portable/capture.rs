@@ -1,8 +1,9 @@
 //! Capturing one immutable snapshot: the catalog, its documents and its retention.
 use super::*;
+use crate::Jsonb;
 use alt_crypto::ed25519::SigningKey;
-use alt_portable::{Catalog, HistoricalPublication, Object, PackageLimits, Reference};
-use alt_remote_protocol::{ContentKind, Publication, RequestState};
+use alt_portable::{Catalog, HistoricalPublication, PackageLimits, Reference};
+use alt_remote_protocol::{Publication, RequestState};
 
 type Segments = (Vec<(String, bool)>, SegmentSet);
 
@@ -28,7 +29,7 @@ struct Inventory {
     budget: usize,
 }
 impl Inventory {
-    fn document(&mut self, value: &impl serde::Serialize) -> Result<Blob> {
+    fn document(&mut self, value: &impl alt_json::ToJson) -> Result<Blob> {
         document(
             &mut self.documents,
             &mut self.blobs,
@@ -43,13 +44,12 @@ impl Inventory {
     }
 }
 
-/// Published content the content store holds, pinned for this export. Previous
-/// export snapshots are not included recursively: only live publication roots,
-/// including retained task history, seed this one.
+/// Published content the content store holds. Previous export snapshots are not
+/// included recursively: only live publication roots, including retained task
+/// history, seed this one.
 fn stored_content(
     tx: &mut Transaction<'_>,
     repository: &str,
-    id: &str,
     limits: PackageLimits,
 ) -> Result<BTreeMap<String, Blob>> {
     let bound = integer((limits.entries as u64).saturating_add(1))?;
@@ -66,48 +66,9 @@ fn stored_content(
             blake3: row.get(0),
             bytes: unsigned(row.get(1))?,
         };
-        crate::requests::pin(tx, repository, &pin_id(id), &blob.blake3, None)?;
         blobs.insert(blob.blake3.clone(), blob);
     }
     Ok(blobs)
-}
-
-fn object_kind(kind: &str) -> Result<ContentKind> {
-    Ok(match kind {
-        "blob" => ContentKind::Blob,
-        "tree" => ContentKind::Tree,
-        "commit" => ContentKind::Commit,
-        "tag" => ContentKind::Tag,
-        _ => return Err(Error::Integrity("portable Git kind")),
-    })
-}
-
-/// Git objects a retained publication carried outside its graph: no segment holds
-/// them, the content store does.
-fn stored_objects(
-    tx: &mut Transaction<'_>,
-    repository: &str,
-    id: &str,
-    limits: PackageLimits,
-    blobs: &BTreeMap<String, Blob>,
-) -> Result<Vec<Object>> {
-    let bound = integer((limits.entries as u64).saturating_add(1))?;
-    let rows = tx.query("SELECT o.oid,o.kind,o.blake3 FROM alt_objects o JOIN alt_pins p ON p.repository=o.repository AND p.blake3=o.blake3 WHERE o.repository=$1 AND p.pin_id=$2 ORDER BY o.oid LIMIT $3", &[&repository,&pin_id(id),&bound])?;
-    if rows.len() > limits.entries {
-        return Err(Error::Limit("portable Git inventory"));
-    }
-    rows.iter()
-        .map(|row| {
-            Ok(Object {
-                oid: row.get(0),
-                kind: object_kind(&row.get::<_, String>(1))?,
-                payload: blobs
-                    .get(&row.get::<_, String>(2))
-                    .ok_or(Error::Integrity("portable object payload"))?
-                    .clone(),
-            })
-        })
-        .collect()
 }
 
 fn source_identities(
@@ -132,7 +93,7 @@ fn source_identities(
                 had_read: row.get(1),
                 had_publish_records: row.get(2),
                 had_review: row.get(4),
-                ref_grants: serde_json::from_value(row.get(3))?,
+                ref_grants: row.get::<_, Jsonb>(3).read()?,
             },
         );
     }
@@ -155,9 +116,9 @@ fn committed_publications(
     }
     let mut publications = Vec::new();
     for row in rows {
-        let publication: Publication = serde_json::from_value(row.get(0))?;
-        let manifest: alt_remote_protocol::Manifest = serde_json::from_value(row.get(1))?;
-        let RequestState::Committed { receipt } = serde_json::from_value(row.get(2))? else {
+        let publication: Publication = row.get::<_, Jsonb>(0).read()?;
+        let manifest: alt_remote_protocol::Manifest = row.get::<_, Jsonb>(1).read()?;
+        let RequestState::Committed { receipt } = row.get::<_, Jsonb>(2).read()? else {
             return Err(Error::Integrity("portable original receipt"));
         };
         let proofs = crate::provenance::load(tx, scope, &publication, &receipt, key, protocol)?;
@@ -196,9 +157,9 @@ fn archived_publications(
     }
     let mut publications = Vec::new();
     for row in rows {
-        let publication: Publication = serde_json::from_value(row.get(0))?;
-        let receipt: alt_remote_protocol::Receipt = serde_json::from_value(row.get(1))?;
-        let mut original: HistoricalPublication = serde_json::from_value(row.get(2))?;
+        let publication: Publication = row.get::<_, Jsonb>(0).read()?;
+        let receipt: alt_remote_protocol::Receipt = row.get::<_, Jsonb>(1).read()?;
+        let mut original: HistoricalPublication = row.get::<_, Jsonb>(2).read()?;
         original.proofs =
             crate::provenance::load(tx, scope, &publication, &receipt, key, protocol)?;
         publications.push(original);
@@ -221,8 +182,8 @@ fn import_history(
     }
     let mut receipts = BTreeMap::new();
     for row in rows {
-        let original: Envelope = serde_json::from_value(row.get(0))?;
-        let receipt: alt_portable::ImportReceipt = serde_json::from_value(row.get(1))?;
+        let original: Envelope = row.get::<_, Jsonb>(0).read()?;
+        let receipt: alt_portable::ImportReceipt = row.get::<_, Jsonb>(1).read()?;
         for item in original.catalog.identities {
             let key = (item.installation_id.clone(), item.actor_id.clone());
             if let Some(existing) = inventory.identities.get_mut(&key) {
@@ -234,7 +195,7 @@ fn import_history(
                 existing.had_review |= item.had_review;
                 let mut grants = BTreeMap::new();
                 for grant in existing.ref_grants.iter().chain(&item.ref_grants) {
-                    grants.insert(serde_json::to_string(grant)?, grant.clone());
+                    grants.insert(alt_json::to_string(grant)?, grant.clone());
                 }
                 existing.ref_grants = grants.into_values().collect();
             } else {
@@ -325,10 +286,10 @@ impl Store {
             if row.get::<_, String>(0) != auth.actor_id || row.get::<_, bool>(3) {
                 return Err(Error::Precondition("export belongs to another actor or was retired"));
             }
-            let envelope: Envelope = serde_json::from_value(row.get(1))?;
+            let envelope: Envelope = row.get::<_, Jsonb>(1).read()?;
             envelope.verify(scope, self.signing_key.verifying_key().as_bytes(), limits.package)?;
             let locations = export_locations(&mut tx, scope, &envelope.catalog.blobs)?;
-            let documents = serde_json::from_value(row.get(2))?;
+            let documents = row.get::<_, Jsonb>(2).read()?;
             tx.commit()?;
             return Ok(Capture::Recorded {
                 envelope,
@@ -390,12 +351,12 @@ impl Store {
             limits.package.metadata_bytes,
         )?;
         let mut inventory = Inventory {
-            blobs: stored_content(&mut tx, repository, id, limits.package)?,
+            blobs: stored_content(&mut tx, repository, limits.package)?,
             documents: BTreeMap::new(),
             identities: source_identities(&mut tx, scope, limits.package)?,
             budget: limits.package.metadata_bytes,
         };
-        let mut objects = objects::git_objects(&opened.1, limits.package.entries)?;
+        let objects = objects::git_objects(&opened.1, limits.package.entries)?;
         for object in objects.values() {
             let payload = &object.payload;
             if let Some(old) = inventory
@@ -405,12 +366,6 @@ impl Store {
             {
                 return Err(Error::Integrity("portable object payload"));
             }
-        }
-        for object in stored_objects(&mut tx, repository, id, limits.package, &inventory.blobs)? {
-            objects.entry(object.oid.clone()).or_insert(object);
-        }
-        if objects.len() > limits.package.entries {
-            return Err(Error::Limit("portable Git inventory"));
         }
         catalog.objects = objects.into_values().collect();
         catalog.publications = committed_publications(
@@ -442,11 +397,16 @@ impl Store {
             bytes: self.bytes.clone(),
             segments: opened.1.clone(),
         };
+        // Only what has to stay in the content store is retained there: Git objects
+        // are held by the segments this export reads them from.
+        for blob in result.stored(limits.package)? {
+            crate::requests::pin(&mut tx, repository, &pin_id(id), &blob.blake3, None)?;
+        }
         // Capturing metadata cannot extend an expired authority lease.
         require_admin(&mut tx, &self.spec, credential)?;
         authorize(&mut tx, &self.spec, credential, &current)?;
         let created_at = integer(now(&mut tx)?)?;
-        tx.execute("INSERT INTO alt_portable_exports(repository,export_id,actor_id,envelope,documents,created_at) VALUES($1,$2,$3,$4,$5,$6)", &[repository,&id,&auth.actor_id,&serde_json::to_value(&result.envelope)?,&serde_json::to_value(&result.documents)?,&created_at])?;
+        tx.execute("INSERT INTO alt_portable_exports(repository,export_id,actor_id,envelope,documents,created_at) VALUES($1,$2,$3,$4,$5,$6)", &[repository,&id,&auth.actor_id,&Jsonb::from(&result.envelope)?,&Jsonb::from(&result.documents)?,&created_at])?;
         audit(
             &mut tx,
             &auth.actor_id,

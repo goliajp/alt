@@ -3,6 +3,7 @@
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::net::{SocketAddr, SocketAddrV6};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -103,6 +104,21 @@ impl Arbitrary for PathBuf {
     }
 }
 
+impl Arbitrary for SocketAddr {
+    fn arbitrary(rng: &mut Rng) -> Self {
+        let port = u16::arbitrary(rng);
+        if rng.chance(2) {
+            SocketAddr::from((u32::arbitrary(rng).to_be_bytes(), port))
+        } else {
+            let mut address = SocketAddrV6::new(u128::arbitrary(rng).into(), port, 0, 0);
+            if rng.chance(4) {
+                address.set_scope_id(u32::arbitrary(rng));
+            }
+            SocketAddr::V6(address)
+        }
+    }
+}
+
 impl Arbitrary for Cow<'_, str> {
     fn arbitrary(rng: &mut Rng) -> Self {
         Cow::Owned(generate::string(rng, 12))
@@ -190,7 +206,11 @@ macro_rules! arbitrary_tuples {
     )+};
 }
 
-arbitrary_tuples!((A) (A B) (A B C) (A B C D));
+arbitrary_tuples! {
+    (A) (A B) (A B C) (A B C D)
+    (A B C D E F G H I)
+    (A B C D E F G H I J K L M N O P)
+}
 
 /// Defines types that derive the traits of both libraries, with each
 /// `#[both(...)]` attribute given to both, and an [`Arbitrary`] impl.
@@ -333,11 +353,11 @@ fn canonical<T: Comparable>(value: &T) -> String {
     }
 }
 
-fn show(input: &[u8]) -> String {
+pub(crate) fn show(input: &[u8]) -> String {
     String::from_utf8_lossy(&input[..input.len().min(400)]).into_owned()
 }
 
-fn category(error: &serde_json::Error) -> alt_json::Category {
+pub(crate) fn category(error: &serde_json::Error) -> alt_json::Category {
     match error.classify() {
         serde_json::error::Category::Io => alt_json::Category::Io,
         serde_json::error::Category::Syntax => alt_json::Category::Syntax,

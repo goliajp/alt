@@ -45,14 +45,14 @@ fn device_grants_have_fixed_public_client_and_scope_and_standard_errors() {
     token.grant_type = "password".into();
     assert!(token.validate().is_err());
     assert_eq!(
-        serde_json::to_string(&DeviceFailure {
+        alt_json::to_string(&DeviceFailure {
             error: DeviceError::AuthorizationPending
         })
         .unwrap(),
         r#"{"error":"authorization_pending"}"#
     );
     assert!(
-        serde_json::from_str::<DeviceTokenRequest>(
+        alt_json::from_str::<DeviceTokenRequest>(
             r#"{"grant_type":"password","device_code":"x","client_id":"alt-cli","secret":"x"}"#
         )
         .is_err()

@@ -4,6 +4,7 @@
 use alt_json::{Map, Value};
 
 use crate::generate;
+use crate::oneway::read;
 use crate::rng::Rng;
 use crate::support::{Both, Comparable, Tally, input, output};
 
@@ -218,6 +219,51 @@ pub fn exercise_with<T: Comparable>(seed: u64, rounds: u64, make: impl Fn(&mut R
         for _ in 0..3 {
             if let Some(repeated) = duplicate_key(&mut rng, &compact) {
                 input::<T>(&repeated, &mut tally);
+            }
+        }
+    }
+    tally
+}
+
+/// For a type that is only ever read: compares both libraries on the text
+/// of `rounds` documents from `make`, each cut short, damaged and edited.
+pub fn exercise_reader<T>(
+    seed: u64,
+    rounds: u64,
+    make: impl Fn(&mut Rng) -> Value,
+    view: fn(&T) -> String,
+) -> Tally
+where
+    T: alt_json::FromJson + serde::de::DeserializeOwned,
+{
+    let mut rng = Rng::new(seed);
+    let mut tally = Tally::default();
+    for _ in 0..rounds {
+        let tree = make(&mut rng);
+        let compact = alt_json::to_vec(&tree).unwrap();
+        tally.values += 1;
+        read(&compact, view, &mut tally);
+        read(&alt_json::to_vec_pretty(&tree).unwrap(), view, &mut tally);
+        for end in 0..compact.len().min(200) {
+            read(&compact[..end], view, &mut tally);
+        }
+        for _ in 0..8 {
+            let mut damaged = compact.clone();
+            for _ in 0..1 + rng.below(2) {
+                mutate(&mut rng, &mut damaged);
+            }
+            read(&damaged, view, &mut tally);
+        }
+        for _ in 0..12 {
+            let mut edited = tree.clone();
+            for _ in 0..1 + rng.below(2) {
+                edit(&mut rng, &mut edited);
+            }
+            read(&alt_json::to_vec(&edited).unwrap(), view, &mut tally);
+        }
+        for _ in 0..3 {
+            if let Some(repeated) = duplicate_key(&mut rng, &compact) {
+                read(&repeated, view, &mut tally);
             }
         }
     }

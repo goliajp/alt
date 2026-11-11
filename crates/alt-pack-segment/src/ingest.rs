@@ -2,6 +2,7 @@
 
 use crate::{
     Error, FLAG_DUPLICATES, FLAG_OVERLAP, Kind, Oid, Record, SegmentSet,
+    carried::Carried,
     format::{self, CommitRow, Delta, NO_BASE},
     object::{self, Parsed},
     object_id,
@@ -259,13 +260,15 @@ pub fn ingest_holding(
                 .collect();
             let messages: Vec<&[&[u8]]> = parts.iter().map(|pair| pair.as_slice()).collect();
             let oids = alt_hash::sha1_many(&messages);
+            let contents: Vec<&[u8]> = kept.iter().map(|(_, _, data)| *data).collect();
+            let digests = alt_hash::blake3::hash_many(&contents);
             let mut out = Vec::with_capacity(batch.len());
-            for ((index, kind, data), oid) in kept.iter().zip(oids) {
+            for (((index, kind, data), oid), digest) in kept.iter().zip(oids).zip(digests) {
                 out.push((
                     *index,
                     Meta {
                         oid,
-                        blake3: *alt_hash::blake3::hash(data).as_bytes(),
+                        blake3: *digest.as_bytes(),
                         kind: *kind,
                         size: data.len() as u64,
                         depth: 0,
@@ -401,39 +404,14 @@ pub fn ingest_holding(
         }
         position[index] = (kept.len() - 1) as u32;
     }
-    let lookup = |oid: &Oid| {
-        kept.binary_search_by(|index| metas[*index].oid.cmp(oid))
-            .ok()
-            .map(|at| &metas[kept[at]])
-    };
-
     // every reference resolves inside the pack or in the segments already present
-    let check = |from: &Oid, to: &Oid, kind: Kind| -> Result<(), Error> {
-        let found = match lookup(to) {
-            Some(meta) => Some(meta.kind),
-            None => existing.kind(to)?,
-        };
-        if found == Some(kind) {
-            Ok(())
-        } else {
-            Err(Error::Dangling(*from, *to))
-        }
-    };
+    let carried = Carried::new(
+        kept.iter()
+            .map(|index| (metas[*index].oid, metas[*index].kind)),
+    );
     alt_threads::try_for_each(&kept, 1024, |index| {
         let meta = &metas[*index];
-        match &meta.parsed {
-            Parsed::Blob => Ok(()),
-            Parsed::Commit { tree, parents } => {
-                check(&meta.oid, tree, Kind::Tree)?;
-                parents
-                    .iter()
-                    .try_for_each(|parent| check(&meta.oid, parent, Kind::Commit))
-            }
-            Parsed::Tree(entries) => entries
-                .iter()
-                .try_for_each(|(oid, kind)| check(&meta.oid, oid, *kind)),
-            Parsed::Tag { object, kind } => check(&meta.oid, object, *kind),
-        }
+        carried.check(existing, &meta.oid, &meta.parsed)
     })?;
     if alt_threads::any(&kept, 1024, |index| {
         existing.locate(&metas[*index].oid).is_some()
@@ -441,70 +419,19 @@ pub fn ingest_holding(
         flags |= FLAG_OVERLAP;
     }
 
-    // generation numbers: one more than the largest parent generation
-    let commit_indexes: Vec<usize> = kept
+    let mut commits: Vec<CommitRow> = kept
         .iter()
-        .copied()
-        .filter(|index| metas[*index].kind == Kind::Commit)
-        .collect();
-    let slot: HashMap<Oid, usize> = commit_indexes
-        .iter()
-        .enumerate()
-        .map(|(at, index)| (metas[*index].oid, at))
-        .collect();
-    let mut generation = vec![0u32; commit_indexes.len()];
-    for start in 0..commit_indexes.len() {
-        let mut stack = vec![start];
-        while let Some(at) = stack.last().copied() {
-            if generation[at] != 0 {
-                stack.pop();
-                continue;
-            }
-            let Parsed::Commit { parents, .. } = &metas[commit_indexes[at]].parsed else {
-                unreachable!()
-            };
-            let mut highest = 0;
-            let mut waiting = false;
-            for parent in parents {
-                match slot.get(parent) {
-                    Some(parent_at) if generation[*parent_at] == 0 => {
-                        if stack.contains(parent_at) {
-                            return Err(Error::Format("commit ancestry cycle"));
-                        }
-                        stack.push(*parent_at);
-                        waiting = true;
-                    }
-                    Some(parent_at) => highest = highest.max(generation[*parent_at]),
-                    None => {
-                        highest = highest.max(
-                            existing
-                                .commit(parent)
-                                .map_or(0, |commit| commit.generation),
-                        )
-                    }
-                }
-            }
-            if !waiting {
-                generation[at] = highest + 1;
-                stack.pop();
-            }
-        }
-    }
-    let commits = commit_indexes
-        .iter()
-        .zip(&generation)
-        .map(|(index, generation)| {
-            let Parsed::Commit { tree, parents } = &metas[*index].parsed else {
-                unreachable!()
-            };
-            CommitRow {
+        .filter_map(|index| match &metas[*index].parsed {
+            Parsed::Commit { tree, parents } => Some(CommitRow {
                 oid: metas[*index].oid,
                 tree: *tree,
-                generation: *generation,
+                generation: 0,
                 parents: parents.clone(),
-            }
+            }),
+            _ => None,
         })
         .collect();
+    crate::generation::assign(&mut commits, existing)?;
     let records = kept
         .iter()
         .map(|index| {

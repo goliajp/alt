@@ -2,10 +2,8 @@ use crate::{Catalog, Error, PackageLimits, Result};
 use alt_crypto::ed25519::{Signature, SigningKey, VerifyingKey};
 use alt_provenance::{decode_hex, encode_hex, sign_export};
 use alt_remote_protocol::{ExportCertificate, ExportCertificateBody, Scope};
-use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct Envelope {
     pub catalog: Catalog,

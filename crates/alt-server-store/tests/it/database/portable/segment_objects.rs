@@ -304,12 +304,12 @@ fn work_envelope(f: &mut Fixture, scope: &Scope, id: &str) -> alt_portable::Enve
             &[&scope.repository_instance_id, &id],
         )
         .unwrap();
-    serde_json::from_value(row.get(0)).unwrap()
+    alt_json::from_value(row.get::<_, alt_server_store::Jsonb>(0).0).unwrap()
 }
 
 #[test]
 #[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
-fn export_keeps_git_objects_a_task_publication_carried_outside_its_graph() {
+fn export_takes_git_objects_a_task_publication_carried_outside_its_graph() {
     let mut f = Fixture::new();
     let mut payload = super::super::tasks::task_payload("loose-object");
     let raw = b"selected Git object no commit reaches".to_vec();
@@ -342,9 +342,9 @@ fn export_keeps_git_objects_a_task_publication_carried_outside_its_graph() {
         .unwrap();
     let scope = payload.publication.key.scope.clone();
     let view = f.store.pack_view(&f.credential, "repository").unwrap();
+    // a selected object no commit reaches is published into the segment all the same
     assert!(
-        !view
-            .segments
+        view.segments
             .locate_any(&<[u8; 20]>::try_from(oid.as_bytes()).unwrap())
     );
     let export = f
@@ -359,7 +359,7 @@ fn export_keeps_git_objects_a_task_publication_carried_outside_its_graph() {
         .find(|object| object.oid == oid.to_string())
         .expect("the publication's manifest names this object");
     assert_eq!(read(&export, &object.payload), raw);
-    assert!(export_pins(&f, "loose").contains(&digest));
+    assert!(!export_pins(&f, "loose").contains(&digest));
     VerifiedSnapshot::verify(
         export.envelope(),
         &scope,
@@ -372,24 +372,32 @@ fn export_keeps_git_objects_a_task_publication_carried_outside_its_graph() {
 
 #[test]
 #[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
-fn export_lists_objects_as_the_content_store_names_them() {
+fn export_lists_objects_as_their_uploads_named_them() {
     let mut f = Fixture::new();
     let (task, _) = publish_task(&mut f, "same-catalog");
     let code = payload_with_file("same-catalog-code", b"file bytes");
     code.publish_new(&mut f.store, &f.credential);
     let scope = task.publication.key.scope.clone();
-    // every object still has its content-store row: both sources must agree
-    let rows = f
-        .client()
-        .query(
-            "SELECT o.oid,o.kind,o.blake3,b.bytes FROM alt_objects o JOIN alt_blobs b ON b.repository=o.repository AND b.blake3=o.blake3 ORDER BY o.oid",
-            &[],
-        )
-        .unwrap();
-    let listed: Vec<(String, String, String, i64)> = rows
+    // oid, kind, digest and size as the uploads named them
+    let listed: std::collections::BTreeSet<(String, String, String, i64)> = task
+        .manifest
+        .entries
         .iter()
-        .map(|row| (row.get(0), row.get(1), row.get(2), row.get(3)))
+        .chain(&code.manifest.entries)
+        .filter_map(|entry| {
+            Some((
+                entry.git_oid.clone()?,
+                alt_json::to_value(entry.kind)
+                    .unwrap()
+                    .as_str()
+                    .unwrap()
+                    .to_owned(),
+                entry.blake3.clone(),
+                entry.bytes as i64,
+            ))
+        })
         .collect();
+    let listed: Vec<_> = listed.into_iter().collect();
     let export = f
         .store
         .prepare_portable_export(&f.credential, &scope, "same", portable_limits())
@@ -402,7 +410,7 @@ fn export_lists_objects_as_the_content_store_names_them() {
         .map(|object| {
             (
                 object.oid.clone(),
-                serde_json::to_value(object.kind)
+                alt_json::to_value(object.kind)
                     .unwrap()
                     .as_str()
                     .unwrap()

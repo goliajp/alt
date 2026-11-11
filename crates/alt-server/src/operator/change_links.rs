@@ -2,11 +2,10 @@
 use super::{Config, Error, Result, read_regular};
 use alt_remote_protocol::DeploymentMode;
 use alt_server_store::InstanceSpec;
-use serde::Deserialize;
 use std::{os::unix::fs::PermissionsExt, path::Path};
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::FromJson)]
+#[json(deny_unknown_fields)]
 struct Settings {
     version: u32,
     instance: InstanceSpec,
@@ -36,7 +35,7 @@ pub(super) fn load(config: &mut Config, directory: &Path) -> Result<()> {
     if !config.change_links.is_empty() {
         return Err(Error::Config("ambiguous change-link configuration"));
     }
-    let settings: Settings = serde_json::from_slice(&read_regular(&path, 65536, true)?)
+    let settings: Settings = alt_json::from_slice(&read_regular(&path, 65536, true)?)
         .map_err(|_| Error::Config("change-link settings JSON"))?;
     // A copied file from a previous recovery generation must fail closed.
     // Runtime credentials and database pairings are checked independently.
@@ -45,4 +44,17 @@ pub(super) fn load(config: &mut Config, directory: &Path) -> Result<()> {
     }
     config.change_links = settings.channels;
     Ok(())
+}
+
+#[cfg(test)]
+mod json_tests {
+    use super::*;
+
+    #[test]
+    fn recorded_verdicts() {
+        alt_json_testkit::fixtures::verify_reader::<Settings>(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/json"),
+            "operator-change_links-Settings",
+        );
+    }
 }

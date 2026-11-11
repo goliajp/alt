@@ -1,6 +1,5 @@
 use alt_git_codec::{Commit, HashAlgo, ObjectId, ObjectKind, Tag, Tree};
 use alt_server_store::{Credential, Error, Page, Result, Store};
-use serde::Serialize;
 use std::io::Read;
 
 const STRUCTURED: usize = 8 * 1024 * 1024;
@@ -57,7 +56,7 @@ impl Reader<'_> {
         Tree::parse(&raw, HashAlgo::Sha1).map_err(|_| Error::Integrity("tree preview"))
     }
 }
-#[derive(Serialize)]
+#[derive(alt_json::ToJson)]
 pub struct TreePage {
     commit: String,
     path: String,
@@ -65,7 +64,7 @@ pub struct TreePage {
     display_path: String,
     entries: Vec<TreeEntry>,
 }
-#[derive(Serialize)]
+#[derive(alt_json::ToJson)]
 struct TreeEntry {
     name: String,
     path: String,
@@ -204,7 +203,7 @@ pub fn tree(
         entries,
     })
 }
-#[derive(Serialize)]
+#[derive(alt_json::ToJson)]
 pub struct BlobPreview {
     oid: String,
     bytes: String,
@@ -246,7 +245,7 @@ pub fn blob(
         download_url: format!("/web/repositories/{repository}/objects/{oid}/download"),
     })
 }
-#[derive(Serialize)]
+#[derive(alt_json::ToJson)]
 pub struct CommitSummary {
     oid: String,
     parents: Vec<String>,
@@ -315,4 +314,63 @@ pub fn history(
         items,
         next: pending.map(|v| v.to_string()),
     })
+}
+
+#[cfg(test)]
+mod json_tests {
+    use alt_json_testkit::fixtures::{assert_stored, written_line};
+    use alt_json_testkit::rng::Rng;
+    use alt_json_testkit::support::Arbitrary;
+
+    use super::*;
+
+    fn any<T: Arbitrary>(rng: &mut Rng) -> T {
+        T::arbitrary(rng)
+    }
+
+    #[test]
+    fn responses_are_written_as_recorded() {
+        let mut rng = Rng::new(0xd700);
+        let rng = &mut rng;
+        let mut lines = String::new();
+        for _ in 0..40 {
+            lines += &written_line(&TreePage {
+                commit: any(rng),
+                path: any(rng),
+                parent: any(rng),
+                display_path: any(rng),
+                entries: (0..rng.below(3))
+                    .map(|_| TreeEntry {
+                        name: any(rng),
+                        path: any(rng),
+                        display_path: any(rng),
+                        oid: any(rng),
+                        kind: rng.pick(&["tree", "blob", "commit"]),
+                        bytes: any(rng),
+                    })
+                    .collect(),
+            });
+            lines += &written_line(&BlobPreview {
+                oid: any(rng),
+                bytes: any(rng),
+                text: any(rng),
+                truncated: any(rng),
+                download_url: any(rng),
+            });
+            lines += &written_line(&CommitSummary {
+                oid: any(rng),
+                parents: any(rng),
+                author: any(rng),
+                timestamp: any(rng),
+                message: any(rng),
+            });
+        }
+        assert_stored(
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/json/browse-responses.txt"
+            ),
+            &lines,
+        );
+    }
 }

@@ -1,11 +1,11 @@
 use super::*;
+use alt_json::json;
 use alt_server::change_links::{ChannelConfig, ChannelRuntime};
 use alt_server_store::ChangeChannel;
 use alt_task::Record;
 use alt_task_service::{RecordKey, RecordKind, RecordSelection, SourceCompletion, TaskBundle};
 use ed25519_dalek::SigningKey;
 use golia_change_link as link;
-use serde_json::json;
 use std::net::{IpAddr, Ipv4Addr};
 
 fn add(payload: &mut Payload, kind: ContentKind, raw: Vec<u8>) -> alt_task::Artifact {
@@ -46,7 +46,7 @@ pub(super) fn task_payload_with_source(
     let mut payload = Payload::new(request, None);
     payload.publication.refs.clear();
     let tree = payload.manifest.entries[0].git_oid.clone().unwrap();
-    let mut task: alt_task::Task = serde_json::from_value(json!({
+    let mut task: alt_task::Task = alt_json::from_value(json!({
         "schema_version":1,"scope":{"repository":"original","workspace":"original-worktree"},
         "spec":{"purpose":"publish selected task","authority":"owner","allowed_paths":["."],"auxiliary":[],"exclusions":[],
             "validation":{"commands":[["verify"]],"cwd":".","environment":{"values":{},"complete":true},"tools":[],"external":[],"validation":{}}},
@@ -65,7 +65,7 @@ pub(super) fn task_payload_with_source(
     let record = add(
         &mut payload,
         ContentKind::Record,
-        serde_json::to_vec(
+        alt_json::to_vec(
             &json!({"schema_version":1,"hash_algorithm":"blake3","kind":"task","record":task}),
         )
         .unwrap(),
@@ -81,7 +81,7 @@ pub(super) fn task_payload_with_source(
     };
     let response = alt_command_protocol::Response {
         exit_code: 0,
-        stdout: serde_json::to_vec(&json!({"task_id":id})).unwrap(),
+        stdout: alt_json::to_vec(&json!({"task_id":id})).unwrap(),
         stderr: vec![],
     }
     .encode();
@@ -104,12 +104,12 @@ pub(super) fn task_payload_with_source(
         intent: add(
             &mut payload,
             ContentKind::Attachment,
-            serde_json::to_vec(&intent).unwrap(),
+            alt_json::to_vec(&intent).unwrap(),
         ),
         completion: add(
             &mut payload,
             ContentKind::Attachment,
-            serde_json::to_vec(&completion).unwrap(),
+            alt_json::to_vec(&completion).unwrap(),
         ),
         response: add(&mut payload, ContentKind::Attachment, response),
         ref_operation: None,
@@ -134,7 +134,7 @@ pub(super) fn task_payload_with_source(
     add(
         &mut payload,
         ContentKind::TaskBundle,
-        serde_json::to_vec(&bundle).unwrap(),
+        alt_json::to_vec(&bundle).unwrap(),
     );
     payload.publication.content_manifest = payload.manifest.id(limits()).unwrap();
     payload
@@ -176,7 +176,7 @@ pub(super) fn channel(f: &mut Fixture, origin: &str) -> (ChannelConfig, ChannelR
         local_credential_file: local,
         peer_credential_file: peer,
     };
-    let mut config: alt_server::operator::Config = serde_json::from_str(include_str!(concat!(
+    let mut config: alt_server::operator::Config = alt_json::from_str(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/example-config.json"
     )))
@@ -241,10 +241,10 @@ fn accept(f: &Fixture, c: &ChannelConfig, server: &Running) -> link::RepairSourc
         "POST",
         golia_change_link_http::INBOX_PATH,
         &f.token,
-        &request,
+        &alt_json_serde::Serde(&request),
     );
     assert_eq!(status, 200, "{value}");
-    let receipt: link::Receipt = serde_json::from_value(value.clone()).unwrap();
+    let receipt: link::Receipt = alt_json_serde::from_value(value.clone()).unwrap();
     receipt
         .verify(
             &request,
@@ -256,7 +256,7 @@ fn accept(f: &Fixture, c: &ChannelConfig, server: &Running) -> link::RepairSourc
             "POST",
             golia_change_link_http::INBOX_PATH,
             &f.token,
-            &request
+            &alt_json_serde::Serde(&request)
         ),
         (200, value)
     );
@@ -266,7 +266,7 @@ fn accept(f: &Fixture, c: &ChannelConfig, server: &Running) -> link::RepairSourc
         &f.token,
     );
     assert_eq!(status, 200, "{proof}");
-    let proof: link::RepairSource = serde_json::from_value(proof).unwrap();
+    let proof: link::RepairSource = alt_json_serde::from_value(proof).unwrap();
     proof.validate().unwrap();
     proof
 }
@@ -301,7 +301,7 @@ fn change_inbox_requires_current_pair_and_exposes_original_proof_without_credent
     assert!(!raw.contains("http://"));
     assert_eq!(
         server.command("GET", &format!("{base}/repairs/{digest}/task"), &f.token),
-        (200, serde_json::Value::Null)
+        (200, alt_json::Value::Null)
     );
     let outsider = f
         .store
@@ -334,7 +334,7 @@ fn change_inbox_requires_current_pair_and_exposes_original_proof_without_credent
                 "POST",
                 golia_change_link_http::INBOX_PATH,
                 &outsider,
-                &proof.request
+                &alt_json_serde::Serde(&proof.request)
             )
             .0,
         403
@@ -347,7 +347,7 @@ fn change_inbox_requires_current_pair_and_exposes_original_proof_without_credent
     .set("Authorization", &format!("Bearer {}", f.token))
     .set("Content-Type", "application/json")
     .set("Origin", "https://unexpected.example")
-    .send_bytes(&serde_json::to_vec(&proof.request).unwrap())
+    .send_bytes(&alt_json::to_vec(&alt_json_serde::Serde(&proof.request)).unwrap())
     .unwrap_err();
     assert!(matches!(error, ureq::Error::Status(403, _)));
     f.store
@@ -359,7 +359,7 @@ fn change_inbox_requires_current_pair_and_exposes_original_proof_without_credent
                 "POST",
                 golia_change_link_http::INBOX_PATH,
                 &f.token,
-                &proof.request
+                &alt_json_serde::Serde(&proof.request)
             )
             .0,
         403
@@ -419,7 +419,9 @@ fn background_worker_notifies_actual_task_once_and_retries_same_event_after_rest
         );
         let mut raw = Vec::new();
         first.as_reader().read_to_end(&mut raw).unwrap();
-        let event: link::SignedEvent = serde_json::from_slice(&raw).unwrap();
+        let event: link::SignedEvent = alt_json::from_slice::<alt_json_serde::Serde<_>>(&raw)
+            .unwrap()
+            .0;
         let link::Body::TaskBound {
             task: bound,
             repair_request_digest: repair,
@@ -449,7 +451,10 @@ fn background_worker_notifies_actual_task_once_and_retries_same_event_after_rest
         assert_eq!(replay, raw);
         retry
             .respond(
-                tiny_http::Response::from_data(serde_json::to_vec(&receipt).unwrap()).with_header(
+                tiny_http::Response::from_data(
+                    alt_json::to_vec(&alt_json_serde::Serde(&receipt)).unwrap(),
+                )
+                .with_header(
                     tiny_http::Header::from_bytes("Content-Type", "application/json").unwrap(),
                 ),
             )

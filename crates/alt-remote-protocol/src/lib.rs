@@ -15,7 +15,6 @@ mod receipt;
 pub use provenance::*;
 pub use publication::*;
 pub use receipt::*;
-use serde::{Deserialize, Serialize};
 
 pub const VERSION: u32 = 1;
 
@@ -71,10 +70,7 @@ fn version(value: u32) -> Result<()> {
     Ok(())
 }
 
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(rename_all = "snake_case")]
 pub enum ObjectFormat {
     Sha1,
@@ -99,24 +95,11 @@ impl ObjectFormat {
     }
 }
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-    alt_json::ToJson,
-    alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct Scope {
     pub installation_id: String,
     pub repository_instance_id: String,
-    #[serde(with = "crate::decimal")]
     #[json(with = "alt_json::with::decimal_u64")]
     pub recovery_epoch: u64,
 }
@@ -131,19 +114,7 @@ impl Scope {
     }
 }
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-    alt_json::ToJson,
-    alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct RequestKey {
     pub scope: Scope,
@@ -160,10 +131,7 @@ impl RequestKey {
 
 /// Limits are advertised by the instance; the protocol supplies no performance
 /// or capacity claim by inventing a universal default.
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct Limits {
     pub request_bytes: usize,
@@ -176,13 +144,10 @@ pub struct Limits {
     pub tree_paths: usize,
     pub path_bytes: usize,
     pub walk_steps: usize,
-    #[serde(with = "crate::decimal")]
     #[json(with = "alt_json::with::decimal_u64")]
     pub chunk_bytes: u64,
-    #[serde(with = "crate::decimal")]
     #[json(with = "alt_json::with::decimal_u64")]
     pub object_bytes: u64,
-    #[serde(with = "crate::decimal")]
     #[json(with = "alt_json::with::decimal_u64")]
     pub total_bytes: u64,
 }
@@ -236,10 +201,7 @@ pub fn validate_ref_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(rename_all = "snake_case")]
 pub enum ActorKind {
     Human,
@@ -249,10 +211,7 @@ pub enum ActorKind {
 
 /// Claimed provenance, checked against the authenticated delegation by the
 /// service. A caller cannot obtain authority by filling in these fields.
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct Attribution {
     pub kind: ActorKind,
@@ -280,19 +239,13 @@ impl Attribution {
         Ok(())
     }
 }
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(rename_all = "snake_case")]
 pub enum DeploymentMode {
     SelfHosted,
     Cloud,
 }
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(rename_all = "snake_case")]
 pub enum Feature {
     GitSmartHttp,
@@ -302,16 +255,12 @@ pub enum Feature {
     Receipts,
     PortableBundles,
 }
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct Capabilities {
     pub protocol_min: u32,
     pub protocol_max: u32,
     pub installation_id: String,
-    #[serde(with = "crate::decimal")]
     #[json(with = "alt_json::with::decimal_u64")]
     pub runtime_generation: u64,
     pub deployment_mode: DeploymentMode,
@@ -347,32 +296,6 @@ impl Capabilities {
             return Err(Error::Version(common));
         }
         Ok(common)
-    }
-}
-
-/// Full-width counters use canonical decimal strings on the wire. JavaScript
-/// and other IEEE-754 clients must not round repository epochs or byte counts.
-mod decimal {
-    use serde::{Deserialize, Deserializer, Serializer};
-    pub fn serialize<S: Serializer>(
-        value: &u64,
-        serializer: S,
-    ) -> std::result::Result<S::Ok, S::Error> {
-        serializer.serialize_str(&value.to_string())
-    }
-    pub fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> std::result::Result<u64, D::Error> {
-        let value = String::deserialize(deserializer)?;
-        if value.is_empty()
-            || (value.len() > 1 && value.starts_with('0'))
-            || !value.bytes().all(|b| b.is_ascii_digit())
-        {
-            return Err(serde::de::Error::custom(
-                "expected canonical unsigned decimal string",
-            ));
-        }
-        value.parse().map_err(serde::de::Error::custom)
     }
 }
 

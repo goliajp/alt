@@ -1,4 +1,5 @@
 //! Agent capabilities always remain attached to a live human credential.
+use crate::Jsonb;
 use crate::database::Transaction;
 use crate::store::{
     authorize, credential_row, instance, integer, now, snapshot, token_digest, unsigned,
@@ -51,7 +52,7 @@ pub(crate) fn check(
     row: &postgres::Row,
 ) -> Result<bool> {
     let Some(parent) = parent(tx, &credential.digest)? else {
-        let attribution: Attribution = serde_json::from_value(row.get("attribution"))?;
+        let attribution: Attribution = row.get::<_, Jsonb>("attribution").read()?;
         if attribution.kind == ActorKind::Agent {
             return Err(Error::Unauthorized);
         }
@@ -64,12 +65,12 @@ pub(crate) fn check(
             &[&parent],
         )?
         .ok_or(Error::Unauthorized)?;
-    let parent_kind: Attribution = serde_json::from_value(parent_kind.get(0))?;
+    let parent_kind: Attribution = parent_kind.get::<_, Jsonb>(0).read()?;
     if parent_kind.kind != ActorKind::Human {
         return Err(Error::Unauthorized);
     }
     let parent = credential_row(tx, spec, &Credential { digest: parent })?;
-    let attribution: Attribution = serde_json::from_value(row.get("attribution"))?;
+    let attribution: Attribution = row.get::<_, Jsonb>("attribution").read()?;
     if parent.get::<_, String>("actor_id") != row.get::<_, String>("actor_id")
         || row.get::<_, bool>("administrator")
         || attribution.kind != ActorKind::Agent
@@ -91,7 +92,7 @@ pub(crate) fn restrict(
     else {
         return Ok(());
     };
-    let scope: AgentScope = serde_json::from_value(row.get(0))?;
+    let scope: AgentScope = row.get::<_, Jsonb>(0).read()?;
     if scope.repository != auth.scope {
         return Err(Error::Unauthorized);
     }
@@ -115,7 +116,7 @@ fn human(
     credential: &Credential,
 ) -> Result<postgres::Row> {
     let row = credential_row(tx, spec, credential)?;
-    let attribution: Attribution = serde_json::from_value(row.get("attribution"))?;
+    let attribution: Attribution = row.get::<_, Jsonb>("attribution").read()?;
     if attribution.kind != ActorKind::Human {
         return Err(Error::Unauthorized);
     }
@@ -124,8 +125,8 @@ fn human(
 fn info(row: &postgres::Row) -> Result<DelegationInfo> {
     Ok(DelegationInfo {
         credential_id: row.get("token_digest"),
-        attribution: serde_json::from_value(row.get("attribution"))?,
-        scope: serde_json::from_value(row.get("scope"))?,
+        attribution: row.get::<_, Jsonb>("attribution").read()?,
+        scope: row.get::<_, Jsonb>("scope").read()?,
         purpose: row.get("purpose"),
         created_at_unix_ms: unsigned(row.get("created_at"))?,
         expires_at_unix_ms: unsigned(row.get("expires_at"))?,
@@ -179,10 +180,10 @@ impl Store {
             "SELECT parent_digest,scope,purpose FROM alt_delegations WHERE token_digest=$1",
             &[&digest],
         )?;
-        let value = serde_json::to_value(&request.scope)?;
+        let value = Jsonb::from(&request.scope)?;
         if let Some(saved) = &existing {
             if saved.get::<_, String>(0) != parent.digest
-                || saved.get::<_, serde_json::Value>(1) != value
+                || saved.get::<_, Jsonb>(1) != value
                 || saved.get::<_, String>(2) != request.purpose
             {
                 return Err(Error::Precondition("agent credential replay differs"));
@@ -229,7 +230,9 @@ impl Store {
                 &actor,
                 "agent.issue",
                 &digest,
-                &serde_json::json!({"parent":parent.digest,"attribution":request.attribution,"scope":request.scope,"purpose":request.purpose,"expires_at":expires.to_string()}),
+                &Jsonb(
+                    alt_json::json!({"parent":parent.digest,"attribution":request.attribution,"scope":request.scope,"purpose":request.purpose,"expires_at":expires.to_string()}),
+                ),
             )?;
         }
         let result = info(&tx.query_one("SELECT c.*,d.scope,d.purpose,d.created_at FROM alt_credentials c JOIN alt_delegations d USING(token_digest) WHERE token_digest=$1", &[&digest])?)?;

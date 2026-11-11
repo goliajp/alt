@@ -60,7 +60,7 @@ fn id(value: &str) -> Result<ObjectId> {
         .map_err(|_| Error::Precondition("object address"))
 }
 fn record_kind(value: &str) -> Result<RecordKind> {
-    serde_json::from_value(serde_json::Value::String(value.into()))
+    alt_json::from_value(alt_json::Value::String(value.into()))
         .map_err(|_| Error::Precondition("record kind"))
 }
 fn arguments(query: Option<&str>, allowed: &[&str]) -> Result<BTreeMap<String, String>> {

@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     Output,
-    native::{body, empty, json},
+    native::{body, body_serde, empty, json, json_serde},
 };
 use alt_remote_protocol::{RequestKey, Scope};
 use alt_server_store::{Credential, Error, Result, Store};
@@ -65,7 +65,8 @@ pub(crate) fn execute(
     }
     match route {
         ChangeRoute::Inbox => {
-            let event: golia_change_link::SignedEvent = body(source, golia_change_link::MAX_BYTES)?;
+            let event: golia_change_link::SignedEvent =
+                body_serde(source, golia_change_link::MAX_BYTES)?;
             let endpoint = &event.event.receiver;
             let scope = Scope {
                 installation_id: endpoint.installation.clone(),
@@ -73,7 +74,7 @@ pub(crate) fn execute(
                 recovery_epoch: endpoint.generation.0,
             };
             let channel = configured(channels, &scope, &event.event.channel, None)?;
-            json(&store.receive_change_event(credential, &scope, &channel.digest, &event)?)
+            json_serde(&store.receive_change_event(credential, &scope, &channel.digest, &event)?)
         }
         ChangeRoute::Scoped(scope, action) => match action {
             Action::Channels => {
@@ -95,8 +96,8 @@ pub(crate) fn execute(
             Action::Events(after) => {
                 json(&store.change_events(credential, &scope, after.as_deref())?)
             }
-            Action::Event(digest) => json(&store.change_event(credential, &scope, &digest)?),
-            Action::Request(actor_id, request_id) => json(&store.change_request_event(
+            Action::Event(digest) => json_serde(&store.change_event(credential, &scope, &digest)?),
+            Action::Request(actor_id, request_id) => json_serde(&store.change_request_event(
                 credential,
                 &RequestKey {
                     scope,
@@ -114,7 +115,7 @@ pub(crate) fn execute(
                 }) {
                     return Err(Error::Unauthorized);
                 }
-                json(&proof)
+                json_serde(&proof)
             }
             Action::Claim(digest) => json(&store.repair_task_claim(credential, &scope, &digest)?),
             Action::Mapping => {
@@ -127,7 +128,7 @@ pub(crate) fn execute(
                     &input.channel,
                     Some(&input.configuration_digest),
                 )?;
-                json(&store.enqueue_change_mapping(credential, &input)?)
+                json_serde(&store.enqueue_change_mapping(credential, &input)?)
             }
             Action::Withdraw => {
                 let input: alt_server_store::ChangeWithdrawalRequest =
@@ -139,7 +140,7 @@ pub(crate) fn execute(
                     &input.channel,
                     Some(&input.configuration_digest),
                 )?;
-                json(&store.enqueue_change_withdrawal(credential, &input)?)
+                json_serde(&store.enqueue_change_withdrawal(credential, &input)?)
             }
             Action::Bind => {
                 let input: alt_server_store::RepairBindingRequest =
@@ -151,7 +152,7 @@ pub(crate) fn execute(
                     &input.channel,
                     Some(&input.configuration_digest),
                 )?;
-                json(&store.enqueue_repair_binding(credential, &input)?)
+                json_serde(&store.enqueue_repair_binding(credential, &input)?)
             }
             Action::Reauthorize(channel, digest) => {
                 let config = configured(channels, &scope, &channel, None)?;
@@ -162,7 +163,7 @@ pub(crate) fn execute(
                     &config.digest,
                     &digest,
                 )?;
-                json(&store.change_event(credential, &scope, &digest)?)
+                json_serde(&store.change_event(credential, &scope, &digest)?)
             }
         },
     }

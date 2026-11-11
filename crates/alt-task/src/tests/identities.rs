@@ -1,26 +1,18 @@
 //! Identities and stored bytes of records built the way the other tests
-//! build them, held to what the serde encoding gave.
+//! build them, held to what the serde encoding gave when they were recorded.
 
 use super::*;
 
 fn samples() -> Vec<(&'static str, String, String)> {
     let mut lines = Vec::new();
-    let mut add =
-        |kind: &'static str, id: String, serde_id: String, ours: String, theirs: String| {
-            assert_eq!(id, serde_id, "{kind}");
-            assert_eq!(ours, theirs, "{kind}");
-            lines.push((kind, id, ours));
-        };
     macro_rules! record {
         ($value:expr) => {{
             let value = $value;
-            add(
+            lines.push((
                 value_kind(&value),
                 value.id().unwrap(),
-                alt_input::identity(value_kind(&value), &value).unwrap(),
                 alt_json::to_string(&value).unwrap(),
-                serde_json::to_string(&value).unwrap(),
-            );
+            ));
         }};
     }
     fn value_kind<T: Record>(_: &T) -> &'static str {
@@ -68,9 +60,6 @@ fn identities_of_real_records_are_the_recorded_ones() {
         env!("CARGO_MANIFEST_DIR"),
         "/src/tests/fixtures/identities.txt"
     );
-    if std::env::var_os("ALT_JSON_RECORD").is_some() {
-        std::fs::write(path, &text).unwrap();
-    }
     assert!(
         std::fs::read_to_string(path).unwrap() == text,
         "identities differ from the recorded ones"

@@ -23,13 +23,13 @@ fn start(db: &OperatorDb) -> (ServerProcess, String) {
         .recv_timeout(Duration::from_secs(15))
         .expect("server readiness");
     reader.join().unwrap();
-    let ready: serde_json::Value = serde_json::from_str(&line).unwrap();
+    let ready: alt_json::Value = alt_json::from_str(&line).unwrap();
     (
         child,
         format!("http://{}", ready["address"].as_str().unwrap()),
     )
 }
-fn channels(url: &str, token: &str) -> serde_json::Value {
+fn channels(url: &str, token: &str) -> alt_json::Value {
     let response = ureq::get(&format!(
         "{url}/v1/repositories/repository/epochs/1/changes/channels"
     ))
@@ -37,7 +37,7 @@ fn channels(url: &str, token: &str) -> serde_json::Value {
     .timeout(Duration::from_secs(5))
     .call()
     .unwrap();
-    serde_json::from_reader(response.into_reader()).unwrap()
+    crate::database::json::body(response)
 }
 
 #[test]
@@ -70,10 +70,8 @@ fn operator_pairing_requires_explicit_install_and_cannot_resurrect_after_restart
     let grants_file = db.path("grants.json");
     std::fs::write(
         &grants_file,
-        serde_json::to_vec(
-            &serde_json::json!({"read":true,"publish_records":true,"grants":grants()}),
-        )
-        .unwrap(),
+        alt_json::to_vec(&alt_json::json!({"read":true,"publish_records":true,"grants":grants()}))
+            .unwrap(),
     )
     .unwrap();
     db.ok(&[
@@ -115,10 +113,10 @@ fn operator_pairing_requires_explicit_install_and_cannot_resurrect_after_restart
         local_credential_file: admin.clone().into(),
         peer_credential_file: peer.clone().into(),
     }];
-    std::fs::write(&db.config, serde_json::to_vec(&config).unwrap()).unwrap();
+    std::fs::write(&db.config, alt_json::to_vec(&config).unwrap()).unwrap();
     let token = alt_server::operator::read_token(std::path::Path::new(&admin)).unwrap();
     let (child, url) = start(&db);
-    assert_eq!(channels(&url, &token), serde_json::json!([]));
+    assert_eq!(channels(&url, &token), alt_json::json!([]));
     drop(child);
     let install = [
         "--credential",
@@ -135,13 +133,13 @@ fn operator_pairing_requires_explicit_install_and_cannot_resurrect_after_restart
     drop(child);
     // An operator configuration edit alone cannot change an installed pairing.
     config.change_links[0].target.origin = "http://127.0.0.1:2".into();
-    std::fs::write(&db.config, serde_json::to_vec(&config).unwrap()).unwrap();
+    std::fs::write(&db.config, alt_json::to_vec(&config).unwrap()).unwrap();
     let (child, url) = start(&db);
     assert_eq!(channels(&url, &token)[0]["enabled"], false);
     drop(child);
     assert!(!db.run(&install).status.success());
     config.change_links[0].target.origin = "http://127.0.0.1:1".into();
-    std::fs::write(&db.config, serde_json::to_vec(&config).unwrap()).unwrap();
+    std::fs::write(&db.config, alt_json::to_vec(&config).unwrap()).unwrap();
     db.ok(&[
         "--credential",
         &admin,
@@ -155,7 +153,7 @@ fn operator_pairing_requires_explicit_install_and_cannot_resurrect_after_restart
     assert!(!db.run(&install).status.success());
     drop(child);
     config.change_links[0].channel = "replacement-pair".into();
-    std::fs::write(&db.config, serde_json::to_vec(&config).unwrap()).unwrap();
+    std::fs::write(&db.config, alt_json::to_vec(&config).unwrap()).unwrap();
     db.ok(&[
         "--credential",
         &admin,

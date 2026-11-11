@@ -1,0 +1,93 @@
+$ [plain] alt status --json
+exit 128
+err| {"error":{"details":{},"kind":"execution_error","message":"not an alt repository (no .alt found)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [plain] alt add . --json
+exit 128
+err| {"error":{"details":{},"kind":"execution_error","message":"not an alt repository (no .alt found)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:0>","retryable":false},"schema_version":1}
+$ [plain] alt commit -m x --json
+exit 128
+err| {"error":{"details":{},"kind":"execution_error","message":"not an alt repository (no .alt found)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:1>","retryable":false},"schema_version":1}
+$ [plain] alt branch --json
+exit 128
+err| {"error":{"details":{},"kind":"execution_error","message":"not an alt repository (no .alt found)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [plain] alt switch main --json
+exit 128
+err| {"error":{"details":{},"kind":"execution_error","message":"not an alt repository (no .alt found)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:2>","retryable":false},"schema_version":1}
+$ [plain] alt show --json
+exit 128
+err| {"error":{"details":{"operation_ids":[]},"kind":"execution_error","message":"not a git repository (or any parent): <root>/plain","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [plain] alt diff --json
+exit 128
+err| {"error":{"details":{},"kind":"execution_error","message":"not an alt repository (no .alt found)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [plain] alt merge x --json
+exit 128
+err| {"error":{"details":{},"kind":"execution_error","message":"not an alt repository (no .alt found)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:3>","retryable":false},"schema_version":1}
+$ [plain] alt rebase x --json
+exit 128
+err| {"error":{"details":{},"kind":"execution_error","message":"not an alt repository (no .alt found)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:4>","retryable":false},"schema_version":1}
+$ [plain] alt revert x --json
+exit 128
+err| {"error":{"details":{},"kind":"execution_error","message":"not an alt repository (no .alt found)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:5>","retryable":false},"schema_version":1}
+$ [plain] alt cherry-pick x --json
+exit 128
+err| {"error":{"details":{},"kind":"execution_error","message":"not an alt repository (no .alt found)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:6>","retryable":false},"schema_version":1}
+$ [plain] alt tag --json
+exit 128
+err| {"error":{"details":{},"kind":"execution_error","message":"not an alt repository (no .alt found)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [plain] alt log --json
+exit 128
+err| {"error":{"details":{"operation_ids":[]},"kind":"execution_error","message":"not a git repository (or any parent): <root>/plain","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [plain] alt flow init --json
+exit 128
+err| {"error":{"details":{},"kind":"execution_error","message":"not an alt repository (no .alt found)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:7>","retryable":false},"schema_version":1}
+$ [plain] alt undo --json
+exit 128
+err| {"error":{"details":{},"kind":"execution_error","message":"not an alt repository (no .alt found)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:8>","retryable":false},"schema_version":1}
+$ [plain] alt operation pending --json
+exit 128
+err| {"error":{"details":{},"kind":"execution_error","message":"not an alt repository (no .alt found)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [plain] alt workspace list --json
+exit 128
+err| {"error":{"details":{},"kind":"execution_error","message":"not an alt repository (no .alt found)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [plain] alt remote list --json
+exit 128
+err| {"error":{"details":{},"kind":"execution_error","message":"not an alt repository (no .alt found)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [plain] alt fetch --json
+exit 128
+err| {"error":{"details":{},"kind":"execution_error","message":"not an alt repository (no .alt found)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:9>","retryable":false},"schema_version":1}
+$ [plain] alt push --json
+exit 128
+err| {"error":{"details":{},"kind":"execution_error","message":"not an alt repository (no .alt found)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:10>","retryable":false},"schema_version":1}
+$ [plain] alt identity list --json
+exit 128
+err| {"error":{"details":{},"kind":"execution_error","message":"not an alt repository (no .alt found)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [plain] alt op-log --json
+exit 128
+err| {"error":{"details":{},"kind":"execution_error","message":"not an alt repository (no .alt found)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [plain] alt ci validate --json
+exit 0
+out| no workflow.toml files found under .alt/ci/<name>/workflow.toml
+$ [plain] alt verify --json
+exit 128
+err| {"error":{"details":{},"kind":"execution_error","message":"not an alt repository (no .alt found)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [plain] alt meta show --json
+exit 128
+err| {"error":{"details":{},"kind":"execution_error","message":"not an alt repository (no .alt found)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [plain] alt request pending --json
+exit 128
+err| {"error":{"details":{},"kind":"execution_error","message":"not an alt repository (no .alt found)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [plain] alt request status <id32:11> --json
+exit 128
+err| {"error":{"details":{},"kind":"execution_error","message":"not an alt repository (no .alt found)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [plain] alt task list --json
+exit 128
+err| {"error":{"details":{},"kind":"execution_error","message":"not an alt repository (no .alt found)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [plain] alt candidate show x --json
+exit 128
+err| {"error":{"details":{},"kind":"execution_error","message":"not an alt repository (no .alt found)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [plain] alt evidence show x --json
+exit 128
+err| {"error":{"details":{},"kind":"execution_error","message":"not an alt repository (no .alt found)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [plain] alt --request-id <id32:11> add . --json
+exit 128
+err| {"error":{"details":{},"kind":"execution_error","message":"not an alt repository (no .alt found)","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:11>","retryable":false},"schema_version":1}

@@ -1,0 +1,95 @@
+$ [repo] alt init .
+exit 0
+$ [repo] alt add .
+exit 0
+$ [repo] alt commit -m first
+exit 0
+$ [repo] alt remote add origin <server> --json
+exit 0
+out| {"fetch":"+refs/heads/*:refs/remotes/origin/*","name":"origin","operation_ids":[],"request_id":"<id32:0>","schema_version":1,"url":"<server>"}
+$ [repo] alt remote add origin <server> --json
+exit 75
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"remote 'origin' already exists","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:1>","retryable":false},"schema_version":1}
+$ [repo] alt remote add other https://example.com/日本語.git --json
+exit 0
+out| {"fetch":"+refs/heads/*:refs/remotes/other/*","name":"other","operation_ids":[],"request_id":"<id32:2>","schema_version":1,"url":"https://example.com/日本語.git"}
+$ [repo] alt remote list --json
+exit 0
+out| {"schema_version":1,"remotes":[{"name":"origin","url":"<server>","fetch":"+refs/heads/*:refs/remotes/origin/*"},{"name":"other","url":"https://example.com/日本語.git","fetch":"+refs/heads/*:refs/remotes/other/*"}]}
+$ [repo] alt remote remove other --json
+exit 0
+out| {"operation_ids":[],"removed":"other","request_id":"<id32:3>","schema_version":1}
+$ [repo] alt fetch origin --json
+exit 0
+out| {"objects":0,"operation_ids":[],"refs":[],"remote":"origin","request_id":"<id32:4>","schema_version":1}
+$ [repo] alt push origin --json
+exit 0
+out| {"objects":5,"operation_ids":[],"pack_bytes":<volatile>,"refs":[{"name":"refs/heads/main","status":"ok"}],"remote":"origin","request_id":"<id32:5>","schema_version":1}
+$ [repo] alt push origin --json
+exit 0
+out| {"operation_ids":[],"refs":[],"remote":"origin","request_id":"<id32:6>","schema_version":1,"updated":false}
+$ [repo] alt fetch origin --json
+exit 0
+out| {"objects":1,"operation_ids":["<id64:7>"],"pack_bytes":<volatile>,"refs":[{"local":"refs/remotes/origin/main","oid":"<id40:8>","old":null,"server":"refs/heads/main"}],"remote":"origin","request_id":"<id32:9>","schema_version":1}
+$ [repo] alt branch --json
+exit 0
+out| {"schema_version":1,"current":"main","branches":[{"name":"main","current":true,"oid":"<id40:8>"}]}
+$ [repo] alt tag v1
+exit 0
+$ [repo] alt push origin refs/tags/v1:refs/tags/v1 --json
+exit 75
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"server rejected push: unpack eof before pack header was fully read","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:10>","retryable":false},"schema_version":1}
+$ alt clone <server> copy --json
+exit 0
+out| Initialized empty alt repository in copy/.alt
+out| added remote 'origin' → <server>
+out| fetch 'origin': 1 ref(s), <volatile> byte(s) of packfile
+out|          new  refs/heads/main -> refs/remotes/origin/main
+out| {"schema_version":1,"url":"<server>","dir":"copy","branch":"main","head":"<id40:8>"}
+$ alt clone <server> copy --json
+exit 75
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"copy/.alt already exists","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":null,"retryable":false},"schema_version":1}
+$ [copy] alt status --json
+exit 0
+out| {"schema_version":1,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[],"unstaged":[],"untracked":[],"unmerged":[],"clean":true}
+$ [copy] alt remote list --json
+exit 0
+out| {"schema_version":1,"remotes":[{"name":"origin","url":"<server>","fetch":"+refs/heads/*:refs/remotes/origin/*"}]}
+$ [copy] alt add .
+exit 0
+$ [copy] alt commit -m second
+exit 0
+$ [copy] alt push origin --json
+exit 0
+out| {"objects":3,"operation_ids":[],"pack_bytes":<volatile>,"refs":[{"name":"refs/heads/main","status":"ok"}],"remote":"origin","request_id":"<id32:11>","schema_version":1}
+$ [repo] alt fetch origin --json
+exit 0
+out| {"objects":1,"operation_ids":["<id64:12>"],"pack_bytes":<volatile>,"refs":[{"local":"refs/remotes/origin/main","oid":"<id40:13>","old":"<id40:8>","server":"refs/heads/main"}],"remote":"origin","request_id":"<id32:14>","schema_version":1}
+$ [repo] alt fetch origin --json
+exit 0
+out| {"objects":1,"operation_ids":[],"pack_bytes":<volatile>,"refs":[{"local":"refs/remotes/origin/main","oid":"<id40:13>","old":"<id40:13>","server":"refs/heads/main"}],"remote":"origin","request_id":"<id32:15>","schema_version":1}
+$ [repo] alt branch --json
+exit 0
+out| {"schema_version":1,"current":"main","branches":[{"name":"main","current":true,"oid":"<id40:8>"}]}
+$ [repo] alt add .
+exit 0
+$ [repo] alt commit -m diverged
+exit 0
+$ [repo] alt push origin --json
+exit 75
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"non-fast-forward push to 'refs/heads/main'; pass -f to override","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:16>","retryable":false},"schema_version":1}
+$ [repo] alt push origin -f --json
+exit 0
+out| {"objects":3,"operation_ids":[],"pack_bytes":<volatile>,"refs":[{"name":"refs/heads/main","status":"ok"}],"remote":"origin","request_id":"<id32:17>","schema_version":1}
+$ [repo] alt push origin nonesuch --json
+exit 75
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"local ref 'refs/heads/nonesuch' does not exist","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:18>","retryable":false},"schema_version":1}
+$ [repo] alt fetch origin refs/heads/nonesuch --json
+exit 75
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"malformed refspec 'refs/heads/nonesuch': missing ':'","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:19>","retryable":false},"schema_version":1}
+$ [repo] alt branch -d origin/main -r --json
+exit 0
+out| {"command_output":{"encoding":"utf-8","text":"deleted branch 'origin/main'\n","truncated":false},"operation_ids":["<id64:20>"],"request_id":"<id32:21>","schema_version":1}
+$ [repo] alt op-log -n 4 --json
+exit 0
+out| {"schema_version":1,"ops":[{"id":"<id64:20>","request_id":"<id32:21>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"branch","ref_changes":[{"name":"refs/remotes/origin/main","old":"<id40:13>","new":null}],"workspace":{"name":"default","instance":"<id64:22>"},"inverse_of":null},{"id":"<id64:23>","request_id":"<id32:24>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"commit","ref_changes":[{"name":"refs/heads/main","old":"<id40:8>","new":"<id40:25>"},{"name":"refs/notes/alt/meta","old":"<id40:26>","new":"<id40:27>"}],"workspace":{"name":"default","instance":"<id64:22>"},"inverse_of":null},{"id":"<id64:28>","request_id":"<id32:29>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"add","ref_changes":null,"recovery":{"phase":"completed","prepared":"<id64:30>"}},{"id":"<id64:30>","request_id":"<id32:29>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"add","ref_changes":null,"recovery":{"phase":"prepared","before":"<id64:31>","after":"<id64:32>","workspace":{"name":"default","instance":"<id64:22>"}}}]}

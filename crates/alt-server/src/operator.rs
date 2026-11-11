@@ -4,7 +4,6 @@ use crate::{HttpOptions, NativeOptions, StoreFactory};
 use alt_crypto::ed25519::SigningKey;
 use alt_remote_protocol::Limits;
 use alt_server_store::{ByteStore, InstanceSpec, Store};
-use serde::{Deserialize, Serialize};
 use std::{
     fs::{File, OpenOptions},
     io::{Read, Write},
@@ -59,14 +58,14 @@ impl From<alt_server_store::Error> for Error {
     }
 }
 pub type Result<T> = std::result::Result<T, Error>;
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, alt_json::ToJson, alt_json::FromJson)]
+#[json(deny_unknown_fields)]
 pub struct Config {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[json(default, skip_serializing_if = "Vec::is_empty")]
     pub change_links: Vec<crate::change_links::ChannelConfig>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[json(default, skip_serializing_if = "Option::is_none")]
     pub portable: Option<alt_portable::http::Bounds>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[json(default, skip_serializing_if = "Option::is_none")]
     pub cloud: Option<CloudConfig>,
     pub version: u32,
     pub instance: InstanceSpec,
@@ -80,26 +79,27 @@ pub struct Config {
     pub limits: Limits,
     pub tasks: alt_task_service::TaskLimits,
     pub http: HttpBounds,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[json(default, skip_serializing_if = "Option::is_none")]
     pub browser: Option<BrowserConfig>,
 }
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, alt_json::ToJson, alt_json::FromJson)]
+#[json(deny_unknown_fields)]
 pub struct CloudConfig {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[json(default, skip_serializing_if = "Option::is_none")]
     pub provision_digest: Option<String>,
+    #[json(with = "alt_json_serde::bridge")]
     pub audience: golia_platform_contract::Audience,
     pub runtime_credential_file: PathBuf,
 }
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, alt_json::ToJson, alt_json::FromJson)]
+#[json(deny_unknown_fields)]
 pub struct BrowserConfig {
     pub public_origin: String,
     pub assets_directory: PathBuf,
     pub session_ttl_ms: u64,
 }
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, alt_json::ToJson, alt_json::FromJson)]
+#[json(deny_unknown_fields)]
 pub struct HttpBounds {
     pub connections: usize,
     pub workers: usize,
@@ -123,8 +123,8 @@ impl Config {
         if bytes.first() != Some(&b'{') {
             return read_token(path);
         }
-        let value: alt_remote_protocol::login::SavedCredential = serde_json::from_slice(&bytes)
-            .map_err(|_| Error::Config("credential file encoding"))?;
+        let value: alt_remote_protocol::login::SavedCredential =
+            alt_json::from_slice(&bytes).map_err(|_| Error::Config("credential file encoding"))?;
         value
             .validate()
             .map_err(|_| Error::Config("credential file fields"))?;
@@ -146,7 +146,7 @@ impl Config {
     pub fn read(path: &Path) -> Result<Self> {
         let bytes = read_regular(path, 65536, false)?;
         let mut config: Self =
-            serde_json::from_slice(&bytes).map_err(|_| Error::Config("configuration JSON"))?;
+            alt_json::from_slice(&bytes).map_err(|_| Error::Config("configuration JSON"))?;
         let parent = std::fs::canonicalize(
             path.parent()
                 .filter(|p| !p.as_os_str().is_empty())
@@ -182,7 +182,7 @@ impl Config {
         config.validate()?;
         // Backups serialize the effective configuration, including separately
         // loaded Cloud settings and resolved paths, into a bounded archive entry.
-        if serde_json::to_vec(&config)
+        if alt_json::to_vec(&config)
             .map_err(|_| Error::Config("configuration encoding"))?
             .len()
             > 65536
@@ -398,13 +398,13 @@ impl Config {
     pub fn open(&self) -> Result<Store> {
         Ok(self.factory()?.open()?)
     }
-    fn volume_identity(&self) -> Result<serde_json::Value> {
+    fn volume_identity(&self) -> Result<alt_json::Value> {
         Ok(
-            serde_json::json!({"version":1,"installation_id":self.instance.installation_id,"workspace_id":self.instance.workspace_id,"deployment_mode":self.instance.deployment_mode,"receipt_key_id":alt_hash::blake3::hash(self.signing_key()?.verifying_key().as_bytes()).to_hex().to_string()}),
+            alt_json::json!({"version":1,"installation_id":self.instance.installation_id,"workspace_id":self.instance.workspace_id,"deployment_mode":self.instance.deployment_mode,"receipt_key_id":alt_hash::blake3::hash(self.signing_key()?.verifying_key().as_bytes()).to_hex().to_string()}),
         )
     }
     pub(super) fn check_volume(&self) -> Result<()> {
-        let marker: serde_json::Value = serde_json::from_slice(&read_regular(
+        let marker: alt_json::Value = alt_json::from_slice(&read_regular(
             &self.bytes_directory.join("instance.json"),
             4096,
             true,
@@ -440,7 +440,7 @@ impl Config {
             }
             create_private(
                 &marker,
-                &serde_json::to_vec(&self.volume_identity()?)
+                &alt_json::to_vec(&self.volume_identity()?)
                     .map_err(|_| Error::Config("volume identity"))?,
             )?;
         }
@@ -538,7 +538,7 @@ impl Config {
             .ok_or(Error::Config("runtime generation overflow"))?;
         next.validate()?;
         let encoded =
-            serde_json::to_vec_pretty(&next).map_err(|_| Error::Config("next configuration"))?;
+            alt_json::to_vec_pretty(&next).map_err(|_| Error::Config("next configuration"))?;
         if output.exists() {
             if read_regular(output, 65536, true)? != encoded {
                 return Err(Error::Config(
@@ -554,25 +554,7 @@ impl Config {
         let client = self.client()?;
         let bytes = ByteStore::open(&self.bytes_directory)?;
         let key = self.signing_key()?;
-        let migrated = match from {
-            1 => Store::migrate_v1(client, bytes, self.instance.clone(), key, self.limits),
-            2 => Store::migrate_v2(client, bytes, self.instance.clone(), key, self.limits),
-            3 => Store::migrate_v3(client, bytes, self.instance.clone(), key, self.limits),
-            4 => Store::migrate_v4(client, bytes, self.instance.clone(), key, self.limits),
-            5 => Store::migrate_v5(client, bytes, self.instance.clone(), key, self.limits),
-            7 => Store::migrate_v7(client, bytes, self.instance.clone(), key, self.limits),
-            8 => Store::migrate_v8(client, bytes, self.instance.clone(), key, self.limits),
-            9 => Store::migrate_v9(client, bytes, self.instance.clone(), key, self.limits),
-            13 => Store::migrate_v13(client, bytes, self.instance.clone(), key, self.limits),
-            14 => Store::migrate_v14(client, bytes, self.instance.clone(), key, self.limits),
-            15 => Store::migrate_v15(client, bytes, self.instance.clone(), key, self.limits),
-            16 => Store::migrate_v16(client, bytes, self.instance.clone(), key, self.limits),
-            12 => Store::migrate_v12(client, bytes, self.instance.clone(), key, self.limits),
-            11 => Store::migrate_v11(client, bytes, self.instance.clone(), key, self.limits),
-            10 => Store::migrate_v10(client, bytes, self.instance.clone(), key, self.limits),
-            6 => Store::migrate_v6(client, bytes, self.instance.clone(), key, self.limits),
-            _ => unreachable!(),
-        };
+        let migrated = Store::migrate(client, bytes, self.instance.clone(), key, self.limits, from);
         match migrated {
             Ok(store) if store.spec() == &next.instance => Ok(next),
             Err(alt_server_store::Error::OutcomeUnknown) if next.open().is_ok() => Ok(next),

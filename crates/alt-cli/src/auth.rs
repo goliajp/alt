@@ -481,4 +481,5 @@ mod json_tests {
     use super::*;
 
     alt_json_testkit::module_fixture_tests!("auth"; Pending, Issued);
+    alt_json_testkit::module_read_tests!("state-auth"; Pending: Pending, Issued: Issued, SavedCredential: SavedCredential);
 }

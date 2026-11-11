@@ -1,0 +1,25 @@
+$ [main] alt init .
+exit 0
+$ [main] alt add .
+exit 0
+$ [main] alt commit -m base
+exit 0
+$ [main] alt workspace add task <root>/main/../task
+exit 0
+$ [scratch] alt runner probe --bindings [{"name":"bash","path":"/bin/bash","version_args":["--version"]}] --environment {"PATH":"/usr/bin:/bin"} --json
+exit 0
+out| {"observer_blake3":"<id64:0>","runner":<volatile>,"schema_version":1,"tools":[{"binary_blake3":"<id64:1>","name":"bash","version":<volatile>}]}
+$ [task] alt task create --definition {"purpose":"left open","authority":"test-owner","allowed_paths":["source.txt"],"auxiliary":[{"path":".ignored","purpose":"private probe"},{"path":"probe.txt","purpose":"root probe"}],"exclusions":[],"validation":{"commands":[["bash","gate.sh"]],"cwd":".","environment":{"values":{"PATH":"/usr/bin:/bin"},"complete":true},"tools":[{"binary_blake3":"<id64:1>","name":"bash","version":<volatile>}],"external":[],"validation":{"outputs":["target"]}}} --target refs/heads/main --json
+exit 0
+out| {"baseline_id":"<id64:2>","operation_id":"<id64:3>","operation_ids":["<id64:3>"],"request_id":"<id32:4>","schema_version":1,"task":{"baseline":{"head":"<id40:5>","refs":{"refs/heads/main":"<id40:5>","refs/heads/task":"<id40:5>","refs/notes/alt/meta":"<id40:6>"},"tree":"<id40:7>"},"creator_request":"<id32:4>","schema_version":1,"scope":{"repository":"<id32:8>","workspace":"<id64:9>"},"spec":{"allowed_paths":["source.txt"],"authority":"test-owner","auxiliary":[{"path":".ignored","purpose":"private probe"},{"path":"probe.txt","purpose":"root probe"}],"exclusions":[],"purpose":"left open","validation":{"commands":[["bash","gate.sh"]],"cwd":".","environment":{"complete":true,"values":{"PATH":"/usr/bin:/bin"}},"external":[],"tools":[{"binary_blake3":"<id64:1>","name":"bash","version":<volatile>}],"validation":{"outputs":["target"]}}},"target_expected":{"refs/heads/main":"<id40:5>"}},"task_id":"<id64:10>"}
+$ [task] alt add source.txt
+exit 0
+$ [task] alt candidate create <id64:10> --json
+exit 0
+out| {"candidate":{"creator_request":"<id32:11>","manifest":"<id64:12>","parent":null,"schema_version":1,"source_selection":"index","target_expected":{"refs/heads/main":"<id40:5>"},"task":"<id64:10>","tree":"<id40:13>"},"candidate_id":"<id64:14>","operation_id":"<id64:15>","operation_ids":["<id64:15>"],"request_id":"<id32:11>","schema_version":1}
+$ [task] alt evidence run <id64:14> --profile {"kind":"local","scratch":"<root>/task/../scratch","tools":[{"name":"bash","path":"/bin/bash","version_args":["--version"]}],"timeout_ms":20000} --json
+exit 0
+out| {"attempt_id":"<id64:16>","evidence":{"actual_context":{"commands":[["bash","gate.sh"]],"cwd":".","environment":{"complete":true,"values":{"PATH":"/usr/bin:/bin"}},"external":[],"tools":[{"binary_blake3":"<id64:1>","name":"bash","version":<volatile>}],"validation":{"outputs":["target"]}},"after":"<id64:12>","artifacts":{"command_observations":{"blake3":"<id64:17>","bytes":<volatile>},"input_observations":{"blake3":"<id64:18>","bytes":<volatile>},"observer_binary":{"blake3":"<id64:0>","bytes":<volatile>},"observer_spec":{"blake3":"<id64:19>","bytes":<volatile>},"output_inventory":{"blake3":"<id64:20>","bytes":<volatile>},"tool-probe:after:bash:stderr":{"blake3":"<id64:21>","bytes":<volatile>},"tool-probe:after:bash:stdout":{"blake3":"<id64:22>","bytes":<volatile>},"tool-probe:after:bash:termination":{"blake3":"<id64:23>","bytes":<volatile>},"tool-probe:before:bash:stderr":{"blake3":"<id64:21>","bytes":<volatile>},"tool-probe:before:bash:stdout":{"blake3":"<id64:22>","bytes":<volatile>},"tool-probe:before:bash:termination":{"blake3":"<id64:23>","bytes":<volatile>}},"before":"<id64:12>","binaries":{"bash":{"blake3":"<id64:1>","bytes":<volatile>}},"candidate":"<id64:14>","creator_request":"<id32:24>","finished_unix_ns":<digits>,"manifest":"<id64:12>","original_report":{"blake3":"<id64:25>","bytes":<volatile>},"provenance":"observed","runner":<volatile>,"schema_version":1,"started_unix_ns":<digits>,"stderr":{"blake3":"<id64:21>","bytes":<volatile>},"stdout":{"blake3":"<id64:26>","bytes":<volatile>},"termination":{"code":0,"kind":"exit"}},"evidence_id":"<id64:27>","operation_id":"<id64:28>","operation_ids":["<id64:29>","<id64:28>"],"receipt_id":"<id64:30>","request_id":"<id32:24>","schema_version":1,"validity":{"eligible":true,"reasons":[]}}
+$ [task] alt request pending --json
+exit 0
+out| {"requests":[],"schema_version":1}

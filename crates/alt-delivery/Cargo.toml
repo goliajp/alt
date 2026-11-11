@@ -19,8 +19,6 @@ alt-os.workspace = true
 alt-refs.workspace = true
 alt-repo.workspace = true
 alt-import.workspace = true
-serde.workspace = true
-serde_json.workspace = true
 alt-bytes.workspace = true
 
 [dev-dependencies]

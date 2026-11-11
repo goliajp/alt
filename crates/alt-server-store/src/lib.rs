@@ -2,11 +2,14 @@
 mod bytes;
 mod database;
 mod gc;
+mod jsonb;
+pub use jsonb::Jsonb;
 mod portable;
 mod portable_import;
 pub use portable::*;
 pub use portable_import::*;
 mod pack_compaction;
+mod pack_native;
 pub use pack_compaction::PACK_RETIRED_GRACE_MS;
 mod packs;
 pub use packs::*;
@@ -19,6 +22,7 @@ pub use publication::*;
 pub use read::*;
 pub use registration::MAX_REGISTER_CONTENTS;
 mod schema;
+mod schema_v19;
 mod segments;
 mod store;
 mod tasks;
@@ -33,7 +37,7 @@ pub enum Error {
     Protocol(alt_remote_protocol::Error),
     Task(alt_task_service::Error),
     Repository(alt_repository_service::Error),
-    Json(serde_json::Error),
+    Json(alt_json::Error),
     Integrity(&'static str),
     Limit(&'static str),
     Precondition(&'static str),
@@ -122,8 +126,8 @@ impl From<alt_repository_service::Error> for Error {
     }
 }
 
-impl From<serde_json::Error> for Error {
-    fn from(e: serde_json::Error) -> Self {
+impl From<alt_json::Error> for Error {
+    fn from(e: alt_json::Error) -> Self {
         Self::Json(e)
     }
 }
@@ -143,7 +147,7 @@ pub use tasks::CurrentReviewAssessment;
 pub use workbench::*;
 
 /// Current persisted schema; runtime open validates all migration checksums.
-pub const SCHEMA_VERSION: u32 = 18;
+pub const SCHEMA_VERSION: u32 = 19;
 
 mod change_channel;
 mod link_history;

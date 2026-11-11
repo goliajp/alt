@@ -33,7 +33,7 @@ fn cloud_backup_restores_with_fresh_binding_and_rejects_old_credentials() {
                     .to_string(),
             ),
         });
-        std::fs::write(&db.config, serde_json::to_vec(&config).unwrap()).unwrap();
+        std::fs::write(&db.config, alt_json::to_vec(&config).unwrap()).unwrap();
         config
     };
     let config = configure(&source, 1, &"ab".repeat(32));
@@ -180,8 +180,11 @@ fn cloud_backup_restores_with_fresh_binding_and_rejects_old_credentials() {
     )
     .unwrap();
     let spec_path = managed.root.path().join("recovery.json");
-    alt_server::operator::create_private(&spec_path, &serde_json::to_vec(&recovery).unwrap())
-        .unwrap();
+    alt_server::operator::create_private(
+        &spec_path,
+        &alt_json::to_vec(&alt_json_serde::Serde(&recovery)).unwrap(),
+    )
+    .unwrap();
     let restore_args = [
         "cloud-restore",
         "--spec",
@@ -255,7 +258,7 @@ fn cloud_backup_restores_with_fresh_binding_and_rejects_old_credentials() {
     assert!(!managed.run(&start_args).status.success());
 }
 
-fn prepare(db: &OperatorDb) -> (Store, String, String) {
+pub(super) fn prepare(db: &OperatorDb) -> (Store, String, String) {
     let seed = db.path("receipt.key");
     let admin = db.path("admin.token");
     let password = db.path("password");
@@ -309,7 +312,7 @@ fn prepare(db: &OperatorDb) -> (Store, String, String) {
         .unwrap();
     (store, admin, password)
 }
-fn publish(store: &mut Store, token: &str) -> Payload {
+pub(super) fn publish(store: &mut Store, token: &str) -> Payload {
     let mut p = Payload::new("operator-backup-source", None);
     p.publication.key.scope.installation_id = store.spec().installation_id.clone();
     let credential = store.authenticate(token).unwrap();
@@ -421,7 +424,7 @@ fn segment_files(bytes: &std::path::Path) -> Vec<PathBuf> {
     }
     files
 }
-fn encryption_key(root: &std::path::Path) -> (String, String) {
+pub(super) fn encryption_key(root: &std::path::Path) -> (String, String) {
     let path = root.join("backup.agekey");
     let output = Command::new("age-keygen")
         .arg("-o")
@@ -520,10 +523,10 @@ fn encrypted_backup_authenticates_every_entry_and_restores_refs_with_new_epoch()
     assert!(!source.run(&verify).status.success());
     std::fs::write(external.join("payload.tar.age"), encrypted).unwrap();
     let target = OperatorDb::new();
-    let mut config: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&target.config).unwrap()).unwrap();
-    config["instance"]["runtime_generation"] = serde_json::json!(10);
-    std::fs::write(&target.config, serde_json::to_vec(&config).unwrap()).unwrap();
+    let mut config: alt_json::Value =
+        alt_json::from_slice(&std::fs::read(&target.config).unwrap()).unwrap();
+    config["instance"]["runtime_generation"] = alt_json::json!(10);
+    std::fs::write(&target.config, alt_json::to_vec(&config).unwrap()).unwrap();
     let restore = [
         "restore",
         "--input",
@@ -741,10 +744,10 @@ fn interrupted_backup_is_incomplete_and_interrupted_restore_cannot_serve_old_cre
     let input = complete.to_str().unwrap();
     source.ok(&["backup", "--recipient", &recipient, "--output", input]);
     let target = OperatorDb::new();
-    let mut config: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&target.config).unwrap()).unwrap();
-    config["instance"]["runtime_generation"] = serde_json::json!(10);
-    std::fs::write(&target.config, serde_json::to_vec(&config).unwrap()).unwrap();
+    let mut config: alt_json::Value =
+        alt_json::from_slice(&std::fs::read(&target.config).unwrap()).unwrap();
+    config["instance"]["runtime_generation"] = alt_json::json!(10);
+    std::fs::write(&target.config, alt_json::to_vec(&config).unwrap()).unwrap();
     let restore = [
         "restore",
         "--input",

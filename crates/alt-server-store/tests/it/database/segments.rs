@@ -60,8 +60,28 @@ fn upload(f: &mut Fixture, p: &Payload) -> Uploaded {
     register(&mut f.store, &f.credential, p, &segment).unwrap();
     segment
 }
+/// publishes a payload made by `retained` or `sparse`
+fn publish_retained(f: &mut Fixture, p: &Payload) {
+    let work = f
+        .store
+        .acquire_publication(&f.credential, &p.publication.key, 60_000, 1000)
+        .unwrap();
+    let (graph, tasks) = super::tasks::verified(&work, p.commit);
+    f.store
+        .mark_ready_with_tasks(&f.credential, &work, &graph, &tasks)
+        .unwrap();
+    f.store
+        .publish_with_tasks(&f.credential, &work, &graph, &tasks)
+        .unwrap();
+}
+/// A task with its record, attachments and bundle: content that stays in the content
+/// store once published. Its Git objects go to a pack segment and leave it.
+fn retained(request: &str) -> Payload {
+    super::tasks::task_payload(request)
+}
+/// `retained` and eight Git blobs: ten of the fifteen members are dead after publication
 fn sparse() -> Payload {
-    let mut p = Payload::new("segment-sparse", None);
+    let mut p = retained("segment-sparse");
     for n in 0..8 {
         let data = vec![n; 32_000];
         let hash = alt_hash::blake3::hash(&data).to_hex().to_string();
@@ -91,12 +111,18 @@ fn path(f: &Fixture, id: &str) -> std::path::PathBuf {
         .join("repository")
         .join(format!("segment-{id}"))
 }
-/// a live expiring pin on the commit, as an upload in flight holds: compaction waits for it
+/// a live expiring pin on the task record, as an upload in flight holds: compaction waits for it
 fn hold(f: &Fixture, p: &Payload) {
+    let record = p
+        .manifest
+        .entries
+        .iter()
+        .find(|entry| entry.kind == ContentKind::Record)
+        .unwrap();
     f.client()
         .execute(
             "INSERT INTO alt_pins(repository,pin_id,blake3,expires_at) VALUES('repository','hold',$1,9223372036854775807)",
-            &[&p.manifest.entries[1].blake3],
+            &[&record.blake3],
         )
         .unwrap();
 }
@@ -105,8 +131,8 @@ fn release(f: &Fixture) {
         .execute("DELETE FROM alt_pins WHERE pin_id='hold'", &[])
         .unwrap();
 }
-fn state(f: &Fixture) -> serde_json::Value {
-    f.client().query_one("SELECT jsonb_build_object('segments',(SELECT jsonb_agg(to_jsonb(s) ORDER BY segment_id) FROM alt_segments s),'locations',(SELECT jsonb_agg(to_jsonb(l) ORDER BY blake3) FROM alt_blob_locations l),'blobs',(SELECT jsonb_agg(to_jsonb(b) ORDER BY blake3) FROM alt_blobs b),'request',(SELECT jsonb_agg(to_jsonb(q) ORDER BY request_id) FROM alt_requests q),'repository',(SELECT jsonb_agg(to_jsonb(r) ORDER BY id) FROM alt_repositories r),'objects',(SELECT jsonb_agg(to_jsonb(o) ORDER BY oid) FROM alt_objects o),'content',(SELECT jsonb_agg(to_jsonb(c) ORDER BY blake3) FROM alt_request_content c))", &[]).unwrap().get(0)
+fn state(f: &Fixture) -> alt_json::Value {
+    f.client().query_one("SELECT jsonb_build_object('segments',(SELECT jsonb_agg(to_jsonb(s) ORDER BY segment_id) FROM alt_segments s),'locations',(SELECT jsonb_agg(to_jsonb(l) ORDER BY blake3) FROM alt_blob_locations l),'blobs',(SELECT jsonb_agg(to_jsonb(b) ORDER BY blake3) FROM alt_blobs b),'request',(SELECT jsonb_agg(to_jsonb(q) ORDER BY request_id) FROM alt_requests q),'repository',(SELECT jsonb_agg(to_jsonb(r) ORDER BY id) FROM alt_repositories r),'objects',(SELECT jsonb_agg(to_jsonb(o) ORDER BY oid) FROM alt_objects o),'content',(SELECT jsonb_agg(to_jsonb(c) ORDER BY blake3) FROM alt_request_content c))", &[]).unwrap().get::<_, alt_server_store::Jsonb>(0).0
 }
 #[test]
 #[ignore = "requires isolated PostgreSQL; shared roles, Cloud quota, segment publication and exact snapshot reads"]
@@ -184,15 +210,16 @@ fn segment_registration_publication_and_duplicate_locations_preserve_originals()
             .collect_orphans(&f.credential, "repository", 100)
             .unwrap();
         assert_eq!(second.id(), first.id());
+        // this publication retains nothing in the content store: the Git objects
+        // are read from their pack segment, and the uploaded byte segment is gone
         assert_eq!(
             std::fs::read_dir(path(&f, first.id()).parent().unwrap())
                 .unwrap()
                 .map(|entry| entry.unwrap())
                 .filter(|e| e.file_name().to_string_lossy().starts_with("segment-"))
                 .count(),
-            1
+            0
         );
-        assert!(path(&f, first.id()).exists());
     }
 }
 #[test]
@@ -275,7 +302,7 @@ fn gc_and_compaction_preserve_live_snapshots_and_reclaim_sparse_segments() {
         let mut f = Fixture::new();
         let p = sparse();
         let segment = upload(&mut f, &p);
-        p.publish(&mut f.store, &f.credential);
+        publish_retained(&mut f, &p);
         let read = f
             .store
             .read_snapshot(&f.credential, "repository", 60_000, 1000)
@@ -300,7 +327,7 @@ fn gc_and_compaction_preserve_live_snapshots_and_reclaim_sparse_segments() {
                 f.store
                     .collect_orphans(&f.credential, "repository", 100)
                     .unwrap(),
-                8
+                10
             );
             let (_, _, mut lazy) = f
                 .store
@@ -313,7 +340,7 @@ fn gc_and_compaction_preserve_live_snapshots_and_reclaim_sparse_segments() {
                 f.store
                     .collect_orphans(&f.credential, "repository", 100)
                     .unwrap(),
-                8
+                10
             );
             assert!(path(&f, segment.id()).exists());
             for blob in &export.envelope().catalog.blobs {
@@ -352,7 +379,7 @@ fn compaction_rollback_keeps_old_locations_and_reclaims_failed_replacement() {
     let mut f = Fixture::new();
     let p = sparse();
     let segment = upload(&mut f, &p);
-    p.publish(&mut f.store, &f.credential);
+    publish_retained(&mut f, &p);
     hold(&f, &p);
     f.store
         .collect_orphans(&f.credential, "repository", 100)
@@ -405,9 +432,9 @@ fn compaction_rollback_keeps_old_locations_and_reclaims_failed_replacement() {
 #[ignore = "requires isolated PostgreSQL; logical raw backup normalization and packed source integrity"]
 fn maintenance_exports_segment_members_and_restored_locations_normalize_only_verified_bytes() {
     let mut f = Fixture::new();
-    let p = Payload::new("segment-backup", None);
+    let p = retained("segment-backup");
     upload(&mut f, &p);
-    p.publish(&mut f.store, &f.credential);
+    publish_retained(&mut f, &p);
     let mut client = f.client();
     let snapshot = MaintenanceSnapshot::begin(
         &mut client,
@@ -577,7 +604,7 @@ fn segment_process_interruption_preserves_owned_files_and_atomic_locations() {
         };
         let old = if compaction {
             let segment = upload(&mut f, &p);
-            p.publish(&mut f.store, &f.credential);
+            publish_retained(&mut f, &p);
             hold(&f, &p);
             f.store
                 .collect_orphans(&f.credential, "repository", 100)
@@ -679,16 +706,19 @@ fn segment_process_interruption_preserves_owned_files_and_atomic_locations() {
             .collect_orphans(&f.credential, "repository", 100)
             .unwrap();
         if phase == "published" || compaction {
-            assert_eq!(f.counts(), (1, 1, 1));
+            // the task publication of the compaction phases moves no ref
+            assert_eq!(f.counts(), (i64::from(!compaction), 1, 1));
             f.store
                 .open_published_object(&f.credential, "repository", p.commit)
                 .unwrap();
+            // a plain publication leaves nothing in the content store: its uploaded
+            // byte segment is collected with the Git copies it held
             assert_eq!(
                 locker
                     .query_one("SELECT count(*) FROM alt_segments", &[])
                     .unwrap()
                     .get::<_, i64>(0),
-                1
+                i64::from(compaction)
             );
             if let Some(id) = old {
                 assert!(!path(&f, &id).exists());
@@ -1111,14 +1141,15 @@ fn packed_batches_and_compaction_bound_open_descriptors() {
     let repeated = persist(&mut f.store, &f.credential, &p);
     register(&mut f.store, &f.credential, &p, &repeated).unwrap();
     assert_eq!(first.id(), repeated.id());
-    p.publish(&mut f.store, &f.credential);
-    // Durable pins model other live owners of members outside this Git graph.
+    // Durable pins model other live owners of the same bytes: what they hold stays
+    // in the content store when the publication lets go of its Git copies.
     f.client().execute("INSERT INTO alt_pins(repository,pin_id,blake3,expires_at) SELECT 'repository','descriptor-fixture',unnest($1::text[]),NULL", &[&keep]).unwrap();
+    p.publish(&mut f.store, &f.credential);
     assert_eq!(
         f.store
             .collect_orphans(&f.credential, "repository", 1000)
             .unwrap(),
-        200
+        202
     );
     assert!(!path(&f, first.id()).exists());
     let row = f
@@ -1129,10 +1160,7 @@ fn packed_batches_and_compaction_bound_open_descriptors() {
         )
         .unwrap();
     assert_eq!(row.get::<_, i64>(0), 1);
-    assert_eq!(
-        row.get::<_, i64>(1),
-        100 + (p.manifest.entries.len() - 300) as i64
-    );
+    assert_eq!(row.get::<_, i64>(1), 100);
     // Ordinary bounded reads after the switch must still return each original.
     let read = f
         .store
@@ -1152,6 +1180,16 @@ fn packed_batches_and_compaction_bound_open_descriptors() {
             .position(|e| e.git_oid.as_deref() == Some(&oid.to_string()))
             .unwrap();
         assert_eq!(actual, p.contents[index]);
+    }
+    // the members that stayed are read from the compacted byte segment
+    for digest in &keep {
+        let (_, mut source) = f
+            .store
+            .open_published_content(&f.credential, &p.publication.key.scope, digest)
+            .unwrap();
+        let mut actual = Vec::new();
+        source.read_to_end(&mut actual).unwrap();
+        assert_eq!(alt_hash::blake3::hash(&actual).to_hex().as_str(), digest);
     }
 }
 

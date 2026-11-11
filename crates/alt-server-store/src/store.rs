@@ -1,14 +1,14 @@
+use crate::Jsonb;
 use crate::database::Transaction;
 use crate::{ByteStore, Error, Result};
 use alt_crypto::ed25519::SigningKey;
 use alt_remote_protocol::{Attribution, DeploymentMode, Limits, ObjectFormat, Scope};
 use alt_repository_service::{Authorization, Grant, RefPolicy, RepositorySnapshot};
 use postgres::Client;
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
+#[json(deny_unknown_fields)]
 pub struct InstanceSpec {
     pub installation_id: String,
     pub workspace_id: String,
@@ -96,23 +96,7 @@ impl Store {
             .to_hex()
             .to_string();
         tx.execute("INSERT INTO alt_instance(singleton,installation_id,workspace_id,deployment_mode,runtime_generation,signing_key_id) VALUES(true,$1,$2,$3,$4,$5)", &[&spec.installation_id,&spec.workspace_id,&spec.mode(),&integer(spec.runtime_generation)?,&key_id])?;
-        crate::schema::apply_v2(tx.raw_mut())?;
-        crate::schema::apply_v3(tx.raw_mut())?;
-        crate::schema::apply_v4(tx.raw_mut())?;
-        crate::schema::apply_v5(tx.raw_mut())?;
-        crate::schema::apply_v6(tx.raw_mut())?;
-        crate::schema::apply_v7(tx.raw_mut())?;
-        crate::schema::apply_v8(tx.raw_mut())?;
-        crate::schema::apply_v9(tx.raw_mut())?;
-        crate::schema::apply_v10(tx.raw_mut())?;
-        crate::schema::apply_v11(tx.raw_mut())?;
-        crate::schema::apply_v12(tx.raw_mut())?;
-        crate::schema::apply_v13(tx.raw_mut())?;
-        crate::schema::apply_v14(tx.raw_mut())?;
-        crate::schema::apply_v15(tx.raw_mut())?;
-        crate::schema::apply_v16(tx.raw_mut())?;
-        crate::schema::apply_v17(tx.raw_mut())?;
-        crate::schema::apply_v18(tx.raw_mut())?;
+        crate::schema::apply_later(tx.raw_mut())?;
         if let Some((audience, digest, provision_digest)) = cloud {
             crate::cloud::initialize_binding(&mut tx, &spec, audience, digest, provision_digest)?;
         }
@@ -241,7 +225,9 @@ impl Store {
             actor,
             "instance.bootstrap",
             actor,
-            &serde_json::json!({"credential_id":token_digest(token),"expires_at_unix_ms":expires_at_unix_ms.to_string()}),
+            &Jsonb(
+                alt_json::json!({"credential_id":token_digest(token),"expires_at_unix_ms":expires_at_unix_ms.to_string()}),
+            ),
         )?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)
     }
@@ -289,7 +275,9 @@ impl Store {
             admin,
             "credential.issue",
             actor,
-            serde_json::json!({"credential_id":token_digest(&token),"attribution":attribution,"expires_at_unix_ms":expires_at_unix_ms.to_string(),"administrator":administrator}),
+            Jsonb(
+                alt_json::json!({"credential_id":token_digest(&token),"attribution":attribution,"expires_at_unix_ms":expires_at_unix_ms.to_string(),"administrator":administrator}),
+            ),
         )?;
         tx.commit()?;
         Ok(token)
@@ -329,7 +317,9 @@ impl Store {
             admin,
             "credential.issue",
             actor,
-            serde_json::json!({"credential_id":token_digest(token),"attribution":attribution,"expires_at_unix_ms":expires_at_unix_ms.to_string(),"administrator":administrator}),
+            Jsonb(
+                alt_json::json!({"credential_id":token_digest(token),"attribution":attribution,"expires_at_unix_ms":expires_at_unix_ms.to_string(),"administrator":administrator}),
+            ),
         )?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)
     }
@@ -356,7 +346,7 @@ impl Store {
             admin,
             "repository.create",
             repository,
-            serde_json::json!({"quota_bytes":quota_bytes.to_string()}),
+            Jsonb(alt_json::json!({"quota_bytes":quota_bytes.to_string()})),
         )?;
         tx.commit()?;
         // the first push then pays no directory creation
@@ -379,7 +369,7 @@ impl Store {
         instance(&mut tx, &self.spec, &self.signing_key)?;
         let _ = snapshot(&mut tx, &self.spec, repository)?;
         require_admin(&mut tx, &self.spec, admin)?;
-        tx.execute("INSERT INTO alt_grants(actor_id,repository,can_read,publish_records,grants) VALUES($1,$2,$3,$4,$5) ON CONFLICT(actor_id,repository) DO UPDATE SET can_read=excluded.can_read,publish_records=excluded.publish_records,grants=excluded.grants",&[&actor,&repository,&can_read,&publish_records,&serde_json::to_value(grants)?])?;
+        tx.execute("INSERT INTO alt_grants(actor_id,repository,can_read,publish_records,grants) VALUES($1,$2,$3,$4,$5) ON CONFLICT(actor_id,repository) DO UPDATE SET can_read=excluded.can_read,publish_records=excluded.publish_records,grants=excluded.grants",&[&actor,&repository,&can_read,&publish_records,&Jsonb::from(&grants)?])?;
         tx.execute(
             "UPDATE alt_repositories SET revocation_generation=revocation_generation+1 WHERE id=$1",
             &[&repository],
@@ -390,7 +380,9 @@ impl Store {
             admin,
             "repository.grants",
             repository,
-            serde_json::json!({"actor_id":actor,"can_read":can_read,"publish_records":publish_records,"grants":grants}),
+            Jsonb(
+                alt_json::json!({"actor_id":actor,"can_read":can_read,"publish_records":publish_records,"grants":grants}),
+            ),
         )?;
         tx.commit()?;
         Ok(())
@@ -410,7 +402,7 @@ impl Store {
         require_admin(&mut tx, &self.spec, admin)?;
         tx.execute(
             "UPDATE alt_repositories SET policies=$2,policy_version=policy_version+1 WHERE id=$1",
-            &[&repository, &serde_json::to_value(policies)?],
+            &[&repository, &Jsonb::from(&policies)?],
         )?;
         crate::browser::audit_admin(
             &mut tx,
@@ -418,7 +410,7 @@ impl Store {
             admin,
             "repository.policies",
             repository,
-            serde_json::json!({"policies":policies}),
+            Jsonb(alt_json::json!({"policies":policies})),
         )?;
         tx.commit()?;
         Ok(())
@@ -443,7 +435,7 @@ impl Store {
             &actor,
             "credential.revoke",
             &token_digest(token),
-            &serde_json::json!({}),
+            &Jsonb(alt_json::json!({})),
         )?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)
     }
@@ -564,11 +556,11 @@ pub(crate) fn insert_known_token(
         return Err(Error::Precondition("credential expiry"));
     }
     let digest = token_digest(token);
-    let attribution = serde_json::to_value(attribution)?;
+    let attribution = Jsonb::from(attribution)?;
     tx.execute("INSERT INTO alt_credentials(token_digest,actor_id,attribution,identity_source,expires_at,administrator) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(token_digest) DO NOTHING",&[&digest,&actor,&attribution,&mode(source),&integer(expires)?,&administrator])?;
     let row=tx.query_one("SELECT actor_id,attribution,identity_source,expires_at,administrator,revoked FROM alt_credentials WHERE token_digest=$1 FOR SHARE",&[&digest])?;
     if row.get::<_, String>(0) != actor
-        || row.get::<_, serde_json::Value>(1) != attribution
+        || row.get::<_, Jsonb>(1) != attribution
         || row.get::<_, String>(2) != mode(source)
         || row.get::<_, i64>(3) != integer(expires)?
         || row.get::<_, bool>(4) != administrator
@@ -691,10 +683,10 @@ fn authorize_scope(
         scope: scope.clone(),
         runtime_generation: spec.runtime_generation,
         actor_id: actor,
-        attribution: serde_json::from_value(row.get(1))?,
+        attribution: row.get::<_, Jsonb>(1).read()?,
         expires_at: unsigned(row.get(3))?,
         revocation_generation,
-        grants: serde_json::from_value(grant.get(2))?,
+        grants: grant.get::<_, Jsonb>(2).read()?,
         publish_records: grant.get(1),
     };
     crate::delegation::restrict(tx, credential, &mut auth)?;
@@ -732,7 +724,7 @@ pub(crate) fn snapshot(
         policy_version: unsigned(row.get(2))?,
         object_format: ObjectFormat::Sha1,
         refs,
-        policies: serde_json::from_value(row.get(4))?,
+        policies: row.get::<_, Jsonb>(4).read()?,
         approved_publications: BTreeSet::new(),
         writes_enabled: row.get::<_, bool>(5) && crate::cloud::writes_enabled(tx, spec)?,
     })

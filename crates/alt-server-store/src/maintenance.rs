@@ -1,19 +1,19 @@
 //! Physical-operator maintenance primitives. A snapshot owns the instance row
 //! lock until all metadata and immutable bytes have been exported. Publication,
 //! credential changes and GC take the shared side of this same barrier.
+use crate::Jsonb;
 use crate::database::Transaction;
 use crate::store::{instance, integer, unsigned};
 use crate::{ByteStore, Error, InstanceSpec, Result, Store};
 use alt_crypto::ed25519::SigningKey;
 use alt_remote_protocol::Scope;
 use postgres::Client;
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Counters are decimal strings to preserve the full database integer range in
 /// browser clients. This is a read-only database observation, not a byte scrub
 /// or proof that an external backup remains available.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, alt_json::ToJson)]
 pub struct InstanceStatus {
     pub installation_id: String,
     pub runtime_generation: String,
@@ -30,7 +30,7 @@ pub struct InstanceStatus {
     pub pending_change_links: String,
     pub recovery_change_links: String,
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, alt_json::ToJson)]
 pub struct InstanceAuditEntry {
     pub sequence: String,
     pub actor_id: String,
@@ -81,7 +81,7 @@ impl Store {
         let row = tx.query_one("SELECT \
             floor(extract(epoch FROM clock_timestamp())*1000)::bigint, \
             (SELECT count(*) FROM alt_repositories), \
-            ((SELECT COALESCE(sum(bytes),0) FROM alt_blobs WHERE state='stored') + (SELECT COALESCE(sum(link_bytes),0) FROM alt_repositories))::text, \
+            ((SELECT COALESCE(sum(bytes),0) FROM alt_blobs WHERE state='stored') + (SELECT COALESCE(sum(bytes),0) FROM alt_pack_segments WHERE state='live') + (SELECT COALESCE(sum(link_bytes),0) FROM alt_repositories))::text, \
             (SELECT COALESCE(sum(reserved_bytes),0)::text FROM alt_repositories), \
             (SELECT count(*) FROM alt_requests q JOIN alt_repositories r ON q.repository=r.id WHERE q.state IN ('receiving','ready') AND q.epoch=r.recovery_epoch), \
             (SELECT count(*) FROM alt_requests q JOIN alt_repositories r ON q.repository=r.id WHERE q.state IN ('receiving','ready') AND q.epoch<>r.recovery_epoch), \
@@ -139,37 +139,37 @@ impl Store {
 }
 
 /// one file-backed pack segment; segments stored with their row travel in the database dump
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
+#[json(deny_unknown_fields)]
 pub struct SnapshotPackSegment {
     pub repository: String,
     pub segment: String,
     pub bytes: u64,
     pub blake3: String,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
+#[json(deny_unknown_fields)]
 pub struct SnapshotBlob {
     pub repository: String,
     pub blake3: String,
     pub bytes: u64,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
+#[json(deny_unknown_fields)]
 pub struct SnapshotRepository {
     pub repository: String,
     pub recovery_epoch: u64,
     pub transaction_sequence: u64,
     pub refs: std::collections::BTreeMap<String, String>,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
+#[json(deny_unknown_fields)]
 pub struct SnapshotCatalog {
     pub schema: u32,
     pub instance: InstanceSpec,
     pub repositories: Vec<SnapshotRepository>,
     pub blobs: Vec<SnapshotBlob>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[json(default, skip_serializing_if = "Vec::is_empty")]
     pub pack_segments: Vec<SnapshotPackSegment>,
 }
 
@@ -379,7 +379,9 @@ impl Store {
         crate::bytes::check_digest(backup_digest)?;
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
-        let expected = serde_json::json!({"backup_digest":backup_digest,"generation":self.spec.runtime_generation});
+        let expected = Jsonb(
+            alt_json::json!({"backup_digest":backup_digest,"generation":self.spec.runtime_generation}),
+        );
         let found: bool = tx.query_one(
             "SELECT EXISTS(SELECT 1 FROM alt_instance_audit WHERE action='instance.restore' AND subject_id=$1 AND details @> $2)",
             &[&self.spec.installation_id, &expected],
@@ -456,7 +458,9 @@ impl Store {
             "UPDATE alt_instance SET runtime_generation=$1 WHERE singleton",
             &[&integer(generation)?],
         )?;
-        let details = serde_json::json!({"backup_digest":backup_digest,"previous_generation":self.spec.runtime_generation,"generation":generation});
+        let details = Jsonb(
+            alt_json::json!({"backup_digest":backup_digest,"previous_generation":self.spec.runtime_generation,"generation":generation}),
+        );
         tx.execute("INSERT INTO alt_instance_audit(actor_id,action,subject_id,details,occurred_at) VALUES('local-operator','instance.restore',$1,$2,floor(extract(epoch FROM clock_timestamp())*1000)::bigint)", &[&self.spec.installation_id, &details])?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)?;
         self.spec.runtime_generation = generation;

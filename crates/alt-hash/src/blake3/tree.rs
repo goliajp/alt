@@ -1,6 +1,6 @@
 //! the tree over the chunks, hashed a whole batch of lanes at a time
 
-use super::lanes::{Batch, cv_bytes};
+use super::lanes::{Batch, Short, alike, cv_bytes};
 use super::{Backend, CHUNK_END, CHUNK_LEN, CHUNK_START, Hash, MAX_LANES, PARENT, ROOT};
 
 /// a chunk or parent node just before its last compression, which decides whether it
@@ -102,6 +102,35 @@ fn chunks(
         flags_start: CHUNK_START,
         flags_end: CHUNK_END,
     };
+    // Chunks that do not fill a group of lanes, the last of them perhaps short, are
+    // still compressed side by side when they are alike enough.
+    let lanes = match backend.ragged_tail() {
+        true => backend.ragged_lanes(),
+        false => 0,
+    };
+    let grouped = if lanes == 0 {
+        whole
+    } else {
+        whole - whole % lanes
+    };
+    let (first, tail) = input.split_at(grouped * CHUNK_LEN);
+    let mut short = [Short {
+        input: &[],
+        counter: 0,
+        root: false,
+    }; MAX_LANES];
+    let mut count = 0;
+    for piece in tail.chunks(CHUNK_LEN) {
+        short[count].input = piece;
+        short[count].counter = counter + (grouped + count) as u64;
+        count += 1;
+    }
+    if lanes != 0 && alike(&short[..count]) {
+        backend.hash_many(&batch, first, counter, out);
+        let tail_out = &mut out[grouped * 32..(grouped + count) * 32];
+        backend.ragged(key, flags, &short[..count], tail_out);
+        return grouped + count;
+    }
     backend.hash_many(&batch, full, counter, out);
     if rest.is_empty() {
         return whole;

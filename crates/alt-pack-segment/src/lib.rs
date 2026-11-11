@@ -7,21 +7,28 @@
 //! After that the file never changes. Reads look objects up by id and trust
 //! the per-entry checksum; resends copy the stored compressed bytes.
 
+mod build;
+mod carried;
 mod format;
+mod generation;
 mod ingest;
 mod merge;
 mod object;
 mod scan;
+mod search;
 mod select;
 mod send;
 mod set;
+mod stream;
 
+pub use build::{Builder, Built};
 pub use format::{CommitInfo, Record, Segment};
 pub use ingest::{Ingested, Limits, ingest, ingest_holding};
 pub use merge::merge;
 pub use select::Selection;
 pub use send::{Piece, build_pack};
 pub use set::SegmentSet;
+pub use stream::ObjectStream;
 
 pub type Oid = [u8; 20];
 

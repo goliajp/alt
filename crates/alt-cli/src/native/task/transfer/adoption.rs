@@ -138,4 +138,5 @@ mod json_tests {
     use super::*;
 
     alt_json_testkit::module_fixture_tests!("native-task-transfer-adoption"; Predecessor, Adoption);
+    alt_json_testkit::module_read_tests!("state-remote"; Adoption: Adoption);
 }

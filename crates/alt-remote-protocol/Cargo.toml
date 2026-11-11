@@ -9,8 +9,6 @@ alt-hash.workspace = true
 alt-json.workspace = true
 alt-json-serde.workspace = true
 golia-change-link.workspace = true
-serde.workspace = true
-serde_json.workspace = true
 
 [dev-dependencies]
 alt-json-testkit.workspace = true

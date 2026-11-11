@@ -17,10 +17,7 @@ pub struct Authorization {
     pub publish_records: bool,
 }
 pub use alt_remote_protocol::authorization::{Grant, RefSelector};
-#[derive(
-    Clone, Debug, serde::Serialize, serde::Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct RefPolicy {
     pub refs: RefSelector,

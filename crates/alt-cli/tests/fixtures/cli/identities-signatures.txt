@@ -1,0 +1,56 @@
+$ [repo] alt init .
+exit 0
+$ [repo] alt identity init alice --json
+exit 0
+out| {"operation_ids":[],"principal":"alice","pub_path":"<root>/repo/.alt/identity/alice.pub","request_id":"<id32:0>","schema_version":1,"sec_path":"<root>/repo/.alt/identity/alice.sec"}
+$ [repo] alt identity init alice --json
+exit 75
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"identity 'alice' already exists; refuse to overwrite","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:1>","retryable":false},"schema_version":1}
+$ [repo] alt identity init bob --json
+exit 0
+out| {"operation_ids":[],"principal":"bob","pub_path":"<root>/repo/.alt/identity/bob.pub","request_id":"<id32:2>","schema_version":1,"sec_path":"<root>/repo/.alt/identity/bob.sec"}
+$ [repo] alt identity list --json
+exit 0
+out| {"schema_version":1,"identities":[{"principal":"alice","fingerprint":<volatile>,"trusted":false},{"principal":"bob","fingerprint":<volatile>,"trusted":false}]}
+$ [repo] alt identity trust alice <root>/repo/.alt/identity/alice.pub --json
+exit 0
+out| {"fingerprint":<volatile>,"operation_ids":[],"principal":"alice","request_id":"<id32:3>","schema_version":1,"trust_path":"<root>/repo/.alt/trust/alice.pub"}
+$ [repo] alt identity trust carol not-a-key.pub --json
+exit 75
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"not a valid alt pubkey at 'not-a-key.pub': malformed key/sig prefix: \"garbage\"","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:4>","retryable":false},"schema_version":1}
+$ [repo] alt identity list --json
+exit 0
+out| {"schema_version":1,"identities":[{"principal":"alice","fingerprint":<volatile>,"trusted":true},{"principal":"bob","fingerprint":<volatile>,"trusted":false}]}
+$ [repo] alt add . --json
+exit 0
+out| {"operation_ids":["<id64:5>","<id64:6>"],"request_id":"<id32:7>","schema_version":1,"staged":2}
+$ [repo] alt commit -m alice signed --json
+exit 0
+out| {"branch":"main","commit":"<id40:8>","operation_ids":["<id64:9>"],"request_id":"<id32:10>","schema_version":1,"tree":"<id40:11>"}
+$ [repo] alt verify --json
+exit 0
+out| {"schema_version":1,"commits":[{"commit":"<id40:8>","verdict":"signed-ok","principal":"alice"}]}
+$ [repo] alt op-log --verify --json
+exit 0
+out| {"schema_version":1,"ops":[{"id":"<id64:9>","request_id":"<id32:10>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"alice","session":null},"verb":"commit","ref_changes":[{"name":"refs/heads/main","old":null,"new":"<id40:8>"},{"name":"refs/notes/alt/meta","old":null,"new":"<id40:12>"}],"workspace":{"name":"default","instance":"<id64:13>"},"inverse_of":null,"sig":{"status":"signed-ok","principal":"alice"}},{"id":"<id64:6>","request_id":"<id32:7>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"alice","session":null},"verb":"add","ref_changes":null,"recovery":{"phase":"completed","prepared":"<id64:5>"},"sig":{"status":"unsigned","principal":null}},{"id":"<id64:5>","request_id":"<id32:7>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"alice","session":null},"verb":"add","ref_changes":null,"recovery":{"phase":"prepared","before":"<id64:14>","after":"<id64:15>","workspace":{"name":"default","instance":"<id64:13>"}},"sig":{"status":"unsigned","principal":null}},{"id":"<id64:16>","request_id":null,"timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"init","ref_changes":[{"name":"HEAD","old":null,"new":"@refs/heads/main"}],"workspace":{"name":"default","instance":"<id64:13>"},"inverse_of":null,"sig":{"status":"unsigned","principal":null}}]}
+$ [repo] alt status --json
+exit 0
+out| {"schema_version":1,"branch":"main","principal":{"kind":"human","id":"alice","session":null},"staged":[],"unstaged":[],"untracked":[],"unmerged":[],"clean":true}
+$ [repo] alt add . --json
+exit 0
+out| {"operation_ids":["<id64:17>","<id64:18>"],"request_id":"<id32:19>","schema_version":1,"staged":3}
+$ [repo] alt commit -m bob unsigned --json
+exit 0
+out| {"branch":"main","commit":"<id40:20>","operation_ids":["<id64:21>"],"request_id":"<id32:22>","schema_version":1,"tree":"<id40:23>"}
+$ [repo] alt verify --json
+exit 0
+out| {"schema_version":1,"commits":[{"commit":"<id40:20>","verdict":"signed-ok","principal":"alice"},{"commit":"<id40:8>","verdict":"signed-ok","principal":"alice"}]}
+$ [repo] alt verify -n 1 --json
+exit 0
+out| {"schema_version":1,"commits":[{"commit":"<id40:20>","verdict":"signed-ok","principal":"alice"}]}
+$ [repo] alt op-log --verify --json
+exit 0
+out| {"schema_version":1,"ops":[{"id":"<id64:21>","request_id":"<id32:22>","timestamp_ms":<digits>,"principal":{"kind":"agent","id":"bob","session":"session-7"},"verb":"commit","ref_changes":[{"name":"refs/heads/main","old":"<id40:8>","new":"<id40:20>"},{"name":"refs/notes/alt/meta","old":"<id40:12>","new":"<id40:24>"}],"workspace":{"name":"default","instance":"<id64:13>"},"inverse_of":null,"sig":{"status":"signed-ok","principal":"alice"}},{"id":"<id64:18>","request_id":"<id32:19>","timestamp_ms":<digits>,"principal":{"kind":"agent","id":"bob","session":"session-7"},"verb":"add","ref_changes":null,"recovery":{"phase":"completed","prepared":"<id64:17>"},"sig":{"status":"unsigned","principal":null}},{"id":"<id64:17>","request_id":"<id32:19>","timestamp_ms":<digits>,"principal":{"kind":"agent","id":"bob","session":"session-7"},"verb":"add","ref_changes":null,"recovery":{"phase":"prepared","before":"<id64:15>","after":"<id64:25>","workspace":{"name":"default","instance":"<id64:13>"}},"sig":{"status":"unsigned","principal":null}},{"id":"<id64:9>","request_id":"<id32:10>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"alice","session":null},"verb":"commit","ref_changes":[{"name":"refs/heads/main","old":null,"new":"<id40:8>"},{"name":"refs/notes/alt/meta","old":null,"new":"<id40:12>"}],"workspace":{"name":"default","instance":"<id64:13>"},"inverse_of":null,"sig":{"status":"signed-ok","principal":"alice"}},{"id":"<id64:6>","request_id":"<id32:7>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"alice","session":null},"verb":"add","ref_changes":null,"recovery":{"phase":"completed","prepared":"<id64:5>"},"sig":{"status":"unsigned","principal":null}},{"id":"<id64:5>","request_id":"<id32:7>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"alice","session":null},"verb":"add","ref_changes":null,"recovery":{"phase":"prepared","before":"<id64:14>","after":"<id64:15>","workspace":{"name":"default","instance":"<id64:13>"}},"sig":{"status":"unsigned","principal":null}},{"id":"<id64:16>","request_id":null,"timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"init","ref_changes":[{"name":"HEAD","old":null,"new":"@refs/heads/main"}],"workspace":{"name":"default","instance":"<id64:13>"},"inverse_of":null,"sig":{"status":"unsigned","principal":null}}]}
+$ [repo] alt status --json
+exit 0
+out| {"schema_version":1,"branch":"main","principal":{"kind":"agent","id":"bob","session":"session-7"},"staged":[],"unstaged":[],"untracked":[],"unmerged":[],"clean":true}

@@ -77,7 +77,7 @@ fn repeated_recovery_preserves_original_receipts_and_chains_to_current_identity(
             .provenance
             .is_empty()
     );
-    let original = serde_json::to_vec(&receipt).unwrap();
+    let original = alt_json::to_vec(&receipt).unwrap();
     let mut previous = None;
     for (index, generation) in [10, 20].into_iter().enumerate() {
         f.store
@@ -86,7 +86,7 @@ fn repeated_recovery_preserves_original_receipts_and_chains_to_current_identity(
         assert!(f.store.authenticate(&f.token).is_err());
         let credential = login(&mut f.store, &origin);
         let bundle = received(&mut f.store, &credential, &payload);
-        assert_eq!(serde_json::to_vec(&bundle.receipt).unwrap(), original);
+        assert_eq!(alt_json::to_vec(&bundle.receipt).unwrap(), original);
         assert_eq!(bundle.provenance.len(), index + 1);
         let proof = bundle.provenance.last().unwrap();
         assert_eq!(proof.body.previous_proof, previous);
@@ -127,12 +127,13 @@ fn legacy_backfill_refuses_missing_or_wrong_epoch_audit_without_partial_migratio
             .unwrap();
         f.client().batch_execute(replace).unwrap();
         assert!(
-            Store::migrate_v5(
+            Store::migrate(
                 f.client(),
                 f.store.bytes().clone(),
                 f.store.spec().clone(),
                 SigningKey::from_bytes(&[7; 32]),
-                limits()
+                limits(),
+                5
             )
             .is_err()
         );
@@ -140,16 +141,17 @@ fn legacy_backfill_refuses_missing_or_wrong_epoch_audit_without_partial_migratio
         assert_eq!(row.get::<_, i32>(0), 5);
         assert_eq!(row.get::<_, i64>(1), 10);
         assert_eq!(row.get::<_, Option<String>>(2), None);
-        let result: serde_json::Value = f
+        let result: alt_json::Value = f
             .client()
             .query_one(
                 "SELECT result FROM alt_requests WHERE digest=$1",
                 &[&payload.publication.digest(limits()).unwrap()],
             )
             .unwrap()
-            .get(0);
+            .get::<_, alt_server_store::Jsonb>(0)
+            .0;
         assert_eq!(
-            serde_json::from_value::<RequestState>(result).unwrap(),
+            alt_json::from_value::<RequestState>(result).unwrap(),
             RequestState::Committed {
                 receipt: Box::new(receipt)
             }

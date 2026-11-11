@@ -1,14 +1,10 @@
 //! Public evidence of an export, migration or recovery. These messages never
 //! carry credentials and do not establish trust in their own included keys.
 use crate::{Result, Scope, hex, identifier, version};
-use serde::{Deserialize, Serialize};
 
 pub const MAX_TRANSFER_PROOFS: usize = 32;
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct ExportCertificateBody {
     pub version: u32,
@@ -17,7 +13,6 @@ pub struct ExportCertificateBody {
     pub publication_digest: String,
     pub catalog_digest: String,
     pub export_id: String,
-    #[serde(with = "crate::decimal")]
     #[json(with = "alt_json::with::decimal_u64")]
     pub snapshot_sequence: u64,
 }
@@ -36,10 +31,7 @@ impl ExportCertificateBody {
     }
 }
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct ExportCertificate {
     pub body: ExportCertificateBody,
@@ -52,10 +44,7 @@ impl ExportCertificate {
     }
 }
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TransferReason {
     /// The source attests inclusion in a particular exported catalog; the
@@ -66,10 +55,7 @@ pub enum TransferReason {
     Recovery { backup_digest: String },
 }
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct TransferBody {
     pub version: u32,
@@ -127,10 +113,7 @@ impl TransferBody {
     }
 }
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct TransferProof {
     pub body: TransferBody,

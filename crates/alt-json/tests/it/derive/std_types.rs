@@ -4,6 +4,7 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::Debug;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -207,14 +208,16 @@ macro_rules! exercise_all {
 #[test]
 fn scalars_at_top_level() {
     exercise_all!(3000; u8 u16 u32 u64 usize i8 i16 i32 i64 isize u128 i128 f64 f32 bool char String Nothing
-        Option<u32> Option<String> PathBuf)
+        Option<u32> Option<String> PathBuf SocketAddr)
         .report("derive std types, scalars at top level in total");
 }
 
 #[test]
 fn containers_at_top_level() {
     exercise_all!(2000; Vec<u8> Vec<Option<String>> [u16; 2] (u8, String) (i8, bool, Option<char>)
-        BTreeSet<i8> BTreeMap<String, u8> BTreeMap<u16, String> BTreeMap<i64, Vec<bool>> Box<Vec<i32>>)
+        BTreeSet<i8> BTreeMap<String, u8> BTreeMap<u16, String> BTreeMap<i64, Vec<bool>> Box<Vec<i32>>
+        (u8, i8, bool, char, String, u16, Option<u8>, u32, i64)
+        (u8, u8, u8, u8, u8, u8, u8, u8, u8, u8, u8, u8, u8, u8, bool, String))
         .report("derive std types, containers at top level in total");
 }
 

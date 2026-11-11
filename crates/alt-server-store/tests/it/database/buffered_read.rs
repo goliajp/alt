@@ -47,7 +47,7 @@ fn snapshot_selection_takes_segment_objects_and_enforces_the_exact_limit() {
         .map(|entry| {
             (
                 entry.git_oid.clone().unwrap(),
-                serde_json::to_value(entry.kind)
+                alt_json::to_value(entry.kind)
                     .unwrap()
                     .as_str()
                     .unwrap()
@@ -86,14 +86,15 @@ fn metadata_snapshots_do_not_pin_objects_or_bypass_final_authority() {
         let payload = Payload::new("metadata", None);
         payload.upload(&mut f.store, &f.credential);
         payload.publish(&mut f.store, &f.credential);
-        let pins = |f: &Fixture| -> serde_json::Value {
+        let pins = |f: &Fixture| -> Option<alt_json::Value> {
             f.client()
                 .query_one(
                     "SELECT jsonb_agg(to_jsonb(p) ORDER BY repository,pin_id,blake3) FROM alt_pins p",
                     &[],
                 )
                 .unwrap()
-                .get(0)
+                .get::<_, Option<alt_server_store::Jsonb>>(0)
+                .map(|json| json.0)
         };
         let before = pins(&f);
         let credential = f.credential.clone();

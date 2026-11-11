@@ -1,4 +1,5 @@
 //! Redacted classifications of adapter work. No raw error payload is recorded.
+use crate::Jsonb;
 use crate::{Error, Result};
 use alt_remote_protocol::{RequestKey, Scope};
 use alt_server_telemetry::{Actor, Id, Outcome, Phase, PhaseGuard, Trace};
@@ -54,11 +55,11 @@ pub fn committed(receipt: &alt_remote_protocol::Receipt) {
     }
 }
 pub(crate) fn authenticated(row: &postgres::Row) {
-    authenticated_as(&row.get::<_, serde_json::Value>("attribution"));
+    authenticated_as(&row.get::<_, Jsonb>("attribution").0);
 }
-pub(crate) fn authenticated_as(attribution: &serde_json::Value) {
+pub(crate) fn authenticated_as(attribution: &alt_json::Value) {
     if let Some(trace) = Trace::current() {
-        let actor = match attribution.get("kind").and_then(serde_json::Value::as_str) {
+        let actor = match attribution.get("kind").and_then(alt_json::Value::as_str) {
             Some("human") => Actor::Human,
             Some("agent") => Actor::Agent,
             Some("service") => Actor::Service,

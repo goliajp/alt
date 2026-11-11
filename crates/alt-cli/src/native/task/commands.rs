@@ -173,3 +173,8 @@ impl NativeRepo<'_> {
         }
     }
 }
+
+#[cfg(test)]
+mod json_tests {
+    alt_json_testkit::module_read_tests!("native-task-commands"; TaskSpec: alt_task::TaskSpec);
+}

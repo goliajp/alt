@@ -1,0 +1,53 @@
+$ [repo] alt init .
+exit 0
+$ [repo] alt add .
+exit 0
+$ [repo] alt commit -m base
+exit 0
+$ [repo] alt add staged.txt
+exit 0
+$ [repo] alt add staged-gone.txt
+exit 0
+$ [repo] alt add added.txt
+exit 0
+$ [repo] alt status --json
+exit 0
+out| {"schema_version":1,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[{"path":"added.txt","change":"added"},{"path":"staged-gone.txt","change":"deleted"},{"path":"staged.txt","change":"modified"}],"unstaged":[{"path":"binary.bin","change":"modified"},{"path":"code.rs","change":"modified"},{"path":"edited.txt","change":"modified"},{"path":"gone.txt","change":"deleted"}],"untracked":["bad-�-name.txt","untracked \"q\".txt"],"unmerged":[],"clean":false}
+$ [repo] alt diff --json
+exit 0
+out| {"schema_version":1,"files":[{"path":"binary.bin","status":"modified","old_oid":"<id40:0>","new_oid":"<id40:1>","old_mode":"100644","new_mode":"100644","binary":true,"hunks":[],"chunk_diff":{"kind":"binary_chunk_diff","shared_chunks":0,"added_chunks":1,"removed_chunks":1,"old_chunks":1,"new_chunks":1,"old_bytes":7,"new_bytes":4,"byte_shared_ratio":0},"perceptual_diff":null,"part_diff":null,"ast_diff":null},{"path":"code.rs","status":"modified","old_oid":"<id40:2>","new_oid":"<id40:3>","old_mode":"100644","new_mode":"100644","binary":false,"hunks":[{"old_start":2,"old_len":6,"new_start":2,"new_len":8,"lines":[{"tag":"context","content":"    1\n"},{"tag":"context","content":"}\n"},{"tag":"context","content":"\n"},{"tag":"remove","content":"fn two() -> u32 {\n"},{"tag":"remove","content":"    2\n"},{"tag":"add","content":"fn two() -> u32 { 2 }\n"},{"tag":"add","content":"\n"},{"tag":"add","content":"fn three() -> u32 {\n"},{"tag":"add","content":"    3\n"},{"tag":"context","content":"}\n"}]}],"chunk_diff":null,"perceptual_diff":null,"part_diff":null,"ast_diff":null},{"path":"edited.txt","status":"modified","old_oid":"<id40:4>","new_oid":"<id40:5>","old_mode":"100644","new_mode":"100644","binary":false,"hunks":[{"old_start":1,"old_len":8,"new_start":1,"new_len":9,"lines":[{"tag":"context","content":"a\n"},{"tag":"remove","content":"b\n"},{"tag":"add","content":"B\n"},{"tag":"context","content":"c\n"},{"tag":"context","content":"d\n"},{"tag":"context","content":"e\n"},{"tag":"context","content":"f\n"},{"tag":"context","content":"g\n"},{"tag":"remove","content":"h\n"},{"tag":"add","content":"H\n"},{"tag":"add","content":"i\n"}]}],"chunk_diff":null,"perceptual_diff":null,"part_diff":null,"ast_diff":null},{"path":"gone.txt","status":"deleted","old_oid":"<id40:6>","new_oid":null,"old_mode":"100644","new_mode":null,"binary":false,"hunks":[{"old_start":1,"old_len":1,"new_start":1,"new_len":0,"lines":[{"tag":"remove","content":"gone\n"}]}],"chunk_diff":null,"perceptual_diff":null,"part_diff":null,"ast_diff":null}]}
+$ [repo] alt diff --cached --json
+exit 0
+out| {"schema_version":1,"files":[{"path":"added.txt","status":"added","old_oid":null,"new_oid":"<id40:7>","old_mode":null,"new_mode":"100644","binary":false,"hunks":[{"old_start":1,"old_len":0,"new_start":1,"new_len":1,"lines":[{"tag":"add","content":"added\n"}]}],"chunk_diff":null,"perceptual_diff":null,"part_diff":null,"ast_diff":null},{"path":"staged-gone.txt","status":"deleted","old_oid":"<id40:6>","new_oid":null,"old_mode":"100644","new_mode":null,"binary":false,"hunks":[{"old_start":1,"old_len":1,"new_start":1,"new_len":0,"lines":[{"tag":"remove","content":"gone\n"}]}],"chunk_diff":null,"perceptual_diff":null,"part_diff":null,"ast_diff":null},{"path":"staged.txt","status":"modified","old_oid":"<id40:8>","new_oid":"<id40:9>","old_mode":"100644","new_mode":"100644","binary":false,"hunks":[{"old_start":1,"old_len":1,"new_start":1,"new_len":1,"lines":[{"tag":"remove","content":"old\n"},{"tag":"add","content":"new 😀 \u0007\n"}]}],"chunk_diff":null,"perceptual_diff":null,"part_diff":null,"ast_diff":null}]}
+$ [repo] alt diff --staged --json
+exit 0
+out| {"schema_version":1,"files":[{"path":"added.txt","status":"added","old_oid":null,"new_oid":"<id40:7>","old_mode":null,"new_mode":"100644","binary":false,"hunks":[{"old_start":1,"old_len":0,"new_start":1,"new_len":1,"lines":[{"tag":"add","content":"added\n"}]}],"chunk_diff":null,"perceptual_diff":null,"part_diff":null,"ast_diff":null},{"path":"staged-gone.txt","status":"deleted","old_oid":"<id40:6>","new_oid":null,"old_mode":"100644","new_mode":null,"binary":false,"hunks":[{"old_start":1,"old_len":1,"new_start":1,"new_len":0,"lines":[{"tag":"remove","content":"gone\n"}]}],"chunk_diff":null,"perceptual_diff":null,"part_diff":null,"ast_diff":null},{"path":"staged.txt","status":"modified","old_oid":"<id40:8>","new_oid":"<id40:9>","old_mode":"100644","new_mode":"100644","binary":false,"hunks":[{"old_start":1,"old_len":1,"new_start":1,"new_len":1,"lines":[{"tag":"remove","content":"old\n"},{"tag":"add","content":"new 😀 \u0007\n"}]}],"chunk_diff":null,"perceptual_diff":null,"part_diff":null,"ast_diff":null}]}
+$ [repo] alt diff --semantic --json
+exit 0
+out| {"schema_version":1,"files":[{"path":"binary.bin","status":"modified","old_oid":"<id40:0>","new_oid":"<id40:1>","old_mode":"100644","new_mode":"100644","binary":true,"hunks":[],"chunk_diff":{"kind":"binary_chunk_diff","shared_chunks":0,"added_chunks":1,"removed_chunks":1,"old_chunks":1,"new_chunks":1,"old_bytes":7,"new_bytes":4,"byte_shared_ratio":0},"perceptual_diff":null,"part_diff":null,"ast_diff":null},{"path":"code.rs","status":"modified","old_oid":"<id40:2>","new_oid":"<id40:3>","old_mode":"100644","new_mode":"100644","binary":false,"hunks":[{"old_start":2,"old_len":6,"new_start":2,"new_len":8,"lines":[{"tag":"context","content":"    1\n"},{"tag":"context","content":"}\n"},{"tag":"context","content":"\n"},{"tag":"remove","content":"fn two() -> u32 {\n"},{"tag":"remove","content":"    2\n"},{"tag":"add","content":"fn two() -> u32 { 2 }\n"},{"tag":"add","content":"\n"},{"tag":"add","content":"fn three() -> u32 {\n"},{"tag":"add","content":"    3\n"},{"tag":"context","content":"}\n"}]}],"chunk_diff":null,"perceptual_diff":null,"part_diff":null,"ast_diff":{"kind":"ast_diff","logical_changes":[],"format_only_changes":[],"items_added":["fn:three"],"items_removed":[],"is_format_only":false}},{"path":"edited.txt","status":"modified","old_oid":"<id40:4>","new_oid":"<id40:5>","old_mode":"100644","new_mode":"100644","binary":false,"hunks":[{"old_start":1,"old_len":8,"new_start":1,"new_len":9,"lines":[{"tag":"context","content":"a\n"},{"tag":"remove","content":"b\n"},{"tag":"add","content":"B\n"},{"tag":"context","content":"c\n"},{"tag":"context","content":"d\n"},{"tag":"context","content":"e\n"},{"tag":"context","content":"f\n"},{"tag":"context","content":"g\n"},{"tag":"remove","content":"h\n"},{"tag":"add","content":"H\n"},{"tag":"add","content":"i\n"}]}],"chunk_diff":null,"perceptual_diff":null,"part_diff":null,"ast_diff":null},{"path":"gone.txt","status":"deleted","old_oid":"<id40:6>","new_oid":null,"old_mode":"100644","new_mode":null,"binary":false,"hunks":[{"old_start":1,"old_len":1,"new_start":1,"new_len":0,"lines":[{"tag":"remove","content":"gone\n"}]}],"chunk_diff":null,"perceptual_diff":null,"part_diff":null,"ast_diff":null}]}
+$ [repo] alt commit --validate --json
+exit 0
+out| {"schema_version":1,"ok":true,"findings":[]}
+$ [repo] alt ci validate --json
+exit 0
+out| no workflow.toml files found under .alt/ci/<name>/workflow.toml
+$ [repo] alt ci validate --json
+exit 0
+$ [repo] alt ci validate --json
+exit 1
+err| {"error":{"details":{"command_output":{"encoding":"utf-8","text":"{\"file\":\"<root>/repo/.alt/ci/broken/workflow.toml\",\"line\":1,\"col\":1,\"severity\":\"error\",\"message\":\"step \\\"test\\\" needs undefined step \\\"does-not-exist\\\"\"}\n","truncated":false},"operation_ids":[]},"kind":"validation_failed","message":"command reported a conflict or failed validation","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [repo] alt add . --json
+exit 75
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"unsupported non-UTF-8 recovery path","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:10>","retryable":false},"schema_version":1}
+$ [repo] alt add . --json
+exit 0
+out| {"operation_ids":["<id64:11>","<id64:12>"],"request_id":"<id32:13>","schema_version":1,"staged":8}
+$ [repo] alt status --json
+exit 0
+out| {"schema_version":1,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[{"path":"added.txt","change":"added"},{"path":"binary.bin","change":"modified"},{"path":"code.rs","change":"modified"},{"path":"edited.txt","change":"modified"},{"path":"gone.txt","change":"deleted"},{"path":"staged-gone.txt","change":"deleted"},{"path":"staged.txt","change":"modified"},{"path":"untracked \"q\".txt","change":"added"}],"unstaged":[],"untracked":[],"unmerged":[],"clean":false}
+$ [repo] alt undo --json
+exit 0
+out| {"operation_ids":["<id64:14>","<id64:15>"],"paths":[".gitignore","added.txt","binary.bin","code.rs","edited.txt","gone.txt","kept.txt","staged.txt","untracked \"q\".txt"],"request_id":"<id32:16>","schema_version":1,"undone":true}
+$ [repo] alt status --json
+exit 0
+out| {"schema_version":1,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[{"path":"added.txt","change":"added"},{"path":"staged-gone.txt","change":"deleted"},{"path":"staged.txt","change":"modified"}],"unstaged":[{"path":"binary.bin","change":"modified"},{"path":"code.rs","change":"modified"},{"path":"edited.txt","change":"modified"},{"path":"gone.txt","change":"deleted"}],"untracked":["untracked \"q\".txt"],"unmerged":[],"clean":false}

@@ -26,7 +26,7 @@ impl ObservedServer {
         let deadline = Instant::now() + Duration::from_secs(15);
         loop {
             if let Some(line) = std::fs::read_to_string(&stdout).unwrap().lines().next()
-                && let Ok(value) = serde_json::from_str::<serde_json::Value>(line)
+                && let Ok(value) = alt_json::from_str::<alt_json::Value>(line)
                 && let Some(address) = value["address"].as_str()
             {
                 return Self {
@@ -221,7 +221,7 @@ fn request_observations_preserve_late_commits_and_current_metrics_authority() {
     let mut config = Config::read(&db.config).unwrap();
     config.http.work_timeout_ms = 1000;
     config.limits.object_bytes = 20_000_000;
-    std::fs::write(&db.config, serde_json::to_vec(&config).unwrap()).unwrap();
+    std::fs::write(&db.config, alt_json::to_vec(&config).unwrap()).unwrap();
     let mut store = Store::open(
         Client::connect(&db.dsn, NoTls).unwrap(),
         ByteStore::open(&config.bytes_directory).unwrap(),
@@ -310,7 +310,7 @@ fn request_observations_preserve_late_commits_and_current_metrics_authority() {
 
     let mut payload = Payload::new("observed-request", None);
     payload.publication.key.scope.installation_id = config.instance.installation_id.clone();
-    let begin = serde_json::to_vec(&alt_server::BeginRequest {
+    let begin = alt_json::to_vec(&alt_server::BeginRequest {
         publication: payload.publication.clone(),
         manifest: payload.manifest.clone(),
     })
@@ -352,14 +352,14 @@ fn request_observations_preserve_late_commits_and_current_metrics_authority() {
     let timed_out = server.call("POST", &format!("{selected}/publish"), Some(&token), b"");
     assert_eq!(timed_out.status(), 503);
     let late_trace = timed_out.header("x-alt-trace-id").unwrap().to_owned();
-    let body: serde_json::Value = serde_json::from_reader(timed_out.into_reader()).unwrap();
+    let body: alt_json::Value = crate::database::json::body(timed_out);
     assert_eq!(body["code"], "outcome_unknown");
     transaction.commit().unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let response = server.call("GET", &selected, Some(&token), b"");
         if response.status() == 200 {
-            let value: serde_json::Value = serde_json::from_reader(response.into_reader()).unwrap();
+            let value: alt_json::Value = crate::database::json::body(response);
             if value["result"]["state"] == "committed" {
                 break;
             }
@@ -379,7 +379,7 @@ fn request_observations_preserve_late_commits_and_current_metrics_authority() {
     let replay = server.call("POST", &format!("{selected}/publish"), Some(&token), b"");
     assert_eq!(replay.status(), 200);
     let replay_trace = replay.header("x-alt-trace-id").unwrap().to_owned();
-    let value: serde_json::Value = serde_json::from_reader(replay.into_reader()).unwrap();
+    let value: alt_json::Value = crate::database::json::body(replay);
     assert_eq!(value["result"]["state"], "committed");
     assert_ne!(replay_trace, late_trace);
     assert!(
@@ -408,7 +408,7 @@ fn request_observations_preserve_late_commits_and_current_metrics_authority() {
         let logged = std::fs::read_to_string(&server.log).unwrap();
         if logged
             .lines()
-            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .filter_map(|line| alt_json::from_str::<alt_json::Value>(line).ok())
             .any(|v| {
                 v["fields"]["trace_id"] == stream_trace && v["fields"]["event"] == "response.ended"
             })
@@ -445,9 +445,9 @@ fn request_observations_preserve_late_commits_and_current_metrics_authority() {
             "request or backend secret entered operational logs"
         );
     }
-    let events: Vec<serde_json::Value> = text
+    let events: Vec<alt_json::Value> = text
         .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
+        .map(|line| alt_json::from_str(line).unwrap())
         .collect();
     assert!(
         events
