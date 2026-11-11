@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: push with unknown capabilities and unchanged refs
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/git.rs
