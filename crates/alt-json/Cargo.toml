@@ -1,0 +1,11 @@
+[package]
+name = "alt-json"
+description = "JSON value type, parser and printer, with no dependencies"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+serde_json.workspace = true
