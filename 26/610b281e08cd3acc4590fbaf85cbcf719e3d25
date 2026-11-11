@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: compare refusal messages through written values
+author-type: human
+author: doracawl
+touched: crates/alt-json/tests/it/derive/messages.rs
