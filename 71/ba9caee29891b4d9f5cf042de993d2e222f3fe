@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: feat
+summary: accept publications of up to ten million objects by default
+author-type: human
+author: doracawl
+touched: crates/alt-server/example-config.json
