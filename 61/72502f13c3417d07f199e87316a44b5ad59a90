@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: segment merges and sweeps wait behind a backup like every write
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/pack_compaction.rs
