@@ -5,6 +5,8 @@ mod dfast;
 mod fast;
 mod fse;
 mod huf;
+#[cfg(target_arch = "x86_64")]
+mod hufx;
 mod lit;
 mod matcher;
 mod params;
@@ -85,7 +87,7 @@ impl BlockCoder {
         out.extend_from_slice(&[0; 3]);
         let count = self.store.sequences.len();
         self.literals.encode(&self.store.literals, count, out);
-        self.sequences.encode(&self.store.sequences, out);
+        self.sequences.encode(&self.store, out);
         let packed = out.len() - header - 3;
         if packed + min_gain(block.len()) < block.len() {
             block_header(&mut out[header..header + 3], last, 2, packed);
@@ -284,11 +286,11 @@ mod tests {
         let digests = [
             (
                 1,
-                "7ed24f5e76130f996b1650ad50a35ea6402e53d98473d15e6669f42a344c3abe",
+                "d0368c01103aec5bcad0d9d3cd5aaeb0939eebcd6728368e1c6fe3e637739cb1",
             ),
             (
                 3,
-                "83ebb11544744e4bee41fb95c351a1b0aa8be457b7cec9f5c66ba285f3b433d3",
+                "7bdf88b2a09d2fa7d960a1d70a80353b2c5a76b1e3bfdf0c38975c394cbfcea1",
             ),
         ];
         for (level, verified) in digests {

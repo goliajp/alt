@@ -1,7 +1,7 @@
 //! Two-table greedy match finder (the default strength): a table of 8-byte
 //! hashes finds long matches, a table of shorter hashes is the fallback.
 
-use super::matcher::{PROBE, SKIP_SPAN, SeqStore, Window, hash};
+use super::matcher::{PROBE, SKIP_SPAN, SeqStore, Window, hash, multiplier};
 
 pub(crate) struct Search<'t> {
     pub long: &'t mut [u32],
@@ -38,7 +38,8 @@ pub(crate) unsafe fn run<const PREFIX: bool>(
     let long = search.long.as_mut_ptr();
     let short = search.short.as_mut_ptr();
     let long_shift = 64 - search.long_log;
-    let drop = 64 - 8 * search.width;
+    let wide = multiplier(8);
+    let mix = multiplier(search.width);
     let short_shift = 64 - search.short_log;
     // a position past `last` cannot be hashed
     let last = end - PROBE;
@@ -52,8 +53,8 @@ pub(crate) unsafe fn run<const PREFIX: bool>(
     unsafe {
         while ip < last {
             let here = window.data64(ip);
-            let long_slot = long.add(hash(here, 0, long_shift));
-            let short_slot = short.add(hash(here, drop, short_shift));
+            let long_slot = long.add(hash(here, wide, long_shift));
+            let short_slot = short.add(hash(here, mix, short_shift));
             let long_candidate = *long_slot as usize;
             let short_candidate = *short_slot as usize;
             *long_slot = ip as u32;
@@ -73,13 +74,13 @@ pub(crate) unsafe fn run<const PREFIX: bool>(
                     forward = 8 + window.common::<PREFIX>(ip + 8, from + 8, end);
                     // the next position is skipped by the match but is a
                     // likely target for later ones
-                    *long.add(hash(window.data64(ip + 1), 0, long_shift)) = (ip + 1) as u32;
+                    *long.add(hash(window.data64(ip + 1), wide, long_shift)) = (ip + 1) as u32;
                 } else if window.hits32::<PREFIX>(short_candidate, low, here as u32) {
                     from = short_candidate;
                     forward = 4 + window.common::<PREFIX>(ip + 4, from + 4, end);
                     // a long match one byte on is taken if it is longer
                     let ahead = window.data64(ip + 1);
-                    let slot = long.add(hash(ahead, 0, long_shift));
+                    let slot = long.add(hash(ahead, wide, long_shift));
                     let next = *slot as usize;
                     *slot = (ip + 1) as u32;
                     if window.hits64::<PREFIX>(next, low, ahead) {
@@ -105,17 +106,17 @@ pub(crate) unsafe fn run<const PREFIX: bool>(
             if ip <= last {
                 // index positions the match jumped over
                 let skipped = window.data64(found + 2);
-                *long.add(hash(skipped, 0, long_shift)) = (found + 2) as u32;
-                *short.add(hash(skipped, drop, short_shift)) = (found + 2) as u32;
-                *long.add(hash(window.data64(ip - 2), 0, long_shift)) = (ip - 2) as u32;
-                *short.add(hash(window.data64(ip - 1), drop, short_shift)) = (ip - 1) as u32;
+                *long.add(hash(skipped, wide, long_shift)) = (found + 2) as u32;
+                *short.add(hash(skipped, mix, short_shift)) = (found + 2) as u32;
+                *long.add(hash(window.data64(ip - 2), wide, long_shift)) = (ip - 2) as u32;
+                *short.add(hash(window.data64(ip - 1), mix, short_shift)) = (ip - 1) as u32;
                 // a match right behind another often repeats the older offset
                 while ip <= last && window.repeats::<PREFIX>(ip, rep1) {
                     let len = 4 + window.common::<PREFIX>(ip + 4, ip + 4 - rep1, end);
                     std::mem::swap(&mut rep0, &mut rep1);
                     let here = window.data64(ip);
-                    *long.add(hash(here, 0, long_shift)) = ip as u32;
-                    *short.add(hash(here, drop, short_shift)) = ip as u32;
+                    *long.add(hash(here, wide, long_shift)) = ip as u32;
+                    *short.add(hash(here, mix, short_shift)) = ip as u32;
                     store.push(window, ip, ip, len, 1);
                     ip += len;
                     anchor = ip;

@@ -3,15 +3,12 @@
 use std::sync::OnceLock;
 
 use super::fse::{CTable, cost, normalize, table_log, write_distribution};
-use super::matcher::Sequence;
+use super::matcher::{LongLength, MATCH_BASE, SeqStore, Sequence};
 use crate::bits::RawBitWriter;
 use crate::fse::{
     LL_BASE, LL_DEFAULT, LL_DEFAULT_LOG, LL_EXTRA, LL_MAX_LOG, MAX_SYMBOLS, ML_BASE, ML_DEFAULT,
     ML_DEFAULT_LOG, ML_EXTRA, ML_MAX_LOG, OF_DEFAULT, OF_DEFAULT_LOG, OF_MAX_LOG,
 };
-
-/// Smallest match length the format can express.
-const MIN_MATCH: u32 = 3;
 
 /// Code of every literal length below 64 and every match length (less
 /// `MIN_MATCH`) below 128; longer ones follow from the bit length.
@@ -46,7 +43,7 @@ static LL_BITS: [u8; CODE_SLOTS] = padded(&LL_EXTRA);
 static ML_BITS: [u8; CODE_SLOTS] = padded(&ML_EXTRA);
 
 static LL_CODES: [u8; 64] = small_codes(&LL_BASE, 0);
-static ML_CODES: [u8; 128] = small_codes(&ML_BASE, MIN_MATCH);
+static ML_CODES: [u8; 128] = small_codes(&ML_BASE, MATCH_BASE as u32);
 
 #[inline(always)]
 fn ll_code(len: u32) -> usize {
@@ -57,13 +54,13 @@ fn ll_code(len: u32) -> usize {
     }
 }
 
+/// Code of a match length given less [`MATCH_BASE`].
 #[inline(always)]
-fn ml_code(len: u32) -> usize {
-    let biased = len - MIN_MATCH;
-    if biased < 128 {
-        ML_CODES[biased as usize] as usize
+fn ml_code(base: u32) -> usize {
+    if base < 128 {
+        ML_CODES[base as usize] as usize
     } else {
-        biased.ilog2() as usize + 36
+        base.ilog2() as usize + 36
     }
 }
 
@@ -153,29 +150,30 @@ impl SequenceCoder {
         (self.fields, self.valid) = (state.0, state.1);
     }
 
-    /// Works out the three codes of every sequence and packs the extra
-    /// bits of its two lengths. Returns the code counts, kept as two
-    /// histograms filled by alternate sequences: a run of one code would
-    /// otherwise make each increment wait for the one before.
-    fn fill(&mut self, sequences: &[Sequence]) -> [[[u32; CODE_SLOTS]; 3]; 2] {
+    /// Works out the three codes of every sequence. Returns the code
+    /// counts, kept as two histograms filled by alternate sequences: a run
+    /// of one code would otherwise make each increment wait for the one
+    /// before.
+    fn fill(&mut self, store: &SeqStore) -> [[[u32; CODE_SLOTS]; 3]; 2] {
         #[cfg(target_arch = "x86_64")]
         if crate::has_bmi2() {
             // safety: the processor was just found to have the features
-            return unsafe { self.fill_bmi2(sequences) };
+            return unsafe { self.fill_bmi2(store) };
         }
-        self.fill_any(sequences)
+        self.fill_any(store)
     }
 
     /// The same compiled for processors with BMI2, where the variable
     /// shift of packing needs no fixed register.
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "bmi1,bmi2,lzcnt")]
-    unsafe fn fill_bmi2(&mut self, sequences: &[Sequence]) -> [[[u32; CODE_SLOTS]; 3]; 2] {
-        self.fill_any(sequences)
+    unsafe fn fill_bmi2(&mut self, store: &SeqStore) -> [[[u32; CODE_SLOTS]; 3]; 2] {
+        self.fill_any(store)
     }
 
     #[inline(always)]
-    fn fill_any(&mut self, sequences: &[Sequence]) -> [[[u32; CODE_SLOTS]; 3]; 2] {
+    fn fill_any(&mut self, store: &SeqStore) -> [[[u32; CODE_SLOTS]; 3]; 2] {
+        let sequences = &store.sequences[..];
         let count = sequences.len();
         for codes in &mut self.codes {
             codes.clear();
@@ -188,7 +186,8 @@ impl SequenceCoder {
         unsafe {
             let [ll_out, of_out, ml_out] = [0, 1, 2].map(|i| self.codes[i].as_mut_ptr());
             let one = |i: usize, seq: &Sequence, counts: &mut [[u32; CODE_SLOTS]; 3]| {
-                let (ll_code, ml_code) = (ll_code(seq.lit_len), ml_code(seq.match_len));
+                let (ll_code, ml_code) =
+                    (ll_code(seq.lit_len as u32), ml_code(seq.match_base as u32));
                 let of_code = seq.offset.ilog2() as usize;
                 ll_out.add(i).write(ll_code as u8);
                 of_out.add(i).write(of_code as u8);
@@ -209,6 +208,17 @@ impl SequenceCoder {
             for codes in &mut self.codes {
                 codes.set_len(count);
             }
+        }
+        // the one length beyond 16 bits was coded from its low bits; such a
+        // length always has the top code of its field
+        if let Some(long) = store.long {
+            let (field, at, code) = match long {
+                LongLength::Literals(at) => (0, at, LL_BASE.len() - 1),
+                LongLength::Match(at) => (2, at, ML_BASE.len() - 1),
+            };
+            let old = std::mem::replace(&mut self.codes[field][at], code as u8);
+            counts[at & 1][field][old as usize] -= 1;
+            counts[at & 1][field][code] += 1;
         }
         counts
     }
@@ -277,8 +287,9 @@ impl SequenceCoder {
         best.1
     }
 
-    /// Appends the sequences section for `sequences`.
-    pub(crate) fn encode(&mut self, sequences: &[Sequence], out: &mut Vec<u8>) {
+    /// Appends the sequences section for the sequences of `store`.
+    pub(crate) fn encode(&mut self, store: &SeqStore, out: &mut Vec<u8>) {
+        let sequences = &store.sequences[..];
         let count = sequences.len();
         match count {
             0..128 => out.push(count as u8),
@@ -291,7 +302,7 @@ impl SequenceCoder {
         if count == 0 {
             return;
         }
-        let counts = self.fill(sequences);
+        let counts = self.fill(store);
         let modes = out.len();
         out.push(0);
         let [even, odd] = &counts;
@@ -343,7 +354,7 @@ impl SequenceCoder {
             let [ll_code, of_code, ml_code] = codes.map(|code| code as usize % CODE_SLOTS);
             let (ll_bits, ml_bits) = (LL_BITS[ll_code] as u32, ML_BITS[ml_code] as u32);
             let low = seq.lit_len as u64 & ((1 << ll_bits) - 1);
-            let high = (seq.match_len - MIN_MATCH) as u64 & ((1 << ml_bits) - 1);
+            let high = seq.match_base as u64 & ((1 << ml_bits) - 1);
             let of_code = of_code as u32;
             if ll_bits + ml_bits + of_code > 30 {
                 writer.flush();

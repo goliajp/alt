@@ -119,41 +119,65 @@ pub(crate) fn table_log(max_log: u32, total: u32, max_symbol: usize) -> u32 {
     max_log.min(by_total).max(floor).max(5)
 }
 
+/// Fewest symbols from which rare ones get the "less than one" share.
+const LOW_SHARE_MIN: u32 = 2048;
+
 /// Scales `counts` (sum `total`, at least two nonzero) to a distribution
-/// summing to `1 << log`, keeping every present symbol at 1 or more.
+/// summing to `1 << log`, keeping every present symbol at 1 or more. In a
+/// long stream a symbol too rare for a whole share gets -1, "less than
+/// one": it still takes one state, but at the top of the table, out of the
+/// way of the frequent symbols.
 pub(crate) fn normalize(counts: &[u32], total: u32, log: u32, norm: &mut [i16]) {
     let size = 1i32 << log;
+    let rare = if total >= LOW_SHARE_MIN {
+        total >> log
+    } else {
+        0
+    };
     let mut sum = 0i32;
     for (slot, &count) in norm.iter_mut().zip(counts) {
         *slot = match count {
             0 => 0,
+            _ if count <= rare => -1,
             _ => (((count as u64) << log) / total as u64).max(1) as i16,
         };
-        sum += *slot as i32;
+        sum += slot.unsigned_abs() as i32;
+    }
+    if sum == size {
+        return;
     }
     // each unit goes where it saves, or costs, the fewest bits: moving a
-    // probability from p to p + 1 changes the cost by about count / (p + ½)
-    while sum != size {
-        let grow = sum < size;
-        let mut best = usize::MAX;
-        let mut best_key = if grow { f32::MIN } else { f32::MAX };
-        for (symbol, (&count, &slot)) in counts.iter().zip(norm.iter()).enumerate() {
-            if count == 0 || (!grow && slot < 2) {
-                continue;
-            }
-            let key = count as f32 / (slot as f32 + if grow { 0.5 } else { -0.5 });
-            if (grow && key > best_key) || (!grow && key < best_key) {
-                best = symbol;
-                best_key = key;
-            }
-        }
-        if grow {
-            norm[best] += 1;
-            sum += 1;
+    // probability from p to p + 1 changes the cost by about count / (p + ½).
+    // A symbol that may not move holds a key that never wins.
+    let grow = sum < size;
+    let (half, never) = if grow {
+        (0.5, f32::MIN)
+    } else {
+        (-0.5, f32::MAX)
+    };
+    let key = |count: u32, slot: i16| {
+        if count == 0 || slot < 0 || (!grow && slot < 2) {
+            never
         } else {
-            norm[best] -= 1;
-            sum -= 1;
+            count as f32 / (slot as f32 + half)
         }
+    };
+    let mut keys = [never; MAX_SYMBOLS];
+    for (key_slot, (&count, &slot)) in keys.iter_mut().zip(counts.iter().zip(norm.iter())) {
+        *key_slot = key(count, slot);
+    }
+    let keys = &mut keys[..counts.len()];
+    while sum != size {
+        let mut best = 0;
+        for (symbol, &candidate) in keys.iter().enumerate() {
+            if (grow && candidate > keys[best]) || (!grow && candidate < keys[best]) {
+                best = symbol;
+            }
+        }
+        let unit = if grow { 1 } else { -1 };
+        norm[best] += unit;
+        sum += unit as i32;
+        keys[best] = key(counts[best], norm[best]);
     }
 }
 
