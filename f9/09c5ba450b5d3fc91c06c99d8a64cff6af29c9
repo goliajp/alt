@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: perf
+summary: native publications write the receipt once, audit and outbox share one statement, new references skip conflict arbitration
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/gc.rs
+touched: crates/alt-server-store/src/packs.rs
+touched: crates/alt-server-store/src/publication.rs
+touched: crates/alt-server-store/src/publication/fence.rs
+touched: crates/alt-server-store/src/publication/refs.rs
