@@ -19,6 +19,16 @@ named database environment variable with a dedicated PostgreSQL database and
 role. The current operator accepts a Unix socket or literal loopback database
 address, and listens on loopback behind an HTTPS edge.
 
+The PostgreSQL server must be built with lz4 compression (`--with-lz4`), as the
+official PostgreSQL images and distribution packages are: the publication
+documents are stored compressed with it. `initialize`, `migrate`, `health` and
+the service itself check this when they open the database and stop with a
+message that says so, before anything is written. To check a server yourself:
+
+```sql
+SELECT 'lz4' = ANY(enumvals) FROM pg_settings WHERE name = 'default_toast_compression';
+```
+
 ```sh
 alt-server secret receipt-key --output receipt.key
 alt-server secret token --output admin.token
@@ -299,20 +309,23 @@ operation's isolated scratch directory until investigation finishes, then
 remove that exact directory. Do not expose scratch or backup directories through
 the web server.
 
-This release upgrades from schema 18 only, and backs up and restores schema 18
-and the current schema 19. A backup of a schema 18 instance requires an explicit
-`--schema 18`. Stop the old service, save and verify its backup, then upgrade:
+This release upgrades from schema 18 and 19, and backs up and restores schema
+18, 19 and the current schema 20. A backup of an instance that is not yet
+upgraded requires its schema explicitly, `--schema 18` or `--schema 19`. Stop
+the old service, save and verify its backup, then upgrade, naming the schema the
+instance is at:
 
 ```sh
-alt-server --config server.json migrate --from-schema 18 --output-config server-next.json
+alt-server --config server.json migrate --from-schema 19 --output-config server-next.json
 alt-server --config server-next.json health
 ```
 
-An instance at schema 17 or older is first upgraded to schema 18 with the
-previous release, the last one that carries the migrations for schemas 1–17,
-and backed up again there. This release refuses such an instance, and a backup
-taken at schema 17 or older, with a message that names this step; it changes
-nothing. A new instance is created directly at the current schema.
+From schema 18 every version in between is applied in the same transaction.
+An instance at schema 17 or older is first upgraded to schema 18 with the last
+release that carries the migrations for schemas 1–17, and backed up again
+there. This release refuses such an instance, and a backup taken at schema 17
+or older, with a message that names this step; it changes nothing. A new
+instance is created directly at the current schema.
 
 The next config is synced before the database transaction. Repeating the same
 migration with that exact output file reconciles a committed upgrade after a
@@ -328,6 +341,20 @@ and each repository's stored bytes are counted again from its pack segments and
 retained content. Uploads in progress keep their content and continue under the
 new generation. The released copies leave the disk with the next garbage
 collection.
+
+From schema 19 the transaction changes how a committed publication is stored.
+That version kept the whole publication four times: in the request, in the
+receipt of the request's stored result, in the audit record and in the outbox
+event. Now the request holds it once and the audit record stays whole; the
+stored result and the outbox event keep the receipt without the publication,
+and every read puts it back from the request. Receipts, their signatures and
+every response are byte for byte what they were. The upgrade rewrites the
+existing rows and checks each one: a row that would not read back as the
+document it replaces fails the command, and the database stays as it was. The
+four columns that hold these documents are compressed with lz4 for values
+written from then on; values already stored are not rewritten. The upgrade
+needs the lz4 support described above and refuses a server without it. The
+space of the shortened rows is returned by PostgreSQL's own vacuum afterwards.
 
 For disaster recovery, externally stop and fence the old service first. Create
 a dedicated empty PostgreSQL database and a new config pointing to **absent**
@@ -377,9 +404,9 @@ normal credentials or create the first browser account, then revoke the short
 recovery token. Existing browser administrators can instead use the password
 recovery command above.
 
-Operator acceptance includes a schema 18 instance upgraded in place and
-restored from the backup taken before its upgrade, encrypted backup
-verification and isolated restoration. Hosts without Docker can select an
+Operator acceptance includes a schema 18 and a schema 19 instance, each
+upgraded in place and restored from the backup taken before its upgrade,
+encrypted backup verification and isolated restoration. Hosts without Docker can select an
 isolated native PostgreSQL installation with
 `ALT_SERVER_TEST_POSTGRES_BIN=/absolute/path/to/bin`; the existing
 `scripts/with-test-postgres.sh` entrypoint then starts a private Unix-socket-only
