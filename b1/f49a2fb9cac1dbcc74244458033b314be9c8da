@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: feat
+summary: find a stored object by the digest of its content
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/format.rs
+touched: crates/alt-pack-segment/src/set.rs
+touched: crates/alt-pack-segment/tests/it/main.rs
