@@ -239,15 +239,30 @@ fn changed_source_refuses_old_cutover_and_old_export_keeps_its_original_bytes() 
         .store
         .prepare_portable_export(&f.credential, scope, "new-snapshot", portable_limits())
         .unwrap();
-    // Old export-only pins must not inflate every later migration package.
+    // The replaced commit is still held by its segment and so still exported.
+    // What an old export alone keeps in the content store must not be retained
+    // again by every later one.
     assert!(
-        !current
+        current
             .envelope()
             .catalog
             .objects
             .iter()
             .any(|o| o.oid == base.commit.to_string())
     );
+    let pins = |id: &str| -> i64 {
+        f.client()
+            .query_one(
+                "SELECT count(*) FROM alt_pins WHERE pin_id=$1 AND blake3=$2",
+                &[
+                    &format!("portable-export:{id}"),
+                    &base.manifest.entries[1].blake3,
+                ],
+            )
+            .unwrap()
+            .get(0)
+    };
+    assert_eq!((pins("old-snapshot"), pins("new-snapshot")), (1, 0));
     f.store
         .freeze_portable_export(
             &f.credential,
@@ -305,13 +320,20 @@ fn export_requires_current_content_authority_and_never_completes_missing_history
     f.client()
         .execute("UPDATE alt_credentials SET revoked=false", &[])
         .unwrap();
+    // Git objects are read from the pack segments; the task record is not one
+    let record = payload
+        .manifest
+        .entries
+        .iter()
+        .find(|entry| entry.kind == ContentKind::Record)
+        .unwrap();
     let file = f
         .root
         .path()
         .join("bytes")
         .join("installation")
         .join("repository")
-        .join(&payload.manifest.entries[1].blake3);
+        .join(&record.blake3);
     std::fs::remove_file(file).unwrap();
     assert!(
         f.store
@@ -2097,7 +2119,7 @@ fn portable_export_validation_does_not_block_current_authority_changes() {
         .manifest
         .entries
         .iter()
-        .find(|e| e.kind == ContentKind::Commit && e.bytes > 0)
+        .find(|e| e.kind == ContentKind::Record && e.bytes > 0)
         .unwrap();
     let selected_path = f
         .root
@@ -2340,3 +2362,4 @@ fn portable_export_pause_child() {
 }
 
 mod change_links;
+mod segment_objects;

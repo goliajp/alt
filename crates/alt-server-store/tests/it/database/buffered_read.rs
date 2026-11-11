@@ -8,60 +8,61 @@ struct Buffered {
 }
 
 #[test]
-#[ignore = "requires isolated PostgreSQL; checks paged snapshot selection and exact object limits"]
-fn snapshot_selection_pages_past_unpublished_objects_and_counts_mappings() {
+#[ignore = "requires isolated PostgreSQL; checks snapshot selection from the pack segments and exact object limits"]
+fn snapshot_selection_takes_segment_objects_and_enforces_the_exact_limit() {
     let mut f = Fixture::new();
-    // Metadata-only fixture: no byte reader is invoked. More than six pages of
-    // unpublished mappings must not hide the published objects that follow.
+    let p = tagged_payload();
+    p.upload(&mut f.store, &f.credential);
+    p.publish(&mut f.store, &f.credential);
+    // an upload that was never published maps an object id without publishing it
     f.client().batch_execute(
-        "INSERT INTO alt_blobs(repository,blake3,bytes,state,created_at)
-         SELECT 'repository',lpad(to_hex(n),64,'0'),0,'stored',0 FROM generate_series(1,6207) n;
-         INSERT INTO alt_objects(repository,oid,kind,blake3)
-         SELECT 'repository',lpad(to_hex(n),40,'0'),'blob',lpad(to_hex(n),64,'0') FROM generate_series(1,6207) n;
-         UPDATE alt_objects SET blake3=lpad(to_hex(6205),64,'0') WHERE oid=lpad(to_hex(6206),40,'0');
-         INSERT INTO alt_pins(repository,pin_id,blake3,expires_at)
-         SELECT 'repository','published',lpad(to_hex(n),64,'0'),NULL FROM unnest(ARRAY[6201,6204,6205]) n;
-         INSERT INTO alt_pins(repository,pin_id,blake3,expires_at) VALUES
-         ('repository','another-publication',lpad(to_hex(6205),64,'0'),NULL),
-         ('repository','upload:live',lpad(to_hex(6202),64,'0'),9223372036854775807),
-         ('repository','read:expired',lpad(to_hex(6203),64,'0'),0);
-         UPDATE alt_blobs SET state='deleting' WHERE blake3=lpad(to_hex(6204),64,'0');"
+        "INSERT INTO alt_blobs(repository,blake3,bytes,state,created_at) VALUES('repository',lpad('1',64,'0'),0,'stored',0);
+         INSERT INTO alt_objects(repository,oid,kind,blake3) VALUES('repository',lpad('1',40,'0'),'blob',lpad('1',64,'0'));
+         INSERT INTO alt_pins(repository,pin_id,blake3,expires_at) VALUES('repository','upload:live',lpad('1',64,'0'),9223372036854775807);"
     ).unwrap();
-    let read_pin_count = |f: &Fixture| -> i64 {
-        f.client().query_one(
-            "SELECT count(*) FROM alt_pins WHERE pin_id LIKE 'read:%' AND pin_id<>'read:expired'", &[],
-        ).unwrap().get(0)
+    let pins = |f: &Fixture| -> i64 {
+        f.client()
+            .query_one("SELECT count(*) FROM alt_pins", &[])
+            .unwrap()
+            .get(0)
     };
+    let before = pins(&f);
     assert!(matches!(
         f.store
-            .read_snapshot(&f.credential, "repository", 60_000, 2),
+            .read_snapshot(&f.credential, "repository", 60_000, 3),
         Err(alt_server_store::Error::Limit("read graph objects"))
     ));
-    assert_eq!(read_pin_count(&f), 0);
     let read = f
         .store
-        .read_snapshot(&f.credential, "repository", 60_000, 3)
+        .read_snapshot(&f.credential, "repository", 60_000, 4)
         .unwrap();
     let actual: Vec<_> = read
         .objects()
-        .map(|(oid, kind, bytes)| {
-            assert_eq!(kind, ObjectKind::Blob);
-            assert_eq!(bytes, 0);
-            oid.to_string()
+        .map(|(oid, kind, bytes)| (oid.to_string(), kind.to_string(), bytes))
+        .collect();
+    let mut expected: Vec<_> = p
+        .manifest
+        .entries
+        .iter()
+        .map(|entry| {
+            (
+                entry.git_oid.clone().unwrap(),
+                serde_json::to_value(entry.kind)
+                    .unwrap()
+                    .as_str()
+                    .unwrap()
+                    .to_owned(),
+                entry.bytes,
+            )
         })
         .collect();
-    let expected: Vec<_> = [6201, 6205, 6206]
-        .into_iter()
-        .map(|n| format!("{n:040x}"))
-        .collect();
+    expected.sort();
     assert_eq!(actual, expected);
     assert_eq!(
-        read_pin_count(&f),
-        2,
-        "equal-byte mappings share one read pin"
+        pins(&f),
+        before,
+        "a snapshot retains nothing in the content store"
     );
-    f.store.release_snapshot(&f.credential, read).unwrap();
-    assert_eq!(read_pin_count(&f), 0);
 }
 impl Drop for Buffered {
     fn drop(&mut self) {
@@ -170,14 +171,12 @@ fn metadata_snapshots_do_not_pin_objects_or_bypass_final_authority() {
         if fault == "valid" {
             assert!(!dropped.load(Ordering::SeqCst));
             drop(result);
-            f.store.release_snapshot(&credential, read).unwrap();
             // The ordinary object snapshot still protects and exposes contents.
             let read = f
                 .store
                 .read_snapshot(&credential, "repository", 60_000, 1000)
                 .unwrap();
             assert_eq!(read.objects().count(), 2);
-            f.store.release_snapshot(&credential, read).unwrap();
         }
         assert!(
             dropped.load(Ordering::SeqCst),
@@ -235,7 +234,6 @@ fn metadata_snapshots_preserve_refs_without_selecting_content() {
                 |_| Ok(credential.clone()),
             )
             .unwrap();
-        f.store.release_snapshot(&credential, read).unwrap();
         let after: i64 = f
             .client()
             .query_one("SELECT count(*) FROM alt_pins", &[])
@@ -340,8 +338,8 @@ fn metadata_responses_discard_results_after_authority_changes() {
 }
 
 #[test]
-#[ignore = "requires isolated PostgreSQL; checks current authority and pin faults during buffered computation"]
-fn buffered_reads_drop_results_after_current_authority_or_pin_changes() {
+#[ignore = "requires isolated PostgreSQL; checks current authority faults during buffered computation"]
+fn buffered_reads_drop_results_after_current_authority_changes() {
     for references in [false, true] {
         for fault in [
             "grant",
@@ -350,11 +348,6 @@ fn buffered_reads_drop_results_after_current_authority_or_pin_changes() {
             "recovery",
             "generation",
             "object-format",
-            "pin-expiry",
-            "pin-missing",
-            "pin-wrong",
-            "deleting",
-            "size",
             "refresh",
         ] {
             let mut f = Fixture::new();
@@ -403,11 +396,6 @@ fn buffered_reads_drop_results_after_current_authority_or_pin_changes() {
                     "recovery" => { client.execute("UPDATE alt_repositories SET recovery_epoch=recovery_epoch+1", &[]).unwrap(); },
                     "generation" => { client.execute("UPDATE alt_instance SET runtime_generation=runtime_generation+1", &[]).unwrap(); },
                     "object-format" => { client.batch_execute("ALTER TABLE alt_repositories DROP CONSTRAINT alt_repositories_object_format_check; UPDATE alt_repositories SET object_format='sha256'").unwrap(); },
-                    "pin-expiry" => { client.execute("UPDATE alt_pins SET expires_at=0 WHERE expires_at IS NOT NULL", &[]).unwrap(); },
-                    "pin-missing" => { client.execute("DELETE FROM alt_pins WHERE expires_at IS NOT NULL", &[]).unwrap(); },
-                    "pin-wrong" => { client.execute("UPDATE alt_pins SET pin_id='read:other' WHERE expires_at IS NOT NULL", &[]).unwrap(); },
-                    "deleting" => { client.execute("UPDATE alt_blobs SET state='deleting'", &[]).unwrap(); },
-                    "size" => { client.execute("UPDATE alt_blobs SET bytes=bytes+1", &[]).unwrap(); },
                     "refresh" => {},
                     _ => unreachable!(),
                 }
@@ -465,7 +453,6 @@ fn buffered_reads_check_initial_authority_and_empty_snapshot_lifetime() {
         f.store
             .set_grants(&credential, "repository", "owner", true, true, &grants())
             .unwrap();
-        f.store.release_snapshot(&credential, read).unwrap();
         let read = if metadata {
             f.store
                 .read_metadata_snapshot(&credential, "repository", 1000)
@@ -485,9 +472,10 @@ fn buffered_reads_check_initial_authority_and_empty_snapshot_lifetime() {
         );
         assert!(matches!(
             result,
-            Err(alt_server_store::Error::Precondition("read pin expired"))
+            Err(alt_server_store::Error::Precondition(
+                "read snapshot expired"
+            ))
         ));
-        f.store.release_snapshot(&credential, read).unwrap();
     }
 }
 
@@ -523,7 +511,7 @@ fn tagged_payload() -> Payload {
 
 #[test]
 #[ignore = "requires isolated PostgreSQL; verifies actual nested tags, projected readers, prefixes and original tag faults"]
-fn reference_snapshots_pin_only_matching_tips_and_verified_tag_chains() {
+fn reference_snapshots_select_only_matching_tips_and_verified_tag_chains() {
     let mut f = Fixture::new();
     let p = tagged_payload();
     p.upload(&mut f.store, &f.credential);
@@ -551,15 +539,6 @@ fn reference_snapshots_pin_only_matching_tips_and_verified_tag_chains() {
             f.store.open_snapshot_object(&credential, &read, tree),
             Err(alt_server_store::Error::Unauthorized)
         ));
-        let pin_count: i64 = f
-            .client()
-            .query_one(
-                "SELECT count(*) FROM alt_pins WHERE pin_id LIKE 'read:%'",
-                &[],
-            )
-            .unwrap()
-            .get(0);
-        assert_eq!(pin_count as usize, expected);
         f.store
             .with_snapshot_objects(
                 &credential,
@@ -580,107 +559,63 @@ fn reference_snapshots_pin_only_matching_tips_and_verified_tag_chains() {
                 |_| Ok(credential.clone()),
             )
             .unwrap();
-        f.store.release_snapshot(&credential, read).unwrap();
     }
-    let read_pins = |f: &Fixture| -> i64 {
-        f.client()
-            .query_one(
-                "SELECT count(*) FROM alt_pins WHERE pin_id LIKE 'read:%'",
-                &[],
-            )
-            .unwrap()
-            .get(0)
+    // flip one stored byte of the outer tag inside its segment file
+    let outer: ObjectId = p.manifest.entries[3]
+        .git_oid
+        .as_ref()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let view = f.store.pack_view(&credential, "repository").unwrap();
+    let record = view
+        .segments
+        .record(&<[u8; 20]>::try_from(outer.as_bytes()).unwrap())
+        .unwrap()
+        .unwrap();
+    let segment: String = f
+        .client()
+        .query_one("SELECT segment_id FROM alt_pack_segments", &[])
+        .unwrap()
+        .get(0);
+    let path = f.store.pack_path("repository", &segment).unwrap();
+    let flip = |path: &std::path::Path| {
+        use std::os::unix::fs::FileExt;
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+            .unwrap();
+        let at = record.offset + u64::from(record.len) - 1;
+        let mut byte = [0u8];
+        file.read_exact_at(&mut byte, at).unwrap();
+        byte[0] ^= 1;
+        file.write_all_at(&byte, at).unwrap();
     };
-    assert_eq!(read_pins(&f), 0);
-    let tag = &p.manifest.entries[2];
-    let path = f
-        .root
-        .path()
-        .join("bytes")
-        .join(&f.spec.installation_id)
-        .join("repository")
-        .join(&tag.blake3);
-    let original = std::fs::read(&path).unwrap();
-    let mut changed = original.clone();
-    *changed.last_mut().unwrap() ^= 1;
-    std::fs::write(&path, &changed).unwrap();
+    flip(&path);
     assert!(
         f.store
             .read_ref_snapshot(&credential, "repository", 60_000, &["refs/tags/".into()])
             .is_err()
     );
-    assert_eq!(
-        read_pins(&f),
-        0,
-        "failed expansion must release its prior pins"
-    );
     // Excluded tag bytes are not interpreted to list an ordinary branch.
-    let read = f
-        .store
+    f.store
         .read_ref_snapshot(&credential, "repository", 60_000, &["refs/heads/".into()])
         .unwrap();
-    f.store.release_snapshot(&credential, read).unwrap();
-    std::fs::write(&path, &original).unwrap();
-    for fault in ["kind", "stored", "permanent-pin"] {
-        match fault {
-            "kind" => {
-                f.client()
-                    .execute(
-                        "UPDATE alt_objects SET kind='blob' WHERE oid=$1",
-                        &[&p.commit.to_string()],
-                    )
-                    .unwrap();
-            }
-            "stored" => {
-                f.client()
-                    .execute(
-                        "UPDATE alt_blobs SET state='deleting' WHERE blake3=$1",
-                        &[&p.manifest.entries[1].blake3],
-                    )
-                    .unwrap();
-            }
-            "permanent-pin" => {
-                f.client()
-                    .execute(
-                        "UPDATE alt_pins SET expires_at=9223372036854775807 WHERE blake3=$1",
-                        &[&p.manifest.entries[1].blake3],
-                    )
-                    .unwrap();
-            }
-            _ => unreachable!(),
-        }
-        assert!(
-            f.store
-                .read_ref_snapshot(&credential, "repository", 60_000, &["refs/tags/".into()])
-                .is_err(),
-            "{fault}"
-        );
-        assert_eq!(read_pins(&f), 0, "{fault}");
-        f.client()
-            .execute(
-                "UPDATE alt_objects SET kind='commit' WHERE oid=$1",
-                &[&p.commit.to_string()],
-            )
-            .unwrap();
-        f.client()
-            .execute(
-                "UPDATE alt_blobs SET state='stored' WHERE blake3=$1",
-                &[&p.manifest.entries[1].blake3],
-            )
-            .unwrap();
-        f.client()
-            .execute(
-                "UPDATE alt_pins SET expires_at=NULL WHERE blake3=$1",
-                &[&p.manifest.entries[1].blake3],
-            )
-            .unwrap();
-    }
+    flip(&path);
+    assert_eq!(
+        f.store
+            .read_ref_snapshot(&credential, "repository", 60_000, &["refs/tags/".into()])
+            .unwrap()
+            .objects()
+            .count(),
+        3
+    );
     let full = f
         .store
         .read_snapshot(&credential, "repository", 60_000, 1000)
         .unwrap();
     assert_eq!(full.objects().count(), 4);
-    f.store.release_snapshot(&credential, full).unwrap();
 }
 
 #[test]
@@ -706,21 +641,11 @@ fn reference_snapshots_enforce_selection_limits_and_empty_expiry() {
         .read_ref_snapshot(&credential, "repository", 60_000, &["refs/heads/".into()])
         .unwrap();
     assert_eq!(read.objects().count(), 1);
-    f.store.release_snapshot(&credential, read).unwrap();
     assert!(matches!(
         f.store
             .read_ref_snapshot(&credential, "repository", 60_000, &["refs/tags/".into()]),
         Err(alt_server_store::Error::Limit(_))
     ));
-    let pins: i64 = f
-        .client()
-        .query_one(
-            "SELECT count(*) FROM alt_pins WHERE pin_id LIKE 'read:%'",
-            &[],
-        )
-        .unwrap()
-        .get(0);
-    assert_eq!(pins, 0);
     assert!(
         f.store
             .read_snapshot(&credential, "repository", 60_000, 1000)
@@ -742,7 +667,89 @@ fn reference_snapshots_enforce_selection_limits_and_empty_expiry() {
     );
     assert!(matches!(
         result,
-        Err(alt_server_store::Error::Precondition("read pin expired"))
+        Err(alt_server_store::Error::Precondition(
+            "read snapshot expired"
+        ))
     ));
-    f.store.release_snapshot(&credential, read).unwrap();
+}
+
+#[test]
+#[ignore = "requires isolated PostgreSQL; snapshots of objects no content-store row describes"]
+fn snapshots_read_objects_held_only_by_a_segment() {
+    let mut f = Fixture::new();
+    let p = tagged_payload();
+    p.upload(&mut f.store, &f.credential);
+    p.publish(&mut f.store, &f.credential);
+    // the state of objects that arrived by git push: no copy in the content store
+    f.client()
+        .execute("DELETE FROM alt_pins WHERE pin_id LIKE 'ref:%'", &[])
+        .unwrap();
+    f.store
+        .collect_orphans(&f.credential, "repository", 100)
+        .unwrap();
+    let rows: i64 = f
+        .client()
+        .query_one(
+            "SELECT (SELECT count(*) FROM alt_blobs)+(SELECT count(*) FROM alt_objects)",
+            &[],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(rows, 0);
+    let credential = f.credential.clone();
+    let expected: std::collections::BTreeMap<ObjectId, &Vec<u8>> = p
+        .manifest
+        .entries
+        .iter()
+        .zip(&p.contents)
+        .map(|(entry, bytes)| (entry.git_oid.as_ref().unwrap().parse().unwrap(), bytes))
+        .collect();
+    let read = f
+        .store
+        .read_snapshot(&credential, "repository", 60_000, 1000)
+        .unwrap();
+    assert_eq!(
+        read.objects().map(|(oid, _, _)| oid).collect::<Vec<_>>(),
+        expected.keys().copied().collect::<Vec<_>>()
+    );
+    for (oid, _, size) in read.objects() {
+        let (_, opened, mut reader) = f
+            .store
+            .open_snapshot_object(&credential, &read, oid)
+            .unwrap();
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes).unwrap();
+        assert_eq!(
+            (size, opened, &bytes),
+            (bytes.len() as u64, size, expected[&oid])
+        );
+    }
+    let buffered = f
+        .store
+        .with_snapshot_objects(
+            &credential,
+            &read,
+            |objects| {
+                let mut all = Vec::new();
+                for (oid, _, _) in read.objects() {
+                    let mut bytes = Vec::new();
+                    objects.open(oid)?.unwrap().reader.read_to_end(&mut bytes)?;
+                    all.push(bytes);
+                }
+                Ok(all)
+            },
+            |_| Ok(credential.clone()),
+        )
+        .unwrap();
+    assert_eq!(
+        buffered,
+        expected.values().map(|b| (*b).clone()).collect::<Vec<_>>()
+    );
+    // the tag chain of a ref is followed through the segments as well
+    let tips = f
+        .store
+        .read_ref_snapshot(&credential, "repository", 60_000, &["refs/tags/".into()])
+        .unwrap();
+    assert_eq!(tips.objects().count(), 3);
+    assert_eq!(read.refs, tips.refs);
 }

@@ -483,26 +483,6 @@ fn bulk_publication_checks_every_mapping_and_pin_then_reads_exact_bytes() {
         )
         .unwrap();
     assert_eq!(buffered, p.contents[1099]);
-    // A missing pin in a later batch cannot be hidden by other live pins.
-    f.client()
-        .execute(
-            "DELETE FROM alt_pins WHERE expires_at IS NOT NULL AND blake3=$1",
-            &[&selected.blake3],
-        )
-        .unwrap();
-    assert!(
-        f.store
-            .with_snapshot_objects(
-                &credential,
-                &snapshot,
-                |_| -> alt_server_store::Result<()> {
-                    panic!("missing selected pin must fail before work")
-                },
-                |_| Ok(credential.clone())
-            )
-            .is_err()
-    );
-    f.store.release_snapshot(&f.credential, snapshot).unwrap();
     let unique: std::collections::BTreeSet<_> =
         p.manifest.entries.iter().map(|e| &e.blake3).collect();
     assert_eq!(
