@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: serve git objects held only by a pack segment to content downloads and task publications
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/tasks.rs
+touched: crates/alt-server-store/src/transport.rs
+touched: crates/alt-server-store/tests/it/database.rs
+touched: crates/alt-server-store/tests/it/database/tasks.rs
+touched: crates/alt-server/tests/it/database/git.rs
