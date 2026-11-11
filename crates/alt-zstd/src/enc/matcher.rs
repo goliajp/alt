@@ -1,0 +1,293 @@
+//! What the match finders share: the view of prefix and data as one index
+//! space, match measurement, and the store the sequences go to.
+
+use std::marker::PhantomData;
+
+use crate::bits::{load32, load64};
+
+/// Multiplier of the multiplicative hashes.
+const MIX: u64 = 0x9E37_79B1_85EB_CA87;
+
+/// Bytes a position must have ahead of it to be hashed or probed.
+pub(crate) const PROBE: usize = 8;
+
+/// Shortest match the finders emit.
+pub(crate) const MIN_MATCH: usize = 4;
+
+/// Positions without a match are skipped faster the longer the dry spell:
+/// one extra step per `1 << SKIP_LOG` literals.
+pub(crate) const SKIP_LOG: u32 = 8;
+
+/// Stands in for a candidate that may not be read, so that the comparison
+/// can go ahead without a branch on the candidate's validity.
+static NOWHERE: [u8; PROBE] = [0; PROBE];
+
+/// Hash of the low `64 - drop` bits of `value`, `64 - shift` bits wide.
+#[inline(always)]
+pub(crate) fn hash(value: u64, drop: u32, shift: u32) -> usize {
+    ((value << drop).wrapping_mul(MIX) >> shift) as usize
+}
+
+/// One literal run followed by one match.
+#[derive(Clone, Copy)]
+pub(crate) struct Sequence {
+    pub lit_len: u32,
+    pub match_len: u32,
+    /// 1..=3 names a repeat offset, anything larger is the distance plus 3
+    pub offset: u32,
+}
+
+/// Prefix and data seen as one run of bytes: the prefix occupies indices
+/// `first..split`, the data `split..end`. Methods take `PREFIX`, which says
+/// whether a prefix exists at all; without one they compile to plain
+/// accesses of the data.
+pub(crate) struct Window<'a> {
+    /// prefix pointer biased so that adding an index below `split` lands in it
+    prefix: *const u8,
+    /// data pointer biased so that adding an index from `split` on lands in it
+    data: *const u8,
+    /// index of the first byte of history; never zero, so that an empty
+    /// hash-table slot cannot look like a candidate
+    pub first: usize,
+    pub split: usize,
+    pub end: usize,
+    life: PhantomData<&'a [u8]>,
+}
+
+impl<'a> Window<'a> {
+    pub(crate) fn new(prefix: &'a [u8], data: &'a [u8], first: usize) -> Self {
+        let split = first + prefix.len();
+        Self {
+            prefix: prefix.as_ptr().wrapping_sub(first),
+            data: data.as_ptr().wrapping_sub(split),
+            first,
+            split,
+            end: split + data.len(),
+            life: PhantomData,
+        }
+    }
+
+    pub(crate) fn has_prefix(&self) -> bool {
+        self.split != self.first
+    }
+
+    /// Address of the byte at `index`, which must lie in `first..end`.
+    #[inline(always)]
+    fn at<const PREFIX: bool>(&self, index: usize) -> *const u8 {
+        if PREFIX && index < self.split {
+            self.prefix.wrapping_add(index)
+        } else {
+            self.data.wrapping_add(index)
+        }
+    }
+
+    /// Address of the data byte at `index`, which must lie in `split..end`.
+    #[inline(always)]
+    pub(crate) fn data_at(&self, index: usize) -> *const u8 {
+        self.data.wrapping_add(index)
+    }
+
+    /// # Safety
+    /// `index >= split` and `index + 8 <= end`.
+    #[inline(always)]
+    pub(crate) unsafe fn data64(&self, index: usize) -> u64 {
+        // safety: the caller keeps the read inside the data
+        unsafe { load64(self.data_at(index)) }
+    }
+
+    /// The 8 bytes of the prefix at `index`.
+    ///
+    /// # Safety
+    /// `first <= index` and `index + 8 <= split`.
+    pub(crate) unsafe fn prefix64(&self, index: usize) -> u64 {
+        // safety: the caller keeps the read inside the prefix
+        unsafe { load64(self.prefix.wrapping_add(index)) }
+    }
+
+    /// Where to read 8 bytes of the candidate at `index`, and whether it is
+    /// a candidate at all: at or above `low`, and not straddling the end of
+    /// the prefix. The address is readable either way.
+    ///
+    /// # Safety
+    /// `index` must be below a data position that has 8 bytes ahead of it.
+    #[inline(always)]
+    pub(crate) unsafe fn probe<const PREFIX: bool>(
+        &self,
+        index: usize,
+        low: usize,
+    ) -> (*const u8, bool) {
+        let usable =
+            index >= low && (!PREFIX || index >= self.split || index + PROBE <= self.split);
+        let from = if usable {
+            self.at::<PREFIX>(index)
+        } else {
+            NOWHERE.as_ptr()
+        };
+        (from, usable)
+    }
+
+    /// Whether the 4 bytes at `ip` repeat those `rep` bytes earlier; a `rep`
+    /// of zero stands for no offset.
+    ///
+    /// # Safety
+    /// `ip` in the data with 4 bytes ahead of it, `ip - rep >= first`.
+    #[inline(always)]
+    pub(crate) unsafe fn repeats<const PREFIX: bool>(&self, ip: usize, rep: usize) -> bool {
+        // safety: with rep == 0 both sides read the same data bytes; a
+        // source in the prefix is read only if 8 bytes of it remain there
+        unsafe {
+            let (from, usable) = self.probe::<PREFIX>(ip - rep, 0);
+            (rep != 0) & usable & (load32(from) == load32(self.data_at(ip)))
+        }
+    }
+
+    /// Length of the common run of the bytes at `ip` (in the data) and at
+    /// the earlier index `from`, stopping at `end`.
+    ///
+    /// # Safety
+    /// `first <= from < ip`, `split <= ip <= end <= self.end`.
+    #[inline(always)]
+    pub(crate) unsafe fn common<const PREFIX: bool>(
+        &self,
+        ip: usize,
+        from: usize,
+        end: usize,
+    ) -> usize {
+        // safety: every comparison stays below `end` on the ip side, and the
+        // other side trails it within the same index space
+        unsafe {
+            if !PREFIX || from >= self.split {
+                return run(self.data_at(ip), self.data_at(from), end - ip);
+            }
+            let in_prefix = (self.split - from).min(end - ip);
+            let len = run(self.data_at(ip), self.prefix.wrapping_add(from), in_prefix);
+            if from + len < self.split {
+                return len;
+            }
+            // the earlier side ran off the prefix: it continues in the data
+            len + run(
+                self.data_at(ip + len),
+                self.data_at(self.split),
+                end - ip - len,
+            )
+        }
+    }
+
+    /// Grows a match backwards: steps `ip` and `from` down while the bytes
+    /// before them agree, without passing `anchor` or `low`. Returns the
+    /// number of steps.
+    ///
+    /// # Safety
+    /// `low >= first`, `anchor >= split`, and both indices inside the window.
+    #[inline(always)]
+    pub(crate) unsafe fn extend_back<const PREFIX: bool>(
+        &self,
+        ip: &mut usize,
+        from: &mut usize,
+        anchor: usize,
+        low: usize,
+    ) -> usize {
+        let start = *ip;
+        // safety: both indices stay at or above `first` and below `end`
+        unsafe {
+            while *ip > anchor
+                && *from > low
+                && self.data_at(*ip - 1).read() == self.at::<PREFIX>(*from - 1).read()
+            {
+                *ip -= 1;
+                *from -= 1;
+            }
+        }
+        start - *ip
+    }
+}
+
+/// Number of equal leading bytes of two ranges of `max` bytes.
+///
+/// # Safety
+/// Both pointers must be valid for `max` bytes of reads.
+#[inline(always)]
+unsafe fn run(a: *const u8, b: *const u8, max: usize) -> usize {
+    let mut len = 0;
+    // safety: every read ends at or before `max`
+    unsafe {
+        while len + 8 <= max {
+            let diff = load64(a.add(len)) ^ load64(b.add(len));
+            if diff != 0 {
+                return len + (diff.trailing_zeros() >> 3) as usize;
+            }
+            len += 8;
+        }
+        while len < max && a.add(len).read() == b.add(len).read() {
+            len += 1;
+        }
+    }
+    len
+}
+
+/// The sequences and literals of one block.
+pub(crate) struct SeqStore {
+    pub sequences: Vec<Sequence>,
+    pub literals: Vec<u8>,
+}
+
+impl SeqStore {
+    pub(crate) const fn new() -> Self {
+        Self {
+            sequences: Vec::new(),
+            literals: Vec::new(),
+        }
+    }
+
+    /// Empties the store and makes room for a block of `block_len` bytes.
+    pub(crate) fn start(&mut self, block_len: usize) {
+        self.sequences.clear();
+        self.sequences.reserve(block_len / MIN_MATCH + 1);
+        self.literals.clear();
+        self.literals.reserve(block_len + 16);
+    }
+
+    /// Records the literals `anchor..ip` and the match that follows them.
+    ///
+    /// # Safety
+    /// `anchor..ip` must lie in the data of `window`; within one block,
+    /// literals and matches (each at least `MIN_MATCH` long) together may
+    /// not exceed the length given to [`SeqStore::start`].
+    #[inline(always)]
+    pub(crate) unsafe fn push(
+        &mut self,
+        window: &Window<'_>,
+        anchor: usize,
+        ip: usize,
+        match_len: usize,
+        offset: usize,
+    ) {
+        let lit_len = ip - anchor;
+        let len = self.literals.len();
+        // safety: the literal buffer has room for the block plus 16 bytes,
+        // so the 16-byte copy fits even for an empty run, and its source is
+        // read 16 wide only when that stays inside the data; the sequence
+        // buffer has room for one sequence per MIN_MATCH bytes of block
+        unsafe {
+            let dst = self.literals.as_mut_ptr().add(len);
+            let src = window.data_at(anchor);
+            if anchor + 16 <= window.end {
+                dst.copy_from_nonoverlapping(src, 16);
+                if lit_len > 16 {
+                    dst.add(16)
+                        .copy_from_nonoverlapping(src.add(16), lit_len - 16);
+                }
+            } else {
+                dst.copy_from_nonoverlapping(src, lit_len);
+            }
+            self.literals.set_len(len + lit_len);
+            let count = self.sequences.len();
+            self.sequences.as_mut_ptr().add(count).write(Sequence {
+                lit_len: lit_len as u32,
+                match_len: match_len as u32,
+                offset: offset as u32,
+            });
+            self.sequences.set_len(count + 1);
+        }
+    }
+}

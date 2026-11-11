@@ -79,11 +79,11 @@ fn bench(c: &mut Criterion) {
     // attribution: split a plain 64 KiB read into its two parts — the zstd
     // decode and the BLAKE3 re-hash — to see which dominates `get()`
     let raw = fill(CHUNK, 0xA1);
-    let comp = zstd::encode_all(&raw[..], 3).unwrap();
+    let comp = alt_zstd::encode_all(&raw[..], 3);
     let mut g = c.benchmark_group("read_parts");
     g.throughput(Throughput::Bytes(CHUNK as u64));
     g.bench_function("zstd_decode_64kib", |b| {
-        b.iter(|| black_box(zstd::decode_all(black_box(&comp[..])).unwrap()))
+        b.iter(|| black_box(alt_zstd::decode_all(black_box(&comp[..])).unwrap()))
     });
     g.bench_function("blake3_rehash_64kib", |b| {
         b.iter(|| black_box(ChunkId::of(black_box(&raw))))

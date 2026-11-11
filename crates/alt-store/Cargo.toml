@@ -9,14 +9,13 @@ license.workspace = true
 alt-cdc.workspace = true
 alt-hash.workspace = true
 alt-os.workspace = true
-zstd.workspace = true
+alt-zstd.workspace = true
 
 [dev-dependencies]
 alt-git-codec.workspace = true
 alt-git-pack.workspace = true
 alt-testutil.workspace = true
 criterion.workspace = true
-zstd.workspace = true
 
 [[bench]]
 name = "store_hot"

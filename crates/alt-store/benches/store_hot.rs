@@ -54,7 +54,7 @@ fn bench(c: &mut Criterion) {
     // --- lineage delta codec (zstd level 3, the store default) ---
     let base = fill(1 << 20, 0x9999_AAAA_BBBB_CCCC);
     let data = perturb(&base, 0xDDDD_EEEE_FFFF_0000);
-    let payload = delta::compress_with_base(&data, &base, 3).expect("compress");
+    let payload = delta::compress_with_base(&data, &base, 3);
     let mut g = c.benchmark_group("delta");
     g.throughput(Throughput::Bytes(data.len() as u64));
     g.bench_function("encode_1mib_l3", |b| {

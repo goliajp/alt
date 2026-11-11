@@ -578,7 +578,7 @@ impl ChunkStore {
         let compressed = if data.len() < self.opts.raw_threshold {
             None
         } else {
-            Some(zstd::encode_all(data, self.opts.zstd_level)?)
+            Some(alt_zstd::encode_all(data, self.opts.zstd_level))
         };
         let (encoding, payload): (u8, &[u8]) = match &compressed {
             Some(z) if z.len() < data.len() => (ENC_ZSTD, z),
@@ -634,9 +634,7 @@ impl ChunkStore {
 
         let data = self.get(id)?;
         let base_data = self.get(base)?;
-        let Some(z) = delta::compress_with_base(&data, &base_data, self.opts.zstd_level) else {
-            return Ok(false);
-        };
+        let z = delta::compress_with_base(&data, &base_data, self.opts.zstd_level);
         let stored = 32 + z.len();
         if stored as u64 >= current.stored_len as u64 {
             return Ok(false); // the delta must actually win
@@ -896,7 +894,7 @@ impl ChunkStore {
         };
         let data = match (header.encoding, base) {
             (ENC_RAW, None) => payload.to_vec(),
-            (ENC_ZSTD, None) => zstd::decode_all(payload).map_err(|_| StoreError::Corrupt {
+            (ENC_ZSTD, None) => alt_zstd::decode_all(payload).map_err(|_| StoreError::Corrupt {
                 id,
                 reason: "zstd decode failed",
             })?,
@@ -1001,10 +999,11 @@ impl ChunkStore {
                     break;
                 }
                 ENC_ZSTD => {
-                    let raw = zstd::decode_all(&payload[..]).map_err(|_| StoreError::Corrupt {
-                        id: cur,
-                        reason: "zstd decode failed",
-                    })?;
+                    let raw =
+                        alt_zstd::decode_all(&payload[..]).map_err(|_| StoreError::Corrupt {
+                            id: cur,
+                            reason: "zstd decode failed",
+                        })?;
                     data = Self::sized(cur, raw, header.orig_len)?;
                     if verify.hash_at(frames.is_empty()) {
                         Self::check_hash(cur, &data)?;

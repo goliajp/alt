@@ -592,8 +592,8 @@ dependencies = [
  "alt-hash",
  "alt-os",
  "alt-testutil",
+ "alt-zstd",
  "criterion",
- "zstd",
 ]
 
 [[package]]
@@ -727,6 +727,13 @@ dependencies = [
  "alt-os",
  "alt-repo",
  "alt-testutil",
+]
+
+[[package]]
+name = "alt-zstd"
+version = "0.1.0"
+dependencies = [
+ "zstd",
 ]
 
 [[package]]
