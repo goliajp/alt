@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: perf
+summary: look up referenced objects in a compact id table during ingest and aim segment searches by id value
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/examples/ingest_tree.rs
+touched: crates/alt-pack-segment/src/carried.rs
+touched: crates/alt-pack-segment/src/format.rs
+touched: crates/alt-pack-segment/src/ingest.rs
+touched: crates/alt-pack-segment/src/lib.rs
+touched: crates/alt-pack-segment/src/search.rs
