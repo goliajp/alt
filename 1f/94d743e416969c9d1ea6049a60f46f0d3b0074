@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: perf
+summary: cheaper zstd decoding tables: direct bit reads, constant per-symbol state, grouped huffman fills
+author-type: human
+author: doracawl
+touched: crates/alt-zstd/src/bits.rs
+touched: crates/alt-zstd/src/fse.rs
+touched: crates/alt-zstd/src/huffman.rs
+touched: crates/alt-zstd/src/sequences.rs
+touched: crates/alt-zstd/src/weights.rs
