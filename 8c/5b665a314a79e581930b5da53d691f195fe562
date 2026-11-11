@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: perf
+summary: select fetch objects by tree difference instead of walking held trees
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/lib.rs
+touched: crates/alt-pack-segment/src/select.rs
+touched: crates/alt-pack-segment/src/send.rs
+touched: crates/alt-pack-segment/tests/it/fetch.rs
+touched: crates/alt-pack-segment/tests/it/main.rs
