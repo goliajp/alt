@@ -111,6 +111,8 @@ struct Found {
     known: HashSet<Oid>,
     /// trees whose whole content is in `known`
     walked: HashSet<Oid>,
+    /// comparisons made: a tree and the tree it was compared with
+    compared: HashSet<(Oid, Option<Oid>)>,
 }
 
 impl Found {
@@ -149,7 +151,15 @@ impl SegmentSet {
                 found.known.insert(tree);
                 continue;
             }
-            if base == Some(tree) || !found.add(tree, false) {
+            if base == Some(tree) {
+                continue;
+            }
+            found.add(tree, false);
+            // A comparison leaves what the two trees share to the walk below the
+            // base, so a tree is settled per base, not once: a directory that
+            // returns to an earlier state is compared with the state between, and
+            // that state with it, and neither covers what they share.
+            if !found.compared.insert((tree, base)) {
                 continue;
             }
             let data = self.tree(&tree)?;

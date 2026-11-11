@@ -184,3 +184,44 @@ fn a_fetch_sends_what_changed_and_nothing_a_changed_directory_already_held() {
         Vec::<String>::new()
     );
 }
+
+/// A directory that returns to an earlier state is compared in both directions,
+/// first against the state between and then that state against it. Neither comparison
+/// covers what the two states share; only the commit that created the earlier state does.
+#[test]
+fn a_directory_that_returns_to_an_earlier_state_is_sent_whole() {
+    let work = alt_os::temp::tempdir().unwrap();
+    let source = work.path().join("source");
+    fs::create_dir(&source).unwrap();
+    git(&source, &["init", "-q", "--initial-branch=main"]);
+    write(&source, "top.txt", b"top\n");
+    let root = commit(&source, "root");
+    write(&source, "dir/kept.txt", b"shared by both states\n");
+    write(&source, "dir/sub/deep.txt", b"shared, one level down\n");
+    write(&source, "dir/flip.txt", b"first\n");
+    let created = commit(&source, "create the directory");
+    write(&source, "dir/flip.txt", b"second\n");
+    commit(&source, "change one file");
+    write(&source, "dir/flip.txt", b"first\n");
+    let back = commit(&source, "change it back");
+
+    let pack = git_in(&source, &["pack-objects", "--all", "--stdout", "-q"], b"");
+    let set = SegmentSet::new(vec![segment(
+        work.path(),
+        "all.seg",
+        &pack,
+        &SegmentSet::default(),
+    )]);
+    assert_eq!(
+        fetch(&source, &set, &[&back], &[], "clone"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        fetch(&source, &set, &[&back], &[&root], "from the root"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        fetch(&source, &set, &[&back], &[&created], "from the first state"),
+        Vec::<String>::new()
+    );
+}
