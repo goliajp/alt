@@ -15,49 +15,10 @@ use std::{
 
 pub mod backup;
 mod change_links;
+mod error;
 pub mod provision;
+pub use error::{Error, Result};
 
-#[derive(Debug)]
-pub enum Error {
-    Config(&'static str),
-    File,
-    Database,
-    Store,
-    Unknown,
-    RestoreStage(&'static str),
-    /// the HTTP service refused to start or ended on an error; nothing was written
-    Serve(String),
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Config(v) => write!(f, "invalid operator configuration: {v}"),
-            Self::File => f.write_str("operator file is unavailable or could not be persisted"),
-            Self::Database => f.write_str("database connection is unavailable"),
-            Self::Store => f.write_str("instance is not ready or operator action was refused"),
-            Self::Unknown => f.write_str(
-                "operator action outcome is unknown; inspect the same instance before retrying",
-            ),
-            Self::RestoreStage(v) => write!(
-                f,
-                "restoration incomplete at {v}; inspect the isolated destination before retrying"
-            ),
-            Self::Serve(v) => write!(f, "service stopped: {v}"),
-        }
-    }
-}
-
-impl std::error::Error for Error {}
-impl From<alt_server_store::Error> for Error {
-    fn from(error: alt_server_store::Error) -> Self {
-        match error {
-            alt_server_store::Error::OutcomeUnknown => Self::Unknown,
-            _ => Self::Store,
-        }
-    }
-}
-pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Clone, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct Config {
