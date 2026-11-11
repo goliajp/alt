@@ -9,11 +9,9 @@ license.workspace = true
 alt-base64.workspace = true
 alt-hash.workspace = true
 
-[dev-dependencies]
-argon2 = "0.5"
-chacha20poly1305 = "0.10"
-ed25519-dalek = "2"
-
 [[test]]
 name = "it"
 path = "tests/it/main.rs"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(alt_crypto_reference)"] }

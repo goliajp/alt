@@ -134,5 +134,5 @@ fn streaming_splits_do_not_matter() {
 fn reports_an_implementation() {
     let name = alt_hash::sha512::implementation();
     println!("sha512: {name}");
-    assert!(["sha512 instructions", "portable"].contains(&name));
+    assert!(["sha512 instructions", "avx2", "portable"].contains(&name));
 }

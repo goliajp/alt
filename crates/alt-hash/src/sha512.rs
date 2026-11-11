@@ -115,6 +115,13 @@ fn select() -> (&'static str, Compress) {
     if std::arch::is_aarch64_feature_detected!("sha3") {
         return ("sha512 instructions", arm::compress);
     }
+    #[cfg(target_arch = "x86_64")]
+    {
+        use std::arch::is_x86_feature_detected as detected;
+        if detected!("avx2") && detected!("bmi1") && detected!("bmi2") {
+            return ("avx2", x86::compress);
+        }
+    }
     ("portable", portable)
 }
 
@@ -186,3 +193,5 @@ pub fn portable(state: &mut [u64; 8], blocks: &[u8]) {
 
 #[cfg(target_arch = "aarch64")]
 mod arm;
+#[cfg(target_arch = "x86_64")]
+mod x86;

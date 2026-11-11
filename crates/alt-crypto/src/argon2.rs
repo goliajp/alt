@@ -1,10 +1,11 @@
 //! Argon2id (RFC 9106, version 0x13) and its PHC string encoding.
 
+pub mod block;
 mod fill;
 mod phc;
 
 use alt_hash::Blake2b;
-use fill::Block;
+use block::Block;
 use std::fmt;
 
 pub use phc::PasswordHash;

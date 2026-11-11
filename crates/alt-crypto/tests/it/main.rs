@@ -2,6 +2,8 @@ mod aead;
 mod argon2;
 mod ct;
 mod ed25519;
+#[cfg(alt_crypto_reference)]
+mod reference;
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()

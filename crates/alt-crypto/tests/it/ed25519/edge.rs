@@ -1,10 +1,11 @@
-//! Every boundary case is put to this implementation and to ed25519-dalek;
-//! key parsing, `verify` and `verify_strict` must agree on each one.
+//! Boundary cases for key parsing, `verify` and `verify_strict`.
+//!
+//! The expected outcome of every case is recorded in `fixtures/ed25519_edge.bin`,
+//! written by `reference.rs` from what ed25519-dalek 2.2 decided for the same case.
 
 use super::edge_cases::CASES;
 use crate::{array, hex, noise, unhex};
 use alt_crypto::ed25519::{Signature, SigningKey, VerifyingKey};
-use ed25519_dalek::Verifier;
 
 /// the group order L, little-endian
 const ORDER: [u8; 32] = [
@@ -33,17 +34,29 @@ const TORSION: [&str; 14] = [
     "edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
 ];
 
-#[derive(Default)]
-struct Tally {
-    cases: usize,
-    keys_rejected: usize,
-    verify_accepted: usize,
-    strict_accepted: usize,
+/// what one implementation says about a (key, message, signature) triple:
+/// bit 0 the key parses, bit 1 it is weak, bit 2 `verify` accepts, bit 3 `verify_strict` accepts
+pub(crate) type Oracle = fn(&[u8; 32], &[u8], &[u8; 64]) -> u8;
+
+pub(crate) fn ours(key: &[u8; 32], message: &[u8], signature: &[u8; 64]) -> u8 {
+    let Ok(parsed) = VerifyingKey::from_bytes(key) else {
+        return 0;
+    };
+    assert_eq!(parsed.to_bytes(), *key, "key bytes are kept as given");
+    let signature = Signature::from_bytes(signature);
+    1 | u8::from(parsed.is_weak()) << 1
+        | u8::from(parsed.verify(message, &signature).is_ok()) << 2
+        | u8::from(parsed.verify_strict(message, &signature).is_ok()) << 3
+}
+
+pub(crate) struct Tally {
+    oracle: Oracle,
+    /// the label and outcome of every case, in the order the cases are generated
+    seen: Vec<(String, u8)>,
 }
 
 impl Tally {
-    /// Runs one case through both implementations and returns what they agreed on:
-    /// `None` when the key does not parse, else (verify, verify_strict).
+    /// Runs one case and returns `None` when the key does not parse, else (verify, verify_strict).
     fn compare(
         &mut self,
         label: &str,
@@ -51,50 +64,9 @@ impl Tally {
         message: &[u8],
         signature: &[u8; 64],
     ) -> Option<(bool, bool)> {
-        self.cases += 1;
-        let ours = VerifyingKey::from_bytes(key);
-        let theirs = ed25519_dalek::VerifyingKey::from_bytes(key);
-        assert_eq!(
-            ours.is_ok(),
-            theirs.is_ok(),
-            "{label}: key {} parses",
-            hex(key)
-        );
-        let (Ok(ours), Ok(theirs)) = (ours, theirs) else {
-            self.keys_rejected += 1;
-            return None;
-        };
-        assert_eq!(
-            ours.to_bytes(),
-            theirs.to_bytes(),
-            "{label}: key bytes are kept as given"
-        );
-        assert_eq!(
-            ours.is_weak(),
-            theirs.is_weak(),
-            "{label}: key {} is weak",
-            hex(key)
-        );
-        let our_signature = Signature::from_bytes(signature);
-        let their_signature = ed25519_dalek::Signature::from_bytes(signature);
-        let verify = ours.verify(message, &our_signature).is_ok();
-        let strict = ours.verify_strict(message, &our_signature).is_ok();
-        let context = || format!("{label}: key {} signature {}", hex(key), hex(signature));
-        assert_eq!(
-            verify,
-            theirs.verify(message, &their_signature).is_ok(),
-            "verify, {}",
-            context()
-        );
-        assert_eq!(
-            strict,
-            theirs.verify_strict(message, &their_signature).is_ok(),
-            "verify_strict, {}",
-            context()
-        );
-        self.verify_accepted += usize::from(verify);
-        self.strict_accepted += usize::from(strict);
-        Some((verify, strict))
+        let outcome = (self.oracle)(key, message, signature);
+        self.seen.push((label.to_owned(), outcome));
+        (outcome & 1 == 1).then_some((outcome & 4 != 0, outcome & 8 != 0))
     }
 }
 
@@ -251,17 +223,40 @@ fn generated(tally: &mut Tally) {
     }
 }
 
-#[test]
-fn verify_and_verify_strict_agree_with_dalek_on_every_boundary_case() {
-    let mut tally = Tally::default();
+/// Every boundary case put to `oracle`, with the checks that hold for any correct verifier.
+pub(crate) fn run(oracle: Oracle) -> Vec<(String, u8)> {
+    let mut tally = Tally {
+        oracle,
+        seen: Vec::new(),
+    };
     small_order_grid(&mut tally);
     non_canonical_y(&mut tally);
     scalar_range(&mut tally);
     corruption(&mut tally);
     generated(&mut tally);
+    tally.seen
+}
+
+#[test]
+fn key_parsing_verify_and_verify_strict_match_the_recorded_outcomes() {
+    let expected = include_bytes!("../fixtures/ed25519_edge.bin");
+    let seen = run(ours);
+    assert_eq!(seen.len(), expected.len(), "number of boundary cases");
+    for (index, ((label, ours), recorded)) in seen.iter().zip(expected).enumerate() {
+        assert_eq!(ours, recorded, "boundary case {index}: {label}");
+    }
+    let count = |bit: u8| {
+        seen.iter()
+            .filter(|(_, outcome)| outcome & bit != 0)
+            .count()
+    };
     println!(
-        "boundary cases: {} compared, {} keys rejected by both, verify accepted {}, verify_strict accepted {}",
-        tally.cases, tally.keys_rejected, tally.verify_accepted, tally.strict_accepted
+        "boundary cases: {} compared, {} keys rejected, {} weak keys, verify accepted {}, verify_strict accepted {}",
+        seen.len(),
+        seen.len() - count(1),
+        count(2),
+        count(4),
+        count(8)
     );
-    assert!(tally.keys_rejected > 100 && tally.verify_accepted > 300 && tally.strict_accepted >= 3);
+    assert!(seen.len() - count(1) > 100 && count(4) > 300 && count(8) >= 3);
 }

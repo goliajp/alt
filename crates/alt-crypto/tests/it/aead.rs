@@ -1,9 +1,9 @@
+//! Expected values under `fixtures/` were produced by the chacha20poly1305 crate (0.10) in the
+//! run where it agreed with this implementation on every case; `reference.rs` says how to
+//! regenerate them.
+
 use super::{array, hex, noise, unhex};
 use alt_crypto::aead::{self, chacha20, poly1305::Poly1305};
-use chacha20poly1305::{
-    ChaCha20Poly1305, XChaCha20Poly1305,
-    aead::{Aead, KeyInit, Payload},
-};
 
 const SUNSCREEN: &[u8] = b"Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it.";
 
@@ -135,64 +135,68 @@ fn accelerated_chacha20_matches_portable() {
     }
 }
 
-#[test]
-fn matches_chacha20poly1305_crate_at_every_length() {
-    let key: [u8; 32] = array(&noise(32, 17));
-    let reference = XChaCha20Poly1305::new((&key).into());
-    let short = ChaCha20Poly1305::new((&key).into());
+pub(crate) struct Case {
+    pub key: [u8; 32],
+    pub nonce: [u8; 24],
+    pub aad: Vec<u8>,
+    pub message: Vec<u8>,
+}
+
+/// every message length up to 1000 with associated data of several lengths
+/// (none for two in seven), then messages long enough for many keystream groups
+pub(crate) fn cases() -> Vec<Case> {
     let data = noise(1000, 19);
-    for len in 0..=1000 {
-        let nonce: [u8; 24] = array(&noise(24, 23 + len as u64));
-        let aad_len = [0, 0, 1, 12, 16, 17, 100][len % 7];
-        let aad = noise(aad_len, 29 + len as u64);
-        let msg = &data[..len];
-        let ours = aead::encrypt(&key, &nonce, &aad, msg);
-        let theirs = reference
-            .encrypt((&nonce).into(), Payload { msg, aad: &aad })
-            .unwrap();
-        assert_eq!(ours, theirs, "length {len}");
-        assert_eq!(aead::decrypt(&key, &nonce, &aad, &theirs).unwrap(), msg);
-        assert_eq!(
-            reference
-                .decrypt(
-                    (&nonce).into(),
-                    Payload {
-                        msg: &ours,
-                        aad: &aad
-                    }
-                )
-                .unwrap(),
-            msg
-        );
-        let nonce: [u8; 12] = array(&nonce[..12]);
-        assert_eq!(
-            aead::encrypt_ietf(&key, &nonce, &aad, msg),
-            short
-                .encrypt((&nonce).into(), Payload { msg, aad: &aad })
-                .unwrap(),
-            "ietf length {len}"
-        );
+    let mut cases: Vec<Case> = (0..=1000usize)
+        .map(|len| Case {
+            key: array(&noise(32, 17)),
+            nonce: array(&noise(24, 23 + len as u64)),
+            aad: noise([0, 0, 1, 12, 16, 17, 100][len % 7], 29 + len as u64),
+            message: data[..len].to_vec(),
+        })
+        .collect();
+    for len in [4096, 65_536, 65_537, 1 << 20] {
+        cases.push(Case {
+            key: array(&noise(32, 31)),
+            nonce: array(&noise(24, 37)),
+            aad: b"header".to_vec(),
+            message: noise(len, 41),
+        });
     }
+    cases
+}
+
+/// the 12-byte nonce the same case uses for the underlying ChaCha20-Poly1305
+pub(crate) fn short_nonce(case: &Case) -> [u8; 12] {
+    array(&case.nonce[..12])
 }
 
 #[test]
-fn matches_chacha20poly1305_crate_on_large_messages() {
-    let key: [u8; 32] = array(&noise(32, 31));
-    let nonce: [u8; 24] = array(&noise(24, 37));
-    let reference = XChaCha20Poly1305::new((&key).into());
-    for len in [4096, 65_536, 65_537, 1 << 20] {
-        let msg = noise(len, 41);
-        let ours = aead::encrypt(&key, &nonce, b"header", &msg);
-        let theirs = reference
-            .encrypt(
-                (&nonce).into(),
-                Payload {
-                    msg: &msg,
-                    aad: b"header",
-                },
-            )
-            .unwrap();
-        assert_eq!(ours, theirs, "length {len}");
+fn sealed_output_matches_the_recorded_digests() {
+    // per case the SHA-256 of the XChaCha20-Poly1305 output, then of the
+    // ChaCha20-Poly1305 output, written by `reference.rs`
+    let (expected, rest) = include_bytes!("fixtures/aead_digests.bin").as_chunks::<64>();
+    let cases = cases();
+    assert!(rest.is_empty() && expected.len() == cases.len());
+    for (index, (case, expected)) in cases.iter().zip(expected).enumerate() {
+        let sealed = aead::encrypt(&case.key, &case.nonce, &case.aad, &case.message);
+        assert_eq!(sealed.len(), case.message.len() + aead::TAG_LEN);
+        assert_eq!(alt_hash::sha256(&sealed), expected[..32], "case {index}");
+        assert_eq!(
+            aead::decrypt(&case.key, &case.nonce, &case.aad, &sealed).unwrap(),
+            case.message,
+            "case {index}"
+        );
+        let nonce = short_nonce(case);
+        let sealed = aead::encrypt_ietf(&case.key, &nonce, &case.aad, &case.message);
+        assert_eq!(
+            alt_hash::sha256(&sealed),
+            expected[32..],
+            "ietf case {index}"
+        );
+        assert_eq!(
+            aead::decrypt_ietf(&case.key, &nonce, &case.aad, &sealed).unwrap(),
+            case.message
+        );
     }
 }
 

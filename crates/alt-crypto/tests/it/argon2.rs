@@ -1,17 +1,9 @@
+//! Expected values under `fixtures/` were produced by the argon2 crate (0.5) in the run where
+//! it agreed with this implementation on every case; `reference.rs` says how to regenerate them.
+
 use super::{hex, noise};
 use alt_crypto::argon2::{self, Error, Params, PasswordHash};
 use argon2::{hash_keyed_into, hash_password, hash_password_into};
-
-fn reference(password: &[u8], salt: &[u8], params: &Params, len: usize) -> Vec<u8> {
-    let hasher = ::argon2::Argon2::new(
-        ::argon2::Algorithm::Argon2id,
-        ::argon2::Version::V0x13,
-        ::argon2::Params::new(params.m_cost, params.t_cost, params.p_cost, Some(len)).unwrap(),
-    );
-    let mut out = vec![0; len];
-    hasher.hash_password_into(password, salt, &mut out).unwrap();
-    out
-}
 
 #[test]
 fn rfc_9106_argon2id_vector() {
@@ -35,9 +27,25 @@ fn rfc_9106_argon2id_vector() {
     );
 }
 
-#[test]
-fn matches_argon2_crate_across_work_factors_and_lengths() {
-    let mut case = 0u64;
+pub(crate) const PRODUCTION: Params = Params {
+    m_cost: 65_536,
+    t_cost: 3,
+    p_cost: 1,
+};
+
+pub(crate) struct Case {
+    pub params: Params,
+    pub password: Vec<u8>,
+    pub salt: Vec<u8>,
+    pub tag_len: usize,
+}
+
+/// work factors with one and several lanes, memory that is and is not a
+/// multiple of the lane count, and every input length class; the production
+/// work factors come last
+pub(crate) fn cases() -> Vec<Case> {
+    let mut cases = Vec::new();
+    let mut number = 0u64;
     for (m_cost, t_cost, p_cost) in [
         (8, 1, 1),
         (9, 1, 1),
@@ -50,11 +58,6 @@ fn matches_argon2_crate_across_work_factors_and_lengths() {
         (1040, 2, 5),
         (4096, 1, 2),
     ] {
-        let params = Params {
-            m_cost,
-            t_cost,
-            p_cost,
-        };
         for (password_len, salt_len, tag_len) in [
             (0, 8, 4),
             (1, 16, 32),
@@ -63,33 +66,53 @@ fn matches_argon2_crate_across_work_factors_and_lengths() {
             (200, 64, 100),
             (1024, 16, 32),
         ] {
-            case += 1;
-            let password = noise(password_len, case);
-            let salt = noise(salt_len, case + 1000);
-            let mut ours = vec![0; tag_len];
-            hash_password_into(&password, &salt, &params, &mut ours).unwrap();
-            assert_eq!(
-                ours,
-                reference(&password, &salt, &params, tag_len),
-                "m={m_cost} t={t_cost} p={p_cost} password={password_len} salt={salt_len} tag={tag_len}"
-            );
+            number += 1;
+            cases.push(Case {
+                params: Params {
+                    m_cost,
+                    t_cost,
+                    p_cost,
+                },
+                password: noise(password_len, number),
+                salt: noise(salt_len, number + 1000),
+                tag_len,
+            });
         }
     }
+    cases.push(Case {
+        params: PRODUCTION,
+        password: b"a real acceptance test password".to_vec(),
+        salt: noise(16, 5),
+        tag_len: 32,
+    });
+    cases
 }
 
 #[test]
-fn matches_argon2_crate_at_the_production_work_factors() {
+fn tags_match_the_recorded_ones() {
+    // the tags of `cases()` one after another, written by `reference.rs`
+    let mut expected = &include_bytes!("fixtures/argon2_tags.bin")[..];
+    for (index, case) in cases().iter().enumerate() {
+        let (tag, rest) = expected.split_at(case.tag_len);
+        expected = rest;
+        let mut ours = vec![0; case.tag_len];
+        hash_password_into(&case.password, &case.salt, &case.params, &mut ours).unwrap();
+        assert_eq!(ours, tag, "case {index}: {:?}", case.params);
+    }
+    assert!(expected.is_empty());
+}
+
+#[test]
+fn fixed_size_and_slice_outputs_agree() {
     let params = Params {
-        m_cost: 65_536,
-        t_cost: 3,
+        m_cost: 16,
+        t_cost: 1,
         p_cost: 1,
     };
-    let salt = noise(16, 5);
-    let ours: [u8; 32] = hash_password(b"a real acceptance test password", &salt, &params).unwrap();
-    assert_eq!(
-        ours.to_vec(),
-        reference(b"a real acceptance test password", &salt, &params, 32)
-    );
+    let fixed: [u8; 24] = hash_password(b"password", &[7; 8], &params).unwrap();
+    let mut slice = [0u8; 24];
+    hash_password_into(b"password", &[7; 8], &params, &mut slice).unwrap();
+    assert_eq!(fixed, slice);
 }
 
 #[test]
@@ -143,49 +166,97 @@ fn rejects_inputs_outside_the_specification() {
     assert_eq!(run(ok, &[0; 8], 3), Err(Error::OutputLength));
 }
 
+/// the password behind line `index` of `fixtures/argon2_phc.txt`
+pub(crate) fn sample_password(index: usize) -> String {
+    format!("sample password number {index}")
+}
+
+/// (work factors, salt length) of each line of `fixtures/argon2_phc.txt`; the
+/// production lines are made the way alt-browser-auth made the ones in databases
+pub(crate) const PHC_SAMPLES: [(Params, usize); 9] = [
+    (PRODUCTION, 16),
+    (PRODUCTION, 16),
+    (
+        Params {
+            m_cost: 64,
+            t_cost: 2,
+            p_cost: 1,
+        },
+        8,
+    ),
+    (
+        Params {
+            m_cost: 64,
+            t_cost: 2,
+            p_cost: 1,
+        },
+        9,
+    ),
+    (
+        Params {
+            m_cost: 64,
+            t_cost: 2,
+            p_cost: 1,
+        },
+        10,
+    ),
+    (
+        Params {
+            m_cost: 64,
+            t_cost: 2,
+            p_cost: 1,
+        },
+        16,
+    ),
+    (
+        Params {
+            m_cost: 256,
+            t_cost: 1,
+            p_cost: 2,
+        },
+        24,
+    ),
+    (
+        Params {
+            m_cost: 256,
+            t_cost: 1,
+            p_cost: 2,
+        },
+        32,
+    ),
+    (
+        Params {
+            m_cost: 19_456,
+            t_cost: 2,
+            p_cost: 1,
+        },
+        48,
+    ),
+];
+
 #[test]
-fn phc_strings_are_interchangeable_with_the_argon2_crate() {
-    use ::argon2::{
-        PasswordHasher, PasswordVerifier,
-        password_hash::{PasswordHash as TheirHash, SaltString},
-    };
-    let theirs = ::argon2::Argon2::new(
-        ::argon2::Algorithm::Argon2id,
-        ::argon2::Version::V0x13,
-        ::argon2::Params::new(65_536, 3, 1, Some(32)).unwrap(),
-    );
-    let params = Params {
-        m_cost: 65_536,
-        t_cost: 3,
-        p_cost: 1,
-    };
-    let password = b"a real acceptance test password";
-    let salt = noise(16, 77);
-
-    // the way alt-browser-auth produced the strings now in databases
-    let encoded = theirs
-        .hash_password(password, &SaltString::encode_b64(&salt).unwrap())
-        .unwrap()
-        .to_string();
-    let parsed = PasswordHash::parse(&encoded).unwrap();
-    assert_eq!(parsed.params, params);
-    assert_eq!(parsed.salt, salt);
-    assert_eq!(parsed.hash.len(), 32);
-    assert_eq!(parsed.to_string(), encoded);
-    assert_eq!(parsed.verify(password), Ok(true));
-    assert_eq!(parsed.verify(b"a real acceptance test passwore"), Ok(false));
-
-    let ours = PasswordHash::new(password, &salt, &params, 32)
-        .unwrap()
-        .to_string();
-    assert_eq!(ours, encoded);
-    let ours = PasswordHash::new(password, &noise(16, 78), &params, 32)
-        .unwrap()
-        .to_string();
-    assert!(ours.starts_with("$argon2id$v=19$m=65536,t=3,p=1$"));
-    let parsed = TheirHash::new(&ours).unwrap();
-    assert!(theirs.verify_password(password, &parsed).is_ok());
-    assert!(theirs.verify_password(b"incorrect", &parsed).is_err());
+fn recorded_phc_strings_parse_verify_and_are_reproduced() {
+    // one string per line, written by `reference.rs` with the argon2 crate's own encoder
+    let samples: Vec<&str> = include_str!("fixtures/argon2_phc.txt").lines().collect();
+    assert_eq!(samples.len(), PHC_SAMPLES.len());
+    for (index, (encoded, (params, salt_len))) in samples.iter().zip(PHC_SAMPLES).enumerate() {
+        let password = sample_password(index);
+        let parsed = PasswordHash::parse(encoded).unwrap();
+        assert_eq!(parsed.params, params, "line {index}");
+        assert_eq!(parsed.salt.len(), salt_len, "line {index}");
+        assert_eq!(parsed.hash.len(), 32, "line {index}");
+        assert_eq!(parsed.to_string(), *encoded, "line {index}");
+        assert_eq!(parsed.verify(password.as_bytes()), Ok(true), "line {index}");
+        if params == PRODUCTION {
+            // one pass over 64 MiB per check: the lighter samples cover the other paths
+            continue;
+        }
+        let wrong = sample_password(index + 1);
+        assert_eq!(parsed.verify(wrong.as_bytes()), Ok(false), "line {index}");
+        let ours = PasswordHash::new(password.as_bytes(), &parsed.salt, &params, 32).unwrap();
+        assert_eq!(ours.to_string(), *encoded, "line {index}");
+    }
+    assert!(samples[0].starts_with("$argon2id$v=19$m=65536,t=3,p=1$"));
 }
 
 #[test]
@@ -229,7 +300,7 @@ fn phc_parsing_rejects_everything_but_the_canonical_form() {
         format!("{good}$AAAA"),
         format!("{head}$"),
         format!("{head}${tag}!"),
-        format!("{head}${}", tag.replace(['+', '/'], "-")),
+        format!("{head}$-{}", &tag[1..]),
         head.to_string(),
         format!(" {good}"),
         format!("{good}\n"),
@@ -239,4 +310,34 @@ fn phc_parsing_rejects_everything_but_the_canonical_form() {
     // a parsed string whose work factors cannot be computed fails at verification
     let impossible = PasswordHash::parse(&good.replace("m=8", "m=7")).unwrap();
     assert_eq!(impossible.verify(b"password"), Err(Error::Params));
+}
+
+#[test]
+fn accelerated_compression_matches_portable() {
+    use alt_crypto::argon2::block::{self, Block};
+    println!("argon2 block: {}", block::implementation());
+    let fill = |seed: u64| -> Block {
+        let bytes = noise(1024, seed);
+        std::array::from_fn(|i| u64::from_le_bytes(super::array(&bytes[8 * i..8 * i + 8])))
+    };
+    for case in 1..40u64 {
+        // all-ones words make every 32-bit product and carry as large as it can be
+        let previous = if case == 1 {
+            [u64::MAX; 128]
+        } else {
+            fill(3 * case)
+        };
+        let reference = if case <= 2 {
+            [u64::MAX >> 1; 128]
+        } else {
+            fill(3 * case + 1)
+        };
+        for xor in [false, true] {
+            let mut fast = fill(3 * case + 2);
+            let mut slow = fast;
+            block::compress(&previous, &reference, &mut fast, xor);
+            block::portable(&previous, &reference, &mut slow, xor);
+            assert_eq!(fast, slow, "case {case}, xor {xor}");
+        }
+    }
 }

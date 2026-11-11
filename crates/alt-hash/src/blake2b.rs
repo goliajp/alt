@@ -1,5 +1,8 @@
 //! BLAKE2b (RFC 7693), unkeyed, with a digest length of 1 to 64 bytes.
 
+#[cfg(target_arch = "x86_64")]
+mod avx2;
+
 /// the initialization vector, shared with SHA-512
 pub const IV: [u64; 8] = super::sha512::INITIAL;
 
@@ -58,8 +61,7 @@ impl Blake2b {
             self.buffer[self.filled..].copy_from_slice(&data[..take]);
             data = &data[take..];
             self.bytes += 128;
-            let block = self.buffer;
-            compress(&mut self.state, &block, self.bytes, false);
+            compress(&mut self.state, &self.buffer, self.bytes, false);
             self.filled = 0;
         }
         while data.len() > 128 {
@@ -82,13 +84,13 @@ impl Blake2b {
         assert_eq!(out.len(), self.out_len, "blake2b digest length");
         self.buffer[self.filled..].fill(0);
         self.bytes += self.filled as u128;
-        let block = self.buffer;
-        compress(&mut self.state, &block, self.bytes, true);
-        let mut full = [0u8; 64];
-        for (chunk, word) in full.as_chunks_mut::<8>().0.iter_mut().zip(self.state) {
+        compress(&mut self.state, &self.buffer, self.bytes, true);
+        let (words, tail) = out.as_chunks_mut::<8>();
+        for (chunk, word) in words.iter_mut().zip(self.state) {
             *chunk = word.to_le_bytes();
         }
-        out.copy_from_slice(&full[..self.out_len]);
+        let partial = self.state[words.len() % 8].to_le_bytes();
+        tail.copy_from_slice(&partial[..tail.len()]);
     }
 }
 
@@ -105,9 +107,34 @@ macro_rules! g {
     };
 }
 
+type Compress = unsafe fn(&mut [u64; 8], &[u8; 128], u128, bool);
+
+/// the fastest implementation this CPU supports, and its name
+fn select() -> (&'static str, Option<Compress>) {
+    #[cfg(target_arch = "x86_64")]
+    if std::arch::is_x86_feature_detected!("avx2") {
+        return ("avx2", Some(avx2::compress));
+    }
+    ("portable", None)
+}
+
+/// which implementation runs on this CPU
+pub fn implementation() -> &'static str {
+    select().0
+}
+
 /// The compression function F: folds one block into `state`, with `bytes`
 /// the input length up to and including this block.
 pub fn compress(state: &mut [u64; 8], block: &[u8; 128], bytes: u128, last: bool) {
+    match select().1 {
+        // an implementation is only selected after its CPU features were detected
+        Some(accelerated) => unsafe { accelerated(state, block, bytes, last) },
+        None => portable(state, block, bytes, last),
+    }
+}
+
+/// The reference implementation every accelerated one is compared with.
+pub fn portable(state: &mut [u64; 8], block: &[u8; 128], bytes: u128, last: bool) {
     let mut m = [0u64; 16];
     for (slot, word) in m.iter_mut().zip(block.as_chunks::<8>().0) {
         *slot = u64::from_le_bytes(*word);

@@ -158,3 +158,28 @@ fn streaming_splits_do_not_matter() {
 fn rejects_a_digest_longer_than_64_bytes() {
     Blake2b::new(65);
 }
+
+#[test]
+fn accelerated_compression_matches_portable() {
+    use alt_hash::blake2b::{self, IV};
+    println!("blake2b: {}", blake2b::implementation());
+    for case in 1..200u64 {
+        let block: [u8; 128] = if case == 1 {
+            [0xff; 128]
+        } else {
+            noise(128, case).try_into().unwrap()
+        };
+        let mut fast = IV;
+        fast[0] ^= case;
+        let mut slow = fast;
+        // both halves of the 128-bit length, and both values of the final-block flag
+        let bytes = (u128::from(case) << 60) | u128::from(case * 131);
+        let last = case % 3 == 0;
+        // two blocks in a row, so the second starts from a state with every bit in play
+        for _ in 0..2 {
+            blake2b::compress(&mut fast, &block, bytes, last);
+            blake2b::portable(&mut slow, &block, bytes, last);
+        }
+        assert_eq!(fast, slow, "case {case}");
+    }
+}
