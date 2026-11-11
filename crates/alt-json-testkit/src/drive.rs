@@ -3,13 +3,45 @@
 
 use alt_json::{Map, Value};
 
-use super::support::{Both, Tally, input, output};
 use crate::generate;
-use crate::invalid::mutate;
 use crate::rng::Rng;
+use crate::support::{Both, Comparable, Tally, input, output};
+
+/// bytes that matter to the grammar, for damaging a document
+pub const INTERESTING: &[u8] =
+    b"[]{}:,\"\\ \n\t0123456789-+.eEtfnul'/\x00\x1f\x7f\x80\xc3\xe2\xf0\xff";
+
+/// One random byte-level edit.
+pub fn mutate(rng: &mut Rng, document: &mut Vec<u8>) {
+    let byte = if rng.chance(4) {
+        rng.next_u64() as u8
+    } else {
+        *rng.pick(INTERESTING)
+    };
+    let at = rng.below(document.len() as u64 + 1) as usize;
+    match rng.below(7) {
+        0 | 1 if at < document.len() => document[at] = byte,
+        2 if at < document.len() => {
+            document.remove(at);
+        }
+        3 if at < document.len() => document[at] ^= 1 << rng.below(8),
+        4 => {
+            // repeat a slice
+            let end = (at + 1 + rng.below(6) as usize).min(document.len());
+            let slice = document[at..end].to_vec();
+            document.splice(at..at, slice);
+        }
+        5 if at < document.len() => {
+            // swap two bytes
+            let other = rng.below(document.len() as u64) as usize;
+            document.swap(at, other);
+        }
+        _ => document.insert(at, byte),
+    }
+}
 
 /// a scalar of a random kind, to put where another kind is expected
-fn stray(rng: &mut Rng) -> Value {
+pub(crate) fn stray(rng: &mut Rng) -> Value {
     match rng.below(12) {
         0 => Value::Null,
         1 => Value::Bool(rng.chance(2)),
@@ -27,7 +59,7 @@ fn stray(rng: &mut Rng) -> Value {
 }
 
 /// One structural change somewhere in the tree.
-fn edit(rng: &mut Rng, value: &mut Value) {
+pub(crate) fn edit(rng: &mut Rng, value: &mut Value) {
     let descend = match value {
         Value::Array(items) => !items.is_empty() && !rng.chance(3),
         Value::Object(map) => !map.is_empty() && !rng.chance(3),
@@ -95,7 +127,7 @@ fn edit(rng: &mut Rng, value: &mut Value) {
 }
 
 /// Repeats the first key of some object in the text, with another value.
-fn duplicate_key(rng: &mut Rng, text: &[u8]) -> Option<Vec<u8>> {
+pub(crate) fn duplicate_key(rng: &mut Rng, text: &[u8]) -> Option<Vec<u8>> {
     let opens: Vec<usize> = (0..text.len()).filter(|&i| text[i] == b'{').collect();
     let open = *opens.get(rng.below(opens.len().max(1) as u64) as usize)?;
     let key_start = open + 1;
@@ -130,10 +162,15 @@ fn duplicate_key(rng: &mut Rng, text: &[u8]) -> Option<Vec<u8>> {
 /// Compares both libraries on `rounds` random values of `T` and on the
 /// inputs derived from each.
 pub fn exercise<T: Both>(seed: u64, rounds: u64) -> Tally {
+    exercise_with(seed, rounds, T::arbitrary)
+}
+
+/// Same, with the values coming from `make`.
+pub fn exercise_with<T: Comparable>(seed: u64, rounds: u64, make: impl Fn(&mut Rng) -> T) -> Tally {
     let mut rng = Rng::new(seed);
     let mut tally = Tally::default();
     for _ in 0..rounds {
-        let value = T::arbitrary(&mut rng);
+        let value = make(&mut rng);
         let Some(compact) = output(&value) else {
             tally.unwritable += 1;
             continue;

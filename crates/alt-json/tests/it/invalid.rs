@@ -1,6 +1,7 @@
 use crate::check::{parse, report};
 use crate::generate;
 use crate::rng::Rng;
+use alt_json_testkit::drive::{INTERESTING, mutate};
 
 const SEEDS: &[&str] = &[
     r#"{"a":1,"b":[true,false,null],"c":{"d":"e"}}"#,
@@ -16,8 +17,6 @@ const SEEDS: &[&str] = &[
     "-9223372036854775808",
     "true",
 ];
-
-const INTERESTING: &[u8] = b"[]{}:,\"\\ \n\t0123456789-+.eEtfnul'/\x00\x1f\x7f\x80\xc3\xe2\xf0\xff";
 
 /// every prefix of every seed
 #[test]
@@ -63,34 +62,6 @@ fn single_byte_edits_of_seeds() {
         }
     }
     report("invalid, single byte edits of seeds", cases, Some(accepted));
-}
-
-pub fn mutate(rng: &mut Rng, document: &mut Vec<u8>) {
-    let byte = if rng.chance(4) {
-        rng.next() as u8
-    } else {
-        *rng.pick(INTERESTING)
-    };
-    let at = rng.below(document.len() as u64 + 1) as usize;
-    match rng.below(7) {
-        0 | 1 if at < document.len() => document[at] = byte,
-        2 if at < document.len() => {
-            document.remove(at);
-        }
-        3 if at < document.len() => document[at] ^= 1 << rng.below(8),
-        4 => {
-            // repeat a slice
-            let end = (at + 1 + rng.below(6) as usize).min(document.len());
-            let slice = document[at..end].to_vec();
-            document.splice(at..at, slice);
-        }
-        5 if at < document.len() => {
-            // swap two bytes
-            let other = rng.below(document.len() as u64) as usize;
-            document.swap(at, other);
-        }
-        _ => document.insert(at, byte),
-    }
 }
 
 /// one to three random edits of random documents

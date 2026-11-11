@@ -3,15 +3,14 @@
 //! is accepted, on the parsed value and on the error text.
 
 mod api;
-mod check;
 mod derive;
 mod float_format;
 mod float_parse;
-mod generate;
 mod integers;
 mod invalid;
 mod macros;
-mod rng;
 mod strings;
 mod syntax;
 mod values;
+
+use alt_json_testkit::{check, generate, rng};

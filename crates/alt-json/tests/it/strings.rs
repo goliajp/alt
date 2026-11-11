@@ -184,7 +184,7 @@ fn raw_bytes_and_invalid_utf8() {
         let inner: Vec<u8> = (0..len)
             .map(|_| {
                 if rng.chance(8) {
-                    rng.next() as u8
+                    rng.next_u64() as u8
                 } else {
                     *rng.pick(&notable)
                 }

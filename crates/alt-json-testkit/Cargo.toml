@@ -1,0 +1,12 @@
+[package]
+name = "alt-json-testkit"
+description = "Differential test driver that compares alt-json with serde_json; used by tests only"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+alt-json.workspace = true
+serde.workspace = true
+serde_json.workspace = true

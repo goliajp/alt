@@ -1,5 +1,5 @@
-//! Shared machinery: random values of the test types, and the comparison
-//! of this crate against serde on output and on input.
+//! Random values of test types, and the comparison of alt-json against
+//! serde on output and on input.
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -18,25 +18,24 @@ pub trait Arbitrary: Sized {
 }
 
 /// Everything a type needs to be compared through both libraries.
-pub trait Both:
-    alt_json::ToJson
-    + alt_json::FromJson
-    + serde::Serialize
-    + serde::de::DeserializeOwned
-    + Debug
-    + Arbitrary
+pub trait Comparable:
+    alt_json::ToJson + alt_json::FromJson + serde::Serialize + serde::de::DeserializeOwned + Debug
 {
 }
 
-impl<T> Both for T where
+impl<T> Comparable for T where
     T: alt_json::ToJson
         + alt_json::FromJson
         + serde::Serialize
         + serde::de::DeserializeOwned
         + Debug
-        + Arbitrary
 {
 }
+
+/// Comparable, with random values built in.
+pub trait Both: Comparable + Arbitrary {}
+
+impl<T: Comparable + Arbitrary> Both for T {}
 
 macro_rules! arbitrary_integers {
     ($($ty:ty)*) => {$(
@@ -46,9 +45,9 @@ macro_rules! arbitrary_integers {
                     0 => 0,
                     1 => <$ty>::MAX,
                     2 => <$ty>::MIN,
-                    3 => (rng.next() % 100) as $ty,
+                    3 => (rng.next_u64() % 100) as $ty,
                     _ => {
-                        let wide = rng.next() as u128 | (rng.next() as u128) << 64;
+                        let wide = rng.next_u64() as u128 | (rng.next_u64() as u128) << 64;
                         wide as $ty >> rng.below(<$ty>::BITS as u64) as u32
                     }
                 }
@@ -75,7 +74,7 @@ impl Arbitrary for f32 {
     fn arbitrary(rng: &mut Rng) -> Self {
         loop {
             let f = match rng.below(4) {
-                0 => f32::from_bits(rng.next() as u32),
+                0 => f32::from_bits(rng.next_u64() as u32),
                 1 => rng.range(-1000, 1000) as f32 / 8.0,
                 2 => generate::float(rng) as f32,
                 _ => rng.range(-100_000, 100_000) as f32 / 1000.0,
@@ -200,6 +199,7 @@ arbitrary_tuples!((A) (A B) (A B C) (A B C D));
 
 /// Defines types that derive the traits of both libraries, with each
 /// `#[both(...)]` attribute given to both, and an [`Arbitrary`] impl.
+#[macro_export]
 macro_rules! types {
     () => {};
     (
@@ -213,14 +213,14 @@ macro_rules! types {
         $(#[serde($($container)*)] #[json($($container)*)])*
         pub struct $name { $($(#[serde($($attr)*)] #[json($($attr)*)])* pub $field: $ty,)* }
 
-        impl $crate::derive::support::Arbitrary for $name {
+        impl $crate::support::Arbitrary for $name {
             fn arbitrary(rng: &mut $crate::rng::Rng) -> Self {
                 let _ = &rng;
-                $name { $($field: $crate::derive::support::Arbitrary::arbitrary(rng),)* }
+                $name { $($field: $crate::support::Arbitrary::arbitrary(rng),)* }
             }
         }
 
-        types! { $($rest)* }
+        $crate::types! { $($rest)* }
     };
     (
         $(#[derive($($extra:ident),*)])?
@@ -233,14 +233,14 @@ macro_rules! types {
         $(#[serde($($container)*)] #[json($($container)*)])*
         pub struct $name($($(#[serde($($attr)*)] #[json($($attr)*)])* pub $ty),*);
 
-        impl $crate::derive::support::Arbitrary for $name {
+        impl $crate::support::Arbitrary for $name {
             fn arbitrary(rng: &mut $crate::rng::Rng) -> Self {
                 let _ = &rng;
-                $name($(<$ty as $crate::derive::support::Arbitrary>::arbitrary(rng)),*)
+                $name($(<$ty as $crate::support::Arbitrary>::arbitrary(rng)),*)
             }
         }
 
-        types! { $($rest)* }
+        $crate::types! { $($rest)* }
     };
     (
         $(#[derive($($extra:ident),*)])?
@@ -267,25 +267,25 @@ macro_rules! types {
             )*
         }
 
-        impl $crate::derive::support::Arbitrary for $name {
+        impl $crate::support::Arbitrary for $name {
             fn arbitrary(rng: &mut $crate::rng::Rng) -> Self {
                 let makers: &[fn(&mut $crate::rng::Rng) -> Self] = &[$(
                     |rng| {
                         let _ = &rng;
                         $name::$variant
-                        $(($(<$tty as $crate::derive::support::Arbitrary>::arbitrary(rng)),*))?
-                        $({ $($field: $crate::derive::support::Arbitrary::arbitrary(rng),)* })?
+                        $(($(<$tty as $crate::support::Arbitrary>::arbitrary(rng)),*))?
+                        $({ $($field: $crate::support::Arbitrary::arbitrary(rng),)* })?
                     },
                 )*];
                 rng.pick(makers)(rng)
             }
         }
 
-        types! { $($rest)* }
+        $crate::types! { $($rest)* }
     };
 }
 
-pub(crate) use types;
+pub use crate::types;
 
 /// What a run over one type found.
 #[derive(Default)]
@@ -326,7 +326,7 @@ impl Tally {
 }
 
 /// A form that does not depend on hash map iteration order.
-fn canonical<T: Both>(value: &T) -> String {
+fn canonical<T: Comparable>(value: &T) -> String {
     match serde_json::to_value(value) {
         Ok(tree) => tree.to_string(),
         Err(_) => format!("{value:?}"),
@@ -348,7 +348,7 @@ fn category(error: &serde_json::Error) -> alt_json::Category {
 
 /// Compact and indented output, and the tree form, must match. `None`
 /// when both sides refuse to write the value.
-pub fn output<T: Both>(value: &T) -> Option<Vec<u8>> {
+pub fn output<T: Comparable>(value: &T) -> Option<Vec<u8>> {
     let compact = match (alt_json::to_vec(value), serde_json::to_vec(value)) {
         (Ok(ours), Ok(theirs)) => {
             assert_eq!(show(&ours), show(&theirs), "compact output of {value:?}");
@@ -377,7 +377,7 @@ pub fn output<T: Both>(value: &T) -> Option<Vec<u8>> {
 
 /// Reads `input` as `T` with both: same verdict, same value, same error
 /// category and position. Then the same from the tree form of the input.
-pub fn input<T: Both>(input: &[u8], tally: &mut Tally) {
+pub fn input<T: Comparable>(input: &[u8], tally: &mut Tally) {
     tally.inputs += 1;
     match (
         alt_json::from_slice::<T>(input),

@@ -67,7 +67,7 @@ fn random() {
     let mut rng = Rng::new(0x147);
     let mut cases = 0;
     for _ in 0..500_000 {
-        let n = rng.next() >> rng.below(64);
+        let n = rng.next_u64() >> rng.below(64);
         check_u64(n, &mut cases);
         check_i64(n as i64, &mut cases);
         check_i64((n as i64).wrapping_neg(), &mut cases);

@@ -43,6 +43,7 @@ alt-hash = { path = "crates/alt-hash" }
 alt-inflate = { path = "crates/alt-inflate" }
 alt-json = { path = "crates/alt-json" }
 alt-json-derive = { path = "crates/alt-json-derive" }
+alt-json-testkit = { path = "crates/alt-json-testkit" }
 alt-threads = { path = "crates/alt-threads" }
 alt-export = { path = "crates/alt-export" }
 alt-flow = { path = "crates/alt-flow" }

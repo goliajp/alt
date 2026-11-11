@@ -9,5 +9,6 @@ license.workspace = true
 alt-json-derive.workspace = true
 
 [dev-dependencies]
+alt-json-testkit.workspace = true
 serde.workspace = true
 serde_json.workspace = true
