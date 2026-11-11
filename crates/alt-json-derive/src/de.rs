@@ -68,7 +68,8 @@ fn construct(path: &str, fields: &Fields) -> String {
 
 /// A closure that reads the fields in order from an array.
 fn positional(path: &str, fields: &Fields, list: &[Field], what: &str) -> String {
-    let expected = quote(&format!("{what} with {} elements", list.len()));
+    let plural = if list.len() == 1 { "" } else { "s" };
+    let expected = quote(&format!("{what} with {} element{plural}", list.len()));
     let mut code = String::new();
     for field in list {
         let missing = default(field).unwrap_or_else(|| {

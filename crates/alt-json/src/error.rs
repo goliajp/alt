@@ -178,6 +178,7 @@ impl fmt::Display for Unknown<'_> {
         match expected {
             [] => write!(f, "there are no {kind}s"),
             [only] => write!(f, "expected `{only}`"),
+            [first, second] => write!(f, "expected `{first}` or `{second}`"),
             many => {
                 f.write_str("expected one of ")?;
                 for (i, name) in many.iter().enumerate() {

@@ -390,6 +390,7 @@ fn describe_number(parsed: Parsed) -> String {
     match parsed {
         Parsed::U64(n) => format!("integer `{n}`"),
         Parsed::I64(n) => format!("integer `{n}`"),
-        Parsed::F64(n) => format!("floating point `{n}`"),
+        // written as the number is written into JSON, not as Rust shows it
+        Parsed::F64(_) => format!("floating point `{}`", Number::from_parsed(parsed)),
     }
 }
