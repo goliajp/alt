@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: alt-json refuses input with the words serde uses
+author-type: human
+author: doracawl
+touched: crates/alt-json-derive/src/de.rs
+touched: crates/alt-json-testkit/src/lib.rs
+touched: crates/alt-json-testkit/src/reads.rs
+touched: crates/alt-json/src/de/text.rs
+touched: crates/alt-json/src/error.rs
+touched: crates/alt-json/tests/it/derive.rs
+touched: crates/alt-json/tests/it/derive/messages.rs
