@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: fast deflate levels wrote code lengths no decoder accepts when a length limit applied
+author-type: human
+author: doracawl
+touched: crates/alt-deflate/src/codes.rs
+touched: crates/alt-deflate/tests/it/limits.rs
+touched: crates/alt-deflate/tests/it/limits/tree-3600.raw
+touched: crates/alt-deflate/tests/it/main.rs
