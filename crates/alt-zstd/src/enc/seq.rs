@@ -28,6 +28,23 @@ const fn small_codes<const N: usize>(base: &[u32], bias: u32) -> [u8; N] {
     }
     codes
 }
+/// Slots of a code histogram: a power of two above every alphabet, so that
+/// a masked code always indexes inside it.
+const CODE_SLOTS: usize = 64;
+
+/// Baseline of each code in the low 24 bits, its extra-bit count above.
+const fn pack<const N: usize>(base: &[u32], extra: &[u8]) -> [u32; N] {
+    let mut packed = [0u32; N];
+    let mut code = 0;
+    while code < base.len() {
+        packed[code] = base[code] | (extra[code] as u32) << 24;
+        code += 1;
+    }
+    packed
+}
+static LL_PACK: [u32; CODE_SLOTS] = pack(&LL_BASE, &LL_EXTRA);
+static ML_PACK: [u32; CODE_SLOTS] = pack(&ML_BASE, &ML_EXTRA);
+
 static LL_CODES: [u8; 64] = small_codes(&LL_BASE, 0);
 static ML_CODES: [u8; 128] = small_codes(&ML_BASE, MIN_MATCH);
 
@@ -139,6 +156,79 @@ impl SequenceCoder {
         (self.fields, self.valid) = (state.0, state.1);
     }
 
+    /// Works out the three codes of every sequence and packs the extra
+    /// bits of its two lengths. Returns the code counts, kept as two
+    /// histograms filled by alternate sequences: a run of one code would
+    /// otherwise make each increment wait for the one before.
+    fn fill(&mut self, sequences: &[Sequence]) -> [[[u32; CODE_SLOTS]; 3]; 2] {
+        #[cfg(target_arch = "x86_64")]
+        if crate::has_bmi2() {
+            // safety: the processor was just found to have the features
+            return unsafe { self.fill_bmi2(sequences) };
+        }
+        self.fill_any(sequences)
+    }
+
+    /// The same compiled for processors with BMI2, where the variable
+    /// shift of packing needs no fixed register.
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "bmi1,bmi2,lzcnt")]
+    unsafe fn fill_bmi2(&mut self, sequences: &[Sequence]) -> [[[u32; CODE_SLOTS]; 3]; 2] {
+        self.fill_any(sequences)
+    }
+
+    #[inline(always)]
+    fn fill_any(&mut self, sequences: &[Sequence]) -> [[[u32; CODE_SLOTS]; 3]; 2] {
+        let count = sequences.len();
+        for codes in &mut self.codes {
+            codes.clear();
+            codes.reserve(count);
+        }
+        self.lengths.clear();
+        self.lengths.reserve(count);
+        let mut counts = [[[0u32; CODE_SLOTS]; 3]; 2];
+        // safety (whole block): each of the four buffers has room for
+        // `count` entries, entry `i` of each is written exactly once before
+        // the lengths are set, and codes index below CODE_SLOTS
+        unsafe {
+            let [ll_out, of_out, ml_out] = [0, 1, 2].map(|i| self.codes[i].as_mut_ptr());
+            let lengths = self.lengths.as_mut_ptr();
+            let one = |i: usize, seq: &Sequence, counts: &mut [[u32; CODE_SLOTS]; 3]| {
+                let (ll_code, ml_code) = (ll_code(seq.lit_len), ml_code(seq.match_len));
+                let of_code = seq.offset.ilog2() as usize;
+                ll_out.add(i).write(ll_code as u8);
+                of_out.add(i).write(of_code as u8);
+                ml_out.add(i).write(ml_code as u8);
+                *counts[0].get_unchecked_mut(ll_code % CODE_SLOTS) += 1;
+                *counts[1].get_unchecked_mut(of_code % CODE_SLOTS) += 1;
+                *counts[2].get_unchecked_mut(ml_code % CODE_SLOTS) += 1;
+                // extra bits of both lengths in the low half, literal
+                // length lowest, and how many they are above
+                let ll = *LL_PACK.get_unchecked(ll_code % CODE_SLOTS);
+                let ml = *ML_PACK.get_unchecked(ml_code % CODE_SLOTS);
+                let ll_bits = ll >> 24;
+                let low = (seq.lit_len - (ll & 0xFF_FFFF)) as u64;
+                let high = (seq.match_len - (ml & 0xFF_FFFF)) as u64;
+                let width = (ll_bits + (ml >> 24)) as u64;
+                lengths.add(i).write(low | high << ll_bits | width << 32);
+            };
+            let [even, odd] = &mut counts;
+            let (pairs, last) = sequences.as_chunks::<2>();
+            for (i, [first, second]) in pairs.iter().enumerate() {
+                one(2 * i, first, even);
+                one(2 * i + 1, second, odd);
+            }
+            if let [seq] = last {
+                one(count - 1, seq, even);
+            }
+            for codes in &mut self.codes {
+                codes.set_len(count);
+            }
+            self.lengths.set_len(count);
+        }
+        counts
+    }
+
     /// Picks the cheapest way to code field `i` for the codes gathered,
     /// writes what the decoder needs to rebuild the table, and returns the
     /// mode bits.
@@ -217,78 +307,45 @@ impl SequenceCoder {
         if count == 0 {
             return;
         }
-        for codes in &mut self.codes {
-            codes.clear();
-            codes.resize(count, 0);
-        }
-        self.lengths.clear();
-        self.lengths.resize(count, 0);
-        // two histograms per field, filled alternately: a run of one code
-        // would otherwise make each increment wait for the one before
-        let mut counts = [[[0u32; MAX_SYMBOLS]; 2]; 3];
-        let mut extra_bits = 0;
-        let [ll_codes, of_codes, ml_codes] = &mut self.codes;
-        let codes = ll_codes.iter_mut().zip(of_codes).zip(ml_codes);
-        let all = sequences.iter().zip(&mut self.lengths).zip(codes);
-        for (index, ((seq, lengths), ((ll, of), ml))) in all.enumerate() {
-            let half = index & 1;
-            let (ll_code, ml_code) = (ll_code(seq.lit_len), ml_code(seq.match_len));
-            let of_code = seq.offset.ilog2();
-            (*ll, *of, *ml) = (ll_code as u8, of_code as u8, ml_code as u8);
-            counts[0][half][ll_code] += 1;
-            counts[1][half][of_code as usize] += 1;
-            counts[2][half][ml_code] += 1;
-            // extra bits of both lengths in the low half, literal length
-            // lowest, and how many they are above
-            let ll_bits = LL_EXTRA[ll_code] as u32;
-            let width = ll_bits + ML_EXTRA[ml_code] as u32;
-            let low = (seq.lit_len - LL_BASE[ll_code]) as u64;
-            let high = (seq.match_len - ML_BASE[ml_code]) as u64;
-            *lengths = low | high << ll_bits | (width as u64) << 32;
-            extra_bits += (width + of_code) as usize;
-        }
+        let counts = self.fill(sequences);
         let modes = out.len();
         out.push(0);
-        for (i, [even, odd]) in counts.iter().enumerate() {
+        let [even, odd] = &counts;
+        for (i, (even, odd)) in even.iter().zip(odd).enumerate() {
             let both: [u32; MAX_SYMBOLS] = std::array::from_fn(|code| even[code] + odd[code]);
             let mode = self.choose(i, &both, out);
             out[modes] |= mode << (6 - 2 * i);
         }
         self.valid = true;
-        self.write_stream(sequences, extra_bits, out);
+        self.write_stream(sequences, out);
     }
 
-    fn write_stream(&self, sequences: &[Sequence], extra_bits: usize, out: &mut Vec<u8>) {
+    fn write_stream(&self, sequences: &[Sequence], out: &mut Vec<u8>) {
         #[cfg(target_arch = "x86_64")]
         if crate::has_bmi2() {
             // safety: the processor was just found to have the features
-            return unsafe { self.write_stream_bmi2(sequences, extra_bits, out) };
+            return unsafe { self.write_stream_bmi2(sequences, out) };
         }
-        self.write_stream_any(sequences, extra_bits, out)
+        self.write_stream_any(sequences, out)
     }
 
     /// The same compiled for processors with BMI2, where the variable
     /// shifts of bit writing need no fixed register.
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "bmi1,bmi2,lzcnt")]
-    unsafe fn write_stream_bmi2(
-        &self,
-        sequences: &[Sequence],
-        extra_bits: usize,
-        out: &mut Vec<u8>,
-    ) {
-        self.write_stream_any(sequences, extra_bits, out)
+    unsafe fn write_stream_bmi2(&self, sequences: &[Sequence], out: &mut Vec<u8>) {
+        self.write_stream_any(sequences, out)
     }
 
     #[inline(always)]
-    fn write_stream_any(&self, sequences: &[Sequence], extra_bits: usize, out: &mut Vec<u8>) {
+    fn write_stream_any(&self, sequences: &[Sequence], out: &mut Vec<u8>) {
         let [ll, of, ml] = [0, 1, 2].map(|i| &self.fields[i].table);
         let [ll_codes, of_codes, ml_codes] = [0, 1, 2].map(|i| &self.codes[i][..]);
         // the most the stream can take: three state changes per sequence at
-        // up to their table logs, the final states, the extra bits, the
-        // marker
+        // up to their table logs, the final states, the marker, and for
+        // each sequence up to 16 extra bits per length and 31 of offset
         let states = (sequences.len() + 1) * (ll.log + of.log + ml.log) as usize;
-        let bound = (states + extra_bits + 1).div_ceil(8);
+        let bound = (states + sequences.len() * 63 + 1).div_ceil(8);
         out.reserve(bound + 8);
         let start = out.len();
         // safety: `bound + 8` bytes were reserved past `start`
