@@ -1,6 +1,7 @@
 //! Bounded association requests use the same origin, credential and outcome
 //! handling as native publication. Callers preserve request identities.
 use super::{Error, Result, Transport, digest, id, scope_path};
+use alt_json_serde::Serde;
 use alt_remote_protocol::{RequestKey, Scope, change_links::*};
 use ed25519_dalek::VerifyingKey;
 use golia_change_link as link;
@@ -90,7 +91,7 @@ impl Transport {
     }
     pub fn change_event(&self, scope: &Scope, event: &str) -> Result<link::HistoricalEvent> {
         digest(event)?;
-        let value = self.json(
+        let Serde(value): Serde<link::HistoricalEvent> = self.json(
             "GET",
             &format!("{}/events/{event}", path(scope)?),
             b"",
@@ -101,7 +102,7 @@ impl Transport {
     }
     pub fn change_request(&self, key: &RequestKey) -> Result<Option<link::HistoricalEvent>> {
         key.validate()?;
-        let value: Option<link::HistoricalEvent> = self.json(
+        let value: Option<Serde<link::HistoricalEvent>> = self.json(
             "GET",
             &format!(
                 "{}/requests/{}/{}",
@@ -112,6 +113,7 @@ impl Transport {
             b"",
             None,
         )?;
+        let value = value.map(|Serde(value)| value);
         if let Some(value) = &value {
             protocol(value.validate())?;
         }
@@ -124,7 +126,7 @@ impl Transport {
         pinned: &[u8; 32],
     ) -> Result<link::RepairSource> {
         digest(event)?;
-        let value: link::RepairSource = self.json(
+        let Serde(value): Serde<link::RepairSource> = self.json(
             "GET",
             &format!("{}/repairs/{event}/source", path(scope)?),
             b"",
@@ -167,7 +169,7 @@ impl Transport {
         id(&request.channel)?;
         digest(&request.configuration_digest)?;
         digest(&request.delivery_id)?;
-        let value: link::HistoricalEvent = self.json(
+        let Serde(value): Serde<link::HistoricalEvent> = self.json(
             "POST",
             &format!("{}/mappings", path(&request.key.scope)?),
             &self.encode(request)?,
@@ -189,7 +191,7 @@ impl Transport {
         request.key.validate()?;
         id(&request.channel)?;
         digest(&request.configuration_digest)?;
-        let value: link::HistoricalEvent = self.json(
+        let Serde(value): Serde<link::HistoricalEvent> = self.json(
             "POST",
             &format!("{}/withdrawals", path(&request.key.scope)?),
             &self.encode(request)?,
@@ -213,7 +215,7 @@ impl Transport {
         id(channel)?;
         digest(event)?;
         // Repeating this permission refresh cannot enqueue another statement.
-        let value = self.json(
+        let Serde(value): Serde<link::HistoricalEvent> = self.json(
             "POST",
             &format!(
                 "{}/channels/{channel}/events/{event}/reauthorize",

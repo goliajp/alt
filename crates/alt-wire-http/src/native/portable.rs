@@ -265,7 +265,7 @@ impl Transport {
             let status = response.status();
             let failure = bounded(response, self.options.response_bytes)
                 .ok()
-                .and_then(|b| serde_json::from_slice(&b).ok())
+                .and_then(|b| alt_json::from_slice(&b).ok())
                 .map(Box::new);
             return Err(Error::Rejected { status, failure });
         }
@@ -282,8 +282,8 @@ impl Transport {
             });
         }
         let decode = || -> Result<()> {
-            let value: serde_json::Value =
-                serde_json::from_slice(&bounded(response, self.options.response_bytes)?)
+            let value: alt_json::Value =
+                alt_json::from_slice(&bounded(response, self.options.response_bytes)?)
                     .map_err(|_| Error::Invalid("portable upload response"))?;
             if value["blake3"] != blob.blake3 || value["verified"] != true {
                 return Err(Error::Invalid("portable upload response identity"));

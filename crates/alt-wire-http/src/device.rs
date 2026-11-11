@@ -1,6 +1,6 @@
 //! Bounded, fixed-origin RFC 8628 transport for a public native client.
+use alt_json::FromJson;
 use alt_remote_protocol::login::*;
-use serde::de::DeserializeOwned;
 use std::{io::Read, time::Duration};
 
 #[derive(Debug)]
@@ -61,7 +61,7 @@ impl Client {
     pub fn origin(&self) -> &str {
         &self.origin
     }
-    fn post<T: DeserializeOwned>(&self, path: &str, fields: &[(&str, &str)]) -> Result<T> {
+    fn post<T: FromJson>(&self, path: &str, fields: &[(&str, &str)]) -> Result<T> {
         let response = match self
             .agent
             .post(&format!("{}{path}", self.origin))
@@ -92,10 +92,10 @@ impl Client {
         }
         if status != 200 {
             let failure: DeviceFailure =
-                serde_json::from_slice(&bytes).map_err(|_| Error::Invalid)?;
+                alt_json::from_slice(&bytes).map_err(|_| Error::Invalid)?;
             return Err(Error::Rejected(failure.error));
         }
-        serde_json::from_slice(&bytes).map_err(|_| Error::Invalid)
+        alt_json::from_slice(&bytes).map_err(|_| Error::Invalid)
     }
     pub fn validate_authorization(&self, value: &DeviceAuthorizationResponse) -> Result<()> {
         let uri = format!("{}/#device", self.origin);
@@ -144,7 +144,7 @@ impl Client {
     pub fn revoke(&self, token: &str) -> Result<()> {
         let secret = token.strip_prefix("alt1_").ok_or(Error::Invalid)?;
         device_secret(secret).map_err(|_| Error::Invalid)?;
-        let _: serde_json::Value = self.post(
+        let _: alt_json::Value = self.post(
             "/oauth/revoke",
             &[("client_id", CLI_CLIENT_ID), ("token", token)],
         )?;
