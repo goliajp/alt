@@ -1,0 +1,17 @@
+schema: alt-meta/1
+type: perf
+summary: cheaper bit reads and table loads in zstd decoding, bmi2 builds of the encoder loops
+author-type: human
+author: doracawl
+touched: crates/alt-zstd/src/bits.rs
+touched: crates/alt-zstd/src/enc/dfast.rs
+touched: crates/alt-zstd/src/enc/fast.rs
+touched: crates/alt-zstd/src/enc/fse.rs
+touched: crates/alt-zstd/src/enc/huf.rs
+touched: crates/alt-zstd/src/enc/matcher.rs
+touched: crates/alt-zstd/src/enc/search.rs
+touched: crates/alt-zstd/src/enc/seq.rs
+touched: crates/alt-zstd/src/execute.rs
+touched: crates/alt-zstd/src/fse.rs
+touched: crates/alt-zstd/src/huffman.rs
+touched: crates/alt-zstd/src/lib.rs
