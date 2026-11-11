@@ -7,6 +7,7 @@ use crate::fse::{Entry, build_table, read_distribution};
 
 /// Reads the weights of all symbols but the last. Returns how many there are
 /// and the bytes consumed.
+#[inline(always)]
 pub(crate) fn read_weights(src: &[u8], weights: &mut [u8; 256]) -> Result<(usize, usize), Error> {
     let header = *src.first().ok_or(Error::Corrupt)? as usize;
     if header >= 128 {
@@ -27,37 +28,53 @@ pub(crate) fn read_weights(src: &[u8], weights: &mut [u8; 256]) -> Result<(usize
 
 /// Decodes weights coded with two interleaved FSE states. The stream holds
 /// no count: it ends when a state update runs out of bits.
+#[inline(always)]
 fn fse_weights(src: &[u8], weights: &mut [u8; 256]) -> Result<usize, Error> {
     const MAX_LOG: u32 = 6;
     let mut norm = [0i16; 256];
     let (log, symbols, used) = read_distribution(src, &mut norm, MAX_LOG)?;
     let mut table = [Entry::default(); 1 << MAX_LOG];
-    build_table(&norm[..symbols], log, &mut table, 0, |symbol| {
-        (symbol as u32, 0)
+    build_table::<256>(&norm[..symbols], log, &mut table, 0, |symbol| {
+        (symbol as u64) << 32
     });
 
     let mut reader = BackReader::new(&src[used..])?;
-    let mut states = [reader.read(log) as usize, reader.read(log) as usize];
+    let mut state = reader.read(log) as usize;
+    let mut other = reader.read(log) as usize;
     reader.refill();
     if reader.overflowed() {
         return Err(Error::Corrupt);
     }
     let mut count = 0;
-    let mut turn = 0;
+    // a whole window holds four state updates, of six bits at most each,
+    // so between two refills that take whole bytes the stream cannot run
+    // out, and the two states advance without waiting for each other
+    while reader.roomy() && count <= 250 {
+        for pair in weights[count..count + 4].as_chunks_mut::<2>().0 {
+            let entry = table[state];
+            pair[0] = entry.base() as u8;
+            state = entry.next() + reader.read(entry.bits()) as usize;
+            let entry = table[other];
+            pair[1] = entry.base() as u8;
+            other = entry.next() + reader.read(entry.bits()) as usize;
+        }
+        count += 4;
+        reader.refill();
+    }
     loop {
         // the last weight is never stored, so 255 is the most there can be
         if count > 253 {
             return Err(Error::Corrupt);
         }
-        let entry = table[states[turn]];
+        let entry = table[state];
         weights[count] = entry.base() as u8;
         count += 1;
-        states[turn] = entry.next() + reader.read(entry.bits()) as usize;
+        state = entry.next() + reader.read(entry.bits()) as usize;
         reader.refill();
-        turn ^= 1;
         if reader.overflowed() {
-            weights[count] = table[states[turn]].base() as u8;
+            weights[count] = table[other].base() as u8;
             return Ok(count + 1);
         }
+        (state, other) = (other, state);
     }
 }

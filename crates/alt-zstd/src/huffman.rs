@@ -64,6 +64,27 @@ impl HufTable {
 
     /// Parses a tree description and returns the bytes it occupied.
     pub(crate) fn read(&mut self, src: &[u8]) -> Result<usize, Error> {
+        #[cfg(target_arch = "x86_64")]
+        if crate::has_bmi2() {
+            // safety: the processor was just found to have the features
+            return unsafe { self.read_bmi2(src) };
+        }
+        self.read_any(src)
+    }
+
+    /// The same code compiled for processors with BMI2, for the bit
+    /// reading of the weights.
+    ///
+    /// # Safety
+    /// The processor must have BMI1, BMI2 and LZCNT.
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "bmi1,bmi2,lzcnt")]
+    unsafe fn read_bmi2(&mut self, src: &[u8]) -> Result<usize, Error> {
+        self.read_any(src)
+    }
+
+    #[inline(always)]
+    fn read_any(&mut self, src: &[u8]) -> Result<usize, Error> {
         let mut weights = [0u8; 256];
         let (count, used) = read_weights(src, &mut weights)?;
         let mut rank = [0u32; MAX_BITS as usize + 2];
@@ -94,50 +115,59 @@ impl HufTable {
             return Err(Error::Corrupt);
         }
 
-        // symbols in the order of the table: by weight, then by value, so
-        // that the entries of one weight are filled by one loop whose
-        // every pass writes the same number of them
+        // symbols in the order of the table: by weight, then by value.
+        // those of weight zero are ordered too, ahead of the others, so
+        // that no symbol needs a test
         let mut next = [0usize; MAX_BITS as usize + 2];
         let mut before = 0;
-        for weight in 1..=log as usize {
+        for weight in 0..=log as usize {
             next[weight] = before;
             before += rank[weight] as usize;
         }
         let mut order = [0u8; 256];
         for (symbol, &weight) in weights[..=count].iter().enumerate() {
-            if weight != 0 {
-                order[next[weight as usize]] = symbol as u8;
-                next[weight as usize] += 1;
-            }
+            let at = &mut next[weight as usize];
+            order[*at] = symbol as u8;
+            *at += 1;
         }
-        let mut symbols = order.iter();
+        // the entries of one weight are filled by one loop, whose every
+        // pass writes the same number of them
+        let mut symbols = &order[rank[0] as usize..];
         let mut at = 0;
         for (weight, &ranked) in rank.iter().enumerate().take(log as usize + 1).skip(1) {
             let span = 1usize << (weight - 1);
             let bits = (log + 1 - weight as u32) as u16;
-            let of_weight = symbols.by_ref().take(ranked as usize);
+            let of_weight;
+            (of_weight, symbols) = symbols.split_at(ranked as usize);
+            let run = &mut self.entries[at..at + of_weight.len() * span];
+            at += run.len();
+            let entry = |symbol: u8| bits | (symbol as u16) << 8;
             match span {
                 1 => {
-                    for &symbol in of_weight {
-                        self.entries[at] = bits | (symbol as u16) << 8;
-                        at += 1;
+                    for (slot, &symbol) in run.iter_mut().zip(of_weight) {
+                        *slot = entry(symbol);
                     }
                 }
                 2 => {
-                    for &symbol in of_weight {
-                        let entry = bits | (symbol as u16) << 8;
-                        self.entries[at..at + 2].copy_from_slice(&[entry; 2]);
-                        at += 2;
+                    for (slots, &symbol) in run.as_chunks_mut::<2>().0.iter_mut().zip(of_weight) {
+                        *slots = [entry(symbol); 2];
+                    }
+                }
+                4 => {
+                    for (slots, &symbol) in run.as_chunks_mut::<4>().0.iter_mut().zip(of_weight) {
+                        *slots = [entry(symbol); 4];
+                    }
+                }
+                8 => {
+                    for (slots, &symbol) in run.as_chunks_mut::<8>().0.iter_mut().zip(of_weight) {
+                        *slots = [entry(symbol); 8];
                     }
                 }
                 _ => {
-                    for &symbol in of_weight {
-                        let entry = bits | (symbol as u16) << 8;
-                        let (quads, _) = self.entries[at..at + span].as_chunks_mut::<4>();
-                        for quad in quads {
-                            *quad = [entry; 4];
+                    for (slots, &symbol) in run.chunks_exact_mut(span).zip(of_weight) {
+                        for wide in slots.as_chunks_mut::<16>().0 {
+                            *wide = [entry(symbol); 16];
                         }
-                        at += span;
                     }
                 }
             }

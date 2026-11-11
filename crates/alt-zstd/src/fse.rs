@@ -49,14 +49,47 @@ pub(crate) static OF_DEFAULT: [i16; 29] = [
     1, 1, 1, 1, 1, 1, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -1, -1, -1, -1, -1,
 ];
 
+/// What every entry of a code holds, whatever its state: the baseline and the
+/// extra-bit count, in their places. Padded to 64 so that a masked index
+/// needs no bounds check.
+const fn fixed_parts(base: &[u32], extra: &[u8]) -> [u64; 64] {
+    let mut out = [0u64; 64];
+    let mut code = 0;
+    while code < base.len() {
+        out[code] = Entry::new(base[code], 0, extra[code], 0).0;
+        code += 1;
+    }
+    out
+}
+
+pub(crate) static LL_FIXED: [u64; 64] = fixed_parts(&LL_BASE, &LL_EXTRA);
+pub(crate) static ML_FIXED: [u64; 64] = fixed_parts(&ML_BASE, &ML_EXTRA);
+pub(crate) static OF_FIXED: [u64; 64] = {
+    // codes 0 and 1 are repeat offsets and never use the baseline; the
+    // others stand for (1 << code) + bits - 3
+    let mut out = [0u64; 64];
+    let mut code = 0;
+    while code < OF_SYMBOLS {
+        out[code] = Entry::new((1u32 << code).wrapping_sub(3), 0, code as u8, 0).0;
+        code += 1;
+    }
+    out
+};
+
 /// One state of a decoding table: the value it stands for and how to reach
 /// the next state. Packed into one word so that a state costs one load.
 #[derive(Clone, Copy, Default)]
 pub(crate) struct Entry(u64);
 
 impl Entry {
-    pub(crate) fn new(base: u32, next: u16, extra: u8, bits: u8) -> Self {
+    pub(crate) const fn new(base: u32, next: u16, extra: u8, bits: u8) -> Self {
         Self((base as u64) << 32 | (next as u64) << 16 | (extra as u64) << 8 | bits as u64)
+    }
+
+    /// An entry from the fixed part of its code.
+    #[inline(always)]
+    pub(crate) fn with(fixed: u64, next: u16, bits: u32) -> Self {
+        Self(fixed | (next as u64) << 16 | bits as u64)
     }
 
     /// Fresh bits to read for the next state.
@@ -85,10 +118,11 @@ impl Entry {
     }
 }
 
-/// Parses a distribution header into `norm`, whose length is the largest
-/// alphabet allowed. Returns the accuracy log, the number of symbols
-/// described and the bytes consumed. On success the absolute values in
-/// `norm` sum to exactly `1 << log`.
+/// Parses a distribution header into `norm`, which must be all zero and
+/// whose length is the largest alphabet allowed. Returns the accuracy log,
+/// the number of symbols described and the bytes consumed. On success the
+/// absolute values in `norm` sum to exactly `1 << log`.
+#[inline(always)]
 pub(crate) fn read_distribution(
     src: &[u8],
     norm: &mut [i16],
@@ -100,7 +134,6 @@ pub(crate) fn read_distribution(
     if log > max_log {
         return Err(Error::Corrupt);
     }
-    norm.fill(0);
     let mut remaining = (1i32 << log) + 1;
     let mut threshold = 1i32 << log;
     let mut width = log + 1;
@@ -150,8 +183,60 @@ pub(crate) fn read_distribution(
     Ok((log, symbol, reader.bytes_used()))
 }
 
-/// Lays the symbols of a distribution out over the `1 << log` states.
-/// `norm` must sum (in absolute values) to the table size.
+/// States of the largest table.
+pub(crate) const SLOTS: usize = 1 << LL_MAX_LOG;
+
+/// Lays the symbols of a distribution out in the order in which the walk
+/// over the table meets them, eight at a time, and lists the "less than
+/// one" symbols. Returns how many of those there are.
+#[inline(always)]
+fn lay_out(norm: &[i16], ordered: &mut [u8; SLOTS + 8], lows: &mut [u8; 256]) -> usize {
+    let mut low_count = 0;
+    let mut filled = 0;
+    for (symbol, &count) in norm.iter().enumerate() {
+        // written whether or not it counts, to spare a branch
+        lows[low_count % 256] = symbol as u8;
+        low_count += (count == -1) as usize;
+        let n = count.max(0) as usize;
+        let pattern = [symbol as u8; 8];
+        ordered[filled..filled + 8].copy_from_slice(&pattern);
+        let mut more = 8;
+        while more < n {
+            ordered[filled + more..filled + more + 8].copy_from_slice(&pattern);
+            more += 8;
+        }
+        filled += n;
+    }
+    low_count
+}
+
+fn walk_step(size: usize) -> usize {
+    (size >> 1) + (size >> 3) + 3
+}
+
+/// Moves the laid-out symbols to their states. The walk takes every state
+/// once, in an order that does not depend on the symbols; a state at the
+/// top, reserved for a "less than one" symbol, takes a write too but uses
+/// up no symbol, and gets its own symbol afterwards.
+#[inline(always)]
+fn scatter(ordered: &[u8; SLOTS + 8], lows: &[u8], log: u32, slots: &mut [u8; SLOTS]) {
+    let size = 1usize << log;
+    let high = size - lows.len();
+    let (step, mask) = (walk_step(size), size - 1);
+    let mut at = 0;
+    let mut next = 0;
+    for _ in 0..size {
+        slots[at % SLOTS] = ordered[next % SLOTS];
+        next += (at < high) as usize;
+        at = (at + step) & mask;
+    }
+    for (slot, &symbol) in slots[..size].iter_mut().rev().zip(lows) {
+        *slot = symbol;
+    }
+}
+
+/// Lays the symbols of a distribution out over the `1 << log` states, for
+/// the encoder. `norm` must sum (in absolute values) to the table size.
 pub(crate) fn spread(norm: &[i16], log: u32, slots: &mut [u8]) {
     let size = 1usize << log;
     let mut high = size;
@@ -195,35 +280,54 @@ pub(crate) fn spread(norm: &[i16], log: u32, slots: &mut [u8]) {
     }
 }
 
-/// Builds a decoding table from a valid distribution. `value` maps a symbol
-/// to its baseline and extra-bit count; `bias` is added to every next state,
-/// for tables that live at an offset inside a larger array.
-pub(crate) fn build_table(
+/// Builds a decoding table from a valid distribution of at most `N`
+/// symbols. `fixed` maps a symbol to the part of its entries that never
+/// changes; `bias` is added to every next state, for tables that live at an
+/// offset inside a larger array.
+#[inline(always)]
+pub(crate) fn build_table<const N: usize>(
     norm: &[i16],
     log: u32,
     table: &mut [Entry],
     bias: u16,
-    value: impl Fn(usize) -> (u32, u8),
+    fixed: impl Fn(usize) -> u64,
 ) {
     let size = 1usize << log;
-    let mut slots = [0u8; 1 << LL_MAX_LOG];
-    spread(norm, log, &mut slots[..size]);
-    // per symbol: the part of its entries that never changes, with the
-    // number of its next state where an entry keeps the state to go to
-    let mut words = [0u64; 256];
-    for (symbol, (word, &count)) in words.iter_mut().zip(norm).enumerate() {
-        let (base, extra) = value(symbol);
-        let first = if count == -1 { 1 } else { count as u16 };
-        *word = Entry::new(base, first, extra, 0).0;
+    let table = &mut table[..size];
+    // the state that the next entry of each symbol stands for
+    let mut states = [0u16; N];
+    for (state, &count) in states.iter_mut().zip(norm) {
+        *state = count.unsigned_abs();
     }
-    let rebase = (bias as u64).wrapping_sub(size as u64) << 16;
-    for (entry, &slot) in table[..size].iter_mut().zip(&slots[..size]) {
-        let word = &mut words[slot as usize];
-        let fixed = *word;
-        *word = fixed + (1 << 16);
-        let state = (fixed >> 16) as u16 as u32;
-        let bits = log - state.ilog2();
-        let next = ((state as u64) << (bits + 16)).wrapping_add(rebase);
-        *entry = Entry((fixed & !0xFFFF_0000) | (next & 0xFFFF_0000) | bits as u64);
+    let rebase = (bias as u32).wrapping_sub(size as u32);
+    let mut entry = |symbol: u8| {
+        let state = &mut states[symbol as usize % N];
+        let now = *state as u32;
+        *state += 1;
+        let bits = log - now.ilog2();
+        let next = (now << bits).wrapping_add(rebase) as u16;
+        Entry::with(fixed(symbol as usize), next, bits)
+    };
+    let mut ordered = [0u8; SLOTS + 8];
+    let mut lows = [0u8; 256];
+    let low_count = lay_out(norm, &mut ordered, &mut lows);
+    if low_count == 0 {
+        // with no state reserved the walk is a multiplication by the step,
+        // so the symbol of a state is found by multiplying back; two
+        // rounds of Newton's iteration give the inverse modulo 4096
+        let step = walk_step(size);
+        let mut inverse = step;
+        for _ in 0..2 {
+            inverse = inverse.wrapping_mul(2usize.wrapping_sub(step.wrapping_mul(inverse)));
+        }
+        for (at, cell) in table.iter_mut().enumerate() {
+            *cell = entry(ordered[(at.wrapping_mul(inverse) & (size - 1)) % SLOTS]);
+        }
+    } else {
+        let mut slots = [0u8; SLOTS];
+        scatter(&ordered, &lows[..low_count], log, &mut slots);
+        for (cell, &symbol) in table.iter_mut().zip(&slots[..size]) {
+            *cell = entry(symbol);
+        }
     }
 }

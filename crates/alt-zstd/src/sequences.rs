@@ -4,9 +4,9 @@ use std::sync::OnceLock;
 
 use crate::Error;
 use crate::fse::{
-    Entry, LL_BASE, LL_DEFAULT, LL_DEFAULT_LOG, LL_EXTRA, LL_MAX_LOG, LL_SYMBOLS, MAX_SYMBOLS,
-    ML_BASE, ML_DEFAULT, ML_DEFAULT_LOG, ML_EXTRA, ML_MAX_LOG, ML_SYMBOLS, OF_DEFAULT,
-    OF_DEFAULT_LOG, OF_MAX_LOG, OF_SYMBOLS, build_table, read_distribution,
+    Entry, LL_DEFAULT, LL_DEFAULT_LOG, LL_FIXED, LL_MAX_LOG, LL_SYMBOLS, MAX_SYMBOLS, ML_DEFAULT,
+    ML_DEFAULT_LOG, ML_FIXED, ML_MAX_LOG, ML_SYMBOLS, OF_DEFAULT, OF_DEFAULT_LOG, OF_FIXED,
+    OF_MAX_LOG, OF_SYMBOLS, build_table, read_distribution,
 };
 
 #[derive(Clone, Copy)]
@@ -33,14 +33,12 @@ impl Field {
         }
     }
 
-    /// Baseline and extra-bit count of a code.
-    fn value(self, code: usize) -> (u32, u8) {
+    /// Per code, the baseline and the extra-bit count as an entry holds them.
+    fn fixed(self) -> &'static [u64; 64] {
         match self {
-            Self::LiteralLength => (LL_BASE[code], LL_EXTRA[code]),
-            Self::MatchLength => (ML_BASE[code], ML_EXTRA[code]),
-            // codes 0 and 1 are repeat offsets and never use the baseline;
-            // the others stand for (1 << code) + bits - 3
-            Self::Offset => ((1u32 << code).wrapping_sub(3), code as u8),
+            Self::LiteralLength => &LL_FIXED,
+            Self::Offset => &OF_FIXED,
+            Self::MatchLength => &ML_FIXED,
         }
     }
 }
@@ -83,17 +81,38 @@ impl SequenceDecoder {
         self.valid = false;
     }
 
+    #[inline(always)]
     fn build(&mut self, i: usize, norm: &[i16], log: u32) {
         let slot = &mut self.entries[SLOT[i]..];
-        build_table(norm, log, slot, SLOT[i] as u16, |code| {
-            FIELDS[i].value(code)
-        });
+        let fixed = FIELDS[i].fixed();
+        build_table::<64>(norm, log, slot, SLOT[i] as u16, |code| fixed[code % 64]);
         self.logs[i] = log;
     }
 
     /// Reads the compression modes byte and the table descriptions that
     /// follow it. Returns the bytes consumed.
     pub(crate) fn read_tables(&mut self, src: &[u8]) -> Result<usize, Error> {
+        #[cfg(target_arch = "x86_64")]
+        if crate::has_bmi2() {
+            // safety: the processor was just found to have the features
+            return unsafe { self.read_tables_bmi2(src) };
+        }
+        self.read_tables_any(src)
+    }
+
+    /// The same code compiled for processors with BMI2: building tables is
+    /// mostly shifts by variable counts and bit scans.
+    ///
+    /// # Safety
+    /// The processor must have BMI1, BMI2 and LZCNT.
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "bmi1,bmi2,lzcnt")]
+    unsafe fn read_tables_bmi2(&mut self, src: &[u8]) -> Result<usize, Error> {
+        self.read_tables_any(src)
+    }
+
+    #[inline(always)]
+    fn read_tables_any(&mut self, src: &[u8]) -> Result<usize, Error> {
         let modes = *src.first().ok_or(Error::Corrupt)?;
         if modes & 3 != 0 {
             return Err(Error::Corrupt);
@@ -113,8 +132,7 @@ impl SequenceDecoder {
                     if code >= field.symbols() {
                         return Err(Error::Corrupt);
                     }
-                    let (base, extra) = field.value(code);
-                    self.entries[SLOT[i]] = Entry::new(base, SLOT[i] as u16, extra, 0);
+                    self.entries[SLOT[i]] = Entry::with(field.fixed()[code], SLOT[i] as u16, 0);
                     self.logs[i] = 0;
                     at += 1;
                 }

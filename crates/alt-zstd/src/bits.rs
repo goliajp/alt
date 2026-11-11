@@ -136,6 +136,14 @@ impl<'a> BackReader<'a> {
         }
     }
 
+    /// True while refills take whole bytes without regard to the start of
+    /// the stream. Right after a refill it tells that the refill was such a
+    /// one, so that at least 57 bits can be read before the next.
+    #[inline(always)]
+    pub(crate) fn roomy(&self) -> bool {
+        self.ptr >= self.fast
+    }
+
     /// The read position within the window, for [`BackReader::rewind`].
     #[inline(always)]
     pub(crate) fn mark(&self) -> i32 {
@@ -178,15 +186,26 @@ impl<'a> FwdReader<'a> {
     }
 
     /// The next 32 bits without consuming them.
+    #[inline(always)]
     pub(crate) fn peek(&self) -> u32 {
-        let at = (self.bit >> 3).min(self.src.len());
-        let rest = &self.src[at..];
+        let at = self.bit >> 3;
+        let word = match self.src.get(at..at + 8) {
+            Some(bytes) => u64::from_le_bytes(bytes.try_into().unwrap()),
+            None => self.peek_near_end(at),
+        };
+        (word >> (self.bit & 7)) as u32
+    }
+
+    #[cold]
+    fn peek_near_end(&self, at: usize) -> u64 {
+        let rest = &self.src[at.min(self.src.len())..];
         let mut bytes = [0u8; 8];
         let n = rest.len().min(8);
         bytes[..n].copy_from_slice(&rest[..n]);
-        (u64::from_le_bytes(bytes) >> (self.bit & 7)) as u32
+        u64::from_le_bytes(bytes)
     }
 
+    #[inline(always)]
     pub(crate) fn skip(&mut self, n: u32) {
         self.bit += n as usize;
     }
