@@ -1,0 +1,15 @@
+schema: alt-meta/1
+type: perf
+summary: read a repository's references as one text value into one buffer
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/lib.rs
+touched: crates/alt-server-store/src/pack_view.rs
+touched: crates/alt-server-store/src/packs.rs
+touched: crates/alt-server-store/src/refs.rs
+touched: crates/alt-server-store/src/store.rs
+touched: crates/alt-server-store/tests/it/database/portable/segment_objects.rs
+touched: crates/alt-server/src/git.rs
+touched: crates/alt-server/src/git_packs.rs
+touched: crates/alt-server/src/git_read.rs
+touched: crates/alt-server/src/lib.rs
