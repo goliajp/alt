@@ -1,3 +1,4 @@
+mod messages;
 mod real_protocol;
 mod real_task;
 mod shapes;

@@ -1,0 +1,168 @@
+A	{"00_0f":"0","00_0f":"0"}	{"00_0f":"0"}
+A	{"00_0f":"0"}	{"00_0f":"0"}
+A	{"00_0f":"8"}	{"00_0f":"8"}
+A	{"18":"0"}	{"18":"0"}
+A	{"18446744073709551615":"007"}	{"18446744073709551615":"007"}
+A	{"18446744073709551615":"866"}	{"18446744073709551615":"866"}
+A	{"18446744073709551615":"^SB?!g"}	{"18446744073709551615":"^SB?!g"}
+A	{"18446744073709581615":"566"}	{"18446744073709581615":"566"}
+A	{"1844674407379551615":"866"}	{"1844674407379551615":"866"}
+A	{"425":"z-0","value":"007"}	{"425":"z-0","value":"007"}
+A	{"425":"z-0"}	{"425":"z-0"}
+A	{"77358892":"0","_":"7M"}	{"77358892":"0","_":"7M"}
+A	{"77358892":"0","_":"NLID^kP%O/11"}	{"77358892":"0","_":"NLID^kP%O/11"}
+A	{"77358892":"0","_":"竎𴘟鲲\r裹 "}	{"77358892":"0","_":"竎𴘟鲲\r裹 "}
+A	{"7za77fb7-b/f":"fa7zz/zaz/","7za77fb7-b/f":"fa7zz/zaz/","[\t呒皭\u0014頾󠀁Αˋ𨢵供l":"ff/"}	{"7za77fb7-b/f":"fa7zz/zaz/","[\t呒皭\u0014頾󠀁Αˋ𨢵供l":"ff/"}
+A	{"7za77fb7-b/f":"fa7zz/zaz/","[\t呒皭\u0014頾󠀁Αˋ𨢵供l":"ff/","extra":"😀-ίÿO\u0004澚韋\u0012\u0000ⵠ\f"}	{"7za77fb7-b/f":"fa7zz/zaz/","[\t呒皭\u0014頾󠀁Αˋ𨢵供l":"ff/","extra":"😀-ίÿO\u0004澚韋\u0012\u0000ⵠ\f"}
+A	{"7za77fb7-b/f":"fa7zz/zaz/","[\t呒皭\u0014頾󠀁Αˋ𨢵供l":"ff/"}	{"7za77fb7-b/f":"fa7zz/zaz/","[\t呒皭\u0014頾󠀁Αˋ𨢵供l":"ff/"}
+A	{"7za77fb7-b/f":"fa7zz/zaz/","[\t呒皭\u0814頾󠀁Αˋ𨢵供l":"ff/"}	{"7za77fb7-b/f":"fa7zz/zaz/","[\t呒皭ࠔ頾󠀁Αˋ𨢵供l":"ff/"}
+A	{"974":"0"}	{"974":"0"}
+A	{"94":"0"}	{"94":"0"}
+A	{"A":"0"}	{"A":"0"}
+A	{"A":"a"}	{"A":"a"}
+A	{"A":"醌\u000b_5\u0003晑"}	{"A":"醌\u000b_5\u0003晑"}
+A	{"ATH":"/usr/bin:/bin"}	{"ATH":"/usr/bin:/bin"}
+A	{"PATH":"/usr/bin:/bin"}	{"PATH":"/usr/bin:/bin"}
+A	{"PATH":"nCA"}	{"PATH":"nCA"}
+A	{"Z/F7":"趉"}	{"Z/F7":"趉"}
+A	{"\f煊ࠀ\r":"0","38":"52"}	{"\f煊ࠀ\r":"0","38":"52"}
+A	{"\f煊ࠀ\r":"󤷌隞ڵݣԮZ管󉹧h","38":"52"}	{"\f煊ࠀ\r":"󤷌隞ڵݣԮZ管󉹧h","38":"52"}
+A	{"\f煊ࠀ\r":"󤷌隞ڵݣԮZ管󉹧h","38":"true"}	{"\f煊ࠀ\r":"󤷌隞ڵݣԮZ管󉹧h","38":"true"}
+A	{"\f煊ࠀ\r":"󤷌隞ڵݣԮZ管󉹧h","\f煊ࠀ\r":"󤷌隞ڵݣԮZ管󉹧h","38":"52"}	{"\f煊ࠀ\r":"󤷌隞ڵݣԮZ管󉹧h","38":"52"}
+A	{"kind":"a"}	{"kind":"a"}
+A	{"z/f7":"趉","z/f7":"趉"}	{"z/f7":"趉"}
+A	{"z/f7":"趉"}	{"z/f7":"趉"}
+A	{}	{}
+R	""	invalid type: string "", expected a map at line 1 column 2
+R	"0"	invalid type: string "0", expected a map at line 1 column 3
+R	"P뛫ύ"	invalid type: string "P뛫ύ", expected a map at line 1 column 8
+R	"\u0004\u001b﻿7"	invalid type: string "\u{f6e5}\u{4}\u{1b}\u{feff}7", expected a map at line 1 column 21
+R	"􏿿钎\u0011\u0006\u001f"	invalid type: string "\u{10ffff}钎\u{11}\u{6}\u{1f}", expected a map at line 1 column 27
+R	-129	invalid type: integer `-129`, expected a map at line 1 column 4
+R	-1e+300	invalid type: floating point `-1e+300`, expected a map at line 1 column 7
+R	-293	invalid type: integer `-293`, expected a map at line 1 column 4
+R	-9223372036854775808	invalid type: integer `-9223372036854775808`, expected a map at line 1 column 20
+R	."18":"0"}	expected value at line 1 column 1
+R	.{}	expected value at line 1 column 1
+R	116	invalid type: integer `116`, expected a map at line 1 column 3
+R	136	invalid type: integer `136`, expected a map at line 1 column 3
+R	184	invalid type: integer `184`, expected a map at line 1 column 3
+R	18446744073709551615	invalid type: integer `18446744073709551615`, expected a map at line 1 column 20
+R	1e+300	invalid type: floating point `1e+300`, expected a map at line 1 column 6
+R	256	invalid type: integer `256`, expected a map at line 1 column 3
+R	297	invalid type: integer `297`, expected a map at line 1 column 3
+R	37	invalid type: integer `37`, expected a map at line 1 column 2
+R	39.5	invalid type: floating point `39.5`, expected a map at line 1 column 4
+R	7.5	invalid type: floating point `7.5`, expected a map at line 1 column 3
+R	8}	invalid type: integer `8`, expected a map at line 1 column 1
+R	["-1"]	invalid type: sequence, expected a map at line 1 column 0
+R	["0"]	invalid type: sequence, expected a map at line 1 column 0
+R	["866"]	invalid type: sequence, expected a map at line 1 column 0
+R	["\u0003B"]	invalid type: sequence, expected a map at line 1 column 0
+R	["z-0",true]	invalid type: sequence, expected a map at line 1 column 0
+R	[1"	invalid type: sequence, expected a map at line 1 column 0
+R	[1,1]	invalid type: sequence, expected a map at line 1 column 0
+R	[1,65536]	invalid type: sequence, expected a map at line 1 column 0
+R	[11.5]	invalid type: sequence, expected a map at line 1 column 0
+R	[15	invalid type: sequence, expected a map at line 1 column 0
+R	[1]	invalid type: sequence, expected a map at line 1 column 0
+R	[1]7	invalid type: sequence, expected a map at line 1 column 0
+R	[21.5,"NLID^kP%O/11"]	invalid type: sequence, expected a map at line 1 column 0
+R	[4294967296]	invalid type: sequence, expected a map at line 1 column 0
+R	[]	invalid type: sequence, expected a map at line 1 column 0
+R	[true,1]	invalid type: sequence, expected a map at line 1 column 0
+R	true	invalid type: boolean `true`, expected a map at line 1 column 4
+R	{""974":"0"}	expected `:` at line 1 column 4
+R	{"":{},"\f煊ࠀ\r":"󤷌隞ڵݣԮZ管󉹧h","38":"52"}	invalid type: map, expected a string at line 1 column 4
+R	{"00_0f":"0""}	expected `,` or `}` at line 1 column 13
+R	{"00_0f":-2147483649}	invalid type: integer `-2147483649`, expected a string at line 1 column 20
+R	{"00_0f":-32769}	invalid type: integer `-32769`, expected a string at line 1 column 15
+R	{"00_0f":65536}	invalid type: integer `65536`, expected a string at line 1 column 14
+R	{"00_0f":9223372036854775808}	invalid type: integer `9223372036854775808`, expected a string at line 1 column 28
+R	{"00_0f":[],"extra":18446744073709551615}	invalid type: sequence, expected a string at line 1 column 9
+R	{"00_0f":[]}	invalid type: sequence, expected a string at line 1 column 9
+R	{"00_0f":{}}	invalid type: map, expected a string at line 1 column 9
+R	{"18":-115,"extra":612.775}	invalid type: integer `-115`, expected a string at line 1 column 10
+R	{"18":-151,"18":"0"}	invalid type: integer `-151`, expected a string at line 1 column 10
+R	{"18":246}	invalid type: integer `246`, expected a string at line 1 column 9
+R	{"18":null,"extra":[false,"ʤ~",[9223372036854775807,false],null]}	invalid type: null, expected a string at line 1 column 10
+R	{"18":null}	invalid type: null, expected a string at line 1 column 10
+R	{"18":{}}	invalid type: map, expected a string at line 1 column 6
+R	{"18446744073709551615":18446744073709551615}	invalid type: integer `18446744073709551615`, expected a string at line 1 column 44
+R	{"18446744073709551615":256}	invalid type: integer `256`, expected a string at line 1 column 27
+R	{"18446744073709551615":65536}	invalid type: integer `65536`, expected a string at line 1 column 29
+R	{"18446744073709551615":866"}	invalid type: integer `866`, expected a string at line 1 column 27
+R	{"18446744073709551615":false,"18446744073709551615":"866"}	invalid type: boolean `false`, expected a string at line 1 column 29
+R	{"18446744073709551615":{}}	invalid type: map, expected a string at line 1 column 24
+R	{"425":"z-0","extra":false}	invalid type: boolean `false`, expected a string at line 1 column 26
+R	{"425":"z-0.}	EOF while parsing a string at line 1 column 13
+R	{"425":"z25":"z-0"}	expected `,` or `}` at line 1 column 13
+R	{"425":-9223372036854775808}	invalid type: integer `-9223372036854775808`, expected a string at line 1 column 27
+R	{"425":287,"425":"z-0"}	invalid type: integer `287`, expected a string at line 1 column 10
+R	{"425":[]}	invalid type: sequence, expected a string at line 1 column 7
+R	{"425":null}	invalid type: null, expected a string at line 1 column 11
+R	{"77358892":"0","_""NLID^kP%O/11"}	expected `:` at line 1 column 20
+R	{"77358892":"0","_":"NLID^kP%O/11","extra":null}	invalid type: null, expected a string at line 1 column 47
+R	{"77358892":"0","_":128}	invalid type: integer `128`, expected a string at line 1 column 23
+R	{"77358892":"0","_":18446744073709551615}	invalid type: integer `18446744073709551615`, expected a string at line 1 column 40
+R	{"77358892":":"0","_":"NLID^kP%O/11"}	expected `,` or `}` at line 1 column 16
+R	{"77358892":-9223372036854775808,"_":"NLID^kP%O/11"}	invalid type: integer `-9223372036854775808`, expected a string at line 1 column 32
+R	{"77358892":48,"77358892":"0","_":"NLID^kP%O/11"}	invalid type: integer `48`, expected a string at line 1 column 14
+R	{"77358892":{},"_":"NLID^kP%O/11"}	invalid type: map, expected a string at line 1 column 12
+R	{"7za77fb7-b/f":"fa7zz/zaz/","[\t呒皭\u0014頾󠀁Αˋ𨢵供l":"ff/","kind":-15}	invalid type: integer `-15`, expected a string at line 1 column 82
+R	{"7za77fb7-b/f":"fa7zz/zaz/","[\t呒皭\u0014頾󠀁Αˋ𨢵供l":"ff/"u	expected `,` or `}` at line 1 column 72
+R	{"7za77fb7-b/f":-0.0,"[\t呒皭\u0014頾󠀁Αˋ𨢵供l":"ff/"}	invalid type: floating point `-0.0`, expected a string at line 1 column 20
+R	{"7za77fb7-b/f":-2147483649,"[\t呒皭\u0014頾󠀁Αˋ𨢵供l":"ff/"}	invalid type: integer `-2147483649`, expected a string at line 1 column 27
+R	{"7za77fb7-b/f":-2147483649}	invalid type: integer `-2147483649`, expected a string at line 1 column 27
+R	{"7za77fb7-b/f":3.0,"[\t呒皭\u0014頾󠀁Αˋ𨢵供L":"ff/"}	invalid type: floating point `3.0`, expected a string at line 1 column 19
+R	{"7za77fb7-b/f":6.5}	invalid type: floating point `6.5`, expected a string at line 1 column 19
+R	{"974":"0}	EOF while parsing a string at line 1 column 10
+R	{"974":-177}	invalid type: integer `-177`, expected a string at line 1 column 11
+R	{"974":28.5,"974":"0"}	invalid type: floating point `28.5`, expected a string at line 1 column 11
+R	{"974":283}	invalid type: integer `283`, expected a string at line 1 column 10
+R	{"974":false}	invalid type: boolean `false`, expected a string at line 1 column 12
+R	{"974":true}	invalid type: boolean `true`, expected a string at line 1 column 11
+R	{"A":-260}	invalid type: integer `-260`, expected a string at line 1 column 9
+R	{"A":-}	invalid number at line 1 column 7
+R	{"A":1}	invalid type: integer `1`, expected a string at line 1 column 6
+R	{"A":1}":1}	invalid type: integer `1`, expected a string at line 1 column 6
+R	{"A":256,"a":89.5}	invalid type: integer `256`, expected a string at line 1 column 8
+R	{"A":52.5}	invalid type: floating point `52.5`, expected a string at line 1 column 9
+R	{"A":9223372036854775808}	invalid type: integer `9223372036854775808`, expected a string at line 1 column 24
+R	{"A":96}	invalid type: integer `96`, expected a string at line 1 column 7
+R	{"A":null,"A":1}	invalid type: null, expected a string at line 1 column 9
+R	{"A">1}	expected `:` at line 1 column 5
+R	{"PATH""/usr/bin:/bin"}	expected `:` at line 1 column 8
+R	{"PATH":"/usr/bin:/bin","extra":true}	invalid type: boolean `true`, expected a string at line 1 column 36
+R	{"PATH":"/usr/bin:/bin","value":[]}	invalid type: sequence, expected a string at line 1 column 32
+R	{"PATH":1e+300}	invalid type: floating point `1e+300`, expected a string at line 1 column 14
+R	{"PATH":3.0}	invalid type: floating point `3.0`, expected a string at line 1 column 11
+R	{"PATH":7.5}	invalid type: floating point `7.5`, expected a string at line 1 column 11
+R	{"PATH":null}	invalid type: null, expected a string at line 1 column 12
+R	{"PATH":{},"PATH":"/usr/bin:/bin"}	invalid type: map, expected a string at line 1 column 8
+R	{"\f煊ࠀ\r":"󤷌隞ڵݣԮZ管󉹧h","38""52"}	expected `:` at line 1 column 44
+R	{"\f煊ࠀ\r":"󤷌隞ڵݣԮZ管󉹧h","38":"52","kind":{}}	invalid type: map, expected a string at line 1 column 56
+R	{"\f煊ࠀ\r":"󤷌隞ڵݣԮZ管󉹧h","38":-32769}	invalid type: integer `-32769`, expected a string at line 1 column 50
+R	{"\f煊ࠀ\r":"󤷌隞ڵݣԮZ管󉹧h","38":52}	invalid type: integer `52`, expected a string at line 1 column 46
+R	{"\f煊ࠀ\r":"󤷌隞ڵݣԮZ管󉹧h","38":95.5}	invalid type: floating point `95.5`, expected a string at line 1 column 48
+R	{"\f煊ࠀ\r":"󤷌隞ڵݣԮZ管󉹧h","a":-129}	invalid type: integer `-129`, expected a string at line 1 column 47
+R	{"a":{}}	invalid type: map, expected a string at line 1 column 5
+R	{"extra":-9223372036854775808}	invalid type: integer `-9223372036854775808`, expected a string at line 1 column 29
+R	{"extra":65536}	invalid type: integer `65536`, expected a string at line 1 column 14
+R	{"extra":884}	invalid type: integer `884`, expected a string at line 1 column 12
+R	{"extra":["褳�f侮\\\u0014쉯?",false,true,1.027e-249]}	invalid type: sequence, expected a string at line 1 column 9
+R	{"extra":["𐀀ሣ\u00128퟿C奠hք򓆝譓\u0007",false]}	invalid type: sequence, expected a string at line 1 column 9
+R	{"extra":[-9223372036854775808,true,9223372036854775808,[true,484.0,true,"s]|f!@X2_%","\u000f,氒󠀁\u000f7擴￿\nf,￵\u0001ࠀ{喻/򯚈摺I\u000e렾č戨"]]}	invalid type: sequence, expected a string at line 1 column 9
+R	{"extra":null}	invalid type: null, expected a string at line 1 column 13
+R	{"kind":-271}	invalid type: integer `-271`, expected a string at line 1 column 12
+R	{"kind":-9223372036854775808}	invalid type: integer `-9223372036854775808`, expected a string at line 1 column 28
+R	{"kind":true}	invalid type: boolean `true`, expected a string at line 1 column 12
+R	{"z/"z/f7":"趉"}	expected `:` at line 1 column 6
+R	{"z/f7":-1e+300}	invalid type: floating point `-1e+300`, expected a string at line 1 column 15
+R	{"z/f7":-2147483649}	invalid type: integer `-2147483649`, expected a string at line 1 column 19
+R	{"z/f7":5趉"}	invalid type: integer `5`, expected a string at line 1 column 9
+R	{"z/f7":{}}	invalid type: map, expected a string at line 1 column 8
+R	{:	key must be a string at line 1 column 2
+R	{}:	trailing characters at line 1 column 3
+R	{}{}	trailing characters at line 1 column 3
+R	{}}	trailing characters at line 1 column 3

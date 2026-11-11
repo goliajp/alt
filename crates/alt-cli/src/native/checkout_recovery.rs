@@ -564,6 +564,6 @@ impl NativeRepo<'_> {
 #[cfg(test)]
 mod json_tests {
     use super::*;
-
     alt_json_testkit::module_fixture_tests!("native-checkout_recovery"; FileState, FileChange, CheckoutIntent, WorkspaceSnapshot, CheckoutDone);
+    alt_json_testkit::module_read_tests!("state-checkout"; CheckoutDone: CheckoutDone, WorkspaceSnapshot: WorkspaceSnapshot);
 }

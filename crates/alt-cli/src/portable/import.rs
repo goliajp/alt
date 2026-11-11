@@ -244,4 +244,5 @@ mod json_tests {
     use super::*;
 
     alt_json_testkit::module_fixture_tests!("portable-import"; ImportRequest);
+    alt_json_testkit::module_read_tests!("portable-import"; IdentityMappings: Vec<IdentityMapping>);
 }

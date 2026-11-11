@@ -590,6 +590,7 @@ fn real_git_push_with_unknown_capabilities_and_unchanged_refs() {
 }
 
 #[test]
+#[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
 fn objects_pushed_by_git_are_downloadable_by_content_digest() {
     let f = Fixture::new();
     let server = Running::start(&f);

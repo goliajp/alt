@@ -251,4 +251,5 @@ mod json_tests {
     use super::*;
 
     alt_json_testkit::module_fixture_tests!("native-task-transfer-changes-repair"; Creation);
+    alt_json_testkit::module_read_tests!("state-remote"; Creation: Creation);
 }

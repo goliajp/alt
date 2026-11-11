@@ -475,3 +475,10 @@ mod tests {
         assert_eq!(error.downcast_ref::<Failure>().unwrap().outcome, "unknown");
     }
 }
+
+#[cfg(test)]
+mod json_tests {
+    use super::*;
+
+    alt_json_testkit::module_read_tests!("state-request"; Intent: Intent, Completion: Completion);
+}

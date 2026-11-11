@@ -1,0 +1,138 @@
+$ [repo] alt init .
+exit 0
+$ [repo] alt --request-id <id32:0> add . --json
+exit 0
+out| {"operation_ids":["<id64:1>","<id64:2>"],"request_id":"<id32:0>","schema_version":1,"staged":2}
+$ [repo] alt --request-id <id32:0> add . --json
+exit 0
+out| {"operation_ids":["<id64:1>","<id64:2>"],"request_id":"<id32:0>","schema_version":1,"staged":2}
+$ [repo] alt --request-id <id32:0> commit -m other --json
+exit 1
+err| {"error":{"details":{},"kind":"request_mismatch","message":"request id was submitted with different arguments or scope","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:0>","retryable":false},"schema_version":1}
+$ [repo] alt --request-id <id32:3> commit -m first --decision d --json
+exit 0
+out| {"branch":"main","commit":"<id40:4>","operation_ids":["<id64:5>"],"request_id":"<id32:3>","schema_version":1,"tree":"<id40:6>"}
+$ [repo] alt --request-id <id32:3> commit -m first --decision d --json
+exit 0
+out| {"branch":"main","commit":"<id40:4>","operation_ids":["<id64:5>"],"request_id":"<id32:3>","schema_version":1,"tree":"<id40:6>"}
+$ [repo] alt --request-id <id32:7> switch -c feat --json
+exit 0
+out| {"branch":"feat","operation_ids":["<id64:8>","<id64:9>"],"request_id":"<id32:7>","result":"created","schema_version":1}
+$ [repo] alt add .
+exit 0
+$ [repo] alt commit -m feat
+exit 0
+$ [repo] alt switch main
+exit 0
+$ [repo] alt add .
+exit 0
+$ [repo] alt commit -m main
+exit 0
+$ [repo] alt --request-id <id32:10> merge feat --json
+exit 1
+err| {"error":{"details":{"command_output":{"encoding":"utf-8","text":"{\"schema_version\":1,\"result\":\"conflicted\",\"commit\":null,\"conflicts\":[\"a.txt\"]}\n","truncated":false},"operation_ids":[]},"kind":"conflict","message":"command reported a conflict or failed validation","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"partial","request_id":"<id32:10>","retryable":false},"schema_version":1}
+$ [repo] alt --request-id <id32:10> merge feat --json
+exit 1
+err| {"error":{"details":{"command_output":{"encoding":"utf-8","text":"{\"schema_version\":1,\"result\":\"conflicted\",\"commit\":null,\"conflicts\":[\"a.txt\"]}\n","truncated":false},"operation_ids":[]},"kind":"conflict","message":"command reported a conflict or failed validation","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"partial","request_id":"<id32:10>","retryable":false},"schema_version":1}
+$ [repo] alt --request-id <id32:11> switch 不存在-日本語 --json
+exit 75
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"switch: a merge is in progress; resolve the conflicts and commit it first","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:11>","retryable":false},"schema_version":1}
+$ [repo] alt --request-id <id32:12> status
+exit 1
+err| fatal: request identities require a write in an existing native repository
+err| request: <id32:12>
+$ [repo] alt request pending --json
+exit 0
+out| {"requests":[],"schema_version":1}
+$ [repo] alt request status <id32:0> --json
+exit 0
+out| {"request":{"exit_code":0,"finished_ms":<digits>,"operation_ids":["<id64:1>","<id64:2>"],"outcome":"applied","recorded_operation_ids":["<id64:1>","<id64:2>"],"repository":"<id32:13>","request_id":"<id32:0>","response_bytes":241,"response_digest":"<id64:14>","started_ms":<volatile>,"state":"completed","workspace":"<id64:15>"},"schema_version":1}
+$ [repo] alt request result <id32:0> --json
+exit 0
+out| {"request":{"exit_code":0,"finished_ms":<digits>,"operation_ids":["<id64:1>","<id64:2>"],"outcome":"applied","recorded_operation_ids":["<id64:1>","<id64:2>"],"repository":"<id32:13>","request_id":"<id32:0>","response_bytes":241,"response_digest":"<id64:14>","started_ms":<volatile>,"state":"completed","stderr":{"encoding":"utf-8","text":"","truncated":false},"stdout":{"encoding":"utf-8","text":"{\"operation_ids\":[\"<id64:1>\",\"<id64:2>\"],\"request_id\":\"<id32:0>\",\"schema_version\":1,\"staged\":2}\n","truncated":false},"workspace":"<id64:15>"},"schema_version":1}
+$ [repo] alt request status <id32:3> --json
+exit 0
+out| {"request":{"exit_code":0,"finished_ms":<digits>,"operation_ids":["<id64:5>"],"outcome":"applied","recorded_operation_ids":["<id64:5>"],"repository":"<id32:13>","request_id":"<id32:3>","response_bytes":281,"response_digest":"<id64:16>","started_ms":<volatile>,"state":"completed","workspace":"<id64:15>"},"schema_version":1}
+$ [repo] alt request result <id32:3> --json
+exit 0
+out| {"request":{"exit_code":0,"finished_ms":<digits>,"operation_ids":["<id64:5>"],"outcome":"applied","recorded_operation_ids":["<id64:5>"],"repository":"<id32:13>","request_id":"<id32:3>","response_bytes":281,"response_digest":"<id64:16>","started_ms":<volatile>,"state":"completed","stderr":{"encoding":"utf-8","text":"","truncated":false},"stdout":{"encoding":"utf-8","text":"{\"branch\":\"main\",\"commit\":\"<id40:4>\",\"operation_ids\":[\"<id64:5>\"],\"request_id\":\"<id32:3>\",\"schema_version\":1,\"tree\":\"<id40:6>\"}\n","truncated":false},"workspace":"<id64:15>"},"schema_version":1}
+$ [repo] alt request status <id32:7> --json
+exit 0
+out| {"request":{"exit_code":0,"finished_ms":<digits>,"operation_ids":["<id64:8>","<id64:9>"],"outcome":"applied","recorded_operation_ids":["<id64:8>","<id64:9>"],"repository":"<id32:13>","request_id":"<id32:7>","response_bytes":265,"response_digest":"<id64:17>","started_ms":<volatile>,"state":"completed","workspace":"<id64:15>"},"schema_version":1}
+$ [repo] alt request result <id32:7> --json
+exit 0
+out| {"request":{"exit_code":0,"finished_ms":<digits>,"operation_ids":["<id64:8>","<id64:9>"],"outcome":"applied","recorded_operation_ids":["<id64:8>","<id64:9>"],"repository":"<id32:13>","request_id":"<id32:7>","response_bytes":265,"response_digest":"<id64:17>","started_ms":<volatile>,"state":"completed","stderr":{"encoding":"utf-8","text":"","truncated":false},"stdout":{"encoding":"utf-8","text":"{\"branch\":\"feat\",\"operation_ids\":[\"<id64:8>\",\"<id64:9>\"],\"request_id\":\"<id32:7>\",\"result\":\"created\",\"schema_version\":1}\n","truncated":false},"workspace":"<id64:15>"},"schema_version":1}
+$ [repo] alt request status <id32:10> --json
+exit 0
+out| {"request":{"exit_code":1,"finished_ms":<digits>,"operation_ids":[],"outcome":"partial","recorded_operation_ids":[],"repository":"<id32:13>","request_id":"<id32:10>","response_bytes":493,"response_digest":"<id64:18>","started_ms":<volatile>,"state":"completed","workspace":"<id64:15>"},"schema_version":1}
+$ [repo] alt request result <id32:10> --json
+exit 0
+out| {"request":{"exit_code":1,"finished_ms":<digits>,"operation_ids":[],"outcome":"partial","recorded_operation_ids":[],"repository":"<id32:13>","request_id":"<id32:10>","response_bytes":493,"response_digest":"<id64:18>","started_ms":<volatile>,"state":"completed","stderr":{"encoding":"utf-8","text":"{\"error\":{\"details\":{\"command_output\":{\"encoding\":\"utf-8\",\"text\":\"{\\\"schema_version\\\":1,\\\"result\\\":\\\"conflicted\\\",\\\"commit\\\":null,\\\"conflicts\\\":[\\\"a.txt\\\"]}\\n\",\"truncated\":false},\"operation_ids\":[]},\"kind\":\"conflict\",\"message\":\"command reported a conflict or failed validation\",\"next_action\":\"Inspect the reported condition before submitting a new request\",\"operation_id\":null,\"outcome\":\"partial\",\"request_id\":\"<id32:10>\",\"retryable\":false},\"schema_version\":1}\n","truncated":false},"stdout":{"encoding":"utf-8","text":"","truncated":false},"workspace":"<id64:15>"},"schema_version":1}
+$ [repo] alt request status <id32:11> --json
+exit 0
+out| {"request":{"exit_code":75,"finished_ms":<digits>,"operation_ids":[],"outcome":"unknown","recorded_operation_ids":[],"repository":"<id32:13>","request_id":"<id32:11>","response_bytes":372,"response_digest":"<id64:19>","started_ms":<volatile>,"state":"completed","workspace":"<id64:15>"},"schema_version":1}
+$ [repo] alt request result <id32:11> --json
+exit 0
+out| {"request":{"exit_code":75,"finished_ms":<digits>,"operation_ids":[],"outcome":"unknown","recorded_operation_ids":[],"repository":"<id32:13>","request_id":"<id32:11>","response_bytes":372,"response_digest":"<id64:19>","started_ms":<volatile>,"state":"completed","stderr":{"encoding":"utf-8","text":"{\"error\":{\"details\":{\"operation_ids\":[]},\"kind\":\"result_unknown\",\"message\":\"switch: a merge is in progress; resolve the conflicts and commit it first\",\"next_action\":\"Query the request and its operations before attempting another write\",\"operation_id\":null,\"outcome\":\"unknown\",\"request_id\":\"<id32:11>\",\"retryable\":false},\"schema_version\":1}\n","truncated":false},"stdout":{"encoding":"utf-8","text":"","truncated":false},"workspace":"<id64:15>"},"schema_version":1}
+$ [repo] alt request status <id32:12> --json
+exit 1
+err| {"error":{"details":{"operation_ids":[]},"kind":"request_not_found","message":"no durable request intent or submission was found","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [repo] alt request result <id32:12> --json
+exit 1
+err| {"error":{"details":{"operation_ids":[]},"kind":"request_not_found","message":"no durable request intent or submission was found","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+$ [repo] alt request status <id32:3>
+exit 0
+out| {
+out|   "request": {
+out|     "exit_code": 0,
+out|     "finished_ms": <digits>,
+out|     "operation_ids": [
+out|       "<id64:5>"
+out|     ],
+out|     "outcome": "applied",
+out|     "recorded_operation_ids": [
+out|       "<id64:5>"
+out|     ],
+out|     "repository": "<id32:13>",
+out|     "request_id": "<id32:3>",
+out|     "response_bytes": 281,
+out|     "response_digest": "<id64:16>",
+out|     "started_ms": <volatile>,
+out|     "state": "completed",
+out|     "workspace": "<id64:15>"
+out|   }
+out| }
+$ [repo] alt request result <id32:10>
+exit 0
+out| {
+out|   "request": {
+out|     "exit_code": 1,
+out|     "finished_ms": <digits>,
+out|     "operation_ids": [],
+out|     "outcome": "partial",
+out|     "recorded_operation_ids": [],
+out|     "repository": "<id32:13>",
+out|     "request_id": "<id32:10>",
+out|     "response_bytes": 493,
+out|     "response_digest": "<id64:18>",
+out|     "started_ms": <volatile>,
+out|     "state": "completed",
+out|     "stderr": {
+out|       "encoding": "utf-8",
+out|       "text": "{\"error\":{\"details\":{\"command_output\":{\"encoding\":\"utf-8\",\"text\":\"{\\\"schema_version\\\":1,\\\"result\\\":\\\"conflicted\\\",\\\"commit\\\":null,\\\"conflicts\\\":[\\\"a.txt\\\"]}\\n\",\"truncated\":false},\"operation_ids\":[]},\"kind\":\"conflict\",\"message\":\"command reported a conflict or failed validation\",\"next_action\":\"Inspect the reported condition before submitting a new request\",\"operation_id\":null,\"outcome\":\"partial\",\"request_id\":\"<id32:10>\",\"retryable\":false},\"schema_version\":1}\n",
+out|       "truncated": false
+out|     },
+out|     "stdout": {
+out|       "encoding": "utf-8",
+out|       "text": "",
+out|       "truncated": false
+out|     },
+out|     "workspace": "<id64:15>"
+out|   }
+out| }
+$ [repo] alt op-log --json
+exit 0
+out| {"schema_version":1,"ops":[{"id":"<id64:20>","request_id":"<id32:21>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"commit","ref_changes":[{"name":"refs/heads/main","old":"<id40:4>","new":"<id40:22>"},{"name":"refs/notes/alt/meta","old":"<id40:23>","new":"<id40:24>"}],"workspace":{"name":"default","instance":"<id64:15>"},"inverse_of":null},{"id":"<id64:25>","request_id":"<id32:26>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"add","ref_changes":null,"recovery":{"phase":"completed","prepared":"<id64:27>"}},{"id":"<id64:27>","request_id":"<id32:26>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"add","ref_changes":null,"recovery":{"phase":"prepared","before":"<id64:28>","after":"<id64:29>","workspace":{"name":"default","instance":"<id64:15>"}}},{"id":"<id64:30>","request_id":"<id32:31>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"checkout","ref_changes":null,"recovery":{"phase":"completed","prepared":"<id64:32>"}},{"id":"<id64:32>","request_id":"<id32:31>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"switch","ref_changes":[{"name":"HEAD","old":"@refs/heads/feat","new":"@refs/heads/main"}],"workspace":{"name":"default","instance":"<id64:15>"},"inverse_of":null},{"id":"<id64:33>","request_id":"<id32:34>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"commit","ref_changes":[{"name":"refs/heads/feat","old":"<id40:4>","new":"<id40:35>"},{"name":"refs/notes/alt/meta","old":"<id40:36>","new":"<id40:23>"}],"workspace":{"name":"default","instance":"<id64:15>"},"inverse_of":null},{"id":"<id64:37>","request_id":"<id32:38>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"add","ref_changes":null,"recovery":{"phase":"completed","prepared":"<id64:39>"}},{"id":"<id64:39>","request_id":"<id32:38>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"add","ref_changes":null,"recovery":{"phase":"prepared","before":"<id64:28>","after":"<id64:40>","workspace":{"name":"default","instance":"<id64:15>"}}},{"id":"<id64:9>","request_id":"<id32:7>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"switch","ref_changes":[{"name":"HEAD","old":"@refs/heads/main","new":"@refs/heads/feat"}],"workspace":{"name":"default","instance":"<id64:15>"},"inverse_of":null},{"id":"<id64:8>","request_id":"<id32:7>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"branch","ref_changes":[{"name":"refs/heads/feat","old":null,"new":"<id40:4>"}],"workspace":{"name":"default","instance":"<id64:15>"},"inverse_of":null},{"id":"<id64:5>","request_id":"<id32:3>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"commit","ref_changes":[{"name":"refs/heads/main","old":null,"new":"<id40:4>"},{"name":"refs/notes/alt/meta","old":null,"new":"<id40:36>"}],"workspace":{"name":"default","instance":"<id64:15>"},"inverse_of":null},{"id":"<id64:2>","request_id":"<id32:0>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"add","ref_changes":null,"recovery":{"phase":"completed","prepared":"<id64:1>"}},{"id":"<id64:1>","request_id":"<id32:0>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"add","ref_changes":null,"recovery":{"phase":"prepared","before":"<id64:41>","after":"<id64:28>","workspace":{"name":"default","instance":"<id64:15>"}}},{"id":"<id64:42>","request_id":null,"timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"init","ref_changes":[{"name":"HEAD","old":null,"new":"@refs/heads/main"}],"workspace":{"name":"default","instance":"<id64:15>"},"inverse_of":null}]}
+$ [repo] alt operation pending --json
+exit 0
+out| {"schema_version":1,"operations":[]}

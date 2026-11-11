@@ -1,0 +1,63 @@
+$ [repo] alt init .
+exit 0
+$ [repo] alt add .
+exit 0
+$ [repo] alt commit -m base
+exit 0
+$ [repo] alt branch apart
+exit 0
+$ [repo] alt switch -c feat
+exit 0
+$ [repo] alt add .
+exit 0
+$ [repo] alt commit -m feat: change line two
+exit 0
+$ [repo] alt add .
+exit 0
+$ [repo] alt commit -m feat: later
+exit 0
+$ [repo] alt switch main
+exit 0
+$ [repo] alt add .
+exit 0
+$ [repo] alt commit -m main: change line two
+exit 0
+$ [repo] alt merge feat --json
+exit 1
+err| {"error":{"details":{"command_output":{"encoding":"utf-8","text":"{\"schema_version\":1,\"result\":\"conflicted\",\"commit\":null,\"conflicts\":[\"f.txt\"]}\n","truncated":false},"operation_ids":[]},"kind":"conflict","message":"command reported a conflict or failed validation","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"partial","request_id":"<id32:0>","retryable":false},"schema_version":1}
+$ [repo] alt status --json
+exit 0
+out| {"schema_version":1,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[{"path":"later.txt","change":"added"},{"path":"only-feat.txt","change":"added"}],"unstaged":[],"untracked":[],"unmerged":["f.txt"],"clean":false}
+$ [repo] alt diff --json
+exit 0
+out| {"schema_version":1,"files":[]}
+$ [repo] alt diff --cached --json
+exit 0
+out| {"schema_version":1,"files":[{"path":"f.txt","status":"deleted","old_oid":"<id40:1>","new_oid":null,"old_mode":"100644","new_mode":null,"binary":false,"hunks":[{"old_start":1,"old_len":3,"new_start":1,"new_len":0,"lines":[{"tag":"remove","content":"l1\n"},{"tag":"remove","content":"main\n"},{"tag":"remove","content":"l3\n"}]}],"chunk_diff":null,"perceptual_diff":null,"part_diff":null,"ast_diff":null},{"path":"later.txt","status":"added","old_oid":null,"new_oid":"<id40:2>","old_mode":null,"new_mode":"100644","binary":false,"hunks":[{"old_start":1,"old_len":0,"new_start":1,"new_len":1,"lines":[{"tag":"add","content":"later\n"}]}],"chunk_diff":null,"perceptual_diff":null,"part_diff":null,"ast_diff":null},{"path":"only-feat.txt","status":"added","old_oid":null,"new_oid":"<id40:3>","old_mode":null,"new_mode":"100644","binary":false,"hunks":[{"old_start":1,"old_len":0,"new_start":1,"new_len":1,"lines":[{"tag":"add","content":"x\n"}]}],"chunk_diff":null,"perceptual_diff":null,"part_diff":null,"ast_diff":null}]}
+$ [repo] alt commit -m too early --json
+exit 0
+out| {"branch":"main","commit":"<id40:4>","operation_ids":["<id64:5>"],"request_id":"<id32:6>","schema_version":1,"tree":"<id40:7>"}
+$ [repo] alt switch feat --json
+exit 75
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"untracked working tree file 'f.txt' would be overwritten","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:8>","retryable":false},"schema_version":1}
+$ [repo] alt operation pending --json
+exit 0
+out| {"schema_version":1,"operations":[]}
+$ [repo] alt add f.txt --json
+exit 0
+out| {"operation_ids":["<id64:9>","<id64:10>"],"request_id":"<id32:11>","schema_version":1,"staged":1}
+$ [repo] alt status --json
+exit 0
+out| {"schema_version":1,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[{"path":"f.txt","change":"added"}],"unstaged":[],"untracked":[],"unmerged":[],"clean":false}
+$ [repo] alt commit -m merge feat --json
+exit 0
+out| {"branch":"main","commit":"<id40:12>","operation_ids":["<id64:13>"],"request_id":"<id32:14>","schema_version":1,"tree":"<id40:15>"}
+$ [repo] alt show --json
+exit 0
+out| {"schema_version":1,"commits":[{"oid":"<id40:12>","tree":"<id40:15>","parents":["<id40:4>"],"author":"json-test <json@test> <digits> +0000","committer":"json-test <json@test> <digits> +0000","message":"merge feat\n","note_message":null}]}
+$ [repo] alt log --json -n 1
+exit 0
+out| {"schema_version":1,"commits":[{"oid":"<id40:12>","tree":"<id40:15>","parents":["<id40:4>"],"author":"json-test <json@test> <digits> +0000","committer":"json-test <json@test> <digits> +0000","message":"merge feat\n","note_message":null}]}
+$ [repo] alt op-log -n 2 --json
+exit 0
+out| {"schema_version":1,"ops":[{"id":"<id64:13>","request_id":"<id32:14>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"commit","ref_changes":[{"name":"refs/heads/main","old":"<id40:4>","new":"<id40:12>"},{"name":"refs/notes/alt/meta","old":"<id40:16>","new":"<id40:17>"}],"workspace":{"name":"default","instance":"<id64:18>"},"inverse_of":null},{"id":"<id64:10>","request_id":"<id32:11>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"add","ref_changes":null,"recovery":{"phase":"completed","prepared":"<id64:9>"}}]}

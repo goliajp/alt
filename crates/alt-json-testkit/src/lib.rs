@@ -4,7 +4,8 @@
 //! libraries and reads back their text, damaged and edited in many ways,
 //! requiring the same bytes, the same verdicts and the same values.
 //! [`fixtures`] freezes what serde produced and accepted, so a type can be
-//! held to it after its serde implementation is gone.
+//! held to it after its serde implementation is gone. [`reads`] does the
+//! same for what a type reads, with the value or the error message.
 
 pub mod arbitrary;
 pub mod check;
@@ -12,6 +13,7 @@ pub mod drive;
 pub mod fixtures;
 pub mod generate;
 pub mod oneway;
+pub mod reads;
 pub mod rng;
 pub mod support;
 
@@ -68,6 +70,21 @@ macro_rules! module_fixture_tests {
             let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/json");
             $(
                 $crate::fixtures::verify_file::<$ty>(dir, concat!($prefix, "-", stringify!($ty)));
+            )*
+        }
+    };
+}
+
+/// Holds what the listed types read to the stored fixtures
+/// `tests/fixtures/json-read/<prefix>-<name>.txt` of the calling crate.
+#[macro_export]
+macro_rules! module_read_tests {
+    ($prefix:literal; $($name:ident: $ty:ty),* $(,)?) => {
+        #[test]
+        fn recorded_reads() {
+            let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/json-read");
+            $(
+                $crate::reads::verify_file::<$ty>(dir, concat!($prefix, "-", stringify!($name)));
             )*
         }
     };
