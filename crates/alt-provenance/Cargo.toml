@@ -11,4 +11,4 @@ alt-remote-protocol.workspace = true
 alt-crypto.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
+alt-json.workspace = true
