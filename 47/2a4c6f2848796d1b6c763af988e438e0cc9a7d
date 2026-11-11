@@ -1,0 +1,16 @@
+schema: alt-meta/1
+type: fix
+summary: read every object back from a built segment before it is published
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/examples/ingest_tree.rs
+touched: crates/alt-pack-segment/src/build.rs
+touched: crates/alt-pack-segment/src/lib.rs
+touched: crates/alt-pack-segment/src/readback.rs
+touched: crates/alt-pack-segment/tests/it/build.rs
+touched: crates/alt-server-store/src/bytes.rs
+touched: crates/alt-server-store/src/pack_native.rs
+touched: crates/alt-server-store/src/publication.rs
+touched: crates/alt-server-store/src/schema_v19.rs
+touched: crates/alt-server-store/tests/it/database/single_copy.rs
+touched: crates/alt-server-store/tests/it/database/single_copy/shared.rs
