@@ -11,12 +11,14 @@ mod format;
 mod ingest;
 mod object;
 mod scan;
+mod select;
 mod send;
 mod set;
 
 pub use format::{CommitInfo, Record, Segment};
 pub use ingest::{Ingested, Limits, ingest};
-pub use send::{Selection, build_pack};
+pub use select::Selection;
+pub use send::build_pack;
 pub use set::SegmentSet;
 
 pub type Oid = [u8; 20];

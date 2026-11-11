@@ -1,3 +1,5 @@
+mod fetch;
+
 use alt_pack_segment::{Limits, Segment, SegmentSet, ingest};
 use std::{fs, io::Write, path::Path, process::Command, sync::Arc};
 

@@ -4,13 +4,10 @@
 use crate::{
     Error, Kind, Oid, SegmentSet,
     format::Delta,
-    object::{self, Parsed},
     scan::{self, Form},
+    select::Selection,
 };
-use std::{
-    collections::{BinaryHeap, HashMap, HashSet},
-    io::Write,
-};
+use std::{collections::HashSet, io::Write};
 
 struct Hashing<'a, W: Write> {
     inner: &'a mut W,
@@ -63,53 +60,6 @@ pub fn build_pack<'a>(
     Ok(pack)
 }
 
-const WANT: u8 = 1;
-const HAVE: u8 = 2;
-
-/// adds `bit` to a commit's flags, queueing it on first sight; `open` counts queued commits
-/// that are wanted and not known to be held
-fn mark(
-    flags: &mut HashMap<Oid, u8>,
-    heap: &mut BinaryHeap<(u32, Oid)>,
-    open: &mut usize,
-    oid: Oid,
-    bit: u8,
-    generation: u32,
-) {
-    let entry = flags.entry(oid).or_insert_with(|| {
-        heap.push((generation, oid));
-        0
-    });
-    let before = *entry;
-    *entry |= bit;
-    match (before, *entry) {
-        (0, WANT) => *open += 1,
-        (WANT, both) if both & HAVE != 0 => *open -= 1,
-        _ => {}
-    }
-}
-
-/// the objects a client asked for and does not have
-pub struct Selection {
-    objects: Vec<Oid>,
-    /// objects the client is known to hold; usable as delta bases of a thin pack
-    known: HashSet<Oid>,
-}
-
-impl Selection {
-    pub fn len(&self) -> usize {
-        self.objects.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.objects.is_empty()
-    }
-
-    pub fn objects(&self) -> &[Oid] {
-        &self.objects
-    }
-}
-
 impl SegmentSet {
     /// every segment can be sent as stored: no duplicate objects within or across segments
     pub fn verbatim(&self) -> bool {
@@ -132,150 +82,6 @@ impl SegmentSet {
             out.put(&pack[12..pack.len() - 20])?;
         }
         out.finish()
-    }
-
-    fn tree_objects(
-        &self,
-        tree: &Oid,
-        seen: &mut HashSet<Oid>,
-        skip: &HashSet<Oid>,
-        out: Option<&mut Vec<Oid>>,
-    ) -> Result<(), Error> {
-        let mut out = out;
-        let mut pending = vec![*tree];
-        while let Some(oid) = pending.pop() {
-            if skip.contains(&oid) || !seen.insert(oid) {
-                continue;
-            }
-            if let Some(out) = out.as_deref_mut() {
-                out.push(oid);
-            }
-            let (kind, data) = self.read(&oid)?;
-            let Parsed::Tree(entries) = object::parse(kind, &data)? else {
-                return Err(Error::Corrupt("tree expected"));
-            };
-            for (child, kind) in entries {
-                match kind {
-                    Kind::Tree => pending.push(child),
-                    _ if skip.contains(&child) || !seen.insert(child) => {}
-                    _ => {
-                        if let Some(out) = out.as_deref_mut() {
-                            out.push(child);
-                        }
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// objects reachable from `wants` and not from `haves`; unknown haves are ignored
-    pub fn select(&self, wants: &[Oid], haves: &[Oid]) -> Result<Selection, Error> {
-        let mut objects = Vec::new();
-        let mut seen = HashSet::new();
-        let mut flags: HashMap<Oid, u8> = HashMap::new();
-        let mut heap = BinaryHeap::new();
-        let mut open = 0usize;
-        let mut trees = Vec::new();
-        for want in wants {
-            // peel tags down to what they name
-            let mut oid = *want;
-            loop {
-                match self.kind(&oid)?.ok_or(Error::NotFound(oid))? {
-                    Kind::Commit => {
-                        let generation = self
-                            .commit(&oid)
-                            .ok_or(Error::Corrupt("commit graph"))?
-                            .generation;
-                        mark(&mut flags, &mut heap, &mut open, oid, WANT, generation);
-                        break;
-                    }
-                    Kind::Tag => {
-                        if seen.insert(oid) {
-                            objects.push(oid);
-                        }
-                        let (kind, data) = self.read(&oid)?;
-                        let Parsed::Tag { object, .. } = object::parse(kind, &data)? else {
-                            unreachable!()
-                        };
-                        oid = object;
-                    }
-                    Kind::Tree => {
-                        trees.push(oid);
-                        break;
-                    }
-                    Kind::Blob => {
-                        if seen.insert(oid) {
-                            objects.push(oid);
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-        for have in haves {
-            if let Some(commit) = self.commit(have) {
-                mark(
-                    &mut flags,
-                    &mut heap,
-                    &mut open,
-                    *have,
-                    HAVE,
-                    commit.generation,
-                );
-            }
-        }
-        // children always carry a higher generation than their parents, so a commit's flags
-        // are final when it leaves the heap
-        let mut commits = Vec::new();
-        let mut boundary = Vec::new();
-        while open > 0 {
-            let Some((_, oid)) = heap.pop() else { break };
-            let state = flags[&oid];
-            let commit = self.commit(&oid).ok_or(Error::Corrupt("commit graph"))?;
-            if state & HAVE != 0 {
-                boundary.push(commit.tree);
-            } else {
-                open -= 1;
-                commits.push((oid, commit.tree));
-            }
-            for parent in &commit.parents {
-                let generation = self
-                    .commit(parent)
-                    .ok_or(Error::Corrupt("commit graph"))?
-                    .generation;
-                mark(
-                    &mut flags,
-                    &mut heap,
-                    &mut open,
-                    *parent,
-                    if state & HAVE != 0 { HAVE } else { WANT },
-                    generation,
-                );
-            }
-        }
-        for (_, oid) in heap {
-            if flags[&oid] & HAVE != 0
-                && let Some(commit) = self.commit(&oid)
-            {
-                boundary.push(commit.tree);
-            }
-        }
-        let mut known = HashSet::new();
-        let nothing = HashSet::new();
-        for tree in &boundary {
-            self.tree_objects(tree, &mut known, &nothing, None)?;
-        }
-        for (oid, tree) in &commits {
-            if seen.insert(*oid) {
-                objects.push(*oid);
-            }
-            self.tree_objects(tree, &mut seen, &known, Some(&mut objects))?;
-        }
-        for tree in &trees {
-            self.tree_objects(tree, &mut seen, &known, Some(&mut objects))?;
-        }
-        Ok(Selection { objects, known })
     }
 
     /// writes `selection` as one pack; with `thin`, deltas may rest on objects the client holds
