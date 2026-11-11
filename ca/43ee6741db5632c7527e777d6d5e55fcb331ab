@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: perf
+summary: write the x86 BLAKE3 block loops in assembly
+author-type: human
+author: doracawl
+touched: crates/alt-hash/src/blake3.rs
+touched: crates/alt-hash/src/blake3/avx2.rs
+touched: crates/alt-hash/src/blake3/avx2/first.rs
+touched: crates/alt-hash/src/blake3/avx2/pairs.rs
+touched: crates/alt-hash/src/blake3/avx2/pairs/text.rs
+touched: crates/alt-hash/src/blake3/avx2/rounds.rs
+touched: crates/alt-hash/src/blake3/lanes.rs
+touched: crates/alt-hash/src/blake3/sse41.rs
+touched: crates/alt-hash/src/blake3/sse41/vex.rs
