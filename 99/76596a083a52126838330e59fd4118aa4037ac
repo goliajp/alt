@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: test
+summary: compare zstd output sizes with frames libzstd made knowing the input length
+author-type: human
+author: doracawl
+touched: crates/alt-zstd/tests/it/frames/sized.pack
+touched: crates/alt-zstd/tests/it/inputs.rs
+touched: crates/alt-zstd/tests/it/pack.rs
+touched: crates/alt-zstd/tests/it/regenerate.rs
+touched: crates/alt-zstd/tests/it/roundtrip.rs
