@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: perf
+summary: take zstd extra bits from the low bits of each length when writing sequences
+author-type: human
+author: doracawl
+touched: crates/alt-zstd/src/enc/fast.rs
+touched: crates/alt-zstd/src/enc/matcher.rs
+touched: crates/alt-zstd/src/enc/seq.rs
