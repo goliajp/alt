@@ -2,7 +2,7 @@
 
 use crate::{Error, Kind, Oid};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum Parsed {
     Blob,
     Commit { tree: Oid, parents: Vec<Oid> },

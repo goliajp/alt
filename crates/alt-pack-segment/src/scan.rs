@@ -90,13 +90,16 @@ pub(crate) struct Scanned {
     pub body_end: usize,
 }
 
-/// `keep` bounds which plain payloads stay in memory; larger ones are handed to `large`
-/// (which hashes them) and dropped
+/// Inflated payloads stay in memory for the later passes while they fit: a plain blob
+/// larger than `keep` never does, and nothing does once `budget` bytes are held. A
+/// plain payload that is not kept is handed to `unkept`, which hashes and parses it; a
+/// delta that is not kept is inflated again when it is resolved.
 pub(crate) fn scan(
     pack: &[u8],
     limits: &crate::Limits,
     keep: usize,
-    mut large: impl FnMut(usize, Kind, &[u8]),
+    budget: u64,
+    mut unkept: impl FnMut(usize, Kind, &[u8]),
 ) -> Result<Scanned, Error> {
     if pack.len() < 32 || &pack[..4] != b"PACK" {
         return Err(Error::Format("not a pack"));
@@ -111,6 +114,7 @@ pub(crate) fn scan(
     let body_end = pack.len() - 20;
     let mut entries = Vec::with_capacity(count);
     let mut inflated = 0u64;
+    let mut held = 0u64;
     let mut pos = 12;
     for index in 0..count {
         let (form, size, head) = header(&pack[..body_end], pos)?;
@@ -132,12 +136,17 @@ pub(crate) fn scan(
             .ok_or(Error::Limit("inflated bytes"))?;
         let (data, compressed) = inflate(&pack[pos + head..body_end], size as usize)?;
         let len = head + compressed;
+        let fits = held + data.len() as u64 <= budget;
         let data = match form {
-            Form::Plain(kind @ Kind::Blob) if data.len() > keep => {
-                large(index, kind, &data);
+            Form::Plain(kind) if !fits || (kind == Kind::Blob && data.len() > keep) => {
+                unkept(index, kind, &data);
                 None
             }
-            _ => Some(data),
+            _ if !fits => None,
+            _ => {
+                held += data.len() as u64;
+                Some(data)
+            }
         };
         entries.push(Raw {
             offset: pos as u64,

@@ -1,3 +1,4 @@
+mod budget;
 mod fetch;
 mod merge;
 

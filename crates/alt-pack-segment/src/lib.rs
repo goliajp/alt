@@ -17,7 +17,7 @@ mod send;
 mod set;
 
 pub use format::{CommitInfo, Record, Segment};
-pub use ingest::{Ingested, Limits, ingest};
+pub use ingest::{Ingested, Limits, ingest, ingest_holding};
 pub use merge::merge;
 pub use select::Selection;
 pub use send::{Piece, build_pack};

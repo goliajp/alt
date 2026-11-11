@@ -19,6 +19,11 @@ pub struct Limits {
 
 /// plain blobs above this size are hashed during the scan and not kept in memory
 const KEEP: usize = 1 << 20;
+/// Inflated bytes kept in memory between the scan and the later passes. Up to here a
+/// pack is inflated once and hashed on every core; what lies beyond is hashed by the
+/// scan itself and inflated again where a delta needs it, so that the memory a pack
+/// takes does not grow with its size.
+const HELD: u64 = 256 << 20;
 
 struct Meta {
     oid: Oid,
@@ -89,6 +94,7 @@ fn digest(kind: Kind, data: &[u8]) -> (Oid, [u8; 32]) {
 }
 
 struct Shared<'a> {
+    pack: &'a [u8],
     entries: &'a [Raw],
     by_base: &'a HashMap<Oid, Vec<usize>>,
     limits: &'a Limits,
@@ -122,9 +128,16 @@ fn descend(
             return Err(Error::Limit("delta depth"));
         }
         let raw = &shared.entries[child];
-        let delta = raw.data.as_deref().ok_or(Error::Format("delta payload"))?;
+        let delta = match &raw.data {
+            Some(delta) => std::borrow::Cow::Borrowed(delta.as_slice()),
+            // not kept by the scan
+            None => {
+                let start = raw.offset as usize + raw.header as usize;
+                std::borrow::Cow::Owned(scan::inflate(&shared.pack[start..], raw.size as usize)?.0)
+            }
+        };
         let data =
-            alt_git_pack::delta::apply_bounded(&frame.data, delta, shared.limits.object_bytes)
+            alt_git_pack::delta::apply_bounded(&frame.data, &delta, shared.limits.object_bytes)
                 .map_err(|_| Error::Format("delta instructions"))?;
         let kind = frame.kind;
         let (oid, blake3) = digest(kind, &data);
@@ -159,17 +172,30 @@ fn descend(
 
 /// `pack` is the complete received pack including its trailer
 pub fn ingest(pack: &[u8], existing: &SegmentSet, limits: &Limits) -> Result<Ingested, Error> {
+    ingest_holding(pack, existing, limits, HELD)
+}
+
+/// `ingest` with a chosen bound on the inflated bytes kept in memory; the result does
+/// not depend on it
+#[doc(hidden)]
+pub fn ingest_holding(
+    pack: &[u8],
+    existing: &SegmentSet,
+    limits: &Limits,
+    held: u64,
+) -> Result<Ingested, Error> {
     let (trailer, scanned) = alt_threads::join(
         || -> Oid { alt_hash::sha1(&pack[..pack.len().saturating_sub(20)]) },
         || {
-            let mut large = HashMap::new();
-            scan::scan(pack, limits, KEEP, |index, kind, data| {
-                large.insert(index, (kind, digest(kind, data), data.len() as u64));
+            let mut unkept = HashMap::new();
+            scan::scan(pack, limits, KEEP, held, |index, kind, data| {
+                let parsed = object::parse(kind, data);
+                unkept.insert(index, (kind, digest(kind, data), data.len() as u64, parsed));
             })
-            .map(|scanned| (scanned, large))
+            .map(|scanned| (scanned, unkept))
         },
     );
-    let (scanned, large) = scanned?;
+    let (scanned, unkept) = scanned?;
     if trailer[..] != pack[scanned.body_end..] {
         return Err(Error::Format("pack checksum"));
     }
@@ -194,6 +220,7 @@ pub fn ingest(pack: &[u8], existing: &SegmentSet, limits: &Limits) -> Result<Ing
         }
     }
     let shared = Shared {
+        pack,
         entries: &entries,
         by_base: &by_base,
         limits,
@@ -249,20 +276,31 @@ pub fn ingest(pack: &[u8], existing: &SegmentSet, limits: &Limits) -> Result<Ing
                 ));
             }
             for index in batch {
-                // large blobs were hashed during the scan and are not kept in memory
+                // what the scan did not keep, it hashed and parsed itself
                 if entries[*index].data.is_none() {
-                    let (kind, (oid, blake3), size) = large[index];
+                    let (kind, (oid, blake3), size, parsed) = &unkept[index];
                     out.push((
                         *index,
                         Meta {
-                            oid,
-                            blake3,
-                            kind,
-                            size,
+                            oid: *oid,
+                            blake3: *blake3,
+                            kind: *kind,
+                            size: *size,
                             depth: 0,
                             base: None,
                             outside: false,
-                            parsed: Parsed::Blob,
+                            parsed: match parsed {
+                                Ok(parsed) => parsed.clone(),
+                                Err(_) => object::parse(
+                                    *kind,
+                                    &scan::inflate(
+                                        &pack[entries[*index].offset as usize
+                                            + entries[*index].header as usize..],
+                                        *size as usize,
+                                    )?
+                                    .0,
+                                )?,
+                            },
                         },
                     ));
                 }
