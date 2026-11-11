@@ -37,7 +37,7 @@ impl Store {
             let mut scope=current.scope.clone(); scope.recovery_epoch=unsigned(row.get(0))?;
             let key=RequestKey { scope,actor_id:row.get(1),request_id:row.get(2) };
             let state=RequestState::Expired {digest:row.get(3)};
-            finish(&mut tx,&key,"expired",&state,unsigned(row.get(4))?)?;
+            finish(&mut tx,&key,"expired",&crate::Jsonb::from(&state)?,unsigned(row.get(4))?)?;
         }
         tx.execute(
             "DELETE FROM alt_pins WHERE repository=$1 AND expires_at<=$2",

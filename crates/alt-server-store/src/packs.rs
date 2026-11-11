@@ -187,13 +187,29 @@ pub(crate) fn insert_segment(
 
 /// The audit and outbox event of a committed publication and the stored state of its
 /// request. Both hold the whole receipt, which is written once and placed in each.
-fn committed_documents(receipt: &Receipt) -> Result<(Vec<u8>, Vec<u8>)> {
+pub(crate) fn committed_documents(receipt: &Receipt) -> Result<(Vec<u8>, Vec<u8>)> {
     let receipt = alt_json::to_vec(receipt)?;
     let around = |open: &[u8]| [open, receipt.as_slice(), b"}"].concat();
     Ok((
         around(br#"{"kind":"publication_committed","receipt":"#),
         around(br#"{"state":"committed","receipt":"#),
     ))
+}
+
+/// the audit record of a committed publication and its outbox event: one document,
+/// sent once and stored in both tables
+pub(crate) fn record_committed(
+    tx: &mut crate::database::Transaction<'_>,
+    repository: &str,
+    sequence: u64,
+    actor: &str,
+    event: &[u8],
+) -> Result<()> {
+    tx.execute(
+        "WITH audit AS (INSERT INTO alt_audit(repository,sequence,actor_id,event) VALUES($1,$2,$3,$4::jsonb)) INSERT INTO alt_outbox(repository,sequence,event) VALUES($1,$2,$4::jsonb)",
+        &[&repository, &integer(sequence)?, &actor, &JsonText(event)],
+    )?;
+    Ok(())
 }
 
 impl Store {
@@ -301,30 +317,7 @@ impl Store {
         let time = now(&mut tx)?;
         let validated =
             validate_publication(publication, &current, &auth, graph, self.limits, time)?;
-        let mut names = Vec::new();
-        let mut oids = Vec::new();
-        let mut deleted = Vec::new();
-        for update in &validated.updates {
-            match update.new {
-                Some(oid) => {
-                    names.push(update.name.as_str());
-                    oids.push(oid.to_string());
-                }
-                None => deleted.push(update.name.as_str()),
-            }
-        }
-        if !names.is_empty() {
-            tx.execute(
-                "INSERT INTO alt_refs(repository,name,oid) SELECT $1,name,oid FROM unnest($2::text[],$3::text[]) AS refs(name,oid) ON CONFLICT(repository,name) DO UPDATE SET oid=excluded.oid",
-                &[repository, &names, &oids],
-            )?;
-        }
-        if !deleted.is_empty() {
-            tx.execute(
-                "DELETE FROM alt_refs WHERE repository=$1 AND name=ANY($2)",
-                &[repository, &deleted],
-            )?;
-        }
+        crate::publication::replace_refs(&mut tx, repository, &validated.updates)?;
         let unreachable = publication
             .refs
             .iter()
@@ -366,15 +359,7 @@ impl Store {
                 .collect(),
         };
         let (event, result) = committed_documents(&receipt)?;
-        let event = JsonText(&event);
-        tx.execute(
-            "INSERT INTO alt_audit(repository,sequence,actor_id,event) VALUES($1,$2,$3,$4)",
-            &[repository, &integer(sequence)?, &auth.actor_id, &event],
-        )?;
-        tx.execute(
-            "INSERT INTO alt_outbox(repository,sequence,event) VALUES($1,$2,$3)",
-            &[repository, &integer(sequence)?, &event],
-        )?;
+        record_committed(&mut tx, repository, sequence, &auth.actor_id, &event)?;
         tx.execute(
             "INSERT INTO alt_requests(repository,epoch,actor_id,request_id,digest,publication,manifest,state,result,expires_at,reserved_bytes) VALUES($1,$2,$3,$4,$5,$6,$7,'committed',$8,0,0)",
             &[
