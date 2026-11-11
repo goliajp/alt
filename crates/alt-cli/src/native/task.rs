@@ -296,4 +296,5 @@ mod json_tests {
     use super::*;
 
     alt_json_testkit::module_fixture_tests!("native-task"; TaskOperation);
+    alt_json_testkit::module_read_tests!("state-task"; TaskOperation: TaskOperation, DeliveryOrigin: alt_delivery::Snapshot);
 }
