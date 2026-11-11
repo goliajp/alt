@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: perf
+summary: bound the inflated bytes pack verification keeps in memory
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/ingest.rs
+touched: crates/alt-pack-segment/src/lib.rs
+touched: crates/alt-pack-segment/src/object.rs
+touched: crates/alt-pack-segment/src/scan.rs
+touched: crates/alt-pack-segment/tests/it/budget.rs
+touched: crates/alt-pack-segment/tests/it/main.rs
