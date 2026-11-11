@@ -1,0 +1,15 @@
+schema: alt-meta/1
+type: perf
+summary: open a git view with the references its request needs and split the http handler into modules
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/lib.rs
+touched: crates/alt-server-store/src/pack_view.rs
+touched: crates/alt-server/src/git.rs
+touched: crates/alt-server/src/git_read.rs
+touched: crates/alt-server/src/http.rs
+touched: crates/alt-server/src/http/body.rs
+touched: crates/alt-server/src/http/handle.rs
+touched: crates/alt-server/src/http/respond.rs
+touched: crates/alt-server/tests/it/database/git.rs
+touched: crates/alt-server/tests/it/database/git/many_refs.rs
