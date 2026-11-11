@@ -59,7 +59,11 @@ impl Params {
             // the window must reach all of the prefix, and the tables must
             // not forget most of it before the data arrives
             params.window_log = total_log.clamp(10, WINDOW_LOG_MAX);
-            let grown = total_log.saturating_sub(2).min(TABLE_LOG_MAX);
+            // the prefix is indexed about as densely as the data is long,
+            // so a table larger than the data only costs time: it is
+            // cleared, and filling it misses the cache on every entry
+            let data_log = data_len.max(1 << 16).next_power_of_two().ilog2();
+            let grown = total_log.saturating_sub(2).min(TABLE_LOG_MAX).min(data_log);
             params.long_log = params.long_log.max(grown);
             params.short_log = params.short_log.max(grown.saturating_sub(double as u32));
         }

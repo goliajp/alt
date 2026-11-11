@@ -208,17 +208,22 @@ pub(crate) fn build_table(
     let size = 1usize << log;
     let mut slots = [0u8; 1 << LL_MAX_LOG];
     spread(norm, log, &mut slots[..size]);
-    let mut next = [0u16; 256];
-    for (state, &count) in next.iter_mut().zip(norm) {
-        *state = if count == -1 { 1 } else { count as u16 };
-    }
-    for (entry, &slot) in table[..size].iter_mut().zip(&slots[..size]) {
-        let symbol = slot as usize;
-        let state = next[symbol] as u32;
-        next[symbol] += 1;
-        let bits = log - state.ilog2();
+    // per symbol: the part of its entries that never changes, with the
+    // number of its next state where an entry keeps the state to go to
+    let mut words = [0u64; 256];
+    for (symbol, (word, &count)) in words.iter_mut().zip(norm).enumerate() {
         let (base, extra) = value(symbol);
-        let next_state = (state << bits) - size as u32;
-        *entry = Entry::new(base, bias + next_state as u16, extra, bits as u8);
+        let first = if count == -1 { 1 } else { count as u16 };
+        *word = Entry::new(base, first, extra, 0).0;
+    }
+    let rebase = (bias as u64).wrapping_sub(size as u64) << 16;
+    for (entry, &slot) in table[..size].iter_mut().zip(&slots[..size]) {
+        let word = &mut words[slot as usize];
+        let fixed = *word;
+        *word = fixed + (1 << 16);
+        let state = (fixed >> 16) as u16 as u32;
+        let bits = log - state.ilog2();
+        let next = ((state as u64) << (bits + 16)).wrapping_add(rebase);
+        *entry = Entry((fixed & !0xFFFF_0000) | (next & 0xFFFF_0000) | bits as u64);
     }
 }
