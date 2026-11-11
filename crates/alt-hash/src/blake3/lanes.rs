@@ -4,7 +4,7 @@
 //! every lane, so the rounds are the scalar ones applied to all lanes at once. The
 //! message has to be laid out the same way: word `k` of every lane in one vector.
 
-use super::{Backend, IV, SCHEDULE};
+use super::{Backend, CHUNK_END, CHUNK_LEN, CHUNK_START, IV, MAX_LANES, ROOT, SCHEDULE};
 
 /// equal-sized nodes that lie one after another in memory
 pub(super) struct Batch<'a> {
@@ -48,6 +48,19 @@ pub(super) trait Lanes: Copy {
     /// writes the eight words of each lane as 32 consecutive bytes, lane after lane:
     /// `N * 32` bytes at `out`
     unsafe fn store(h: &[Self; 8], out: *mut u8);
+    /// `load` for blocks that lie anywhere: reads 64 bytes at each of the first `N`
+    /// of `blocks`
+    #[inline(always)]
+    unsafe fn gather(blocks: &[*const u8; MAX_LANES]) -> [Self; 16] {
+        let mut together = [0u8; MAX_LANES * 64];
+        // each source is 64 readable bytes, and `N` of them fit in the buffer
+        unsafe {
+            for (lane, block) in blocks[..Self::N].iter().enumerate() {
+                std::ptr::copy_nonoverlapping(*block, together.as_mut_ptr().add(lane * 64), 64);
+            }
+            Self::load(together.as_ptr(), 64)
+        }
+    }
 }
 
 macro_rules! g {
@@ -148,6 +161,147 @@ unsafe fn compress_lanes<V: Lanes>(batch: &Batch, input: &[u8], counter: u64, ou
             flags = batch.flags;
         }
         V::store(&h, out.as_mut_ptr());
+    }
+}
+
+/// one chunk among those `compress_ragged` takes side by side
+#[derive(Clone, Copy)]
+pub(super) struct Short<'a> {
+    /// at most a chunk
+    pub input: &'a [u8],
+    pub counter: u64,
+    /// whether the chunk is a whole input, whose last compression gives its hash
+    /// and not a chaining value
+    pub root: bool,
+}
+
+impl Short<'_> {
+    /// compressions the chunk takes; even an empty one takes a block of zeros
+    #[inline(always)]
+    pub fn blocks(&self) -> usize {
+        self.input.len().div_ceil(64).max(1)
+    }
+}
+
+/// Whether compressing these chunks side by side beats one after another. A step of
+/// four lanes costs a little over two single blocks, and every step is paid for the
+/// longest chunk.
+#[inline]
+pub(super) fn alike(chunks: &[Short]) -> bool {
+    let blocks = chunks.iter().map(Short::blocks);
+    let (total, longest) = blocks.fold((0, 0), |(total, longest), blocks| {
+        (total + blocks, longest.max(blocks))
+    });
+    longest != 0 && total >= 3 * longest
+}
+
+/// Compresses at most `V::N` chunks of any lengths side by side and writes 32 bytes
+/// for each to `out`: its hash if it is a root, else its chaining value. Every step
+/// costs the same however many lanes still have input, so the caller decides whether
+/// the chunks are alike enough. The caller has detected the CPU features `V` needs.
+#[inline(always)]
+pub(super) unsafe fn compress_ragged<V: Lanes>(
+    key: &[u32; 8],
+    flags: u32,
+    chunks: &[Short],
+    out: &mut [u8],
+) {
+    assert!(chunks.len() <= V::N && out.len() == chunks.len() * 32);
+    // the last block of each lane, zero beyond its input; idle lanes compress zeros
+    let mut last = [[0u8; 64]; MAX_LANES];
+    let mut last_len = [0u32; MAX_LANES];
+    let mut blocks = [0; MAX_LANES];
+    let (mut low, mut high) = ([0; 8], [0; 8]);
+    for (lane, chunk) in chunks.iter().enumerate() {
+        assert!(chunk.input.len() <= CHUNK_LEN && !(chunk.root && chunk.counter != 0));
+        blocks[lane] = chunk.blocks();
+        let rest = &chunk.input[(blocks[lane] - 1) * 64..];
+        last[lane][..rest.len()].copy_from_slice(rest);
+        last_len[lane] = rest.len() as u32;
+        low[lane] = chunk.counter as u32;
+        high[lane] = (chunk.counter >> 32) as u32;
+    }
+    let steps = blocks.iter().copied().max().unwrap_or(0);
+    let mut done = [0u8; MAX_LANES * 32];
+    // every pointer handed to `gather` is to 64 bytes: a whole block inside a
+    // chunk's input before its last one, or one of the blocks in `last`
+    unsafe {
+        let mut h = [
+            V::splat(key[0]),
+            V::splat(key[1]),
+            V::splat(key[2]),
+            V::splat(key[3]),
+            V::splat(key[4]),
+            V::splat(key[5]),
+            V::splat(key[6]),
+            V::splat(key[7]),
+        ];
+        let iv = [
+            V::splat(IV[0]),
+            V::splat(IV[1]),
+            V::splat(IV[2]),
+            V::splat(IV[3]),
+        ];
+        let (low, high) = (V::words(&low), V::words(&high));
+        for step in 0..steps {
+            let mut at = [last[0].as_ptr(); MAX_LANES];
+            let (mut lens, mut lane_flags) = ([0; 8], [0; 8]);
+            let mut ending = false;
+            for (lane, chunk) in chunks.iter().enumerate() {
+                let start = if step == 0 { CHUNK_START } else { 0 };
+                if step + 1 < blocks[lane] {
+                    at[lane] = chunk.input.as_ptr().add(step * 64);
+                    lens[lane] = 64;
+                    lane_flags[lane] = flags | start;
+                } else {
+                    // a lane that has ended goes on compressing its last block; its
+                    // result was taken when it ended
+                    at[lane] = last[lane].as_ptr();
+                    lens[lane] = last_len[lane];
+                    let root = if chunk.root { ROOT } else { 0 };
+                    lane_flags[lane] = flags | start | CHUNK_END | root;
+                    ending |= step + 1 == blocks[lane];
+                }
+            }
+            let m = V::gather(&at);
+            let mut v = [
+                h[0],
+                h[1],
+                h[2],
+                h[3],
+                h[4],
+                h[5],
+                h[6],
+                h[7],
+                iv[0],
+                iv[1],
+                iv[2],
+                iv[3],
+                low,
+                high,
+                V::words(&lens),
+                V::words(&lane_flags),
+            ];
+            round(&mut v, &m, &SCHEDULE[0]);
+            round(&mut v, &m, &SCHEDULE[1]);
+            round(&mut v, &m, &SCHEDULE[2]);
+            round(&mut v, &m, &SCHEDULE[3]);
+            round(&mut v, &m, &SCHEDULE[4]);
+            round(&mut v, &m, &SCHEDULE[5]);
+            round(&mut v, &m, &SCHEDULE[6]);
+            for word in 0..8 {
+                h[word] = v[word].xor(v[word + 8]);
+            }
+            if ending {
+                V::store(&h, done.as_mut_ptr());
+                for lane in 0..chunks.len() {
+                    if step + 1 == blocks[lane] {
+                        out[lane * 32..lane * 32 + 32]
+                            .copy_from_slice(&done[lane * 32..lane * 32 + 32]);
+                    }
+                }
+            }
+        }
     }
 }
 

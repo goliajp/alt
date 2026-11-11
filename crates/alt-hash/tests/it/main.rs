@@ -1,5 +1,6 @@
 mod blake2b;
 mod blake3;
+mod blake3_many;
 mod sha512;
 
 use alt_hash::{Sha1, Sha256, sha1, sha1_many, sha256};

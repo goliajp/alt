@@ -112,8 +112,14 @@ type Compress = unsafe fn(&mut [u64; 8], &[u8]);
 /// the fastest implementation this CPU supports, and its name
 fn select() -> (&'static str, Compress) {
     #[cfg(target_arch = "aarch64")]
-    if std::arch::is_aarch64_feature_detected!("sha3") {
-        return ("sha512 instructions", arm::compress);
+    {
+        use std::arch::is_aarch64_feature_detected as detected;
+        if detected!("sha3") {
+            return ("sha512 instructions", arm::compress);
+        }
+        if detected!("neon") {
+            return ("neon", neon::compress);
+        }
     }
     #[cfg(target_arch = "x86_64")]
     {
@@ -193,5 +199,7 @@ pub fn portable(state: &mut [u64; 8], blocks: &[u8]) {
 
 #[cfg(target_arch = "aarch64")]
 mod arm;
+#[cfg(target_arch = "aarch64")]
+mod neon;
 #[cfg(target_arch = "x86_64")]
 mod x86;

@@ -8,12 +8,14 @@
 //! the per-entry checksum; resends copy the stored compressed bytes.
 
 mod build;
+mod carried;
 mod format;
 mod generation;
 mod ingest;
 mod merge;
 mod object;
 mod scan;
+mod search;
 mod select;
 mod send;
 mod set;

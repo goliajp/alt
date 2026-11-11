@@ -7,6 +7,7 @@
 mod digest;
 mod hasher;
 mod lanes;
+mod many;
 pub mod portable;
 mod tree;
 
@@ -19,6 +20,7 @@ mod sse41;
 
 pub use digest::{Hash, Hex, HexError};
 pub use hasher::Hasher;
+pub use many::{hash_many, hash_many_with};
 
 /// bytes in a hash
 pub const OUT_LEN: usize = 32;
@@ -207,6 +209,52 @@ impl Backend {
             #[cfg(target_arch = "x86_64")]
             Kind::Avx2 => unsafe { sse41::absorb_vex(cv, blocks, counter, flags, flags_start) },
             _ => portable::absorb(cv, blocks, counter, flags, flags_start),
+        }
+    }
+
+    /// how many chunks of unequal lengths one call of `ragged` compresses side by
+    /// side; zero where that is never faster than one after another
+    #[inline]
+    fn ragged_lanes(self) -> usize {
+        match self.0 {
+            Kind::Portable => 0,
+            #[cfg(target_arch = "aarch64")]
+            Kind::Neon | Kind::NeonPaired => 4,
+            #[cfg(target_arch = "x86_64")]
+            Kind::Sse41 | Kind::Avx2 => 4,
+        }
+    }
+
+    /// Whether the chunks at the end of one input that do not fill a group are
+    /// worth compressing with `ragged`. Not with AVX2, whose groups of two and of
+    /// four full chunks are faster: measured at 3072 bytes, 2062 against 1564 MiB/s.
+    #[inline]
+    fn ragged_tail(self) -> bool {
+        match self.0 {
+            #[cfg(target_arch = "x86_64")]
+            Kind::Avx2 => false,
+            _ => self.ragged_lanes() != 0,
+        }
+    }
+
+    /// For each of at most `ragged_lanes` chunks, 32 bytes written to `out`: its
+    /// hash if it is a root, else its chaining value.
+    fn ragged(self, key: &[u32; 8], flags: u32, chunks: &[lanes::Short], out: &mut [u8]) {
+        match self.0 {
+            Kind::Portable => {
+                for (chunk, out) in chunks.iter().zip(out.as_chunks_mut::<32>().0) {
+                    let output = tree::chunk(chunk.input, key, chunk.counter, flags, self);
+                    *out = match chunk.root {
+                        true => *output.root(self).as_bytes(),
+                        false => output.chaining_value(self),
+                    };
+                }
+            }
+            // each value only exists after the features of its functions were detected
+            #[cfg(target_arch = "aarch64")]
+            Kind::Neon | Kind::NeonPaired => unsafe { neon::ragged(key, flags, chunks, out) },
+            #[cfg(target_arch = "x86_64")]
+            Kind::Sse41 | Kind::Avx2 => unsafe { sse41::ragged(key, flags, chunks, out) },
         }
     }
 
