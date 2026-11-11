@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: feat
+summary: merge pack segments into one, counting delta chains across segments
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/ingest.rs
+touched: crates/alt-pack-segment/src/lib.rs
+touched: crates/alt-pack-segment/src/merge.rs
+touched: crates/alt-pack-segment/src/send.rs
+touched: crates/alt-pack-segment/tests/it/main.rs
+touched: crates/alt-pack-segment/tests/it/merge.rs
