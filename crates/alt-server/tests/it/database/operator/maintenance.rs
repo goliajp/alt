@@ -357,6 +357,70 @@ fn publish(store: &mut Store, token: &str) -> Payload {
     store.publish(&credential, &work, &graph).unwrap();
     p
 }
+/// Pushes a commit whose single file is too large for a segment kept with its row, so
+/// that its segment is a file. Returns the commit, the blob and the blob's bytes.
+fn push_large(store: &mut Store, token: &str) -> (String, ObjectId, Vec<u8>) {
+    use alt_pack_segment::Kind;
+    let mut state = 0x9e37_79b9_7f4a_7c15u64;
+    let asset: Vec<u8> = (0..200_000)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state as u8
+        })
+        .collect();
+    let blob = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, &asset);
+    let mut tree = b"100644 asset.bin\0".to_vec();
+    tree.extend_from_slice(blob.as_bytes());
+    let tree_id = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Tree, &tree);
+    let commit = format!(
+        "tree {tree_id}\nauthor A <a@example.test> 1 +0000\ncommitter A <a@example.test> 1 +0000\n\nlarge asset\n"
+    )
+    .into_bytes();
+    let commit_id = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Commit, &commit);
+    let pack = alt_pack_segment::build_pack(
+        [
+            (Kind::Blob, asset.as_slice()),
+            (Kind::Tree, tree.as_slice()),
+            (Kind::Commit, commit.as_slice()),
+        ]
+        .into_iter(),
+    )
+    .unwrap();
+    let mut body = Vec::new();
+    alt_wire::pkt::write_data(
+        &mut body,
+        format!(
+            "{} {commit_id} refs/heads/asset\0report-status\n",
+            "0".repeat(40)
+        )
+        .as_bytes(),
+    )
+    .unwrap();
+    alt_wire::pkt::write_flush(&mut body).unwrap();
+    body.extend_from_slice(&pack);
+    let credential = store.authenticate(token).unwrap();
+    alt_server::execute_git(
+        store,
+        &credential,
+        alt_server::Route::GitReceive("repository".into()),
+        false,
+        &mut std::io::Cursor::new(body),
+    )
+    .unwrap();
+    (commit_id.to_string(), blob, asset)
+}
+/// every pack segment file under a byte volume
+fn segment_files(bytes: &std::path::Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    for directory in std::fs::read_dir(bytes.join("packs")).unwrap() {
+        for file in std::fs::read_dir(directory.unwrap().path()).unwrap() {
+            files.push(file.unwrap().path());
+        }
+    }
+    files
+}
 fn encryption_key(root: &std::path::Path) -> (String, String) {
     let path = root.join("backup.agekey");
     let output = Command::new("age-keygen")
@@ -388,6 +452,14 @@ fn encrypted_backup_authenticates_every_entry_and_restores_refs_with_new_epoch()
     let (mut store, admin, password) = prepare(&source);
     let token = alt_server::operator::read_token(std::path::Path::new(&admin)).unwrap();
     let p = publish(&mut store, &token);
+    let (asset_commit, asset_blob, asset) = push_large(&mut store, &token);
+    let source_segments = segment_files(&source.root.path().join("bytes"));
+    assert!(
+        source_segments
+            .iter()
+            .any(|file| file.metadata().unwrap().len() > 200_000),
+        "the large push is a segment file"
+    );
     let trust = source.ok(&["health"])["receipt_public_key"]
         .as_str()
         .unwrap()
@@ -478,6 +550,21 @@ fn encrypted_backup_authenticates_every_entry_and_restores_refs_with_new_epoch()
         restored["catalog"]["repositories"][0]["refs"]["refs/heads/main"],
         p.commit.to_string()
     );
+    assert_eq!(
+        restored["catalog"]["repositories"][0]["refs"]["refs/heads/asset"],
+        asset_commit
+    );
+    // the segment that was a file came back as a file holding the same object
+    let restored_segments: Vec<_> = segment_files(&target.root.path().join("bytes"))
+        .iter()
+        .filter(|file| file.metadata().unwrap().len() > 200_000)
+        .map(|file| std::sync::Arc::new(alt_pack_segment::Segment::open(file).unwrap()))
+        .collect();
+    assert_eq!(restored_segments.len(), 1);
+    let (_, bytes) = alt_pack_segment::SegmentSet::new(restored_segments)
+        .read(asset_blob.as_bytes().try_into().unwrap())
+        .unwrap();
+    assert_eq!(bytes, asset);
     assert!(
         !target.run(&restore).status.success(),
         "cannot overwrite a restored target"
@@ -602,6 +689,14 @@ fn interrupted_backup_is_incomplete_and_interrupted_restore_cannot_serve_old_cre
     let (mut store, admin, _password) = prepare(&source);
     let token = alt_server::operator::read_token(std::path::Path::new(&admin)).unwrap();
     let p = publish(&mut store, &token);
+    let (asset_commit, asset_blob, asset) = push_large(&mut store, &token);
+    let source_segments = segment_files(&source.root.path().join("bytes"));
+    assert!(
+        source_segments
+            .iter()
+            .any(|file| file.metadata().unwrap().len() > 200_000),
+        "the large push is a segment file"
+    );
     let trust = source.ok(&["health"])["receipt_public_key"]
         .as_str()
         .unwrap()
