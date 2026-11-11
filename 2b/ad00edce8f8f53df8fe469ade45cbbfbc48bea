@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: feat
+summary: build a pack segment object by object and read stored objects as streams
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/build.rs
+touched: crates/alt-pack-segment/src/generation.rs
+touched: crates/alt-pack-segment/src/ingest.rs
+touched: crates/alt-pack-segment/src/lib.rs
+touched: crates/alt-pack-segment/src/stream.rs
+touched: crates/alt-pack-segment/tests/it/build.rs
+touched: crates/alt-pack-segment/tests/it/main.rs
