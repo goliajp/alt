@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: test
+summary: generate differential values from serde implementations
+author-type: human
+author: doracawl
+touched: Cargo.lock
+touched: crates/alt-json-serde/src/lib.rs
+touched: crates/alt-json-testkit/src/arbitrary.rs
+touched: crates/alt-json-testkit/src/drive.rs
+touched: crates/alt-json-testkit/src/fixtures.rs
+touched: crates/alt-json-testkit/src/lib.rs
+touched: crates/alt-json-testkit/src/support.rs
+touched: crates/alt-json/src/lib.rs
