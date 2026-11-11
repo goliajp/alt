@@ -158,6 +158,23 @@ impl<'a> Window<'a> {
         }
     }
 
+    /// As [`Window::hits32`], with the usability test as a plain branch.
+    /// On a long input unusable candidates are rare, the branch predicts
+    /// well, and the candidate can be read without waiting for the test.
+    ///
+    /// # Safety
+    /// `index` must be below a data position that has 8 bytes ahead of it.
+    #[inline(always)]
+    pub(crate) unsafe fn hits32_likely<const PREFIX: bool>(
+        &self,
+        index: usize,
+        low: usize,
+        here: u32,
+    ) -> bool {
+        // safety: a usable candidate has 8 readable bytes
+        self.usable::<PREFIX>(index, low) && unsafe { load32(self.at::<PREFIX>(index)) } == here
+    }
+
     /// As [`Window::hits32`], for the eight bytes `here`.
     ///
     /// # Safety

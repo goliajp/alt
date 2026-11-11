@@ -50,7 +50,7 @@ pub(crate) unsafe fn run<const PREFIX: bool>(
     unsafe {
         let slot_of = |ip: usize| table.add(hash(window.data64(ip), drop, shift));
         let hit = |ip: usize, candidate: usize| {
-            window.hits32::<PREFIX>(candidate, low, window.data64(ip) as u32)
+            window.hits32_likely::<PREFIX>(candidate, low, window.data64(ip) as u32)
         };
         'search: loop {
             // the gap between pairs; pairs are (ip0, ip1) then (ip2, ip3)
