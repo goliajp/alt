@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: a fetch left out files of a directory that had returned to an earlier state
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/select.rs
+touched: crates/alt-pack-segment/tests/it/fetch.rs
