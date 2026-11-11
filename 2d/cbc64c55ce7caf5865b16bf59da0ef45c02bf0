@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: fewer instructions per sequence when coding zstd sequence symbols
+author-type: human
+author: doracawl
+touched: crates/alt-zstd/src/enc/seq.rs
