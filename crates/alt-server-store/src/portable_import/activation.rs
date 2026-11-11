@@ -7,6 +7,8 @@ use alt_remote_protocol::{
 };
 use std::{collections::BTreeMap, io::Read, os::unix::fs::MetadataExt};
 
+mod settle;
+
 type Stamp = (u64, u64, u64, i64, i64, i64, i64);
 struct Source {
     bytes: crate::ByteStore,
@@ -239,39 +241,6 @@ impl Store {
         }
         result.map(|(receipt, _)| receipt)
     }
-    /// The snapshot's Git objects as one pack segment: where Git clients and every
-    /// reader of published objects look for them.
-    fn materialize_import(
-        &mut self,
-        work: &PortableImportWork,
-    ) -> Result<Option<crate::packs::Materialized>> {
-        let scope = &work.intent.key.scope;
-        let mut objects = Vec::with_capacity(work.envelope.catalog.objects.len());
-        for object in &work.envelope.catalog.objects {
-            let kind = match object.kind {
-                alt_remote_protocol::ContentKind::Blob => alt_pack_segment::Kind::Blob,
-                alt_remote_protocol::ContentKind::Tree => alt_pack_segment::Kind::Tree,
-                alt_remote_protocol::ContentKind::Commit => alt_pack_segment::Kind::Commit,
-                alt_remote_protocol::ContentKind::Tag => alt_pack_segment::Kind::Tag,
-                _ => return Err(Error::Integrity("portable object kind")),
-            };
-            let mut data = Vec::with_capacity(object.payload.bytes as usize);
-            self.bytes
-                .read_payload(
-                    scope,
-                    &object.payload.blake3,
-                    object.payload.bytes,
-                    work.locations.get(&object.payload.blake3),
-                )?
-                .read_to_end(&mut data)?;
-            objects.push((kind, data));
-        }
-        self.materialize(
-            &scope.repository_instance_id,
-            &alt_pack_segment::SegmentSet::new(Vec::new()),
-            objects,
-        )
-    }
     /// the receipt, and whether this call was the one that activated the import
     fn activate_transaction(
         &mut self,
@@ -327,21 +296,7 @@ impl Store {
             return Err(Error::Precondition("portable verified content changed"));
         }
         crate::cloud_quota::check_publication(&mut tx, &self.spec)?;
-        for object in &envelope.catalog.objects {
-            let kind = match object.kind {
-                alt_remote_protocol::ContentKind::Blob => "blob",
-                alt_remote_protocol::ContentKind::Tree => "tree",
-                alt_remote_protocol::ContentKind::Commit => "commit",
-                alt_remote_protocol::ContentKind::Tag => "tag",
-                _ => return Err(Error::Integrity("portable object kind")),
-            };
-            tx.execute("INSERT INTO alt_objects(repository,oid,kind,blake3) VALUES($1,$2,$3,$4) ON CONFLICT(repository,oid) DO UPDATE SET kind=excluded.kind,blake3=excluded.blake3", &[repository,&object.oid,&kind,&object.payload.blake3])?;
-        }
-        // Permanent historical roots preserve the exact original snapshot,
-        // including metadata and explicitly selected unreachable Git objects.
-        for blob in &envelope.catalog.blobs {
-            crate::requests::pin(&mut tx, repository, &pin_id(&digest), &blob.blake3, None)?;
-        }
+        settle::retain_history(&mut tx, repository, &pin_id(&digest), work)?;
         for reference in &envelope.catalog.refs {
             tx.execute(
                 "INSERT INTO alt_refs(repository,name,oid) VALUES($1,$2,$3)",
@@ -410,6 +365,7 @@ impl Store {
             }
         }
         if let Some(segment) = materialized {
+            crate::pack_native::account_segment(&mut tx, repository, segment.bytes)?;
             crate::packs::insert_segment(
                 &mut tx,
                 repository,

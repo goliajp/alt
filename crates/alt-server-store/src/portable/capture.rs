@@ -43,13 +43,12 @@ impl Inventory {
     }
 }
 
-/// Published content the content store holds, pinned for this export. Previous
-/// export snapshots are not included recursively: only live publication roots,
-/// including retained task history, seed this one.
+/// Published content the content store holds. Previous export snapshots are not
+/// included recursively: only live publication roots, including retained task
+/// history, seed this one.
 fn stored_content(
     tx: &mut Transaction<'_>,
     repository: &str,
-    id: &str,
     limits: PackageLimits,
 ) -> Result<BTreeMap<String, Blob>> {
     let bound = integer((limits.entries as u64).saturating_add(1))?;
@@ -66,7 +65,6 @@ fn stored_content(
             blake3: row.get(0),
             bytes: unsigned(row.get(1))?,
         };
-        crate::requests::pin(tx, repository, &pin_id(id), &blob.blake3, None)?;
         blobs.insert(blob.blake3.clone(), blob);
     }
     Ok(blobs)
@@ -82,17 +80,17 @@ fn object_kind(kind: &str) -> Result<ContentKind> {
     })
 }
 
-/// Git objects a retained publication carried outside its graph: no segment holds
-/// them, the content store does.
+/// Git objects the content store retains. Publications from before Git objects moved
+/// to the pack segments left some there that no segment holds: what a task
+/// publication carried outside its graph.
 fn stored_objects(
     tx: &mut Transaction<'_>,
     repository: &str,
-    id: &str,
     limits: PackageLimits,
     blobs: &BTreeMap<String, Blob>,
 ) -> Result<Vec<Object>> {
     let bound = integer((limits.entries as u64).saturating_add(1))?;
-    let rows = tx.query("SELECT o.oid,o.kind,o.blake3 FROM alt_objects o JOIN alt_pins p ON p.repository=o.repository AND p.blake3=o.blake3 WHERE o.repository=$1 AND p.pin_id=$2 ORDER BY o.oid LIMIT $3", &[&repository,&pin_id(id),&bound])?;
+    let rows = tx.query("SELECT o.oid,o.kind,o.blake3 FROM alt_objects o WHERE o.repository=$1 AND EXISTS(SELECT 1 FROM alt_pins p WHERE p.repository=o.repository AND p.blake3=o.blake3 AND p.expires_at IS NULL AND p.pin_id NOT LIKE 'portable-export:%') ORDER BY o.oid LIMIT $2", &[&repository,&bound])?;
     if rows.len() > limits.entries {
         return Err(Error::Limit("portable Git inventory"));
     }
@@ -390,7 +388,7 @@ impl Store {
             limits.package.metadata_bytes,
         )?;
         let mut inventory = Inventory {
-            blobs: stored_content(&mut tx, repository, id, limits.package)?,
+            blobs: stored_content(&mut tx, repository, limits.package)?,
             documents: BTreeMap::new(),
             identities: source_identities(&mut tx, scope, limits.package)?,
             budget: limits.package.metadata_bytes,
@@ -406,7 +404,7 @@ impl Store {
                 return Err(Error::Integrity("portable object payload"));
             }
         }
-        for object in stored_objects(&mut tx, repository, id, limits.package, &inventory.blobs)? {
+        for object in stored_objects(&mut tx, repository, limits.package, &inventory.blobs)? {
             objects.entry(object.oid.clone()).or_insert(object);
         }
         if objects.len() > limits.package.entries {
@@ -442,6 +440,11 @@ impl Store {
             bytes: self.bytes.clone(),
             segments: opened.1.clone(),
         };
+        // Only what has to stay in the content store is retained there: Git objects
+        // are held by the segments this export reads them from.
+        for blob in result.stored(limits.package)? {
+            crate::requests::pin(&mut tx, repository, &pin_id(id), &blob.blake3, None)?;
+        }
         // Capturing metadata cannot extend an expired authority lease.
         require_admin(&mut tx, &self.spec, credential)?;
         authorize(&mut tx, &self.spec, credential, &current)?;

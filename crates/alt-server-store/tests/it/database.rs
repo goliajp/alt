@@ -9,6 +9,7 @@ mod maintenance;
 mod provenance;
 mod registration;
 mod segments;
+mod single_copy;
 mod tasks;
 mod upload_selection;
 
@@ -318,11 +319,12 @@ fn durable_commit_replay_restart_and_signed_receipt() {
         matches!(observed,RequestObservation::Recorded {result,..} if *result==RequestState::Committed {receipt:Box::new(receipt)})
     );
     assert_eq!(f.counts(), (1, 1, 1));
+    // the content-store copies of the two published Git objects
     assert_eq!(
         f.store
             .collect_orphans(&f.credential, "repository", 100)
             .unwrap(),
-        0
+        2
     );
 }
 #[test]

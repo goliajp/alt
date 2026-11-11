@@ -21,6 +21,9 @@ fn snapshot_barrier_blocks_gc_and_publication_until_every_byte_is_verified() {
     .unwrap();
     f.store.mark_ready(&f.credential, &work, &graph).unwrap();
     f.store.publish(&f.credential, &work, &graph).unwrap();
+    // Git objects are backed up with their pack segment; a task leaves content in
+    // the content store for the snapshot to verify
+    super::portable::publish_task(&mut f, "snapshot-task");
     let mut gc = f.reopen();
     let mut writer = f.reopen();
     let mut client = f.client();
@@ -36,8 +39,8 @@ fn snapshot_barrier_blocks_gc_and_publication_until_every_byte_is_verified() {
         snapshot.catalog().repositories[0].refs["refs/heads/main"],
         payload.commit.to_string()
     );
-    assert_eq!(snapshot.catalog().repositories[0].transaction_sequence, 1);
-    assert_eq!(snapshot.catalog().blobs.len(), 2);
+    assert_eq!(snapshot.catalog().repositories[0].transaction_sequence, 2);
+    assert_eq!(snapshot.catalog().blobs.len(), 5);
     let credential = f.credential.clone();
     let credential2 = f.credential.clone();
     let (started_tx, started_rx) = std::sync::mpsc::channel();

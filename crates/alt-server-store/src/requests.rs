@@ -23,6 +23,9 @@ impl Store {
         if ttl_ms == 0 || ttl_ms > 86_400_000 {
             return Err(Error::Limit("upload lifetime"));
         }
+        // Git objects the segments hold need no upload. Segments only gain objects, so
+        // a set opened before the transaction grants nothing a later one would not.
+        let segments = self.published_segments(&publication.key.scope.repository_instance_id)?;
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         let snapshot = snapshot(
@@ -45,7 +48,7 @@ impl Store {
         let expires = time
             .checked_add(ttl_ms)
             .ok_or(Error::Limit("upload lifetime"))?;
-        let contents = selected_contents(manifest)?;
+        let contents = selected_contents(manifest, &segments)?;
         let repository = &publication.key.scope.repository_instance_id;
         let mut reservation = 0u64;
         let selected: Vec<_> = contents.iter().collect();
@@ -75,7 +78,7 @@ impl Store {
                         false
                     }
                 };
-                if !stored {
+                if !stored && !content.settled() {
                     reservation = reservation
                         .checked_add(content.bytes)
                         .ok_or(Error::Limit("upload reservation"))?;
@@ -101,7 +104,7 @@ impl Store {
             let mut entries = Vec::with_capacity(batch.len());
             let mut chunk_sizes = Vec::with_capacity(batch.len());
             for (digest, content) in batch {
-                let present = published.contains(digest.as_str());
+                let present = published.contains(digest.as_str()) || content.settled();
                 if !present && !content.entries.is_empty() {
                     ingress_reservation = ingress_reservation
                         .checked_add(content.bytes)
@@ -400,33 +403,46 @@ struct SelectedContent<'a> {
     bytes: u64,
     entries: Vec<&'a ContentEntry>,
     chunk: bool,
+    /// some entry with these bytes, or made of this chunk, is not a Git object the
+    /// segments already hold
+    needed: bool,
 }
-fn selected_contents(manifest: &Manifest) -> Result<BTreeMap<String, SelectedContent<'_>>> {
+impl SelectedContent<'_> {
+    /// nothing has to be uploaded for these bytes
+    fn settled(&self) -> bool {
+        !self.needed
+    }
+}
+fn selected_contents<'a>(
+    manifest: &'a Manifest,
+    segments: &alt_pack_segment::SegmentSet,
+) -> Result<BTreeMap<String, SelectedContent<'a>>> {
     let mut selected = BTreeMap::new();
+    let blank = |bytes| SelectedContent {
+        bytes,
+        entries: Vec::new(),
+        chunk: false,
+        needed: false,
+    };
     for entry in &manifest.entries {
+        let needed = !crate::pack_native::holds_entry(segments, entry)?;
         let item = selected
             .entry(entry.blake3.clone())
-            .or_insert_with(|| SelectedContent {
-                bytes: entry.bytes,
-                entries: Vec::new(),
-                chunk: false,
-            });
+            .or_insert_with(|| blank(entry.bytes));
         if item.bytes != entry.bytes {
             return Err(Error::Integrity("conflicting content sizes"));
         }
         item.entries.push(entry);
+        item.needed |= needed;
         for chunk in &entry.chunks {
             let item = selected
                 .entry(chunk.blake3.clone())
-                .or_insert_with(|| SelectedContent {
-                    bytes: chunk.bytes,
-                    entries: Vec::new(),
-                    chunk: false,
-                });
+                .or_insert_with(|| blank(chunk.bytes));
             if item.bytes != chunk.bytes {
                 return Err(Error::Integrity("conflicting content sizes"));
             }
             item.chunk = true;
+            item.needed |= needed;
         }
     }
     Ok(selected)

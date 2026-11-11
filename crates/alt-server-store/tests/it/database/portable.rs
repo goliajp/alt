@@ -17,7 +17,7 @@ pub(super) fn portable_limits() -> VerificationLimits {
         reads: 100_000,
     }
 }
-fn publish_task(f: &mut Fixture, name: &str) -> (Payload, Receipt) {
+pub(super) fn publish_task(f: &mut Fixture, name: &str) -> (Payload, Receipt) {
     let payload = super::tasks::task_payload(name);
     payload.upload(&mut f.store, &f.credential);
     let work = f
@@ -240,8 +240,7 @@ fn changed_source_refuses_old_cutover_and_old_export_keeps_its_original_bytes() 
         .prepare_portable_export(&f.credential, scope, "new-snapshot", portable_limits())
         .unwrap();
     // The replaced commit is still held by its segment and so still exported.
-    // What an old export alone keeps in the content store must not be retained
-    // again by every later one.
+    // Neither export retains a Git object in the content store.
     assert!(
         current
             .envelope()
@@ -262,7 +261,7 @@ fn changed_source_refuses_old_cutover_and_old_export_keeps_its_original_bytes() 
             .unwrap()
             .get(0)
     };
-    assert_eq!((pins("old-snapshot"), pins("new-snapshot")), (1, 0));
+    assert_eq!((pins("old-snapshot"), pins("new-snapshot")), (0, 0));
     f.store
         .freeze_portable_export(
             &f.credential,

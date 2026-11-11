@@ -70,6 +70,10 @@ pub(crate) fn check_pins(
     // pinned, not just the subset needed to validate today's task roots.
     let time = integer(now(tx)?)?;
     for entry in &work.manifest.entries {
+        // a Git object a segment holds needs no copy in the content store
+        if work.source.settled_entry(entry)? {
+            continue;
+        }
         let row = tx.query_opt("SELECT b.bytes FROM alt_blobs b JOIN alt_pins p ON p.repository=b.repository AND p.blake3=b.blake3 WHERE b.repository=$1 AND b.blake3=$2 AND b.state='stored' AND p.pin_id=$3 AND p.expires_at>$4", &[repository,&entry.blake3,&pin_id,&time])?.ok_or(Error::Precondition("task selection pin expired"))?;
         if unsigned(row.get(0))? != entry.bytes {
             return Err(Error::Integrity("task selection size"));
@@ -92,7 +96,6 @@ fn in_segment(work: &PublicationWork, oid: &alt_git_codec::ObjectId) -> bool {
 pub(crate) fn retain(
     tx: &mut Transaction<'_>,
     work: &PublicationWork,
-    graph: &VerifiedGraph,
     tasks: Option<&VerifiedTaskGraph>,
     sequence: u64,
     digest: &str,
@@ -103,17 +106,11 @@ pub(crate) fn retain(
     let repository = &work.key.scope.repository_instance_id;
     let bundle = &tasks.bundle_artifact().blake3;
     let pin_id = format!("task-bundle:{bundle}");
+    // Records, attachments and the bundle stay in the content store for good. The
+    // Git objects the manifest selects are held by the pack segments instead.
     for entry in &work.manifest.entries {
-        pin(tx, repository, &pin_id, &entry.blake3, None)?;
-    }
-    // The original publication also names its old/new ref graphs. Keep those
-    // historical inputs even after current refs advance or disappear.
-    for oid in graph.objects() {
-        match work.source.objects.get(&oid) {
-            Some((_, digest, _)) => pin(tx, repository, &pin_id, digest, None)?,
-            // a segment keeps what it holds; there is no content to pin
-            None if in_segment(work, &oid) => {}
-            None => return Err(Error::Integrity("task object mapping")),
+        if entry.git_oid.is_none() {
+            pin(tx, repository, &pin_id, &entry.blake3, None)?;
         }
     }
     for selection in tasks.records() {

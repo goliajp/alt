@@ -166,7 +166,7 @@ impl<'a, W: Write> Builder<'a, W> {
         {
             self.flags |= FLAG_OVERLAP;
         }
-        self.commits.sort_by(|a, b| a.oid.cmp(&b.oid));
+        self.commits.sort_by_key(|commit| commit.oid);
         crate::generation::assign(&mut self.commits, self.existing)?;
         let mut index = Vec::new();
         format::write_index(
