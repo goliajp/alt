@@ -9,7 +9,7 @@ use crate::{
 use alt_git_codec::{HashAlgo, ObjectKind};
 use alt_pack_segment::{Kind, Oid, SegmentSet};
 use alt_repository_service::{Node, parse_node};
-use alt_server_store::{Error, PackView, Result};
+use alt_server_store::{Error, PackView, RefScope, Result};
 use alt_wire::pkt;
 use std::collections::HashSet;
 
@@ -152,10 +152,11 @@ pub(crate) fn read(
         pkt::write_flush(&mut output)?;
         return bytes(UPLOAD_RESULT, output);
     }
-    let everything = haves.is_empty()
-        && !view.unreachable
-        && set.verbatim()
-        && tips.iter().all(|tip| wants.contains(tip));
+    let every_tip = match view.ref_scope {
+        RefScope::Filtered { other_tips } => !other_tips,
+        _ => tips.iter().all(|tip| wants.contains(tip)),
+    };
+    let everything = haves.is_empty() && !view.unreachable && set.verbatim() && every_tip;
     if everything {
         // nothing is computed per object: the stored bytes go out as they are read
         let (pieces, checksum) = set.whole().map_err(segment_error)?;

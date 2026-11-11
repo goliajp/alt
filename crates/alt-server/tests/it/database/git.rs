@@ -1,4 +1,5 @@
 use super::*;
+mod many_refs;
 use std::{
     path::Path,
     process::{Command, Output},
@@ -242,113 +243,6 @@ fn real_git_protected_branch_rejects_entire_atomic_push_and_force_without_review
     );
     assert!(!rejected.status.success());
     assert_eq!(f.counts(), (1, 2, 2));
-}
-
-#[test]
-#[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
-fn real_git_many_refs_clone_and_bounded_gzip_requests() {
-    use std::io::Read;
-    let f = Fixture::new();
-    let server = Running::start(&f);
-    let temp = alt_os::temp::tempdir().unwrap();
-    let first = temp.path().join("first");
-    std::fs::create_dir(&first).unwrap();
-    ok(&first, &f.token, &["init", "-q", "--initial-branch=main"]);
-    identity(&first, &f.token);
-    std::fs::write(
-        first.join("file"),
-        b"many refs preserve the original bytes\n",
-    )
-    .unwrap();
-    ok(&first, &f.token, &["add", "file"]);
-    ok(&first, &f.token, &["commit", "-qm", "source"]);
-    let head = text(ok(&first, &f.token, &["rev-parse", "HEAD"]));
-    for index in 0..64 {
-        ok(&first, &f.token, &["branch", &format!("topic-{index:03}")]);
-    }
-    let url = format!("{}/git/repository", server.url);
-    ok(&first, &f.token, &["push", "--mirror", &url]);
-    ok(temp.path(), &f.token, &["clone", "--quiet", &url, "second"]);
-    let second = temp.path().join("second");
-    assert_eq!(text(ok(&second, &f.token, &["rev-parse", "HEAD"])), head);
-    assert_eq!(
-        std::fs::read(second.join("file")).unwrap(),
-        std::fs::read(first.join("file")).unwrap()
-    );
-    assert_eq!(
-        text(ok(&second, &f.token, &["ls-remote", "--refs", &url]))
-            .lines()
-            .count(),
-        65
-    );
-    ok(&second, &f.token, &["fsck", "--strict", "--full"]);
-
-    let mut command = Vec::new();
-    alt_wire::pkt::write_data(&mut command, b"command=ls-refs\n").unwrap();
-    alt_wire::pkt::write_delim(&mut command).unwrap();
-    alt_wire::pkt::write_data(&mut command, b"ref-prefix refs/heads/\n").unwrap();
-    alt_wire::pkt::write_flush(&mut command).unwrap();
-    let gzip = |bytes: &[u8]| alt_deflate::compress(bytes, 6, alt_deflate::Format::Gzip);
-    let send = |path: &str, encoding: &str, body: &[u8], authorized: bool| {
-        let mut request = ureq::post(&format!("{}{path}", server.url))
-            .timeout(Duration::from_secs(15))
-            .set("Git-Protocol", "version=2")
-            .set("Content-Type", "application/x-git-upload-pack-request")
-            .set("Content-Encoding", encoding);
-        if authorized {
-            request = request.set("Authorization", &format!("Bearer {}", f.token));
-        }
-        let response = match request.send_bytes(body) {
-            Ok(response) | Err(ureq::Error::Status(_, response)) => response,
-            Err(error) => panic!("gzip HTTP request failed: {error}"),
-        };
-        let status = response.status();
-        let mut bytes = Vec::new();
-        response.into_reader().read_to_end(&mut bytes).unwrap();
-        (status, bytes)
-    };
-    let path = "/git/repository/git-upload-pack";
-    let compressed = gzip(&command);
-    let (status, refs) = send(path, "gzip", &compressed, true);
-    assert_eq!(status, 200);
-    assert!(
-        refs.windows(head.len())
-            .any(|value| value == head.as_bytes())
-    );
-    let split = command.len() / 2;
-    let mut members = gzip(&command[..split]);
-    members.extend(gzip(&command[split..]));
-    assert_eq!(send(path, "GZip", &members, true), (200, refs));
-    let mut checksum = compressed.clone();
-    let crc = checksum.len() - 8;
-    checksum[crc] ^= 1;
-    let mut trailing = compressed.clone();
-    trailing.extend_from_slice(b"invalid trailing input");
-    for invalid in [
-        &compressed[..compressed.len() - 1],
-        &checksum,
-        &trailing,
-        b"",
-    ] {
-        assert_eq!(send(path, "gzip", invalid, true).0, 400);
-    }
-    let oversized = gzip(&vec![b'x'; limits().request_bytes + 1]);
-    assert!(oversized.len() < limits().request_bytes);
-    assert_eq!(send(path, "gzip", &oversized, true).0, 413);
-    assert_eq!(send(path, "gzip", &oversized, false).0, 401);
-    assert_eq!(send(path, "gzip, gzip", &compressed, true).0, 415);
-    assert_eq!(send(path, "br", &compressed, true).0, 415);
-    assert_eq!(
-        send(
-            "/v1/repositories/repository/epochs/1/requests",
-            "gzip",
-            &compressed,
-            true
-        )
-        .0,
-        415
-    );
-    assert_eq!(f.counts(), (65, 1, 1));
 }
 
 #[test]
