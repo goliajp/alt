@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: perf
+summary: compute the sha-512 message schedule in neon on arm64 cores without the sha-512 instructions
+author-type: human
+author: doracawl
+touched: crates/alt-hash/examples/sha512_speed.rs
+touched: crates/alt-hash/src/sha512.rs
+touched: crates/alt-hash/src/sha512/neon.rs
+touched: crates/alt-hash/tests/it/sha512.rs
