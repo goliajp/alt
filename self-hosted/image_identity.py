@@ -157,6 +157,15 @@ class Archive:
             result = []
             for child in children:
                 child_id = digest(child['digest'])
+                platform = child.get('platform')
+                if (isinstance(platform, dict) and platform.get('os') == 'unknown'
+                        and platform.get('architecture') == 'unknown'):
+                    # A build attestation: the containerd image store keeps it
+                    # beside the image, and no engine selects it to run.
+                    continue
+                if 'blobs/sha256/' + child_id[7:] not in self.members:
+                    # Another platform of a pulled image, which the store never held.
+                    continue
                 _, encoded = self.read_json('blobs/sha256/' + child_id[7:])
                 if len(encoded) != child['size']:
                     raise ValueError('image index child extent differs')

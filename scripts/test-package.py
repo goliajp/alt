@@ -400,6 +400,58 @@ class ImageIdentityTests(unittest.TestCase):
             for value in [self.config_id, self.manifest_id, self.index_id]:
                 self.assertEqual(archive.for_id(value, 'arm64'), identity)
 
+    def attestation(self):
+        statement = b'{"_type":"https://in-toto.io/Statement/v0.1"}'
+        config = encoded({'architecture': 'unknown', 'os': 'unknown', 'config': {},
+                          'rootfs': {'type': 'layers', 'diff_ids': [digest(statement)]}})
+        manifest = encoded({'schemaVersion': 2, 'mediaType': 'application/vnd.oci.image.manifest.v1+json',
+                            'config': {'mediaType': 'application/vnd.oci.image.config.v1+json',
+                                       'digest': digest(config), 'size': len(config)},
+                            'layers': [{'mediaType': 'application/vnd.in-toto+json',
+                                        'digest': digest(statement), 'size': len(statement)}]})
+        self.files.update({blob(digest(statement)): statement, blob(digest(config)): config,
+                           blob(digest(manifest)): manifest})
+        return {'mediaType': 'application/vnd.oci.image.manifest.v1+json', 'digest': digest(manifest),
+                'size': len(manifest), 'platform': {'architecture': 'unknown', 'os': 'unknown'},
+                'annotations': {'vnd.docker.reference.digest': self.manifest_id,
+                                'vnd.docker.reference.type': 'attestation-manifest'}}
+
+    def reindex(self, children):
+        del self.files[blob(self.index_id)]
+        self.index['manifests'] += children
+        self.raw_index = encoded(self.index)
+        self.index_id = digest(self.raw_index)
+        self.files[blob(self.index_id)] = self.raw_index
+
+    def test_index_with_build_attestation_resolves_to_the_image(self):
+        # what `docker image save` writes for a Buildx image in the containerd store
+        self.reindex([self.attestation()])
+        self.write()
+        with IMAGEAPI['Archive'](self.path) as archive:
+            identity = archive.for_reference('alt:test', 'arm64')
+            self.assertEqual(archive.for_id(self.index_id, 'arm64'), identity)
+
+    def test_index_naming_platforms_the_archive_does_not_hold_resolves(self):
+        # what `docker image save` writes for a pulled multi-platform image
+        other = digest(b'manifest of another platform')
+        self.reindex([{'mediaType': self.manifest['mediaType'], 'digest': other, 'size': 28,
+                       'platform': {'os': 'linux', 'architecture': 'amd64'}}])
+        self.write()
+        with IMAGEAPI['Archive'](self.path) as archive:
+            identity = archive.for_reference('alt:test', 'arm64')
+            self.assertEqual(archive.for_id(self.index_id, 'arm64'), identity)
+            with self.assertRaises(ValueError): archive.for_id(self.index_id, 'amd64')
+
+    def test_runnable_manifest_outside_the_archive_manifest_is_still_rejected(self):
+        # only a child marked as having no platform is skipped
+        child = self.attestation()
+        child['platform'] = {'architecture': 'arm64', 'os': 'linux'}
+        self.reindex([child])
+        self.write()
+        with IMAGEAPI['Archive'](self.path) as archive:
+            with self.assertRaisesRegex(ValueError, 'absent from Docker archive manifest'):
+                archive.for_id(self.index_id, 'arm64')
+
     def test_origin_handle_cannot_be_replaced_by_different_configuration(self):
         self.config['config']['Cmd'] = ['different-command']
         self.files[blob(self.config_id)] = encoded(self.config)
