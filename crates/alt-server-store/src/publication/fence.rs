@@ -1,5 +1,6 @@
 //! The checks every transition of a leased request repeats, and its terminal step.
 use super::*;
+use crate::Jsonb;
 
 pub(crate) fn worker(tx: &mut Transaction<'_>, work: &PublicationWork) -> Result<postgres::Row> {
     let row = request_row(tx, &work.key)?.ok_or(Error::Precondition("request not registered"))?;
@@ -64,7 +65,7 @@ pub(crate) fn finish(
 ) -> Result<()> {
     let repository = &key.scope.repository_instance_id;
     crate::cloud_quota::release(tx, key)?;
-    tx.execute("UPDATE alt_requests SET state=$5,result=$6,reserved_bytes=0,worker_lease_until=0 WHERE repository=$1 AND epoch=$2 AND actor_id=$3 AND request_id=$4",&[repository,&integer(key.scope.recovery_epoch)?,&key.actor_id,&key.request_id,&state,&serde_json::to_value(result)?])?;
+    tx.execute("UPDATE alt_requests SET state=$5,result=$6,reserved_bytes=0,worker_lease_until=0 WHERE repository=$1 AND epoch=$2 AND actor_id=$3 AND request_id=$4",&[repository,&integer(key.scope.recovery_epoch)?,&key.actor_id,&key.request_id,&state,&Jsonb::from(&result)?])?;
     tx.execute(
         "UPDATE alt_repositories SET reserved_bytes=reserved_bytes-$2 WHERE id=$1",
         &[repository, &integer(reservation)?],

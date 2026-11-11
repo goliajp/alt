@@ -1,10 +1,10 @@
 //! Browser projection of the same verified review used by native approval.
 use crate::NativeOptions;
+use alt_json::{Value, json};
 use alt_remote_protocol::{RecordKind, RequestKey};
 use alt_server_store::{Credential, Error, Result, Store};
 use alt_task_service::{ArtifactSource, RecordKey, TaskRecord, VerifiedPublication};
 use serde::Deserialize;
-use serde_json::{Value, json};
 use std::io::Read;
 
 #[derive(Deserialize, alt_json::FromJson)]
@@ -117,7 +117,7 @@ pub fn inspect(
         {
             return Err(Error::Integrity("review original bytes"));
         }
-        let original: Changes = serde_json::from_slice(&bytes)?;
+        let original: Changes = alt_json::from_slice(&bytes)?;
         let mut remaining = 2 * 1024 * 1024usize;
         let mut projected = Vec::new();
         let mut truncated = false;
@@ -175,7 +175,7 @@ pub fn inspect(
             review.changes.blake3
         );
         Ok(
-            json!({"key":key,"inspected":inspected,"integration_id":integration_id,"candidate_id":review.candidate,"historical_reviewer":review.reviewer,"changes":projected,"changes_truncated":truncated,"original_changes_url":original_url,"evidence":[{"id":review.evidence,"command":evidence.actual_context.commands.iter().map(|v|v.join(" ")).collect::<Vec<_>>().join("\n"),"outcome":serde_json::to_string(&evidence.termination)?,"source":current.evidence.source_proof,"accepted":current.evidence.eligible,"reason":current.evidence.reasons.join(", ")}],"approved":current.approved,"eligible":current.eligible,"reason":current.reason}),
+            json!({"key":key,"inspected":inspected,"integration_id":integration_id,"candidate_id":review.candidate,"historical_reviewer":review.reviewer,"changes":projected,"changes_truncated":truncated,"original_changes_url":original_url,"evidence":[{"id":review.evidence,"command":evidence.actual_context.commands.iter().map(|v|v.join(" ")).collect::<Vec<_>>().join("\n"),"outcome":alt_json::to_string(&evidence.termination)?,"source":current.evidence.source_proof,"accepted":current.evidence.eligible,"reason":current.evidence.reasons.join(", ")}],"approved":current.approved,"eligible":current.eligible,"reason":current.reason}),
         )
     })();
     let released = store.release_publication(credential, &work);

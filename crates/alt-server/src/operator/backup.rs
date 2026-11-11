@@ -276,7 +276,7 @@ fn create_inner(
     );
     create_private(
         &work.path().join("config.json"),
-        &serde_json::to_vec(config).map_err(|_| Error::File)?,
+        &alt_json::to_vec(config).map_err(|_| Error::File)?,
     )?;
     files.insert(
         "config.json".into(),
@@ -320,12 +320,12 @@ fn create_inner(
         files,
         payload: digest(&mut regular(&payload_path)?)?,
     };
-    let encoded = serde_json::to_vec(&manifest).map_err(|_| Error::File)?;
+    let encoded = alt_json::to_vec(&manifest).map_err(|_| Error::File)?;
     let signed = SignedManifest {
         signature: STANDARD.encode(signing_key.sign(&encoded).to_bytes()),
         manifest: manifest.clone(),
     };
-    let completed = serde_json::to_vec_pretty(&signed).map_err(|_| Error::File)?;
+    let completed = alt_json::to_vec_pretty(&signed).map_err(|_| Error::File)?;
     if completed.len() > MANIFEST_LIMIT {
         return Err(Error::Config("backup manifest exceeds supported size"));
     }
@@ -353,8 +353,8 @@ pub fn verify(
 ) -> Result<VerifiedBackup> {
     let bytes = read_regular(&input.join("manifest.json"), MANIFEST_LIMIT, false)?;
     let signed: SignedManifest =
-        serde_json::from_slice(&bytes).map_err(|_| Error::Config("backup manifest"))?;
-    let encoded = serde_json::to_vec(&signed.manifest).map_err(|_| Error::File)?;
+        alt_json::from_slice(&bytes).map_err(|_| Error::Config("backup manifest"))?;
+    let encoded = alt_json::to_vec(&signed.manifest).map_err(|_| Error::File)?;
     let signature: [u8; 64] = STANDARD
         .decode(&signed.signature)
         .map_err(|_| Error::Config("backup signature"))?
@@ -516,7 +516,7 @@ pub fn verify(
     {
         return Err(Error::Config("backup contains another receipt key"));
     }
-    let source: Config = serde_json::from_slice(&read_regular(
+    let source: Config = alt_json::from_slice(&read_regular(
         &directory.path().join("config.json"),
         65536,
         true,
@@ -605,7 +605,7 @@ pub fn restore(
         let bytes = ByteStore::open(&target.bytes_directory)?;
         create_private(
             &target.bytes_directory.join("instance.json"),
-            &serde_json::to_vec(&target.volume_identity()?).map_err(|_| Error::File)?,
+            &alt_json::to_vec(&target.volume_identity()?).map_err(|_| Error::File)?,
         )?;
         for blob in &original.blobs {
             let scope = alt_remote_protocol::Scope {

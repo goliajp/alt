@@ -2,6 +2,7 @@
 //! local artifact is durable before the database transaction; retries compare
 //! the original intent and never generate another identity or key.
 use super::*;
+use alt_json_serde::Serde;
 use golia_platform_contract::{Product, lifecycle::ProvisionSpec};
 
 fn ensure(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -24,8 +25,9 @@ pub fn initialize(
     listen: SocketAddr,
     database_environment: &str,
 ) -> Result<Config> {
-    let spec: ProvisionSpec = serde_json::from_slice(&read_regular(spec_path, 16384, true)?)
-        .map_err(|_| Error::Config("provision specification"))?;
+    let Serde(spec): Serde<ProvisionSpec> =
+        alt_json::from_slice(&read_regular(spec_path, 16384, true)?)
+            .map_err(|_| Error::Config("provision specification"))?;
     spec.validate()
         .map_err(|_| Error::Config("provision specification"))?;
     if spec.audience.product != Product::Alt {
@@ -41,10 +43,13 @@ pub fn initialize(
     if spec.audience.generation.0 != 1 {
         // A restored generation may only open a completed recovery; it must
         // never take the initialization path on an empty or partial database.
-        let recovery: golia_platform_contract::lifecycle::RecoverySpec = serde_json::from_slice(
-            &read_regular(&directory.join("recovery.json"), 65536, true)?,
-        )
-        .map_err(|_| Error::Config("recovery intent"))?;
+        let Serde(recovery): Serde<golia_platform_contract::lifecycle::RecoverySpec> =
+            alt_json::from_slice(&read_regular(
+                &directory.join("recovery.json"),
+                65536,
+                true,
+            )?)
+            .map_err(|_| Error::Config("recovery intent"))?;
         recovery
             .validate()
             .map_err(|_| Error::Config("recovery intent"))?;
@@ -82,7 +87,7 @@ pub fn initialize(
     let config = configuration(&spec, &directory, assets, listen, database_environment)?;
     ensure(
         &intent,
-        &serde_json::to_vec(&spec).map_err(|_| Error::Config("provision encoding"))?,
+        &alt_json::to_vec(&Serde(&spec)).map_err(|_| Error::Config("provision encoding"))?,
     )?;
     let mut signing = [0u8; 32];
     for (index, byte) in signing.iter_mut().enumerate() {
@@ -96,8 +101,7 @@ pub fn initialize(
     )?;
     ensure(
         &directory.join("config.json"),
-        &serde_json::to_vec_pretty(&config)
-            .map_err(|_| Error::Config("provision configuration"))?,
+        &alt_json::to_vec_pretty(&config).map_err(|_| Error::Config("provision configuration"))?,
     )?;
     config.initialize(true)?;
     Ok(config)
@@ -110,14 +114,14 @@ fn configuration(
     listen: SocketAddr,
     database_environment: &str,
 ) -> Result<Config> {
-    let mut config: Config = serde_json::from_str(include_str!("../../example-config.json"))
+    let mut config: Config = alt_json::from_str(include_str!("../../example-config.json"))
         .map_err(|_| Error::Config("packaged Cloud defaults"))?;
     // Older frozen provisioning intents predate portable transfer. Restarting
     // one must preserve its opt-out and exact config bytes. Other saved fields
     // still have to match the specification through ensure/verify_artifacts.
     let saved = directory.join("config.json");
     if saved.symlink_metadata().is_ok() {
-        let prior: Config = serde_json::from_slice(&read_regular(&saved, 65536, true)?)
+        let prior: Config = alt_json::from_slice(&read_regular(&saved, 65536, true)?)
             .map_err(|_| Error::Config("saved provision configuration"))?;
         if prior.portable.is_none() {
             config.portable = None;
@@ -155,7 +159,7 @@ fn configuration(
 fn verify_artifacts(config: &Config, spec: &ProvisionSpec, directory: &Path) -> Result<()> {
     let saved = read_regular(&directory.join("config.json"), 65536, true)?;
     let key = read_regular(&directory.join("runtime.key"), 64, true)?;
-    if saved != serde_json::to_vec_pretty(config).map_err(|_| Error::File)?
+    if saved != alt_json::to_vec_pretty(config).map_err(|_| Error::File)?
         || key != spec.runtime_key.expose().as_bytes()
     {
         return Err(Error::Config("recovery configuration changed"));
@@ -195,10 +199,13 @@ pub fn prepare_recovery(
         listen,
         database_environment,
     )?;
-    ensure(&intent, &serde_json::to_vec(spec).map_err(|_| Error::File)?)?;
+    ensure(
+        &intent,
+        &alt_json::to_vec(&Serde(spec)).map_err(|_| Error::File)?,
+    )?;
     ensure(
         &directory.join("provision.json"),
-        &serde_json::to_vec(&spec.target).map_err(|_| Error::File)?,
+        &alt_json::to_vec(&Serde(&spec.target)).map_err(|_| Error::File)?,
     )?;
     ensure(
         &directory.join("runtime.key"),
@@ -206,7 +213,7 @@ pub fn prepare_recovery(
     )?;
     ensure(
         &directory.join("config.json"),
-        &serde_json::to_vec_pretty(&config).map_err(|_| Error::File)?,
+        &alt_json::to_vec_pretty(&config).map_err(|_| Error::File)?,
     )?;
     Ok(config)
 }

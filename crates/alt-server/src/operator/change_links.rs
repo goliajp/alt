@@ -37,7 +37,7 @@ pub(super) fn load(config: &mut Config, directory: &Path) -> Result<()> {
     if !config.change_links.is_empty() {
         return Err(Error::Config("ambiguous change-link configuration"));
     }
-    let settings: Settings = serde_json::from_slice(&read_regular(&path, 65536, true)?)
+    let settings: Settings = alt_json::from_slice(&read_regular(&path, 65536, true)?)
         .map_err(|_| Error::Config("change-link settings JSON"))?;
     // A copied file from a previous recovery generation must fail closed.
     // Runtime credentials and database pairings are checked independently.

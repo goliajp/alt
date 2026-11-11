@@ -1,5 +1,6 @@
 //! Leasing a request to one worker, with the content it selected.
 use super::*;
+use crate::Jsonb;
 
 impl Store {
     pub fn acquire_publication(
@@ -61,7 +62,7 @@ impl Store {
         if unsigned(row.get("worker_lease_until"))? > time {
             return Err(Error::Precondition("publication worker already leased"));
         }
-        let publication: Publication = serde_json::from_value(row.get("publication"))?;
+        let publication: Publication = row.get::<_, Jsonb>("publication").read()?;
         if !review {
             alt_repository_service::authorize_intent(
                 &publication,
@@ -71,7 +72,7 @@ impl Store {
                 time,
             )?;
         }
-        let manifest: Manifest = serde_json::from_value(row.get("manifest"))?;
+        let manifest: Manifest = row.get::<_, Jsonb>("manifest").read()?;
         manifest.validate(self.limits)?;
         let repository = &key.scope.repository_instance_id;
         for batch in manifest.entries.chunks(crate::database::BATCH_ROWS) {

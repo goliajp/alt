@@ -20,7 +20,7 @@ fn failure(error: DeviceError) -> Response<ResponseBody> {
             400
         },
         "application/json",
-        full(serde_json::to_vec(&DeviceFailure { error }).expect("device error")),
+        full(alt_json::to_vec(&DeviceFailure { error }).expect("device error")),
     )
 }
 fn form(bytes: &[u8]) -> Result<BTreeMap<String, String>, DeviceError> {
@@ -143,7 +143,7 @@ async fn inner(
                     return Err(DeviceError::InvalidRequest);
                 }
                 store.revoke_client_token(&token).map_err(mapped)?;
-                Ok(serde_json::json!({}))
+                Ok(alt_json::json!({}))
             } else if starting {
                 if input.remove("scope").as_deref() != Some(CLI_SCOPE) {
                     return Err(DeviceError::InvalidScope);
@@ -171,7 +171,7 @@ async fn inner(
                     )
                     .map_err(mapped)?;
                 let uri = format!("{}/#device", browser.origin.as_str());
-                serde_json::to_value(DeviceAuthorizationResponse {
+                alt_json::to_value(DeviceAuthorizationResponse {
                     device_code: code,
                     user_code: human.clone(),
                     verification_uri: uri.clone(),
@@ -201,7 +201,7 @@ async fn inner(
                         if remaining == 0 {
                             return Err(DeviceError::ExpiredToken);
                         }
-                        serde_json::to_value(DeviceTokenResponse {
+                        alt_json::to_value(DeviceTokenResponse {
                             access_token: token,
                             token_type: "Bearer".into(),
                             expires_in: remaining,
@@ -218,7 +218,7 @@ async fn inner(
         Ok(Ok(Ok(value))) => response(
             200,
             "application/json",
-            full(serde_json::to_vec(&value).expect("device response")),
+            full(alt_json::to_vec(&value).expect("device response")),
         ),
         Ok(Ok(Err(error))) => failure(error),
         _ => failure(DeviceError::TemporarilyUnavailable),

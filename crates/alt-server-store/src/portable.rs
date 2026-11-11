@@ -1,4 +1,5 @@
 //! Logical, authenticated snapshots. Physical disaster backups stay separate.
+use crate::Jsonb;
 mod capture;
 mod lifecycle;
 mod objects;
@@ -75,10 +76,10 @@ fn identity(installation: &str, actor: &str) -> IdentityRequirement {
 fn document(
     documents: &mut BTreeMap<String, Vec<u8>>,
     blobs: &mut BTreeMap<String, Blob>,
-    value: &impl serde::Serialize,
+    value: &impl alt_json::ToJson,
     budget: &mut usize,
 ) -> Result<Blob> {
-    let raw = serde_json::to_vec(value)?;
+    let raw = alt_json::to_vec(value)?;
     let blob = Blob::of(&raw);
     if !documents.contains_key(&blob.blake3) {
         *budget = budget
@@ -105,7 +106,7 @@ fn audit(
         actor,
         action,
         &scope.repository_instance_id,
-        &serde_json::json!({"export_id":id,"scope":scope}),
+        &Jsonb(alt_json::json!({"export_id":id,"scope":scope})),
     )
 }
 
@@ -195,7 +196,7 @@ impl Store {
         let repository = &scope.repository_instance_id;
         let row = tx.query_opt("SELECT actor_id,envelope,retired,verified_at FROM alt_portable_exports WHERE repository=$1 AND export_id=$2 FOR UPDATE", &[repository,&id])?
             .ok_or(Error::Precondition("portable export intent missing"))?;
-        let recorded: Envelope = serde_json::from_value(row.get(1))?;
+        let recorded: Envelope = row.get::<_, Jsonb>(1).read()?;
         if row.get::<_, String>(0) != auth.actor_id
             || row.get::<_, bool>(2)
             || recorded.encode(limits.package)? != result.envelope.encode(limits.package)?

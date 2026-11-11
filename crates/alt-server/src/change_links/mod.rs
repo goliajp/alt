@@ -5,6 +5,7 @@ use crate::{
     StoreFactory,
     operator::{self, Config},
 };
+use alt_json_serde::Serde;
 use alt_remote_protocol::Scope;
 use alt_server_store::{ChangeChannel, Error, RepairBindingRequest, Result};
 use alt_server_telemetry::{Id, Metrics, Outcome, Phase, Route, Trace};
@@ -79,13 +80,13 @@ impl ChannelConfig {
         if peer_token.is_empty() || !peer_token.bytes().all(|b| b.is_ascii_graphic()) {
             return Err(operator::Error::Config("change-link peer credential"));
         }
-        let identity = serde_json::to_vec(&(
+        let identity = alt_json::to_vec(&(
             &self.scope,
             &self.channel,
             &self.application,
-            &self.peer,
+            Serde(&self.peer),
             &self.peer_public_key,
-            &self.target,
+            Serde(&self.target),
             &self.peer_browser_origin,
             alt_hash::blake3::hash(local_token.as_bytes())
                 .to_hex()

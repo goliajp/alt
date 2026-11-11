@@ -142,7 +142,7 @@ fn failure(
     request: Option<RequestKey>,
     retry: Retry,
 ) -> Response<ResponseBody> {
-    let body = serde_json::to_vec(&Failure {
+    let body = alt_json::to_vec(&Failure {
         code,
         message: message.into(),
         request,
@@ -698,7 +698,7 @@ fn render_output(
                 .insert(header::CONTENT_LENGTH, bytes.into());
             output
         }
-        Ok(Output::Json(value)) => match serde_json::to_vec(&value) {
+        Ok(Output::Json(value)) => match alt_json::to_vec(&value) {
             Ok(bytes) => response(200, "application/json", full(bytes)),
             Err(_) => failure(
                 500,

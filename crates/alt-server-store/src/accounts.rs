@@ -1,4 +1,5 @@
 //! Session ownership and explicit local account recovery.
+use crate::Jsonb;
 use crate::browser::{audit_details, binding};
 use crate::store::{credential_row, instance, integer, now, require_admin, unsigned};
 use crate::{Credential, Error, Result, Store};
@@ -74,7 +75,9 @@ impl Store {
                 "local-operator",
                 "credential.operator_recovery",
                 actor,
-                &serde_json::json!({"reason":reason,"credential_id":digest,"old_credentials_revoked":true}),
+                &Jsonb(
+                    alt_json::json!({"reason":reason,"credential_id":digest,"old_credentials_revoked":true}),
+                ),
             )?;
         }
         tx.commit().map_err(|_| Error::OutcomeUnknown)
@@ -160,7 +163,7 @@ impl Store {
             &actor,
             "session.revoke",
             id,
-            &serde_json::json!({}),
+            &Jsonb(alt_json::json!({})),
         )?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)
     }
@@ -200,7 +203,7 @@ impl Store {
             &owner,
             "user.password_reset",
             actor,
-            &serde_json::json!({"credentials_revoked":true}),
+            &Jsonb(alt_json::json!({"credentials_revoked":true})),
         )?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)
     }
@@ -236,7 +239,7 @@ impl Store {
             "local-operator",
             "user.administrator_recovery",
             actor,
-            &serde_json::json!({"reason":reason,"credentials_revoked":true}),
+            &Jsonb(alt_json::json!({"reason":reason,"credentials_revoked":true})),
         )?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)
     }

@@ -159,8 +159,8 @@ pub fn detail(
                     .collect::<Vec<_>>()
                     .join("\n"),
             );
-            add("outcome", serde_json::to_string(&v.termination)?);
-            add("provenance", serde_json::to_string(&v.provenance)?);
+            add("outcome", alt_json::to_string(&v.termination)?);
+            add("provenance", alt_json::to_string(&v.provenance)?);
         }
         TaskRecord::Review(v) => {
             add("historicalReview", v.reviewer.clone());

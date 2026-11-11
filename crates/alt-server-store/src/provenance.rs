@@ -1,5 +1,6 @@
 //! Durable lineage is appended under the same transaction as recovery fencing.
 //! Reads verify it and never manufacture missing history or current approvals.
+use crate::Jsonb;
 use crate::database::Transaction;
 use crate::{Error, InstanceSpec, Result};
 use alt_crypto::ed25519::SigningKey;
@@ -12,7 +13,7 @@ fn evidence<T>(value: alt_provenance::Result<T>) -> Result<T> {
 }
 fn stored(tx: &mut Transaction<'_>, scope: &Scope, digest: &str) -> Result<Vec<TransferProof>> {
     tx.query_opt("SELECT proofs FROM alt_publication_provenance WHERE repository=$1 AND publication_digest=$2", &[&scope.repository_instance_id, &digest])?
-        .map(|row| serde_json::from_value(row.get(0)).map_err(Error::from)).transpose().map(|v|v.unwrap_or_default())
+        .map(|row| row.get::<_, Jsonb>(0).read().map_err(Error::from)).transpose().map(|v|v.unwrap_or_default())
 }
 pub(crate) fn save(
     tx: &mut Transaction<'_>,
@@ -23,7 +24,7 @@ pub(crate) fn save(
     if proofs.is_empty() {
         return Ok(());
     }
-    tx.execute("INSERT INTO alt_publication_provenance(repository,publication_digest,proofs) VALUES($1,$2,$3) ON CONFLICT(repository,publication_digest) DO UPDATE SET proofs=excluded.proofs", &[&scope.repository_instance_id,&digest,&serde_json::to_value(proofs)?])?;
+    tx.execute("INSERT INTO alt_publication_provenance(repository,publication_digest,proofs) VALUES($1,$2,$3) ON CONFLICT(repository,publication_digest) DO UPDATE SET proofs=excluded.proofs", &[&scope.repository_instance_id,&digest,&Jsonb::from(&proofs)?])?;
     Ok(())
 }
 pub(crate) fn load(
@@ -72,8 +73,8 @@ fn publications(
             visit(
                 tx,
                 scope,
-                serde_json::from_value(row.get(3))?,
-                serde_json::from_value(row.get(4))?,
+                row.get::<_, Jsonb>(3).read()?,
+                row.get::<_, Jsonb>(4).read()?,
             )?;
         }
     }
@@ -93,9 +94,9 @@ pub(crate) fn backfill_legacy(
         let digest = publication.digest(limits)?;
         let mut proofs = stored(tx, &scope, &digest)?;
         if proofs.is_empty() && publication.key.scope != scope {
-            let row = tx.query_opt("SELECT details FROM alt_instance_audit WHERE action='instance.restore' AND subject_id=$1 AND details @> $2 ORDER BY sequence DESC LIMIT 1", &[&spec.installation_id,&serde_json::json!({"generation":scope.recovery_epoch})])?
+            let row = tx.query_opt("SELECT details FROM alt_instance_audit WHERE action='instance.restore' AND subject_id=$1 AND details @> $2 ORDER BY sequence DESC LIMIT 1", &[&spec.installation_id,&Jsonb(alt_json::json!({"generation":scope.recovery_epoch}))])?
                 .ok_or(Error::Integrity("historical recovery audit absent"))?;
-            let details: serde_json::Value = row.get(0);
+            let Jsonb(details) = row.get(0);
             let backup = details
                 .get("backup_digest")
                 .and_then(|v| v.as_str())

@@ -37,7 +37,7 @@ pub enum Error {
     Protocol(alt_remote_protocol::Error),
     Task(alt_task_service::Error),
     Repository(alt_repository_service::Error),
-    Json(serde_json::Error),
+    Json(alt_json::Error),
     Integrity(&'static str),
     Limit(&'static str),
     Precondition(&'static str),
@@ -126,8 +126,8 @@ impl From<alt_repository_service::Error> for Error {
     }
 }
 
-impl From<serde_json::Error> for Error {
-    fn from(e: serde_json::Error) -> Self {
+impl From<alt_json::Error> for Error {
+    fn from(e: alt_json::Error) -> Self {
         Self::Json(e)
     }
 }

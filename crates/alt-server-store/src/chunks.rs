@@ -1,3 +1,4 @@
+use crate::Jsonb;
 use crate::requests::{active, check_key, upload_pin, upload_request_row, upload_selection};
 use crate::store::{authorize, instance, integer, now, snapshot};
 use crate::{ByteStore, Credential, Error, Result, Store};
@@ -20,7 +21,7 @@ impl Store {
         let row = upload_request_row(&mut tx, key)?.ok_or(Error::Unauthorized)?;
         let time = now(&mut tx)?;
         active(&row, time)?;
-        let publication: Publication = serde_json::from_value(row.get("publication"))?;
+        let publication: Publication = row.get::<_, Jsonb>("publication").read()?;
         alt_repository_service::authorize_intent(&publication, &current, &auth, self.limits, time)?;
         let chunks: BTreeMap<String, u64> = tx.query("SELECT blake3,chunk_bytes FROM alt_request_content WHERE repository=$1 AND epoch=$2 AND actor_id=$3 AND request_id=$4 AND chunk_bytes IS NOT NULL ORDER BY blake3", &[&key.scope.repository_instance_id,&integer(key.scope.recovery_epoch)?,&key.actor_id,&key.request_id])?
             .into_iter().map(|row| Ok((row.get(0), crate::store::unsigned(row.get(1))?))).collect::<Result<_>>()?;
@@ -57,7 +58,7 @@ impl Store {
         let row = upload_request_row(&mut tx, key)?.ok_or(Error::Unauthorized)?;
         let time = now(&mut tx)?;
         active(&row, time)?;
-        let publication: Publication = serde_json::from_value(row.get("publication"))?;
+        let publication: Publication = row.get::<_, Jsonb>("publication").read()?;
         alt_repository_service::authorize_intent(&publication, &current, &auth, self.limits, time)?;
         let bytes = upload_selection(&mut tx, key, digest)?
             .and_then(|s| s.chunk_bytes)

@@ -1,3 +1,4 @@
+use crate::Jsonb;
 use crate::database::Transaction;
 use crate::requests::{pin, upload_pin};
 use crate::store::{authorize, instance, integer, now, require_admin, snapshot, unsigned};
@@ -117,7 +118,7 @@ pub(crate) fn retain(
         tx.execute("INSERT INTO alt_task_records(repository,kind,record_id,payload_blake3) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING", &[repository,&selection.record.kind.as_str(),&selection.record.id,&selection.payload.blake3])?;
     }
     for root in tasks.roots() {
-        let kind = serde_json::to_value(root.kind)?
+        let kind = alt_json::to_value(root.kind)?
             .as_str()
             .ok_or(Error::Integrity("task root kind"))?
             .to_owned();
@@ -128,7 +129,7 @@ pub(crate) fn retain(
         tx.execute("INSERT INTO alt_task_bundle_records(repository,epoch,actor_id,request_id,kind,record_id,payload_blake3) VALUES($1,$2,$3,$4,$5,$6,$7)", &[repository,&integer(work.key.scope.recovery_epoch)?,&work.key.actor_id,&work.key.request_id,&selection.record.kind.as_str(),&selection.record.id,&selection.payload.blake3])?;
     }
     for root in tasks.roots() {
-        let kind = serde_json::to_value(root.kind)?
+        let kind = alt_json::to_value(root.kind)?
             .as_str()
             .ok_or(Error::Integrity("task root kind"))?
             .to_owned();
@@ -146,7 +147,7 @@ pub(crate) fn collector_policy(
         "SELECT generation,policy FROM alt_collector_policies WHERE repository=$1",
         &[&repository],
     )? {
-        Some(row) => Ok((unsigned(row.get(0))?, serde_json::from_value(row.get(1))?)),
+        Some(row) => Ok((unsigned(row.get(0))?, row.get::<_, Jsonb>(1).read()?)),
         None => Ok((0, CollectorPolicy::default())),
     }
 }
@@ -261,7 +262,7 @@ impl Store {
             admin,
             "repository.review_grant",
             repository,
-            serde_json::json!({"actor_id":actor,"can_review":can_review}),
+            Jsonb(alt_json::json!({"actor_id":actor,"can_review":can_review})),
         )?;
         tx.commit()?;
         Ok(())
@@ -273,21 +274,21 @@ impl Store {
         policy: &CollectorPolicy,
     ) -> Result<()> {
         policy.validate()?;
-        if serde_json::to_vec(policy)?.len() > self.limits.request_bytes {
+        if alt_json::to_vec(policy)?.len() > self.limits.request_bytes {
             return Err(Error::Limit("collector policy bytes"));
         }
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         snapshot(&mut tx, &self.spec, repository)?;
         require_admin(&mut tx, &self.spec, admin)?;
-        tx.execute("INSERT INTO alt_collector_policies VALUES($1,1,$2) ON CONFLICT(repository) DO UPDATE SET generation=alt_collector_policies.generation+1,policy=excluded.policy", &[&repository,&serde_json::to_value(policy)?])?;
+        tx.execute("INSERT INTO alt_collector_policies VALUES($1,1,$2) ON CONFLICT(repository) DO UPDATE SET generation=alt_collector_policies.generation+1,policy=excluded.policy", &[&repository,&Jsonb::from(&policy)?])?;
         crate::browser::audit_admin(
             &mut tx,
             &self.spec,
             admin,
             "repository.collector_policy",
             repository,
-            serde_json::json!({"policy":policy}),
+            Jsonb(alt_json::json!({"policy":policy})),
         )?;
         tx.commit()?;
         Ok(())

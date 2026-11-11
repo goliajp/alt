@@ -132,9 +132,9 @@ impl ByteStore {
         Read::by_ref(&mut marker)
             .take(4097)
             .read_to_end(&mut bytes)?;
-        let identity: serde_json::Value = serde_json::from_slice(&bytes)?;
+        let identity: alt_json::Value = alt_json::from_slice(&bytes)?;
         if identity
-            != serde_json::json!({"version":1,"installation_id":spec.installation_id,
+            != alt_json::json!({"version":1,"installation_id":spec.installation_id,
             "workspace_id":spec.workspace_id,"deployment_mode":spec.deployment_mode,"receipt_key_id":key_id})
         {
             return Err(Error::Integrity("volume identity"));

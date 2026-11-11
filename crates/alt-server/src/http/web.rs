@@ -3,9 +3,9 @@ mod input;
 use super::*;
 use crate::web_route::{self, WebRoute};
 use alt_browser_auth::PublicOrigin;
+use alt_json::{Value, json};
 use alt_server_store::{Credential, Result, Store};
 use input::{DeviceDecision, Empty, Login, NewUser, UserState};
-use serde_json::{Value, json};
 use std::{io::Read, net::IpAddr};
 
 #[derive(Clone)]
@@ -332,7 +332,7 @@ async fn handle_inner(
             return Ok((Output::Json(json!({"deployment_mode":store.spec().deployment_mode,"workspace_id":store.spec().workspace_id})), None));
         }
         if login {
-            let input: Login = serde_json::from_slice(&raw)?;
+            let input: Login = alt_json::from_slice(&raw)?;
             let authenticated = store.browser_login(&browser.origin, &input.login_name, &input.password, peer, browser.session_ttl_ms)?.ok_or(Error::Unauthorized)?;
             let credential = store.authenticate(&authenticated.token)?;
             let session = session(&mut store, &credential, &browser.origin, &authenticated.token, &factory.signing_key)?;
@@ -353,12 +353,12 @@ async fn handle_inner(
             WebRoute::Session => Ok((Output::Json(session(&mut store, &credential, &browser.origin, &token, &factory.signing_key)?), None)),
             WebRoute::Navigation => {
                 let cloud=factory.cloud.as_ref().ok_or(Error::Unauthorized)?;
-                Ok((output(cloud.navigation(&mut store,&token)?)?,None))
+                Ok((crate::native::json_serde(&cloud.navigation(&mut store,&token)?)?,None))
             }
             WebRoute::Sessions => Ok((output(store.browser_sessions(&credential, &browser.origin)?)?, None)),
             WebRoute::DeviceConsent(code) => Ok((output(store.device_consent(&credential,&browser.origin,&code,peer)?)?,None)),
             WebRoute::DeviceDecision => {
-                let input:DeviceDecision=serde_json::from_slice(&raw)?;
+                let input:DeviceDecision=alt_json::from_slice(&raw)?;
                 let consent=store.device_consent(&credential,&browser.origin,&input.user_code,peer)?;
                 let local=super::device::credential(&factory.signing_key,&consent.id);
                 let sealed=if input.allow {
@@ -372,23 +372,23 @@ async fn handle_inner(
             },
             WebRoute::AgentDelegations(after) => Ok((output(store.agent_delegations(&credential,&after)?)?,None)),
             WebRoute::RevokeAgent(id) => {
-                let _:Empty=serde_json::from_slice(&raw)?;
+                let _:Empty=alt_json::from_slice(&raw)?;
                 store.revoke_agent(&credential,&id)?;
                 Ok((Output::Json(json!({"revoked":true})),None))
             },
             WebRoute::ClientCredentials => Ok((output(store.client_credentials(&credential)?)?,None)),
             WebRoute::RevokeClientCredential(id) => {
-                let _:Empty=serde_json::from_slice(&raw)?;
+                let _:Empty=alt_json::from_slice(&raw)?;
                 store.revoke_client_credential(&credential,&id)?;
                 Ok((Output::Json(json!({"revoked":true})),None))
             },
             WebRoute::RevokeSession(id) => {
-                let _: Empty = serde_json::from_slice(&raw)?;
+                let _: Empty = alt_json::from_slice(&raw)?;
                 store.revoke_browser_session(&credential, &browser.origin, &id)?;
                 Ok((Output::Json(json!({"revoked":true})), None))
             },
             WebRoute::Logout => {
-                let _: Empty = serde_json::from_slice(&raw)?;
+                let _: Empty = alt_json::from_slice(&raw)?;
                 store.browser_logout(&credential, &browser.origin)?;
                 Ok((Output::Json(json!({"signed_out":true})), Some(browser.origin.clear_cookie())))
             },
@@ -451,8 +451,8 @@ fn session(
         json!({"installation_id":spec.installation_id,"workspace_id":spec.workspace_id,"deployment_mode":spec.deployment_mode,"runtime_generation":spec.runtime_generation.to_string(),"build_id":option_env!("ALT_BUILD_ID").unwrap_or("development"),"user":session.user,"csrf":csrf(token,key),"products":[{"product":"alt","title":"alt","url":"/"}]}),
     )
 }
-fn output(value: impl serde::Serialize) -> Result<Output> {
-    Ok(Output::Json(serde_json::to_value(value)?))
+fn output(value: impl alt_json::ToJson) -> Result<Output> {
+    Ok(Output::Json(alt_json::to_value(value)?))
 }
 fn execute(
     store: &mut Store,
@@ -556,7 +556,7 @@ fn execute(
             output(alt_server_store::Page { items, next })
         }
         WebRoute::CreateUser => {
-            let input: NewUser = serde_json::from_slice(raw)?;
+            let input: NewUser = alt_json::from_slice(raw)?;
             let actor = format!("user-{}", alt_browser_auth::secret());
             output(store.create_local_user(
                 credential,
@@ -568,7 +568,7 @@ fn execute(
             )?)
         }
         WebRoute::UserState(actor) => {
-            let input: UserState = serde_json::from_slice(raw)?;
+            let input: UserState = alt_json::from_slice(raw)?;
             store.disable_local_user(credential, &actor, input.disabled)?;
             output(json!({"actor_id":actor,"disabled":input.disabled}))
         }

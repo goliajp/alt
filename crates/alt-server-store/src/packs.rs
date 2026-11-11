@@ -1,6 +1,7 @@
 //! Git objects as verified pack segments: one database row per segment, refs and the
 //! segment published in one transaction, reads without any per-object row.
 
+use crate::Jsonb;
 use crate::{
     Credential, Error, Result, Store,
     store::{authorize, credential_row, instance, integer, now, snapshot, unsigned},
@@ -338,11 +339,11 @@ impl Store {
         credential: &Credential,
         repository: &str,
     ) -> Result<Option<PackView>> {
-        use serde_json::Value;
+        use alt_json::Value;
         let row = self
             .client
             .query_one(VIEW, &[&credential.digest, &repository])?;
-        let field = |index: usize| row.get::<_, Option<Value>>(index);
+        let field = |index: usize| row.get::<_, Option<Jsonb>>(index).map(|json| json.0);
         let text =
             |value: &Value, key: &str| value.get(key).and_then(Value::as_str).map(str::to_owned);
         let number = |value: &Value, key: &str| value.get(key).and_then(Value::as_i64);
@@ -400,7 +401,7 @@ impl Store {
             return Err(Error::Unauthorized);
         }
         let grants: Vec<alt_repository_service::Grant> =
-            serde_json::from_value(grant.get("grants").cloned().unwrap_or(Value::Null))?;
+            alt_json::from_value(grant.get("grants").cloned().unwrap_or(Value::Null))?;
         let mut refs = BTreeMap::new();
         for pair in field(7)
             .and_then(|value| value.as_array().cloned())
@@ -418,7 +419,7 @@ impl Store {
                     .map_err(|_| Error::Integrity("stored reference object id"))?,
             );
         }
-        let ids: Vec<(String, bool)> = serde_json::from_value(field(8).unwrap_or(Value::Null))?;
+        let ids: Vec<(String, bool)> = alt_json::from_value(field(8).unwrap_or(Value::Null))?;
         Ok(Some(PackView {
             scope: Scope {
                 installation_id: self.spec.installation_id.clone(),
@@ -438,7 +439,7 @@ impl Store {
                     .any(|grant| grant.create || grant.update || grant.delete),
             actor_id: text(&credential_row, "actor_id")
                 .ok_or(Error::Integrity("credential actor"))?,
-            attribution: serde_json::from_value(attribution)?,
+            attribution: alt_json::from_value(attribution)?,
             segments: self.open_segments(repository, &ids)?,
         }))
     }
@@ -553,7 +554,7 @@ impl Store {
                 .map(|byte| format!("{byte:02x}"))
                 .collect(),
         };
-        let event = serde_json::json!({"kind":"publication_committed","receipt":receipt});
+        let event = Jsonb(alt_json::json!({"kind":"publication_committed","receipt":receipt}));
         tx.execute(
             "INSERT INTO alt_audit(repository,sequence,actor_id,event) VALUES($1,$2,$3,$4)",
             &[repository, &integer(sequence)?, &auth.actor_id, &event],
@@ -573,9 +574,9 @@ impl Store {
                 &publication.key.actor_id,
                 &publication.key.request_id,
                 &validated.digest,
-                &serde_json::to_value(publication)?,
-                &serde_json::json!({"pack_segment": segment.as_ref().map(|segment| segment.id)}),
-                &serde_json::to_value(&result)?,
+                &Jsonb::from(&publication)?,
+                &Jsonb(alt_json::json!({"pack_segment": segment.as_ref().map(|segment| segment.id)})),
+                &Jsonb::from(&result)?,
             ],
         )?;
         // lock waits can outlive a lease checked on entry

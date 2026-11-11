@@ -1,4 +1,5 @@
 //! Product browser sessions retain platform identity without local accounts.
+use crate::Jsonb;
 use crate::database::Transaction;
 use crate::store::{credential_row, instance, integer, now, unsigned};
 use crate::{ActiveBrowserSession, BrowserSession, Credential, Error, LocalUser, Result, Store};
@@ -20,7 +21,7 @@ impl Store {
         crate::browser::binding(&mut tx, origin)?;
         credential_row(&mut tx, &self.spec, credential)?;
         let row = browser(&mut tx, &credential.digest)?;
-        let claims: AccountAuthorization = serde_json::from_value(row.get("claims"))?;
+        let claims: AccountAuthorization = row.get::<_, Jsonb>("claims").read_serde()?;
         let result = BrowserSession {
             user: LocalUser {
                 actor_id: claims.account_id.as_str().into(),

@@ -1,5 +1,6 @@
 //! Local browser identities and sessions. They share the same credential and
 //! repository authorization checks as CLI/Git. Cloud cannot create local users.
+use crate::Jsonb;
 use crate::database::Transaction;
 use crate::store::{credential_row, instance, integer, now, require_admin, token_digest, unsigned};
 use crate::{Credential, Error, Result, Store};
@@ -54,14 +55,14 @@ pub(crate) fn audit(
     action: &str,
     subject: &str,
 ) -> Result<()> {
-    audit_details(tx, actor, action, subject, &serde_json::json!({}))
+    audit_details(tx, actor, action, subject, &Jsonb(alt_json::json!({})))
 }
 pub(crate) fn audit_details(
     tx: &mut Transaction<'_>,
     actor: &str,
     action: &str,
     subject: &str,
-    details: &serde_json::Value,
+    details: &Jsonb,
 ) -> Result<()> {
     let time = integer(now(tx)?)?;
     tx.execute("INSERT INTO alt_instance_audit(actor_id,action,subject_id,details,occurred_at) VALUES($1,$2,$3,$4,$5)", &[&actor,&action,&subject,&details,&time])?;
@@ -73,7 +74,7 @@ pub(crate) fn audit_admin(
     admin: &Credential,
     action: &str,
     subject: &str,
-    details: serde_json::Value,
+    details: Jsonb,
 ) -> Result<()> {
     let actor: String = credential_row(tx, spec, admin)?.get("actor_id");
     audit_details(tx, &actor, action, subject, &details)
@@ -180,7 +181,9 @@ impl Store {
             &owner,
             "user.create",
             actor,
-            &serde_json::json!({"login_name":login,"display_name":display_name,"administrator":administrator}),
+            &Jsonb(
+                alt_json::json!({"login_name":login,"display_name":display_name,"administrator":administrator}),
+            ),
         )?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)?;
         Ok(LocalUser {

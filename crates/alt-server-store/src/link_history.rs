@@ -3,12 +3,13 @@
 use crate::database::Transaction;
 use crate::store::{integer, unsigned};
 use crate::{Error, Result};
+use alt_json_serde::Serde;
 use golia_change_link::HistoricalEvent;
 
 fn decode(raw: &[u8], digest: &str) -> Result<HistoricalEvent> {
     let history = HistoricalEvent::from_bytes(raw)
         .map_err(|_| Error::Integrity("change-link historical signature"))?;
-    if serde_json::to_vec(&history)? != raw
+    if alt_json::to_vec(&Serde(&history))? != raw
         || history
             .statement
             .digest()
@@ -59,7 +60,7 @@ pub(crate) fn import(
         return Err(Error::Limit("repository quota"));
     }
     for history in &catalog.change_links {
-        let raw = serde_json::to_vec(history)?;
+        let raw = alt_json::to_vec(&Serde(history))?;
         let digest = history
             .statement
             .digest()
@@ -102,7 +103,7 @@ pub(crate) fn retain(
         .statement
         .digest()
         .map_err(|_| Error::Integrity("change-link identity"))?;
-    let raw = serde_json::to_vec(history)?;
+    let raw = alt_json::to_vec(&Serde(history))?;
     decode(&raw, &digest)?;
     let old = tx.query_opt(
         "SELECT history FROM alt_link_history WHERE repository=$1 AND event_digest=$2",

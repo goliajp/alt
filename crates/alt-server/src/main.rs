@@ -1,7 +1,7 @@
+use alt_json::{Value, json};
 use alt_remote_protocol::{ActorKind, Attribution};
 use alt_server::operator::{self, Config, Error, Result};
 use clap::{Parser, Subcommand, ValueEnum};
-use serde_json::{Value, json};
 mod grants;
 use grants::Grants;
 use std::{
@@ -241,8 +241,8 @@ enum SecretKind {
     ReceiptKey,
     Token,
 }
-fn json_file<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
-    serde_json::from_slice(&operator::read_regular(path, 4 * 1024 * 1024, false)?)
+fn json_file<T: alt_json::FromJson>(path: &Path) -> Result<T> {
+    alt_json::from_slice(&operator::read_regular(path, 4 * 1024 * 1024, false)?)
         .map_err(|_| Error::Config("operator input JSON"))
 }
 fn password_file(path: &Path) -> Result<String> {
@@ -290,8 +290,8 @@ fn execute(args: &Args) -> Result<Value> {
                 "--source-fenced is required for disaster recovery",
             ));
         }
-        let spec: golia_platform_contract::lifecycle::RecoverySpec =
-            serde_json::from_slice(&operator::read_regular(spec, 65536, true)?)
+        let alt_json_serde::Serde::<golia_platform_contract::lifecycle::RecoverySpec>(spec) =
+            alt_json::from_slice(&operator::read_regular(spec, 65536, true)?)
                 .map_err(|_| Error::Config("recovery specification"))?;
         spec.validate()
             .map_err(|_| Error::Config("recovery specification"))?;
@@ -550,10 +550,10 @@ fn execute(args: &Args) -> Result<Value> {
             json!({"repository":repository,"channel":channel,"disabled":true})
         }
         Action::Status => {
-            serde_json::to_value(store.instance_status(&admin)?).map_err(|_| Error::Store)?
+            alt_json::to_value(store.instance_status(&admin)?).map_err(|_| Error::Store)?
         }
         Action::Audit { before, limit } => {
-            serde_json::to_value(store.instance_audit(&admin, *before, *limit)?)
+            alt_json::to_value(store.instance_audit(&admin, *before, *limit)?)
                 .map_err(|_| Error::Store)?
         }
         Action::RepositoryCreate { id, quota_bytes } => {

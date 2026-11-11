@@ -1,3 +1,4 @@
+use crate::Jsonb;
 mod acquire;
 mod fence;
 mod pack;
@@ -185,7 +186,7 @@ impl Store {
         let state = RequestState::Ready {
             digest: row.get("digest"),
         };
-        tx.execute("UPDATE alt_requests SET state='ready',result=$5 WHERE repository=$1 AND epoch=$2 AND actor_id=$3 AND request_id=$4",&[&work.key.scope.repository_instance_id,&integer(work.key.scope.recovery_epoch)?,&work.key.actor_id,&work.key.request_id,&serde_json::to_value(&state)?])?;
+        tx.execute("UPDATE alt_requests SET state='ready',result=$5 WHERE repository=$1 AND epoch=$2 AND actor_id=$3 AND request_id=$4",&[&work.key.scope.repository_instance_id,&integer(work.key.scope.recovery_epoch)?,&work.key.actor_id,&work.key.request_id,&Jsonb::from(&state)?])?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)?;
         Ok(())
     }
@@ -290,7 +291,7 @@ impl Store {
             .ok_or(Error::Precondition("request not registered"))?;
         crate::requests::check_request_attribution(&row, &auth)?;
         if row.get::<_, String>("state") == "committed" {
-            let state: RequestState = serde_json::from_value(row.get("result"))?;
+            let state: RequestState = row.get::<_, Jsonb>("result").read()?;
             if let RequestState::Committed { receipt } = state {
                 return Ok(*receipt);
             }
@@ -417,7 +418,7 @@ impl Store {
         let result = RequestState::Committed {
             receipt: Box::new(receipt.clone()),
         };
-        let event = serde_json::json!({"kind":"publication_committed","receipt":receipt});
+        let event = Jsonb(alt_json::json!({"kind":"publication_committed","receipt":receipt}));
         tx.execute(
             "INSERT INTO alt_audit(repository,sequence,actor_id,event) VALUES($1,$2,$3,$4)",
             &[repository, &integer(sequence)?, &auth.actor_id, &event],

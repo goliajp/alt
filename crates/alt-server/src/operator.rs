@@ -133,8 +133,8 @@ impl Config {
         if bytes.first() != Some(&b'{') {
             return read_token(path);
         }
-        let value: alt_remote_protocol::login::SavedCredential = serde_json::from_slice(&bytes)
-            .map_err(|_| Error::Config("credential file encoding"))?;
+        let value: alt_remote_protocol::login::SavedCredential =
+            alt_json::from_slice(&bytes).map_err(|_| Error::Config("credential file encoding"))?;
         value
             .validate()
             .map_err(|_| Error::Config("credential file fields"))?;
@@ -156,7 +156,7 @@ impl Config {
     pub fn read(path: &Path) -> Result<Self> {
         let bytes = read_regular(path, 65536, false)?;
         let mut config: Self =
-            serde_json::from_slice(&bytes).map_err(|_| Error::Config("configuration JSON"))?;
+            alt_json::from_slice(&bytes).map_err(|_| Error::Config("configuration JSON"))?;
         let parent = std::fs::canonicalize(
             path.parent()
                 .filter(|p| !p.as_os_str().is_empty())
@@ -192,7 +192,7 @@ impl Config {
         config.validate()?;
         // Backups serialize the effective configuration, including separately
         // loaded Cloud settings and resolved paths, into a bounded archive entry.
-        if serde_json::to_vec(&config)
+        if alt_json::to_vec(&config)
             .map_err(|_| Error::Config("configuration encoding"))?
             .len()
             > 65536
@@ -408,13 +408,13 @@ impl Config {
     pub fn open(&self) -> Result<Store> {
         Ok(self.factory()?.open()?)
     }
-    fn volume_identity(&self) -> Result<serde_json::Value> {
+    fn volume_identity(&self) -> Result<alt_json::Value> {
         Ok(
-            serde_json::json!({"version":1,"installation_id":self.instance.installation_id,"workspace_id":self.instance.workspace_id,"deployment_mode":self.instance.deployment_mode,"receipt_key_id":alt_hash::blake3::hash(self.signing_key()?.verifying_key().as_bytes()).to_hex().to_string()}),
+            alt_json::json!({"version":1,"installation_id":self.instance.installation_id,"workspace_id":self.instance.workspace_id,"deployment_mode":self.instance.deployment_mode,"receipt_key_id":alt_hash::blake3::hash(self.signing_key()?.verifying_key().as_bytes()).to_hex().to_string()}),
         )
     }
     pub(super) fn check_volume(&self) -> Result<()> {
-        let marker: serde_json::Value = serde_json::from_slice(&read_regular(
+        let marker: alt_json::Value = alt_json::from_slice(&read_regular(
             &self.bytes_directory.join("instance.json"),
             4096,
             true,
@@ -450,7 +450,7 @@ impl Config {
             }
             create_private(
                 &marker,
-                &serde_json::to_vec(&self.volume_identity()?)
+                &alt_json::to_vec(&self.volume_identity()?)
                     .map_err(|_| Error::Config("volume identity"))?,
             )?;
         }
@@ -548,7 +548,7 @@ impl Config {
             .ok_or(Error::Config("runtime generation overflow"))?;
         next.validate()?;
         let encoded =
-            serde_json::to_vec_pretty(&next).map_err(|_| Error::Config("next configuration"))?;
+            alt_json::to_vec_pretty(&next).map_err(|_| Error::Config("next configuration"))?;
         if output.exists() {
             if read_regular(output, 65536, true)? != encoded {
                 return Err(Error::Config(

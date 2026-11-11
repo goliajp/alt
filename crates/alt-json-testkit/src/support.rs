@@ -206,7 +206,11 @@ macro_rules! arbitrary_tuples {
     )+};
 }
 
-arbitrary_tuples!((A) (A B) (A B C) (A B C D));
+arbitrary_tuples! {
+    (A) (A B) (A B C) (A B C D)
+    (A B C D E F G H I)
+    (A B C D E F G H I J K L M N O P)
+}
 
 /// Defines types that derive the traits of both libraries, with each
 /// `#[both(...)]` attribute given to both, and an [`Arbitrary`] impl.

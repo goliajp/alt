@@ -285,6 +285,14 @@ tuples! {
     (6 A 0 B 1 C 2 D 3 E 4 F 5)
     (7 A 0 B 1 C 2 D 3 E 4 F 5 G 6)
     (8 A 0 B 1 C 2 D 3 E 4 F 5 G 6 H 7)
+    (9 A 0 B 1 C 2 D 3 E 4 F 5 G 6 H 7 I 8)
+    (10 A 0 B 1 C 2 D 3 E 4 F 5 G 6 H 7 I 8 J 9)
+    (11 A 0 B 1 C 2 D 3 E 4 F 5 G 6 H 7 I 8 J 9 K 10)
+    (12 A 0 B 1 C 2 D 3 E 4 F 5 G 6 H 7 I 8 J 9 K 10 L 11)
+    (13 A 0 B 1 C 2 D 3 E 4 F 5 G 6 H 7 I 8 J 9 K 10 L 11 M 12)
+    (14 A 0 B 1 C 2 D 3 E 4 F 5 G 6 H 7 I 8 J 9 K 10 L 11 M 12 N 13)
+    (15 A 0 B 1 C 2 D 3 E 4 F 5 G 6 H 7 I 8 J 9 K 10 L 11 M 12 N 13 O 14)
+    (16 A 0 B 1 C 2 D 3 E 4 F 5 G 6 H 7 I 8 J 9 K 10 L 11 M 12 N 13 O 14 P 15)
 }
 
 impl FromJson for Value {

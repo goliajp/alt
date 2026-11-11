@@ -4,6 +4,7 @@
 //! objects move to the pack segments where they are not held already, their copies
 //! and pins go, and each repository's stored bytes are counted again.
 
+use crate::Jsonb;
 use crate::{
     ByteStore, Error, Result,
     database::{BATCH_ROWS, Transaction},
@@ -180,8 +181,8 @@ fn settle_repository(
 /// imports, and what exports that are still open serve besides Git objects.
 fn other_uses(tx: &mut Transaction<'_>, repository: &str) -> Result<BTreeSet<String>> {
     let mut kept = BTreeSet::new();
-    let manifest = |kept: &mut BTreeSet<String>, value: serde_json::Value| -> Result<()> {
-        let manifest: Manifest = serde_json::from_value(value)?;
+    let manifest = |kept: &mut BTreeSet<String>, value: Jsonb| -> Result<()> {
+        let manifest: Manifest = value.read()?;
         kept.extend(
             manifest
                 .entries
@@ -199,18 +200,18 @@ fn other_uses(tx: &mut Transaction<'_>, repository: &str) -> Result<BTreeSet<Str
         &[&repository],
     )? {
         manifest(&mut kept, row.get(0))?;
-        let original: HistoricalPublication = serde_json::from_value(row.get(1))?;
+        let original: HistoricalPublication = row.get::<_, Jsonb>(1).read()?;
         for blob in [original.publication, original.manifest, original.receipt] {
             kept.insert(blob.blake3);
         }
     }
     let envelopes = tx.query("SELECT envelope,NULL::jsonb FROM alt_portable_imports WHERE repository=$1 AND state='committed' UNION ALL SELECT envelope,documents FROM alt_portable_exports WHERE repository=$1 AND NOT retired", &[&repository])?;
     for row in envelopes {
-        let envelope: Envelope = serde_json::from_value(row.get(0))?;
+        let envelope: Envelope = row.get::<_, Jsonb>(0).read()?;
         // an export serves its own documents; they are not content-store bytes
-        let documents: BTreeMap<String, serde_json::Value> = row
-            .get::<_, Option<serde_json::Value>>(1)
-            .map(serde_json::from_value)
+        let documents: BTreeMap<String, alt_json::Value> = row
+            .get::<_, Option<Jsonb>>(1)
+            .map(Jsonb::read)
             .transpose()?
             .unwrap_or_default();
         let catalog = envelope.catalog;

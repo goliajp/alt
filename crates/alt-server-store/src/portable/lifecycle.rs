@@ -1,5 +1,6 @@
 //! Opening, freezing, reopening, retiring and querying a captured export.
 use super::*;
+use crate::Jsonb;
 
 impl Store {
     /// Resume an existing immutable export. This read never silently captures
@@ -21,10 +22,10 @@ impl Store {
         }
         export_key(scope, &auth.actor_id, id)?;
         let row = tx.query_opt("SELECT envelope,documents FROM alt_portable_exports WHERE repository=$1 AND export_id=$2 AND NOT retired AND verified_at IS NOT NULL", &[&scope.repository_instance_id,&id])?.ok_or(Error::Precondition("active portable export not found"))?;
-        let envelope: Envelope = serde_json::from_value(row.get(0))?;
+        let envelope: Envelope = row.get::<_, Jsonb>(0).read()?;
         envelope.verify(scope, self.signing_key.verifying_key().as_bytes(), limits)?;
         let locations = export_locations(&mut tx, scope, &envelope.catalog.blobs)?;
-        let documents = serde_json::from_value(row.get(1))?;
+        let documents = row.get::<_, Jsonb>(1).read()?;
         let ids = Self::live_segment_ids(&mut tx, &scope.repository_instance_id)?;
         tx.commit()?;
         let (_, segments) = self.open_listed_segments(&scope.repository_instance_id, ids)?;
@@ -57,7 +58,7 @@ impl Store {
         export_key(scope, &auth.actor_id, id)?;
         let repository = &scope.repository_instance_id;
         let row = tx.query_opt("SELECT envelope FROM alt_portable_exports WHERE repository=$1 AND export_id=$2 AND NOT retired AND verified_at IS NOT NULL", &[repository,&id])?.ok_or(Error::Precondition("active portable export not found"))?;
-        let envelope: Envelope = serde_json::from_value(row.get(0))?;
+        let envelope: Envelope = row.get::<_, Jsonb>(0).read()?;
         envelope.verify(scope, self.signing_key.verifying_key().as_bytes(), limits)?;
         let catalog = &envelope.catalog;
         let row = tx.query_one("SELECT transaction_sequence,default_branch,portable_freeze FROM alt_repositories WHERE id=$1", &[repository])?;
@@ -70,8 +71,7 @@ impl Store {
         if catalog.source != *scope
             || catalog.snapshot_sequence != unsigned(row.get(0))?
             || catalog.default_branch != row.get::<_, String>(1)
-            || serde_json::to_value(&catalog.protections)?
-                != serde_json::to_value(&current.policies)?
+            || alt_json::to_value(&catalog.protections)? != alt_json::to_value(&current.policies)?
             || catalog
                 .refs
                 .iter()
@@ -224,7 +224,7 @@ impl Store {
             "SELECT envelope,retired,verified_at FROM alt_portable_exports WHERE repository=$1 AND export_id=$2",
             &[&scope.repository_instance_id, &id],
         )? {
-            let envelope: Envelope = serde_json::from_value(row.get(0))?;
+            let envelope: Envelope = row.get::<_, Jsonb>(0).read()?;
             if envelope.catalog.source != *scope {
                 unknown()
             } else {

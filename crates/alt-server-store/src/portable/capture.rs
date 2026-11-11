@@ -1,5 +1,6 @@
 //! Capturing one immutable snapshot: the catalog, its documents and its retention.
 use super::*;
+use crate::Jsonb;
 use alt_crypto::ed25519::SigningKey;
 use alt_portable::{Catalog, HistoricalPublication, PackageLimits, Reference};
 use alt_remote_protocol::{Publication, RequestState};
@@ -28,7 +29,7 @@ struct Inventory {
     budget: usize,
 }
 impl Inventory {
-    fn document(&mut self, value: &impl serde::Serialize) -> Result<Blob> {
+    fn document(&mut self, value: &impl alt_json::ToJson) -> Result<Blob> {
         document(
             &mut self.documents,
             &mut self.blobs,
@@ -92,7 +93,7 @@ fn source_identities(
                 had_read: row.get(1),
                 had_publish_records: row.get(2),
                 had_review: row.get(4),
-                ref_grants: serde_json::from_value(row.get(3))?,
+                ref_grants: row.get::<_, Jsonb>(3).read()?,
             },
         );
     }
@@ -115,9 +116,9 @@ fn committed_publications(
     }
     let mut publications = Vec::new();
     for row in rows {
-        let publication: Publication = serde_json::from_value(row.get(0))?;
-        let manifest: alt_remote_protocol::Manifest = serde_json::from_value(row.get(1))?;
-        let RequestState::Committed { receipt } = serde_json::from_value(row.get(2))? else {
+        let publication: Publication = row.get::<_, Jsonb>(0).read()?;
+        let manifest: alt_remote_protocol::Manifest = row.get::<_, Jsonb>(1).read()?;
+        let RequestState::Committed { receipt } = row.get::<_, Jsonb>(2).read()? else {
             return Err(Error::Integrity("portable original receipt"));
         };
         let proofs = crate::provenance::load(tx, scope, &publication, &receipt, key, protocol)?;
@@ -156,9 +157,9 @@ fn archived_publications(
     }
     let mut publications = Vec::new();
     for row in rows {
-        let publication: Publication = serde_json::from_value(row.get(0))?;
-        let receipt: alt_remote_protocol::Receipt = serde_json::from_value(row.get(1))?;
-        let mut original: HistoricalPublication = serde_json::from_value(row.get(2))?;
+        let publication: Publication = row.get::<_, Jsonb>(0).read()?;
+        let receipt: alt_remote_protocol::Receipt = row.get::<_, Jsonb>(1).read()?;
+        let mut original: HistoricalPublication = row.get::<_, Jsonb>(2).read()?;
         original.proofs =
             crate::provenance::load(tx, scope, &publication, &receipt, key, protocol)?;
         publications.push(original);
@@ -181,8 +182,8 @@ fn import_history(
     }
     let mut receipts = BTreeMap::new();
     for row in rows {
-        let original: Envelope = serde_json::from_value(row.get(0))?;
-        let receipt: alt_portable::ImportReceipt = serde_json::from_value(row.get(1))?;
+        let original: Envelope = row.get::<_, Jsonb>(0).read()?;
+        let receipt: alt_portable::ImportReceipt = row.get::<_, Jsonb>(1).read()?;
         for item in original.catalog.identities {
             let key = (item.installation_id.clone(), item.actor_id.clone());
             if let Some(existing) = inventory.identities.get_mut(&key) {
@@ -194,7 +195,7 @@ fn import_history(
                 existing.had_review |= item.had_review;
                 let mut grants = BTreeMap::new();
                 for grant in existing.ref_grants.iter().chain(&item.ref_grants) {
-                    grants.insert(serde_json::to_string(grant)?, grant.clone());
+                    grants.insert(alt_json::to_string(grant)?, grant.clone());
                 }
                 existing.ref_grants = grants.into_values().collect();
             } else {
@@ -285,10 +286,10 @@ impl Store {
             if row.get::<_, String>(0) != auth.actor_id || row.get::<_, bool>(3) {
                 return Err(Error::Precondition("export belongs to another actor or was retired"));
             }
-            let envelope: Envelope = serde_json::from_value(row.get(1))?;
+            let envelope: Envelope = row.get::<_, Jsonb>(1).read()?;
             envelope.verify(scope, self.signing_key.verifying_key().as_bytes(), limits.package)?;
             let locations = export_locations(&mut tx, scope, &envelope.catalog.blobs)?;
-            let documents = serde_json::from_value(row.get(2))?;
+            let documents = row.get::<_, Jsonb>(2).read()?;
             tx.commit()?;
             return Ok(Capture::Recorded {
                 envelope,
@@ -405,7 +406,7 @@ impl Store {
         require_admin(&mut tx, &self.spec, credential)?;
         authorize(&mut tx, &self.spec, credential, &current)?;
         let created_at = integer(now(&mut tx)?)?;
-        tx.execute("INSERT INTO alt_portable_exports(repository,export_id,actor_id,envelope,documents,created_at) VALUES($1,$2,$3,$4,$5,$6)", &[repository,&id,&auth.actor_id,&serde_json::to_value(&result.envelope)?,&serde_json::to_value(&result.documents)?,&created_at])?;
+        tx.execute("INSERT INTO alt_portable_exports(repository,export_id,actor_id,envelope,documents,created_at) VALUES($1,$2,$3,$4,$5,$6)", &[repository,&id,&auth.actor_id,&Jsonb::from(&result.envelope)?,&Jsonb::from(&result.documents)?,&created_at])?;
         audit(
             &mut tx,
             &auth.actor_id,

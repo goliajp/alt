@@ -1,3 +1,4 @@
+use crate::Jsonb;
 use crate::requests::{active, check_key, request_row, upload_request_row, upload_selection};
 use crate::store::{authorize, credential_row, instance, integer, now, snapshot, unsigned};
 use crate::{Credential, Error, InstanceSpec, PublicationWork, Result, Store};
@@ -19,7 +20,7 @@ impl Store {
         if let Some(id) = after {
             alt_task::check_id(id).map_err(|_| Error::Unauthorized)?;
         }
-        let name = serde_json::to_value(kind)?
+        let name = alt_json::to_value(kind)?
             .as_str()
             .ok_or(Error::Integrity("record kind"))?
             .to_owned();
@@ -48,8 +49,8 @@ impl Store {
         let (collector_generation, _) =
             crate::tasks::collector_policy(&mut tx, &key.scope.repository_instance_id)?;
         let result = ReviewSelection {
-            publication: serde_json::from_value(row.get("publication"))?,
-            manifest: serde_json::from_value(row.get("manifest"))?,
+            publication: row.get::<_, Jsonb>("publication").read()?,
+            manifest: row.get::<_, Jsonb>("manifest").read()?,
             current_refs: current
                 .refs
                 .into_iter()
@@ -73,7 +74,7 @@ impl Store {
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         let (row, _) = review_request(&mut tx, &self.spec, credential, key)?;
-        let manifest: Manifest = serde_json::from_value(row.get("manifest"))?;
+        let manifest: Manifest = row.get::<_, Jsonb>("manifest").read()?;
         let entry = manifest
             .entries
             .iter()
@@ -140,7 +141,7 @@ impl Store {
         let row = credential_row(&mut tx, &self.spec, credential)?;
         let value = PrincipalInfo {
             actor_id: row.get("actor_id"),
-            attribution: serde_json::from_value(row.get("attribution"))?,
+            attribution: row.get::<_, Jsonb>("attribution").read()?,
         };
         tx.commit()?;
         Ok(value)
@@ -206,7 +207,7 @@ impl Store {
             credential,
             "repository.default_branch",
             repository,
-            serde_json::json!({"branch":branch}),
+            Jsonb(alt_json::json!({"branch":branch})),
         )?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)?;
         Ok(())
@@ -237,7 +238,7 @@ impl Store {
         check_key(key, &current.scope, &auth.actor_id)?;
         let row = upload_request_row(&mut tx, key)?.ok_or(Error::Unauthorized)?;
         active(&row, now(&mut tx)?)?;
-        let publication: Publication = serde_json::from_value(row.get("publication"))?;
+        let publication: Publication = row.get::<_, Jsonb>("publication").read()?;
         alt_repository_service::authorize_intent(
             &publication,
             &current,
@@ -342,7 +343,7 @@ impl Store {
         if &current.scope != scope {
             return Err(Error::Unauthorized);
         }
-        let kind = serde_json::to_value(root.kind)?
+        let kind = alt_json::to_value(root.kind)?
             .as_str()
             .ok_or(Error::Integrity("task root kind"))?
             .to_owned();
@@ -350,10 +351,10 @@ impl Store {
         let mut result = Vec::new();
         let mut bytes = 0usize;
         for row in rows {
-            let publication: serde_json::Value = row.get(0);
-            let manifest: serde_json::Value = row.get(1);
-            let receipt: alt_remote_protocol::Receipt = serde_json::from_value(row.get(2))?;
-            let publication = serde_json::from_value(publication)?;
+            let publication: Jsonb = row.get(0);
+            let manifest: Jsonb = row.get(1);
+            let receipt: alt_remote_protocol::Receipt = row.get::<_, Jsonb>(2).read()?;
+            let publication = publication.read()?;
             let provenance = crate::provenance::load(
                 &mut tx,
                 scope,
@@ -364,12 +365,12 @@ impl Store {
             )?;
             let bundle = PublishedBundle {
                 publication,
-                manifest: serde_json::from_value(manifest)?,
+                manifest: manifest.read()?,
                 receipt,
                 provenance,
             };
             bytes = bytes
-                .checked_add(serde_json::to_vec(&bundle)?.len())
+                .checked_add(alt_json::to_vec(&bundle)?.len())
                 .ok_or(Error::Limit("bundle page bytes"))?;
             if bytes > self.limits.total_bytes.min(usize::MAX as u64) as usize {
                 return Err(Error::Limit("bundle page bytes"));

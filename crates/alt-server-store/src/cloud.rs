@@ -1,9 +1,11 @@
 //! Persisted platform authority. HTTP and encryption belong to the caller; this
 //! module validates leases again against the database clock inside each use.
+use crate::Jsonb;
 use crate::database::Transaction;
 use crate::store::{instance, integer, now, token_digest, unsigned};
 use crate::{ByteStore, Credential, Error, InstanceSpec, Result, Store};
 use alt_crypto::ed25519::SigningKey;
+use alt_json_serde::Serde;
 use alt_remote_protocol::{ActorKind, Attribution, DeploymentMode, Limits};
 use golia_platform_contract::{
     AccountAuthorization, AltServiceAuthorization, Audience, Capability, Product,
@@ -32,7 +34,7 @@ pub(crate) fn restore_binding(
     replacement: &CloudRestoreBinding<'_>,
 ) -> Result<()> {
     let row = binding(tx)?;
-    let mut expected: Audience = serde_json::from_value(row.get("audience"))?;
+    let mut expected: Audience = row.get::<_, Jsonb>("audience").read_serde()?;
     audience_matches(source, &expected)?;
     expected.generation = golia_platform_contract::Counter(generation);
     let mut target = source.clone();
@@ -54,7 +56,7 @@ pub(crate) fn restore_binding(
     }
     tx.execute(
         "UPDATE alt_cloud_binding SET audience=$1,runtime_key_digest=$2,provision_digest=$3,service=NULL,service_denied_at=0 WHERE singleton",
-        &[&serde_json::to_value(replacement.audience)?, &replacement.runtime_key_digest, &replacement.provision_digest],
+        &[&Jsonb::from_serde(&replacement.audience)?, &replacement.runtime_key_digest, &replacement.provision_digest],
     )?;
     Ok(())
 }
@@ -92,7 +94,7 @@ pub(crate) fn initialize_binding(
     }
     tx.execute(
         "INSERT INTO alt_cloud_binding(singleton,audience,runtime_key_digest,provision_digest) VALUES(true,$1,$2,$3)",
-        &[&serde_json::to_value(audience)?, &key_digest, &provision_digest],
+        &[&Jsonb::from_serde(&audience)?, &key_digest, &provision_digest],
     )?;
     tx.execute(
         "INSERT INTO alt_browser_binding(singleton,public_origin) VALUES(true,$1)",
@@ -105,7 +107,7 @@ pub(crate) fn initialize_binding(
 /// A backwards wall clock never gives a previously accepted lease extra life.
 pub(crate) fn check_instance(tx: &mut Transaction<'_>, spec: &InstanceSpec) -> Result<()> {
     let row = binding(tx)?;
-    let audience: Audience = serde_json::from_value(row.get("audience"))?;
+    let audience: Audience = row.get::<_, Jsonb>("audience").read_serde()?;
     audience_matches(spec, &audience)?;
     let time = now(tx)?;
     if time < unsigned(row.get("clock_high_water"))? {
@@ -134,7 +136,7 @@ fn check_revision(tx: &mut Transaction<'_>, revision: u64) -> Result<()> {
 }
 fn check_claims(tx: &mut Transaction<'_>, claims: &AccountAuthorization) -> Result<()> {
     let row = binding(tx)?;
-    let audience: Audience = serde_json::from_value(row.get("audience"))?;
+    let audience: Audience = row.get::<_, Jsonb>("audience").read_serde()?;
     denied(claims.check(&audience, now(tx)?))?;
     if !claims.capabilities.contains(&Capability::UseProduct) {
         return Err(Error::Unauthorized);
@@ -160,7 +162,7 @@ fn claims_for(tx: &mut Transaction<'_>, digest: &str) -> Result<AccountAuthoriza
             &[&digest],
         )?
         .ok_or(Error::Unauthorized)?;
-    Ok(serde_json::from_value(row.get(0))?)
+    Ok(row.get::<_, Jsonb>(0).read_serde()?)
 }
 pub(crate) fn check_credential(
     tx: &mut Transaction<'_>,
@@ -272,7 +274,7 @@ impl Store {
         instance(&mut tx, &self.spec, &self.signing_key)?;
         audience_matches(&self.spec, audience)?;
         let row = binding(&mut tx)?;
-        denied(audience.check(&serde_json::from_value(row.get("audience"))?))?;
+        denied(audience.check(&row.get::<_, Jsonb>("audience").read_serde()?))?;
         if row.get::<_, String>("runtime_key_digest") != runtime_key_digest {
             return Err(Error::Unauthorized);
         }
@@ -352,14 +354,14 @@ impl Store {
             expires_at,
             claims.capabilities.contains(&Capability::ManageInstance),
         )?;
-        let value = serde_json::to_value(claims)?;
+        let value = Jsonb::from_serde(&claims)?;
         let created = integer(now(&mut tx)?)?;
         tx.execute("INSERT INTO alt_cloud_credentials(token_digest,claims,sealed_grant,browser,created_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT(token_digest) DO NOTHING", &[&digest,&value,&sealed_grant,&browser,&created])?;
         let row = tx.query_one(
             "SELECT claims,sealed_grant,browser FROM alt_cloud_credentials WHERE token_digest=$1",
             &[&digest],
         )?;
-        if row.get::<_, serde_json::Value>(0) != value
+        if row.get::<_, Jsonb>(0) != value
             || row.get::<_, String>(1) != sealed_grant
             || row.get::<_, bool>(2) != browser
         {
@@ -376,7 +378,9 @@ impl Store {
             claims.account_id.as_str(),
             "cloud.login",
             &digest,
-            &serde_json::json!({"session_id": claims.session_id, "membership_id":claims.membership_id, "browser":browser}),
+            &Jsonb(
+                alt_json::json!({"session_id": Serde(&claims.session_id), "membership_id":Serde(&claims.membership_id), "browser":browser}),
+            ),
         )?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)
     }
@@ -403,9 +407,9 @@ impl Store {
         if row.get::<_, bool>("revoked") || unsigned(row.get("expires_at"))? <= now(&mut tx)? {
             return Err(Error::Unauthorized);
         }
-        let claims: AccountAuthorization = serde_json::from_value(row.get("claims"))?;
+        let claims: AccountAuthorization = row.get::<_, Jsonb>("claims").read_serde()?;
         let authority = binding(&mut tx)?;
-        let audience: Audience = serde_json::from_value(authority.get("audience"))?;
+        let audience: Audience = authority.get::<_, Jsonb>("audience").read_serde()?;
         let refresh_needed = claims
             .check(&audience, now(&mut tx)?.saturating_add(10_000))
             .is_err()
@@ -444,7 +448,7 @@ impl Store {
         }
         tx.execute(
             "UPDATE alt_cloud_credentials SET claims=$2 WHERE token_digest=$1",
-            &[&credential_digest, &serde_json::to_value(claims)?],
+            &[&credential_digest, &Jsonb::from_serde(&claims)?],
         )?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)
     }
@@ -481,10 +485,10 @@ impl Store {
             return Err(Error::Unauthorized);
         }
         let row = binding(&mut tx)?;
-        let audience: Audience = serde_json::from_value(row.get("audience"))?;
-        let needed = match row.get::<_, Option<serde_json::Value>>("service") {
+        let audience: Audience = row.get::<_, Jsonb>("audience").read_serde()?;
+        let needed = match row.get::<_, Option<Jsonb>>("service") {
             Some(value) => {
-                let service: AltServiceAuthorization = serde_json::from_value(value)?;
+                let service: AltServiceAuthorization = value.read_serde()?;
                 service
                     .check(&audience, now(&mut tx)?.saturating_add(10_000))
                     .is_err()
@@ -504,18 +508,18 @@ impl Store {
             return Err(Error::Unauthorized);
         }
         let row = binding(&mut tx)?;
-        let audience = serde_json::from_value(row.get("audience"))?;
+        let audience = row.get::<_, Jsonb>("audience").read_serde()?;
         denied(service.check(&audience, now(&mut tx)?))?;
         if service.lease.issued_at_unix_ms.0 <= unsigned(row.get("service_denied_at"))? {
             return Err(Error::Unauthorized);
         }
-        if let Some(value) = row.get::<_, Option<serde_json::Value>>("service") {
-            denied(service.check_after(&serde_json::from_value(value)?))?;
+        if let Some(value) = row.get::<_, Option<Jsonb>>("service") {
+            denied(service.check_after(&value.read_serde()?))?;
         }
         check_revision(&mut tx, service.lease.revocation_generation.0)?;
         tx.execute(
             "UPDATE alt_cloud_binding SET service=$1 WHERE singleton",
-            &[&serde_json::to_value(service)?],
+            &[&Jsonb::from_serde(&service)?],
         )?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)
     }
@@ -531,13 +535,13 @@ pub(crate) fn service(
         return Ok(None);
     }
     let row = binding(tx)?;
-    let value: serde_json::Value =
-        row.get::<_, Option<serde_json::Value>>("service")
-            .ok_or(Error::Precondition(
-                "Cloud service authorization unavailable",
-            ))?;
-    let service: AltServiceAuthorization = serde_json::from_value(value)?;
-    let audience: Audience = serde_json::from_value(row.get("audience"))?;
+    let value: Jsonb = row
+        .get::<_, Option<Jsonb>>("service")
+        .ok_or(Error::Precondition(
+            "Cloud service authorization unavailable",
+        ))?;
+    let service: AltServiceAuthorization = value.read_serde()?;
+    let audience: Audience = row.get::<_, Jsonb>("audience").read_serde()?;
     denied(service.check(&audience, now(tx)?))?;
     if service.lease.revocation_generation.0 < unsigned(row.get("authority_revision"))?
         || service.lease.issued_at_unix_ms.0 <= unsigned(row.get("service_denied_at"))?

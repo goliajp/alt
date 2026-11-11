@@ -1,6 +1,7 @@
 //! Bounded upload registration within one current-authority transaction. Byte
 //! persistence/identity checks remain separate and every proof is rechecked
 //! under the same repository barrier as the scalar registration path.
+use crate::Jsonb;
 use std::collections::BTreeMap;
 
 use alt_remote_protocol::{ContentEntry, Publication, RequestKey};
@@ -40,7 +41,7 @@ impl Store {
             .ok_or(Error::Precondition("request not registered"))?;
         let time = now(&mut tx)?;
         active(&request, time)?;
-        let publication: Publication = serde_json::from_value(request.get("publication"))?;
+        let publication: Publication = request.get::<_, Jsonb>("publication").read()?;
         authorize_intent(&publication, &current, &auth, self.limits, time)?;
         let repository = &key.scope.repository_instance_id;
         let epoch = integer(key.scope.recovery_epoch)?;
@@ -52,7 +53,7 @@ impl Store {
         let selections: BTreeMap<String, (Vec<ContentEntry>, bool)> = tx.query(
             "SELECT blake3,selected_entries,verified FROM alt_request_content WHERE repository=$1 AND epoch=$2 AND actor_id=$3 AND request_id=$4 AND blake3=ANY($5)",
             &[repository, &epoch, &key.actor_id, &key.request_id, &digests],
-        )?.into_iter().map(|row| Ok((row.get(0), (serde_json::from_value(row.get(1))?, row.get(2)))))
+        )?.into_iter().map(|row| Ok((row.get(0), (row.get::<_, Jsonb>(1).read()?, row.get(2)))))
             .collect::<Result<_>>()?;
         let blobs: BTreeMap<String, (String, bool, u64)> = tx.query(
             "SELECT blake3,state,accounted,bytes FROM alt_blobs WHERE repository=$1 AND blake3=ANY($2)",

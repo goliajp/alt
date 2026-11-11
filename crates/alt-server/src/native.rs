@@ -2,7 +2,7 @@ use crate::{RequestAction, Route, ValidatedWork};
 use alt_remote_protocol::{Capabilities, Feature, ObjectFormat, RequestObservation, RequestState};
 use alt_server_store::{Credential, Error, Result, Store};
 use alt_task_service::TaskLimits;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::io::Read;
 
 pub use alt_remote_protocol::{ApprovalRequest, BeginRequest};
@@ -15,7 +15,7 @@ pub struct NativeOptions {
     pub approval_ttl_ms: u64,
 }
 pub enum Output {
-    Json(serde_json::Value),
+    Json(alt_json::Value),
     GitReport {
         bytes: Vec<u8>,
         request: alt_remote_protocol::RequestKey,
@@ -38,10 +38,10 @@ pub enum Output {
         file: alt_server_store::StoredReader,
     },
 }
-pub(crate) fn json(value: &impl Serialize) -> Result<Output> {
-    Ok(Output::Json(serde_json::to_value(value)?))
+pub(crate) fn json(value: &impl alt_json::ToJson) -> Result<Output> {
+    Ok(Output::Json(alt_json::to_value(value)?))
 }
-pub(crate) fn body<T: for<'de> Deserialize<'de>>(source: &mut dyn Read, max: usize) -> Result<T> {
+pub(crate) fn body<T: alt_json::FromJson>(source: &mut dyn Read, max: usize) -> Result<T> {
     let mut raw = Vec::new();
     source
         .take((max as u64).saturating_add(1))
@@ -49,7 +49,17 @@ pub(crate) fn body<T: for<'de> Deserialize<'de>>(source: &mut dyn Read, max: usi
     if raw.len() > max {
         return Err(Error::Limit("request body"));
     }
-    Ok(serde_json::from_slice(&raw)?)
+    Ok(alt_json::from_slice(&raw)?)
+}
+/// For the vendored contract types, which have serde implementations only.
+pub(crate) fn json_serde(value: &impl Serialize) -> Result<Output> {
+    Ok(Output::Json(alt_json_serde::to_value(value)?))
+}
+pub(crate) fn body_serde<T: serde::de::DeserializeOwned>(
+    source: &mut dyn Read,
+    max: usize,
+) -> Result<T> {
+    Ok(body::<alt_json_serde::Serde<T>>(source, max)?.0)
 }
 pub(crate) fn empty(source: &mut dyn Read) -> Result<()> {
     if source.read(&mut [0u8; 1])? != 0 {
@@ -98,7 +108,7 @@ pub fn execute_native(
                 limits: store.limits(),
             };
             json(
-                &serde_json::json!({"capabilities":caps,"receipt_public_key":store.receipt_public_key()}),
+                &alt_json::json!({"capabilities":caps,"receipt_public_key":store.receipt_public_key()}),
             )
         }
         Route::IssueAgent => {
@@ -116,7 +126,7 @@ pub fn execute_native(
         Route::RevokeAgent(digest) => {
             empty(source)?;
             store.revoke_agent(credential, &digest)?;
-            json(&serde_json::json!({"revoked":true,"credential_id":digest}))
+            json(&alt_json::json!({"revoked":true,"credential_id":digest}))
         }
         Route::Principal => {
             empty(source)?;
@@ -162,12 +172,12 @@ pub fn execute_native(
             }
             RequestAction::UploadChunk(digest) => {
                 store.upload_chunk(credential, &key, &digest, source)?;
-                json(&serde_json::json!({"blake3":digest,"verified":true}))
+                json(&alt_json::json!({"blake3":digest,"verified":true}))
             }
             RequestAction::Assemble(digest) => {
                 empty(source)?;
                 store.assemble_content(credential, &key, &digest)?;
-                json(&serde_json::json!({"blake3":digest,"verified":true}))
+                json(&alt_json::json!({"blake3":digest,"verified":true}))
             }
             RequestAction::Review => {
                 empty(source)?;
@@ -199,7 +209,7 @@ pub fn execute_native(
                 for entry in entries {
                     store.register_content(credential, &key, &entry, &proof)?;
                 }
-                json(&serde_json::json!({"blake3":digest,"verified":true}))
+                json(&alt_json::json!({"blake3":digest,"verified":true}))
             }
             RequestAction::Prepare | RequestAction::Publish => {
                 empty(source)?;
@@ -271,7 +281,7 @@ pub fn execute_native(
                 let _ = store.release_publication(credential, validated.work());
                 result?;
                 json(
-                    &serde_json::json!({"request":key,"integration_id":request.integration_id,"approved":true}),
+                    &alt_json::json!({"request":key,"integration_id":request.integration_id,"approved":true}),
                 )
             }
         },

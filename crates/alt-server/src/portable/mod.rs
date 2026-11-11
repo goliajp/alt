@@ -201,7 +201,7 @@ pub fn execute(
                     source,
                 )?;
                 store.register_portable_content(credential, &key, &proof)?;
-                json(&serde_json::json!({"blake3":digest,"verified":true}))
+                json(&alt_json::json!({"blake3":digest,"verified":true}))
             }
             ImportAction::Activate => {
                 let intent: ImportIntent = body(source, settings.metadata_bytes)?;

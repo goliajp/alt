@@ -215,7 +215,9 @@ fn scalars_at_top_level() {
 #[test]
 fn containers_at_top_level() {
     exercise_all!(2000; Vec<u8> Vec<Option<String>> [u16; 2] (u8, String) (i8, bool, Option<char>)
-        BTreeSet<i8> BTreeMap<String, u8> BTreeMap<u16, String> BTreeMap<i64, Vec<bool>> Box<Vec<i32>>)
+        BTreeSet<i8> BTreeMap<String, u8> BTreeMap<u16, String> BTreeMap<i64, Vec<bool>> Box<Vec<i32>>
+        (u8, i8, bool, char, String, u16, Option<u8>, u32, i64)
+        (u8, u8, u8, u8, u8, u8, u8, u8, u8, u8, u8, u8, u8, u8, bool, String))
         .report("derive std types, containers at top level in total");
 }
 

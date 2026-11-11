@@ -1,6 +1,7 @@
 //! Physical-operator maintenance primitives. A snapshot owns the instance row
 //! lock until all metadata and immutable bytes have been exported. Publication,
 //! credential changes and GC take the shared side of this same barrier.
+use crate::Jsonb;
 use crate::database::Transaction;
 use crate::store::{instance, integer, unsigned};
 use crate::{ByteStore, Error, InstanceSpec, Result, Store};
@@ -392,7 +393,9 @@ impl Store {
         crate::bytes::check_digest(backup_digest)?;
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
-        let expected = serde_json::json!({"backup_digest":backup_digest,"generation":self.spec.runtime_generation});
+        let expected = Jsonb(
+            alt_json::json!({"backup_digest":backup_digest,"generation":self.spec.runtime_generation}),
+        );
         let found: bool = tx.query_one(
             "SELECT EXISTS(SELECT 1 FROM alt_instance_audit WHERE action='instance.restore' AND subject_id=$1 AND details @> $2)",
             &[&self.spec.installation_id, &expected],
@@ -469,7 +472,9 @@ impl Store {
             "UPDATE alt_instance SET runtime_generation=$1 WHERE singleton",
             &[&integer(generation)?],
         )?;
-        let details = serde_json::json!({"backup_digest":backup_digest,"previous_generation":self.spec.runtime_generation,"generation":generation});
+        let details = Jsonb(
+            alt_json::json!({"backup_digest":backup_digest,"previous_generation":self.spec.runtime_generation,"generation":generation}),
+        );
         tx.execute("INSERT INTO alt_instance_audit(actor_id,action,subject_id,details,occurred_at) VALUES('local-operator','instance.restore',$1,$2,floor(extract(epoch FROM clock_timestamp())*1000)::bigint)", &[&self.spec.installation_id, &details])?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)?;
         self.spec.runtime_generation = generation;

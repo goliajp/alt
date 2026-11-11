@@ -1,5 +1,6 @@
 //! Durable device consent and credential issuance. Human CLI credentials use the
 //! same current account checks as browser sessions; agent delegation is separate.
+use crate::Jsonb;
 use crate::database::Transaction;
 use crate::store::{credential_row, instance, integer, now, token_digest, unsigned};
 use crate::{Credential, Error, Result, Store};
@@ -29,7 +30,7 @@ pub struct ClientCredential {
     pub current: bool,
 }
 fn human(row: &Row) -> Result<()> {
-    let attribution: Attribution = serde_json::from_value(row.get("attribution"))?;
+    let attribution: Attribution = row.get::<_, Jsonb>("attribution").read()?;
     if attribution.kind != ActorKind::Human {
         return Err(Error::Unauthorized);
     }
@@ -189,7 +190,7 @@ impl Store {
             }
             let expires =
                 unsigned(parent.get("expires_at"))?.min(time.saturating_add(8 * 3_600_000));
-            let attribution: Attribution = serde_json::from_value(parent.get("attribution"))?;
+            let attribution: Attribution = parent.get::<_, Jsonb>("attribution").read()?;
             crate::store::insert_known_token(
                 &mut tx,
                 token,
@@ -221,7 +222,9 @@ impl Store {
                 "device.denied"
             },
             &device,
-            &serde_json::json!({"client_id":CLI_CLIENT_ID,"scope":CLI_SCOPE,"credential_id":if allow {Some(token_digest(token))} else {None}}),
+            &Jsonb(
+                alt_json::json!({"client_id":CLI_CLIENT_ID,"scope":CLI_SCOPE,"credential_id":if allow {Some(token_digest(token))} else {None}}),
+            ),
         )?;
         let mut result = info(&row)?;
         result.state = next.into();
