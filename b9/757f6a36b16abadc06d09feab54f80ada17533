@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: fix
+summary: a portable export takes git objects from the pack segments
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/portable.rs
+touched: crates/alt-server-store/src/portable/capture.rs
+touched: crates/alt-server-store/src/portable/lifecycle.rs
+touched: crates/alt-server-store/src/portable/objects.rs
+touched: crates/alt-server-store/tests/it/database/portable.rs
+touched: crates/alt-server-store/tests/it/database/portable/segment_objects.rs
+touched: crates/alt-server/tests/it/database/portable.rs
+touched: crates/alt-server/tests/it/database/portable/cloud.rs
