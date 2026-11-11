@@ -213,7 +213,7 @@ impl TransportError {
 
 fn basic_auth_header(auth: &BasicAuth) -> String {
     let raw = format!("{}:{}", auth.username, auth.token);
-    format!("Basic {}", base64_encode(raw.as_bytes()))
+    format!("Basic {}", alt_base64::STANDARD.encode(raw.as_bytes()))
 }
 
 fn read_body(resp: ureq::Response) -> Result<Vec<u8>, TransportError> {
@@ -222,53 +222,9 @@ fn read_body(resp: ureq::Response) -> Result<Vec<u8>, TransportError> {
     Ok(buf)
 }
 
-/// Tiny base64 encoder — RFC 4648 standard alphabet, padding, no newlines.
-/// Pulled inline so the crate doesn't take a `base64` dep just for the
-/// Basic-auth header (one call per request, performance irrelevant).
-fn base64_encode(input: &[u8]) -> String {
-    const ALPHA: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
-    let mut i = 0;
-    while i + 3 <= input.len() {
-        let n = ((input[i] as u32) << 16) | ((input[i + 1] as u32) << 8) | (input[i + 2] as u32);
-        out.push(ALPHA[((n >> 18) & 0x3f) as usize] as char);
-        out.push(ALPHA[((n >> 12) & 0x3f) as usize] as char);
-        out.push(ALPHA[((n >> 6) & 0x3f) as usize] as char);
-        out.push(ALPHA[(n & 0x3f) as usize] as char);
-        i += 3;
-    }
-    let rem = input.len() - i;
-    if rem == 1 {
-        let n = (input[i] as u32) << 16;
-        out.push(ALPHA[((n >> 18) & 0x3f) as usize] as char);
-        out.push(ALPHA[((n >> 12) & 0x3f) as usize] as char);
-        out.push('=');
-        out.push('=');
-    } else if rem == 2 {
-        let n = ((input[i] as u32) << 16) | ((input[i + 1] as u32) << 8);
-        out.push(ALPHA[((n >> 18) & 0x3f) as usize] as char);
-        out.push(ALPHA[((n >> 12) & 0x3f) as usize] as char);
-        out.push(ALPHA[((n >> 6) & 0x3f) as usize] as char);
-        out.push('=');
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn base64_matches_rfc4648_vectors() {
-        // RFC 4648 §10
-        assert_eq!(base64_encode(b""), "");
-        assert_eq!(base64_encode(b"f"), "Zg==");
-        assert_eq!(base64_encode(b"fo"), "Zm8=");
-        assert_eq!(base64_encode(b"foo"), "Zm9v");
-        assert_eq!(base64_encode(b"foob"), "Zm9vYg==");
-        assert_eq!(base64_encode(b"fooba"), "Zm9vYmE=");
-        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
-    }
 
     #[test]
     fn basic_auth_header_encodes_username_token() {

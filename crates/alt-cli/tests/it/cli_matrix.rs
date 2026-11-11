@@ -41,7 +41,7 @@ fn assert_same_split(alt_cwd: &Path, git_cwd: &Path, args: &[&str]) {
     );
 }
 
-use bstr::ByteSlice;
+use alt_bytes::ByteSlice;
 
 fn matrix(repo: &Path) {
     matrix_split(repo, repo)

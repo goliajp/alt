@@ -10,8 +10,8 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
+use alt_bytes::BString;
 use alt_git_codec::{HashAlgo, ObjectId};
-use bstr::BString;
 
 use crate::{Ref, RefError, RefTarget};
 

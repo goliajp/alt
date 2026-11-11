@@ -12,7 +12,7 @@ alt-git-pack.workspace = true
 alt-git-refs.workspace = true
 alt-odb.workspace = true
 alt-refs.workspace = true
-bstr.workspace = true
+alt-bytes.workspace = true
 
 [dev-dependencies]
 alt-import.workspace = true

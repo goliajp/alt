@@ -1,6 +1,6 @@
 use core::fmt;
 
-use bstr::{BString, ByteSlice};
+use alt_bytes::{BString, ByteSlice};
 
 use crate::{HashAlgo, ObjectId, ObjectKind, ObjectParseError};
 

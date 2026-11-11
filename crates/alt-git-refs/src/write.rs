@@ -6,7 +6,7 @@
 use std::fs;
 use std::path::Path;
 
-use bstr::{BString, ByteSlice};
+use alt_bytes::{BString, ByteSlice};
 
 use crate::{RefError, RefTarget};
 

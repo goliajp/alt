@@ -10,10 +10,10 @@ mod ignore;
 
 use std::path::Path;
 
+use alt_bytes::{BString, ByteSlice};
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind, Tree};
 use alt_git_index::Index;
 use alt_odb::{NativeOdb, OdbError};
-use bstr::{BString, ByteSlice};
 
 #[derive(Debug)]
 pub enum WorktreeError {

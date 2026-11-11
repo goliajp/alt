@@ -13,11 +13,11 @@ use alt_odb::NativeOdb;
 use alt_refs::{IdemKey, OpId, RefChange, RefPolicy, RefStore, RefTarget};
 
 use crate::policy::{Capabilities, Policy};
+use alt_bytes::{BString, ByteSlice};
 use alt_worktree::{
     ChangeKind, Sig, WorkEntry, build_commit_bytes, flatten_tree, index_entries, status,
     write_commit, write_tree,
 };
-use bstr::{BString, ByteSlice};
 use http_auth::{build_transport, http_auth};
 
 mod add;

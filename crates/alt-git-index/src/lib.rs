@@ -4,8 +4,8 @@
 
 use std::path::Path;
 
+use alt_bytes::{BString, ByteSlice};
 use alt_git_codec::{HashAlgo, ObjectId};
-use bstr::{BString, ByteSlice};
 
 /// Stage bits and friends live in `flags`; typed accessors below.
 #[derive(Debug, Clone, PartialEq, Eq)]

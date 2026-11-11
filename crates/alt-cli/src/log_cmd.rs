@@ -1,9 +1,9 @@
 use std::borrow::Cow;
 use std::io::Write;
 
+use alt_bytes::{BString, ByteSlice};
 use alt_git_codec::{Commit, ObjectId, ObjectKind, Tree};
 use alt_repo::Repository;
-use bstr::{BString, ByteSlice};
 
 /// git's `logmsg_reencode` for the default UTF-8 output encoding: a commit
 /// with an `encoding` header is converted to UTF-8 (whole buffer) and the
@@ -495,7 +495,7 @@ fn run_json(
         let (oid, _) = item?;
         let obj = repo.read_object(&oid)?.expect("walked oid exists");
         let commit = alt_git_codec::Commit::parse(&obj.data)?;
-        let opt = |v: Option<&bstr::BStr>| match v {
+        let opt = |v: Option<&alt_bytes::BStr>| match v {
             Some(s) => Json::str(s),
             None => Json::Null,
         };

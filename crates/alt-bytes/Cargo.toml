@@ -1,0 +1,8 @@
+[package]
+name = "alt-bytes"
+description = "Byte strings that are conventionally, but not necessarily, UTF-8, with no dependencies"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

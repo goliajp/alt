@@ -1865,9 +1865,8 @@ fn check_auth(req: &tiny_http::Request, users_path: &Path) -> AuthOutcome {
     let Some(b64) = header_value.strip_prefix("Basic ") else {
         return AuthOutcome::Reject("only Basic auth is supported".into());
     };
-    let decoded = match base64_decode(b64.trim()) {
-        Some(b) => b,
-        None => return AuthOutcome::Reject("Authorization base64 decode failed".into()),
+    let Ok(decoded) = alt_base64::STANDARD.decode(b64.trim()) else {
+        return AuthOutcome::Reject("Authorization base64 decode failed".into());
     };
     let decoded_str = match std::str::from_utf8(&decoded) {
         Ok(s) => s,
@@ -1926,55 +1925,6 @@ fn read_users(path: &Path) -> std::io::Result<HashMap<String, UserEntry>> {
         );
     }
     Ok(out)
-}
-
-/// Minimal RFC-4648 base64 decoder (standard alphabet, padded). Tiny
-/// scope: HTTP Basic creds are short, this avoids dragging in a base64
-/// crate. Returns None on any malformed input — the request gets a 401.
-fn base64_decode(input: &str) -> Option<Vec<u8>> {
-    const TABLE: [u8; 256] = {
-        let mut t = [0xffu8; 256];
-        let alphabet = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        let mut i = 0;
-        while i < alphabet.len() {
-            t[alphabet[i] as usize] = i as u8;
-            i += 1;
-        }
-        t
-    };
-    let bytes = input.as_bytes();
-    if !bytes.len().is_multiple_of(4) {
-        return None;
-    }
-    let mut out = Vec::with_capacity(bytes.len() / 4 * 3);
-    for chunk in bytes.chunks(4) {
-        let mut vals = [0u8; 4];
-        let mut pad = 0;
-        for (i, &c) in chunk.iter().enumerate() {
-            if c == b'=' {
-                pad += 1;
-                vals[i] = 0;
-            } else {
-                let v = TABLE[c as usize];
-                if v == 0xff {
-                    return None;
-                }
-                vals[i] = v;
-            }
-        }
-        let n = (vals[0] as u32) << 18
-            | (vals[1] as u32) << 12
-            | (vals[2] as u32) << 6
-            | vals[3] as u32;
-        out.push((n >> 16) as u8);
-        if pad < 2 {
-            out.push((n >> 8) as u8);
-        }
-        if pad < 1 {
-            out.push(n as u8);
-        }
-    }
-    Some(out)
 }
 
 #[cfg(test)]

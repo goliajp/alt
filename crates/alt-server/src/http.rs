@@ -16,7 +16,6 @@ mod web;
 use crate::{NativeOptions, Output, RequestAction, Route, execute_native, parse_route};
 use alt_remote_protocol::{ErrorCode, Failure, Limits, RequestKey, Retry};
 use alt_server_store::{ByteStore, Error, InstanceSpec, Store};
-use base64::Engine;
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full, combinators::UnsyncBoxBody};
 use hyper::{Request, Response, body::Incoming, header, server::conn::http1, service::service_fn};
@@ -251,9 +250,7 @@ pub fn authorization(headers: &hyper::HeaderMap) -> Option<String> {
         token.to_owned()
     } else {
         let encoded = value.strip_prefix("Basic ")?;
-        let decoded = base64::engine::general_purpose::STANDARD
-            .decode(encoded)
-            .ok()?;
+        let decoded = alt_base64::STANDARD.decode(encoded).ok()?;
         let text = std::str::from_utf8(&decoded).ok()?;
         let (username, password) = text.split_once(':')?;
         if username.is_empty() || username.chars().any(char::is_control) {

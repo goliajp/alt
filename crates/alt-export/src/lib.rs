@@ -14,12 +14,12 @@
 use std::fs;
 use std::path::Path;
 
+use alt_bytes::BString;
 use alt_git_codec::HashAlgo;
 use alt_git_config::Config;
 use alt_git_pack::PackWriter;
 use alt_odb::{NativeOdb, OdbError};
 use alt_refs::{RefError, RefStore, RefTarget};
-use bstr::BString;
 
 #[derive(Debug)]
 pub enum ExportError {

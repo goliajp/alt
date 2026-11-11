@@ -404,7 +404,7 @@ pub fn verify_object(
     parse_node(object.kind, &data, oid.algo())
 }
 fn single_header<'a>(
-    headers: &'a [(bstr::BString, bstr::BString)],
+    headers: &'a [(alt_bytes::BString, alt_bytes::BString)],
     name: &[u8],
 ) -> Result<&'a [u8]> {
     let mut values = headers

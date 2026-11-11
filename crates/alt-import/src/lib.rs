@@ -15,12 +15,12 @@ use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::path::Path;
 
+use alt_bytes::ByteSlice;
 use alt_git_codec::{Commit, HashAlgo, LooseStore, ObjectId, ObjectKind, Tag, Tree};
 use alt_git_pack::IndexedPack;
 use alt_odb::{NativeOdb, OdbError};
 use alt_refs::{RefChange, RefError, RefStore, RefTarget};
 use alt_repo::{RepoError, Repository};
-use bstr::ByteSlice;
 
 #[derive(Debug)]
 pub enum ImportError {

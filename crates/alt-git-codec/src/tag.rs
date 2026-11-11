@@ -1,4 +1,4 @@
-use bstr::{BStr, BString};
+use alt_bytes::{BStr, BString};
 
 use crate::headers::HeaderBlock;
 use crate::{ObjectId, ObjectKind, ObjectParseError};

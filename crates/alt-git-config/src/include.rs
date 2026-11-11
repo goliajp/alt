@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use bstr::{BStr, ByteSlice};
+use alt_bytes::{BStr, ByteSlice};
 
 use crate::wildmatch::wildmatch;
 use crate::{ConfigError, Entry, parse};
@@ -14,7 +14,7 @@ pub struct IncludeContext {
     /// Absolute, symlink-resolved `$GIT_DIR` (for `gitdir:`/`gitdir/i:`).
     pub git_dir: Option<PathBuf>,
     /// Current branch short name (for `onbranch:`).
-    pub branch: Option<bstr::BString>,
+    pub branch: Option<alt_bytes::BString>,
     /// Home directory for `~/` expansion in paths and patterns.
     pub home: Option<PathBuf>,
 }

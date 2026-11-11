@@ -13,8 +13,8 @@ use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
+use alt_bytes::{BString, ByteSlice};
 use alt_git_codec::{HashAlgo, ObjectId};
-use bstr::{BString, ByteSlice};
 
 /// What a ref points at.
 #[derive(Debug, Clone, PartialEq, Eq)]

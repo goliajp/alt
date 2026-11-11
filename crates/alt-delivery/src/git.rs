@@ -1,6 +1,6 @@
 use super::*;
+use alt_bytes::BString;
 use alt_git_pack::PackWriter;
-use bstr::BString;
 use std::{path::PathBuf, process::Command};
 
 /// Only self-contained inert configuration crosses the task boundary. Values

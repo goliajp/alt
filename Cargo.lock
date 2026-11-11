@@ -22,6 +22,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "alt-base64"
+version = "0.1.0"
+
+[[package]]
 name = "alt-browser-auth"
 version = "0.1.0"
 dependencies = [
@@ -37,6 +41,10 @@ version = "0.1.0"
 dependencies = [
  "alt-hash",
 ]
+
+[[package]]
+name = "alt-bytes"
+version = "0.1.0"
 
 [[package]]
 name = "alt-catalog-block"
@@ -56,7 +64,9 @@ dependencies = [
 name = "alt-cli"
 version = "0.1.0"
 dependencies = [
+ "alt-base64",
  "alt-browser-auth",
+ "alt-bytes",
  "alt-command-protocol",
  "alt-deflate",
  "alt-delivery",
@@ -94,7 +104,6 @@ dependencies = [
  "alt-wire",
  "alt-wire-http",
  "alt-worktree",
- "bstr",
  "clap",
  "criterion",
  "ed25519-dalek",
@@ -112,9 +121,9 @@ dependencies = [
 name = "alt-cloud-client"
 version = "0.1.0"
 dependencies = [
+ "alt-base64",
  "alt-hash",
  "alt-os",
- "base64 0.22.1",
  "chacha20poly1305",
  "golia-platform-contract",
  "serde",
@@ -144,6 +153,7 @@ dependencies = [
 name = "alt-delivery"
 version = "0.1.0"
 dependencies = [
+ "alt-bytes",
  "alt-git-codec",
  "alt-git-config",
  "alt-git-index",
@@ -156,7 +166,6 @@ dependencies = [
  "alt-os",
  "alt-refs",
  "alt-repo",
- "bstr",
  "serde",
  "serde_json",
 ]
@@ -174,6 +183,7 @@ dependencies = [
 name = "alt-export"
 version = "0.1.0"
 dependencies = [
+ "alt-bytes",
  "alt-git-codec",
  "alt-git-config",
  "alt-git-pack",
@@ -184,7 +194,6 @@ dependencies = [
  "alt-refs",
  "alt-repo",
  "alt-testutil",
- "bstr",
 ]
 
 [[package]]
@@ -195,32 +204,32 @@ version = "0.1.0"
 name = "alt-git-codec"
 version = "0.1.0"
 dependencies = [
+ "alt-bytes",
  "alt-deflate",
  "alt-hash",
  "alt-inflate",
  "alt-os",
  "alt-testutil",
- "bstr",
 ]
 
 [[package]]
 name = "alt-git-config"
 version = "0.1.0"
 dependencies = [
+ "alt-bytes",
  "alt-os",
  "alt-testutil",
- "bstr",
 ]
 
 [[package]]
 name = "alt-git-index"
 version = "0.1.0"
 dependencies = [
+ "alt-bytes",
  "alt-git-codec",
  "alt-hash",
  "alt-os",
  "alt-testutil",
- "bstr",
 ]
 
 [[package]]
@@ -240,10 +249,10 @@ dependencies = [
 name = "alt-git-refs"
 version = "0.1.0"
 dependencies = [
+ "alt-bytes",
  "alt-git-codec",
  "alt-os",
  "alt-testutil",
- "bstr",
 ]
 
 [[package]]
@@ -257,6 +266,7 @@ dependencies = [
 name = "alt-import"
 version = "0.1.0"
 dependencies = [
+ "alt-bytes",
  "alt-git-codec",
  "alt-git-pack",
  "alt-git-refs",
@@ -265,7 +275,6 @@ dependencies = [
  "alt-refs",
  "alt-repo",
  "alt-testutil",
- "bstr",
 ]
 
 [[package]]
@@ -438,6 +447,7 @@ dependencies = [
 name = "alt-repo"
 version = "0.1.0"
 dependencies = [
+ "alt-bytes",
  "alt-git-codec",
  "alt-git-config",
  "alt-git-pack",
@@ -447,17 +457,16 @@ dependencies = [
  "alt-os",
  "alt-refs",
  "alt-testutil",
- "bstr",
 ]
 
 [[package]]
 name = "alt-repository-service"
 version = "0.1.0"
 dependencies = [
+ "alt-bytes",
  "alt-git-codec",
  "alt-hash",
  "alt-remote-protocol",
- "bstr",
  "serde",
 ]
 
@@ -477,6 +486,7 @@ dependencies = [
 name = "alt-server"
 version = "0.1.0"
 dependencies = [
+ "alt-base64",
  "alt-browser-auth",
  "alt-byte-segment",
  "alt-cloud-client",
@@ -498,7 +508,6 @@ dependencies = [
  "alt-task-service",
  "alt-wire",
  "alt-wire-http",
- "base64 0.22.1",
  "bytes",
  "clap",
  "ed25519-dalek",
@@ -568,6 +577,7 @@ dependencies = [
 name = "alt-sign"
 version = "0.1.0"
 dependencies = [
+ "alt-base64",
  "alt-os",
  "ed25519-dalek",
 ]
@@ -692,6 +702,7 @@ dependencies = [
 name = "alt-wire-http"
 version = "0.1.0"
 dependencies = [
+ "alt-base64",
  "alt-hash",
  "alt-portable",
  "alt-remote-protocol",
@@ -708,6 +719,7 @@ dependencies = [
 name = "alt-worktree"
 version = "0.1.0"
 dependencies = [
+ "alt-bytes",
  "alt-git-codec",
  "alt-git-index",
  "alt-import",
@@ -715,7 +727,6 @@ dependencies = [
  "alt-os",
  "alt-repo",
  "alt-testutil",
- "bstr",
 ]
 
 [[package]]
@@ -913,17 +924,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2f6c7dbe95a6ed67ad9f18e57daf93a2f034c524b99fd2b76d18fdfeb6660aa"
 dependencies = [
  "hybrid-array",
-]
-
-[[package]]
-name = "bstr"
-version = "1.12.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5cee35f73844aa3014bb606320a6c1f010249dbdf43342fe54b5a4f6a8ed4b79"
-dependencies = [
- "memchr",
- "regex-automata",
- "serde_core",
 ]
 
 [[package]]

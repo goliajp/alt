@@ -1,9 +1,9 @@
 //! Loose-ref writing: write from scratch, read back with our own
 //! (git-verified) reader, and check the on-disk shapes git expects.
 
+use alt_bytes::BString;
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
 use alt_git_refs::{RefStore, RefTarget, write_loose};
-use bstr::BString;
 
 fn oid(n: u8) -> ObjectId {
     ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, &[n])

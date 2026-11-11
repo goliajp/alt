@@ -1,4 +1,4 @@
-use bstr::BString;
+use alt_bytes::BString;
 
 use crate::{ConfigError, Entry};
 

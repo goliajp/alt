@@ -8,5 +8,5 @@ license.workspace = true
 alt-hash.workspace = true
 alt-git-codec.workspace = true
 alt-remote-protocol.workspace = true
-bstr.workspace = true
+alt-bytes.workspace = true
 serde.workspace = true

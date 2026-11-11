@@ -8,7 +8,7 @@ license.workspace = true
 [dependencies]
 alt-hash.workspace = true
 alt-git-codec.workspace = true
-bstr.workspace = true
+alt-bytes.workspace = true
 
 [dev-dependencies]
 alt-os.workspace = true

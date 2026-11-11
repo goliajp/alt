@@ -194,7 +194,10 @@ impl Sig {
 }
 
 fn encode_with_prefix(kind: &str, body: &[u8]) -> String {
-    format!("alt-{kind}-ed25519:{}\n", base64url_encode(body))
+    format!(
+        "alt-{kind}-ed25519:{}\n",
+        alt_base64::URL_SAFE_NO_PAD.encode(body)
+    )
 }
 
 fn decode_with_prefix(expected_kind: &str, text: &str) -> Result<Vec<u8>, SignError> {
@@ -203,83 +206,9 @@ fn decode_with_prefix(expected_kind: &str, text: &str) -> Result<Vec<u8>, SignEr
     let rest = trimmed
         .strip_prefix(&want)
         .ok_or_else(|| SignError::BadPrefix(trimmed.to_owned()))?;
-    base64url_decode(rest).ok_or(SignError::BadBody)
-}
-
-/// Tiny URL-safe Base64 encoder, no padding — RFC 4648 §5 alphabet
-/// (`-` and `_` in place of `+` and `/`). Inlined so this crate's only
-/// third-party dependency is `ed25519-dalek`.
-fn base64url_encode(bytes: &[u8]) -> String {
-    const ALPHA: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    let mut i = 0;
-    while i + 3 <= bytes.len() {
-        let n = ((bytes[i] as u32) << 16) | ((bytes[i + 1] as u32) << 8) | (bytes[i + 2] as u32);
-        out.push(ALPHA[((n >> 18) & 0x3f) as usize] as char);
-        out.push(ALPHA[((n >> 12) & 0x3f) as usize] as char);
-        out.push(ALPHA[((n >> 6) & 0x3f) as usize] as char);
-        out.push(ALPHA[(n & 0x3f) as usize] as char);
-        i += 3;
-    }
-    let rem = bytes.len() - i;
-    if rem == 1 {
-        let n = (bytes[i] as u32) << 16;
-        out.push(ALPHA[((n >> 18) & 0x3f) as usize] as char);
-        out.push(ALPHA[((n >> 12) & 0x3f) as usize] as char);
-    } else if rem == 2 {
-        let n = ((bytes[i] as u32) << 16) | ((bytes[i + 1] as u32) << 8);
-        out.push(ALPHA[((n >> 18) & 0x3f) as usize] as char);
-        out.push(ALPHA[((n >> 12) & 0x3f) as usize] as char);
-        out.push(ALPHA[((n >> 6) & 0x3f) as usize] as char);
-    }
-    out
-}
-
-fn base64url_decode(s: &str) -> Option<Vec<u8>> {
-    fn val(c: u8) -> Option<u8> {
-        match c {
-            b'A'..=b'Z' => Some(c - b'A'),
-            b'a'..=b'z' => Some(c - b'a' + 26),
-            b'0'..=b'9' => Some(c - b'0' + 52),
-            b'-' => Some(62),
-            b'_' => Some(63),
-            _ => None,
-        }
-    }
-    let bytes = s.as_bytes();
-    let n_chars = bytes.len();
-    if n_chars % 4 == 1 {
-        return None;
-    }
-    let n_out = n_chars * 3 / 4;
-    let mut out = Vec::with_capacity(n_out);
-    let mut i = 0;
-    while i + 4 <= n_chars {
-        let a = val(bytes[i])?;
-        let b = val(bytes[i + 1])?;
-        let c = val(bytes[i + 2])?;
-        let d = val(bytes[i + 3])?;
-        let n = (a as u32) << 18 | (b as u32) << 12 | (c as u32) << 6 | (d as u32);
-        out.push((n >> 16) as u8);
-        out.push((n >> 8) as u8);
-        out.push(n as u8);
-        i += 4;
-    }
-    let rem = n_chars - i;
-    if rem == 2 {
-        let a = val(bytes[i])?;
-        let b = val(bytes[i + 1])?;
-        let n = (a as u32) << 18 | (b as u32) << 12;
-        out.push((n >> 16) as u8);
-    } else if rem == 3 {
-        let a = val(bytes[i])?;
-        let b = val(bytes[i + 1])?;
-        let c = val(bytes[i + 2])?;
-        let n = (a as u32) << 18 | (b as u32) << 12 | (c as u32) << 6;
-        out.push((n >> 16) as u8);
-        out.push((n >> 8) as u8);
-    }
-    Some(out)
+    alt_base64::URL_SAFE_NO_PAD
+        .decode(rest)
+        .map_err(|_| SignError::BadBody)
 }
 
 #[cfg(test)]
@@ -363,7 +292,7 @@ mod tests {
     /// is called — we don't try to second-guess that here.)
     #[test]
     fn wrong_length_public_key_returns_typed_error() {
-        let body = base64url_encode(&[0u8; 31]); // 31, not 32
+        let body = alt_base64::URL_SAFE_NO_PAD.encode([0u8; 31]); // 31, not 32
         let text = format!("alt-pubkey-ed25519:{body}");
         let err = PublicKey::from_text(&text).unwrap_err();
         assert!(matches!(err, SignError::BadKey(_)), "{err:?}");

@@ -13,12 +13,12 @@ mod revwalk;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use alt_bytes::{BString, ByteSlice};
 use alt_git_codec::{Commit, HashAlgo, LooseStore, ObjectId, ObjectKind, RawObject, Tag, Tree};
 use alt_git_config::{Config, IncludeContext};
 use alt_git_pack::IndexedPack;
 use alt_git_refs::{RefStore, RefTarget};
 use alt_odb::NativeOdb;
-use bstr::{BString, ByteSlice};
 pub use object_format::native_object_format;
 use object_format::object_format;
 

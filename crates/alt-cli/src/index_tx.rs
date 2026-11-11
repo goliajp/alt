@@ -25,8 +25,8 @@
 //!       raw oid bytes (algo's raw_len)
 //!       u32 LE       mode
 
+use alt_bytes::BString;
 use alt_git_codec::{HashAlgo, ObjectId};
-use bstr::BString;
 
 /// Op kind discriminator for an index-only transaction. Distinct from
 /// `alt_refs::PAYLOAD_REF_TX` (= 1) so undo can switch on the first byte.

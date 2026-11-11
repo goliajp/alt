@@ -13,9 +13,9 @@
 use std::io::Write;
 use std::path::PathBuf;
 
+use alt_bytes::BString;
 use alt_git_config::Entry;
 use alt_repo::Repository;
-use bstr::BString;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 

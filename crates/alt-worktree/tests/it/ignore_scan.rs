@@ -4,9 +4,9 @@
 
 use std::path::Path;
 
+use alt_bytes::ByteSlice;
 use alt_git_codec::HashAlgo;
 use alt_worktree::scan_worktree;
-use bstr::ByteSlice;
 
 fn setup(root: &Path) {
     // root-level .gitignore — the shape `alt`'s own project uses

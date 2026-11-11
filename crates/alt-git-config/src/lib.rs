@@ -8,7 +8,7 @@ mod wildmatch;
 
 use std::path::Path;
 
-use bstr::{BStr, BString};
+use alt_bytes::{BStr, BString};
 
 pub use include::IncludeContext;
 pub use parse::parse_file;
@@ -183,7 +183,7 @@ impl From<std::io::Error> for ConfigError {
 }
 
 // needed by parse_int / parse_bool
-use bstr::ByteSlice;
+use alt_bytes::ByteSlice;
 
 #[cfg(test)]
 mod tests {

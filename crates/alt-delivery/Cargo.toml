@@ -20,4 +20,4 @@ alt-repo.workspace = true
 alt-import.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-bstr.workspace = true
+alt-bytes.workspace = true

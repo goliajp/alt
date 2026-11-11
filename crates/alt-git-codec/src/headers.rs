@@ -1,4 +1,4 @@
-use bstr::{BStr, BString, ByteSlice};
+use alt_bytes::{BStr, BString, ByteSlice};
 
 /// The shared text layout of commit and tag objects: a run of
 /// `name SP value LF` headers (values may continue on `SP`-prefixed lines),

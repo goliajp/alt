@@ -2,8 +2,8 @@
 //! one fenced database snapshot. A completed manifest is published only after
 //! the encrypted payload has been synced. Verification is not a restore drill.
 use super::{Config, Error, Result, create_private, read_regular};
+use alt_base64::STANDARD;
 use alt_server_store::{ByteStore, MaintenanceSnapshot, SnapshotCatalog};
-use base64::{Engine, engine::general_purpose::STANDARD};
 use ed25519_dalek::{Signature, Signer, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::{

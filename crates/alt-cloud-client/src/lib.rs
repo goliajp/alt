@@ -1,7 +1,7 @@
 //! Fixed-origin platform transport. Successful HTTP is not product authority;
 //! adapters must persist and recheck claims within their operation transaction.
 #![forbid(unsafe_code)]
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use alt_base64::URL_SAFE_NO_PAD;
 use chacha20poly1305::{
     XChaCha20Poly1305, XNonce,
     aead::{Aead, KeyInit, Payload},

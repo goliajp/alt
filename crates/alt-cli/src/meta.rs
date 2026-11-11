@@ -18,8 +18,8 @@
 
 use std::sync::LazyLock;
 
+use alt_bytes::BString;
 use alt_git_codec::{EntryMode, HashAlgo, ObjectId, ObjectKind, Tree, TreeEntry};
-use bstr::BString;
 use regex::Regex;
 
 pub const NOTES_REF: &str = "refs/notes/alt/meta";

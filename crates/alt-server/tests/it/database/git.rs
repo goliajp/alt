@@ -1,12 +1,11 @@
 use super::*;
-use base64::Engine;
 use std::{
     path::Path,
     process::{Command, Output},
 };
 
 fn git(directory: &Path, token: &str, args: &[&str]) -> Output {
-    let auth = base64::engine::general_purpose::STANDARD.encode(format!("alt:{token}"));
+    let auth = alt_base64::STANDARD.encode(format!("alt:{token}"));
     Command::new("git")
         .args(args)
         .current_dir(directory)
