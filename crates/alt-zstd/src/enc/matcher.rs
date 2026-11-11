@@ -143,6 +143,37 @@ impl<'a> Window<'a> {
         let usable = self.usable::<PREFIX>(index, low);
         // safety: a usable candidate has 8 readable bytes, as does a stand-in
         unsafe {
+            if cfg!(target_arch = "x86_64") {
+                let nowhere = NOWHERE[(here as u8 == 0xFF) as usize].as_ptr();
+                let from = select_unpredictable(usable, self.at::<PREFIX>(index), nowhere);
+                load32(from) == here
+            } else {
+                let from = if usable {
+                    self.at::<PREFIX>(index)
+                } else {
+                    NOWHERE[0].as_ptr()
+                };
+                (load32(from) == here) & usable
+            }
+        }
+    }
+
+    /// As [`Window::hits32`], written so that no architecture turns the
+    /// usability test into a branch: on a short input, where the tables
+    /// start out empty, that branch would be mispredicted often.
+    ///
+    /// # Safety
+    /// `index` must be below a data position that has 8 bytes ahead of it.
+    #[inline(always)]
+    pub(crate) unsafe fn hits32_unlikely<const PREFIX: bool>(
+        &self,
+        index: usize,
+        low: usize,
+        here: u32,
+    ) -> bool {
+        let usable = self.usable::<PREFIX>(index, low);
+        // safety: a usable candidate has 8 readable bytes, as does a stand-in
+        unsafe {
             let from = select_unpredictable(usable, self.at::<PREFIX>(index), NOWHERE[0].as_ptr());
             ((load32(from) ^ here) | !usable as u32) == 0
         }
