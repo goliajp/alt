@@ -1,0 +1,15 @@
+schema: alt-meta/1
+type: perf
+summary: verify ed25519 with four-way avx2 field arithmetic
+author-type: human
+author: doracawl
+touched: crates/alt-crypto/src/ed25519.rs
+touched: crates/alt-crypto/src/ed25519/avx2.rs
+touched: crates/alt-crypto/src/ed25519/avx2/field.rs
+touched: crates/alt-crypto/src/ed25519/avx2/point.rs
+touched: crates/alt-crypto/src/ed25519/invert.rs
+touched: crates/alt-crypto/src/ed25519/point.rs
+touched: crates/alt-crypto/tests/it/ed25519.rs
+touched: crates/alt-crypto/tests/it/ed25519/backends.rs
+touched: crates/alt-crypto/tests/it/ed25519/edge.rs
+touched: crates/alt-crypto/tests/it/reference.rs
