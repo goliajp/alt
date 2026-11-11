@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: perf
+summary: frame a fetch response as it is written and spill a large one to a file
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/git_packs.rs
+touched: crates/alt-server/src/git_response.rs
+touched: crates/alt-server/src/lib.rs
