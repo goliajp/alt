@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: perf
+summary: verify a native publication down to what the repository already holds
+author-type: human
+author: doracawl
+touched: crates/alt-repository-service/src/graph.rs
+touched: crates/alt-repository-service/tests/it/main.rs
+touched: crates/alt-server-store/src/packs.rs
+touched: crates/alt-server-store/src/publication.rs
+touched: crates/alt-server/src/git_packs.rs
+touched: crates/alt-task-service/src/publication.rs
