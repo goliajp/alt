@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: perf
+summary: write a push receipt once for its event and request state and read push commands through a buffer
+author-type: human
+author: doracawl
+touched: crates/alt-remote-protocol/src/publication.rs
+touched: crates/alt-remote-protocol/src/receipt.rs
+touched: crates/alt-server-store/src/jsonb.rs
+touched: crates/alt-server-store/src/packs.rs
+touched: crates/alt-server/src/git_packs.rs
