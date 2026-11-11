@@ -235,6 +235,21 @@ fn buckets() -> Vec<f64> {
     ]
 }
 
+/// Reports failures of work that no request waits for.
+#[derive(Clone)]
+pub struct BackgroundLog(tracing::Dispatch);
+impl BackgroundLog {
+    /// captures the logging of the calling thread, for use on another
+    pub fn current() -> Self {
+        Self(tracing::dispatcher::get_default(Clone::clone))
+    }
+    pub fn failed(&self, task: &'static str, repository: &str, error: &dyn std::fmt::Display) {
+        tracing::dispatcher::with_default(&self.0, || {
+            tracing::warn!(event = "background.failed", task, repository, error = %error);
+        });
+    }
+}
+
 #[derive(Clone)]
 pub struct Trace(Arc<TraceInner>);
 struct TraceInner {

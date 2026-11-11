@@ -6,6 +6,8 @@ mod portable;
 mod portable_import;
 pub use portable::*;
 pub use portable_import::*;
+mod pack_compaction;
+pub use pack_compaction::PACK_RETIRED_GRACE_MS;
 mod packs;
 pub use packs::*;
 mod provenance;

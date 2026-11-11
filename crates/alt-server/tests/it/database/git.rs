@@ -382,3 +382,87 @@ fn real_git_default_client_pushes_a_pack_larger_than_its_post_buffer() {
     assert_eq!(std::fs::read(second.join("asset.bin")).unwrap(), noise);
     ok(&second, &f.token, &["fsck", "--strict", "--full"]);
 }
+
+#[test]
+#[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
+fn real_git_small_pushes_are_merged_and_stay_readable() {
+    let mut f = Fixture::new();
+    let server = Running::start(&f);
+    let temp = alt_os::temp::tempdir().unwrap();
+    let first = temp.path().join("first");
+    std::fs::create_dir(&first).unwrap();
+    let url = format!("{}/git/repository", server.url);
+    ok(&first, &f.token, &["init", "-q", "--initial-branch=main"]);
+    identity(&first, &f.token);
+    let pushes = 40;
+    for index in 0..pushes {
+        let body: String = (0..300)
+            .map(|line| {
+                format!(
+                    "line {line} of push {}\n",
+                    if line % 29 == index % 29 { index } else { 0 }
+                )
+            })
+            .collect();
+        std::fs::write(first.join("source.txt"), body).unwrap();
+        ok(&first, &f.token, &["add", "."]);
+        ok(
+            &first,
+            &f.token,
+            &["commit", "-qm", &format!("push {index}")],
+        );
+        ok(&first, &f.token, &["push", "-q", &url, "main"]);
+    }
+    let count = |f: &Fixture, state: &str| -> i64 {
+        f.client()
+            .query_one(
+                "SELECT count(*) FROM alt_pack_segments WHERE state=$1",
+                &[&state],
+            )
+            .unwrap()
+            .get(0)
+    };
+    // merging runs behind the pushes; without it there would be one segment per push
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while count(&f, "live") > 12 && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(
+        count(&f, "live") <= 12,
+        "live segments: {}",
+        count(&f, "live")
+    );
+    assert!(count(&f, "retired") > 0);
+
+    ok(temp.path(), &f.token, &["clone", "--quiet", &url, "second"]);
+    let second = temp.path().join("second");
+    ok(&second, &f.token, &["fsck", "--strict", "--full"]);
+    assert_eq!(
+        text(ok(&second, &f.token, &["rev-list", "--count", "HEAD"])),
+        pushes.to_string()
+    );
+    std::fs::write(first.join("source.txt"), "after the merges\n").unwrap();
+    ok(&first, &f.token, &["commit", "-qam", "one more"]);
+    ok(&first, &f.token, &["push", "-q", &url, "main"]);
+    ok(&second, &f.token, &["pull", "-q", "--ff-only"]);
+    assert_eq!(
+        std::fs::read_to_string(second.join("source.txt")).unwrap(),
+        "after the merges\n"
+    );
+
+    // once their time is up the retired segments leave the disk; nothing misses them
+    let retired = count(&f, "retired");
+    let removed = f.store.sweep_packs("repository", 0).unwrap();
+    assert!(
+        removed as i64 >= retired,
+        "{removed} files for {retired} segments"
+    );
+    assert_eq!(count(&f, "retired"), 0);
+    ok(temp.path(), &f.token, &["clone", "--quiet", &url, "third"]);
+    let third = temp.path().join("third");
+    ok(&third, &f.token, &["fsck", "--strict", "--full"]);
+    assert_eq!(
+        text(ok(&third, &f.token, &["rev-parse", "HEAD"])),
+        text(ok(&first, &f.token, &["rev-parse", "HEAD"]))
+    );
+}

@@ -7,6 +7,7 @@ mod native;
 pub use native::*;
 mod http;
 pub use http::*;
+mod compaction;
 mod git;
 mod git_packs;
 pub use git::execute_git;

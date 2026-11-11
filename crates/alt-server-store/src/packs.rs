@@ -34,6 +34,11 @@ pub const INLINE_SEGMENT_BYTES: usize = 65536;
 /// segments are immutable, so one mapping per file serves every request
 static OPEN: LazyLock<Mutex<HashMap<PathBuf, Arc<Segment>>>> = LazyLock::new(Default::default);
 
+/// drops the shared mapping of a segment whose file is about to be deleted
+pub(crate) fn forget_segment(path: &std::path::Path) {
+    OPEN.lock().unwrap().remove(path);
+}
+
 pub struct PackView {
     pub scope: Scope,
     pub refs: BTreeMap<String, ObjectId>,
@@ -331,6 +336,17 @@ impl Store {
 
     /// refs and live segments as of one instant, for a caller allowed to read the repository
     pub fn pack_view(&mut self, credential: &Credential, repository: &str) -> Result<PackView> {
+        match self.pack_view_once(credential, repository) {
+            // a merge retired segments between the list being read and the files
+            // being opened, and their time on disk ran out: the new list has none of them
+            Err(Error::Integrity("pack segment unavailable")) => {
+                self.pack_view_once(credential, repository)
+            }
+            view => view,
+        }
+    }
+
+    fn pack_view_once(&mut self, credential: &Credential, repository: &str) -> Result<PackView> {
         if self.spec.deployment_mode == alt_remote_protocol::DeploymentMode::SelfHosted
             && let Some(view) = self.pack_view_statement(credential, repository)?
         {

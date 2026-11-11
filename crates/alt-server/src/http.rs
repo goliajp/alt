@@ -113,6 +113,7 @@ pub struct HttpOptions {
 }
 struct State {
     metrics: Arc<alt_server_telemetry::Metrics>,
+    compaction: crate::compaction::Compaction,
     factory: pool::Pool,
     options: HttpOptions,
     workers: Arc<Semaphore>,
@@ -565,6 +566,7 @@ async fn handle(
     let options = state.options.native.clone();
     let factory = state.factory.clone();
     let metrics = state.metrics.clone();
+    let compaction = state.compaction.clone();
     let result = tokio::time::timeout(
         state.options.work_timeout,
         spawn_observed(Phase::Execute, move || {
@@ -600,22 +602,41 @@ async fn handle(
                     )
                 }
                 Route::GitAdvertise(..) | Route::GitUpload(..) | Route::GitReceive(..) => {
-                    crate::git::execute_git_with_cache(
+                    let pushed = match &route {
+                        Route::GitReceive(repository) => Some(repository.clone()),
+                        _ => None,
+                    };
+                    let output = crate::git::execute_git_with_cache(
                         &mut store,
                         &credential,
                         route,
                         protocol_v2,
                         source.as_file_mut(),
                         view.ok_or(Error::Integrity("Git repository view"))?,
-                    )
+                    )?;
+                    if let Some(repository) = pushed {
+                        compaction.published(&repository);
+                    }
+                    Ok(output)
                 }
-                _ => execute_native(
-                    &mut store,
-                    &credential,
-                    &options,
-                    route,
-                    source.as_file_mut(),
-                ),
+                _ => {
+                    // a native publication stores its Git objects as a segment too
+                    let published = match &route {
+                        Route::Request(key, _) => Some(key.scope.repository_instance_id.clone()),
+                        _ => None,
+                    };
+                    let output = execute_native(
+                        &mut store,
+                        &credential,
+                        &options,
+                        route,
+                        source.as_file_mut(),
+                    )?;
+                    if let Some(repository) = published {
+                        compaction.published(&repository);
+                    }
+                    Ok(output)
+                }
             }
         }),
     )
@@ -801,6 +822,7 @@ pub async fn serve_with_browser(
     let state = Arc::new(State {
         metrics: alt_server_telemetry::Metrics::new(alt_server_telemetry::process_log_losses())
             .map_err(|_| std::io::Error::other("metrics initialization unavailable"))?,
+        compaction: crate::compaction::Compaction::start(factory.clone()),
         factory: pool::Pool::new(factory, options.workers),
         workers: Arc::new(Semaphore::new(options.workers)),
         options,
