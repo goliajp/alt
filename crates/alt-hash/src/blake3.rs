@@ -213,7 +213,7 @@ impl Backend {
     /// Chaining values of the nodes in `input`, 32 bytes each, written to `out`;
     /// the first node counts `counter`.
     fn hash_many(self, batch: &lanes::Batch, input: &[u8], counter: u64, out: &mut [u8]) {
-        assert!(out.len() >= input.len() / batch.node_len * 32);
+        assert!(out.len() >= batch.nodes(input.len()) * 32);
         // each value only exists after the features of its functions were detected
         let (rest, counter, out) = match self.0 {
             Kind::Portable => (input, counter, out),

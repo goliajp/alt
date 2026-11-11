@@ -19,6 +19,16 @@ pub(super) struct Batch<'a> {
     pub flags_end: u32,
 }
 
+impl Batch<'_> {
+    /// How many whole nodes `len` bytes hold. A shift: the length of a node is a
+    /// power of two, and a division here would cost as much as half a block.
+    #[inline(always)]
+    pub fn nodes(&self, len: usize) -> usize {
+        debug_assert!(self.node_len.is_power_of_two());
+        len >> self.node_len.trailing_zeros()
+    }
+}
+
 /// a vector of one 32-bit word per lane
 pub(super) trait Lanes: Copy {
     const N: usize;
@@ -151,16 +161,17 @@ pub(super) unsafe fn in_groups<'a, 'b, V: Lanes>(
     mut counter: u64,
     out: &'b mut [u8],
 ) -> (&'a [u8], u64, &'b mut [u8]) {
-    let groups = input.len() / (V::N * batch.node_len);
-    let (wide, rest) = input.split_at(groups * V::N * batch.node_len);
-    let (wide_out, rest_out) = out.split_at_mut(groups * V::N * 32);
-    let wide = wide.chunks_exact(V::N * batch.node_len);
-    for (group, out) in wide.zip(wide_out.chunks_exact_mut(V::N * 32)) {
+    let group_len = V::N * batch.node_len;
+    let (mut input, mut out) = (input, out);
+    while input.len() >= group_len {
+        let (group, after) = input.split_at(group_len);
+        let (group_out, after_out) = out.split_at_mut(V::N * 32);
         // the caller vouches for the features
-        unsafe { compress_lanes::<V>(batch, group, counter, out) };
+        unsafe { compress_lanes::<V>(batch, group, counter, group_out) };
         counter += V::N as u64 * batch.increment as u64;
+        (input, out) = (after, after_out);
     }
-    (rest, counter, rest_out)
+    (input, counter, out)
 }
 
 pub(super) fn cv_bytes(words: &[u32; 8]) -> [u8; 32] {
@@ -179,8 +190,10 @@ pub(super) fn one_by_one(
     out: &mut [u8],
     backend: Backend,
 ) {
-    let nodes = input.chunks_exact(batch.node_len);
-    for (node, out) in nodes.zip(out.as_chunks_mut::<32>().0) {
+    let (mut input, mut out) = (input, out);
+    while input.len() >= batch.node_len {
+        let (node, after) = input.split_at(batch.node_len);
+        let (node_out, after_out) = out.split_first_chunk_mut::<32>().unwrap();
         let mut cv = *batch.key;
         let (last, before) = node.as_chunks::<64>().0.split_last().unwrap();
         backend.absorb(&mut cv, before, counter, batch.flags, batch.flags_start);
@@ -190,7 +203,8 @@ pub(super) fn one_by_one(
             0
         };
         let flags = batch.flags | start | batch.flags_end;
-        *out = cv_bytes(&backend.compress(&cv, last, 64, counter, flags));
+        *node_out = cv_bytes(&backend.compress(&cv, last, 64, counter, flags));
         counter += batch.increment as u64;
+        (input, out) = (after, after_out);
     }
 }

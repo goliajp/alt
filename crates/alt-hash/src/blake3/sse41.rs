@@ -5,12 +5,14 @@ use super::IV;
 use super::lanes::{Batch, Lanes, in_groups};
 use std::arch::x86_64::*;
 
+mod vex;
+
 // The `unsafe` blocks below only wrap vector instructions. Those on registers are
 // sound on any CPU with the features of the function they are inlined into; the
 // loads and stores access exactly the bytes their callers are documented to own.
 
 /// the immediate that selects words `a b c d`, in that order, in a shuffle
-const fn pick(a: i32, b: i32, c: i32, d: i32) -> i32 {
+pub(super) const fn pick(a: i32, b: i32, c: i32, d: i32) -> i32 {
     a | b << 2 | c << 4 | d << 6
 }
 
@@ -140,7 +142,8 @@ impl Lanes for __m128i {
 #[inline(always)]
 unsafe fn half<const FIRST: bool>(rows: &mut [__m128i; 4], m: __m128i) {
     unsafe {
-        rows[0] = rows[0].add(rows[1]).add(m);
+        // the message word first: row 1 is the value that arrives last
+        rows[0] = rows[0].add(m).add(rows[1]);
         rows[3] = rows[3].xor(rows[0]);
         rows[3] = if FIRST {
             rows[3].rot16()
@@ -160,7 +163,7 @@ unsafe fn half<const FIRST: bool>(rows: &mut [__m128i; 4], m: __m128i) {
 /// The chaining value that follows `cv` after one block. Inlined into a function for
 /// each instruction set: with AVX the same code needs no register copies.
 #[inline(always)]
-unsafe fn compress_body(
+unsafe fn compress_body<const VEX: bool>(
     cv: &[u32; 8],
     block: &[u8; 64],
     block_len: u32,
@@ -170,7 +173,7 @@ unsafe fn compress_body(
     // unaligned loads and stores on references that are as long as what is accessed
     unsafe {
         let value = [load(cv.as_ptr().cast()), load(cv.as_ptr().add(4).cast())];
-        let value = compress_rows(value, block, block_len, counter, flags);
+        let value = compress_rows::<VEX>(value, block, block_len, counter, flags);
         let mut out = [0u32; 8];
         _mm_storeu_si128(out.as_mut_ptr().cast(), value[0]);
         _mm_storeu_si128(out.as_mut_ptr().add(4).cast(), value[1]);
@@ -178,9 +181,10 @@ unsafe fn compress_body(
     }
 }
 
-/// `compress_body` on a chaining value that is already in two registers
+/// `compress_body` on a chaining value that is already in two registers; `VEX` says
+/// that the caller has detected AVX2
 #[inline(always)]
-unsafe fn compress_rows(
+unsafe fn compress_rows<const VEX: bool>(
     value: [__m128i; 2],
     block: &[u8; 64],
     block_len: u32,
@@ -189,6 +193,22 @@ unsafe fn compress_rows(
 ) -> [__m128i; 2] {
     // unaligned loads from references that are as long as what is read
     unsafe {
+        if VEX {
+            let rows = [
+                load(IV.as_ptr().cast()),
+                _mm_set_epi32(
+                    flags as i32,
+                    block_len as i32,
+                    (counter >> 32) as i32,
+                    counter as i32,
+                ),
+            ];
+            let rotations = [
+                _mm_setr_epi8(2, 3, 0, 1, 6, 7, 4, 5, 10, 11, 8, 9, 14, 15, 12, 13),
+                _mm_setr_epi8(1, 2, 3, 0, 5, 6, 7, 4, 9, 10, 11, 8, 13, 14, 15, 12),
+            ];
+            return vex::compress_rows(value, block, rows, rotations);
+        }
         let mut rows = [
             value[0],
             value[1],
@@ -208,15 +228,21 @@ unsafe fn compress_rows(
         for _ in 0..7 {
             half::<true>(&mut rows, pair::<{ pick(0, 2, 0, 2) }>(a, b));
             half::<false>(&mut rows, pair::<{ pick(1, 3, 1, 3) }>(a, b));
-            // rotating rows 1-3 turns the diagonals into columns
-            rows[1] = _mm_shuffle_epi32::<{ pick(1, 2, 3, 0) }>(rows[1]);
-            rows[2] = _mm_shuffle_epi32::<{ pick(2, 3, 0, 1) }>(rows[2]);
-            rows[3] = _mm_shuffle_epi32::<{ pick(3, 0, 1, 2) }>(rows[3]);
-            half::<true>(&mut rows, pair::<{ pick(0, 2, 0, 2) }>(c, d));
-            half::<false>(&mut rows, pair::<{ pick(1, 3, 1, 3) }>(c, d));
-            rows[1] = _mm_shuffle_epi32::<{ pick(3, 0, 1, 2) }>(rows[1]);
-            rows[2] = _mm_shuffle_epi32::<{ pick(2, 3, 0, 1) }>(rows[2]);
-            rows[3] = _mm_shuffle_epi32::<{ pick(1, 2, 3, 0) }>(rows[3]);
+            // Rotating rows 0, 2 and 3 turns the diagonals into columns. Row 1 stays:
+            // it is the last one a half step produces and the first the next needs,
+            // so moving it would lengthen the chain. The message words turn with row 0.
+            rows[0] = _mm_shuffle_epi32::<{ pick(3, 0, 1, 2) }>(rows[0]);
+            rows[3] = _mm_shuffle_epi32::<{ pick(2, 3, 0, 1) }>(rows[3]);
+            rows[2] = _mm_shuffle_epi32::<{ pick(1, 2, 3, 0) }>(rows[2]);
+            let first =
+                _mm_shuffle_epi32::<{ pick(3, 0, 1, 2) }>(pair::<{ pick(0, 2, 0, 2) }>(c, d));
+            let second =
+                _mm_shuffle_epi32::<{ pick(3, 0, 1, 2) }>(pair::<{ pick(1, 3, 1, 3) }>(c, d));
+            half::<true>(&mut rows, first);
+            half::<false>(&mut rows, second);
+            rows[0] = _mm_shuffle_epi32::<{ pick(1, 2, 3, 0) }>(rows[0]);
+            rows[3] = _mm_shuffle_epi32::<{ pick(2, 3, 0, 1) }>(rows[3]);
+            rows[2] = _mm_shuffle_epi32::<{ pick(3, 0, 1, 2) }>(rows[2]);
             // the permutation: a' = a2 b2 a3 c2, b' = b3 a0 b0 d1,
             // c' = a1 c3 d0 b1, d' = c1 d2 d3 c0
             let next_a = _mm_blend_epi16::<0xc0>(
@@ -241,7 +267,7 @@ unsafe fn compress_rows(
 
 /// advances `cv` over whole blocks of one chunk; the first one also gets `flags_start`
 #[inline(always)]
-unsafe fn absorb_body(
+unsafe fn absorb_body<const VEX: bool>(
     cv: &mut [u32; 8],
     blocks: &[[u8; 64]],
     counter: u64,
@@ -253,7 +279,7 @@ unsafe fn absorb_body(
     unsafe {
         let mut value = [load(cv.as_ptr().cast()), load(cv.as_ptr().add(4).cast())];
         for block in blocks {
-            value = compress_rows(value, block, 64, counter, block_flags);
+            value = compress_rows::<VEX>(value, block, 64, counter, block_flags);
             block_flags = flags;
         }
         _mm_storeu_si128(cv.as_mut_ptr().cast(), value[0]);
@@ -262,7 +288,7 @@ unsafe fn absorb_body(
 }
 
 macro_rules! instances {
-    ($feature:literal, $compress:ident, $absorb:ident) => {
+    ($feature:literal, $vex:literal, $compress:ident, $absorb:ident) => {
         /// the chaining value that follows `cv` after one block
         #[target_feature(enable = $feature)]
         pub(super) unsafe fn $compress(
@@ -273,7 +299,7 @@ macro_rules! instances {
             flags: u32,
         ) -> [u32; 8] {
             // the feature is enabled for this function
-            unsafe { compress_body(cv, block, block_len, counter, flags) }
+            unsafe { compress_body::<$vex>(cv, block, block_len, counter, flags) }
         }
 
         /// advances `cv` over whole blocks of one chunk; the first also gets `flags_start`
@@ -286,13 +312,13 @@ macro_rules! instances {
             flags_start: u32,
         ) {
             // the feature is enabled for this function
-            unsafe { absorb_body(cv, blocks, counter, flags, flags_start) }
+            unsafe { absorb_body::<$vex>(cv, blocks, counter, flags, flags_start) }
         }
     };
 }
 
-instances!("sse4.1", compress, absorb);
-instances!("avx2", compress_vex, absorb_vex);
+instances!("sse4.1", false, compress, absorb);
+instances!("avx2", true, compress_vex, absorb_vex);
 
 /// Compresses the nodes in `input` four at a time and returns what is left of the
 /// input and of `out`, and the counter of the next node.

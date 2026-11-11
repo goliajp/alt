@@ -1,18 +1,21 @@
 //! Eight lanes in 256-bit vectors.
 //!
-//! The rounds are assembly: sixteen state vectors and a temporary do not fit in the
-//! sixteen registers, and the compiler's choice of what to keep in memory costs a
-//! sixth of the speed. Here fifteen state vectors stay in registers, the sixteenth
-//! lives in memory with its register serving as the temporary, and message words are
-//! read straight from memory.
+//! The loop over the blocks of eight nodes is assembly: sixteen state vectors and a
+//! temporary do not fit in the sixteen registers, and the compiler's choice of what
+//! to keep in memory costs a sixth of the speed. Here fifteen state vectors stay in
+//! registers, the sixteenth lives in memory with its register serving as the
+//! temporary, and message words are read straight from memory.
 
 use super::IV;
-use super::lanes::{Batch, Lanes};
-use super::sse41;
+use super::lanes::Batch;
 use std::arch::x86_64::*;
+use std::mem::MaybeUninit;
 
+mod pairs;
 #[macro_use]
 mod rounds;
+#[macro_use]
+mod first;
 
 // The `unsafe` blocks below only wrap vector instructions. Those on registers are
 // sound on any CPU with the features of the function they are inlined into; the
@@ -58,23 +61,6 @@ unsafe fn load(at: *const u8) -> __m256i {
     unsafe { _mm256_loadu_si256(at.cast()) }
 }
 
-/// eight words from each of eight lanes, as one vector per word
-#[inline(always)]
-unsafe fn half(blocks: *const u8, stride: usize) -> [__m256i; 8] {
-    unsafe {
-        transpose([
-            load(blocks),
-            load(blocks.add(stride)),
-            load(blocks.add(2 * stride)),
-            load(blocks.add(3 * stride)),
-            load(blocks.add(4 * stride)),
-            load(blocks.add(5 * stride)),
-            load(blocks.add(6 * stride)),
-            load(blocks.add(7 * stride)),
-        ])
-    }
-}
-
 /// byte shuffles that rotate each 32-bit word right by 16 and by 8
 #[repr(C, align(16))]
 struct Rotations([u8; 32]);
@@ -86,233 +72,191 @@ static ROTATIONS: Rotations = Rotations([
 #[repr(C, align(32))]
 struct Vectors<const N: usize>([__m256i; N]);
 
+/// Words `$o / 4` to `$o / 4 + 3` of the block at rsi in each of the eight nodes, to
+/// the message vectors `$k0`-`$k3`. Nodes n and n + 4 share a register, so that the
+/// transposition of each half comes out with the lanes in order.
+macro_rules! quarter {
+    ($o:literal, $k0:tt, $k1:tt, $k2:tt, $k3:tt) => {
+        concat!(
+            "vmovdqu xmm8, xmmword ptr [r8 + rsi + ",
+            $o,
+            "]\n",
+            "vmovdqu xmm9, xmmword ptr [r9 + rsi + ",
+            $o,
+            "]\n",
+            "vmovdqu xmm10, xmmword ptr [r10 + rsi + ",
+            $o,
+            "]\n",
+            "vmovdqu xmm11, xmmword ptr [r11 + rsi + ",
+            $o,
+            "]\n",
+            "vinserti128 ymm8, ymm8, xmmword ptr [r12 + rsi + ",
+            $o,
+            "], 1\n",
+            "vinserti128 ymm9, ymm9, xmmword ptr [r13 + rsi + ",
+            $o,
+            "], 1\n",
+            "vinserti128 ymm10, ymm10, xmmword ptr [r14 + rsi + ",
+            $o,
+            "], 1\n",
+            "vinserti128 ymm11, ymm11, xmmword ptr [r15 + rsi + ",
+            $o,
+            "], 1\n",
+            "vpunpckldq ymm12, ymm8, ymm9\n",
+            "vpunpckhdq ymm13, ymm8, ymm9\n",
+            "vpunpckldq ymm14, ymm10, ymm11\n",
+            "vpunpckhdq ymm15, ymm10, ymm11\n",
+            "vpunpcklqdq ymm8, ymm12, ymm14\n",
+            "vpunpckhqdq ymm9, ymm12, ymm14\n",
+            "vpunpcklqdq ymm10, ymm13, ymm15\n",
+            "vpunpckhqdq ymm11, ymm13, ymm15\n",
+            "vmovdqa ymmword ptr [",
+            slot!($k0),
+            "], ymm8\n",
+            "vmovdqa ymmword ptr [",
+            slot!($k1),
+            "], ymm9\n",
+            "vmovdqa ymmword ptr [",
+            slot!($k2),
+            "], ymm10\n",
+            "vmovdqa ymmword ptr [",
+            slot!($k3),
+            "], ymm11\n",
+        )
+    };
+}
+
+/// What the assembly reads besides the input, in units of 32 bytes from where rdx
+/// points: before it, the starting values of state words 8-11; at it, the place
+/// where the rounds keep word 8; then the starting values of words 12-14; the length
+/// of a node; from `FLAGS` on, 64 bytes apart, word 15 of each block.
+const BASE: usize = 4;
+const FLAGS: usize = 10;
+const SCRATCH: usize = BASE + FLAGS + 2 * 16;
+
 /// Compresses the eight nodes in `input`, the first of which counts `counter`, and
 /// writes their chaining values to `out`.
+///
+/// The loop over the blocks is assembly as a whole: the chaining values stay in
+/// ymm0-ymm7 from block to block, and the message is transposed in the other eight
+/// registers before the rounds need them. Not inlined, so that the program holds
+/// this long stretch of code once.
 #[target_feature(enable = "avx2")]
+#[inline(never)]
 unsafe fn compress_group(batch: &Batch, input: &[u8], counter: u64, out: &mut [u8]) {
     assert!(input.len() == 8 * batch.node_len && out.len() == 8 * 32);
+    let blocks = batch.node_len / 64;
+    assert!((1..=16).contains(&blocks));
     let (mut low, mut high) = ([0u32; 8], [0u32; 8]);
     for lane in 0..8 {
         let count = counter + if batch.increment { lane as u64 } else { 0 };
         low[lane] = count as u32;
         high[lane] = (count >> 32) as u32;
     }
-    let blocks = batch.node_len / 64;
     // every load stays inside `input` and the store inside `out`, whose lengths were
-    // just checked; the assembly reads and writes only the three arrays it is given
+    // just checked, except the prefetches, which may name any address; the assembly
+    // reads of `message` and `scratch` only what was written before, and writes
+    // only `message` and the vector of `scratch` that rdx points at
     unsafe {
-        let key = batch.key;
-        let mut h = Vectors(std::array::from_fn(|word| {
-            _mm256_set1_epi32(key[word] as i32)
-        }));
-        let (low, high) = (load(low.as_ptr().cast()), load(high.as_ptr().cast()));
-        let mut message = Vectors([_mm256_setzero_si256(); 16]);
-        let mut flags = batch.flags | batch.flags_start;
-        for block in 0..blocks {
-            if block + 1 == blocks {
-                flags |= batch.flags_end;
-            }
-            let at = input.as_ptr().add(block * 64);
-            // lanes are read side by side, too many streams for the processor to
-            // fetch ahead on its own; an address past the end is harmless
-            for lane in 0..8 {
-                _mm_prefetch::<_MM_HINT_T0>(at.wrapping_add(lane * batch.node_len + 256).cast());
-            }
-            let (first, second) = message.0.split_at_mut(8);
-            first.copy_from_slice(&half(at, batch.node_len));
-            second.copy_from_slice(&half(at.add(32), batch.node_len));
-            let mut rest = Vectors([
-                _mm256_set1_epi32(IV[0] as i32),
-                _mm256_set1_epi32(IV[1] as i32),
-                _mm256_set1_epi32(IV[2] as i32),
-                _mm256_set1_epi32(IV[3] as i32),
-                low,
-                high,
-                _mm256_set1_epi32(64),
-                _mm256_set1_epi32(flags as i32),
-            ]);
-            std::arch::asm!(
-                "vmovdqa ymm0, ymmword ptr [rsi]\n",
-                "vmovdqa ymm1, ymmword ptr [rsi + 32]\n",
-                "vmovdqa ymm2, ymmword ptr [rsi + 64]\n",
-                "vmovdqa ymm3, ymmword ptr [rsi + 96]\n",
-                "vmovdqa ymm4, ymmword ptr [rsi + 128]\n",
-                "vmovdqa ymm5, ymmword ptr [rsi + 160]\n",
-                "vmovdqa ymm6, ymmword ptr [rsi + 192]\n",
-                "vmovdqa ymm7, ymmword ptr [rsi + 224]\n",
-                "vmovdqa ymm9, ymmword ptr [rdx + 32]\n",
-                "vmovdqa ymm10, ymmword ptr [rdx + 64]\n",
-                "vmovdqa ymm11, ymmword ptr [rdx + 96]\n",
-                "vmovdqa ymm12, ymmword ptr [rdx + 128]\n",
-                "vmovdqa ymm13, ymmword ptr [rdx + 160]\n",
-                "vmovdqa ymm14, ymmword ptr [rdx + 192]\n",
-                "vmovdqa ymm15, ymmword ptr [rdx + 224]\n",
-                round!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15),
-                round!(2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8),
-                round!(3, 4, 10, 12, 13, 2, 7, 14, 6, 5, 9, 0, 11, 15, 8, 1),
-                round!(10, 7, 12, 9, 14, 3, 13, 15, 4, 0, 11, 2, 5, 8, 1, 6),
-                round!(12, 13, 9, 11, 15, 10, 14, 8, 7, 2, 5, 3, 0, 1, 6, 4),
-                round!(9, 14, 11, 5, 8, 12, 15, 1, 13, 3, 0, 10, 2, 6, 4, 7),
-                round!(11, 15, 5, 0, 1, 9, 8, 6, 14, 10, 2, 12, 3, 4, 7, 13),
-                // the new chaining value is the upper half folded onto the lower
-                "vpxor ymm0, ymm0, ymmword ptr [rdx]\n",
-                "vpxor ymm1, ymm1, ymm9\n",
-                "vpxor ymm2, ymm2, ymm10\n",
-                "vpxor ymm3, ymm3, ymm11\n",
-                "vpxor ymm4, ymm4, ymm12\n",
-                "vpxor ymm5, ymm5, ymm13\n",
-                "vpxor ymm6, ymm6, ymm14\n",
-                "vpxor ymm7, ymm7, ymm15\n",
-                "vmovdqa ymmword ptr [rsi], ymm0\n",
-                "vmovdqa ymmword ptr [rsi + 32], ymm1\n",
-                "vmovdqa ymmword ptr [rsi + 64], ymm2\n",
-                "vmovdqa ymmword ptr [rsi + 96], ymm3\n",
-                "vmovdqa ymmword ptr [rsi + 128], ymm4\n",
-                "vmovdqa ymmword ptr [rsi + 160], ymm5\n",
-                "vmovdqa ymmword ptr [rsi + 192], ymm6\n",
-                "vmovdqa ymmword ptr [rsi + 224], ymm7\n",
-                in("rdi") message.0.as_ptr(),
-                in("rsi") h.0.as_mut_ptr(),
-                in("rdx") rest.0.as_mut_ptr(),
-                in("rcx") &raw const ROTATIONS,
-                out("ymm0") _,
-                out("ymm1") _,
-                out("ymm2") _,
-                out("ymm3") _,
-                out("ymm4") _,
-                out("ymm5") _,
-                out("ymm6") _,
-                out("ymm7") _,
-                out("ymm8") _,
-                out("ymm9") _,
-                out("ymm10") _,
-                out("ymm11") _,
-                out("ymm12") _,
-                out("ymm13") _,
-                out("ymm14") _,
-                out("ymm15") _,
-                options(nostack),
-            );
-            flags = batch.flags;
+        let mut message = MaybeUninit::<Vectors<16>>::uninit();
+        let mut scratch = MaybeUninit::<Vectors<SCRATCH>>::uninit();
+        let scratch: *mut __m256i = scratch.as_mut_ptr().cast::<__m256i>().add(BASE);
+        for (word, value) in IV[..4].iter().enumerate() {
+            scratch
+                .sub(4 - word)
+                .write(_mm256_set1_epi32(*value as i32));
         }
-        for (lane, cv) in transpose(h.0).into_iter().enumerate() {
+        scratch.add(1).write(load(low.as_ptr().cast()));
+        scratch.add(2).write(load(high.as_ptr().cast()));
+        scratch.add(3).write(_mm256_set1_epi32(64));
+        scratch.add(8).cast::<u64>().write(batch.node_len as u64);
+        for block in 0..blocks {
+            let start = if block == 0 { batch.flags_start } else { 0 };
+            let end = if block + 1 == blocks {
+                batch.flags_end
+            } else {
+                0
+            };
+            let flags = _mm256_set1_epi32((batch.flags | start | end) as i32);
+            scratch.add(FLAGS + 2 * block).write(flags);
+        }
+        let key = batch.key;
+        let mut h: [__m256i; 8] = std::array::from_fn(|word| _mm256_set1_epi32(key[word] as i32));
+        let nodes = input.as_ptr();
+        let message: *mut __m256i = message.as_mut_ptr().cast();
+        std::arch::asm!(
+            "2:\n",
+            // the lanes are read side by side, too many streams for the processor
+            // to fetch ahead on its own
+            "prefetcht0 byte ptr [r8 + rsi + 256]\n",
+            "prefetcht0 byte ptr [r9 + rsi + 256]\n",
+            "prefetcht0 byte ptr [r10 + rsi + 256]\n",
+            "prefetcht0 byte ptr [r11 + rsi + 256]\n",
+            "prefetcht0 byte ptr [r12 + rsi + 256]\n",
+            "prefetcht0 byte ptr [r13 + rsi + 256]\n",
+            "prefetcht0 byte ptr [r14 + rsi + 256]\n",
+            "prefetcht0 byte ptr [r15 + rsi + 256]\n",
+            quarter!("0", 0, 1, 2, 3),
+            quarter!("16", 4, 5, 6, 7),
+            quarter!("32", 8, 9, 10, 11),
+            quarter!("48", 12, 13, 14, 15),
+            first_round!(),
+            round!(2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8),
+            round!(3, 4, 10, 12, 13, 2, 7, 14, 6, 5, 9, 0, 11, 15, 8, 1),
+            round!(10, 7, 12, 9, 14, 3, 13, 15, 4, 0, 11, 2, 5, 8, 1, 6),
+            round!(12, 13, 9, 11, 15, 10, 14, 8, 7, 2, 5, 3, 0, 1, 6, 4),
+            round!(9, 14, 11, 5, 8, 12, 15, 1, 13, 3, 0, 10, 2, 6, 4, 7),
+            round!(11, 15, 5, 0, 1, 9, 8, 6, 14, 10, 2, 12, 3, 4, 7, 13),
+            // the new chaining value is the upper half folded onto the lower
+            "vpxor ymm0, ymm0, ymmword ptr [rdx]\n",
+            "vpxor ymm1, ymm1, ymm9\n",
+            "vpxor ymm2, ymm2, ymm10\n",
+            "vpxor ymm3, ymm3, ymm11\n",
+            "vpxor ymm4, ymm4, ymm12\n",
+            "vpxor ymm5, ymm5, ymm13\n",
+            "vpxor ymm6, ymm6, ymm14\n",
+            "vpxor ymm7, ymm7, ymm15\n",
+            "add rsi, 64\n",
+            "cmp rsi, qword ptr [rdx + 256]\n",
+            "jne 2b\n",
+            in("r8") nodes,
+            in("r9") nodes.add(batch.node_len),
+            in("r10") nodes.add(2 * batch.node_len),
+            in("r11") nodes.add(3 * batch.node_len),
+            in("r12") nodes.add(4 * batch.node_len),
+            in("r13") nodes.add(5 * batch.node_len),
+            in("r14") nodes.add(6 * batch.node_len),
+            in("r15") nodes.add(7 * batch.node_len),
+            inout("rsi") 0usize => _,
+            in("rdi") message.add(4),
+            in("rax") message.add(12),
+            in("rdx") scratch,
+            in("rcx") &raw const ROTATIONS,
+            inout("ymm0") h[0],
+            inout("ymm1") h[1],
+            inout("ymm2") h[2],
+            inout("ymm3") h[3],
+            inout("ymm4") h[4],
+            inout("ymm5") h[5],
+            inout("ymm6") h[6],
+            inout("ymm7") h[7],
+            out("ymm8") _,
+            out("ymm9") _,
+            out("ymm10") _,
+            out("ymm11") _,
+            out("ymm12") _,
+            out("ymm13") _,
+            out("ymm14") _,
+            out("ymm15") _,
+            options(nostack),
+        );
+        for (lane, cv) in transpose(h).into_iter().enumerate() {
             _mm256_storeu_si256(out.as_mut_ptr().add(lane * 32).cast(), cv);
         }
     }
 }
 
-#[repr(C, align(16))]
-struct Quarter<const N: usize>([__m128i; N]);
-
-/// Compresses the four nodes in `input`, the first of which counts `counter`, and
-/// writes their chaining values to `out`: the same rounds in the lower halves of the
-/// registers.
-#[target_feature(enable = "avx2")]
-unsafe fn compress_four(batch: &Batch, input: &[u8], counter: u64, out: &mut [u8]) {
-    assert!(input.len() == 4 * batch.node_len && out.len() == 4 * 32);
-    let (mut low, mut high) = ([0u32; 8], [0u32; 8]);
-    for lane in 0..4 {
-        let count = counter + if batch.increment { lane as u64 } else { 0 };
-        low[lane] = count as u32;
-        high[lane] = (count >> 32) as u32;
-    }
-    let blocks = batch.node_len / 64;
-    // every load stays inside `input` and the store inside `out`, whose lengths were
-    // just checked; the assembly reads and writes only the three arrays it is given
-    unsafe {
-        let key = batch.key;
-        let mut h = Quarter(std::array::from_fn(|word| _mm_set1_epi32(key[word] as i32)));
-        let (low, high) = (
-            <__m128i as Lanes>::words(&low),
-            <__m128i as Lanes>::words(&high),
-        );
-        let mut flags = batch.flags | batch.flags_start;
-        for block in 0..blocks {
-            if block + 1 == blocks {
-                flags |= batch.flags_end;
-            }
-            let message = Quarter(<__m128i as Lanes>::load(
-                input.as_ptr().add(block * 64),
-                batch.node_len,
-            ));
-            let mut rest = Quarter([
-                _mm_set1_epi32(IV[0] as i32),
-                _mm_set1_epi32(IV[1] as i32),
-                _mm_set1_epi32(IV[2] as i32),
-                _mm_set1_epi32(IV[3] as i32),
-                low,
-                high,
-                _mm_set1_epi32(64),
-                _mm_set1_epi32(flags as i32),
-            ]);
-            std::arch::asm!(
-                "vmovdqa xmm0, xmmword ptr [rsi]\n",
-                "vmovdqa xmm1, xmmword ptr [rsi + 16]\n",
-                "vmovdqa xmm2, xmmword ptr [rsi + 32]\n",
-                "vmovdqa xmm3, xmmword ptr [rsi + 48]\n",
-                "vmovdqa xmm4, xmmword ptr [rsi + 64]\n",
-                "vmovdqa xmm5, xmmword ptr [rsi + 80]\n",
-                "vmovdqa xmm6, xmmword ptr [rsi + 96]\n",
-                "vmovdqa xmm7, xmmword ptr [rsi + 112]\n",
-                "vmovdqa xmm9, xmmword ptr [rdx + 16]\n",
-                "vmovdqa xmm10, xmmword ptr [rdx + 32]\n",
-                "vmovdqa xmm11, xmmword ptr [rdx + 48]\n",
-                "vmovdqa xmm12, xmmword ptr [rdx + 64]\n",
-                "vmovdqa xmm13, xmmword ptr [rdx + 80]\n",
-                "vmovdqa xmm14, xmmword ptr [rdx + 96]\n",
-                "vmovdqa xmm15, xmmword ptr [rdx + 112]\n",
-                round_four!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15),
-                round_four!(2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8),
-                round_four!(3, 4, 10, 12, 13, 2, 7, 14, 6, 5, 9, 0, 11, 15, 8, 1),
-                round_four!(10, 7, 12, 9, 14, 3, 13, 15, 4, 0, 11, 2, 5, 8, 1, 6),
-                round_four!(12, 13, 9, 11, 15, 10, 14, 8, 7, 2, 5, 3, 0, 1, 6, 4),
-                round_four!(9, 14, 11, 5, 8, 12, 15, 1, 13, 3, 0, 10, 2, 6, 4, 7),
-                round_four!(11, 15, 5, 0, 1, 9, 8, 6, 14, 10, 2, 12, 3, 4, 7, 13),
-                "vpxor xmm0, xmm0, xmmword ptr [rdx]\n",
-                "vpxor xmm1, xmm1, xmm9\n",
-                "vpxor xmm2, xmm2, xmm10\n",
-                "vpxor xmm3, xmm3, xmm11\n",
-                "vpxor xmm4, xmm4, xmm12\n",
-                "vpxor xmm5, xmm5, xmm13\n",
-                "vpxor xmm6, xmm6, xmm14\n",
-                "vpxor xmm7, xmm7, xmm15\n",
-                "vmovdqa xmmword ptr [rsi], xmm0\n",
-                "vmovdqa xmmword ptr [rsi + 16], xmm1\n",
-                "vmovdqa xmmword ptr [rsi + 32], xmm2\n",
-                "vmovdqa xmmword ptr [rsi + 48], xmm3\n",
-                "vmovdqa xmmword ptr [rsi + 64], xmm4\n",
-                "vmovdqa xmmword ptr [rsi + 80], xmm5\n",
-                "vmovdqa xmmword ptr [rsi + 96], xmm6\n",
-                "vmovdqa xmmword ptr [rsi + 112], xmm7\n",
-                in("rdi") message.0.as_ptr(),
-                in("rsi") h.0.as_mut_ptr(),
-                in("rdx") rest.0.as_mut_ptr(),
-                in("rcx") &raw const ROTATIONS,
-                out("ymm0") _,
-                out("ymm1") _,
-                out("ymm2") _,
-                out("ymm3") _,
-                out("ymm4") _,
-                out("ymm5") _,
-                out("ymm6") _,
-                out("ymm7") _,
-                out("ymm8") _,
-                out("ymm9") _,
-                out("ymm10") _,
-                out("ymm11") _,
-                out("ymm12") _,
-                out("ymm13") _,
-                out("ymm14") _,
-                out("ymm15") _,
-                options(nostack),
-            );
-            flags = batch.flags;
-        }
-        <__m128i as Lanes>::store(&h.0, out.as_mut_ptr());
-    }
-}
-
-/// Compresses the nodes in `input` eight at a time, then four at a time, and
+/// Compresses the nodes in `input` eight at a time, then four, then two, and
 /// returns what is left of the input and of `out`, and the counter of the next node.
 #[target_feature(enable = "avx2")]
 pub(super) unsafe fn hash_many<'a, 'b>(
@@ -321,24 +265,30 @@ pub(super) unsafe fn hash_many<'a, 'b>(
     mut counter: u64,
     out: &'b mut [u8],
 ) -> (&'a [u8], u64, &'b mut [u8]) {
-    let groups = input.len() / (8 * batch.node_len);
-    let (wide, rest) = input.split_at(groups * 8 * batch.node_len);
-    let (wide_out, rest_out) = out.split_at_mut(groups * 8 * 32);
-    let wide = wide.chunks_exact(8 * batch.node_len);
-    // avx2 is enabled for this function, and it implies sse4.1
+    let (mut rest, mut rest_out) = (input, out);
+    // avx2 is enabled for this function
     unsafe {
-        for (group, out) in wide.zip(wide_out.as_chunks_mut::<{ 8 * 32 }>().0) {
-            compress_group(batch, group, counter, out);
+        while rest.len() >= 8 * batch.node_len {
+            let (group, after) = rest.split_at(8 * batch.node_len);
+            let (group_out, after_out) = rest_out.split_at_mut(8 * 32);
+            compress_group(batch, group, counter, group_out);
             counter += 8 * batch.increment as u64;
+            (rest, rest_out) = (after, after_out);
         }
-        let (mut rest, mut rest_out) = (rest, rest_out);
         if rest.len() >= 4 * batch.node_len {
             let (four, after) = rest.split_at(4 * batch.node_len);
             let (four_out, after_out) = rest_out.split_at_mut(4 * 32);
-            compress_four(batch, four, counter, four_out);
+            pairs::compress_four(batch, four, counter, four_out);
             counter += 4 * batch.increment as u64;
             (rest, rest_out) = (after, after_out);
         }
-        sse41::hash_many(batch, rest, counter, rest_out)
+        if rest.len() >= 2 * batch.node_len {
+            let (two, after) = rest.split_at(2 * batch.node_len);
+            let (two_out, after_out) = rest_out.split_at_mut(2 * 32);
+            pairs::compress_two(batch, two, counter, two_out);
+            counter += 2 * batch.increment as u64;
+            (rest, rest_out) = (after, after_out);
+        }
+        (rest, counter, rest_out)
     }
 }

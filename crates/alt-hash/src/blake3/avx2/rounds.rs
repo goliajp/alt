@@ -1,4 +1,58 @@
-//! the rounds on eight or four lanes, as assembly text
+//! the rounds on eight lanes, as assembly text
+
+/// Where message vector `n` is: rdi and rax point 128 bytes into each half of the
+/// sixteen, so that every one is within a one-byte displacement. The loop is too long
+/// for the cache of decoded instructions, so its speed is its size in bytes.
+macro_rules! slot {
+    (0) => {
+        "rdi - 128"
+    };
+    (1) => {
+        "rdi - 96"
+    };
+    (2) => {
+        "rdi - 64"
+    };
+    (3) => {
+        "rdi - 32"
+    };
+    (4) => {
+        "rdi"
+    };
+    (5) => {
+        "rdi + 32"
+    };
+    (6) => {
+        "rdi + 64"
+    };
+    (7) => {
+        "rdi + 96"
+    };
+    (8) => {
+        "rax - 128"
+    };
+    (9) => {
+        "rax - 96"
+    };
+    (10) => {
+        "rax - 64"
+    };
+    (11) => {
+        "rax - 32"
+    };
+    (12) => {
+        "rax"
+    };
+    (13) => {
+        "rax + 32"
+    };
+    (14) => {
+        "rax + 64"
+    };
+    (15) => {
+        "rax + 96"
+    };
+}
 
 /// Half of the mixing function on four independent groups of words (a, b, c, d) at
 /// once: a += b + m; d = (d ^ a) rotated by a byte shuffle; c += d; b = (b ^ c)
@@ -9,7 +63,7 @@ macro_rules! half {
     ($t:literal, $word:literal, $stride:literal, $mask:literal,
      ($a0:literal, $b0:literal, $d0:literal), ($a1:literal, $b1:literal, $c1:literal, $d1:literal),
      ($a2:literal, $b2:literal, $c2:literal, $d2:literal), ($a3:literal, $b3:literal, $c3:literal, $d3:literal),
-     $m0:literal, $m1:literal, $m2:literal, $m3:literal, $shuffle:literal, $right:literal, $left:literal) => {
+     $m0:tt, $m1:tt, $m2:tt, $m3:tt, $shuffle:literal, $right:literal, $left:literal) => {
         concat!(
             "vpaddd ",
             $a0,
@@ -17,10 +71,8 @@ macro_rules! half {
             $a0,
             ", ",
             $word,
-            " ptr [rdi + ",
-            $m0,
-            "*",
-            $stride,
+            " ptr [",
+            slot!($m0),
             "]\n",
             "vpaddd ",
             $a1,
@@ -28,10 +80,8 @@ macro_rules! half {
             $a1,
             ", ",
             $word,
-            " ptr [rdi + ",
-            $m1,
-            "*",
-            $stride,
+            " ptr [",
+            slot!($m1),
             "]\n",
             "vpaddd ",
             $a2,
@@ -39,10 +89,8 @@ macro_rules! half {
             $a2,
             ", ",
             $word,
-            " ptr [rdi + ",
-            $m2,
-            "*",
-            $stride,
+            " ptr [",
+            slot!($m2),
             "]\n",
             "vpaddd ",
             $a3,
@@ -50,10 +98,8 @@ macro_rules! half {
             $a3,
             ", ",
             $word,
-            " ptr [rdi + ",
-            $m3,
-            "*",
-            $stride,
+            " ptr [",
+            slot!($m3),
             "]\n",
             "vpaddd ",
             $a0,
@@ -295,8 +341,8 @@ macro_rules! half {
 /// One round on the message words in the given order: the four columns, then the four
 /// diagonals, each in two halves. State word n is in ymm n, except word 8 in memory.
 macro_rules! round {
-    ($s0:literal, $s1:literal, $s2:literal, $s3:literal, $s4:literal, $s5:literal, $s6:literal, $s7:literal,
-     $s8:literal, $s9:literal, $s10:literal, $s11:literal, $s12:literal, $s13:literal, $s14:literal, $s15:literal) => {
+    ($s0:tt, $s1:tt, $s2:tt, $s3:tt, $s4:tt, $s5:tt, $s6:tt, $s7:tt,
+     $s8:tt, $s9:tt, $s10:tt, $s11:tt, $s12:tt, $s13:tt, $s14:tt, $s15:tt) => {
         concat!(
             half!(
                 "ymm8",
@@ -358,84 +404,6 @@ macro_rules! round {
                 ("ymm0", "ymm5", "ymm10", "ymm15"),
                 ("ymm1", "ymm6", "ymm11", "ymm12"),
                 ("ymm3", "ymm4", "ymm9", "ymm14"),
-                $s13,
-                $s9,
-                $s11,
-                $s15,
-                16,
-                7,
-                25
-            ),
-        )
-    };
-}
-
-/// One round on the message words in the given order: the four columns, then the four
-/// diagonals, each in two halves. State word n is in xmm n, except word 8 in memory.
-macro_rules! round_four {
-    ($s0:literal, $s1:literal, $s2:literal, $s3:literal, $s4:literal, $s5:literal, $s6:literal, $s7:literal,
-     $s8:literal, $s9:literal, $s10:literal, $s11:literal, $s12:literal, $s13:literal, $s14:literal, $s15:literal) => {
-        concat!(
-            half!(
-                "xmm8",
-                "xmmword",
-                "16",
-                "vmovdqa xmm8, xmmword ptr",
-                ("xmm0", "xmm4", "xmm12"),
-                ("xmm1", "xmm5", "xmm9", "xmm13"),
-                ("xmm2", "xmm6", "xmm10", "xmm14"),
-                ("xmm3", "xmm7", "xmm11", "xmm15"),
-                $s0,
-                $s2,
-                $s4,
-                $s6,
-                0,
-                12,
-                20
-            ),
-            half!(
-                "xmm8",
-                "xmmword",
-                "16",
-                "vmovdqa xmm8, xmmword ptr",
-                ("xmm0", "xmm4", "xmm12"),
-                ("xmm1", "xmm5", "xmm9", "xmm13"),
-                ("xmm2", "xmm6", "xmm10", "xmm14"),
-                ("xmm3", "xmm7", "xmm11", "xmm15"),
-                $s1,
-                $s3,
-                $s5,
-                $s7,
-                16,
-                7,
-                25
-            ),
-            half!(
-                "xmm8",
-                "xmmword",
-                "16",
-                "vmovdqa xmm8, xmmword ptr",
-                ("xmm2", "xmm7", "xmm13"),
-                ("xmm0", "xmm5", "xmm10", "xmm15"),
-                ("xmm1", "xmm6", "xmm11", "xmm12"),
-                ("xmm3", "xmm4", "xmm9", "xmm14"),
-                $s12,
-                $s8,
-                $s10,
-                $s14,
-                0,
-                12,
-                20
-            ),
-            half!(
-                "xmm8",
-                "xmmword",
-                "16",
-                "vmovdqa xmm8, xmmword ptr",
-                ("xmm2", "xmm7", "xmm13"),
-                ("xmm0", "xmm5", "xmm10", "xmm15"),
-                ("xmm1", "xmm6", "xmm11", "xmm12"),
-                ("xmm3", "xmm4", "xmm9", "xmm14"),
                 $s13,
                 $s9,
                 $s11,
