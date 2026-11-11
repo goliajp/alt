@@ -1,6 +1,7 @@
 //! JSON and JSONB values as the driver sends and receives them.
 
 use alt_json::{FromJson, ToJson, Value};
+use alt_json_serde::Serde;
 use postgres::types::private::BytesMut;
 use postgres::types::{FromSql, IsNull, ToSql, Type, accepts, to_sql_checked};
 
@@ -8,6 +9,7 @@ type Failure = Box<dyn std::error::Error + Sync + Send>;
 
 /// A `json` or `jsonb` parameter or column.
 #[derive(Clone, Debug, PartialEq, Eq)]
+
 pub struct Jsonb(pub Value);
 
 /// The binary form of `jsonb` is this version byte followed by the text.
@@ -23,12 +25,18 @@ impl Jsonb {
     }
 
     /// For the vendored contract types, which have serde implementations only.
-    pub fn from_serde<T: serde::Serialize + ?Sized>(value: &T) -> alt_json::Result<Self> {
-        alt_json_serde::to_value(&value).map(Self)
+    pub fn from_serde<T>(value: &T) -> alt_json::Result<Self>
+    where
+        for<'a> Serde<&'a T>: ToJson,
+    {
+        Self::from(&Serde(value))
     }
 
-    pub fn read_serde<T: serde::de::DeserializeOwned>(self) -> alt_json::Result<T> {
-        alt_json_serde::from_value(self.0)
+    pub fn read_serde<T>(self) -> alt_json::Result<T>
+    where
+        Serde<T>: FromJson,
+    {
+        self.read::<Serde<T>>().map(|Serde(value)| value)
     }
 }
 

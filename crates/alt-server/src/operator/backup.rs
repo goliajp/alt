@@ -5,7 +5,6 @@ use super::{Config, Error, Result, create_private, read_regular};
 use alt_base64::STANDARD;
 use alt_crypto::ed25519::{Signature, VerifyingKey};
 use alt_server_store::{ByteStore, MaintenanceSnapshot, SnapshotCatalog};
-use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     fs::{File, OpenOptions},
@@ -16,28 +15,24 @@ use std::{
 };
 
 const MANIFEST_LIMIT: usize = 64 * 1024 * 1024;
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct FileDigest {
     pub bytes: u64,
     pub blake3: String,
 }
-#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct Manifest {
     pub format: u32,
     pub kind: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[json(default, skip_serializing_if = "Option::is_none")]
     pub operation_id: Option<String>,
     pub catalog: SnapshotCatalog,
     pub files: BTreeMap<String, FileDigest>,
     pub payload: FileDigest,
 }
-#[derive(Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub(crate) struct SignedManifest {
     manifest: Manifest,

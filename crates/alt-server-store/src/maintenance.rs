@@ -8,13 +8,12 @@ use crate::{ByteStore, Error, InstanceSpec, Result, Store};
 use alt_crypto::ed25519::SigningKey;
 use alt_remote_protocol::Scope;
 use postgres::Client;
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Counters are decimal strings to preserve the full database integer range in
 /// browser clients. This is a read-only database observation, not a byte scrub
 /// or proof that an external backup remains available.
-#[derive(Clone, Debug, Serialize, alt_json::ToJson)]
+#[derive(Clone, Debug, alt_json::ToJson)]
 pub struct InstanceStatus {
     pub installation_id: String,
     pub runtime_generation: String,
@@ -31,7 +30,7 @@ pub struct InstanceStatus {
     pub pending_change_links: String,
     pub recovery_change_links: String,
 }
-#[derive(Clone, Debug, Serialize, alt_json::ToJson)]
+#[derive(Clone, Debug, alt_json::ToJson)]
 pub struct InstanceAuditEntry {
     pub sequence: String,
     pub actor_id: String,
@@ -40,6 +39,7 @@ pub struct InstanceAuditEntry {
     pub occurred_at_unix_ms: String,
 }
 #[derive(Clone, Copy)]
+
 pub enum BackupEvent {
     Started,
     Created,
@@ -140,10 +140,7 @@ impl Store {
 }
 
 /// one file-backed pack segment; segments stored with their row travel in the database dump
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct SnapshotPackSegment {
     pub repository: String,
@@ -151,20 +148,14 @@ pub struct SnapshotPackSegment {
     pub bytes: u64,
     pub blake3: String,
 }
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct SnapshotBlob {
     pub repository: String,
     pub blake3: String,
     pub bytes: u64,
 }
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct SnapshotRepository {
     pub repository: String,
@@ -172,17 +163,13 @@ pub struct SnapshotRepository {
     pub transaction_sequence: u64,
     pub refs: std::collections::BTreeMap<String, String>,
 }
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct SnapshotCatalog {
     pub schema: u32,
     pub instance: InstanceSpec,
     pub repositories: Vec<SnapshotRepository>,
     pub blobs: Vec<SnapshotBlob>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[json(default, skip_serializing_if = "Vec::is_empty")]
     pub pack_segments: Vec<SnapshotPackSegment>,
 }

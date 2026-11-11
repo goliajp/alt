@@ -4,7 +4,6 @@ use crate::{HttpOptions, NativeOptions, StoreFactory};
 use alt_crypto::ed25519::SigningKey;
 use alt_remote_protocol::Limits;
 use alt_server_store::{ByteStore, InstanceSpec, Store};
-use serde::{Deserialize, Serialize};
 use std::{
     fs::{File, OpenOptions},
     io::{Read, Write},
@@ -19,6 +18,7 @@ mod change_links;
 pub mod provision;
 
 #[derive(Debug)]
+
 pub enum Error {
     Config(&'static str),
     File,
@@ -59,17 +59,13 @@ impl From<alt_server_store::Error> for Error {
     }
 }
 pub type Result<T> = std::result::Result<T, Error>;
-#[derive(Clone, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct Config {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[json(default, skip_serializing_if = "Vec::is_empty")]
     pub change_links: Vec<crate::change_links::ChannelConfig>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[json(default, skip_serializing_if = "Option::is_none")]
     pub portable: Option<alt_portable::http::Bounds>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[json(default, skip_serializing_if = "Option::is_none")]
     pub cloud: Option<CloudConfig>,
     pub version: u32,
@@ -84,31 +80,26 @@ pub struct Config {
     pub limits: Limits,
     pub tasks: alt_task_service::TaskLimits,
     pub http: HttpBounds,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[json(default, skip_serializing_if = "Option::is_none")]
     pub browser: Option<BrowserConfig>,
 }
-#[derive(Clone, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct CloudConfig {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[json(default, skip_serializing_if = "Option::is_none")]
     pub provision_digest: Option<String>,
     #[json(with = "alt_json_serde::bridge")]
     pub audience: golia_platform_contract::Audience,
     pub runtime_credential_file: PathBuf,
 }
-#[derive(Clone, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct BrowserConfig {
     pub public_origin: String,
     pub assets_directory: PathBuf,
     pub session_ttl_ms: u64,
 }
-#[derive(Clone, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct HttpBounds {
     pub connections: usize,

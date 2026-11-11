@@ -9,6 +9,7 @@ use alt_server_telemetry::BackgroundLog;
 use std::{collections::BTreeSet, sync::mpsc};
 
 #[derive(Clone)]
+
 pub(crate) struct Compaction(mpsc::Sender<String>);
 
 impl Compaction {

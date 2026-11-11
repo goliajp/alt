@@ -160,9 +160,6 @@ impl Fixture {
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
-        if !std::thread::panicking() {
-            json::compare_stored(&mut self.client());
-        }
         let mut client = Client::connect(&self.admin_dsn, NoTls).unwrap();
         client
             .batch_execute(&format!("DROP DATABASE {} WITH (FORCE)", self.database))
@@ -631,7 +628,9 @@ fn corrupt_policy_is_rejected_without_stale_fallback() {
     f.client()
         .execute(
             "UPDATE alt_repositories SET policies=$1",
-            &[&serde_json::json!({"corrupted":true})],
+            &[&alt_server_store::Jsonb(
+                alt_json::json!({"corrupted":true}),
+            )],
         )
         .unwrap();
     assert!(f.store.publish(&f.credential, &work, &graph).is_err());

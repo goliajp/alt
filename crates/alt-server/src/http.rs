@@ -36,6 +36,7 @@ type ResponseBody = UnsyncBoxBody<Bytes, BoxError>;
 /// Persisted instance identity is required in every mode. Opening never calls
 /// initialization or local bootstrap when configuration/authorization is absent.
 #[derive(Clone)]
+
 pub struct StoreFactory {
     pub change_links: Arc<[crate::change_links::ChannelRuntime]>,
     pub cloud: Option<Arc<crate::cloud::Runtime>>,
@@ -101,6 +102,7 @@ impl StoreFactory {
     }
 }
 #[derive(Clone)]
+
 pub struct HttpOptions {
     pub connections: usize,
     pub workers: usize,

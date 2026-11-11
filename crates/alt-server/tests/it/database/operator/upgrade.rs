@@ -26,7 +26,7 @@ fn as_schema_18(db: &OperatorDb, store: &Store, objects: &[(&ContentEntry, &Vec<
                 &mut std::io::Cursor::new(bytes),
             )
             .unwrap();
-        let kind = serde_json::to_value(entry.kind).unwrap();
+        let kind = alt_json::to_value(entry.kind).unwrap();
         client.execute("INSERT INTO alt_blobs(repository,blake3,bytes,state,accounted,created_at) VALUES('repository',$1,$2,'stored',true,0) ON CONFLICT(repository,blake3) DO UPDATE SET state='stored',accounted=true", &[&entry.blake3,&(entry.bytes as i64)]).unwrap();
         client
             .execute(
@@ -119,10 +119,10 @@ fn a_schema_18_instance_upgrades_in_place_and_from_its_backup() {
 
     // from the backup taken before the upgrade
     let target = OperatorDb::new();
-    let mut config: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&target.config).unwrap()).unwrap();
-    config["instance"]["runtime_generation"] = serde_json::json!(10);
-    std::fs::write(&target.config, serde_json::to_vec(&config).unwrap()).unwrap();
+    let mut config: alt_json::Value =
+        alt_json::from_slice(&std::fs::read(&target.config).unwrap()).unwrap();
+    config["instance"]["runtime_generation"] = alt_json::json!(10);
+    std::fs::write(&target.config, alt_json::to_vec(&config).unwrap()).unwrap();
     let restored = target.ok(&[
         "restore",
         "--input",

@@ -20,7 +20,7 @@ fn proofs(f: &Fixture, p: &Payload) -> Vec<DurableBytes> {
         .unwrap()
 }
 
-fn catalog(f: &Fixture) -> serde_json::Value {
+fn catalog(f: &Fixture) -> alt_json::Value {
     f.client().query_one("SELECT jsonb_build_object(
         'repositories',(SELECT jsonb_agg(to_jsonb(r) ORDER BY id) FROM alt_repositories r),
         'requests',(SELECT jsonb_agg(to_jsonb(r) ORDER BY request_id) FROM alt_requests r),
@@ -29,7 +29,7 @@ fn catalog(f: &Fixture) -> serde_json::Value {
         'objects',(SELECT jsonb_agg(to_jsonb(r) ORDER BY oid) FROM alt_objects r),
         'pins',(SELECT jsonb_agg(to_jsonb(r) ORDER BY pin_id,blake3) FROM alt_pins r),
         'ingress',(SELECT jsonb_agg(to_jsonb(r) ORDER BY month) FROM alt_cloud_ingress r),
-        'reservations',(SELECT jsonb_agg(to_jsonb(r) ORDER BY request_id) FROM alt_cloud_reservations r))", &[]).unwrap().get(0)
+        'reservations',(SELECT jsonb_agg(to_jsonb(r) ORDER BY request_id) FROM alt_cloud_reservations r))", &[]).unwrap().get::<_, alt_server_store::Jsonb>(0).0
 }
 
 pub(super) fn shared_payload() -> Payload {

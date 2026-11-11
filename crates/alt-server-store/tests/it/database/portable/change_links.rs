@@ -59,7 +59,7 @@ fn linked_fixture(
 ) {
     let (mut source, _, mut intent) = import_fixture(target);
     let history = signed_history(true);
-    let raw = serde_json::to_vec(&history).unwrap();
+    let raw = alt_json::to_vec(&alt_json_serde::Serde(&history)).unwrap();
     let digest = history.statement.digest().unwrap();
     // The fixture supplies already-committed historical facts, without any
     // installed connector. Production intake/current authorization is tested

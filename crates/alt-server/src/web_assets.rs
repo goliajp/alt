@@ -8,10 +8,12 @@ use std::{
 };
 
 #[derive(Clone)]
+
 pub struct Assets {
     files: BTreeMap<String, Asset>,
 }
 #[derive(Clone)]
+
 pub struct Asset {
     pub bytes: Arc<[u8]>,
     pub content_type: &'static str,

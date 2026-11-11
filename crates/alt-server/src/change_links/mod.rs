@@ -10,14 +10,12 @@ use alt_remote_protocol::Scope;
 use alt_server_store::{ChangeChannel, Error, RepairBindingRequest, Result};
 use alt_server_telemetry::{Id, Metrics, Outcome, Phase, Route, Trace};
 use golia_change_link as link;
-use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 pub(crate) mod api;
 pub mod route;
 
-#[derive(Clone, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct ChannelConfig {
     pub scope: Scope,
@@ -28,7 +26,6 @@ pub struct ChannelConfig {
     pub peer_public_key: String,
     #[json(with = "alt_json_serde::bridge")]
     pub target: link::transport::Target,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[json(default, skip_serializing_if = "Option::is_none")]
     pub peer_browser_origin: Option<String>,
     pub local_credential_file: PathBuf,
@@ -105,6 +102,7 @@ impl ChannelConfig {
     }
 }
 #[derive(Clone)]
+
 pub struct ChannelRuntime {
     pub(crate) config: ChannelConfig,
     pub(crate) digest: String,
@@ -138,6 +136,7 @@ impl ChannelRuntime {
 }
 
 #[derive(Clone, Default)]
+
 struct Cursors {
     claims: Option<String>,
     events: Option<String>,

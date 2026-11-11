@@ -162,13 +162,13 @@ fn restored_activation_revokes_old_authority_preserves_receipts_and_marks_old_ga
     assert_eq!(status.last_restore.unwrap().action, "instance.restore");
     assert!(f.store.instance_status(&f.credential).is_err());
     assert_eq!(
-        serde_json::to_value(
+        alt_json::to_value(
             f.store
                 .query(&credential, &payload.publication.key)
                 .unwrap()
         )
         .unwrap(),
-        serde_json::to_value(committed).unwrap()
+        alt_json::to_value(committed).unwrap()
     );
     assert!(matches!(
         f.store
@@ -282,7 +282,7 @@ fn instance_audit_pagination_and_status_require_current_administrator() {
     assert_eq!(second.items[0].action, "backup.started");
     assert_ne!(second.items[0].sequence, first.items[0].sequence);
     assert!(f.store.instance_audit(&f.credential, Some(0), 1).is_err());
-    let serialized = serde_json::to_string(&first.items).unwrap();
+    let serialized = alt_json::to_string(&first.items).unwrap();
     assert!(!serialized.contains("details"));
     assert!(!serialized.contains(&f.token));
     let created = f

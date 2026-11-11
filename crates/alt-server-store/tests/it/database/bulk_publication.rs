@@ -231,7 +231,7 @@ fn acquire_preserves_equal_pins_and_refreshes_changed_or_missing_pins() {
     p.upload(&mut f.store, &f.credential);
     let pin = format!(
         "upload:{}",
-        alt_hash::blake3::hash(&serde_json::to_vec(&p.publication.key).unwrap()).to_hex()
+        alt_hash::blake3::hash(&alt_json::to_vec(&p.publication.key).unwrap()).to_hex()
     );
     let mut client = f.client();
     let tuples =
@@ -367,7 +367,7 @@ fn bulk_publication_checks_every_mapping_and_pin_then_reads_exact_bytes() {
     .unwrap();
     let pin = format!(
         "upload:{}",
-        alt_hash::blake3::hash(&serde_json::to_vec(&p.publication.key).unwrap()).to_hex()
+        alt_hash::blake3::hash(&alt_json::to_vec(&p.publication.key).unwrap()).to_hex()
     );
     f.client()
         .execute(

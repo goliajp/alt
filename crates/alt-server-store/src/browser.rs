@@ -6,9 +6,8 @@ use crate::store::{credential_row, instance, integer, now, require_admin, token_
 use crate::{Credential, Error, Result, Store};
 use alt_browser_auth::{PublicOrigin, password_hash, password_verify};
 use alt_remote_protocol::{ActorKind, Attribution, DeploymentMode};
-use serde::Serialize;
 
-#[derive(Clone, Serialize, alt_json::ToJson)]
+#[derive(Clone, alt_json::ToJson)]
 pub struct LocalUser {
     pub actor_id: String,
     pub login_name: String,
@@ -22,7 +21,7 @@ pub struct BrowserLogin {
     pub expires_at_unix_ms: u64,
     pub user: LocalUser,
 }
-#[derive(Serialize, alt_json::ToJson)]
+#[derive(alt_json::ToJson)]
 pub struct BrowserSession {
     pub user: LocalUser,
     pub expires_at_unix_ms: u64,

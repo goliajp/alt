@@ -84,10 +84,7 @@ fn chunks_resume_after_restart_verify_assembly_and_release_temporary_storage() {
     let server = Running::start(&f);
     let (status, uploaded) = server.command("GET", &format!("{request}/uploads"), &f.token);
     assert_eq!(status, 200);
-    assert_eq!(
-        uploaded["verified_chunks"],
-        serde_json::json!([first.blake3])
-    );
+    assert_eq!(uploaded["verified_chunks"], alt_json::json!([first.blake3]));
     for chunk in &entry.chunks[1..] {
         let start = chunk.offset as usize;
         assert_eq!(

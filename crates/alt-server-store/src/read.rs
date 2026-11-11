@@ -100,6 +100,7 @@ impl ReadSnapshot {
     }
 }
 #[derive(Clone, Copy)]
+
 enum Selection<'a> {
     All(usize),
     Metadata,

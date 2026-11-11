@@ -7,9 +7,8 @@ use crate::{Credential, Error, Result, Store};
 use alt_browser_auth::PublicOrigin;
 use alt_remote_protocol::{ActorKind, Attribution, DeploymentMode, login::*};
 use postgres::Row;
-use serde::Serialize;
 
-#[derive(Serialize, alt_json::ToJson)]
+#[derive(alt_json::ToJson)]
 pub struct DeviceConsent {
     pub id: String,
     pub client_id: &'static str,
@@ -21,7 +20,7 @@ pub enum DevicePoll {
     Waiting(DeviceError),
     Ready { expires_at_unix_ms: u64 },
 }
-#[derive(Serialize, alt_json::ToJson)]
+#[derive(alt_json::ToJson)]
 pub struct ClientCredential {
     pub id: String,
     pub client_id: String,

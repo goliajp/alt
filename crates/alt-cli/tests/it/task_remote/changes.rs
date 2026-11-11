@@ -46,12 +46,11 @@ pub(super) fn inspect_delivery(
         local_credential_file: local,
         peer_credential_file: peer,
     };
-    let alt_json_serde::Serde(mut operator): alt_json_serde::Serde<alt_server::operator::Config> =
-        alt_json::from_str(include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../alt-server/example-config.json"
-        )))
-        .unwrap();
+    let mut operator: alt_server::operator::Config = alt_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../alt-server/example-config.json"
+    )))
+    .unwrap();
     operator.instance = server.factory.instance.clone();
     let runtime = config.load(&operator).unwrap();
     let config_digest = runtime.configuration_digest().to_owned();

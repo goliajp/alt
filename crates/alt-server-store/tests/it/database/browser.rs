@@ -371,7 +371,7 @@ fn account_revocation_waits_before_credentials_without_blocking_an_active_accoun
     let events = f.client().query("SELECT action,details FROM alt_instance_audit WHERE action IN ('user.create','user.disable') ORDER BY sequence", &[]).unwrap();
     assert_eq!(events.len(), 2);
     assert_eq!(
-        events[0].get::<_, serde_json::Value>(1)["administrator"],
+        events[0].get::<_, alt_server_store::Jsonb>(1).0["administrator"],
         false
     );
     assert_eq!(events[1].get::<_, String>(0), "user.disable");

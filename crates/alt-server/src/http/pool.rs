@@ -13,6 +13,7 @@ struct Inner {
     limit: usize,
 }
 #[derive(Default)]
+
 struct Idle {
     stores: Vec<Store>,
     closed: bool,
@@ -30,6 +31,7 @@ impl Drop for Inner {
 }
 
 #[derive(Clone)]
+
 pub(super) struct Pool(Arc<Inner>);
 impl Pool {
     pub fn new(factory: StoreFactory, workers: usize) -> Self {

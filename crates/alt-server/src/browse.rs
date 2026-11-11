@@ -1,6 +1,5 @@
 use alt_git_codec::{Commit, HashAlgo, ObjectId, ObjectKind, Tag, Tree};
 use alt_server_store::{Credential, Error, Page, Result, Store};
-use serde::Serialize;
 use std::io::Read;
 
 const STRUCTURED: usize = 8 * 1024 * 1024;
@@ -57,7 +56,7 @@ impl Reader<'_> {
         Tree::parse(&raw, HashAlgo::Sha1).map_err(|_| Error::Integrity("tree preview"))
     }
 }
-#[derive(Serialize, alt_json::ToJson)]
+#[derive(alt_json::ToJson)]
 pub struct TreePage {
     commit: String,
     path: String,
@@ -65,7 +64,7 @@ pub struct TreePage {
     display_path: String,
     entries: Vec<TreeEntry>,
 }
-#[derive(Serialize, alt_json::ToJson)]
+#[derive(alt_json::ToJson)]
 struct TreeEntry {
     name: String,
     path: String,
@@ -204,7 +203,7 @@ pub fn tree(
         entries,
     })
 }
-#[derive(Serialize, alt_json::ToJson)]
+#[derive(alt_json::ToJson)]
 pub struct BlobPreview {
     oid: String,
     bytes: String,
@@ -246,7 +245,7 @@ pub fn blob(
         download_url: format!("/web/repositories/{repository}/objects/{oid}/download"),
     })
 }
-#[derive(Serialize, alt_json::ToJson)]
+#[derive(alt_json::ToJson)]
 pub struct CommitSummary {
     oid: String,
     parents: Vec<String>,
@@ -319,7 +318,7 @@ pub fn history(
 
 #[cfg(test)]
 mod json_tests {
-    use alt_json_testkit::fixtures::{check_recorded, written_line_as_serde};
+    use alt_json_testkit::fixtures::{assert_stored, written_line};
     use alt_json_testkit::rng::Rng;
     use alt_json_testkit::support::Arbitrary;
 
@@ -335,7 +334,7 @@ mod json_tests {
         let rng = &mut rng;
         let mut lines = String::new();
         for _ in 0..40 {
-            lines += &written_line_as_serde(&TreePage {
+            lines += &written_line(&TreePage {
                 commit: any(rng),
                 path: any(rng),
                 parent: any(rng),
@@ -351,14 +350,14 @@ mod json_tests {
                     })
                     .collect(),
             });
-            lines += &written_line_as_serde(&BlobPreview {
+            lines += &written_line(&BlobPreview {
                 oid: any(rng),
                 bytes: any(rng),
                 text: any(rng),
                 truncated: any(rng),
                 download_url: any(rng),
             });
-            lines += &written_line_as_serde(&CommitSummary {
+            lines += &written_line(&CommitSummary {
                 oid: any(rng),
                 parents: any(rng),
                 author: any(rng),
@@ -366,7 +365,7 @@ mod json_tests {
                 message: any(rng),
             });
         }
-        check_recorded(
+        assert_stored(
             concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/tests/fixtures/json/browse-responses.txt"

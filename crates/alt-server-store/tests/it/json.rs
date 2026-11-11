@@ -1,9 +1,7 @@
-//! The store's own types read and written through alt-json, compared with
-//! serde on random values and held to recorded bytes and verdicts.
+//! The store's own types held to recorded bytes and verdicts.
 
-use alt_json_testkit::fixtures::{check, check_recorded, written_line_as_serde};
+use alt_json_testkit::fixtures::{assert_stored, verify_file, written_line};
 use alt_json_testkit::rng::Rng;
-use alt_json_testkit::same_as_serde;
 use alt_json_testkit::support::Arbitrary;
 use alt_remote_protocol::{RecordKind, RecordRoot, RequestKey, ReviewSelection, Scope};
 use alt_server_store::*;
@@ -15,25 +13,10 @@ fn any<T: Arbitrary>(rng: &mut Rng) -> T {
 }
 
 #[test]
-fn same_as_serde() {
-    same_as_serde!(0x5700, 400;
-        InstanceSpec, SnapshotPackSegment, SnapshotBlob, SnapshotRepository, SnapshotCatalog,
-        ChangeChannel,
-    )
-    .report("alt-server-store, 6 types in total");
-}
-
-#[test]
 fn recorded_bytes_and_verdicts() {
-    let mut files = 0;
-    macro_rules! recorded {
-        ($($ty:ident),*) => {$(
-            check::<$ty>(DIR, stringify!($ty), 0x5710 + files, 20);
-            files += 1;
-        )*};
-    }
-    recorded!(InstanceSpec, SnapshotCatalog, ChangeChannel);
-    println!("alt-server-store fixtures: {files} files");
+    verify_file::<InstanceSpec>(DIR, "InstanceSpec");
+    verify_file::<SnapshotCatalog>(DIR, "SnapshotCatalog");
+    verify_file::<ChangeChannel>(DIR, "ChangeChannel");
 }
 
 fn audit_entry(rng: &mut Rng) -> InstanceAuditEntry {
@@ -81,7 +64,7 @@ fn responses_are_written_as_recorded() {
     let rng = &mut rng;
     let mut lines = String::new();
     for _ in 0..40 {
-        lines += &written_line_as_serde(&InstanceStatus {
+        lines += &written_line(&InstanceStatus {
             installation_id: any(rng),
             runtime_generation: any(rng),
             schema: any(rng),
@@ -97,7 +80,7 @@ fn responses_are_written_as_recorded() {
             pending_change_links: any(rng),
             recovery_change_links: any(rng),
         });
-        lines += &written_line_as_serde(&Page {
+        lines += &written_line(&Page {
             items: (0..rng.below(3))
                 .map(|_| WorkbenchRepository {
                     scope: scope(rng),
@@ -109,7 +92,7 @@ fn responses_are_written_as_recorded() {
                 .collect(),
             next: any(rng),
         });
-        lines += &written_line_as_serde(&Page {
+        lines += &written_line(&Page {
             items: (0..rng.below(3))
                 .map(|_| WorkbenchRequest {
                     key: RequestKey {
@@ -134,31 +117,31 @@ fn responses_are_written_as_recorded() {
                 .collect(),
             next: any(rng),
         });
-        lines += &written_line_as_serde(&ActiveBrowserSession {
+        lines += &written_line(&ActiveBrowserSession {
             id: any(rng),
             created_at_unix_ms: any(rng),
             expires_at_unix_ms: any(rng),
             current: any(rng),
         });
-        lines += &written_line_as_serde(&BrowserSession {
+        lines += &written_line(&BrowserSession {
             user: local_user(rng),
             expires_at_unix_ms: any(rng),
         });
-        lines += &written_line_as_serde(&DeviceConsent {
+        lines += &written_line(&DeviceConsent {
             id: any(rng),
             client_id: "alt-cli",
             scope: "repository",
             state: any(rng),
             expires_at_unix_ms: any(rng),
         });
-        lines += &written_line_as_serde(&ClientCredential {
+        lines += &written_line(&ClientCredential {
             id: any(rng),
             client_id: any(rng),
             created_at_unix_ms: any(rng),
             expires_at_unix_ms: any(rng),
             current: any(rng),
         });
-        lines += &written_line_as_serde(&CurrentReviewAssessment {
+        lines += &written_line(&CurrentReviewAssessment {
             approved: any(rng),
             selection: selection(rng),
             evidence: alt_task_service::EvidenceAssessment {
@@ -172,7 +155,7 @@ fn responses_are_written_as_recorded() {
             reason: "current",
         });
     }
-    check_recorded(&format!("{DIR}/responses.txt"), &lines);
+    assert_stored(&format!("{DIR}/responses.txt"), &lines);
     println!(
         "alt-server-store responses: {} values",
         lines.lines().count()

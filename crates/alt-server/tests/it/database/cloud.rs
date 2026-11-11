@@ -79,15 +79,18 @@ fn cloud_http_refresh_outage_revocation_and_browser_identity() {
                 );
                 let mut bytes = Vec::new();
                 request.as_reader().read_to_end(&mut bytes).unwrap();
-                let input: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-                assert_eq!(input["audience"], serde_json::to_value(&audience).unwrap());
+                let input: alt_json::Value = alt_json::from_slice(&bytes).unwrap();
+                assert_eq!(
+                    input["audience"],
+                    alt_json_serde::to_value(&&audience).unwrap()
+                );
                 let sequence = calls.fetch_add(1, Ordering::SeqCst) as u64 + 2;
                 let (status, body) = match mode.load(Ordering::SeqCst) {
                     3 if request.url().ends_with("/exchange") => {
                         exchanges.fetch_add(1, Ordering::SeqCst);
-                        (503, serde_json::json!({}))
+                        (503, alt_json::json!({}))
                     }
-                    1 => (503, serde_json::json!({})),
+                    1 => (503, alt_json::json!({})),
                     _ if request.url().ends_with("/exchange") => {
                         exchanges.fetch_add(1, Ordering::SeqCst);
                         assert_eq!(input["ticket"], "ff".repeat(32));
@@ -99,13 +102,13 @@ fn cloud_http_refresh_outage_revocation_and_browser_identity() {
                         claims.lease = lease(&audience, sequence);
                         (
                             200,
-                            serde_json::json!({"version":1,"grant":"cd".repeat(32),"account":claims}),
+                            alt_json::json!({"version":1,"grant":"cd".repeat(32),"account":alt_json_serde::Serde(&claims)}),
                         )
                     }
-                    2 if request.url().ends_with("/introspect") => (403, serde_json::json!({})),
+                    2 if request.url().ends_with("/introspect") => (403, alt_json::json!({})),
                     _ if request.url().ends_with("/service") => (
                         200,
-                        serde_json::to_value(AltServiceAuthorization {
+                        alt_json_serde::to_value(&AltServiceAuthorization {
                             lease: lease(&audience, sequence),
                             writes_enabled: false,
                             limits: AltLimits {
@@ -119,7 +122,7 @@ fn cloud_http_refresh_outage_revocation_and_browser_identity() {
                     _ => {
                         assert_eq!(input["grant"], "cd".repeat(32));
                         claims.lease = lease(&audience, sequence);
-                        (200, serde_json::to_value(&claims).unwrap())
+                        (200, alt_json_serde::to_value(&&claims).unwrap())
                     }
                 };
                 request
@@ -197,7 +200,7 @@ fn cloud_http_refresh_outage_revocation_and_browser_identity() {
         .set("Cookie", &cookie)
         .call()
         .unwrap();
-    let session: serde_json::Value = crate::database::json::body(browser);
+    let session: alt_json::Value = crate::database::json::body(browser);
     assert_eq!(session["user"]["display_name"], "Shared account");
     assert_eq!(
         calls.load(Ordering::SeqCst),
@@ -324,7 +327,7 @@ fn cloud_http_refresh_outage_revocation_and_browser_identity() {
     );
     assert_eq!(started.status(), 200);
     assert_eq!(started.header("Cache-Control"), Some("no-store"));
-    let device: serde_json::Value = crate::database::json::body(started);
+    let device: alt_json::Value = crate::database::json::body(started);
     assert_eq!(device["interval"], 5);
     let code = device["device_code"].as_str().unwrap();
     let human = device["user_code"].as_str().unwrap();
@@ -333,14 +336,13 @@ fn cloud_http_refresh_outage_revocation_and_browser_identity() {
         ("grant_type", DEVICE_GRANT_TYPE),
         ("device_code", code),
     ];
-    let waiting: serde_json::Value =
-        crate::database::json::body(form_call("/oauth/token", &polling));
+    let waiting: alt_json::Value = crate::database::json::body(form_call("/oauth/token", &polling));
     assert_eq!(waiting["error"], "slow_down");
-    let current: serde_json::Value = crate::database::json::body(call(
+    let current: alt_json::Value = crate::database::json::body(call(
         &format!("{}/web/session", server.url),
         &session_cookie,
     ));
-    let decision = serde_json::json!({"user_code":human,"allow":true}).to_string();
+    let decision = alt_json::json!({"user_code":human,"allow":true}).to_string();
     let decide = |proof: &str| match agent
         .post(&format!("{}/web/device", server.url))
         .set("Cookie", &session_cookie)
@@ -361,9 +363,9 @@ fn cloud_http_refresh_outage_revocation_and_browser_identity() {
     );
     let issued = form_call("/oauth/token", &polling);
     assert_eq!(issued.status(), 200);
-    let issued: serde_json::Value = crate::database::json::body(issued);
+    let issued: alt_json::Value = crate::database::json::body(issued);
     let cli_token = issued["access_token"].as_str().unwrap();
-    let repeated: serde_json::Value =
+    let repeated: alt_json::Value =
         crate::database::json::body(form_call("/oauth/token", &polling));
     assert_eq!(issued["access_token"], repeated["access_token"]);
     assert_eq!(server.command("GET", "/v1/capabilities", cli_token).0, 200);
@@ -378,7 +380,7 @@ fn cloud_http_refresh_outage_revocation_and_browser_identity() {
         call(&format!("{}/web/session", server.url), &cookie_as_cli).status(),
         401
     );
-    let list: serde_json::Value = crate::database::json::body(call(
+    let list: alt_json::Value = crate::database::json::body(call(
         &format!("{}/web/client-credentials", server.url),
         &session_cookie,
     ));
@@ -397,8 +399,7 @@ fn cloud_http_refresh_outage_revocation_and_browser_identity() {
         .unwrap();
     assert_eq!(revoked.status(), 200);
     assert_eq!(server.command("GET", "/v1/capabilities", cli_token).0, 403);
-    let refused: serde_json::Value =
-        crate::database::json::body(form_call("/oauth/token", &polling));
+    let refused: alt_json::Value = crate::database::json::body(form_call("/oauth/token", &polling));
     assert_eq!(refused["error"], "access_denied");
     // A remote exchange with an indeterminate result is never replayed.
     let start = agent

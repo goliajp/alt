@@ -5,13 +5,9 @@ use alt_crypto::ed25519::SigningKey;
 use alt_remote_protocol::{Attribution, DeploymentMode, Limits, ObjectFormat, Scope};
 use alt_repository_service::{Authorization, Grant, RefPolicy, RepositorySnapshot};
 use postgres::Client;
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct InstanceSpec {
     pub installation_id: String,
@@ -37,6 +33,7 @@ impl InstanceSpec {
 /// An authenticated handle contains no token secret and cannot be constructed
 /// by callers. Every operation rechecks the credential in the DB transaction.
 #[derive(Clone)]
+
 pub struct Credential {
     pub(crate) digest: String,
 }

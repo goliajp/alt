@@ -415,7 +415,7 @@ pub(crate) fn approve_current(
     Ok(())
 }
 
-#[derive(serde::Serialize, alt_json::ToJson)]
+#[derive(alt_json::ToJson)]
 pub struct CurrentReviewAssessment {
     pub approved: bool,
     pub selection: alt_remote_protocol::ReviewSelection,

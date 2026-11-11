@@ -45,7 +45,11 @@ fn cloud_provision_interrupt_resume_and_storage_binding() {
     .unwrap();
     let spec_path = root.join("spec.json");
     let spec = input(&db);
-    alt_server::operator::create_private(&spec_path, &serde_json::to_vec(&spec).unwrap()).unwrap();
+    alt_server::operator::create_private(
+        &spec_path,
+        &alt_json::to_vec(&alt_json_serde::Serde(&spec)).unwrap(),
+    )
+    .unwrap();
     let initialize = || {
         let mut c = db.command();
         c.args([
@@ -125,13 +129,13 @@ fn cloud_provision_interrupt_resume_and_storage_binding() {
             assert_eq!(std::fs::read(state.join(name)).unwrap(), saved[index]);
         }
     }
-    let mut generated: serde_json::Value = serde_json::from_slice(&saved[3]).unwrap();
+    let mut generated: alt_json::Value = alt_json::from_slice(&saved[3]).unwrap();
     assert_eq!(generated["portable"]["total_bytes"], "4294967296");
     // An upgrade/restart must not enable a new API or replace a legacy frozen
     // config. Exercise the real initializer with its pre-portable encoding.
     generated.as_object_mut().unwrap().remove("portable");
-    let legacy: alt_server::operator::Config = serde_json::from_value(generated).unwrap();
-    let legacy_bytes = serde_json::to_vec_pretty(&legacy).unwrap();
+    let legacy: alt_server::operator::Config = alt_json::from_value(generated).unwrap();
+    let legacy_bytes = alt_json::to_vec_pretty(&legacy).unwrap();
     std::fs::write(state.join("config.json"), &legacy_bytes).unwrap();
     assert!(initialize().output().unwrap().status.success());
     assert_eq!(
@@ -139,11 +143,11 @@ fn cloud_provision_interrupt_resume_and_storage_binding() {
         legacy_bytes
     );
     // Bounds remain part of a frozen new configuration, not an ignored field.
-    let mut changed: serde_json::Value = serde_json::from_slice(&saved[3]).unwrap();
-    changed["portable"]["total_bytes"] = serde_json::json!("1");
+    let mut changed: alt_json::Value = alt_json::from_slice(&saved[3]).unwrap();
+    changed["portable"]["total_bytes"] = alt_json::json!("1");
     std::fs::write(
         state.join("config.json"),
-        serde_json::to_vec(&changed).unwrap(),
+        alt_json::to_vec(&changed).unwrap(),
     )
     .unwrap();
     assert!(!initialize().output().unwrap().status.success());
@@ -155,25 +159,33 @@ fn cloud_provision_interrupt_resume_and_storage_binding() {
     assert_eq!(exists, 1);
     let mut wrong = spec.clone();
     wrong.data_key = "78".repeat(32).try_into().unwrap();
-    std::fs::write(&spec_path, serde_json::to_vec(&wrong).unwrap()).unwrap();
+    std::fs::write(
+        &spec_path,
+        alt_json::to_vec(&alt_json_serde::Serde(&wrong)).unwrap(),
+    )
+    .unwrap();
     assert!(!initialize().output().unwrap().status.success());
-    std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
+    std::fs::write(
+        &spec_path,
+        alt_json::to_vec(&alt_json_serde::Serde(&spec)).unwrap(),
+    )
+    .unwrap();
     let config = state.join("config.json");
     // Pairing settings survive the exact initializer used by cloud-serve;
     // frozen provision/config/key bytes retain their original identities.
-    let frozen: alt_server::operator::Config = serde_json::from_slice(&saved[3]).unwrap();
+    let frozen: alt_server::operator::Config = alt_json::from_slice(&saved[3]).unwrap();
     let mut channel = crate::cloud_settings::channel();
-    channel["scope"]["installation_id"] = serde_json::json!(frozen.instance.installation_id);
+    channel["scope"]["installation_id"] = alt_json::json!(frozen.instance.installation_id);
     alt_server::operator::create_private(
         &state.join("local.key"),
         format!("alt1_{}", "ab".repeat(32)).as_bytes(),
     )
     .unwrap();
     alt_server::operator::create_private(&state.join("peer.key"), b"peer-token").unwrap();
-    let settings = serde_json::json!({"version":1,"instance":frozen.instance,"channels":[channel]});
+    let settings = alt_json::json!({"version":1,"instance":frozen.instance,"channels":[channel]});
     alt_server::operator::create_private(
         &state.join("change-links.json"),
-        &serde_json::to_vec(&settings).unwrap(),
+        &alt_json::to_vec(&settings).unwrap(),
     )
     .unwrap();
     for _ in 0..2 {
@@ -204,7 +216,7 @@ fn cloud_provision_interrupt_resume_and_storage_binding() {
     });
     let line = rx.recv_timeout(Duration::from_secs(15)).unwrap();
     reader.join().unwrap();
-    let started: serde_json::Value = serde_json::from_str(&line).unwrap();
+    let started: alt_json::Value = alt_json::from_str(&line).unwrap();
     let url = format!(
         "http://{}/cloud/runtime/v1/health",
         started["address"].as_str().unwrap()
@@ -224,14 +236,16 @@ fn cloud_provision_interrupt_resume_and_storage_binding() {
         if cookie {
             req = req.set("Cookie", "session=unrelated");
         }
-        req.send_string(&serde_json::to_string(probe).unwrap())
+        req.send_string(&alt_json::to_string(&alt_json_serde::Serde(probe)).unwrap())
             .map_err(|error| match error {
                 ureq::Error::Status(code, _) => code,
                 error => panic!("probe transport: {error}"),
             })
     };
-    let result: Readiness =
-        crate::database::json::body(call(&probe, spec.runtime_key.expose(), false).unwrap());
+    let result: Readiness = crate::database::json::body::<alt_json_serde::Serde<_>>(
+        call(&probe, spec.runtime_key.expose(), false).unwrap(),
+    )
+    .0;
     result.check(&probe).unwrap();
     assert!(matches!(
         call(&probe, spec.runtime_key.expose(), true),

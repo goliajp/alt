@@ -36,8 +36,8 @@ fn with_shared_roles(request: &str, parent: Option<ObjectId>) -> Payload {
 fn downgrade_to_thirteen(f: &Fixture) {
     f.client().batch_execute("ALTER TABLE alt_request_content DROP COLUMN selected_entries, DROP COLUMN chunk_bytes; DROP TABLE alt_blob_locations,alt_segments; DROP INDEX alt_pins_permanent_content; DELETE FROM alt_schema WHERE version>=14").unwrap();
 }
-fn original_requests(f: &Fixture) -> serde_json::Value {
-    f.client().query_one("SELECT jsonb_agg(jsonb_build_object('publication',publication,'manifest',manifest,'digest',digest,'result',result,'expires_at',expires_at,'reserved_bytes',reserved_bytes) ORDER BY request_id) FROM alt_requests", &[]).unwrap().get(0)
+fn original_requests(f: &Fixture) -> alt_json::Value {
+    f.client().query_one("SELECT jsonb_agg(jsonb_build_object('publication',publication,'manifest',manifest,'digest',digest,'result',result,'expires_at',expires_at,'reserved_bytes',reserved_bytes) ORDER BY request_id) FROM alt_requests", &[]).unwrap().get::<_, alt_server_store::Jsonb>(0).0
 }
 
 #[test]

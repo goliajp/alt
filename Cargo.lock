@@ -577,8 +577,6 @@ dependencies = [
  "hyper",
  "hyper-util",
  "postgres",
- "serde",
- "serde_json",
  "tar",
  "tiny_http",
  "tokio",
@@ -616,8 +614,6 @@ dependencies = [
  "golia-change-link",
  "golia-platform-contract",
  "postgres",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -2249,8 +2245,6 @@ dependencies = [
  "bytes",
  "fallible-iterator",
  "postgres-protocol",
- "serde_core",
- "serde_json",
 ]
 
 [[package]]

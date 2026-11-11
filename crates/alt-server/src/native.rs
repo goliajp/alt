@@ -1,12 +1,13 @@
 use crate::{RequestAction, Route, ValidatedWork};
+use alt_json_serde::Serde;
 use alt_remote_protocol::{Capabilities, Feature, ObjectFormat, RequestObservation, RequestState};
 use alt_server_store::{Credential, Error, Result, Store};
 use alt_task_service::TaskLimits;
-use serde::Serialize;
 use std::io::Read;
 
 pub use alt_remote_protocol::{ApprovalRequest, BeginRequest};
 #[derive(Clone)]
+
 pub struct NativeOptions {
     pub portable: Option<alt_portable::http::Bounds>,
     pub task_limits: TaskLimits,
@@ -52,14 +53,17 @@ pub(crate) fn body<T: alt_json::FromJson>(source: &mut dyn Read, max: usize) -> 
     Ok(alt_json::from_slice(&raw)?)
 }
 /// For the vendored contract types, which have serde implementations only.
-pub(crate) fn json_serde(value: &impl Serialize) -> Result<Output> {
-    Ok(Output::Json(alt_json_serde::to_value(value)?))
+pub(crate) fn json_serde<T>(value: &T) -> Result<Output>
+where
+    for<'a> Serde<&'a T>: alt_json::ToJson,
+{
+    json(&Serde(value))
 }
-pub(crate) fn body_serde<T: serde::de::DeserializeOwned>(
-    source: &mut dyn Read,
-    max: usize,
-) -> Result<T> {
-    Ok(body::<alt_json_serde::Serde<T>>(source, max)?.0)
+pub(crate) fn body_serde<T>(source: &mut dyn Read, max: usize) -> Result<T>
+where
+    Serde<T>: alt_json::FromJson,
+{
+    Ok(body::<Serde<T>>(source, max)?.0)
 }
 pub(crate) fn empty(source: &mut dyn Read) -> Result<()> {
     if source.read(&mut [0u8; 1])? != 0 {

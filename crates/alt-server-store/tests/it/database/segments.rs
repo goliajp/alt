@@ -131,8 +131,8 @@ fn release(f: &Fixture) {
         .execute("DELETE FROM alt_pins WHERE pin_id='hold'", &[])
         .unwrap();
 }
-fn state(f: &Fixture) -> serde_json::Value {
-    f.client().query_one("SELECT jsonb_build_object('segments',(SELECT jsonb_agg(to_jsonb(s) ORDER BY segment_id) FROM alt_segments s),'locations',(SELECT jsonb_agg(to_jsonb(l) ORDER BY blake3) FROM alt_blob_locations l),'blobs',(SELECT jsonb_agg(to_jsonb(b) ORDER BY blake3) FROM alt_blobs b),'request',(SELECT jsonb_agg(to_jsonb(q) ORDER BY request_id) FROM alt_requests q),'repository',(SELECT jsonb_agg(to_jsonb(r) ORDER BY id) FROM alt_repositories r),'objects',(SELECT jsonb_agg(to_jsonb(o) ORDER BY oid) FROM alt_objects o),'content',(SELECT jsonb_agg(to_jsonb(c) ORDER BY blake3) FROM alt_request_content c))", &[]).unwrap().get(0)
+fn state(f: &Fixture) -> alt_json::Value {
+    f.client().query_one("SELECT jsonb_build_object('segments',(SELECT jsonb_agg(to_jsonb(s) ORDER BY segment_id) FROM alt_segments s),'locations',(SELECT jsonb_agg(to_jsonb(l) ORDER BY blake3) FROM alt_blob_locations l),'blobs',(SELECT jsonb_agg(to_jsonb(b) ORDER BY blake3) FROM alt_blobs b),'request',(SELECT jsonb_agg(to_jsonb(q) ORDER BY request_id) FROM alt_requests q),'repository',(SELECT jsonb_agg(to_jsonb(r) ORDER BY id) FROM alt_repositories r),'objects',(SELECT jsonb_agg(to_jsonb(o) ORDER BY oid) FROM alt_objects o),'content',(SELECT jsonb_agg(to_jsonb(c) ORDER BY blake3) FROM alt_request_content c))", &[]).unwrap().get::<_, alt_server_store::Jsonb>(0).0
 }
 #[test]
 #[ignore = "requires isolated PostgreSQL; shared roles, Cloud quota, segment publication and exact snapshot reads"]

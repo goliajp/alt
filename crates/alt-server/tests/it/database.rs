@@ -185,14 +185,9 @@ impl Running {
         method: &str,
         path: &str,
         token: &str,
-        body: &impl serde::Serialize,
-    ) -> (u16, serde_json::Value) {
-        let response = self.send(
-            method,
-            path,
-            Some(token),
-            &serde_json::to_vec(body).unwrap(),
-        );
+        body: &impl alt_json::ToJson,
+    ) -> (u16, alt_json::Value) {
+        let response = self.send(method, path, Some(token), &alt_json::to_vec(body).unwrap());
         let status = response.status();
         (status, crate::database::json::body(response))
     }
@@ -215,7 +210,7 @@ impl Running {
             std::thread::sleep(Duration::from_millis(20));
         }
     }
-    fn command(&self, method: &str, path: &str, token: &str) -> (u16, serde_json::Value) {
+    fn command(&self, method: &str, path: &str, token: &str) -> (u16, alt_json::Value) {
         let response = self.send(method, path, Some(token), b"");
         let status = response.status();
         (status, crate::database::json::body(response))

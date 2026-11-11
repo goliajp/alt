@@ -10,6 +10,7 @@ mod session;
 pub(crate) use session::ReadSession;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+
 pub(super) struct Stamp {
     dev: u64,
     ino: u64,
@@ -36,6 +37,7 @@ impl Stamp {
 /// A physical member selected by the authoritative database transaction.
 /// These values grant no permission to read or publish an object.
 #[derive(Clone, Debug, PartialEq, Eq)]
+
 pub struct SegmentLocation {
     pub segment_id: String,
     pub index_digest: [u8; 32],
@@ -178,6 +180,7 @@ impl Seek for StoredReader {
 }
 
 #[derive(Clone, Copy, Debug)]
+
 enum Boundary {
     Created,
     Encoded,

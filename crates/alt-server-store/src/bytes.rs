@@ -17,11 +17,13 @@ pub use segments::{DurableSegment, SegmentLocation, StoredReader};
 /// A dedicated, service-owned POSIX volume. The adapter never derives a path
 /// from a repository display name, ref, URL or arbitrary client filename.
 #[derive(Clone)]
+
 pub struct ByteStore {
     root: PathBuf,
 }
 /// Capacity of the byte-store filesystem, which can be shared with other data.
 #[derive(Clone, Copy, Debug)]
+
 pub struct VolumeCapacity {
     pub total_bytes: u64,
     pub available_bytes: u64,

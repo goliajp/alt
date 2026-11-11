@@ -83,7 +83,7 @@ impl OperatorDb {
                 approval_ttl_ms: 60000,
             },
         };
-        std::fs::write(&config, serde_json::to_vec(&spec).unwrap()).unwrap();
+        std::fs::write(&config, alt_json::to_vec(&spec).unwrap()).unwrap();
         Self {
             admin,
             name,
@@ -103,7 +103,7 @@ impl OperatorDb {
     fn run(&self, args: &[&str]) -> Output {
         self.command().args(args).output().unwrap()
     }
-    fn ok(&self, args: &[&str]) -> serde_json::Value {
+    fn ok(&self, args: &[&str]) -> alt_json::Value {
         let result = self.run(args);
         assert!(
             result.status.success(),
@@ -111,7 +111,7 @@ impl OperatorDb {
             String::from_utf8_lossy(&result.stderr)
         );
         super::json::observe(&result.stdout);
-        serde_json::from_slice(&result.stdout).unwrap()
+        alt_json::from_slice(&result.stdout).unwrap()
     }
     fn path(&self, name: &str) -> String {
         self.root.path().join(name).to_str().unwrap().into()
@@ -237,7 +237,7 @@ fn persisted_operator_secrets_resume_without_bootstrap_mode_or_volume_fallback()
         panic!("operator server did not announce readiness");
     }
     reader.join().unwrap();
-    let started: serde_json::Value = serde_json::from_str(&line.unwrap()).unwrap();
+    let started: alt_json::Value = alt_json::from_str(&line.unwrap()).unwrap();
     let url = format!("http://{}", started["address"].as_str().unwrap());
     let response = ureq::get(&format!("{url}/healthz"))
         .timeout(Duration::from_secs(5))
@@ -249,7 +249,7 @@ fn persisted_operator_secrets_resume_without_bootstrap_mode_or_volume_fallback()
         .timeout(Duration::from_secs(5))
         .call()
         .unwrap();
-    let capabilities: serde_json::Value = crate::database::json::body(response);
+    let capabilities: alt_json::Value = crate::database::json::body(response);
     assert_eq!(
         capabilities["receipt_public_key"],
         health["receipt_public_key"]
@@ -266,9 +266,9 @@ fn persisted_operator_secrets_resume_without_bootstrap_mode_or_volume_fallback()
         .unwrap();
     assert!(!missing.status.success());
     let original = std::fs::read(&db.config).unwrap();
-    let mut config: serde_json::Value = serde_json::from_slice(&original).unwrap();
-    config["instance"]["deployment_mode"] = serde_json::json!("cloud");
-    std::fs::write(&db.config, serde_json::to_vec(&config).unwrap()).unwrap();
+    let mut config: alt_json::Value = alt_json::from_slice(&original).unwrap();
+    config["instance"]["deployment_mode"] = alt_json::json!("cloud");
+    std::fs::write(&db.config, alt_json::to_vec(&config).unwrap()).unwrap();
     for args in [
         &["health"][..],
         &["initialize", "--resume"][..],
@@ -283,14 +283,14 @@ fn persisted_operator_secrets_resume_without_bootstrap_mode_or_volume_fallback()
     ] {
         assert!(!db.run(args).status.success());
     }
-    config = serde_json::from_slice(&original).unwrap();
-    config["bytes_directory"] = serde_json::json!(db.path("other-volume"));
-    std::fs::write(&db.config, serde_json::to_vec(&config).unwrap()).unwrap();
+    config = alt_json::from_slice(&original).unwrap();
+    config["bytes_directory"] = alt_json::json!(db.path("other-volume"));
+    std::fs::write(&db.config, alt_json::to_vec(&config).unwrap()).unwrap();
     assert!(!db.run(&["health"]).status.success());
     assert!(!db.root.path().join("other-volume").exists());
-    config = serde_json::from_slice(&original).unwrap();
-    config["listen"] = serde_json::json!("0.0.0.0:8080");
-    std::fs::write(&db.config, serde_json::to_vec(&config).unwrap()).unwrap();
+    config = alt_json::from_slice(&original).unwrap();
+    config["listen"] = alt_json::json!("0.0.0.0:8080");
+    std::fs::write(&db.config, alt_json::to_vec(&config).unwrap()).unwrap();
     assert!(!db.run(&["serve"]).status.success());
     std::fs::write(&db.config, original).unwrap();
     assert_eq!(db.ok(&["health"])["ready"], true);

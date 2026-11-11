@@ -102,8 +102,11 @@ impl Provider {
                     );
                     let mut body = Vec::new();
                     request.as_reader().read_to_end(&mut body).unwrap();
-                    let input: serde_json::Value = serde_json::from_slice(&body).unwrap();
-                    assert_eq!(input["audience"], serde_json::to_value(&audience).unwrap());
+                    let input: alt_json::Value = alt_json::from_slice(&body).unwrap();
+                    assert_eq!(
+                        input["audience"],
+                        alt_json_serde::to_value(&&audience).unwrap()
+                    );
                     let sequence = calls.fetch_add(1, Ordering::SeqCst) as u64 + 100;
                     let mode = mode.load(Ordering::SeqCst);
                     if mode != previous_mode {
@@ -111,20 +114,20 @@ impl Provider {
                         previous_mode = mode;
                     }
                     let (status, body) = if mode == 3 {
-                        (503, serde_json::json!({}))
+                        (503, alt_json::json!({}))
                     } else if request.url().ends_with("/service") {
                         let mut value = service(&audience, sequence, mode != 2);
                         value.lease.revocation_generation = Counter(revision);
-                        (200, serde_json::to_value(value).unwrap())
+                        (200, alt_json_serde::to_value(&value).unwrap())
                     } else {
                         assert!(request.url().ends_with("/introspect"));
                         assert_eq!(input["grant"], "cd".repeat(32));
                         if mode == 1 {
-                            (403, serde_json::json!({}))
+                            (403, alt_json::json!({}))
                         } else {
                             let mut value = account(&audience, sequence);
                             value.lease.revocation_generation = Counter(revision);
-                            (200, serde_json::to_value(value).unwrap())
+                            (200, alt_json_serde::to_value(&value).unwrap())
                         }
                     };
                     request
@@ -221,7 +224,7 @@ impl Process {
         alt_server::operator::create_private(&runtime_key, "ab".repeat(32).as_bytes()).unwrap();
         alt_server::operator::create_private(&receipt_key, &[f.key_seed; 32]).unwrap();
         let mut config: alt_server::operator::Config =
-            serde_json::from_str(include_str!("../../../../example-config.json")).unwrap();
+            alt_json::from_str(include_str!("../../../../example-config.json")).unwrap();
         config.instance = f.spec.clone();
         config.cloud = Some(alt_server::operator::CloudConfig {
             audience: provider.audience.clone(),
@@ -242,13 +245,13 @@ impl Process {
         config.portable = Some(bounds());
         config.validate().unwrap();
         // Explicit fixture volume binding; initialization is covered separately.
-        let marker = serde_json::json!({"version":1,"installation_id":f.spec.installation_id,"workspace_id":f.spec.workspace_id,"deployment_mode":f.spec.deployment_mode,"receipt_key_id":alt_hash::blake3::hash(SigningKey::from_bytes(&[f.key_seed;32]).verifying_key().as_bytes()).to_hex().to_string()});
+        let marker = alt_json::json!({"version":1,"installation_id":f.spec.installation_id,"workspace_id":f.spec.workspace_id,"deployment_mode":f.spec.deployment_mode,"receipt_key_id":alt_hash::blake3::hash(SigningKey::from_bytes(&[f.key_seed;32]).verifying_key().as_bytes()).to_hex().to_string()});
         alt_server::operator::create_private(
             &root.join("bytes/instance.json"),
-            &serde_json::to_vec(&marker).unwrap(),
+            &alt_json::to_vec(&marker).unwrap(),
         )
         .unwrap();
-        std::fs::write(&config_path, serde_json::to_vec(&config).unwrap()).unwrap();
+        std::fs::write(&config_path, alt_json::to_vec(&config).unwrap()).unwrap();
         assert!(f.admin_dsn.contains("dbname=postgres"));
         let dsn = f
             .admin_dsn
@@ -277,7 +280,7 @@ impl Process {
         });
         let line = rx.recv_timeout(Duration::from_secs(15)).unwrap();
         reader.join().unwrap();
-        let started: serde_json::Value = serde_json::from_str(&line).unwrap();
+        let started: alt_json::Value = alt_json::from_str(&line).unwrap();
         process.url = format!("http://{}", started["address"].as_str().unwrap());
         process
     }
@@ -367,7 +370,7 @@ ssize_t pread64(int fd, void *buffer, size_t size, off64_t offset) {
     );
     library
 }
-fn post(url: String, token: String, body: Vec<u8>) -> (u16, serde_json::Value) {
+fn post(url: String, token: String, body: Vec<u8>) -> (u16, alt_json::Value) {
     let request = ureq::post(&url)
         .timeout(Duration::from_secs(45))
         .set("Authorization", &format!("Bearer {token}"))
@@ -515,7 +518,7 @@ fn portable_cloud_validation_refreshes_current_authority_before_completion() {
             let url = format!("{}{path}", process.url);
             let token = f.token.clone();
             let body = if importing {
-                serde_json::to_vec(&intent).unwrap()
+                alt_json::to_vec(&intent).unwrap()
             } else {
                 vec![]
             };
@@ -569,7 +572,7 @@ fn portable_cloud_validation_refreshes_current_authority_before_completion() {
                 provider.mode.store(0, Ordering::SeqCst);
                 expire(&f);
                 let body = if importing {
-                    serde_json::to_vec(&intent).unwrap()
+                    alt_json::to_vec(&intent).unwrap()
                 } else {
                     vec![]
                 };

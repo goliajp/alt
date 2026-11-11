@@ -1,11 +1,11 @@
 use super::*;
+use alt_json::json;
 use alt_task::Record;
 use alt_task_service::{CollectorAttestation, CollectorPolicy, TaskRecord, TrustedCollector};
 use alt_task_service::{
     RecordKey, RecordKind, RecordSelection, SourceCompletion, TaskBundle, TaskLimits,
     VerifiedTaskGraph,
 };
-use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) fn task_limits() -> TaskLimits {
@@ -63,7 +63,7 @@ pub(super) fn task_payload_with_source(
     let mut payload = Payload::new(request, None);
     payload.publication.refs.clear();
     let tree = payload.manifest.entries[0].git_oid.clone().unwrap();
-    let mut task: alt_task::Task = serde_json::from_value(json!({
+    let mut task: alt_task::Task = alt_json::from_value(json!({
         "schema_version":1,"scope":{"repository":"original","workspace":"original-worktree"},
         "spec":{"purpose":"publish selected task","authority":"owner","allowed_paths":["."],"auxiliary":[],"exclusions":[],
             "validation":{"commands":[["verify"]],"cwd":".","environment":{"values":{},"complete":true},"tools":[],"external":[],"validation":{}}},
@@ -82,7 +82,7 @@ pub(super) fn task_payload_with_source(
     let record = add(
         &mut payload,
         ContentKind::Record,
-        serde_json::to_vec(
+        alt_json::to_vec(
             &json!({"schema_version":1,"hash_algorithm":"blake3","kind":"task","record":task}),
         )
         .unwrap(),
@@ -98,7 +98,7 @@ pub(super) fn task_payload_with_source(
     };
     let response = alt_command_protocol::Response {
         exit_code: 0,
-        stdout: serde_json::to_vec(&json!({"task_id":id})).unwrap(),
+        stdout: alt_json::to_vec(&json!({"task_id":id})).unwrap(),
         stderr: vec![],
     }
     .encode();
@@ -121,12 +121,12 @@ pub(super) fn task_payload_with_source(
         intent: add(
             &mut payload,
             ContentKind::Attachment,
-            serde_json::to_vec(&intent).unwrap(),
+            alt_json::to_vec(&intent).unwrap(),
         ),
         completion: add(
             &mut payload,
             ContentKind::Attachment,
-            serde_json::to_vec(&completion).unwrap(),
+            alt_json::to_vec(&completion).unwrap(),
         ),
         response: add(&mut payload, ContentKind::Attachment, response),
         ref_operation: None,
@@ -151,7 +151,7 @@ pub(super) fn task_payload_with_source(
     add(
         &mut payload,
         ContentKind::TaskBundle,
-        serde_json::to_vec(&bundle).unwrap(),
+        alt_json::to_vec(&bundle).unwrap(),
     );
     payload.publication.content_manifest = payload.manifest.id(limits()).unwrap();
     payload
@@ -426,11 +426,11 @@ fn task_publication_refuses_revoked_publish_scope_and_wrong_verified_bundle() {
 }
 
 fn selected_record<T: Record>(record: &T, payload: &mut Payload) -> (TaskRecord, RecordSelection) {
-    let raw = serde_json::to_vec(
+    let raw = alt_json::to_vec(
         &json!({"schema_version":1,"hash_algorithm":"blake3","kind":T::KIND,"record":record}),
     )
     .unwrap();
-    let kind = serde_json::from_value(json!(T::KIND)).unwrap();
+    let kind = alt_json::from_value(json!(T::KIND)).unwrap();
     let key = RecordKey {
         kind,
         id: record.id().unwrap(),
@@ -477,7 +477,7 @@ fn completed_source(
     };
     let response = alt_command_protocol::Response {
         exit_code: 0,
-        stdout: serde_json::to_vec(&json!({field:key.id})).unwrap(),
+        stdout: alt_json::to_vec(&json!({field:key.id})).unwrap(),
         stderr: vec![],
     }
     .encode();
@@ -500,12 +500,12 @@ fn completed_source(
         intent: add(
             payload,
             ContentKind::Attachment,
-            serde_json::to_vec(&intent).unwrap(),
+            alt_json::to_vec(&intent).unwrap(),
         ),
         completion: add(
             payload,
             ContentKind::Attachment,
-            serde_json::to_vec(&completion).unwrap(),
+            alt_json::to_vec(&completion).unwrap(),
         ),
         response: add(payload, ContentKind::Attachment, response),
         ref_operation: operation.map(|(_, raw)| add(payload, ContentKind::Attachment, raw)),
@@ -554,7 +554,7 @@ fn integration_payload(base: &Payload, omit_output: bool, recover: bool) -> Inte
         ContentKind::Attachment,
         b"original diagnostic stream".to_vec(),
     );
-    let task: alt_task::Task = serde_json::from_value(json!({
+    let task: alt_task::Task = alt_json::from_value(json!({
         "schema_version":1,"scope":{"repository":"original","workspace":"original-worktree"},
         "spec":{"purpose":"publish reviewed task","authority":"owner","allowed_paths":["."],"auxiliary":[],"exclusions":[],
           "validation":{"commands":[["verify"]],"cwd":".","environment":{"values":{},"complete":true},"tools":[{"name":"verify","version":"1","binary_blake3":binary.blake3}],"external":[],"validation":{}}},
@@ -636,7 +636,7 @@ fn integration_payload(base: &Payload, omit_output: bool, recover: bool) -> Inte
         snapshot: add(
             &mut payload,
             ContentKind::Attachment,
-            serde_json::to_vec(&snapshot).unwrap(),
+            alt_json::to_vec(&snapshot).unwrap(),
         ),
         creator_request: "original-baseline".into(),
     };
@@ -653,7 +653,7 @@ fn integration_payload(base: &Payload, omit_output: bool, recover: bool) -> Inte
         changes: add(
             &mut payload,
             ContentKind::Attachment,
-            serde_json::to_vec(&json!({"changes":[],"truncated":false})).unwrap(),
+            alt_json::to_vec(&json!({"changes":[],"truncated":false})).unwrap(),
         ),
         creator_request: "original-review".into(),
     };
@@ -680,7 +680,7 @@ fn integration_payload(base: &Payload, omit_output: bool, recover: bool) -> Inte
         }],
     )
     .unwrap();
-    let context = serde_json::to_vec(&json!({"version":2,"effects":"refs_only","workspace":{"name":"source","instance":task.scope.workspace},"inverse_of":null,"checkout":null,"request_id":integration.creator_request})).unwrap();
+    let context = alt_json::to_vec(&json!({"version":2,"effects":"refs_only","workspace":{"name":"source","instance":task.scope.workspace},"inverse_of":null,"checkout":null,"request_id":integration.creator_request})).unwrap();
     let op = refs
         .commit_scoped(
             "original actor",
@@ -824,7 +824,7 @@ fn integration_payload(base: &Payload, omit_output: bool, recover: bool) -> Inte
     add(
         &mut payload,
         ContentKind::TaskBundle,
-        serde_json::to_vec(&bundle).unwrap(),
+        alt_json::to_vec(&bundle).unwrap(),
     );
     payload.publication.content_manifest = payload.manifest.id(limits()).unwrap();
     IntegrationPayload {
@@ -1246,7 +1246,9 @@ fn current_review_rechecks_revocation_policy_expiry_and_target_at_commit() {
                 f.client()
                     .execute(
                         "UPDATE alt_collector_policies SET policy=$1",
-                        &[&serde_json::to_value(expired).unwrap()],
+                        &[&alt_server_store::Jsonb(
+                            alt_json::to_value(expired).unwrap(),
+                        )],
                     )
                     .unwrap();
             }
@@ -1397,7 +1399,7 @@ pub(super) fn published_delivery(f: &mut Fixture) -> (String, Payload) {
         .iter()
         .position(|e| e.kind == ContentKind::TaskBundle)
         .unwrap();
-    let mut bundle: TaskBundle = serde_json::from_slice(&payload.contents.remove(index)).unwrap();
+    let mut bundle: TaskBundle = alt_json::from_slice(&payload.contents.remove(index)).unwrap();
     payload.manifest.entries.remove(index);
     let record = |kind| {
         let selection = bundle
@@ -1433,8 +1435,7 @@ pub(super) fn published_delivery(f: &mut Fixture) -> (String, Payload) {
         .iter()
         .position(|e| e.blake3 == baseline_record.snapshot.blake3)
         .unwrap();
-    let baseline: alt_delivery::Snapshot =
-        serde_json::from_slice(&payload.contents[index]).unwrap();
+    let baseline: alt_delivery::Snapshot = alt_json::from_slice(&payload.contents[index]).unwrap();
     let mut exported = baseline.clone();
     exported
         .refs
@@ -1483,7 +1484,7 @@ pub(super) fn published_delivery(f: &mut Fixture) -> (String, Payload) {
         report: add(
             payload,
             ContentKind::Attachment,
-            serde_json::to_vec(&report).unwrap(),
+            alt_json::to_vec(&report).unwrap(),
         ),
         creator_request: "original-delivery".into(),
     };
@@ -1501,7 +1502,7 @@ pub(super) fn published_delivery(f: &mut Fixture) -> (String, Payload) {
     add(
         payload,
         ContentKind::TaskBundle,
-        serde_json::to_vec(&bundle).unwrap(),
+        alt_json::to_vec(&bundle).unwrap(),
     );
     payload.publication.content_manifest = payload.manifest.id(limits()).unwrap();
     let (_, reviewer) = current_reviewer(f, &data);

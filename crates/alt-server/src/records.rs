@@ -1,10 +1,9 @@
 use alt_remote_protocol::{ContentKind, RecordKind, RecordRoot, Scope};
 use alt_server_store::{Credential, Error, Page, PublishedRecord, Result, Store};
 use alt_task_service::{RecordKind as TaskKind, TaskBundle, TaskLimits, TaskRecord};
-use serde::Serialize;
 use std::io::Read;
 
-#[derive(Serialize, alt_json::ToJson)]
+#[derive(alt_json::ToJson)]
 pub struct RecordSummary {
     kind: RecordKind,
     id: String,
@@ -13,7 +12,7 @@ pub struct RecordSummary {
     published_at: String,
     task_id: Option<String>,
 }
-#[derive(Serialize, alt_json::ToJson)]
+#[derive(alt_json::ToJson)]
 pub struct RecordDetail {
     summary: RecordSummary,
     fields: Vec<Field>,
@@ -22,25 +21,25 @@ pub struct RecordDetail {
     publication: PublicationInfo,
     fields_truncated: bool,
 }
-#[derive(Serialize, alt_json::ToJson)]
+#[derive(alt_json::ToJson)]
 struct Field {
     label: &'static str,
     value: String,
 }
-#[derive(Serialize, alt_json::ToJson)]
+#[derive(alt_json::ToJson)]
 struct Related {
     kind: RecordKind,
     id: String,
     title: String,
 }
-#[derive(Serialize, alt_json::ToJson)]
+#[derive(alt_json::ToJson)]
 struct Attachment {
     name: String,
     bytes: String,
     download_url: Option<String>,
     omitted_reason: Option<String>,
 }
-#[derive(Serialize, alt_json::ToJson)]
+#[derive(alt_json::ToJson)]
 struct PublicationInfo {
     actor_id: String,
     request_id: String,
@@ -307,7 +306,7 @@ fn artifact_name(record: &TaskRecord, digest: &str) -> String {
 
 #[cfg(test)]
 mod json_tests {
-    use alt_json_testkit::fixtures::{check_recorded, written_line_as_serde};
+    use alt_json_testkit::fixtures::{assert_stored, written_line};
     use alt_json_testkit::rng::Rng;
     use alt_json_testkit::support::Arbitrary;
 
@@ -345,11 +344,11 @@ mod json_tests {
         let rng = &mut rng;
         let mut lines = String::new();
         for _ in 0..40 {
-            lines += &written_line_as_serde(&Page {
+            lines += &written_line(&Page {
                 items: (0..rng.below(3)).map(|_| summary(rng)).collect(),
                 next: any(rng),
             });
-            lines += &written_line_as_serde(&RecordDetail {
+            lines += &written_line(&RecordDetail {
                 summary: summary(rng),
                 fields: (0..rng.below(3))
                     .map(|_| Field {
@@ -381,7 +380,7 @@ mod json_tests {
                 fields_truncated: any(rng),
             });
         }
-        check_recorded(
+        assert_stored(
             concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/tests/fixtures/json/records-responses.txt"

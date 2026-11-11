@@ -304,7 +304,7 @@ fn work_envelope(f: &mut Fixture, scope: &Scope, id: &str) -> alt_portable::Enve
             &[&scope.repository_instance_id, &id],
         )
         .unwrap();
-    serde_json::from_value(row.get(0)).unwrap()
+    alt_json::from_value(row.get::<_, alt_server_store::Jsonb>(0).0).unwrap()
 }
 
 #[test]
@@ -387,7 +387,7 @@ fn export_lists_objects_as_their_uploads_named_them() {
         .filter_map(|entry| {
             Some((
                 entry.git_oid.clone()?,
-                serde_json::to_value(entry.kind)
+                alt_json::to_value(entry.kind)
                     .unwrap()
                     .as_str()
                     .unwrap()
@@ -410,7 +410,7 @@ fn export_lists_objects_as_their_uploads_named_them() {
         .map(|object| {
             (
                 object.oid.clone(),
-                serde_json::to_value(object.kind)
+                alt_json::to_value(object.kind)
                     .unwrap()
                     .as_str()
                     .unwrap()

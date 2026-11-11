@@ -37,7 +37,7 @@ fn keep_in_content_store(f: &Fixture, scope: &Scope, items: &[Item<'_>], pin: &s
             )
             .unwrap()
             .is_some_and(|row| row.get(0));
-        let kind = serde_json::to_value(entry.kind).unwrap();
+        let kind = alt_json::to_value(entry.kind).unwrap();
         client.execute("INSERT INTO alt_blobs(repository,blake3,bytes,state,accounted,created_at) VALUES('repository',$1,$2,'stored',true,0) ON CONFLICT(repository,blake3) DO UPDATE SET state='stored',accounted=true", &[&entry.blake3,&(entry.bytes as i64)]).unwrap();
         if !counted {
             client
@@ -53,8 +53,8 @@ fn keep_in_content_store(f: &Fixture, scope: &Scope, items: &[Item<'_>], pin: &s
 }
 
 /// what the migration moves or leaves, as one comparable value
-fn state(f: &Fixture) -> serde_json::Value {
-    f.client().query_one("SELECT jsonb_build_object('pins',(SELECT jsonb_agg(to_jsonb(p) ORDER BY pin_id,blake3) FROM alt_pins p),'blobs',(SELECT jsonb_agg(jsonb_build_array(blake3,state,accounted) ORDER BY blake3) FROM alt_blobs),'objects',(SELECT jsonb_agg(to_jsonb(o) ORDER BY oid) FROM alt_objects o),'segments',(SELECT jsonb_agg(jsonb_build_array(segment_id,state,objects,bytes) ORDER BY segment_id) FROM alt_pack_segments),'stored',(SELECT jsonb_agg(stored_bytes ORDER BY id) FROM alt_repositories),'refs',(SELECT jsonb_agg(to_jsonb(r) ORDER BY name) FROM alt_refs r))", &[]).unwrap().get(0)
+fn state(f: &Fixture) -> alt_json::Value {
+    f.client().query_one("SELECT jsonb_build_object('pins',(SELECT jsonb_agg(to_jsonb(p) ORDER BY pin_id,blake3) FROM alt_pins p),'blobs',(SELECT jsonb_agg(jsonb_build_array(blake3,state,accounted) ORDER BY blake3) FROM alt_blobs),'objects',(SELECT jsonb_agg(to_jsonb(o) ORDER BY oid) FROM alt_objects o),'segments',(SELECT jsonb_agg(jsonb_build_array(segment_id,state,objects,bytes) ORDER BY segment_id) FROM alt_pack_segments),'stored',(SELECT jsonb_agg(stored_bytes ORDER BY id) FROM alt_repositories),'refs',(SELECT jsonb_agg(to_jsonb(r) ORDER BY name) FROM alt_refs r))", &[]).unwrap().get::<_, alt_server_store::Jsonb>(0).0
 }
 fn count(f: &Fixture, sql: &str) -> i64 {
     f.client().query_one(sql, &[]).unwrap().get(0)

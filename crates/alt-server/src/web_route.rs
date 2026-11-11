@@ -4,6 +4,7 @@ use alt_server_store::{Error, Result};
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+
 pub enum WebRoute {
     Portable(crate::PortableRoute),
     ChangeLink(crate::change_links::route::ChangeRoute),

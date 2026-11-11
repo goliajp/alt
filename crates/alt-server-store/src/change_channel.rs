@@ -6,12 +6,8 @@ use crate::{Credential, Error, InstanceSpec, Result, Store};
 use alt_remote_protocol::{ActorKind, RequestKey, Scope};
 use alt_repository_service::{Authorization, RepositorySnapshot};
 use golia_change_link::{Counter, Endpoint, Product};
-use serde::{Deserialize, Serialize};
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct ChangeChannel {
     pub channel: String,
