@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: resolve image identity in archives saved from the containerd image store
+author-type: human
+author: doracawl
+touched: scripts/test-package.py
+touched: self-hosted/image_identity.py
