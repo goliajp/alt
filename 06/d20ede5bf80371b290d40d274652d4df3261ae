@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: name a database server without lz4 in operator errors
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/operator.rs
+touched: crates/alt-server/src/operator/error.rs
