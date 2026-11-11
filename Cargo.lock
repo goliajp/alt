@@ -298,8 +298,14 @@ dependencies = [
 name = "alt-json"
 version = "0.1.0"
 dependencies = [
+ "alt-json-derive",
+ "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "alt-json-derive"
+version = "0.1.0"
 
 [[package]]
 name = "alt-lfs"

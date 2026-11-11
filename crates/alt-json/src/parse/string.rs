@@ -1,14 +1,17 @@
+use std::borrow::Cow;
+
 use super::Parser;
 use crate::Result;
 use crate::error::ErrorCode;
 use crate::scan::find_special;
 
-impl Parser<'_> {
+impl<'a> Parser<'a> {
     /// Parses the rest of a string whose opening quote has been consumed.
+    /// The text is borrowed from the input when it has no escapes.
     ///
     /// Raw bytes are checked as UTF-8 only once the closing quote is reached,
     /// so an earlier syntax error in the same string is reported first.
-    pub(super) fn parse_string(&mut self) -> Result<String> {
+    pub(crate) fn parse_str(&mut self) -> Result<Cow<'a, str>> {
         let mut unescaped: Vec<u8> = Vec::new();
         let mut start = self.index;
         loop {
@@ -21,10 +24,10 @@ impl Parser<'_> {
             match byte {
                 b'"' => {
                     let text = if unescaped.is_empty() {
-                        std::str::from_utf8(run).map(str::to_owned).ok()
+                        std::str::from_utf8(run).map(Cow::Borrowed).ok()
                     } else {
                         unescaped.extend_from_slice(run);
-                        String::from_utf8(unescaped).ok()
+                        String::from_utf8(unescaped).map(Cow::Owned).ok()
                     };
                     return text.ok_or_else(|| self.error(ErrorCode::InvalidUnicodeCodePoint));
                 }
@@ -88,7 +91,7 @@ impl Parser<'_> {
         Ok(())
     }
 
-    fn parse_hex4(&mut self) -> Result<u16> {
+    pub(super) fn parse_hex4(&mut self) -> Result<u16> {
         let Some(digits) = self.input.get(self.index..self.index + 4) else {
             self.index = self.input.len();
             return Err(self.error(ErrorCode::EofWhileParsingString));

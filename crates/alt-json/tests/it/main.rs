@@ -4,6 +4,7 @@
 
 mod api;
 mod check;
+mod derive;
 mod float_format;
 mod float_parse;
 mod generate;

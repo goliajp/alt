@@ -1,0 +1,161 @@
+//! The handles a reader gets for the inside of an array, an object and
+//! an enum variant.
+
+use super::{Decoder, FromJson, Source};
+use crate::{Error, Result};
+
+/// The elements of an array being read.
+pub struct SeqAccess<'d, 'a> {
+    pub(super) d: &'d mut Decoder<'a>,
+    pub(super) first: bool,
+}
+
+impl<'a> SeqAccess<'_, 'a> {
+    /// The next element, or `None` at the end of the array.
+    pub fn next_element<T: FromJson>(&mut self) -> Result<Option<T>> {
+        self.next_with(T::from_json)
+    }
+
+    pub fn next_with<T>(
+        &mut self,
+        f: impl FnOnce(&mut Decoder<'a>) -> Result<T>,
+    ) -> Result<Option<T>> {
+        let more = match &mut self.d.source {
+            Source::Text(p) => p.has_next_element(&mut self.first)?,
+            Source::Tree(t) => t.has_next_element(),
+        };
+        if more { f(self.d).map(Some) } else { Ok(None) }
+    }
+}
+
+/// The members of an object being read: a key, then its value.
+pub struct MapAccess<'d, 'a> {
+    pub(super) d: &'d mut Decoder<'a>,
+    pub(super) first: bool,
+    pub(super) hidden: Vec<&'static str>,
+}
+
+impl<'a> MapAccess<'_, 'a> {
+    fn has_next_key(&mut self) -> Result<bool> {
+        loop {
+            let more = match &mut self.d.source {
+                Source::Text(p) => p.has_next_key(&mut self.first)?,
+                Source::Tree(t) => t.has_next_key(),
+            };
+            let (true, false, Source::Text(p)) = (more, self.hidden.is_empty(), &mut self.d.source)
+            else {
+                return Ok(more);
+            };
+            // look at the key without consuming it
+            let start = p.index;
+            p.eat();
+            if !self.hidden.contains(&&*p.parse_str()?) {
+                p.index = start;
+                return Ok(true);
+            }
+            p.object_colon()?;
+            p.ignore_value()?;
+        }
+    }
+
+    /// The next key, passed through `f`; `None` at the end of the object.
+    pub fn next_key<T>(&mut self, f: impl FnOnce(&str) -> Result<T>) -> Result<Option<T>> {
+        if !self.has_next_key()? {
+            return Ok(None);
+        }
+        match &mut self.d.source {
+            Source::Text(p) => {
+                p.eat();
+                let key = p.parse_str()?;
+                f(&key).map(Some)
+            }
+            Source::Tree(t) => f(&t.read_str("a string key")?).map(Some),
+        }
+    }
+
+    /// The next key as a typed value.
+    pub fn next_key_as<K: FromJson>(&mut self) -> Result<Option<K>> {
+        if self.has_next_key()? {
+            K::from_json_key(self.d).map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn next_value<T: FromJson>(&mut self) -> Result<T> {
+        self.next_value_with(T::from_json)
+    }
+
+    pub fn next_value_with<T>(
+        &mut self,
+        f: impl FnOnce(&mut Decoder<'a>) -> Result<T>,
+    ) -> Result<T> {
+        match &mut self.d.source {
+            Source::Text(p) => p.object_colon()?,
+            Source::Tree(t) => t.object_colon(),
+        }
+        f(self.d)
+    }
+
+    /// Skips the value of a key nobody reads.
+    pub fn ignore_value(&mut self) -> Result<()> {
+        self.next_value_with(Decoder::ignore)
+    }
+}
+
+/// The data of an enum variant in the default form.
+pub struct Variant<'d, 'a> {
+    pub(super) d: &'d mut Decoder<'a>,
+    pub(super) has_data: bool,
+}
+
+impl<'a> Variant<'_, 'a> {
+    fn data(&self, kind: &str) -> Result<()> {
+        if self.has_data {
+            Ok(())
+        } else {
+            Err(Error::invalid_type("unit variant", kind))
+        }
+    }
+
+    /// A variant without data: a bare name, or a name with `null`.
+    pub fn unit(self) -> Result<()> {
+        if self.has_data {
+            self.d.unit("unit variant")
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn newtype<T: FromJson>(self) -> Result<T> {
+        self.newtype_with(T::from_json)
+    }
+
+    pub fn newtype_with<T>(self, f: impl FnOnce(&mut Decoder<'a>) -> Result<T>) -> Result<T> {
+        self.data("newtype variant")?;
+        f(self.d)
+    }
+
+    pub fn tuple<T>(
+        self,
+        expected: &str,
+        f: impl FnOnce(&mut SeqAccess<'_, 'a>) -> Result<T>,
+    ) -> Result<T> {
+        self.data("tuple variant")?;
+        self.d.seq(expected, f)
+    }
+
+    /// From a tree, only the object form of a struct variant is accepted.
+    pub fn structure<T>(
+        self,
+        expected: &str,
+        seq: impl FnOnce(&mut SeqAccess<'_, 'a>) -> Result<T>,
+        map: impl FnOnce(&mut MapAccess<'_, 'a>) -> Result<T>,
+    ) -> Result<T> {
+        self.data("struct variant")?;
+        match (&self.d.source, self.d.buffered) {
+            (Source::Tree(_), false) => self.d.map(expected, map),
+            _ => self.d.structure(expected, seq, map),
+        }
+    }
+}

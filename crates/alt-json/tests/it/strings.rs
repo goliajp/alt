@@ -37,10 +37,13 @@ fn escapes_are_pinned() {
         r##" !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"##,
         "\u{7f}\""
     );
-    assert_eq!(alt_json::to_string(&Value::String(all.clone())), expected);
+    assert_eq!(
+        alt_json::to_string(&Value::String(all.clone())).unwrap(),
+        expected
+    );
     output(&Value::String(all));
     assert_eq!(
-        alt_json::to_string(&Value::from("é\u{2028}😀/")),
+        alt_json::to_string(&Value::from("é\u{2028}😀/")).unwrap(),
         "\"é\u{2028}😀/\""
     );
 }

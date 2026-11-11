@@ -4,49 +4,62 @@
 //! that was consumed is reported at that byte, and an error about a byte that
 //! was only looked at is reported one past it (capped at the end of input).
 
+mod ignore;
 mod number;
 mod string;
 
 use crate::error::ErrorCode;
 use crate::{Error, Map, Result, Value};
 
+pub(crate) use number::Parsed;
+
 /// Arrays and objects may nest 127 deep; the 128th level is rejected.
 const DEPTH_LIMIT: u8 = 128;
 
 pub(crate) struct Parser<'a> {
-    input: &'a [u8],
-    index: usize,
-    remaining_depth: u8,
+    pub(crate) input: &'a [u8],
+    pub(crate) index: usize,
+    pub(crate) remaining_depth: u8,
 }
 
 pub(crate) fn parse(input: &[u8]) -> Result<Value> {
-    let mut parser = Parser {
-        input,
-        index: 0,
-        remaining_depth: DEPTH_LIMIT,
-    };
+    let mut parser = Parser::new(input);
     let value = parser.parse_value()?;
-    match parser.skip_whitespace() {
-        Some(_) => Err(parser.peek_error(ErrorCode::TrailingCharacters)),
-        None => Ok(value),
-    }
+    parser.end()?;
+    Ok(value)
 }
 
-impl Parser<'_> {
-    fn peek(&self) -> Option<u8> {
+impl<'a> Parser<'a> {
+    pub(crate) fn new(input: &'a [u8]) -> Self {
+        Parser {
+            input,
+            index: 0,
+            remaining_depth: DEPTH_LIMIT,
+        }
+    }
+
+    /// Only whitespace may remain.
+    pub(crate) fn end(&mut self) -> Result<()> {
+        match self.skip_whitespace() {
+            Some(_) => Err(self.peek_error(ErrorCode::TrailingCharacters)),
+            None => Ok(()),
+        }
+    }
+
+    pub(crate) fn peek(&self) -> Option<u8> {
         self.input.get(self.index).copied()
     }
 
     /// end of input reads as a zero byte, which no caller treats as valid
-    fn peek_or_null(&self) -> u8 {
+    pub(crate) fn peek_or_null(&self) -> u8 {
         self.peek().unwrap_or(0)
     }
 
-    fn eat(&mut self) {
+    pub(crate) fn eat(&mut self) {
         self.index += 1;
     }
 
-    fn next(&mut self) -> Option<u8> {
+    pub(crate) fn next(&mut self) -> Option<u8> {
         let byte = self.peek()?;
         self.index += 1;
         Some(byte)
@@ -67,19 +80,19 @@ impl Parser<'_> {
 
     /// error about the byte just consumed
     #[cold]
-    fn error(&self, code: ErrorCode) -> Error {
+    pub(crate) fn error(&self, code: ErrorCode) -> Error {
         let (line, column) = self.position_of(self.index);
         Error::new(code, line, column)
     }
 
     /// error about the byte under the cursor
     #[cold]
-    fn peek_error(&self, code: ErrorCode) -> Error {
+    pub(crate) fn peek_error(&self, code: ErrorCode) -> Error {
         let (line, column) = self.position_of(self.input.len().min(self.index + 1));
         Error::new(code, line, column)
     }
 
-    fn skip_whitespace(&mut self) -> Option<u8> {
+    pub(crate) fn skip_whitespace(&mut self) -> Option<u8> {
         loop {
             match self.peek() {
                 Some(b' ' | b'\n' | b'\t' | b'\r') => self.eat(),
@@ -88,7 +101,7 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_ident(&mut self, rest: &[u8]) -> Result<()> {
+    pub(crate) fn parse_ident(&mut self, rest: &[u8]) -> Result<()> {
         for &expected in rest {
             match self.next() {
                 None => return Err(self.error(ErrorCode::EofWhileParsingValue)),
@@ -101,7 +114,7 @@ impl Parser<'_> {
         Ok(())
     }
 
-    fn parse_value(&mut self) -> Result<Value> {
+    pub(crate) fn parse_value(&mut self) -> Result<Value> {
         let Some(peek) = self.skip_whitespace() else {
             return Err(self.peek_error(ErrorCode::EofWhileParsingValue));
         };
@@ -123,12 +136,12 @@ impl Parser<'_> {
             }
             b'-' => {
                 self.eat();
-                self.parse_number(false)
+                self.parse_number(false).map(Parsed::into_value)
             }
-            b'0'..=b'9' => self.parse_number(true),
+            b'0'..=b'9' => self.parse_number(true).map(Parsed::into_value),
             b'"' => {
                 self.eat();
-                self.parse_string().map(Value::String)
+                Ok(Value::String(self.parse_str()?.into_owned()))
             }
             b'[' => {
                 self.enter()?;
@@ -147,7 +160,7 @@ impl Parser<'_> {
     }
 
     /// Consumes the opening bracket or brace.
-    fn enter(&mut self) -> Result<()> {
+    pub(crate) fn enter(&mut self) -> Result<()> {
         self.remaining_depth -= 1;
         if self.remaining_depth == 0 {
             return Err(self.peek_error(ErrorCode::RecursionLimitExceeded));
@@ -209,7 +222,7 @@ impl Parser<'_> {
                 return Err(self.peek_error(ErrorCode::ExpectedObjectCommaOrEnd));
             }
             self.eat();
-            let key = self.parse_string()?;
+            let key = self.parse_str()?.into_owned();
             match self.skip_whitespace() {
                 Some(b':') => self.eat(),
                 Some(_) => return Err(self.peek_error(ErrorCode::ExpectedColon)),

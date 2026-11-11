@@ -1,6 +1,8 @@
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
+use crate::parse::Parsed;
+
 /// A JSON number: a non-negative integer, a negative integer or a finite
 /// float. Numbers of different kinds are never equal, so `1` differs from
 /// `1.0`.
@@ -49,6 +51,15 @@ impl Hash for N {
 impl Number {
     pub(crate) fn kind(&self) -> N {
         self.n
+    }
+
+    pub(crate) fn from_parsed(parsed: Parsed) -> Number {
+        let n = match parsed {
+            Parsed::U64(n) => N::PosInt(n),
+            Parsed::I64(n) => N::NegInt(n),
+            Parsed::F64(n) => N::Float(n),
+        };
+        Number { n }
     }
 
     /// True for an integer between `i64::MIN` and `i64::MAX`.

@@ -207,7 +207,10 @@ fn notation_thresholds() {
         (0.1 + 0.2, "0.30000000000000004"),
     ] {
         float_output(f);
-        assert_eq!(alt_json::to_string(&alt_json::Value::from(f)), text);
+        assert_eq!(
+            alt_json::to_string(&alt_json::Value::from(f)).unwrap(),
+            text
+        );
         cases += 1;
     }
     report("float format, notation thresholds", cases, None);
@@ -238,7 +241,10 @@ fn integers_as_floats() {
 #[test]
 fn non_finite() {
     for f in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-        assert_eq!(alt_json::to_string(&alt_json::Value::from(f)), "null");
+        assert_eq!(
+            alt_json::to_string(&alt_json::Value::from(f)).unwrap(),
+            "null"
+        );
         assert_eq!(serde_json::to_string(&f).unwrap(), "null");
         assert!(alt_json::Number::from_f64(f).is_none());
     }

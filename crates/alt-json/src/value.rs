@@ -41,11 +41,13 @@ impl fmt::Debug for Value {
 /// `{}` prints the compact form and `{:#}` the indented form.
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut out = Vec::new();
         if f.alternate() {
-            f.write_str(&crate::to_string_pretty(self))
+            crate::write::write_pretty(self, 0, &mut out);
         } else {
-            f.write_str(&crate::to_string(self))
+            crate::write::write_compact(self, &mut out);
         }
+        f.write_str(&crate::into_string(out))
     }
 }
 
@@ -53,7 +55,7 @@ impl FromStr for Value {
     type Err = crate::Error;
 
     fn from_str(s: &str) -> Result<Value, crate::Error> {
-        crate::from_str(s)
+        crate::parse(s.as_bytes())
     }
 }
 

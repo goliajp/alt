@@ -1,0 +1,11 @@
+[package]
+name = "alt-json-derive"
+description = "Derive macros for the alt-json traits, with no dependencies"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]

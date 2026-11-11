@@ -11,8 +11,23 @@ use super::Parser;
 use crate::error::ErrorCode;
 use crate::{Number, Result, Value};
 
-fn float(f: f64) -> Value {
-    Number::from_f64(f).map_or(Value::Null, Value::Number)
+/// A number as the grammar classifies it.
+#[derive(Clone, Copy)]
+pub(crate) enum Parsed {
+    U64(u64),
+    /// always negative
+    I64(i64),
+    F64(f64),
+}
+
+impl Parsed {
+    pub(crate) fn into_value(self) -> Value {
+        match self {
+            Parsed::U64(n) => Value::Number(n.into()),
+            Parsed::I64(n) => Value::Number(n.into()),
+            Parsed::F64(f) => Number::from_f64(f).map_or(Value::Null, Value::Number),
+        }
+    }
 }
 
 fn push_digit(significand: u64, digit: u8) -> Option<u64> {
@@ -23,7 +38,7 @@ fn push_digit(significand: u64, digit: u8) -> Option<u64> {
 
 impl Parser<'_> {
     /// Parses a number whose minus sign, if any, has been consumed.
-    pub(super) fn parse_number(&mut self, positive: bool) -> Result<Value> {
+    pub(crate) fn parse_number(&mut self, positive: bool) -> Result<Parsed> {
         let Some(first) = self.next() else {
             return Err(self.error(ErrorCode::EofWhileParsingValue));
         };
@@ -37,7 +52,11 @@ impl Parser<'_> {
                 while let digit @ b'0'..=b'9' = self.peek_or_null() {
                     match push_digit(significand, digit) {
                         Some(grown) => significand = grown,
-                        None => return self.parse_long_integer(positive, significand).map(float),
+                        None => {
+                            return self
+                                .parse_long_integer(positive, significand)
+                                .map(Parsed::F64);
+                        }
                     }
                     self.eat();
                 }
@@ -47,18 +66,22 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_after_integer(&mut self, positive: bool, significand: u64) -> Result<Value> {
+    fn parse_after_integer(&mut self, positive: bool, significand: u64) -> Result<Parsed> {
         match self.peek_or_null() {
-            b'.' => self.parse_decimal(positive, significand, 0).map(float),
-            b'e' | b'E' => self.parse_exponent(positive, significand, 0).map(float),
-            _ if positive => Ok(Value::Number(significand.into())),
+            b'.' => self
+                .parse_decimal(positive, significand, 0)
+                .map(Parsed::F64),
+            b'e' | b'E' => self
+                .parse_exponent(positive, significand, 0)
+                .map(Parsed::F64),
+            _ if positive => Ok(Parsed::U64(significand)),
             _ => {
                 let negated = (significand as i64).wrapping_neg();
                 // zero and magnitudes past i64::MIN have no i64 form
                 if negated >= 0 {
-                    Ok(float(-(significand as f64)))
+                    Ok(Parsed::F64(-(significand as f64)))
                 } else {
-                    Ok(Value::Number(negated.into()))
+                    Ok(Parsed::I64(negated))
                 }
             }
         }

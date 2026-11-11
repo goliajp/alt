@@ -27,8 +27,8 @@ fn truncation() {
     let mut documents: Vec<Vec<u8>> = SEEDS.iter().map(|s| s.as_bytes().to_vec()).collect();
     for _ in 0..3000 {
         let value = generate::value(&mut rng, 4);
-        documents.push(alt_json::to_vec(&value));
-        documents.push(alt_json::to_vec_pretty(&value));
+        documents.push(alt_json::to_vec(&value).unwrap());
+        documents.push(alt_json::to_vec_pretty(&value).unwrap());
     }
     for document in &documents {
         for end in 0..=document.len() {
@@ -65,7 +65,7 @@ fn single_byte_edits_of_seeds() {
     report("invalid, single byte edits of seeds", cases, Some(accepted));
 }
 
-fn mutate(rng: &mut Rng, document: &mut Vec<u8>) {
+pub fn mutate(rng: &mut Rng, document: &mut Vec<u8>) {
     let byte = if rng.chance(4) {
         rng.next() as u8
     } else {
@@ -100,9 +100,9 @@ fn random_edits(seed: u64, count: u64) -> (u64, u64) {
     while cases < count {
         let value = generate::value(&mut rng, 4);
         let original = if rng.chance(3) {
-            alt_json::to_vec_pretty(&value)
+            alt_json::to_vec_pretty(&value).unwrap()
         } else {
-            alt_json::to_vec(&value)
+            alt_json::to_vec(&value).unwrap()
         };
         for _ in 0..20 {
             let mut document = original.clone();
