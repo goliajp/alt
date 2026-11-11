@@ -1,17 +1,20 @@
-use crate::{Error, Result, checked_path, identity};
+use crate::{Error, Result, checked_path, identity_json};
+use alt_json::{FromJson, ToJson};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToJson, FromJson)]
 #[serde(rename_all = "snake_case")]
+#[json(rename_all = "snake_case")]
 pub enum EntryKind {
     File,
     Symlink,
     Directory,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToJson, FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct Node {
     pub kind: EntryKind,
     pub executable: bool,
@@ -74,28 +77,32 @@ pub trait Tree {
     fn children(&self, path: &str) -> Result<Vec<String>>;
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToJson, FromJson)]
 #[serde(rename_all = "snake_case")]
+#[json(rename_all = "snake_case")]
 pub enum InputRole {
     Source,
     Auxiliary,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToJson, FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct Entry {
     pub path: String,
     pub path_bytes_hex: String,
     pub role: InputRole,
     pub node: Node,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToJson, FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct InputRoot {
     pub path: String,
     pub purpose: String,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToJson, FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct InputPlan {
     /// Complete index-selected source file set, supplied by the VCS adapter.
     pub source: Vec<String>,
@@ -104,28 +111,32 @@ pub struct InputPlan {
     /// Exclusions are explicit and bound into the identity; bytes are not read.
     pub exclusions: Vec<String>,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToJson, FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct Environment {
     pub values: BTreeMap<String, String>,
     pub complete: bool,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToJson, FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct ToolIdentity {
     pub name: String,
     pub version: String,
     pub binary_blake3: Option<String>,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToJson, FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct ExternalDependency {
     pub provider: String,
     pub version: Option<String>,
     pub purpose: String,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToJson, FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct Context {
     pub commands: Vec<Vec<String>>,
     pub cwd: String,
@@ -133,6 +144,7 @@ pub struct Context {
     pub tools: Vec<ToolIdentity>,
     pub external: Vec<ExternalDependency>,
     /// Immutable acceptance definition; this is part of the input identity.
+    #[json(with = "crate::serde_value")]
     pub validation: serde_json::Value,
 }
 impl Context {
@@ -165,8 +177,9 @@ impl Context {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToJson, FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct Manifest {
     pub schema_version: u32,
     pub hash_algorithm: String,
@@ -177,7 +190,7 @@ pub struct Manifest {
 impl Manifest {
     pub fn id(&self) -> Result<String> {
         self.validate()?;
-        identity("manifest", self)
+        identity_json("manifest", self)
     }
     pub fn validate(&self) -> Result<()> {
         if self.schema_version != 1 || self.hash_algorithm != "blake3" {

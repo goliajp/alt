@@ -4,6 +4,7 @@ mod filesystem;
 mod manifest;
 mod path;
 mod platform;
+mod serde_value;
 
 pub use filesystem::Root;
 pub use manifest::Tree;
@@ -18,6 +19,7 @@ pub use platform::check_execution_platform;
 pub enum Error {
     Io(std::io::Error),
     Json(serde_json::Error),
+    Encoding(alt_json::Error),
     Path {
         reason: &'static str,
         bytes_hex: String,
@@ -32,6 +34,7 @@ impl std::fmt::Display for Error {
         match self {
             Self::Io(e) => write!(f, "input I/O: {e}"),
             Self::Json(e) => write!(f, "input encoding: {e}"),
+            Self::Encoding(e) => write!(f, "input encoding: {e}"),
             Self::Path { reason, bytes_hex } => {
                 write!(f, "unsupported input path ({reason}); bytes={bytes_hex}")
             }
@@ -47,6 +50,7 @@ impl std::error::Error for Error {
         match self {
             Self::Io(e) => Some(e),
             Self::Json(e) => Some(e),
+            Self::Encoding(e) => Some(e),
             _ => None,
         }
     }
@@ -61,6 +65,11 @@ impl From<std::io::Error> for Error {
 impl From<serde_json::Error> for Error {
     fn from(e: serde_json::Error) -> Self {
         Self::Json(e)
+    }
+}
+impl From<alt_json::Error> for Error {
+    fn from(e: alt_json::Error) -> Self {
+        Self::Encoding(e)
     }
 }
 pub type Result<T> = std::result::Result<T, Error>;
@@ -90,12 +99,23 @@ pub fn identity<T: serde::Serialize>(domain: &str, value: &T) -> Result<String> 
         sorted(value)
     }
     let bytes = serde_json::to_vec(&sorted_value(serde_json::to_value(value)?))?;
+    Ok(digest(domain, &bytes))
+}
+
+/// [`identity`] for types written with alt-json; both give the same result
+/// for the same value. A tree has its object keys sorted at every level.
+pub fn identity_json<T: alt_json::ToJson>(domain: &str, value: &T) -> Result<String> {
+    let bytes = alt_json::to_vec(&alt_json::to_value(value)?)?;
+    Ok(digest(domain, &bytes))
+}
+
+fn digest(domain: &str, bytes: &[u8]) -> String {
     let mut hash = alt_hash::blake3::Hasher::new();
     hash.update(b"alt-input-v1\0");
     hash.update(domain.as_bytes());
     hash.update(b"\0");
-    hash.update(&bytes);
-    Ok(hash.finalize().to_hex().to_string())
+    hash.update(bytes);
+    hash.finalize().to_hex().to_string()
 }
 
 #[cfg(test)]
