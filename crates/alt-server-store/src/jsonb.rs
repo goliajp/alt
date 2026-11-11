@@ -7,6 +7,23 @@ use postgres::types::{FromSql, IsNull, ToSql, Type, accepts, to_sql_checked};
 
 type Failure = Box<dyn std::error::Error + Sync + Send>;
 
+/// A `json` or `jsonb` parameter that is already JSON text, sent as it is.
+#[derive(Debug)]
+pub(crate) struct JsonText<'a>(pub &'a [u8]);
+
+impl ToSql for JsonText<'_> {
+    fn to_sql(&self, ty: &Type, out: &mut BytesMut) -> Result<IsNull, Failure> {
+        if *ty == Type::JSONB {
+            out.extend_from_slice(&[JSONB_VERSION]);
+        }
+        out.extend_from_slice(self.0);
+        Ok(IsNull::No)
+    }
+
+    accepts!(JSON, JSONB);
+    to_sql_checked!();
+}
+
 /// A `json` or `jsonb` parameter or column.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Jsonb(pub Value);

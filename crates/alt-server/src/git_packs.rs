@@ -94,7 +94,10 @@ pub(crate) fn receive(
             bytes: Vec::new(),
         });
     }
-    let mut replay = std::io::Cursor::new([&probe[..filled], &rest[..more]].concat()).chain(source);
+    // the commands are read a few bytes at a time and the body is a file
+    let mut replay = std::io::BufReader::new(
+        std::io::Cursor::new([&probe[..filled], &rest[..more]].concat()).chain(source),
+    );
     let source: &mut dyn Read = &mut replay;
     let head = alt_wire::push::parse_push_request_head_bounded(
         &mut (&mut *source).take(limits.request_bytes as u64),

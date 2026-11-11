@@ -63,17 +63,23 @@ impl ReceiptBody {
     /// trust are adapters' responsibilities; syntactic validation is not proof.
     pub fn signing_bytes(&self, limits: Limits) -> Result<Vec<u8>> {
         self.validate(limits)?;
-        let mut normalized = self.clone();
-        normalized
-            .publication
-            .refs
-            .sort_by(|a, b| a.name.cmp(&b.name));
-        normalized
-            .publication
-            .record_roots
-            .sort_by(|a, b| (a.kind.tag(), &a.id).cmp(&(b.kind.tag(), &b.id)));
+        self.signing_bytes_of_validated()
+    }
+    /// The signed bytes of a body the caller has just built from a publication it
+    /// validated and from that publication's digest. Nothing is checked here.
+    pub fn signing_bytes_of_validated(&self) -> Result<Vec<u8>> {
         let mut bytes = b"alt-receipt-v1\0".to_vec();
-        alt_json::to_writer(&mut bytes, &normalized).map_err(|e| Error::Json(e.to_string()))?;
+        let written = match self.publication.normalized() {
+            std::borrow::Cow::Borrowed(_) => alt_json::to_writer(&mut bytes, self),
+            std::borrow::Cow::Owned(publication) => alt_json::to_writer(
+                &mut bytes,
+                &Self {
+                    publication,
+                    ..self.clone()
+                },
+            ),
+        };
+        written.map_err(|e| Error::Json(e.to_string()))?;
         Ok(bytes)
     }
 }
