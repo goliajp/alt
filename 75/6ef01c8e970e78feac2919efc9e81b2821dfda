@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: ci
+summary: build bundles on the runner's own image store
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/operator/maintenance.rs
+touched: self-hosted/README.md
+touched: self-hosted/ci/selfhosted-image.yml
