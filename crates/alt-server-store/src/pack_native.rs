@@ -113,17 +113,33 @@ impl Drop for Materializing<'_> {
 /// the objects handed over are not a closed, well-formed set
 pub(crate) const INVALID_SEGMENT: &str = "native Git objects do not form a valid segment";
 
+/// the segment written did not return an object as it was handed over
+pub(crate) const UNREADABLE_SEGMENT: &str = "written pack segment does not read back";
+
 fn invalid(error: alt_pack_segment::Error) -> Error {
     match error {
         alt_pack_segment::Error::Io(error) => Error::Io(error),
+        alt_pack_segment::Error::Corrupt(alt_pack_segment::UNREADABLE) => {
+            Error::Integrity(UNREADABLE_SEGMENT)
+        }
         _ => Error::Integrity(INVALID_SEGMENT),
     }
 }
 
-/// Starts a segment of `objects` Git objects in the byte volume at `root`. The file
-/// is written as they are added; the row that makes it live is the caller's to insert.
+impl crate::ByteStore {
+    /// Compresses the Git objects written into new pack segments with `compress`
+    /// instead of the built-in compressor. A segment is published only after every
+    /// object has been read back from it, whatever wrote the streams.
+    pub fn packing_with(mut self, compress: alt_pack_segment::Compress) -> Self {
+        self.pack_compress = Some(compress);
+        self
+    }
+}
+
+/// Starts a segment of `objects` Git objects in the byte volume. The file is
+/// written as they are added; the row that makes it live is the caller's to insert.
 pub(crate) fn materialize_at<'a>(
-    root: &std::path::Path,
+    bytes: &crate::ByteStore,
     repository: &str,
     existing: &'a SegmentSet,
     objects: u64,
@@ -132,9 +148,12 @@ pub(crate) fn materialize_at<'a>(
     let mut nonce = [0u8; 16];
     alt_os::random::fill(&mut nonce);
     let id: String = nonce.iter().map(|byte| format!("{byte:02x}")).collect();
+    let root = bytes.root();
     crate::packs::pack_directory_at(root, repository)?;
     let path = crate::packs::segment_file(root, repository, &id)?;
+    // read as well: the builder reads back what it wrote
     let file = std::fs::OpenOptions::new()
+        .read(true)
         .write(true)
         .create_new(true)
         .mode(0o600)
@@ -144,7 +163,11 @@ pub(crate) fn materialize_at<'a>(
         id,
         path,
     };
-    writing.builder = Some(Builder::new(file, existing, objects).map_err(invalid)?);
+    let builder = match bytes.pack_compress {
+        Some(compress) => Builder::compressing(file, existing, objects, compress),
+        None => Builder::new(file, existing, objects),
+    };
+    writing.builder = Some(builder.map_err(invalid)?);
     Ok(writing)
 }
 
@@ -155,7 +178,7 @@ impl Store {
         existing: &'a SegmentSet,
         objects: u64,
     ) -> Result<Materializing<'a>> {
-        materialize_at(self.bytes().root(), repository, existing, objects)
+        materialize_at(&self.bytes, repository, existing, objects)
     }
 
     /// the live segments of a repository as of now, for a caller that has yet to

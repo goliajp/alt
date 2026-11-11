@@ -1,7 +1,7 @@
 //! Git smart HTTP translation. Ref/object authorization and publication remain
 //! in the same repository domain and SQL transaction as native requests.
 use crate::{Output, Route};
-use alt_server_store::{Credential, Error, Result, Store};
+use alt_server_store::{Credential, Error, RefFilter, RefScope, Result, Store};
 use alt_wire::pkt::{self, Frame};
 use std::io::{Cursor, Read};
 fn validate_command(raw: &[u8], max_lines: usize) -> Result<(String, bool)> {
@@ -121,6 +121,17 @@ fn command(
     }
 }
 
+/// The references a request's view is opened with before its body is read: a push
+/// reads every one, the fetch advertisement none, and a fetch command all of them
+/// unless there are too many to read before knowing which it asks for.
+pub(crate) fn ref_filter(route: &Route) -> RefFilter<'static> {
+    match route {
+        Route::GitAdvertise(_, false) => RefFilter::Nothing,
+        Route::GitUpload(_) => RefFilter::Bounded,
+        _ => RefFilter::All,
+    }
+}
+
 /// Runs one Git smart HTTP request for an already authenticated caller.
 pub fn execute_git(
     store: &mut Store,
@@ -135,7 +146,7 @@ pub fn execute_git(
         | Route::GitReceive(repository) => repository.clone(),
         _ => return Err(Error::Precondition("not a Git endpoint")),
     };
-    let view = store.pack_view(credential, &repository)?;
+    let view = store.pack_view_with(credential, &repository, ref_filter(&route))?;
     execute_git_with_cache(store, credential, route, protocol_v2, source, view)
 }
 
@@ -163,5 +174,30 @@ pub(crate) fn execute_git_with_cache(
         return crate::git_packs::receive(store, credential, &repository, source, view);
     }
     let command = command(source, advertisement, store.limits())?;
-    crate::git_packs::read(store.limits(), receive, &command, view)
+    // the first view authorized the caller without the references; this one checks
+    // again and reads the ones the command names together with the segments
+    let view = match (&command, view.ref_scope) {
+        (Command::Refs(request, _), RefScope::Deferred) if request.ref_prefixes.is_empty() => {
+            store.pack_view(credential, &repository)?
+        }
+        (Command::Refs(request, _), RefScope::Deferred) => store.pack_view_with(
+            credential,
+            &repository,
+            RefFilter::Prefixes(&request.ref_prefixes),
+        )?,
+        (Command::Fetch(request), RefScope::Deferred) => {
+            let wants: Vec<String> = request.wants.iter().map(ToString::to_string).collect();
+            let tags = request.include_tag;
+            store.pack_view_with(
+                credential,
+                &repository,
+                RefFilter::Tips {
+                    wants: &wants,
+                    tags,
+                },
+            )?
+        }
+        _ => view,
+    };
+    crate::git_read::read(store.limits(), receive, &command, view)
 }

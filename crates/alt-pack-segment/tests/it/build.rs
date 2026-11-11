@@ -1,7 +1,18 @@
 //! Segments written object by object, and objects read back as streams.
 use super::*;
 use alt_pack_segment::{Builder, Error, Kind, build_pack};
-use std::io::Read;
+use std::io::{Cursor, Read, Seek, SeekFrom, Write};
+
+/// a new file a builder can write and read back
+fn file(path: &Path) -> fs::File {
+    fs::File::options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path)
+        .unwrap()
+}
 
 fn id(kind: Kind, data: &[u8]) -> [u8; 20] {
     let mut hasher = alt_hash::Sha1::new();
@@ -93,11 +104,7 @@ fn built(
     existing: &SegmentSet,
 ) -> Result<(Arc<Segment>, alt_pack_segment::Built<fs::File>), Error> {
     let path = dir.join(name);
-    let mut builder = Builder::new(
-        fs::File::create(&path).unwrap(),
-        existing,
-        objects.len() as u64,
-    )?;
+    let mut builder = Builder::new(file(&path), existing, objects.len() as u64)?;
     for (kind, data) in objects {
         builder.add(*kind, data)?;
     }
@@ -262,13 +269,13 @@ fn a_build_settles_references_against_itself_and_the_segments_present() {
 
     // the declared count is exact
     let path = work.path().join("count.seg");
-    let mut builder = Builder::new(fs::File::create(&path).unwrap(), &empty, 1).unwrap();
+    let mut builder = Builder::new(file(&path), &empty, 1).unwrap();
     builder.add(Kind::Blob, &blob).unwrap();
     assert!(matches!(
         builder.add(Kind::Blob, b"more"),
         Err(Error::Format("more objects than declared"))
     ));
-    let builder = Builder::new(fs::File::create(&path).unwrap(), &empty, 2).unwrap();
+    let builder = Builder::new(file(&path), &empty, 2).unwrap();
     assert!(matches!(
         builder.finish(),
         Err(Error::Format("fewer objects than declared"))
@@ -316,4 +323,177 @@ fn objects_stored_as_deltas_stream_like_whole_ones() {
         assert_eq!(data, whole.1);
     }
     assert!(deltas > 0);
+}
+
+fn zlib(data: &[u8]) -> Vec<u8> {
+    alt_deflate::compress(data, 1, alt_deflate::Format::Zlib)
+}
+
+/// the compressors below go wrong for objects that begin like this
+const MARK: &[u8] = b"marked";
+
+fn marked(data: &[u8]) -> bool {
+    data.starts_with(MARK)
+}
+
+/// a stream that ends before its checksum
+fn cut(data: &[u8]) -> Vec<u8> {
+    let mut stream = zlib(data);
+    if marked(data) {
+        stream.truncate(stream.len() - 4);
+    }
+    stream
+}
+
+/// a stream damaged in the middle
+fn flipped(data: &[u8]) -> Vec<u8> {
+    let mut stream = zlib(data);
+    if marked(data) {
+        let middle = stream.len() / 2;
+        stream[middle] ^= 0x10;
+    }
+    stream
+}
+
+/// a sound stream of other content of the same length
+fn other(data: &[u8]) -> Vec<u8> {
+    if !marked(data) {
+        return zlib(data);
+    }
+    let mut changed = data.to_vec();
+    *changed.last_mut().unwrap() ^= 1;
+    zlib(&changed)
+}
+
+/// a sound stream of content one byte shorter
+fn shorter(data: &[u8]) -> Vec<u8> {
+    zlib(&data[..data.len() - usize::from(marked(data))])
+}
+
+/// a sound stream with a byte after its end
+fn padded(data: &[u8]) -> Vec<u8> {
+    let mut stream = zlib(data);
+    if marked(data) {
+        stream.push(0);
+    }
+    stream
+}
+
+#[test]
+fn a_build_fails_when_a_written_object_does_not_read_back() {
+    let work = alt_os::temp::tempdir().unwrap();
+    let empty = SegmentSet::default();
+    let path = work.path().join("built.seg");
+    // one object of a few bytes and one that is read back in several chunks
+    for size in [16, 300 << 10] {
+        let mut bad = MARK.to_vec();
+        bad.extend(noise(7, size));
+        let objects = [
+            (Kind::Blob, noise(1, 4096)),
+            (Kind::Blob, bad),
+            (Kind::Blob, noise(2, 100 << 10)),
+        ];
+        let compressors: [(&str, alt_pack_segment::Compress); 5] = [
+            ("cut", cut),
+            ("flipped", flipped),
+            ("other", other),
+            ("shorter", shorter),
+            ("padded", padded),
+        ];
+        for (name, compress) in compressors {
+            let mut builder = Builder::compressing(file(&path), &empty, 3, compress).unwrap();
+            for (kind, data) in &objects {
+                builder.add(*kind, data).unwrap();
+            }
+            assert!(
+                matches!(
+                    builder.finish(),
+                    Err(Error::Corrupt(alt_pack_segment::UNREADABLE))
+                ),
+                "{name} {size}"
+            );
+        }
+        // the same objects through a sound compressor
+        let mut builder = Builder::compressing(file(&path), &empty, 3, zlib).unwrap();
+        for (kind, data) in &objects {
+            builder.add(*kind, data).unwrap();
+        }
+        assert_eq!(builder.finish().unwrap().objects, 3);
+    }
+}
+
+/// storage that keeps one byte other than the one written to it
+struct Faulty {
+    inner: Cursor<Vec<u8>>,
+    at: u64,
+}
+
+impl Write for Faulty {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let position = self.inner.position();
+        let mut bytes = bytes.to_vec();
+        if (position..position + bytes.len() as u64).contains(&self.at) {
+            bytes[(self.at - position) as usize] ^= 0x40;
+        }
+        self.inner.write(&bytes)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Read for Faulty {
+    fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+        self.inner.read(output)
+    }
+}
+
+impl Seek for Faulty {
+    fn seek(&mut self, to: SeekFrom) -> std::io::Result<u64> {
+        self.inner.seek(to)
+    }
+}
+
+#[test]
+fn a_build_fails_when_the_bytes_stored_are_not_the_bytes_written() {
+    let empty = SegmentSet::default();
+    let objects = [
+        (Kind::Blob, noise(1, 4096)),
+        (Kind::Blob, noise(2, 100 << 10)),
+        (Kind::Blob, noise(3, 4096)),
+    ];
+    // the segment follows whatever the output already holds
+    let start = 7;
+    let build = |at: u64| {
+        let mut inner = Cursor::new(vec![0xee; start]);
+        inner.seek(SeekFrom::End(0)).unwrap();
+        let mut builder = Builder::new(Faulty { inner, at }, &empty, 3).unwrap();
+        for (kind, data) in &objects {
+            builder.add(*kind, data).unwrap();
+        }
+        builder.finish()
+    };
+    let built = build(u64::MAX).unwrap();
+    let whole = built.out.inner.into_inner();
+    assert_eq!(whole.len() as u64, start as u64 + built.bytes);
+    let path = alt_os::temp::tempdir().unwrap();
+    fs::write(path.path().join("built.seg"), &whole[start..]).unwrap();
+    let set = SegmentSet::new(vec![Arc::new(
+        Segment::open(&path.path().join("built.seg")).unwrap(),
+    )]);
+    // a byte of each entry in turn: its header, then somewhere in its stream
+    for (kind, data) in &objects {
+        let oid = id(*kind, data);
+        let record = set.record(&oid).unwrap().unwrap();
+        for within in [0, u64::from(record.len) / 2, u64::from(record.len) - 1] {
+            assert!(
+                matches!(
+                    build(start as u64 + record.offset + within),
+                    Err(Error::Corrupt(alt_pack_segment::UNREADABLE))
+                ),
+                "{within}"
+            );
+        }
+    }
 }

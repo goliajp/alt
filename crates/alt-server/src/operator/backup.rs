@@ -163,7 +163,7 @@ fn segment_path(segment: &alt_server_store::SnapshotPackSegment) -> String {
 /// an HTTP administrator token alone cannot export passwords or signing keys.
 /// The recipient is a public age key. Keep its private identity off the server.
 pub fn create(config: &Config, schema: u32, recipient: &str, output: &Path) -> Result<Manifest> {
-    // Historical schemas cannot record maintenance events. Their signed
+    // The older schema cannot record maintenance events. Its signed
     // completion manifest remains the authority; never migrate just to back up.
     let mut store = if schema == alt_server_store::SCHEMA_VERSION {
         Some(config.open()?)
@@ -196,6 +196,7 @@ fn create_inner(
     output: &Path,
     operation: &str,
 ) -> Result<Manifest> {
+    alt_server_store::check_backup_schema(schema).map_err(Error::Config)?;
     config.check_volume()?;
     if !recipient.starts_with("age1")
         || recipient.len() > 128
@@ -360,12 +361,10 @@ pub fn verify(
         .verify_strict(&encoded, &Signature::from_bytes(&signature))
         .map_err(|_| Error::Config("backup signature does not match trusted receipt key"))?;
     let manifest = signed.manifest;
-    if manifest.format != 1
-        || manifest.kind != "disaster_recovery"
-        || !(1..=alt_server_store::SCHEMA_VERSION).contains(&manifest.catalog.schema)
-    {
-        return Err(Error::Config("unsupported backup format/schema"));
+    if manifest.format != 1 || manifest.kind != "disaster_recovery" {
+        return Err(Error::Config("unsupported backup format"));
     }
+    alt_server_store::check_backup_schema(manifest.catalog.schema).map_err(Error::Config)?;
     let mut expected: std::collections::BTreeSet<String> =
         ["database.dump", "receipt.key", "config.json"]
             .map(String::from)

@@ -1,11 +1,10 @@
-//! Git smart HTTP over verified pack segments: a push is verified once and stored as one
-//! immutable segment published with its refs; reads resend stored bytes.
+//! Git smart HTTP pushes over verified pack segments: a push is verified once and stored
+//! as one immutable segment published with its refs.
 
-use crate::{Output, git::Command};
-use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
-use alt_pack_segment::{Kind, Limits, Oid, Segment, SegmentSet, ingest};
+use crate::Output;
+use alt_git_codec::{HashAlgo, ObjectId};
+use alt_pack_segment::{Limits, Oid, Segment, SegmentSet, ingest};
 use alt_remote_protocol::{Manifest, ObjectFormat, Publication, RefUpdate, RequestKey, VERSION};
-use alt_repository_service::{Node, parse_node};
 use alt_server_store::{Credential, Error, NewSegment, PackView, Result, Store};
 use alt_wire::pkt;
 use std::{
@@ -15,17 +14,15 @@ use std::{
     sync::Arc,
 };
 
-const UPLOAD_RESULT: &str = "application/x-git-upload-pack-result";
-
-fn raw(oid: ObjectId) -> Oid {
+pub(crate) fn raw(oid: ObjectId) -> Oid {
     oid.as_bytes().try_into().expect("sha1 object id")
 }
 
-fn id(oid: &Oid) -> ObjectId {
+pub(crate) fn id(oid: &Oid) -> ObjectId {
     ObjectId::from_bytes(HashAlgo::Sha1, oid).expect("sha1 object id")
 }
 
-fn segment_error(error: alt_pack_segment::Error) -> Error {
+pub(crate) fn segment_error(error: alt_pack_segment::Error) -> Error {
     use alt_pack_segment::Error as E;
     match error {
         E::Io(error) => Error::Io(error),
@@ -97,7 +94,10 @@ pub(crate) fn receive(
             bytes: Vec::new(),
         });
     }
-    let mut replay = std::io::Cursor::new([&probe[..filled], &rest[..more]].concat()).chain(source);
+    // the commands are read a few bytes at a time and the body is a file
+    let mut replay = std::io::BufReader::new(
+        std::io::Cursor::new([&probe[..filled], &rest[..more]].concat()).chain(source),
+    );
     let source: &mut dyn Read = &mut replay;
     let head = alt_wire::push::parse_push_request_head_bounded(
         &mut (&mut *source).take(limits.request_bytes as u64),
@@ -300,7 +300,7 @@ fn publish(
     for update in &head.updates {
         if update.old != update.new {
             changes.push(update);
-        } else if view.refs.get(&update.name).copied() != update.old {
+        } else if view.refs.get(&update.name) != update.old {
             return Err(Error::Precondition("reference changed since it was read"));
         }
     }
@@ -434,177 +434,4 @@ fn publish(
         store.adopt_segment(repository, &id, segment)?;
     }
     Ok(Some(key))
-}
-
-fn peel(set: &SegmentSet, mut oid: Oid, remaining: &mut usize) -> Result<Option<Oid>> {
-    let mut peeled = None;
-    while set.kind(&oid).map_err(segment_error)? == Some(Kind::Tag) {
-        *remaining = remaining
-            .checked_sub(1)
-            .ok_or(Error::Limit("tag peel walk"))?;
-        let (_, data) = set.read(&oid).map_err(segment_error)?;
-        let Node::Tag { target, .. } = parse_node(ObjectKind::Tag, &data, HashAlgo::Sha1)? else {
-            return Err(Error::Integrity("tag object"));
-        };
-        oid = raw(target);
-        peeled = Some(oid);
-    }
-    Ok(peeled)
-}
-
-pub(crate) fn read(
-    limits: alt_remote_protocol::Limits,
-    receive: bool,
-    command: &Command,
-    view: PackView,
-) -> Result<Output> {
-    let bytes = |content_type, bytes| {
-        Ok(Output::Bytes {
-            content_type,
-            bytes,
-        })
-    };
-    let mut output = Vec::new();
-    if matches!(command, Command::Advertisement) {
-        if receive {
-            let refs: Vec<_> = view
-                .refs
-                .iter()
-                .map(|(name, oid)| (name.clone(), *oid))
-                .collect();
-            alt_wire::push::encode_v1_ref_advertisement(
-                &mut output,
-                &refs,
-                &[
-                    "report-status",
-                    "atomic",
-                    "delete-refs",
-                    "ofs-delta",
-                    "side-band-64k",
-                    "object-format=sha1",
-                    "agent=alt-server",
-                ],
-                HashAlgo::Sha1,
-            )?;
-            return bytes("application/x-git-receive-pack-advertisement", output);
-        }
-        pkt::write_data(&mut output, b"# service=git-upload-pack\n")?;
-        pkt::write_flush(&mut output)?;
-        for line in [
-            "version 2\n",
-            "agent=alt-server\n",
-            "ls-refs=unborn\n",
-            "fetch=wait-for-done\n",
-            "object-format=sha1\n",
-        ] {
-            pkt::write_data(&mut output, line.as_bytes())?;
-        }
-        pkt::write_flush(&mut output)?;
-        return bytes("application/x-git-upload-pack-advertisement", output);
-    }
-    let mut remaining = limits.walk_steps;
-    if let Command::Refs(request, unborn) = command {
-        let wanted = |name: &str| {
-            request.ref_prefixes.is_empty()
-                || request
-                    .ref_prefixes
-                    .iter()
-                    .any(|prefix| name.starts_with(prefix))
-        };
-        let mut refs = view.refs.clone();
-        if let Some(oid) = refs.get(&view.default_branch).copied() {
-            refs.insert("HEAD".into(), oid);
-        }
-        for (name, oid) in refs {
-            if !wanted(&name) {
-                continue;
-            }
-            let mut line = format!("{oid} {name}");
-            if request.symrefs && name == "HEAD" {
-                line.push_str(&format!(" symref-target:{}", view.default_branch));
-            }
-            if request.peel
-                && let Some(target) = peel(&view.segments, raw(oid), &mut remaining)?
-            {
-                line.push_str(&format!(" peeled:{}", id(&target)));
-            }
-            line.push('\n');
-            pkt::write_data(&mut output, line.as_bytes())?;
-        }
-        if !view.refs.contains_key(&view.default_branch) && *unborn && wanted("HEAD") {
-            pkt::write_data(
-                &mut output,
-                format!("unborn HEAD symref-target:{}\n", view.default_branch).as_bytes(),
-            )?;
-        }
-        pkt::write_flush(&mut output)?;
-        return bytes(UPLOAD_RESULT, output);
-    }
-    let Command::Fetch(request) = command else {
-        return Err(Error::Integrity("Git command dispatch"));
-    };
-    if request.wants.is_empty() {
-        return Err(Error::Integrity("empty Git wants"));
-    }
-    // as in Git's default configuration, only current ref tips can be asked for
-    let tips: HashSet<Oid> = view.refs.values().map(|oid| raw(*oid)).collect();
-    let wants: Vec<Oid> = request.wants.iter().map(|oid| raw(*oid)).collect();
-    if wants.iter().any(|oid| !tips.contains(oid)) {
-        return Err(Error::Unauthorized);
-    }
-    let set = &view.segments;
-    let haves: Vec<Oid> = request
-        .haves
-        .iter()
-        .map(|oid| raw(*oid))
-        .filter(|oid| set.commit(oid).is_some())
-        .collect();
-    if !request.done {
-        pkt::write_data(&mut output, b"acknowledgments\n")?;
-        if haves.is_empty() {
-            pkt::write_data(&mut output, b"NAK\n")?;
-        } else {
-            for oid in &haves {
-                pkt::write_data(&mut output, format!("ACK {}\n", id(oid)).as_bytes())?;
-            }
-        }
-        pkt::write_flush(&mut output)?;
-        return bytes(UPLOAD_RESULT, output);
-    }
-    let everything = haves.is_empty()
-        && !view.unreachable
-        && set.verbatim()
-        && tips.iter().all(|tip| wants.contains(tip));
-    if everything {
-        // nothing is computed per object: the stored bytes go out as they are read
-        let (pieces, checksum) = set.whole().map_err(segment_error)?;
-        return Ok(Output::WholePack(pieces, checksum));
-    }
-    let mut selection = set.select(&wants, &haves).map_err(segment_error)?;
-    if request.include_tag {
-        let chosen: HashSet<&Oid> = selection.objects().iter().collect();
-        let mut more = wants.clone();
-        for (name, oid) in &view.refs {
-            let tag = raw(*oid);
-            if name.starts_with("refs/tags/")
-                && !chosen.contains(&tag)
-                && let Some(target) = peel(set, tag, &mut remaining)?
-                && chosen.contains(&target)
-            {
-                more.push(tag);
-            }
-        }
-        if more.len() > wants.len() {
-            selection = set.select(&more, &haves).map_err(segment_error)?;
-        }
-    }
-    // the pack is framed as it is written; a large one is not kept in memory
-    let mut body = crate::git_response::Spill::new();
-    pkt::write_data(&mut body, b"packfile\n")?;
-    let mut band = crate::git_response::Band::new(&mut body);
-    set.write_selected(&selection, request.thin_pack, &mut band)
-        .map_err(segment_error)?;
-    band.finish()?;
-    pkt::write_flush(&mut body)?;
-    body.into_output(UPLOAD_RESULT)
 }

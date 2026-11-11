@@ -143,3 +143,47 @@ fn a_schema_18_instance_upgrades_in_place_and_from_its_backup() {
     assert_eq!(shape(&target.dsn), (19, 0, 0, 3, true));
     assert_eq!(target.ok(&["health"])["ready"], true);
 }
+
+#[test]
+#[ignore = "requires isolated PostgreSQL, age and real operator subprocesses; exercised by closing gate"]
+fn an_instance_older_than_schema_18_is_told_which_release_upgrades_it() {
+    let source = OperatorDb::new();
+    let (store, _, _) = prepare(&source);
+    drop(store);
+    Client::connect(&source.dsn, NoTls)
+        .unwrap()
+        .batch_execute("DELETE FROM alt_schema WHERE version>17")
+        .unwrap();
+    let next = source.path("next.json");
+    let migrated = source.run(&["migrate", "--from-schema", "17", "--output-config", &next]);
+    assert!(!migrated.status.success());
+    assert!(
+        String::from_utf8_lossy(&migrated.stderr).contains(
+            "this release upgrades from schema 18 only; upgrade an older instance to schema 18 with the previous release first"
+        ),
+        "{}",
+        String::from_utf8_lossy(&migrated.stderr)
+    );
+    assert!(!std::path::Path::new(&next).exists());
+
+    let offsite = alt_os::temp::tempdir().unwrap();
+    let (_, recipient) = encryption_key(offsite.path());
+    let backup = source.path("backup");
+    let created = source.run(&[
+        "backup",
+        "--schema",
+        "17",
+        "--recipient",
+        &recipient,
+        "--output",
+        &backup,
+    ]);
+    assert!(!created.status.success());
+    assert!(
+        String::from_utf8_lossy(&created.stderr)
+            .contains("this release backs up and restores schema 18 and 19 only"),
+        "{}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+    assert!(!std::path::Path::new(&backup).exists());
+}

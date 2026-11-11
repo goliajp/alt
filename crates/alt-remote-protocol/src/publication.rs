@@ -123,14 +123,27 @@ impl Publication {
     /// Version 1 normalizes unordered updates/roots, then encodes this closed
     /// schema as UTF-8 JSON. There are no floats, arbitrary maps, default fields
     /// or ignored extensions. Every accepted request parameter is included.
-    pub fn canonical_bytes(&self, limits: Limits) -> Result<Vec<u8>> {
-        self.validate(limits)?;
+    /// references by name and record roots by kind and id, the order every digest and
+    /// signature is taken over; a publication already in that order is not copied
+    pub(crate) fn normalized(&self) -> std::borrow::Cow<'_, Self> {
+        if self.refs.is_sorted_by(|a, b| a.name <= b.name)
+            && self
+                .record_roots
+                .is_sorted_by(|a, b| (a.kind.tag(), &a.id) <= (b.kind.tag(), &b.id))
+        {
+            return std::borrow::Cow::Borrowed(self);
+        }
         let mut normalized = self.clone();
         normalized.refs.sort_by(|a, b| a.name.cmp(&b.name));
         normalized
             .record_roots
             .sort_by(|a, b| (a.kind.tag(), &a.id).cmp(&(b.kind.tag(), &b.id)));
-        let bytes = alt_json::to_vec(&normalized).map_err(|e| Error::Json(e.to_string()))?;
+        std::borrow::Cow::Owned(normalized)
+    }
+    pub fn canonical_bytes(&self, limits: Limits) -> Result<Vec<u8>> {
+        self.validate(limits)?;
+        let bytes =
+            alt_json::to_vec(self.normalized().as_ref()).map_err(|e| Error::Json(e.to_string()))?;
         if bytes.len() > limits.request_bytes {
             return Err(Error::Limit("request bytes"));
         }

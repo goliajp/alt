@@ -33,13 +33,6 @@ fn with_shared_roles(request: &str, parent: Option<ObjectId>) -> Payload {
     p.publication.content_manifest = p.manifest.id(limits()).unwrap();
     p
 }
-fn downgrade_to_thirteen(f: &Fixture) {
-    f.client().batch_execute("ALTER TABLE alt_request_content DROP COLUMN selected_entries, DROP COLUMN chunk_bytes; DROP TABLE alt_blob_locations,alt_segments; DROP INDEX alt_pins_permanent_content; DELETE FROM alt_schema WHERE version>=14").unwrap();
-}
-fn original_requests(f: &Fixture) -> alt_json::Value {
-    f.client().query_one("SELECT jsonb_agg(jsonb_build_object('publication',publication,'manifest',manifest,'digest',digest,'result',result,'expires_at',expires_at,'reserved_bytes',reserved_bytes) ORDER BY request_id) FROM alt_requests", &[]).unwrap().get::<_, alt_server_store::Jsonb>(0).0
-}
-
 #[test]
 #[ignore = "requires isolated PostgreSQL; shared root/chunk roles and original selection boundaries"]
 fn indexed_selection_preserves_equal_bytes_in_multiple_roles_and_exact_chunks() {
@@ -156,43 +149,6 @@ fn indexed_selection_preserves_equal_bytes_in_multiple_roles_and_exact_chunks() 
             .register_content(&f.credential, key, full, &proof)
             .is_err()
     );
-}
-
-#[test]
-#[ignore = "requires isolated PostgreSQL; invalid old selections must roll back the entire schema migration"]
-fn schema_thirteen_conflicting_original_sizes_leave_no_partial_index() {
-    let mut f = Fixture::new();
-    let p = Payload::new("invalid-old-selection", None);
-    f.store
-        .begin(&f.credential, &p.publication, &p.manifest, 60_000)
-        .unwrap();
-    downgrade_to_thirteen(&f);
-    f.client()
-        .batch_execute(
-            "UPDATE alt_requests SET manifest=jsonb_set(manifest,'{entries,0,bytes}','\"1\"')",
-        )
-        .unwrap();
-    let original = original_requests(&f);
-    assert!(
-        Store::migrate(
-            f.client(),
-            f.store.bytes().clone(),
-            f.spec.clone(),
-            SigningKey::from_bytes(&f.signing_seed),
-            limits(),
-            13
-        )
-        .is_err()
-    );
-    assert_eq!(original_requests(&f), original);
-    assert_eq!(
-        f.client()
-            .query_one("SELECT max(version) FROM alt_schema", &[])
-            .unwrap()
-            .get::<_, i32>(0),
-        13
-    );
-    assert_eq!(f.client().query_one("SELECT count(*) FROM information_schema.columns WHERE table_name='alt_request_content' AND column_name IN ('selected_entries','chunk_bytes')", &[]).unwrap().get::<_,i64>(0), 0);
 }
 
 #[test]

@@ -1,32 +1,20 @@
 //! Git objects as verified pack segments: one database row per segment, refs and the
 //! segment published in one transaction, reads without any per-object row.
 
-use crate::Jsonb;
+use crate::jsonb::JsonText;
 use crate::{
     Credential, Error, Result, Store,
     store::{authorize, credential_row, instance, integer, now, snapshot, unsigned},
 };
 use alt_git_codec::{ObjectId, ObjectKind};
 use alt_pack_segment::{Kind, Segment, SegmentSet};
-use alt_remote_protocol::{Publication, Receipt, ReceiptBody, RequestState, Scope};
+use alt_remote_protocol::{Publication, Receipt, ReceiptBody};
 use alt_repository_service::{Graph, validate_publication};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     path::PathBuf,
     sync::{Arc, LazyLock, Mutex},
 };
-
-const VIEW: &str = "SELECT
- (SELECT row_to_json(i) FROM (SELECT installation_id,workspace_id,deployment_mode,runtime_generation,signing_key_id FROM alt_instance WHERE singleton) i),
- (SELECT row_to_json(c) FROM (SELECT actor_id,attribution,identity_source,expires_at,revoked FROM alt_credentials WHERE token_digest=$1) c),
- EXISTS(SELECT 1 FROM alt_delegations WHERE token_digest=$1),
- (SELECT row_to_json(a) FROM (SELECT disabled FROM alt_web_accounts WHERE actor_id=(SELECT actor_id FROM alt_credentials WHERE token_digest=$1)) a),
- (SELECT row_to_json(s) FROM (SELECT s.account_generation,a.generation,s.expires_at FROM alt_web_sessions s JOIN alt_web_accounts a ON a.actor_id=s.actor_id WHERE s.token_digest=$1) s),
- (SELECT row_to_json(g) FROM (SELECT can_read,publish_records,grants FROM alt_grants WHERE repository=$2 AND actor_id=(SELECT actor_id FROM alt_credentials WHERE token_digest=$1)) g),
- (SELECT row_to_json(r) FROM (SELECT recovery_epoch,object_format,default_branch,pack_unreachable,writes_enabled AND portable_freeze IS NULL AND portable_import IS NULL AS writable FROM alt_repositories WHERE id=$2) r),
- (SELECT coalesce(json_agg(json_build_array(name,oid) ORDER BY name),'[]'::json) FROM alt_refs WHERE repository=$2),
- (SELECT coalesce(json_agg(json_build_array(segment_id,inline IS NOT NULL) ORDER BY sequence),'[]'::json) FROM alt_pack_segments WHERE repository=$2 AND state='live'),
- floor(extract(epoch FROM clock_timestamp())*1000)::bigint";
 
 /// segments up to this size are stored with their row instead of being flushed to disk
 pub const INLINE_SEGMENT_BYTES: usize = 65536;
@@ -37,19 +25,6 @@ static OPEN: LazyLock<Mutex<HashMap<PathBuf, Arc<Segment>>>> = LazyLock::new(Def
 /// drops the shared mapping of a segment whose file is about to be deleted
 pub(crate) fn forget_segment(path: &std::path::Path) {
     OPEN.lock().unwrap().remove(path);
-}
-
-pub struct PackView {
-    pub scope: Scope,
-    pub refs: BTreeMap<String, ObjectId>,
-    pub default_branch: String,
-    pub segments: SegmentSet,
-    /// some stored objects may be unreachable from the refs
-    pub unreachable: bool,
-    pub actor_id: String,
-    pub attribution: alt_remote_protocol::Attribution,
-    /// writes are enabled and the caller holds some ref-changing grant
-    pub writable: bool,
 }
 
 pub struct NewSegment<'a> {
@@ -210,6 +185,33 @@ pub(crate) fn insert_segment(
     Ok(())
 }
 
+/// The audit and outbox event of a committed publication and the stored state of its
+/// request. Both hold the whole receipt, which is written once and placed in each.
+pub(crate) fn committed_documents(receipt: &Receipt) -> Result<(Vec<u8>, Vec<u8>)> {
+    let receipt = alt_json::to_vec(receipt)?;
+    let around = |open: &[u8]| [open, receipt.as_slice(), b"}"].concat();
+    Ok((
+        around(br#"{"kind":"publication_committed","receipt":"#),
+        around(br#"{"state":"committed","receipt":"#),
+    ))
+}
+
+/// the audit record of a committed publication and its outbox event: one document,
+/// sent once and stored in both tables
+pub(crate) fn record_committed(
+    tx: &mut crate::database::Transaction<'_>,
+    repository: &str,
+    sequence: u64,
+    actor: &str,
+    event: &[u8],
+) -> Result<()> {
+    tx.execute(
+        "WITH audit AS (INSERT INTO alt_audit(repository,sequence,actor_id,event) VALUES($1,$2,$3,$4::jsonb)) INSERT INTO alt_outbox(repository,sequence,event) VALUES($1,$2,$4::jsonb)",
+        &[&repository, &integer(sequence)?, &actor, &JsonText(event)],
+    )?;
+    Ok(())
+}
+
 impl Store {
     /// A Git object of the repository, read from its segments. Every published Git
     /// object lives there, whichever protocol brought it in.
@@ -298,181 +300,6 @@ impl Store {
         Ok(SegmentSet::new(segments))
     }
 
-    /// authenticates a token and opens the repository view in the same transaction
-    pub fn git_open(&mut self, token: &str, repository: &str) -> Result<(Credential, PackView)> {
-        if token.len() != 69 || !token.starts_with("alt1_") {
-            return Err(Error::Unauthorized);
-        }
-        let credential = Credential {
-            digest: crate::store::token_digest(token),
-        };
-        let view = self.pack_view(&credential, repository)?;
-        Ok((credential, view))
-    }
-
-    /// refs and live segments as of one instant, for a caller allowed to read the repository
-    pub fn pack_view(&mut self, credential: &Credential, repository: &str) -> Result<PackView> {
-        match self.pack_view_once(credential, repository) {
-            // a merge retired segments between the list being read and the files
-            // being opened, and their time on disk ran out: the new list has none of them
-            Err(Error::Integrity("pack segment unavailable")) => {
-                self.pack_view_once(credential, repository)
-            }
-            view => view,
-        }
-    }
-
-    fn pack_view_once(&mut self, credential: &Credential, repository: &str) -> Result<PackView> {
-        if self.spec.deployment_mode == alt_remote_protocol::DeploymentMode::SelfHosted
-            && let Some(view) = self.pack_view_statement(credential, repository)?
-        {
-            return Ok(view);
-        }
-        self.pack_view_locked(credential, repository)
-    }
-
-    /// The same decision as `pack_view_locked` from one statement and therefore one
-    /// snapshot, without row locks. Delegated credentials return None and take the
-    /// transactional path, which owns the delegation rules.
-    fn pack_view_statement(
-        &mut self,
-        credential: &Credential,
-        repository: &str,
-    ) -> Result<Option<PackView>> {
-        use alt_json::Value;
-        let row = self
-            .client
-            .query_one(VIEW, &[&credential.digest, &repository])?;
-        let field = |index: usize| row.get::<_, Option<Jsonb>>(index).map(|json| json.0);
-        let text =
-            |value: &Value, key: &str| value.get(key).and_then(Value::as_str).map(str::to_owned);
-        let number = |value: &Value, key: &str| value.get(key).and_then(Value::as_i64);
-        let flag = |value: &Value, key: &str| value.get(key).and_then(Value::as_bool);
-        let instance = field(0).ok_or(Error::Precondition("instance not initialized"))?;
-        if text(&instance, "installation_id").as_deref() != Some(self.spec.installation_id.as_str())
-            || text(&instance, "workspace_id").as_deref() != Some(self.spec.workspace_id.as_str())
-            || text(&instance, "deployment_mode").as_deref() != Some("self_hosted")
-            || number(&instance, "runtime_generation")
-                != Some(integer(self.spec.runtime_generation)?)
-            || text(&instance, "signing_key_id").as_deref()
-                != Some(
-                    alt_hash::blake3::hash(self.signing_key.verifying_key().as_bytes())
-                        .to_hex()
-                        .as_str(),
-                )
-        {
-            return Err(Error::Precondition(
-                "instance identity, mode, generation or signing key",
-            ));
-        }
-        if row.get::<_, bool>(2) {
-            return Ok(None);
-        }
-        let time: i64 = row.get(9);
-        let credential_row = field(1).ok_or(Error::Unauthorized)?;
-        let attribution = credential_row
-            .get("attribution")
-            .cloned()
-            .unwrap_or(Value::Null);
-        if text(&credential_row, "identity_source").as_deref() != Some("self_hosted")
-            || flag(&credential_row, "revoked") != Some(false)
-            || number(&credential_row, "expires_at").is_none_or(|expires| expires <= time)
-            || attribution.get("kind").and_then(Value::as_str) == Some("agent")
-        {
-            return Err(Error::Unauthorized);
-        }
-        if field(3).is_some_and(|account| flag(&account, "disabled") != Some(false)) {
-            return Err(Error::Unauthorized);
-        }
-        if let Some(session) = field(4)
-            && (number(&session, "account_generation") != number(&session, "generation")
-                || number(&session, "expires_at").is_none_or(|expires| expires <= time))
-        {
-            return Err(Error::Unauthorized);
-        }
-        crate::telemetry::authenticated_as(&attribution);
-        let repository_row = field(6).ok_or(Error::Unauthorized)?;
-        if text(&repository_row, "object_format").as_deref() != Some("sha1") {
-            return Err(Error::Precondition("unsupported repository object format"));
-        }
-        let grant = field(5).ok_or(Error::Unauthorized)?;
-        // administrators do not get implicit access to repository contents
-        if flag(&grant, "can_read") != Some(true) {
-            return Err(Error::Unauthorized);
-        }
-        let grants: Vec<alt_repository_service::Grant> =
-            alt_json::from_value(grant.get("grants").cloned().unwrap_or(Value::Null))?;
-        let mut refs = BTreeMap::new();
-        for pair in field(7)
-            .and_then(|value| value.as_array().cloned())
-            .unwrap_or_default()
-        {
-            let (Some(name), Some(oid)) = (
-                pair.get(0).and_then(Value::as_str),
-                pair.get(1).and_then(Value::as_str),
-            ) else {
-                return Err(Error::Integrity("stored reference"));
-            };
-            refs.insert(
-                name.to_owned(),
-                oid.parse()
-                    .map_err(|_| Error::Integrity("stored reference object id"))?,
-            );
-        }
-        let ids: Vec<(String, bool)> = alt_json::from_value(field(8).unwrap_or(Value::Null))?;
-        Ok(Some(PackView {
-            scope: Scope {
-                installation_id: self.spec.installation_id.clone(),
-                repository_instance_id: repository.into(),
-                recovery_epoch: unsigned(
-                    number(&repository_row, "recovery_epoch")
-                        .ok_or(Error::Integrity("repository epoch"))?,
-                )?,
-            },
-            refs,
-            default_branch: text(&repository_row, "default_branch")
-                .ok_or(Error::Integrity("default branch"))?,
-            unreachable: flag(&repository_row, "pack_unreachable") == Some(true),
-            writable: flag(&repository_row, "writable") == Some(true)
-                && grants
-                    .iter()
-                    .any(|grant| grant.create || grant.update || grant.delete),
-            actor_id: text(&credential_row, "actor_id")
-                .ok_or(Error::Integrity("credential actor"))?,
-            attribution: alt_json::from_value(attribution)?,
-            segments: self.open_segments(repository, &ids)?,
-        }))
-    }
-
-    fn pack_view_locked(&mut self, credential: &Credential, repository: &str) -> Result<PackView> {
-        let mut tx = self.client.transaction()?;
-        // nothing durable is written here; row locks alone need no synchronous flush
-        tx.execute("SET LOCAL synchronous_commit=off", &[])?;
-        instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = snapshot(&mut tx, &self.spec, repository)?;
-        let auth = authorize(&mut tx, &self.spec, credential, &current)?;
-        let row = tx.query_one(
-            "SELECT default_branch,pack_unreachable FROM alt_repositories WHERE id=$1",
-            &[&repository],
-        )?;
-        let ids = Self::live_segment_ids(&mut tx, repository)?;
-        tx.commit()?;
-        Ok(PackView {
-            scope: current.scope,
-            refs: current.refs,
-            default_branch: row.get(0),
-            unreachable: row.get(1),
-            writable: current.writes_enabled
-                && auth
-                    .grants
-                    .iter()
-                    .any(|grant| grant.create || grant.update || grant.delete),
-            actor_id: auth.actor_id,
-            attribution: auth.attribution,
-            segments: self.open_segments(repository, &ids)?,
-        })
-    }
-
     /// Publishes ref updates, and the segment that carries their new objects, in one
     /// transaction. The segment file must already be durable under its final name.
     pub fn pack_publish(
@@ -490,30 +317,7 @@ impl Store {
         let time = now(&mut tx)?;
         let validated =
             validate_publication(publication, &current, &auth, graph, self.limits, time)?;
-        let mut names = Vec::new();
-        let mut oids = Vec::new();
-        let mut deleted = Vec::new();
-        for update in &validated.updates {
-            match update.new {
-                Some(oid) => {
-                    names.push(update.name.as_str());
-                    oids.push(oid.to_string());
-                }
-                None => deleted.push(update.name.as_str()),
-            }
-        }
-        if !names.is_empty() {
-            tx.execute(
-                "INSERT INTO alt_refs(repository,name,oid) SELECT $1,name,oid FROM unnest($2::text[],$3::text[]) AS refs(name,oid) ON CONFLICT(repository,name) DO UPDATE SET oid=excluded.oid",
-                &[repository, &names, &oids],
-            )?;
-        }
-        if !deleted.is_empty() {
-            tx.execute(
-                "DELETE FROM alt_refs WHERE repository=$1 AND name=ANY($2)",
-                &[repository, &deleted],
-            )?;
-        }
+        crate::publication::replace_refs(&mut tx, repository, &validated.updates)?;
         let unreachable = publication
             .refs
             .iter()
@@ -542,7 +346,7 @@ impl Store {
             policy_version: validated.policy_version,
             committed_at_unix_ms: now(&mut tx)?,
         };
-        let signature = self.signing_key.sign(&body.signing_bytes(self.limits)?);
+        let signature = self.signing_key.sign(&body.signing_bytes_of_validated()?);
         let receipt = Receipt {
             body,
             signing_key_id: alt_hash::blake3::hash(self.signing_key.verifying_key().as_bytes())
@@ -554,18 +358,8 @@ impl Store {
                 .map(|byte| format!("{byte:02x}"))
                 .collect(),
         };
-        let event = Jsonb(alt_json::json!({"kind":"publication_committed","receipt":receipt}));
-        tx.execute(
-            "INSERT INTO alt_audit(repository,sequence,actor_id,event) VALUES($1,$2,$3,$4)",
-            &[repository, &integer(sequence)?, &auth.actor_id, &event],
-        )?;
-        tx.execute(
-            "INSERT INTO alt_outbox(repository,sequence,event) VALUES($1,$2,$3)",
-            &[repository, &integer(sequence)?, &event],
-        )?;
-        let result = RequestState::Committed {
-            receipt: Box::new(receipt.clone()),
-        };
+        let (event, result) = committed_documents(&receipt)?;
+        record_committed(&mut tx, repository, sequence, &auth.actor_id, &event)?;
         tx.execute(
             "INSERT INTO alt_requests(repository,epoch,actor_id,request_id,digest,publication,manifest,state,result,expires_at,reserved_bytes) VALUES($1,$2,$3,$4,$5,$6,$7,'committed',$8,0,0)",
             &[
@@ -574,9 +368,9 @@ impl Store {
                 &publication.key.actor_id,
                 &publication.key.request_id,
                 &validated.digest,
-                &Jsonb::from(&publication)?,
-                &Jsonb(alt_json::json!({"pack_segment": segment.as_ref().map(|segment| segment.id)})),
-                &Jsonb::from(&result)?,
+                &JsonText(&alt_json::to_vec(publication)?),
+                &JsonText(&alt_json::to_vec(&alt_json::json!({"pack_segment": segment.as_ref().map(|segment| segment.id)}))?),
+                &JsonText(&result),
             ],
         )?;
         // lock waits can outlive a lease checked on entry
@@ -584,5 +378,72 @@ impl Store {
         crate::cloud_quota::check_publication(&mut tx, &self.spec)?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)?;
         Ok(receipt)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alt_remote_protocol::{
+        ActorKind, Attribution, ObjectFormat, RefUpdate, RequestKey, RequestState, Scope, VERSION,
+    };
+
+    #[test]
+    fn committed_documents_read_as_the_event_and_the_request_state() {
+        let receipt = Receipt {
+            body: ReceiptBody {
+                publication: Publication {
+                    protocol_version: VERSION,
+                    key: RequestKey {
+                        scope: Scope {
+                            installation_id: "installation".into(),
+                            repository_instance_id: "repository".into(),
+                            recovery_epoch: 1,
+                        },
+                        actor_id: "owner".into(),
+                        request_id: "git-00".into(),
+                    },
+                    attribution: Attribution {
+                        kind: ActorKind::Human,
+                        on_behalf_of: None,
+                        delegation_id: None,
+                        agent_session: None,
+                    },
+                    object_format: ObjectFormat::Sha1,
+                    refs: vec![RefUpdate {
+                        name: "refs/heads/\"quoted\"".into(),
+                        expected: None,
+                        new: Some("1".repeat(40)),
+                        force: false,
+                    }],
+                    record_roots: vec![],
+                    content_manifest: "0".repeat(64),
+                },
+                request_digest: "2".repeat(64),
+                transaction_sequence: 7,
+                policy_version: 1,
+                committed_at_unix_ms: 1_700_000_000_000,
+            },
+            signing_key_id: "3".repeat(64),
+            signature: "4".repeat(128),
+        };
+        let (event, result) = committed_documents(&receipt).unwrap();
+        assert_eq!(
+            alt_json::parse(&event).unwrap(),
+            alt_json::json!({"kind":"publication_committed","receipt":receipt})
+        );
+        assert_eq!(
+            alt_json::from_slice::<RequestState>(&result).unwrap(),
+            RequestState::Committed {
+                receipt: Box::new(receipt.clone())
+            }
+        );
+        assert_eq!(
+            alt_json::parse(&result).unwrap(),
+            alt_json::to_value(&RequestState::Committed {
+                receipt: Box::new(receipt)
+            })
+            .unwrap()
+        );
     }
 }

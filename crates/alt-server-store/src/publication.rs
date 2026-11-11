@@ -6,6 +6,7 @@ mod refs;
 mod source;
 
 pub(crate) use fence::{check_graph_pins, finish, worker};
+pub(crate) use refs::replace as replace_refs;
 
 use crate::database::Transaction;
 use crate::requests::{active, check_key, pin_many, request_row, upload_pin};
@@ -63,6 +64,8 @@ enum Packed {
     Ready(Option<crate::packs::Materialized>),
     /// a selected object could not be read back
     Unavailable,
+    /// the segment written did not return an object as it was handed over
+    Unreadable,
     /// the selected objects are not a closed set
     Invalid,
 }
@@ -131,7 +134,7 @@ impl Store {
             &mut tx,
             &work.key,
             "rejected",
-            &state,
+            &Jsonb::from(&state)?,
             unsigned(row.get("reserved_bytes"))?,
         )?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)?;
@@ -244,6 +247,7 @@ impl Store {
             let packed = match self.materialize_publication(work, graph, &live) {
                 Ok(segment) => Packed::Ready(segment),
                 Err(Error::Integrity(crate::pack_native::INVALID_SEGMENT)) => Packed::Invalid,
+                Err(Error::Integrity(crate::pack_native::UNREADABLE_SEGMENT)) => Packed::Unreadable,
                 Err(_) => Packed::Unavailable,
             };
             let result = self.publish_transaction(
@@ -303,8 +307,15 @@ impl Store {
             return Err(Error::Precondition(SEGMENTS_MOVED));
         }
         read_integrity?;
-        if matches!(packed, Packed::Unavailable) {
-            return Err(Error::Integrity("selected Git object unavailable"));
+        match packed {
+            Packed::Unavailable => {
+                return Err(Error::Integrity("selected Git object unavailable"));
+            }
+            // a fault of this server, not of the request: it stays as it is
+            Packed::Unreadable => {
+                return Err(Error::Integrity(crate::pack_native::UNREADABLE_SEGMENT));
+            }
+            _ => {}
         }
         let _ = worker(&mut tx, work)?;
         if row.get::<_, String>("state") != "ready" {
@@ -325,7 +336,7 @@ impl Store {
                 tx,
                 &work.key,
                 "rejected",
-                &result,
+                &Jsonb::from(&result)?,
                 unsigned(row.get("reserved_bytes"))?,
             )
         };
@@ -403,7 +414,7 @@ impl Store {
             policy_version: validated.policy_version,
             committed_at_unix_ms: now(&mut tx)?,
         };
-        let signature = self.signing_key.sign(&body.signing_bytes(self.limits)?);
+        let signature = self.signing_key.sign(&body.signing_bytes_of_validated()?);
         let receipt = Receipt {
             body,
             signing_key_id: alt_hash::blake3::hash(self.signing_key.verifying_key().as_bytes())
@@ -415,23 +426,13 @@ impl Store {
                 .map(|b| format!("{b:02x}"))
                 .collect(),
         };
-        let result = RequestState::Committed {
-            receipt: Box::new(receipt.clone()),
-        };
-        let event = Jsonb(alt_json::json!({"kind":"publication_committed","receipt":receipt}));
-        tx.execute(
-            "INSERT INTO alt_audit(repository,sequence,actor_id,event) VALUES($1,$2,$3,$4)",
-            &[repository, &integer(sequence)?, &auth.actor_id, &event],
-        )?;
-        tx.execute(
-            "INSERT INTO alt_outbox(repository,sequence,event) VALUES($1,$2,$3)",
-            &[repository, &integer(sequence)?, &event],
-        )?;
+        let (event, result) = crate::packs::committed_documents(&receipt)?;
+        crate::packs::record_committed(&mut tx, repository, sequence, &auth.actor_id, &event)?;
         finish(
             &mut tx,
             &work.key,
             "committed",
-            &result,
+            &crate::jsonb::JsonText(&result),
             unsigned(row.get("reserved_bytes"))?,
         )?;
         // With the upload pins gone, what this request uploaded and nothing retains

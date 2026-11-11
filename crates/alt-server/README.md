@@ -299,13 +299,20 @@ operation's isolated scratch directory until investigation finishes, then
 remove that exact directory. Do not expose scratch or backup directories through
 the web server.
 
-A historical schema backup requires an explicit `--schema` (supported source
-schemas: 1–18). Stop the old service, save and verify its backup, then upgrade:
+This release upgrades from schema 18 only, and backs up and restores schema 18
+and the current schema 19. A backup of a schema 18 instance requires an explicit
+`--schema 18`. Stop the old service, save and verify its backup, then upgrade:
 
 ```sh
-alt-server --config server.json migrate --from-schema 3 --output-config server-next.json
+alt-server --config server.json migrate --from-schema 18 --output-config server-next.json
 alt-server --config server-next.json health
 ```
+
+An instance at schema 17 or older is first upgraded to schema 18 with the
+previous release, the last one that carries the migrations for schemas 1–17,
+and backed up again there. This release refuses such an instance, and a backup
+taken at schema 17 or older, with a message that names this step; it changes
+nothing. A new instance is created directly at the current schema.
 
 The next config is synced before the database transaction. Repeating the same
 migration with that exact output file reconciles a committed upgrade after a
@@ -314,7 +321,7 @@ and config for diagnosis; the old binary is fenced after migration and cannot
 open the new schema. An upgrade rollback restores a backup into an isolated
 instance, rather than pointing an old binary at the upgraded database.
 
-From schema 18 or older the same transaction moves published Git objects out of
+From schema 18 the same transaction moves published Git objects out of
 the content store: objects no pack segment holds are written to a new segment
 per repository, every content-store copy of a published Git object is released,
 and each repository's stored bytes are counted again from its pack segments and
@@ -339,7 +346,7 @@ alt-server --config restored.json health
 `--source-fenced` records an operator prerequisite; a command against a new
 local database cannot fence a different machine. Restore refuses existing
 volumes/keys or a nonempty database. It checks the SQL catalog and every stored
-byte before activation, upgrades supported historical schemas, raises runtime
+byte before activation, upgrades a schema 18 backup, raises runtime
 and repository epochs, and revokes old credentials and browser sessions. It
 preserves committed receipts. An old request that was unfinished at the backup
 watermark remains **unknown**, even after GC; the source might have committed
@@ -370,11 +377,9 @@ normal credentials or create the first browser account, then revoke the short
 recovery token. Existing browser administrators can instead use the password
 recovery command above.
 
-Operator acceptance includes a real schema-3 binary, Git push before upgrade,
-clone after upgrade, encrypted backup verification and isolated restoration.
-For the ignored PostgreSQL tests, set `ALT_SERVER_TEST_OLD_BINARY` to a binary
-built from the S04 commit
-`0ad8d5abc9d7112026c2147bf50c0a6c0f7d43a3`. Hosts without Docker can select an
+Operator acceptance includes a schema 18 instance upgraded in place and
+restored from the backup taken before its upgrade, encrypted backup
+verification and isolated restoration. Hosts without Docker can select an
 isolated native PostgreSQL installation with
 `ALT_SERVER_TEST_POSTGRES_BIN=/absolute/path/to/bin`; the existing
 `scripts/with-test-postgres.sh` entrypoint then starts a private Unix-socket-only

@@ -181,8 +181,8 @@ pub struct MaintenanceSnapshot<'a> {
     locations: BTreeMap<(String, String), crate::SegmentLocation>,
 }
 impl<'a> MaintenanceSnapshot<'a> {
-    /// Supports precisely the checksummed historical layouts, so the current
-    /// operator can make an encrypted pre-upgrade backup of an older instance.
+    /// Supports the current schema and the one this release upgrades from, so
+    /// the current operator can make an encrypted pre-upgrade backup of that one.
     /// No mutations or schema changes occur here. Dropping releases the barrier.
     pub fn begin(
         client: &'a mut Client,
@@ -191,7 +191,7 @@ impl<'a> MaintenanceSnapshot<'a> {
         signing_key: &SigningKey,
         schema: u32,
     ) -> Result<Self> {
-        if !(1..=crate::SCHEMA_VERSION).contains(&schema) {
+        if !(crate::OLDEST_SCHEMA..=crate::SCHEMA_VERSION).contains(&schema) {
             return Err(Error::Precondition("unsupported snapshot schema"));
         }
         let mut tx = Transaction::uncached(client.transaction()?);
@@ -239,33 +239,29 @@ impl<'a> MaintenanceSnapshot<'a> {
             blobs.push(blob);
         }
         let mut pack_segments = Vec::new();
-        if schema >= 18 {
-            for row in tx.query("SELECT repository,segment_id,bytes FROM alt_pack_segments WHERE state='live' AND inline IS NULL ORDER BY repository,sequence", &[])? {
-                let (repository, segment): (String, String) = (row.get(0), row.get(1));
-                let expected = unsigned(row.get(2))?;
-                let mut file = std::fs::File::open(crate::packs::segment_file(bytes.root(), &repository, &segment)?)
-                    .map_err(|_| Error::Integrity("published pack segment unavailable"))?;
-                let mut hasher = alt_hash::blake3::Hasher::new();
-                let actual = std::io::copy(&mut file, &mut hasher)?;
-                if actual != expected {
-                    return Err(Error::Integrity("published pack segment size"));
-                }
-                pack_segments.push(SnapshotPackSegment { repository, segment, bytes: expected, blake3: hasher.finalize().to_hex().to_string() });
+        for row in tx.query("SELECT repository,segment_id,bytes FROM alt_pack_segments WHERE state='live' AND inline IS NULL ORDER BY repository,sequence", &[])? {
+            let (repository, segment): (String, String) = (row.get(0), row.get(1));
+            let expected = unsigned(row.get(2))?;
+            let mut file = std::fs::File::open(crate::packs::segment_file(bytes.root(), &repository, &segment)?)
+                .map_err(|_| Error::Integrity("published pack segment unavailable"))?;
+            let mut hasher = alt_hash::blake3::Hasher::new();
+            let actual = std::io::copy(&mut file, &mut hasher)?;
+            if actual != expected {
+                return Err(Error::Integrity("published pack segment size"));
             }
+            pack_segments.push(SnapshotPackSegment { repository, segment, bytes: expected, blake3: hasher.finalize().to_hex().to_string() });
         }
         let mut locations = BTreeMap::new();
-        if schema >= 16 {
-            for repository in &repositories {
-                let digests: Vec<_> = blobs
-                    .iter()
-                    .filter(|b| b.repository == repository.repository)
-                    .map(|b| b.blake3.as_str())
-                    .collect();
-                for (digest, location) in
-                    crate::segments::locations(&mut tx, &repository.repository, &digests)?
-                {
-                    locations.insert((repository.repository.clone(), digest), location);
-                }
+        for repository in &repositories {
+            let digests: Vec<_> = blobs
+                .iter()
+                .filter(|b| b.repository == repository.repository)
+                .map(|b| b.blake3.as_str())
+                .collect();
+            for (digest, location) in
+                crate::segments::locations(&mut tx, &repository.repository, &digests)?
+            {
+                locations.insert((repository.repository.clone(), digest), location);
             }
         }
         Ok(Self {
@@ -291,9 +287,6 @@ impl<'a> MaintenanceSnapshot<'a> {
         catalog: &SnapshotCatalog,
         signing_key: &SigningKey,
     ) -> Result<()> {
-        if catalog.schema < 16 {
-            return Ok(());
-        }
         let mut tx = Transaction::uncached(client.transaction()?);
         tx.query_one("SELECT pg_advisory_xact_lock(715071909111)", &[])?;
         crate::schema::check(tx.raw_mut(), catalog.schema as usize)?;

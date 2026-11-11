@@ -4,6 +4,10 @@
 //! is kept: what a build holds in memory grows with the number of objects, not with
 //! their bytes. References are settled as the objects come, in any order, and the
 //! index follows the pack when the last one is in.
+//!
+//! The objects' other copies are let go once the segment is published, so a build
+//! ends by reading every entry back from where it was written: nothing comes out of
+//! `finish` that has not been inflated and compared with what was handed over.
 
 use crate::{
     Error, FLAG_DUPLICATES, FLAG_OVERLAP, Kind, Oid, Record, SegmentSet,
@@ -12,10 +16,23 @@ use crate::{
     object_id,
     send::{entry_header, pack_header},
 };
-use std::{collections::HashMap, io::Write};
+use std::{
+    collections::HashMap,
+    io::{BufReader, Read, Seek, SeekFrom, Write},
+};
 
-pub struct Builder<'a, W: Write> {
+/// the zlib stream of one object's bytes
+pub type Compress = fn(&[u8]) -> Vec<u8>;
+
+fn deflate(data: &[u8]) -> Vec<u8> {
+    alt_deflate::compress(data, 1, alt_deflate::Format::Zlib)
+}
+
+pub struct Builder<'a, W> {
     out: W,
+    /// where the pack begins in `out`
+    start: u64,
+    compress: Compress,
     existing: &'a SegmentSet,
     pack: alt_hash::Sha1,
     written: u64,
@@ -38,13 +55,27 @@ pub struct Built<W> {
     pub flags: u32,
 }
 
-impl<'a, W: Write> Builder<'a, W> {
+impl<'a, W: Read + Write + Seek> Builder<'a, W> {
     /// A segment of exactly `objects` objects, written to `out` from its current
     /// position. `existing` are the segments already present: what the new objects
     /// refer to is looked for there and among each other.
     pub fn new(out: W, existing: &'a SegmentSet, objects: u64) -> Result<Self, Error> {
+        Self::compressing(out, existing, objects, deflate)
+    }
+
+    /// `new` with another compressor. What it returns is written as it is, and
+    /// `finish` fails unless every stream reads back as the object it was given.
+    pub fn compressing(
+        mut out: W,
+        existing: &'a SegmentSet,
+        objects: u64,
+        compress: Compress,
+    ) -> Result<Self, Error> {
+        let start = out.stream_position()?;
         let mut builder = Self {
             out,
+            start,
+            compress,
             existing,
             pack: alt_hash::Sha1::new(),
             written: 0,
@@ -89,7 +120,7 @@ impl<'a, W: Write> Builder<'a, W> {
         }
         let oid = object_id(kind, data);
         let header = entry_header(kind as u8, data.len() as u64);
-        let compressed = alt_deflate::compress(data, 1, alt_deflate::Format::Zlib);
+        let compressed = (self.compress)(data);
         let mut crc = alt_hash::Crc32::new();
         crc.update(&header);
         crc.update(&compressed);
@@ -142,9 +173,10 @@ impl<'a, W: Write> Builder<'a, W> {
         Ok(())
     }
 
-    /// Ends the pack and appends its index. Fails if the declared number of objects
-    /// did not come or one of them refers to an object neither the segment nor
-    /// `existing` holds.
+    /// Ends the pack, reads every entry back and appends the index. Fails if the
+    /// declared number of objects did not come, if one of them refers to an object
+    /// neither the segment nor `existing` holds, or if an entry does not read back as
+    /// the object it was written for.
     pub fn finish(mut self) -> Result<Built<W>, Error> {
         if self.records.len() != self.declared {
             return Err(Error::Format("fewer objects than declared"));
@@ -155,6 +187,13 @@ impl<'a, W: Write> Builder<'a, W> {
         let trailer = self.pack.finalize();
         self.out.write_all(&trailer)?;
         let pack_len = self.written + 20;
+        self.out.seek(SeekFrom::Start(self.start + 12))?;
+        // before duplicates are dropped: every entry written is read
+        crate::readback::entries(
+            &mut BufReader::with_capacity(256 << 10, &mut self.out),
+            &self.records,
+        )?;
+        self.out.seek(SeekFrom::Start(self.start + pack_len))?;
         // sorted by oid, the first occurrence wins
         self.records
             .sort_by(|a, b| a.oid.cmp(&b.oid).then(a.offset.cmp(&b.offset)));
