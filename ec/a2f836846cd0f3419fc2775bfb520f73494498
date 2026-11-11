@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: docs
+summary: describe the schema 20 upgrade and the lz4 requirement
+author-type: human
+author: doracawl
+touched: crates/alt-server/README.md
+touched: self-hosted/README.md
