@@ -10,7 +10,7 @@
 use crate::{
     Error, Result, Store,
     packs::{INLINE_SEGMENT_BYTES, NewSegment, forget_segment, insert_segment},
-    store::{integer, now, unsigned},
+    store::{instance, integer, now, unsigned},
 };
 use alt_pack_segment::{Segment, SegmentSet};
 use std::{collections::HashSet, sync::Arc, time::Duration};
@@ -116,6 +116,9 @@ impl Store {
             Arc::new(Segment::open(path).map_err(|_| Error::Integrity("merged pack segment"))?);
         let part_ids: Vec<&str> = parts.iter().map(|(id, _)| id.as_str()).collect();
         let mut tx = self.client.transaction()?;
+        // a backup holds the instance row while it copies the files of the live
+        // segments; like every write, a merge waits behind it
+        instance(&mut tx, &self.spec, &self.signing_key)?;
         // publications take this lock too, so the set of live segments stands still
         tx.query_one(
             "SELECT 1 FROM alt_repositories WHERE id=$1 FOR UPDATE",
@@ -159,6 +162,8 @@ impl Store {
     /// and files in its directory that no row knows. Returns how many files went.
     pub fn sweep_packs(&mut self, repository: &str, grace_ms: u64) -> Result<usize> {
         let mut tx = self.client.transaction()?;
+        // not while a backup is copying files that were live when it began
+        instance(&mut tx, &self.spec, &self.signing_key)?;
         tx.query_one(
             "SELECT 1 FROM alt_repositories WHERE id=$1 FOR UPDATE",
             &[&repository],
