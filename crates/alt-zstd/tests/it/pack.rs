@@ -24,6 +24,7 @@ pub fn append(pack: &mut Vec<u8>, key: &str, bytes: &[u8]) {
 }
 
 pub static CORPUS: &[u8] = include_bytes!("frames/corpus.pack");
+pub static SIZED: &[u8] = include_bytes!("frames/sized.pack");
 pub static SMALL: &[u8] = include_bytes!("frames/small.pack");
 pub static PREFIXED: &[u8] = include_bytes!("frames/prefixed.pack");
 pub static CHECKED: &[u8] = include_bytes!("frames/checked.pack");

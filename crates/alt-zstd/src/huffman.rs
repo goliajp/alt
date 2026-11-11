@@ -94,21 +94,53 @@ impl HufTable {
             return Err(Error::Corrupt);
         }
 
-        let mut start = [0usize; MAX_BITS as usize + 2];
-        let mut at = 0;
+        // symbols in the order of the table: by weight, then by value, so
+        // that the entries of one weight are filled by one loop whose
+        // every pass writes the same number of them
+        let mut next = [0usize; MAX_BITS as usize + 2];
+        let mut before = 0;
         for weight in 1..=log as usize {
-            start[weight] = at;
-            at += (rank[weight] as usize) << (weight - 1);
+            next[weight] = before;
+            before += rank[weight] as usize;
         }
+        let mut order = [0u8; 256];
         for (symbol, &weight) in weights[..=count].iter().enumerate() {
-            if weight == 0 {
-                continue;
+            if weight != 0 {
+                order[next[weight as usize]] = symbol as u8;
+                next[weight as usize] += 1;
             }
+        }
+        let mut symbols = order.iter();
+        let mut at = 0;
+        for (weight, &ranked) in rank.iter().enumerate().take(log as usize + 1).skip(1) {
             let span = 1usize << (weight - 1);
-            let entry = (log + 1 - weight as u32) as u16 | (symbol as u16) << 8;
-            let from = start[weight as usize];
-            self.entries[from..from + span].fill(entry);
-            start[weight as usize] += span;
+            let bits = (log + 1 - weight as u32) as u16;
+            let of_weight = symbols.by_ref().take(ranked as usize);
+            match span {
+                1 => {
+                    for &symbol in of_weight {
+                        self.entries[at] = bits | (symbol as u16) << 8;
+                        at += 1;
+                    }
+                }
+                2 => {
+                    for &symbol in of_weight {
+                        let entry = bits | (symbol as u16) << 8;
+                        self.entries[at..at + 2].copy_from_slice(&[entry; 2]);
+                        at += 2;
+                    }
+                }
+                _ => {
+                    for &symbol in of_weight {
+                        let entry = bits | (symbol as u16) << 8;
+                        let (quads, _) = self.entries[at..at + span].as_chunks_mut::<4>();
+                        for quad in quads {
+                            *quad = [entry; 4];
+                        }
+                        at += span;
+                    }
+                }
+            }
         }
         self.log = log;
         self.pairs_ready = false;

@@ -1,7 +1,7 @@
 //! The match finder of one frame: its tables, the prefix index and the
 //! per-block bookkeeping of repeat offsets.
 
-use super::matcher::{PROBE, SeqStore, Window, hash};
+use super::matcher::{PROBE, SeqStore, Window, hash, multiplier};
 use super::params::Params;
 use super::{dfast, fast};
 
@@ -32,15 +32,16 @@ impl Matcher<'_> {
         let step = (len >> (table_log - 1))
             .max(3)
             .max(len / data_len.max(1 << 16));
-        let drop = 64 - 8 * self.params.width;
+        let wide = multiplier(8);
+        let mix = multiplier(self.params.width);
         let mut index = window.first;
         while index + PROBE <= window.split {
             // safety: the 8 bytes at `index` lie inside the prefix
             let value = unsafe { window.prefix64(index) };
             if self.params.double {
-                self.long[hash(value, 0, 64 - self.params.long_log)] = index as u32;
+                self.long[hash(value, wide, 64 - self.params.long_log)] = index as u32;
             }
-            self.short[hash(value, drop, 64 - self.params.short_log)] = index as u32;
+            self.short[hash(value, mix, 64 - self.params.short_log)] = index as u32;
             index += step;
         }
     }

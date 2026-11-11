@@ -86,21 +86,15 @@ pub(crate) fn build(counts: &[u32; 256], limit: u32) -> Codes {
         depth[node] = depth[parent[node] as usize] + 1;
     }
 
-    // cap the lengths, then restore a complete code: each step trades one
-    // code of the longest length and one shorter code for two codes one bit
-    // longer than the latter
+    // the lightest leaf lies deepest
     let limit = limit as usize;
     let mut per_len = [0u32; MAX_BITS as usize + 1];
-    for &d in &depth[..leaves] {
-        per_len[(d as usize).min(limit)] += 1;
-    }
-    let mut filled: u32 = (1..=limit).map(|len| per_len[len] << (limit - len)).sum();
-    while filled > 1 << limit {
-        per_len[limit] -= 1;
-        let len = (1..limit).rev().find(|&len| per_len[len] != 0).unwrap();
-        per_len[len] -= 1;
-        per_len[len + 1] += 2;
-        filled -= 1;
+    if depth[0] as usize <= limit {
+        for &d in &depth[..leaves] {
+            per_len[d as usize] += 1;
+        }
+    } else {
+        limited(&weight[..leaves], &depth[..leaves], limit, &mut per_len);
     }
     let log = (1..=limit).rev().find(|&len| per_len[len] != 0).unwrap() as u32;
 
@@ -132,6 +126,70 @@ pub(crate) fn build(counts: &[u32; 256], limit: u32) -> Codes {
         }
     }
     codes
+}
+
+/// Counts, per length, the codes of a prefix code that has none longer than
+/// `limit` bits, given the leaf `weights` (ascending) and their `depth` in
+/// the unlimited tree. Codes beyond the limit are cut to it, which claims
+/// more code space than there is; the excess is paid back by lengthening
+/// codes one bit at a time, each time the one that costs the fewest bits
+/// per unit of space returned.
+fn limited(
+    weights: &[u32],
+    depth: &[u8],
+    limit: usize,
+    per_len: &mut [u32; MAX_BITS as usize + 1],
+) {
+    // lengths fall as weights rise, so the leaves of one length are
+    // adjacent; `first[len]` is the lightest of them
+    let mut first = [0usize; MAX_BITS as usize + 2];
+    for (leaf, &d) in depth.iter().enumerate().rev() {
+        let len = (d as usize).min(limit);
+        per_len[len] += 1;
+        first[len] = leaf;
+    }
+    // space in units of the longest code
+    let used: i64 = (1..=limit)
+        .map(|len| (per_len[len] as i64) << (limit - len))
+        .sum();
+    let mut excess = used - (1 << limit);
+    while excess > 0 {
+        // lengthening the lightest leaf of length `len` returns `unit`
+        let mut best: Option<(usize, i64)> = None;
+        for len in (1..limit).rev() {
+            if per_len[len] == 0 {
+                continue;
+            }
+            let unit = 1i64 << (limit - len - 1);
+            let cost = weights[first[len]] as i64;
+            let better = match best {
+                None => true,
+                // more than is owed only if nothing smaller exists
+                Some(_) if unit > excess => false,
+                Some((other, other_unit)) => {
+                    cost * other_unit < weights[first[other]] as i64 * unit
+                }
+            };
+            if better {
+                best = Some((len, unit));
+            }
+        }
+        let (len, unit) = best.unwrap();
+        if per_len[len + 1] == 0 {
+            first[len + 1] = first[len];
+        }
+        per_len[len] -= 1;
+        per_len[len + 1] += 1;
+        first[len] += 1;
+        excess -= unit;
+    }
+    // returned too much: the heaviest leaves of the longest length take
+    // the space back, one unit each
+    while excess < 0 {
+        per_len[limit] -= 1;
+        per_len[limit - 1] += 1;
+        excess += 1;
+    }
 }
 
 /// Appends the tree description for symbols `0..=max_symbol`. Returns false
@@ -243,27 +301,20 @@ pub(crate) fn encode_stream(codes: &Codes, src: &[u8], out: &mut Vec<u8>) {
     writer.finish_marked();
 }
 
-/// Appends `src` as four bitstreams behind their jump table. The four are
-/// written side by side into `scratch`, so that none waits for another.
+/// Appends `src` as four bitstreams behind their jump table.
 pub(crate) fn encode_4x(codes: &Codes, src: &[u8], scratch: &mut Vec<u8>, out: &mut Vec<u8>) {
     #[cfg(target_arch = "x86_64")]
     if crate::has_bmi2() {
-        // safety: the processor was just found to have the features
-        return unsafe { encode_4x_bmi2(codes, src, scratch, out) };
+        // safety: the processor was just found to have the features, and
+        // the caller's codes cover the literals
+        return unsafe { super::hufx::encode_4x(codes, src, out) };
     }
     encode_4x_any(codes, src, scratch, out)
 }
 
-/// The same compiled for processors with BMI2, where the variable shifts
-/// of bit writing need no fixed register.
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "bmi1,bmi2,lzcnt")]
-unsafe fn encode_4x_bmi2(codes: &Codes, src: &[u8], scratch: &mut Vec<u8>, out: &mut Vec<u8>) {
-    encode_4x_any(codes, src, scratch, out)
-}
-
-#[inline(always)]
-fn encode_4x_any(codes: &Codes, src: &[u8], scratch: &mut Vec<u8>, out: &mut Vec<u8>) {
+/// The four streams written side by side into `scratch`, so that none
+/// waits for another.
+pub(super) fn encode_4x_any(codes: &Codes, src: &[u8], scratch: &mut Vec<u8>, out: &mut Vec<u8>) {
     const GROUP: usize = 4;
     let segment = src.len().div_ceil(4);
     let parts: [&[u8]; 4] = std::array::from_fn(|i| {

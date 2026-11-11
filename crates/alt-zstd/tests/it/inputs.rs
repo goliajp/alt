@@ -242,6 +242,10 @@ pub fn length_sweep(seed: u64) -> Vec<u8> {
     out
 }
 
+/// Shortest corpus input whose compressed size is compared with the
+/// reference's.
+pub const SIZED_MIN: usize = 100_000;
+
 pub fn corpus() -> Vec<(&'static str, Vec<u8>)> {
     let mut mixed = text(140_000, 21);
     mixed.extend_from_slice(&records(140_000, 22));

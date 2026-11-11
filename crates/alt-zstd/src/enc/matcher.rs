@@ -6,9 +6,6 @@ use std::marker::PhantomData;
 
 use crate::bits::{load32, load64};
 
-/// Multiplier of the multiplicative hashes.
-const MIX: u64 = 0x9E37_79B1_85EB_CA87;
-
 /// Bytes a position must have ahead of it to be hashed or probed.
 pub(crate) const PROBE: usize = 8;
 
@@ -22,21 +19,47 @@ pub(crate) const SKIP_SPAN: usize = 256;
 /// Stand-ins for a candidate that may not be read. One of the two differs
 /// from any data in its first byte, so comparing against it fails without
 /// a branch on the candidate's validity.
-static NOWHERE: [[u8; PROBE]; 2] = [[0xFF; PROBE], [0; PROBE]];
+pub(crate) static NOWHERE: [[u8; PROBE]; 2] = [[0xFF; PROBE], [0; PROBE]];
 
-/// Hash of the low `64 - drop` bits of `value`, `64 - shift` bits wide.
-#[inline(always)]
-pub(crate) fn hash(value: u64, drop: u32, shift: u32) -> usize {
-    ((value << drop).wrapping_mul(MIX) >> shift) as usize
+/// Multiplier that hashes the low `width` bytes of a word: a prime moved up
+/// so that the product keeps nothing of the bytes above them.
+pub(crate) const fn multiplier(width: u32) -> u64 {
+    let prime: u64 = match width {
+        4 => 2_654_435_761,
+        5 => 889_523_592_379,
+        6 => 227_718_039_650_203,
+        7 => 58_295_818_150_454_627,
+        _ => 0xCF1B_BCDC_B7A5_6463,
+    };
+    prime << (64 - 8 * width)
 }
 
-/// One literal run followed by one match.
+/// Hash of `value` by a [`multiplier`], `64 - shift` bits wide.
+#[inline(always)]
+pub(crate) fn hash(value: u64, multiplier: u64, shift: u32) -> usize {
+    (value.wrapping_mul(multiplier) >> shift) as usize
+}
+
+/// One literal run followed by one match, in 8 bytes: the lengths keep
+/// their low 16 bits. A block is too short for two lengths beyond that; the
+/// one it may hold is named by [`SeqStore::long`].
 #[derive(Clone, Copy)]
 pub(crate) struct Sequence {
-    pub lit_len: u32,
-    pub match_len: u32,
     /// 1..=3 names a repeat offset, anything larger is the distance plus 3
     pub offset: u32,
+    pub lit_len: u16,
+    /// match length less [`MATCH_BASE`]
+    pub match_base: u16,
+}
+
+/// Shortest match the format can express.
+pub(crate) const MATCH_BASE: usize = 3;
+
+/// The length of a block that does not fit 16 bits, by sequence index.
+#[derive(Clone, Copy)]
+pub(crate) enum LongLength {
+    Literals(usize),
+    Match(usize),
 }
 
 /// Prefix and data seen as one run of bytes: the prefix occupies indices
@@ -324,10 +347,29 @@ unsafe fn run(a: *const u8, b: *const u8, max: usize) -> usize {
     len
 }
 
+/// Copies `len` bytes 16 at a time, up to 15 too many. Long literal runs
+/// are rare: a call to this costs less than one to a copy that must work
+/// for every length, and the loops that store sequences stay free of it.
+///
+/// # Safety
+/// Both ranges must be valid for `len` rounded up to a multiple of 16.
+#[inline(never)]
+unsafe fn copy_wide(dst: *mut u8, src: *const u8, len: usize) {
+    let mut done = 0;
+    while done < len {
+        // safety: the caller provides the rounded-up length on both sides
+        unsafe {
+            dst.add(done).copy_from_nonoverlapping(src.add(done), 16);
+        }
+        done += 16;
+    }
+}
+
 /// The sequences and literals of one block.
 pub(crate) struct SeqStore {
     pub sequences: Vec<Sequence>,
     pub literals: Vec<u8>,
+    pub long: Option<LongLength>,
 }
 
 impl SeqStore {
@@ -335,6 +377,7 @@ impl SeqStore {
         Self {
             sequences: Vec::new(),
             literals: Vec::new(),
+            long: None,
         }
     }
 
@@ -344,6 +387,7 @@ impl SeqStore {
         self.sequences.reserve(block_len / MIN_MATCH + 1);
         self.literals.clear();
         self.literals.reserve(block_len + 16);
+        self.long = None;
     }
 
     /// Records the literals `anchor..ip` and the match that follows them.
@@ -351,7 +395,8 @@ impl SeqStore {
     /// # Safety
     /// `anchor..ip` must lie in the data of `window`; within one block,
     /// literals and matches (each at least `MIN_MATCH` long) together may
-    /// not exceed the length given to [`SeqStore::start`].
+    /// not exceed the length given to [`SeqStore::start`], which may not
+    /// exceed the largest block of the format.
     #[inline(always)]
     pub(crate) unsafe fn push(
         &mut self,
@@ -364,8 +409,10 @@ impl SeqStore {
         let lit_len = ip - anchor;
         let len = self.literals.len();
         // safety: the literal buffer has room for the block plus 16 bytes,
-        // so the 16-byte copy fits even for an empty run, and its source is
-        // read 16 wide only when that stays inside the data; the sequence
+        // so a copy that rounds a run up to 16 bytes fits even at the end
+        // of the block, which a match of at least MIN_MATCH bytes follows;
+        // the source is read 16 wide only when that stays inside the data
+        // (below `ip + 16` for the later steps of a long run); the sequence
         // buffer has room for one sequence per MIN_MATCH bytes of block
         unsafe {
             let dst = self.literals.as_mut_ptr().add(len);
@@ -373,18 +420,30 @@ impl SeqStore {
             if anchor + 16 <= window.end {
                 dst.copy_from_nonoverlapping(src, 16);
                 if lit_len > 16 {
-                    dst.add(16)
-                        .copy_from_nonoverlapping(src.add(16), lit_len - 16);
+                    if ip + 16 <= window.end {
+                        copy_wide(dst.add(16), src.add(16), lit_len - 16);
+                    } else {
+                        dst.add(16)
+                            .copy_from_nonoverlapping(src.add(16), lit_len - 16);
+                    }
                 }
             } else {
                 dst.copy_from_nonoverlapping(src, lit_len);
             }
             self.literals.set_len(len + lit_len);
             let count = self.sequences.len();
+            let match_base = match_len - MATCH_BASE;
+            if (lit_len | match_base) > 0xFFFF {
+                self.long = Some(if lit_len > 0xFFFF {
+                    LongLength::Literals(count)
+                } else {
+                    LongLength::Match(count)
+                });
+            }
             self.sequences.as_mut_ptr().add(count).write(Sequence {
-                lit_len: lit_len as u32,
-                match_len: match_len as u32,
                 offset: offset as u32,
+                lit_len: lit_len as u16,
+                match_base: match_base as u16,
             });
             self.sequences.set_len(count + 1);
         }

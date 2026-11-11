@@ -8,11 +8,17 @@ use std::fmt::Write;
 use zstd::zstd_safe::{CCtx, CParameter, DCtx, InBuffer, OutBuffer};
 
 use crate::digests::hex;
-use crate::inputs::{self, Rng, few_symbols, random, records, runs, text};
+use crate::inputs::{self, Rng, SIZED_MIN, few_symbols, random, records, runs, text};
 use crate::pack::append;
 
 fn encode(data: &[u8], level: i32) -> Vec<u8> {
     zstd::encode_all(data, level).unwrap()
+}
+
+/// one-shot compression: the reference knows the input length, as our
+/// encoder always does, and picks its parameters by it
+fn encode_sized(data: &[u8], level: i32) -> Vec<u8> {
+    zstd::bulk::compress(data, level).unwrap()
 }
 
 fn encode_checked(data: &[u8], level: i32) -> Vec<u8> {
@@ -124,6 +130,18 @@ fn regenerate() {
         }
     }
     save("corpus.pack", &corpus);
+
+    // what our sizes are held against: the large inputs at the default
+    // level, compressed in one call
+    let mut sized = Vec::new();
+    for (name, data) in inputs::corpus() {
+        if data.len() >= SIZED_MIN {
+            let frame = encode_sized(&data, 3);
+            assert!(alt_zstd::decode_all(&frame).as_ref() == Ok(&data), "{name}");
+            append(&mut sized, name, &frame);
+        }
+    }
+    save("sized.pack", &sized);
 
     let mut small = Vec::new();
     for (len, data, prefix) in inputs::small() {
