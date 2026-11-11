@@ -55,8 +55,9 @@ pub(crate) fn verify_artifact(
     }
     Ok(())
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct SourceCompletion {
     pub schema_version: u32,
     pub record: RecordKey,
@@ -112,13 +113,14 @@ pub fn check_source(
     {
         return Err(Error::Integrity("source request/record binding"));
     }
-    let intent: alt_command_protocol::Intent = serde_json::from_value(strict_json::decode(
+    let intent: alt_command_protocol::Intent = alt_json::from_value(strict_json::decode(
         &read_artifact(source, &proof.intent, limit)?,
         limit,
     )?)?;
-    let completion: alt_command_protocol::Completion = serde_json::from_value(
-        strict_json::decode(&read_artifact(source, &proof.completion, limit)?, limit)?,
-    )?;
+    let completion: alt_command_protocol::Completion = alt_json::from_value(strict_json::decode(
+        &read_artifact(source, &proof.completion, limit)?,
+        limit,
+    )?)?;
     if intent.repository != proof.origin.repository
         || intent.workspace != proof.origin.workspace
         || intent.request_id != proof.request_id
@@ -172,7 +174,7 @@ pub fn command_record_result(
     response: &alt_command_protocol::Response,
     request_id: &str,
     limit: usize,
-) -> Result<serde_json::Value> {
+) -> Result<alt_json::Value> {
     if response.exit_code == 0 {
         return strict_json::decode(&response.stdout, limit);
     }

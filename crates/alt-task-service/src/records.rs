@@ -2,8 +2,20 @@ use crate::{Error, Result, strict_json};
 use alt_task::Record;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    alt_json::ToJson,
+    alt_json::FromJson,
+)]
 #[serde(rename_all = "kebab-case")]
+#[json(rename_all = "kebab-case")]
 pub enum RecordKind {
     Task,
     Candidate,
@@ -34,8 +46,20 @@ impl RecordKind {
         }
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    alt_json::ToJson,
+    alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct RecordKey {
     pub kind: RecordKind,
     pub id: String,
@@ -49,13 +73,13 @@ impl RecordKey {
 
 /// The existing source envelope, kept byte-for-byte in storage. The wire entry
 /// names both its raw payload digest and this record's domain-separated ID.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::FromJson)]
+#[json(deny_unknown_fields)]
 struct Envelope {
     schema_version: u32,
     hash_algorithm: String,
     kind: RecordKind,
-    record: serde_json::Value,
+    record: alt_json::Value,
 }
 #[derive(Clone, Debug)]
 pub enum TaskRecord {
@@ -106,7 +130,7 @@ impl TaskRecord {
     }
     pub fn decode(key: &RecordKey, bytes: &[u8], limit: usize) -> Result<Self> {
         key.validate()?;
-        let envelope: Envelope = serde_json::from_value(strict_json::decode(bytes, limit)?)?;
+        let envelope: Envelope = alt_json::from_value(strict_json::decode(bytes, limit)?)?;
         if envelope.schema_version != 1
             || envelope.hash_algorithm != "blake3"
             || envelope.kind != key.kind
@@ -115,17 +139,17 @@ impl TaskRecord {
         }
         let v = envelope.record;
         let record = match key.kind {
-            RecordKind::Task => Self::Task(serde_json::from_value(v)?),
-            RecordKind::Candidate => Self::Candidate(serde_json::from_value(v)?),
-            RecordKind::Manifest => Self::Manifest(serde_json::from_value(v)?),
-            RecordKind::Evidence => Self::Evidence(serde_json::from_value(v)?),
-            RecordKind::Review => Self::Review(serde_json::from_value(v)?),
-            RecordKind::Integration => Self::Integration(serde_json::from_value(v)?),
-            RecordKind::Delivery => Self::Delivery(serde_json::from_value(v)?),
-            RecordKind::TaskBaseline => Self::TaskBaseline(serde_json::from_value(v)?),
-            RecordKind::Event => Self::Event(serde_json::from_value(v)?),
-            RecordKind::IntegrationReceipt => Self::IntegrationReceipt(serde_json::from_value(v)?),
-            RecordKind::DeliveryReceipt => Self::DeliveryReceipt(serde_json::from_value(v)?),
+            RecordKind::Task => Self::Task(alt_json::from_value(v)?),
+            RecordKind::Candidate => Self::Candidate(alt_json::from_value(v)?),
+            RecordKind::Manifest => Self::Manifest(alt_json::from_value(v)?),
+            RecordKind::Evidence => Self::Evidence(alt_json::from_value(v)?),
+            RecordKind::Review => Self::Review(alt_json::from_value(v)?),
+            RecordKind::Integration => Self::Integration(alt_json::from_value(v)?),
+            RecordKind::Delivery => Self::Delivery(alt_json::from_value(v)?),
+            RecordKind::TaskBaseline => Self::TaskBaseline(alt_json::from_value(v)?),
+            RecordKind::Event => Self::Event(alt_json::from_value(v)?),
+            RecordKind::IntegrationReceipt => Self::IntegrationReceipt(alt_json::from_value(v)?),
+            RecordKind::DeliveryReceipt => Self::DeliveryReceipt(alt_json::from_value(v)?),
         };
         if record.id()? != key.id {
             return Err(Error::Integrity("canonical record identity"));

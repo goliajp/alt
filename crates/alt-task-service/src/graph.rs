@@ -174,7 +174,7 @@ impl PreparedTaskGraph {
                         &v.snapshot,
                         self.limits.structured_bytes,
                     )?;
-                    let snapshot: alt_delivery::Snapshot = serde_json::from_value(
+                    let snapshot: alt_delivery::Snapshot = alt_json::from_value(
                         crate::strict_json::decode(&bytes, self.limits.structured_bytes)?,
                     )?;
                     if snapshot.schema_version != 1 || snapshot.object_format != "sha1" {

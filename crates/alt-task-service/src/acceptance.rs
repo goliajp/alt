@@ -6,7 +6,7 @@ use alt_repository_service::{ObjectSource, VerifiedGraph};
 use serde::Serialize;
 use std::collections::BTreeMap;
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, alt_json::ToJson)]
 pub struct EvidenceAssessment {
     pub evidence: String,
     pub source_proof: String,

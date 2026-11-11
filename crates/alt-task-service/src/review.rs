@@ -5,25 +5,24 @@ use crate::{
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
 use alt_repository_service::VerifiedGraph;
 use alt_task::Record;
-use serde::Deserialize;
 use std::collections::BTreeSet;
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::FromJson)]
+#[json(deny_unknown_fields)]
 struct Changes {
     changes: Vec<Change>,
     truncated: bool,
 }
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::FromJson)]
+#[json(deny_unknown_fields)]
 struct Change {
     path: String,
     path_bytes_hex: String,
     before: Option<Value>,
     after: Option<Value>,
 }
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::FromJson)]
+#[json(deny_unknown_fields)]
 struct Value {
     mode: u32,
     oid: String,
@@ -81,7 +80,7 @@ pub(crate) fn verify_review_changes_bounded(
     }
     let raw = crate::source::read_artifact(source, &review.changes, limits.structured_bytes)?;
     let changes: Changes =
-        serde_json::from_value(crate::strict_json::decode(&raw, limits.structured_bytes)?)?;
+        alt_json::from_value(crate::strict_json::decode(&raw, limits.structured_bytes)?)?;
     if changes.truncated {
         return Err(Error::Integrity("truncated original review"));
     }

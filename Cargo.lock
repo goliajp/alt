@@ -115,9 +115,11 @@ dependencies = [
  "alt-base64",
  "alt-crypto",
  "alt-hash",
+ "alt-json",
+ "alt-json-serde",
+ "alt-json-testkit",
  "alt-os",
  "golia-platform-contract",
- "serde",
  "serde_json",
  "tiny_http",
  "ureq",
@@ -459,8 +461,8 @@ version = "0.1.0"
 dependencies = [
  "alt-crypto",
  "alt-hash",
+ "alt-json",
  "alt-remote-protocol",
- "serde_json",
 ]
 
 [[package]]
@@ -674,6 +676,7 @@ dependencies = [
  "alt-hash",
  "alt-input",
  "alt-json",
+ "alt-json-testkit",
  "alt-oplog",
  "alt-os",
  "alt-refs",
@@ -693,6 +696,7 @@ dependencies = [
  "alt-hash",
  "alt-input",
  "alt-json",
+ "alt-json-testkit",
  "alt-os",
  "alt-remote-protocol",
  "alt-repository-service",
