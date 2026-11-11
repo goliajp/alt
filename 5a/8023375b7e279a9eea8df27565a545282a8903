@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: refactor
+summary: alt-repository-service reads and writes json with alt-json
+author-type: human
+author: doracawl
+touched: crates/alt-repository-service/Cargo.toml
+touched: crates/alt-repository-service/src/publication.rs
+touched: crates/alt-repository-service/tests/it/fixtures/RefPolicy.txt
+touched: crates/alt-repository-service/tests/it/json.rs
+touched: crates/alt-repository-service/tests/it/main.rs
