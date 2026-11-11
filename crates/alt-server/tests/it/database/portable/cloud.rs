@@ -474,24 +474,40 @@ fn portable_cloud_validation_refreshes_current_authority_before_completion() {
                     })
                     .collect(),
             };
-            if importing {
+            let selected = if importing {
                 b.portable_import_begin(&intent, &envelope, package)
                     .unwrap();
                 for blob in &envelope.catalog.blobs {
                     b.portable_upload(&intent.key, blob, &mut &contents[&blob.blake3][..])
                         .unwrap();
                 }
+                selected.clone()
             } else {
                 let mut cloud_payload = Payload::new("cloud-validation-source", None);
                 cloud_payload.publication.key.scope = intent.key.scope.clone();
                 publish(&b, &cloud_payload);
-            }
+                // an export reads Git objects from the mapped pack segments; the read
+                // to pause on is the task record, which the content store holds
+                let mut task = super::super::change_links::task_payload_with_source(
+                    "cloud-validation-task",
+                    None,
+                );
+                task.publication.key.scope = intent.key.scope.clone();
+                publish(&b, &task);
+                task.manifest
+                    .entries
+                    .iter()
+                    .find(|e| e.kind == ContentKind::Record)
+                    .unwrap()
+                    .blake3
+                    .clone()
+            };
             drop(server);
             let selected_path = f
                 .root
                 .path()
                 .join("bytes/cloud-installation/repository")
-                .join(selected);
+                .join(&selected);
             assert!(selected_path.is_file());
             let mut process = Process::start(&f, &provider, &library, &selected_path);
             let path = if importing {

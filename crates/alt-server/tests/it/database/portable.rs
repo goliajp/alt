@@ -264,3 +264,70 @@ fn portable_http_transfers_immutable_snapshot_with_lost_activation_response_and_
         .unwrap();
     assert!(b.portable_import_status(&intent, package).is_err());
 }
+
+#[test]
+#[ignore = "requires explicitly isolated PostgreSQL and loopback HTTP; portable network acceptance"]
+fn portable_http_downloads_git_objects_held_only_by_a_segment() {
+    let mut source = Fixture::new();
+    let server = Running::start(&source);
+    let a = client(&server, &source.token);
+    let package = bounds()
+        .verification(limits(), task_limits())
+        .unwrap()
+        .package;
+    let payload = Payload::new("segment-only", None);
+    publish(&a, &payload);
+    // the state of objects that arrived by git push: no copy in the content store
+    source
+        .client()
+        .execute("DELETE FROM alt_pins WHERE pin_id LIKE 'ref:%'", &[])
+        .unwrap();
+    source
+        .store
+        .collect_orphans(&source.credential, "repository", 100)
+        .unwrap();
+    assert_eq!(
+        source
+            .client()
+            .query_one("SELECT count(*) FROM alt_blobs", &[])
+            .unwrap()
+            .get::<_, i64>(0),
+        0
+    );
+    let key = RequestKey {
+        scope: payload.publication.key.scope.clone(),
+        actor_id: "owner".into(),
+        request_id: "segment-export".into(),
+    };
+    let source_key = SigningKey::from_bytes(&[7; 32]).verifying_key().to_bytes();
+    let ExportState::Available { envelope, .. } = a
+        .portable_export(&key, ExportCommand::Prepare, &source_key, package)
+        .unwrap()
+    else {
+        panic!("prepared")
+    };
+    assert_eq!(
+        envelope
+            .catalog
+            .objects
+            .iter()
+            .map(|object| object.oid.clone())
+            .collect::<std::collections::BTreeSet<_>>(),
+        payload
+            .manifest
+            .entries
+            .iter()
+            .map(|entry| entry.git_oid.clone().unwrap())
+            .collect()
+    );
+    for (entry, bytes) in payload.manifest.entries.iter().zip(&payload.contents) {
+        let blob = alt_portable::Blob {
+            blake3: entry.blake3.clone(),
+            bytes: entry.bytes,
+        };
+        let mut raw = Vec::new();
+        a.portable_download(&key.scope, &key.request_id, &blob, &mut raw)
+            .unwrap();
+        assert_eq!(&raw, bytes);
+    }
+}
