@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: release the second flock explicitly instead of by closing
+author-type: human
+author: doracawl
+touched: crates/alt-os/tests/it/sys.rs
