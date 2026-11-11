@@ -633,16 +633,13 @@ pub(crate) fn read(
             selection = set.select(&more, &haves).map_err(segment_error)?;
         }
     }
-    let mut pack = Vec::new();
-    set.write_selected(&selection, request.thin_pack, &mut pack)
+    // the pack is framed as it is written; a large one is not kept in memory
+    let mut body = crate::git_response::Spill::new();
+    pkt::write_data(&mut body, b"packfile\n")?;
+    let mut band = crate::git_response::Band::new(&mut body);
+    set.write_selected(&selection, request.thin_pack, &mut band)
         .map_err(segment_error)?;
-    output.reserve(pack.len() + pack.len() / 65515 * 5 + 64);
-    pkt::write_data(&mut output, b"packfile\n")?;
-    for chunk in pack.chunks(65515) {
-        output.extend_from_slice(format!("{:04x}", chunk.len() + 5).as_bytes());
-        output.push(1);
-        output.extend_from_slice(chunk);
-    }
-    pkt::write_flush(&mut output)?;
-    bytes(UPLOAD_RESULT, output)
+    band.finish()?;
+    pkt::write_flush(&mut body)?;
+    body.into_output(UPLOAD_RESULT)
 }

@@ -10,6 +10,7 @@ pub use http::*;
 mod compaction;
 mod git;
 mod git_packs;
+mod git_response;
 pub use git::execute_git;
 pub mod operator;
 
