@@ -65,7 +65,7 @@ pub(crate) unsafe fn run<const PREFIX: bool, const LIKELY: bool>(
             if LIKELY {
                 window.hits32_likely::<PREFIX>(candidate, low, here)
             } else {
-                window.hits32::<PREFIX>(candidate, low, here)
+                window.hits32_unlikely::<PREFIX>(candidate, low, here)
             }
         };
         'search: loop {

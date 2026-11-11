@@ -32,18 +32,18 @@ const fn small_codes<const N: usize>(base: &[u32], bias: u32) -> [u8; N] {
 /// a masked code always indexes inside it.
 const CODE_SLOTS: usize = 64;
 
-/// Baseline of each code in the low 24 bits, its extra-bit count above.
-const fn pack<const N: usize>(base: &[u32], extra: &[u8]) -> [u32; N] {
-    let mut packed = [0u32; N];
+/// Extra-bit count of each code, padded to `CODE_SLOTS`.
+const fn padded(extra: &[u8]) -> [u8; CODE_SLOTS] {
+    let mut bits = [0u8; CODE_SLOTS];
     let mut code = 0;
-    while code < base.len() {
-        packed[code] = base[code] | (extra[code] as u32) << 24;
+    while code < extra.len() {
+        bits[code] = extra[code];
         code += 1;
     }
-    packed
+    bits
 }
-static LL_PACK: [u32; CODE_SLOTS] = pack(&LL_BASE, &LL_EXTRA);
-static ML_PACK: [u32; CODE_SLOTS] = pack(&ML_BASE, &ML_EXTRA);
+static LL_BITS: [u8; CODE_SLOTS] = padded(&LL_EXTRA);
+static ML_BITS: [u8; CODE_SLOTS] = padded(&ML_EXTRA);
 
 static LL_CODES: [u8; 64] = small_codes(&LL_BASE, 0);
 static ML_CODES: [u8; 128] = small_codes(&ML_BASE, MIN_MATCH);
@@ -125,8 +125,6 @@ pub(crate) struct SequenceCoder {
     fields: [FieldCoder; 3],
     valid: bool,
     codes: [Vec<u8>; 3],
-    /// per sequence, the extra bits of both lengths and their count
-    lengths: Vec<u64>,
     header: Vec<u8>,
 }
 
@@ -139,7 +137,6 @@ impl SequenceCoder {
             fields: predefined().clone(),
             valid: false,
             codes: [Vec::new(), Vec::new(), Vec::new()],
-            lengths: Vec::new(),
             header: Vec::new(),
         }
     }
@@ -184,15 +181,12 @@ impl SequenceCoder {
             codes.clear();
             codes.reserve(count);
         }
-        self.lengths.clear();
-        self.lengths.reserve(count);
         let mut counts = [[[0u32; CODE_SLOTS]; 3]; 2];
         // safety (whole block): each of the four buffers has room for
         // `count` entries, entry `i` of each is written exactly once before
         // the lengths are set, and codes index below CODE_SLOTS
         unsafe {
             let [ll_out, of_out, ml_out] = [0, 1, 2].map(|i| self.codes[i].as_mut_ptr());
-            let lengths = self.lengths.as_mut_ptr();
             let one = |i: usize, seq: &Sequence, counts: &mut [[u32; CODE_SLOTS]; 3]| {
                 let (ll_code, ml_code) = (ll_code(seq.lit_len), ml_code(seq.match_len));
                 let of_code = seq.offset.ilog2() as usize;
@@ -202,15 +196,6 @@ impl SequenceCoder {
                 *counts[0].get_unchecked_mut(ll_code % CODE_SLOTS) += 1;
                 *counts[1].get_unchecked_mut(of_code % CODE_SLOTS) += 1;
                 *counts[2].get_unchecked_mut(ml_code % CODE_SLOTS) += 1;
-                // extra bits of both lengths in the low half, literal
-                // length lowest, and how many they are above
-                let ll = *LL_PACK.get_unchecked(ll_code % CODE_SLOTS);
-                let ml = *ML_PACK.get_unchecked(ml_code % CODE_SLOTS);
-                let ll_bits = ll >> 24;
-                let low = (seq.lit_len - (ll & 0xFF_FFFF)) as u64;
-                let high = (seq.match_len - (ml & 0xFF_FFFF)) as u64;
-                let width = (ll_bits + (ml >> 24)) as u64;
-                lengths.add(i).write(low | high << ll_bits | width << 32);
             };
             let [even, odd] = &mut counts;
             let (pairs, last) = sequences.as_chunks::<2>();
@@ -224,7 +209,6 @@ impl SequenceCoder {
             for codes in &mut self.codes {
                 codes.set_len(count);
             }
-            self.lengths.set_len(count);
         }
         counts
     }
@@ -351,17 +335,22 @@ impl SequenceCoder {
         // safety: `bound + 8` bytes were reserved past `start`
         let mut writer = unsafe { RawBitWriter::new(out.as_mut_ptr().add(start)) };
 
-        // literal-length and match-length extra bits were packed together
-        // with their count; with the offset bits they may exceed what the
-        // writer takes after a state change
-        let extras = |writer: &mut RawBitWriter, seq: &Sequence, lengths: u64, of_code: u32| {
-            let width = (lengths >> 32) as u32;
-            if width + of_code > 30 {
+        // the extra bits of a length are its low bits: every baseline is a
+        // multiple of the range it opens (for match lengths, counted from
+        // the shortest match). Together with the offset bits they may
+        // exceed what the writer takes after a state change.
+        let extras = |writer: &mut RawBitWriter, seq: &Sequence, codes: [u8; 3]| {
+            let [ll_code, of_code, ml_code] = codes.map(|code| code as usize % CODE_SLOTS);
+            let (ll_bits, ml_bits) = (LL_BITS[ll_code] as u32, ML_BITS[ml_code] as u32);
+            let low = seq.lit_len as u64 & ((1 << ll_bits) - 1);
+            let high = (seq.match_len - MIN_MATCH) as u64 & ((1 << ml_bits) - 1);
+            let of_code = of_code as u32;
+            if ll_bits + ml_bits + of_code > 30 {
                 writer.flush();
-                writer.put(lengths & 0xFFFF_FFFF, width);
+                writer.put(low | high << ll_bits, ll_bits + ml_bits);
                 writer.flush();
             } else {
-                writer.put(lengths & 0xFFFF_FFFF, width);
+                writer.put(low | high << ll_bits, ll_bits + ml_bits);
             }
             writer.put((seq.offset - (1 << of_code)) as u64, of_code);
             writer.flush();
@@ -370,13 +359,13 @@ impl SequenceCoder {
         // the decoder walks the stream from its end, so the last sequence
         // is written first and each field in the reverse of reading order
         let codes = ll_codes.iter().zip(of_codes).zip(ml_codes);
-        let mut all = sequences.iter().zip(&self.lengths).zip(codes).rev();
-        let ((seq, &lengths), ((&ll_code, &of_code), &ml_code)) = all.next().unwrap();
+        let mut all = sequences.iter().zip(codes).rev();
+        let (seq, ((&ll_code, &of_code), &ml_code)) = all.next().unwrap();
         let mut ml_state = ml.start(ml_code as usize);
         let mut of_state = of.start(of_code as usize);
         let mut ll_state = ll.start(ll_code as usize);
-        extras(&mut writer, seq, lengths, of_code as u32);
-        for ((seq, &lengths), ((&ll_code, &of_code), &ml_code)) in all {
+        extras(&mut writer, seq, [ll_code, of_code, ml_code]);
+        for (seq, ((&ll_code, &of_code), &ml_code)) in all {
             // up to 26 bits of state changes
             let (bits, width) = of.encode(&mut of_state, of_code as usize);
             writer.put(bits, width);
@@ -384,7 +373,7 @@ impl SequenceCoder {
             writer.put(bits, width);
             let (bits, width) = ll.encode(&mut ll_state, ll_code as usize);
             writer.put(bits, width);
-            extras(&mut writer, seq, lengths, of_code as u32);
+            extras(&mut writer, seq, [ll_code, of_code, ml_code]);
         }
         for (table, state) in [(ml, ml_state), (of, of_state), (ll, ll_state)] {
             let (bits, width) = table.last(state);
