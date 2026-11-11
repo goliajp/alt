@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: clone with git what a native client published
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/native_client.rs
