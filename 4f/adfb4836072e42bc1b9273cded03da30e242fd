@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: test
+summary: record identities of real task records
+author-type: human
+author: doracawl
+touched: crates/alt-task/src/tests.rs
+touched: crates/alt-task/src/tests/fixtures/identities.txt
+touched: crates/alt-task/src/tests/identities.rs
+touched: crates/alt-task/src/tests/repair_source.rs
