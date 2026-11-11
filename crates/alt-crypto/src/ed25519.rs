@@ -5,7 +5,10 @@
 //! on rather than the letter of the RFC; see [`VerifyingKey::verify`] and
 //! [`VerifyingKey::verify_strict`].
 
+#[cfg(target_arch = "x86_64")]
+mod avx2;
 mod field;
+mod invert;
 mod point;
 mod scalar;
 mod tables;
@@ -41,6 +44,55 @@ impl fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+/// Which implementation verification's double scalar multiplication runs on.
+/// All of them give the same answers; the choice exists so that tests can
+/// exercise each one.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Backend {
+    /// 64-bit limbs, one field element at a time
+    Portable,
+    /// four field elements per 256-bit vector
+    #[cfg(target_arch = "x86_64")]
+    Avx2,
+}
+
+impl Backend {
+    /// The fastest backend this CPU supports.
+    pub fn detect() -> Backend {
+        *Self::available().last().expect("portable is always there")
+    }
+
+    /// Every backend this CPU supports, slowest first.
+    pub fn available() -> &'static [Backend] {
+        #[cfg(target_arch = "x86_64")]
+        if std::arch::is_x86_feature_detected!("avx2") {
+            return &[Backend::Portable, Backend::Avx2];
+        }
+        &[Backend::Portable]
+    }
+}
+
+/// `a * P + b * B` for the base point B and the point `P` encodes, or
+/// `None` when `point` is not on the curve. The scalars are little-endian
+/// and must be below 2^255. Not constant time.
+///
+/// # Panics
+/// When `backend` is not among [`Backend::available`].
+#[doc(hidden)]
+pub fn double_base_mul(
+    backend: Backend,
+    point: &[u8; 32],
+    a: &[u8; 32],
+    b: &[u8; 32],
+) -> Option<[u8; 32]> {
+    Some(
+        Point::decompress(point)?
+            .double_base_mul_vartime(a, b, backend)
+            .compress_vartime(),
+    )
+}
 
 /// A secret key: the 32-byte seed together with what is derived from it.
 ///
@@ -181,31 +233,60 @@ impl VerifyingKey {
     /// order can; use [`VerifyingKey::verify_strict`] when a signature must
     /// bind to one key and one message.
     pub fn verify(&self, message: &[u8], signature: &Signature) -> Result<(), Error> {
-        self.check(message, signature, false)
+        self.check(message, signature, false, Backend::detect())
     }
 
     /// [`VerifyingKey::verify`], additionally rejecting a key or an R of
     /// small order and an R that is not a point on the curve.
     pub fn verify_strict(&self, message: &[u8], signature: &Signature) -> Result<(), Error> {
-        self.check(message, signature, true)
+        self.check(message, signature, true, Backend::detect())
     }
 
-    fn check(&self, message: &[u8], signature: &Signature, strict: bool) -> Result<(), Error> {
+    /// [`VerifyingKey::verify`] or, with `strict`, [`VerifyingKey::verify_strict`] on a chosen backend.
+    ///
+    /// # Panics
+    /// When `backend` is not among [`Backend::available`].
+    #[doc(hidden)]
+    pub fn verify_on(
+        &self,
+        backend: Backend,
+        message: &[u8],
+        signature: &Signature,
+        strict: bool,
+    ) -> Result<(), Error> {
+        self.check(message, signature, strict, backend)
+    }
+
+    fn check(
+        &self,
+        message: &[u8],
+        signature: &Signature,
+        strict: bool,
+        backend: Backend,
+    ) -> Result<(), Error> {
         let (commitment, response) = signature.bytes.split_at(32);
         let commitment: &[u8; 32] = commitment.try_into().expect("half of 64 bytes");
         let response: &[u8; 32] = response.try_into().expect("half of 64 bytes");
         if !scalar::is_canonical(response) {
             return Err(Error::Verification);
         }
-        if strict {
+        let challenge = challenge(commitment, &self.bytes, message).to_bytes();
+        let expected = || {
+            self.negated
+                .double_base_mul_vartime(&challenge, response, backend)
+        };
+        let accepted = if strict {
             let point = Point::decompress(commitment).ok_or(Error::Verification)?;
             if point.is_small_order() || self.negated.is_small_order() {
                 return Err(Error::Verification);
             }
-        }
-        let challenge = challenge(commitment, &self.bytes, message).to_bytes();
-        let expected = self.negated.double_base_mul_vartime(&challenge, response);
-        if expected == *commitment {
+            // R is already a point here: requiring its bytes to be the canonical encoding and
+            // comparing points gives the same answer as comparing encodings
+            point.encode_decompressed() == *commitment && expected().equals_decompressed(&point)
+        } else {
+            expected().compress_vartime() == *commitment
+        };
+        if accepted {
             Ok(())
         } else {
             Err(Error::Verification)

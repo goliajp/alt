@@ -1,12 +1,13 @@
 //! Expected values under `fixtures/` were produced by ed25519-dalek 2.2 in the run where it
 //! agreed with this implementation on every case; `reference.rs` says how to regenerate them.
 
+mod backends;
 pub(crate) mod edge;
 mod edge_cases;
 mod vectors;
 
 use super::{array, hex, noise, unhex};
-use alt_crypto::ed25519::{Error, Signature, SigningKey, VerifyingKey};
+use alt_crypto::ed25519::{Backend, Error, Signature, SigningKey, VerifyingKey};
 
 #[test]
 fn rfc_8032_vectors() {
@@ -70,6 +71,15 @@ fn public_keys_and_signatures_match_the_recorded_ones() {
         );
         assert_eq!(public.verify(message, &signature), Ok(()));
         assert_eq!(public.verify_strict(message, &signature), Ok(()));
+        for &backend in Backend::available() {
+            for strict in [false, true] {
+                assert_eq!(
+                    public.verify_on(backend, message, &signature, strict),
+                    Ok(()),
+                    "{backend:?}, case {index}"
+                );
+            }
+        }
     }
 }
 
@@ -114,4 +124,31 @@ fn rejects_a_signature_for_another_message_or_key() {
         other.verifying_key().verify_strict(b"message", &signature),
         Err(Error::Verification)
     );
+}
+
+#[test]
+fn rejects_an_r_that_differs_from_the_recomputed_one_only_in_the_sign_of_x() {
+    // built with big-integer arithmetic from the key of seed [7; 32]: S = r + k a for the
+    // nonce r, but the R in the signature is -(r B), which shares its y with r B
+    let key: [u8; 32] = array(&unhex(
+        "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c",
+    ));
+    assert_eq!(
+        key,
+        SigningKey::from_bytes(&[7; 32]).verifying_key().to_bytes()
+    );
+    let signature = Signature::from_bytes(&array(&unhex(
+        "ae54107b96326792f2bb25aca23d805715b86903eb43daba3a253e991f3c6d34\
+         7aaba3467eb42e459123947510299f1148eb0d4c91f6c3810d9a10117a657406",
+    )));
+    let key = VerifyingKey::from_bytes(&key).unwrap();
+    for &backend in Backend::available() {
+        for strict in [false, true] {
+            assert_eq!(
+                key.verify_on(backend, b"sign of x", &signature, strict),
+                Err(Error::Verification),
+                "{backend:?}, strict {strict}"
+            );
+        }
+    }
 }

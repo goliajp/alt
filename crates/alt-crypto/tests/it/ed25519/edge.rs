@@ -5,7 +5,7 @@
 
 use super::edge_cases::CASES;
 use crate::{array, hex, noise, unhex};
-use alt_crypto::ed25519::{Signature, SigningKey, VerifyingKey};
+use alt_crypto::ed25519::{Backend, Signature, SigningKey, VerifyingKey};
 
 /// the group order L, little-endian
 const ORDER: [u8; 32] = [
@@ -15,7 +15,7 @@ const ORDER: [u8; 32] = [
 
 /// the eight points of small order in canonical form, then the six other
 /// encodings that decode to one of them
-const TORSION: [&str; 14] = [
+pub(crate) const TORSION: [&str; 14] = [
     "0100000000000000000000000000000000000000000000000000000000000000",
     "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
     "0000000000000000000000000000000000000000000000000000000000000000",
@@ -36,7 +36,7 @@ const TORSION: [&str; 14] = [
 
 /// what one implementation says about a (key, message, signature) triple:
 /// bit 0 the key parses, bit 1 it is weak, bit 2 `verify` accepts, bit 3 `verify_strict` accepts
-pub(crate) type Oracle = fn(&[u8; 32], &[u8], &[u8; 64]) -> u8;
+pub(crate) type Oracle<'a> = &'a dyn Fn(&[u8; 32], &[u8], &[u8; 64]) -> u8;
 
 pub(crate) fn ours(key: &[u8; 32], message: &[u8], signature: &[u8; 64]) -> u8 {
     let Ok(parsed) = VerifyingKey::from_bytes(key) else {
@@ -49,13 +49,29 @@ pub(crate) fn ours(key: &[u8; 32], message: &[u8], signature: &[u8; 64]) -> u8 {
         | u8::from(parsed.verify_strict(message, &signature).is_ok()) << 3
 }
 
-pub(crate) struct Tally {
-    oracle: Oracle,
+/// [`ours`] with verification pinned to one backend
+fn ours_on(backend: Backend, key: &[u8; 32], message: &[u8], signature: &[u8; 64]) -> u8 {
+    let Ok(parsed) = VerifyingKey::from_bytes(key) else {
+        return 0;
+    };
+    let signature = Signature::from_bytes(signature);
+    let accepts = |strict| {
+        parsed
+            .verify_on(backend, message, &signature, strict)
+            .is_ok()
+    };
+    1 | u8::from(parsed.is_weak()) << 1
+        | u8::from(accepts(false)) << 2
+        | u8::from(accepts(true)) << 3
+}
+
+pub(crate) struct Tally<'a> {
+    oracle: Oracle<'a>,
     /// the label and outcome of every case, in the order the cases are generated
     seen: Vec<(String, u8)>,
 }
 
-impl Tally {
+impl Tally<'_> {
     /// Runs one case and returns `None` when the key does not parse, else (verify, verify_strict).
     fn compare(
         &mut self,
@@ -89,7 +105,7 @@ fn add(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
     out
 }
 
-fn small_order_grid(tally: &mut Tally) {
+fn small_order_grid(tally: &mut Tally<'_>) {
     let zero = [0u8; 32];
     let mut accepted_by_key = [0usize; 14];
     for (index, key) in TORSION.iter().enumerate() {
@@ -117,7 +133,7 @@ fn small_order_grid(tally: &mut Tally) {
     );
 }
 
-fn non_canonical_y(tally: &mut Tally) {
+fn non_canonical_y(tally: &mut Tally<'_>) {
     let honest = SigningKey::from_bytes(&[7; 32]);
     let public = honest.verifying_key().to_bytes();
     let signature = honest.sign(b"message").to_bytes();
@@ -145,7 +161,7 @@ fn non_canonical_y(tally: &mut Tally) {
     }
 }
 
-fn scalar_range(tally: &mut Tally) {
+fn scalar_range(tally: &mut Tally<'_>) {
     let honest = SigningKey::from_bytes(&[7; 32]);
     let public = honest.verifying_key().to_bytes();
     let signature = honest.sign(b"message").to_bytes();
@@ -182,7 +198,7 @@ fn scalar_range(tally: &mut Tally) {
     }
 }
 
-fn corruption(tally: &mut Tally) {
+fn corruption(tally: &mut Tally<'_>) {
     for case in 0..300u64 {
         let key = SigningKey::from_bytes(&array(&noise(32, 5000 + case)));
         let public = key.verifying_key().to_bytes();
@@ -210,7 +226,7 @@ fn corruption(tally: &mut Tally) {
     }
 }
 
-fn generated(tally: &mut Tally) {
+fn generated(tally: &mut Tally<'_>) {
     for case in &CASES {
         let outcome = tally.compare(
             case.name,
@@ -240,23 +256,31 @@ pub(crate) fn run(oracle: Oracle) -> Vec<(String, u8)> {
 #[test]
 fn key_parsing_verify_and_verify_strict_match_the_recorded_outcomes() {
     let expected = include_bytes!("../fixtures/ed25519_edge.bin");
-    let seen = run(ours);
-    assert_eq!(seen.len(), expected.len(), "number of boundary cases");
-    for (index, ((label, ours), recorded)) in seen.iter().zip(expected).enumerate() {
-        assert_eq!(ours, recorded, "boundary case {index}: {label}");
-    }
-    let count = |bit: u8| {
-        seen.iter()
-            .filter(|(_, outcome)| outcome & bit != 0)
-            .count()
+    let check = |name: String, seen: Vec<(String, u8)>| {
+        assert_eq!(seen.len(), expected.len(), "number of boundary cases");
+        for (index, ((label, ours), recorded)) in seen.iter().zip(expected).enumerate() {
+            assert_eq!(ours, recorded, "{name}, boundary case {index}: {label}");
+        }
+        let count = |bit: u8| {
+            seen.iter()
+                .filter(|(_, outcome)| outcome & bit != 0)
+                .count()
+        };
+        println!(
+            "boundary cases on {name}: {} compared, {} keys rejected, {} weak keys, verify accepted {}, verify_strict accepted {}",
+            seen.len(),
+            seen.len() - count(1),
+            count(2),
+            count(4),
+            count(8)
+        );
+        assert!(seen.len() - count(1) > 100 && count(4) > 300 && count(8) >= 3);
     };
-    println!(
-        "boundary cases: {} compared, {} keys rejected, {} weak keys, verify accepted {}, verify_strict accepted {}",
-        seen.len(),
-        seen.len() - count(1),
-        count(2),
-        count(4),
-        count(8)
-    );
-    assert!(seen.len() - count(1) > 100 && count(4) > 300 && count(8) >= 3);
+    check("the detected backend".into(), run(&ours));
+    for &backend in Backend::available() {
+        let oracle = move |key: &[u8; 32], message: &[u8], signature: &[u8; 64]| {
+            ours_on(backend, key, message, signature)
+        };
+        check(format!("{backend:?}"), run(&oracle));
+    }
 }

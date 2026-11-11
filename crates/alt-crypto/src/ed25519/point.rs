@@ -1,6 +1,8 @@
 //! The twisted Edwards curve -x^2 + y^2 = 1 + d x^2 y^2 in extended coordinates.
 
+use super::Backend;
 use super::field::{D, D2, Fe};
+use super::invert::invert_vartime;
 use super::scalar;
 use super::tables::{BASE_ODD, BASE_WINDOWS};
 use crate::wipe::wipe;
@@ -55,6 +57,12 @@ impl AffineNiels {
         y_minus_x: Fe::ONE,
         xy2d: Fe::ZERO,
     };
+
+    /// (y + x, y - x, 2dxy) as 51-bit limbs
+    #[cfg(target_arch = "x86_64")]
+    pub(super) const fn limbs(&self) -> [[u64; 5]; 3] {
+        [self.y_plus_x.0, self.y_minus_x.0, self.xy2d.0]
+    }
 
     pub(super) const fn from_limbs(
         y_plus_x: [u64; 5],
@@ -163,11 +171,32 @@ impl Point {
     }
 
     pub(super) fn compress(&self) -> [u8; 32] {
-        let inverse = self.z.invert();
-        let x = self.x.mul(&inverse);
-        let mut bytes = self.y.mul(&inverse).to_bytes();
+        self.encode(&self.z.invert())
+    }
+
+    /// [`Point::compress`] for public points: not constant time.
+    pub(super) fn compress_vartime(&self) -> [u8; 32] {
+        self.encode(&invert_vartime(&self.z))
+    }
+
+    fn encode(&self, z_inverse: &Fe) -> [u8; 32] {
+        let x = self.x.mul(z_inverse);
+        let mut bytes = self.y.mul(z_inverse).to_bytes();
         bytes[31] ^= (x.to_bytes()[0] & 1) << 7;
         bytes
+    }
+
+    /// The encoding of a point that came out of [`Point::decompress`], whose Z is one.
+    pub(super) fn encode_decompressed(&self) -> [u8; 32] {
+        let mut bytes = self.y.to_bytes();
+        bytes[31] ^= (self.x.to_bytes()[0] & 1) << 7;
+        bytes
+    }
+
+    /// Whether `self` is the same point as `affine`, whose Z is one. Cross-multiplying
+    /// by the Z of `self` spares the inversion a comparison of encodings would need.
+    pub(super) fn equals_decompressed(&self, affine: &Point) -> bool {
+        self.x.sub(&affine.x.mul(&self.z)).is_zero() && self.y.sub(&affine.y.mul(&self.z)).is_zero()
     }
 
     pub(super) fn neg(&self) -> Point {
@@ -282,11 +311,41 @@ impl Point {
         point
     }
 
-    /// `a * self + b * B`, compressed. Not constant time: for verification,
-    /// where both scalars and the point are public.
-    pub(super) fn double_base_mul_vartime(&self, a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
+    /// `a * self + b * B`, with T left unset. Not constant time: for
+    /// verification, where both scalars and the point are public.
+    pub(super) fn double_base_mul_vartime(
+        &self,
+        a: &[u8; 32],
+        b: &[u8; 32],
+        backend: Backend,
+    ) -> Point {
         let a_naf = scalar::non_adjacent_form(a, 5);
         let b_naf = scalar::non_adjacent_form(b, 8);
+        match backend {
+            Backend::Portable => self.double_base_mul_portable(&a_naf, &b_naf),
+            #[cfg(target_arch = "x86_64")]
+            Backend::Avx2 => {
+                assert!(
+                    std::arch::is_x86_feature_detected!("avx2"),
+                    "this CPU has no AVX2"
+                );
+                // the vector code wants every limb below 2^51
+                let canonical = |element: &Fe| Fe::from_bytes(&element.to_bytes());
+                let point = [&self.x, &self.y, &self.z, &self.t].map(canonical);
+                // AVX2 was detected just above
+                let [x, y, z] =
+                    unsafe { super::avx2::double_base_mul_vartime(point, &a_naf, &b_naf) };
+                Point {
+                    x,
+                    y,
+                    z,
+                    t: Fe::ZERO,
+                }
+            }
+        }
+    }
+
+    fn double_base_mul_portable(&self, a_naf: &[i8; 256], b_naf: &[i8; 256]) -> Point {
         // self, 3 * self, ..., 15 * self
         let mut odd = [self.niels(); 8];
         let twice = self.projective().double().extended().niels();
@@ -296,7 +355,7 @@ impl Point {
             *slot = multiple.niels();
         }
         let Some(top) = (0..256).rev().find(|&i| a_naf[i] != 0 || b_naf[i] != 0) else {
-            return Point::IDENTITY.compress();
+            return Point::IDENTITY;
         };
         let mut sum = Projective::IDENTITY;
         for i in (0..=top).rev() {
@@ -325,6 +384,5 @@ impl Point {
             z: sum.z,
             t: Fe::ZERO,
         }
-        .compress()
     }
 }

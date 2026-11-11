@@ -30,8 +30,8 @@ fn dalek(key: &[u8; 32], message: &[u8], signature: &[u8; 64]) -> u8 {
 #[test]
 #[ignore = "rewrites fixtures; needs the reference crates"]
 fn ed25519_edge() {
-    let ours = ed25519::edge::run(ed25519::edge::ours);
-    let theirs = ed25519::edge::run(dalek);
+    let ours = ed25519::edge::run(&ed25519::edge::ours);
+    let theirs = ed25519::edge::run(&dalek);
     assert_eq!(ours.len(), theirs.len());
     for (index, (ours, theirs)) in ours.iter().zip(&theirs).enumerate() {
         assert_eq!(ours, theirs, "boundary case {index}");
