@@ -1,0 +1,18 @@
+schema: alt-meta/1
+type: perf
+summary: eight-byte zstd sequences, libzstd's hash multipliers, a faster four-stream huffman writer on x86
+author-type: human
+author: doracawl
+touched: crates/alt-zstd/src/enc/dfast.rs
+touched: crates/alt-zstd/src/enc/fast.rs
+touched: crates/alt-zstd/src/enc/fse.rs
+touched: crates/alt-zstd/src/enc/huf.rs
+touched: crates/alt-zstd/src/enc/hufx.rs
+touched: crates/alt-zstd/src/enc/matcher.rs
+touched: crates/alt-zstd/src/enc/mod.rs
+touched: crates/alt-zstd/src/enc/search.rs
+touched: crates/alt-zstd/src/enc/seq.rs
+touched: crates/alt-zstd/src/huffman.rs
+touched: crates/alt-zstd/tests/it/frames/damaged.pack
+touched: crates/alt-zstd/tests/it/frames/own.sha256
+touched: crates/alt-zstd/tests/it/roundtrip.rs
