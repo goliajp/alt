@@ -404,7 +404,7 @@ fn a_cloud_publication_counts_its_segment_against_the_aggregate_allowance() {
         .collect();
     objects.sort_by_key(|(oid, _, _)| *oid);
     let none = alt_pack_segment::SegmentSet::default();
-    let mut builder = alt_pack_segment::Builder::new(Vec::new(), &none, 3).unwrap();
+    let mut builder = alt_pack_segment::Builder::new(Cursor::new(Vec::new()), &none, 3).unwrap();
     for (_, kind, bytes) in &objects {
         builder.add(*kind, bytes).unwrap();
     }

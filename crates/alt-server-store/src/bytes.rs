@@ -19,6 +19,8 @@ pub use segments::{DurableSegment, SegmentLocation, StoredReader};
 #[derive(Clone)]
 pub struct ByteStore {
     root: PathBuf,
+    /// see `packing_with`
+    pub(crate) pack_compress: Option<alt_pack_segment::Compress>,
 }
 /// Capacity of the byte-store filesystem, which can be shared with other data.
 #[derive(Clone, Copy, Debug)]
@@ -83,6 +85,7 @@ impl ByteStore {
         directory(root)?;
         Ok(Self {
             root: root.to_path_buf(),
+            pack_compress: None,
         })
     }
     /// Read through a directory descriptor so replacing the final component by

@@ -380,5 +380,81 @@ fn a_selected_git_object_that_refers_to_nothing_published_rejects_the_request() 
     );
 }
 
+/// a well-formed zlib stream of stored blocks whose content differs from `data` in
+/// one bit: what a compressor that goes wrong without failing would write
+fn wrong_content(data: &[u8]) -> Vec<u8> {
+    let mut content = data.to_vec();
+    content[0] ^= 1;
+    let mut stream = vec![0x78, 0x01];
+    let mut blocks = content.chunks(0xffff).peekable();
+    while let Some(block) = blocks.next() {
+        stream.push(u8::from(blocks.peek().is_none()));
+        stream.extend_from_slice(&(block.len() as u16).to_le_bytes());
+        stream.extend_from_slice(&(!(block.len() as u16)).to_le_bytes());
+        stream.extend_from_slice(block);
+    }
+    stream.extend_from_slice(&alt_hash::adler32(1, &content).to_be_bytes());
+    stream
+}
+
+#[test]
+#[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
+fn a_segment_that_does_not_read_back_fails_the_publication_and_keeps_the_uploaded_copies() {
+    let mut f = Fixture::new();
+    let payload = commit_with_file("single-unreadable", b"file content", None);
+    payload.upload(&mut f.store, &f.credential);
+    let work = f
+        .store
+        .acquire_publication(&f.credential, &payload.publication.key, 30_000, 1000)
+        .unwrap();
+    let graph = verify_graph(
+        work.source(),
+        HashAlgo::Sha1,
+        &work.roots().unwrap(),
+        graph_limits(),
+    )
+    .unwrap();
+    f.store.mark_ready(&f.credential, &work, &graph).unwrap();
+    let before = (git_rows(&f, &payload), accounting(&f).0);
+    assert_eq!(before.0, (3, 3, 3));
+    let mut faulty = Store::open(
+        f.client(),
+        f.store.bytes().clone().packing_with(wrong_content),
+        f.spec.clone(),
+        SigningKey::from_bytes(&f.signing_seed),
+        limits(),
+    )
+    .unwrap();
+    assert!(matches!(
+        faulty.publish(&f.credential, &work, &graph),
+        Err(alt_server_store::Error::Integrity(
+            "written pack segment does not read back"
+        ))
+    ));
+    // nothing was published, and what was uploaded is held as before
+    assert_eq!(f.counts(), (0, 0, 0));
+    assert_eq!((git_rows(&f, &payload), accounting(&f).0), before);
+    assert_eq!(
+        f.client()
+            .query_one("SELECT count(*) FROM alt_pack_segments", &[])
+            .unwrap()
+            .get::<_, i64>(0),
+        0
+    );
+    assert_eq!(
+        std::fs::read_dir(f.store.pack_directory("repository").unwrap())
+            .unwrap()
+            .count(),
+        0
+    );
+    // the request was not rejected: the uploaded copies are what a sound compressor
+    // then packs, and what is read afterwards is compared with them
+    f.store.publish(&f.credential, &work, &graph).unwrap();
+    assert_eq!(f.counts(), (1, 1, 1));
+    assert_eq!(git_rows(&f, &payload), (0, 0, 0));
+    assert_readable(&mut f, &payload);
+    assert_accounted(&f);
+}
+
 mod migrate;
 mod shared;

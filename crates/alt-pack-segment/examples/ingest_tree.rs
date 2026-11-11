@@ -6,8 +6,10 @@
 //! `ingest_tree whole [rounds]` verifies everything as one pack into an empty set.
 //! `ingest_tree split [rounds]` verifies the second half of the history against a
 //! segment that holds the first half, so most references resolve in that segment.
+//! `ingest_tree build [rounds]` writes the same objects one by one into a segment
+//! file, the way content that did not arrive as a pack is stored.
 
-use alt_pack_segment::{Kind, Limits, Oid, Segment, SegmentSet, ingest};
+use alt_pack_segment::{Builder, Kind, Limits, Oid, Segment, SegmentSet, ingest};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 
 const COMMITS: usize = 4201;
@@ -155,6 +157,9 @@ fn main() {
     };
     let commits = history();
     let work = alt_os::temp::tempdir().unwrap();
+    if mode == "build" {
+        return build(&commits, work.path(), rounds);
+    }
     let (existing, measured) = match mode.as_str() {
         "whole" => (SegmentSet::default(), pack(&commits)),
         "split" => {
@@ -190,6 +195,38 @@ fn main() {
         existing.objects(),
         measured.len(),
         alt_hash::blake3::hash(&index),
+        times[times.len() / 2],
+        times[0]
+    );
+}
+
+fn build(commits: &[Vec<(Kind, Vec<u8>)>], work: &std::path::Path, rounds: usize) {
+    // a commit comes after everything it refers to; the builder takes any order
+    let objects: Vec<&(Kind, Vec<u8>)> = commits.iter().flatten().collect();
+    let existing = SegmentSet::default();
+    let path = work.join("built.seg");
+    let mut times = Vec::new();
+    let (mut count, mut bytes) = (0, 0);
+    for _ in 0..rounds {
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&path)
+            .unwrap();
+        let start = Instant::now();
+        let mut builder = Builder::new(file, &existing, objects.len() as u64).unwrap();
+        for (kind, data) in &objects {
+            builder.add(*kind, data).unwrap();
+        }
+        let built = builder.finish().unwrap();
+        times.push(start.elapsed().as_secs_f64() * 1000.0);
+        (count, bytes) = (built.objects, built.bytes);
+    }
+    times.sort_by(f64::total_cmp);
+    println!(
+        "build: objects {count} segment_bytes {bytes} median_ms {:.1} min_ms {:.1}",
         times[times.len() / 2],
         times[0]
     );

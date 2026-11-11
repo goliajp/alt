@@ -63,6 +63,8 @@ enum Packed {
     Ready(Option<crate::packs::Materialized>),
     /// a selected object could not be read back
     Unavailable,
+    /// the segment written did not return an object as it was handed over
+    Unreadable,
     /// the selected objects are not a closed set
     Invalid,
 }
@@ -244,6 +246,7 @@ impl Store {
             let packed = match self.materialize_publication(work, graph, &live) {
                 Ok(segment) => Packed::Ready(segment),
                 Err(Error::Integrity(crate::pack_native::INVALID_SEGMENT)) => Packed::Invalid,
+                Err(Error::Integrity(crate::pack_native::UNREADABLE_SEGMENT)) => Packed::Unreadable,
                 Err(_) => Packed::Unavailable,
             };
             let result = self.publish_transaction(
@@ -303,8 +306,15 @@ impl Store {
             return Err(Error::Precondition(SEGMENTS_MOVED));
         }
         read_integrity?;
-        if matches!(packed, Packed::Unavailable) {
-            return Err(Error::Integrity("selected Git object unavailable"));
+        match packed {
+            Packed::Unavailable => {
+                return Err(Error::Integrity("selected Git object unavailable"));
+            }
+            // a fault of this server, not of the request: it stays as it is
+            Packed::Unreadable => {
+                return Err(Error::Integrity(crate::pack_native::UNREADABLE_SEGMENT));
+            }
+            _ => {}
         }
         let _ = worker(&mut tx, work)?;
         if row.get::<_, String>("state") != "ready" {

@@ -108,7 +108,7 @@ fn settle_repository(
     if !absent.is_empty() {
         let digests: Vec<&str> = absent.iter().map(|entry| entry.blake3.as_str()).collect();
         let locations = crate::segments::locations(tx, repository, &digests)?;
-        let mut segment = materialize_at(bytes.root(), repository, &segments, absent.len() as u64)?;
+        let mut segment = materialize_at(bytes, repository, &segments, absent.len() as u64)?;
         for entry in &absent {
             let mut data = Vec::with_capacity(entry.bytes as usize);
             bytes
