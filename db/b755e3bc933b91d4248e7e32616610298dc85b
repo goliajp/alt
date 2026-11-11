@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: refactor
+summary: alt-cloud-client reads and writes json with alt-json
+author-type: human
+author: doracawl
+touched: crates/alt-cloud-client/Cargo.toml
+touched: crates/alt-cloud-client/src/lib.rs
+touched: crates/alt-cloud-client/tests/it/json.rs
+touched: crates/alt-cloud-client/tests/it/main.rs
