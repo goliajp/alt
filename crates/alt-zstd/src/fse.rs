@@ -66,6 +66,7 @@ impl Entry {
     }
 
     /// Extra bits that follow the baseline in the stream.
+    #[cfg(not(target_arch = "x86_64"))]
     #[inline(always)]
     pub(crate) fn extra(self) -> u32 {
         (self.0 >> 8) as u8 as u32

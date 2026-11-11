@@ -2,11 +2,18 @@
 
 use crate::Error;
 use crate::bits::BackReader;
+use crate::fse::Entry;
 use crate::literals::Literals;
 use crate::sequences::SequenceDecoder;
 
 /// Bytes a wide copy may write past the end of what it was asked to copy.
 pub(crate) const OUT_SLACK: usize = 32;
+
+/// The last sequence of a block has no next states in the stream. Either a
+/// branch skips reading them, or they are read regardless and the read is
+/// taken back after the loop. The second is cheaper where registers are
+/// scarce, the first elsewhere.
+const READ_AHEAD: bool = cfg!(target_arch = "x86_64");
 
 /// Where sequences write and what they may copy from: the output of the
 /// current frame, then `prefix` before it.
@@ -32,7 +39,7 @@ impl SequenceDecoder {
         repeats: &mut [usize; 3],
     ) -> Result<(), Error> {
         #[cfg(target_arch = "x86_64")]
-        if std::is_x86_feature_detected!("bmi2") {
+        if crate::has_bmi2() {
             // safety: the processor was just found to have the feature
             return unsafe { self.execute_bmi2(stream, count, literals, sink, repeats) };
         }
@@ -42,7 +49,7 @@ impl SequenceDecoder {
     /// The same loop compiled for processors with BMI2, where the variable
     /// shifts of bit reading need no flags and no fixed register.
     #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "bmi2")]
+    #[target_feature(enable = "bmi1,bmi2,lzcnt")]
     unsafe fn execute_bmi2(
         &self,
         stream: &[u8],
@@ -92,12 +99,13 @@ impl SequenceDecoder {
             let mut lit = literals.ptr;
             let lit_end = lit.add(literals.len);
             let mut left = count;
+            let mut mark = reader.mark();
 
             loop {
                 reader.refill();
-                let ll = *table.add(ll_state);
-                let of = *table.add(of_state);
-                let ml = *table.add(ml_state);
+                let ll = Symbol::at(table.add(ll_state));
+                let of = Symbol::at(table.add(of_state));
+                let ml = Symbol::at(table.add(ml_state));
 
                 let offset;
                 if of.extra() > 1 {
@@ -137,7 +145,8 @@ impl SequenceDecoder {
                 }
                 let lit_len = ll.base() + reader.read(ll.extra()) as usize;
                 left -= 1;
-                if left != 0 {
+                if READ_AHEAD || left != 0 {
+                    mark = reader.mark();
                     ll_state = ll.next() + reader.read(ll.bits()) as usize;
                     ml_state = ml.next() + reader.read(ml.bits()) as usize;
                     of_state = of.next() + reader.read(of.bits()) as usize;
@@ -166,6 +175,9 @@ impl SequenceDecoder {
                     break;
                 }
             }
+            if READ_AHEAD {
+                reader.rewind(mark);
+            }
 
             let rest = lit_end.offset_from(lit) as usize;
             if rest > limit.offset_from(op) as usize {
@@ -181,6 +193,83 @@ impl SequenceDecoder {
         }
         *repeats = [rep0, rep1, rep2];
         Ok(())
+    }
+}
+
+/// One state of a sequence table, read field by field. Where registers are
+/// scarce each field is loaded from the table when it is needed; elsewhere
+/// the entry is loaded once and taken apart.
+#[derive(Clone, Copy)]
+struct Symbol(
+    #[cfg(target_arch = "x86_64")] *const Entry,
+    #[cfg(not(target_arch = "x86_64"))] Entry,
+);
+
+#[cfg(target_arch = "x86_64")]
+impl Symbol {
+    /// # Safety
+    /// `entry` must point to a table entry that outlives the symbol.
+    #[inline(always)]
+    unsafe fn at(entry: *const Entry) -> Self {
+        Self(entry)
+    }
+
+    // an entry is one little-endian word: fresh bits in its lowest byte,
+    // then extra bits, the next state in 16 bits, the baseline in 32
+
+    #[inline(always)]
+    fn bits(self) -> u32 {
+        // safety: `at` was given a valid entry
+        unsafe { self.0.cast::<u8>().read() as u32 }
+    }
+
+    #[inline(always)]
+    fn extra(self) -> u32 {
+        // safety: `at` was given a valid entry
+        unsafe { self.0.cast::<u8>().add(1).read() as u32 }
+    }
+
+    #[inline(always)]
+    fn next(self) -> usize {
+        // safety: `at` was given a valid entry
+        unsafe { self.0.cast::<u16>().add(1).read() as usize }
+    }
+
+    #[inline(always)]
+    fn base(self) -> usize {
+        // safety: `at` was given a valid entry
+        unsafe { self.0.cast::<u32>().add(1).read() as usize }
+    }
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+impl Symbol {
+    /// # Safety
+    /// `entry` must point to a table entry.
+    #[inline(always)]
+    unsafe fn at(entry: *const Entry) -> Self {
+        // safety: forwarded from the caller
+        Self(unsafe { *entry })
+    }
+
+    #[inline(always)]
+    fn bits(self) -> u32 {
+        self.0.bits()
+    }
+
+    #[inline(always)]
+    fn extra(self) -> u32 {
+        self.0.extra()
+    }
+
+    #[inline(always)]
+    fn next(self) -> usize {
+        self.0.next()
+    }
+
+    #[inline(always)]
+    fn base(self) -> usize {
+        self.0.base()
     }
 }
 

@@ -36,7 +36,8 @@ pub(crate) struct BackReader<'a> {
     /// lowest window position from which a full refill is always in bounds
     fast: *const u8,
     container: u64,
-    consumed: u32,
+    /// bits of the window not read yet; negative once the stream overflowed
+    left: i32,
     life: PhantomData<&'a [u8]>,
 }
 
@@ -58,7 +59,7 @@ impl<'a> BackReader<'a> {
                     start: src.as_ptr(),
                     fast: src.as_ptr().wrapping_add(8),
                     container: u64::from_le_bytes(bytes),
-                    consumed: pad + 8 * (8 - src.len()) as u32,
+                    left: 8 * src.len() as i32 - pad as i32,
                     life: PhantomData,
                 })
             }
@@ -74,27 +75,29 @@ impl<'a> BackReader<'a> {
             start: src.as_ptr(),
             fast: src[8..].as_ptr(),
             container: u64::from_le_bytes(window.try_into().unwrap()),
-            consumed,
+            left: 64 - consumed as i32,
             life: PhantomData,
         }
     }
 
-    /// The next `n` bits (0..=56) without consuming them.
+    /// The next `n` bits (1..=56) without consuming them; where the stream
+    /// has fewer left, zeros stand in for the missing low bits.
     #[inline(always)]
-    pub(crate) fn peek(&self, n: u32) -> u64 {
-        ((self.container << (self.consumed & 63)) >> 1) >> (63 - n)
+    pub(crate) fn peek_padded(&self, n: u32) -> u64 {
+        (self.container << ((64 - self.left) as u32 & 63)) >> (64 - n)
     }
 
     #[inline(always)]
     pub(crate) fn skip(&mut self, n: u32) {
-        self.consumed += n;
+        self.left -= n as i32;
     }
 
+    /// Consumes and returns the next `n` bits (0..=56). Past the start of
+    /// the stream the result is arbitrary.
     #[inline(always)]
     pub(crate) fn read(&mut self, n: u32) -> u64 {
-        let bits = self.peek(n);
-        self.consumed += n;
-        bits
+        self.left -= n as i32;
+        (self.container >> (self.left as u32 & 63)) & ((1 << n) - 1)
     }
 
     /// Slides the window down over the consumed bytes. Afterwards at least 57
@@ -102,15 +105,16 @@ impl<'a> BackReader<'a> {
     #[inline(always)]
     pub(crate) fn refill(&mut self) {
         if self.ptr >= self.fast {
-            debug_assert!(self.consumed <= 64);
+            debug_assert!((0..=64).contains(&self.left));
+            let used = (64 - self.left) as u32;
             // safety: the window starts at least 8 bytes into the stream and
             // at most 64 bits of it were consumed, so it moves down by at
             // most 8 bytes and stays inside the stream
             unsafe {
-                self.ptr = self.ptr.sub((self.consumed >> 3) as usize);
+                self.ptr = self.ptr.sub((used >> 3) as usize);
                 self.container = load64(self.ptr);
             }
-            self.consumed &= 7;
+            self.left += (used & !7) as i32;
         } else {
             self.refill_near_start();
         }
@@ -120,9 +124,9 @@ impl<'a> BackReader<'a> {
     fn refill_near_start(&mut self) {
         // safety: both pointers lie in the same stream, ptr at or above start
         let room = unsafe { self.ptr.offset_from(self.start) } as usize;
-        let bytes = ((self.consumed >> 3) as usize).min(room);
+        let bytes = (((64 - self.left) >> 3) as usize).min(room);
         if bytes != 0 {
-            self.consumed -= 8 * bytes as u32;
+            self.left += 8 * bytes as i32;
             // safety: room is nonzero only for streams of 8 bytes or more,
             // where every window from start to the initial one is in bounds
             unsafe {
@@ -132,18 +136,31 @@ impl<'a> BackReader<'a> {
         }
     }
 
+    /// The read position within the window, for [`BackReader::rewind`].
+    #[inline(always)]
+    pub(crate) fn mark(&self) -> i32 {
+        self.left
+    }
+
+    /// Takes back every read since `mark` was taken; no refill may have
+    /// happened in between.
+    #[inline(always)]
+    pub(crate) fn rewind(&mut self, mark: i32) {
+        self.left = mark;
+    }
+
     /// True once more bits were read than the stream holds. Only meaningful
     /// right after [`BackReader::refill`].
     #[inline(always)]
     pub(crate) fn overflowed(&self) -> bool {
-        self.consumed > 64
+        self.left < 0
     }
 
     /// True when every bit was read and none beyond. Only meaningful right
     /// after [`BackReader::refill`].
     #[inline(always)]
     pub(crate) fn finished(&self) -> bool {
-        self.ptr == self.start && self.consumed == 64
+        self.ptr == self.start && self.left == 0
     }
 }
 
@@ -235,5 +252,58 @@ impl<'a> BitWriter<'a> {
     pub(crate) fn finish_marked(mut self) {
         self.put(1, 1);
         self.finish();
+    }
+}
+
+/// A [`BitWriter`] without capacity checks, for streams whose size is known
+/// beforehand. Bits go to raw memory; the caller accounts for the length.
+pub(crate) struct RawBitWriter {
+    at: *mut u8,
+    acc: u64,
+    bits: u32,
+}
+
+impl RawBitWriter {
+    /// Starts writing at `at`.
+    ///
+    /// # Safety
+    /// `at` must be valid for writes of every byte the stream will hold
+    /// plus 8.
+    pub(crate) unsafe fn new(at: *mut u8) -> Self {
+        Self {
+            at,
+            acc: 0,
+            bits: 0,
+        }
+    }
+
+    /// Adds the low `n` bits of `value`, which must have no higher bits set.
+    /// At most 56 bits may be added between two flushes.
+    #[inline(always)]
+    pub(crate) fn put(&mut self, value: u64, n: u32) {
+        debug_assert!(value >> n == 0 && self.bits + n <= 63);
+        self.acc |= value << self.bits;
+        self.bits += n;
+    }
+
+    /// Moves every whole byte to the output; fewer than 8 bits stay pending.
+    #[inline(always)]
+    pub(crate) fn flush(&mut self) {
+        // safety: the constructor's caller reserved 8 bytes past the stream
+        unsafe {
+            self.at.cast::<u64>().write_unaligned(self.acc.to_le());
+            self.at = self.at.add((self.bits >> 3) as usize);
+        }
+        self.acc >>= self.bits & !7;
+        self.bits &= 7;
+    }
+
+    /// Ends a stream that is read backwards with its marker bit and returns
+    /// the address one past its last byte.
+    pub(crate) fn finish_marked(mut self) -> *mut u8 {
+        self.put(1, 1);
+        self.flush();
+        // safety: as for flush; the pending bits were stored by it already
+        unsafe { self.at.add((self.bits != 0) as usize) }
     }
 }

@@ -198,14 +198,17 @@ fn compress_weights(weights: &[u8], out: &mut Vec<u8>) -> bool {
     if weights.len() & 1 == 1 {
         first = table.start(take());
         second = table.start(take());
-        table.encode(&mut writer, &mut first, take());
+        let (bits, width) = table.encode(&mut first, take());
+        writer.put(bits, width);
     } else {
         second = table.start(take());
         first = table.start(take());
     }
     for _ in 0..(weights.len() - 2) / 2 {
-        table.encode(&mut writer, &mut second, take());
-        table.encode(&mut writer, &mut first, take());
+        for state in [&mut second, &mut first] {
+            let (bits, width) = table.encode(state, take());
+            writer.put(bits, width);
+        }
         writer.flush();
     }
     for state in [second, first] {
@@ -243,6 +246,24 @@ pub(crate) fn encode_stream(codes: &Codes, src: &[u8], out: &mut Vec<u8>) {
 /// Appends `src` as four bitstreams behind their jump table. The four are
 /// written side by side into `scratch`, so that none waits for another.
 pub(crate) fn encode_4x(codes: &Codes, src: &[u8], scratch: &mut Vec<u8>, out: &mut Vec<u8>) {
+    #[cfg(target_arch = "x86_64")]
+    if crate::has_bmi2() {
+        // safety: the processor was just found to have the features
+        return unsafe { encode_4x_bmi2(codes, src, scratch, out) };
+    }
+    encode_4x_any(codes, src, scratch, out)
+}
+
+/// The same compiled for processors with BMI2, where the variable shifts
+/// of bit writing need no fixed register.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "bmi1,bmi2,lzcnt")]
+unsafe fn encode_4x_bmi2(codes: &Codes, src: &[u8], scratch: &mut Vec<u8>, out: &mut Vec<u8>) {
+    encode_4x_any(codes, src, scratch, out)
+}
+
+#[inline(always)]
+fn encode_4x_any(codes: &Codes, src: &[u8], scratch: &mut Vec<u8>, out: &mut Vec<u8>) {
     const GROUP: usize = 4;
     let segment = src.len().div_ceil(4);
     let parts: [&[u8]; 4] = std::array::from_fn(|i| {

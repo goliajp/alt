@@ -23,6 +23,7 @@ pub(crate) struct Search<'t> {
 /// every nonzero rep at most `start - search.low`, each table at least
 /// `1 << log` entries long with all entries below `start`, `PREFIX` true if
 /// the window has a prefix, and `store` started for this block.
+#[inline(always)]
 pub(crate) unsafe fn run<const PREFIX: bool>(
     search: Search<'_>,
     window: &Window<'_>,
@@ -61,8 +62,8 @@ pub(crate) unsafe fn run<const PREFIX: bool>(
             let found = ip;
             let match_len;
 
-            let (long_ptr, long_usable) = window.probe::<PREFIX>(long_candidate, low);
-            let (short_ptr, short_usable) = window.probe::<PREFIX>(short_candidate, low);
+            let long_ptr = window.probe::<PREFIX>(long_candidate, low, here as u8);
+            let short_ptr = window.probe::<PREFIX>(short_candidate, low, here as u8);
             if window.repeats::<PREFIX>(ip + 1, rep0) {
                 ip += 1;
                 match_len = 4 + window.common::<PREFIX>(ip + 4, ip + 4 - rep0, end);
@@ -70,20 +71,20 @@ pub(crate) unsafe fn run<const PREFIX: bool>(
             } else {
                 let mut from;
                 let forward;
-                if (load64(long_ptr) == here) & long_usable {
+                if load64(long_ptr) == here {
                     from = long_candidate;
                     forward = 8 + window.common::<PREFIX>(ip + 8, from + 8, end);
                     // the next position is skipped by the match but is a
                     // likely target for later ones
                     *long.add(hash(window.data64(ip + 1), 0, long_shift)) = (ip + 1) as u32;
-                } else if (load32(short_ptr) == here as u32) & short_usable {
+                } else if load32(short_ptr) == here as u32 {
                     // a long match one byte on beats the short one here
                     let ahead = window.data64(ip + 1);
                     let slot = long.add(hash(ahead, 0, long_shift));
                     let next = *slot as usize;
                     *slot = (ip + 1) as u32;
-                    let (next_ptr, next_usable) = window.probe::<PREFIX>(next, low);
-                    if (load64(next_ptr) == ahead) & next_usable {
+                    let next_ptr = window.probe::<PREFIX>(next, low, ahead as u8);
+                    if load64(next_ptr) == ahead {
                         ip += 1;
                         from = next;
                         forward = 8 + window.common::<PREFIX>(ip + 8, from + 8, end);

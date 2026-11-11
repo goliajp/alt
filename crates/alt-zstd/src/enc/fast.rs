@@ -21,6 +21,7 @@ pub(crate) struct Search<'t> {
 /// every nonzero rep at most `start - search.low`, the table at least
 /// `1 << search.log` entries long with all entries below `start`, `PREFIX`
 /// true if the window has a prefix, and `store` started for this block.
+#[inline(always)]
 pub(crate) unsafe fn run<const PREFIX: bool>(
     search: Search<'_>,
     window: &Window<'_>,
@@ -60,12 +61,12 @@ pub(crate) unsafe fn run<const PREFIX: bool>(
             let found = ip;
             let match_len;
 
-            let (from_ptr, usable) = window.probe::<PREFIX>(candidate, low);
+            let from_ptr = window.probe::<PREFIX>(candidate, low, here as u8);
             if window.repeats::<PREFIX>(ip + 1, rep0) {
                 ip += 1;
                 match_len = 4 + window.common::<PREFIX>(ip + 4, ip + 4 - rep0, end);
                 store.push(window, anchor, ip, match_len, 1);
-            } else if (load32(from_ptr) == here as u32) & usable {
+            } else if load32(from_ptr) == here as u32 {
                 let mut from = candidate;
                 let forward = 4 + window.common::<PREFIX>(ip + 4, from + 4, end);
                 match_len = forward + window.extend_back::<PREFIX>(&mut ip, &mut from, anchor, low);

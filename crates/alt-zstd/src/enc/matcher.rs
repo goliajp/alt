@@ -1,6 +1,7 @@
 //! What the match finders share: the view of prefix and data as one index
 //! space, match measurement, and the store the sequences go to.
 
+use std::hint::select_unpredictable;
 use std::marker::PhantomData;
 
 use crate::bits::{load32, load64};
@@ -18,9 +19,10 @@ pub(crate) const MIN_MATCH: usize = 4;
 /// the step between probes grows by one for every `SKIP_SPAN` bytes passed.
 pub(crate) const SKIP_SPAN: usize = 256;
 
-/// Stands in for a candidate that may not be read, so that the comparison
-/// can go ahead without a branch on the candidate's validity.
-static NOWHERE: [u8; PROBE] = [0; PROBE];
+/// Stand-ins for a candidate that may not be read. One of the two differs
+/// from any data in its first byte, so comparing against it fails without
+/// a branch on the candidate's validity.
+static NOWHERE: [[u8; PROBE]; 2] = [[0xFF; PROBE], [0; PROBE]];
 
 /// Hash of the low `64 - drop` bits of `value`, `64 - shift` bits wide.
 #[inline(always)]
@@ -104,9 +106,10 @@ impl<'a> Window<'a> {
         unsafe { load64(self.prefix.wrapping_add(index)) }
     }
 
-    /// Where to read 8 bytes of the candidate at `index`, and whether it is
-    /// a candidate at all: at or above `low`, and not straddling the end of
-    /// the prefix. The address is readable either way.
+    /// Where to read 8 bytes of the candidate at `index`. A candidate below
+    /// `low`, or one straddling the end of the prefix, is no candidate: the
+    /// address then holds bytes that differ from `first` in the first byte,
+    /// `first` being the first byte of what the candidate is compared to.
     ///
     /// # Safety
     /// `index` must be below a data position that has 8 bytes ahead of it.
@@ -115,15 +118,14 @@ impl<'a> Window<'a> {
         &self,
         index: usize,
         low: usize,
-    ) -> (*const u8, bool) {
+        first: u8,
+    ) -> *const u8 {
         let usable =
             index >= low && (!PREFIX || index >= self.split || index + PROBE <= self.split);
-        let from = if usable {
-            self.at::<PREFIX>(index)
-        } else {
-            NOWHERE.as_ptr()
-        };
-        (from, usable)
+        let nowhere = NOWHERE[(first == 0xFF) as usize].as_ptr();
+        // whether a slot holds a live candidate is close to random at the
+        // start of a frame, so this must not become a branch
+        select_unpredictable(usable, self.at::<PREFIX>(index), nowhere)
     }
 
     /// Whether the 4 bytes at `ip` repeat those `rep` bytes earlier; a `rep`
@@ -136,8 +138,9 @@ impl<'a> Window<'a> {
         // safety: with rep == 0 both sides read the same data bytes; a
         // source in the prefix is read only if 8 bytes of it remain there
         unsafe {
-            let (from, usable) = self.probe::<PREFIX>(ip - rep, 0);
-            (rep != 0) & usable & (load32(from) == load32(self.data_at(ip)))
+            let here = load32(self.data_at(ip));
+            let from = self.probe::<PREFIX>(ip - rep, 0, here as u8);
+            (rep != 0) & (load32(from) == here)
         }
     }
 

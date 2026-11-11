@@ -143,7 +143,7 @@ impl HufTable {
             reader.refill();
             let burst = left.min(BURST);
             for _ in 0..burst {
-                let index = reader.peek(self.log) as usize;
+                let index = reader.peek_padded(self.log) as usize;
                 // safety: peek(log) < 1 << log <= entries.len(), and the
                 // caller provides room for every symbol written
                 unsafe {
@@ -229,7 +229,7 @@ impl HufTable {
         readers: &mut [Option<BackReader<'a>>; 4],
     ) {
         #[cfg(target_arch = "x86_64")]
-        if std::is_x86_feature_detected!("bmi2") {
+        if crate::has_bmi2() {
             // safety: the processor was just found to have the feature; the
             // rest is forwarded from the caller
             return unsafe { self.burst_4x_bmi2(streams, dst, lens, pairs, done, readers) };
@@ -244,7 +244,7 @@ impl HufTable {
     /// # Safety
     /// As for [`HufTable::burst_4x`].
     #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "bmi2")]
+    #[target_feature(enable = "bmi1,bmi2,lzcnt")]
     unsafe fn burst_4x_bmi2<'a>(
         &self,
         streams: [&'a [u8]; 4],

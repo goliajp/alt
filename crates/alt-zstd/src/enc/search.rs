@@ -56,38 +56,10 @@ impl Matcher<'_> {
         let before = self.reps;
         let mut reps = before.map(|rep| if rep > reach { 0 } else { rep });
         // safety: start..end is a block inside the data of `window`, `low`
-        // is at least `first`, reps were limited to `reach` just above, the
-        // tables hold only indices of positions already passed (or below
-        // `first`), and the const argument follows `has_prefix`
-        let anchor = unsafe {
-            if self.params.double {
-                let search = dfast::Search {
-                    long: &mut *self.long,
-                    long_log: self.params.long_log,
-                    short: &mut *self.short,
-                    short_log: self.params.short_log,
-                    width: self.params.width,
-                    low,
-                };
-                if window.has_prefix() {
-                    dfast::run::<true>(search, window, start, end, &mut reps, store)
-                } else {
-                    dfast::run::<false>(search, window, start, end, &mut reps, store)
-                }
-            } else {
-                let search = fast::Search {
-                    table: &mut *self.short,
-                    log: self.params.short_log,
-                    width: self.params.width,
-                    low,
-                };
-                if window.has_prefix() {
-                    fast::run::<true>(search, window, start, end, &mut reps, store)
-                } else {
-                    fast::run::<false>(search, window, start, end, &mut reps, store)
-                }
-            }
-        };
+        // is at least `first`, reps were limited to `reach` just above, and
+        // the tables hold only indices of positions already passed (or
+        // below `first`)
+        let anchor = unsafe { self.find(window, start, end, low, &mut reps, store) };
         // safety: anchor..end is the unmatched tail of the block
         let tail = unsafe { std::slice::from_raw_parts(window.data_at(anchor), end - anchor) };
         store.literals.extend_from_slice(tail);
@@ -103,5 +75,96 @@ impl Matcher<'_> {
             if reps[0] != 0 { reps[0] } else { aside[0] },
             if reps[1] != 0 { reps[1] } else { second },
         ];
+    }
+
+    /// Runs the match finder over `start..end` and returns where the
+    /// trailing literals begin.
+    ///
+    /// # Safety
+    /// As for the `run` functions of the two finders, except that the
+    /// prefix argument is derived here.
+    unsafe fn find(
+        &mut self,
+        window: &Window<'_>,
+        start: usize,
+        end: usize,
+        low: usize,
+        reps: &mut [usize; 2],
+        store: &mut SeqStore,
+    ) -> usize {
+        let prefix = window.has_prefix();
+        // safety: forwarded from the caller; the const argument follows
+        // `has_prefix`, and the special build runs only where detected
+        unsafe {
+            #[cfg(target_arch = "x86_64")]
+            if crate::has_bmi2() {
+                return if prefix {
+                    self.find_bmi2::<true>(window, start, end, low, reps, store)
+                } else {
+                    self.find_bmi2::<false>(window, start, end, low, reps, store)
+                };
+            }
+            if prefix {
+                self.find_any::<true>(window, start, end, low, reps, store)
+            } else {
+                self.find_any::<false>(window, start, end, low, reps, store)
+            }
+        }
+    }
+
+    /// The finders compiled for processors with BMI2, where hashing and
+    /// match measuring need no fixed shift register.
+    ///
+    /// # Safety
+    /// As for [`Matcher::find_any`].
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "bmi1,bmi2,lzcnt")]
+    unsafe fn find_bmi2<const PREFIX: bool>(
+        &mut self,
+        window: &Window<'_>,
+        start: usize,
+        end: usize,
+        low: usize,
+        reps: &mut [usize; 2],
+        store: &mut SeqStore,
+    ) -> usize {
+        // safety: forwarded from the caller
+        unsafe { self.find_any::<PREFIX>(window, start, end, low, reps, store) }
+    }
+
+    /// # Safety
+    /// As for the `run` functions of the two finders.
+    #[inline(always)]
+    unsafe fn find_any<const PREFIX: bool>(
+        &mut self,
+        window: &Window<'_>,
+        start: usize,
+        end: usize,
+        low: usize,
+        reps: &mut [usize; 2],
+        store: &mut SeqStore,
+    ) -> usize {
+        // safety: forwarded from the caller
+        unsafe {
+            if self.params.double {
+                let search = dfast::Search {
+                    long: &mut *self.long,
+                    long_log: self.params.long_log,
+                    short: &mut *self.short,
+                    short_log: self.params.short_log,
+                    width: self.params.width,
+                    low,
+                };
+                dfast::run::<PREFIX>(search, window, start, end, reps, store)
+            } else {
+                let search = fast::Search {
+                    table: &mut *self.short,
+                    log: self.params.short_log,
+                    width: self.params.width,
+                    low,
+                };
+                fast::run::<PREFIX>(search, window, start, end, reps, store)
+            }
+        }
     }
 }

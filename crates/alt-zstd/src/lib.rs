@@ -17,6 +17,15 @@ mod sequences;
 mod weights;
 mod xxh64;
 
+/// Whether the processor has the bit-manipulation instructions that the
+/// hot loops are compiled a second time for.
+#[cfg(target_arch = "x86_64")]
+pub(crate) fn has_bmi2() -> bool {
+    std::is_x86_feature_detected!("bmi2")
+        && std::is_x86_feature_detected!("bmi1")
+        && std::is_x86_feature_detected!("lzcnt")
+}
+
 /// Why a decode failed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
