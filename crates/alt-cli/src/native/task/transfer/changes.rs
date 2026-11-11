@@ -339,5 +339,9 @@ mod json_tests {
     use super::*;
 
     alt_json_testkit::module_fixture_tests!("native-task-transfer-changes"; Saved);
-    alt_json_testkit::module_read_tests!("native-task-transfer-changes"; Plan: Plan, Action: Action);
+    mod reads {
+        use super::*;
+        alt_json_testkit::module_read_tests!("native-task-transfer-changes"; Plan: Plan, Action: Action);
+    }
+    alt_json_testkit::module_read_tests!("state-remote"; Saved: Saved, ChangePlan: Plan);
 }

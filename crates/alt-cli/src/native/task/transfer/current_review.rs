@@ -222,5 +222,9 @@ mod json_tests {
     use super::*;
 
     alt_json_testkit::module_fixture_tests!("native-task-transfer-current_review"; ReviewContext);
-    alt_json_testkit::module_read_tests!("native-task-transfer"; Plan: Plan);
+    alt_json_testkit::module_read_tests!("state-remote"; ReviewContext: ReviewContext, Binding: Binding, PublicationBinding: Binding, PublishedOrigin: PublishedOrigin, Receipt: protocol::Receipt, Plan: Plan);
+    mod reads {
+        use super::*;
+        alt_json_testkit::module_read_tests!("native-task-transfer"; Plan: Plan);
+    }
 }

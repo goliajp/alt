@@ -249,5 +249,9 @@ mod json_tests {
     use super::*;
 
     alt_json_testkit::module_fixture_tests!("auth-delegate"; PendingAgent);
-    alt_json_testkit::module_read_tests!("auth-delegate"; Plan: Plan);
+    mod reads {
+        use super::*;
+        alt_json_testkit::module_read_tests!("auth-delegate"; Plan: Plan);
+    }
+    alt_json_testkit::module_read_tests!("state-auth"; PendingAgent: PendingAgent, Plan: Plan);
 }
