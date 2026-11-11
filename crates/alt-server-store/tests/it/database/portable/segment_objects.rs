@@ -218,7 +218,7 @@ fn export_of_segment_objects_imports_into_another_instance() {
         .store
         .pack_view(&target.credential, "repository")
         .unwrap();
-    assert_eq!(view.refs["refs/heads/main"], payloads[1].commit);
+    assert_eq!(view.refs.get("refs/heads/main"), Some(payloads[1].commit));
     assert_eq!(view.segments.objects(), 3);
 }
 

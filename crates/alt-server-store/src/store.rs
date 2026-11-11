@@ -696,18 +696,10 @@ pub(crate) fn snapshot(
     if row.get::<_, String>(1) != "sha1" {
         return Err(Error::Precondition("unsupported repository object format"));
     }
-    let mut refs = std::collections::BTreeMap::new();
-    for row in tx.query(
-        "SELECT name,oid FROM alt_refs WHERE repository=$1 ORDER BY name",
-        &[&repository],
-    )? {
-        let oid: String = row.get(1);
-        refs.insert(
-            row.get(0),
-            oid.parse()
-                .map_err(|_| Error::Integrity("stored reference object id"))?,
-        );
-    }
+    let refs = crate::refs::map(
+        tx.query_one(crate::refs::REFS_TEXT, &[&repository])?
+            .get::<_, Option<&str>>(0),
+    )?;
     Ok(RepositorySnapshot {
         scope: Scope {
             installation_id: spec.installation_id.clone(),

@@ -163,5 +163,5 @@ pub(crate) fn execute_git_with_cache(
         return crate::git_packs::receive(store, credential, &repository, source, view);
     }
     let command = command(source, advertisement, store.limits())?;
-    crate::git_packs::read(store.limits(), receive, &command, view)
+    crate::git_read::read(store.limits(), receive, &command, view)
 }
