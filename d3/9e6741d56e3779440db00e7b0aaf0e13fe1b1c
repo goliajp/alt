@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: read serde enums nested in a tagged variant through the bridge
+author-type: human
+author: doracawl
+touched: crates/alt-json-serde/tests/it/change_link.rs
+touched: crates/alt-json/src/de.rs
+touched: crates/alt-json/src/de/access.rs
+touched: crates/alt-json/src/de/raw.rs
