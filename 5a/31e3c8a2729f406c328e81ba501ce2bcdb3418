@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: feat
+summary: merge pack segments in the background after publications
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/lib.rs
+touched: crates/alt-server-store/src/pack_compaction.rs
+touched: crates/alt-server-store/src/packs.rs
+touched: crates/alt-server-telemetry/src/lib.rs
+touched: crates/alt-server/src/compaction.rs
+touched: crates/alt-server/src/http.rs
+touched: crates/alt-server/src/lib.rs
+touched: crates/alt-server/tests/it/database/git.rs
