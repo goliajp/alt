@@ -622,5 +622,5 @@ fn objects_pushed_by_git_are_downloadable_by_content_digest() {
         commit
     );
     let absent = alt_hash::blake3::hash(b"never stored").to_hex();
-    assert_eq!(download(absent.as_str()).status(), 401);
+    assert_eq!(download(absent.as_str()).status(), 403);
 }
