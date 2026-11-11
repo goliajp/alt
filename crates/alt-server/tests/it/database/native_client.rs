@@ -2,7 +2,7 @@ use super::*;
 use alt_wire_http::native::{Options, Transport, verify_receipt};
 
 #[test]
-#[ignore = "requires isolated PostgreSQL and loopback HTTP; exercised by server acceptance and closing gate"]
+#[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
 fn native_transport_negotiates_resumes_and_verifies_authoritative_receipt_and_bytes() {
     let f = Fixture::new();
     let server = Running::start(&f);
@@ -80,6 +80,20 @@ fn native_transport_negotiates_resumes_and_verifies_authoritative_receipt_and_by
             .records(&key.scope, RecordKind::Task, None)
             .unwrap()
             .is_empty()
+    );
+    // what a native client published is a Git repository to a Git client
+    let temp = alt_os::temp::tempdir().unwrap();
+    let url = format!("{}/git/repository", server.url);
+    git::ok(temp.path(), &f.token, &["clone", "--quiet", &url, "cloned"]);
+    let cloned = temp.path().join("cloned");
+    git::ok(&cloned, &f.token, &["fsck", "--strict", "--full"]);
+    assert_eq!(
+        Some(git::text(git::ok(
+            &cloned,
+            &f.token,
+            &["rev-parse", "HEAD"]
+        ))),
+        payload.manifest.entries[1].git_oid
     );
     assert_eq!(f.counts(), (1, 1, 1));
 }
