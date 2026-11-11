@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -99,6 +100,12 @@ impl ToJson for Path {
 impl ToJson for PathBuf {
     fn to_json(&self, w: &mut Writer) -> Result<()> {
         w.string(path_text(self)?)
+    }
+}
+
+impl ToJson for SocketAddr {
+    fn to_json(&self, w: &mut Writer) -> Result<()> {
+        w.string(&self.to_string())
     }
 }
 

@@ -27,3 +27,6 @@ mod portable;
 pub use portable::route::{ExportAction, ImportAction, PortableRoute};
 
 pub mod change_links;
+
+#[cfg(test)]
+mod json_tests;

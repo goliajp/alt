@@ -7,17 +7,17 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::io::Read;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, alt_json::FromJson)]
 struct Changes {
     changes: Vec<Change>,
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, alt_json::FromJson)]
 struct Change {
     path: String,
     before: Option<Version>,
     after: Option<Version>,
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, alt_json::FromJson)]
 struct Version {
     oid: String,
     mode: u32,
@@ -185,5 +185,63 @@ pub fn inspect(
             Ok(value)
         }
         Err(error) => Err(error),
+    }
+}
+
+#[cfg(test)]
+mod json_tests {
+    use alt_json::{Value, json};
+    use alt_json_testkit::drive::exercise_reader;
+    use alt_json_testkit::fixtures::{check_recorded, record_reader, verify_reader};
+    use alt_json_testkit::rng::Rng;
+    use alt_json_testkit::support::Arbitrary;
+
+    use super::*;
+
+    const DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/json");
+
+    fn version(rng: &mut Rng) -> Value {
+        if rng.chance(3) {
+            return Value::Null;
+        }
+        json!({
+            "oid": String::arbitrary(rng),
+            "mode": u32::arbitrary(rng),
+            "utf8": Option::<String>::arbitrary(rng),
+        })
+    }
+
+    fn changes(rng: &mut Rng) -> Value {
+        let changes: Vec<Value> = (0..rng.below(3))
+            .map(|_| json!({"path": String::arbitrary(rng), "before": version(rng), "after": version(rng)}))
+            .collect();
+        json!({"changes": changes})
+    }
+
+    fn view(value: &Changes) -> String {
+        let version = |v: &Option<Version>| {
+            v.as_ref()
+                .map(|v| format!("{:?}", (&v.oid, v.mode, &v.utf8)))
+        };
+        let changes: Vec<_> = value
+            .changes
+            .iter()
+            .map(|c| (&c.path, version(&c.before), version(&c.after)))
+            .collect();
+        format!("{changes:?}")
+    }
+
+    #[test]
+    fn same_as_serde() {
+        exercise_reader::<Changes>(0xd500, 300, changes, view).report("review changes");
+    }
+
+    #[test]
+    fn recorded_verdicts() {
+        check_recorded(
+            &format!("{DIR}/web_review-Changes.txt"),
+            &record_reader::<Changes>(0xd501, 15, changes),
+        );
+        verify_reader::<Changes>(DIR, "web_review-Changes");
     }
 }

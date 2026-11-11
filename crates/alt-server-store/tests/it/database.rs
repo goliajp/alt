@@ -5,6 +5,7 @@ mod change_links;
 mod cloud;
 mod delegation;
 mod faults;
+mod json;
 mod maintenance;
 mod provenance;
 mod registration;
@@ -159,6 +160,9 @@ impl Fixture {
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
+        if !std::thread::panicking() {
+            json::compare_stored(&mut self.client());
+        }
         let mut client = Client::connect(&self.admin_dsn, NoTls).unwrap();
         client
             .batch_execute(&format!("DROP DATABASE {} WITH (FORCE)", self.database))

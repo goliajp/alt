@@ -8,6 +8,7 @@ mod chunks;
 mod cloud;
 mod connections;
 mod git;
+mod json;
 mod native_client;
 mod operator;
 mod portable;
@@ -193,10 +194,7 @@ impl Running {
             &serde_json::to_vec(body).unwrap(),
         );
         let status = response.status();
-        (
-            status,
-            serde_json::from_reader(response.into_reader()).unwrap(),
-        )
+        (status, crate::database::json::body(response))
     }
     fn metrics(&self, token: &str) -> String {
         let response = self.send("GET", "/v1/instance/metrics", Some(token), b"");
@@ -220,10 +218,7 @@ impl Running {
     fn command(&self, method: &str, path: &str, token: &str) -> (u16, serde_json::Value) {
         let response = self.send(method, path, Some(token), b"");
         let status = response.status();
-        (
-            status,
-            serde_json::from_reader(response.into_reader()).unwrap(),
-        )
+        (status, crate::database::json::body(response))
     }
 }
 impl Drop for Running {

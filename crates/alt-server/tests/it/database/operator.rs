@@ -110,6 +110,7 @@ impl OperatorDb {
             "{args:?}: {}",
             String::from_utf8_lossy(&result.stderr)
         );
+        super::json::observe(&result.stdout);
         serde_json::from_slice(&result.stdout).unwrap()
     }
     fn path(&self, name: &str) -> String {
@@ -248,7 +249,7 @@ fn persisted_operator_secrets_resume_without_bootstrap_mode_or_volume_fallback()
         .timeout(Duration::from_secs(5))
         .call()
         .unwrap();
-    let capabilities: serde_json::Value = serde_json::from_reader(response.into_reader()).unwrap();
+    let capabilities: serde_json::Value = crate::database::json::body(response);
     assert_eq!(
         capabilities["receipt_public_key"],
         health["receipt_public_key"]

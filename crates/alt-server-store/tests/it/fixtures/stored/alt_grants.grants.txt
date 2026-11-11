@@ -1,0 +1,3 @@
+[{"refs": {"Namespace": "refs/"}, "force": true, "paths": null, "create": true, "delete": true, "update": true}]	[{"refs":{"Namespace":"refs/"},"create":true,"update":true,"delete":true,"force":true,"paths":null}]
+[]	[]
+[{"refs": {"Namespace": "refs/"}, "force": true, "paths": [[115, 114, 99]], "create": true, "delete": true, "update": true}]	[{"refs":{"Namespace":"refs/"},"create":true,"update":true,"delete":true,"force":true,"paths":[[115,114,99]]}]

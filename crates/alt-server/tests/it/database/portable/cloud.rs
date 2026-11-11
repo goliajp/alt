@@ -376,10 +376,7 @@ fn post(url: String, token: String, body: Vec<u8>) -> (u16, serde_json::Value) {
         Ok(r) | Err(ureq::Error::Status(_, r)) => r,
         Err(e) => panic!("HTTP request: {e}"),
     };
-    (
-        response.status(),
-        serde_json::from_reader(response.into_reader()).unwrap(),
-    )
+    (response.status(), crate::database::json::body(response))
 }
 fn expire(f: &Fixture) {
     let mut client = f.client();

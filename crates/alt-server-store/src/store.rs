@@ -7,8 +7,11 @@ use postgres::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct InstanceSpec {
     pub installation_id: String,
     pub workspace_id: String,

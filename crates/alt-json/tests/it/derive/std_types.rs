@@ -4,6 +4,7 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::Debug;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -207,7 +208,7 @@ macro_rules! exercise_all {
 #[test]
 fn scalars_at_top_level() {
     exercise_all!(3000; u8 u16 u32 u64 usize i8 i16 i32 i64 isize u128 i128 f64 f32 bool char String Nothing
-        Option<u32> Option<String> PathBuf)
+        Option<u32> Option<String> PathBuf SocketAddr)
         .report("derive std types, scalars at top level in total");
 }
 

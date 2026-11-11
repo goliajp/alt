@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 /// Counters are decimal strings to preserve the full database integer range in
 /// browser clients. This is a read-only database observation, not a byte scrub
 /// or proof that an external backup remains available.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, alt_json::ToJson)]
 pub struct InstanceStatus {
     pub installation_id: String,
     pub runtime_generation: String,
@@ -30,7 +30,7 @@ pub struct InstanceStatus {
     pub pending_change_links: String,
     pub recovery_change_links: String,
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, alt_json::ToJson)]
 pub struct InstanceAuditEntry {
     pub sequence: String,
     pub actor_id: String,
@@ -139,37 +139,50 @@ impl Store {
 }
 
 /// one file-backed pack segment; segments stored with their row travel in the database dump
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct SnapshotPackSegment {
     pub repository: String,
     pub segment: String,
     pub bytes: u64,
     pub blake3: String,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct SnapshotBlob {
     pub repository: String,
     pub blake3: String,
     pub bytes: u64,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct SnapshotRepository {
     pub repository: String,
     pub recovery_epoch: u64,
     pub transaction_sequence: u64,
     pub refs: std::collections::BTreeMap<String, String>,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct SnapshotCatalog {
     pub schema: u32,
     pub instance: InstanceSpec,
     pub repositories: Vec<SnapshotRepository>,
     pub blobs: Vec<SnapshotBlob>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[json(default, skip_serializing_if = "Vec::is_empty")]
     pub pack_segments: Vec<SnapshotPackSegment>,
 }
 

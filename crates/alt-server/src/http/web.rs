@@ -1,9 +1,10 @@
 mod cloud_login;
+mod input;
 use super::*;
 use crate::web_route::{self, WebRoute};
 use alt_browser_auth::PublicOrigin;
 use alt_server_store::{Credential, Result, Store};
-use serde::Deserialize;
+use input::{DeviceDecision, Empty, Login, NewUser, UserState};
 use serde_json::{Value, json};
 use std::{io::Read, net::IpAddr};
 
@@ -357,10 +358,7 @@ async fn handle_inner(
             WebRoute::Sessions => Ok((output(store.browser_sessions(&credential, &browser.origin)?)?, None)),
             WebRoute::DeviceConsent(code) => Ok((output(store.device_consent(&credential,&browser.origin,&code,peer)?)?,None)),
             WebRoute::DeviceDecision => {
-                #[derive(Deserialize)]
-                #[serde(deny_unknown_fields)]
-                struct Decision { user_code:String, allow:bool }
-                let input:Decision=serde_json::from_slice(&raw)?;
+                let input:DeviceDecision=serde_json::from_slice(&raw)?;
                 let consent=store.device_consent(&credential,&browser.origin,&input.user_code,peer)?;
                 let local=super::device::credential(&factory.signing_key,&consent.id);
                 let sealed=if input.allow {
@@ -440,15 +438,6 @@ async fn handle_inner(
         ),
     }
 }
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Login {
-    login_name: String,
-    password: String,
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Empty {}
 fn session(
     store: &mut Store,
     credential: &Credential,
@@ -567,15 +556,7 @@ fn execute(
             output(alt_server_store::Page { items, next })
         }
         WebRoute::CreateUser => {
-            #[derive(Deserialize)]
-            #[serde(deny_unknown_fields)]
-            struct Input {
-                login_name: String,
-                display_name: String,
-                password: String,
-                administrator: bool,
-            }
-            let input: Input = serde_json::from_slice(raw)?;
+            let input: NewUser = serde_json::from_slice(raw)?;
             let actor = format!("user-{}", alt_browser_auth::secret());
             output(store.create_local_user(
                 credential,
@@ -587,12 +568,7 @@ fn execute(
             )?)
         }
         WebRoute::UserState(actor) => {
-            #[derive(Deserialize)]
-            #[serde(deny_unknown_fields)]
-            struct Input {
-                disabled: bool,
-            }
-            let input: Input = serde_json::from_slice(raw)?;
+            let input: UserState = serde_json::from_slice(raw)?;
             store.disable_local_user(credential, &actor, input.disabled)?;
             output(json!({"actor_id":actor,"disabled":input.disabled}))
         }

@@ -352,14 +352,14 @@ fn request_observations_preserve_late_commits_and_current_metrics_authority() {
     let timed_out = server.call("POST", &format!("{selected}/publish"), Some(&token), b"");
     assert_eq!(timed_out.status(), 503);
     let late_trace = timed_out.header("x-alt-trace-id").unwrap().to_owned();
-    let body: serde_json::Value = serde_json::from_reader(timed_out.into_reader()).unwrap();
+    let body: serde_json::Value = crate::database::json::body(timed_out);
     assert_eq!(body["code"], "outcome_unknown");
     transaction.commit().unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let response = server.call("GET", &selected, Some(&token), b"");
         if response.status() == 200 {
-            let value: serde_json::Value = serde_json::from_reader(response.into_reader()).unwrap();
+            let value: serde_json::Value = crate::database::json::body(response);
             if value["result"]["state"] == "committed" {
                 break;
             }
@@ -379,7 +379,7 @@ fn request_observations_preserve_late_commits_and_current_metrics_authority() {
     let replay = server.call("POST", &format!("{selected}/publish"), Some(&token), b"");
     assert_eq!(replay.status(), 200);
     let replay_trace = replay.header("x-alt-trace-id").unwrap().to_owned();
-    let value: serde_json::Value = serde_json::from_reader(replay.into_reader()).unwrap();
+    let value: serde_json::Value = crate::database::json::body(replay);
     assert_eq!(value["result"]["state"], "committed");
     assert_ne!(replay_trace, late_trace);
     assert!(

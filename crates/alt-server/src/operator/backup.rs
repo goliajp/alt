@@ -16,26 +16,30 @@ use std::{
 };
 
 const MANIFEST_LIMIT: usize = 64 * 1024 * 1024;
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct FileDigest {
     pub bytes: u64,
     pub blake3: String,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct Manifest {
     pub format: u32,
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[json(default, skip_serializing_if = "Option::is_none")]
     pub operation_id: Option<String>,
     pub catalog: SnapshotCatalog,
     pub files: BTreeMap<String, FileDigest>,
     pub payload: FileDigest,
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
-struct SignedManifest {
+#[json(deny_unknown_fields)]
+pub(crate) struct SignedManifest {
     manifest: Manifest,
     signature: String,
 }

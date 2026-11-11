@@ -26,6 +26,8 @@ alt-git-codec.workspace = true
 alt-git-pack.workspace = true
 alt-inflate.workspace = true
 alt-wire.workspace = true
+alt-json.workspace = true
+alt-json-serde.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 postgres = {version="0.19",features=["with-serde_json-1"]}
@@ -43,6 +45,7 @@ tar = "0.4"
 tokio-util = {version="0.7",features=["io"]}
 
 [dev-dependencies]
+alt-json-testkit.workspace = true
 alt-command-protocol.workspace = true
 alt-deflate.workspace = true
 tiny_http = "0.12"

@@ -6,7 +6,7 @@ use alt_browser_auth::{PublicOrigin, password_hash};
 use alt_remote_protocol::DeploymentMode;
 use serde::Serialize;
 
-#[derive(Serialize)]
+#[derive(Serialize, alt_json::ToJson)]
 pub struct ActiveBrowserSession {
     /// A database identifier, never an authentication secret.
     pub id: String,

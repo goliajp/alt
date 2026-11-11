@@ -4,12 +4,12 @@ use crate::{Credential, Error, Result, Store};
 use alt_remote_protocol::{Publication, RequestKey, Scope};
 use serde::Serialize;
 
-#[derive(Serialize)]
+#[derive(Serialize, alt_json::ToJson)]
 pub struct Page<T> {
     pub items: Vec<T>,
     pub next: Option<String>,
 }
-#[derive(Serialize)]
+#[derive(Serialize, alt_json::ToJson)]
 pub struct WorkbenchRepository {
     pub scope: Scope,
     pub default_branch: String,
@@ -17,7 +17,7 @@ pub struct WorkbenchRepository {
     pub can_review: bool,
     pub can_publish: bool,
 }
-#[derive(Serialize)]
+#[derive(Serialize, alt_json::ToJson)]
 pub struct WorkbenchRequest {
     pub key: RequestKey,
     pub state: String,

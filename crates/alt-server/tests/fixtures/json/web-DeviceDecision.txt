@@ -1,0 +1,85 @@
+A {"allow":false,"user_code":""}
+A {"allow":false,"user_code":"V)__bT"}
+A {"allow":false,"user_code":"null"}
+A {"allow":false,"user_code":"孋ȶSq𜆕鰗\n"}
+A {"allow":false,"user_code":"뮂􏿽\u0006禒톬Ԗ󣝑̀"}
+A {"allow":false,"user_code":"퍧\rz~K|\n\\X߿先"}
+A {"allow":false,"user_code":"Їִ戚\"\u0016"}
+A {"allow":false,"user_code":"󰀀A弃\u0002"}
+A {"allow":true,"user_code":" 󟥙\u0001u佨䬑\n\u0011\u000b\u0002"}
+A {"allow":true,"user_code":""}
+A {"allow":true,"user_code":"-1"}
+A {"allow":true,"user_code":"P5瓳񲟋҄Ǎ杤lY篢@"}
+A {"allow":true,"user_code":"plS^0"}
+A {"allow":true,"user_code":"wￗ萱綂\u000e㢬ο韰i講t󑈹"}
+A {"allow":true,"user_code":"ÿ.Џ$󡱼縭񉗘֏t韣𐀀"}
+A {"allow":true,"user_code":"緳񵤝赓Y\b\u0006\u001f"}
+A {"allow":true,"user_code":"縓 ar򺱶圊\u0016\u0018萆"}
+R "12"
+R "null"
+R -10
+R [-129,"퍧\rz~K|\n\\X߿先"]
+R []
+R [false,"V)__bT"]
+R [false,89.5]
+R [true," 󟥙\u0001u佨䬑\n\u0011\u000b\u0002",{}]
+R [true,7]
+R [true,true,"緳񵤝赓Y\b\u0006\u001f"]
+R false
+R {"ALLOW":true,"user_code":-1e+300}
+R {"USER_CODE":"-1","allow":true}
+R {"USER_CODE":"Їִ戚\"\u0016","allow":26.5}
+R {"a":4294967296,"allow":true,"user_code":{}}
+R {"allow":"","user_code":"緳񵤝赓Y\b\u0006\u001f"}
+R {"allow":"a","user_code":"縓 ar򺱶圊\u0016\u0018萆"}
+R {"allow":-184,"allow":true,"user_code":"wￗ萱綂\u000e㢬ο韰i講t󑈹"}
+R {"allow":-1e+300,"user_code":"wￗ萱綂\u000e㢬ο韰i講t󑈹"}
+R {"allow":-2147483649,"user_code":" 󟥙\u0001u佨䬑\n\u0011\u000b\u0002"}
+R {"allow":-40,"user_code":"ÿ.Џ$󡱼縭񉗘֏t韣𐀀"}
+R {"allow":-74,"user_code":-129}
+R {"allow":-9223372036854775808,"user_code":"퍧\rz~K|\n\\X߿先"}
+R {"allow":108,"user_code":"P5瓳񲟋҄Ǎ杤lY篢@"}
+R {"allow":168,"user_code":"󰀀A弃\u0002"}
+R {"allow":33.5,"allow":false,"user_code":"󰀀A弃\u0002"}
+R {"allow":48.5,"allow":true,"user_code":"ÿ.Џ$󡱼縭񉗘֏t韣𐀀"}
+R {"allow":49.5,"kind":25.5,"user_code":""}
+R {"allow":65536,"user_code":""}
+R {"allow":65536,"user_code":23}
+R {"allow":false,"allow":false,"user_code":""}
+R {"allow":false,"allow":false,"user_code":"V)__bT"}
+R {"allow":false,"allow":false,"user_code":"孋ȶSq𜆕鰗\n"}
+R {"allow":false,"allow":false,"user_code":"뮂􏿽\u0006禒톬Ԗ󣝑̀"}
+R {"allow":false,"allow":false,"user_code":"퍧\rz~K|\n\\X߿先"}
+R {"allow":false,"kind":-9223372036854775808,"user_code":"Їִ戚\"\u0016"}
+R {"allow":false,"user_code":-20}
+R {"allow":false,"user_code":-2147483649}
+R {"allow":false,"user_code":1.5}
+R {"allow":false,"user_code":9223372036854775808}
+R {"allow":false,"user_code":true}
+R {"allow":false,"user_code":{}}
+R {"allow":false}
+R {"allow":null,"user_code":"󰀀A弃\u0002"}
+R {"allow":true,"allow":true,"user_code":" 󟥙\u0001u佨䬑\n\u0011\u000b\u0002"}
+R {"allow":true,"allow":true,"user_code":""}
+R {"allow":true,"allow":true,"user_code":"P5瓳񲟋҄Ǎ杤lY篢@"}
+R {"allow":true,"allow":true,"user_code":"緳񵤝赓Y\b\u0006\u001f"}
+R {"allow":true,"allow":true,"user_code":"縓 ar򺱶圊\u0016\u0018萆"}
+R {"allow":true,"kind":"true","user_code":-32769}
+R {"allow":true,"user_code":-129}
+R {"allow":true,"user_code":-20}
+R {"allow":true,"user_code":-2147483649}
+R {"allow":true,"user_code":-9223372036854775808}
+R {"allow":true,"user_code":1e+40}
+R {"allow":true,"user_code":256}
+R {"allow":true,"user_code":3.0,"value":3.5}
+R {"allow":true,"user_code":52.5}
+R {"allow":true,"user_code":99}
+R {"allow":true,"user_code":[]}
+R {"allow":true,"user_code":null}
+R {"allow":{},"allow":false,"user_code":"Їִ戚\"\u0016"}
+R {"allow":{},"allow":true,"user_code":"plS^0"}
+R {"allow":{},"user_code":"plS^0"}
+R {"allow":{},"user_code":"縓 ar򺱶圊\u0016\u0018萆"}
+R {"user_code":""}
+R {"user_code":"}"}
+R {"user_code":"ÿ.Џ$󡱼縭񉗘֏t韣𐀀"}

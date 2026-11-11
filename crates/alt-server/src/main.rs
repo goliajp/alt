@@ -2,6 +2,8 @@ use alt_remote_protocol::{ActorKind, Attribution};
 use alt_server::operator::{self, Config, Error, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use serde_json::{Value, json};
+mod grants;
+use grants::Grants;
 use std::{
     io::Write,
     path::{Path, PathBuf},
@@ -238,13 +240,6 @@ enum Action {
 enum SecretKind {
     ReceiptKey,
     Token,
-}
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Grants {
-    read: bool,
-    publish_records: bool,
-    grants: Vec<alt_repository_service::Grant>,
 }
 fn json_file<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
     serde_json::from_slice(&operator::read_regular(path, 4 * 1024 * 1024, false)?)

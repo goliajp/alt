@@ -2,6 +2,8 @@
 mod bytes;
 mod database;
 mod gc;
+mod jsonb;
+pub use jsonb::Jsonb;
 mod portable;
 mod portable_import;
 pub use portable::*;

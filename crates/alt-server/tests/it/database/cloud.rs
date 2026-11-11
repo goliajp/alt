@@ -197,7 +197,7 @@ fn cloud_http_refresh_outage_revocation_and_browser_identity() {
         .set("Cookie", &cookie)
         .call()
         .unwrap();
-    let session: serde_json::Value = serde_json::from_reader(browser.into_reader()).unwrap();
+    let session: serde_json::Value = crate::database::json::body(browser);
     assert_eq!(session["user"]["display_name"], "Shared account");
     assert_eq!(
         calls.load(Ordering::SeqCst),
@@ -324,7 +324,7 @@ fn cloud_http_refresh_outage_revocation_and_browser_identity() {
     );
     assert_eq!(started.status(), 200);
     assert_eq!(started.header("Cache-Control"), Some("no-store"));
-    let device: serde_json::Value = serde_json::from_reader(started.into_reader()).unwrap();
+    let device: serde_json::Value = crate::database::json::body(started);
     assert_eq!(device["interval"], 5);
     let code = device["device_code"].as_str().unwrap();
     let human = device["user_code"].as_str().unwrap();
@@ -334,12 +334,12 @@ fn cloud_http_refresh_outage_revocation_and_browser_identity() {
         ("device_code", code),
     ];
     let waiting: serde_json::Value =
-        serde_json::from_reader(form_call("/oauth/token", &polling).into_reader()).unwrap();
+        crate::database::json::body(form_call("/oauth/token", &polling));
     assert_eq!(waiting["error"], "slow_down");
-    let current: serde_json::Value = serde_json::from_reader(
-        call(&format!("{}/web/session", server.url), &session_cookie).into_reader(),
-    )
-    .unwrap();
+    let current: serde_json::Value = crate::database::json::body(call(
+        &format!("{}/web/session", server.url),
+        &session_cookie,
+    ));
     let decision = serde_json::json!({"user_code":human,"allow":true}).to_string();
     let decide = |proof: &str| match agent
         .post(&format!("{}/web/device", server.url))
@@ -361,10 +361,10 @@ fn cloud_http_refresh_outage_revocation_and_browser_identity() {
     );
     let issued = form_call("/oauth/token", &polling);
     assert_eq!(issued.status(), 200);
-    let issued: serde_json::Value = serde_json::from_reader(issued.into_reader()).unwrap();
+    let issued: serde_json::Value = crate::database::json::body(issued);
     let cli_token = issued["access_token"].as_str().unwrap();
     let repeated: serde_json::Value =
-        serde_json::from_reader(form_call("/oauth/token", &polling).into_reader()).unwrap();
+        crate::database::json::body(form_call("/oauth/token", &polling));
     assert_eq!(issued["access_token"], repeated["access_token"]);
     assert_eq!(server.command("GET", "/v1/capabilities", cli_token).0, 200);
     let cookie_as_cli = origin
@@ -378,14 +378,10 @@ fn cloud_http_refresh_outage_revocation_and_browser_identity() {
         call(&format!("{}/web/session", server.url), &cookie_as_cli).status(),
         401
     );
-    let list: serde_json::Value = serde_json::from_reader(
-        call(
-            &format!("{}/web/client-credentials", server.url),
-            &session_cookie,
-        )
-        .into_reader(),
-    )
-    .unwrap();
+    let list: serde_json::Value = crate::database::json::body(call(
+        &format!("{}/web/client-credentials", server.url),
+        &session_cookie,
+    ));
     assert_eq!(list.as_array().unwrap().len(), 1);
     let id = list[0]["id"].as_str().unwrap();
     let revoked = agent
@@ -402,7 +398,7 @@ fn cloud_http_refresh_outage_revocation_and_browser_identity() {
     assert_eq!(revoked.status(), 200);
     assert_eq!(server.command("GET", "/v1/capabilities", cli_token).0, 403);
     let refused: serde_json::Value =
-        serde_json::from_reader(form_call("/oauth/token", &polling).into_reader()).unwrap();
+        crate::database::json::body(form_call("/oauth/token", &polling));
     assert_eq!(refused["error"], "access_denied");
     // A remote exchange with an indeterminate result is never replayed.
     let start = agent

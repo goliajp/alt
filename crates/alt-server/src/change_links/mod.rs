@@ -15,16 +15,20 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 pub(crate) mod api;
 pub mod route;
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct ChannelConfig {
     pub scope: Scope,
     pub channel: String,
     pub application: String,
+    #[json(with = "alt_json_serde::bridge")]
     pub peer: link::Endpoint,
     pub peer_public_key: String,
+    #[json(with = "alt_json_serde::bridge")]
     pub target: link::transport::Target,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[json(default, skip_serializing_if = "Option::is_none")]
     pub peer_browser_origin: Option<String>,
     pub local_credential_file: PathBuf,
     pub peer_credential_file: PathBuf,

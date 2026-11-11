@@ -84,17 +84,14 @@ fn login(server: &Running, actor: &str) -> (String, Value) {
     );
     assert!(!cookie.contains("Domain="));
     let cookie = cookie.split(';').next().unwrap().to_owned();
-    let session: Value = serde_json::from_reader(response.into_reader()).unwrap();
+    let session: Value = crate::database::json::body(response);
     assert_eq!(session["user"]["actor_id"], actor);
     assert!(!serde_json::to_string(&session).unwrap().contains("alt1_"));
     (cookie, session)
 }
 fn get(server: &Running, path: &str, cookie: &str) -> (u16, Value) {
     let response = send(server, "GET", path, Some(cookie), None, None, None);
-    (
-        response.status(),
-        serde_json::from_reader(response.into_reader()).unwrap(),
-    )
+    (response.status(), crate::database::json::body(response))
 }
 #[test]
 #[ignore = "requires isolated PostgreSQL and loopback HTTP; exercised by browser acceptance and closing gate"]
@@ -572,9 +569,7 @@ fn browser_migration_requires_current_cookie_origin_and_csrf_for_binary_uploads(
         b"",
     );
     assert_eq!(response.status(), 200);
-    let ExportState::Available { envelope, .. } =
-        serde_json::from_reader(response.into_reader()).unwrap()
-    else {
+    let ExportState::Available { envelope, .. } = crate::database::json::body(response) else {
         panic!("export available")
     };
     let package = super::portable::bounds()
@@ -640,7 +635,7 @@ fn browser_migration_requires_current_cookie_origin_and_csrf_for_binary_uploads(
         &serde_json::to_vec(&inspect).unwrap(),
     );
     assert_eq!(checked.status(), 200);
-    let checked: InspectedArchive = serde_json::from_reader(checked.into_reader()).unwrap();
+    let checked: InspectedArchive = crate::database::json::body(checked);
     let intent = alt_portable::ImportIntent {
         version: 1,
         key: RequestKey {
@@ -738,7 +733,7 @@ fn browser_migration_requires_current_cookie_origin_and_csrf_for_binary_uploads(
         &serde_json::to_vec(&intent).unwrap(),
     );
     assert_eq!(response.status(), 200);
-    let state: ImportState = serde_json::from_reader(response.into_reader()).unwrap();
+    let state: ImportState = crate::database::json::body(response);
     assert!(matches!(state, ImportState::Committed { .. }));
     assert_eq!(
         target

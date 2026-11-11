@@ -37,7 +37,7 @@ fn channels(url: &str, token: &str) -> serde_json::Value {
     .timeout(Duration::from_secs(5))
     .call()
     .unwrap();
-    serde_json::from_reader(response.into_reader()).unwrap()
+    crate::database::json::body(response)
 }
 
 #[test]

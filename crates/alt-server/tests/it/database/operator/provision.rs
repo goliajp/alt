@@ -230,12 +230,8 @@ fn cloud_provision_interrupt_resume_and_storage_binding() {
                 error => panic!("probe transport: {error}"),
             })
     };
-    let result: Readiness = serde_json::from_reader(
-        call(&probe, spec.runtime_key.expose(), false)
-            .unwrap()
-            .into_reader(),
-    )
-    .unwrap();
+    let result: Readiness =
+        crate::database::json::body(call(&probe, spec.runtime_key.expose(), false).unwrap());
     result.check(&probe).unwrap();
     assert!(matches!(
         call(&probe, spec.runtime_key.expose(), true),

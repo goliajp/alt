@@ -7,10 +7,14 @@ use alt_repository_service::{Authorization, RepositorySnapshot};
 use golia_change_link::{Counter, Endpoint, Product};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct ChangeChannel {
     pub channel: String,
+    #[json(with = "alt_json_serde::bridge")]
     pub peer: Endpoint,
     /// One exact Sentori application within the paired project.
     pub application: String,

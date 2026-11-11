@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::hash::{BuildHasher, Hash};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -110,6 +111,12 @@ impl FromJson for char {
 impl FromJson for PathBuf {
     fn from_json(d: &mut Decoder<'_>) -> Result<Self> {
         d.str("path string", |s| Ok(PathBuf::from(s.into_owned())))
+    }
+}
+
+impl FromJson for SocketAddr {
+    fn from_json(d: &mut Decoder<'_>) -> Result<Self> {
+        d.str("socket address", |s| s.parse().map_err(Error::custom))
     }
 }
 
