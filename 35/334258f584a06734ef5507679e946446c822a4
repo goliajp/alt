@@ -1,0 +1,15 @@
+schema: alt-meta/1
+type: refactor
+summary: alt-task-transfer reads and writes json with alt-json
+author-type: human
+author: doracawl
+touched: Cargo.lock
+touched: crates/alt-cli/Cargo.toml
+touched: crates/alt-cli/src/native/task/transfer_source.rs
+touched: crates/alt-task-transfer/Cargo.toml
+touched: crates/alt-task-transfer/src/lib.rs
+touched: crates/alt-task-transfer/src/package.rs
+touched: crates/alt-task-transfer/src/selection.rs
+touched: crates/alt-task-transfer/tests/it/fixtures/Selection.txt
+touched: crates/alt-task-transfer/tests/it/json.rs
+touched: crates/alt-task-transfer/tests/it/main.rs
