@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: perf
+summary: keep zstd decoding tables per thread; arm64 keeps the plain candidate check
+author-type: human
+author: doracawl
+touched: crates/alt-zstd/src/enc/dfast.rs
+touched: crates/alt-zstd/src/enc/fast.rs
+touched: crates/alt-zstd/src/enc/matcher.rs
+touched: crates/alt-zstd/src/frame.rs
+touched: crates/alt-zstd/src/lib.rs
