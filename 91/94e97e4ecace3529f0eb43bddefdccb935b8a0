@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: refactor
+summary: alt-command-protocol reads and writes json with alt-json
+author-type: human
+author: doracawl
+touched: crates/alt-command-protocol/Cargo.toml
+touched: crates/alt-command-protocol/src/lib.rs
+touched: crates/alt-command-protocol/tests/it/fixtures/completion.txt
+touched: crates/alt-command-protocol/tests/it/fixtures/intent.txt
+touched: crates/alt-command-protocol/tests/it/json.rs
+touched: crates/alt-command-protocol/tests/it/main.rs
+touched: crates/alt-json-testkit/src/drive.rs
+touched: crates/alt-json-testkit/src/fixtures.rs
