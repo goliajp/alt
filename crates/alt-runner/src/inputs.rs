@@ -86,7 +86,7 @@ pub(crate) fn restore_root_auxiliary(root: &Path, manifest: &Manifest) -> Result
 }
 pub fn output_roots(manifest: &Manifest) -> Result<Vec<String>> {
     let outputs: Vec<String> = match manifest.context.validation.get("outputs") {
-        Some(value) => serde_json::from_value(value.clone())?,
+        Some(value) => alt_json::from_value(value.clone())?,
         None => Vec::new(),
     };
     for entry in &manifest.entries {
@@ -219,8 +219,9 @@ pub fn materialize(
     Ok(())
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct InputObservation {
     pub identity: Option<String>,
     pub manifest: Option<Manifest>,

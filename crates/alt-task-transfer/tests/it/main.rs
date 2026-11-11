@@ -167,7 +167,7 @@ impl Local {
                     },
                     tools: vec![],
                     external: vec![],
-                    validation: serde_json::json!({"test":true}),
+                    validation: alt_json::json!({"test":true}),
                 },
             },
             baseline: alt_task::Baseline {

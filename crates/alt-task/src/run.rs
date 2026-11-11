@@ -3,8 +3,9 @@ use serde::{Deserialize, Serialize};
 
 /// Durable launch attribution, written before starting any validation command.
 /// A missing whole-command receipt does not authorize a second launch.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct RunAttempt {
     pub schema_version: u32,
     pub task: String,
@@ -19,8 +20,9 @@ pub struct RunAttempt {
     pub authentication_key: Artifact,
     pub creator_request: String,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct RemoteRun {
     pub destination: String,
     pub directory: String,
@@ -72,8 +74,9 @@ impl Record for RunAttempt {
 
 /// Collection is separate from launch, so a controller can recover a lost
 /// response by reading an existing report without executing the task again.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct RunReceipt {
     pub schema_version: u32,
     pub attempt: String,

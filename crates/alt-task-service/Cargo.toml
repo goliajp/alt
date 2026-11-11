@@ -21,4 +21,5 @@ alt-oplog.workspace = true
 alt-refs.workspace = true
 
 [dev-dependencies]
+alt-json.workspace = true
 alt-os.workspace = true

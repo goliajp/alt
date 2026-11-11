@@ -49,7 +49,7 @@ fn task() -> alt_task::Task {
                 },
                 tools: vec![],
                 external: vec![],
-                validation: json!({"mode":"strict"}),
+                validation: alt_json::json!({"mode":"strict"}),
             },
         },
         baseline: alt_task::Baseline {

@@ -13,7 +13,7 @@ pub use validity::{Validity, evaluate};
 #[derive(Debug)]
 pub enum Error {
     Io(std::io::Error),
-    Json(serde_json::Error),
+    Json(alt_json::Error),
     Input(alt_input::Error),
     Blob(alt_store::StoreError),
     Invalid(String),
@@ -51,8 +51,8 @@ impl From<std::io::Error> for Error {
     }
 }
 
-impl From<serde_json::Error> for Error {
-    fn from(e: serde_json::Error) -> Self {
+impl From<alt_json::Error> for Error {
+    fn from(e: alt_json::Error) -> Self {
         Self::Json(e)
     }
 }

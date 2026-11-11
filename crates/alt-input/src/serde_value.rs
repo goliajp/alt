@@ -1,57 +1,114 @@
-//! Reads and writes a `serde_json::Value` field with alt-json, for as long
-//! as the acceptance definition is still held as a serde tree.
+//! Reads and writes the `alt_json::Value` field through serde, for the
+//! crates that still read and write the manifest types that way.
 
-use alt_json::{Decoder, Result, Writer};
-use serde_json::Value;
+use std::fmt;
 
-pub(crate) fn to_json(value: &Value, w: &mut Writer) -> Result<()> {
+use alt_json::{Map, Value};
+use serde::de::{self, MapAccess, SeqAccess, Visitor};
+use serde::ser::{SerializeMap, SerializeSeq};
+use serde::{Deserializer, Serializer};
+
+struct Tree<'a>(&'a Value);
+
+impl serde::Serialize for Tree<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serialize(self.0, serializer)
+    }
+}
+
+pub(crate) fn serialize<S: Serializer>(value: &Value, serializer: S) -> Result<S::Ok, S::Error> {
     match value {
-        Value::Null => w.null(),
-        Value::Bool(b) => w.bool(*b),
+        Value::Null => serializer.serialize_unit(),
+        Value::Bool(b) => serializer.serialize_bool(*b),
         Value::Number(n) => match (n.as_u64(), n.as_i64()) {
-            (Some(u), _) => w.u64(u),
-            (_, Some(i)) => w.i64(i),
-            _ => w.f64(n.as_f64().unwrap_or_default()),
+            (Some(u), _) => serializer.serialize_u64(u),
+            (_, Some(i)) => serializer.serialize_i64(i),
+            _ => serializer.serialize_f64(n.as_f64().unwrap_or_default()),
         },
-        Value::String(s) => w.string(s),
+        Value::String(s) => serializer.serialize_str(s),
         Value::Array(items) => {
-            w.begin_array()?;
+            let mut seq = serializer.serialize_seq(Some(items.len()))?;
             for item in items {
-                w.element();
-                to_json(item, w)?;
+                seq.serialize_element(&Tree(item))?;
             }
-            w.end_array();
-            Ok(())
+            seq.end()
         }
         Value::Object(map) => {
-            w.begin_object()?;
+            let mut object = serializer.serialize_map(Some(map.len()))?;
             for (key, member) in map {
-                w.key(key);
-                to_json(member, w)?;
+                object.serialize_entry(key, &Tree(member))?;
             }
-            w.end_object();
-            Ok(())
+            object.end()
         }
     }
 }
 
-pub(crate) fn from_json(d: &mut Decoder<'_>) -> Result<Value> {
-    d.value().map(|value| convert(&value))
+struct Owned(Value);
+
+impl<'de> serde::Deserialize<'de> for Owned {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserialize(deserializer).map(Owned)
+    }
 }
 
-fn convert(value: &alt_json::Value) -> Value {
-    match value {
-        alt_json::Value::Null => Value::Null,
-        alt_json::Value::Bool(b) => Value::Bool(*b),
-        alt_json::Value::Number(n) => match (n.as_u64(), n.as_i64(), n.as_f64()) {
-            (Some(u), _, _) => Value::from(u),
-            (_, Some(i), _) => Value::from(i),
-            (_, _, f) => Value::from(f.unwrap_or_default()),
-        },
-        alt_json::Value::String(s) => Value::String(s.clone()),
-        alt_json::Value::Array(items) => Value::Array(items.iter().map(convert).collect()),
-        alt_json::Value::Object(map) => {
-            Value::Object(map.iter().map(|(k, v)| (k.clone(), convert(v))).collect())
-        }
+struct Values;
+
+impl<'de> Visitor<'de> for Values {
+    type Value = Value;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("any valid JSON value")
     }
+
+    fn visit_bool<E: de::Error>(self, v: bool) -> Result<Value, E> {
+        Ok(Value::Bool(v))
+    }
+
+    fn visit_i64<E: de::Error>(self, v: i64) -> Result<Value, E> {
+        Ok(Value::from(v))
+    }
+
+    fn visit_u64<E: de::Error>(self, v: u64) -> Result<Value, E> {
+        Ok(Value::from(v))
+    }
+
+    fn visit_f64<E: de::Error>(self, v: f64) -> Result<Value, E> {
+        Ok(Value::from(v))
+    }
+
+    fn visit_str<E: de::Error>(self, v: &str) -> Result<Value, E> {
+        Ok(Value::String(v.to_owned()))
+    }
+
+    fn visit_unit<E: de::Error>(self) -> Result<Value, E> {
+        Ok(Value::Null)
+    }
+
+    fn visit_none<E: de::Error>(self) -> Result<Value, E> {
+        Ok(Value::Null)
+    }
+
+    fn visit_some<D: Deserializer<'de>>(self, deserializer: D) -> Result<Value, D::Error> {
+        deserialize(deserializer)
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Value, A::Error> {
+        let mut items = Vec::new();
+        while let Some(Owned(item)) = seq.next_element()? {
+            items.push(item);
+        }
+        Ok(Value::Array(items))
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut object: A) -> Result<Value, A::Error> {
+        let mut map = Map::new();
+        while let Some((key, Owned(member))) = object.next_entry::<String, Owned>()? {
+            map.insert(key, member);
+        }
+        Ok(Value::Object(map))
+    }
+}
+
+pub(crate) fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Value, D::Error> {
+    deserializer.deserialize_any(Values)
 }

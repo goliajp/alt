@@ -2,30 +2,41 @@ use crate::{Error, Result, check_id};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub trait Record: Serialize + serde::de::DeserializeOwned {
+pub trait Record:
+    Serialize + serde::de::DeserializeOwned + alt_json::ToJson + alt_json::FromJson
+{
     const KIND: &'static str;
     fn validate(&self) -> Result<()>;
     fn id(&self) -> Result<String> {
         self.validate()?;
-        Ok(alt_input::identity(Self::KIND, self)?)
+        Ok(alt_input::identity_json(Self::KIND, self)?)
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct Scope {
     pub repository: String,
     pub workspace: String,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct Baseline {
     pub head: String,
     pub tree: String,
     pub refs: BTreeMap<String, String>,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct TaskSpec {
     pub purpose: String,
     pub authority: String,
@@ -37,6 +48,11 @@ pub struct TaskSpec {
     /// attribution only; the caller separately checks current remote authority
     /// and claims the exact planned Task before creating a source-linked task.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[json(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "alt_json_serde::bridge"
+    )]
     pub repair_source: Option<Box<golia_change_link::RepairSource>>,
 }
 impl TaskSpec {
@@ -76,8 +92,11 @@ impl TaskSpec {
         })
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct Task {
     pub schema_version: u32,
     pub scope: Scope,
@@ -119,8 +138,11 @@ impl Record for Task {
         Ok(())
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct Candidate {
     pub schema_version: u32,
     pub task: String,
@@ -156,28 +178,40 @@ impl Record for alt_input::Manifest {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct Artifact {
     pub blake3: String,
     pub bytes: u64,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[json(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Termination {
     Exit { code: i32 },
     Signal { number: i32 },
     Timeout,
     Unknown,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(rename_all = "snake_case")]
+#[json(rename_all = "snake_case")]
 pub enum Provenance {
     Reported,
     Observed,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct Evidence {
     pub schema_version: u32,
     pub candidate: String,
@@ -220,8 +254,11 @@ impl Record for Evidence {
         Ok(())
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct Event {
     pub schema_version: u32,
     pub task: String,
@@ -230,8 +267,11 @@ pub struct Event {
     pub reason: String,
     pub creator_request: String,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(rename_all = "snake_case")]
+#[json(rename_all = "snake_case")]
 pub enum TaskState {
     Abandoned,
     Integrated,
