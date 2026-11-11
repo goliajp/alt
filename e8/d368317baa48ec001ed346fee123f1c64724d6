@@ -1,0 +1,27 @@
+schema: alt-meta/1
+type: feat
+summary: bridge serde types through alt-json
+author-type: human
+author: doracawl
+touched: Cargo.lock
+touched: Cargo.toml
+touched: crates/alt-json-serde/Cargo.toml
+touched: crates/alt-json-serde/src/de.rs
+touched: crates/alt-json-serde/src/error.rs
+touched: crates/alt-json-serde/src/key.rs
+touched: crates/alt-json-serde/src/lib.rs
+touched: crates/alt-json-serde/src/ser.rs
+touched: crates/alt-json-serde/tests/it/change_link.rs
+touched: crates/alt-json-serde/tests/it/main.rs
+touched: crates/alt-json-testkit/Cargo.toml
+touched: crates/alt-json-testkit/src/drive.rs
+touched: crates/alt-json/src/de.rs
+touched: crates/alt-json/src/de/access.rs
+touched: crates/alt-json/src/de/raw.rs
+touched: crates/alt-json/src/de/text.rs
+touched: crates/alt-json/src/de/tree.rs
+touched: crates/alt-json/src/lib.rs
+touched: crates/alt-json/tests/it/derive/real_protocol.rs
+touched: crates/alt-json/tests/it/derive/real_task.rs
+touched: crates/alt-json/tests/it/derive/shapes.rs
+touched: crates/alt-json/tests/it/derive/std_types.rs
