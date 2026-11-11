@@ -258,6 +258,10 @@ impl Payload {
                 .unwrap();
         }
     }
+    fn publish_new(&self, store: &mut Store, credential: &Credential) -> Receipt {
+        self.upload(store, credential);
+        self.publish(store, credential)
+    }
     fn publish(&self, store: &mut Store, credential: &Credential) -> Receipt {
         let work = store
             .acquire_publication(credential, &self.publication.key, 30_000, 1000)

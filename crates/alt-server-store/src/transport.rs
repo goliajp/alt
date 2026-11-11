@@ -2,6 +2,7 @@ use crate::requests::{active, check_key, request_row, upload_request_row, upload
 use crate::store::{authorize, credential_row, instance, integer, now, snapshot, unsigned};
 use crate::{Credential, Error, InstanceSpec, PublicationWork, Result, Store};
 use alt_remote_protocol::{ContentEntry, Manifest, Publication, RequestKey, Scope};
+use std::io::Write;
 
 pub use alt_remote_protocol::{PrincipalInfo, PublishedBundle, RepositoryInfo, ReviewSelection};
 impl Store {
@@ -273,7 +274,10 @@ impl Store {
         if &current.scope != scope {
             return Err(Error::Unauthorized);
         }
-        let row = tx.query_opt("SELECT b.bytes FROM alt_blobs b WHERE b.repository=$1 AND b.blake3=$2 AND b.state='stored' AND EXISTS(SELECT 1 FROM alt_pins p WHERE p.repository=b.repository AND p.blake3=b.blake3 AND p.expires_at IS NULL)", &[&scope.repository_instance_id,&digest])?.ok_or(Error::Unauthorized)?;
+        let Some(row) = tx.query_opt("SELECT b.bytes FROM alt_blobs b WHERE b.repository=$1 AND b.blake3=$2 AND b.state='stored' AND EXISTS(SELECT 1 FROM alt_pins p WHERE p.repository=b.repository AND p.blake3=b.blake3 AND p.expires_at IS NULL)", &[&scope.repository_instance_id,&digest])? else {
+            tx.commit()?;
+            return self.open_published_git_content(credential, scope, digest);
+        };
         let size = unsigned(row.get(0))?;
         let location = crate::segments::location(&mut tx, &scope.repository_instance_id, digest)?;
         let file = self
@@ -281,6 +285,33 @@ impl Store {
             .read_payload(scope, digest, size, location.as_ref())?;
         tx.commit()?;
         Ok((size, file))
+    }
+    /// A published Git object by the digest of its content. Git objects live in the
+    /// pack segments, whichever protocol brought them in.
+    fn open_published_git_content(
+        &mut self,
+        credential: &Credential,
+        scope: &Scope,
+        digest: &str,
+    ) -> Result<(u64, crate::StoredReader)> {
+        let view = self.pack_view(credential, &scope.repository_instance_id)?;
+        if &view.scope != scope {
+            return Err(Error::Unauthorized);
+        }
+        let mut key = [0u8; 32];
+        for (byte, pair) in key.iter_mut().zip(digest.as_bytes().chunks(2)) {
+            let pair = std::str::from_utf8(pair).map_err(|_| Error::Unauthorized)?;
+            *byte = u8::from_str_radix(pair, 16).map_err(|_| Error::Unauthorized)?;
+        }
+        let (_, _, data) = view
+            .segments
+            .read_blake3(&key)
+            .map_err(|_| Error::Integrity("published object bytes"))?
+            .ok_or(Error::Unauthorized)?;
+        let mut file = alt_os::temp::tempfile()?;
+        file.write_all(&data)?;
+        let size = data.len() as u64;
+        Ok((size, crate::StoredReader::from_file(file, size)?))
     }
     /// Select published task bundles by any selected immutable record. Original manifest,
     /// publication and receipt are retained; a receiving client never invents

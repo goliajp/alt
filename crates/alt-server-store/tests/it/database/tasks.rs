@@ -285,6 +285,55 @@ fn task_publication_preserves_every_selected_payload_after_gc() {
 
 #[test]
 #[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
+fn task_publication_accepts_git_objects_held_only_by_a_segment() {
+    let mut f = Fixture::new();
+    // the tree both payloads share is published first, then leaves the content store:
+    // the state of an object that arrived by git push
+    Payload::new("segment-base", None).publish_new(&mut f.store, &f.credential);
+    f.client()
+        .execute("DELETE FROM alt_pins WHERE pin_id LIKE 'ref:%'", &[])
+        .unwrap();
+    f.store
+        .collect_orphans(&f.credential, "repository", 100)
+        .unwrap();
+    let mut payload = task_payload("segment-task");
+    let tree = payload.manifest.entries.remove(0);
+    let tree_bytes = payload.contents.remove(0);
+    assert_eq!(
+        f.client()
+            .query_one(
+                "SELECT count(*) FROM alt_blobs WHERE blake3=$1",
+                &[&tree.blake3]
+            )
+            .unwrap()
+            .get::<_, i64>(0),
+        0
+    );
+    payload.publication.content_manifest = payload.manifest.id(limits()).unwrap();
+    payload.upload(&mut f.store, &f.credential);
+    let work = f
+        .store
+        .acquire_publication(&f.credential, &payload.publication.key, 60_000, 1000)
+        .unwrap();
+    let (graph, tasks) = verified(&work, payload.commit);
+    f.store
+        .mark_ready_with_tasks(&f.credential, &work, &graph, &tasks)
+        .unwrap();
+    f.store
+        .publish_with_tasks(&f.credential, &work, &graph, &tasks)
+        .unwrap();
+    // a receiver downloads the tree by its digest although no manifest carries it
+    let (size, mut file) = f
+        .store
+        .open_published_content(&f.credential, &payload.publication.key.scope, &tree.blake3)
+        .unwrap();
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut file, &mut bytes).unwrap();
+    assert_eq!((size, bytes), (tree_bytes.len() as u64, tree_bytes));
+}
+
+#[test]
+#[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
 fn task_publication_preserves_baseline_after_ref_deletion() {
     let mut f = Fixture::new();
     let old = Payload::new("historical-task-baseline", None);

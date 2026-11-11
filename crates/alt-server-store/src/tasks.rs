@@ -77,13 +77,17 @@ pub(crate) fn check_pins(
     }
     for oid in tasks.git_objects() {
         graph.node(*oid)?;
-        if !work.source.objects.contains_key(oid) {
+        if !work.source.objects.contains_key(oid) && !in_segment(work, oid) {
             return Err(Error::Integrity(
                 "task Git object outside authorized source",
             ));
         }
     }
     Ok(())
+}
+/// published earlier, by either protocol
+fn in_segment(work: &PublicationWork, oid: &alt_git_codec::ObjectId) -> bool {
+    <[u8; 20]>::try_from(oid.as_bytes()).is_ok_and(|key| work.source.segments.locate_any(&key))
 }
 pub(crate) fn retain(
     tx: &mut Transaction<'_>,
@@ -105,12 +109,12 @@ pub(crate) fn retain(
     // The original publication also names its old/new ref graphs. Keep those
     // historical inputs even after current refs advance or disappear.
     for oid in graph.objects() {
-        let (_, digest, _) = work
-            .source
-            .objects
-            .get(&oid)
-            .ok_or(Error::Integrity("task object mapping"))?;
-        pin(tx, repository, &pin_id, digest, None)?;
+        match work.source.objects.get(&oid) {
+            Some((_, digest, _)) => pin(tx, repository, &pin_id, digest, None)?,
+            // a segment keeps what it holds; there is no content to pin
+            None if in_segment(work, &oid) => {}
+            None => return Err(Error::Integrity("task object mapping")),
+        }
     }
     for selection in tasks.records() {
         tx.execute("INSERT INTO alt_task_records(repository,kind,record_id,payload_blake3) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING", &[repository,&selection.record.kind.as_str(),&selection.record.id,&selection.payload.blake3])?;
