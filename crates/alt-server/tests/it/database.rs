@@ -11,6 +11,7 @@ mod git;
 mod native_client;
 mod operator;
 mod portable;
+mod single_copy;
 use alt_crypto::ed25519::SigningKey;
 use alt_server_store::{ByteStore, Credential, InstanceSpec, Store};
 use postgres::{Client, NoTls};

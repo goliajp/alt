@@ -255,7 +255,7 @@ fn cloud_backup_restores_with_fresh_binding_and_rejects_old_credentials() {
     assert!(!managed.run(&start_args).status.success());
 }
 
-fn prepare(db: &OperatorDb) -> (Store, String, String) {
+pub(super) fn prepare(db: &OperatorDb) -> (Store, String, String) {
     let seed = db.path("receipt.key");
     let admin = db.path("admin.token");
     let password = db.path("password");
@@ -309,7 +309,7 @@ fn prepare(db: &OperatorDb) -> (Store, String, String) {
         .unwrap();
     (store, admin, password)
 }
-fn publish(store: &mut Store, token: &str) -> Payload {
+pub(super) fn publish(store: &mut Store, token: &str) -> Payload {
     let mut p = Payload::new("operator-backup-source", None);
     p.publication.key.scope.installation_id = store.spec().installation_id.clone();
     let credential = store.authenticate(token).unwrap();
@@ -421,7 +421,7 @@ fn segment_files(bytes: &std::path::Path) -> Vec<PathBuf> {
     }
     files
 }
-fn encryption_key(root: &std::path::Path) -> (String, String) {
+pub(super) fn encryption_key(root: &std::path::Path) -> (String, String) {
     let path = root.join("backup.agekey");
     let output = Command::new("age-keygen")
         .arg("-o")

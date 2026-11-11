@@ -666,119 +666,23 @@ pub fn restore(
             }
         }
         stage = "schema migration";
-        let mut store = match original.schema {
-            1 => alt_server_store::Store::migrate_v1(
+        let mut store = if original.schema == alt_server_store::SCHEMA_VERSION {
+            alt_server_store::Store::open(
                 client,
                 bytes,
                 original.instance.clone(),
                 key,
                 target.limits,
-            )?,
-            2 => alt_server_store::Store::migrate_v2(
+            )?
+        } else {
+            alt_server_store::Store::migrate(
                 client,
                 bytes,
                 original.instance.clone(),
                 key,
                 target.limits,
-            )?,
-            3 => alt_server_store::Store::migrate_v3(
-                client,
-                bytes,
-                original.instance.clone(),
-                key,
-                target.limits,
-            )?,
-            4 => alt_server_store::Store::migrate_v4(
-                client,
-                bytes,
-                original.instance.clone(),
-                key,
-                target.limits,
-            )?,
-            5 => alt_server_store::Store::migrate_v5(
-                client,
-                bytes,
-                original.instance.clone(),
-                key,
-                target.limits,
-            )?,
-            13 => alt_server_store::Store::migrate_v13(
-                client,
-                bytes,
-                original.instance.clone(),
-                key,
-                target.limits,
-            )?,
-            14 => alt_server_store::Store::migrate_v14(
-                client,
-                bytes,
-                original.instance.clone(),
-                key,
-                target.limits,
-            )?,
-            15 => alt_server_store::Store::migrate_v15(
-                client,
-                bytes,
-                original.instance.clone(),
-                key,
-                target.limits,
-            )?,
-            12 => alt_server_store::Store::migrate_v12(
-                client,
-                bytes,
-                original.instance.clone(),
-                key,
-                target.limits,
-            )?,
-            11 => alt_server_store::Store::migrate_v11(
-                client,
-                bytes,
-                original.instance.clone(),
-                key,
-                target.limits,
-            )?,
-            10 => alt_server_store::Store::migrate_v10(
-                client,
-                bytes,
-                original.instance.clone(),
-                key,
-                target.limits,
-            )?,
-            9 => alt_server_store::Store::migrate_v9(
-                client,
-                bytes,
-                original.instance.clone(),
-                key,
-                target.limits,
-            )?,
-            8 => alt_server_store::Store::migrate_v8(
-                client,
-                bytes,
-                original.instance.clone(),
-                key,
-                target.limits,
-            )?,
-            7 => alt_server_store::Store::migrate_v7(
-                client,
-                bytes,
-                original.instance.clone(),
-                key,
-                target.limits,
-            )?,
-            6 => alt_server_store::Store::migrate_v6(
-                client,
-                bytes,
-                original.instance.clone(),
-                key,
-                target.limits,
-            )?,
-            _ => alt_server_store::Store::open(
-                client,
-                bytes,
-                original.instance.clone(),
-                key,
-                target.limits,
-            )?,
+                original.schema,
+            )?
         };
         stage = "recovery activation";
         if let Some(cloud) = &cloud {

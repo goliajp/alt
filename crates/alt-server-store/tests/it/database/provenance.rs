@@ -127,12 +127,13 @@ fn legacy_backfill_refuses_missing_or_wrong_epoch_audit_without_partial_migratio
             .unwrap();
         f.client().batch_execute(replace).unwrap();
         assert!(
-            Store::migrate_v5(
+            Store::migrate(
                 f.client(),
                 f.store.bytes().clone(),
                 f.store.spec().clone(),
                 SigningKey::from_bytes(&[7; 32]),
-                limits()
+                limits(),
+                5
             )
             .is_err()
         );

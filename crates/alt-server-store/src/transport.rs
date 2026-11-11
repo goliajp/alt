@@ -2,7 +2,6 @@ use crate::requests::{active, check_key, request_row, upload_request_row, upload
 use crate::store::{authorize, credential_row, instance, integer, now, snapshot, unsigned};
 use crate::{Credential, Error, InstanceSpec, PublicationWork, Result, Store};
 use alt_remote_protocol::{ContentEntry, Manifest, Publication, RequestKey, Scope};
-use std::io::Write;
 
 pub use alt_remote_protocol::{PrincipalInfo, PublishedBundle, RepositoryInfo, ReviewSelection};
 impl Store {
@@ -81,7 +80,18 @@ impl Store {
             .find(|entry| entry.blake3 == digest)
             .ok_or(Error::Unauthorized)?;
         let time = integer(now(&mut tx)?)?;
-        if tx.query_opt("SELECT 1 FROM alt_pins p JOIN alt_blobs b ON b.repository=p.repository AND b.blake3=p.blake3 WHERE p.repository=$1 AND p.pin_id=$2 AND p.blake3=$3 AND p.expires_at>$4 AND b.state='stored' AND b.bytes=$5", &[&key.scope.repository_instance_id,&crate::requests::upload_pin(key),&digest,&time,&integer(entry.bytes)?])?.is_none() {return Err(Error::Precondition("review content pin expired"));}
+        if tx.query_opt("SELECT 1 FROM alt_pins p JOIN alt_blobs b ON b.repository=p.repository AND b.blake3=p.blake3 WHERE p.repository=$1 AND p.pin_id=$2 AND p.blake3=$3 AND p.expires_at>$4 AND b.state='stored' AND b.bytes=$5", &[&key.scope.repository_instance_id,&crate::requests::upload_pin(key),&digest,&time,&integer(entry.bytes)?])?.is_none() {
+            // a selected Git object that was published earlier was not uploaded again
+            let entry = entry.clone();
+            tx.commit()?;
+            let segments = self.published_segments(&key.scope.repository_instance_id)?;
+            if crate::pack_native::holds_entry(&segments, &entry)?
+                && let Some(content) = segment_content(&segments, digest)?
+            {
+                return Ok(content);
+            }
+            return Err(Error::Precondition("review content pin expired"));
+        }
         let location =
             crate::segments::location(&mut tx, &key.scope.repository_instance_id, digest)?;
         let file = self
@@ -210,6 +220,15 @@ impl Store {
         key: &RequestKey,
         digest: &str,
     ) -> Result<Vec<ContentEntry>> {
+        Ok(self.selected_upload_state(credential, key, digest)?.0)
+    }
+    /// the selected entries, and whether the request already has their content
+    pub(crate) fn selected_upload_state(
+        &mut self,
+        credential: &Credential,
+        key: &RequestKey,
+        digest: &str,
+    ) -> Result<(Vec<ContentEntry>, bool)> {
         alt_task::check_id(digest).map_err(|_| Error::Unauthorized)?;
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
@@ -226,14 +245,12 @@ impl Store {
             self.limits,
             now(&mut tx)?,
         )?;
-        let entries = upload_selection(&mut tx, key, digest)?
-            .ok_or(Error::Unauthorized)?
-            .entries;
-        if entries.is_empty() {
+        let selection = upload_selection(&mut tx, key, digest)?.ok_or(Error::Unauthorized)?;
+        if selection.entries.is_empty() {
             return Err(Error::Unauthorized);
         }
         tx.commit()?;
-        Ok(entries)
+        Ok((selection.entries, selection.verified))
     }
     /// Relinquish only this fenced worker. It cannot extend a lease, change a
     /// request result or release another worker's newer incarnation.
@@ -298,20 +315,7 @@ impl Store {
         if &view.scope != scope {
             return Err(Error::Unauthorized);
         }
-        let mut key = [0u8; 32];
-        for (byte, pair) in key.iter_mut().zip(digest.as_bytes().chunks(2)) {
-            let pair = std::str::from_utf8(pair).map_err(|_| Error::Unauthorized)?;
-            *byte = u8::from_str_radix(pair, 16).map_err(|_| Error::Unauthorized)?;
-        }
-        let (_, _, data) = view
-            .segments
-            .read_blake3(&key)
-            .map_err(|_| Error::Integrity("published object bytes"))?
-            .ok_or(Error::Unauthorized)?;
-        let mut file = alt_os::temp::tempfile()?;
-        file.write_all(&data)?;
-        let size = data.len() as u64;
-        Ok((size, crate::StoredReader::from_file(file, size)?))
+        segment_content(&view.segments, digest)?.ok_or(Error::Unauthorized)
     }
     /// Select published task bundles by any selected immutable record. Original manifest,
     /// publication and receipt are retained; a receiving client never invents
@@ -394,4 +398,24 @@ fn review_request(
         return Err(Error::Precondition("publication not ready for review"));
     }
     Ok((row, current))
+}
+
+/// The object whose content has this digest, inflated into an unnamed temporary file
+/// as it is read from its segment.
+fn segment_content(
+    segments: &alt_pack_segment::SegmentSet,
+    digest: &str,
+) -> Result<Option<(u64, crate::StoredReader)>> {
+    let key = alt_provenance::decode_hex::<32>(digest).map_err(|_| Error::Unauthorized)?;
+    let Some((_, _, size, mut stream)) = segments
+        .open_blake3(&key)
+        .map_err(|_| Error::Integrity("published object bytes"))?
+    else {
+        return Ok(None);
+    };
+    let mut file = alt_os::temp::tempfile()?;
+    if std::io::copy(&mut stream, &mut file)? != size {
+        return Err(Error::Integrity("published object bytes"));
+    }
+    Ok(Some((size, crate::StoredReader::from_file(file, size)?)))
 }

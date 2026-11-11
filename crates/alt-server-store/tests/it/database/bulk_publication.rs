@@ -75,7 +75,7 @@ fn larger_store(f: &Fixture) -> Store {
 #[test]
 #[ignore = "requires isolated PostgreSQL; exact ref closures and atomic rollback after a later SQL batch"]
 fn batched_refs_keep_exact_closures_and_roll_back_late_failures() {
-    use std::collections::{BTreeMap, BTreeSet};
+    use std::collections::BTreeMap;
     let mut f = Fixture::new();
     f.store = Store::open(
         f.client(),
@@ -187,45 +187,28 @@ fn batched_refs_keep_exact_closures_and_roll_back_late_failures() {
         .map(|r| (r.get(0), r.get(1)))
         .collect();
     assert_eq!(actual, expected);
-    let old: BTreeSet<_> = first
-        .manifest
-        .entries
-        .iter()
-        .map(|e| e.blake3.clone())
-        .collect();
-    let new: BTreeSet<_> = old
-        .iter()
-        .cloned()
-        .chain(second.manifest.entries.iter().map(|e| e.blake3.clone()))
-        .collect();
-    let mut actual_pins: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    for row in client
-        .query(
-            "SELECT pin_id,blake3,expires_at FROM alt_pins WHERE pin_id LIKE 'ref:%'",
-            &[],
-        )
-        .unwrap()
-    {
-        assert_eq!(row.get::<_, Option<i64>>(2), None);
-        actual_pins
-            .entry(row.get(0))
-            .or_default()
-            .insert(row.get(1));
-    }
-    let expected_pins: BTreeMap<_, _> = expected
-        .iter()
-        .map(|(name, oid)| {
-            (
-                format!("ref:{name}"),
-                if oid == &first.commit.to_string() {
-                    old.clone()
-                } else {
-                    new.clone()
-                },
+    // refs record no retention: what they reach is held by the pack segments
+    assert_eq!(
+        client
+            .query_one(
+                "SELECT count(*) FROM alt_pins WHERE pin_id LIKE 'ref:%'",
+                &[]
             )
-        })
-        .collect();
-    assert_eq!(actual_pins, expected_pins);
+            .unwrap()
+            .get::<_, i64>(0),
+        0
+    );
+    for payload in [&first, &second] {
+        for entry in &payload.manifest.entries {
+            f.store
+                .open_published_object(
+                    &f.credential,
+                    "repository",
+                    entry.git_oid.as_ref().unwrap().parse().unwrap(),
+                )
+                .unwrap();
+        }
+    }
     assert_eq!(
         client
             .query_one(
@@ -483,17 +466,13 @@ fn bulk_publication_checks_every_mapping_and_pin_then_reads_exact_bytes() {
         )
         .unwrap();
     assert_eq!(buffered, p.contents[1099]);
-    let unique: std::collections::BTreeSet<_> =
-        p.manifest.entries.iter().map(|e| &e.blake3).collect();
+    // nothing is retained in the content store for objects a segment holds
     assert_eq!(
         f.client()
-            .query_one(
-                "SELECT count(*) FROM alt_pins WHERE expires_at IS NULL",
-                &[]
-            )
+            .query_one("SELECT count(*) FROM alt_pins", &[])
             .unwrap()
             .get::<_, i64>(0),
-        unique.len() as i64
+        0
     );
 }
 

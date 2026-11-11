@@ -234,7 +234,17 @@ fn task_publication_retains_original_records_and_artifacts_in_one_transaction() 
         .client()
         .query("SELECT blake3 FROM alt_pins WHERE expires_at IS NULL", &[])
         .unwrap();
-    assert_eq!(pins.len(), payload.contents.len());
+    // the record, its three attachments and the bundle; the Git objects are in a segment
+    assert_eq!(
+        pins.len(),
+        payload
+            .manifest
+            .entries
+            .iter()
+            .filter(|entry| entry.git_oid.is_none())
+            .count()
+    );
+    assert_eq!(pins.len(), 5);
     let mut restarted = f.reopen();
     assert!(
         matches!(restarted.query(&f.credential,&payload.publication.key).unwrap(),RequestObservation::Recorded{result,..} if matches!(*result,RequestState::Committed{..}))
@@ -1116,11 +1126,25 @@ fn current_review_is_separate_and_commits_with_refs_records_and_receipt() {
             &[],
         )
         .unwrap();
+    // only the released copies of published Git objects are collected
+    let before: i64 = f
+        .client()
+        .query_one("SELECT count(*) FROM alt_blobs WHERE state='stored'", &[])
+        .unwrap()
+        .get(0);
+    f.store
+        .collect_orphans(&f.credential, "repository", 1000)
+        .unwrap();
+    let rows = f
+        .client()
+        .query_one(
+            "SELECT count(*),count(*) FILTER (WHERE state='stored') FROM alt_blobs",
+            &[],
+        )
+        .unwrap();
     assert_eq!(
-        f.store
-            .collect_orphans(&f.credential, "repository", 1000)
-            .unwrap(),
-        0
+        (rows.get::<_, i64>(0), rows.get::<_, i64>(1)),
+        (before, before)
     );
 }
 

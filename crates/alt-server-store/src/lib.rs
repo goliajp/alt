@@ -7,6 +7,7 @@ mod portable_import;
 pub use portable::*;
 pub use portable_import::*;
 mod pack_compaction;
+mod pack_native;
 pub use pack_compaction::PACK_RETIRED_GRACE_MS;
 mod packs;
 pub use packs::*;
@@ -19,6 +20,7 @@ pub use publication::*;
 pub use read::*;
 pub use registration::MAX_REGISTER_CONTENTS;
 mod schema;
+mod schema_v19;
 mod segments;
 mod store;
 mod tasks;
@@ -143,7 +145,7 @@ pub use tasks::CurrentReviewAssessment;
 pub use workbench::*;
 
 /// Current persisted schema; runtime open validates all migration checksums.
-pub const SCHEMA_VERSION: u32 = 18;
+pub const SCHEMA_VERSION: u32 = 19;
 
 mod change_channel;
 mod link_history;

@@ -210,25 +210,14 @@ impl Store {
         let rows = tx.query("SELECT b.blake3,b.bytes FROM alt_blobs b JOIN alt_pins p ON p.repository=b.repository AND p.blake3=b.blake3 WHERE b.repository=$1 AND p.pin_id=$2 AND p.expires_at IS NULL AND b.state='stored' ORDER BY b.blake3", &[repository,&pin_id(id)])?;
         let retained = rows
             .iter()
-            .map(|r| Ok((r.get(0), unsigned(r.get(1))?)))
-            .collect::<Result<BTreeMap<String, u64>>>()?;
-        // Git objects are held by the pack segments and need no pin here. A
-        // logical metadata document can deduplicate an already retained raw
-        // blob; that pin is permitted, as is one on a Git object's bytes.
-        let catalog: BTreeMap<_, _> = result
-            .envelope
-            .catalog
-            .blobs
-            .iter()
-            .map(|blob| (blob.blake3.as_str(), blob.bytes))
-            .collect();
-        if stored
-            .iter()
-            .any(|blob| retained.get(&blob.blake3) != Some(&blob.bytes))
-            || retained
-                .iter()
-                .any(|(digest, bytes)| catalog.get(digest.as_str()) != Some(bytes))
-        {
+            .map(|r| {
+                Ok(Blob {
+                    blake3: r.get(0),
+                    bytes: unsigned(r.get(1))?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        if retained != stored {
             return Err(Error::Precondition("portable export retention changed"));
         }
         require_admin(&mut tx, &self.spec, credential)?;
