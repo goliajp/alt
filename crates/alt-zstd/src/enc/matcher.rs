@@ -106,26 +106,75 @@ impl<'a> Window<'a> {
         unsafe { load64(self.prefix.wrapping_add(index)) }
     }
 
-    /// Where to read 8 bytes of the candidate at `index`. A candidate below
-    /// `low`, or one straddling the end of the prefix, is no candidate: the
-    /// address then holds bytes that differ from `first` in the first byte,
-    /// `first` being the first byte of what the candidate is compared to.
+    /// Whether `index` may be read as a candidate: at or above `low`, and
+    /// not straddling the end of the prefix.
+    #[inline(always)]
+    fn usable<const PREFIX: bool>(&self, index: usize, low: usize) -> bool {
+        index >= low && (!PREFIX || index >= self.split || index + PROBE <= self.split)
+    }
+
+    /// Whether the candidate at `index` is usable and starts with the four
+    /// bytes `here`.
+    ///
+    /// Where the compiler would turn the usability test into a branch of
+    /// its own, which mispredicts at the start of a frame, an unusable
+    /// candidate is instead read from a stand-in that differs from `here`
+    /// in its first byte.
     ///
     /// # Safety
     /// `index` must be below a data position that has 8 bytes ahead of it.
     #[inline(always)]
-    pub(crate) unsafe fn probe<const PREFIX: bool>(
+    pub(crate) unsafe fn hits32<const PREFIX: bool>(
         &self,
         index: usize,
         low: usize,
-        first: u8,
-    ) -> *const u8 {
-        let usable =
-            index >= low && (!PREFIX || index >= self.split || index + PROBE <= self.split);
-        let nowhere = NOWHERE[(first == 0xFF) as usize].as_ptr();
-        // whether a slot holds a live candidate is close to random at the
-        // start of a frame, so this must not become a branch
-        select_unpredictable(usable, self.at::<PREFIX>(index), nowhere)
+        here: u32,
+    ) -> bool {
+        let usable = self.usable::<PREFIX>(index, low);
+        // safety: a usable candidate has 8 readable bytes, as does a stand-in
+        unsafe {
+            if cfg!(target_arch = "x86_64") {
+                let nowhere = NOWHERE[(here as u8 == 0xFF) as usize].as_ptr();
+                let from = select_unpredictable(usable, self.at::<PREFIX>(index), nowhere);
+                load32(from) == here
+            } else {
+                let from = if usable {
+                    self.at::<PREFIX>(index)
+                } else {
+                    NOWHERE[0].as_ptr()
+                };
+                (load32(from) == here) & usable
+            }
+        }
+    }
+
+    /// As [`Window::hits32`], for the eight bytes `here`.
+    ///
+    /// # Safety
+    /// `index` must be below a data position that has 8 bytes ahead of it.
+    #[inline(always)]
+    pub(crate) unsafe fn hits64<const PREFIX: bool>(
+        &self,
+        index: usize,
+        low: usize,
+        here: u64,
+    ) -> bool {
+        let usable = self.usable::<PREFIX>(index, low);
+        // safety: a usable candidate has 8 readable bytes, as does a stand-in
+        unsafe {
+            if cfg!(target_arch = "x86_64") {
+                let nowhere = NOWHERE[(here as u8 == 0xFF) as usize].as_ptr();
+                let from = select_unpredictable(usable, self.at::<PREFIX>(index), nowhere);
+                load64(from) == here
+            } else {
+                let from = if usable {
+                    self.at::<PREFIX>(index)
+                } else {
+                    NOWHERE[0].as_ptr()
+                };
+                (load64(from) == here) & usable
+            }
+        }
     }
 
     /// Whether the 4 bytes at `ip` repeat those `rep` bytes earlier; a `rep`
@@ -139,8 +188,7 @@ impl<'a> Window<'a> {
         // source in the prefix is read only if 8 bytes of it remain there
         unsafe {
             let here = load32(self.data_at(ip));
-            let from = self.probe::<PREFIX>(ip - rep, 0, here as u8);
-            (rep != 0) & (load32(from) == here)
+            (rep != 0) & self.hits32::<PREFIX>(ip - rep, 0, here)
         }
     }
 

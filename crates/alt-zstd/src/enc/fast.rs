@@ -1,7 +1,6 @@
 //! Single-table greedy match finder (the fast strength).
 
 use super::matcher::{PROBE, SKIP_SPAN, SeqStore, Window, hash};
-use crate::bits::load32;
 
 pub(crate) struct Search<'t> {
     pub table: &'t mut [u32],
@@ -61,12 +60,11 @@ pub(crate) unsafe fn run<const PREFIX: bool>(
             let found = ip;
             let match_len;
 
-            let from_ptr = window.probe::<PREFIX>(candidate, low, here as u8);
             if window.repeats::<PREFIX>(ip + 1, rep0) {
                 ip += 1;
                 match_len = 4 + window.common::<PREFIX>(ip + 4, ip + 4 - rep0, end);
                 store.push(window, anchor, ip, match_len, 1);
-            } else if load32(from_ptr) == here as u32 {
+            } else if window.hits32::<PREFIX>(candidate, low, here as u32) {
                 let mut from = candidate;
                 let forward = 4 + window.common::<PREFIX>(ip + 4, from + 4, end);
                 match_len = forward + window.extend_back::<PREFIX>(&mut ip, &mut from, anchor, low);

@@ -65,6 +65,9 @@ impl std::error::Error for Error {}
 /// The content size stated in a frame header is verified but never trusted
 /// for allocation, and a content checksum is verified when present. Window
 /// sizes are not limited: the output buffer is the window.
+///
+/// Each thread that decompresses keeps its decoding tables and literal
+/// buffer (up to about 160 KiB) for the next call.
 pub fn decode_all(src: &[u8]) -> Result<Vec<u8>, Error> {
     frame::decode(src, &[], usize::MAX)
 }

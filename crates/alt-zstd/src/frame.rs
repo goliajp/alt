@@ -1,5 +1,7 @@
 //! Frame and block level decoding.
 
+use std::cell::Cell;
+
 use crate::Error;
 use crate::execute::{OUT_SLACK, Sink};
 use crate::literals::LiteralDecoder;
@@ -222,9 +224,8 @@ impl Decoder {
 /// Decodes every frame in `src`. `prefix` is history placed before the
 /// first data frame; the output may not grow past `limit`, which the caller
 /// vouches for when it is not `usize::MAX`.
-pub(crate) fn decode(src: &[u8], mut prefix: &[u8], limit: usize) -> Result<Vec<u8>, Error> {
+pub(crate) fn decode(src: &[u8], prefix: &[u8], limit: usize) -> Result<Vec<u8>, Error> {
     let mut out = Vec::new();
-    let mut decoder: Option<Box<Decoder>> = None;
     // what a frame may make us allocate before it has produced anything:
     // the caller's length if there is one, else a generous multiple of the
     // input, so that a forged content size cannot ask for the moon
@@ -239,20 +240,43 @@ pub(crate) fn decode(src: &[u8], mut prefix: &[u8], limit: usize) -> Result<Vec<
     if src.is_empty() {
         return Err(Error::Truncated);
     }
-    let mut rest = src;
-    while !rest.is_empty() {
-        let magic = le(take(&mut rest, 4)?) as u32;
-        if magic & !0xF == SKIPPABLE_MAGIC {
-            let len = le(take(&mut rest, 4)?) as usize;
-            take(&mut rest, len)?;
-            continue;
+    let mut decoder = KEPT.take().unwrap_or_else(|| Box::new(Decoder::new()));
+    let done = decoder.frames(src, &mut out, prefix, limit, reserve);
+    KEPT.set(Some(decoder));
+    done.map(|()| out)
+}
+
+impl Decoder {
+    /// Decodes every frame in `src`, appending to `out`.
+    fn frames(
+        &mut self,
+        src: &[u8],
+        out: &mut Vec<u8>,
+        mut prefix: &[u8],
+        limit: usize,
+        reserve: usize,
+    ) -> Result<(), Error> {
+        let mut rest = src;
+        while !rest.is_empty() {
+            let magic = le(take(&mut rest, 4)?) as u32;
+            if magic & !0xF == SKIPPABLE_MAGIC {
+                let len = le(take(&mut rest, 4)?) as usize;
+                take(&mut rest, len)?;
+                continue;
+            }
+            if magic != MAGIC {
+                return Err(Error::BadMagic);
+            }
+            rest = self.frame(rest, out, prefix, limit, reserve)?;
+            prefix = &[];
         }
-        if magic != MAGIC {
-            return Err(Error::BadMagic);
-        }
-        let decoder = decoder.get_or_insert_with(|| Box::new(Decoder::new()));
-        rest = decoder.frame(rest, &mut out, prefix, limit, reserve)?;
-        prefix = &[];
+        Ok(())
     }
-    Ok(out)
+}
+
+thread_local! {
+    /// Tables and the literal buffer of the last decode on this thread,
+    /// kept so that decoding many small inputs does not set them up anew
+    /// for each. A frame resets what it needs.
+    static KEPT: Cell<Option<Box<Decoder>>> = const { Cell::new(None) };
 }

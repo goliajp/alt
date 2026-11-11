@@ -2,7 +2,6 @@
 //! hashes finds long matches, a table of shorter hashes is the fallback.
 
 use super::matcher::{PROBE, SKIP_SPAN, SeqStore, Window, hash};
-use crate::bits::{load32, load64};
 
 pub(crate) struct Search<'t> {
     pub long: &'t mut [u32],
@@ -62,8 +61,6 @@ pub(crate) unsafe fn run<const PREFIX: bool>(
             let found = ip;
             let match_len;
 
-            let long_ptr = window.probe::<PREFIX>(long_candidate, low, here as u8);
-            let short_ptr = window.probe::<PREFIX>(short_candidate, low, here as u8);
             if window.repeats::<PREFIX>(ip + 1, rep0) {
                 ip += 1;
                 match_len = 4 + window.common::<PREFIX>(ip + 4, ip + 4 - rep0, end);
@@ -71,20 +68,19 @@ pub(crate) unsafe fn run<const PREFIX: bool>(
             } else {
                 let mut from;
                 let forward;
-                if load64(long_ptr) == here {
+                if window.hits64::<PREFIX>(long_candidate, low, here) {
                     from = long_candidate;
                     forward = 8 + window.common::<PREFIX>(ip + 8, from + 8, end);
                     // the next position is skipped by the match but is a
                     // likely target for later ones
                     *long.add(hash(window.data64(ip + 1), 0, long_shift)) = (ip + 1) as u32;
-                } else if load32(short_ptr) == here as u32 {
+                } else if window.hits32::<PREFIX>(short_candidate, low, here as u32) {
                     // a long match one byte on beats the short one here
                     let ahead = window.data64(ip + 1);
                     let slot = long.add(hash(ahead, 0, long_shift));
                     let next = *slot as usize;
                     *slot = (ip + 1) as u32;
-                    let next_ptr = window.probe::<PREFIX>(next, low, ahead as u8);
-                    if load64(next_ptr) == ahead {
+                    if window.hits64::<PREFIX>(next, low, ahead) {
                         ip += 1;
                         from = next;
                         forward = 8 + window.common::<PREFIX>(ip + 8, from + 8, end);
