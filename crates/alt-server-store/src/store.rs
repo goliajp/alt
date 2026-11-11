@@ -107,7 +107,7 @@ impl Store {
     ) -> Result<Self> {
         spec.validate()?;
         limits.validate()?;
-        crate::schema::check(&mut client, crate::SCHEMA_VERSION as usize)?;
+        crate::schema::check_current(&mut client)?;
         let mut tx = Transaction::uncached(client.transaction()?);
         instance(&mut tx, &spec, &signing_key)?;
         tx.commit()?;

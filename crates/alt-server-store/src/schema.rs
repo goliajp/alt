@@ -7,12 +7,18 @@ use postgres::{Client, GenericClient};
 const BASELINE: &str = include_str!("schema.sql");
 /// what takes schema 18 to 19, ahead of the data step in `schema_v19`
 const VERSION_19: &str = include_str!("schema-v19.sql");
+/// what takes schema 19 to 20, ahead of the data step in `schema_v20`
+const VERSION_20: &str = include_str!("schema-v20.sql");
 
 /// The oldest schema this release reads: it upgrades an instance of that schema,
 /// and takes and restores backups from it on.
 pub const OLDEST_SCHEMA: u32 = 18;
-pub const UNSUPPORTED_SOURCE_SCHEMA: &str = "unsupported source schema: this release upgrades from schema 18 only; upgrade an older instance to schema 18 with the previous release first";
-const UNSUPPORTED_BACKUP_SCHEMA: &str = "unsupported schema: this release backs up and restores schema 18 and 19 only; restore or upgrade an older instance to schema 18 with the previous release first";
+pub const UNSUPPORTED_SOURCE_SCHEMA: &str = "unsupported source schema: this release upgrades from schema 18 and 19 only; upgrade an older instance to schema 18 with the last release that carries those migrations first";
+const UNSUPPORTED_BACKUP_SCHEMA: &str = "unsupported schema: this release backs up and restores schema 18, 19 and 20 only; restore or upgrade an older instance to schema 18 with the last release that carries those migrations first";
+/// The publication documents are stored with lz4 compression, which a PostgreSQL
+/// server has only when it was built with it. Without it the first large document
+/// would fail to be written.
+pub const LZ4_REQUIRED: &str = "this PostgreSQL server was built without lz4 compression, which the schema requires; use a server built with lz4 (--with-lz4), as the official images are";
 
 /// whether this release takes or restores a backup of an instance at `schema`
 pub fn check_backup_schema(schema: u32) -> std::result::Result<(), &'static str> {
@@ -52,12 +58,28 @@ const HISTORY: [&str; 18] = [
 /// what `alt_schema` holds for each version up to the current one
 fn checksums() -> Vec<String> {
     let mut all: Vec<String> = HISTORY.iter().map(|checksum| (*checksum).into()).collect();
-    all.push(
-        alt_hash::blake3::hash(VERSION_19.as_bytes())
-            .to_hex()
-            .to_string(),
-    );
+    for version in [VERSION_19, VERSION_20] {
+        all.push(
+            alt_hash::blake3::hash(version.as_bytes())
+                .to_hex()
+                .to_string(),
+        );
+    }
     all
+}
+/// refuses a server that cannot write the compressed columns
+pub(crate) fn require_lz4(client: &mut impl GenericClient) -> Result<()> {
+    let supported: bool = client
+        .query_one(
+            "SELECT 'lz4'=ANY(enumvals) FROM pg_settings WHERE name='default_toast_compression'",
+            &[],
+        )?
+        .get(0);
+    if supported {
+        Ok(())
+    } else {
+        Err(Error::Precondition(LZ4_REQUIRED))
+    }
 }
 pub(crate) fn check(client: &mut impl GenericClient, expected: usize) -> Result<()> {
     let rows = client.query(
@@ -65,6 +87,11 @@ pub(crate) fn check(client: &mut impl GenericClient, expected: usize) -> Result<
         &[],
     )?;
     check_rows(&rows, expected)
+}
+/// what opening an instance requires of its database
+pub(crate) fn check_current(client: &mut impl GenericClient) -> Result<()> {
+    check(client, crate::SCHEMA_VERSION as usize)?;
+    require_lz4(client)
 }
 /// Every recorded version is held to its checksum, the ones the baseline replaced
 /// included: a row that was changed or is missing is not the history this release
@@ -92,6 +119,7 @@ fn record(client: &mut impl GenericClient, version: usize, checksum: &str) -> Re
 }
 /// the current schema in a database that has none
 pub(crate) fn create(client: &mut impl GenericClient) -> Result<()> {
+    require_lz4(client)?;
     client.batch_execute(BASELINE)?;
     for (index, checksum) in checksums().iter().enumerate() {
         record(client, index + 1, checksum)?;
@@ -104,8 +132,11 @@ impl Store {
     /// validated; historical checksums, request identities and immutable content
     /// stay as they are. Runtime open never migrates silently.
     ///
-    /// The only source is schema 18. The upgrade moves the published Git objects
-    /// that version kept in the content store into pack segments; see `schema_v19`.
+    /// The sources are schema 18 and 19, and every version between the source and
+    /// the current one is applied in turn. From 18 the published Git objects that
+    /// version kept in the content store move into pack segments; see `schema_v19`.
+    /// From 19 the stored state of committed requests and their outbox events give
+    /// up their copy of the publication; see `schema_v20`.
     pub fn migrate(
         mut client: Client,
         bytes: ByteStore,
@@ -118,6 +149,7 @@ impl Store {
             return Err(Error::Precondition(UNSUPPORTED_SOURCE_SCHEMA));
         }
         limits.validate()?;
+        require_lz4(&mut client)?;
         // segment files the data step writes belong to rows of this transaction
         let mut written = Vec::new();
         let migrated: Result<u64> = (|| {
@@ -130,9 +162,14 @@ impl Store {
             )?;
             crate::store::instance(&mut tx, &spec, &signing_key)?;
             tx.batch_execute("LOCK TABLE alt_repositories,alt_requests IN ACCESS EXCLUSIVE MODE")?;
-            tx.batch_execute(VERSION_19)?;
-            record(tx.raw_mut(), 19, &checksums()[18])?;
-            crate::schema_v19::settle(&mut tx, &bytes, &spec.installation_id, &mut written)?;
+            if from == 18 {
+                tx.batch_execute(VERSION_19)?;
+                record(tx.raw_mut(), 19, &checksums()[18])?;
+                crate::schema_v19::settle(&mut tx, &bytes, &spec.installation_id, &mut written)?;
+            }
+            tx.batch_execute(VERSION_20)?;
+            record(tx.raw_mut(), 20, &checksums()[19])?;
+            crate::schema_v20::shorten(&mut tx)?;
             tx.execute("UPDATE alt_requests SET fence=fence+1,worker_lease_until=0 WHERE state IN ('receiving','ready')", &[])?;
             let generation = spec
                 .runtime_generation

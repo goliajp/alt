@@ -185,33 +185,6 @@ pub(crate) fn insert_segment(
     Ok(())
 }
 
-/// The audit and outbox event of a committed publication and the stored state of its
-/// request. Both hold the whole receipt, which is written once and placed in each.
-pub(crate) fn committed_documents(receipt: &Receipt) -> Result<(Vec<u8>, Vec<u8>)> {
-    let receipt = alt_json::to_vec(receipt)?;
-    let around = |open: &[u8]| [open, receipt.as_slice(), b"}"].concat();
-    Ok((
-        around(br#"{"kind":"publication_committed","receipt":"#),
-        around(br#"{"state":"committed","receipt":"#),
-    ))
-}
-
-/// the audit record of a committed publication and its outbox event: one document,
-/// sent once and stored in both tables
-pub(crate) fn record_committed(
-    tx: &mut crate::database::Transaction<'_>,
-    repository: &str,
-    sequence: u64,
-    actor: &str,
-    event: &[u8],
-) -> Result<()> {
-    tx.execute(
-        "WITH audit AS (INSERT INTO alt_audit(repository,sequence,actor_id,event) VALUES($1,$2,$3,$4::jsonb)) INSERT INTO alt_outbox(repository,sequence,event) VALUES($1,$2,$4::jsonb)",
-        &[&repository, &integer(sequence)?, &actor, &JsonText(event)],
-    )?;
-    Ok(())
-}
-
 impl Store {
     /// A Git object of the repository, read from its segments. Every published Git
     /// object lives there, whichever protocol brought it in.
@@ -358,8 +331,14 @@ impl Store {
                 .map(|byte| format!("{byte:02x}"))
                 .collect(),
         };
-        let (event, result) = committed_documents(&receipt)?;
-        record_committed(&mut tx, repository, sequence, &auth.actor_id, &event)?;
+        let documents = crate::committed::committed_documents(&receipt)?;
+        crate::committed::record_committed(
+            &mut tx,
+            repository,
+            sequence,
+            &auth.actor_id,
+            &documents,
+        )?;
         tx.execute(
             "INSERT INTO alt_requests(repository,epoch,actor_id,request_id,digest,publication,manifest,state,result,expires_at,reserved_bytes) VALUES($1,$2,$3,$4,$5,$6,$7,'committed',$8,0,0)",
             &[
@@ -370,7 +349,7 @@ impl Store {
                 &validated.digest,
                 &JsonText(&alt_json::to_vec(publication)?),
                 &JsonText(&alt_json::to_vec(&alt_json::json!({"pack_segment": segment.as_ref().map(|segment| segment.id)}))?),
-                &JsonText(&result),
+                &JsonText(&documents.result),
             ],
         )?;
         // lock waits can outlive a lease checked on entry
@@ -378,72 +357,5 @@ impl Store {
         crate::cloud_quota::check_publication(&mut tx, &self.spec)?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)?;
         Ok(receipt)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use alt_remote_protocol::{
-        ActorKind, Attribution, ObjectFormat, RefUpdate, RequestKey, RequestState, Scope, VERSION,
-    };
-
-    #[test]
-    fn committed_documents_read_as_the_event_and_the_request_state() {
-        let receipt = Receipt {
-            body: ReceiptBody {
-                publication: Publication {
-                    protocol_version: VERSION,
-                    key: RequestKey {
-                        scope: Scope {
-                            installation_id: "installation".into(),
-                            repository_instance_id: "repository".into(),
-                            recovery_epoch: 1,
-                        },
-                        actor_id: "owner".into(),
-                        request_id: "git-00".into(),
-                    },
-                    attribution: Attribution {
-                        kind: ActorKind::Human,
-                        on_behalf_of: None,
-                        delegation_id: None,
-                        agent_session: None,
-                    },
-                    object_format: ObjectFormat::Sha1,
-                    refs: vec![RefUpdate {
-                        name: "refs/heads/\"quoted\"".into(),
-                        expected: None,
-                        new: Some("1".repeat(40)),
-                        force: false,
-                    }],
-                    record_roots: vec![],
-                    content_manifest: "0".repeat(64),
-                },
-                request_digest: "2".repeat(64),
-                transaction_sequence: 7,
-                policy_version: 1,
-                committed_at_unix_ms: 1_700_000_000_000,
-            },
-            signing_key_id: "3".repeat(64),
-            signature: "4".repeat(128),
-        };
-        let (event, result) = committed_documents(&receipt).unwrap();
-        assert_eq!(
-            alt_json::parse(&event).unwrap(),
-            alt_json::json!({"kind":"publication_committed","receipt":receipt})
-        );
-        assert_eq!(
-            alt_json::from_slice::<RequestState>(&result).unwrap(),
-            RequestState::Committed {
-                receipt: Box::new(receipt.clone())
-            }
-        );
-        assert_eq!(
-            alt_json::parse(&result).unwrap(),
-            alt_json::to_value(&RequestState::Committed {
-                receipt: Box::new(receipt)
-            })
-            .unwrap()
-        );
     }
 }

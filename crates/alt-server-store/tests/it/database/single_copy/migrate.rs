@@ -84,6 +84,7 @@ fn segment_files(f: &Fixture) -> usize {
 }
 /// makes the database the schema 18 one it stands in for
 fn as_schema_18(f: &Fixture) {
+    crate::database::schema_20::as_schema_19(f);
     f.client()
         .batch_execute("DELETE FROM alt_schema WHERE version=19; ALTER TABLE alt_pins DROP CONSTRAINT IF EXISTS alt_pins_no_ref")
         .unwrap();

@@ -58,16 +58,19 @@ CREATE TABLE alt_refs (
   oid text NOT NULL,
   PRIMARY KEY(repository, name)
 );
+-- The result of a committed request is its receipt without the publication, which
+-- the row holds once in its own column; the outbox event of the publication is the
+-- same. The publication documents are compressed with lz4.
 CREATE TABLE alt_requests (
   repository text NOT NULL REFERENCES alt_repositories(id),
   epoch bigint NOT NULL,
   actor_id text NOT NULL,
   request_id text NOT NULL,
   digest text NOT NULL,
-  publication jsonb NOT NULL,
+  publication jsonb COMPRESSION lz4 NOT NULL,
   manifest jsonb NOT NULL,
   state text NOT NULL CHECK (state IN ('receiving','ready','committed','rejected','expired')),
-  result jsonb NOT NULL,
+  result jsonb COMPRESSION lz4 NOT NULL,
   expires_at bigint NOT NULL,
   reserved_bytes bigint NOT NULL CHECK (reserved_bytes >= 0),
   fence bigint NOT NULL DEFAULT 0 CHECK (fence >= 0),
@@ -143,7 +146,7 @@ CREATE TABLE alt_audit (
   repository text NOT NULL REFERENCES alt_repositories(id),
   sequence bigint NOT NULL,
   actor_id text NOT NULL,
-  event jsonb NOT NULL,
+  event jsonb COMPRESSION lz4 NOT NULL,
   PRIMARY KEY(repository, sequence)
 );
 CREATE TABLE alt_outbox (
@@ -152,7 +155,7 @@ CREATE TABLE alt_outbox (
   delivered boolean NOT NULL DEFAULT false,
   attempts bigint NOT NULL DEFAULT 0,
   next_attempt_at bigint NOT NULL DEFAULT 0,
-  event jsonb NOT NULL,
+  event jsonb COMPRESSION lz4 NOT NULL,
   PRIMARY KEY(repository, sequence),
   FOREIGN KEY(repository, sequence) REFERENCES alt_audit(repository, sequence)
 );

@@ -347,7 +347,7 @@ impl Store {
             .as_str()
             .ok_or(Error::Integrity("task root kind"))?
             .to_owned();
-        let rows = tx.query("SELECT publication,manifest,receipt FROM (SELECT q.digest,q.publication,q.manifest,q.result->'receipt' AS receipt FROM alt_task_bundle_records r JOIN alt_requests q ON q.repository=r.repository AND q.epoch=r.epoch AND q.actor_id=r.actor_id AND q.request_id=r.request_id WHERE r.repository=$1 AND r.kind=$2 AND r.record_id=$3 AND q.state='committed' UNION ALL SELECT p.digest,p.publication,p.manifest,p.receipt FROM alt_archived_records r JOIN alt_archived_publications p ON p.repository=r.repository AND p.digest=r.digest WHERE r.repository=$1 AND r.kind=$2 AND r.record_id=$3) h WHERE digest>$4 ORDER BY digest LIMIT $5", &[&scope.repository_instance_id,&kind,&root.id,&after_digest.unwrap_or(""),&integer(count as u64)?])?;
+        let rows = tx.query(concat!("SELECT publication,manifest,receipt FROM (SELECT q.digest,q.publication,q.manifest,", crate::committed::receipt_sql!(), " AS receipt FROM alt_task_bundle_records r JOIN alt_requests q ON q.repository=r.repository AND q.epoch=r.epoch AND q.actor_id=r.actor_id AND q.request_id=r.request_id WHERE r.repository=$1 AND r.kind=$2 AND r.record_id=$3 AND q.state='committed' UNION ALL SELECT p.digest,p.publication,p.manifest,p.receipt FROM alt_archived_records r JOIN alt_archived_publications p ON p.repository=r.repository AND p.digest=r.digest WHERE r.repository=$1 AND r.kind=$2 AND r.record_id=$3) h WHERE digest>$4 ORDER BY digest LIMIT $5"), &[&scope.repository_instance_id,&kind,&root.id,&after_digest.unwrap_or(""),&integer(count as u64)?])?;
         let mut result = Vec::new();
         let mut bytes = 0usize;
         for row in rows {

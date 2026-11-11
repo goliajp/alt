@@ -1,4 +1,5 @@
 use crate::Jsonb;
+pub(crate) use crate::committed::request_row;
 use crate::database::Transaction;
 use crate::store::{authorize, instance, integer, now, snapshot, unsigned};
 use crate::{Credential, DurableBytes, Error, Result, Store};
@@ -44,7 +45,7 @@ impl Store {
                     "request ID reused with different parameters",
                 ));
             }
-            return Ok(row.get::<_, Jsonb>("result").read()?);
+            return Ok(row.get::<_, Jsonb>("outcome").read()?);
         }
         let expires = time
             .checked_add(ttl_ms)
@@ -153,7 +154,7 @@ impl Store {
             }
             Some(row) => RequestObservation::Recorded {
                 key: key.clone(),
-                result: Box::new(row.get::<_, Jsonb>("result").read()?),
+                result: Box::new(row.get::<_, Jsonb>("outcome").read()?),
             },
             None if key.scope.recovery_epoch == current.scope.recovery_epoch => {
                 RequestObservation::NotSeen { key: key.clone() }
@@ -312,12 +313,6 @@ impl Store {
         tx.commit().map_err(|_| Error::OutcomeUnknown)?;
         Ok(())
     }
-}
-pub(crate) fn request_row(
-    tx: &mut Transaction<'_>,
-    key: &RequestKey,
-) -> Result<Option<postgres::Row>> {
-    Ok(tx.query_opt("SELECT * FROM alt_requests WHERE repository=$1 AND epoch=$2 AND actor_id=$3 AND request_id=$4 FOR UPDATE",&[&key.scope.repository_instance_id,&integer(key.scope.recovery_epoch)?,&key.actor_id,&key.request_id])?)
 }
 pub(crate) fn active(row: &postgres::Row, time: u64) -> Result<()> {
     if !matches!(

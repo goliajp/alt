@@ -24,6 +24,14 @@ atomically records refs, signed receipt, audit and outbox. Commit transport erro
 are returned as unknown; callers query the original request. Terminal request IDs
 and digests remain durable. Old-epoch absence is unknown, not permission to replay.
 
+A committed publication is stored once, in the row of its request. The audit
+record is a fact of its own and holds the whole signed receipt. The stored
+result of the request and the outbox event hold the receipt without the
+publication; reads put it back from the request, and `Store::outbox_event`
+returns the whole event of an outbox row. These documents are compressed with
+lz4, so the PostgreSQL server must be built with it; opening, creating and
+upgrading a database refuse a server that is not.
+
 Upload, snapshot and durable ref pins share the same repository lock with GC.
 GC first commits a deleting marker, then checks its row generation under the lock
 before unlinking and syncing the directory. Concurrent stale GC workers cannot
@@ -49,11 +57,14 @@ Schema versions have immutable checksums. A new database is created at the
 current schema in one step and records the checksum of every version up to it,
 exactly as a database that was upgraded version by version does. Opening
 requires the current schema and checks every recorded checksum.
-`Store::migrate` explicitly upgrades schema 18, the one before the current
-schema, in one transaction, preserves existing data, advances the runtime
-generation and fences old upload workers. Older schemas are refused: the
-previous release upgrades them to schema 18 first. Callers must reopen with the returned instance specification. An old
-process or worker cannot continue writes after migration.
+`Store::migrate` explicitly upgrades schema 18 or 19 in one transaction,
+applying every version up to the current one in turn. It preserves existing
+data, advances the runtime generation and fences old upload workers. Rows it
+rewrites are checked to read back as what they replace, and a row that does
+not fails the whole upgrade. Older schemas are refused: the last release that
+carries their migrations upgrades them to schema 18 first. Callers must reopen
+with the returned instance specification. An old process or worker cannot
+continue writes after migration.
 
 Cloud identity issuance, task transport/UI, portable backup/operator workflows
 and outbox delivery are separate integrations; table existence does not mean

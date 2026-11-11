@@ -30,6 +30,17 @@ fn untyped(value: Jsonb) -> Vec<u8> {
     alt_json::to_vec(&value.0).unwrap()
 }
 
+/// The stored state of a request. A committed one is not the protocol's state: its
+/// receipt lacks the publication, which the row has in another column.
+fn stored_state(value: Jsonb) -> Vec<u8> {
+    if value.0["state"] == "committed" {
+        assert!(value.0["receipt"]["body"].get("publication").is_none());
+        untyped(value)
+    } else {
+        typed::<RequestState>(value)
+    }
+}
+
 /// Every `json` and `jsonb` column of the schema with the type its rows hold.
 const COLUMNS: &[(&str, &str, Reread)] = &[
     ("alt_repositories", "policies", typed::<Vec<RefPolicy>>),
@@ -37,7 +48,7 @@ const COLUMNS: &[(&str, &str, Reread)] = &[
     ("alt_grants", "grants", typed::<Vec<Grant>>),
     ("alt_requests", "publication", typed::<Publication>),
     ("alt_requests", "manifest", typed::<Manifest>),
-    ("alt_requests", "result", typed::<RequestState>),
+    ("alt_requests", "result", stored_state),
     ("alt_audit", "event", untyped),
     ("alt_outbox", "event", untyped),
     ("alt_collector_policies", "policy", typed::<CollectorPolicy>),

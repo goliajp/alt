@@ -58,7 +58,7 @@ fn publications(
     let mut cursor: Option<(String, String)> = None;
     loop {
         let (repository, digest) = cursor.clone().unwrap_or_default();
-        let rows = tx.query("SELECT h.repository,h.digest,r.recovery_epoch,h.publication,h.receipt FROM (SELECT repository,digest,publication,result->'receipt' AS receipt FROM alt_requests WHERE state='committed' UNION ALL SELECT repository,digest,publication,receipt FROM alt_archived_publications) h JOIN alt_repositories r ON r.id=h.repository WHERE (h.repository,h.digest)>($1,$2) ORDER BY h.repository,h.digest LIMIT 100", &[&repository,&digest])?;
+        let rows = tx.query(concat!("SELECT h.repository,h.digest,r.recovery_epoch,h.publication,h.receipt FROM (SELECT q.repository,q.digest,q.publication,", crate::committed::receipt_sql!(), " AS receipt FROM alt_requests q WHERE q.state='committed' UNION ALL SELECT repository,digest,publication,receipt FROM alt_archived_publications) h JOIN alt_repositories r ON r.id=h.repository WHERE (h.repository,h.digest)>($1,$2) ORDER BY h.repository,h.digest LIMIT 100"), &[&repository,&digest])?;
         if rows.is_empty() {
             break;
         }

@@ -1,5 +1,6 @@
 //! PostgreSQL publication authority and a durable immutable POSIX byte store.
 mod bytes;
+mod committed;
 mod database;
 mod gc;
 mod jsonb;
@@ -26,8 +27,9 @@ pub use publication::*;
 pub use read::*;
 pub use registration::MAX_REGISTER_CONTENTS;
 mod schema;
-pub use schema::{OLDEST_SCHEMA, UNSUPPORTED_SOURCE_SCHEMA, check_backup_schema};
+pub use schema::{LZ4_REQUIRED, OLDEST_SCHEMA, UNSUPPORTED_SOURCE_SCHEMA, check_backup_schema};
 mod schema_v19;
+mod schema_v20;
 mod segments;
 mod store;
 mod tasks;
@@ -152,7 +154,7 @@ pub use tasks::CurrentReviewAssessment;
 pub use workbench::*;
 
 /// Current persisted schema; runtime open validates all migration checksums.
-pub const SCHEMA_VERSION: u32 = 19;
+pub const SCHEMA_VERSION: u32 = 20;
 
 mod change_channel;
 mod link_history;

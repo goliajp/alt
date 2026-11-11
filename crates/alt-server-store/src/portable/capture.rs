@@ -110,7 +110,7 @@ fn committed_publications(
     inventory: &mut Inventory,
 ) -> Result<Vec<HistoricalPublication>> {
     let bound = integer((limits.publications as u64).saturating_add(1))?;
-    let rows = tx.query("SELECT q.publication,q.manifest,q.result FROM alt_requests q JOIN alt_task_bundles b ON b.repository=q.repository AND b.epoch=q.epoch AND b.actor_id=q.actor_id AND b.request_id=q.request_id WHERE q.repository=$1 AND q.state='committed' ORDER BY q.digest LIMIT $2", &[&scope.repository_instance_id,&bound])?;
+    let rows = tx.query(concat!("SELECT q.publication,q.manifest,", crate::committed::state_sql!(), " FROM alt_requests q JOIN alt_task_bundles b ON b.repository=q.repository AND b.epoch=q.epoch AND b.actor_id=q.actor_id AND b.request_id=q.request_id WHERE q.repository=$1 AND q.state='committed' ORDER BY q.digest LIMIT $2"), &[&scope.repository_instance_id,&bound])?;
     if rows.len() > limits.publications {
         return Err(Error::Limit("portable task publication inventory"));
     }

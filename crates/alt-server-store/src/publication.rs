@@ -295,7 +295,7 @@ impl Store {
             .ok_or(Error::Precondition("request not registered"))?;
         crate::requests::check_request_attribution(&row, &auth)?;
         if row.get::<_, String>("state") == "committed" {
-            let state: RequestState = row.get::<_, Jsonb>("result").read()?;
+            let state: RequestState = row.get::<_, Jsonb>("outcome").read()?;
             if let RequestState::Committed { receipt } = state {
                 return Ok(*receipt);
             }
@@ -426,13 +426,19 @@ impl Store {
                 .map(|b| format!("{b:02x}"))
                 .collect(),
         };
-        let (event, result) = crate::packs::committed_documents(&receipt)?;
-        crate::packs::record_committed(&mut tx, repository, sequence, &auth.actor_id, &event)?;
+        let documents = crate::committed::committed_documents(&receipt)?;
+        crate::committed::record_committed(
+            &mut tx,
+            repository,
+            sequence,
+            &auth.actor_id,
+            &documents,
+        )?;
         finish(
             &mut tx,
             &work.key,
             "committed",
-            &crate::jsonb::JsonText(&result),
+            &crate::jsonb::JsonText(&documents.result),
             unsigned(row.get("reserved_bytes"))?,
         )?;
         // With the upload pins gone, what this request uploaded and nothing retains
