@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use alt_zstd::{decode_all, decode_with_prefix, encode_all, encode_with_prefix};
 
-use crate::inputs::{corpus, random, small, text};
+use crate::inputs::{SIZED_MIN, corpus, random, small, text};
 use crate::walk::{self, Shape};
 use crate::{digests, pack};
 
@@ -147,28 +147,20 @@ fn every_digest_belongs_to_a_test() {
 
 #[test]
 fn sizes_stay_close_to_reference() {
-    let reference: HashMap<_, _> = pack::parse(pack::CORPUS)
-        .into_iter()
-        .map(|(key, frame)| (key, frame.len()))
-        .collect();
+    let inputs: HashMap<_, _> = corpus().into_iter().collect();
     let mut compared = 0;
-    for (name, data) in corpus() {
-        if data.len() < 100_000 {
-            continue;
-        }
-        // level 3 is the one level every large input has a reference
-        // frame for
-        let theirs = reference[format!("{name}/3").as_str()];
-        let ours = encode_all(&data, 3).len();
+    // reference frames made in one call, so that the reference knew the
+    // input length and chose the parameters we choose
+    for (name, frame) in pack::parse(pack::SIZED) {
+        let data = &inputs[name];
+        assert!(data.len() >= SIZED_MIN, "{name}");
+        assert!(decode_all(frame).as_ref() == Ok(data), "{name}");
+        let (ours, theirs) = (encode_all(data, 3).len(), frame.len());
         println!("{name}: ours {ours}, reference {theirs}");
-        // allow a fixed handful of bytes for inputs that shrink to nothing.
-        // The reference frames were made without telling the encoder the
-        // input length, which below 256 KiB gives it larger tables and a
-        // longer minimum match than it takes when it knows the length, as
-        // we always do; on noise over four symbols that alone is worth
-        // 3.5%, with the matches of both encoders otherwise identical
+        // when the frames were made the largest excess was 13 bytes on an
+        // input that shrinks to nothing and 0.01% otherwise
         assert!(
-            ours as f64 <= theirs as f64 * 1.04 + 64.0,
+            ours as f64 <= theirs as f64 * 1.001 + 16.0,
             "{name}: {ours} against {theirs}"
         );
         compared += 1;
