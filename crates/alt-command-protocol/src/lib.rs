@@ -1,11 +1,13 @@
 //! Existing whole-command receipt encoding, independent of filesystem and CLI.
 //! These are source facts; reading a receipt does not authorize replay or make
 //! its original command an execution performed by the importing instance.
+use alt_json::{FromJson, ToJson};
 use serde::{Deserialize, Serialize};
 use std::io;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, ToJson, FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct Intent {
     pub version: u32,
     pub hash_algorithm: String,
@@ -15,8 +17,9 @@ pub struct Intent {
     pub workspace: String,
     pub started_ms: u128,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, ToJson, FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct Completion {
     pub version: u32,
     pub hash_algorithm: String,

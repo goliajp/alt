@@ -1,3 +1,5 @@
+mod json;
+
 use alt_command_protocol::*;
 #[test]
 fn exact_legacy_bytes_and_malformed_lengths() {

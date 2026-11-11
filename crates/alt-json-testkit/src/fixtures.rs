@@ -29,7 +29,12 @@ pub fn record<T: Comparable>(seed: u64, samples: u64, make: impl Fn(&mut Rng) ->
     for _ in 0..samples {
         let value = make(&mut rng);
         let compact = output(&value).expect("fixture values must be writable");
-        lines.push(format!("= {}", String::from_utf8(compact.clone()).unwrap()));
+        // number text does not always read back to the same float, so
+        // only values serde itself writes back unchanged are recorded
+        let reread: T = serde_json::from_slice(&compact).unwrap();
+        if serde_json::to_vec(&reread).unwrap() == compact {
+            lines.push(format!("= {}", String::from_utf8(compact.clone()).unwrap()));
+        }
         let tree = alt_json::parse(&compact).unwrap();
         verdict(alt_json::to_vec(&tree).unwrap(), &mut lines);
         for _ in 0..4 {
@@ -46,6 +51,20 @@ pub fn record<T: Comparable>(seed: u64, samples: u64, make: impl Fn(&mut Rng) ->
     lines.sort();
     lines.dedup();
     lines.join("\n") + "\n"
+}
+
+/// Checks a stored fixture against a fresh [`record`] of the same seed,
+/// which holds serde to it for as long as the type still has its serde
+/// implementation. With `ALT_JSON_RECORD` set, writes the file instead.
+pub fn check_recorded(path: &str, recorded: &str) {
+    if std::env::var_os("ALT_JSON_RECORD").is_some() {
+        std::fs::write(path, recorded).unwrap();
+    }
+    let stored = std::fs::read_to_string(path).unwrap();
+    assert!(
+        stored == recorded,
+        "{path} differs from what serde produces now"
+    );
 }
 
 /// What a fixture held.

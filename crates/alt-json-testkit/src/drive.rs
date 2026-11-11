@@ -41,7 +41,7 @@ pub fn mutate(rng: &mut Rng, document: &mut Vec<u8>) {
 }
 
 /// a scalar of a random kind, to put where another kind is expected
-pub(crate) fn stray(rng: &mut Rng) -> Value {
+pub fn stray(rng: &mut Rng) -> Value {
     match rng.below(12) {
         0 => Value::Null,
         1 => Value::Bool(rng.chance(2)),
@@ -59,7 +59,7 @@ pub(crate) fn stray(rng: &mut Rng) -> Value {
 }
 
 /// One structural change somewhere in the tree.
-pub(crate) fn edit(rng: &mut Rng, value: &mut Value) {
+pub fn edit(rng: &mut Rng, value: &mut Value) {
     let descend = match value {
         Value::Array(items) => !items.is_empty() && !rng.chance(3),
         Value::Object(map) => !map.is_empty() && !rng.chance(3),
@@ -127,7 +127,7 @@ pub(crate) fn edit(rng: &mut Rng, value: &mut Value) {
 }
 
 /// Repeats the first key of some object in the text, with another value.
-pub(crate) fn duplicate_key(rng: &mut Rng, text: &[u8]) -> Option<Vec<u8>> {
+pub fn duplicate_key(rng: &mut Rng, text: &[u8]) -> Option<Vec<u8>> {
     let opens: Vec<usize> = (0..text.len()).filter(|&i| text[i] == b'{').collect();
     let open = *opens.get(rng.below(opens.len().max(1) as u64) as usize)?;
     let key_start = open + 1;

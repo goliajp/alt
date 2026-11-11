@@ -6,5 +6,9 @@ license.workspace = true
 
 [dependencies]
 alt-hash.workspace = true
+alt-json.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+alt-json-testkit.workspace = true
