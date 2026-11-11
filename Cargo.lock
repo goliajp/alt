@@ -72,6 +72,7 @@ dependencies = [
  "alt-import",
  "alt-inflate",
  "alt-input",
+ "alt-json",
  "alt-lfs",
  "alt-merge",
  "alt-odb",

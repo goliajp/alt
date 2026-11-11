@@ -1,3 +1,5 @@
+mod json;
+
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
 use alt_remote_protocol::*;
 use alt_task::Record;
@@ -193,7 +195,7 @@ impl Local {
         };
         let response = alt_command_protocol::Response {
             exit_code: 0,
-            stdout: serde_json::to_vec(&serde_json::json!({"task_id":key.id})).unwrap(),
+            stdout: alt_json::to_vec(&alt_json::json!({"task_id":key.id})).unwrap(),
             stderr: vec![],
         }
         .encode();
@@ -209,8 +211,8 @@ impl Local {
             outcome: "applied".into(),
         };
         let raw_proof = vec![
-            serde_json::to_vec(&original).unwrap(),
-            serde_json::to_vec(&completion).unwrap(),
+            alt_json::to_vec(&original).unwrap(),
+            alt_json::to_vec(&completion).unwrap(),
             response,
         ];
         let artifact = |bytes: &Vec<u8>| alt_task::Artifact {
@@ -227,7 +229,7 @@ impl Local {
             response: artifact(&raw_proof[2]),
             ref_operation: None,
         };
-        let raw_record = serde_json::to_vec_pretty(&serde_json::json!({"schema_version":1,"hash_algorithm":"blake3","kind":"task","record":task})).unwrap();
+        let raw_record = alt_json::to_vec_pretty(&alt_json::json!({"schema_version":1,"hash_algorithm":"blake3","kind":"task","record":task})).unwrap();
         Self {
             task,
             raw_record,

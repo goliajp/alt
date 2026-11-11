@@ -63,8 +63,8 @@ pub(super) fn completed(
     let intent_raw = bounded(&directory.join("intent.json"), maximum)?;
     let completion_raw = bounded(&directory.join("completed.json"), maximum)?;
     let response_raw = bounded(&directory.join("response.bin"), maximum)?;
-    let intent: alt_command_protocol::Intent = serde_json::from_slice(&intent_raw)?;
-    let completion: alt_command_protocol::Completion = serde_json::from_slice(&completion_raw)?;
+    let intent: alt_command_protocol::Intent = alt_json::from_slice(&intent_raw)?;
+    let completion: alt_command_protocol::Completion = alt_json::from_slice(&completion_raw)?;
     let mut proof = SourceCompletion {
         schema_version: 1,
         record: key.clone(),
@@ -225,7 +225,7 @@ impl Source for LocalSource<'_, '_> {
                 .join("intent.json"),
             maximum,
         )?;
-        let intent: alt_command_protocol::Intent = serde_json::from_slice(&raw_intent)?;
+        let intent: alt_command_protocol::Intent = alt_json::from_slice(&raw_intent)?;
         let mut proof = SourceRecovery {
             schema_version: 1,
             record: key.clone(),

@@ -202,7 +202,7 @@ impl Draft {
         request
             .manifest
             .validate_publication(&request.publication, self.limits)?;
-        let bytes = serde_json::to_vec(&request)?;
+        let bytes = alt_json::to_vec(&request)?;
         if bytes.len() > self.limits.request_bytes {
             return Err(Error::Limit("begin request bytes"));
         }
@@ -255,7 +255,7 @@ impl Package {
         if bytes.len() > limits.request_bytes {
             return Err(Error::Limit("package request bytes"));
         }
-        let request: BeginRequest = serde_json::from_slice(&bytes)?;
+        let request: BeginRequest = alt_json::from_slice(&bytes)?;
         request
             .manifest
             .validate_publication(&request.publication, limits)?;
