@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: a portable import becomes a pack segment; keep a segment file whose commit outcome is unknown
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/pack_compaction.rs
+touched: crates/alt-server-store/src/portable_import/activation.rs
+touched: crates/alt-server-store/src/publication.rs
+touched: crates/alt-server-store/tests/it/database/portable.rs
+touched: crates/alt-server/src/git_packs.rs
