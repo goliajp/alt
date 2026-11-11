@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: perf
+summary: branch on candidate validity in the long-input zstd level 1 loop
+author-type: human
+author: doracawl
+touched: crates/alt-zstd/src/enc/matcher.rs
+touched: crates/alt-zstd/src/enc/pairs.rs
