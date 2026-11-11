@@ -1,8 +1,11 @@
 use crate::{Error, Limits, Publication, RequestKey, Result, hex};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(rename_all = "snake_case")]
+#[json(rename_all = "snake_case")]
 pub enum ErrorCode {
     Unauthenticated,
     Forbidden,
@@ -15,8 +18,11 @@ pub enum ErrorCode {
     InvalidRequest,
     RequestIdConflict,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(rename_all = "snake_case")]
+#[json(rename_all = "snake_case")]
 pub enum Retry {
     Never,
     /// Reuse the exact request identity and parameters; no new logical write.
@@ -26,8 +32,11 @@ pub enum Retry {
     /// A rejected precondition requires a new intent and a fresh request ID.
     NewIntent,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct Failure {
     pub code: ErrorCode,
     pub message: String,
@@ -35,16 +44,22 @@ pub struct Failure {
     pub retry: Retry,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct ReceiptBody {
     pub publication: Publication,
     pub request_digest: String,
     #[serde(with = "crate::decimal")]
+    #[json(with = "alt_json::with::decimal_u64")]
     pub transaction_sequence: u64,
     #[serde(with = "crate::decimal")]
+    #[json(with = "alt_json::with::decimal_u64")]
     pub policy_version: u64,
     #[serde(with = "crate::decimal")]
+    #[json(with = "alt_json::with::decimal_u64")]
     pub committed_at_unix_ms: u64,
 }
 impl ReceiptBody {
@@ -74,12 +89,15 @@ impl ReceiptBody {
             .record_roots
             .sort_by(|a, b| (a.kind.tag(), &a.id).cmp(&(b.kind.tag(), &b.id)));
         let mut bytes = b"alt-receipt-v1\0".to_vec();
-        serde_json::to_writer(&mut bytes, &normalized).map_err(|e| Error::Json(e.to_string()))?;
+        alt_json::to_writer(&mut bytes, &normalized).map_err(|e| Error::Json(e.to_string()))?;
         Ok(bytes)
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct Receipt {
     pub body: ReceiptBody,
     /// BLAKE3 identity of the instance's Ed25519 public key.
@@ -97,12 +115,16 @@ impl Receipt {
 
 /// Durable states. Unknown is deliberately absent: it describes a client's
 /// inability to observe the authority, not a server decision to replay a write.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+#[json(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RequestState {
     Receiving {
         digest: String,
         #[serde(with = "crate::decimal")]
+        #[json(with = "alt_json::with::decimal_u64")]
         expires_at_unix_ms: u64,
     },
     Ready {
@@ -137,8 +159,11 @@ impl RequestState {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(tag = "observation", rename_all = "snake_case", deny_unknown_fields)]
+#[json(tag = "observation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RequestObservation {
     Recorded {
         key: RequestKey,

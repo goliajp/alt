@@ -4,8 +4,9 @@ use serde::{Deserialize, Serialize};
 
 pub const MAX_LIFETIME_MS: u64 = 3_600_000;
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct AgentScope {
     pub repository: Scope,
     pub grants: Vec<Grant>,
@@ -24,7 +25,7 @@ impl AgentScope {
             grant.validate()?;
         }
         // Keep metadata, private journals and responses bounded together.
-        if serde_json::to_vec(self)
+        if alt_json::to_vec(self)
             .map_err(|_| Error::Invalid("agent scope"))?
             .len()
             > 8192
@@ -34,13 +35,15 @@ impl AgentScope {
         Ok(())
     }
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct DelegationRequest {
     pub version: u32,
     pub access_token: String,
     pub attribution: Attribution,
     #[serde(with = "crate::decimal")]
+    #[json(with = "alt_json::with::decimal_u64")]
     pub expires_at_unix_ms: u64,
     pub purpose: String,
     pub scope: AgentScope,
@@ -68,22 +71,26 @@ impl DelegationRequest {
         self.scope.validate()
     }
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct DelegationInfo {
     pub credential_id: String,
     pub attribution: Attribution,
     pub scope: AgentScope,
     pub purpose: String,
     #[serde(with = "crate::decimal")]
+    #[json(with = "alt_json::with::decimal_u64")]
     pub created_at_unix_ms: u64,
     #[serde(with = "crate::decimal")]
+    #[json(with = "alt_json::with::decimal_u64")]
     pub expires_at_unix_ms: u64,
     pub revoked: bool,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct DelegationPage {
     pub items: Vec<DelegationInfo>,
     pub next: Option<String>,

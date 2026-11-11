@@ -32,8 +32,9 @@ pub fn user_code(value: &str) -> Result<String> {
     Ok(format!("{}-{}", &upper[..4], &upper[4..]))
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct DeviceAuthorizationRequest {
     pub client_id: String,
     pub scope: String,
@@ -46,8 +47,9 @@ impl DeviceAuthorizationRequest {
         Ok(())
     }
 }
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct DeviceAuthorizationResponse {
     pub device_code: String,
     pub user_code: String,
@@ -56,8 +58,9 @@ pub struct DeviceAuthorizationResponse {
     pub expires_in: u64,
     pub interval: u64,
 }
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct DeviceTokenRequest {
     pub grant_type: String,
     pub device_code: String,
@@ -71,16 +74,20 @@ impl DeviceTokenRequest {
         device_secret(&self.device_code)
     }
 }
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct DeviceTokenResponse {
     pub access_token: String,
     pub token_type: String,
     pub expires_in: u64,
     pub scope: String,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(rename_all = "snake_case")]
+#[json(rename_all = "snake_case")]
 pub enum DeviceError {
     InvalidRequest,
     InvalidClient,
@@ -93,15 +100,17 @@ pub enum DeviceError {
     ExpiredToken,
     TemporarilyUnavailable,
 }
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct DeviceFailure {
     pub error: DeviceError,
 }
 
 /// Private file envelope, bound to one origin/installation. No Debug output.
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, alt_json::ToJson, alt_json::FromJson)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct SavedCredential {
     pub version: u32,
     pub origin: String,

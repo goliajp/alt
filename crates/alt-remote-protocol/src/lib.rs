@@ -71,8 +71,11 @@ fn version(value: u32) -> Result<()> {
     Ok(())
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(rename_all = "snake_case")]
+#[json(rename_all = "snake_case")]
 pub enum ObjectFormat {
     Sha1,
     Sha256,
@@ -96,12 +99,25 @@ impl ObjectFormat {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    alt_json::ToJson,
+    alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct Scope {
     pub installation_id: String,
     pub repository_instance_id: String,
     #[serde(with = "crate::decimal")]
+    #[json(with = "alt_json::with::decimal_u64")]
     pub recovery_epoch: u64,
 }
 impl Scope {
@@ -115,8 +131,20 @@ impl Scope {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    alt_json::ToJson,
+    alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct RequestKey {
     pub scope: Scope,
     pub actor_id: String,
@@ -132,8 +160,11 @@ impl RequestKey {
 
 /// Limits are advertised by the instance; the protocol supplies no performance
 /// or capacity claim by inventing a universal default.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct Limits {
     pub request_bytes: usize,
     pub ref_updates: usize,
@@ -146,10 +177,13 @@ pub struct Limits {
     pub path_bytes: usize,
     pub walk_steps: usize,
     #[serde(with = "crate::decimal")]
+    #[json(with = "alt_json::with::decimal_u64")]
     pub chunk_bytes: u64,
     #[serde(with = "crate::decimal")]
+    #[json(with = "alt_json::with::decimal_u64")]
     pub object_bytes: u64,
     #[serde(with = "crate::decimal")]
+    #[json(with = "alt_json::with::decimal_u64")]
     pub total_bytes: u64,
 }
 impl Limits {
@@ -202,8 +236,11 @@ pub fn validate_ref_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(rename_all = "snake_case")]
+#[json(rename_all = "snake_case")]
 pub enum ActorKind {
     Human,
     Agent,
@@ -212,8 +249,11 @@ pub enum ActorKind {
 
 /// Claimed provenance, checked against the authenticated delegation by the
 /// service. A caller cannot obtain authority by filling in these fields.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct Attribution {
     pub kind: ActorKind,
     pub on_behalf_of: Option<String>,
@@ -240,14 +280,20 @@ impl Attribution {
         Ok(())
     }
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(rename_all = "snake_case")]
+#[json(rename_all = "snake_case")]
 pub enum DeploymentMode {
     SelfHosted,
     Cloud,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(rename_all = "snake_case")]
+#[json(rename_all = "snake_case")]
 pub enum Feature {
     GitSmartHttp,
     Publications,
@@ -256,13 +302,17 @@ pub enum Feature {
     Receipts,
     PortableBundles,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct Capabilities {
     pub protocol_min: u32,
     pub protocol_max: u32,
     pub installation_id: String,
     #[serde(with = "crate::decimal")]
+    #[json(with = "alt_json::with::decimal_u64")]
     pub runtime_generation: u64,
     pub deployment_mode: DeploymentMode,
     pub object_formats: Vec<ObjectFormat>,

@@ -1,0 +1,171 @@
+= {"digest":"-lw Zn)","channel":"109","entity":"378745524","kind":"974","revision":"795","issued_unix_ms":"54","decision":null,"pending":false,"can_reauthorize":true}
+= {"digest":"0","channel":"1717376289024945","entity":"7106725302086","kind":"18446744073709551615","revision":"30","issued_unix_ms":"32276909779","decision":null,"pending":true,"can_reauthorize":true}
+= {"digest":"0","channel":"999","entity":"18446744073709551615","kind":"0","revision":"118","issued_unix_ms":"459","decision":{"state":"refused","reason":"artifact_unavailable"},"pending":false,"can_reauthorize":false}
+= {"digest":"0","channel":"C񔞴˘\u0019枱U󈚫񤍉'\u0002憻Ǖ","entity":"0","kind":"dὍ#}㣂Юʚ杗","revision":"617","issued_unix_ms":"0","decision":{"state":"applied"},"pending":false,"can_reauthorize":true}
+= {"digest":"0_/0b/70/za/","channel":"z0zz/7","entity":"293","kind":"18446744073709551615","revision":"0","issued_unix_ms":"259","decision":{"state":"refused","reason":"artifact_unavailable"},"pending":true,"can_reauthorize":true}
+= {"digest":"125547105","channel":"0","entity":"841","kind":"57","revision":"3450251288722085883","issued_unix_ms":"983","decision":{"state":"refused","reason":"state_conflict"},"pending":true,"can_reauthorize":true}
+= {"digest":"1685559","channel":"0","entity":"346","kind":"0","revision":"1","issued_unix_ms":"141463","decision":null,"pending":true,"can_reauthorize":false}
+= {"digest":"247","channel":"2","entity":"18446744073709551615","kind":"0","revision":"0","issued_unix_ms":"540","decision":{"state":"refused","reason":"state_conflict"},"pending":true,"can_reauthorize":false}
+= {"digest":"370","channel":"243","entity":"b0_b7f0_","kind":"0","revision":"965","issued_unix_ms":"7197","decision":{"state":"applied"},"pending":false,"can_reauthorize":true}
+= {"digest":"402","channel":"0","entity":"79","kind":"","revision":"18446744073709551615","issued_unix_ms":"0","decision":{"state":"refused","reason":"target_unavailable"},"pending":true,"can_reauthorize":true}
+= {"digest":"496","channel":"D","entity":"25","kind":"0","revision":"1105","issued_unix_ms":"1410172189073297","decision":{"state":"refused","reason":"request_unavailable"},"pending":true,"can_reauthorize":true}
+= {"digest":"675","channel":"0","entity":"0","kind":"0","revision":"73","issued_unix_ms":"0","decision":null,"pending":true,"can_reauthorize":false}
+= {"digest":"681","channel":"Ai=lLC","entity":"672","kind":"176","revision":"0","issued_unix_ms":"0","decision":null,"pending":true,"can_reauthorize":true}
+= {"digest":"761","channel":"0","entity":"31934100774","kind":"0","revision":"0","issued_unix_ms":"18446744073709551615","decision":null,"pending":false,"can_reauthorize":false}
+= {"digest":"7z","channel":"0","entity":"0","kind":"0","revision":"9","issued_unix_ms":"37","decision":null,"pending":true,"can_reauthorize":false}
+= {"digest":"84684965492431","channel":"_00a07f-","entity":"o?6R[2\\0I","kind":"Ҩ\tj壷7󑁣\u0000 \u000e𚿼ѿu","revision":"0","issued_unix_ms":"185853","decision":null,"pending":false,"can_reauthorize":false}
+= {"digest":"86","channel":"1","entity":"fab7","kind":"15556021","revision":"806","issued_unix_ms":"853","decision":null,"pending":false,"can_reauthorize":true}
+= {"digest":"95","channel":"821","entity":"0","kind":"屏㬃搰𳯃臰 \u00074﻿","revision":"18446744073709551615","issued_unix_ms":"647","decision":{"state":"applied"},"pending":true,"can_reauthorize":true}
+= {"digest":"_=NzrQ","channel":"18446744073709551615","entity":"18446744073709551615","kind":"z--b/","revision":"0","issued_unix_ms":"552","decision":null,"pending":false,"can_reauthorize":true}
+= {"digest":"b;#z","channel":"903","entity":"t U}-+D@St","kind":"374","revision":"18446744073709551615","issued_unix_ms":"18446744073709551615","decision":{"state":"applied"},"pending":true,"can_reauthorize":false}
+= {"digest":"ba---0","channel":"\u000f땬|\u001c\u0011蠏跤ɏشҧ","entity":"-az-0b","kind":"12104","revision":"0","issued_unix_ms":"963","decision":null,"pending":false,"can_reauthorize":false}
+= {"digest":"i2","channel":"艿`܂歹xHv�","entity":"_a7-","kind":"277579366","revision":"4361129","issued_unix_ms":"481410210","decision":{"state":"refused","reason":"request_unavailable"},"pending":true,"can_reauthorize":true}
+= {"digest":"x","channel":"54","entity":"18446744073709551615","kind":"18446744073709551615","revision":"527","issued_unix_ms":"627","decision":null,"pending":false,"can_reauthorize":false}
+= {"digest":"ʽ\r[疝\n`ʛsk𼟶\f","channel":"42","entity":"721","kind":"0","revision":"0","issued_unix_ms":"0","decision":{"state":"applied"},"pending":false,"can_reauthorize":false}
+= {"digest":"󉷷蠑䕔鴔\u0006ڕނ","channel":"%NQEMuK/","entity":"{ח߿鑭","kind":"⤁ݗ\u0007\u0007听݅娩\nͧܮu","revision":"1128165","issued_unix_ms":"425","decision":{"state":"refused","reason":"artifact_unavailable"},"pending":false,"can_reauthorize":true}
+A {"":18446744073709551615,"can_reauthorize":false,"channel":"54","decision":null,"digest":"x","entity":"18446744073709551615","issued_unix_ms":"627","kind":"18446744073709551615","pending":false,"revision":"527"}
+A {"a":54.5,"can_reauthorize":false,"channel":"2","decision":{"reason":"state_conflict","state":"refused"},"digest":"247","entity":"18446744073709551615","issued_unix_ms":"540","kind":"true","pending":true,"revision":"0"}
+A {"can_reauthorize":false,"channel":"0","decision":null,"digest":"1685559","entity":"346","issued_unix_ms":"141463","kind":"0","pending":true,"revision":"1"}
+A {"can_reauthorize":false,"channel":"0","decision":null,"digest":"675","entity":"0","issued_unix_ms":"0","kind":"0","pending":true,"revision":"73"}
+A {"can_reauthorize":false,"channel":"0","decision":null,"digest":"761","entity":"31934100774","issued_unix_ms":"18446744073709551615","kind":"0","pending":false,"revision":"0"}
+A {"can_reauthorize":false,"channel":"0","decision":null,"digest":"761","entity":"31934100774","issued_unix_ms":"18446744073709551615","kind":"0","pending":true,"revision":"0"}
+A {"can_reauthorize":false,"channel":"0","decision":null,"digest":"7z","entity":"0","issued_unix_ms":"37","kind":"0","pending":true,"revision":"9"}
+A {"can_reauthorize":false,"channel":"2","decision":{"reason":"state_conflict","state":"refused"},"digest":"247","entity":"18446744073709551615","issued_unix_ms":"540","kind":"0","pending":true,"revision":"0"}
+A {"can_reauthorize":false,"channel":"42","decision":{"state":"applied"},"digest":"ʽ\r[疝\n`ʛsk𼟶\f","entity":"721","issued_unix_ms":"0","kind":"0","pending":false,"revision":"0"}
+A {"can_reauthorize":false,"channel":"54","decision":null,"digest":"x","entity":"18446744073709551615","issued_unix_ms":"627","kind":"18446744073709551615","pending":false,"revision":"527"}
+A {"can_reauthorize":false,"channel":"903","decision":{"state":"applied"},"digest":"b;#z","entity":"a","extra":7.67017576184e-313,"issued_unix_ms":"18446744073709551615","kind":"374","pending":true,"revision":"18446744073709551615"}
+A {"can_reauthorize":false,"channel":"903","decision":{"state":"applied"},"digest":"b;#z","entity":"t U}-+D@St","issued_unix_ms":"18446744073709551615","kind":"374","pending":true,"revision":"18446744073709551615"}
+A {"can_reauthorize":false,"channel":"999","decision":{"reason":"artifact_unavailable","state":"refused"},"digest":"0","entity":"18446744073709551615","issued_unix_ms":"459","kind":"0","pending":false,"revision":"118"}
+A {"can_reauthorize":false,"channel":"Ai=lLC","decision":null,"digest":"681","entity":"672","issued_unix_ms":"0","kind":"176","pending":true,"revision":"0"}
+A {"can_reauthorize":false,"channel":"\u000f땬|\u001c\u0011蠏跤ɏشҧ","decision":null,"digest":"ba---0","entity":"-az-0b","extra":["RBVdSLLt<*U.S`\\)KwAbF",8.914e+305,{"":true," 3z疒鴷":6648918263208,":lሽ۳":"8jBGC:ktE^Flpug+}-N#=","=":null,"󠀁\u0003͖筛":-666687}],"issued_unix_ms":"963","kind":"12104","pending":false,"revision":"0"}
+A {"can_reauthorize":false,"channel":"\u000f땬|\u001c\u0011蠏跤ɏشҧ","decision":null,"digest":"ba---0","entity":"-az-0b","issued_unix_ms":"963","kind":"12104","pending":false,"revision":"0"}
+A {"can_reauthorize":false,"channel":"_00a07f-","decision":null,"digest":"84684965492431","entity":"o?6R[2\\0I","issued_unix_ms":"185853","kind":"Ҩ\tj壷7󑁣\u0000 \u000e𚿼ѿu","pending":false,"revision":"0"}
+A {"can_reauthorize":true,"channel":"%NQEMuK/","decision":{"reason":"artifact_unavailable","state":"refused"},"digest":"󉷷蠑䕔鴔\u0006ڕނ","entity":"{ח߿鑭","issued_unix_ms":"425","kind":"⤁ݗ\u0007\u0007听݅娩\nͧܮu","pending":false,"revision":"1128165"}
+A {"can_reauthorize":true,"channel":"0","decision":{"reason":"state_conflict","state":"refused"},"digest":"125547105","entity":"841","issued_unix_ms":"983","kind":"57","pending":true,"revision":"3450251288722085883"}
+A {"can_reauthorize":true,"channel":"0","decision":{"reason":"target_unavailable","state":"refused"},"digest":"402","entity":"79","issued_unix_ms":"0","kind":"","pending":true,"revision":"18446744073709551615"}
+A {"can_reauthorize":true,"channel":"1","decision":null,"digest":"86","entity":"fab7","issued_unix_ms":"853","kind":"15556021","pending":false,"revision":"806","value":1e+300}
+A {"can_reauthorize":true,"channel":"1","decision":null,"digest":"86","entity":"fab7","issued_unix_ms":"853","kind":"15556021","pending":false,"revision":"806"}
+A {"can_reauthorize":true,"channel":"109","decision":null,"digest":"-lw Zn)","entity":"378745524","extra":"","issued_unix_ms":"54","kind":"974","pending":false,"revision":"795"}
+A {"can_reauthorize":true,"channel":"109","decision":null,"digest":"-lw Zn)","entity":"378745524","issued_unix_ms":"54","kind":"974","pending":false,"revision":"795"}
+A {"can_reauthorize":true,"channel":"1717376289024945","decision":null,"digest":"0","entity":"7106725302086","issued_unix_ms":"32276909779","kind":"18446744073709551615","pending":true,"revision":"30"}
+A {"can_reauthorize":true,"channel":"18446744073709551615","decision":null,"digest":"_=NzrQ","entity":"18446744073709551615","issued_unix_ms":"552","kind":"z--b/","pending":false,"revision":"0"}
+A {"can_reauthorize":true,"channel":"18446744073709551615","decision":null,"digest":"{`x(9","entity":"18446744073709551615","issued_unix_ms":"552","kind":"z--b/","pending":false,"revision":"0"}
+A {"can_reauthorize":true,"channel":"243","decision":{"state":"applied"},"digest":"370","entity":"b0_b7f0_","issued_unix_ms":"7197","kind":"0","pending":false,"revision":"965"}
+A {"can_reauthorize":true,"channel":"821","decision":{"state":"applied"},"digest":"95","entity":"0","issued_unix_ms":"647","kind":"屏㬃搰𳯃臰 \u00074﻿","pending":true,"revision":"18446744073709551615"}
+A {"can_reauthorize":true,"channel":"Ai=lLC","decision":null,"digest":"681","entity":"672","issued_unix_ms":"0","kind":"176","pending":true,"revision":"0"}
+A {"can_reauthorize":true,"channel":"C񔞴˘\u0019枱U󈚫񤍉'\u0002憻Ǖ","decision":{"state":"applied"},"digest":"0","entity":"0","issued_unix_ms":"0","kind":"dὍ#}㣂Юʚ杗","pending":false,"revision":"617"}
+A {"can_reauthorize":true,"channel":"D","decision":{"reason":"request_unavailable","state":"refused"},"digest":"496","entity":"25","issued_unix_ms":"1410172189073297","kind":"0","pending":true,"revision":"1105"}
+A {"can_reauthorize":true,"channel":"l<","decision":{"reason":"artifact_unavailable","state":"refused"},"digest":"󉷷蠑䕔鴔\u0006ڕނ","entity":"{ח߿鑭","issued_unix_ms":"425","kind":"⤁ݗ\u0007\u0007听݅娩\nͧܮu","pending":false,"revision":"1128165"}
+A {"can_reauthorize":true,"channel":"z0zz/7","decision":{"reason":"artifact_unavailable","state":"refused"},"digest":"0_/0b/70/za/","entity":"293","extra":[],"issued_unix_ms":"259","kind":"18446744073709551615","pending":true,"revision":"0"}
+A {"can_reauthorize":true,"channel":"z0zz/7","decision":{"reason":"artifact_unavailable","state":"refused"},"digest":"0_/0b/70/za/","entity":"293","issued_unix_ms":"259","kind":"18446744073709551615","pending":true,"revision":"0"}
+A {"can_reauthorize":true,"channel":"艿`܂歹xHv�","decision":{"reason":"request_unavailable","state":"refused"},"digest":"i2","entity":"_a7-","issued_unix_ms":"481410210","kind":"277579366","pending":true,"revision":"4361129"}
+R "ߖ"
+R -1e+300
+R -2147483649
+R 95.5
+R []
+R [false,"0",null,"761","31934100774","18446744073709551615","0",false,95.5]
+R [false,"42",{"state":"applied"},"ʽ\r[疝\n`ʛsk𼟶\f","721","0","0",false,"0"]
+R [false,"999",{"reason":"artifact_unavailable","state":"refused"},"0","18446744073709551615","459","0",false,"118"]
+R [false,"_00a07f-",null,"84684965492431",-24,"185853","Ҩ\tj壷7󑁣\u0000 \u000e𚿼ѿu",false,"0"]
+R [true,"0",{"reason":"target_unavailable","state":"refused"},"402","79","0","",true,79.5]
+R [true,"109",null,"-lw Zn)",29.5,"54","974",false,"795"]
+R [true,"821",{"state":"applied"},"95","0","647","屏㬃搰𳯃臰 \u00074﻿",true,"18446744073709551615",true]
+R null
+R {"CHANNEL":"42","can_reauthorize":false,"decision":{"state":"applied"},"digest":"ʽ\r[疝\n`ʛsk𼟶\f","entity":"721","issued_unix_ms":"0","kind":"0","pending":null,"revision":"0"}
+R {"DECISION":null,"can_reauthorize":true,"channel":"1","digest":true,"entity":"fab7","issued_unix_ms":"853","kind":"15556021","pending":false,"revision":"806"}
+R {"DIGEST":"-lw Zn)","can_reauthorize":true,"channel":"109","decision":null,"entity":"378745524","issued_unix_ms":"54","kind":"974","pending":false,"revision":"795"}
+R {"DIGEST":"84684965492431","channel":"_00a07f-","decision":null,"entity":"o?6R[2\\0I","issued_unix_ms":"185853","kind":"Ҩ\tj壷7󑁣\u0000 \u000e𚿼ѿu","pending":false,"revision":"0"}
+R {"ENTITY":"18446744073709551615","can_reauthorize":false,"channel":"2","decision":{"reason":"state_conflict","state":"-1"},"digest":"247","issued_unix_ms":"540","kind":"0","pending":true,"revision":"0"}
+R {"ISSUED_UNIX_MS":"0","can_reauthorize":false,"channel":"0","decision":null,"digest":"675","entity":"0","kind":"0","pending":true,"revision":"73"}
+R {"KIND":"0","can_reauthorize":true,"channel":"243","decision":{"state":"applied"},"digest":"370","entity":"b0_b7f0_","issued_unix_ms":"7197","pending":-99,"revision":"965"}
+R {"KIND":"Ҩ\tj壷7󑁣\u0000 \u000e𚿼ѿu","can_reauthorize":false,"channel":"_00a07f-","decision":null,"digest":"84684965492431","entity":"o?6R[2\\0I","issued_unix_ms":"185853","pending":false,"revision":"0"}
+R {"REVISION":"30","can_reauthorize":true,"channel":"1717376289024945","decision":null,"digest":"0","entity":-79,"issued_unix_ms":"32276909779","kind":"18446744073709551615","pending":true}
+R {"can_reauthorize":"-1","channel":null,"decision":null,"digest":"681","entity":"672","issued_unix_ms":"0","kind":"176","pending":true,"revision":"0"}
+R {"can_reauthorize":"007","channel":"109","decision":null,"digest":"-lw Zn)","entity":"378745524","issued_unix_ms":"54","kind":"974","pending":false,"revision":"795"}
+R {"can_reauthorize":"true","channel":"903","decision":{"state":"applied"},"digest":"b;#z","entity":"t U}-+D@St","issued_unix_ms":"18446744073709551615","kind":"374","pending":true,"revision":"18446744073709551615"}
+R {"can_reauthorize":-129,"channel":"903","decision":{"state":"applied"},"digest":"b;#z","entity":"t U}-+D@St","issued_unix_ms":20.5,"kind":"374","pending":true,"revision":"18446744073709551615"}
+R {"can_reauthorize":-208,"channel":"0","decision":{"reason":"target_unavailable","state":"refused"},"digest":"402","entity":"79","issued_unix_ms":"0","kind":"","pending":true,"revision":"18446744073709551615"}
+R {"can_reauthorize":-3,"channel":"0","decision":{"reason":"state_conflict","state":"refused"},"digest":"125547105","entity":"841","issued_unix_ms":"983","kind":"57","pending":true,"revision":"3450251288722085883"}
+R {"can_reauthorize":48.5,"channel":"0","decision":null,"digest":"675","entity":"0","issued_unix_ms":false,"kind":"0","pending":true,"revision":"73"}
+R {"can_reauthorize":52.5,"channel":"艿`܂歹xHv�","decision":{"reason":"request_unavailable","state":"refused"},"digest":"i2","entity":"_a7-","issued_unix_ms":"481410210","kind":[],"pending":true,"revision":"4361129"}
+R {"can_reauthorize":[],"channel":"Ai=lLC","decision":77.5,"digest":"681","entity":"672","issued_unix_ms":"0","kind":"176","pending":true,"revision":"0"}
+R {"can_reauthorize":false,"channel":"0","decision":"007","digest":"1685559","entity":"346","issued_unix_ms":"141463","kind":"0","pending":true,"revision":"1"}
+R {"can_reauthorize":false,"channel":"0","decision":-9223372036854775808,"digest":"761","entity":"31934100774","issued_unix_ms":"18446744073709551615","kind":"0","pending":false,"revision":"0"}
+R {"can_reauthorize":false,"channel":"0","decision":3.0,"digest":"7z","entity":"0","issued_unix_ms":"37","kind":"0","pending":true,"revision":"9"}
+R {"can_reauthorize":false,"channel":"0","decision":null,"digest":"675","entity":"0","issued_unix_ms":"0","kind":"0","revision":"73"}
+R {"can_reauthorize":false,"channel":"0","decision":null,"digest":"675","entity":"0","issued_unix_ms":"0","pending":true,"revision":"73"}
+R {"can_reauthorize":false,"channel":"0","decision":null,"digest":"7z","entity":-290,"issued_unix_ms":"37","kind":"0","pending":true,"revision":"9"}
+R {"can_reauthorize":false,"channel":"0","decision":null,"digest":-247,"entity":"0","issued_unix_ms":"37","kind":"0","pending":true,"revision":"9"}
+R {"can_reauthorize":false,"channel":"0","decision":null,"digest":-9223372036854775808,"entity":247,"issued_unix_ms":"141463","kind":"0","pending":true,"revision":"1"}
+R {"can_reauthorize":false,"channel":"0","decision":null,"digest":null,"entity":"346","issued_unix_ms":"141463","kind":"0","pending":true,"revision":"1"}
+R {"can_reauthorize":false,"channel":"42","decision":{"state":"applied"},"digest":"ʽ\r[疝\n`ʛsk𼟶\f","entity":"721","issued_unix_ms":"0","kind":"0","pending":false,"revision":null}
+R {"can_reauthorize":false,"channel":"42","decision":{"state":9223372036854775808},"digest":"ʽ\r[疝\n`ʛsk𼟶\f","entity":"721","issued_unix_ms":"0","kind":"0","pending":false,"revision":"0"}
+R {"can_reauthorize":false,"channel":"903","decision":{"state":"applied"},"digest":"b;#z","entity":"t U}-+D@St","issued_unix_ms":"18446744073709551615","kind":"374","pending":-2147483649,"revision":"18446744073709551615"}
+R {"can_reauthorize":false,"channel":"999","decision":{"STATE":"refused","reason":"artifact_unavailable"},"digest":-32769,"entity":"18446744073709551615","issued_unix_ms":"459","kind":"0","pending":false,"revision":"118"}
+R {"can_reauthorize":false,"channel":"999","decision":{"reason":"artifact_unavailable","state":"refused"},"digest":"0","entity":"18446744073709551615","issued_unix_ms":"v>)","kind":"0","pending":false,"revision":"118"}
+R {"can_reauthorize":false,"channel":"999","decision":{"reason":{},"state":"refused"},"digest":"0","entity":"18446744073709551615","issued_unix_ms":"459","kind":"0","pending":false,"revision":"118"}
+R {"can_reauthorize":false,"channel":"\u000f땬|\u001c\u0011蠏跤ɏشҧ","decision":null,"digest":"ba---0","entity":"-az-0b","issued_unix_ms":"963","kind":"12104","pending":false,"revision":3.0}
+R {"can_reauthorize":false,"channel":"_00a07f-","decision":null,"digest":-195,"entity":"o?6R[2\\0I","issued_unix_ms":"185853","kind":"Ҩ\tj壷7󑁣\u0000 \u000e𚿼ѿu","pending":false,"revision":"0"}
+R {"can_reauthorize":false,"channel":0.0,"decision":{"reason":"state_conflict","state":"refused"},"digest":"247","entity":"18446744073709551615","issued_unix_ms":"540","kind":"0","pending":true,"revision":"0"}
+R {"can_reauthorize":false,"channel":148,"decision":null,"digest":"7z","entity":"0","issued_unix_ms":"37","kind":"0","pending":true,"revision":-9223372036854775808}
+R {"can_reauthorize":null,"channel":"0","decision":{"reason":"target_unavailable","state":"refused"},"digest":"402","entity":"79","issued_unix_ms":"0","kind":"","pending":true,"revision":"18446744073709551615"}
+R {"can_reauthorize":null,"channel":"54","decision":null,"digest":"x","entity":"18446744073709551615","issued_unix_ms":"627","kind":"18446744073709551615","pending":false,"revision":1e+300}
+R {"can_reauthorize":true,"channel":"%NQEMuK/","decision":{"reason":"artifact_unavailable","state":"refused"},"digest":"󉷷蠑䕔鴔\u0006ڕނ","entity":-2147483649,"issued_unix_ms":"425","kind":"⤁ݗ\u0007\u0007听݅娩\nͧܮu","pending":false,"revision":"1128165"}
+R {"can_reauthorize":true,"channel":"%NQEMuK/","decision":{"reason":"artifact_unavailable","state":"refused"},"digest":"󉷷蠑䕔鴔\u0006ڕނ","entity":128,"extra":"򈤤","issued_unix_ms":"425","kind":"⤁ݗ\u0007\u0007听݅娩\nͧܮu","pending":false,"revision":"1128165"}
+R {"can_reauthorize":true,"channel":"-1","decision":{"reason":"request_unavailable","state":"refused"},"digest":"496","entity":"25","issued_unix_ms":"1410172189073297","kind":"0","pending":{},"revision":"1105"}
+R {"can_reauthorize":true,"channel":"0","decision":null,"digest":"_=NzrQ","entity":"18446744073709551615","issued_unix_ms":"552","kind":1e+300,"pending":false,"revision":"0"}
+R {"can_reauthorize":true,"channel":"0","decision":{"reason":18446744073709551615,"state":"refused"},"digest":"125547105","entity":"841","issued_unix_ms":true,"kind":"57","pending":true,"revision":"3450251288722085883"}
+R {"can_reauthorize":true,"channel":"1","decision":-9223372036854775808,"digest":65536,"entity":"fab7","issued_unix_ms":"853","kind":"15556021","pending":false,"revision":"806"}
+R {"can_reauthorize":true,"channel":"1","decision":null,"digest":65536,"entity":"fab7","issued_unix_ms":"853","kind":"15556021","pending":false,"revision":"806"}
+R {"can_reauthorize":true,"channel":"1717376289024945","decision":"","digest":"0","entity":"7106725302086","issued_unix_ms":"32276909779","kind":"18446744073709551615","pending":true,"revision":"30"}
+R {"can_reauthorize":true,"channel":"1717376289024945","decision":null,"digest":"0","entity":0.0,"issued_unix_ms":"32276909779","kind":"18446744073709551615","pending":true,"revision":"30"}
+R {"can_reauthorize":true,"channel":"1717376289024945","decision":null,"digest":"0","entity":4294967296,"issued_unix_ms":"32276909779","kind":{},"pending":true,"revision":"30"}
+R {"can_reauthorize":true,"channel":"18446744073709551615","decision":null,"digest":"_=NzrQ","entity":"18446744073709551615","extra":"C##QKb","issued_unix_ms":"552","kind":"z--b/","pending":false}
+R {"can_reauthorize":true,"channel":"243","decision":{"state":"applied"},"digest":"370","entity":"b0_b7f0_","issued_unix_ms":"7197","kind":"0","pending":82.5,"revision":"OK)$q'"}
+R {"can_reauthorize":true,"channel":"243","decision":{"state":{}},"digest":"370","issued_unix_ms":"7197","kind":"0","pending":false,"revision":"965"}
+R {"can_reauthorize":true,"channel":"821","decision":{"state":"applied"},"digest":"95","entity":"0","issued_unix_ms":"647","kind":"屏㬃搰𳯃臰 \u00074﻿","pending":true,"revision":-1e+300}
+R {"can_reauthorize":true,"channel":"821","decision":{"state":"applied"},"entity":"0","issued_unix_ms":"647","kind":"屏㬃搰𳯃臰 \u00074﻿","pending":-125,"revision":"18446744073709551615"}
+R {"can_reauthorize":true,"channel":"Ai=lLC","decision":null,"digest":"681","entity":"672","issued_unix_ms":"0","kind":"176","pending":true,"revision":true}
+R {"can_reauthorize":true,"channel":"C񔞴˘\u0019枱U󈚫񤍉'\u0002憻Ǖ","decision":{"state":"applied"},"digest":"0","entity":"0","extra":"ҳ/󕀯\bu[N\u0013񆷆幋\u0016n徿魺陌̀񚾈\u0014ϰ","issued_unix_ms":"0","kind":"dὍ#}㣂Юʚ杗","pending":false,"revision":-1e+300}
+R {"can_reauthorize":true,"channel":"C񔞴˘\u0019枱U󈚫񤍉'\u0002憻Ǖ","decision":{"state":"applied"},"digest":"0","entity":"0","issued_unix_ms":"0","kind":"dὍ#}㣂Юʚ杗","pending":-2147483649,"revision":"617"}
+R {"can_reauthorize":true,"channel":"C񔞴˘\u0019枱U󈚫񤍉'\u0002憻Ǖ","decision":{"state":"applied"},"digest":"0","entity":"0","issued_unix_ms":129,"kind":"dὍ#}㣂Юʚ杗","pending":33.5,"revision":"617"}
+R {"can_reauthorize":true,"channel":"C񔞴˘\u0019枱U󈚫񤍉'\u0002憻Ǖ","decision":{"state":"applied"},"digest":{},"entity":"0","issued_unix_ms":"0","kind":"dὍ#}㣂Юʚ杗","pending":false,"revision":true}
+R {"can_reauthorize":true,"channel":"D","decision":{"reason":"request_unavailable","state":"refused"},"digest":"496","entity":"25","issued_unix_ms":"1410172189073297","kind":"0","pending":true,"revision":"n^"}
+R {"can_reauthorize":true,"channel":"D","decision":{"reason":"request_unavailable","state":"refused"},"digest":"496","entity":"25","issued_unix_ms":-255,"kind":"0","pending":-102,"revision":"1105"}
+R {"can_reauthorize":true,"channel":"z0zz/7","decision":{"extra":[-160,""],"reason":"artifact_unavailable","state":"refused"},"digest":"0_/0b/70/za/","entity":"293","issued_unix_ms":"259","kind":"","pending":true,"revision":"0"}
+R {"can_reauthorize":true,"channel":"z0zz/7","decision":{"reason":"artifact_unavailable","state":"refused"},"digest":"0_/0b/70/za/","entity":"293","issued_unix_ms":"259","kind":-2147483649,"pending":true,"revision":"0"}
+R {"can_reauthorize":true,"channel":"z0zz/7","decision":{"reason":"artifact_unavailable","state":"refused"},"digest":"0_/0b/70/za/","entity":"9T4`","issued_unix_ms":"259","kind":"18446744073709551615","pending":true,"revision":null}
+R {"can_reauthorize":true,"channel":"艿`܂歹xHv�","decision":{"reason":"request_unavailable","state":"refused"},"digest":"i2","entity":"_a7-","issued_unix_ms":"481410210","kind":"277579366","pending":true}
+R {"can_reauthorize":true,"channel":-32769,"decision":{"reason":"request_unavailable","state":"refused"},"digest":"i2","entity":"_a7-","issued_unix_ms":true,"kind":"277579366","pending":true,"revision":"4361129"}
+R {"can_reauthorize":true,"channel":-5,"decision":{"reason":"artifact_unavailable","state":"refused"},"digest":"󉷷蠑䕔鴔\u0006ڕނ","entity":70.5,"issued_unix_ms":"425","kind":"⤁ݗ\u0007\u0007听݅娩\nͧܮu","pending":false,"revision":"1128165"}
+R {"can_reauthorize":true,"channel":71.5,"decision":{"reason":"state_conflict","state":"refused"},"digest":"125547105","entity":"841","issued_unix_ms":"983","kind":"C0+","pending":true,"revision":"3450251288722085883"}
+R {"can_reauthorize":true,"channel":true,"decision":null,"digest":"_=NzrQ","entity":"18446744073709551615","issued_unix_ms":10,"kind":"z--b/","pending":false,"revision":"0"}
+R {"can_reauthorize":true,"channel":{},"decision":{"reason":"target_unavailable","state":"refused"},"digest":"402","entity":"79","issued_unix_ms":"0","kind":"","pending":true,"revision":"18446744073709551615"}
+R {"can_reauthorize":true,"decision":{"reason":"request_unavailable","state":"refused"},"digest":"i2","entity":"_a7-","issued_unix_ms":"481410210","kind":"277579366","pending":true,"revision":"4361129"}
+R {"digest":"-lw Zn)","digest":"-lw Zn)","channel":"109","entity":"378745524","kind":"974","revision":"795","issued_unix_ms":"54","decision":null,"pending":false,"can_reauthorize":true}
+R {"digest":"0","channel":"C񔞴˘\u0019枱U󈚫񤍉'\u0002憻Ǖ","entity":"0","kind":"dὍ#}㣂Юʚ杗","revision":"617","issued_unix_ms":"0","decision":{"state":[],"state":"applied"},"pending":false,"can_reauthorize":true}
+R {"digest":"0","digest":"0","channel":"1717376289024945","entity":"7106725302086","kind":"18446744073709551615","revision":"30","issued_unix_ms":"32276909779","decision":null,"pending":true,"can_reauthorize":true}
+R {"digest":"007","digest":"86","channel":"1","entity":"fab7","kind":"15556021","revision":"806","issued_unix_ms":"853","decision":null,"pending":false,"can_reauthorize":true}
+R {"digest":"0_/0b/70/za/","digest":"0_/0b/70/za/","channel":"z0zz/7","entity":"293","kind":"18446744073709551615","revision":"0","issued_unix_ms":"259","decision":{"state":"refused","reason":"artifact_unavailable"},"pending":true,"can_reauthorize":true}
+R {"digest":"125547105","channel":"0","entity":"841","kind":"57","revision":"3450251288722085883","issued_unix_ms":"983","decision":{"state":"refused","state":"refused","reason":"state_conflict"},"pending":true,"can_reauthorize":true}
+R {"digest":"1685559","digest":"1685559","channel":"0","entity":"346","kind":"0","revision":"1","issued_unix_ms":"141463","decision":null,"pending":true,"can_reauthorize":false}
+R {"digest":"247","channel":"2","entity":"18446744073709551615","kind":"0","revision":"0","issued_unix_ms":"540","decision":{"state":{},"state":"refused","reason":"state_conflict"},"pending":true,"can_reauthorize":false}
+R {"digest":"370","channel":"243","entity":"b0_b7f0_","kind":"0","revision":"965","issued_unix_ms":"7197","decision":{"state":"applied","state":"applied"},"pending":false,"can_reauthorize":true}
+R {"digest":"496","digest":"496","channel":"D","entity":"25","kind":"0","revision":"1105","issued_unix_ms":"1410172189073297","decision":{"state":"refused","reason":"request_unavailable"},"pending":true,"can_reauthorize":true}
+R {"digest":"761","digest":"761","channel":"0","entity":"31934100774","kind":"0","revision":"0","issued_unix_ms":"18446744073709551615","decision":null,"pending":false,"can_reauthorize":false}
+R {"digest":"84684965492431","digest":"84684965492431","channel":"_00a07f-","entity":"o?6R[2\\0I","kind":"Ҩ\tj壷7󑁣\u0000 \u000e𚿼ѿu","revision":"0","issued_unix_ms":"185853","decision":null,"pending":false,"can_reauthorize":false}
+R {"digest":"95","channel":"821","entity":"0","kind":"屏㬃搰𳯃臰 \u00074﻿","revision":"18446744073709551615","issued_unix_ms":"647","decision":{"state":21.5,"state":"applied"},"pending":true,"can_reauthorize":true}
+R {"digest":"_=NzrQ","digest":"_=NzrQ","channel":"18446744073709551615","entity":"18446744073709551615","kind":"z--b/","revision":"0","issued_unix_ms":"552","decision":null,"pending":false,"can_reauthorize":true}
+R {"digest":"b;#z","digest":"b;#z","channel":"903","entity":"t U}-+D@St","kind":"374","revision":"18446744073709551615","issued_unix_ms":"18446744073709551615","decision":{"state":"applied"},"pending":true,"can_reauthorize":false}
+R {"digest":"x","digest":"x","channel":"54","entity":"18446744073709551615","kind":"18446744073709551615","revision":"527","issued_unix_ms":"627","decision":null,"pending":false,"can_reauthorize":false}
+R {"digest":"󉷷蠑䕔鴔\u0006ڕނ","channel":"%NQEMuK/","entity":"{ח߿鑭","kind":"⤁ݗ\u0007\u0007听݅娩\nͧܮu","revision":"1128165","issued_unix_ms":"425","decision":{"state":"refused","state":"refused","reason":"artifact_unavailable"},"pending":false,"can_reauthorize":true}
+R {"digest":-0.0,"digest":"675","channel":"0","entity":"0","kind":"0","revision":"73","issued_unix_ms":"0","decision":null,"pending":true,"can_reauthorize":false}
+R {"digest":-129,"digest":"0","channel":"999","entity":"18446744073709551615","kind":"0","revision":"118","issued_unix_ms":"459","decision":{"state":"refused","reason":"artifact_unavailable"},"pending":false,"can_reauthorize":false}
+R {"digest":-129,"digest":"ba---0","channel":"\u000f땬|\u001c\u0011蠏跤ɏشҧ","entity":"-az-0b","kind":"12104","revision":"0","issued_unix_ms":"963","decision":null,"pending":false,"can_reauthorize":false}
+R {"digest":0.0,"digest":"ʽ\r[疝\n`ʛsk𼟶\f","channel":"42","entity":"721","kind":"0","revision":"0","issued_unix_ms":"0","decision":{"state":"applied"},"pending":false,"can_reauthorize":false}
+R {"digest":224,"digest":"i2","channel":"艿`܂歹xHv�","entity":"_a7-","kind":"277579366","revision":"4361129","issued_unix_ms":"481410210","decision":{"state":"refused","reason":"request_unavailable"},"pending":true,"can_reauthorize":true}
+R {"digest":72.5,"digest":"7z","channel":"0","entity":"0","kind":"0","revision":"9","issued_unix_ms":"37","decision":null,"pending":true,"can_reauthorize":false}
+R {"digest":81.5,"digest":"681","channel":"Ai=lLC","entity":"672","kind":"176","revision":"0","issued_unix_ms":"0","decision":null,"pending":true,"can_reauthorize":true}
+R {"digest":null,"digest":"402","channel":"0","entity":"79","kind":"","revision":"18446744073709551615","issued_unix_ms":"0","decision":{"state":"refused","reason":"target_unavailable"},"pending":true,"can_reauthorize":true}
+R {}

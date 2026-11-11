@@ -5,8 +5,11 @@ use serde::{Deserialize, Serialize};
 
 pub const MAX_TRANSFER_PROOFS: usize = 32;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct ExportCertificateBody {
     pub version: u32,
     pub source: Scope,
@@ -15,6 +18,7 @@ pub struct ExportCertificateBody {
     pub catalog_digest: String,
     pub export_id: String,
     #[serde(with = "crate::decimal")]
+    #[json(with = "alt_json::with::decimal_u64")]
     pub snapshot_sequence: u64,
 }
 impl ExportCertificateBody {
@@ -32,8 +36,11 @@ impl ExportCertificateBody {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct ExportCertificate {
     pub body: ExportCertificateBody,
     pub signature: String,
@@ -45,8 +52,11 @@ impl ExportCertificate {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[json(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TransferReason {
     /// The source attests inclusion in a particular exported catalog; the
     /// destination independently accepts it into a new installation.
@@ -56,8 +66,11 @@ pub enum TransferReason {
     Recovery { backup_digest: String },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct TransferBody {
     pub version: u32,
     pub publication_digest: String,
@@ -114,8 +127,11 @@ impl TransferBody {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
+)]
 #[serde(deny_unknown_fields)]
+#[json(deny_unknown_fields)]
 pub struct TransferProof {
     pub body: TransferBody,
     pub signature: String,
@@ -135,9 +151,9 @@ impl TransferProof {
     }
 }
 
-fn signing_bytes(prefix: &[u8], value: &impl Serialize) -> Result<Vec<u8>> {
+fn signing_bytes(prefix: &[u8], value: &impl alt_json::ToJson) -> Result<Vec<u8>> {
     let mut bytes = prefix.to_vec();
-    serde_json::to_writer(&mut bytes, value)
+    alt_json::to_writer(&mut bytes, value)
         .map_err(|error| crate::Error::Json(error.to_string()))?;
     Ok(bytes)
 }
