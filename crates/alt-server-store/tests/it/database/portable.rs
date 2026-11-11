@@ -1406,7 +1406,7 @@ fn portable_activation_failure_rolls_back_every_visible_effect_and_can_retry() {
         target
             .store
             .activate_portable_import(&target.credential, &work),
-        Err(Error::OutcomeUnknown)
+        Err(alt_server_store::Error::OutcomeUnknown)
     ));
     assert_no_activation(&target);
     assert_eq!(pack_segments(&target), (0, 1));
