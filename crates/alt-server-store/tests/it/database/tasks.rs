@@ -5,7 +5,6 @@ use alt_task_service::{
     RecordKey, RecordKind, RecordSelection, SourceCompletion, TaskBundle, TaskLimits,
     VerifiedTaskGraph,
 };
-use ed25519_dalek::Signer;
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
 

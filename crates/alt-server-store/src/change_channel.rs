@@ -50,7 +50,7 @@ impl ChangeChannel {
         }
         let key = alt_provenance::decode_hex::<32>(&self.peer_public_key)
             .map_err(|_| Error::Precondition("change-link peer key"))?;
-        ed25519_dalek::VerifyingKey::from_bytes(&key)
+        alt_crypto::ed25519::VerifyingKey::from_bytes(&key)
             .map_err(|_| Error::Precondition("change-link peer key"))?;
         crate::bytes::check_digest(&self.local_credential_digest)?;
         crate::bytes::check_digest(&self.configuration_digest)?;

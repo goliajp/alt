@@ -1,7 +1,7 @@
+use alt_crypto::ed25519::SigningKey;
 use alt_portable::*;
 use alt_provenance::encode_hex;
 use alt_remote_protocol::*;
-use ed25519_dalek::{Signer, SigningKey};
 use std::{
     cell::RefCell,
     collections::BTreeMap,

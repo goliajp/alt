@@ -5,7 +5,7 @@ use alt_remote_protocol::login::*;
 use alt_server_store::DevicePoll;
 use std::{collections::BTreeMap, io::Read};
 
-pub(super) fn credential(key: &ed25519_dalek::SigningKey, device_digest: &str) -> String {
+pub(super) fn credential(key: &alt_crypto::ed25519::SigningKey, device_digest: &str) -> String {
     let key = alt_hash::blake3::derive_key("alt device credential v1", &key.to_bytes());
     format!(
         "alt1_{}",

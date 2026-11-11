@@ -2,10 +2,10 @@
 //! Reads verify it and never manufacture missing history or current approvals.
 use crate::database::Transaction;
 use crate::{Error, InstanceSpec, Result};
+use alt_crypto::ed25519::SigningKey;
 use alt_remote_protocol::{
     Limits, Publication, Receipt, Scope, TransferBody, TransferProof, TransferReason,
 };
-use ed25519_dalek::SigningKey;
 
 fn evidence<T>(value: alt_provenance::Result<T>) -> Result<T> {
     value.map_err(|_| Error::Integrity("publication provenance"))

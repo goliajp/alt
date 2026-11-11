@@ -238,6 +238,11 @@ fn cookie_sessions_csrf_revocation_and_origin_binding_are_enforced_over_http() {
     assert_eq!(get(&server, "/web/session", &cookie).0, 401);
     // Runtime refuses missing config after persistent browser enablement.
     assert!(f.store.check_browser_binding(None).is_err());
+    // and says why, instead of leaving the operator with an unknown outcome
+    assert_eq!(
+        Running::refusal(&f, None),
+        "the browser origin recorded in the database differs from the configured one"
+    );
     let response = send(&server, "GET", "/", None, None, None, None);
     assert_eq!(response.status(), 200);
     assert!(

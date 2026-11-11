@@ -1,11 +1,11 @@
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 mod adopt;
 mod changes;
+use alt_crypto::ed25519::SigningKey;
 use alt_remote_protocol::{ActorKind, Attribution, DeploymentMode, Limits};
 use alt_repository_service::{Grant, RefSelector};
 use alt_server::{HttpOptions, NativeOptions, StoreFactory};
 use alt_server_store::{ByteStore, Credential, InstanceSpec, Store};
-use ed25519_dalek::SigningKey;
 use postgres::{Client, NoTls};
 use serde_json::{Value, json};
 use std::{

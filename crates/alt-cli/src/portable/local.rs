@@ -484,7 +484,7 @@ mod tests {
                 total_bytes: 1000000,
             },
         };
-        let key = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+        let key = alt_crypto::ed25519::SigningKey::from_bytes(&[7; 32]);
         let scope = alt_remote_protocol::Scope {
             installation_id: "source".into(),
             repository_instance_id: "repository".into(),

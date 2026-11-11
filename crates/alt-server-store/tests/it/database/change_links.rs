@@ -1,6 +1,7 @@
 mod repair;
 use super::*;
 use alt_server_store::{ChangeChannel, ChangeMappingRequest};
+use ed25519_dalek::SigningKey;
 use golia_change_link as link;
 
 fn scope(f: &Fixture) -> Scope {

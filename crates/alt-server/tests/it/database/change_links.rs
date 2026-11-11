@@ -3,6 +3,7 @@ use alt_server::change_links::{ChannelConfig, ChannelRuntime};
 use alt_server_store::ChangeChannel;
 use alt_task::Record;
 use alt_task_service::{RecordKey, RecordKind, RecordSelection, SourceCompletion, TaskBundle};
+use ed25519_dalek::SigningKey;
 use golia_change_link as link;
 use serde_json::json;
 use std::net::{IpAddr, Ipv4Addr};

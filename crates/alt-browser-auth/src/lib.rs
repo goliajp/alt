@@ -1,9 +1,6 @@
 //! Pure browser authentication boundaries. Persistence, authorization and rate
 //! admission belong to the instance adapter; this crate performs no network I/O.
-use argon2::{
-    Algorithm, Argon2, Params, PasswordHash, PasswordHasher, PasswordVerifier, Version,
-    password_hash::{Salt, SaltString},
-};
+use alt_crypto::argon2::{Params, PasswordHash};
 use std::net::IpAddr;
 use url::{Host, Url};
 
@@ -187,24 +184,28 @@ pub fn digest_matches(value: &str, expected: &str) -> bool {
     alt_hash::blake3::hash(value.as_bytes()) == alt_hash::blake3::Hash::from(bytes)
 }
 
-fn argon() -> Result<Argon2<'static>> {
-    Ok(Argon2::new(
-        Algorithm::Argon2id,
-        Version::V0x13,
-        Params::new(65_536, 3, 1, Some(32)).map_err(|_| Error::PasswordOperation)?,
-    ))
-}
+const PASSWORD_PARAMS: Params = Params {
+    m_cost: 65_536,
+    t_cost: 3,
+    p_cost: 1,
+};
+const PASSWORD_SALT_LEN: usize = 16;
+const PASSWORD_HASH_LEN: usize = 32;
+
 pub fn password_hash(password: &str) -> Result<String> {
     if password.chars().count() < 12 || password.len() > 1024 {
         return Err(Error::Password);
     }
-    let mut salt = [0u8; Salt::RECOMMENDED_LENGTH];
+    let mut salt = [0u8; PASSWORD_SALT_LEN];
     alt_os::random::fill(&mut salt);
-    let salt = SaltString::encode_b64(&salt).map_err(|_| Error::PasswordOperation)?;
-    argon()?
-        .hash_password(password.as_bytes(), &salt)
-        .map(|value| value.to_string())
-        .map_err(|_| Error::PasswordOperation)
+    PasswordHash::new(
+        password.as_bytes(),
+        &salt,
+        &PASSWORD_PARAMS,
+        PASSWORD_HASH_LEN,
+    )
+    .map(|value| value.to_string())
+    .map_err(|_| Error::PasswordOperation)
 }
 /// Verifies only the bounded encoding this implementation emits. A corrupted
 /// database hash cannot increase memory or CPU beyond the configured work unit.
@@ -212,21 +213,14 @@ pub fn password_verify(password: &str, encoded: &str) -> Result<bool> {
     if password.len() > 1024 {
         return Ok(false);
     }
-    let parsed = PasswordHash::new(encoded).map_err(|_| Error::PasswordEncoding)?;
-    if parsed.algorithm.as_str() != "argon2id"
-        || parsed.version != Some(19)
-        || parsed.params.iter().count() != 3
-        || parsed.params.get_decimal("m") != Some(65_536)
-        || parsed.params.get_decimal("t") != Some(3)
-        || parsed.params.get_decimal("p") != Some(1)
-        || parsed.hash.is_none_or(|hash| hash.len() != 32)
-        || parsed.salt.is_none_or(|salt| salt.len() != 22)
+    let parsed = PasswordHash::parse(encoded).map_err(|_| Error::PasswordEncoding)?;
+    if parsed.params != PASSWORD_PARAMS
+        || parsed.hash.len() != PASSWORD_HASH_LEN
+        || parsed.salt.len() != PASSWORD_SALT_LEN
     {
         return Err(Error::PasswordEncoding);
     }
-    match argon()?.verify_password(password.as_bytes(), &parsed) {
-        Ok(()) => Ok(true),
-        Err(argon2::password_hash::Error::Password) => Ok(false),
-        Err(_) => Err(Error::PasswordEncoding),
-    }
+    parsed
+        .verify(password.as_bytes())
+        .map_err(|_| Error::PasswordEncoding)
 }

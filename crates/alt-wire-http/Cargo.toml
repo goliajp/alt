@@ -12,6 +12,7 @@ golia-change-link.workspace = true
 alt-portable.workspace = true
 alt-wire.workspace = true
 alt-remote-protocol.workspace = true
+alt-crypto.workspace = true
 ed25519-dalek.workspace = true
 serde.workspace = true
 serde_json.workspace = true

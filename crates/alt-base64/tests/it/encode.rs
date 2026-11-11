@@ -1,4 +1,4 @@
-use alt_base64::{STANDARD, URL_SAFE_NO_PAD};
+use alt_base64::{STANDARD, STANDARD_NO_PAD, URL_SAFE_NO_PAD};
 
 const RFC4648: [(&str, &str); 7] = [
     ("", ""),
@@ -21,6 +21,7 @@ fn standard_matches_rfc4648_vectors() {
 fn url_safe_no_pad_matches_rfc4648_vectors_without_padding() {
     for (plain, encoded) in RFC4648 {
         assert_eq!(URL_SAFE_NO_PAD.encode(plain), encoded.trim_end_matches('='));
+        assert_eq!(STANDARD_NO_PAD.encode(plain), encoded.trim_end_matches('='));
     }
 }
 
@@ -43,6 +44,7 @@ fn alphabets_differ_only_in_the_last_two_symbols() {
 #[test]
 fn high_bytes_use_the_top_of_the_alphabet() {
     assert_eq!(STANDARD.encode([0xfb, 0xff]), "+/8=");
+    assert_eq!(STANDARD_NO_PAD.encode([0xfb, 0xff]), "+/8");
     assert_eq!(URL_SAFE_NO_PAD.encode([0xfb, 0xff]), "-_8");
     assert_eq!(STANDARD.encode([0xff; 3]), "////");
 }

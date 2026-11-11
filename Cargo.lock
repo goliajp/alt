@@ -29,9 +29,9 @@ version = "0.1.0"
 name = "alt-browser-auth"
 version = "0.1.0"
 dependencies = [
+ "alt-crypto",
  "alt-hash",
  "alt-os",
- "argon2",
  "url",
 ]
 
@@ -68,6 +68,7 @@ dependencies = [
  "alt-browser-auth",
  "alt-bytes",
  "alt-command-protocol",
+ "alt-crypto",
  "alt-deflate",
  "alt-delivery",
  "alt-diff",
@@ -122,9 +123,9 @@ name = "alt-cloud-client"
 version = "0.1.0"
 dependencies = [
  "alt-base64",
+ "alt-crypto",
  "alt-hash",
  "alt-os",
- "chacha20poly1305",
  "golia-platform-contract",
  "serde",
  "serde_json",
@@ -139,6 +140,17 @@ dependencies = [
  "alt-hash",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "alt-crypto"
+version = "0.1.0"
+dependencies = [
+ "alt-base64",
+ "alt-hash",
+ "argon2",
+ "chacha20poly1305",
+ "ed25519-dalek",
 ]
 
 [[package]]
@@ -357,6 +369,7 @@ dependencies = [
 name = "alt-portable"
 version = "0.1.0"
 dependencies = [
+ "alt-crypto",
  "alt-git-codec",
  "alt-hash",
  "alt-provenance",
@@ -417,9 +430,9 @@ dependencies = [
 name = "alt-provenance"
 version = "0.1.0"
 dependencies = [
+ "alt-crypto",
  "alt-hash",
  "alt-remote-protocol",
- "ed25519-dalek",
  "serde_json",
 ]
 
@@ -491,6 +504,7 @@ dependencies = [
  "alt-byte-segment",
  "alt-cloud-client",
  "alt-command-protocol",
+ "alt-crypto",
  "alt-deflate",
  "alt-git-codec",
  "alt-git-pack",
@@ -521,7 +535,6 @@ dependencies = [
  "postgres",
  "serde",
  "serde_json",
- "subtle",
  "tar",
  "tiny_http",
  "tokio",
@@ -537,6 +550,7 @@ dependencies = [
  "alt-browser-auth",
  "alt-byte-segment",
  "alt-command-protocol",
+ "alt-crypto",
  "alt-delivery",
  "alt-git-codec",
  "alt-hash",
@@ -578,8 +592,8 @@ name = "alt-sign"
 version = "0.1.0"
 dependencies = [
  "alt-base64",
+ "alt-crypto",
  "alt-os",
- "ed25519-dalek",
 ]
 
 [[package]]
@@ -615,6 +629,7 @@ name = "alt-task-service"
 version = "0.1.0"
 dependencies = [
  "alt-command-protocol",
+ "alt-crypto",
  "alt-delivery",
  "alt-git-codec",
  "alt-git-config",
@@ -626,7 +641,6 @@ dependencies = [
  "alt-remote-protocol",
  "alt-repository-service",
  "alt-task",
- "ed25519-dalek",
  "serde",
  "serde_json",
 ]
@@ -703,6 +717,7 @@ name = "alt-wire-http"
 version = "0.1.0"
 dependencies = [
  "alt-base64",
+ "alt-crypto",
  "alt-hash",
  "alt-portable",
  "alt-remote-protocol",

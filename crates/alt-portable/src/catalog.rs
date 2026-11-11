@@ -1,10 +1,10 @@
 use crate::{Error, Result};
+use alt_crypto::ed25519::{Signature, SigningKey, VerifyingKey};
 use alt_provenance::{decode_hex, encode_hex, sign_export};
 use alt_remote_protocol::{
     ContentKind, DeploymentMode, ExportCertificate, ExportCertificateBody, Limits,
     MAX_TRANSFER_PROOFS, Manifest, Publication, Receipt, RequestKey, Scope, TransferProof,
 };
-use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},

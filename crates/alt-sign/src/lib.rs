@@ -27,14 +27,14 @@
 //! grit, and a one-line text file is what `cat` / `diff` users expect on
 //! a hand-managed identity store.
 //!
-//! ## Why ed25519-dalek
+//! ## Verification rule
 //!
-//! Pure Rust, no C deps (matches alt's zero-C stance), audited
-//! implementation widely deployed in `rustls`/`signal-server`/etc. Fixed
-//! 32-byte secret + 64-byte signature width.
+//! Signing and verification come from `alt-crypto`. [`PublicKey::verify`]
+//! requires a canonical S and compares the recomputed R byte for byte; it
+//! does not reject keys of small order.
 
-use ed25519_dalek::{
-    SECRET_KEY_LENGTH, SIGNATURE_LENGTH, Signature, Signer, SigningKey, Verifier, VerifyingKey,
+use alt_crypto::ed25519::{
+    SECRET_KEY_LENGTH, SIGNATURE_LENGTH, Signature, SigningKey, VerifyingKey,
 };
 
 /// A public Ed25519 verification key. Cheaply cloneable; matches one

@@ -2,8 +2,8 @@
 //! trust, local publication previews and all decisions to resume a request.
 pub mod change_links;
 pub mod portable;
+use alt_crypto::ed25519::{Signature, VerifyingKey};
 use alt_remote_protocol::*;
-use ed25519_dalek::{Signature, VerifyingKey};
 use serde::{Serialize, de::DeserializeOwned};
 use std::{
     io::{Read, Write},

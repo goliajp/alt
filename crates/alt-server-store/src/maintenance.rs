@@ -4,8 +4,8 @@
 use crate::database::Transaction;
 use crate::store::{instance, integer, unsigned};
 use crate::{ByteStore, Error, InstanceSpec, Result, Store};
+use alt_crypto::ed25519::SigningKey;
 use alt_remote_protocol::Scope;
-use ed25519_dalek::SigningKey;
 use postgres::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

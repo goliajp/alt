@@ -7,7 +7,6 @@ use crate::{ByteStore, Credential, Error, Result, Store};
 use alt_git_codec::{ObjectId, ObjectKind};
 use alt_remote_protocol::{Manifest, Publication, Receipt, ReceiptBody, RequestKey, RequestState};
 use alt_repository_service::{ObjectReader, ObjectSource, VerifiedGraph, validate_publication};
-use ed25519_dalek::Signer;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// A leased worker snapshot. The fence is rechecked for every transition; a

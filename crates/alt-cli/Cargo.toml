@@ -55,6 +55,7 @@ alt-sign.workspace = true
 alt-treediff.workspace = true
 alt-wire.workspace = true
 alt-wire-http.workspace = true
+alt-crypto.workspace = true
 ed25519-dalek.workspace = true
 tiny_http.workspace = true
 alt-worktree.workspace = true

@@ -12,11 +12,11 @@ mod segments;
 mod tasks;
 mod upload_selection;
 
+use alt_crypto::ed25519::SigningKey;
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
 use alt_remote_protocol::*;
 use alt_repository_service::{Grant, GraphLimits, RefSelector, verify_graph};
 use alt_server_store::{ByteStore, Credential, InstanceSpec, Store};
-use ed25519_dalek::SigningKey;
 use postgres::{Client, NoTls};
 use std::io::Cursor;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -294,7 +294,7 @@ fn durable_commit_replay_restart_and_signed_receipt() {
         .iter()
         .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
         .collect();
-    let sig = ed25519_dalek::Signature::from_slice(&sig_bytes).unwrap();
+    let sig = alt_crypto::ed25519::Signature::from_slice(&sig_bytes).unwrap();
     SigningKey::from_bytes(&[7; 32])
         .verifying_key()
         .verify_strict(&receipt.body.signing_bytes(limits()).unwrap(), &sig)

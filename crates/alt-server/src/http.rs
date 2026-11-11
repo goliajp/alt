@@ -41,7 +41,7 @@ pub struct StoreFactory {
     pub database: postgres::Config,
     pub bytes: ByteStore,
     pub instance: InstanceSpec,
-    pub signing_key: ed25519_dalek::SigningKey,
+    pub signing_key: alt_crypto::ed25519::SigningKey,
     pub limits: Limits,
     pub connect_timeout: Duration,
     pub statement_timeout: Duration,
@@ -802,7 +802,11 @@ pub async fn serve_with_browser(
     spawn_blocking(move || check_factory.open()?.check_browser_binding(origin.as_ref()))
         .await
         .map_err(|_| std::io::Error::other("browser binding check unavailable"))?
-        .map_err(|_| std::io::Error::other("browser binding does not match configuration"))?;
+        .map_err(|_| {
+            std::io::Error::other(
+                "the browser origin recorded in the database differs from the configured one",
+            )
+        })?;
     if options.connections == 0
         || options.workers == 0
         || options.header_bytes < 8192

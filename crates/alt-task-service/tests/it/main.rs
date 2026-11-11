@@ -524,7 +524,7 @@ fn event_chain_cannot_borrow_a_predecessor_from_another_selected_task() {
 
 #[test]
 fn collector_signature_is_bound_to_current_key_runner_and_exact_source() {
-    use ed25519_dalek::{Signer, SigningKey};
+    use alt_crypto::ed25519::SigningKey;
     let signing = SigningKey::from_bytes(&[7; 32]);
     let public = signing.verifying_key();
     let key_id = alt_hash::blake3::hash(public.as_bytes())
@@ -761,8 +761,8 @@ fn received_facts_require_original_completion_and_bound_total_retained_bytes() {
 
 #[test]
 fn observed_history_needs_trusted_collector_complete_attachments_and_current_target() {
+    use alt_crypto::ed25519::SigningKey;
     use alt_git_codec::{HashAlgo, ObjectKind};
-    use ed25519_dalek::{Signer, SigningKey};
     let mut objects = Objects::default();
     let tree = objects.put(ObjectKind::Tree, vec![]);
     let head = objects.put(ObjectKind::Commit, format!("tree {tree}\nauthor A <a@example.test> 1 +0000\ncommitter A <a@example.test> 1 +0000\n\nbase\n").into_bytes());

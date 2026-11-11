@@ -18,6 +18,7 @@ alt-portable = { path = "crates/alt-portable" }
 alt-provenance = { path = "crates/alt-provenance" }
 golia-platform-contract = { path = "vendor/golia-platform-contract", version = "=0.1.0" }
 alt-cloud-client = { path = "crates/alt-cloud-client" }
+alt-crypto = { path = "crates/alt-crypto" }
 alt-browser-auth = { path = "crates/alt-browser-auth" }
 alt-task-transfer = { path = "crates/alt-task-transfer" }
 alt-server = { path = "crates/alt-server" }

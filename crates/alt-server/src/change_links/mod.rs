@@ -55,7 +55,7 @@ impl ChannelConfig {
         }
         let key = alt_provenance::decode_hex::<32>(&self.peer_public_key)
             .map_err(|_| operator::Error::Config("change-link key"))?;
-        ed25519_dalek::VerifyingKey::from_bytes(&key)
+        alt_crypto::ed25519::VerifyingKey::from_bytes(&key)
             .map_err(|_| operator::Error::Config("change-link key"))?;
         Ok(())
     }

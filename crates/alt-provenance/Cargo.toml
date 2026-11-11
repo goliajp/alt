@@ -8,7 +8,7 @@ license.workspace = true
 [dependencies]
 alt-hash.workspace = true
 alt-remote-protocol.workspace = true
-ed25519-dalek.workspace = true
+alt-crypto.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

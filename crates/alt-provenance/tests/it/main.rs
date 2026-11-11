@@ -1,6 +1,6 @@
+use alt_crypto::ed25519::SigningKey;
 use alt_provenance::{encode_hex, sign_export, sign_transfer, verify_origin};
 use alt_remote_protocol::*;
-use ed25519_dalek::{Signer, SigningKey};
 
 fn limits() -> Limits {
     Limits {

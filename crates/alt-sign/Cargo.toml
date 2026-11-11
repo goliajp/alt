@@ -8,4 +8,4 @@ license.workspace = true
 [dependencies]
 alt-base64.workspace = true
 alt-os.workspace = true
-ed25519-dalek.workspace = true
+alt-crypto.workspace = true

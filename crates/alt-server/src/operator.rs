@@ -1,9 +1,9 @@
 //! Explicit instance configuration and local operator operations. Runtime open
 //! never initializes, migrates, or bootstraps an identity on configuration loss.
 use crate::{HttpOptions, NativeOptions, StoreFactory};
+use alt_crypto::ed25519::SigningKey;
 use alt_remote_protocol::Limits;
 use alt_server_store::{ByteStore, InstanceSpec, Store};
-use ed25519_dalek::SigningKey;
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{File, OpenOptions},
@@ -26,6 +26,8 @@ pub enum Error {
     Store,
     Unknown,
     RestoreStage(&'static str),
+    /// the HTTP service refused to start or ended on an error; nothing was written
+    Serve(String),
 }
 
 impl std::fmt::Display for Error {
@@ -42,6 +44,7 @@ impl std::fmt::Display for Error {
                 f,
                 "restoration incomplete at {v}; inspect the isolated destination before retrying"
             ),
+            Self::Serve(v) => write!(f, "service stopped: {v}"),
         }
     }
 }

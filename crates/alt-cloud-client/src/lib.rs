@@ -2,10 +2,7 @@
 //! adapters must persist and recheck claims within their operation transaction.
 #![forbid(unsafe_code)]
 use alt_base64::URL_SAFE_NO_PAD;
-use chacha20poly1305::{
-    XChaCha20Poly1305, XNonce,
-    aead::{Aead, KeyInit, Payload},
-};
+use alt_crypto::aead;
 use golia_platform_contract::{
     AccountAuthorization, AltServiceAuthorization, Audience, Product, Secret, TicketExchange,
     VERSION,
@@ -196,7 +193,7 @@ impl Client {
 /// The runtime credential is a random secret, not a user password. This key is
 /// domain-separated from authentication and never written to the product DB.
 pub struct GrantSealer {
-    cipher: XChaCha20Poly1305,
+    key: aead::Key,
     audience: Audience,
 }
 impl GrantSealer {
@@ -215,7 +212,7 @@ impl GrantSealer {
             credential.expose().as_bytes(),
         );
         Ok(Self {
-            cipher: XChaCha20Poly1305::new((&key).into()),
+            key: aead::Key::new(key),
             audience,
         })
     }
@@ -234,16 +231,8 @@ impl GrantSealer {
         let aad = self.aad(local_credential_digest)?;
         let mut nonce = [0; 24];
         alt_os::random::fill(&mut nonce);
-        let ciphertext = self
-            .cipher
-            .encrypt(
-                XNonce::from_slice(&nonce),
-                Payload {
-                    msg: grant.expose().as_bytes(),
-                    aad: &aad,
-                },
-            )
-            .map_err(|_| Error::SealedGrant)?;
+        let ciphertext =
+            aead::encrypt(self.key.as_bytes(), &nonce, &aad, grant.expose().as_bytes());
         let mut sealed = vec![1];
         sealed.extend_from_slice(&nonce);
         sealed.extend_from_slice(&ciphertext);
@@ -260,15 +249,10 @@ impl GrantSealer {
             return Err(Error::SealedGrant);
         }
         let aad = self.aad(local_credential_digest)?;
-        let plaintext = self
-            .cipher
-            .decrypt(
-                XNonce::from_slice(&bytes[1..25]),
-                Payload {
-                    msg: &bytes[25..],
-                    aad: &aad,
-                },
-            )
+        let (nonce, ciphertext) = bytes[1..]
+            .split_first_chunk::<{ aead::NONCE_LEN }>()
+            .ok_or(Error::SealedGrant)?;
+        let plaintext = aead::decrypt(self.key.as_bytes(), nonce, &aad, ciphertext)
             .map_err(|_| Error::SealedGrant)?;
         String::from_utf8(plaintext)
             .map_err(|_| Error::SealedGrant)?

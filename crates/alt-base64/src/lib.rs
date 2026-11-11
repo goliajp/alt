@@ -1,7 +1,8 @@
 //! Strict RFC 4648 base64.
 //!
-//! Two engines are provided: [`STANDARD`] (the `+/` alphabet with `=`
-//! padding) and [`URL_SAFE_NO_PAD`] (the `-_` alphabet without padding).
+//! Three engines are provided: [`STANDARD`] (the `+/` alphabet with `=`
+//! padding), [`STANDARD_NO_PAD`] (the same alphabet without padding) and
+//! [`URL_SAFE_NO_PAD`] (the `-_` alphabet without padding).
 //! Decoding accepts exactly the strings the matching encoder produces:
 //! no whitespace, no missing or surplus padding, and no set bits in the
 //! unused tail of the last symbol.
@@ -22,6 +23,12 @@ pub struct Engine {
 pub const STANDARD: Engine = Engine::new(
     b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
     true,
+);
+
+/// The standard alphabet (`A-Z a-z 0-9 + /`) with padding forbidden.
+pub const STANDARD_NO_PAD: Engine = Engine::new(
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
+    false,
 );
 
 /// The URL-safe alphabet (`A-Z a-z 0-9 - _`) with padding forbidden.

@@ -7,8 +7,8 @@ use crate::{
     ByteInput, ByteStore, Credential, DurableBytes, Error, InstanceSpec, Result, SegmentLocation,
     Store,
 };
+use alt_crypto::ed25519::SigningKey;
 use alt_remote_protocol::{ContentEntry, Limits, Publication, RequestKey};
-use ed25519_dalek::SigningKey;
 use std::collections::BTreeMap;
 
 pub(crate) type Locations = BTreeMap<String, SegmentLocation>;

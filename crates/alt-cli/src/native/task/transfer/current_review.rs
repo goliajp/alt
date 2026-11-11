@@ -1,5 +1,4 @@
 use super::*;
-use ed25519_dalek::Signer;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -47,7 +46,7 @@ impl NativeRepo<'_> {
         let seed: [u8; 32] = bounded(&path, 32)?
             .try_into()
             .map_err(|_| refused("collector key file must contain exactly 32 raw bytes"))?;
-        let signer = ed25519_dalek::SigningKey::from_bytes(&seed);
+        let signer = alt_crypto::ed25519::SigningKey::from_bytes(&seed);
         let mut attestation = alt_task_service::CollectorAttestation {
             schema_version: 1,
             evidence: id.into(),

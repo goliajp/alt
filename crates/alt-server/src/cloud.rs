@@ -38,17 +38,13 @@ impl Runtime {
         self.provision_digest.as_deref()
     }
     pub fn authenticate_probe(&self, credential: &str) -> bool {
-        use subtle::ConstantTimeEq;
         golia_platform_contract::lifecycle::lower_hex_32(credential)
-            && self
-                .key_digest
-                .as_bytes()
-                .ct_eq(
-                    alt_hash::blake3::hash(credential.as_bytes())
-                        .to_hex()
-                        .as_bytes(),
-                )
-                .into()
+            && alt_crypto::ct::eq(
+                self.key_digest.as_bytes(),
+                alt_hash::blake3::hash(credential.as_bytes())
+                    .to_hex()
+                    .as_bytes(),
+            )
     }
     pub fn readiness(
         &self,

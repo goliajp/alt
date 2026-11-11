@@ -9,7 +9,6 @@ use alt_git_codec::{ObjectId, ObjectKind};
 use alt_pack_segment::{Kind, Segment, SegmentSet};
 use alt_remote_protocol::{Publication, Receipt, ReceiptBody, RequestState, Scope};
 use alt_repository_service::{Graph, validate_publication};
-use ed25519_dalek::Signer;
 use std::{
     collections::{BTreeMap, HashMap},
     path::PathBuf,

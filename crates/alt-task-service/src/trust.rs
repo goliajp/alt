@@ -1,5 +1,5 @@
 use crate::{CollectorAttestation, Error, Result};
-use ed25519_dalek::{Signature, VerifyingKey};
+use alt_crypto::ed25519::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 

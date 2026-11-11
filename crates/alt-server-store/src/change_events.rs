@@ -14,6 +14,10 @@ pub use alt_remote_protocol::change_links::ChangeMappingRequest;
 fn protocol<T>(result: link::Result<T>) -> Result<T> {
     result.map_err(|_| Error::Precondition("change-link signature, identity or revision"))
 }
+/// the key in the form the change-link protocol crate signs with
+fn link_key(key: &alt_crypto::ed25519::SigningKey) -> ed25519_dalek::SigningKey {
+    ed25519_dalek::SigningKey::from_bytes(&key.to_bytes())
+}
 fn peer_key(channel: &ChangeChannel) -> Result<ed25519_dalek::VerifyingKey> {
     ed25519_dalek::VerifyingKey::from_bytes(
         &alt_provenance::decode_hex::<32>(&channel.peer_public_key)
@@ -138,7 +142,7 @@ fn queued_request(
 fn append_outbox(
     tx: &mut Transaction<'_>,
     spec: &InstanceSpec,
-    signing: &ed25519_dalek::SigningKey,
+    signing: &alt_crypto::ed25519::SigningKey,
     input: Outgoing<'_>,
 ) -> Result<link::HistoricalEvent> {
     let Outgoing {
@@ -178,7 +182,7 @@ fn append_outbox(
             issued_unix_ms: link::Counter(time),
             body,
         },
-        signing,
+        &link_key(signing),
     ))?;
     let digest = protocol(signed.digest())?;
     let history = link::HistoricalEvent {
@@ -450,7 +454,7 @@ impl Store {
             signed,
             link::Counter(time),
             decision,
-            &self.signing_key,
+            &link_key(&self.signing_key),
         ))?;
         let history = link::HistoricalEvent {
             statement: signed.clone(),

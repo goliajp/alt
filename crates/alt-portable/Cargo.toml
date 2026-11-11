@@ -14,6 +14,9 @@ alt-remote-protocol.workspace = true
 alt-repository-service.workspace = true
 alt-task.workspace = true
 alt-task-service.workspace = true
-ed25519-dalek.workspace = true
+alt-crypto.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+ed25519-dalek.workspace = true

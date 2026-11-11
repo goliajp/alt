@@ -1,9 +1,9 @@
 //! An immutable import binds explicit historical identity dispositions. Linking
 //! an identity never grants a target capability or rewrites a source signature.
 use crate::{Envelope, Error, PackageLimits, Result};
+use alt_crypto::ed25519::{Signature, SigningKey, VerifyingKey};
 use alt_provenance::{decode_hex, encode_hex};
 use alt_remote_protocol::{RequestKey, Scope};
-use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

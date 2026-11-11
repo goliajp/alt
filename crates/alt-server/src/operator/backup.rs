@@ -3,8 +3,8 @@
 //! the encrypted payload has been synced. Verification is not a restore drill.
 use super::{Config, Error, Result, create_private, read_regular};
 use alt_base64::STANDARD;
+use alt_crypto::ed25519::{Signature, VerifyingKey};
 use alt_server_store::{ByteStore, MaintenanceSnapshot, SnapshotCatalog};
-use ed25519_dalek::{Signature, Signer, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -505,7 +505,7 @@ pub fn verify(
     let key: [u8; 32] = read_regular(&directory.path().join("receipt.key"), 32, true)?
         .try_into()
         .map_err(|_| Error::Config("backup receipt key"))?;
-    if ed25519_dalek::SigningKey::from_bytes(&key)
+    if alt_crypto::ed25519::SigningKey::from_bytes(&key)
         .verifying_key()
         .to_bytes()
         != trusted_key

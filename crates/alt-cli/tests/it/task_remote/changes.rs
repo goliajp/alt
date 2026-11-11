@@ -1,5 +1,6 @@
 use super::*;
 use alt_server::change_links::ChannelConfig;
+use ed25519_dalek::SigningKey;
 use golia_change_link as link;
 use std::net::{IpAddr, Ipv4Addr};
 

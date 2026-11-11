@@ -4,9 +4,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 [dependencies]
+alt-crypto.workspace = true
 alt-hash.workspace = true
 alt-os.workspace = true
-argon2 = "0.5"
 url.workspace = true
 [[test]]
 name = "it"

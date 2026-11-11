@@ -34,22 +34,22 @@ fn cookie(origin: &PublicOrigin, values: &[&str]) -> Result<String> {
     }
     result.ok_or(Error::Unauthorized)
 }
-fn derived(key: &ed25519_dalek::SigningKey, purpose: &'static str, secret: &str) -> String {
+fn derived(key: &alt_crypto::ed25519::SigningKey, purpose: &'static str, secret: &str) -> String {
     let key = alt_hash::blake3::derive_key(purpose, &key.to_bytes());
     alt_hash::blake3::keyed_hash(&key, secret.as_bytes())
         .to_hex()
         .to_string()
 }
-fn token(key: &ed25519_dalek::SigningKey, secret: &str) -> String {
+fn token(key: &alt_crypto::ed25519::SigningKey, secret: &str) -> String {
     format!(
         "alt1_{}",
         derived(key, "alt Cloud browser credential v1", secret)
     )
 }
-fn state(key: &ed25519_dalek::SigningKey, secret: &str) -> String {
+fn state(key: &alt_crypto::ed25519::SigningKey, secret: &str) -> String {
     derived(key, "alt Cloud browser state v1", secret)
 }
-fn verifier(key: &ed25519_dalek::SigningKey, secret: &str) -> Secret {
+fn verifier(key: &alt_crypto::ed25519::SigningKey, secret: &str) -> Secret {
     derived(key, "alt Cloud browser PKCE verifier v1", secret)
         .try_into()
         .expect("derived secret")

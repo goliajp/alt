@@ -1,4 +1,5 @@
 use super::*;
+use ed25519_dalek::SigningKey;
 
 fn signed_history(acknowledged: bool) -> golia_change_link::HistoricalEvent {
     use golia_change_link as link;

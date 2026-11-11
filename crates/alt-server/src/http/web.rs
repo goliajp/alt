@@ -21,7 +21,7 @@ impl WebOptions {
         Ok(())
     }
 }
-fn csrf(token: &str, key: &ed25519_dalek::SigningKey) -> String {
+fn csrf(token: &str, key: &alt_crypto::ed25519::SigningKey) -> String {
     let secret = alt_hash::blake3::derive_key("alt browser CSRF key v1", &key.to_bytes());
     alt_hash::blake3::keyed_hash(&secret, token.as_bytes())
         .to_hex()
@@ -454,7 +454,7 @@ fn session(
     credential: &Credential,
     origin: &PublicOrigin,
     token: &str,
-    key: &ed25519_dalek::SigningKey,
+    key: &alt_crypto::ed25519::SigningKey,
 ) -> Result<Value> {
     let session = store.browser_session(credential, origin)?;
     let spec = store.spec();

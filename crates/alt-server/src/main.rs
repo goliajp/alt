@@ -468,7 +468,7 @@ fn execute(args: &Args) -> Result<Value> {
                 let line=json!({"event":"listening","address":address,"instance":config.instance,"build":build_info()});
                 println!("{line}");std::io::stdout().flush().map_err(|_|Error::File)?;
                 let mut termination=tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).map_err(|_|Error::Config("termination signal"))?;
-                alt_server::serve_with_browser(listener,factory,options,browser,async move {tokio::select! {_=tokio::signal::ctrl_c()=>{},_=termination.recv()=>{}}}).await.map_err(|_|Error::Unknown)
+                alt_server::serve_with_browser(listener,factory,options,browser,async move {tokio::select! {_=tokio::signal::ctrl_c()=>{},_=termination.recv()=>{}}}).await.map_err(|error|Error::Serve(error.to_string()))
             })?;
             return Ok(json!({"event":"stopped"}));
         }

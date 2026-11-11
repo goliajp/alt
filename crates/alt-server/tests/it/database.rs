@@ -11,8 +11,8 @@ mod git;
 mod native_client;
 mod operator;
 mod portable;
+use alt_crypto::ed25519::SigningKey;
 use alt_server_store::{ByteStore, Credential, InstanceSpec, Store};
-use ed25519_dalek::SigningKey;
 use postgres::{Client, NoTls};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -59,13 +59,11 @@ impl Running {
     ) -> Self {
         Self::start_with_shutdown(f, browser, cloud, links, false)
     }
-    fn start_with_shutdown(
+    fn parts(
         f: &Fixture,
-        browser: Option<alt_server::WebOptions>,
         cloud: Option<std::sync::Arc<alt_server::cloud::Runtime>>,
         links: Vec<alt_server::change_links::ChannelRuntime>,
-        abort: bool,
-    ) -> Self {
+    ) -> (StoreFactory, HttpOptions) {
         let mut database: postgres::Config = f.admin_dsn.parse().unwrap();
         database.dbname(&f.database);
         let signing_key = SigningKey::from_bytes(&[f.key_seed; 32]);
@@ -97,6 +95,31 @@ impl Running {
                 approval_ttl_ms: 60_000,
             },
         };
+        (factory, options)
+    }
+    /// what the service reports when it refuses to start with this browser configuration
+    fn refusal(f: &Fixture, browser: Option<alt_server::WebOptions>) -> String {
+        let (factory, options) = Self::parts(f, None, vec![]);
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            alt_server::serve_with_browser(listener, factory, options, browser, async {})
+                .await
+                .unwrap_err()
+                .to_string()
+        })
+    }
+    fn start_with_shutdown(
+        f: &Fixture,
+        browser: Option<alt_server::WebOptions>,
+        cloud: Option<std::sync::Arc<alt_server::cloud::Runtime>>,
+        links: Vec<alt_server::change_links::ChannelRuntime>,
+        abort: bool,
+    ) -> Self {
+        let (factory, options) = Self::parts(f, cloud, links);
         let (address_tx, address_rx) = std::sync::mpsc::channel();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let thread = std::thread::spawn(move || {

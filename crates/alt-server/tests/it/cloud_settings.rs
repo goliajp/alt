@@ -20,7 +20,7 @@ fn fixture(root: &Path) -> Value {
     c
 }
 pub(super) fn channel() -> Value {
-    let key = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+    let key = alt_crypto::ed25519::SigningKey::from_bytes(&[7; 32]);
     let public: String = key
         .verifying_key()
         .as_bytes()

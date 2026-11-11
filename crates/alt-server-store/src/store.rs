@@ -1,8 +1,8 @@
 use crate::database::Transaction;
 use crate::{ByteStore, Error, Result};
+use alt_crypto::ed25519::SigningKey;
 use alt_remote_protocol::{Attribution, DeploymentMode, Limits, ObjectFormat, Scope};
 use alt_repository_service::{Authorization, Grant, RefPolicy, RepositorySnapshot};
-use ed25519_dalek::SigningKey;
 use postgres::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;

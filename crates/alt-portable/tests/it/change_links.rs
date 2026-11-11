@@ -2,8 +2,8 @@ use super::*;
 
 fn signed_history(acknowledged: bool) -> golia_change_link::HistoricalEvent {
     use golia_change_link as link;
-    let sender = SigningKey::from_bytes(&[3; 32]);
-    let receiver = SigningKey::from_bytes(&[4; 32]);
+    let sender = ed25519_dalek::SigningKey::from_bytes(&[3; 32]);
+    let receiver = ed25519_dalek::SigningKey::from_bytes(&[4; 32]);
     let endpoint = |product| link::Endpoint {
         product,
         installation: format!("{product:?}-installation"),

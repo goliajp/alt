@@ -1,4 +1,4 @@
-use alt_base64::{DecodeError, Engine, STANDARD, URL_SAFE_NO_PAD};
+use alt_base64::{DecodeError, Engine, STANDARD, STANDARD_NO_PAD, URL_SAFE_NO_PAD};
 
 fn bytes(len: usize, seed: u8) -> Vec<u8> {
     (0..len)
@@ -18,6 +18,7 @@ fn round_trips(engine: &Engine) {
 #[test]
 fn every_length_round_trips() {
     round_trips(&STANDARD);
+    round_trips(&STANDARD_NO_PAD);
     round_trips(&URL_SAFE_NO_PAD);
 }
 
@@ -171,4 +172,23 @@ fn decode_error_messages_are_distinct() {
     for (i, message) in messages.iter().enumerate() {
         assert!(!messages[i + 1..].contains(message));
     }
+}
+
+#[test]
+fn standard_no_pad_is_strict_about_padding_alphabet_and_tail_bits() {
+    assert_eq!(STANDARD_NO_PAD.decode("Zm8"), Ok(b"fo".to_vec()));
+    assert_eq!(STANDARD_NO_PAD.decode("+/8"), Ok(vec![0xfb, 0xff]));
+    assert_eq!(
+        STANDARD_NO_PAD.decode("Zm8="),
+        Err(DecodeError::InvalidSymbol)
+    );
+    assert_eq!(
+        STANDARD_NO_PAD.decode("-_8"),
+        Err(DecodeError::InvalidSymbol)
+    );
+    assert_eq!(
+        STANDARD_NO_PAD.decode("Zm9"),
+        Err(DecodeError::TrailingBits)
+    );
+    assert_eq!(STANDARD_NO_PAD.decode("Z"), Err(DecodeError::InvalidLength));
 }

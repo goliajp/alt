@@ -1,10 +1,10 @@
 //! Cryptographic evidence is separate from current account authorization.
 //! The caller must independently authenticate the expected current scope/key.
+use alt_crypto::ed25519::{Signature, SigningKey, VerifyingKey};
 use alt_remote_protocol::{
     ExportCertificate, ExportCertificateBody, Limits, MAX_TRANSFER_PROOFS, Publication, Receipt,
     Scope, TransferBody, TransferProof, TransferReason,
 };
-use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use std::collections::BTreeSet;
 
 #[derive(Debug)]

@@ -1,4 +1,5 @@
 use super::*;
+use ed25519_dalek::SigningKey;
 use std::sync::{Arc, Barrier};
 
 fn prepare(f: &mut Fixture) -> (ChangeChannel, link::SignedEvent, link::RepairSource) {

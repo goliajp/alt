@@ -1,6 +1,6 @@
 use crate::{ByteStore, Error, InstanceSpec, Result, Store};
+use alt_crypto::ed25519::SigningKey;
 use alt_remote_protocol::Limits;
-use ed25519_dalek::SigningKey;
 use postgres::{Client, GenericClient};
 
 const MIGRATIONS: [&str; 18] = [

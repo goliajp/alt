@@ -13,7 +13,6 @@ golia-change-link.workspace = true
 golia-change-link-http.workspace = true
 alt-portable.workspace = true
 alt-provenance.workspace = true
-subtle = "2"
 alt-server-store.workspace = true
 alt-cloud-client.workspace = true
 golia-platform-contract.workspace = true
@@ -30,6 +29,7 @@ alt-wire.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 postgres = {version="0.19",features=["with-serde_json-1"]}
+alt-crypto.workspace = true
 ed25519-dalek.workspace = true
 hyper = {version="1",features=["server","http1"]}
 hyper-util = {version="0.1",features=["tokio"]}
