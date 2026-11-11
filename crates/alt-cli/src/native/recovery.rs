@@ -2,15 +2,11 @@
 //! completion is a separate append. Missing completion is never success.
 
 use super::*;
-use serde::{Deserialize, Serialize};
 
 pub(super) const PREPARE: u8 = 0x30;
 pub(super) const COMPLETE: u8 = 0x31;
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub(super) struct WorkspaceIdentity {
     pub name: String,
@@ -19,19 +15,7 @@ pub(super) struct WorkspaceIdentity {
 
 /// Recovery semantics are written by the operation, never inferred from an
 /// actor label or from the absence of a checkout in historical records.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    alt_json::ToJson,
-    alt_json::FromJson,
-)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(rename_all = "snake_case")]
 pub(super) enum RefEffects {
     #[default]
@@ -40,41 +24,32 @@ pub(super) enum RefEffects {
     Checkout,
 }
 
-#[derive(Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub(super) struct RefContext {
     pub version: u32,
-    #[serde(default)]
     #[json(default)]
     pub effects: RefEffects,
     pub workspace: WorkspaceIdentity,
     pub inverse_of: Option<String>,
-    #[serde(default)]
     #[json(default)]
     pub checkout: Option<checkout_recovery::CheckoutIntent>,
-    #[serde(default)]
     #[json(default)]
     pub request_id: Option<String>,
 }
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 struct PathGuard {
     path: Vec<u8>,
     state: Option<(u32, String)>,
 }
 
-#[derive(Clone, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub(super) struct IndexIntent {
     version: u32,
     pub(super) workspace: WorkspaceIdentity,
-    #[serde(default)]
     #[json(default)]
     pub(super) request_id: Option<String>,
     before: String,
@@ -83,24 +58,22 @@ pub(super) struct IndexIntent {
     inverse_of: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 struct Completion {
     version: u32,
     prepared: String,
-    #[serde(default)]
     #[json(default)]
     request_id: Option<String>,
 }
 
-pub(super) fn encode<T: Serialize>(kind: u8, value: &T) -> Res<Vec<u8>> {
+pub(super) fn encode<T: alt_json::ToJson>(kind: u8, value: &T) -> Res<Vec<u8>> {
     let mut bytes = vec![kind, 1];
-    bytes.extend(serde_json::to_vec(value)?);
+    bytes.extend(alt_json::to_vec(value)?);
     Ok(bytes)
 }
 
-pub(super) fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8], kind: u8) -> Res<T> {
+pub(super) fn decode<T: alt_json::FromJson>(bytes: &[u8], kind: u8) -> Res<T> {
     if bytes.get(..2) != Some(&[kind, 1]) {
         return Err(crate::machine::Failure::refusal(
             "unsupported_record",
@@ -108,7 +81,7 @@ pub(super) fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8], kind: u8) -> 
         )
         .into());
     }
-    Ok(serde_json::from_slice(&bytes[2..])?)
+    Ok(alt_json::from_slice(&bytes[2..])?)
 }
 
 /// Cache/stat fields are not state. Conflict stages, flags, paths, oid and
@@ -520,7 +493,7 @@ impl NativeRepo<'_> {
     fn undo_scoped_refs(&mut self, op: &alt_oplog::Op) -> Res<()> {
         let tx = alt_refs::parse_tx(&op.payload)?.ok_or("not a ref operation")?;
         let context = tx.context.ok_or_else(|| crate::machine::Failure::refusal("unsupported_record", "legacy operation lacks workspace ownership and recovery prestate; automatic undo refused"))?;
-        let context: RefContext = serde_json::from_slice(&context)?;
+        let context: RefContext = alt_json::from_slice(&context)?;
         if context.workspace != self.workspace_identity()? {
             return Err(crate::machine::Failure::refusal(
                 "precondition_failed",
@@ -705,5 +678,5 @@ mod tests {
 mod json_tests {
     use super::*;
 
-    alt_json_testkit::module_tests!("native-recovery", 0xc103; WorkspaceIdentity, RefEffects, RefContext, PathGuard, IndexIntent, Completion);
+    alt_json_testkit::module_fixture_tests!("native-recovery"; WorkspaceIdentity, RefEffects, RefContext, PathGuard, IndexIntent, Completion);
 }

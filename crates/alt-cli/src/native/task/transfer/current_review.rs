@@ -1,7 +1,6 @@
 use super::*;
 
-#[derive(serde::Serialize, serde::Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 struct ReviewContext {
     binding: Binding,
@@ -129,7 +128,7 @@ impl NativeRepo<'_> {
                             "review changes no longer match their original content",
                         ));
                     }
-                    Some(serde_json::from_slice::<serde_json::Value>(&bytes)?)
+                    Some(alt_json::from_slice::<alt_json::Value>(&bytes)?)
                 } else {
                     None
                 };
@@ -172,7 +171,7 @@ impl NativeRepo<'_> {
         key.validate()?;
         let directory = self.store.alt_dir.join("task-reviews").join(digest);
         let previous: ReviewContext = json_file(&directory.join("review.json"))?;
-        if serde_json::to_value(&previous.binding)? != serde_json::to_value(&binding)?
+        if alt_json::to_value(&previous.binding)? != alt_json::to_value(&binding)?
             || previous.selection.publication.key != key
             || previous.selection.publication.digest(limits())? != digest
         {
@@ -222,5 +221,5 @@ impl NativeRepo<'_> {
 mod json_tests {
     use super::*;
 
-    alt_json_testkit::module_tests!("native-task-transfer-current_review", 0xc10a; ReviewContext);
+    alt_json_testkit::module_fixture_tests!("native-task-transfer-current_review"; ReviewContext);
 }

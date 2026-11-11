@@ -124,7 +124,7 @@ needs = ["a"]
         String::from_utf8_lossy(&out.stdout)
     );
     assert!(out.stdout.is_empty());
-    let failure: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    let failure: alt_json::Value = alt_json::from_slice(&out.stderr).unwrap();
     assert_eq!(failure["error"]["kind"], "validation_failed");
     let stdout = failure["error"]["details"]["command_output"]["text"]
         .as_str()

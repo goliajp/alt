@@ -49,7 +49,7 @@ pub(super) fn operation_request(op: &alt_oplog::Op) -> Res<Option<String>> {
             };
             let key = tx.key.map(|key| crate::machine::hex(&key));
             if let Some(bytes) = tx.context {
-                let value: serde_json::Value = serde_json::from_slice(&bytes)?;
+                let value: alt_json::Value = alt_json::from_slice(&bytes)?;
                 return Ok(value["request_id"].as_str().map(str::to_owned).or(key));
             }
             return Ok(key);
@@ -58,7 +58,7 @@ pub(super) fn operation_request(op: &alt_oplog::Op) -> Res<Option<String>> {
     };
     match context {
         Some(bytes) => Ok(
-            serde_json::from_slice::<serde_json::Value>(&bytes)?["request_id"]
+            alt_json::from_slice::<alt_json::Value>(&bytes)?["request_id"]
                 .as_str()
                 .map(str::to_owned),
         ),

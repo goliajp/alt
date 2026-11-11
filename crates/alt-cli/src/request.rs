@@ -5,7 +5,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-use serde_json::{Value, json};
+use alt_json::{Value, json};
 
 use crate::daemon::{RequestId, Response};
 use crate::machine::{Failure, hex};
@@ -77,11 +77,11 @@ pub fn claim(
     {
         alt_os::sys::flock(&lock, alt_os::sys::LOCK_EX)?;
     }
-    let binding_digest = digest(&serde_json::to_vec(binding)?);
+    let binding_digest = digest(&alt_json::to_vec(binding)?);
     let intent_path = directory.join("intent.json");
     match std::fs::read(&intent_path) {
         Ok(bytes) => {
-            let intent: Intent = serde_json::from_slice(&bytes)?;
+            let intent: Intent = alt_json::from_slice(&bytes)?;
             if intent.version != 1
                 || intent.hash_algorithm != "blake3"
                 || intent.request_id != request_id
@@ -123,7 +123,7 @@ pub fn claim(
                 workspace,
                 started_ms: now_ms(),
             };
-            durable_write(&intent_path, &serde_json::to_vec(&intent)?)?;
+            durable_write(&intent_path, &alt_json::to_vec(&intent)?)?;
             Ok(Claimed::Execute(Claim {
                 _lock: lock,
                 directory,
@@ -149,7 +149,7 @@ impl Claim {
                 "stderr":{"path":"stderr.bin","bytes":response.stderr.len(),"blake3":digest(&response.stderr)},"exit_code":response.exit_code,"truncated":false});
             durable_write(
                 &self.directory.join("output-artifacts.json"),
-                &serde_json::to_vec(&artifacts)?,
+                &alt_json::to_vec(&artifacts)?,
             )?;
             let mut failure = Failure::unknown(
                 "response exceeds the wire length limit; complete output is preserved in the request directory",
@@ -172,7 +172,7 @@ impl Claim {
         };
         durable_write(
             &self.directory.join("completed.json"),
-            &serde_json::to_vec(&completion)?,
+            &alt_json::to_vec(&completion)?,
         )
     }
 }
@@ -183,7 +183,7 @@ pub fn read_completion(directory: &Path, intent: &Intent) -> Res<Option<(Complet
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),
     };
-    let completion: Completion = serde_json::from_slice(&bytes)?;
+    let completion: Completion = alt_json::from_slice(&bytes)?;
     let bytes = std::fs::read(directory.join("response.bin"))?;
     let response = alt_command_protocol::validate_completion(intent, &completion, &bytes)
         .map_err(|error| Failure::unknown(error.to_string()))?;
@@ -232,8 +232,8 @@ pub fn record_submission(alt_dir: &Path, id: RequestId, binding: &Value) -> Res<
     let directory = alt_dir.join("submissions");
     std::fs::create_dir_all(&directory)?;
     let path = directory.join(format!("{}.json", hex(&id)));
-    let bytes = serde_json::to_vec(
-        &json!({"version":1, "request_id":hex(&id), "binding_digest":digest(&serde_json::to_vec(binding)?)}),
+    let bytes = alt_json::to_vec(
+        &json!({"version":1, "request_id":hex(&id), "binding_digest":digest(&alt_json::to_vec(binding)?)}),
     )?;
     let mut tmp = alt_os::temp::NamedTempFile::new_in(&directory)?;
     tmp.write_all(&bytes)?;
@@ -290,7 +290,7 @@ pub fn query(
             }
             Err(error) => return Err(error.into()),
         };
-        let intent: Intent = serde_json::from_slice(&bytes)
+        let intent: Intent = alt_json::from_slice(&bytes)
             .map_err(|error| Failure::unknown(format!("cannot verify request intent: {error}")))?;
         if intent.version != 1 || intent.hash_algorithm != "blake3" || intent.request_id != id {
             return Err(Failure::unknown("unsupported request intent").into());
@@ -313,7 +313,7 @@ pub fn query(
             }
         } else {
             if let Ok(bytes) = std::fs::read(directory.join("output-artifacts.json")) {
-                value["output_artifacts"] = serde_json::from_slice(&bytes)?;
+                value["output_artifacts"] = alt_json::from_slice(&bytes)?;
             }
             value["outcome"] = json!("unknown");
             value["next_action"] = json!(
@@ -358,7 +358,7 @@ pub fn query(
         value["schema_version"] = json!(1);
         writeln!(out, "{value}")?;
     } else {
-        writeln!(out, "{}", serde_json::to_string_pretty(&value)?)?;
+        writeln!(out, "{}", alt_json::to_string_pretty(&value)?)?;
     }
     Ok(())
 }

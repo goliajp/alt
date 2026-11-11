@@ -34,7 +34,7 @@ fn run() -> Response {
     if cwd.to_str().is_none() {
         let mut error = Failure::usage("non-UTF-8 working directories are not supported");
         error.kind = "unsupported_path";
-        *error.details = serde_json::json!({"path_bytes_hex": machine::hex(cwd.as_os_str().as_encoded_bytes()), "encoding":"os_bytes"});
+        *error.details = alt_json::json!({"path_bytes_hex": machine::hex(cwd.as_os_str().as_encoded_bytes()), "encoding":"os_bytes"});
         return error.response(parsed.json, parsed.cli.request_id.as_deref());
     }
     if let Command::Runner { op, .. } = &parsed.cli.command {
@@ -134,14 +134,14 @@ fn run() -> Response {
             Outcome::Served(response) => {
                 if parsed.json
                     && response.exit_code != 0
-                    && serde_json::from_slice::<serde_json::Value>(&response.stderr)
+                    && alt_json::from_slice::<alt_json::Value>(&response.stderr)
                         .ok()
                         .and_then(|v| v["error"]["outcome"].as_str().map(str::to_owned))
                         .is_none()
                 {
                     let mut error =
                         Failure::unknown("daemon did not return a supported command result");
-                    *error.details = serde_json::json!({"stdout":machine::bytes_value(&response.stdout),"stderr":machine::bytes_value(&response.stderr)});
+                    *error.details = alt_json::json!({"stdout":machine::bytes_value(&response.stdout),"stderr":machine::bytes_value(&response.stderr)});
                     return error.response(true, parsed.cli.request_id.as_deref());
                 }
                 return response;

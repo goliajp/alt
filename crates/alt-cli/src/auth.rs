@@ -2,13 +2,12 @@
 //! Secrets are saved before instructions are shown and before success is printed.
 mod delegate;
 use crate::{cli::AuthOp, machine::Failure};
+use alt_json::json;
 use alt_remote_protocol::login::{DeviceAuthorizationResponse, DeviceError, SavedCredential};
 use alt_wire_http::{
     device::{Client, Error as DeviceTransportError},
     native::{Options, Transport},
 };
-use serde::{Deserialize, Serialize};
-use serde_json::json;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::{
     fs::{File, OpenOptions},
@@ -18,8 +17,7 @@ use std::{
 };
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
-#[derive(Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 struct Pending {
     version: u32,
@@ -28,8 +26,7 @@ struct Pending {
     started_at_unix_ms: u64,
     authorization: DeviceAuthorizationResponse,
 }
-#[derive(Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 struct Issued {
     version: u32,
@@ -78,19 +75,19 @@ fn private_file(path: &Path, write: bool) -> Res<File> {
     }
     Ok(file)
 }
-fn read<T: serde::de::DeserializeOwned>(file: &mut File) -> Res<T> {
+fn read<T: alt_json::FromJson>(file: &mut File) -> Res<T> {
     let mut bytes = Vec::new();
     file.take(16_385).read_to_end(&mut bytes)?;
     if bytes.len() > 16_384 {
         return Err(refused("credential state is too large"));
     }
-    Ok(serde_json::from_slice(&bytes)?)
+    Ok(alt_json::from_slice(&bytes)?)
 }
-fn save(path: &Path, value: &impl Serialize) -> Res<()> {
+fn save(path: &Path, value: &impl alt_json::ToJson) -> Res<()> {
     let mut temp = alt_os::temp::NamedTempFile::new_in(parent(path))?;
     temp.as_file()
         .set_permissions(std::fs::Permissions::from_mode(0o600))?;
-    serde_json::to_writer(&mut temp, value)?;
+    alt_json::to_writer(&mut temp, value)?;
     temp.write_all(b"\n")?;
     temp.as_file().sync_all()?;
     temp.persist_noclobber(path)?;
@@ -140,7 +137,7 @@ fn inspect(value: &SavedCredential) -> Res<()> {
     }
     Ok(())
 }
-fn summary(value: &SavedCredential, path: &Path) -> serde_json::Value {
+fn summary(value: &SavedCredential, path: &Path) -> alt_json::Value {
     json!({"schema_version":1,"authenticated":true,"origin":value.origin,"installation_id":value.installation_id,"principal":value.principal,"expires_at_unix_ms":value.expires_at_unix_ms.to_string(),"credential_file":path})
 }
 fn journal(path: &Path) -> PathBuf {
@@ -214,7 +211,7 @@ pub fn run(op: &AuthOp, out: &mut impl Write, progress: &mut impl Write) -> Res<
         } => {
             let value = read_credential(credential_file)?;
             inspect(&value)?;
-            serde_json::to_value(transport(&value)?.agent_delegations(after.as_deref())?)?
+            alt_json::to_value(transport(&value)?.agent_delegations(after.as_deref())?)?
         }
         AuthOp::RevokeAgent {
             credential_file,
@@ -260,7 +257,7 @@ pub fn run(op: &AuthOp, out: &mut impl Write, progress: &mut impl Write) -> Res<
             json!({"schema_version":1,"revoked":true,"origin":value.origin,"credential_file_removed":credential_file})
         }
     };
-    serde_json::to_writer(&mut *out, &result)?;
+    alt_json::to_writer(&mut *out, &result)?;
     writeln!(out)?;
     Ok(())
 }
@@ -271,7 +268,7 @@ fn login(
     resume: bool,
     no_wait: bool,
     progress: &mut impl Write,
-) -> Res<serde_json::Value> {
+) -> Res<alt_json::Value> {
     let client = Client::new(server, allow_http)?;
     if path.try_exists()? {
         if !resume {
@@ -483,5 +480,5 @@ fn login(
 mod json_tests {
     use super::*;
 
-    alt_json_testkit::module_tests!("auth", 0xc100; Pending, Issued);
+    alt_json_testkit::module_fixture_tests!("auth"; Pending, Issued);
 }

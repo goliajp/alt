@@ -172,8 +172,8 @@ impl Identity {
         }
     }
 
-    pub fn binding(&self) -> serde_json::Value {
-        serde_json::json!({
+    pub fn binding(&self) -> alt_json::Value {
+        alt_json::json!({
             "actor": self.actor("request"), "author_name": self.author_name,
             "author_email": self.author_email, "controlling": self.controlling,
             "protected_override": self.protected_override, "environment":self.execution_environment,

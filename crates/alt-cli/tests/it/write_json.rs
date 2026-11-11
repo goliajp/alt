@@ -123,7 +123,7 @@ fn merge_json_clean_and_conflict() {
     let m = alt(root, &["merge", "x", "--json"]);
     assert!(!m.status.success(), "conflicting merge exits non-zero");
     assert!(m.stdout.is_empty());
-    let failure: serde_json::Value = serde_json::from_slice(&m.stderr).unwrap();
+    let failure: alt_json::Value = alt_json::from_slice(&m.stderr).unwrap();
     assert_eq!(failure["error"]["kind"], "conflict");
     assert_eq!(failure["error"]["outcome"], "partial");
     let json = failure["error"]["details"]["command_output"]["text"]

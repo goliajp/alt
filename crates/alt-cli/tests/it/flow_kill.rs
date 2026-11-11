@@ -60,8 +60,8 @@ fn ok(o: Output) -> String {
 fn settle_post_kill_dirty_state(root: &Path) {
     // D02 records unfinished local writes explicitly. Complete only the
     // recorded intent, with the product's full prestate checks, before moving on.
-    let pending: serde_json::Value =
-        serde_json::from_str(&ok(alt(root, &["operation", "pending", "--json"]))).unwrap();
+    let pending: alt_json::Value =
+        alt_json::from_str(&ok(alt(root, &["operation", "pending", "--json"]))).unwrap();
     for operation in pending["operations"].as_array().unwrap() {
         let id = operation["operation_id"].as_str().unwrap();
         ok(alt(root, &["operation", "recover", id]));

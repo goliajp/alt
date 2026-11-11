@@ -583,7 +583,7 @@ pub fn init(dir: Option<PathBuf>, out: &mut impl Write) -> Res<()> {
     let mut odb = NativeOdb::open(&alt_dir)?;
     odb.flush()?;
     let mut refs = RefStore::open(&alt_dir)?;
-    let context = serde_json::to_vec(&recovery::RefContext {
+    let context = alt_json::to_vec(&recovery::RefContext {
         version: 2,
         effects: recovery::RefEffects::Unknown,
         workspace: recovery::workspace_identity_at(&alt_dir.join("index"), DEFAULT_WORKSPACE)?,
@@ -988,7 +988,7 @@ impl<'a> NativeRepo<'a> {
             state_check: Some(&one_workspace_per_branch),
         };
         let actor = self.id.actor(verb);
-        let context = serde_json::to_vec(&recovery::RefContext {
+        let context = alt_json::to_vec(&recovery::RefContext {
             version: 2,
             effects: if self.checkout_intent.is_some() {
                 recovery::RefEffects::Checkout

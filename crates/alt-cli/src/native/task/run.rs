@@ -8,8 +8,7 @@ use std::{
 
 mod transport;
 
-#[derive(serde::Deserialize, alt_json::FromJson)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[derive(alt_json::FromJson)]
 #[json(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(super) enum Profile {
     Local {
@@ -61,7 +60,7 @@ impl NativeRepo<'_> {
             .join("requests")
             .join(&receipt.creator_request);
         let intent = match std::fs::read(directory.join("intent.json")) {
-            Ok(raw) => serde_json::from_slice::<crate::request::Intent>(&raw)?,
+            Ok(raw) => alt_json::from_slice::<crate::request::Intent>(&raw)?,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
             Err(e) => return Err(e.into()),
         };
@@ -130,14 +129,14 @@ impl NativeRepo<'_> {
                 .join("task-data/records/run-receipt")
                 .join(format!("{}.json", operation.record_id));
             let raw = super::transfer_source::bounded(&path, 4 * 1024 * 1024)?;
-            let value: serde_json::Value = serde_json::from_slice(&raw)?;
+            let value: alt_json::Value = alt_json::from_slice(&raw)?;
             if value["schema_version"] != 1
                 || value["hash_algorithm"] != "blake3"
                 || value["kind"] != "run-receipt"
             {
                 return Err(refused("invalid local run receipt envelope"));
             }
-            let receipt: RunReceipt = serde_json::from_value(value["record"].clone())?;
+            let receipt: RunReceipt = alt_json::from_value(value["record"].clone())?;
             if receipt.id()? != operation.record_id {
                 return Err(refused("local run receipt address mismatch"));
             }
@@ -158,7 +157,7 @@ impl NativeRepo<'_> {
         out: &mut impl Write,
     ) -> Res<()> {
         self.ensure_writable("evidence run")?;
-        let profile: Profile = serde_json::from_str(definition)
+        let profile: Profile = alt_json::from_str(definition)
             .map_err(|error| crate::machine::Failure::usage(error.to_string()))?;
         let mut store = self.task_store()?;
         let candidate: Candidate = store.load(candidate_id)?;
@@ -275,7 +274,7 @@ impl NativeRepo<'_> {
                 Profile::RemoteSync { device, .. } => device.clone(),
             },
         };
-        fs::write(control.join("spec.json"), serde_json::to_vec(&spec)?)?;
+        fs::write(control.join("spec.json"), alt_json::to_vec(&spec)?)?;
         let spec_artifact = captured(&mut store, &control.join("spec.json"))?;
         let (remote, observer_path, observer) =
             transport::prepare(&root, &profile, &spec, &mut store)?;

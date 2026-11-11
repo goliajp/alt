@@ -2,12 +2,12 @@
 mod adopt;
 mod changes;
 use alt_crypto::ed25519::SigningKey;
+use alt_json::{Value, json};
 use alt_remote_protocol::{ActorKind, Attribution, DeploymentMode, Limits};
 use alt_repository_service::{Grant, RefSelector};
 use alt_server::{HttpOptions, NativeOptions, StoreFactory};
 use alt_server_store::{ByteStore, Credential, InstanceSpec, Store};
 use postgres::{Client, NoTls};
-use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
@@ -332,7 +332,7 @@ fn ok(root: &Path, token: &str, args: &[&str]) -> Output {
     output
 }
 fn value(root: &Path, token: &str, args: &[&str]) -> Value {
-    serde_json::from_slice(&ok(root, token, args).stdout).unwrap()
+    alt_json::from_slice(&ok(root, token, args).stdout).unwrap()
 }
 fn git(root: &Path, token: &str, args: &[&str]) -> Vec<u8> {
     let output = Command::new("git")
@@ -377,7 +377,7 @@ fn connect(root: &Path, server: &Server, token: &str, name: &str) {
     );
 }
 fn preview(root: &Path, token: &str, name: &str, plan: &Value, path: &Path) -> Value {
-    std::fs::write(path, serde_json::to_vec(plan).unwrap()).unwrap();
+    std::fs::write(path, alt_json::to_vec(plan).unwrap()).unwrap();
     value(
         root,
         token,
@@ -989,7 +989,7 @@ fn browser_request(
             .stdin
             .take()
             .unwrap()
-            .write_all(&serde_json::to_vec(&body).unwrap())
+            .write_all(&alt_json::to_vec(&body).unwrap())
             .unwrap();
     } else {
         drop(child.stdin.take());
@@ -1006,7 +1006,7 @@ fn browser_request(
             .parse()
             .unwrap(),
         std::fs::read_to_string(headers.path()).unwrap(),
-        serde_json::from_reader(std::fs::File::open(output.path()).unwrap()).unwrap(),
+        alt_json::from_reader(std::fs::File::open(output.path()).unwrap()).unwrap(),
     )
 }
 fn browser_login(server: &Server) -> (String, Value) {

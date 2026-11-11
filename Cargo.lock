@@ -105,8 +105,6 @@ dependencies = [
  "golia-change-link",
  "postgres",
  "regex",
- "serde",
- "serde_json",
  "tiny_http",
  "tokio",
 ]

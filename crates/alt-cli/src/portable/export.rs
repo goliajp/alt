@@ -2,15 +2,13 @@ use super::{Binding, Budget, Res, connection, local::Journal, refused};
 use alt_portable::{Envelope, http::ExportState};
 use alt_remote_protocol::RequestKey;
 use alt_wire_http::native::portable::ExportCommand;
-use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
     io::{Read, Seek, Write},
     path::{Path, PathBuf},
 };
 
-#[derive(Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 struct ExportRequest {
     version: u32,
@@ -18,8 +16,7 @@ struct ExportRequest {
     key: RequestKey,
     output: PathBuf,
 }
-#[derive(Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 struct ArchiveFact {
     version: u32,
@@ -175,9 +172,9 @@ pub fn export(
             output,
         };
         journal.record("archive.json", &fact, budget.metadata_bytes)?;
-        serde_json::to_writer(
+        alt_json::to_writer(
             &mut *out,
-            &serde_json::json!({"schema_version":1,"state":"exported","source":request.key.scope,"source_public_key":envelope.catalog.source_public_key,"export_id":request.key.request_id,"snapshot_sequence":envelope.catalog.snapshot_sequence.to_string(),"source_frozen":frozen,"archive":fact}),
+            &alt_json::json!({"schema_version":1,"state":"exported","source":request.key.scope,"source_public_key":envelope.catalog.source_public_key,"export_id":request.key.request_id,"snapshot_sequence":envelope.catalog.snapshot_sequence.to_string(),"source_frozen":frozen,"archive":fact}),
         )?;
         out.write_all(b"\n")?;
         Ok(())
@@ -222,7 +219,7 @@ pub fn control(
     {
         return Err(refused("source export identity changed"));
     }
-    serde_json::to_writer(&mut *out, &result)?;
+    alt_json::to_writer(&mut *out, &result)?;
     out.write_all(b"\n")?;
     Ok(())
 }
@@ -231,5 +228,5 @@ pub fn control(
 mod json_tests {
     use super::*;
 
-    alt_json_testkit::module_tests!("portable-export", 0xc10b; ExportRequest, ArchiveFact);
+    alt_json_testkit::module_fixture_tests!("portable-export"; ExportRequest, ArchiveFact);
 }

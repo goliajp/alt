@@ -5,15 +5,13 @@ use alt_remote_protocol::change_links::{ChangeMappingRequest, ChangeWithdrawalRe
 use golia_change_link as link;
 mod repair;
 
-#[derive(serde::Deserialize, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 struct Plan {
     channel: String,
     action: Action,
 }
-#[derive(serde::Deserialize, alt_json::FromJson)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[derive(alt_json::FromJson)]
 #[json(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum Action {
     Mapping {
@@ -28,8 +26,7 @@ enum Action {
         reason: String,
     },
 }
-#[derive(serde::Serialize, serde::Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum Request {
     Mapping(ChangeMappingRequest),
@@ -49,8 +46,7 @@ impl Request {
         }
     }
 }
-#[derive(serde::Serialize, serde::Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 struct Saved {
     version: u32,
@@ -120,7 +116,7 @@ fn result(
     emit(
         out,
         json_mode,
-        json!({"change_id":id,"state":state,"history":value}),
+        json!({"change_id":id,"state":state,"history":alt_json_serde::Serde(value)}),
     )
 }
 fn failed(
@@ -164,11 +160,11 @@ impl NativeRepo<'_> {
                     ChangeOp::Channels { .. } => {
                         json!({"channels":client.change_channels(&binding.scope)?})
                     }
-                    ChangeOp::List { after, .. } => serde_json::to_value(
-                        client.change_events(&binding.scope, after.as_deref())?,
-                    )?,
+                    ChangeOp::List { after, .. } => {
+                        alt_json::to_value(client.change_events(&binding.scope, after.as_deref())?)?
+                    }
                     ChangeOp::Show { digest, .. } => {
-                        json!({"history":client.change_event(&binding.scope,digest)?})
+                        json!({"history":alt_json_serde::Serde(client.change_event(&binding.scope,digest)?)})
                     }
                     ChangeOp::Repair { digest, .. } => {
                         let claim = client.repair_claim(&binding.scope, digest)?;
@@ -184,12 +180,12 @@ impl NativeRepo<'_> {
                         } else {
                             None
                         };
-                        json!({"repair_request_digest":digest,"published_task":claim,"source":source})
+                        json!({"repair_request_digest":digest,"published_task":claim,"source":alt_json_serde::Serde(source)})
                     }
                     ChangeOp::Reauthorize {
                         channel, digest, ..
                     } => {
-                        json!({"history":client.change_reauthorize(&binding.scope,channel,digest)?})
+                        json!({"history":alt_json_serde::Serde(client.change_reauthorize(&binding.scope,channel,digest)?)})
                     }
                     _ => unreachable!(),
                 };
@@ -268,7 +264,7 @@ impl NativeRepo<'_> {
             binding,
             request,
         };
-        let bytes = serde_json::to_vec(&saved)?;
+        let bytes = alt_json::to_vec(&saved)?;
         if bytes.len() > link::MAX_BYTES {
             return Err(refused("association intent exceeds the supported size"));
         }
@@ -304,7 +300,7 @@ impl NativeRepo<'_> {
         if alt_hash::blake3::hash(&bytes).to_hex().as_str() != id {
             return Err(refused("saved association intent changed"));
         }
-        let saved: Saved = serde_json::from_slice(&bytes)?;
+        let saved: Saved = alt_json::from_slice(&bytes)?;
         self.check_binding(&saved.binding)?;
         if saved.version != 1
             || saved.request.key().scope != saved.binding.scope
@@ -339,34 +335,6 @@ impl NativeRepo<'_> {
 #[cfg(test)]
 mod json_tests {
     use super::*;
-    use alt_json_testkit::arbitrary::from_serde;
-    use alt_json_testkit::rng::Rng;
 
-    const DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/json");
-    const NAME: &str = "native-task-transfer-changes-Saved";
-
-    // the request is an enum with a tag, which cannot be generated from
-    // its serde implementation
-    fn saved(rng: &mut Rng) -> Saved {
-        Saved {
-            version: from_serde(rng),
-            binding: from_serde(rng),
-            request: match rng.below(2) {
-                0 => Request::Mapping(from_serde(rng)),
-                _ => Request::Withdraw(from_serde(rng)),
-            },
-        }
-    }
-
-    #[test]
-    fn same_as_serde() {
-        alt_json_testkit::drive::exercise_with(0xc108, 600, saved).report(NAME);
-    }
-
-    #[test]
-    fn recorded_bytes_and_verdicts() {
-        let recorded = alt_json_testkit::fixtures::record(0xc109, 15, saved);
-        alt_json_testkit::fixtures::check_recorded(&format!("{DIR}/{NAME}.txt"), &recorded);
-        alt_json_testkit::fixtures::verify_file::<Saved>(DIR, NAME);
-    }
+    alt_json_testkit::module_fixture_tests!("native-task-transfer-changes"; Saved);
 }

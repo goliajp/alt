@@ -1,24 +1,13 @@
 use super::*;
 use std::collections::BTreeSet;
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    alt_json::ToJson,
-    alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub(super) struct Predecessor {
     pub digest: String,
     pub request: String,
 }
-#[derive(serde::Serialize, serde::Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub(super) struct Adoption {
     pub version: u32,
@@ -26,7 +15,6 @@ pub(super) struct Adoption {
     pub publication: String,
     pub destination: Scope,
     pub creator_request: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[json(default, skip_serializing_if = "Option::is_none")]
     pub supersedes: Option<Predecessor>,
 }
@@ -43,14 +31,14 @@ impl NativeRepo<'_> {
         alt_task::check_id(id)?;
         let path = self.adoption_path(id);
         let original = bounded(&path, MARKER_BYTES)?;
-        let current: Adoption = serde_json::from_slice(&original)?;
+        let current: Adoption = alt_json::from_slice(&original)?;
         let scope = self.task_scope()?;
         let history = path.parent().expect("marker parent").join("history");
         let mut raw = original.clone();
         let mut requests = BTreeSet::new();
         let mut digests = BTreeSet::new();
         for depth in 1..=64 {
-            let marker: Adoption = serde_json::from_slice(&raw)?;
+            let marker: Adoption = alt_json::from_slice(&raw)?;
             crate::request::parse_id(&marker.creator_request)?;
             alt_task::check_id(&marker.publication)?;
             if !matches!(
@@ -76,7 +64,7 @@ impl NativeRepo<'_> {
             if alt_hash::blake3::hash(&raw).to_hex().as_str() != prior.digest {
                 return Err(refused("task adoption predecessor bytes changed"));
             }
-            let previous: Adoption = serde_json::from_slice(&raw)?;
+            let previous: Adoption = alt_json::from_slice(&raw)?;
             if previous.creator_request != prior.request {
                 return Err(refused("task adoption predecessor request mismatch"));
             }
@@ -108,11 +96,11 @@ impl NativeRepo<'_> {
         if completion.outcome != "applied" || response.exit_code != 0 {
             return Ok(false);
         }
-        let result: serde_json::Value = serde_json::from_slice(&response.stdout)?;
+        let result: alt_json::Value = alt_json::from_slice(&response.stdout)?;
         if result["adopted_task_id"] != adoption.task
             || result["publication_digest"] != adoption.publication
-            || result["destination"] != serde_json::to_value(&adoption.destination)?
-            || result["supersedes"] != serde_json::to_value(&adoption.supersedes)?
+            || result["destination"] != alt_json::to_value(&adoption.destination)?
+            || result["supersedes"] != alt_json::to_value(&adoption.supersedes)?
         {
             return Err(refused("task adoption completion binding mismatch"));
         }
@@ -149,5 +137,5 @@ impl NativeRepo<'_> {
 mod json_tests {
     use super::*;
 
-    alt_json_testkit::module_tests!("native-task-transfer-adoption", 0xc107; Predecessor, Adoption);
+    alt_json_testkit::module_fixture_tests!("native-task-transfer-adoption"; Predecessor, Adoption);
 }

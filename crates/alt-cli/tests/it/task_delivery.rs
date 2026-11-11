@@ -1,4 +1,4 @@
-use serde_json::{Value, json};
+use alt_json::{Value, json};
 use std::{
     path::{Path, PathBuf},
     process::{Command, Output},
@@ -25,7 +25,7 @@ fn ok(root: &Path, args: &[&str]) -> Output {
     output
 }
 fn value(root: &Path, args: &[&str]) -> Value {
-    serde_json::from_slice(&ok(root, args).stdout).unwrap()
+    alt_json::from_slice(&ok(root, args).stdout).unwrap()
 }
 struct Fixture {
     _dir: alt_os::temp::TempDir,
@@ -195,7 +195,7 @@ fn reviewed_integration_exports_only_accepted_content_and_preserves_other_worksp
     ];
     let first = ok(&f.workspace, &args);
     assert_eq!(ok(&f.workspace, &args).stdout, first.stdout);
-    let integrated: Value = serde_json::from_slice(&first.stdout).unwrap();
+    let integrated: Value = alt_json::from_slice(&first.stdout).unwrap();
     let integration = integrated["integration_id"].as_str().unwrap();
     assert_eq!(
         value(&f.workspace, &["task", "show", &f.task, "--json"])["state"],
@@ -360,7 +360,7 @@ fn failed_validation_and_missing_completion_cannot_grant_review_or_delivery() {
             "--json",
         ],
     );
-    let error: Value = serde_json::from_slice(&failed.stderr).unwrap();
+    let error: Value = alt_json::from_slice(&failed.stderr).unwrap();
     let evidence = error["error"]["details"]["evidence_id"].as_str().unwrap();
     let denied = run(
         &f.workspace,
@@ -582,7 +582,7 @@ fn independent_intake_preserves_dirty_source_and_reports_unsupported_forms() {
         ],
     );
     assert_eq!(output.status.code(), Some(1));
-    let failure: Value = serde_json::from_slice(&output.stderr).unwrap();
+    let failure: Value = alt_json::from_slice(&output.stderr).unwrap();
     assert_eq!(failure["error"]["outcome"], "not_applied");
     assert!(!rejected.exists());
     assert!(!String::from_utf8_lossy(&output.stderr).contains("never-read-secret-config"));
@@ -691,7 +691,7 @@ fn interrupted_git_verification_keeps_queries_available_and_never_publishes_part
         String::from_utf8_lossy(&query.stderr)
     );
     assert_eq!(
-        serde_json::from_slice::<Value>(&query.stdout).unwrap()["state"],
+        alt_json::from_slice::<Value>(&query.stdout).unwrap()["state"],
         "integrated"
     );
     assert!(!target.exists());
@@ -770,7 +770,7 @@ fn non_deliverable_candidate_is_refused_before_review_or_integration() {
             "unsupported {path} was reviewed: {}",
             String::from_utf8_lossy(&output.stdout)
         );
-        let failure: Value = serde_json::from_slice(&output.stderr).unwrap();
+        let failure: Value = alt_json::from_slice(&output.stderr).unwrap();
         assert_eq!(failure["error"]["outcome"], "not_applied");
         assert!(!f.main.join(".alt/task-data/records/review").exists());
         assert!(!f.main.join(".alt/task-data/records/integration").exists());

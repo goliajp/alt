@@ -25,7 +25,7 @@ fn credential() -> SavedCredential {
 fn auth_private_credentials_reject_links_shared_permissions_and_other_origins() {
     let root = alt_os::temp::tempdir().unwrap();
     let file = root.path().join("credential.json");
-    std::fs::write(&file, serde_json::to_vec(&credential()).unwrap()).unwrap();
+    std::fs::write(&file, alt_json::to_vec(&credential()).unwrap()).unwrap();
     std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
     assert_eq!(
         alt_cli::auth::credential_for_origin(&file, "https://alt.example.test").unwrap(),
@@ -40,7 +40,7 @@ fn auth_private_credentials_reject_links_shared_permissions_and_other_origins() 
     std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
     let mut bad = credential();
     bad.origin = "https://user:secret@alt.example.test".into();
-    std::fs::write(&file, serde_json::to_vec(&bad).unwrap()).unwrap();
+    std::fs::write(&file, alt_json::to_vec(&bad).unwrap()).unwrap();
     assert!(alt_cli::auth::read_credential(&file).is_err());
 }
 #[test]
@@ -63,7 +63,7 @@ fn auth_is_repository_independent_and_refuses_to_overwrite_credentials() {
         .output()
         .unwrap();
     assert!(!output.status.success());
-    let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    let error: alt_json::Value = alt_json::from_slice(&output.stderr).unwrap();
     assert_eq!(error["error"]["kind"], "authorization_refused");
     assert!(
         !String::from_utf8(output.stderr)
@@ -76,7 +76,7 @@ fn auth_is_repository_independent_and_refuses_to_overwrite_credentials() {
 
 #[test]
 fn auth_resumes_after_process_death_with_issued_token_and_expired_device_request() {
-    use serde_json::{Value, json};
+    use alt_json::{Value, json};
     use std::{io::Write, process::Stdio, time::Duration};
     struct Child(Option<std::process::Child>);
     impl Drop for Child {
@@ -143,9 +143,9 @@ fn auth_resumes_after_process_death_with_issued_token_and_expired_device_request
     assert!(!file.exists());
     let issued = std::fs::read(journal.join("issued.json")).unwrap();
     let mut pending: Value =
-        serde_json::from_slice(&std::fs::read(journal.join("request.json")).unwrap()).unwrap();
+        alt_json::from_slice(&std::fs::read(journal.join("request.json")).unwrap()).unwrap();
     pending["started_at_unix_ms"] = json!(1);
-    let pending = serde_json::to_vec(&pending).unwrap();
+    let pending = alt_json::to_vec(&pending).unwrap();
     std::fs::write(journal.join("request.json"), &pending).unwrap();
     let capability = json!({"capabilities":{
         "protocol_min":1,"protocol_max":1,"installation_id":"instance",
@@ -160,7 +160,7 @@ fn auth_resumes_after_process_death_with_issued_token_and_expired_device_request
     reply(receive("/v1/capabilities"), capability.clone());
     reply(
         receive("/v1/principal"),
-        serde_json::to_value(credential().principal).unwrap(),
+        alt_json::to_value(credential().principal).unwrap(),
     );
     let output = resumed.0.take().unwrap().wait_with_output().unwrap();
     assert!(
@@ -197,11 +197,11 @@ fn auth_resumes_after_process_death_with_issued_token_and_expired_device_request
     reply(receive("/v1/capabilities"), capability);
     reply(
         receive("/v1/principal"),
-        serde_json::to_value(credential().principal).unwrap(),
+        alt_json::to_value(credential().principal).unwrap(),
     );
     let output = resumed.0.take().unwrap().wait_with_output().unwrap();
     assert!(output.status.success());
-    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let result: Value = alt_json::from_slice(&output.stdout).unwrap();
     assert_eq!(result["pending_state_removed"], true);
     assert!(!journal.exists());
     assert!(!root.path().join(".alt").exists());
@@ -209,7 +209,7 @@ fn auth_resumes_after_process_death_with_issued_token_and_expired_device_request
 
 #[test]
 fn auth_delegate_reuses_exact_private_intent_after_process_death_during_registration() {
-    use serde_json::{Value, json};
+    use alt_json::{Value, json};
     use std::{
         process::Stdio,
         time::{Duration, SystemTime, UNIX_EPOCH},
@@ -235,7 +235,7 @@ fn auth_delegate_reuses_exact_private_intent_after_process_death_during_registra
         .as_millis() as u64
         + 3_600_000;
     let parent_file = root.path().join("parent.json");
-    std::fs::write(&parent_file, serde_json::to_vec(&parent).unwrap()).unwrap();
+    std::fs::write(&parent_file, alt_json::to_vec(&parent).unwrap()).unwrap();
     std::fs::set_permissions(&parent_file, std::fs::Permissions::from_mode(0o600)).unwrap();
     let file = root.path().join("agent.json");
     let journal = root.path().join("agent.json.delegation");
@@ -288,15 +288,15 @@ fn auth_delegate_reuses_exact_private_intent_after_process_death_during_registra
     reply(receive("/v1/capabilities"), capability.clone());
     reply(
         receive("/v1/principal"),
-        serde_json::to_value(&parent.principal).unwrap(),
+        alt_json::to_value(&parent.principal).unwrap(),
     );
     let mut request = receive("/v1/delegations");
     let mut first = Vec::new();
     request.as_reader().read_to_end(&mut first).unwrap();
     let saved = std::fs::read(journal.join("request.json")).unwrap();
-    let pending: Value = serde_json::from_slice(&saved).unwrap();
+    let pending: Value = alt_json::from_slice(&saved).unwrap();
     assert_eq!(
-        serde_json::from_slice::<Value>(&first).unwrap(),
+        alt_json::from_slice::<Value>(&first).unwrap(),
         pending["request"]
     );
     assert_eq!(
@@ -315,7 +315,7 @@ fn auth_delegate_reuses_exact_private_intent_after_process_death_during_registra
     reply(receive("/v1/capabilities"), capability.clone());
     reply(
         receive("/v1/principal"),
-        serde_json::to_value(&parent.principal).unwrap(),
+        alt_json::to_value(&parent.principal).unwrap(),
     );
     let mut request = receive("/v1/delegations");
     let mut second = Vec::new();
@@ -346,7 +346,7 @@ fn auth_delegate_reuses_exact_private_intent_after_process_death_during_registra
         secret
     );
     assert_eq!(
-        serde_json::from_slice::<Value>(&result.stdout).unwrap()["credential_id"],
+        alt_json::from_slice::<Value>(&result.stdout).unwrap()["credential_id"],
         id
     );
     assert!(!journal.exists());

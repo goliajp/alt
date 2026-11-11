@@ -6,15 +6,13 @@ mod local;
 use alt_portable::PackageLimits;
 use alt_remote_protocol::PrincipalInfo;
 use alt_wire_http::native::{Options, Transport};
-use serde::{Deserialize, Serialize};
 use std::{path::Path, time::Duration};
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 fn refused(message: &str) -> Box<dyn std::error::Error> {
     crate::machine::Failure::refusal("portable_refused", message).into()
 }
-#[derive(Clone, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 struct Binding {
     origin: String,
@@ -125,7 +123,7 @@ fn uncertain(
     journal: &Path,
 ) -> Box<dyn std::error::Error> {
     let mut failure = crate::machine::Failure::unknown(error.to_string());
-    failure.details = Box::new(serde_json::json!({"portable_request":key,"journal":journal}));
+    failure.details = Box::new(alt_json::json!({"portable_request":key,"journal":journal}));
     failure.next_action = "Query the original portable export-status or import-status with the same journal before resuming";
     failure.into()
 }
@@ -254,5 +252,5 @@ pub fn run(op: &crate::cli::PortableOp, out: &mut impl std::io::Write) -> Res<()
 mod json_tests {
     use super::*;
 
-    alt_json_testkit::module_tests!("portable-mod", 0xc10d; Binding);
+    alt_json_testkit::module_fixture_tests!("portable-mod"; Binding);
 }

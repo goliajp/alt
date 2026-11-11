@@ -4,8 +4,7 @@ use alt_remote_protocol::{
     delegation::{AgentScope, DelegationInfo, DelegationRequest, MAX_LIFETIME_MS},
 };
 
-#[derive(Deserialize, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 struct Plan {
     purpose: String,
@@ -13,8 +12,7 @@ struct Plan {
     lifetime_seconds: u64,
     scope: AgentScope,
 }
-#[derive(Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 struct PendingAgent {
     version: u32,
@@ -68,7 +66,7 @@ fn matches(info: &DelegationInfo, req: &DelegationRequest) -> Res<()> {
         || info.attribution != req.attribution
         || info.purpose != req.purpose
         || info.expires_at_unix_ms != req.expires_at_unix_ms
-        || serde_json::to_value(&info.scope)? != serde_json::to_value(&req.scope)?
+        || alt_json::to_value(&info.scope)? != alt_json::to_value(&req.scope)?
         || info.revoked
     {
         return Err(refused(
@@ -82,7 +80,7 @@ pub(super) fn run(
     path: &Path,
     plan: Option<&Path>,
     resume: bool,
-) -> Res<serde_json::Value> {
+) -> Res<alt_json::Value> {
     let human = read_credential(parent_path)?;
     if human.principal.attribution.kind != ActorKind::Human {
         return Err(refused("delegation requires a current human credential"));
@@ -210,7 +208,7 @@ pub(super) fn run(
     inspect(&human)?;
     if path.try_exists()? {
         let saved = read_credential(path)?;
-        if serde_json::to_value(&saved)? != serde_json::to_value(&child)? {
+        if alt_json::to_value(&saved)? != alt_json::to_value(&child)? {
             return Err(refused(
                 "agent destination differs from the saved delegation",
             ));
@@ -239,7 +237,7 @@ pub(super) fn run(
     result["credential_id"] = json!(alt_remote_protocol::delegation::credential_id(
         &child.access_token
     )?);
-    result["scope"] = serde_json::to_value(&pending.request.scope)?;
+    result["scope"] = alt_json::to_value(&pending.request.scope)?;
     result["purpose"] = json!(pending.request.purpose);
     result["pending_state_removed"] = json!(clean(&directory));
     Ok(result)
@@ -249,5 +247,5 @@ pub(super) fn run(
 mod json_tests {
     use super::*;
 
-    alt_json_testkit::module_tests!("auth-delegate", 0xc101; PendingAgent);
+    alt_json_testkit::module_fixture_tests!("auth-delegate"; PendingAgent);
 }

@@ -64,8 +64,6 @@ alt-bytes.workspace = true
 clap.workspace = true
 encoding_rs.workspace = true
 regex.workspace = true
-serde.workspace = true
-serde_json.workspace = true
 alt-json.workspace = true
 alt-json-serde.workspace = true
 

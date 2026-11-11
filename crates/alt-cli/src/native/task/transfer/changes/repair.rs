@@ -1,8 +1,7 @@
 use super::*;
 use std::collections::BTreeSet;
 
-#[derive(serde::Serialize, serde::Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 struct Creation {
     version: u32,
@@ -15,11 +14,11 @@ struct Creation {
 
 fn read(path: &Path) -> Res<(Creation, Vec<u8>, usize)> {
     let raw = bounded(path, 8192)?;
-    let current: Creation = serde_json::from_slice(&raw)?;
+    let current: Creation = alt_json::from_slice(&raw)?;
     let mut bytes = raw.clone();
     let mut requests = BTreeSet::new();
     for depth in 1..=64 {
-        let value: Creation = serde_json::from_slice(&bytes)?;
+        let value: Creation = alt_json::from_slice(&bytes)?;
         alt_task::check_id(&value.repair)?;
         alt_task::check_id(&value.intent)?;
         crate::request::parse_id(&value.creator_request)?;
@@ -43,7 +42,7 @@ fn read(path: &Path) -> Res<(Creation, Vec<u8>, usize)> {
                 .join(format!("{}.json", prior.digest)),
             8192,
         )?;
-        let previous: Creation = serde_json::from_slice(&bytes)?;
+        let previous: Creation = alt_json::from_slice(&bytes)?;
         if alt_hash::blake3::hash(&bytes).to_hex().as_str() != prior.digest
             || previous.creator_request != prior.request
         {
@@ -56,7 +55,7 @@ fn read(path: &Path) -> Res<(Creation, Vec<u8>, usize)> {
 }
 
 impl NativeRepo<'_> {
-    fn completed_repair(&self, creation: &Creation) -> Res<Option<serde_json::Value>> {
+    fn completed_repair(&self, creation: &Creation) -> Res<Option<alt_json::Value>> {
         let directory = self
             .store
             .alt_dir
@@ -78,8 +77,8 @@ impl NativeRepo<'_> {
         if completion.outcome != "applied" || response.exit_code != 0 {
             return Ok(None);
         }
-        let result: serde_json::Value = serde_json::from_slice(&response.stdout)?;
-        let task: Task = serde_json::from_value(result["task"].clone())?;
+        let result: alt_json::Value = alt_json::from_slice(&response.stdout)?;
+        let task: Task = alt_json::from_value(result["task"].clone())?;
         let source = task
             .spec
             .repair_source
@@ -134,7 +133,7 @@ impl NativeRepo<'_> {
                 "task target differs from the explicit repair request",
             ));
         }
-        let mut spec: alt_task::TaskSpec = serde_json::from_str(definition)
+        let mut spec: alt_task::TaskSpec = alt_json::from_str(definition)
             .map_err(|e| crate::machine::Failure::usage(e.to_string()))?;
         if spec.repair_source.is_some() {
             return Err(refused(
@@ -143,7 +142,7 @@ impl NativeRepo<'_> {
         }
         spec.repair_source = Some(Box::new(source));
         spec.validate()?;
-        let intent = alt_hash::blake3::hash(&serde_json::to_vec(&(&binding.scope, &spec, target))?)
+        let intent = alt_hash::blake3::hash(&alt_json::to_vec(&(&binding.scope, &spec, target))?)
             .to_hex()
             .to_string();
         let scope = self.task_scope()?;
@@ -236,7 +235,7 @@ impl NativeRepo<'_> {
         // completion makes it publishable; earlier interrupted records remain.
         self.task_command(
             &crate::cli::TaskOp::Create {
-                definition: serde_json::to_string(&spec)?,
+                definition: alt_json::to_string(&spec)?,
                 target: target.clone(),
             },
             json_mode,
@@ -251,5 +250,5 @@ impl NativeRepo<'_> {
 mod json_tests {
     use super::*;
 
-    alt_json_testkit::module_tests!("native-task-transfer-changes-repair", 0xc109; Creation);
+    alt_json_testkit::module_fixture_tests!("native-task-transfer-changes-repair"; Creation);
 }

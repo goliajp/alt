@@ -35,7 +35,7 @@ impl NativeRepo<'_> {
             .map(|(name, target)| (name.to_owned(), alt_delivery::render(target)))
             .collect();
         let mut origin: alt_delivery::Snapshot = match std::fs::read(&origin_path) {
-            Ok(bytes) => serde_json::from_slice(&bytes)?,
+            Ok(bytes) => alt_json::from_slice(&bytes)?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 if !store.list::<Task>()?.is_empty() {
                     return Err(refused(
@@ -48,7 +48,7 @@ impl NativeRepo<'_> {
                     &config,
                     self.store.algo,
                 )?;
-                crate::durable::write(&origin_path, serde_json::to_vec(&origin)?)?;
+                crate::durable::write(&origin_path, alt_json::to_vec(&origin)?)?;
                 origin
             }
             Err(error) => return Err(error.into()),
@@ -95,7 +95,7 @@ impl NativeRepo<'_> {
             return Err(refused("task baseline is ambiguous or incomplete"));
         }
         let snapshot: alt_delivery::Snapshot =
-            serde_json::from_slice(&store.blob(&record.1.snapshot)?)?;
+            alt_json::from_slice(&store.blob(&record.1.snapshot)?)?;
         snapshot.validate(&self.store.odb)?;
         Ok((record.0, snapshot))
     }
@@ -169,7 +169,7 @@ impl NativeRepo<'_> {
             .map_err(|error| refused(error.to_string()))?;
         Ok((task, candidate))
     }
-    fn review_changes(&self, task: &Task) -> Res<serde_json::Value> {
+    fn review_changes(&self, task: &Task) -> Res<alt_json::Value> {
         let before = self.commit_entries(ObjectId::from_hex(task.baseline.head.as_bytes())?)?;
         let before: BTreeMap<_, _> = before
             .into_iter()
@@ -178,9 +178,9 @@ impl NativeRepo<'_> {
         let after = self.task_index()?;
         let paths: std::collections::BTreeSet<_> =
             before.keys().chain(after.entries.keys()).cloned().collect();
-        let value = |entry: Option<&(u32, ObjectId)>| -> Res<serde_json::Value> {
+        let value = |entry: Option<&(u32, ObjectId)>| -> Res<alt_json::Value> {
             match entry {
-                None => Ok(serde_json::Value::Null),
+                None => Ok(alt_json::Value::Null),
                 Some((mode, oid)) => {
                     let bytes = self
                         .store
@@ -239,7 +239,7 @@ impl NativeRepo<'_> {
         let mut store = self.task_store()?;
         let (task, candidate) = self.eligible_review_inputs(&store, candidate_id, evidence_id)?;
         let (baseline, _) = self.task_baseline_record(&store, &candidate.task)?;
-        let changes = store.put_blob(&serde_json::to_vec(&self.review_changes(&task)?)?)?;
+        let changes = store.put_blob(&alt_json::to_vec(&self.review_changes(&task)?)?)?;
         let review = Review {
             schema_version: 1,
             task: candidate.task.clone(),
@@ -269,7 +269,7 @@ impl NativeRepo<'_> {
     ) -> Res<()> {
         let store = self.task_store()?;
         let review: Review = store.load(id)?;
-        let changes: serde_json::Value = serde_json::from_slice(&store.blob(&review.changes)?)?;
+        let changes: alt_json::Value = alt_json::from_slice(&store.blob(&review.changes)?)?;
         emit(
             out,
             json_mode,
@@ -296,7 +296,7 @@ impl NativeRepo<'_> {
             self.eligible_review_inputs(&store, &review.candidate, &review.evidence)?;
         if review.task != candidate.task
             || review.target_expected != candidate.target_expected
-            || store.blob(&review.changes)? != serde_json::to_vec(&self.review_changes(&task)?)?
+            || store.blob(&review.changes)? != alt_json::to_vec(&self.review_changes(&task)?)?
         {
             return Err(refused("review no longer describes this candidate/target"));
         }
@@ -478,7 +478,7 @@ impl NativeRepo<'_> {
             return Err(refused("integration review/baseline mismatch"));
         }
         let snapshot: alt_delivery::Snapshot =
-            serde_json::from_slice(&store.blob(&baseline.snapshot)?)?;
+            alt_json::from_slice(&store.blob(&baseline.snapshot)?)?;
         let mut refs = snapshot.refs.clone();
         refs.insert(integration.target.clone(), integration.commit.clone());
         refs.insert(
@@ -507,7 +507,7 @@ impl NativeRepo<'_> {
             git,
         )?;
         let mut store = self.task_store()?;
-        let report_artifact = store.put_blob(&serde_json::to_vec(&prepared.report)?)?;
+        let report_artifact = store.put_blob(&alt_json::to_vec(&prepared.report)?)?;
         let delivery = Delivery {
             schema_version: 1,
             task: integration.task.clone(),
@@ -538,7 +538,7 @@ impl NativeRepo<'_> {
     ) -> Res<()> {
         let store = self.task_store()?;
         let delivery: Delivery = store.load(id)?;
-        let report: serde_json::Value = serde_json::from_slice(&store.blob(&delivery.report)?)?;
+        let report: alt_json::Value = alt_json::from_slice(&store.blob(&delivery.report)?)?;
         emit(
             out,
             json_mode,
@@ -592,7 +592,7 @@ impl NativeRepo<'_> {
                 .join("intent.json"),
             4 * 1024 * 1024,
         ) {
-            Ok(raw) => serde_json::from_slice(&raw)?,
+            Ok(raw) => alt_json::from_slice(&raw)?,
             Err(alt_task_transfer::Error::Io(error))
                 if error.kind() == std::io::ErrorKind::NotFound =>
             {
@@ -613,7 +613,7 @@ impl NativeRepo<'_> {
                 continue;
             };
             let Some(context) = tx.context else { continue };
-            let context: recovery::RefContext = serde_json::from_slice(&context)?;
+            let context: recovery::RefContext = alt_json::from_slice(&context)?;
             if !matches!(context.version, 1 | 2)
                 || context.workspace.instance != intent.workspace
                 || context.request_id.as_deref() != Some(&integration.creator_request)
@@ -809,7 +809,7 @@ impl NativeRepo<'_> {
             return Err(refused("integration completion is still unknown"));
         }
         let report: alt_delivery::ExportReport =
-            serde_json::from_slice(&store.blob(&delivery.report)?)?;
+            alt_json::from_slice(&store.blob(&delivery.report)?)?;
         drop(store);
         let verification = alt_delivery::verify_existing(
             &self.store.odb,
@@ -819,7 +819,7 @@ impl NativeRepo<'_> {
         )
         .map_err(|e| refused(e.to_string()))?;
         let mut store = self.task_store()?;
-        let artifact = store.put_blob(&serde_json::to_vec(&verification)?)?;
+        let artifact = store.put_blob(&alt_json::to_vec(&verification)?)?;
         let receipt = alt_task::DeliveryReceipt {
             schema_version: 1,
             delivery: id.into(),

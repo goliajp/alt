@@ -53,7 +53,7 @@ impl NativeRepo<'_> {
                         "task creation requires a named isolated workspace; create one with alt workspace add",
                     ));
                 }
-                let spec: alt_task::TaskSpec = serde_json::from_str(definition)
+                let spec: alt_task::TaskSpec = alt_json::from_str(definition)
                     .map_err(|error| crate::machine::Failure::usage(error.to_string()))?;
                 spec.validate()?;
                 if !target.starts_with("refs/heads/") {
@@ -99,7 +99,7 @@ impl NativeRepo<'_> {
                 let mut store = alt_task::Store::open(&self.store.alt_dir.join("task-data"))?;
                 let snapshot = self.prepare_task_baseline(&store)?;
                 let id = store.publish(&task)?;
-                let snapshot = store.put_blob(&serde_json::to_vec(&snapshot)?)?;
+                let snapshot = store.put_blob(&alt_json::to_vec(&snapshot)?)?;
                 let baseline_id = store.publish(&alt_task::TaskBaseline {
                     schema_version: 1,
                     task: id.clone(),

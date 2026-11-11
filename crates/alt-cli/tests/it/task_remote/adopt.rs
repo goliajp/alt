@@ -415,7 +415,7 @@ fn interrupted_received_task_adoption_can_be_explicitly_reauthorized() {
                     .success()
             );
             assert_eq!(
-                serde_json::from_slice::<Value>(&previous).unwrap()["version"],
+                alt_json::from_slice::<Value>(&previous).unwrap()["version"],
                 2
             );
             println!(

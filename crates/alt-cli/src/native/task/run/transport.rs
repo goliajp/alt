@@ -55,7 +55,7 @@ fn invoke_input(
         .append(true)
         .create(true)
         .open(directory.join("operations.jsonl"))?;
-    serde_json::to_writer(
+    alt_json::to_writer(
         &mut log,
         &json!({"step":label,"stdout":stdout,"stderr":stderr,"exit_code":status.code(),"success":status.success(),"input_error":input_error.as_ref().map(ToString::to_string)}),
     )?;
@@ -291,7 +291,7 @@ pub(super) fn collect(
 ) -> Res<(Evidence, Artifact)> {
     let root = Path::new(&attempt.local_directory);
     let original_spec = store.blob(&attempt.spec)?;
-    let spec: alt_runner::Spec = serde_json::from_slice(&original_spec)?;
+    let spec: alt_runner::Spec = alt_json::from_slice(&original_spec)?;
     if spec.nonce != attempt.nonce
         || spec.candidate != attempt.candidate
         || spec.manifest.id()? != attempt.manifest
@@ -321,7 +321,7 @@ pub(super) fn collect(
     if alt_hash::blake3::keyed_hash(&key, &bytes).to_hex().as_str() != mac.trim() {
         return Err(refused("observer report authentication failed"));
     }
-    let report: alt_runner::Report = serde_json::from_slice(&bytes)?;
+    let report: alt_runner::Report = alt_json::from_slice(&bytes)?;
     if report.schema_version != 1
         || report.nonce != attempt.nonce
         || report.evidence.candidate != attempt.candidate

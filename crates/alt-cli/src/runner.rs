@@ -3,7 +3,7 @@
 //! the observer's files and is never mixed into its JSON response.
 use crate::cli::RunnerOp;
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
-use serde_json::json;
+use alt_json::json;
 use std::io::Write;
 
 pub fn run(op: &RunnerOp, out: &mut impl Write) -> Res<()> {
@@ -13,10 +13,10 @@ pub fn run(op: &RunnerOp, out: &mut impl Write) -> Res<()> {
             bindings,
             environment,
         } => {
-            let bindings: Vec<alt_runner::ToolBinding> = serde_json::from_str(bindings)
+            let bindings: Vec<alt_runner::ToolBinding> = alt_json::from_str(bindings)
                 .map_err(|error| crate::machine::Failure::usage(error.to_string()))?;
             let environment: std::collections::BTreeMap<String, String> =
-                serde_json::from_str(environment)
+                alt_json::from_str(environment)
                     .map_err(|error| crate::machine::Failure::usage(error.to_string()))?;
             let tools = bindings
                 .iter()
@@ -26,16 +26,16 @@ pub fn run(op: &RunnerOp, out: &mut impl Write) -> Res<()> {
             json!({"schema_version":1,"runner":alt_runner::host_identity()?,"tools":tools,"observer_blake3":alt_hash::blake3::hash(&observer).to_hex().to_string()})
         }
         RunnerOp::Execute { spec } => {
-            let spec: alt_runner::Spec = serde_json::from_slice(&std::fs::read(spec)?)?;
+            let spec: alt_runner::Spec = alt_json::from_slice(&std::fs::read(spec)?)?;
             use std::io::Read;
             let mut authentication_key = [0; 32];
             std::io::stdin()
                 .lock()
                 .read_exact(&mut authentication_key)?;
-            serde_json::to_value(alt_runner::execute(&root, &spec, &authentication_key)?)?
+            alt_json::to_value(alt_runner::execute(&root, &spec, &authentication_key)?)?
         }
     };
-    serde_json::to_writer(&mut *out, &value)?;
+    alt_json::to_writer(&mut *out, &value)?;
     writeln!(out)?;
     Ok(())
 }

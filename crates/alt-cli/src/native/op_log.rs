@@ -46,7 +46,7 @@ pub(super) fn render_op_log_json(
         if let Some(tx) = parse_ref_tx_or_none(&op.payload)?
             && let Some(context) = tx.context
         {
-            let context: recovery::RefContext = serde_json::from_slice(&context)?;
+            let context: recovery::RefContext = alt_json::from_slice(&context)?;
             fields.push((
                 "workspace",
                 Json::Object(vec![
@@ -76,7 +76,7 @@ pub(super) fn render_op_log_json(
             if op.payload.get(1) != Some(&1) {
                 return Err("unsupported recovery record version".into());
             }
-            let value: serde_json::Value = serde_json::from_slice(&op.payload[2..])?;
+            let value: alt_json::Value = alt_json::from_slice(&op.payload[2..])?;
             let mut recovery = vec![(
                 "phase",
                 Json::str(if matches!(op.payload[0], 0x30 | 0x32) {
@@ -93,7 +93,7 @@ pub(super) fn render_op_log_json(
                 "index_after",
                 "inverse_of",
             ] {
-                if let Some(value) = value.get(key).and_then(serde_json::Value::as_str) {
+                if let Some(value) = value.get(key).and_then(alt_json::Value::as_str) {
                     recovery.push((key, Json::str(value)));
                 }
             }

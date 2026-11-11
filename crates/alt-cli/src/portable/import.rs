@@ -1,11 +1,9 @@
 use super::{Binding, Budget, Res, connection, local::Journal, refused};
 use alt_portable::{Envelope, IdentityMapping, ImportIntent, http::ImportState};
 use alt_remote_protocol::{RequestKey, Scope};
-use serde::{Deserialize, Serialize};
 use std::{io::Write, path::Path};
 
-#[derive(Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 struct ImportRequest {
     version: u32,
@@ -38,7 +36,7 @@ fn mappings(path: &Path, maximum: usize) -> Res<Vec<IdentityMapping>> {
             "identity mapping file changed or exceeds its budget",
         ));
     }
-    let mut result: Vec<IdentityMapping> = serde_json::from_slice(&bytes)?;
+    let mut result: Vec<IdentityMapping> = alt_json::from_slice(&bytes)?;
     result
         .sort_by(|a, b| (&a.installation_id, &a.actor_id).cmp(&(&b.installation_id, &b.actor_id)));
     Ok(result)
@@ -173,7 +171,7 @@ pub fn stage(
         if let ImportState::Committed { receipt } = &state {
             journal.record("receipt.json", receipt, budget.metadata_bytes)?;
         }
-        serde_json::to_writer(&mut *out, &state)?;
+        alt_json::to_writer(&mut *out, &state)?;
         out.write_all(b"\n")?;
         Ok(())
     })();
@@ -228,7 +226,7 @@ pub fn control(
         if let ImportState::Committed { receipt } = &state {
             journal.record("receipt.json", receipt, budget.metadata_bytes)?;
         }
-        serde_json::to_writer(&mut *out, &state)?;
+        alt_json::to_writer(&mut *out, &state)?;
         out.write_all(b"\n")?;
         Ok(())
     })();
@@ -245,5 +243,5 @@ pub fn control(
 mod json_tests {
     use super::*;
 
-    alt_json_testkit::module_tests!("portable-import", 0xc10c; ImportRequest);
+    alt_json_testkit::module_fixture_tests!("portable-import"; ImportRequest);
 }

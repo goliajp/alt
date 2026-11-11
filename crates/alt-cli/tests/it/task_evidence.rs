@@ -1,4 +1,4 @@
-use serde_json::{Value, json};
+use alt_json::{Value, json};
 use std::{
     path::Path,
     process::{Command, Output},
@@ -26,7 +26,7 @@ fn ok(root: &Path, args: &[&str]) -> Output {
     output
 }
 fn value(root: &Path, args: &[&str]) -> Value {
-    serde_json::from_slice(&ok(root, args).stdout).unwrap()
+    alt_json::from_slice(&ok(root, args).stdout).unwrap()
 }
 struct Fixture {
     _dir: alt_os::temp::TempDir,
@@ -201,7 +201,7 @@ fn candidate_retries_preserve_identity_and_operation_attribution() {
     let first = ok(&f.workspace, &args);
     let repeated = ok(&f.workspace, &args);
     assert_eq!(first.stdout, repeated.stdout);
-    let created: Value = serde_json::from_slice(&first.stdout).unwrap();
+    let created: Value = alt_json::from_slice(&first.stdout).unwrap();
     let operation = value(
         &f.workspace,
         &[
@@ -289,7 +289,7 @@ fn external_success_claims_and_failures_keep_raw_bytes_without_becoming_observed
             .unwrap()
             .contains(&json!("stderr_missing"))
     );
-    let mut failed: Value = serde_json::from_str(&report).unwrap();
+    let mut failed: Value = alt_json::from_str(&report).unwrap();
     failed["termination"]["code"] = json!(9);
     let failed = value(
         &f.workspace,

@@ -2,8 +2,8 @@
 
 use std::ffi::OsString;
 
+use alt_json::{Value, json};
 use clap::{CommandFactory, FromArgMatches};
-use serde_json::{Value, json};
 
 use crate::cli::Cli;
 use crate::daemon::Response;
@@ -69,7 +69,7 @@ impl Failure {
 
     pub fn response(&self, json_mode: bool, request_id: Option<&str>) -> Response {
         let stderr = if json_mode {
-            let mut bytes = serde_json::to_vec(&json!({
+            let mut bytes = alt_json::to_vec(&json!({
                 "schema_version": 1,
                 "error": {
                     "kind": self.kind,
@@ -317,10 +317,10 @@ pub fn finish(
             }
             let mut stdout = stdout;
             if json_mode && (request_id.is_some() || !diagnostics.is_empty()) {
-                let mut value = match serde_json::from_slice::<Value>(&stdout) {
+                let mut value = match alt_json::from_slice::<Value>(&stdout) {
                     Ok(Value::Object(value)) => value,
                     _ => {
-                        let mut value = serde_json::Map::new();
+                        let mut value = alt_json::Map::new();
                         value.insert("schema_version".into(), json!(1));
                         value.insert("command_output".into(), bytes_value(&stdout));
                         value
@@ -331,7 +331,7 @@ pub fn finish(
                 if !diagnostics.is_empty() {
                     value.insert("diagnostics".into(), bytes_value(&diagnostics));
                 }
-                stdout = serde_json::to_vec(&value).expect("JSON values serialize");
+                stdout = alt_json::to_vec(&value).expect("JSON values serialize");
                 stdout.push(b'\n');
             }
             return Response {
@@ -418,7 +418,7 @@ mod tests {
             .response(true, Some("00112233445566778899aabbccddeeff"));
         assert!(response.stdout.is_empty());
         assert_eq!(response.exit_code, 1);
-        let value: Value = serde_json::from_slice(&response.stderr).unwrap();
+        let value: Value = alt_json::from_slice(&response.stderr).unwrap();
         assert_eq!(value["error"]["message"], "文件「日本語」已改变");
         assert_eq!(value["error"]["outcome"], "not_applied");
         assert_eq!(
@@ -441,7 +441,7 @@ mod tests {
         .unwrap();
         assert_eq!(response.exit_code, 2);
         assert!(response.stdout.is_empty());
-        let value: Value = serde_json::from_slice(&response.stderr).unwrap();
+        let value: Value = alt_json::from_slice(&response.stderr).unwrap();
         assert_eq!(value["error"]["details"]["bytes_hex"], "61ff");
     }
 
@@ -461,7 +461,7 @@ mod tests {
             },
         );
         assert!(response.stdout.is_empty());
-        let value: Value = serde_json::from_slice(&response.stderr).unwrap();
+        let value: Value = alt_json::from_slice(&response.stderr).unwrap();
         assert_eq!(value["error"]["kind"], "conflict");
         assert_eq!(value["error"]["outcome"], "partial");
         assert_eq!(

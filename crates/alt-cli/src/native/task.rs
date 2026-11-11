@@ -1,8 +1,8 @@
 //! Task records live outside the Git ODB. Request completion, not the presence
 //! of a metadata file, determines whether a creation command finished.
 use super::*;
+use alt_json::json;
 use alt_task::{Artifact, Candidate, Event, Evidence, Record, Scope, Task, TaskState};
-use serde_json::json;
 use std::collections::BTreeMap;
 
 mod candidate;
@@ -16,8 +16,7 @@ mod transfer_source;
 
 pub(super) const TASK_OPERATION: u8 = 0x34;
 
-#[derive(serde::Serialize, serde::Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub(super) struct TaskOperation {
     pub version: u32,
@@ -31,14 +30,14 @@ pub(super) struct TaskOperation {
 fn refused(message: impl Into<String>) -> Box<dyn std::error::Error> {
     crate::machine::Failure::refusal("precondition_failed", message).into()
 }
-fn emit(out: &mut impl Write, json_mode: bool, fields: serde_json::Value) -> Res<()> {
+fn emit(out: &mut impl Write, json_mode: bool, fields: alt_json::Value) -> Res<()> {
     if json_mode {
         let mut fields = fields;
         fields["schema_version"] = json!(1);
-        serde_json::to_writer(&mut *out, &fields)?;
+        alt_json::to_writer(&mut *out, &fields)?;
         writeln!(out)?;
     } else {
-        writeln!(out, "{}", serde_json::to_string_pretty(&fields)?)?;
+        writeln!(out, "{}", alt_json::to_string_pretty(&fields)?)?;
     }
     Ok(())
 }
@@ -296,5 +295,5 @@ impl NativeRepo<'_> {
 mod json_tests {
     use super::*;
 
-    alt_json_testkit::module_tests!("native-task", 0xc104; TaskOperation);
+    alt_json_testkit::module_fixture_tests!("native-task"; TaskOperation);
 }

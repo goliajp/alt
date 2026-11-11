@@ -4,7 +4,7 @@ use crate::daemon::{RequestId, Response};
 use crate::machine::{self, Failure, Parsed};
 use crate::native::{self, Identity, Store};
 use crate::request::{self, Claim, Claimed};
-use serde_json::json;
+use alt_json::json;
 use std::path::{Path, PathBuf};
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
@@ -23,7 +23,7 @@ pub fn binding(
     parsed: &Parsed,
     cwd: &Path,
     identity: &Identity,
-) -> Res<(PathBuf, String, String, serde_json::Value)> {
+) -> Res<(PathBuf, String, String, alt_json::Value)> {
     let (alt_dir, coord) = native::resolve_workspace(cwd, parsed.cli.workspace.as_deref())?;
     let repository = request::repository_identity(&alt_dir)?;
     let workspace = coord.request_workspace()?;

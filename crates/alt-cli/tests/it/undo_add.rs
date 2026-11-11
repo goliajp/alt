@@ -406,16 +406,16 @@ fn recovery_prepared_index_without_replacement_is_not_reported_as_success() {
 }
 
 fn recover_pending(root: &Path) {
-    let pending: serde_json::Value =
-        serde_json::from_str(&ok(alt(root, &["operation", "pending", "--json"]))).unwrap();
+    let pending: alt_json::Value =
+        alt_json::from_str(&ok(alt(root, &["operation", "pending", "--json"]))).unwrap();
     let operations = pending["operations"].as_array().unwrap();
     assert_eq!(operations.len(), 1);
     let id = operations[0]["operation_id"].as_str().unwrap();
-    let before: serde_json::Value =
-        serde_json::from_str(&ok(alt(root, &["operation", "status", id, "--json"]))).unwrap();
+    let before: alt_json::Value =
+        alt_json::from_str(&ok(alt(root, &["operation", "status", id, "--json"]))).unwrap();
     assert_eq!(before["operation"]["outcome"], "unknown");
-    let after: serde_json::Value =
-        serde_json::from_str(&ok(alt(root, &["operation", "recover", id, "--json"]))).unwrap();
+    let after: alt_json::Value =
+        alt_json::from_str(&ok(alt(root, &["operation", "recover", id, "--json"]))).unwrap();
     assert_eq!(after["operation"]["state"], "completed");
     let log = std::fs::read(root.join(".alt/oplog/log")).unwrap();
     ok(alt(root, &["operation", "recover", id]));
@@ -435,8 +435,8 @@ fn recovery_pending_operation_refuses_an_unrecorded_third_state() {
     ok(alt(root, &["add", "f"]));
     remove_final_log_frame(root);
     std::fs::write(root.join("f"), "later user work").unwrap();
-    let pending: serde_json::Value =
-        serde_json::from_str(&ok(alt(root, &["operation", "pending", "--json"]))).unwrap();
+    let pending: alt_json::Value =
+        alt_json::from_str(&ok(alt(root, &["operation", "pending", "--json"]))).unwrap();
     let id = pending["operations"][0]["operation_id"].as_str().unwrap();
     let before = index_bytes(root);
     let log = std::fs::read(root.join(".alt/oplog/log")).unwrap();
@@ -503,9 +503,9 @@ fn recovery_resumes_each_file_and_index_boundary_without_touching_untracked_data
             assert_eq!(std::fs::read(root.join(path)).unwrap(), b"old");
         }
         assert_eq!(std::fs::read(root.join("untracked")).unwrap(), b"precious");
-        let status: serde_json::Value = serde_json::from_str(&staged_paths(root)).unwrap();
-        assert_eq!(status["staged"], serde_json::json!([]));
-        assert_eq!(status["unstaged"], serde_json::json!([]));
+        let status: alt_json::Value = alt_json::from_str(&staged_paths(root)).unwrap();
+        assert_eq!(status["staged"], alt_json::json!([]));
+        assert_eq!(status["unstaged"], alt_json::json!([]));
     }
 }
 
@@ -590,7 +590,7 @@ fn ref_undo_refuses_legacy_missing_or_unknown_effects_without_mutation() {
         let tx = alt_refs::parse_tx(&refs.last_op().unwrap().payload)
             .unwrap()
             .unwrap();
-        let mut context: serde_json::Value = serde_json::from_slice(&tx.context.unwrap()).unwrap();
+        let mut context: alt_json::Value = alt_json::from_slice(&tx.context.unwrap()).unwrap();
         if let Some(effect) = effects {
             context["effects"] = effect.into();
         } else {
@@ -610,7 +610,7 @@ fn ref_undo_refuses_legacy_missing_or_unknown_effects_without_mutation() {
             &[change],
             None,
             None,
-            Some(&serde_json::to_vec(&context).unwrap()),
+            Some(&alt_json::to_vec(&context).unwrap()),
         )
         .unwrap();
         drop(refs);
@@ -618,7 +618,7 @@ fn ref_undo_refuses_legacy_missing_or_unknown_effects_without_mutation() {
         let log = std::fs::read(root.join(".alt/oplog/log")).unwrap();
         let result = alt(root, &["undo", "--json"]);
         assert!(!result.status.success());
-        let response: serde_json::Value = serde_json::from_slice(&result.stderr).unwrap();
+        let response: alt_json::Value = alt_json::from_slice(&result.stderr).unwrap();
         assert_eq!(response["error"]["kind"], "unsupported_record");
         assert_eq!(index_bytes(root), index);
         assert_eq!(std::fs::read(root.join(".alt/oplog/log")).unwrap(), log);

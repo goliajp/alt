@@ -2,7 +2,6 @@
 //! from repository requests and never contains credentials or active grants.
 use super::{Res, refused};
 use alt_portable::{Blob, BlobSource};
-use serde::{Serialize, de::DeserializeOwned};
 use std::{
     fs::{File, OpenOptions},
     io::{Read, Write},
@@ -116,7 +115,7 @@ impl Journal {
         directory(&root.join("content"))?;
         Ok(Self { root, _lock: lock })
     }
-    pub fn read<T: DeserializeOwned>(&self, entry: &str, maximum: usize) -> Res<Option<T>> {
+    pub fn read<T: alt_json::FromJson>(&self, entry: &str, maximum: usize) -> Res<Option<T>> {
         name(entry)?;
         let mut file = match regular(&self.root.join(entry), maximum as u64) {
             Ok(file) => file,
@@ -136,13 +135,13 @@ impl Journal {
         if bytes.len() > maximum {
             return Err(refused("migration journal entry exceeds its budget"));
         }
-        Ok(Some(serde_json::from_slice(&bytes)?))
+        Ok(Some(alt_json::from_slice(&bytes)?))
     }
     /// Idempotent only for the same bytes. Updating a pending operation never
     /// rewrites the original identity or overwrites an earlier durable result.
-    pub fn record(&self, entry: &str, value: &impl Serialize, maximum: usize) -> Res<()> {
+    pub fn record(&self, entry: &str, value: &impl alt_json::ToJson, maximum: usize) -> Res<()> {
         name(entry)?;
-        let bytes = serde_json::to_vec(value)?;
+        let bytes = alt_json::to_vec(value)?;
         if bytes.len() > maximum {
             return Err(refused("migration journal entry exceeds its budget"));
         }
@@ -313,14 +312,14 @@ mod tests {
             0o700
         );
         journal
-            .record("intent.json", &serde_json::json!({"id":"original"}), 1000)
+            .record("intent.json", &alt_json::json!({"id":"original"}), 1000)
             .unwrap();
         journal
-            .record("intent.json", &serde_json::json!({"id":"original"}), 1000)
+            .record("intent.json", &alt_json::json!({"id":"original"}), 1000)
             .unwrap();
         assert!(
             journal
-                .record("intent.json", &serde_json::json!({"id":"different"}), 1000)
+                .record("intent.json", &alt_json::json!({"id":"different"}), 1000)
                 .is_err()
         );
         assert!(Journal::open(&path).is_err());

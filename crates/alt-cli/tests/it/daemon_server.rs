@@ -1032,7 +1032,7 @@ fn protected_override_is_per_request_in_a_warm_daemon() {
     request.id = Some([91; 16]);
     let second = exchange(&request);
     assert_eq!(second.exit_code, 1, "{}", err_str(&second));
-    let failure: serde_json::Value = serde_json::from_slice(&second.stderr).unwrap();
+    let failure: alt_json::Value = alt_json::from_slice(&second.stderr).unwrap();
     assert_eq!(failure["error"]["kind"], "precondition_failed");
     assert_eq!(failure["error"]["outcome"], "not_applied");
 }

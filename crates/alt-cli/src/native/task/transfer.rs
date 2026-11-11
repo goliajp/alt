@@ -41,8 +41,7 @@ fn task_limits() -> TaskLimits {
         walk_steps: 10_000_000,
     }
 }
-#[derive(Clone, serde::Serialize, serde::Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 struct Binding {
     version: u32,
@@ -74,23 +73,19 @@ fn negotiated_limits(remote: protocol::Limits) -> protocol::Limits {
     );
     local
 }
-#[derive(serde::Serialize, serde::Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 struct PublishedOrigin {
     version: u32,
     binding: Binding,
     receipt: protocol::Receipt,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[json(default, skip_serializing_if = "Vec::is_empty")]
     provenance: Vec<protocol::TransferProof>,
 }
-#[derive(serde::Deserialize, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 struct Plan {
     selection: alt_task_transfer::Selection,
-    #[serde(default)]
     #[json(default)]
     refs: Vec<protocol::RefUpdate>,
 }
@@ -124,14 +119,14 @@ fn kind(value: &str) -> Res<protocol::RecordKind> {
         .into()),
     }
 }
-fn json_file<T: serde::de::DeserializeOwned>(path: &Path) -> Res<T> {
-    Ok(serde_json::from_slice(&bounded(
+fn json_file<T: alt_json::FromJson>(path: &Path) -> Res<T> {
+    Ok(alt_json::from_slice(&bounded(
         path,
         limits().request_bytes,
     )?)?)
 }
-fn write_json(path: &Path, value: &impl serde::Serialize) -> Res<()> {
-    Ok(crate::durable::write(path, serde_json::to_vec(value)?)?)
+fn write_json(path: &Path, value: &impl alt_json::ToJson) -> Res<()> {
+    Ok(crate::durable::write(path, alt_json::to_vec(value)?)?)
 }
 fn transport(binding: &Binding) -> Res<Transport> {
     let token = if let Some(path) = std::env::var_os("ALT_SERVER_CREDENTIAL") {
@@ -227,10 +222,10 @@ impl NativeRepo<'_> {
     pub(super) fn task_record_complete<T: Record>(&self, record: &T) -> Res<bool> {
         let id = record.id()?;
         let key = RecordKey {
-            kind: serde_json::from_value(json!(T::KIND))?,
+            kind: alt_json::from_value(json!(T::KIND))?,
             id,
         };
-        let raw = serde_json::to_vec(
+        let raw = alt_json::to_vec(
             &json!({"schema_version":1,"hash_algorithm":"blake3","kind":T::KIND,"record":record}),
         )?;
         let decoded = TaskRecord::decode(&key, &raw, task_limits().structured_bytes)?;
@@ -460,7 +455,7 @@ impl NativeRepo<'_> {
                 check_connection(&client, &binding, false)?;
                 let kind = kind(record_kind)?;
                 let value = if let Some(id) = id {
-                    serde_json::to_value(client.bundles(
+                    alt_json::to_value(client.bundles(
                         &binding.scope,
                         &protocol::RecordRoot {
                             kind,
@@ -469,7 +464,7 @@ impl NativeRepo<'_> {
                         after.as_deref(),
                     )?)?
                 } else {
-                    serde_json::to_value(client.records(&binding.scope, kind, after.as_deref())?)?
+                    alt_json::to_value(client.records(&binding.scope, kind, after.as_deref())?)?
                 };
                 emit(
                     out,
@@ -929,5 +924,5 @@ impl NativeRepo<'_> {
 mod json_tests {
     use super::*;
 
-    alt_json_testkit::module_tests!("native-task-transfer", 0xc106; Binding, PublishedOrigin);
+    alt_json_testkit::module_fixture_tests!("native-task-transfer"; Binding, PublishedOrigin);
 }

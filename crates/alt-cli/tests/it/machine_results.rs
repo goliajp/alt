@@ -1,5 +1,5 @@
 //! Machine results and whole-command receipts are identical across transports.
-use serde_json::Value;
+use alt_json::Value;
 use std::path::Path;
 use std::process::{Command, Output};
 
@@ -47,7 +47,7 @@ fn error(output: &Output, code: i32, kind: &str) -> Value {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(output.stdout.is_empty(), "failure leaked stdout");
-    let value: Value = serde_json::from_slice(&output.stderr).unwrap();
+    let value: Value = alt_json::from_slice(&output.stderr).unwrap();
     assert_eq!(value["schema_version"], 1);
     assert_eq!(value["error"]["kind"], kind);
     for field in [
@@ -86,7 +86,7 @@ fn ordinary_refusal_is_unicode_json_and_replays_across_transports() {
         );
         same(&first, &run(root.path(), &args, !daemon));
         let result = ok(root.path(), &["request", "result", ID, "--json"]);
-        let value: Value = serde_json::from_slice(&result.stdout).unwrap();
+        let value: Value = alt_json::from_slice(&result.stdout).unwrap();
         assert_eq!(
             value["request"]["stderr"]["text"],
             String::from_utf8(first.stderr).unwrap()
@@ -137,7 +137,7 @@ fn completed_add_replays_before_reading_changed_worktree() {
         index,
         std::fs::read(root.path().join(".alt/index")).unwrap()
     );
-    let value: Value = serde_json::from_slice(&first.stdout).unwrap();
+    let value: Value = alt_json::from_slice(&first.stdout).unwrap();
     assert_eq!(value["request_id"], ID);
     assert!(value["operation_ids"].as_array().unwrap().len() >= 2);
     error(
@@ -162,7 +162,7 @@ fn pending_and_corrupt_receipts_never_reexecute() {
     std::fs::remove_file(directory.join("completed.json")).unwrap();
     error(&run(root.path(), &args, true), 75, "result_unknown");
     let pending = ok(root.path(), &["request", "pending", "--json"]);
-    let pending: Value = serde_json::from_slice(&pending.stdout).unwrap();
+    let pending: Value = alt_json::from_slice(&pending.stdout).unwrap();
     assert!(
         pending["requests"]
             .as_array()
@@ -325,7 +325,7 @@ fn io_failure_during_a_write_is_unknown_on_both_transports() {
         assert_eq!(value["error"]["outcome"], "unknown");
         assert_eq!(value["error"]["request_id"], ID);
         let status = ok(root.path(), &["request", "status", ID, "--json"]);
-        let status: Value = serde_json::from_slice(&status.stdout).unwrap();
+        let status: Value = alt_json::from_slice(&status.stdout).unwrap();
         assert_eq!(status["request"]["outcome"], "unknown");
     }
 }
@@ -381,10 +381,10 @@ fn recovering_a_suboperation_does_not_complete_the_interrupted_request() {
     assert_eq!(operation.len(), 64);
     ok(root.path(), &["operation", "recover", operation, "--json"]);
     let operation_status = ok(root.path(), &["operation", "status", operation, "--json"]);
-    let operation_status: Value = serde_json::from_slice(&operation_status.stdout).unwrap();
+    let operation_status: Value = alt_json::from_slice(&operation_status.stdout).unwrap();
     assert_eq!(operation_status["operation"]["state"], "completed");
     let request_status = ok(root.path(), &["request", "status", ID, "--json"]);
-    let request_status: Value = serde_json::from_slice(&request_status.stdout).unwrap();
+    let request_status: Value = alt_json::from_slice(&request_status.stdout).unwrap();
     assert_eq!(request_status["request"]["state"], "pending");
     assert_eq!(request_status["request"]["outcome"], "unknown");
     error(

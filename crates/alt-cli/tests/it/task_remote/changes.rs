@@ -46,11 +46,12 @@ pub(super) fn inspect_delivery(
         local_credential_file: local,
         peer_credential_file: peer,
     };
-    let mut operator: alt_server::operator::Config = serde_json::from_str(include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../alt-server/example-config.json"
-    )))
-    .unwrap();
+    let alt_json_serde::Serde(mut operator): alt_json_serde::Serde<alt_server::operator::Config> =
+        alt_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../alt-server/example-config.json"
+        )))
+        .unwrap();
     operator.instance = server.factory.instance.clone();
     let runtime = config.load(&operator).unwrap();
     let config_digest = runtime.configuration_digest().to_owned();
@@ -91,7 +92,7 @@ pub(super) fn inspect_delivery(
     );
     assert_eq!(channels["channels"][0]["channel"], "sentori-cli");
     let plan = server._root.path().join("mapping.json");
-    std::fs::write(&plan,serde_json::to_vec(&json!({"channel":"sentori-cli","action":{"kind":"mapping","delivery_id":delivery,"release":{"application":"application","release":"release-id","release_name":"v1","environment":"production","artifact_sha256":"a".repeat(64)},"expected_previous":null}})).unwrap()).unwrap();
+    std::fs::write(&plan,alt_json::to_vec(&json!({"channel":"sentori-cli","action":{"kind":"mapping","delivery_id":delivery,"release":{"application":"application","release":"release-id","release_name":"v1","environment":"production","artifact_sha256":"a".repeat(64)},"expected_previous":null}})).unwrap()).unwrap();
     let preview = value(
         work,
         &token,
@@ -132,7 +133,8 @@ pub(super) fn inspect_delivery(
     // Each invocation has its own local command receipt, while the saved
     // association carries the same immutable remote request.
     assert_ne!(replay["request_id"], queued["request_id"]);
-    let history: link::HistoricalEvent = serde_json::from_value(queued["history"].clone()).unwrap();
+    let history: link::HistoricalEvent =
+        alt_json_serde::from_value(queued["history"].clone()).unwrap();
     let digest = history.statement.digest().unwrap();
     let receipt = link::Receipt::accept(
         &history.statement,
@@ -214,7 +216,7 @@ pub(super) fn inspect_delivery(
     assert!(source["published_task"].is_null());
     assert_eq!(
         source["source"]["request"],
-        serde_json::to_value(&repair).unwrap()
+        alt_json_serde::to_value(&repair).unwrap()
     );
     let definition = definition.to_string();
     let mut create_args = vec![
@@ -267,7 +269,7 @@ pub(super) fn inspect_delivery(
     assert_eq!(known["created"], false);
     assert_eq!(known["published_task"]["task"], created["task_id"]);
     let withdraw = server._root.path().join("withdrawal.json");
-    std::fs::write(&withdraw,serde_json::to_vec(&json!({"channel":"sentori-cli","action":{"kind":"withdraw","mapping_event_digest":digest,"expected_previous":digest,"reason":"publisher correction"}})).unwrap()).unwrap();
+    std::fs::write(&withdraw,alt_json::to_vec(&json!({"channel":"sentori-cli","action":{"kind":"withdraw","mapping_event_digest":digest,"expected_previous":digest,"reason":"publisher correction"}})).unwrap()).unwrap();
     let preview = value(
         work,
         &token,
@@ -288,7 +290,8 @@ pub(super) fn inspect_delivery(
         &token,
         &["task", "remote", "changes", "send", withdrawal_id, "--json"],
     );
-    let history: link::HistoricalEvent = serde_json::from_value(queued["history"].clone()).unwrap();
+    let history: link::HistoricalEvent =
+        alt_json_serde::from_value(queued["history"].clone()).unwrap();
     let receipt = link::Receipt::accept(
         &history.statement,
         link::Counter(future()),

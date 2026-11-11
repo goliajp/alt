@@ -3,23 +3,18 @@
 
 use super::*;
 use recovery::{WorkspaceIdentity, canonical_index, decode, durable_write, encode, hash};
-use serde::{Deserialize, Serialize};
 
 pub(super) const PREPARE_CHECKOUT: u8 = 0x32;
 pub(super) const COMPLETE_CHECKOUT: u8 = 0x33;
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson,
-)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 struct FileState {
     mode: u32,
     contents: String,
 }
 
-#[derive(Clone, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 struct FileChange {
     path: Vec<u8>,
@@ -27,13 +22,11 @@ struct FileChange {
     after: Option<FileState>,
 }
 
-#[derive(Clone, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub(super) struct CheckoutIntent {
     version: u32,
     pub(super) workspace: WorkspaceIdentity,
-    #[serde(default)]
     #[json(default)]
     pub(super) request_id: Option<String>,
     index_before: String,
@@ -43,8 +36,7 @@ pub(super) struct CheckoutIntent {
 
 /// A complete tracked prestate for a multi-step operation such as rebase.
 /// Stored by content identity so a restarted command cannot invent a prestate.
-#[derive(Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 struct WorkspaceSnapshot {
     version: u32,
@@ -53,13 +45,11 @@ struct WorkspaceSnapshot {
     files: Vec<(Vec<u8>, Option<FileState>)>,
 }
 
-#[derive(Clone, Serialize, Deserialize, alt_json::ToJson, alt_json::FromJson)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub(super) struct CheckoutDone {
     pub(super) version: u32,
     pub(super) prepared: String,
-    #[serde(default)]
     #[json(default)]
     request_id: Option<String>,
 }
@@ -105,7 +95,7 @@ impl NativeRepo<'_> {
                     if let Some(tx) = alt_refs::parse_tx(&op.payload)?
                         && let Some(context) = tx.context
                     {
-                        let context: recovery::RefContext = serde_json::from_slice(&context)?;
+                        let context: recovery::RefContext = alt_json::from_slice(&context)?;
                         if context.workspace == identity
                             && context.checkout.is_some()
                             && !completed.contains(&op.id.to_string())
@@ -202,11 +192,11 @@ impl NativeRepo<'_> {
             index: self.snapshot(&canonical_index(index, self.store.algo))?,
             files,
         };
-        self.snapshot(&serde_json::to_vec(&snapshot)?)
+        self.snapshot(&alt_json::to_vec(&snapshot)?)
     }
 
     pub(super) fn completed_workspace_delta(&self, snapshot: &str) -> Res<CheckoutIntent> {
-        let snapshot: WorkspaceSnapshot = serde_json::from_slice(&self.read_snapshot(snapshot)?)?;
+        let snapshot: WorkspaceSnapshot = alt_json::from_slice(&self.read_snapshot(snapshot)?)?;
         if snapshot.version != 1 || snapshot.workspace != self.workspace_identity()? {
             return Err("invalid workspace recovery snapshot".into());
         }
@@ -575,5 +565,5 @@ impl NativeRepo<'_> {
 mod json_tests {
     use super::*;
 
-    alt_json_testkit::module_tests!("native-checkout_recovery", 0xc102; FileState, FileChange, CheckoutIntent, WorkspaceSnapshot, CheckoutDone);
+    alt_json_testkit::module_fixture_tests!("native-checkout_recovery"; FileState, FileChange, CheckoutIntent, WorkspaceSnapshot, CheckoutDone);
 }

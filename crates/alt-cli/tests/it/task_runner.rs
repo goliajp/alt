@@ -1,4 +1,4 @@
-use serde_json::{Value, json};
+use alt_json::{Value, json};
 use std::{
     path::{Path, PathBuf},
     process::{Command, Output},
@@ -25,7 +25,7 @@ fn ok(root: &Path, args: &[&str]) -> Output {
     output
 }
 fn value(root: &Path, args: &[&str]) -> Value {
-    serde_json::from_slice(&ok(root, args).stdout).unwrap()
+    alt_json::from_slice(&ok(root, args).stdout).unwrap()
 }
 struct Fixture {
     _dir: alt_os::temp::TempDir,
@@ -121,7 +121,7 @@ fn result(f: &Fixture, request: &str) -> Output {
 }
 fn failure(output: &Output) -> Value {
     assert!(!output.status.success());
-    serde_json::from_slice::<Value>(&output.stderr).unwrap()["error"].clone()
+    alt_json::from_slice::<Value>(&output.stderr).unwrap()["error"].clone()
 }
 #[test]
 fn human_mode_failed_validation_still_has_record_bound_local_completion() {
@@ -164,7 +164,7 @@ fn isolated_run_replay_and_read_only_collection_preserve_exact_logs() {
         "{}",
         String::from_utf8_lossy(&first.stderr)
     );
-    let record: Value = serde_json::from_slice(&first.stdout).unwrap();
+    let record: Value = alt_json::from_slice(&first.stdout).unwrap();
     assert_eq!(record["validity"]["eligible"], true);
     assert_eq!(record["evidence"]["provenance"], "observed");
     let repeat = result(&f, request);
@@ -265,9 +265,9 @@ fn modified_report_cannot_be_promoted_by_collect() {
     let status = value(&f.workspace, &["evidence", "run-status", attempt, "--json"]);
     let report = Path::new(status["attempt"]["local_directory"].as_str().unwrap())
         .join(".alt-runner/report.json");
-    let mut edited: Value = serde_json::from_slice(&std::fs::read(&report).unwrap()).unwrap();
+    let mut edited: Value = alt_json::from_slice(&std::fs::read(&report).unwrap()).unwrap();
     edited["evidence"]["termination"] = json!({"kind":"exit","code":0});
-    std::fs::write(&report, serde_json::to_vec(&edited).unwrap()).unwrap();
+    std::fs::write(&report, alt_json::to_vec(&edited).unwrap()).unwrap();
     let rejected = run(&f.workspace, &["evidence", "collect", attempt, "--json"]);
     assert_eq!(rejected.status.code(), Some(1));
     assert!(
@@ -310,7 +310,7 @@ fn stale_auxiliary_or_target_refuses_launch_without_a_run_directory() {
 fn equal_request_ids_in_different_repositories_have_distinct_run_directories() {
     let first = fixture("printf first\n");
     let mut second = fixture("printf second\n");
-    let mut profile: Value = serde_json::from_str(&second.profile).unwrap();
+    let mut profile: Value = alt_json::from_str(&second.profile).unwrap();
     profile["scratch"] = json!(first.scratch.path());
     second.profile = profile.to_string();
     let request = "d0500000000000000000000000000040";
@@ -322,7 +322,7 @@ fn equal_request_ids_in_different_repositories_have_distinct_run_directories() {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let record: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let record: Value = alt_json::from_slice(&output.stdout).unwrap();
         let status = value(
             &f.workspace,
             &[

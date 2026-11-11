@@ -30,7 +30,7 @@ impl NativeRepo<'_> {
                     )
                     .into());
                 }
-                let mut evidence: Evidence = serde_json::from_str(report)
+                let mut evidence: Evidence = alt_json::from_str(report)
                     .map_err(|error| crate::machine::Failure::usage(error.to_string()))?;
                 if evidence.candidate != *candidate_id || evidence.manifest != candidate.manifest {
                     return Err(refused(

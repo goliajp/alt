@@ -29,7 +29,7 @@ impl NativeRepo<'_> {
             if op.payload.first() != Some(&kind) {
                 continue;
             }
-            let done: serde_json::Value = decode(&op.payload, kind)?;
+            let done: alt_json::Value = decode(&op.payload, kind)?;
             if done["version"] != 1 {
                 return Err(crate::machine::Failure::refusal(
                     "unsupported_record",
@@ -77,7 +77,7 @@ impl NativeRepo<'_> {
                 let tx = alt_refs::parse_tx(&op.payload)?.ok_or("not a ref operation")?;
                 match tx.context {
                     Some(bytes) => {
-                        let context: RefContext = serde_json::from_slice(&bytes)?;
+                        let context: RefContext = alt_json::from_slice(&bytes)?;
                         if !matches!(context.version, 1 | 2) {
                             return Err(crate::machine::Failure::refusal(
                                 "unsupported_record",
@@ -267,7 +267,7 @@ impl NativeRepo<'_> {
                         }
                     }
                     let context: RefContext =
-                        serde_json::from_slice(&tx.context.ok_or("missing recovery scope")?)?;
+                        alt_json::from_slice(&tx.context.ok_or("missing recovery scope")?)?;
                     self.finish_interrupted_checkout(
                         op.id,
                         context.checkout.ok_or("missing checkout intent")?,
