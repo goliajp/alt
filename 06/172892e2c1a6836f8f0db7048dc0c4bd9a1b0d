@@ -1,0 +1,15 @@
+schema: alt-meta/1
+type: refactor
+summary: alt-input reads and writes json with alt-json
+author-type: human
+author: doracawl
+touched: crates/alt-input/Cargo.toml
+touched: crates/alt-input/src/lib.rs
+touched: crates/alt-input/src/manifest.rs
+touched: crates/alt-input/src/serde_value.rs
+touched: crates/alt-input/tests/it/fixtures/context.txt
+touched: crates/alt-input/tests/it/fixtures/entry.txt
+touched: crates/alt-input/tests/it/fixtures/identities.txt
+touched: crates/alt-input/tests/it/fixtures/manifest.txt
+touched: crates/alt-input/tests/it/json.rs
+touched: crates/alt-input/tests/it/main.rs
