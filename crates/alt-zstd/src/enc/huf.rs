@@ -208,8 +208,10 @@ fn compress_weights(weights: &[u8], out: &mut Vec<u8>) -> bool {
         table.encode(&mut writer, &mut first, take());
         writer.flush();
     }
-    table.finish(&mut writer, second);
-    table.finish(&mut writer, first);
+    for state in [second, first] {
+        let (bits, width) = table.last(state);
+        writer.put(bits, width);
+    }
     writer.finish_marked();
     true
 }
@@ -238,17 +240,78 @@ pub(crate) fn encode_stream(codes: &Codes, src: &[u8], out: &mut Vec<u8>) {
     writer.finish_marked();
 }
 
-/// Appends `src` as four bitstreams behind their jump table.
-pub(crate) fn encode_4x(codes: &Codes, src: &[u8], out: &mut Vec<u8>) {
-    let jump = out.len();
-    out.extend_from_slice(&[0; 6]);
+/// Appends `src` as four bitstreams behind their jump table. The four are
+/// written side by side into `scratch`, so that none waits for another.
+pub(crate) fn encode_4x(codes: &Codes, src: &[u8], scratch: &mut Vec<u8>, out: &mut Vec<u8>) {
+    const GROUP: usize = 4;
     let segment = src.len().div_ceil(4);
-    for (i, part) in src.chunks(segment).enumerate() {
-        let start = out.len();
-        encode_stream(codes, part, out);
-        if i < 3 {
-            let size = (out.len() - start) as u16;
-            out[jump + 2 * i..jump + 2 * i + 2].copy_from_slice(&size.to_le_bytes());
+    let parts: [&[u8]; 4] = std::array::from_fn(|i| {
+        &src[(i * segment).min(src.len())..((i + 1) * segment).min(src.len())]
+    });
+    // room per stream: its longest possible encoding, the marker, and the
+    // 8 bytes a flush stores
+    let room = segment * MAX_BITS as usize / 8 + 16;
+    scratch.clear();
+    scratch.reserve(4 * room);
+    let base = scratch.as_mut_ptr();
+    let mut ends = [base; 4];
+
+    // safety (whole block): stream i writes inside scratch[i * room..][..room]:
+    // each flush stores 8 bytes at a position that is at most the stream's
+    // encoded size so far, which stays below room - 8
+    unsafe {
+        let mut at: [*mut u8; 4] = std::array::from_fn(|i| base.add(i * room));
+        let mut acc = [0u64; 4];
+        let mut bits = [0u32; 4];
+        let mut left = parts.map(<[u8]>::len);
+        let put = |acc: &mut u64, bits: &mut u32, byte: u8| {
+            let packed = *codes.packed.get_unchecked(byte as usize);
+            *acc |= ((packed & 0xFFFF) as u64) << *bits;
+            *bits += packed >> 16;
+        };
+        let flush = |at: &mut *mut u8, acc: &mut u64, bits: &mut u32| {
+            at.cast::<u64>().write_unaligned(acc.to_le());
+            *at = at.add((*bits >> 3) as usize);
+            *acc >>= *bits & !7;
+            *bits &= 7;
+        };
+        // the reader starts at the end of each stream, so last bytes go
+        // first; bring all four to the same multiple of GROUP
+        let groups = left[3] / GROUP;
+        for i in 0..4 {
+            while left[i] > groups * GROUP {
+                left[i] -= 1;
+                put(&mut acc[i], &mut bits[i], parts[i][left[i]]);
+                flush(&mut at[i], &mut acc[i], &mut bits[i]);
+            }
         }
+        for group in (0..groups).rev() {
+            for i in 0..4 {
+                let bytes = parts[i].as_ptr().add(group * GROUP);
+                for k in (0..GROUP).rev() {
+                    put(&mut acc[i], &mut bits[i], bytes.add(k).read());
+                }
+                flush(&mut at[i], &mut acc[i], &mut bits[i]);
+            }
+        }
+        for i in 0..4 {
+            acc[i] |= 1 << bits[i];
+            bits[i] += 1;
+            flush(&mut at[i], &mut acc[i], &mut bits[i]);
+            ends[i] = at[i].add((bits[i] != 0) as usize);
+        }
+    }
+
+    // safety: each end lies in its stream's part of the scratch area, and
+    // the bytes from the start of that part to the end were all written
+    let streams: [&[u8]; 4] = std::array::from_fn(|i| unsafe {
+        let start = base.add(i * room);
+        std::slice::from_raw_parts(start, ends[i].offset_from(start) as usize)
+    });
+    for stream in &streams[..3] {
+        out.extend_from_slice(&(stream.len() as u16).to_le_bytes());
+    }
+    for stream in streams {
+        out.extend_from_slice(stream);
     }
 }

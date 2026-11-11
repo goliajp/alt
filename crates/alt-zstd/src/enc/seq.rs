@@ -139,16 +139,11 @@ impl SequenceCoder {
     /// Picks the cheapest way to code field `i` for the codes gathered,
     /// writes what the decoder needs to rebuild the table, and returns the
     /// mode bits.
-    fn choose(&mut self, i: usize, out: &mut Vec<u8>) -> u8 {
-        let codes = &self.codes[i];
+    fn choose(&mut self, i: usize, counts: &[u32; MAX_SYMBOLS], out: &mut Vec<u8>) -> u8 {
         let field = &FIELDS[i];
-        let mut counts = [0u32; MAX_SYMBOLS];
-        for &code in codes {
-            counts[code as usize] += 1;
-        }
         let symbols = counts.iter().rposition(|&count| count != 0).unwrap() + 1;
         let counts = &counts[..symbols];
-        let total = codes.len() as u32;
+        let total = self.codes[i].len() as u32;
         let most = *counts.iter().max().unwrap();
 
         // each candidate pays for its description and for the final state
@@ -223,17 +218,25 @@ impl SequenceCoder {
             codes.clear();
             codes.resize(count, 0);
         }
+        // two histograms per field, filled alternately: a run of one code
+        // would otherwise make each increment wait for the one before
+        let mut counts = [[[0u32; MAX_SYMBOLS]; 2]; 3];
         let [ll_codes, of_codes, ml_codes] = &mut self.codes;
         let codes = ll_codes.iter_mut().zip(of_codes).zip(ml_codes);
-        for (seq, ((ll, of), ml)) in sequences.iter().zip(codes) {
+        for (index, (seq, ((ll, of), ml))) in sequences.iter().zip(codes).enumerate() {
+            let half = index & 1;
             *ll = ll_code(seq.lit_len) as u8;
             *of = seq.offset.ilog2() as u8;
             *ml = ml_code(seq.match_len) as u8;
+            counts[0][half][*ll as usize] += 1;
+            counts[1][half][*of as usize] += 1;
+            counts[2][half][*ml as usize] += 1;
         }
         let modes = out.len();
         out.push(0);
-        for i in 0..3 {
-            let mode = self.choose(i, out);
+        for (i, [even, odd]) in counts.iter().enumerate() {
+            let both: [u32; MAX_SYMBOLS] = std::array::from_fn(|code| even[code] + odd[code]);
+            let mode = self.choose(i, &both, out);
             out[modes] |= mode << (6 - 2 * i);
         }
         self.valid = true;
@@ -259,26 +262,30 @@ impl SequenceCoder {
                 of_codes[i] as usize,
                 ml_codes[i] as usize,
             );
+            let (ll_bits, ml_bits) = (LL_EXTRA[ll_code] as u32, ML_EXTRA[ml_code] as u32);
+            // up to 26 bits of state changes, then the extra bits; the
+            // writer takes 56 bits between flushes
             if i != last {
                 of.encode(&mut writer, &mut of_state, of_code);
                 ml.encode(&mut writer, &mut ml_state, ml_code);
                 ll.encode(&mut writer, &mut ll_state, ll_code);
             }
-            writer.put(
-                (seq.lit_len - LL_BASE[ll_code]) as u64,
-                LL_EXTRA[ll_code] as u32,
-            );
-            writer.flush();
-            writer.put(
-                (seq.match_len - ML_BASE[ml_code]) as u64,
-                ML_EXTRA[ml_code] as u32,
-            );
+            if ll_bits + ml_bits + of_code as u32 > 30 {
+                writer.flush();
+                writer.put((seq.lit_len - LL_BASE[ll_code]) as u64, ll_bits);
+                writer.put((seq.match_len - ML_BASE[ml_code]) as u64, ml_bits);
+                writer.flush();
+            } else {
+                writer.put((seq.lit_len - LL_BASE[ll_code]) as u64, ll_bits);
+                writer.put((seq.match_len - ML_BASE[ml_code]) as u64, ml_bits);
+            }
             writer.put((seq.offset - (1 << of_code)) as u64, of_code as u32);
             writer.flush();
         }
-        ml.finish(&mut writer, ml_state);
-        of.finish(&mut writer, of_state);
-        ll.finish(&mut writer, ll_state);
+        for (table, state) in [(ml, ml_state), (of, of_state), (ll, ll_state)] {
+            let (bits, width) = table.last(state);
+            writer.put(bits, width);
+        }
         writer.finish_marked();
     }
 }

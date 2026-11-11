@@ -3,7 +3,7 @@
 
 use crate::Error;
 use crate::bits::{BackReader, load64};
-use crate::fse::{Entry, build_table, read_distribution};
+use crate::weights::read_weights;
 
 /// Longest code the format allows.
 pub(crate) const MAX_BITS: u32 = 11;
@@ -12,10 +12,23 @@ pub(crate) const MAX_BITS: u32 = 11;
 /// in what a refill guarantees.
 const BURST: usize = 5;
 
-/// Lookup table indexed by the next `log` bits of a stream. An entry holds
-/// the symbol in its low byte and the code length above it.
+/// The two-symbol table is used when sixteen times the compressed size is
+/// at most this many times the literal count: beyond that, codes are too
+/// long for pairs to be common.
+const PAIRS_RATIO: usize = 13;
+
+/// Literal count from which the two-symbol table pays for its construction.
+const PAIRS_MIN: usize = 8 << 10;
+
+/// Lookup tables indexed by the next `log` bits of a stream.
 pub(crate) struct HufTable {
+    /// the symbol in the low byte, its code length above it
     entries: [u16; 1 << MAX_BITS],
+    /// up to two symbols at once: the symbols in the low two bytes (first
+    /// one lowest), then the bits they take, then how many they are
+    pairs: [u32; 1 << MAX_BITS],
+    /// whether `pairs` matches `entries`
+    pairs_ready: bool,
     log: u32,
 }
 
@@ -23,8 +36,28 @@ impl HufTable {
     pub(crate) fn new() -> Self {
         Self {
             entries: [0; 1 << MAX_BITS],
+            pairs: [0; 1 << MAX_BITS],
+            pairs_ready: false,
             log: 0,
         }
+    }
+
+    /// Derives the two-symbol table: wherever the bits left after one code
+    /// hold all of the next code, the entry yields both.
+    fn build_pairs(&mut self) {
+        let size = 1usize << self.log;
+        for index in 0..size {
+            let first = self.entries[index] as u32;
+            let first_len = first >> 8;
+            let second = self.entries[(index << first_len) & (size - 1)] as u32;
+            let both = first_len + (second >> 8);
+            self.pairs[index] = if both <= self.log {
+                (first & 0xFF) | (second & 0xFF) << 8 | both << 16 | 2 << 24
+            } else {
+                (first & 0xFF) | first_len << 16 | 1 << 24
+            };
+        }
+        self.pairs_ready = true;
     }
 
     /// Parses a tree description and returns the bytes it occupied.
@@ -76,6 +109,7 @@ impl HufTable {
             start[weight as usize] += span;
         }
         self.log = log;
+        self.pairs_ready = false;
         Ok(used)
     }
 
@@ -135,7 +169,7 @@ impl HufTable {
     /// # Safety
     /// `dst` must be valid for `count` bytes of writes.
     pub(crate) unsafe fn decode_4x(
-        &self,
+        &mut self,
         src: &[u8],
         dst: *mut u8,
         count: usize,
@@ -154,9 +188,15 @@ impl HufTable {
         let mut done = [0usize; 4];
         let mut readers = [None, None, None, None];
         if streams.iter().all(|s| s.len() >= 8 && s[s.len() - 1] != 0) {
+            // two symbols per lookup win when codes are short and there
+            // are enough literals to repay building the table
+            let pairs = count >= PAIRS_MIN && src.len() * 16 <= count * PAIRS_RATIO;
+            if pairs && !self.pairs_ready {
+                self.build_pairs();
+            }
             // safety: forwarded from the caller; the four output segments are
             // disjoint parts of dst..dst + count
-            unsafe { self.burst_4x(streams, dst, lens, &mut done, &mut readers) };
+            unsafe { self.burst_4x(streams, dst, lens, pairs, &mut done, &mut readers) };
         }
         let mut out = dst;
         for i in 0..4 {
@@ -184,10 +224,54 @@ impl HufTable {
         streams: [&'a [u8]; 4],
         dst: *mut u8,
         lens: [usize; 4],
+        pairs: bool,
+        done: &mut [usize; 4],
+        readers: &mut [Option<BackReader<'a>>; 4],
+    ) {
+        #[cfg(target_arch = "x86_64")]
+        if std::is_x86_feature_detected!("bmi2") {
+            // safety: the processor was just found to have the feature; the
+            // rest is forwarded from the caller
+            return unsafe { self.burst_4x_bmi2(streams, dst, lens, pairs, done, readers) };
+        }
+        // safety: forwarded from the caller
+        unsafe { self.burst_4x_any(streams, dst, lens, pairs, done, readers) }
+    }
+
+    /// The same loop compiled for processors with BMI2, where the variable
+    /// shifts of bit reading need no flags and no fixed register.
+    ///
+    /// # Safety
+    /// As for [`HufTable::burst_4x`].
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "bmi2")]
+    unsafe fn burst_4x_bmi2<'a>(
+        &self,
+        streams: [&'a [u8]; 4],
+        dst: *mut u8,
+        lens: [usize; 4],
+        pairs: bool,
+        done: &mut [usize; 4],
+        readers: &mut [Option<BackReader<'a>>; 4],
+    ) {
+        // safety: forwarded from the caller
+        unsafe { self.burst_4x_any(streams, dst, lens, pairs, done, readers) }
+    }
+
+    /// # Safety
+    /// As for [`HufTable::burst_4x`].
+    #[inline(always)]
+    unsafe fn burst_4x_any<'a>(
+        &self,
+        streams: [&'a [u8]; 4],
+        dst: *mut u8,
+        lens: [usize; 4],
+        pairs: bool,
         done: &mut [usize; 4],
         readers: &mut [Option<BackReader<'a>>; 4],
     ) {
         let table = self.entries.as_ptr();
+        let pair_table = self.pairs.as_ptr();
         let shift = 64 - self.log;
         // safety (whole block): `ip[i]` stays inside its stream because a
         // round runs only while ip[i] >= start + 8 and moves it down by at
@@ -209,6 +293,24 @@ impl HufTable {
                 dst.add(lens[0] + lens[1] + lens[2]),
             ];
             let mut left = lens;
+            // a pair lookup always stores two bytes, so it needs room for
+            // two per lookup, or it would spill into the next segment
+            while pairs && (0..4).all(|i| ip[i] >= floor[i] && left[i] >= 2 * BURST) {
+                for _ in 0..BURST {
+                    for i in 0..4 {
+                        let entry = *pair_table.add((bits[i] >> shift) as usize);
+                        op[i].cast::<u16>().write_unaligned((entry as u16).to_le());
+                        op[i] = op[i].add((entry >> 24) as usize);
+                        bits[i] <<= (entry >> 16) & 0xFF;
+                    }
+                }
+                for i in 0..4 {
+                    let used = bits[i].trailing_zeros();
+                    ip[i] = ip[i].sub((used >> 3) as usize);
+                    bits[i] = (load64(ip[i]) | 1) << (used & 7);
+                    left[i] = lens[i] - op[i].offset_from(dst.add(lens[..i].iter().sum())) as usize;
+                }
+            }
             while (0..4).all(|i| ip[i] >= floor[i] && left[i] >= BURST) {
                 for _ in 0..BURST {
                     for i in 0..4 {
@@ -234,63 +336,6 @@ impl HufTable {
                     bits[i].trailing_zeros(),
                 ));
             }
-        }
-    }
-}
-
-/// Reads the weights of all symbols but the last. Returns how many there are
-/// and the bytes consumed.
-fn read_weights(src: &[u8], weights: &mut [u8; 256]) -> Result<(usize, usize), Error> {
-    let header = *src.first().ok_or(Error::Corrupt)? as usize;
-    if header >= 128 {
-        // four bits per weight
-        let count = header - 127;
-        let bytes = count.div_ceil(2);
-        let body = src.get(1..1 + bytes).ok_or(Error::Corrupt)?;
-        for (i, weight) in weights[..count].iter_mut().enumerate() {
-            let pair = body[i / 2];
-            *weight = if i & 1 == 0 { pair >> 4 } else { pair & 15 };
-        }
-        Ok((count, 1 + bytes))
-    } else {
-        let body = src.get(1..1 + header).ok_or(Error::Corrupt)?;
-        Ok((fse_weights(body, weights)?, 1 + header))
-    }
-}
-
-/// Decodes weights coded with two interleaved FSE states. The stream holds
-/// no count: it ends when a state update runs out of bits.
-fn fse_weights(src: &[u8], weights: &mut [u8; 256]) -> Result<usize, Error> {
-    const MAX_LOG: u32 = 6;
-    let mut norm = [0i16; 256];
-    let (log, symbols, used) = read_distribution(src, &mut norm, MAX_LOG)?;
-    let mut table = [Entry::default(); 1 << MAX_LOG];
-    build_table(&norm[..symbols], log, &mut table, 0, |symbol| {
-        (symbol as u32, 0)
-    });
-
-    let mut reader = BackReader::new(&src[used..])?;
-    let mut states = [reader.read(log) as usize, reader.read(log) as usize];
-    reader.refill();
-    if reader.overflowed() {
-        return Err(Error::Corrupt);
-    }
-    let mut count = 0;
-    let mut turn = 0;
-    loop {
-        // the last weight is never stored, so 255 is the most there can be
-        if count > 253 {
-            return Err(Error::Corrupt);
-        }
-        let entry = table[states[turn]];
-        weights[count] = entry.base() as u8;
-        count += 1;
-        states[turn] = entry.next() + reader.read(entry.bits()) as usize;
-        reader.refill();
-        turn ^= 1;
-        if reader.overflowed() {
-            weights[count] = table[states[turn]].base() as u8;
-            return Ok(count + 1);
         }
     }
 }

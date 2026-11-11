@@ -1,7 +1,10 @@
 mod corrupt;
+mod digests;
 mod frames;
 mod inputs;
+mod pack;
 mod prefix;
-mod reference;
+#[cfg(alt_zstd_regenerate)]
+mod regenerate;
 mod roundtrip;
 mod walk;

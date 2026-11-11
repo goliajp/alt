@@ -1,7 +1,7 @@
 //! Two-table greedy match finder (the default strength): a table of 8-byte
 //! hashes finds long matches, a table of shorter hashes is the fallback.
 
-use super::matcher::{PROBE, SKIP_LOG, SeqStore, Window, hash};
+use super::matcher::{PROBE, SKIP_SPAN, SeqStore, Window, hash};
 use crate::bits::{load32, load64};
 
 pub(crate) struct Search<'t> {
@@ -73,6 +73,9 @@ pub(crate) unsafe fn run<const PREFIX: bool>(
                 if (load64(long_ptr) == here) & long_usable {
                     from = long_candidate;
                     forward = 8 + window.common::<PREFIX>(ip + 8, from + 8, end);
+                    // the next position is skipped by the match but is a
+                    // likely target for later ones
+                    *long.add(hash(window.data64(ip + 1), 0, long_shift)) = (ip + 1) as u32;
                 } else if (load32(short_ptr) == here as u32) & short_usable {
                     // a long match one byte on beats the short one here
                     let ahead = window.data64(ip + 1);
@@ -89,7 +92,7 @@ pub(crate) unsafe fn run<const PREFIX: bool>(
                         forward = 4 + window.common::<PREFIX>(ip + 4, from + 4, end);
                     }
                 } else {
-                    ip += 1 + ((ip - anchor) >> SKIP_LOG);
+                    ip += 1 + ((ip - anchor) / SKIP_SPAN);
                     continue;
                 }
                 match_len = forward + window.extend_back::<PREFIX>(&mut ip, &mut from, anchor, low);

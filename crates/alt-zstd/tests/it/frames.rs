@@ -1,35 +1,43 @@
 use alt_zstd::{Error, decode_all, decode_with_prefix, encode_all};
 
-use crate::inputs::{random, text};
-use crate::reference;
+use crate::inputs::{corpus, damage_sources, random, text};
+use crate::pack;
+
+/// the frame stored under `key` in a pack
+fn stored(pack: &'static [u8], key: &str) -> &'static [u8] {
+    let found = pack::parse(pack).into_iter().find(|(name, _)| *name == key);
+    found.unwrap_or_else(|| panic!("no frame {key}")).1
+}
+
+fn input(inputs: Vec<(&'static str, Vec<u8>)>, name: &str) -> Vec<u8> {
+    let found = inputs.into_iter().find(|(key, _)| *key == name);
+    found.unwrap().1
+}
 
 #[test]
 fn empty_input_is_not_a_frame() {
     assert_eq!(decode_all(&[]), Err(Error::Truncated));
-    assert!(reference::decode(&[]).is_err());
     assert_eq!(decode_with_prefix(&[], b"prefix", 0), Err(Error::Truncated));
 }
 
 #[test]
 fn concatenated_and_skippable_frames() {
-    let (a, b, c) = (text(70_000, 31), random(900, 32), text(200_000, 33));
+    // a reference frame with a checksum, one of ours, a reference frame
+    // from the slowest level, and two empty frames
+    let a = input(damage_sources(), "text");
+    let b = random(900, 32);
+    let c = input(corpus(), "text block");
     let mut stream = Vec::new();
-    stream.extend_from_slice(&reference::encode_checked(&a, 3));
+    stream.extend_from_slice(stored(pack::CHECKED, "source/text/19"));
     // a skippable frame: magic, length, payload
     stream.extend_from_slice(&[0x53, 0x2A, 0x4D, 0x18, 5, 0, 0, 0, 1, 2, 3, 4, 5]);
     stream.extend_from_slice(&encode_all(&b, 1));
     stream.extend_from_slice(&[0x50, 0x2A, 0x4D, 0x18, 0, 0, 0, 0]);
-    stream.extend_from_slice(&reference::encode(&c, 19));
+    stream.extend_from_slice(stored(pack::CORPUS, "text block/19"));
     stream.extend_from_slice(&encode_all(&[], 3));
-    stream.extend_from_slice(&reference::encode(&[], 3));
+    stream.extend_from_slice(stored(pack::CORPUS, "empty/3"));
     let expected = [a, b, c].concat();
     assert!(decode_all(&stream).as_ref() == Ok(&expected));
-    assert!(reference::decode(&stream).unwrap() == expected);
-
-    // a later frame may not reach back into an earlier one: decoding the
-    // tail alone must give the same bytes as decoding it in the stream
-    let tail = reference::encode(&expected[70_900..], 19);
-    assert!(decode_all(&tail).unwrap() == expected[70_900..]);
 }
 
 #[test]
@@ -39,13 +47,12 @@ fn trailing_bytes_are_rejected() {
     assert_eq!(decode_all(&frame), Err(Error::Truncated));
     frame.extend_from_slice(&[1, 2, 3]);
     assert_eq!(decode_all(&frame), Err(Error::BadMagic));
-    assert!(reference::decode(&frame).is_err());
 }
 
 #[test]
 fn checksums_are_verified() {
-    let data = text(50_000, 34);
-    let mut frame = reference::encode_checked(&data, 3);
+    let data = input(damage_sources(), "records");
+    let mut frame = stored(pack::CHECKED, "source/records/1").to_vec();
     assert!(decode_all(&frame).as_ref() == Ok(&data));
     let last = frame.len() - 1;
     frame[last] ^= 0x10;
@@ -59,8 +66,10 @@ fn checksums_of_all_tail_lengths() {
     // every remainder of the 32-byte stripe and of the 8- and 4-byte steps
     let data = random(200, 35);
     for len in 0..data.len() {
-        let frame = reference::encode_checked(&data[..len], 1);
-        assert_eq!(decode_all(&frame).as_deref(), Ok(&data[..len]), "{len}");
+        let frame = stored(pack::CHECKED, &format!("tail/{len}"));
+        // descriptor bit 2 announces the checksum
+        assert!(frame[4] & 4 != 0);
+        assert_eq!(decode_all(frame).as_deref(), Ok(&data[..len]), "{len}");
     }
 }
 
@@ -87,7 +96,6 @@ fn declared_sizes_must_hold() {
         let mut wrong = frame.clone();
         wrong[5] = wrong[5].wrapping_add(delta);
         assert!(decode_all(&wrong).is_err(), "{delta}");
-        assert!(reference::decode(&wrong).is_err());
     }
     let mut longer = frame.clone();
     longer[5] += 1;

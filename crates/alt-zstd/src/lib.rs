@@ -14,6 +14,7 @@ mod fse;
 mod huffman;
 mod literals;
 mod sequences;
+mod weights;
 mod xxh64;
 
 /// Why a decode failed.

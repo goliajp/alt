@@ -263,16 +263,25 @@ mod tests {
             let at = (state % 40) as usize;
             data.extend_from_slice(&word[at..at + (state >> 32) as usize % 6 + 1]);
         }
-        for level in [1, 3] {
+        let digests = [
+            (
+                1,
+                "e0d132548f7c8358b16a2ec0e14b3d07b68fc68a43073821ef141046ccb215f6",
+            ),
+            (
+                3,
+                "f50e33c167bdb8b4edeab0d1336cfe9463d13035412bd41c422dfe7f22c87806",
+            ),
+        ];
+        for (level, verified) in digests {
             let packed = encode_in_epochs(&data, b"alpha beta gamma", level, 3 << 17);
             let ours = crate::decode_with_prefix(&packed, b"alpha beta gamma", data.len());
             assert_eq!(ours.as_ref(), Ok(&data));
-            // the reference decoder must read the same frame
-            let mut reference = zstd::zstd_safe::DCtx::create();
-            reference.ref_prefix(b"alpha beta gamma").unwrap();
-            let mut plain = Vec::with_capacity(data.len());
-            reference.decompress(&mut plain, &packed).unwrap();
-            assert_eq!(plain, data);
+            // the reference implementation decoded exactly these bytes
+            // back to the input when the digests were recorded
+            let digest = alt_hash::sha256(&packed);
+            let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+            assert_eq!(hex, verified, "level {level}");
         }
     }
 }

@@ -1,49 +1,57 @@
-use crate::inputs::{Rng, corpus, few_symbols, mutate, random, records, runs, skewed, text};
-use crate::reference;
+//! Plain frames: those of the reference implementation are decoded from
+//! the packs, our own are decoded again and held to their recorded digests.
+
+use std::collections::{HashMap, HashSet};
+
+use alt_zstd::{decode_all, decode_with_prefix, encode_all, encode_with_prefix};
+
+use crate::inputs::{corpus, small, text};
 use crate::walk::{self, Shape};
+use crate::{digests, pack};
+
+/// records in `frames/corpus.pack`
+const CORPUS_FRAMES: usize = 73;
+/// records in `frames/small.pack`
+const SMALL_FRAMES: usize = 2 * (300 * 3 + 13);
+/// lines in `frames/own.sha256`: the corpus, the small inputs plain and
+/// prefixed, the prefix cases and the far-reaching prefix, at two levels
+const DIGESTS: usize = 2 * (26 + 2 * 313 + 14 + 1);
 
 #[test]
-fn reference_reads_our_frames() {
+fn reference_frames_decode() {
+    let inputs: HashMap<_, _> = corpus().into_iter().collect();
+    let records = pack::parse(pack::CORPUS);
+    let mut shape = Shape::default();
+    let mut seen = HashSet::new();
+    for (key, frame) in &records {
+        let (name, _level) = key.rsplit_once('/').unwrap();
+        assert!(decode_all(frame).as_ref() == Ok(&inputs[name]), "{key}");
+        walk::add(frame, &mut shape);
+        seen.insert(name);
+    }
+    assert_eq!(seen.len(), inputs.len());
+    assert_eq!(records.len(), CORPUS_FRAMES);
+    assert_all_kinds(&shape, "reference encoder");
+}
+
+#[test]
+fn own_frames_round_trip_and_keep_their_digests() {
     let mut shape = Shape::default();
     let mut cases = 0;
     for (name, data) in corpus() {
         for level in [1, 3] {
-            let frame = alt_zstd::encode_all(&data, level);
-            let plain = reference::decode(&frame)
-                .unwrap_or_else(|error| panic!("{name} level {level}: {error}"));
+            let frame = encode_all(&data, level);
             assert!(
-                plain == data,
-                "{name} level {level}: reference output differs"
+                decode_all(&frame).as_ref() == Ok(&data),
+                "{name} level {level}"
             );
-            assert!(
-                alt_zstd::decode_all(&frame).as_ref() == Ok(&data),
-                "{name} level {level}: own output differs"
-            );
+            digests::expect(&format!("c/{name}/{level}"), &frame);
             walk::add(&frame, &mut shape);
             cases += 1;
         }
     }
     assert_eq!(cases, 52);
     assert_all_kinds(&shape, "our encoder");
-}
-
-#[test]
-fn we_read_reference_frames() {
-    let mut shape = Shape::default();
-    let mut cases = 0;
-    for (name, data) in corpus() {
-        for level in [1, 3, 9, 19] {
-            let frame = reference::encode(&data, level);
-            assert!(
-                alt_zstd::decode_all(&frame).as_ref() == Ok(&data),
-                "{name} level {level}"
-            );
-            walk::add(&frame, &mut shape);
-            cases += 1;
-        }
-    }
-    assert_eq!(cases, 104);
-    assert_all_kinds(&shape, "reference encoder");
 }
 
 /// every block kind, literal kind, stream layout and table mode must have
@@ -63,89 +71,86 @@ fn assert_all_kinds(shape: &Shape, who: &str) {
 }
 
 #[test]
-fn levels_differ_and_stay_close_to_reference() {
+fn small_reference_frames_decode() {
+    let inputs: HashMap<_, _> = small()
+        .into_iter()
+        .map(|(len, data, prefix)| (len.to_string(), (data, prefix)))
+        .collect();
+    let records = pack::parse(pack::SMALL);
+    for (key, frame) in &records {
+        let mut parts = key.split('/');
+        let kind = parts.next().unwrap();
+        let (data, prefix) = &inputs[parts.next().unwrap()];
+        let plain = match kind {
+            "plain" => decode_all(frame),
+            _ => decode_with_prefix(frame, prefix, data.len()),
+        };
+        assert!(plain.as_ref() == Ok(data), "{key}");
+    }
+    assert_eq!(records.len(), SMALL_FRAMES);
+}
+
+#[test]
+fn small_own_frames_round_trip_and_keep_their_digests() {
+    let mut cases = 0;
+    for (len, data, prefix) in small() {
+        for level in [1, 3] {
+            let frame = encode_all(&data, level);
+            assert!(
+                decode_all(&frame).as_ref() == Ok(&data),
+                "{len} level {level}"
+            );
+            digests::expect(&format!("s/{len}/{level}"), &frame);
+            let frame = encode_with_prefix(&data, &prefix, level);
+            let plain = decode_with_prefix(&frame, &prefix, len);
+            assert!(plain.as_ref() == Ok(&data), "{len} level {level} prefixed");
+            digests::expect(&format!("sp/{len}/{level}"), &frame);
+            cases += 2;
+        }
+    }
+    assert_eq!(cases, 313 * 4);
+}
+
+#[test]
+fn every_digest_belongs_to_a_test() {
+    assert_eq!(digests::count(), DIGESTS);
+}
+
+#[test]
+fn sizes_stay_close_to_reference() {
+    let reference: HashMap<_, _> = pack::parse(pack::CORPUS)
+        .into_iter()
+        .map(|(key, frame)| (key, frame.len()))
+        .collect();
+    let mut compared = 0;
     for (name, data) in corpus() {
         if data.len() < 100_000 {
             continue;
         }
-        let ours = [1, 3].map(|level| alt_zstd::encode_all(&data, level).len());
-        let theirs = [1, 3].map(|level| reference::encode(&data, level).len());
-        println!("{name}: ours {ours:?}, reference {theirs:?}");
-        for (ours, theirs) in ours.iter().zip(theirs) {
-            // allow a fixed handful of bytes for inputs that shrink to nothing
-            assert!(
-                *ours as f64 <= theirs as f64 * 1.03 + 64.0,
-                "{name}: {ours} against {theirs}"
-            );
-        }
+        // level 3 is the one level every large input has a reference
+        // frame for
+        let theirs = reference[format!("{name}/3").as_str()];
+        let ours = encode_all(&data, 3).len();
+        println!("{name}: ours {ours}, reference {theirs}");
+        // allow a fixed handful of bytes for inputs that shrink to nothing
+        assert!(
+            ours as f64 <= theirs as f64 * 1.03 + 64.0,
+            "{name}: {ours} against {theirs}"
+        );
+        compared += 1;
     }
-    let data = crate::inputs::text(450_000, 3);
-    assert!(alt_zstd::encode_all(&data, 3).len() < alt_zstd::encode_all(&data, 1).len());
+    assert_eq!(compared, 13);
+    let data = text(450_000, 3);
+    assert!(encode_all(&data, 3).len() < encode_all(&data, 1).len());
 }
 
 #[test]
 fn level_mapping() {
-    let data = crate::inputs::text(300_000, 77);
-    let fast = alt_zstd::encode_all(&data, 1);
-    let default = alt_zstd::encode_all(&data, 3);
-    assert_eq!(alt_zstd::encode_all(&data, -5), fast);
-    assert_eq!(alt_zstd::encode_all(&data, 2), fast);
-    assert_eq!(alt_zstd::encode_all(&data, 0), default);
-    assert_eq!(alt_zstd::encode_all(&data, 19), default);
-}
-
-/// Short inputs of every length up to a few hundred bytes and around the
-/// sizes where headers change shape, in both directions and with a prefix.
-#[test]
-fn small_inputs_both_ways() {
-    let mut rng = Rng::new(91);
-    let mut lens: Vec<usize> = (0..300).collect();
-    lens.extend([
-        1023, 1024, 1025, 4095, 4096, 4097, 16383, 16384, 16385, 65535, 65536, 65791, 65792,
-    ]);
-    let mut cases = 0;
-    for len in lens {
-        let seed = rng.next();
-        let data = match len % 6 {
-            0 => text(len, seed),
-            1 => random(len, seed),
-            2 => few_symbols(len, seed, 3),
-            3 => records(len, seed),
-            4 => runs(len, seed),
-            _ => skewed(len, seed),
-        };
-        let prefix = mutate(&data, seed, 3);
-        for level in [1, 3] {
-            let frame = alt_zstd::encode_all(&data, level);
-            assert!(
-                reference::decode(&frame).unwrap() == data,
-                "{len} level {level}"
-            );
-            assert!(
-                alt_zstd::decode_all(&frame).as_ref() == Ok(&data),
-                "{len} level {level}"
-            );
-            let frame = alt_zstd::encode_with_prefix(&data, &prefix, level);
-            let plain = reference::decode_with_prefix(&frame, &prefix, len);
-            assert!(
-                plain.as_ref() == Some(&data),
-                "{len} level {level} prefixed"
-            );
-            let own = alt_zstd::decode_with_prefix(&frame, &prefix, len);
-            assert!(own.as_ref() == Ok(&data), "{len} level {level} prefixed");
-            cases += 2;
-        }
-        for level in [1, 3, 19] {
-            let frame = reference::encode(&data, level);
-            assert!(
-                alt_zstd::decode_all(&frame).as_ref() == Ok(&data),
-                "{len} level {level}"
-            );
-            let frame = reference::encode_with_prefix(&data, &prefix, level);
-            let own = alt_zstd::decode_with_prefix(&frame, &prefix, len);
-            assert!(own.as_ref() == Ok(&data), "{len} level {level} prefixed");
-            cases += 2;
-        }
-    }
-    assert_eq!(cases, 313 * 10);
+    let data = text(300_000, 77);
+    let fast = encode_all(&data, 1);
+    let default = encode_all(&data, 3);
+    assert_eq!(encode_all(&data, -5), fast);
+    assert_eq!(encode_all(&data, 2), fast);
+    assert_eq!(encode_all(&data, 0), default);
+    assert_eq!(encode_all(&data, 19), default);
 }

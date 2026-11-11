@@ -31,6 +31,38 @@ impl SequenceDecoder {
         sink: Sink<'_>,
         repeats: &mut [usize; 3],
     ) -> Result<(), Error> {
+        #[cfg(target_arch = "x86_64")]
+        if std::is_x86_feature_detected!("bmi2") {
+            // safety: the processor was just found to have the feature
+            return unsafe { self.execute_bmi2(stream, count, literals, sink, repeats) };
+        }
+        self.execute_any(stream, count, literals, sink, repeats)
+    }
+
+    /// The same loop compiled for processors with BMI2, where the variable
+    /// shifts of bit reading need no flags and no fixed register.
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "bmi2")]
+    unsafe fn execute_bmi2(
+        &self,
+        stream: &[u8],
+        count: usize,
+        literals: Literals,
+        sink: Sink<'_>,
+        repeats: &mut [usize; 3],
+    ) -> Result<(), Error> {
+        self.execute_any(stream, count, literals, sink, repeats)
+    }
+
+    #[inline(always)]
+    fn execute_any(
+        &self,
+        stream: &[u8],
+        count: usize,
+        literals: Literals,
+        sink: Sink<'_>,
+        repeats: &mut [usize; 3],
+    ) -> Result<(), Error> {
         let Sink {
             out,
             frame_start,
@@ -117,9 +149,9 @@ impl SequenceDecoder {
                 if lit_len + match_len > limit.offset_from(op) as usize {
                     return Err(overflow);
                 }
-                op.copy_from_nonoverlapping(lit, 16);
-                if lit_len > 16 {
-                    copy_wide(lit.add(16), op.add(16), lit_len - 16);
+                op.copy_from_nonoverlapping(lit, 32);
+                if lit_len > 32 {
+                    copy_wide(lit.add(32), op.add(32), lit_len - 32);
                 }
                 lit = lit.add(lit_len);
                 op = op.add(lit_len);
@@ -156,7 +188,7 @@ impl SequenceDecoder {
 /// and may run on into the frame.
 ///
 /// # Safety
-/// `history <= op`, both in one buffer that is valid for `len + 15` bytes of
+/// `history <= op`, both in one buffer that is valid for `len + 31` bytes of
 /// writes at `op`, and `offset` larger than their distance.
 #[cold]
 unsafe fn copy_from_prefix(
@@ -211,12 +243,12 @@ const NEAR_FORWARD: [usize; 8] = [0, 1, 2, 1, 4, 4, 4, 4];
 const NEAR_BACK: [usize; 8] = [8, 8, 8, 7, 8, 9, 10, 11];
 
 /// Copies a match of `len` bytes that starts `offset` bytes before `op`,
-/// replicating the pattern when the two overlap. May write up to 15 bytes
+/// replicating the pattern when the two overlap. May write up to 31 bytes
 /// past `len`.
 ///
 /// # Safety
 /// `offset` must be nonzero, the `offset` bytes before `op` initialized, and
-/// `op` valid for `len + 15` bytes of writes.
+/// `op` valid for `len + 31` bytes of writes.
 #[inline(always)]
 unsafe fn copy_match(op: *mut u8, offset: usize, len: usize) {
     // safety: sources always trail the write position, so every byte read
@@ -224,9 +256,12 @@ unsafe fn copy_match(op: *mut u8, offset: usize, len: usize) {
     unsafe {
         let mut src = op.sub(offset) as *const u8;
         if offset >= 16 {
+            // 32 bytes up front: most matches end there, and a branch on
+            // the length would often be mispredicted
             op.copy_from_nonoverlapping(src, 16);
-            if len > 16 {
-                copy_wide(src.add(16), op.add(16), len - 16);
+            op.add(16).copy_from_nonoverlapping(src.add(16), 16);
+            if len > 32 {
+                copy_wide(src.add(32), op.add(32), len - 32);
             }
             return;
         }

@@ -6,4 +6,8 @@ edition.workspace = true
 license.workspace = true
 
 [dev-dependencies]
-zstd.workspace = true
+alt-hash.workspace = true
+
+[lints.rust]
+# set by hand to rebuild the test fixtures, see tests/it/regenerate.rs
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(alt_zstd_regenerate)'] }

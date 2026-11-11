@@ -91,9 +91,9 @@ impl CTable {
         *state = self.states[index as usize & ((1 << LL_MAX_LOG) - 1)] as u32;
     }
 
-    /// Writes the final state, which the decoder reads first.
-    pub(crate) fn finish(&self, writer: &mut BitWriter<'_>, state: u32) {
-        writer.put((state & ((1 << self.log) - 1)) as u64, self.log);
+    /// The final state as the bits to write, which the decoder reads first.
+    pub(crate) fn last(&self, state: u32) -> (u64, u32) {
+        ((state & ((1 << self.log) - 1)) as u64, self.log)
     }
 }
 

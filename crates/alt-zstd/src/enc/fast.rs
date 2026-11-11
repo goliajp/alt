@@ -1,6 +1,6 @@
 //! Single-table greedy match finder (the fast strength).
 
-use super::matcher::{PROBE, SKIP_LOG, SeqStore, Window, hash};
+use super::matcher::{PROBE, SKIP_SPAN, SeqStore, Window, hash};
 use crate::bits::load32;
 
 pub(crate) struct Search<'t> {
@@ -73,7 +73,7 @@ pub(crate) unsafe fn run<const PREFIX: bool>(
                 rep0 = ip - from;
                 store.push(window, anchor, ip, match_len, rep0 + 3);
             } else {
-                ip += 1 + ((ip - anchor) >> SKIP_LOG);
+                ip += 1 + ((ip - anchor) / SKIP_SPAN);
                 continue;
             }
             ip += match_len;

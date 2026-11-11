@@ -10,6 +10,8 @@ pub(crate) struct LiteralCoder {
     valid: bool,
     /// scratch for a tree description
     tree: Vec<u8>,
+    /// scratch for the four literal streams
+    streams: Vec<u8>,
 }
 
 /// Bytes inspected at each end of a block suspected to be incompressible.
@@ -62,6 +64,7 @@ impl LiteralCoder {
             codes: Codes::new(),
             valid: false,
             tree: Vec::new(),
+            streams: Vec::new(),
         }
     }
 
@@ -149,7 +152,7 @@ impl LiteralCoder {
             &fresh
         };
         if four {
-            huf::encode_4x(codes, literals, out);
+            huf::encode_4x(codes, literals, &mut self.streams, out);
         } else {
             huf::encode_stream(codes, literals, out);
         }

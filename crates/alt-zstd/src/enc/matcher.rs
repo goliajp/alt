@@ -15,8 +15,8 @@ pub(crate) const PROBE: usize = 8;
 pub(crate) const MIN_MATCH: usize = 4;
 
 /// Positions without a match are skipped faster the longer the dry spell:
-/// one extra step per `1 << SKIP_LOG` literals.
-pub(crate) const SKIP_LOG: u32 = 8;
+/// the step between probes grows by one for every `SKIP_SPAN` bytes passed.
+pub(crate) const SKIP_SPAN: usize = 256;
 
 /// Stands in for a candidate that may not be read, so that the comparison
 /// can go ahead without a branch on the candidate's validity.

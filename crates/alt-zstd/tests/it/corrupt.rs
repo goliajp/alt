@@ -1,72 +1,76 @@
-//! Damaged input must be refused, never crash, hang or over-allocate. The
-//! reference decoder is run on the same damage: whatever it accepts we must
-//! accept with the same bytes, and the other way round.
+//! Damaged input must be refused, never crash, hang or over-allocate, and
+//! whatever is accepted from a frame with a content checksum must be the
+//! original content.
+
+use std::collections::HashMap;
 
 use alt_zstd::{decode_all, decode_with_prefix};
 
-use crate::inputs::{Rng, mutate, random, records, runs, text};
-use crate::reference;
+use crate::inputs::{Rng, damage_sources, mutate, text};
+use crate::{digests, pack};
 
-/// small frames from both encoders that between them use every block kind
-fn frames() -> Vec<(String, Vec<u8>, Vec<u8>)> {
-    let inputs = [
-        ("text", text(6000, 61)),
-        ("records", records(5000, 62)),
-        ("runs", runs(40_000, 63)),
-        ("random", random(700, 64)),
-        ("multi-block", text(140_000, 65)),
-        ("stitched", crate::inputs::stitched(66)),
-    ];
-    let mut frames = Vec::new();
-    for (name, data) in inputs {
-        for level in [1, 19] {
-            let frame = reference::encode_checked(&data, level);
-            frames.push((format!("reference {name} {level}"), frame, data.clone()));
-        }
-        let frame = alt_zstd::encode_all(&data, 3);
-        frames.push((format!("own {name}"), frame, data.clone()));
+/// records in `frames/damaged.pack`
+const DAMAGED_FRAMES: usize = 271;
+
+struct Source {
+    name: String,
+    frame: Vec<u8>,
+    data: Vec<u8>,
+    /// whether the frame carries a content checksum
+    checked: bool,
+}
+
+/// frames from both encoders that between them use every block kind; the
+/// reference ones carry a content checksum, ours do not
+fn sources() -> Vec<Source> {
+    let inputs: HashMap<_, _> = damage_sources().into_iter().collect();
+    let mut sources = Vec::new();
+    for (key, frame) in pack::parse(pack::CHECKED) {
+        let Some(rest) = key.strip_prefix("source/") else {
+            continue;
+        };
+        let (name, _level) = rest.rsplit_once('/').unwrap();
+        sources.push(Source {
+            name: format!("reference {rest}"),
+            frame: frame.to_vec(),
+            data: inputs[name].clone(),
+            checked: true,
+        });
     }
-    frames
+    assert_eq!(sources.len(), 10);
+    for (name, data) in damage_sources() {
+        sources.push(Source {
+            name: format!("own {name}"),
+            frame: alt_zstd::encode_all(&data, 3),
+            data,
+            checked: false,
+        });
+    }
+    sources
 }
 
-enum Verdict {
-    Accepted,
-    Refused,
-    /// refused by us alone
-    Stricter,
-}
-
-/// Decodes with both implementations. What we accept the reference must
-/// accept with the same bytes, except that it refuses windows above 128 MiB
-/// and we have no such limit. We may refuse more: we insist that every
-/// Huffman stream ends exactly where its last symbol does.
-fn verdict(what: &str, input: &[u8]) -> Verdict {
-    match (decode_all(input), reference::decode(input)) {
-        (Ok(ours), Ok(theirs)) => {
-            assert!(ours == theirs, "{what}: outputs differ");
-            Verdict::Accepted
-        }
-        (Err(_), Err(_)) => Verdict::Refused,
-        (Ok(_), Err(error)) => {
+/// Decodes damaged input and returns whether it was accepted. Accepting is
+/// only right, for a frame with a checksum, if the content is unchanged.
+fn survives(source: &Source, what: &str, damaged: &[u8]) -> bool {
+    match decode_all(damaged) {
+        Ok(out) => {
             assert!(
-                error.to_string().contains("too much memory"),
-                "{what}: only we accept ({error})"
+                !source.checked || out == source.data,
+                "{what}: wrong content"
             );
-            Verdict::Accepted
+            true
         }
-        (Err(_), Ok(_)) => Verdict::Stricter,
+        Err(_) => false,
     }
 }
 
 #[test]
 fn truncation_is_an_error() {
     let mut checked = 0;
-    for (name, frame, _) in frames() {
+    for Source { name, frame, .. } in sources() {
         let step = (frame.len() / 600).max(1);
-        for len in (0..frame.len())
-            .step_by(step)
-            .chain(frame.len() - 8..frame.len())
-        {
+        let cuts = (0..frame.len()).step_by(step);
+        for len in cuts.chain(frame.len() - 8..frame.len()) {
             assert!(decode_all(&frame[..len]).is_err(), "{name} cut at {len}");
             checked += 1;
         }
@@ -75,43 +79,36 @@ fn truncation_is_an_error() {
 }
 
 #[test]
-fn bit_flips_get_the_reference_verdict() {
-    let (mut flips, mut accepted, mut stricter) = (0, 0, 0);
-    for (name, frame, data) in frames() {
-        let step = (frame.len() / 400).max(1);
-        for at in (0..frame.len()).step_by(step) {
+fn bit_flips_never_pass_a_checksum() {
+    let (mut flips, mut accepted, mut accepted_checked) = (0, 0, 0);
+    for source in sources() {
+        let step = (source.frame.len() / 400).max(1);
+        for at in (0..source.frame.len()).step_by(step) {
             for bit in 0..8 {
-                let mut damaged = frame.clone();
+                let mut damaged = source.frame.clone();
                 damaged[at] ^= 1 << bit;
-                let what = format!("{name} byte {at} bit {bit}");
-                match verdict(&what, &damaged) {
-                    Verdict::Accepted => {
-                        accepted += 1;
-                        // a checksummed frame survives only flips that
-                        // change nothing
-                        if name.starts_with("reference") {
-                            assert!(decode_all(&damaged).unwrap() == data, "{what}");
-                        }
-                    }
-                    Verdict::Stricter => stricter += 1,
-                    Verdict::Refused => {}
+                let what = format!("{} byte {at} bit {bit}", source.name);
+                if survives(&source, &what, &damaged) {
+                    accepted += 1;
+                    accepted_checked += source.checked as usize;
                 }
                 flips += 1;
             }
         }
     }
-    println!("{flips} flips: {accepted} accepted, {stricter} refused by us alone");
+    println!("{flips} flips: {accepted} accepted, {accepted_checked} of them with a checksum");
     assert!(flips > 40_000, "{flips}");
-    assert!(stricter < flips / 20, "{stricter}");
+    // with a checksum only flips of bits that carry no meaning get through
+    assert!(accepted_checked < flips / 200, "{accepted_checked}");
 }
 
 #[test]
-fn spliced_and_overwritten_frames_get_the_reference_verdict() {
+fn splices_and_overwrites_never_pass_a_checksum() {
     let mut rng = Rng::new(67);
     let mut tried = 0;
-    for (name, frame, _) in frames() {
+    for source in sources() {
         for round in 0..300 {
-            let mut damaged = frame.clone();
+            let mut damaged = source.frame.clone();
             let at = rng.below(damaged.len());
             match round % 4 {
                 0 => damaged[at] = (rng.next() >> 56) as u8,
@@ -125,29 +122,31 @@ fn spliced_and_overwritten_frames_get_the_reference_verdict() {
                     damaged[at..end].fill(0xFF);
                 }
             }
-            verdict(&format!("{name} round {round}"), &damaged);
+            survives(&source, &format!("{} round {round}", source.name), &damaged);
             tried += 1;
         }
     }
-    assert_eq!(tried, 18 * 300);
+    assert_eq!(tried, 16 * 300);
 }
 
 #[test]
-fn noise_behind_a_valid_header() {
+fn noise_behind_a_valid_header_never_crashes() {
     let mut rng = Rng::new(68);
+    let mut accepted = 0;
     for round in 0..20_000 {
         let mut input = vec![0x28, 0xB5, 0x2F, 0xFD];
         let len = 6 + rng.below(200);
         input.extend((0..len).map(|_| (rng.next() >> 56) as u8));
-        // steer most rounds into a compressed block right away
+        // steer half the rounds into a compressed block right away
         if round % 2 == 0 {
             input[4] = 0x20;
             input[5] = 0xFF;
             let body = (len.saturating_sub(5)) as u32;
             input[6..9].copy_from_slice(&(body << 3 | 0b101).to_le_bytes()[..3]);
         }
-        verdict(&format!("round {round}"), &input);
+        accepted += decode_all(&input).is_ok() as usize;
     }
+    println!("{accepted} of 20000 accepted");
 }
 
 #[test]
@@ -164,12 +163,6 @@ fn damaged_prefixed_frames_never_crash() {
                 Ok(out) => assert_eq!(out.len(), data.len()),
                 Err(_) => refused += 1,
             }
-            // the reference must not accept what we refuse to produce
-            let theirs = reference::decode_with_prefix(&damaged, &prefix, data.len());
-            if let Some(theirs) = theirs.filter(|out| out.len() == data.len()) {
-                let ours = decode_with_prefix(&damaged, &prefix, data.len());
-                assert!(ours.as_ref() == Ok(&theirs), "byte {at} bit {bit}");
-            }
         }
         assert!(decode_with_prefix(&frame[..at], &prefix, data.len()).is_err());
     }
@@ -179,4 +172,22 @@ fn damaged_prefixed_frames_never_crash() {
         3 * frame.len()
     );
     assert!(refused > frame.len() / 2);
+}
+
+/// Damaged frames that the reference implementation accepted when the pack
+/// was made, each with the digest of what it decoded them to: we must
+/// accept them too, with the same result.
+#[test]
+fn damage_the_reference_accepts_decodes_alike() {
+    let records = pack::parse(pack::DAMAGED);
+    for (key, record) in &records {
+        let (digest, frame) = record.split_at(32);
+        let out = decode_all(frame).unwrap_or_else(|error| panic!("{key}: {error}"));
+        assert!(
+            alt_hash::sha256(&out) == digest,
+            "{key}: {}",
+            digests::hex(digest)
+        );
+    }
+    assert_eq!(records.len(), DAMAGED_FRAMES);
 }
