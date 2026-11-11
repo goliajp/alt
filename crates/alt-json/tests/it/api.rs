@@ -136,9 +136,12 @@ fn conversions() {
         json!({"a": 2, "b": 1})
     );
     assert_eq!("[1, 2]".parse::<Value>().unwrap(), json!([1, 2]));
-    assert_eq!(alt_json::from_str("{}").unwrap(), json!({}));
-    assert_eq!(alt_json::from_slice(b"7").unwrap(), 7);
-    assert_eq!(alt_json::to_value(&[Some(1), None]), json!([1, null]));
+    assert_eq!(alt_json::from_str::<Value>("{}").unwrap(), json!({}));
+    assert_eq!(alt_json::from_slice::<Value>(b"7").unwrap(), 7);
+    assert_eq!(
+        alt_json::to_value([Some(1), None]).unwrap(),
+        json!([1, null])
+    );
     assert_eq!(Value::default(), Value::Null);
     let mut map = Map::new();
     map.insert("z".into(), json!(1));

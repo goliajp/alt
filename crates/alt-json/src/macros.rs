@@ -8,14 +8,15 @@
 ///     "nested": { "ok": true, "count": 1 + 2 },
 /// });
 /// assert_eq!(
-///     alt_json::to_string(&value),
+///     alt_json::to_string(&value).unwrap(),
 ///     r#"{"name":"alt","nested":{"count":3,"ok":true},"tags":["a","b",null]}"#
 /// );
 /// ```
 ///
-/// Any expression whose type implements [`ToValue`](crate::ToValue) can be
+/// Any expression whose type implements [`ToJson`](crate::ToJson) can be
 /// used as an element, a member value or the whole argument; it is borrowed,
-/// not moved. Keys are string literals, identifiers bound to something that
+/// not moved. The macro panics if such a value cannot be represented, for
+/// example a map whose keys are not strings. Keys are string literals, identifiers bound to something that
 /// converts into `String`, or any such expression in parentheses. Trailing
 /// commas are allowed.
 #[macro_export]
@@ -38,7 +39,7 @@ macro_rules! json {
         $crate::Value::Object(object)
     }};
     ($other:expr) => {
-        $crate::ToValue::to_value(&$other)
+        $crate::to_value(&$other).unwrap()
     };
 }
 

@@ -37,10 +37,13 @@ fn escapes_are_pinned() {
         r##" !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"##,
         "\u{7f}\""
     );
-    assert_eq!(alt_json::to_string(&Value::String(all.clone())), expected);
+    assert_eq!(
+        alt_json::to_string(&Value::String(all.clone())).unwrap(),
+        expected
+    );
     output(&Value::String(all));
     assert_eq!(
-        alt_json::to_string(&Value::from("é\u{2028}😀/")),
+        alt_json::to_string(&Value::from("é\u{2028}😀/")).unwrap(),
         "\"é\u{2028}😀/\""
     );
 }
@@ -181,7 +184,7 @@ fn raw_bytes_and_invalid_utf8() {
         let inner: Vec<u8> = (0..len)
             .map(|_| {
                 if rng.chance(8) {
-                    rng.next() as u8
+                    rng.next_u64() as u8
                 } else {
                     *rng.pick(&notable)
                 }

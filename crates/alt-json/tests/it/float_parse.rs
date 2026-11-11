@@ -9,7 +9,7 @@ fn digits(rng: &mut Rng, count: u64) -> String {
 
 fn finite(rng: &mut Rng) -> f64 {
     loop {
-        let f = f64::from_bits(rng.next());
+        let f = f64::from_bits(rng.next_u64());
         if f.is_finite() {
             return f;
         }
@@ -110,7 +110,7 @@ fn random_digit_strings() {
             text.push(*rng.pick(&['e', 'E']));
             text.push_str(rng.pick(&["", "+", "-"]));
             let exponent = match rng.below(10) {
-                0 => rng.next().to_string(),
+                0 => rng.next_u64().to_string(),
                 1 => format!("000{}", rng.below(400)),
                 2 => rng.range(280, 420).to_string(),
                 _ => rng.below(400).to_string(),

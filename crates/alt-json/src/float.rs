@@ -2,10 +2,15 @@
 //!
 //! The digits are the shortest that identify the value, closest to it when
 //! several have that length. Values whose decimal exponent is between -5 and
-//! 15 are written positionally (`1500.0`, `0.00012`), the rest as
-//! `1.5e+16` / `1.2e-7`.
+//! 15 (-6 and 12 for `f32`) are written positionally (`1500.0`, `0.00012`),
+//! the rest as `1.5e+16` / `1.2e-7`.
 
 mod pow10;
+mod single;
+
+pub(crate) use single::write_f32;
+
+use std::ops::RangeInclusive;
 
 use crate::digits::PAIRS;
 
@@ -54,7 +59,7 @@ pub(crate) fn write_f64(value: f64, out: &mut Vec<u8>) {
     let exponent = decimal.exp + 15 + i32::from(extra_digit);
     let mut buf = [0u8; 17];
     let digits = significant_digits(decimal.sig, extra_digit, &mut buf);
-    layout(digits, exponent, out);
+    layout(digits, exponent, -5..=15, out);
 }
 
 /// floor(log10(2^bin_exp)), or floor(log10(3/4 * 2^bin_exp)) for a power of two
@@ -186,9 +191,10 @@ fn significant_digits(mut sig: u64, extra_digit: bool, buf: &mut [u8; 17]) -> &[
     &buf[start..end]
 }
 
-/// `exponent` is the power of ten of the first digit.
-fn layout(digits: &[u8], exponent: i32, out: &mut Vec<u8>) {
-    if (-5..=15).contains(&exponent) {
+/// `exponent` is the power of ten of the first digit; values whose exponent
+/// is in `positional` are written without an exponent.
+fn layout(digits: &[u8], exponent: i32, positional: RangeInclusive<i32>, out: &mut Vec<u8>) {
+    if positional.contains(&exponent) {
         if exponent < 0 {
             // 1234e-6 -> 0.001234
             out.extend_from_slice(b"0.");

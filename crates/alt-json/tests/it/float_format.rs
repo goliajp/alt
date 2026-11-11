@@ -20,7 +20,7 @@ fn random_bits(seed: u64, count: u64) -> u64 {
     let mut rng = Rng::new(seed);
     let mut cases = 0;
     while cases < count {
-        let f = f64::from_bits(rng.next());
+        let f = f64::from_bits(rng.next_u64());
         if f.is_finite() {
             float_output(f);
             cases += 1;
@@ -68,7 +68,7 @@ fn every_exponent() {
             1 << 51,
         ];
         let mut fractions = edge.to_vec();
-        fractions.extend((0..200).map(|_| rng.next() & MAX_FRACTION));
+        fractions.extend((0..200).map(|_| rng.next_u64() & MAX_FRACTION));
         // few set bits: short decimals and exact halves live here
         fractions.extend((0..56).map(|_| (1u64 << rng.below(52)) | (1u64 << rng.below(52))));
         for fraction in fractions {
@@ -93,8 +93,10 @@ fn subnormals() {
         with_neighbours(f64::from_bits(1 << bit), &mut cases);
     }
     for _ in 0..500_000 {
-        float_output(f64::from_bits(rng.next() & MAX_FRACTION));
-        float_output(f64::from_bits((rng.next() & MAX_FRACTION) >> rng.below(52)));
+        float_output(f64::from_bits(rng.next_u64() & MAX_FRACTION));
+        float_output(f64::from_bits(
+            (rng.next_u64() & MAX_FRACTION) >> rng.below(52),
+        ));
         cases += 2;
     }
     with_neighbours(f64::MIN_POSITIVE, &mut cases);
@@ -207,7 +209,10 @@ fn notation_thresholds() {
         (0.1 + 0.2, "0.30000000000000004"),
     ] {
         float_output(f);
-        assert_eq!(alt_json::to_string(&alt_json::Value::from(f)), text);
+        assert_eq!(
+            alt_json::to_string(&alt_json::Value::from(f)).unwrap(),
+            text
+        );
         cases += 1;
     }
     report("float format, notation thresholds", cases, None);
@@ -228,7 +233,7 @@ fn integers_as_floats() {
         with_neighbours(10f64.powi(power), &mut cases);
     }
     for _ in 0..500_000 {
-        float_output((rng.next() >> rng.below(64)) as f64);
+        float_output((rng.next_u64() >> rng.below(64)) as f64);
         cases += 1;
     }
     report("float format, integers as floats", cases, None);
@@ -238,7 +243,10 @@ fn integers_as_floats() {
 #[test]
 fn non_finite() {
     for f in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-        assert_eq!(alt_json::to_string(&alt_json::Value::from(f)), "null");
+        assert_eq!(
+            alt_json::to_string(&alt_json::Value::from(f)).unwrap(),
+            "null"
+        );
         assert_eq!(serde_json::to_string(&f).unwrap(), "null");
         assert!(alt_json::Number::from_f64(f).is_none());
     }

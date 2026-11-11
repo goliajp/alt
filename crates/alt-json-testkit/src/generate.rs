@@ -42,15 +42,15 @@ pub fn string(rng: &mut Rng, max_len: u64) -> String {
 pub fn float(rng: &mut Rng) -> f64 {
     loop {
         let f = match rng.below(6) {
-            0 => f64::from_bits(rng.next()),
+            0 => f64::from_bits(rng.next_u64()),
             1 => rng.range(-1_000_000, 1_000_000) as f64 / 1000.0,
             2 => rng.range(-10, 10) as f64,
-            3 => (rng.next() >> rng.below(64)) as f64,
+            3 => (rng.next_u64() >> rng.below(64)) as f64,
             4 => {
                 let text = format!("{}e{}", rng.below(100_000), rng.range(-330, 310));
                 text.parse().unwrap()
             }
-            _ => f64::from_bits(rng.next() >> rng.below(64)),
+            _ => f64::from_bits(rng.next_u64() >> rng.below(64)),
         };
         if f.is_finite() {
             return f;
@@ -61,8 +61,8 @@ pub fn float(rng: &mut Rng) -> f64 {
 pub fn number(rng: &mut Rng) -> Number {
     match rng.below(6) {
         0 => Number::from(rng.below(1000)),
-        1 => Number::from(rng.next() >> rng.below(64)),
-        2 => Number::from(-((rng.next() >> 1 >> rng.below(63)) as i64) - 1),
+        1 => Number::from(rng.next_u64() >> rng.below(64)),
+        2 => Number::from(-((rng.next_u64() >> 1 >> rng.below(63)) as i64) - 1),
         3 => Number::from(*rng.pick(&[0, u64::MAX, i64::MAX as u64, i64::MAX as u64 + 1])),
         4 => Number::from(*rng.pick(&[i64::MIN, i64::MIN + 1, -1])),
         _ => Number::from_f64(float(rng)).unwrap(),

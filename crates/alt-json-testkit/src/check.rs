@@ -47,6 +47,25 @@ pub fn to_serde(a: &Alt) -> Serde {
     }
 }
 
+pub fn from_serde(s: &Serde) -> Alt {
+    match s {
+        Serde::Null => Alt::Null,
+        Serde::Bool(b) => Alt::Bool(*b),
+        Serde::Number(n) => match (n.as_u64(), n.as_i64()) {
+            (Some(u), _) => Alt::from(u),
+            (_, Some(i)) => Alt::from(i),
+            _ => Alt::from(n.as_f64().unwrap()),
+        },
+        Serde::String(s) => Alt::String(s.clone()),
+        Serde::Array(items) => Alt::Array(items.iter().map(from_serde).collect()),
+        Serde::Object(map) => Alt::Object(
+            map.iter()
+                .map(|(k, v)| (k.clone(), from_serde(v)))
+                .collect(),
+        ),
+    }
+}
+
 fn show(input: &[u8]) -> String {
     let head = &input[..input.len().min(300)];
     format!(
@@ -89,14 +108,14 @@ pub fn parse(input: &[u8]) -> bool {
 pub fn output(a: &Alt) -> Vec<u8> {
     let s = to_serde(a);
     assert!(same(a, &s));
-    let compact = alt_json::to_vec(a);
+    let compact = alt_json::to_vec(a).unwrap();
     assert_eq!(
         compact,
         serde_json::to_vec(&s).unwrap(),
         "compact output differs: {}",
         show(&compact)
     );
-    let pretty = alt_json::to_vec_pretty(a);
+    let pretty = alt_json::to_vec_pretty(a).unwrap();
     assert_eq!(
         pretty,
         serde_json::to_vec_pretty(&s).unwrap(),
@@ -108,7 +127,7 @@ pub fn output(a: &Alt) -> Vec<u8> {
 
 /// Output of one float, through the same entry points as any other value.
 pub fn float_output(f: f64) {
-    let alt = alt_json::to_vec(&Alt::from(f));
+    let alt = alt_json::to_vec(&Alt::from(f)).unwrap();
     let serde = serde_json::to_vec(&f).unwrap();
     assert_eq!(
         alt,

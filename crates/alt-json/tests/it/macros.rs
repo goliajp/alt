@@ -8,7 +8,7 @@ macro_rules! both {
         let alt = alt_json::json!($($tt)+);
         let serde = serde_json::json!($($tt)+);
         assert!(same(&alt, &serde), "{alt:?} vs {serde:?}");
-        assert_eq!(alt_json::to_vec(&alt), serde_json::to_vec(&serde).unwrap());
+        assert_eq!(alt_json::to_vec(&alt).unwrap(), serde_json::to_vec(&serde).unwrap());
         alt
     }};
 }

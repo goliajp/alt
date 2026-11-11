@@ -83,6 +83,16 @@ impl<'a> Window<'a> {
         }
     }
 
+    /// The byte at `index`.
+    ///
+    /// # Safety
+    /// `index` must lie in `first..end`.
+    #[inline(always)]
+    pub(crate) unsafe fn byte<const PREFIX: bool>(&self, index: usize) -> u8 {
+        // safety: the caller keeps the index inside the window
+        unsafe { self.at::<PREFIX>(index).read() }
+    }
+
     /// Address of the data byte at `index`, which must lie in `split..end`.
     #[inline(always)]
     pub(crate) fn data_at(&self, index: usize) -> *const u8 {

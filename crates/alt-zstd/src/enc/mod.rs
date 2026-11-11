@@ -7,9 +7,11 @@ mod fse;
 mod huf;
 mod lit;
 mod matcher;
+mod pairs;
 mod params;
 mod search;
 mod seq;
+mod split;
 
 use std::cell::RefCell;
 
@@ -198,6 +200,8 @@ fn encode_in_epochs(data: &[u8], prefix: &[u8], level: i32, epoch: usize) -> Vec
         };
 
         let mut done = 0;
+        // input bytes less output bytes over the blocks so far
+        let mut saved = 0i64;
         while done < data.len() {
             // later epochs see the end of the previous one as their prefix
             let history = if done == 0 {
@@ -210,17 +214,32 @@ fn encode_in_epochs(data: &[u8], prefix: &[u8], level: i32, epoch: usize) -> Vec
             let part = &data[done..data.len().min(done + epoch)];
             let window = Window::new(history, part, first);
             matcher.load(&window);
-            for (i, block) in part.chunks(BLOCK_MAX).enumerate() {
-                let at = done + i * BLOCK_MAX;
-                let ends = (at == 0, at + block.len() == data.len());
+            let mut at = 0;
+            while at < part.len() {
+                let mut len = BLOCK_MAX.min(part.len() - at);
+                // only full blocks are split, and only once compression
+                // has been seen to pay, so that noise stays in few blocks
+                if len == BLOCK_MAX && saved >= 3 {
+                    let block = &part[at..at + len];
+                    len = if params.double {
+                        split::by_chunks(block)
+                    } else {
+                        split::by_borders(block)
+                    };
+                }
+                let block = &part[at..at + len];
+                let ends = (done + at == 0, done + at + len == data.len());
+                let before = out.len();
                 coder.block(
                     &mut matcher,
                     &window,
-                    window.split + i * BLOCK_MAX,
+                    window.split + at,
                     block,
                     ends,
                     &mut out,
                 );
+                saved += len as i64 - (out.len() - before) as i64;
+                at += len;
             }
             done += part.len();
         }
@@ -266,11 +285,11 @@ mod tests {
         let digests = [
             (
                 1,
-                "e0d132548f7c8358b16a2ec0e14b3d07b68fc68a43073821ef141046ccb215f6",
+                "12064fe040632cfce8ee767f98c1ac590b89b257c41d3926bf61e8dc51900ca7",
             ),
             (
                 3,
-                "f50e33c167bdb8b4edeab0d1336cfe9463d13035412bd41c422dfe7f22c87806",
+                "83ebb11544744e4bee41fb95c351a1b0aa8be457b7cec9f5c66ba285f3b433d3",
             ),
         ];
         for (level, verified) in digests {

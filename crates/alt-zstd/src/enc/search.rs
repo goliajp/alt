@@ -3,7 +3,7 @@
 
 use super::matcher::{PROBE, SeqStore, Window, hash};
 use super::params::Params;
-use super::{dfast, fast};
+use super::{dfast, fast, pairs};
 
 /// Hash tables and the two latest offsets, for one frame.
 pub(crate) struct Matcher<'t> {
@@ -19,6 +19,7 @@ impl Matcher<'_> {
     /// Indexes the prefix of `window`. The tables may hold older entries as
     /// long as they are below `window.first`.
     pub(crate) fn load(&mut self, window: &Window<'_>) {
+        let data_len = window.end - window.split;
         let len = window.split - window.first;
         let table_log = if self.params.double {
             self.params.long_log
@@ -26,7 +27,11 @@ impl Matcher<'_> {
             self.params.short_log
         };
         // sparse enough to leave the table half empty
-        let step = (len >> (table_log - 1)).max(3);
+        // and no denser than a few entries per byte of data: indexing a
+        // prefix far larger than the data would cost more than it saves
+        let step = (len >> (table_log - 1))
+            .max(3)
+            .max(len / data_len.max(1 << 16));
         let drop = 64 - 8 * self.params.width;
         let mut index = window.first;
         while index + PROBE <= window.split {
@@ -163,7 +168,11 @@ impl Matcher<'_> {
                     width: self.params.width,
                     low,
                 };
-                fast::run::<PREFIX>(search, window, start, end, reps, store)
+                if self.params.paired {
+                    pairs::run::<PREFIX>(search, window, start, end, reps, store)
+                } else {
+                    fast::run::<PREFIX>(search, window, start, end, reps, store)
+                }
             }
         }
     }

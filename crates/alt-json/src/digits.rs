@@ -36,3 +36,19 @@ pub(crate) fn write_i64(n: i64, out: &mut Vec<u8>) {
     }
     write_u64(n.unsigned_abs(), out);
 }
+
+pub(crate) fn write_u128(n: u128, out: &mut Vec<u8>) {
+    const CHUNK: u128 = 10_000_000_000_000_000_000;
+    if n < CHUNK {
+        return write_u64(n as u64, out);
+    }
+    write_u128(n / CHUNK, out);
+    // the low part keeps its leading zeros
+    let mut low = (n % CHUNK) as u64;
+    let mut buf = [b'0'; 19];
+    for digit in buf.iter_mut().rev() {
+        *digit = b'0' + (low % 10) as u8;
+        low /= 10;
+    }
+    out.extend_from_slice(&buf);
+}

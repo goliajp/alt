@@ -67,7 +67,7 @@ pub(crate) unsafe fn run<const PREFIX: bool>(
                 store.push(window, anchor, ip, match_len, 1);
             } else {
                 let mut from;
-                let forward;
+                let mut forward;
                 if window.hits64::<PREFIX>(long_candidate, low, here) {
                     from = long_candidate;
                     forward = 8 + window.common::<PREFIX>(ip + 8, from + 8, end);
@@ -75,18 +75,20 @@ pub(crate) unsafe fn run<const PREFIX: bool>(
                     // likely target for later ones
                     *long.add(hash(window.data64(ip + 1), 0, long_shift)) = (ip + 1) as u32;
                 } else if window.hits32::<PREFIX>(short_candidate, low, here as u32) {
-                    // a long match one byte on beats the short one here
+                    from = short_candidate;
+                    forward = 4 + window.common::<PREFIX>(ip + 4, from + 4, end);
+                    // a long match one byte on is taken if it is longer
                     let ahead = window.data64(ip + 1);
                     let slot = long.add(hash(ahead, 0, long_shift));
                     let next = *slot as usize;
                     *slot = (ip + 1) as u32;
                     if window.hits64::<PREFIX>(next, low, ahead) {
-                        ip += 1;
-                        from = next;
-                        forward = 8 + window.common::<PREFIX>(ip + 8, from + 8, end);
-                    } else {
-                        from = short_candidate;
-                        forward = 4 + window.common::<PREFIX>(ip + 4, from + 4, end);
+                        let longer = 8 + window.common::<PREFIX>(ip + 9, next + 8, end);
+                        if longer > forward {
+                            ip += 1;
+                            from = next;
+                            forward = longer;
+                        }
                     }
                 } else {
                     ip += 1 + ((ip - anchor) / SKIP_SPAN);
