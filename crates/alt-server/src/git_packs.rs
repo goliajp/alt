@@ -161,7 +161,11 @@ pub(crate) fn receive(
             &mut published,
         ),
     };
-    if !published && let Some(path) = &created {
+    // an unknown outcome may be a committed row: the sweep removes the file if it is not
+    if !published
+        && !matches!(result, Err(Error::OutcomeUnknown))
+        && let Some(path) = &created
+    {
         // nothing references an unpublished segment
         let _ = std::fs::remove_file(path);
     }

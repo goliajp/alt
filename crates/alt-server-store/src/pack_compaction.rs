@@ -99,6 +99,8 @@ impl Store {
                 let _ = std::fs::remove_file(&path);
                 Ok(false)
             }
+            // the merge may have committed: the sweep removes the file if it did not
+            Err(Error::OutcomeUnknown) => Err(Error::OutcomeUnknown),
             Err(error) => {
                 let _ = std::fs::remove_file(&path);
                 Err(error)
@@ -159,7 +161,7 @@ impl Store {
             "UPDATE alt_repositories SET stored_bytes=greatest(stored_bytes+$2,0) WHERE id=$1",
             &[&repository, &(integer(content.len() as u64)? - before)],
         )?;
-        tx.commit()?;
+        tx.commit().map_err(|_| Error::OutcomeUnknown)?;
         Ok(Some(segment))
     }
 

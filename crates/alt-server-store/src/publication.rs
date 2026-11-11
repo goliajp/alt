@@ -481,6 +481,8 @@ impl Store {
                 &segment.id,
                 segment.segment,
             )?,
+            // the transaction may have committed: the sweep removes the file if it did not
+            (Err(Error::OutcomeUnknown), Some(_)) => {}
             (Err(_), Some(segment)) => {
                 // nothing references an unpublished segment
                 let _ = std::fs::remove_file(&segment.path);

@@ -222,6 +222,63 @@ impl Store {
         credential: &Credential,
         work: &PortableImportWork,
     ) -> Result<ImportReceipt> {
+        let repository = &work.intent.key.scope.repository_instance_id;
+        let materialized = self.materialize_import(work)?;
+        let result = self.activate_transaction(credential, work, materialized.as_ref());
+        match (&result, materialized) {
+            (Ok((_, true)), Some(segment)) => {
+                self.adopt_segment(repository, &segment.id, segment.segment)?
+            }
+            // the transaction may have committed: the sweep removes the file if it did not
+            (Err(Error::OutcomeUnknown), Some(_)) => {}
+            (_, Some(segment)) => {
+                // a replayed or failed activation references no new segment
+                let _ = std::fs::remove_file(&segment.path);
+            }
+            _ => {}
+        }
+        result.map(|(receipt, _)| receipt)
+    }
+    /// The snapshot's Git objects as one pack segment: where Git clients and every
+    /// reader of published objects look for them.
+    fn materialize_import(
+        &mut self,
+        work: &PortableImportWork,
+    ) -> Result<Option<crate::packs::Materialized>> {
+        let scope = &work.intent.key.scope;
+        let mut objects = Vec::with_capacity(work.envelope.catalog.objects.len());
+        for object in &work.envelope.catalog.objects {
+            let kind = match object.kind {
+                alt_remote_protocol::ContentKind::Blob => alt_pack_segment::Kind::Blob,
+                alt_remote_protocol::ContentKind::Tree => alt_pack_segment::Kind::Tree,
+                alt_remote_protocol::ContentKind::Commit => alt_pack_segment::Kind::Commit,
+                alt_remote_protocol::ContentKind::Tag => alt_pack_segment::Kind::Tag,
+                _ => return Err(Error::Integrity("portable object kind")),
+            };
+            let mut data = Vec::with_capacity(object.payload.bytes as usize);
+            self.bytes
+                .read_payload(
+                    scope,
+                    &object.payload.blake3,
+                    object.payload.bytes,
+                    work.locations.get(&object.payload.blake3),
+                )?
+                .read_to_end(&mut data)?;
+            objects.push((kind, data));
+        }
+        self.materialize(
+            &scope.repository_instance_id,
+            &alt_pack_segment::SegmentSet::new(Vec::new()),
+            objects,
+        )
+    }
+    /// the receipt, and whether this call was the one that activated the import
+    fn activate_transaction(
+        &mut self,
+        credential: &Credential,
+        work: &PortableImportWork,
+        materialized: Option<&crate::packs::Materialized>,
+    ) -> Result<(ImportReceipt, bool)> {
         let intent = &work.intent;
         let key = &intent.key;
         let repository = &key.scope.repository_instance_id;
@@ -235,7 +292,7 @@ impl Store {
             state(&mut tx, &row, key, &current.scope)?
         {
             tx.commit()?;
-            return Ok(*receipt);
+            return Ok((*receipt, false));
         }
         authorize_write(
             &mut tx,
@@ -352,6 +409,20 @@ impl Store {
                 }
             }
         }
+        if let Some(segment) = materialized {
+            crate::packs::insert_segment(
+                &mut tx,
+                repository,
+                1,
+                &crate::NewSegment {
+                    id: &segment.id,
+                    objects: segment.objects,
+                    bytes: segment.bytes,
+                    flags: segment.flags,
+                    inline: segment.inline.as_deref(),
+                },
+            )?;
+        }
         crate::link_history::import(
             &mut tx,
             repository,
@@ -387,6 +458,6 @@ impl Store {
         authorize_write(&mut tx, &self.spec, key, &current, &renewed, None)?;
         crate::cloud_quota::check_publication(&mut tx, &self.spec)?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)?;
-        Ok(receipt)
+        Ok((receipt, true))
     }
 }

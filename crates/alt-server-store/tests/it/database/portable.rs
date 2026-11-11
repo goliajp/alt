@@ -1226,6 +1226,21 @@ fn verify_import(
         .verify_portable_import(&target.credential, intent, portable_limits())
         .unwrap()
 }
+/// live segment rows of the repository, and files in its segment directory
+fn pack_segments(target: &Fixture) -> (i64, usize) {
+    let rows = target
+        .client()
+        .query_one(
+            "SELECT count(*) FROM alt_pack_segments WHERE state='live'",
+            &[],
+        )
+        .unwrap()
+        .get(0);
+    let files = std::fs::read_dir(target.store.pack_directory("repository").unwrap())
+        .unwrap()
+        .count();
+    (rows, files)
+}
 fn assert_no_activation(target: &Fixture) {
     let row=target.client().query_one("SELECT (SELECT transaction_sequence FROM alt_repositories WHERE id='repository'),(SELECT count(*) FROM alt_archived_publications),(SELECT count(*) FROM alt_task_records),(SELECT count(*) FROM alt_refs),(SELECT count(*) FROM alt_pins WHERE expires_at IS NULL),(SELECT count(*) FROM alt_audit),(SELECT count(*) FROM alt_outbox)",&[]).unwrap();
     for col in 0..7 {
@@ -1260,6 +1275,22 @@ fn portable_activation_preserves_history_and_replay_never_overwrites_new_work() 
         )
         .unwrap();
     assert!(target.store.authenticate(&source.token).is_err());
+    // the snapshot's Git objects are where Git clients and object readers look
+    let repository = &intent.key.scope.repository_instance_id;
+    assert!(!export.envelope().catalog.objects.is_empty());
+    for object in &export.envelope().catalog.objects {
+        let (_, size, _) = target
+            .store
+            .open_published_object(&target.credential, repository, object.oid.parse().unwrap())
+            .unwrap();
+        assert_eq!(size, object.payload.bytes);
+    }
+    assert_eq!(pack_segments(&target), (1, 1));
+    target
+        .store
+        .activate_portable_import(&target.credential, &work)
+        .unwrap();
+    assert_eq!(pack_segments(&target), (1, 1));
     let counts=target.client().query_one("SELECT (SELECT count(*) FROM alt_requests),(SELECT count(*) FROM alt_current_approvals),(SELECT count(*) FROM alt_credentials),(SELECT count(*) FROM alt_grants),(SELECT count(*) FROM alt_archived_publications),(SELECT count(*) FROM alt_outbox),(SELECT reserved_bytes FROM alt_repositories)",&[]).unwrap();
     assert_eq!((counts.get::<_, i64>(0), counts.get::<_, i64>(1)), (0, 0));
     assert_eq!((counts.get::<_, i64>(2), counts.get::<_, i64>(3)), (1, 1));
@@ -1358,6 +1389,7 @@ fn portable_activation_failure_rolls_back_every_visible_effect_and_can_retry() {
             .is_err()
     );
     assert_no_activation(&target);
+    assert_eq!(pack_segments(&target), (0, 0));
     assert!(
         missing(
             target
@@ -1367,11 +1399,23 @@ fn portable_activation_failure_rolls_back_every_visible_effect_and_can_retry() {
         )
         .is_empty()
     );
+    // a failure at commit leaves the outcome unknown: the segment file must survive,
+    // because the row that names it may have been written
+    target.client().batch_execute("DROP TRIGGER reject_portable_outbox ON alt_outbox; CREATE CONSTRAINT TRIGGER reject_portable_outbox AFTER INSERT ON alt_outbox DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION reject_portable_outbox()").unwrap();
+    assert!(matches!(
+        target
+            .store
+            .activate_portable_import(&target.credential, &work),
+        Err(Error::OutcomeUnknown)
+    ));
+    assert_no_activation(&target);
+    assert_eq!(pack_segments(&target), (0, 1));
     target.client().batch_execute("DROP TRIGGER reject_portable_outbox ON alt_outbox; DROP FUNCTION reject_portable_outbox()").unwrap();
     target
         .store
         .activate_portable_import(&target.credential, &work)
         .unwrap();
+    assert_eq!(pack_segments(&target), (1, 2));
 }
 #[test]
 #[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
