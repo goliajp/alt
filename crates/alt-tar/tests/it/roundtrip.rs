@@ -3,7 +3,7 @@ use alt_tar::{Archive, Builder, Error};
 use std::io::Read;
 
 fn sample() -> Members {
-    [0usize, 1, 511, 512, 513, 262_144, 600_001]
+    [0usize, 1, 511, 512, 513, 65_536, 600_001]
         .into_iter()
         .enumerate()
         .map(|(index, size)| {

@@ -26,7 +26,8 @@ pub const MAX_PATH: usize = 4096;
 /// The largest long-name or PAX extension record accepted when reading.
 pub const MAX_EXTENSION: u64 = 1024 * 1024;
 
-const BUFFER: usize = 256 * 1024;
+// the capacity of a linux pipe; larger copies through a pipe measured slower
+const BUFFER: usize = 64 * 1024;
 
 #[derive(Debug)]
 pub enum Error {
