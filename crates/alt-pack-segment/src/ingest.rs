@@ -157,6 +157,11 @@ fn descend(
             children.extend_from_slice(more);
         }
         done.push((child, meta));
+        // a base is dropped before its last child is descended into, so a chain holds
+        // one object and not one per link
+        if frame.next == frame.children.len() {
+            stack.pop();
+        }
         if !children.is_empty() {
             stack.push(Frame {
                 data,
