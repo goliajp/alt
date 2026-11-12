@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: chore
+summary: time bulk array and wide result statements in pg_speed
+author-type: human
+author: doracawl
+touched: crates/alt-pg/examples/pg_speed.rs
