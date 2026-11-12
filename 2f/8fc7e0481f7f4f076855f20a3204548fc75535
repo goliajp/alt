@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: bound the segment mappings a server process keeps
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/lib.rs
+touched: crates/alt-server-store/src/open_segments.rs
+touched: crates/alt-server-store/src/pack_compaction.rs
+touched: crates/alt-server-store/src/packs.rs
