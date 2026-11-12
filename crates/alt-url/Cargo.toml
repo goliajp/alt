@@ -1,0 +1,8 @@
+[package]
+name = "alt-url"
+description = "WHATWG URL parsing, serialization, relative resolution and form-urlencoded, with no dependencies"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
