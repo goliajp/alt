@@ -1,5 +1,5 @@
 use crate::percent::{self, EncodeSet};
-use crate::{ParseError, ip};
+use crate::{ParseError, idna, ip};
 use std::fmt;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
@@ -88,25 +88,25 @@ pub(crate) fn parse(out: &mut String, input: &str, special: bool) -> Result<Host
     })
 }
 
-fn push_domain(out: &mut String, bytes: &[u8]) -> Result<(), ParseError> {
-    if !bytes.is_ascii() {
-        return Err(ParseError::NonAsciiHost);
-    }
-    for &byte in bytes {
-        if forbidden(FORBIDDEN_DOMAIN, byte) {
-            return Err(ParseError::InvalidDomainCharacter);
-        }
-        out.push(byte.to_ascii_lowercase() as char);
-    }
-    Ok(())
-}
-
 fn domain(out: &mut String, input: &str) -> Result<HostKind, ParseError> {
     let start = out.len();
-    if input.as_bytes().contains(&b'%') {
-        push_domain(out, &percent::decode(input.as_bytes()))?;
+    let decoded = percent::decode(input.as_bytes());
+    if decoded.is_ascii() {
+        for &byte in decoded.iter() {
+            if forbidden(FORBIDDEN_DOMAIN, byte) {
+                return Err(ParseError::InvalidDomainCharacter);
+            }
+            out.push(byte.to_ascii_lowercase() as char);
+        }
     } else {
-        push_domain(out, input.as_bytes())?;
+        let text = std::str::from_utf8(&decoded).map_err(|_| ParseError::IdnaError)?;
+        idna::to_ascii(text, out)?;
+        if out[start..]
+            .bytes()
+            .any(|byte| forbidden(FORBIDDEN_DOMAIN, byte))
+        {
+            return Err(ParseError::InvalidDomainCharacter);
+        }
     }
     if out.len() == start {
         return Err(ParseError::EmptyHost);
