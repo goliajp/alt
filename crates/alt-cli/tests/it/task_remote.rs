@@ -12,6 +12,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
     process::{Command, Output},
+    sync::atomic::{AtomicUsize, Ordering},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -77,7 +78,12 @@ impl Server {
             "requires isolated PostgreSQL"
         );
         let admin_dsn = std::env::var("ALT_SERVER_TEST_ADMIN_DSN").unwrap();
-        let database = format!("alt_cli_remote_{}", std::process::id());
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let database = format!(
+            "alt_cli_remote_{}_{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        );
         Client::connect(&admin_dsn)
             .unwrap()
             .batch_execute(&format!("CREATE DATABASE {database}"))
