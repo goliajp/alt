@@ -22,7 +22,7 @@ dependencies = [
  "alt-crypto",
  "alt-hash",
  "alt-os",
- "url",
+ "alt-url",
 ]
 
 [[package]]
@@ -549,6 +549,7 @@ dependencies = [
  "alt-server-telemetry",
  "alt-task",
  "alt-task-service",
+ "alt-url",
  "alt-wire",
  "alt-wire-http",
  "bytes",
@@ -567,7 +568,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "ureq",
- "url",
 ]
 
 [[package]]
@@ -712,6 +712,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "alt-url"
+version = "0.1.0"
+
+[[package]]
 name = "alt-verify"
 version = "0.1.0"
 dependencies = [
@@ -752,11 +756,11 @@ dependencies = [
  "alt-json-serde",
  "alt-portable",
  "alt-remote-protocol",
+ "alt-url",
  "alt-wire",
  "ed25519-dalek",
  "golia-change-link",
  "ureq",
- "url",
 ]
 
 [[package]]

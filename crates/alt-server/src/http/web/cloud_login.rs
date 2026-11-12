@@ -60,7 +60,7 @@ fn callback(query: Option<&str>) -> Result<(Secret, String)> {
         return Err(Error::Unauthorized);
     }
     let mut args = std::collections::BTreeMap::new();
-    for (key, value) in url::form_urlencoded::parse(query.as_bytes()) {
+    for (key, value) in alt_url::form::parse(query.as_bytes()) {
         if !matches!(key.as_ref(), "ticket" | "state")
             || args.insert(key.into_owned(), value.into_owned()).is_some()
         {
@@ -202,19 +202,18 @@ pub(super) async fn handle(
                     browser.session_ttl_ms,
                     peer,
                 )?;
-                let mut destination = url::Url::parse(&format!(
+                let mut destination = alt_url::Url::parse(&format!(
                     "{}/cloud/access",
                     cloud.audience().control_origin.as_str()
                 ))
                 .map_err(|_| Error::Unauthorized)?;
                 destination
-                    .query_pairs_mut()
-                    .append_pair("installationId", cloud.audience().installation_id.as_str())
-                    .append_pair(
+                    .append_query_pair("installationId", cloud.audience().installation_id.as_str())
+                    .append_query_pair(
                         "challenge",
                         &pkce_challenge(&verifier(&factory.signing_key, &secret)),
                     )
-                    .append_pair("state", &self::state(&factory.signing_key, &secret));
+                    .append_query_pair("state", &self::state(&factory.signing_key, &secret));
                 Ok::<_, Error>((
                     destination.to_string(),
                     vec![pending_cookie(&browser.origin, &secret, 300)],

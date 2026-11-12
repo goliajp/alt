@@ -16,5 +16,5 @@ alt-crypto.workspace = true
 ed25519-dalek.workspace = true
 alt-json.workspace = true
 alt-json-serde.workspace = true
-url.workspace = true
+alt-url.workspace = true
 ureq.workspace = true

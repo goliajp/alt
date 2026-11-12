@@ -29,7 +29,7 @@ fn form(bytes: &[u8]) -> Result<BTreeMap<String, String>, DeviceError> {
         return Err(DeviceError::InvalidRequest);
     }
     let mut result = BTreeMap::new();
-    for (key, value) in url::form_urlencoded::parse(bytes) {
+    for (key, value) in alt_url::form::parse(bytes) {
         if result
             .insert(key.into_owned(), value.into_owned())
             .is_some()

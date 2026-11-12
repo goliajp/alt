@@ -31,10 +31,10 @@ pub struct Client {
 }
 impl Client {
     pub fn new(origin: &str, allow_loopback_http: bool) -> Result<Self> {
-        let url = url::Url::parse(origin).map_err(|_| Error::Invalid)?;
+        let url = alt_url::Url::parse(origin).map_err(|_| Error::Invalid)?;
         let local = match url.host() {
-            Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
-            Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+            Some(alt_url::Host::Ipv4(ip)) => ip.is_loopback(),
+            Some(alt_url::Host::Ipv6(ip)) => ip.is_loopback(),
             _ => false,
         };
         if url.host().is_none()
