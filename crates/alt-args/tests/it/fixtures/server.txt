@@ -158,7 +158,7 @@ Usage: alt-server backup [OPTIONS] --recipient <RECIPIENT> --output <OUTPUT>
 
 Options:
       --config <CONFIG>          
-      --schema <SCHEMA>          [default: 20]
+      --schema <SCHEMA>          [default: 21]
       --credential <CREDENTIAL>  Private file containing an already issued administrator token
       --recipient <RECIPIENT>    
       --output <OUTPUT>          

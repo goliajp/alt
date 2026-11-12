@@ -309,9 +309,10 @@ operation's isolated scratch directory until investigation finishes, then
 remove that exact directory. Do not expose scratch or backup directories through
 the web server.
 
-This release upgrades from schema 18 and 19, and backs up and restores schema
-18, 19 and the current schema 20. A backup of an instance that is not yet
-upgraded requires its schema explicitly, `--schema 18` or `--schema 19`. Stop
+This release upgrades from schema 18, 19 and 20, and backs up and restores schema
+18, 19, 20 and the current schema 21. A backup of an instance that is not yet
+upgraded requires its schema explicitly, `--schema 18`, `--schema 19` or
+`--schema 20`. Stop
 the old service, save and verify its backup, then upgrade, naming the schema the
 instance is at:
 
@@ -355,6 +356,11 @@ four columns that hold these documents are compressed with lz4 for values
 written from then on; values already stored are not rewritten. The upgrade
 needs the lz4 support described above and refuses a server without it. The
 space of the shortened rows is returned by PostgreSQL's own vacuum afterwards.
+
+From schema 20 the transaction removes the foreign key from a ref to its
+repository. The database checked it once for every ref a push created, while a
+ref is only ever written under the lock of its repository's row and no
+repository is removed. No row changes.
 
 For disaster recovery, externally stop and fence the old service first. Create
 a dedicated empty PostgreSQL database and a new config pointing to **absent**
@@ -404,7 +410,7 @@ normal credentials or create the first browser account, then revoke the short
 recovery token. Existing browser administrators can instead use the password
 recovery command above.
 
-Operator acceptance includes a schema 18 and a schema 19 instance, each
+Operator acceptance includes a schema 18, a schema 19 and a schema 20 instance, each
 upgraded in place and restored from the backup taken before its upgrade,
 encrypted backup verification and isolated restoration. Hosts without Docker can select an
 isolated native PostgreSQL installation with

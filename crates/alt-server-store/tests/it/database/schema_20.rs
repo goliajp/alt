@@ -9,6 +9,7 @@ const RECORDED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/it/fixtures/s
 /// Makes the database the schema 19 one it stands in for. The longer rows are built
 /// from the audit records, which hold whole receipts in every version.
 pub(super) fn as_schema_19(f: &Fixture) {
+    super::schema_21::as_schema_20(f);
     let mut client = f.client();
     client
         .batch_execute(
@@ -35,7 +36,7 @@ pub(super) fn as_schema_19(f: &Fixture) {
     assert_eq!(short, 0, "{longer} results made longer");
 }
 
-fn migrate(f: &mut Fixture, from: u32) -> alt_server_store::Result<()> {
+pub(super) fn migrate(f: &mut Fixture, from: u32) -> alt_server_store::Result<()> {
     let store = Store::migrate(
         f.client(),
         f.store.bytes().clone(),
@@ -214,7 +215,7 @@ fn a_schema_19_instance_reads_every_request_as_before_the_upgrade() {
         assert!(f.store.check_connection().is_err());
 
         migrate(&mut f, from).unwrap();
-        assert_eq!(shape(&f), (20, 2, 0, 0));
+        assert_eq!(shape(&f), (21, 2, 0, 0));
         assert!(compression(&f).iter().all(|(_, method)| method == "l"));
         let after: Vec<Vec<u8>> = keys.iter().map(|key| observed(&mut f, key)).collect();
         assert_eq!(after, before, "from schema {from}");
@@ -238,7 +239,7 @@ fn a_schema_19_instance_reads_every_request_as_before_the_upgrade() {
         // the upgraded instance goes on publishing
         let third = Payload::new("third", Some(second.commit));
         third.publish_new(&mut f.store, &f.credential);
-        assert_eq!(shape(&f), (20, 2, 0, 0));
+        assert_eq!(shape(&f), (21, 2, 0, 0));
     }
 }
 
@@ -286,7 +287,7 @@ fn a_row_that_would_not_read_back_fails_the_upgrade_and_leaves_schema_19() {
         )
         .unwrap();
     migrate(&mut f, 19).unwrap();
-    assert_eq!(shape(&f), (20, 2, 0, 0));
+    assert_eq!(shape(&f), (21, 2, 0, 0));
     assert_eq!(observed(&mut f, &first.publication.key), before);
     assert_eq!(outbox_events(&mut f), values(&text(&f, AUDIT)));
 }
@@ -396,7 +397,7 @@ fn rows_recorded_at_schema_19_are_read_unchanged_after_the_upgrade() {
     assert_eq!(shape(&f).2, (committed + publications) as i64);
 
     migrate(&mut f, 19).unwrap();
-    assert_eq!(shape(&f), (20, 2, 0, 0));
+    assert_eq!(shape(&f), (21, 2, 0, 0));
 
     let mut queried = 0;
     for (line, (stored, written)) in results.iter().enumerate() {

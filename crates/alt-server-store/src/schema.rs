@@ -9,12 +9,14 @@ const BASELINE: &str = include_str!("schema.sql");
 const VERSION_19: &str = include_str!("schema-v19.sql");
 /// what takes schema 19 to 20, ahead of the data step in `schema_v20`
 const VERSION_20: &str = include_str!("schema-v20.sql");
+/// what takes schema 20 to 21; it has no data step
+const VERSION_21: &str = include_str!("schema-v21.sql");
 
 /// The oldest schema this release reads: it upgrades an instance of that schema,
 /// and takes and restores backups from it on.
 pub const OLDEST_SCHEMA: u32 = 18;
-pub const UNSUPPORTED_SOURCE_SCHEMA: &str = "unsupported source schema: this release upgrades from schema 18 and 19 only; upgrade an older instance to schema 18 with the last release that carries those migrations first";
-const UNSUPPORTED_BACKUP_SCHEMA: &str = "unsupported schema: this release backs up and restores schema 18, 19 and 20 only; restore or upgrade an older instance to schema 18 with the last release that carries those migrations first";
+pub const UNSUPPORTED_SOURCE_SCHEMA: &str = "unsupported source schema: this release upgrades from schema 18, 19 and 20 only; upgrade an older instance to schema 18 with the last release that carries those migrations first";
+const UNSUPPORTED_BACKUP_SCHEMA: &str = "unsupported schema: this release backs up and restores schema 18, 19, 20 and 21 only; restore or upgrade an older instance to schema 18 with the last release that carries those migrations first";
 /// The publication documents are stored with lz4 compression, which a PostgreSQL
 /// server has only when it was built with it. Without it the first large document
 /// would fail to be written.
@@ -58,7 +60,7 @@ const HISTORY: [&str; 18] = [
 /// what `alt_schema` holds for each version up to the current one
 fn checksums() -> Vec<String> {
     let mut all: Vec<String> = HISTORY.iter().map(|checksum| (*checksum).into()).collect();
-    for version in [VERSION_19, VERSION_20] {
+    for version in [VERSION_19, VERSION_20, VERSION_21] {
         all.push(
             alt_hash::blake3::hash(version.as_bytes())
                 .to_hex()
@@ -132,11 +134,12 @@ impl Store {
     /// validated; historical checksums, request identities and immutable content
     /// stay as they are. Runtime open never migrates silently.
     ///
-    /// The sources are schema 18 and 19, and every version between the source and
+    /// The sources are schema 18, 19 and 20, and every version between the source and
     /// the current one is applied in turn. From 18 the published Git objects that
     /// version kept in the content store move into pack segments; see `schema_v19`.
     /// From 19 the stored state of committed requests and their outbox events give
-    /// up their copy of the publication; see `schema_v20`.
+    /// up their copy of the publication; see `schema_v20`. From 20 refs lose their
+    /// foreign key to the repository.
     pub fn migrate(
         mut client: Client,
         bytes: ByteStore,
@@ -167,9 +170,13 @@ impl Store {
                 record(tx.raw_mut(), 19, &checksums()[18])?;
                 crate::schema_v19::settle(&mut tx, &bytes, &spec.installation_id, &mut written)?;
             }
-            tx.batch_execute(VERSION_20)?;
-            record(tx.raw_mut(), 20, &checksums()[19])?;
-            crate::schema_v20::shorten(&mut tx)?;
+            if from <= 19 {
+                tx.batch_execute(VERSION_20)?;
+                record(tx.raw_mut(), 20, &checksums()[19])?;
+                crate::schema_v20::shorten(&mut tx)?;
+            }
+            tx.batch_execute(VERSION_21)?;
+            record(tx.raw_mut(), 21, &checksums()[20])?;
             tx.execute("UPDATE alt_requests SET fence=fence+1,worker_lease_until=0 WHERE state IN ('receiving','ready')", &[])?;
             let generation = spec
                 .runtime_generation

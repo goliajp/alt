@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use alt_args::{Parser, Subcommand, ValueEnum};
 
-pub const SCHEMA_VERSION: u32 = 20;
+pub const SCHEMA_VERSION: u32 = 21;
 
 #[derive(Parser)]
 #[command(

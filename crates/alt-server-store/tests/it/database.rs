@@ -10,6 +10,7 @@ mod maintenance;
 mod provenance;
 mod registration;
 mod schema_20;
+mod schema_21;
 mod segments;
 mod single_copy;
 mod tasks;

@@ -52,8 +52,11 @@ CREATE TABLE alt_grants (
   grants jsonb NOT NULL,
   PRIMARY KEY(actor_id, repository)
 );
+-- Refs are written only under the lock of their repository's row, and no repository
+-- is ever removed, so the row a ref names exists without a foreign key checking it
+-- once for every ref of a push.
 CREATE TABLE alt_refs (
-  repository text NOT NULL REFERENCES alt_repositories(id),
+  repository text NOT NULL,
   name text NOT NULL,
   oid text NOT NULL,
   PRIMARY KEY(repository, name)
