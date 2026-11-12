@@ -9,7 +9,7 @@
 
 use crate::{
     Error, Result, Store,
-    packs::{INLINE_SEGMENT_BYTES, NewSegment, forget_segment, insert_segment},
+    packs::{INLINE_SEGMENT_BYTES, NewSegment, insert_segment},
     store::{instance, integer, now, unsigned},
 };
 use alt_pack_segment::{Segment, SegmentSet};
@@ -216,7 +216,7 @@ impl Store {
         let mut removed = 0;
         for id in &expired {
             let path = self.pack_path(repository, id)?;
-            forget_segment(&path);
+            crate::open_segments::forget(&path);
             if std::fs::remove_file(&path).is_ok() {
                 removed += 1;
             }

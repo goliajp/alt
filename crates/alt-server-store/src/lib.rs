@@ -9,6 +9,7 @@ mod portable;
 mod portable_import;
 pub use portable::*;
 pub use portable_import::*;
+mod open_segments;
 mod pack_compaction;
 mod pack_native;
 pub use pack_compaction::PACK_RETIRED_GRACE_MS;
