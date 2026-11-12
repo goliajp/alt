@@ -2,8 +2,8 @@
 
 use std::ffi::OsString;
 
+use alt_args::{ErrorKind, Matches, Parser};
 use alt_json::{Value, json};
-use clap::{CommandFactory, FromArgMatches};
 
 use crate::cli::Cli;
 use crate::daemon::Response;
@@ -112,85 +112,71 @@ pub fn parse(args: Vec<OsString>) -> Result<Parsed, Response> {
         .iter()
         .take_while(|a| *a != "--")
         .any(|a| a == "--json");
-    for (index, arg) in args.iter().enumerate() {
-        if arg.to_str().is_none() {
-            let mut failure = Failure::usage("non-UTF-8 arguments are not supported");
-            failure.kind = "unsupported_path";
-            *failure.details = json!({
-                "argument_index": index,
-                "bytes_hex": hex(arg.as_encoded_bytes()),
-                "encoding": "os_bytes",
-            });
-            return Err(failure.response(json_mode, None));
+    let mut words = Vec::with_capacity(args.len());
+    for (index, arg) in args.into_iter().enumerate() {
+        match arg.into_string() {
+            Ok(word) => words.push(word),
+            Err(arg) => {
+                let mut failure = Failure::usage("non-UTF-8 arguments are not supported");
+                failure.kind = "unsupported_path";
+                *failure.details = json!({
+                    "argument_index": index,
+                    "bytes_hex": hex(arg.as_encoded_bytes()),
+                    "encoding": "os_bytes",
+                });
+                return Err(failure.response(json_mode, None));
+            }
         }
     }
-    let matches = Cli::command().try_get_matches_from(args).map_err(|error| {
-        if matches!(
-            error.kind(),
-            clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion
-        ) {
-            Response {
-                exit_code: 0,
-                stdout: error.to_string().into_bytes(),
-                stderr: Vec::new(),
-            }
-        } else {
-            Failure::usage(error.to_string()).response(json_mode, None)
-        }
+    let matches = alt_args::parse(Cli::COMMAND, words).map_err(|error| match error.kind {
+        ErrorKind::Help | ErrorKind::Version => Response {
+            exit_code: 0,
+            stdout: error.to_string().into_bytes(),
+            stderr: Vec::new(),
+        },
+        ErrorKind::Usage => Failure::usage(error.to_string()).response(json_mode, None),
     })?;
-    let normalized = canonical_matches(&matches);
-    let json_mode = matches_json(&matches);
-    let cli = Cli::from_arg_matches(&matches)
-        .map_err(|error| Failure::usage(error.to_string()).response(json_mode, None))?;
     Ok(Parsed {
-        cli,
-        normalized,
-        json: json_mode,
+        cli: Cli::from_matches(&matches),
+        normalized: canonical_matches(&matches),
+        json: matches_json(&matches),
     })
 }
 
-fn matches_json(matches: &clap::ArgMatches) -> bool {
-    matches
-        .try_get_one::<bool>("json")
-        .ok()
-        .flatten()
-        .copied()
-        .unwrap_or(false)
-        || matches
-            .subcommand()
-            .is_some_and(|(_, sub)| matches_json(sub))
+fn matches_json(matches: &Matches) -> bool {
+    matches.flag("json") || matches.subcommand().is_some_and(matches_json)
 }
 
-fn canonical_matches(matches: &clap::ArgMatches) -> Value {
+/// The argument values a durable request is bound to. Stored bindings are
+/// compared with this on a retry, so its shape must never change.
+fn canonical_matches(matches: &Matches) -> Value {
     let mut args = std::collections::BTreeMap::new();
-    for id in matches.ids() {
-        if matches!(id.as_str(), "request_id" | "workspace") {
+    for entry in matches.entries() {
+        if matches!(entry.id, "request_id" | "workspace") {
             continue;
         }
-        // Clap propagates a subcommand's global flag into ancestor values,
-        // even where debug builds do not register its argument definition.
-        // Preserve the same raw boolean representation in every build mode.
-        if id.as_str() == "json" {
+        // a global flag reads the same on every level, wherever it was given
+        if entry.id == "json" {
             let raw = if matches_json(matches) {
                 "true"
             } else {
                 "false"
             };
-            args.insert(id.as_str(), vec![hex(raw.as_bytes())]);
+            args.insert(entry.id, vec![hex(raw.as_bytes())]);
             continue;
         }
-        if let Some(values) = matches.get_raw(id.as_str()) {
-            args.insert(
-                id.as_str(),
-                values
-                    .map(|value| hex(value.as_encoded_bytes()))
-                    .collect::<Vec<_>>(),
-            );
-        }
+        args.insert(
+            entry.id,
+            entry
+                .values
+                .iter()
+                .map(|value| hex(value.as_bytes()))
+                .collect::<Vec<_>>(),
+        );
     }
-    let subcommand = matches.subcommand().map(|(name, sub)| {
+    let subcommand = matches.subcommand().map(|sub| {
         json!({
-            "name": name, "arguments": canonical_matches(sub)
+            "name": sub.name(), "arguments": canonical_matches(sub)
         })
     });
     json!({"values": args, "subcommand": subcommand})

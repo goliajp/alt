@@ -55,7 +55,7 @@ fn strip_encoding_header(data: &[u8]) -> Vec<u8> {
     out
 }
 
-#[derive(clap::Args, Clone)]
+#[derive(alt_args::Args, Clone)]
 pub struct LogArgs {
     /// pretty-print commits: raw | oneline (ignored with --json)
     #[arg(long, default_value = "oneline")]

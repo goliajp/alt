@@ -8,6 +8,8 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+alt-args = { path = "crates/alt-args" }
+alt-args-derive = { path = "crates/alt-args-derive" }
 alt-base64 = { path = "crates/alt-base64" }
 alt-byte-segment = { path = "crates/alt-byte-segment" }
 alt-bytes = { path = "crates/alt-bytes" }
@@ -72,7 +74,6 @@ alt-zstd = { path = "crates/alt-zstd" }
 alt-tar = { path = "crates/alt-tar" }
 alt-testutil = { path = "crates/alt-testutil" }
 
-clap = { version = "4", features = ["derive"] }
 criterion = "0.5"
 ed25519-dalek = { version = "2", default-features = false, features = ["std", "rand_core"] }
 encoding_rs = "0.8"

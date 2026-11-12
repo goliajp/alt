@@ -1,5 +1,5 @@
 //! The command surface, shared by the `alt` binary (direct) and the `altd`
-//! daemon. The clap types and the per-command dispatch live here so both reuse
+//! daemon. The argument types and the per-command dispatch live here so both reuse
 //! the exact same command logic — the daemon is a perf cache, not a fork of
 //! behaviour. Native commands run against a [`NativeRepo`] bound to a [`Store`];
 //! git-layer commands (`cat-file`/`rev-parse`/`log`/`import`/`export`) open
@@ -8,9 +8,9 @@
 use std::io::Write;
 use std::path::Path;
 
+use alt_args::{Parser, Subcommand};
 use alt_git_codec::{ObjectId, ObjectKind, RawObject, Tree};
 use alt_repo::Repository;
-use clap::{Parser, Subcommand};
 
 use crate::native::{self, Identity, NativeRepo, Store};
 use crate::{log_cmd, quote};
@@ -642,7 +642,7 @@ pub enum FlowTopicOp {
     Finish { name: String },
 }
 
-#[derive(clap::Args)]
+#[derive(alt_args::Args)]
 pub struct CatFileArgs {
     /// show object type
     #[arg(short = 't', group = "op")]
@@ -748,7 +748,7 @@ pub fn ci_validate<W: Write>(
     Ok(if error_count > 0 { 1 } else { 0 })
 }
 
-#[derive(clap::Subcommand, Debug)]
+#[derive(Subcommand, Debug)]
 pub enum TaskOp {
     /// Publish selected task history or receive and continue published work
     Remote {
@@ -821,7 +821,7 @@ pub enum TaskOp {
         reason: String,
     },
 }
-#[derive(clap::Subcommand, Debug)]
+#[derive(Subcommand, Debug)]
 pub enum AuthOp {
     /// Give an agent a short credential with explicit repository and write bounds
     Delegate {
@@ -877,7 +877,7 @@ pub enum AuthOp {
     },
 }
 
-#[derive(clap::Subcommand, Debug)]
+#[derive(Subcommand, Debug)]
 pub enum ChangeOp {
     /// List the explicitly configured Sentori channels
     Channels { remote: String },
@@ -922,7 +922,7 @@ pub enum ChangeOp {
     },
 }
 
-#[derive(clap::Subcommand, Debug)]
+#[derive(Subcommand, Debug)]
 pub enum TaskRemoteOp {
     /// Inspect and publish exact associations with Sentori
     Changes {
@@ -1012,7 +1012,7 @@ pub enum TaskRemoteOp {
         reconcile_request: Option<String>,
     },
 }
-#[derive(clap::Subcommand, Debug)]
+#[derive(Subcommand, Debug)]
 pub enum CandidateOp {
     /// Snapshot index-selected source plus the task's explicit auxiliary roots
     Create {
@@ -1028,7 +1028,7 @@ pub enum CandidateOp {
         id: String,
     },
 }
-#[derive(clap::Subcommand, Debug)]
+#[derive(Subcommand, Debug)]
 pub enum EvidenceOp {
     /// Materialize the candidate and execute through the selected runner
     Run {
@@ -1068,7 +1068,7 @@ pub enum EvidenceOp {
     },
 }
 
-#[derive(clap::Subcommand, Debug)]
+#[derive(Subcommand, Debug)]
 pub enum RunnerOp {
     Probe {
         #[arg(long)]
@@ -1081,7 +1081,7 @@ pub enum RunnerOp {
     },
 }
 
-#[derive(clap::Subcommand, Debug)]
+#[derive(Subcommand, Debug)]
 pub enum RequestOp {
     /// List requests without a durable completion
     Pending,
@@ -1091,7 +1091,7 @@ pub enum RequestOp {
     Result { id: String },
 }
 
-#[derive(clap::Subcommand, Debug)]
+#[derive(Subcommand, Debug)]
 pub enum OperationOp {
     /// List incomplete operations belonging to this workspace instance
     Pending,
@@ -1709,7 +1709,7 @@ fn pretty_print<W: Write>(
     Ok(())
 }
 
-#[derive(clap::Args, Debug)]
+#[derive(alt_args::Args, Debug)]
 pub struct PortableOptions {
     /// Private credential created by alt auth login
     #[arg(long)]
@@ -1730,7 +1730,7 @@ pub struct PortableOptions {
     #[arg(long, default_value_t = 120)]
     pub timeout_seconds: u64,
 }
-#[derive(clap::Subcommand, Debug)]
+#[derive(Subcommand, Debug)]
 pub enum PortableOp {
     /// Download a complete signed snapshot without stopping source writes
     Export {

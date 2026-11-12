@@ -1,0 +1,2329 @@
+### portable --help
+exit 0
+--- stdout
+Transfer signed repository snapshots with explicit cutover and durable request recovery
+
+Usage: alt portable [OPTIONS] <COMMAND>
+
+Commands:
+  export           Download a complete signed snapshot without stopping source writes
+  export-status    Inspect the same immutable source export
+  freeze-source    Stop source writes only at the original export watermark
+  reopen-source    Explicitly remove the original source write barrier
+  retire-export    Release retention for the original export; a frozen source must be reopened first
+  import           Verify a local archive and stage it privately in a new empty target repository
+  import-status    Query the original target intent, including a lost activation response
+  activate-import  Atomically activate the original staged import under current target authority
+  abandon-import   Abandon a receiving import without deleting the source or accepted history
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### evidence --help
+exit 0
+--- stdout
+Preserve validation reports and inspect their current validity
+
+Usage: alt evidence [OPTIONS] <COMMAND>
+
+Commands:
+  run         Materialize the candidate and execute through the selected runner
+  collect     Read an existing run report without launching validation again
+  run-status  Inspect durable launch attribution and collection receipts
+  import      Preserve an external report; imported claims never become observed runs
+  show        
+  check       
+  log         Read an entire preserved output stream without truncation
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### cat-file --help
+exit 0
+--- stdout
+Provide contents or details of repository objects
+
+Usage: alt cat-file [OPTIONS] <OBJECT>
+
+Arguments:
+  <OBJECT>  
+
+Options:
+  -t                           show object type
+  -s                           show object size
+  -p                           pretty-print object's content
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### log --help
+exit 0
+--- stdout
+Show commit logs
+
+Usage: alt log [OPTIONS] [REV]
+
+Arguments:
+  [REV]  start revision [default: HEAD]
+
+Options:
+      --pretty <PRETTY>        pretty-print commits: raw | oneline (ignored with --json) [default: oneline]
+  -n <MAX_COUNT>               limit the number of commits
+      --json                   emit the commit list as a stable JSON object
+  -p, --patch                  show a per-commit patch (unified diff for text, compact chunk + perceptual summary for binary so large-file history doesn't blow up the terminal). Ignored with --json
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### add --help
+exit 0
+--- stdout
+Stage file contents into the index
+
+Usage: alt add [OPTIONS] [PATHS]...
+
+Arguments:
+  [PATHS]...  Paths to stage; `.` stages the whole working tree
+
+Options:
+      --json                   Emit a structured JSON result instead of the human line
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### commit --help
+exit 0
+--- stdout
+Record staged changes as a new commit
+
+Usage: alt commit [OPTIONS]
+
+Options:
+  -m <MESSAGE>                 Commit message (with --amend, defaults to the amended commit's)
+      --amend                  Replace the current branch tip with a new commit made from the index, keeping its parents and author
+      --no-edit                Keep the amended commit's message (alt never opens an editor, so this is already the default without -m; accepted as in git)
+      --allow-empty            Record the commit even when it changes nothing
+  -n, --no-verify              Skip the pre-commit checks (secret scan, large-file warning)
+      --validate               Only run the pre-commit checks on what is staged; commit nothing
+      --decision <TEXT>        Record a one-line decision in the commit's metadata (up to 3)
+      --meta <KEY=VALUE>       Record an extra metadata field (`key=value`, e.g. `model=…`)
+      --json                   Emit the new commit/tree oids (or, with --validate, the findings) as a JSON object
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### status --help
+exit 0
+--- stdout
+Show the working tree status
+
+Usage: alt status [OPTIONS]
+
+Options:
+      --json                   Emit a stable JSON object instead of the human-readable view
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### status -h
+exit 0
+--- stdout
+Show the working tree status
+
+Usage: alt status [OPTIONS]
+
+Options:
+      --json                   Emit a stable JSON object instead of the human-readable view
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### branch --help
+exit 0
+--- stdout
+List, create, or delete branches
+
+Usage: alt branch [OPTIONS] [NAME]
+
+Arguments:
+  [NAME]  Branch name to create (omit to list branches)
+
+Options:
+  -d <DELETE>                  Delete the named branch
+  -r, --remotes                With -d, the branch is a remote-tracking one (`<remote>/<branch>`)
+      --json                   Emit the branch list as a stable JSON object
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### bisect --help
+exit 0
+--- stdout
+Find the commit that introduced a change by binary search
+
+Usage: alt bisect [OPTIONS] <COMMAND>
+
+Commands:
+  start  Start a session, optionally naming the bad commit and good ones
+  bad    Mark commits (default: the one being tested) as bad
+  good   Mark commits (default: the one being tested) as good
+  skip   Mark commits (default: the one being tested) as untestable
+  reset  End the session and go back to the branch
+  run    Let a command judge each commit: exit 0 good, 125 skip, 1-127 bad, anything else stops
+
+Options:
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### rebase --help
+exit 0
+--- stdout
+Replay the current branch's own commits onto another base
+
+Usage: alt rebase [OPTIONS] [UPSTREAM]
+
+Arguments:
+  [UPSTREAM]  The base to replay onto
+
+Options:
+  -i, --interactive            Edit the list of commits first (pick, reword, squash, fixup, drop) in $GIT_SEQUENCE_EDITOR, $GIT_EDITOR, $VISUAL or $EDITOR
+      --continue               Commit the resolved step and go on
+      --skip                   Drop the stopped step and go on
+      --abort                  Put the branch back as it was before the rebase
+      --json                   Emit a structured JSON result instead of human lines
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### revert --help
+exit 0
+--- stdout
+Record new commits that undo earlier ones
+
+Usage: alt revert [OPTIONS] [REVS]...
+
+Arguments:
+  [REVS]...  Commits to revert, in order
+
+Options:
+  -m, --mainline <MAINLINE>    For a merge commit, the parent (1-based) whose side is kept
+      --continue               Commit the resolved revert and go on with the rest
+      --abort                  Put the branch back where it was before the reverts
+      --no-edit                Use the generated message (alt never opens an editor; accepted as in git)
+      --json                   Emit a structured JSON result instead of human lines
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### diff --help
+exit 0
+--- stdout
+Show changes between the index and the working tree (or HEAD)
+
+Usage: alt diff [OPTIONS]
+
+Options:
+      --cached                 Show staged changes (HEAD vs index) instead of unstaged [aliases: --staged]
+      --json                   Emit a structured JSON diff instead of unified text
+      --semantic               Show an AST-level diff per supported language: item-level logical vs format-only changes for `.rs` files; line/binary diff for files without a parser
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### flow --help
+exit 0
+--- stdout
+git-flow workflow operations (atomic, undoable)
+
+Usage: alt flow [OPTIONS] <COMMAND>
+
+Commands:
+  init     Create the `develop` branch off `main` and switch to it
+  feature  Feature-branch operations
+  release  Release-branch operations
+  hotfix   Hotfix-branch operations
+
+Options:
+      --json                   Emit a structured JSON result instead of the human line
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### workspace --help
+exit 0
+--- stdout
+Manage parallel workspaces (isolated HEAD/index/working tree)
+
+Usage: alt workspace [OPTIONS] <COMMAND>
+
+Commands:
+  add     Create a workspace with its own working tree, checked out on a branch
+  list    List the workspaces
+  remove  Remove a workspace (its HEAD ref and control dir; files are kept)
+
+Options:
+      --json                   Emit a structured JSON result instead of the human view
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### fetch --help
+exit 0
+--- stdout
+Fetch refs + objects from a configured remote (git smart-http v2)
+
+Usage: alt fetch [OPTIONS] [REMOTE] [REFSPECS]...
+
+Arguments:
+  [REMOTE]       Remote name (defaults to `origin`) [default: origin]
+  [REFSPECS]...  Refspecs to fetch (defaults to the remote's configured refspec)
+
+Options:
+      --json                   Emit a structured JSON result instead of the human view
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### portable export --help
+exit 0
+--- stdout
+Download a complete signed snapshot without stopping source writes
+
+Usage: alt portable export [OPTIONS] --credential-file <CREDENTIAL_FILE> --journal <JOURNAL> --repository <REPOSITORY> --output <OUTPUT>
+
+Options:
+      --credential-file <CREDENTIAL_FILE>
+          Private credential created by alt auth login
+      --journal <JOURNAL>
+          Private durable journal; reuse this directory after an interrupted attempt
+      --max-metadata-bytes <MAX_METADATA_BYTES>
+          [default: 16777216]
+      --max-entries <MAX_ENTRIES>
+          [default: 1000000]
+      --max-publications <MAX_PUBLICATIONS>
+          [default: 100000]
+      --max-blob-bytes <MAX_BLOB_BYTES>
+          [default: 8589934592]
+      --max-total-bytes <MAX_TOTAL_BYTES>
+          [default: 68719476736]
+      --timeout-seconds <TIMEOUT_SECONDS>
+          [default: 120]
+      --repository <REPOSITORY>
+          
+      --json
+          
+      --output <OUTPUT>
+          
+      --workspace <WORKSPACE>
+          Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>
+          Stable request identity for a write in an existing native repository
+  -h, --help
+          Print help
+--- stderr
+
+### portable export-status --help
+exit 0
+--- stdout
+Inspect the same immutable source export
+
+Usage: alt portable export-status [OPTIONS] --credential-file <CREDENTIAL_FILE> --journal <JOURNAL>
+
+Options:
+      --credential-file <CREDENTIAL_FILE>
+          Private credential created by alt auth login
+      --journal <JOURNAL>
+          Private durable journal; reuse this directory after an interrupted attempt
+      --max-metadata-bytes <MAX_METADATA_BYTES>
+          [default: 16777216]
+      --max-entries <MAX_ENTRIES>
+          [default: 1000000]
+      --max-publications <MAX_PUBLICATIONS>
+          [default: 100000]
+      --max-blob-bytes <MAX_BLOB_BYTES>
+          [default: 8589934592]
+      --max-total-bytes <MAX_TOTAL_BYTES>
+          [default: 68719476736]
+      --timeout-seconds <TIMEOUT_SECONDS>
+          [default: 120]
+      --json
+          
+      --workspace <WORKSPACE>
+          Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>
+          Stable request identity for a write in an existing native repository
+  -h, --help
+          Print help
+--- stderr
+
+### portable freeze-source --help
+exit 0
+--- stdout
+Stop source writes only at the original export watermark
+
+Usage: alt portable freeze-source [OPTIONS] --credential-file <CREDENTIAL_FILE> --journal <JOURNAL>
+
+Options:
+      --credential-file <CREDENTIAL_FILE>
+          Private credential created by alt auth login
+      --journal <JOURNAL>
+          Private durable journal; reuse this directory after an interrupted attempt
+      --max-metadata-bytes <MAX_METADATA_BYTES>
+          [default: 16777216]
+      --max-entries <MAX_ENTRIES>
+          [default: 1000000]
+      --max-publications <MAX_PUBLICATIONS>
+          [default: 100000]
+      --max-blob-bytes <MAX_BLOB_BYTES>
+          [default: 8589934592]
+      --max-total-bytes <MAX_TOTAL_BYTES>
+          [default: 68719476736]
+      --timeout-seconds <TIMEOUT_SECONDS>
+          [default: 120]
+      --json
+          
+      --workspace <WORKSPACE>
+          Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>
+          Stable request identity for a write in an existing native repository
+  -h, --help
+          Print help
+--- stderr
+
+### portable reopen-source --help
+exit 0
+--- stdout
+Explicitly remove the original source write barrier
+
+Usage: alt portable reopen-source [OPTIONS] --credential-file <CREDENTIAL_FILE> --journal <JOURNAL>
+
+Options:
+      --credential-file <CREDENTIAL_FILE>
+          Private credential created by alt auth login
+      --journal <JOURNAL>
+          Private durable journal; reuse this directory after an interrupted attempt
+      --max-metadata-bytes <MAX_METADATA_BYTES>
+          [default: 16777216]
+      --max-entries <MAX_ENTRIES>
+          [default: 1000000]
+      --max-publications <MAX_PUBLICATIONS>
+          [default: 100000]
+      --max-blob-bytes <MAX_BLOB_BYTES>
+          [default: 8589934592]
+      --max-total-bytes <MAX_TOTAL_BYTES>
+          [default: 68719476736]
+      --timeout-seconds <TIMEOUT_SECONDS>
+          [default: 120]
+      --json
+          
+      --workspace <WORKSPACE>
+          Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>
+          Stable request identity for a write in an existing native repository
+  -h, --help
+          Print help
+--- stderr
+
+### portable retire-export --help
+exit 0
+--- stdout
+Release retention for the original export; a frozen source must be reopened first
+
+Usage: alt portable retire-export [OPTIONS] --credential-file <CREDENTIAL_FILE> --journal <JOURNAL>
+
+Options:
+      --credential-file <CREDENTIAL_FILE>
+          Private credential created by alt auth login
+      --journal <JOURNAL>
+          Private durable journal; reuse this directory after an interrupted attempt
+      --max-metadata-bytes <MAX_METADATA_BYTES>
+          [default: 16777216]
+      --max-entries <MAX_ENTRIES>
+          [default: 1000000]
+      --max-publications <MAX_PUBLICATIONS>
+          [default: 100000]
+      --max-blob-bytes <MAX_BLOB_BYTES>
+          [default: 8589934592]
+      --max-total-bytes <MAX_TOTAL_BYTES>
+          [default: 68719476736]
+      --timeout-seconds <TIMEOUT_SECONDS>
+          [default: 120]
+      --json
+          
+      --workspace <WORKSPACE>
+          Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>
+          Stable request identity for a write in an existing native repository
+  -h, --help
+          Print help
+--- stderr
+
+### portable import --help
+exit 0
+--- stdout
+Verify a local archive and stage it privately in a new empty target repository
+
+Usage: alt portable import [OPTIONS] --credential-file <CREDENTIAL_FILE> --journal <JOURNAL> --repository <REPOSITORY> --archive <ARCHIVE> --mappings <MAPPINGS> --source-installation <SOURCE_INSTALLATION> --source-repository <SOURCE_REPOSITORY> --source-epoch <SOURCE_EPOCH> --source-key <SOURCE_KEY>
+
+Options:
+      --credential-file <CREDENTIAL_FILE>
+          Private credential created by alt auth login
+      --journal <JOURNAL>
+          Private durable journal; reuse this directory after an interrupted attempt
+      --max-metadata-bytes <MAX_METADATA_BYTES>
+          [default: 16777216]
+      --max-entries <MAX_ENTRIES>
+          [default: 1000000]
+      --max-publications <MAX_PUBLICATIONS>
+          [default: 100000]
+      --max-blob-bytes <MAX_BLOB_BYTES>
+          [default: 8589934592]
+      --max-total-bytes <MAX_TOTAL_BYTES>
+          [default: 68719476736]
+      --timeout-seconds <TIMEOUT_SECONDS>
+          [default: 120]
+      --repository <REPOSITORY>
+          
+      --archive <ARCHIVE>
+          
+      --json
+          
+      --mappings <MAPPINGS>
+          JSON list of explicit source identity dispositions; null links preserve history only
+      --source-installation <SOURCE_INSTALLATION>
+          
+      --source-repository <SOURCE_REPOSITORY>
+          
+      --source-epoch <SOURCE_EPOCH>
+          
+      --source-key <SOURCE_KEY>
+          Source receipt public key obtained independently of the archive
+      --workspace <WORKSPACE>
+          Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>
+          Stable request identity for a write in an existing native repository
+  -h, --help
+          Print help
+--- stderr
+
+### portable import-status --help
+exit 0
+--- stdout
+Query the original target intent, including a lost activation response
+
+Usage: alt portable import-status [OPTIONS] --credential-file <CREDENTIAL_FILE> --journal <JOURNAL>
+
+Options:
+      --credential-file <CREDENTIAL_FILE>
+          Private credential created by alt auth login
+      --journal <JOURNAL>
+          Private durable journal; reuse this directory after an interrupted attempt
+      --max-metadata-bytes <MAX_METADATA_BYTES>
+          [default: 16777216]
+      --max-entries <MAX_ENTRIES>
+          [default: 1000000]
+      --max-publications <MAX_PUBLICATIONS>
+          [default: 100000]
+      --max-blob-bytes <MAX_BLOB_BYTES>
+          [default: 8589934592]
+      --max-total-bytes <MAX_TOTAL_BYTES>
+          [default: 68719476736]
+      --timeout-seconds <TIMEOUT_SECONDS>
+          [default: 120]
+      --json
+          
+      --workspace <WORKSPACE>
+          Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>
+          Stable request identity for a write in an existing native repository
+  -h, --help
+          Print help
+--- stderr
+
+### portable activate-import --help
+exit 0
+--- stdout
+Atomically activate the original staged import under current target authority
+
+Usage: alt portable activate-import [OPTIONS] --credential-file <CREDENTIAL_FILE> --journal <JOURNAL>
+
+Options:
+      --credential-file <CREDENTIAL_FILE>
+          Private credential created by alt auth login
+      --journal <JOURNAL>
+          Private durable journal; reuse this directory after an interrupted attempt
+      --max-metadata-bytes <MAX_METADATA_BYTES>
+          [default: 16777216]
+      --max-entries <MAX_ENTRIES>
+          [default: 1000000]
+      --max-publications <MAX_PUBLICATIONS>
+          [default: 100000]
+      --max-blob-bytes <MAX_BLOB_BYTES>
+          [default: 8589934592]
+      --max-total-bytes <MAX_TOTAL_BYTES>
+          [default: 68719476736]
+      --timeout-seconds <TIMEOUT_SECONDS>
+          [default: 120]
+      --json
+          
+      --workspace <WORKSPACE>
+          Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>
+          Stable request identity for a write in an existing native repository
+  -h, --help
+          Print help
+--- stderr
+
+### portable abandon-import --help
+exit 0
+--- stdout
+Abandon a receiving import without deleting the source or accepted history
+
+Usage: alt portable abandon-import [OPTIONS] --credential-file <CREDENTIAL_FILE> --journal <JOURNAL>
+
+Options:
+      --credential-file <CREDENTIAL_FILE>
+          Private credential created by alt auth login
+      --journal <JOURNAL>
+          Private durable journal; reuse this directory after an interrupted attempt
+      --max-metadata-bytes <MAX_METADATA_BYTES>
+          [default: 16777216]
+      --max-entries <MAX_ENTRIES>
+          [default: 1000000]
+      --max-publications <MAX_PUBLICATIONS>
+          [default: 100000]
+      --max-blob-bytes <MAX_BLOB_BYTES>
+          [default: 8589934592]
+      --max-total-bytes <MAX_TOTAL_BYTES>
+          [default: 68719476736]
+      --timeout-seconds <TIMEOUT_SECONDS>
+          [default: 120]
+      --json
+          
+      --workspace <WORKSPACE>
+          Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>
+          Stable request identity for a write in an existing native repository
+  -h, --help
+          Print help
+--- stderr
+
+### evidence run --help
+exit 0
+--- stdout
+Materialize the candidate and execute through the selected runner
+
+Usage: alt evidence run [OPTIONS] --profile <PROFILE> <CANDIDATE>
+
+Arguments:
+  <CANDIDATE>  
+
+Options:
+      --profile <PROFILE>      
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### evidence collect --help
+exit 0
+--- stdout
+Read an existing run report without launching validation again
+
+Usage: alt evidence collect [OPTIONS] <ID>
+
+Arguments:
+  <ID>  
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### evidence run-status --help
+exit 0
+--- stdout
+Inspect durable launch attribution and collection receipts
+
+Usage: alt evidence run-status [OPTIONS] <ID>
+
+Arguments:
+  <ID>  
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### evidence import --help
+exit 0
+--- stdout
+Preserve an external report; imported claims never become observed runs
+
+Usage: alt evidence import [OPTIONS] --report <REPORT> <CANDIDATE>
+
+Arguments:
+  <CANDIDATE>  
+
+Options:
+      --report <REPORT>        
+      --stdout <STDOUT>        
+      --stderr <STDERR>        
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### evidence show --help
+exit 0
+--- stdout
+Usage: alt evidence show [OPTIONS] <ID>
+
+Arguments:
+  <ID>  
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### evidence check --help
+exit 0
+--- stdout
+Usage: alt evidence check [OPTIONS] <ID>
+
+Arguments:
+  <ID>  
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### evidence log --help
+exit 0
+--- stdout
+Read an entire preserved output stream without truncation
+
+Usage: alt evidence log [OPTIONS] <ID> <STREAM>
+
+Arguments:
+  <ID>      
+  <STREAM>  [possible values: stdout, stderr, original-report]
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### bisect start --help
+exit 0
+--- stdout
+Start a session, optionally naming the bad commit and good ones
+
+Usage: alt bisect start [OPTIONS] [BAD] [GOOD]...
+
+Arguments:
+  [BAD]      The bad commit
+  [GOOD]...  Known good commits
+
+Options:
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### bisect bad --help
+exit 0
+--- stdout
+Mark commits (default: the one being tested) as bad
+
+Usage: alt bisect bad [OPTIONS] [REVS]...
+
+Arguments:
+  [REVS]...  
+
+Options:
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### bisect good --help
+exit 0
+--- stdout
+Mark commits (default: the one being tested) as good
+
+Usage: alt bisect good [OPTIONS] [REVS]...
+
+Arguments:
+  [REVS]...  
+
+Options:
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### bisect skip --help
+exit 0
+--- stdout
+Mark commits (default: the one being tested) as untestable
+
+Usage: alt bisect skip [OPTIONS] [REVS]...
+
+Arguments:
+  [REVS]...  
+
+Options:
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### bisect reset --help
+exit 0
+--- stdout
+End the session and go back to the branch
+
+Usage: alt bisect reset [OPTIONS]
+
+Options:
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### bisect run --help
+exit 0
+--- stdout
+Let a command judge each commit: exit 0 good, 125 skip, 1-127 bad, anything else stops
+
+Usage: alt bisect run [OPTIONS] <CMD>...
+
+Arguments:
+  <CMD>...  
+
+Options:
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### bisect run -h
+exit 0
+--- stdout
+Let a command judge each commit: exit 0 good, 125 skip, 1-127 bad, anything else stops
+
+Usage: alt bisect run [OPTIONS] <CMD>...
+
+Arguments:
+  <CMD>...  
+
+Options:
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### flow init --help
+exit 0
+--- stdout
+Create the `develop` branch off `main` and switch to it
+
+Usage: alt flow init [OPTIONS]
+
+Options:
+      --json                   Emit a structured JSON result instead of the human line
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### flow feature --help
+exit 0
+--- stdout
+Feature-branch operations
+
+Usage: alt flow feature [OPTIONS] <COMMAND>
+
+Commands:
+  start   Branch the topic off its base and switch to it
+  finish  Merge the topic back into its target(s) and delete it (atomic ref transaction + single op-log entry, like every other flow op)
+
+Options:
+      --json                   Emit a structured JSON result instead of the human line
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### flow release --help
+exit 0
+--- stdout
+Release-branch operations
+
+Usage: alt flow release [OPTIONS] <COMMAND>
+
+Commands:
+  start   Branch the topic off its base and switch to it
+  finish  Merge the topic back into its target(s) and delete it (atomic ref transaction + single op-log entry, like every other flow op)
+
+Options:
+      --json                   Emit a structured JSON result instead of the human line
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### flow hotfix --help
+exit 0
+--- stdout
+Hotfix-branch operations
+
+Usage: alt flow hotfix [OPTIONS] <COMMAND>
+
+Commands:
+  start   Branch the topic off its base and switch to it
+  finish  Merge the topic back into its target(s) and delete it (atomic ref transaction + single op-log entry, like every other flow op)
+
+Options:
+      --json                   Emit a structured JSON result instead of the human line
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### workspace add --help
+exit 0
+--- stdout
+Create a workspace with its own working tree, checked out on a branch
+
+Usage: alt workspace add [OPTIONS] <NAME> <PATH> [BRANCH]
+
+Arguments:
+  <NAME>    Workspace name
+  <PATH>    Working-tree directory for the workspace
+  [BRANCH]  Branch to check out (defaults to a new branch named after the workspace, at the current commit)
+
+Options:
+      --json                   Emit a structured JSON result instead of the human view
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### workspace list --help
+exit 0
+--- stdout
+List the workspaces
+
+Usage: alt workspace list [OPTIONS]
+
+Options:
+      --json                   Emit a structured JSON result instead of the human view
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### workspace remove --help
+exit 0
+--- stdout
+Remove a workspace (its HEAD ref and control dir; files are kept)
+
+Usage: alt workspace remove [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  Workspace name
+
+Options:
+      --json                   Emit a structured JSON result instead of the human view
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### flow feature start --help
+exit 0
+--- stdout
+Branch the topic off its base and switch to it
+
+Usage: alt flow feature start [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  
+
+Options:
+      --json                   Emit a structured JSON result instead of the human line
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### flow feature finish --help
+exit 0
+--- stdout
+Merge the topic back into its target(s) and delete it (atomic ref transaction + single op-log entry, like every other flow op)
+
+Usage: alt flow feature finish [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  
+
+Options:
+      --json                   Emit a structured JSON result instead of the human line
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### flow release start --help
+exit 0
+--- stdout
+Branch the topic off its base and switch to it
+
+Usage: alt flow release start [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  
+
+Options:
+      --json                   Emit a structured JSON result instead of the human line
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### flow release finish --help
+exit 0
+--- stdout
+Merge the topic back into its target(s) and delete it (atomic ref transaction + single op-log entry, like every other flow op)
+
+Usage: alt flow release finish [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  
+
+Options:
+      --json                   Emit a structured JSON result instead of the human line
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### flow hotfix start --help
+exit 0
+--- stdout
+Branch the topic off its base and switch to it
+
+Usage: alt flow hotfix start [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  
+
+Options:
+      --json                   Emit a structured JSON result instead of the human line
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### flow hotfix finish --help
+exit 0
+--- stdout
+Merge the topic back into its target(s) and delete it (atomic ref transaction + single op-log entry, like every other flow op)
+
+Usage: alt flow hotfix finish [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  
+
+Options:
+      --json                   Emit a structured JSON result instead of the human line
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### --version
+exit 0
+--- stdout
+alt 0.1.0
+--- stderr
+
+### -V
+exit 0
+--- stdout
+alt 0.1.0
+--- stderr
+
+### flow
+exit 2
+--- stdout
+--- stderr
+fatal: git-flow workflow operations (atomic, undoable)
+
+Usage: alt flow [OPTIONS] <COMMAND>
+
+Commands:
+  init     Create the `develop` branch off `main` and switch to it
+  feature  Feature-branch operations
+  release  Release-branch operations
+  hotfix   Hotfix-branch operations
+
+Options:
+      --json                   Emit a structured JSON result instead of the human line
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+
+
+### flow feature
+exit 2
+--- stdout
+--- stderr
+fatal: Feature-branch operations
+
+Usage: alt flow feature [OPTIONS] <COMMAND>
+
+Commands:
+  start   Branch the topic off its base and switch to it
+  finish  Merge the topic back into its target(s) and delete it (atomic ref transaction + single op-log entry, like every other flow op)
+
+Options:
+      --json                   Emit a structured JSON result instead of the human line
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+
+
+### workspace
+exit 2
+--- stdout
+--- stderr
+fatal: Manage parallel workspaces (isolated HEAD/index/working tree)
+
+Usage: alt workspace [OPTIONS] <COMMAND>
+
+Commands:
+  add     Create a workspace with its own working tree, checked out on a branch
+  list    List the workspaces
+  remove  Remove a workspace (its HEAD ref and control dir; files are kept)
+
+Options:
+      --json                   Emit a structured JSON result instead of the human view
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+
+
+### nonesuch
+exit 2
+--- stdout
+--- stderr
+fatal: error: unrecognized subcommand 'nonesuch'
+
+Usage: alt [OPTIONS] <COMMAND>
+
+For more information, try '--help'.
+
+
+### status --bogus
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument '--bogus' found
+
+Usage: alt status [OPTIONS]
+
+For more information, try '--help'.
+
+
+### status extra
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument 'extra' found
+
+Usage: alt status [OPTIONS]
+
+For more information, try '--help'.
+
+
+### status --json=1
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected value '1' for '--json' found; no more were expected
+
+Usage: alt status --json
+
+For more information, try '--help'.
+
+
+### commit
+exit 2
+--- stdout
+--- stderr
+fatal: error: the following required arguments were not provided:
+  -m <MESSAGE>
+
+Usage: alt commit -m <MESSAGE>
+
+For more information, try '--help'.
+
+
+### commit --no-edit -m x
+exit 2
+--- stdout
+--- stderr
+fatal: error: the following required arguments were not provided:
+  --amend
+
+Usage: alt commit --amend --no-edit -m <MESSAGE>
+
+For more information, try '--help'.
+
+
+### commit --validate --amend
+exit 2
+--- stdout
+--- stderr
+fatal: error: the argument '--validate' cannot be used with '--amend'
+
+Usage: alt commit --validate
+
+For more information, try '--help'.
+
+
+### commit --validate -m x -n
+exit 2
+--- stdout
+--- stderr
+fatal: error: the argument '--validate' cannot be used with:
+  -m <MESSAGE>
+  --no-verify
+
+Usage: alt commit --validate
+
+For more information, try '--help'.
+
+
+### commit -m
+exit 2
+--- stdout
+--- stderr
+fatal: error: a value is required for '-m <MESSAGE>' but none was supplied
+
+For more information, try '--help'.
+
+
+### commit -m x -m y
+exit 2
+--- stdout
+--- stderr
+fatal: error: the argument '-m <MESSAGE>' cannot be used multiple times
+
+Usage: alt commit [OPTIONS]
+
+For more information, try '--help'.
+
+
+### rebase
+exit 2
+--- stdout
+--- stderr
+fatal: error: the following required arguments were not provided:
+  <UPSTREAM>
+
+Usage: alt rebase <UPSTREAM>
+
+For more information, try '--help'.
+
+
+### rebase main --abort
+exit 2
+--- stdout
+--- stderr
+fatal: error: the argument '[UPSTREAM]' cannot be used with '--abort'
+
+Usage: alt rebase <UPSTREAM>
+
+For more information, try '--help'.
+
+
+### rebase --continue --skip
+exit 2
+--- stdout
+--- stderr
+fatal: error: the argument '--continue' cannot be used with '--skip'
+
+Usage: alt rebase --continue [UPSTREAM]
+
+For more information, try '--help'.
+
+
+### rebase --continue --abort main
+exit 2
+--- stdout
+--- stderr
+fatal: error: the argument '--continue' cannot be used with:
+  --abort
+  [UPSTREAM]
+
+Usage: alt rebase --continue [UPSTREAM]
+
+For more information, try '--help'.
+
+
+### revert
+exit 2
+--- stdout
+--- stderr
+fatal: error: the following required arguments were not provided:
+  <REVS>...
+
+Usage: alt revert <REVS>...
+
+For more information, try '--help'.
+
+
+### revert a --continue
+exit 2
+--- stdout
+--- stderr
+fatal: error: the argument '[REVS]...' cannot be used with '--continue'
+
+Usage: alt revert <REVS>...
+
+For more information, try '--help'.
+
+
+### revert --abort -m 1
+exit 2
+--- stdout
+--- stderr
+fatal: error: the argument '--abort' cannot be used with '--mainline <MAINLINE>'
+
+Usage: alt revert --abort [REVS]...
+
+For more information, try '--help'.
+
+
+### revert a -m x
+exit 2
+--- stdout
+--- stderr
+fatal: error: invalid value 'x' for '--mainline <MAINLINE>': invalid digit found in string
+
+For more information, try '--help'.
+
+
+### revert a -m
+exit 2
+--- stdout
+--- stderr
+fatal: error: a value is required for '--mainline <MAINLINE>' but none was supplied
+
+For more information, try '--help'.
+
+
+### branch -r
+exit 2
+--- stdout
+--- stderr
+fatal: error: the following required arguments were not provided:
+  -d <DELETE>
+
+Usage: alt branch -d <DELETE> --remotes [NAME]
+
+For more information, try '--help'.
+
+
+### branch -d
+exit 2
+--- stdout
+--- stderr
+fatal: error: a value is required for '-d <DELETE>' but none was supplied
+
+For more information, try '--help'.
+
+
+### cat-file -t -s abc
+exit 2
+--- stdout
+--- stderr
+fatal: error: the argument '-t' cannot be used with '-s'
+
+Usage: alt cat-file -t <OBJECT>
+
+For more information, try '--help'.
+
+
+### cat-file -t -s -p abc
+exit 2
+--- stdout
+--- stderr
+fatal: error: the argument '-t' cannot be used with:
+  -s
+  -p
+
+Usage: alt cat-file -t <OBJECT>
+
+For more information, try '--help'.
+
+
+### cat-file -t
+exit 2
+--- stdout
+--- stderr
+fatal: error: the following required arguments were not provided:
+  <OBJECT>
+
+Usage: alt cat-file -t <OBJECT>
+
+For more information, try '--help'.
+
+
+### evidence log x nostream
+exit 2
+--- stdout
+--- stderr
+fatal: error: invalid value 'nostream' for '<STREAM>'
+  [possible values: stdout, stderr, original-report]
+
+For more information, try '--help'.
+
+
+### evidence log x
+exit 2
+--- stdout
+--- stderr
+fatal: error: the following required arguments were not provided:
+  <STREAM>
+
+Usage: alt evidence log <ID> <STREAM>
+
+For more information, try '--help'.
+
+
+### log --prety raw
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument '--prety' found
+
+  tip: a similar argument exists: '--pretty'
+
+Usage: alt log --pretty <PRETTY> [REV]
+
+For more information, try '--help'.
+
+
+### log --jsno
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument '--jsno' found
+
+  tip: a similar argument exists: '--json'
+
+Usage: alt log --json [REV]
+
+For more information, try '--help'.
+
+
+### log --pach
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument '--pach' found
+
+  tip: a similar argument exists: '--patch'
+
+Usage: alt log --patch [REV]
+
+For more information, try '--help'.
+
+
+### diff --stage
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument '--stage' found
+
+  tip: a similar argument exists: '--staged'
+
+Usage: alt diff --cached
+
+For more information, try '--help'.
+
+
+### diff --cachd
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument '--cachd' found
+
+  tip: a similar argument exists: '--cached'
+
+Usage: alt diff --cached
+
+For more information, try '--help'.
+
+
+### add -x
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument '-x' found
+
+  tip: to pass '-x' as a value, use '-- -x'
+
+Usage: alt add [OPTIONS] [PATHS]...
+
+For more information, try '--help'.
+
+
+### bisect run
+exit 2
+--- stdout
+--- stderr
+fatal: error: the following required arguments were not provided:
+  <CMD>...
+
+Usage: alt bisect run <CMD>...
+
+For more information, try '--help'.
+
+
+### portable export-status
+exit 2
+--- stdout
+--- stderr
+fatal: error: the following required arguments were not provided:
+  --credential-file <CREDENTIAL_FILE>
+  --journal <JOURNAL>
+
+Usage: alt portable export-status --credential-file <CREDENTIAL_FILE> --journal <JOURNAL>
+
+For more information, try '--help'.
+
+
+### portable export --credential-file c --journal j --repository r --output o --max-entries x
+exit 2
+--- stdout
+--- stderr
+fatal: error: invalid value 'x' for '--max-entries <MAX_ENTRIES>': invalid digit found in string
+
+For more information, try '--help'.
+
+
+### portable import --credential-file c --journal j --source-epoch -1
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument '-1' found
+
+Usage: alt portable import [OPTIONS] --credential-file <CREDENTIAL_FILE> --journal <JOURNAL> --repository <REPOSITORY> --archive <ARCHIVE> --mappings <MAPPINGS> --source-installation <SOURCE_INSTALLATION> --source-repository <SOURCE_REPOSITORY> --source-epoch <SOURCE_EPOCH> --source-key <SOURCE_KEY>
+
+For more information, try '--help'.
+
+
+### fetch a b --jsn
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument '--jsn' found
+
+  tip: a similar argument exists: '--json'
+
+Usage: alt fetch --json <REMOTE> <REFSPECS>...
+
+For more information, try '--help'.
+
+
+### workspace add
+exit 2
+--- stdout
+--- stderr
+fatal: error: the following required arguments were not provided:
+  <NAME>
+  <PATH>
+
+Usage: alt workspace add <NAME> <PATH> [BRANCH]
+
+For more information, try '--help'.
+
+
+### workspace add a
+exit 2
+--- stdout
+--- stderr
+fatal: error: the following required arguments were not provided:
+  <PATH>
+
+Usage: alt workspace add <NAME> <PATH> [BRANCH]
+
+For more information, try '--help'.
+
+
+### workspace add a b c d
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument 'd' found
+
+Usage: alt workspace add [OPTIONS] <NAME> <PATH> [BRANCH]
+
+For more information, try '--help'.
+
+
+### --workspace
+exit 2
+--- stdout
+--- stderr
+fatal: error: a value is required for '--workspace <WORKSPACE>' but none was supplied
+
+For more information, try '--help'.
+
+
+### --request-id
+exit 2
+--- stdout
+--- stderr
+fatal: error: a value is required for '--request-id <HEX>' but none was supplied
+
+For more information, try '--help'.
+
+
+### help
+exit 2
+--- stdout
+--- stderr
+fatal: error: unrecognized subcommand 'help'
+
+Usage: alt [OPTIONS] <COMMAND>
+
+For more information, try '--help'.
+
+
+### status --help extra
+exit 0
+--- stdout
+Show the working tree status
+
+Usage: alt status [OPTIONS]
+
+Options:
+      --json                   Emit a stable JSON object instead of the human-readable view
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### status -h --bogus
+exit 0
+--- stdout
+Show the working tree status
+
+Usage: alt status [OPTIONS]
+
+Options:
+      --json                   Emit a stable JSON object instead of the human-readable view
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### status --bogus -h
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument '--bogus' found
+
+Usage: alt status [OPTIONS]
+
+For more information, try '--help'.
+
+
+### status --version
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument '--version' found
+
+Usage: alt status [OPTIONS]
+
+For more information, try '--help'.
+
+
+### status -V
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument '-V' found
+
+Usage: alt status [OPTIONS]
+
+For more information, try '--help'.
+
+
+### -x
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument '-x' found
+
+Usage: alt [OPTIONS] <COMMAND>
+
+For more information, try '--help'.
+
+
+### status -
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument '-' found
+
+Usage: alt status [OPTIONS]
+
+For more information, try '--help'.
+
+
+### log -n 3x
+exit 2
+--- stdout
+--- stderr
+fatal: error: invalid value '3x' for '-n <MAX_COUNT>': invalid digit found in string
+
+For more information, try '--help'.
+
+
+### log --pretty
+exit 2
+--- stdout
+--- stderr
+fatal: error: a value is required for '--pretty <PRETTY>' but none was supplied
+
+For more information, try '--help'.
+
+
+### log -n
+exit 2
+--- stdout
+--- stderr
+fatal: error: a value is required for '-n <MAX_COUNT>' but none was supplied
+
+For more information, try '--help'.
+
+
+### flow feature start
+exit 2
+--- stdout
+--- stderr
+fatal: error: the following required arguments were not provided:
+  <NAME>
+
+Usage: alt flow feature start <NAME>
+
+For more information, try '--help'.
+
+
+### flow feature start a b
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument 'b' found
+
+Usage: alt flow feature start [OPTIONS] <NAME>
+
+For more information, try '--help'.
+
+
+### flow bogus
+exit 2
+--- stdout
+--- stderr
+fatal: error: unrecognized subcommand 'bogus'
+
+Usage: alt flow [OPTIONS] <COMMAND>
+
+For more information, try '--help'.
+
+
+### flow feature bogus
+exit 2
+--- stdout
+--- stderr
+fatal: error: unrecognized subcommand 'bogus'
+
+Usage: alt flow feature [OPTIONS] <COMMAND>
+
+For more information, try '--help'.
+
+
+### status --workspace
+exit 2
+--- stdout
+--- stderr
+fatal: error: a value is required for '--workspace <WORKSPACE>' but none was supplied
+
+For more information, try '--help'.
+
+
+### status --request-id
+exit 2
+--- stdout
+--- stderr
+fatal: error: a value is required for '--request-id <HEX>' but none was supplied
+
+For more information, try '--help'.
+
+
+### status -j
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument '-j' found
+
+Usage: alt status [OPTIONS]
+
+For more information, try '--help'.
+
+
+### commit -x
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument '-x' found
+
+Usage: alt commit [OPTIONS]
+
+For more information, try '--help'.
+
+
+### commit -nx
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument '-x' found
+
+Usage: alt commit [OPTIONS]
+
+For more information, try '--help'.
+
+
+### commit -nm
+exit 2
+--- stdout
+--- stderr
+fatal: error: a value is required for '-m <MESSAGE>' but none was supplied
+
+For more information, try '--help'.
+
+
+### cat-file -t --bogus x
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument '--bogus' found
+
+  tip: to pass '--bogus' as a value, use '-- --bogus'
+
+Usage: alt cat-file -t <OBJECT>
+
+For more information, try '--help'.
+
+
+### cat-file -t --bogu
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument '--bogu' found
+
+  tip: to pass '--bogu' as a value, use '-- --bogu'
+
+Usage: alt cat-file -t <OBJECT>
+
+For more information, try '--help'.
+
+
+### log -n 3 --bogus
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument '--bogus' found
+
+  tip: to pass '--bogus' as a value, use '-- --bogus'
+
+Usage: alt log -n <MAX_COUNT> [REV]
+
+For more information, try '--help'.
+
+
+### --workspace w --bogus
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument '--bogus' found
+
+Usage: alt --workspace <WORKSPACE> <COMMAND>
+
+For more information, try '--help'.
+
+
+### --workspace w --versio
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument '--versio' found
+
+  tip: a similar argument exists: '--version'
+
+Usage: alt --workspace <WORKSPACE> --version <COMMAND>
+
+For more information, try '--help'.
+
+
+### --workspace w nonesuch
+exit 2
+--- stdout
+--- stderr
+fatal: error: unrecognized subcommand 'nonesuch'
+
+Usage: alt [OPTIONS] <COMMAND>
+
+For more information, try '--help'.
+
+
+### --hel
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument '--hel' found
+
+  tip: a similar argument exists: '--help'
+
+Usage: alt --help <COMMAND>
+
+For more information, try '--help'.
+
+
+### --versio
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument '--versio' found
+
+  tip: a similar argument exists: '--version'
+
+Usage: alt --version <COMMAND>
+
+For more information, try '--help'.
+
+
+### status --jso
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument '--jso' found
+
+  tip: a similar argument exists: '--json'
+
+Usage: alt status --json
+
+For more information, try '--help'.
+
+
+### status --workspac
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument '--workspac' found
+
+  tip: a similar argument exists: '--workspace'
+
+Usage: alt status --workspace <WORKSPACE>
+
+For more information, try '--help'.
+
+
+### commit --amen
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument '--amen' found
+
+  tip: a similar argument exists: '--amend'
+
+Usage: alt commit --amend
+
+For more information, try '--help'.
+
+
+### commit -m x --amen
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument '--amen' found
+
+  tip: a similar argument exists: '--amend'
+
+Usage: alt commit -m <MESSAGE> --amend
+
+For more information, try '--help'.
+
+
+### bisect run --bogus x
+exit 0
+--- stdout
+--- stderr
+
+### bisect run x --help
+exit 0
+--- stdout
+--- stderr
+
+### bisect run -x
+exit 0
+--- stdout
+--- stderr
+
+### bisect start --bogus
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument '--bogus' found
+
+  tip: to pass '--bogus' as a value, use '-- --bogus'
+
+Usage: alt bisect start [OPTIONS] [BAD] [GOOD]...
+
+For more information, try '--help'.
+
+
+### add a -- b
+exit 0
+--- stdout
+--- stderr
+
+### log -- x y
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument 'y' found
+
+Usage: alt log [OPTIONS] [REV]
+
+For more information, try '--help'.
+
+
+### log --pretty= x y
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument 'y' found
+
+Usage: alt log [OPTIONS] [REV]
+
+For more information, try '--help'.
+
+
+### log -n3 -n4
+exit 2
+--- stdout
+--- stderr
+fatal: error: the argument '-n <MAX_COUNT>' cannot be used multiple times
+
+Usage: alt log [OPTIONS] [REV]
+
+For more information, try '--help'.
+
+
+### evidence log x stdou
+exit 2
+--- stdout
+--- stderr
+fatal: error: invalid value 'stdou' for '<STREAM>'
+  [possible values: stdout, stderr, original-report]
+
+  tip: a similar value exists: 'stdout'
+
+For more information, try '--help'.
+
+
+### diff --staged --cached
+exit 2
+--- stdout
+--- stderr
+fatal: error: the argument '--cached' cannot be used multiple times
+
+Usage: alt diff [OPTIONS]
+
+For more information, try '--help'.
+
+
+### diff --staged=1
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected value '1' for '--cached' found; no more were expected
+
+Usage: alt diff --cached
+
+For more information, try '--help'.
+
+
+### revert -m 1
+exit 2
+--- stdout
+--- stderr
+fatal: error: the following required arguments were not provided:
+  <REVS>...
+
+Usage: alt revert --mainline <MAINLINE> <REVS>...
+
+For more information, try '--help'.
+
+
+### revert --continue a
+exit 2
+--- stdout
+--- stderr
+fatal: error: the argument '--continue' cannot be used with '[REVS]...'
+
+Usage: alt revert --continue [REVS]...
+
+For more information, try '--help'.
+
+
+### revert --continue -m 1
+exit 2
+--- stdout
+--- stderr
+fatal: error: the argument '--continue' cannot be used with '--mainline <MAINLINE>'
+
+Usage: alt revert --continue [REVS]...
+
+For more information, try '--help'.
+
+
+### rebase --abort --continue
+exit 2
+--- stdout
+--- stderr
+fatal: error: the argument '--abort' cannot be used with '--continue'
+
+Usage: alt rebase --abort [UPSTREAM]
+
+For more information, try '--help'.
+
+
+### rebase --skip --abort
+exit 2
+--- stdout
+--- stderr
+fatal: error: the argument '--skip' cannot be used with '--abort'
+
+Usage: alt rebase --skip [UPSTREAM]
+
+For more information, try '--help'.
+
+
+### rebase --skip main
+exit 2
+--- stdout
+--- stderr
+fatal: error: the argument '--skip' cannot be used with '[UPSTREAM]'
+
+Usage: alt rebase --skip [UPSTREAM]
+
+For more information, try '--help'.
+
+
+### commit --validate --no-verify --amend -m x
+exit 2
+--- stdout
+--- stderr
+fatal: error: the argument '--validate' cannot be used with:
+  --no-verify
+  --amend
+  -m <MESSAGE>
+
+Usage: alt commit --validate
+
+For more information, try '--help'.
+
+
+### commit --no-edit
+exit 2
+--- stdout
+--- stderr
+fatal: error: the following required arguments were not provided:
+  --amend
+  -m <MESSAGE>
+
+Usage: alt commit --amend --no-edit -m <MESSAGE>
+
+For more information, try '--help'.
+
+
+### commit --amend --no-edit --validate
+exit 2
+--- stdout
+--- stderr
+fatal: error: the argument '--amend' cannot be used with '--validate'
+
+Usage: alt commit --amend --no-edit
+
+For more information, try '--help'.
+
+
+### portable export --journal j
+exit 2
+--- stdout
+--- stderr
+fatal: error: the following required arguments were not provided:
+  --credential-file <CREDENTIAL_FILE>
+  --repository <REPOSITORY>
+  --output <OUTPUT>
+
+Usage: alt portable export --credential-file <CREDENTIAL_FILE> --journal <JOURNAL> --repository <REPOSITORY> --output <OUTPUT>
+
+For more information, try '--help'.
+
+
+### portable import
+exit 2
+--- stdout
+--- stderr
+fatal: error: the following required arguments were not provided:
+  --credential-file <CREDENTIAL_FILE>
+  --journal <JOURNAL>
+  --repository <REPOSITORY>
+  --archive <ARCHIVE>
+  --mappings <MAPPINGS>
+  --source-installation <SOURCE_INSTALLATION>
+  --source-repository <SOURCE_REPOSITORY>
+  --source-epoch <SOURCE_EPOCH>
+  --source-key <SOURCE_KEY>
+
+Usage: alt portable import --credential-file <CREDENTIAL_FILE> --journal <JOURNAL> --repository <REPOSITORY> --archive <ARCHIVE> --mappings <MAPPINGS> --source-installation <SOURCE_INSTALLATION> --source-repository <SOURCE_REPOSITORY> --source-epoch <SOURCE_EPOCH> --source-key <SOURCE_KEY>
+
+For more information, try '--help'.
+
+
+### status --workspace=a --workspace=b
+exit 2
+--- stdout
+--- stderr
+fatal: error: the argument '--workspace <WORKSPACE>' cannot be used multiple times
+
+Usage: alt status [OPTIONS]
+
+For more information, try '--help'.
+
+
+### --workspace a --workspace b
+exit 2
+--- stdout
+--- stderr
+fatal: error: the argument '--workspace <WORKSPACE>' cannot be used multiple times
+
+Usage: alt [OPTIONS] <COMMAND>
+
+For more information, try '--help'.
+
+
+### --request-id=x --request-id=y status
+exit 2
+--- stdout
+--- stderr
+fatal: error: the argument '--request-id <HEX>' cannot be used multiple times
+
+Usage: alt [OPTIONS] <COMMAND>
+
+For more information, try '--help'.
+
+
+### commit -m --help
+exit 2
+--- stdout
+--- stderr
+fatal: error: a value is required for '-m <MESSAGE>' but none was supplied
+
+For more information, try '--help'.
+
+
+### status --help --bogus
+exit 0
+--- stdout
+Show the working tree status
+
+Usage: alt status [OPTIONS]
+
+Options:
+      --json                   Emit a stable JSON object instead of the human-readable view
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+--- stderr
+
+### fetch a --jsn b
+exit 2
+--- stdout
+--- stderr
+fatal: error: unexpected argument '--jsn' found
+
+  tip: a similar argument exists: '--json'
+
+Usage: alt fetch --json <REMOTE> [REFSPECS]...
+
+For more information, try '--help'.
+
+
+### branch new -d
+exit 2
+--- stdout
+--- stderr
+fatal: error: a value is required for '-d <DELETE>' but none was supplied
+
+For more information, try '--help'.
+
