@@ -10,22 +10,10 @@ use alt_git_codec::{ObjectId, ObjectKind};
 use alt_pack_segment::{Kind, Segment, SegmentSet};
 use alt_remote_protocol::{Publication, Receipt, ReceiptBody};
 use alt_repository_service::{Graph, validate_publication};
-use std::{
-    collections::HashMap,
-    path::PathBuf,
-    sync::{Arc, LazyLock, Mutex},
-};
+use std::{path::PathBuf, sync::Arc};
 
 /// segments up to this size are stored with their row instead of being flushed to disk
 pub const INLINE_SEGMENT_BYTES: usize = 65536;
-
-/// segments are immutable, so one mapping per file serves every request
-static OPEN: LazyLock<Mutex<HashMap<PathBuf, Arc<Segment>>>> = LazyLock::new(Default::default);
-
-/// drops the shared mapping of a segment whose file is about to be deleted
-pub(crate) fn forget_segment(path: &std::path::Path) {
-    OPEN.lock().unwrap().remove(path);
-}
 
 pub struct NewSegment<'a> {
     pub id: &'a str,
@@ -230,9 +218,7 @@ impl Store {
 
     /// makes a segment this process just wrote available to later requests
     pub fn adopt_segment(&self, repository: &str, id: &str, segment: Arc<Segment>) -> Result<()> {
-        OPEN.lock()
-            .unwrap()
-            .insert(self.pack_path(repository, id)?, segment);
+        crate::open_segments::insert(self.pack_path(repository, id)?, segment);
         Ok(())
     }
 
@@ -245,7 +231,7 @@ impl Store {
         let mut segments = Vec::with_capacity(ids.len());
         for (id, inline) in ids {
             let path = self.pack_path(repository, id)?;
-            let cached = OPEN.lock().unwrap().get(&path).cloned();
+            let cached = crate::open_segments::get(&path);
             let segment = match cached {
                 Some(segment) => segment,
                 None => {
@@ -264,7 +250,7 @@ impl Store {
                         Segment::open(&path)
                             .map_err(|_| Error::Integrity("pack segment unavailable"))?,
                     );
-                    OPEN.lock().unwrap().insert(path, segment.clone());
+                    crate::open_segments::insert(path, segment.clone());
                     segment
                 }
             };
