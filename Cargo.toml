@@ -57,6 +57,7 @@ alt-merge = { path = "crates/alt-merge" }
 alt-odb = { path = "crates/alt-odb" }
 alt-oplog = { path = "crates/alt-oplog" }
 alt-os = { path = "crates/alt-os" }
+alt-pg = { path = "crates/alt-pg" }
 alt-pack-segment = { path = "crates/alt-pack-segment" }
 alt-prism = { path = "crates/alt-prism" }
 alt-prism-deflate = { path = "crates/alt-prism-deflate" }

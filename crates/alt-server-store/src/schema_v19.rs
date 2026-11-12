@@ -55,7 +55,7 @@ pub(crate) fn settle(
     Ok(())
 }
 
-fn object_entry(row: &postgres::Row) -> Result<ContentEntry> {
+fn object_entry(row: &alt_pg::Row) -> Result<ContentEntry> {
     let kind = match row.get::<_, String>(1).as_str() {
         "blob" => ContentKind::Blob,
         "tree" => ContentKind::Tree,

@@ -2027,13 +2027,13 @@ fn portable_import_process_crash_boundaries() {
     }
 }
 fn portable_crash_child(phase: &str) {
-    let mut config: postgres::Config = std::env::var("ALT_SERVER_TEST_ADMIN_DSN")
+    let mut config: alt_pg::Config = std::env::var("ALT_SERVER_TEST_ADMIN_DSN")
         .unwrap()
         .parse()
         .unwrap();
     config
-        .dbname(&std::env::var("ALT_PORTABLE_FAULT_DB").unwrap())
-        .application_name("alt-portable-fault-worker");
+        .set_dbname(&std::env::var("ALT_PORTABLE_FAULT_DB").unwrap())
+        .set_application_name("alt-portable-fault-worker");
     let root = std::path::PathBuf::from(std::env::var("ALT_PORTABLE_FAULT_ROOT").unwrap());
     let token = std::env::var("ALT_PORTABLE_FAULT_TOKEN").unwrap();
     let input = root.join("portable-input");
@@ -2048,7 +2048,7 @@ fn portable_crash_child(phase: &str) {
         runtime_generation: 1,
     };
     let mut store = Store::open(
-        config.connect(NoTls).unwrap(),
+        config.connect().unwrap(),
         ByteStore::open(&root.join("bytes")).unwrap(),
         spec,
         SigningKey::from_bytes(&[7; 32]),
@@ -2320,16 +2320,16 @@ ssize_t pread64(int fd, void *buffer, size_t size, off64_t offset) {
 }
 #[cfg(target_os = "linux")]
 fn portable_export_pause_child() {
-    let mut config: postgres::Config = std::env::var("ALT_SERVER_TEST_ADMIN_DSN")
+    let mut config: alt_pg::Config = std::env::var("ALT_SERVER_TEST_ADMIN_DSN")
         .unwrap()
         .parse()
         .unwrap();
     config
-        .dbname(&std::env::var("ALT_EXPORT_PAUSE_DB").unwrap())
-        .application_name("alt-export-pause-child");
+        .set_dbname(&std::env::var("ALT_EXPORT_PAUSE_DB").unwrap())
+        .set_application_name("alt-export-pause-child");
     let root = std::path::PathBuf::from(std::env::var("ALT_EXPORT_PAUSE_ROOT").unwrap());
     let mut store = Store::open(
-        config.connect(NoTls).unwrap(),
+        config.connect().unwrap(),
         ByteStore::open(&root.join("bytes")).unwrap(),
         InstanceSpec {
             installation_id: "installation".into(),

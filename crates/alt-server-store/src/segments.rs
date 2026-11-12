@@ -78,7 +78,7 @@ fn upload_authority(
     credential: &Credential,
     key: &RequestKey,
     limits: Limits,
-) -> Result<postgres::Row> {
+) -> Result<alt_pg::Row> {
     instance(tx, spec, signing_key)?;
     let current = snapshot(tx, spec, &key.scope.repository_instance_id)?;
     let auth = authorize(tx, spec, credential, &current)?;

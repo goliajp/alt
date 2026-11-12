@@ -85,10 +85,10 @@ and creates/removes only its own private 64 KiB tmpfs. The crash case kills only
 child PIDs returned by its own process launcher. Full closing gates also run
 inside this wrapper, with the real corpus path preserved.
 
-Connections are supplied by the application. The test wrapper uses loopback
-`NoTls`; production connection/TLS and role configuration belong to the operator
-adapter. Request/graph/resource bounds are advertised protocol limits, not
-performance guarantees.
+Connections are supplied by the application. The test wrapper uses a loopback
+or Unix-socket connection without TLS; production connection and role
+configuration belong to the operator adapter. Request/graph/resource bounds
+are advertised protocol limits, not performance guarantees.
 
 Cloud initialization requires the exact organization/workspace/product/instance,
 generation and origins plus the runtime credential digest. Account leases and

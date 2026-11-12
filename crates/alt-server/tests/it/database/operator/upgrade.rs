@@ -8,7 +8,7 @@ use super::*;
 /// Makes the database the schema 19 one it stands in for. The longer rows are built
 /// from the audit records, which hold whole receipts in every version.
 fn as_schema_19(db: &OperatorDb) {
-    Client::connect(&db.dsn, NoTls)
+    Client::connect(&db.dsn)
         .unwrap()
         .batch_execute(
             "DELETE FROM alt_schema WHERE version=20;
@@ -24,7 +24,7 @@ fn as_schema_19(db: &OperatorDb) {
 /// ones, and makes the database the schema 18 one it stands in for.
 fn as_schema_18(db: &OperatorDb, store: &Store, objects: &[(&ContentEntry, &Vec<u8>, &str)]) {
     as_schema_19(db);
-    let mut client = Client::connect(&db.dsn, NoTls).unwrap();
+    let mut client = Client::connect(&db.dsn).unwrap();
     client
         .batch_execute("DELETE FROM alt_schema WHERE version=19; ALTER TABLE alt_pins DROP CONSTRAINT alt_pins_no_ref")
         .unwrap();
@@ -65,13 +65,13 @@ fn as_schema_18(db: &OperatorDb, store: &Store, objects: &[(&ContentEntry, &Vec<
 /// stored bytes are the live segments plus the counted content
 /// schema, and how many stored results and outbox events hold a publication
 fn copies(dsn: &str) -> (i32, i64, i64) {
-    let row = Client::connect(dsn, NoTls).unwrap().query_one("SELECT (SELECT max(version) FROM alt_schema),(SELECT count(*) FROM alt_requests WHERE result #> '{receipt,body}' ? 'publication'),(SELECT count(*) FROM alt_outbox WHERE event #> '{receipt,body}' ? 'publication')", &[]).unwrap();
+    let row = Client::connect(dsn).unwrap().query_one("SELECT (SELECT max(version) FROM alt_schema),(SELECT count(*) FROM alt_requests WHERE result #> '{receipt,body}' ? 'publication'),(SELECT count(*) FROM alt_outbox WHERE event #> '{receipt,body}' ? 'publication')", &[]).unwrap();
     (row.get(0), row.get(1), row.get(2))
 }
 fn opened(db: &OperatorDb, config: &str) -> Store {
     let config = Config::read(std::path::Path::new(config)).unwrap();
     Store::open(
-        Client::connect(&db.dsn, NoTls).unwrap(),
+        Client::connect(&db.dsn).unwrap(),
         ByteStore::open(&config.bytes_directory).unwrap(),
         config.instance.clone(),
         config.signing_key().unwrap(),
@@ -107,7 +107,7 @@ fn delivered_receipt(db: &OperatorDb, config: &str) -> Vec<u8> {
     alt_json::to_vec(&receipt).unwrap()
 }
 fn shape(dsn: &str) -> (i32, i64, i64, i64, bool) {
-    let row = Client::connect(dsn, NoTls).unwrap().query_one("SELECT (SELECT max(version) FROM alt_schema),(SELECT count(*) FROM alt_pins WHERE pin_id LIKE 'ref:%'),(SELECT count(*) FROM alt_objects),(SELECT sum(objects) FROM alt_pack_segments WHERE state='live')::bigint,(SELECT stored_bytes FROM alt_repositories WHERE id='repository')=(SELECT sum(bytes) FROM alt_pack_segments WHERE state='live')::bigint+(SELECT COALESCE(sum(bytes),0) FROM alt_blobs WHERE accounted)::bigint AND NOT EXISTS(SELECT 1 FROM alt_blobs WHERE accounted)", &[]).unwrap();
+    let row = Client::connect(dsn).unwrap().query_one("SELECT (SELECT max(version) FROM alt_schema),(SELECT count(*) FROM alt_pins WHERE pin_id LIKE 'ref:%'),(SELECT count(*) FROM alt_objects),(SELECT sum(objects) FROM alt_pack_segments WHERE state='live')::bigint,(SELECT stored_bytes FROM alt_repositories WHERE id='repository')=(SELECT sum(bytes) FROM alt_pack_segments WHERE state='live')::bigint+(SELECT COALESCE(sum(bytes),0) FROM alt_blobs WHERE accounted)::bigint AND NOT EXISTS(SELECT 1 FROM alt_blobs WHERE accounted)", &[]).unwrap();
     (row.get(0), row.get(1), row.get(2), row.get(3), row.get(4))
 }
 
@@ -302,7 +302,7 @@ fn an_instance_older_than_schema_18_is_told_which_release_upgrades_it() {
     let source = OperatorDb::new();
     let (store, _, _) = prepare(&source);
     drop(store);
-    Client::connect(&source.dsn, NoTls)
+    Client::connect(&source.dsn)
         .unwrap()
         .batch_execute("DELETE FROM alt_schema WHERE version>17")
         .unwrap();

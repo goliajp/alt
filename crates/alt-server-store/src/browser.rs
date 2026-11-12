@@ -38,7 +38,7 @@ fn login_name(value: &str) -> Result<String> {
     }
     Ok(value.to_ascii_lowercase())
 }
-fn user(row: &postgres::Row) -> Result<LocalUser> {
+fn user(row: &alt_pg::Row) -> Result<LocalUser> {
     Ok(LocalUser {
         actor_id: row.get("actor_id"),
         login_name: row.get("login_name"),

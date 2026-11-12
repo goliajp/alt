@@ -34,7 +34,7 @@ pub(crate) fn shorten(tx: &mut Transaction<'_>) -> Result<()> {
 }
 
 /// fails the migration when a rewritten row of some repository does not read back
-fn held(row: postgres::Row, what: &'static str) -> Result<()> {
+fn held(row: alt_pg::Row, what: &'static str) -> Result<()> {
     match row.get::<_, Option<String>>(0) {
         None => Ok(()),
         Some(repository) => {

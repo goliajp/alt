@@ -77,7 +77,7 @@ impl Store {
         let repository = &key.scope.repository_instance_id;
         for batch in manifest.entries.chunks(crate::database::BATCH_ROWS) {
             let digests: Vec<_> = batch.iter().map(|entry| entry.blake3.as_str()).collect();
-            let content: BTreeMap<String, postgres::Row> = tx.query("SELECT c.blake3,c.verified,b.bytes,b.state FROM alt_request_content c LEFT JOIN alt_blobs b ON b.repository=c.repository AND b.blake3=c.blake3 WHERE c.repository=$1 AND c.epoch=$2 AND c.actor_id=$3 AND c.request_id=$4 AND c.blake3=ANY($5)", &[repository,&integer(key.scope.recovery_epoch)?,&key.actor_id,&key.request_id,&digests])?
+            let content: BTreeMap<String, alt_pg::Row> = tx.query("SELECT c.blake3,c.verified,b.bytes,b.state FROM alt_request_content c LEFT JOIN alt_blobs b ON b.repository=c.repository AND b.blake3=c.blake3 WHERE c.repository=$1 AND c.epoch=$2 AND c.actor_id=$3 AND c.request_id=$4 AND c.blake3=ANY($5)", &[repository,&integer(key.scope.recovery_epoch)?,&key.actor_id,&key.request_id,&digests])?
                 .into_iter().map(|row| (row.get(0), row)).collect();
             let oids: Vec<_> = batch
                 .iter()

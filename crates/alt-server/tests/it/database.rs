@@ -14,8 +14,8 @@ mod operator;
 mod portable;
 mod single_copy;
 use alt_crypto::ed25519::SigningKey;
+use alt_pg::Client;
 use alt_server_store::{ByteStore, Credential, InstanceSpec, Store};
-use postgres::{Client, NoTls};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -66,8 +66,8 @@ impl Running {
         cloud: Option<std::sync::Arc<alt_server::cloud::Runtime>>,
         links: Vec<alt_server::change_links::ChannelRuntime>,
     ) -> (StoreFactory, HttpOptions) {
-        let mut database: postgres::Config = f.admin_dsn.parse().unwrap();
-        database.dbname(&f.database);
+        let mut database: alt_pg::Config = f.admin_dsn.parse().unwrap();
+        database.set_dbname(&f.database);
         let signing_key = SigningKey::from_bytes(&[f.key_seed; 32]);
         let factory = StoreFactory {
             change_links: links.into(),
@@ -464,7 +464,7 @@ impl Fixture {
             std::process::id(),
             NEXT.fetch_add(1, Ordering::SeqCst)
         );
-        let mut client = Client::connect(&admin_dsn, NoTls).unwrap();
+        let mut client = Client::connect(&admin_dsn).unwrap();
         client
             .batch_execute(&format!("CREATE DATABASE {database}"))
             .unwrap();
@@ -475,10 +475,10 @@ impl Fixture {
             deployment_mode: DeploymentMode::SelfHosted,
             runtime_generation: 1,
         };
-        let mut config: postgres::Config = admin_dsn.parse().unwrap();
-        config.dbname(&database);
+        let mut config: alt_pg::Config = admin_dsn.parse().unwrap();
+        config.set_dbname(&database);
         let mut store = Store::initialize(
-            config.connect(NoTls).unwrap(),
+            config.connect().unwrap(),
             ByteStore::open(&root.path().join("bytes")).unwrap(),
             spec.clone(),
             SigningKey::from_bytes(&[key_seed; 32]),
@@ -505,9 +505,9 @@ impl Fixture {
         }
     }
     fn client(&self) -> Client {
-        let mut config: postgres::Config = self.admin_dsn.parse().unwrap();
-        config.dbname(&self.database);
-        config.connect(NoTls).unwrap()
+        let mut config: alt_pg::Config = self.admin_dsn.parse().unwrap();
+        config.set_dbname(&self.database);
+        config.connect().unwrap()
     }
     fn counts(&self) -> (i64, i64, i64) {
         let row=self.client().query_one("SELECT (SELECT count(*) FROM alt_refs),(SELECT count(*) FROM alt_audit),(SELECT count(*) FROM alt_outbox)",&[]).unwrap();
@@ -516,7 +516,7 @@ impl Fixture {
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
-        let mut client = Client::connect(&self.admin_dsn, NoTls).unwrap();
+        let mut client = Client::connect(&self.admin_dsn).unwrap();
         client
             .batch_execute(&format!("DROP DATABASE {} WITH (FORCE)", self.database))
             .unwrap();

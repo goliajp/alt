@@ -2,26 +2,28 @@
 
 use alt_json::{FromJson, ToJson, Value};
 use alt_json_serde::Serde;
-use postgres::types::private::BytesMut;
-use postgres::types::{FromSql, IsNull, ToSql, Type, accepts, to_sql_checked};
-
-type Failure = Box<dyn std::error::Error + Sync + Send>;
+use alt_pg::{FromSql, IsNull, Oid, ToSql, WRONG_TYPE, oid};
 
 /// A `json` or `jsonb` parameter that is already JSON text, sent as it is.
 #[derive(Debug)]
 pub(crate) struct JsonText<'a>(pub &'a [u8]);
 
+/// appends the header of a `json` or `jsonb` value's binary form
+fn start(ty: Oid, out: &mut Vec<u8>) -> Result<(), &'static str> {
+    match ty {
+        oid::JSONB => out.push(JSONB_VERSION),
+        oid::JSON => {}
+        _ => return Err(WRONG_TYPE),
+    }
+    Ok(())
+}
+
 impl ToSql for JsonText<'_> {
-    fn to_sql(&self, ty: &Type, out: &mut BytesMut) -> Result<IsNull, Failure> {
-        if *ty == Type::JSONB {
-            out.extend_from_slice(&[JSONB_VERSION]);
-        }
+    fn to_sql(&self, ty: Oid, out: &mut Vec<u8>) -> Result<IsNull, &'static str> {
+        start(ty, out)?;
         out.extend_from_slice(self.0);
         Ok(IsNull::No)
     }
-
-    accepts!(JSON, JSONB);
-    to_sql_checked!();
 }
 
 /// A `json` or `jsonb` parameter or column.
@@ -57,21 +59,20 @@ impl Jsonb {
 }
 
 impl ToSql for Jsonb {
-    fn to_sql(&self, ty: &Type, out: &mut BytesMut) -> Result<IsNull, Failure> {
-        if *ty == Type::JSONB {
-            out.extend_from_slice(&[JSONB_VERSION]);
-        }
-        out.extend_from_slice(&alt_json::to_vec(&self.0)?);
+    fn to_sql(&self, ty: Oid, out: &mut Vec<u8>) -> Result<IsNull, &'static str> {
+        start(ty, out)?;
+        alt_json::to_writer(&mut *out, &self.0).map_err(|_| "value cannot be written as JSON")?;
         Ok(IsNull::No)
     }
-
-    accepts!(JSON, JSONB);
-    to_sql_checked!();
 }
 
-impl<'a> FromSql<'a> for Jsonb {
-    fn from_sql(ty: &Type, raw: &'a [u8]) -> Result<Self, Failure> {
-        let text = if *ty == Type::JSONB {
+impl FromSql<'_> for Jsonb {
+    fn accepts(ty: Oid) -> bool {
+        matches!(ty, oid::JSON | oid::JSONB)
+    }
+
+    fn from_sql(ty: Oid, raw: &[u8]) -> Result<Self, String> {
+        let text = if ty == oid::JSONB {
             match raw.split_first() {
                 Some((&JSONB_VERSION, text)) => text,
                 _ => return Err("unsupported JSONB encoding version".into()),
@@ -79,8 +80,8 @@ impl<'a> FromSql<'a> for Jsonb {
         } else {
             raw
         };
-        Ok(Self(alt_json::parse(text)?))
+        alt_json::parse(text)
+            .map(Self)
+            .map_err(|error| error.to_string())
     }
-
-    accepts!(JSON, JSONB);
 }

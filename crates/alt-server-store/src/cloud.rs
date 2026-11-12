@@ -6,11 +6,11 @@ use crate::store::{instance, integer, now, token_digest, unsigned};
 use crate::{ByteStore, Credential, Error, InstanceSpec, Result, Store};
 use alt_crypto::ed25519::SigningKey;
 use alt_json_serde::Serde;
+use alt_pg::Client;
 use alt_remote_protocol::{ActorKind, Attribution, DeploymentMode, Limits};
 use golia_platform_contract::{
     AccountAuthorization, AltServiceAuthorization, Audience, Capability, Product,
 };
-use postgres::Client;
 
 /// Authenticated ciphertext, never the upstream bearer grant. No Debug output.
 pub struct CloudRefresh {
@@ -119,7 +119,7 @@ pub(crate) fn check_instance(tx: &mut Transaction<'_>, spec: &InstanceSpec) -> R
     )?;
     Ok(())
 }
-fn binding(tx: &mut Transaction<'_>) -> Result<postgres::Row> {
+fn binding(tx: &mut Transaction<'_>) -> Result<alt_pg::Row> {
     tx.query_opt("SELECT audience,runtime_key_digest,provision_digest,clock_high_water,authority_revision,service,service_denied_at FROM alt_cloud_binding WHERE singleton FOR UPDATE", &[])?
         .ok_or(Error::Precondition("Cloud platform binding required"))
 }
@@ -168,7 +168,7 @@ pub(crate) fn check_credential(
     tx: &mut Transaction<'_>,
     _spec: &InstanceSpec,
     credential: &Credential,
-    row: &postgres::Row,
+    row: &alt_pg::Row,
 ) -> Result<()> {
     let claims = claims_for(tx, &credential.digest)?;
     check_claims(tx, &claims)?;

@@ -41,7 +41,7 @@ pub use store::*;
 pub enum Error {
     Portable(alt_portable::Error),
     Io(std::io::Error),
-    Database(postgres::Error),
+    Database(alt_pg::Error),
     Protocol(alt_remote_protocol::Error),
     Task(alt_task_service::Error),
     Repository(alt_repository_service::Error),
@@ -110,8 +110,8 @@ impl From<std::io::Error> for Error {
     }
 }
 
-impl From<postgres::Error> for Error {
-    fn from(e: postgres::Error) -> Self {
+impl From<alt_pg::Error> for Error {
+    fn from(e: alt_pg::Error) -> Self {
         Self::Database(e)
     }
 }

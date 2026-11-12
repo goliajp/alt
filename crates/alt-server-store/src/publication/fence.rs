@@ -1,7 +1,7 @@
 //! The checks every transition of a leased request repeats, and its terminal step.
 use super::*;
 
-pub(crate) fn worker(tx: &mut Transaction<'_>, work: &PublicationWork) -> Result<postgres::Row> {
+pub(crate) fn worker(tx: &mut Transaction<'_>, work: &PublicationWork) -> Result<alt_pg::Row> {
     let row = request_row(tx, &work.key)?.ok_or(Error::Precondition("request not registered"))?;
     let time = now(tx)?;
     active(&row, time)?;
@@ -59,7 +59,7 @@ pub(crate) fn finish(
     tx: &mut Transaction<'_>,
     key: &RequestKey,
     state: &str,
-    result: &(dyn postgres::types::ToSql + Sync),
+    result: &(dyn alt_pg::ToSql + Sync),
     reservation: u64,
 ) -> Result<()> {
     let repository = &key.scope.repository_instance_id;

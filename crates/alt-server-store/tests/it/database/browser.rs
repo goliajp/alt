@@ -175,14 +175,14 @@ fn login_budget_is_committed_before_password_work_and_serializes_concurrent_atte
     let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
     let mut workers = Vec::new();
     for _ in 0..2 {
-        let mut config: postgres::Config = f.admin_dsn.parse().unwrap();
-        config.dbname(&f.database);
+        let mut config: alt_pg::Config = f.admin_dsn.parse().unwrap();
+        config.set_dbname(&f.database);
         let bytes = ByteStore::open(&f.root.path().join("bytes")).unwrap();
         let spec = f.spec.clone();
         let barrier = barrier.clone();
         workers.push(std::thread::spawn(move || {
             let mut store = Store::open(
-                config.connect(NoTls).unwrap(),
+                config.connect().unwrap(),
                 bytes,
                 spec,
                 SigningKey::from_bytes(&[7; 32]),

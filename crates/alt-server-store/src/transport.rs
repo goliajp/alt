@@ -386,7 +386,7 @@ fn review_request(
     spec: &InstanceSpec,
     credential: &Credential,
     key: &RequestKey,
-) -> Result<(postgres::Row, alt_repository_service::RepositorySnapshot)> {
+) -> Result<(alt_pg::Row, alt_repository_service::RepositorySnapshot)> {
     key.validate()?;
     let current = snapshot(tx, spec, &key.scope.repository_instance_id)?;
     crate::tasks::reviewer(tx, spec, credential, &current)?;

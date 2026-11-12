@@ -17,10 +17,10 @@ mod upload_selection;
 
 use alt_crypto::ed25519::SigningKey;
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
+use alt_pg::Client;
 use alt_remote_protocol::*;
 use alt_repository_service::{Grant, GraphLimits, RefSelector, verify_graph};
 use alt_server_store::{ByteStore, Credential, InstanceSpec, Store};
-use postgres::{Client, NoTls};
 use std::io::Cursor;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -99,7 +99,7 @@ impl Fixture {
             std::process::id(),
             NEXT.fetch_add(1, Ordering::SeqCst)
         );
-        let mut client = Client::connect(&admin_dsn, NoTls).unwrap();
+        let mut client = Client::connect(&admin_dsn).unwrap();
         client
             .batch_execute(&format!("CREATE DATABASE {database}"))
             .unwrap();
@@ -110,10 +110,10 @@ impl Fixture {
             deployment_mode: DeploymentMode::SelfHosted,
             runtime_generation: 1,
         };
-        let mut config: postgres::Config = admin_dsn.parse().unwrap();
-        config.dbname(&database);
+        let mut config: alt_pg::Config = admin_dsn.parse().unwrap();
+        config.set_dbname(&database);
         let mut store = Store::initialize(
-            config.connect(NoTls).unwrap(),
+            config.connect().unwrap(),
             ByteStore::open(&root.path().join("bytes")).unwrap(),
             spec.clone(),
             SigningKey::from_bytes(&signing_seed),
@@ -140,9 +140,9 @@ impl Fixture {
         }
     }
     fn client(&self) -> Client {
-        let mut config: postgres::Config = self.admin_dsn.parse().unwrap();
-        config.dbname(&self.database);
-        config.connect(NoTls).unwrap()
+        let mut config: alt_pg::Config = self.admin_dsn.parse().unwrap();
+        config.set_dbname(&self.database);
+        config.connect().unwrap()
     }
     fn reopen(&self) -> Store {
         Store::open(
@@ -161,7 +161,7 @@ impl Fixture {
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
-        let mut client = Client::connect(&self.admin_dsn, NoTls).unwrap();
+        let mut client = Client::connect(&self.admin_dsn).unwrap();
         client
             .batch_execute(&format!("DROP DATABASE {} WITH (FORCE)", self.database))
             .unwrap();

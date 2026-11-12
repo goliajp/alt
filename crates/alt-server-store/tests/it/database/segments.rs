@@ -739,13 +739,13 @@ fn segment_process_interruption_preserves_owned_files_and_atomic_locations() {
 }
 fn segment_crash_child(phase: &str) {
     let root = std::path::PathBuf::from(std::env::var("ALT_SEGMENT_DB_ROOT").unwrap());
-    let mut config: postgres::Config = std::env::var("ALT_SERVER_TEST_ADMIN_DSN")
+    let mut config: alt_pg::Config = std::env::var("ALT_SERVER_TEST_ADMIN_DSN")
         .unwrap()
         .parse()
         .unwrap();
     config
-        .dbname(&std::env::var("ALT_SEGMENT_DB_NAME").unwrap())
-        .application_name("alt-segment-fault-worker");
+        .set_dbname(&std::env::var("ALT_SEGMENT_DB_NAME").unwrap())
+        .set_application_name("alt-segment-fault-worker");
     let spec = InstanceSpec {
         installation_id: "installation".into(),
         workspace_id: "workspace".into(),
@@ -753,7 +753,7 @@ fn segment_crash_child(phase: &str) {
         runtime_generation: 1,
     };
     let mut store = Store::open(
-        config.connect(NoTls).unwrap(),
+        config.connect().unwrap(),
         ByteStore::open(&root.join("bytes")).unwrap(),
         spec,
         SigningKey::from_bytes(&[7; 32]),

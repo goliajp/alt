@@ -24,7 +24,7 @@ alt-crypto.workspace = true
 ed25519-dalek.workspace = true
 alt-json.workspace = true
 alt-json-serde.workspace = true
-postgres = "0.19.14"
+alt-pg.workspace = true
 
 [dev-dependencies]
 alt-json-testkit.workspace = true

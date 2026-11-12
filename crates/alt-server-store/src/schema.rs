@@ -1,7 +1,7 @@
 use crate::{ByteStore, Error, InstanceSpec, Result, Store};
 use alt_crypto::ed25519::SigningKey;
+use alt_pg::{Client, GenericClient};
 use alt_remote_protocol::Limits;
-use postgres::{Client, GenericClient};
 
 /// the whole current layout, for a database that is being created
 const BASELINE: &str = include_str!("schema.sql");
@@ -96,7 +96,7 @@ pub(crate) fn check_current(client: &mut impl GenericClient) -> Result<()> {
 /// Every recorded version is held to its checksum, the ones the baseline replaced
 /// included: a row that was changed or is missing is not the history this release
 /// continues.
-pub(crate) fn check_rows(rows: &[postgres::Row], expected: usize) -> Result<()> {
+pub(crate) fn check_rows(rows: &[alt_pg::Row], expected: usize) -> Result<()> {
     let checksums = checksums();
     if rows.len() != expected
         || rows.iter().enumerate().any(|(index, row)| {

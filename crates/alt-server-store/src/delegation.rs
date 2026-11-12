@@ -49,7 +49,7 @@ pub(crate) fn check(
     tx: &mut Transaction<'_>,
     spec: &InstanceSpec,
     credential: &Credential,
-    row: &postgres::Row,
+    row: &alt_pg::Row,
 ) -> Result<bool> {
     let Some(parent) = parent(tx, &credential.digest)? else {
         let attribution: Attribution = row.get::<_, Jsonb>("attribution").read()?;
@@ -114,7 +114,7 @@ fn human(
     tx: &mut Transaction<'_>,
     spec: &InstanceSpec,
     credential: &Credential,
-) -> Result<postgres::Row> {
+) -> Result<alt_pg::Row> {
     let row = credential_row(tx, spec, credential)?;
     let attribution: Attribution = row.get::<_, Jsonb>("attribution").read()?;
     if attribution.kind != ActorKind::Human {
@@ -122,7 +122,7 @@ fn human(
     }
     Ok(row)
 }
-fn info(row: &postgres::Row) -> Result<DelegationInfo> {
+fn info(row: &alt_pg::Row) -> Result<DelegationInfo> {
     Ok(DelegationInfo {
         credential_id: row.get("token_digest"),
         attribution: row.get::<_, Jsonb>("attribution").read()?,

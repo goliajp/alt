@@ -45,7 +45,7 @@ fn cloud_backup_restores_with_fresh_binding_and_rejects_old_credentials() {
     ]);
     source.ok(&["initialize"]);
     let mut store = Store::open(
-        Client::connect(&source.dsn, NoTls).unwrap(),
+        Client::connect(&source.dsn).unwrap(),
         ByteStore::open(&config.bytes_directory).unwrap(),
         config.instance.clone(),
         config.signing_key().unwrap(),
@@ -98,7 +98,7 @@ fn cloud_backup_restores_with_fresh_binding_and_rejects_old_credentials() {
     assert_eq!(result["old_credentials_revoked"], true);
     assert_eq!(target.ok(&["health"])["ready"], true);
     let mut restored = Store::open(
-        Client::connect(&target.dsn, NoTls).unwrap(),
+        Client::connect(&target.dsn).unwrap(),
         ByteStore::open(&restored_config.bytes_directory).unwrap(),
         restored_config.instance.clone(),
         restored_config.signing_key().unwrap(),
@@ -206,7 +206,7 @@ fn cloud_backup_restores_with_fresh_binding_and_rejects_old_credentials() {
         assert_eq!(outcome["instance"]["runtime_generation"], 20);
         assert_eq!(outcome["manifest_digest"], recovery.backup.manifest_digest);
     }
-    let mut db = Client::connect(&managed.dsn, NoTls).unwrap();
+    let mut db = Client::connect(&managed.dsn).unwrap();
     assert_eq!(
         db.query_one(
             "SELECT count(*) FROM alt_instance_audit WHERE action='instance.restore'",
@@ -231,7 +231,7 @@ fn cloud_backup_restores_with_fresh_binding_and_rejects_old_credentials() {
     managed.ok(&start_args);
     let cfg = Config::read(&state.join("config.json")).unwrap();
     let mut recovered = Store::open(
-        Client::connect(&managed.dsn, NoTls).unwrap(),
+        Client::connect(&managed.dsn).unwrap(),
         ByteStore::open(&cfg.bytes_directory).unwrap(),
         cfg.instance.clone(),
         cfg.signing_key().unwrap(),
@@ -298,7 +298,7 @@ pub(super) fn prepare(db: &OperatorDb) -> (Store, String, String) {
     ]);
     let config = Config::read(&db.config).unwrap();
     let mut store = Store::open(
-        Client::connect(&db.dsn, NoTls).unwrap(),
+        Client::connect(&db.dsn).unwrap(),
         ByteStore::open(&config.bytes_directory).unwrap(),
         config.instance.clone(),
         config.signing_key().unwrap(),
@@ -763,7 +763,7 @@ fn interrupted_backup_is_incomplete_and_interrupted_restore_cannot_serve_old_cre
     let (mut process, stopped) = interrupted_tool(&target, "pg_restore", true, &restore);
     // The SQL commit is real, but activation has not happened. New config and
     // old database generations deliberately disagree throughout this window.
-    let mut client = Client::connect(&target.dsn, NoTls).unwrap();
+    let mut client = Client::connect(&target.dsn).unwrap();
     assert_eq!(
         client
             .query_one("SELECT oid FROM alt_refs WHERE name='refs/heads/main'", &[])

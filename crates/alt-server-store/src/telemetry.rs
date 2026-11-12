@@ -54,7 +54,7 @@ pub fn committed(receipt: &alt_remote_protocol::Receipt) {
         );
     }
 }
-pub(crate) fn authenticated(row: &postgres::Row) {
+pub(crate) fn authenticated(row: &alt_pg::Row) {
     authenticated_as(&row.get::<_, Jsonb>("attribution").0);
 }
 pub(crate) fn authenticated_as(attribution: &alt_json::Value) {
