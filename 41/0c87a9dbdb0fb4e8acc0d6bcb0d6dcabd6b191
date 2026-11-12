@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: perf
+summary: copy tar member data in pipe-sized buffers
+author-type: human
+author: doracawl
+touched: crates/alt-tar/src/lib.rs
+touched: crates/alt-tar/tests/it/roundtrip.rs
