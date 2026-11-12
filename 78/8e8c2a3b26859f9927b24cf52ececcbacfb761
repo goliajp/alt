@@ -1,0 +1,17 @@
+schema: alt-meta/1
+type: refactor
+summary: parse alt and alt-server arguments with alt-args
+author-type: human
+author: doracawl
+touched: Cargo.lock
+touched: Cargo.toml
+touched: crates/alt-cli/Cargo.toml
+touched: crates/alt-cli/src/cli.rs
+touched: crates/alt-cli/src/log_cmd.rs
+touched: crates/alt-cli/src/machine.rs
+touched: crates/alt-cli/src/native/bisect.rs
+touched: crates/alt-cli/tests/fixtures/args/bindings.txt
+touched: crates/alt-cli/tests/it/argument_bindings.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-server/Cargo.toml
+touched: crates/alt-server/src/main.rs
