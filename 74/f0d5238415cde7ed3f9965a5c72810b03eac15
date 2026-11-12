@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: feat
+summary: add hmac-sha256 and pbkdf2 to alt-hash
+author-type: human
+author: doracawl
+touched: crates/alt-hash/src/hmac.rs
+touched: crates/alt-hash/src/lib.rs
