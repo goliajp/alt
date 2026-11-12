@@ -1,0 +1,17 @@
+schema: alt-meta/1
+type: refactor
+summary: replace the url crate with alt-url in alt-browser-auth, alt-wire-http and alt-server
+author-type: human
+author: doracawl
+touched: Cargo.lock
+touched: Cargo.toml
+touched: crates/alt-browser-auth/Cargo.toml
+touched: crates/alt-browser-auth/src/lib.rs
+touched: crates/alt-server/Cargo.toml
+touched: crates/alt-server/src/http/device.rs
+touched: crates/alt-server/src/http/web/cloud_login.rs
+touched: crates/alt-server/src/web_route.rs
+touched: crates/alt-server/tests/it/database/cloud.rs
+touched: crates/alt-wire-http/Cargo.toml
+touched: crates/alt-wire-http/src/device.rs
+touched: crates/alt-wire-http/src/native.rs
