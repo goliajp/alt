@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: give each cli remote fixture its own database
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/task_remote.rs
