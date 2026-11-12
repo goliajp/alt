@@ -14,7 +14,7 @@ use crate::{
 };
 use alt_pack_segment::{Segment, SegmentSet};
 use alt_remote_protocol::DeploymentMode;
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{collections::HashSet, path::PathBuf, sync::Arc, time::Duration};
 
 /// fewest segments a merge is worth
 const RUN: usize = 8;
@@ -189,10 +189,12 @@ impl Store {
     /// Deletes the segments of `repository` that were retired at least `grace_ms` ago,
     /// and files in its directory that no row knows. Returns how many files went.
     pub fn sweep_packs(&mut self, repository: &str, grace_ms: u64) -> Result<usize> {
-        let (expired, known) = match self.segments_unless_expired(repository, grace_ms)? {
-            Some(known) => (Vec::new(), known),
-            None => self.expire_segments(repository, grace_ms)?,
-        };
+        if let Some(known) = self.segments_unless_expired(repository, grace_ms)?
+            && self.unknown_files(repository, &known)?.is_empty()
+        {
+            return Ok(0);
+        }
+        let (expired, known) = self.expire_segments(repository, grace_ms)?;
         let mut removed = 0;
         for id in &expired {
             let path = self.pack_path(repository, id)?;
@@ -201,32 +203,44 @@ impl Store {
                 removed += 1;
             }
         }
-        // a crash between writing a file and committing its row leaves the file
-        for entry in std::fs::read_dir(self.pack_directory(repository)?)? {
-            let entry = entry?;
-            let path = entry.path();
-            let stem = path.file_stem().and_then(|stem| stem.to_str());
-            let unknown = stem
-                .is_some_and(|stem| !known.contains(stem) && !expired.iter().any(|id| id == stem));
-            let old = entry
-                .metadata()?
-                .modified()?
-                .elapsed()
-                .is_ok_and(|age| age >= UNKNOWN_FILE_AGE);
-            if unknown && old && std::fs::remove_file(&path).is_ok() {
+        for path in self.unknown_files(repository, &known)? {
+            if std::fs::remove_file(&path).is_ok() {
                 removed += 1;
             }
         }
         Ok(removed)
     }
 
+    /// The files in the directory of `repository` that no row in `known` names and
+    /// that are too old to belong to a transaction still writing its row: a crash
+    /// between writing a file and committing its row leaves the file.
+    fn unknown_files(&self, repository: &str, known: &HashSet<String>) -> Result<Vec<PathBuf>> {
+        let mut unknown = Vec::new();
+        for entry in std::fs::read_dir(self.pack_directory(repository)?)? {
+            let entry = entry?;
+            let path = entry.path();
+            let named = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .is_some_and(|stem| known.contains(stem));
+            let old = entry
+                .metadata()?
+                .modified()?
+                .elapsed()
+                .is_ok_and(|age| age >= UNKNOWN_FILE_AGE);
+            if !named && old {
+                unknown.push(path);
+            }
+        }
+        Ok(unknown)
+    }
+
     /// The segments of `repository` that have a row, read without a lock; None when
     /// the time of a retired one has run out. This is every sweep but a few, and it
     /// follows every publication: a row lock here would give the transaction
     /// something to flush and hold back the next push to the repository meanwhile.
-    /// A row this read does not see yet belongs to a file younger than
-    /// `UNKNOWN_FILE_AGE`: publications and merges write the file right before the
-    /// transaction that commits its row.
+    /// Nothing is deleted on the strength of this read: a file it does not know may
+    /// have a row that is not committed yet.
     fn segments_unless_expired(
         &mut self,
         repository: &str,

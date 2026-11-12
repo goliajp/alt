@@ -25,7 +25,7 @@ fn files(f: &Fixture) -> Vec<PathBuf> {
 
 #[test]
 #[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
-fn a_sweep_with_nothing_expired_takes_no_row_lock_and_still_removes_stale_files() {
+fn a_sweep_takes_row_locks_only_when_it_has_something_to_delete() {
     let mut f = Fixture::new();
     Payload::new("first", None).publish_new(&mut f.store, &f.credential);
     let live = files(&f);
@@ -39,9 +39,7 @@ fn a_sweep_with_nothing_expired_takes_no_row_lock_and_still_removes_stale_files(
             &[&"a".repeat(32)],
         )
         .unwrap();
-    // files without a row: one a crash left long ago, one a publication may be writing
-    let stale = f.store.pack_path("repository", &"b".repeat(32)).unwrap();
-    aged(&stale, Duration::from_secs(7200));
+    // a file without a row that a publication may be writing
     let fresh = f.store.pack_path("repository", &"c".repeat(32)).unwrap();
     aged(&fresh, Duration::ZERO);
 
@@ -64,19 +62,39 @@ fn a_sweep_with_nothing_expired_takes_no_row_lock_and_still_removes_stale_files(
              SELECT 1 FROM alt_repositories WHERE id='repository' FOR UPDATE",
         )
         .unwrap();
+    let mut kept = live.clone();
+    kept.extend([retired.clone(), fresh.clone()]);
+    kept.sort();
+    assert_eq!(
+        store
+            .sweep_packs("repository", PACK_RETIRED_GRACE_MS)
+            .unwrap(),
+        0
+    );
+    assert_eq!(files(&f), kept);
+
+    // a file a crash left long ago goes under the locks: its row could be uncommitted
+    let stale = f.store.pack_path("repository", &"b".repeat(32)).unwrap();
+    aged(&stale, Duration::from_secs(7200));
+    assert!(
+        store
+            .sweep_packs("repository", PACK_RETIRED_GRACE_MS)
+            .is_err()
+    );
+    assert!(stale.exists());
+    holder.batch_execute("ROLLBACK").unwrap();
     assert_eq!(
         store
             .sweep_packs("repository", PACK_RETIRED_GRACE_MS)
             .unwrap(),
         1
     );
-    assert!(!stale.exists());
-    let mut kept = live.clone();
-    kept.extend([retired.clone(), fresh.clone()]);
-    kept.sort();
     assert_eq!(files(&f), kept);
 
-    // once its time is up the retired segment goes, under the locks
+    // once its time is up the retired segment goes, under the locks too
+    holder
+        .batch_execute("BEGIN; SELECT 1 FROM alt_repositories WHERE id='repository' FOR UPDATE")
+        .unwrap();
     assert!(store.sweep_packs("repository", 0).is_err());
     assert_eq!(files(&f), kept);
     holder.batch_execute("ROLLBACK").unwrap();
