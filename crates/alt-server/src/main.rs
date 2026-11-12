@@ -1,7 +1,7 @@
+use alt_args::{Parser, Subcommand, ValueEnum};
 use alt_json::{Value, json};
 use alt_remote_protocol::{ActorKind, Attribution};
 use alt_server::operator::{self, Config, Error, Result};
-use clap::{Parser, Subcommand, ValueEnum};
 mod grants;
 use grants::Grants;
 use std::{
@@ -61,7 +61,6 @@ enum Action {
     },
     /// Generate and fsync a secret before registering it with the database
     Secret {
-        #[arg(value_enum)]
         kind: SecretKind,
         #[arg(long)]
         output: PathBuf,
@@ -161,7 +160,7 @@ enum Action {
     ReviewGrant {
         repository: String,
         actor: String,
-        #[arg(long,action=clap::ArgAction::Set)]
+        #[arg(long, action = set)]
         allow: bool,
     },
     CollectorPolicy {

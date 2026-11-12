@@ -1,0 +1,446 @@
+alt init
+{"subcommand":{"arguments":{"subcommand":null,"values":{}},"name":"init"},"values":{}}
+alt init dir
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Init":["646972"],"dir":["646972"]}},"name":"init"},"values":{}}
+alt add a b --json
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Add":["7061746873","6a736f6e"],"json":["74727565"],"paths":["61","62"]}},"name":"add"},"values":{}}
+alt add .
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Add":["7061746873"],"json":["66616c7365"],"paths":["2e"]}},"name":"add"},"values":{}}
+alt commit -m msg
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Commit":["6d657373616765"],"allow_empty":["66616c7365"],"amend":["66616c7365"],"json":["66616c7365"],"message":["6d7367"],"no_edit":["66616c7365"],"no_verify":["66616c7365"],"validate":["66616c7365"]}},"name":"commit"},"values":{}}
+alt commit -mmsg --allow-empty -n
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Commit":["6d657373616765","616c6c6f775f656d707479","6e6f5f766572696679"],"allow_empty":["74727565"],"amend":["66616c7365"],"json":["66616c7365"],"message":["6d7367"],"no_edit":["66616c7365"],"no_verify":["74727565"],"validate":["66616c7365"]}},"name":"commit"},"values":{}}
+alt commit --amend --no-edit --json
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Commit":["616d656e64","6e6f5f65646974","6a736f6e"],"allow_empty":["66616c7365"],"amend":["74727565"],"json":["74727565"],"no_edit":["74727565"],"no_verify":["66616c7365"],"validate":["66616c7365"]}},"name":"commit"},"values":{}}
+alt commit --validate
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Commit":["76616c6964617465"],"allow_empty":["66616c7365"],"amend":["66616c7365"],"json":["66616c7365"],"no_edit":["66616c7365"],"no_verify":["66616c7365"],"validate":["74727565"]}},"name":"commit"},"values":{}}
+alt commit -m x --decision d1 --decision d2 --meta k=v --meta a=b=c
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Commit":["6d657373616765","6465636973696f6e73","6465636973696f6e73","6578747261","6578747261"],"allow_empty":["66616c7365"],"amend":["66616c7365"],"decisions":["6431","6432"],"extra":["6b3d76","613d623d63"],"json":["66616c7365"],"message":["78"],"no_edit":["66616c7365"],"no_verify":["66616c7365"],"validate":["66616c7365"]}},"name":"commit"},"values":{}}
+alt status
+{"subcommand":{"arguments":{"subcommand":null,"values":{"json":["66616c7365"]}},"name":"status"},"values":{}}
+alt status --json
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Status":["6a736f6e"],"json":["74727565"]}},"name":"status"},"values":{}}
+alt branch
+{"subcommand":{"arguments":{"subcommand":null,"values":{"json":["66616c7365"],"remotes":["66616c7365"]}},"name":"branch"},"values":{}}
+alt branch new
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Branch":["6e616d65"],"json":["66616c7365"],"name":["6e6577"],"remotes":["66616c7365"]}},"name":"branch"},"values":{}}
+alt branch -d old -r
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Branch":["64656c657465","72656d6f746573"],"delete":["6f6c64"],"json":["66616c7365"],"remotes":["74727565"]}},"name":"branch"},"values":{}}
+alt branch -rd old
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Branch":["72656d6f746573","64656c657465"],"delete":["6f6c64"],"json":["66616c7365"],"remotes":["74727565"]}},"name":"branch"},"values":{}}
+alt switch -c topic --json
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Switch":["637265617465","6e616d65","6a736f6e"],"create":["74727565"],"json":["74727565"],"name":["746f706963"]}},"name":"switch"},"values":{}}
+alt show
+{"subcommand":{"arguments":{"subcommand":null,"values":{"json":["66616c7365"]}},"name":"show"},"values":{}}
+alt show HEAD~1 --json
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Show":["726576","6a736f6e"],"json":["74727565"],"rev":["484541447e31"]}},"name":"show"},"values":{}}
+alt blame f.txt HEAD -M
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Blame":["70617468","726576","666f6c6c6f77"],"follow":["74727565"],"path":["662e747874"],"rev":["48454144"]}},"name":"blame"},"values":{}}
+alt blame f.txt --follow
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Blame":["70617468","666f6c6c6f77"],"follow":["74727565"],"path":["662e747874"]}},"name":"blame"},"values":{}}
+alt meta show
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"json":["66616c7365"],"rev":["48454144"]}},"name":"show"},"values":{}},"name":"meta"},"values":{}}
+alt meta show abc --json
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Show":["726576","6a736f6e"],"json":["74727565"],"rev":["616263"]}},"name":"show"},"values":{}},"name":"meta"},"values":{}}
+alt meta set -m m --decision x --meta k=v
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Set":["6d657373616765","6465636973696f6e73","6578747261"],"decisions":["78"],"extra":["6b3d76"],"message":["6d"],"rev":["48454144"]}},"name":"set"},"values":{}},"name":"meta"},"values":{}}
+alt lfs fetch
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"remote":["6f726967696e"]}},"name":"fetch"},"values":{}},"name":"lfs"},"values":{}}
+alt lfs fetch up
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Fetch":["72656d6f7465"],"remote":["7570"]}},"name":"fetch"},"values":{}},"name":"lfs"},"values":{}}
+alt lfs import /tmp/g
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Import":["6769745f646972"],"git_dir":["2f746d702f67"]}},"name":"import"},"values":{}},"name":"lfs"},"values":{}}
+alt lfs ls
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{}},"name":"ls"},"values":{}},"name":"lfs"},"values":{}}
+alt bisect start
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{}},"name":"start"},"values":{}},"name":"bisect"},"values":{}}
+alt bisect start bad good1 good2
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Start":["626164","676f6f64"],"bad":["626164"],"good":["676f6f6431","676f6f6432"]}},"name":"start"},"values":{}},"name":"bisect"},"values":{}}
+alt bisect bad
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{}},"name":"bad"},"values":{}},"name":"bisect"},"values":{}}
+alt bisect good a b
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Good":["72657673"],"revs":["61","62"]}},"name":"good"},"values":{}},"name":"bisect"},"values":{}}
+alt bisect skip
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{}},"name":"skip"},"values":{}},"name":"bisect"},"values":{}}
+alt bisect reset
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{}},"name":"reset"},"values":{}},"name":"bisect"},"values":{}}
+alt bisect run sh -c exit --flag -x
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Run":["636d64"],"cmd":["7368","2d63","65786974","2d2d666c6167","2d78"]}},"name":"run"},"values":{}},"name":"bisect"},"values":{}}
+alt bisect run -- make test
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Run":["636d64"],"cmd":["6d616b65","74657374"]}},"name":"run"},"values":{}},"name":"bisect"},"values":{}}
+alt rebase main -i
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Rebase":["757073747265616d","696e746572616374697665"],"abort":["66616c7365"],"cont":["66616c7365"],"interactive":["74727565"],"json":["66616c7365"],"skip":["66616c7365"],"upstream":["6d61696e"]}},"name":"rebase"},"values":{}}
+alt rebase --continue --json
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Rebase":["636f6e74","6a736f6e"],"abort":["66616c7365"],"cont":["74727565"],"interactive":["66616c7365"],"json":["74727565"],"skip":["66616c7365"]}},"name":"rebase"},"values":{}}
+alt rebase --skip
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Rebase":["736b6970"],"abort":["66616c7365"],"cont":["66616c7365"],"interactive":["66616c7365"],"json":["66616c7365"],"skip":["74727565"]}},"name":"rebase"},"values":{}}
+alt rebase --abort
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Rebase":["61626f7274"],"abort":["74727565"],"cont":["66616c7365"],"interactive":["66616c7365"],"json":["66616c7365"],"skip":["66616c7365"]}},"name":"rebase"},"values":{}}
+alt revert a b -m 1 --no-edit
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Revert":["72657673","6d61696e6c696e65","6e6f5f65646974"],"abort":["66616c7365"],"cont":["66616c7365"],"json":["66616c7365"],"mainline":["31"],"no_edit":["74727565"],"revs":["61","62"]}},"name":"revert"},"values":{}}
+alt revert --mainline=2 a
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Revert":["6d61696e6c696e65","72657673"],"abort":["66616c7365"],"cont":["66616c7365"],"json":["66616c7365"],"mainline":["32"],"no_edit":["66616c7365"],"revs":["61"]}},"name":"revert"},"values":{}}
+alt revert --continue
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Revert":["636f6e74"],"abort":["66616c7365"],"cont":["74727565"],"json":["66616c7365"],"no_edit":["66616c7365"]}},"name":"revert"},"values":{}}
+alt revert --abort --json
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Revert":["61626f7274","6a736f6e"],"abort":["74727565"],"cont":["66616c7365"],"json":["74727565"],"no_edit":["66616c7365"]}},"name":"revert"},"values":{}}
+alt cherry-pick abc --json
+{"subcommand":{"arguments":{"subcommand":null,"values":{"CherryPick":["726576","6a736f6e"],"json":["74727565"],"rev":["616263"]}},"name":"cherry-pick"},"values":{}}
+alt config user.name
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Config":["6b6579"],"key":["757365722e6e616d65"],"list":["66616c7365"]}},"name":"config"},"values":{}}
+alt config user.name Alice
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Config":["6b6579","76616c7565"],"key":["757365722e6e616d65"],"list":["66616c7365"],"value":["416c696365"]}},"name":"config"},"values":{}}
+alt config --list
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Config":["6c697374"],"list":["74727565"]}},"name":"config"},"values":{}}
+alt config --unset user.name
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Config":["756e736574"],"list":["66616c7365"],"unset":["757365722e6e616d65"]}},"name":"config"},"values":{}}
+alt tag
+{"subcommand":{"arguments":{"subcommand":null,"values":{"annotate":["66616c7365"],"json":["66616c7365"]}},"name":"tag"},"values":{}}
+alt tag v1 HEAD -a -m msg
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Tag":["6e616d65","726576","616e6e6f74617465","6d657373616765"],"annotate":["74727565"],"json":["66616c7365"],"message":["6d7367"],"name":["7631"],"rev":["48454144"]}},"name":"tag"},"values":{}}
+alt tag -d v1
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Tag":["64656c657465"],"annotate":["66616c7365"],"delete":["7631"],"json":["66616c7365"]}},"name":"tag"},"values":{}}
+alt tag --delete=v1 --json
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Tag":["64656c657465","6a736f6e"],"annotate":["66616c7365"],"delete":["7631"],"json":["74727565"]}},"name":"tag"},"values":{}}
+alt diff
+{"subcommand":{"arguments":{"subcommand":null,"values":{"cached":["66616c7365"],"json":["66616c7365"],"semantic":["66616c7365"]}},"name":"diff"},"values":{}}
+alt diff --cached --json --semantic
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Diff":["636163686564","6a736f6e","73656d616e746963"],"cached":["74727565"],"json":["74727565"],"semantic":["74727565"]}},"name":"diff"},"values":{}}
+alt diff --staged
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Diff":["636163686564"],"cached":["74727565"],"json":["66616c7365"],"semantic":["66616c7365"]}},"name":"diff"},"values":{}}
+alt merge topic --json
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Merge":["6272616e6368","6a736f6e"],"branch":["746f706963"],"json":["74727565"]}},"name":"merge"},"values":{}}
+alt flow init
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"json":["66616c7365"]}},"name":"init"},"values":{"json":["66616c7365"]}},"name":"flow"},"values":{"json":["66616c7365"]}}
+alt flow --json init
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"json":["74727565"]}},"name":"init"},"values":{"Flow":["6a736f6e"],"json":["74727565"]}},"name":"flow"},"values":{"json":["74727565"]}}
+alt flow feature start x
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Start":["6e616d65"],"json":["66616c7365"],"name":["78"]}},"name":"start"},"values":{"json":["66616c7365"]}},"name":"feature"},"values":{"json":["66616c7365"]}},"name":"flow"},"values":{"json":["66616c7365"]}}
+alt flow feature finish x --json
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Finish":["6e616d65"],"json":["74727565"],"name":["78"]}},"name":"finish"},"values":{"json":["74727565"]}},"name":"feature"},"values":{"json":["74727565"]}},"name":"flow"},"values":{"json":["74727565"]}}
+alt flow release start 1.0
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Start":["6e616d65"],"json":["66616c7365"],"name":["312e30"]}},"name":"start"},"values":{"json":["66616c7365"]}},"name":"release"},"values":{"json":["66616c7365"]}},"name":"flow"},"values":{"json":["66616c7365"]}}
+alt flow hotfix finish h --json
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Finish":["6e616d65"],"json":["74727565"],"name":["68"]}},"name":"finish"},"values":{"json":["74727565"]}},"name":"hotfix"},"values":{"json":["74727565"]}},"name":"flow"},"values":{"json":["74727565"]}}
+alt undo
+{"subcommand":{"arguments":{"subcommand":null,"values":{"json":["66616c7365"]}},"name":"undo"},"values":{}}
+alt undo --json
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Undo":["6a736f6e"],"json":["74727565"]}},"name":"undo"},"values":{}}
+alt operation pending
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"json":["66616c7365"]}},"name":"pending"},"values":{"json":["66616c7365"]}},"name":"operation"},"values":{"json":["66616c7365"]}}
+alt operation status abc --json
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Status":["6964"],"id":["616263"],"json":["74727565"]}},"name":"status"},"values":{"json":["74727565"]}},"name":"operation"},"values":{"json":["74727565"]}}
+alt operation --json recover abc
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Recover":["6964"],"id":["616263"],"json":["74727565"]}},"name":"recover"},"values":{"Operation":["6a736f6e"],"json":["74727565"]}},"name":"operation"},"values":{"json":["74727565"]}}
+alt workspace add task /tmp/task
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Add":["6e616d65","70617468"],"json":["66616c7365"],"name":["7461736b"],"path":["2f746d702f7461736b"]}},"name":"add"},"values":{"json":["66616c7365"]}},"name":"workspace"},"values":{"json":["66616c7365"]}}
+alt workspace --json add task /tmp/task
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Add":["6e616d65","70617468"],"json":["74727565"],"name":["7461736b"],"path":["2f746d702f7461736b"]}},"name":"add"},"values":{"Workspace":["6a736f6e"],"json":["74727565"]}},"name":"workspace"},"values":{"json":["74727565"]}}
+alt workspace add task /tmp/task --json
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Add":["6e616d65","70617468"],"json":["74727565"],"name":["7461736b"],"path":["2f746d702f7461736b"]}},"name":"add"},"values":{"json":["74727565"]}},"name":"workspace"},"values":{"json":["74727565"]}}
+alt workspace --json add task /tmp/task --json
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Add":["6e616d65","70617468"],"json":["74727565"],"name":["7461736b"],"path":["2f746d702f7461736b"]}},"name":"add"},"values":{"Workspace":["6a736f6e"],"json":["74727565"]}},"name":"workspace"},"values":{"json":["74727565"]}}
+alt workspace add task /tmp/task br
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Add":["6e616d65","70617468","6272616e6368"],"branch":["6272"],"json":["66616c7365"],"name":["7461736b"],"path":["2f746d702f7461736b"]}},"name":"add"},"values":{"json":["66616c7365"]}},"name":"workspace"},"values":{"json":["66616c7365"]}}
+alt workspace list
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"json":["66616c7365"]}},"name":"list"},"values":{"json":["66616c7365"]}},"name":"workspace"},"values":{"json":["66616c7365"]}}
+alt workspace remove task
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Remove":["6e616d65"],"json":["66616c7365"],"name":["7461736b"]}},"name":"remove"},"values":{"json":["66616c7365"]}},"name":"workspace"},"values":{"json":["66616c7365"]}}
+alt remote add origin https://example.com/r.git
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Add":["6e616d65","75726c"],"json":["66616c7365"],"name":["6f726967696e"],"url":["68747470733a2f2f6578616d706c652e636f6d2f722e676974"]}},"name":"add"},"values":{"json":["66616c7365"]}},"name":"remote"},"values":{"json":["66616c7365"]}}
+alt remote list --json
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"json":["74727565"]}},"name":"list"},"values":{"json":["74727565"]}},"name":"remote"},"values":{"json":["74727565"]}}
+alt remote remove origin
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Remove":["6e616d65"],"json":["66616c7365"],"name":["6f726967696e"]}},"name":"remove"},"values":{"json":["66616c7365"]}},"name":"remote"},"values":{"json":["66616c7365"]}}
+alt clone https://example.com/r.git
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Clone":["75726c"],"json":["66616c7365"],"url":["68747470733a2f2f6578616d706c652e636f6d2f722e676974"]}},"name":"clone"},"values":{}}
+alt clone https://example.com/r.git dir --json
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Clone":["75726c","646972","6a736f6e"],"dir":["646972"],"json":["74727565"],"url":["68747470733a2f2f6578616d706c652e636f6d2f722e676974"]}},"name":"clone"},"values":{}}
+alt fetch
+{"subcommand":{"arguments":{"subcommand":null,"values":{"json":["66616c7365"],"remote":["6f726967696e"]}},"name":"fetch"},"values":{}}
+alt fetch up refs/heads/a refs/heads/b --json
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Fetch":["72656d6f7465","7265667370656373","6a736f6e"],"json":["74727565"],"refspecs":["726566732f68656164732f61","726566732f68656164732f62"],"remote":["7570"]}},"name":"fetch"},"values":{}}
+alt push
+{"subcommand":{"arguments":{"subcommand":null,"values":{"force":["66616c7365"],"json":["66616c7365"],"remote":["6f726967696e"]}},"name":"push"},"values":{}}
+alt push origin main -f
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Push":["72656d6f7465","7265667370656373","666f726365"],"force":["74727565"],"json":["66616c7365"],"refspecs":["6d61696e"],"remote":["6f726967696e"]}},"name":"push"},"values":{}}
+alt push --force --json
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Push":["666f726365","6a736f6e"],"force":["74727565"],"json":["74727565"],"remote":["6f726967696e"]}},"name":"push"},"values":{}}
+alt identity init
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"json":["66616c7365"]}},"name":"init"},"values":{"json":["66616c7365"]}},"name":"identity"},"values":{"json":["66616c7365"]}}
+alt identity init alice --json
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Init":["7072696e636970616c"],"json":["74727565"],"principal":["616c696365"]}},"name":"init"},"values":{"json":["74727565"]}},"name":"identity"},"values":{"json":["74727565"]}}
+alt identity list
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"json":["66616c7365"]}},"name":"list"},"values":{"json":["66616c7365"]}},"name":"identity"},"values":{"json":["66616c7365"]}}
+alt identity trust bob bob.pub
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Trust":["7072696e636970616c","7075625f66696c65"],"json":["66616c7365"],"principal":["626f62"],"pub_file":["626f622e707562"]}},"name":"trust"},"values":{"json":["66616c7365"]}},"name":"identity"},"values":{"json":["66616c7365"]}}
+alt op-log
+{"subcommand":{"arguments":{"subcommand":null,"values":{"json":["66616c7365"],"verify":["66616c7365"]}},"name":"op-log"},"values":{}}
+alt op-log -n 5 --json --verify
+{"subcommand":{"arguments":{"subcommand":null,"values":{"OpLog":["6d61785f636f756e74","6a736f6e","766572696679"],"json":["74727565"],"max_count":["35"],"verify":["74727565"]}},"name":"op-log"},"values":{}}
+alt ci validate
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"json":["66616c7365"]}},"name":"validate"},"values":{"json":["66616c7365"]}},"name":"ci"},"values":{"json":["66616c7365"]}}
+alt ci validate a.toml b.toml --json
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Validate":["7061746873"],"json":["74727565"],"paths":["612e746f6d6c","622e746f6d6c"]}},"name":"validate"},"values":{"json":["74727565"]}},"name":"ci"},"values":{"json":["74727565"]}}
+alt verify
+{"subcommand":{"arguments":{"subcommand":null,"values":{"json":["66616c7365"]}},"name":"verify"},"values":{}}
+alt verify abc def -n 3 --json
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Verify":["636f6d6d697473","6d61785f636f756e74","6a736f6e"],"commits":["616263","646566"],"json":["74727565"],"max_count":["33"]}},"name":"verify"},"values":{}}
+alt verify --max-count 9
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Verify":["6d61785f636f756e74"],"json":["66616c7365"],"max_count":["39"]}},"name":"verify"},"values":{}}
+alt cat-file -t abc
+{"subcommand":{"arguments":{"subcommand":null,"values":{"CatFileArgs":["73686f775f74797065","6f626a656374"],"object":["616263"],"op":["73686f775f74797065"],"pretty":["66616c7365"],"show_size":["66616c7365"],"show_type":["74727565"]}},"name":"cat-file"},"values":{}}
+alt cat-file -s abc
+{"subcommand":{"arguments":{"subcommand":null,"values":{"CatFileArgs":["73686f775f73697a65","6f626a656374"],"object":["616263"],"op":["73686f775f73697a65"],"pretty":["66616c7365"],"show_size":["74727565"],"show_type":["66616c7365"]}},"name":"cat-file"},"values":{}}
+alt cat-file -p abc
+{"subcommand":{"arguments":{"subcommand":null,"values":{"CatFileArgs":["707265747479","6f626a656374"],"object":["616263"],"op":["707265747479"],"pretty":["74727565"],"show_size":["66616c7365"],"show_type":["66616c7365"]}},"name":"cat-file"},"values":{}}
+alt cat-file abc
+{"subcommand":{"arguments":{"subcommand":null,"values":{"CatFileArgs":["6f626a656374"],"object":["616263"],"pretty":["66616c7365"],"show_size":["66616c7365"],"show_type":["66616c7365"]}},"name":"cat-file"},"values":{}}
+alt rev-parse HEAD
+{"subcommand":{"arguments":{"subcommand":null,"values":{"RevParse":["726576"],"rev":["48454144"]}},"name":"rev-parse"},"values":{}}
+alt log
+{"subcommand":{"arguments":{"subcommand":null,"values":{"json":["66616c7365"],"patch":["66616c7365"],"pretty":["6f6e656c696e65"],"rev":["48454144"]}},"name":"log"},"values":{}}
+alt log -n 3 --json -p main
+{"subcommand":{"arguments":{"subcommand":null,"values":{"LogArgs":["6d61785f636f756e74","6a736f6e","7061746368","726576"],"json":["74727565"],"max_count":["33"],"patch":["74727565"],"pretty":["6f6e656c696e65"],"rev":["6d61696e"]}},"name":"log"},"values":{}}
+alt log --pretty raw --patch
+{"subcommand":{"arguments":{"subcommand":null,"values":{"LogArgs":["707265747479","7061746368"],"json":["66616c7365"],"patch":["74727565"],"pretty":["726177"],"rev":["48454144"]}},"name":"log"},"values":{}}
+alt log --pretty=raw -n3
+{"subcommand":{"arguments":{"subcommand":null,"values":{"LogArgs":["707265747479","6d61785f636f756e74"],"json":["66616c7365"],"max_count":["33"],"patch":["66616c7365"],"pretty":["726177"],"rev":["48454144"]}},"name":"log"},"values":{}}
+alt log -pn3
+{"subcommand":{"arguments":{"subcommand":null,"values":{"LogArgs":["7061746368","6d61785f636f756e74"],"json":["66616c7365"],"max_count":["33"],"patch":["74727565"],"pretty":["6f6e656c696e65"],"rev":["48454144"]}},"name":"log"},"values":{}}
+alt intake src dst
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Intake":["736f75726365","746172676574"],"git":["2f7573722f62696e2f676974"],"json":["66616c7365"],"source":["737263"],"target":["647374"]}},"name":"intake"},"values":{"json":["66616c7365"]}}
+alt intake src dst --git /opt/git --json
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Intake":["736f75726365","746172676574","676974","6a736f6e"],"git":["2f6f70742f676974"],"json":["74727565"],"source":["737263"],"target":["647374"]}},"name":"intake"},"values":{"json":["74727565"]}}
+alt import dst
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Import":["746172676574"],"target":["647374"]}},"name":"import"},"values":{}}
+alt export dst
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Export":["746172676574"],"target":["647374"]}},"name":"export"},"values":{}}
+alt --workspace w status
+{"subcommand":{"arguments":{"subcommand":null,"values":{"json":["66616c7365"]}},"name":"status"},"values":{"Cli":["776f726b7370616365"]}}
+alt status --workspace w
+{"subcommand":{"arguments":{"subcommand":null,"values":{"json":["66616c7365"]}},"name":"status"},"values":{}}
+alt --workspace a status --workspace b
+{"subcommand":{"arguments":{"subcommand":null,"values":{"json":["66616c7365"]}},"name":"status"},"values":{"Cli":["776f726b7370616365"]}}
+alt --request-id 00112233445566778899aabbccddeeff add .
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Add":["7061746873"],"json":["66616c7365"],"paths":["2e"]}},"name":"add"},"values":{"Cli":["726571756573745f6964"]}}
+alt add . --request-id 00112233445566778899aabbccddeeff --json
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Add":["7061746873","6a736f6e"],"json":["74727565"],"paths":["2e"]}},"name":"add"},"values":{}}
+alt --workspace w --request-id 00112233445566778899aabbccddeeff flow feature start x --json
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Start":["6e616d65"],"json":["74727565"],"name":["78"]}},"name":"start"},"values":{"json":["74727565"]}},"name":"feature"},"values":{"json":["74727565"]}},"name":"flow"},"values":{"Cli":["776f726b7370616365","726571756573745f6964"],"json":["74727565"]}}
+alt task list
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"json":["66616c7365"]}},"name":"list"},"values":{"json":["66616c7365"]}},"name":"task"},"values":{"json":["66616c7365"]}}
+alt task list --json
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"json":["74727565"]}},"name":"list"},"values":{"json":["74727565"]}},"name":"task"},"values":{"json":["74727565"]}}
+alt task show t1
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Show":["6964"],"id":["7431"],"json":["66616c7365"]}},"name":"show"},"values":{"json":["66616c7365"]}},"name":"task"},"values":{"json":["66616c7365"]}}
+alt task create --definition {} --target refs/heads/main
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Create":["646566696e6974696f6e","746172676574"],"definition":["7b7d"],"json":["66616c7365"],"target":["726566732f68656164732f6d61696e"]}},"name":"create"},"values":{"json":["66616c7365"]}},"name":"task"},"values":{"json":["66616c7365"]}}
+alt task abandon t1 --reason r --json
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Abandon":["6964","726561736f6e"],"id":["7431"],"json":["74727565"],"reason":["72"]}},"name":"abandon"},"values":{"json":["74727565"]}},"name":"task"},"values":{"json":["74727565"]}}
+alt task changes c1
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Changes":["63616e646964617465"],"candidate":["6331"],"json":["66616c7365"]}},"name":"changes"},"values":{"json":["66616c7365"]}},"name":"task"},"values":{"json":["66616c7365"]}}
+alt task review c1 --evidence e --reviewer r --reason why -m msg
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Review":["63616e646964617465","65766964656e6365","7265766965776572","726561736f6e","6d657373616765"],"candidate":["6331"],"evidence":["65"],"json":["66616c7365"],"message":["6d7367"],"reason":["776879"],"reviewer":["72"]}},"name":"review"},"values":{"json":["66616c7365"]}},"name":"task"},"values":{"json":["66616c7365"]}}
+alt task review-show r1
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"ReviewShow":["6964"],"id":["7231"],"json":["66616c7365"]}},"name":"review-show"},"values":{"json":["66616c7365"]}},"name":"task"},"values":{"json":["66616c7365"]}}
+alt task integrate r1
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Integrate":["726576696577"],"json":["66616c7365"],"review":["7231"]}},"name":"integrate"},"values":{"json":["66616c7365"]}},"name":"task"},"values":{"json":["66616c7365"]}}
+alt task integration-show i1
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"IntegrationShow":["6964"],"id":["6931"],"json":["66616c7365"]}},"name":"integration-show"},"values":{"json":["66616c7365"]}},"name":"task"},"values":{"json":["66616c7365"]}}
+alt task integration-collect i1
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"IntegrationCollect":["6964"],"id":["6931"],"json":["66616c7365"]}},"name":"integration-collect"},"values":{"json":["66616c7365"]}},"name":"task"},"values":{"json":["66616c7365"]}}
+alt task export i1 /tmp/out
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Export":["696e746567726174696f6e","746172676574"],"git":["2f7573722f62696e2f676974"],"integration":["6931"],"json":["66616c7365"],"target":["2f746d702f6f7574"]}},"name":"export"},"values":{"json":["66616c7365"]}},"name":"task"},"values":{"json":["66616c7365"]}}
+alt task export i1 /tmp/out --git /opt/git
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Export":["696e746567726174696f6e","746172676574","676974"],"git":["2f6f70742f676974"],"integration":["6931"],"json":["66616c7365"],"target":["2f746d702f6f7574"]}},"name":"export"},"values":{"json":["66616c7365"]}},"name":"task"},"values":{"json":["66616c7365"]}}
+alt task delivery-show d1
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"DeliveryShow":["6964"],"id":["6431"],"json":["66616c7365"]}},"name":"delivery-show"},"values":{"json":["66616c7365"]}},"name":"task"},"values":{"json":["66616c7365"]}}
+alt task delivery-collect d1 --json
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"DeliveryCollect":["6964"],"git":["2f7573722f62696e2f676974"],"id":["6431"],"json":["74727565"]}},"name":"delivery-collect"},"values":{"json":["74727565"]}},"name":"task"},"values":{"json":["74727565"]}}
+alt task remote connect up --url https://x --repository r --receipt-key k --allow-loopback-http
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Connect":["6e616d65","75726c","7265706f7369746f7279","726563656970745f6b6579","616c6c6f775f6c6f6f706261636b5f68747470"],"allow_loopback_http":["74727565"],"json":["66616c7365"],"name":["7570"],"receipt_key":["6b"],"repository":["72"],"url":["68747470733a2f2f78"]}},"name":"connect"},"values":{"json":["66616c7365"]}},"name":"remote"},"values":{"json":["66616c7365"]}},"name":"task"},"values":{"json":["66616c7365"]}}
+alt task remote preview up --plan p.json
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Preview":["72656d6f7465","706c616e"],"json":["66616c7365"],"plan":["702e6a736f6e"],"remote":["7570"]}},"name":"preview"},"values":{"json":["66616c7365"]}},"name":"remote"},"values":{"json":["66616c7365"]}},"name":"task"},"values":{"json":["66616c7365"]}}
+alt task remote publish p1 --prepare-only
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Publish":["6964","707265706172655f6f6e6c79"],"id":["7031"],"json":["66616c7365"],"prepare_only":["74727565"]}},"name":"publish"},"values":{"json":["66616c7365"]}},"name":"remote"},"values":{"json":["66616c7365"]}},"name":"task"},"values":{"json":["66616c7365"]}}
+alt task remote attest e1 --key-file k
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Attest":["65766964656e6365","6b65795f66696c65"],"evidence":["6531"],"json":["66616c7365"],"key_file":["6b"]}},"name":"attest"},"values":{"json":["66616c7365"]}},"name":"remote"},"values":{"json":["66616c7365"]}},"name":"task"},"values":{"json":["66616c7365"]}}
+alt task remote review up --actor a --request r
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Review":["72656d6f7465","6163746f72","72657175657374"],"actor":["61"],"json":["66616c7365"],"remote":["7570"],"request":["72"]}},"name":"review"},"values":{"json":["66616c7365"]}},"name":"remote"},"values":{"json":["66616c7365"]}},"name":"task"},"values":{"json":["66616c7365"]}}
+alt task remote approve up --actor a --request r --integration i --digest d
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Approve":["72656d6f7465","6163746f72","72657175657374","696e746567726174696f6e","646967657374"],"actor":["61"],"digest":["64"],"integration":["69"],"json":["66616c7365"],"remote":["7570"],"request":["72"]}},"name":"approve"},"values":{"json":["66616c7365"]}},"name":"remote"},"values":{"json":["66616c7365"]}},"name":"task"},"values":{"json":["66616c7365"]}}
+alt task remote status p1 --json
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Status":["6964"],"id":["7031"],"json":["74727565"]}},"name":"status"},"values":{"json":["74727565"]}},"name":"remote"},"values":{"json":["74727565"]}},"name":"task"},"values":{"json":["74727565"]}}
+alt task remote list up --kind task --id t --after c
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"List":["72656d6f7465","6b696e64","6964","6166746572"],"after":["63"],"id":["74"],"json":["66616c7365"],"kind":["7461736b"],"remote":["7570"]}},"name":"list"},"values":{"json":["66616c7365"]}},"name":"remote"},"values":{"json":["66616c7365"]}},"name":"task"},"values":{"json":["66616c7365"]}}
+alt task remote receive up --kind task --id t --publication p
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Receive":["72656d6f7465","6b696e64","6964","7075626c69636174696f6e"],"id":["74"],"json":["66616c7365"],"kind":["7461736b"],"publication":["70"],"remote":["7570"]}},"name":"receive"},"values":{"json":["66616c7365"]}},"name":"remote"},"values":{"json":["66616c7365"]}},"name":"task"},"values":{"json":["66616c7365"]}}
+alt task remote adopt t --publication p --reconcile-request q
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Adopt":["7461736b","7075626c69636174696f6e","7265636f6e63696c655f72657175657374"],"json":["66616c7365"],"publication":["70"],"reconcile_request":["71"],"task":["74"]}},"name":"adopt"},"values":{"json":["66616c7365"]}},"name":"remote"},"values":{"json":["66616c7365"]}},"name":"task"},"values":{"json":["66616c7365"]}}
+alt task remote changes channels up
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Channels":["72656d6f7465"],"json":["66616c7365"],"remote":["7570"]}},"name":"channels"},"values":{"json":["66616c7365"]}},"name":"changes"},"values":{"json":["66616c7365"]}},"name":"remote"},"values":{"json":["66616c7365"]}},"name":"task"},"values":{"json":["66616c7365"]}}
+alt task remote changes list up --after c --json
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"List":["72656d6f7465","6166746572"],"after":["63"],"json":["74727565"],"remote":["7570"]}},"name":"list"},"values":{"json":["74727565"]}},"name":"changes"},"values":{"json":["74727565"]}},"name":"remote"},"values":{"json":["74727565"]}},"name":"task"},"values":{"json":["74727565"]}}
+alt task remote changes show up d
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Show":["72656d6f7465","646967657374"],"digest":["64"],"json":["66616c7365"],"remote":["7570"]}},"name":"show"},"values":{"json":["66616c7365"]}},"name":"changes"},"values":{"json":["66616c7365"]}},"name":"remote"},"values":{"json":["66616c7365"]}},"name":"task"},"values":{"json":["66616c7365"]}}
+alt task remote changes repair up d
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Repair":["72656d6f7465","646967657374"],"digest":["64"],"json":["66616c7365"],"remote":["7570"]}},"name":"repair"},"values":{"json":["66616c7365"]}},"name":"changes"},"values":{"json":["66616c7365"]}},"name":"remote"},"values":{"json":["66616c7365"]}},"name":"task"},"values":{"json":["66616c7365"]}}
+alt task remote changes repair-create up d --definition {} --target t --reconcile-request q
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"RepairCreate":["72656d6f7465","646967657374","646566696e6974696f6e","746172676574","7265636f6e63696c655f72657175657374"],"definition":["7b7d"],"digest":["64"],"json":["66616c7365"],"reconcile_request":["71"],"remote":["7570"],"target":["74"]}},"name":"repair-create"},"values":{"json":["66616c7365"]}},"name":"changes"},"values":{"json":["66616c7365"]}},"name":"remote"},"values":{"json":["66616c7365"]}},"name":"task"},"values":{"json":["66616c7365"]}}
+alt task remote changes preview up --plan p
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Preview":["72656d6f7465","706c616e"],"json":["66616c7365"],"plan":["70"],"remote":["7570"]}},"name":"preview"},"values":{"json":["66616c7365"]}},"name":"changes"},"values":{"json":["66616c7365"]}},"name":"remote"},"values":{"json":["66616c7365"]}},"name":"task"},"values":{"json":["66616c7365"]}}
+alt task remote changes send i
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Send":["6964"],"id":["69"],"json":["66616c7365"]}},"name":"send"},"values":{"json":["66616c7365"]}},"name":"changes"},"values":{"json":["66616c7365"]}},"name":"remote"},"values":{"json":["66616c7365"]}},"name":"task"},"values":{"json":["66616c7365"]}}
+alt task remote changes status i
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Status":["6964"],"id":["69"],"json":["66616c7365"]}},"name":"status"},"values":{"json":["66616c7365"]}},"name":"changes"},"values":{"json":["66616c7365"]}},"name":"remote"},"values":{"json":["66616c7365"]}},"name":"task"},"values":{"json":["66616c7365"]}}
+alt task remote changes reauthorize up ch d
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Reauthorize":["72656d6f7465","6368616e6e656c","646967657374"],"channel":["6368"],"digest":["64"],"json":["66616c7365"],"remote":["7570"]}},"name":"reauthorize"},"values":{"json":["66616c7365"]}},"name":"changes"},"values":{"json":["66616c7365"]}},"name":"remote"},"values":{"json":["66616c7365"]}},"name":"task"},"values":{"json":["66616c7365"]}}
+alt candidate create t1
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Create":["7461736b"],"json":["66616c7365"],"task":["7431"]}},"name":"create"},"values":{"json":["66616c7365"]}},"name":"candidate"},"values":{"json":["66616c7365"]}}
+alt candidate create t1 --parent c0 --json
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Create":["7461736b","706172656e74"],"json":["74727565"],"parent":["6330"],"task":["7431"]}},"name":"create"},"values":{"json":["74727565"]}},"name":"candidate"},"values":{"json":["74727565"]}}
+alt candidate show c1
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Show":["6964"],"id":["6331"],"json":["66616c7365"]}},"name":"show"},"values":{"json":["66616c7365"]}},"name":"candidate"},"values":{"json":["66616c7365"]}}
+alt candidate check c1
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Check":["6964"],"id":["6331"],"json":["66616c7365"]}},"name":"check"},"values":{"json":["66616c7365"]}},"name":"candidate"},"values":{"json":["66616c7365"]}}
+alt evidence run c1 --profile {}
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Run":["63616e646964617465","70726f66696c65"],"candidate":["6331"],"json":["66616c7365"],"profile":["7b7d"]}},"name":"run"},"values":{"json":["66616c7365"]}},"name":"evidence"},"values":{"json":["66616c7365"]}}
+alt evidence collect e1
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Collect":["6964"],"id":["6531"],"json":["66616c7365"]}},"name":"collect"},"values":{"json":["66616c7365"]}},"name":"evidence"},"values":{"json":["66616c7365"]}}
+alt evidence run-status e1
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"RunStatus":["6964"],"id":["6531"],"json":["66616c7365"]}},"name":"run-status"},"values":{"json":["66616c7365"]}},"name":"evidence"},"values":{"json":["66616c7365"]}}
+alt evidence import c1 --report r --stdout o --stderr e
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Import":["63616e646964617465","7265706f7274","7374646f7574","737464657272"],"candidate":["6331"],"json":["66616c7365"],"report":["72"],"stderr":["65"],"stdout":["6f"]}},"name":"import"},"values":{"json":["66616c7365"]}},"name":"evidence"},"values":{"json":["66616c7365"]}}
+alt evidence show e1
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Show":["6964"],"id":["6531"],"json":["66616c7365"]}},"name":"show"},"values":{"json":["66616c7365"]}},"name":"evidence"},"values":{"json":["66616c7365"]}}
+alt evidence check e1
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Check":["6964"],"id":["6531"],"json":["66616c7365"]}},"name":"check"},"values":{"json":["66616c7365"]}},"name":"evidence"},"values":{"json":["66616c7365"]}}
+alt evidence log e1 stdout --json
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Log":["6964","73747265616d"],"id":["6531"],"json":["74727565"],"stream":["7374646f7574"]}},"name":"log"},"values":{"json":["74727565"]}},"name":"evidence"},"values":{"json":["74727565"]}}
+alt runner probe --bindings [] --environment {}
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Probe":["62696e64696e6773","656e7669726f6e6d656e74"],"bindings":["5b5d"],"environment":["7b7d"],"json":["66616c7365"]}},"name":"probe"},"values":{"json":["66616c7365"]}},"name":"runner"},"values":{"json":["66616c7365"]}}
+alt runner execute spec.json --json
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Execute":["73706563"],"json":["74727565"],"spec":["737065632e6a736f6e"]}},"name":"execute"},"values":{"json":["74727565"]}},"name":"runner"},"values":{"json":["74727565"]}}
+alt request pending
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"json":["66616c7365"]}},"name":"pending"},"values":{"json":["66616c7365"]}},"name":"request"},"values":{"json":["66616c7365"]}}
+alt request status r1 --json
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Status":["6964"],"id":["7231"],"json":["74727565"]}},"name":"status"},"values":{"json":["74727565"]}},"name":"request"},"values":{"json":["74727565"]}}
+alt request result r1
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Result":["6964"],"id":["7231"],"json":["66616c7365"]}},"name":"result"},"values":{"json":["66616c7365"]}},"name":"request"},"values":{"json":["66616c7365"]}}
+alt auth delegate --credential-file c --agent-file a --plan p
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Delegate":["63726564656e7469616c5f66696c65","6167656e745f66696c65","706c616e"],"agent_file":["61"],"credential_file":["63"],"json":["66616c7365"],"plan":["70"],"resume":["66616c7365"]}},"name":"delegate"},"values":{"json":["66616c7365"]}},"name":"auth"},"values":{"json":["66616c7365"]}}
+alt auth delegate --credential-file c --agent-file a --resume --json
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Delegate":["63726564656e7469616c5f66696c65","6167656e745f66696c65","726573756d65"],"agent_file":["61"],"credential_file":["63"],"json":["74727565"],"resume":["74727565"]}},"name":"delegate"},"values":{"json":["74727565"]}},"name":"auth"},"values":{"json":["74727565"]}}
+alt auth delegations --credential-file c --after x
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Delegations":["63726564656e7469616c5f66696c65","6166746572"],"after":["78"],"credential_file":["63"],"json":["66616c7365"]}},"name":"delegations"},"values":{"json":["66616c7365"]}},"name":"auth"},"values":{"json":["66616c7365"]}}
+alt auth revoke-agent --credential-file c --credential-id i
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"RevokeAgent":["63726564656e7469616c5f66696c65","63726564656e7469616c5f6964"],"credential_file":["63"],"credential_id":["69"],"json":["66616c7365"]}},"name":"revoke-agent"},"values":{"json":["66616c7365"]}},"name":"auth"},"values":{"json":["66616c7365"]}}
+alt auth login --server https://s --credential-file c --resume --no-wait --allow-loopback-http
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Login":["736572766572","63726564656e7469616c5f66696c65","726573756d65","6e6f5f77616974","616c6c6f775f6c6f6f706261636b5f68747470"],"allow_loopback_http":["74727565"],"credential_file":["63"],"json":["66616c7365"],"no_wait":["74727565"],"resume":["74727565"],"server":["68747470733a2f2f73"]}},"name":"login"},"values":{"json":["66616c7365"]}},"name":"auth"},"values":{"json":["66616c7365"]}}
+alt auth status --credential-file c
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Status":["63726564656e7469616c5f66696c65"],"credential_file":["63"],"json":["66616c7365"]}},"name":"status"},"values":{"json":["66616c7365"]}},"name":"auth"},"values":{"json":["66616c7365"]}}
+alt auth logout --credential-file c --json
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Logout":["63726564656e7469616c5f66696c65"],"credential_file":["63"],"json":["74727565"]}},"name":"logout"},"values":{"json":["74727565"]}},"name":"auth"},"values":{"json":["74727565"]}}
+alt portable export --credential-file c --journal j --repository r --output o
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"PortableOptions":["63726564656e7469616c5f66696c65","6a6f75726e616c"],"credential_file":["63"],"journal":["6a"],"json":["66616c7365"],"max_blob_bytes":["38353839393334353932"],"max_entries":["31303030303030"],"max_metadata_bytes":["3136373737323136"],"max_publications":["313030303030"],"max_total_bytes":["3638373139343736373336"],"output":["6f"],"repository":["72"],"timeout_seconds":["313230"]}},"name":"export"},"values":{"json":["66616c7365"]}},"name":"portable"},"values":{"json":["66616c7365"]}}
+alt portable export --credential-file c --journal j --repository r --output o --max-entries 5 --timeout-seconds=9 --json
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"PortableOptions":["63726564656e7469616c5f66696c65","6a6f75726e616c","6d61785f656e7472696573","74696d656f75745f7365636f6e6473"],"credential_file":["63"],"journal":["6a"],"json":["74727565"],"max_blob_bytes":["38353839393334353932"],"max_entries":["35"],"max_metadata_bytes":["3136373737323136"],"max_publications":["313030303030"],"max_total_bytes":["3638373139343736373336"],"output":["6f"],"repository":["72"],"timeout_seconds":["39"]}},"name":"export"},"values":{"json":["74727565"]}},"name":"portable"},"values":{"json":["74727565"]}}
+alt portable export-status --credential-file c --journal j
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"PortableOptions":["63726564656e7469616c5f66696c65","6a6f75726e616c"],"credential_file":["63"],"journal":["6a"],"json":["66616c7365"],"max_blob_bytes":["38353839393334353932"],"max_entries":["31303030303030"],"max_metadata_bytes":["3136373737323136"],"max_publications":["313030303030"],"max_total_bytes":["3638373139343736373336"],"timeout_seconds":["313230"]}},"name":"export-status"},"values":{"json":["66616c7365"]}},"name":"portable"},"values":{"json":["66616c7365"]}}
+alt portable freeze-source --credential-file c --journal j
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"PortableOptions":["63726564656e7469616c5f66696c65","6a6f75726e616c"],"credential_file":["63"],"journal":["6a"],"json":["66616c7365"],"max_blob_bytes":["38353839393334353932"],"max_entries":["31303030303030"],"max_metadata_bytes":["3136373737323136"],"max_publications":["313030303030"],"max_total_bytes":["3638373139343736373336"],"timeout_seconds":["313230"]}},"name":"freeze-source"},"values":{"json":["66616c7365"]}},"name":"portable"},"values":{"json":["66616c7365"]}}
+alt portable reopen-source --credential-file c --journal j
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"PortableOptions":["63726564656e7469616c5f66696c65","6a6f75726e616c"],"credential_file":["63"],"journal":["6a"],"json":["66616c7365"],"max_blob_bytes":["38353839393334353932"],"max_entries":["31303030303030"],"max_metadata_bytes":["3136373737323136"],"max_publications":["313030303030"],"max_total_bytes":["3638373139343736373336"],"timeout_seconds":["313230"]}},"name":"reopen-source"},"values":{"json":["66616c7365"]}},"name":"portable"},"values":{"json":["66616c7365"]}}
+alt portable retire-export --credential-file c --journal j
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"PortableOptions":["63726564656e7469616c5f66696c65","6a6f75726e616c"],"credential_file":["63"],"journal":["6a"],"json":["66616c7365"],"max_blob_bytes":["38353839393334353932"],"max_entries":["31303030303030"],"max_metadata_bytes":["3136373737323136"],"max_publications":["313030303030"],"max_total_bytes":["3638373139343736373336"],"timeout_seconds":["313230"]}},"name":"retire-export"},"values":{"json":["66616c7365"]}},"name":"portable"},"values":{"json":["66616c7365"]}}
+alt portable import --credential-file c --journal j --repository r --archive a --mappings m --source-installation si --source-repository sr --source-epoch 3 --source-key k
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"PortableOptions":["63726564656e7469616c5f66696c65","6a6f75726e616c"],"archive":["61"],"credential_file":["63"],"journal":["6a"],"json":["66616c7365"],"mappings":["6d"],"max_blob_bytes":["38353839393334353932"],"max_entries":["31303030303030"],"max_metadata_bytes":["3136373737323136"],"max_publications":["313030303030"],"max_total_bytes":["3638373139343736373336"],"repository":["72"],"source_epoch":["33"],"source_installation":["7369"],"source_key":["6b"],"source_repository":["7372"],"timeout_seconds":["313230"]}},"name":"import"},"values":{"json":["66616c7365"]}},"name":"portable"},"values":{"json":["66616c7365"]}}
+alt portable import-status --credential-file c --journal j
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"PortableOptions":["63726564656e7469616c5f66696c65","6a6f75726e616c"],"credential_file":["63"],"journal":["6a"],"json":["66616c7365"],"max_blob_bytes":["38353839393334353932"],"max_entries":["31303030303030"],"max_metadata_bytes":["3136373737323136"],"max_publications":["313030303030"],"max_total_bytes":["3638373139343736373336"],"timeout_seconds":["313230"]}},"name":"import-status"},"values":{"json":["66616c7365"]}},"name":"portable"},"values":{"json":["66616c7365"]}}
+alt portable activate-import --credential-file c --journal j
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"PortableOptions":["63726564656e7469616c5f66696c65","6a6f75726e616c"],"credential_file":["63"],"journal":["6a"],"json":["66616c7365"],"max_blob_bytes":["38353839393334353932"],"max_entries":["31303030303030"],"max_metadata_bytes":["3136373737323136"],"max_publications":["313030303030"],"max_total_bytes":["3638373139343736373336"],"timeout_seconds":["313230"]}},"name":"activate-import"},"values":{"json":["66616c7365"]}},"name":"portable"},"values":{"json":["66616c7365"]}}
+alt portable abandon-import --credential-file c --journal j --json
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"PortableOptions":["63726564656e7469616c5f66696c65","6a6f75726e616c"],"credential_file":["63"],"journal":["6a"],"json":["74727565"],"max_blob_bytes":["38353839393334353932"],"max_entries":["31303030303030"],"max_metadata_bytes":["3136373737323136"],"max_publications":["313030303030"],"max_total_bytes":["3638373139343736373336"],"timeout_seconds":["313230"]}},"name":"abandon-import"},"values":{"json":["74727565"]}},"name":"portable"},"values":{"json":["74727565"]}}
+alt add a --json b
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Add":["7061746873","6a736f6e","7061746873"],"json":["74727565"],"paths":["61","62"]}},"name":"add"},"values":{}}
+alt add a b -- c --json
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Add":["7061746873"],"json":["66616c7365"],"paths":["61","62","63","2d2d6a736f6e"]}},"name":"add"},"values":{}}
+alt add -- -x
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Add":["7061746873"],"json":["66616c7365"],"paths":["2d78"]}},"name":"add"},"values":{}}
+alt commit --decision d1 -m x --decision=d2 -n --meta=k=v
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Commit":["6465636973696f6e73","6d657373616765","6465636973696f6e73","6e6f5f766572696679","6578747261"],"allow_empty":["66616c7365"],"amend":["66616c7365"],"decisions":["6431","6432"],"extra":["6b3d76"],"json":["66616c7365"],"message":["78"],"no_edit":["66616c7365"],"no_verify":["74727565"],"validate":["66616c7365"]}},"name":"commit"},"values":{}}
+alt log main -n 2
+{"subcommand":{"arguments":{"subcommand":null,"values":{"LogArgs":["726576","6d61785f636f756e74"],"json":["66616c7365"],"max_count":["32"],"patch":["66616c7365"],"pretty":["6f6e656c696e65"],"rev":["6d61696e"]}},"name":"log"},"values":{}}
+alt log -n=2
+{"subcommand":{"arguments":{"subcommand":null,"values":{"LogArgs":["6d61785f636f756e74"],"json":["66616c7365"],"max_count":["32"],"patch":["66616c7365"],"pretty":["6f6e656c696e65"],"rev":["48454144"]}},"name":"log"},"values":{}}
+alt tag -am msg v1
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Tag":["616e6e6f74617465","6d657373616765","6e616d65"],"annotate":["74727565"],"json":["66616c7365"],"message":["6d7367"],"name":["7631"]}},"name":"tag"},"values":{}}
+alt tag -ma v1
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Tag":["6d657373616765","6e616d65"],"annotate":["66616c7365"],"json":["66616c7365"],"message":["61"],"name":["7631"]}},"name":"tag"},"values":{}}
+alt verify a -n 3 b
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Verify":["636f6d6d697473","6d61785f636f756e74","636f6d6d697473"],"commits":["61","62"],"json":["66616c7365"],"max_count":["33"]}},"name":"verify"},"values":{}}
+alt verify a --max-count=3 b --json
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Verify":["636f6d6d697473","6d61785f636f756e74","636f6d6d697473","6a736f6e"],"commits":["61","62"],"json":["74727565"],"max_count":["33"]}},"name":"verify"},"values":{}}
+alt fetch up a --json b
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Fetch":["72656d6f7465","7265667370656373","6a736f6e","7265667370656373"],"json":["74727565"],"refspecs":["61","62"],"remote":["7570"]}},"name":"fetch"},"values":{}}
+alt push -f origin a b
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Push":["666f726365","72656d6f7465","7265667370656373"],"force":["74727565"],"json":["66616c7365"],"refspecs":["61","62"],"remote":["6f726967696e"]}},"name":"push"},"values":{}}
+alt bisect start b g1 g2
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Start":["626164","676f6f64"],"bad":["62"],"good":["6731","6732"]}},"name":"start"},"values":{}},"name":"bisect"},"values":{}}
+alt bisect run sh -- x
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Run":["636d64"],"cmd":["7368","2d2d","78"]}},"name":"run"},"values":{}},"name":"bisect"},"values":{}}
+alt bisect run --bogus x
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Run":["636d64"],"cmd":["2d2d626f677573","78"]}},"name":"run"},"values":{}},"name":"bisect"},"values":{}}
+alt bisect run x --help
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Run":["636d64"],"cmd":["78","2d2d68656c70"]}},"name":"run"},"values":{}},"name":"bisect"},"values":{}}
+alt bisect run -x
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Run":["636d64"],"cmd":["2d78"]}},"name":"run"},"values":{}},"name":"bisect"},"values":{}}
+alt branch -d=x
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Branch":["64656c657465"],"delete":["78"],"json":["66616c7365"],"remotes":["66616c7365"]}},"name":"branch"},"values":{}}
+alt --workspace=w status --json
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Status":["6a736f6e"],"json":["74727565"]}},"name":"status"},"values":{"Cli":["776f726b7370616365"]}}
+alt --workspace= status
+{"subcommand":{"arguments":{"subcommand":null,"values":{"json":["66616c7365"]}},"name":"status"},"values":{"Cli":["776f726b7370616365"]}}
+alt workspace --json add task /tmp/task --workspace w
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Add":["6e616d65","70617468"],"json":["74727565"],"name":["7461736b"],"path":["2f746d702f7461736b"]}},"name":"add"},"values":{"Workspace":["6a736f6e"],"json":["74727565"]}},"name":"workspace"},"values":{"json":["74727565"]}}
+alt flow --json feature start x --request-id 00112233445566778899aabbccddeeff
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Start":["6e616d65"],"json":["74727565"],"name":["78"]}},"name":"start"},"values":{"json":["74727565"]}},"name":"feature"},"values":{"Flow":["6a736f6e"],"json":["74727565"]}},"name":"flow"},"values":{"json":["74727565"]}}
+alt cat-file abc -p
+{"subcommand":{"arguments":{"subcommand":null,"values":{"CatFileArgs":["6f626a656374","707265747479"],"object":["616263"],"op":["707265747479"],"pretty":["74727565"],"show_size":["66616c7365"],"show_type":["66616c7365"]}},"name":"cat-file"},"values":{}}
+alt config --unset=user.name
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Config":["756e736574"],"list":["66616c7365"],"unset":["757365722e6e616d65"]}},"name":"config"},"values":{}}
+alt config -- a b
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Config":["6b6579","76616c7565"],"key":["61"],"list":["66616c7365"],"value":["62"]}},"name":"config"},"values":{}}
+alt revert a -m 1 b
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Revert":["72657673","6d61696e6c696e65","72657673"],"abort":["66616c7365"],"cont":["66616c7365"],"json":["66616c7365"],"mainline":["31"],"no_edit":["66616c7365"],"revs":["61","62"]}},"name":"revert"},"values":{}}
+alt rebase -i main --json
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Rebase":["696e746572616374697665","757073747265616d","6a736f6e"],"abort":["66616c7365"],"cont":["66616c7365"],"interactive":["74727565"],"json":["74727565"],"skip":["66616c7365"],"upstream":["6d61696e"]}},"name":"rebase"},"values":{}}
+alt intake --git=/g src dst
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Intake":["676974","736f75726365","746172676574"],"git":["2f67"],"json":["66616c7365"],"source":["737263"],"target":["647374"]}},"name":"intake"},"values":{"json":["66616c7365"]}}
+alt portable export --output o --repository r --journal j --credential-file c --max-blob-bytes=1
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"PortableOptions":["6a6f75726e616c","63726564656e7469616c5f66696c65","6d61785f626c6f625f6279746573"],"credential_file":["63"],"journal":["6a"],"json":["66616c7365"],"max_blob_bytes":["31"],"max_entries":["31303030303030"],"max_metadata_bytes":["3136373737323136"],"max_publications":["313030303030"],"max_total_bytes":["3638373139343736373336"],"output":["6f"],"repository":["72"],"timeout_seconds":["313230"]}},"name":"export"},"values":{"json":["66616c7365"]}},"name":"portable"},"values":{"json":["66616c7365"]}}
+alt evidence import c1 --stdout o --report r
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Import":["63616e646964617465","7374646f7574","7265706f7274"],"candidate":["6331"],"json":["66616c7365"],"report":["72"],"stdout":["6f"]}},"name":"import"},"values":{"json":["66616c7365"]}},"name":"evidence"},"values":{"json":["66616c7365"]}}
+alt task review c1 -m msg --reason why --reviewer r --evidence e --json
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Review":["63616e646964617465","6d657373616765","726561736f6e","7265766965776572","65766964656e6365"],"candidate":["6331"],"evidence":["65"],"json":["74727565"],"message":["6d7367"],"reason":["776879"],"reviewer":["72"]}},"name":"review"},"values":{"json":["74727565"]}},"name":"task"},"values":{"json":["74727565"]}}
+alt init -- dir
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Init":["646972"],"dir":["646972"]}},"name":"init"},"values":{}}
+alt diff --staged --json
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Diff":["636163686564","6a736f6e"],"cached":["74727565"],"json":["74727565"],"semantic":["66616c7365"]}},"name":"diff"},"values":{}}
+alt show -- HEAD
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Show":["726576"],"json":["66616c7365"],"rev":["48454144"]}},"name":"show"},"values":{}}
+alt status --
+{"subcommand":{"arguments":{"subcommand":null,"values":{"json":["66616c7365"]}},"name":"status"},"values":{}}
+alt op-log -n5
+{"subcommand":{"arguments":{"subcommand":null,"values":{"OpLog":["6d61785f636f756e74"],"json":["66616c7365"],"max_count":["35"],"verify":["66616c7365"]}},"name":"op-log"},"values":{}}
+alt commit -nm msg
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Commit":["6e6f5f766572696679","6d657373616765"],"allow_empty":["66616c7365"],"amend":["66616c7365"],"json":["66616c7365"],"message":["6d7367"],"no_edit":["66616c7365"],"no_verify":["74727565"],"validate":["66616c7365"]}},"name":"commit"},"values":{}}
+alt commit -m=msg
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Commit":["6d657373616765"],"allow_empty":["66616c7365"],"amend":["66616c7365"],"json":["66616c7365"],"message":["6d7367"],"no_edit":["66616c7365"],"no_verify":["66616c7365"],"validate":["66616c7365"]}},"name":"commit"},"values":{}}
+alt commit -m -
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Commit":["6d657373616765"],"allow_empty":["66616c7365"],"amend":["66616c7365"],"json":["66616c7365"],"message":["2d"],"no_edit":["66616c7365"],"no_verify":["66616c7365"],"validate":["66616c7365"]}},"name":"commit"},"values":{}}
+alt switch -
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Switch":["6e616d65"],"create":["66616c7365"],"json":["66616c7365"],"name":["2d"]}},"name":"switch"},"values":{}}
+alt log -
+{"subcommand":{"arguments":{"subcommand":null,"values":{"LogArgs":["726576"],"json":["66616c7365"],"patch":["66616c7365"],"pretty":["6f6e656c696e65"],"rev":["2d"]}},"name":"log"},"values":{}}

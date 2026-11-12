@@ -73,7 +73,6 @@ alt-worktree = { path = "crates/alt-worktree" }
 alt-zstd = { path = "crates/alt-zstd" }
 alt-testutil = { path = "crates/alt-testutil" }
 
-clap = { version = "4", features = ["derive"] }
 criterion = "0.5"
 ed25519-dalek = { version = "2", default-features = false, features = ["std", "rand_core"] }
 encoding_rs = "0.8"

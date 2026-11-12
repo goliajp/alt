@@ -102,7 +102,7 @@ impl NativeRepo<'_> {
             }
             "good" => state.good.extend(commits),
             "skip" => state.skip.extend(commits),
-            _ => unreachable!("clap limits the verdicts"),
+            _ => unreachable!("the caller passes one of three verdicts"),
         }
         self.save_bisect_state(&state)?;
         self.bisect_step(&state, out)

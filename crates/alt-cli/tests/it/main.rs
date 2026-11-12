@@ -3,6 +3,7 @@ mod add_ignore;
 mod add_paths;
 mod altd_server;
 mod amend;
+mod argument_bindings;
 mod bisect;
 mod blame;
 mod branch_switch;
