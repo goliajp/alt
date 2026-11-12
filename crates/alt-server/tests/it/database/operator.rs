@@ -42,7 +42,7 @@ impl OperatorDb {
             std::process::id(),
             NEXT.fetch_add(1, Ordering::SeqCst)
         );
-        Client::connect(&admin, NoTls)
+        Client::connect(&admin)
             .unwrap()
             .batch_execute(&format!("CREATE DATABASE {name}"))
             .unwrap();
@@ -119,7 +119,7 @@ impl OperatorDb {
 }
 impl Drop for OperatorDb {
     fn drop(&mut self) {
-        Client::connect(&self.admin, NoTls)
+        Client::connect(&self.admin)
             .unwrap()
             .batch_execute(&format!("DROP DATABASE {} WITH (FORCE)", self.name))
             .unwrap();

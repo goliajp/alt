@@ -6,8 +6,8 @@ use crate::database::Transaction;
 use crate::store::{instance, integer, unsigned};
 use crate::{ByteStore, Error, InstanceSpec, Result, Store};
 use alt_crypto::ed25519::SigningKey;
+use alt_pg::Client;
 use alt_remote_protocol::Scope;
-use postgres::Client;
 use std::collections::BTreeMap;
 
 /// Counters are decimal strings to preserve the full database integer range in
@@ -61,7 +61,7 @@ impl Store {
         Ok(())
     }
 }
-fn audit_entry(row: postgres::Row) -> Result<InstanceAuditEntry> {
+fn audit_entry(row: alt_pg::Row) -> Result<InstanceAuditEntry> {
     Ok(InstanceAuditEntry {
         sequence: unsigned(row.get(0))?.to_string(),
         actor_id: row.get(1),

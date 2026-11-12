@@ -223,7 +223,7 @@ fn request_observations_preserve_late_commits_and_current_metrics_authority() {
     config.limits.object_bytes = 20_000_000;
     std::fs::write(&db.config, alt_json::to_vec(&config).unwrap()).unwrap();
     let mut store = Store::open(
-        Client::connect(&db.dsn, NoTls).unwrap(),
+        Client::connect(&db.dsn).unwrap(),
         ByteStore::open(&config.bytes_directory).unwrap(),
         config.instance.clone(),
         config.signing_key().unwrap(),
@@ -341,7 +341,7 @@ fn request_observations_preserve_late_commits_and_current_metrics_authority() {
     );
     // Repository row lock is after the HTTP credential preflight. The HTTP
     // deadline expires while the real publication worker remains alive.
-    let mut blocker = Client::connect(&db.dsn, NoTls).unwrap();
+    let mut blocker = Client::connect(&db.dsn).unwrap();
     let mut transaction = blocker.transaction().unwrap();
     transaction
         .query_one(

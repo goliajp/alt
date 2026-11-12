@@ -33,7 +33,7 @@ pub(crate) use {outbox_event_sql, receipt_sql, state_sql};
 pub(crate) fn request_row(
     tx: &mut Transaction<'_>,
     key: &RequestKey,
-) -> Result<Option<postgres::Row>> {
+) -> Result<Option<alt_pg::Row>> {
     Ok(tx.query_opt(concat!("SELECT q.*,", state_sql!(), " AS outcome FROM alt_requests q WHERE q.repository=$1 AND q.epoch=$2 AND q.actor_id=$3 AND q.request_id=$4 FOR UPDATE"),&[&key.scope.repository_instance_id,&integer(key.scope.recovery_epoch)?,&key.actor_id,&key.request_id])?)
 }
 

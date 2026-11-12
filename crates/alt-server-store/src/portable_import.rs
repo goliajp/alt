@@ -4,11 +4,11 @@ use crate::Jsonb;
 use crate::database::Transaction;
 use crate::store::{authorize, instance, integer, now, require_admin, snapshot, unsigned};
 use crate::{Credential, DurableBytes, Error, InstanceSpec, Result, Store};
+use alt_pg::Row;
 pub use alt_portable::http::ImportState as PortableImportState;
 use alt_portable::{Blob, Envelope, ImportIntent, ImportReceipt, PackageLimits};
 use alt_remote_protocol::{ActorKind, RequestKey, Scope};
 use alt_repository_service::{Authorization, RepositorySnapshot};
-use postgres::Row;
 fn pin_id(digest: &str) -> String {
     format!("portable-import:{digest}")
 }

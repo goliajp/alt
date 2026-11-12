@@ -318,10 +318,10 @@ fn crash_child(phase: &str, tasks: bool) {
     let database = std::env::var("ALT_SERVER_FAULT_DB").unwrap();
     let root = std::path::PathBuf::from(std::env::var("ALT_SERVER_FAULT_ROOT").unwrap());
     let token = std::env::var("ALT_SERVER_FAULT_TOKEN").unwrap();
-    let mut config: postgres::Config = dsn.parse().unwrap();
+    let mut config: alt_pg::Config = dsn.parse().unwrap();
     config
-        .dbname(&database)
-        .application_name("alt-publication-fault-worker");
+        .set_dbname(&database)
+        .set_application_name("alt-publication-fault-worker");
     let spec = InstanceSpec {
         installation_id: "installation".into(),
         workspace_id: "workspace".into(),
@@ -329,7 +329,7 @@ fn crash_child(phase: &str, tasks: bool) {
         runtime_generation: 1,
     };
     let mut store = Store::open(
-        config.connect(NoTls).unwrap(),
+        config.connect().unwrap(),
         ByteStore::open(&root.join("bytes")).unwrap(),
         spec,
         SigningKey::from_bytes(&[7; 32]),

@@ -3,11 +3,11 @@ mod adopt;
 mod changes;
 use alt_crypto::ed25519::SigningKey;
 use alt_json::{Value, json};
+use alt_pg::Client;
 use alt_remote_protocol::{ActorKind, Attribution, DeploymentMode, Limits};
 use alt_repository_service::{Grant, RefSelector};
 use alt_server::{HttpOptions, NativeOptions, StoreFactory};
 use alt_server_store::{ByteStore, Credential, InstanceSpec, Store};
-use postgres::{Client, NoTls};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
@@ -78,7 +78,7 @@ impl Server {
         );
         let admin_dsn = std::env::var("ALT_SERVER_TEST_ADMIN_DSN").unwrap();
         let database = format!("alt_cli_remote_{}", std::process::id());
-        Client::connect(&admin_dsn, NoTls)
+        Client::connect(&admin_dsn)
             .unwrap()
             .batch_execute(&format!("CREATE DATABASE {database}"))
             .unwrap();
@@ -89,11 +89,11 @@ impl Server {
             deployment_mode: DeploymentMode::SelfHosted,
             runtime_generation: 1,
         };
-        let mut config: postgres::Config = admin_dsn.parse().unwrap();
-        config.dbname(&database);
+        let mut config: alt_pg::Config = admin_dsn.parse().unwrap();
+        config.set_dbname(&database);
         let bytes = ByteStore::open(&root.path().join("bytes")).unwrap();
         let mut store = Store::initialize(
-            config.connect(NoTls).unwrap(),
+            config.connect().unwrap(),
             bytes.clone(),
             spec.clone(),
             SigningKey::from_bytes(&[7; 32]),
@@ -282,10 +282,10 @@ impl Server {
         alt_input::hex(SigningKey::from_bytes(&[7; 32]).verifying_key().as_bytes())
     }
     fn counts(&self) -> (i64, i64) {
-        let mut config: postgres::Config = self.admin_dsn.parse().unwrap();
-        config.dbname(&self.database);
+        let mut config: alt_pg::Config = self.admin_dsn.parse().unwrap();
+        config.set_dbname(&self.database);
         let row = config
-            .connect(NoTls)
+            .connect()
             .unwrap()
             .query_one(
                 "SELECT (SELECT count(*) FROM alt_audit),(SELECT count(*) FROM alt_outbox)",
@@ -303,7 +303,7 @@ impl Drop for Server {
         if let Some(thread) = self.thread.take() {
             thread.join().unwrap();
         }
-        Client::connect(&self.admin_dsn, NoTls)
+        Client::connect(&self.admin_dsn)
             .unwrap()
             .batch_execute(&format!("DROP DATABASE {} WITH (FORCE)", self.database))
             .unwrap();

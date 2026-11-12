@@ -73,7 +73,7 @@ alt-browser-auth.workspace = true
 alt-deflate.workspace = true
 alt-server.workspace = true
 alt-server-store.workspace = true
-postgres = "0.19"
+alt-pg.workspace = true
 tokio = {version="1",features=["rt-multi-thread","net","sync"]}
 alt-sign.workspace = true
 alt-testutil.workspace = true

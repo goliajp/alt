@@ -45,7 +45,7 @@ type ResponseBody = UnsyncBoxBody<Bytes, BoxError>;
 pub struct StoreFactory {
     pub change_links: Arc<[crate::change_links::ChannelRuntime]>,
     pub cloud: Option<Arc<crate::cloud::Runtime>>,
-    pub database: postgres::Config,
+    pub database: alt_pg::Config,
     pub bytes: ByteStore,
     pub instance: InstanceSpec,
     pub signing_key: alt_crypto::ed25519::SigningKey,
@@ -56,8 +56,8 @@ pub struct StoreFactory {
 impl StoreFactory {
     pub fn open(&self) -> alt_server_store::Result<Store> {
         let mut config = self.database.clone();
-        config.connect_timeout(self.connect_timeout);
-        let mut client = config.connect(postgres::NoTls)?;
+        config.set_connect_timeout(self.connect_timeout);
+        let mut client = config.connect()?;
         let timeout = self.statement_timeout.as_millis();
         if timeout == 0 || timeout > 300_000 {
             return Err(Error::Limit("database statement timeout"));

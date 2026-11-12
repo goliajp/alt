@@ -21,9 +21,9 @@ impl Drop for Inner {
     fn drop(&mut self) {
         let stores = std::mem::take(&mut self.idle.get_mut().expect("idle stores").stores);
         if !stores.is_empty() {
-            // Cancellation can bypass async shutdown. Synchronous postgres
-            // clients run their own runtime while closing, so even this final
-            // bounded cleanup must run outside the HTTP runtime's async task.
+            // Cancellation can bypass async shutdown. Closing a database
+            // client writes to its socket, so even this final bounded
+            // cleanup must run outside the HTTP runtime's async task.
             std::thread::spawn(move || drop(stores));
         }
     }

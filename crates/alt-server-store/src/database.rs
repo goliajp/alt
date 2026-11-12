@@ -1,116 +1,66 @@
 //! Connection-local statement reuse. Only SQL plans are retained; result rows,
 //! authority decisions, transaction boundaries and errors are never cached.
-use postgres::{Client, Error, Row, Statement, types::ToSql};
-use std::collections::{HashMap, VecDeque};
+use alt_pg::{Client, Error, Row, ToSql};
 
-const STATEMENT_LIMIT: usize = 256;
 pub(crate) const BATCH_ROWS: usize = 1024;
-
-#[derive(Default)]
-struct Statements {
-    values: HashMap<String, Statement>,
-    order: VecDeque<String>,
-}
-impl Statements {
-    fn clear(&mut self) {
-        self.values.clear();
-        self.order.clear();
-    }
-    fn insert(&mut self, sql: &str, statement: Statement) {
-        if self.values.len() == STATEMENT_LIMIT {
-            let oldest = self.order.pop_front().expect("statement cache order");
-            self.values.remove(&oldest);
-        }
-        self.order.push_back(sql.to_owned());
-        self.values.insert(sql.to_owned(), statement);
-    }
-}
 
 pub(crate) struct Connection {
     client: Client,
-    statements: Statements,
 }
 impl Connection {
     pub fn new(client: Client) -> Self {
-        Self {
-            client,
-            statements: Statements::default(),
-        }
+        Self { client }
     }
     pub fn is_closed(&self) -> bool {
         self.client.is_closed()
     }
     /// one statement outside any transaction block, with the cached plan
     pub fn query_one(&mut self, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<Row, Error> {
-        let statement = match self.statements.values.get(sql) {
-            Some(statement) => statement.clone(),
-            None => {
-                let statement = self.client.prepare(sql)?;
-                self.statements.insert(sql, statement.clone());
-                statement
-            }
-        };
-        self.client.query_one(&statement, params)
+        self.client.query_one(sql, params)
     }
     pub fn transaction(&mut self) -> Result<Transaction<'_>, Error> {
         Ok(Transaction {
             inner: self.client.transaction()?,
-            statements: Some(&mut self.statements),
+            cached: true,
         })
     }
 }
 
 pub(crate) struct Transaction<'a> {
-    inner: postgres::Transaction<'a>,
-    statements: Option<&'a mut Statements>,
+    inner: alt_pg::Transaction<'a>,
+    cached: bool,
 }
 impl<'a> Transaction<'a> {
     /// Operator initialization/migration/backup may borrow an external client.
-    /// They keep its ordinary transaction lifetime without a cross-client cache.
-    pub fn uncached(inner: postgres::Transaction<'a>) -> Self {
+    /// They keep its ordinary transaction lifetime without retaining plans.
+    pub fn uncached(inner: alt_pg::Transaction<'a>) -> Self {
         Self {
-            inner,
-            statements: None,
+            inner: inner.uncached(),
+            cached: false,
         }
     }
-    pub fn raw_mut(&mut self) -> &mut postgres::Transaction<'a> {
+    pub fn raw_mut(&mut self) -> &mut alt_pg::Transaction<'a> {
         // Raw schema operations may change statement result types or settings.
-        if let Some(statements) = &mut self.statements {
-            statements.clear();
+        if self.cached {
+            self.inner.clear_statements();
         }
         &mut self.inner
     }
-    fn statement(&mut self, sql: &str) -> Result<Statement, Error> {
-        if let Some(statements) = &self.statements
-            && let Some(statement) = statements.values.get(sql)
-        {
-            return Ok(statement.clone());
-        }
-        let statement = self.inner.prepare(sql)?;
-        if let Some(statements) = &mut self.statements {
-            statements.insert(sql, statement.clone());
-        }
-        Ok(statement)
-    }
     pub fn query(&mut self, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<Vec<Row>, Error> {
-        let statement = self.statement(sql)?;
-        self.inner.query(&statement, params)
+        self.inner.query(sql, params)
     }
     pub fn query_opt(
         &mut self,
         sql: &str,
         params: &[&(dyn ToSql + Sync)],
     ) -> Result<Option<Row>, Error> {
-        let statement = self.statement(sql)?;
-        self.inner.query_opt(&statement, params)
+        self.inner.query_opt(sql, params)
     }
     pub fn query_one(&mut self, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<Row, Error> {
-        let statement = self.statement(sql)?;
-        self.inner.query_one(&statement, params)
+        self.inner.query_one(sql, params)
     }
     pub fn execute(&mut self, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<u64, Error> {
-        let statement = self.statement(sql)?;
-        self.inner.execute(&statement, params)
+        self.inner.execute(sql, params)
     }
     pub fn batch_execute(&mut self, sql: &str) -> Result<(), Error> {
         self.raw_mut().batch_execute(sql)
@@ -123,6 +73,7 @@ impl<'a> Transaction<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alt_pg::STATEMENT_LIMIT;
 
     #[test]
     #[ignore = "requires an explicitly isolated PostgreSQL service"]
@@ -132,7 +83,7 @@ mod tests {
             Ok("1")
         );
         let dsn = std::env::var("ALT_SERVER_TEST_ADMIN_DSN").unwrap();
-        let connect = || Connection::new(Client::connect(&dsn, postgres::NoTls).unwrap());
+        let connect = || Connection::new(Client::connect(&dsn).unwrap());
         let mut connection = connect();
         {
             let mut tx = connection.transaction().unwrap();
@@ -191,9 +142,9 @@ mod tests {
             );
             tx.commit().unwrap();
         }
-        assert_eq!(connection.statements.values.len(), STATEMENT_LIMIT);
+        assert_eq!(connection.client.cached_statements(), STATEMENT_LIMIT);
         let mut other = connect();
-        assert!(other.statements.values.is_empty());
+        assert_eq!(other.client.cached_statements(), 0);
         assert_eq!(
             other
                 .transaction()

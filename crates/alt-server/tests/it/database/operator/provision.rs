@@ -71,7 +71,7 @@ fn cloud_provision_interrupt_resume_and_storage_binding() {
         );
         c
     };
-    let mut blocker = Client::connect(&db.dsn, NoTls).unwrap();
+    let mut blocker = Client::connect(&db.dsn).unwrap();
     blocker
         .query_one("SELECT pg_advisory_lock(715071909111)", &[])
         .unwrap();

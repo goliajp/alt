@@ -314,7 +314,7 @@ impl Store {
         Ok(())
     }
 }
-pub(crate) fn active(row: &postgres::Row, time: u64) -> Result<()> {
+pub(crate) fn active(row: &alt_pg::Row, time: u64) -> Result<()> {
     if !matches!(
         row.get::<_, String>("state").as_str(),
         "receiving" | "ready"
@@ -381,7 +381,7 @@ pub(crate) fn git_kind(kind: ContentKind) -> Result<&'static str> {
 /// An agent cannot inspect or mutate another session's private request merely
 /// because both are attributed to the same human owner.
 pub(crate) fn check_request_attribution(
-    row: &postgres::Row,
+    row: &alt_pg::Row,
     auth: &alt_repository_service::Authorization,
 ) -> Result<()> {
     if auth.attribution.kind == alt_remote_protocol::ActorKind::Agent {
@@ -449,7 +449,7 @@ fn selected_contents<'a>(
 pub(crate) fn upload_request_row(
     tx: &mut Transaction<'_>,
     key: &RequestKey,
-) -> Result<Option<postgres::Row>> {
+) -> Result<Option<alt_pg::Row>> {
     Ok(tx.query_opt("SELECT state,expires_at,publication,reserved_bytes FROM alt_requests WHERE repository=$1 AND epoch=$2 AND actor_id=$3 AND request_id=$4 FOR UPDATE", &[&key.scope.repository_instance_id,&integer(key.scope.recovery_epoch)?,&key.actor_id,&key.request_id])?)
 }
 pub(crate) struct UploadSelection {

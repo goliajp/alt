@@ -5,8 +5,8 @@ use crate::database::Transaction;
 use crate::store::{credential_row, instance, integer, now, token_digest, unsigned};
 use crate::{Credential, Error, Result, Store};
 use alt_browser_auth::PublicOrigin;
+use alt_pg::Row;
 use alt_remote_protocol::{ActorKind, Attribution, DeploymentMode, login::*};
-use postgres::Row;
 
 #[derive(alt_json::ToJson)]
 pub struct DeviceConsent {

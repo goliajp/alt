@@ -2,9 +2,9 @@ use crate::Jsonb;
 use crate::database::Transaction;
 use crate::{ByteStore, Error, Result};
 use alt_crypto::ed25519::SigningKey;
+use alt_pg::Client;
 use alt_remote_protocol::{Attribution, DeploymentMode, Limits, ObjectFormat, Scope};
 use alt_repository_service::{Authorization, Grant, RefPolicy, RepositorySnapshot};
-use postgres::Client;
 use std::collections::BTreeSet;
 
 #[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
@@ -571,7 +571,7 @@ pub(crate) fn credential_row(
     tx: &mut Transaction<'_>,
     spec: &InstanceSpec,
     credential: &Credential,
-) -> Result<postgres::Row> {
+) -> Result<alt_pg::Row> {
     let row=tx.query_opt("SELECT actor_id,attribution,identity_source,expires_at,revoked,administrator FROM alt_credentials WHERE token_digest=$1 FOR SHARE",&[&credential.digest])?.ok_or(Error::Unauthorized)?;
     if row.get::<_, String>(2) != spec.mode()
         || row.get::<_, bool>(4)

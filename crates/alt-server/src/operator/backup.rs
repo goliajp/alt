@@ -93,31 +93,28 @@ fn postgres_command(config: &Config, program: &str) -> Result<Command> {
     command
         .env_clear()
         .env("PATH", std::env::var_os("PATH").unwrap_or_default());
-    let host = match db.get_hosts() {
-        [postgres::config::Host::Tcp(host)] => host.clone(),
-        [postgres::config::Host::Unix(path)] => path
+    let host = match db.host() {
+        Some(alt_pg::Host::Tcp(host)) => host.clone(),
+        Some(alt_pg::Host::Unix(path)) => path
             .to_str()
             .ok_or(Error::Config("database socket encoding"))?
             .into(),
-        _ => return Err(Error::Config("backup requires one explicit database host")),
+        None => return Err(Error::Config("backup requires one explicit database host")),
     };
-    if db.get_ports().len() > 1 || !db.get_hostaddrs().is_empty() {
+    if db.hostaddr().is_some() {
         return Err(Error::Config("backup requires one database endpoint"));
     }
     command
         .env("PGHOST", host)
-        .env(
-            "PGPORT",
-            db.get_ports().first().copied().unwrap_or(5432).to_string(),
-        )
+        .env("PGPORT", db.port().unwrap_or(5432).to_string())
         .env(
             "PGDATABASE",
-            db.get_dbname()
+            db.dbname()
                 .ok_or(Error::Config("explicit database name required"))?,
         )
         .env(
             "PGUSER",
-            db.get_user()
+            db.user()
                 .ok_or(Error::Config("explicit database user required"))?,
         )
         .env(
@@ -131,9 +128,8 @@ fn postgres_command(config: &Config, program: &str) -> Result<Command> {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    if let Some(password) = db.get_password() {
-        use std::os::unix::ffi::OsStrExt;
-        command.env("PGPASSWORD", std::ffi::OsStr::from_bytes(password));
+    if let Some(password) = db.password() {
+        command.env("PGPASSWORD", password);
     }
     Ok(command)
 }

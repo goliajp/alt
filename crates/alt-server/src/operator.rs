@@ -288,36 +288,32 @@ impl Config {
         }
         Ok(())
     }
-    pub fn database(&self) -> Result<postgres::Config> {
+    pub fn database(&self) -> Result<alt_pg::Config> {
         self.validate()?;
         let value = std::env::var(&self.database_environment)
             .map_err(|_| Error::Config("required database environment missing"))?;
-        let mut config: postgres::Config = value
+        let mut config: alt_pg::Config = value
             .parse()
             .map_err(|_| Error::Config("database connection parameters"))?;
         // The v1 POSIX adapter uses a local DB socket/sidecar. A remote DB needs
         // an explicit TLS adapter, never an implicit plaintext downgrade.
-        if config.get_hosts().is_empty()
-            || config.get_hosts().iter().any(|host| match host {
-                postgres::config::Host::Tcp(host) => !host
-                    .parse::<std::net::IpAddr>()
-                    .is_ok_and(|ip| ip.is_loopback()),
-                postgres::config::Host::Unix(path) => !path.is_absolute(),
-            })
-            || config.get_hostaddrs().iter().any(|ip| !ip.is_loopback())
-        {
+        let local = match config.host() {
+            Some(alt_pg::Host::Tcp(host)) => host
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|ip| ip.is_loopback()),
+            Some(alt_pg::Host::Unix(path)) => path.is_absolute(),
+            None => false,
+        };
+        if !local || config.hostaddr().is_some_and(|ip| !ip.is_loopback()) {
             return Err(Error::Config(
                 "database must use an explicit local socket or literal loopback address",
             ));
         }
-        config.connect_timeout(Duration::from_millis(self.http.database_connect_timeout_ms));
+        config.set_connect_timeout(Duration::from_millis(self.http.database_connect_timeout_ms));
         Ok(config)
     }
-    pub fn client(&self) -> Result<postgres::Client> {
-        let mut client = self
-            .database()?
-            .connect(postgres::NoTls)
-            .map_err(|_| Error::Database)?;
+    pub fn client(&self) -> Result<alt_pg::Client> {
+        let mut client = self.database()?.connect().map_err(|_| Error::Database)?;
         let timeout = self.http.database_statement_timeout_ms;
         client
             .batch_execute(&format!(
