@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: perf
+summary: sweep pack segments without row locks when none has expired
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/pack_compaction.rs
+touched: crates/alt-server-store/src/store.rs
+touched: crates/alt-server-store/tests/it/database.rs
+touched: crates/alt-server-store/tests/it/database/pack_sweep.rs
