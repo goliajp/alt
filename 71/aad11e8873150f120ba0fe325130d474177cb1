@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: drop a delta base before descending into its last child
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/ingest.rs
