@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: delete unknown segment files only under the repository lock
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/pack_compaction.rs
+touched: crates/alt-server-store/tests/it/database/pack_sweep.rs
