@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: build release binaries with fat lto and one codegen unit
+author-type: human
+author: doracawl
+touched: Cargo.toml
