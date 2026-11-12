@@ -1,6 +1,6 @@
 //! Expected values recorded from the parser this crate replaced, for the
 //! kinds of input the callers pass: configured origins and redirect targets.
-use alt_url::{Host, ParseError, Url};
+use alt_url::{Host, Url};
 
 fn summary(url: &Url) -> String {
     let host = match url.host() {
@@ -293,16 +293,5 @@ fn appended_query_pairs() {
         for ((name, value), pair) in tail.iter().zip(pairs) {
             assert_eq!((name.as_str(), value.as_str()), *pair);
         }
-    }
-}
-
-#[test]
-fn non_ascii_hosts_are_rejected() {
-    for input in [
-        "https://\u{4f8b}\u{3048}.jp",
-        "https://%E4%BE%8B.jp",
-        "http://caf\u{e9}.example",
-    ] {
-        assert_eq!(Url::parse(input), Err(ParseError::NonAsciiHost));
     }
 }

@@ -1,5 +1,6 @@
-//! Times URL parsing and form-urlencoded parsing; prints the fastest of
-//! several rounds, in nanoseconds per URL and per query string.
+//! Times URL parsing, with ASCII and with international host names, and
+//! form-urlencoded parsing; prints the fastest of several rounds, in
+//! nanoseconds per URL and per query string.
 use alt_url::{Url, form};
 use std::hint::black_box;
 use std::time::Instant;
@@ -15,6 +16,15 @@ const URLS: &[&str] = &[
     "https://user:pass@Example.COM:443/a/b/../c/./d?x=1&y=2#frag",
     "http://192.168.0.1/path/to/resource.html",
     "https://example.org/a%20b/c d?q=1 2#f g",
+];
+
+const INTERNATIONAL: &[&str] = &[
+    "https://\u{4f8b}\u{3048}.jp",
+    "https://b\u{fc}cher.example/",
+    "https://\u{43f}\u{440}\u{438}\u{43c}\u{435}\u{440}.\u{440}\u{444}/",
+    "https://\u{645}\u{62b}\u{627}\u{644}.\u{625}\u{62e}\u{62a}\u{628}\u{627}\u{631}",
+    "https://e\u{301}cole.fr",
+    "https://%E4%BE%8B%E3%81%88.jp/path",
 ];
 
 const QUERY: &[u8] = b"installationId=0123456789abcdef&challenge=AbCdEfGhIjKl%2BMnOp+QrSt&state=ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
@@ -42,5 +52,12 @@ fn main() {
             black_box(pair);
         }
     });
-    println!("parse {parse:.1} ns/url, form {pairs:.1} ns/query");
+    let international = fastest(5, 100_000, || {
+        for input in INTERNATIONAL {
+            black_box(Url::parse(black_box(input)).ok());
+        }
+    }) / INTERNATIONAL.len() as f64;
+    println!(
+        "parse {parse:.1} ns/url, form {pairs:.1} ns/query, non-ASCII host {international:.1} ns/url"
+    );
 }

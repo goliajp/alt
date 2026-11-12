@@ -1,8 +1,6 @@
-//! The web-platform-tests URL data in `tests/data`. Hosts that are not
-//! ASCII need IDNA mapping, which the crate reports as `NonAsciiHost`;
-//! those cases are counted instead of compared.
+//! The web-platform-tests URL data in `tests/data`
 use crate::json::Json;
-use alt_url::{ParseError, Url};
+use alt_url::Url;
 
 fn expected<'a>(case: &'a Json, name: &str) -> &'a str {
     case.get(name).and_then(Json::text).unwrap()
@@ -43,7 +41,7 @@ fn check(case: &Json, url: &Url) {
 
 #[test]
 fn urltestdata() {
-    let (mut compared, mut non_ascii) = (0, 0);
+    let mut compared = 0;
     for case in Json::load("urltestdata.json").items() {
         let Some(input) = case.get("input").and_then(Json::text) else {
             continue;
@@ -54,7 +52,6 @@ fn urltestdata() {
         };
         let failure = matches!(case.get("failure"), Some(Json::Bool(true)));
         match parsed {
-            Err(ParseError::NonAsciiHost) if !failure => non_ascii += 1,
             Err(_) => assert!(failure, "{case:?}"),
             Ok(url) => {
                 assert!(!failure, "{case:?} parsed as {url}");
@@ -63,27 +60,26 @@ fn urltestdata() {
         }
         compared += 1;
     }
-    assert_eq!((compared, non_ascii), (896, 13));
+    assert_eq!(compared, 896);
 }
 
 /// Each host parsed as `https://{input}/x`
 #[test]
 fn toascii() {
-    let (mut compared, mut non_ascii) = (0, 0);
+    let mut compared = 0;
     for case in Json::load("toascii.json").items() {
         let Some(input) = case.get("input").and_then(Json::text) else {
             continue;
         };
         let output = case.get("output").and_then(Json::text);
         match (Url::parse(&format!("https://{input}/x")), output) {
-            (Err(ParseError::NonAsciiHost), _) => non_ascii += 1,
             (Err(_), None) => {}
             (Ok(url), Some(output)) => assert_eq!(url.host_str(), Some(output)),
             (parsed, output) => panic!("{input:?}: {parsed:?}, expected {output:?}"),
         }
         compared += 1;
     }
-    assert_eq!((compared, non_ascii), (87, 63));
+    assert_eq!(compared, 87);
 }
 
 /// UTF-8 encoding of the query and the fragment

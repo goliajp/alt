@@ -3,12 +3,14 @@
 //!
 //! A [`Url`] is its serialization plus the offsets of its components, so
 //! parsing allocates one string and the getters return slices of it.
-//! Host names that are not ASCII after percent-decoding are rejected with
-//! [`ParseError::NonAsciiHost`]; `xn--` labels are kept as written.
+//! Host names that are not ASCII after percent-decoding go through UTS #46
+//! processing; an ASCII host name is lowercased and its `xn--` labels are
+//! kept as written.
 
 mod error;
 pub mod form;
 mod host;
+mod idna;
 mod ip;
 mod origin;
 mod parser;
@@ -16,6 +18,7 @@ pub mod percent;
 
 pub use error::ParseError;
 pub use host::Host;
+pub use idna::UNICODE_VERSION;
 pub use origin::Origin;
 
 use host::HostKind;

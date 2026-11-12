@@ -4,8 +4,7 @@ use std::fmt;
 #[non_exhaustive]
 pub enum ParseError {
     EmptyHost,
-    /// the host is not ASCII after percent-decoding; IDNA mapping is not implemented
-    NonAsciiHost,
+    IdnaError,
     InvalidPort,
     InvalidIpv4Address,
     InvalidIpv6Address,
@@ -18,7 +17,7 @@ impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::EmptyHost => "empty host",
-            Self::NonAsciiHost => "non-ASCII host names are not supported",
+            Self::IdnaError => "invalid international domain name",
             Self::InvalidPort => "invalid port number",
             Self::InvalidIpv4Address => "invalid IPv4 address",
             Self::InvalidIpv6Address => "invalid IPv6 address",
