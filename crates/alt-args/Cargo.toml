@@ -1,0 +1,9 @@
+[package]
+name = "alt-args"
+description = "Command-line argument parsing from static tables, with no dependencies"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+alt-args-derive.workspace = true

@@ -1,0 +1,11 @@
+[package]
+name = "alt-args-derive"
+description = "Derive macros for the alt-args traits, with no dependencies"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]

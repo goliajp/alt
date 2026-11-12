@@ -12,6 +12,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "alt-args"
+version = "0.1.0"
+dependencies = [
+ "alt-args-derive",
+]
+
+[[package]]
+name = "alt-args-derive"
+version = "0.1.0"
+
+[[package]]
 name = "alt-base64"
 version = "0.1.0"
 

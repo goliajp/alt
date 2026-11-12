@@ -8,6 +8,8 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+alt-args = { path = "crates/alt-args" }
+alt-args-derive = { path = "crates/alt-args-derive" }
 alt-base64 = { path = "crates/alt-base64" }
 alt-byte-segment = { path = "crates/alt-byte-segment" }
 alt-bytes = { path = "crates/alt-bytes" }

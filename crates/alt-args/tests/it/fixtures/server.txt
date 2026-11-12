@@ -1,0 +1,657 @@
+### cloud-initialize --help
+exit 0
+--- stdout
+Initialize or resume exactly one frozen Cloud provision specification
+
+Usage: alt-server cloud-initialize [OPTIONS] --spec <SPEC> --directory <DIRECTORY> --assets <ASSETS>
+
+Options:
+      --config <CONFIG>
+          
+      --spec <SPEC>
+          
+      --credential <CREDENTIAL>
+          Private file containing an already issued administrator token
+      --directory <DIRECTORY>
+          
+      --assets <ASSETS>
+          
+      --listen <LISTEN>
+          [default: 127.0.0.1:8081]
+      --database-environment <DATABASE_ENVIRONMENT>
+          [default: ALT_SERVER_DATABASE]
+  -h, --help
+          Print help
+--- stderr
+
+### secret --help
+exit 0
+--- stdout
+Generate and fsync a secret before registering it with the database
+
+Usage: alt-server secret [OPTIONS] --output <OUTPUT> <KIND>
+
+Arguments:
+  <KIND>  [possible values: receipt-key, token]
+
+Options:
+      --config <CONFIG>          
+      --output <OUTPUT>          
+      --credential <CREDENTIAL>  Private file containing an already issued administrator token
+  -h, --help                     Print help
+--- stderr
+
+### bootstrap --help
+exit 0
+--- stdout
+Install the first self-hosted administrator using a saved secret
+
+Usage: alt-server bootstrap [OPTIONS] --secret <SECRET> --expires-unix-ms <EXPIRES_UNIX_MS> <ACTOR>
+
+Arguments:
+  <ACTOR>  
+
+Options:
+      --config <CONFIG>
+          
+      --secret <SECRET>
+          
+      --credential <CREDENTIAL>
+          Private file containing an already issued administrator token
+      --expires-unix-ms <EXPIRES_UNIX_MS>
+          
+  -h, --help
+          Print help
+--- stderr
+
+### link-install --help
+exit 0
+--- stdout
+Explicitly install one operator-configured cross-product pairing
+
+Usage: alt-server link-install [OPTIONS] <REPOSITORY> <EPOCH> <CHANNEL>
+
+Arguments:
+  <REPOSITORY>  
+  <EPOCH>       
+  <CHANNEL>     
+
+Options:
+      --config <CONFIG>          
+      --credential <CREDENTIAL>  Private file containing an already issued administrator token
+  -h, --help                     Print help
+--- stderr
+
+### serve --help
+exit 0
+--- stdout
+Open an existing instance without migration/bootstrap fallback
+
+Usage: alt-server serve [OPTIONS]
+
+Options:
+      --config <CONFIG>          
+      --credential <CREDENTIAL>  Private file containing an already issued administrator token
+  -h, --help                     Print help
+--- stderr
+
+### health --help
+exit 0
+--- stdout
+Verify current schema, persisted mode, receipt key and volume identity
+
+Usage: alt-server health [OPTIONS]
+
+Options:
+      --config <CONFIG>          
+      --credential <CREDENTIAL>  Private file containing an already issued administrator token
+  -h, --help                     Print help
+--- stderr
+
+### status --help
+exit 0
+--- stdout
+Read-only administrator counters; does not perform a storage scrub
+
+Usage: alt-server status [OPTIONS]
+
+Options:
+      --config <CONFIG>          
+      --credential <CREDENTIAL>  Private file containing an already issued administrator token
+  -h, --help                     Print help
+--- stderr
+
+### status -h
+exit 0
+--- stdout
+Read-only administrator counters; does not perform a storage scrub
+
+Usage: alt-server status [OPTIONS]
+
+Options:
+      --config <CONFIG>          
+      --credential <CREDENTIAL>  Private file containing an already issued administrator token
+  -h, --help                     Print help
+--- stderr
+
+### audit --help
+exit 0
+--- stdout
+Read administrator operation history without secrets or action details
+
+Usage: alt-server audit [OPTIONS]
+
+Options:
+      --before <BEFORE>          
+      --config <CONFIG>          
+      --credential <CREDENTIAL>  Private file containing an already issued administrator token
+      --limit <LIMIT>            [default: 50]
+  -h, --help                     Print help
+--- stderr
+
+### backup --help
+exit 0
+--- stdout
+Encrypted physical backup, including credentials and the receipt key
+
+Usage: alt-server backup [OPTIONS] --recipient <RECIPIENT> --output <OUTPUT>
+
+Options:
+      --config <CONFIG>          
+      --schema <SCHEMA>          [default: 20]
+      --credential <CREDENTIAL>  Private file containing an already issued administrator token
+      --recipient <RECIPIENT>    
+      --output <OUTPUT>          
+  -h, --help                     Print help
+--- stderr
+
+### review-grant --help
+exit 0
+--- stdout
+Usage: alt-server review-grant [OPTIONS] --allow <ALLOW> <REPOSITORY> <ACTOR>
+
+Arguments:
+  <REPOSITORY>  
+  <ACTOR>       
+
+Options:
+      --allow <ALLOW>            [possible values: true, false]
+      --config <CONFIG>          
+      --credential <CREDENTIAL>  Private file containing an already issued administrator token
+  -h, --help                     Print help
+--- stderr
+
+### collect --help
+exit 0
+--- stdout
+Usage: alt-server collect [OPTIONS] <REPOSITORY>
+
+Arguments:
+  <REPOSITORY>  
+
+Options:
+      --config <CONFIG>          
+      --limit <LIMIT>            [default: 100]
+      --credential <CREDENTIAL>  Private file containing an already issued administrator token
+  -h, --help                     Print help
+--- stderr
+
+### --version
+exit 0
+--- stdout
+alt-server 0.1.0
+--- stderr
+
+### -V
+exit 0
+--- stdout
+alt-server 0.1.0
+--- stderr
+
+### help secret
+exit 0
+--- stdout
+Generate and fsync a secret before registering it with the database
+
+Usage: alt-server secret [OPTIONS] --output <OUTPUT> <KIND>
+
+Arguments:
+  <KIND>  [possible values: receipt-key, token]
+
+Options:
+      --config <CONFIG>          
+      --output <OUTPUT>          
+      --credential <CREDENTIAL>  Private file containing an already issued administrator token
+  -h, --help                     Print help
+--- stderr
+
+### help help
+exit 0
+--- stdout
+Print this message or the help of the given subcommand(s)
+
+Usage: alt-server help [COMMAND]...
+
+Arguments:
+  [COMMAND]...  Print help for the subcommand(s)
+--- stderr
+
+### help nonesuch
+exit 2
+--- stdout
+--- stderr
+error: unrecognized subcommand 'nonesuch'
+
+Usage: alt-server [OPTIONS] <COMMAND>
+
+For more information, try '--help'.
+
+### help secret extra
+exit 2
+--- stdout
+--- stderr
+error: unrecognized subcommand 'extra'
+
+Usage: alt-server secret [OPTIONS] --output <OUTPUT> <KIND>
+
+For more information, try '--help'.
+
+### secret
+exit 2
+--- stdout
+--- stderr
+error: the following required arguments were not provided:
+  --output <OUTPUT>
+  <KIND>
+
+Usage: alt-server secret --output <OUTPUT> <KIND>
+
+For more information, try '--help'.
+
+### secret bogus --output o
+exit 2
+--- stdout
+--- stderr
+error: invalid value 'bogus' for '<KIND>'
+  [possible values: receipt-key, token]
+
+For more information, try '--help'.
+
+### secret token
+exit 2
+--- stdout
+--- stderr
+error: the following required arguments were not provided:
+  --output <OUTPUT>
+
+Usage: alt-server secret --output <OUTPUT> <KIND>
+
+For more information, try '--help'.
+
+### review-grant r a
+exit 2
+--- stdout
+--- stderr
+error: the following required arguments were not provided:
+  --allow <ALLOW>
+
+Usage: alt-server review-grant --allow <ALLOW> <REPOSITORY> <ACTOR>
+
+For more information, try '--help'.
+
+### review-grant r a --allow
+exit 2
+--- stdout
+--- stderr
+error: a value is required for '--allow <ALLOW>' but none was supplied
+  [possible values: true, false]
+
+For more information, try '--help'.
+
+### review-grant r a --allow maybe
+exit 2
+--- stdout
+--- stderr
+error: invalid value 'maybe' for '--allow <ALLOW>'
+  [possible values: true, false]
+
+For more information, try '--help'.
+
+### review-grant r a --allow true --allow false
+exit 2
+--- stdout
+--- stderr
+error: the argument '--allow <ALLOW>' cannot be used multiple times
+
+Usage: alt-server review-grant [OPTIONS] --allow <ALLOW> <REPOSITORY> <ACTOR>
+
+For more information, try '--help'.
+
+### audit --limit x
+exit 2
+--- stdout
+--- stderr
+error: invalid value 'x' for '--limit <LIMIT>': invalid digit found in string
+
+For more information, try '--help'.
+
+### audit --before
+exit 2
+--- stdout
+--- stderr
+error: a value is required for '--before <BEFORE>' but none was supplied
+
+For more information, try '--help'.
+
+### audit --before x
+exit 2
+--- stdout
+--- stderr
+error: invalid value 'x' for '--before <BEFORE>': invalid digit found in string
+
+For more information, try '--help'.
+
+### link-install r x c
+exit 2
+--- stdout
+--- stderr
+error: invalid value 'x' for '<EPOCH>': invalid digit found in string
+
+For more information, try '--help'.
+
+### link-install r
+exit 2
+--- stdout
+--- stderr
+error: the following required arguments were not provided:
+  <EPOCH>
+  <CHANNEL>
+
+Usage: alt-server link-install <REPOSITORY> <EPOCH> <CHANNEL>
+
+For more information, try '--help'.
+
+### cloud-initialize --spec s --directory d --assets a --listen bad
+exit 2
+--- stdout
+--- stderr
+error: invalid value 'bad' for '--listen <LISTEN>': invalid socket address syntax
+
+For more information, try '--help'.
+
+### cloud-initialize
+exit 2
+--- stdout
+--- stderr
+error: the following required arguments were not provided:
+  --spec <SPEC>
+  --directory <DIRECTORY>
+  --assets <ASSETS>
+
+Usage: alt-server cloud-initialize --spec <SPEC> --directory <DIRECTORY> --assets <ASSETS>
+
+For more information, try '--help'.
+
+### bootstrap
+exit 2
+--- stdout
+--- stderr
+error: the following required arguments were not provided:
+  --secret <SECRET>
+  --expires-unix-ms <EXPIRES_UNIX_MS>
+  <ACTOR>
+
+Usage: alt-server bootstrap --secret <SECRET> --expires-unix-ms <EXPIRES_UNIX_MS> <ACTOR>
+
+For more information, try '--help'.
+
+### bootstrap a --secret s
+exit 2
+--- stdout
+--- stderr
+error: the following required arguments were not provided:
+  --expires-unix-ms <EXPIRES_UNIX_MS>
+
+Usage: alt-server bootstrap --secret <SECRET> --expires-unix-ms <EXPIRES_UNIX_MS> <ACTOR>
+
+For more information, try '--help'.
+
+### bootstrap a --secret s --expires-unix-ms -1
+exit 2
+--- stdout
+--- stderr
+error: unexpected argument '-1' found
+
+  tip: to pass '-1' as a value, use '-- -1'
+
+Usage: alt-server bootstrap [OPTIONS] --secret <SECRET> --expires-unix-ms <EXPIRES_UNIX_MS> <ACTOR>
+
+For more information, try '--help'.
+
+### nonesuch
+exit 2
+--- stdout
+--- stderr
+error: unrecognized subcommand 'nonesuch'
+
+Usage: alt-server [OPTIONS] <COMMAND>
+
+For more information, try '--help'.
+
+### --config
+exit 2
+--- stdout
+--- stderr
+error: a value is required for '--config <CONFIG>' but none was supplied
+
+For more information, try '--help'.
+
+### --bogus
+exit 2
+--- stdout
+--- stderr
+error: unexpected argument '--bogus' found
+
+Usage: alt-server [OPTIONS] <COMMAND>
+
+For more information, try '--help'.
+
+### serve extra
+exit 2
+--- stdout
+--- stderr
+error: unexpected argument 'extra' found
+
+Usage: alt-server serve [OPTIONS]
+
+For more information, try '--help'.
+
+### serve --bogus
+exit 2
+--- stdout
+--- stderr
+error: unexpected argument '--bogus' found
+
+Usage: alt-server serve [OPTIONS]
+
+For more information, try '--help'.
+
+### serve --config
+exit 2
+--- stdout
+--- stderr
+error: a value is required for '--config <CONFIG>' but none was supplied
+
+For more information, try '--help'.
+
+### backup --schema x --recipient r --output o
+exit 2
+--- stdout
+--- stderr
+error: invalid value 'x' for '--schema <SCHEMA>': invalid digit found in string
+
+For more information, try '--help'.
+
+### collect r --limit x
+exit 2
+--- stdout
+--- stderr
+error: invalid value 'x' for '--limit <LIMIT>': invalid digit found in string
+
+For more information, try '--help'.
+
+### collect
+exit 2
+--- stdout
+--- stderr
+error: the following required arguments were not provided:
+  <REPOSITORY>
+
+Usage: alt-server collect <REPOSITORY>
+
+For more information, try '--help'.
+
+### secret --version
+exit 2
+--- stdout
+--- stderr
+error: unexpected argument '--version' found
+
+  tip: to pass '--version' as a value, use '-- --version'
+
+Usage: alt-server secret [OPTIONS] --output <OUTPUT> <KIND>
+
+For more information, try '--help'.
+
+### help --bogus
+exit 2
+--- stdout
+--- stderr
+error: unrecognized subcommand '--bogus'
+
+Usage: alt-server [OPTIONS] <COMMAND>
+
+For more information, try '--help'.
+
+### help serve
+exit 0
+--- stdout
+Open an existing instance without migration/bootstrap fallback
+
+Usage: alt-server serve [OPTIONS]
+
+Options:
+      --config <CONFIG>          
+      --credential <CREDENTIAL>  Private file containing an already issued administrator token
+  -h, --help                     Print help
+--- stderr
+
+### help -h
+exit 2
+--- stdout
+--- stderr
+error: unrecognized subcommand '-h'
+
+Usage: alt-server [OPTIONS] <COMMAND>
+
+For more information, try '--help'.
+
+### secret tokn --output o
+exit 2
+--- stdout
+--- stderr
+error: invalid value 'tokn' for '<KIND>'
+  [possible values: receipt-key, token]
+
+  tip: a similar value exists: 'token'
+
+For more information, try '--help'.
+
+### secret Token --output o
+exit 2
+--- stdout
+--- stderr
+error: invalid value 'Token' for '<KIND>'
+  [possible values: receipt-key, token]
+
+  tip: a similar value exists: 'token'
+
+For more information, try '--help'.
+
+### review-grant r a --allow=true --bogus
+exit 2
+--- stdout
+--- stderr
+error: unexpected argument '--bogus' found
+
+  tip: to pass '--bogus' as a value, use '-- --bogus'
+
+Usage: alt-server review-grant --allow <ALLOW> <REPOSITORY> <ACTOR>
+
+For more information, try '--help'.
+
+### --config c nonesuch
+exit 2
+--- stdout
+--- stderr
+error: unrecognized subcommand 'nonesuch'
+
+Usage: alt-server [OPTIONS] <COMMAND>
+
+For more information, try '--help'.
+
+### serv
+exit 2
+--- stdout
+--- stderr
+error: unrecognized subcommand 'serv'
+
+  tip: some similar subcommands exist: 'secret', 'serve'
+
+Usage: alt-server [OPTIONS] <COMMAND>
+
+For more information, try '--help'.
+
+### healt
+exit 2
+--- stdout
+--- stderr
+error: unrecognized subcommand 'healt'
+
+  tip: some similar subcommands exist: 'help', 'health'
+
+Usage: alt-server [OPTIONS] <COMMAND>
+
+For more information, try '--help'.
+
+### status --confg x
+exit 2
+--- stdout
+--- stderr
+error: unexpected argument '--confg' found
+
+  tip: a similar argument exists: '--config'
+
+Usage: alt-server status --config <CONFIG>
+
+For more information, try '--help'.
+
+### audit --limit=5 --limit=6
+exit 2
+--- stdout
+--- stderr
+error: the argument '--limit <LIMIT>' cannot be used multiple times
+
+Usage: alt-server audit [OPTIONS]
+
+For more information, try '--help'.
+
+### audit --limit 5 extra
+exit 2
+--- stdout
+--- stderr
+error: unexpected argument 'extra' found
+
+Usage: alt-server audit [OPTIONS]
+
+For more information, try '--help'.
