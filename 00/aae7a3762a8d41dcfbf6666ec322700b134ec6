@@ -1,0 +1,18 @@
+schema: alt-meta/1
+type: perf
+summary: drop the foreign key from refs to their repository
+author-type: human
+author: doracawl
+touched: crates/alt-args/tests/it/fixtures/server.txt
+touched: crates/alt-args/tests/it/server.rs
+touched: crates/alt-server-store/src/lib.rs
+touched: crates/alt-server-store/src/schema-v21.sql
+touched: crates/alt-server-store/src/schema.rs
+touched: crates/alt-server-store/src/schema.sql
+touched: crates/alt-server-store/tests/it/database.rs
+touched: crates/alt-server-store/tests/it/database/schema_20.rs
+touched: crates/alt-server-store/tests/it/database/schema_21.rs
+touched: crates/alt-server-store/tests/it/database/single_copy/baseline.rs
+touched: crates/alt-server/README.md
+touched: crates/alt-server/tests/it/database/operator/upgrade.rs
+touched: self-hosted/README.md
