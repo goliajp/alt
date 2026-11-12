@@ -2,9 +2,7 @@
 //! secrets in the lines it adds, and files too large for git hosts to take.
 //! Pure logic over the changed files' old and new bytes.
 
-use std::sync::LazyLock;
-
-use regex::Regex;
+use crate::patterns::{self, Shape};
 
 /// Findings of this severity stop the commit; warnings are reported only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,67 +71,19 @@ pub fn check(changes: &[Change]) -> Vec<Finding> {
     out
 }
 
-struct Rule {
-    name: &'static str,
-    what: &'static str,
-    re: Regex,
+/// The rule a credential shape is reported under and what it is. Names
+/// stay generic on purpose.
+fn rule(shape: Shape) -> (&'static str, &'static str) {
+    match shape {
+        Shape::PrivateKey => ("private-key", "a private key"),
+        Shape::CloudAccessKey => ("cloud-access-key", "a cloud access key id"),
+        Shape::ForgeToken => ("forge-token", "a code-hosting access token"),
+        Shape::SkApiKey => ("sk-api-key", "an API secret key"),
+        Shape::ChatToken => ("chat-token", "a chat workspace token"),
+        Shape::BrowserApiKey => ("browser-api-key", "a web API key"),
+        Shape::PaymentLiveKey => ("payment-live-key", "a live payment key"),
+    }
 }
-
-/// Credentials with a recognizable shape. Names stay generic on purpose.
-static RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
-    let rule = |name, what, re: &str| Rule {
-        name,
-        what,
-        re: Regex::new(re).expect("built-in pattern"),
-    };
-    vec![
-        rule(
-            "private-key",
-            "a private key",
-            r"-----BEGIN [A-Z ]*PRIVATE KEY( BLOCK)?-----",
-        ),
-        rule(
-            "cloud-access-key",
-            "a cloud access key id",
-            r"\b(AKIA|ASIA)[0-9A-Z]{16}\b",
-        ),
-        rule(
-            "forge-token",
-            "a code-hosting access token",
-            r"\b(gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{60,})\b",
-        ),
-        rule(
-            "sk-api-key",
-            "an API secret key",
-            r"\bsk-(proj-|ant-)?[A-Za-z0-9_-]{32,}",
-        ),
-        rule(
-            "chat-token",
-            "a chat workspace token",
-            r"\bxox[baprs]-[A-Za-z0-9-]{10,}",
-        ),
-        rule(
-            "browser-api-key",
-            "a web API key",
-            r"\bAIza[0-9A-Za-z_-]{35}\b",
-        ),
-        rule(
-            "payment-live-key",
-            "a live payment key",
-            r"\b[sr]k_live_[0-9A-Za-z]{24,}\b",
-        ),
-    ]
-});
-
-/// A value assigned to a secret-sounding name. Only flagged when the value
-/// itself looks random (see [`looks_random`]), so identifiers, calls and
-/// hashes named otherwise pass.
-static ASSIGNMENT: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r#"(?i)[a-z0-9_.-]*(api[_-]?key|secret|token|passw(or)?d|private[_-]?key|access[_-]?key)[a-z0-9_.-]*["']?\s*[:=]\s*["']?([A-Za-z0-9+/=_.-]{16,})"#,
-    )
-    .expect("built-in pattern")
-});
 
 /// Scans the lines `c` adds; content already in HEAD is left alone.
 fn scan_secrets(c: &Change) -> Vec<Finding> {
@@ -157,15 +107,15 @@ fn scan_secrets(c: &Change) -> Vec<Finding> {
         if line.contains(ALLOW_MARKER) {
             continue;
         }
-        let hit = RULES
-            .iter()
-            .find_map(|r| {
-                r.re.find(&line)
-                    .map(|m| (r.name, r.what, m.as_str().to_owned()))
+        let hit = patterns::credential(&line)
+            .map(|(shape, found)| {
+                let (name, what) = rule(shape);
+                (name, what, found.to_owned())
             })
             .or_else(|| {
-                ASSIGNMENT.captures(&line).and_then(|cap| {
-                    let value = cap.get(3)?.as_str();
+                // a value assigned to a secret-sounding name, flagged only when
+                // the value itself looks random
+                patterns::assignment_value(&line).and_then(|value| {
                     looks_random(value).then(|| {
                         (
                             "secret-assignment",

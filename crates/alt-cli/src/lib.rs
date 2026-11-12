@@ -19,6 +19,7 @@ pub mod log_cmd;
 pub mod machine;
 pub mod meta;
 pub mod native;
+pub mod patterns;
 pub mod policy;
 pub mod portable;
 pub mod precommit;

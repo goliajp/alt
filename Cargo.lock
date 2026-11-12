@@ -115,7 +115,6 @@ dependencies = [
  "ed25519-dalek",
  "encoding_rs",
  "golia-change-link",
- "regex",
  "tiny_http",
  "tokio",
 ]

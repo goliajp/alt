@@ -34,6 +34,7 @@ mod merge_criss_cross;
 mod monorepo_bench;
 mod nested_repo;
 mod op_log;
+mod patterns;
 mod precommit;
 mod push;
 mod push_policy;

@@ -16,11 +16,8 @@
 //! decision: chose Result over Option to match the parser
 //! ```
 
-use std::sync::LazyLock;
-
 use alt_bytes::BString;
 use alt_git_codec::{EntryMode, HashAlgo, ObjectId, ObjectKind, Tree, TreeEntry};
-use regex::Regex;
 
 pub const NOTES_REF: &str = "refs/notes/alt/meta";
 pub const SCHEMA: &str = "alt-meta/1";
@@ -112,18 +109,15 @@ pub fn derive(
     decisions: &[String],
     extra: &[(String, String)],
 ) -> Res<Meta> {
-    static CONVENTIONAL: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"^([a-z]+)(\([^)]*\))?(!)?: (.+)$").expect("built-in pattern")
-    });
     let recorded = recorded(decisions, extra)?;
     let subject = message.lines().next().unwrap_or("");
     let mut m = Meta::default();
     m.push("schema", SCHEMA);
-    match CONVENTIONAL.captures(subject) {
+    match crate::patterns::conventional(subject) {
         Some(c) => {
-            m.push("type", &c[1]);
-            m.push("summary", &c[4]);
-            let breaking = c.get(3).is_some() || message.contains("\nBREAKING CHANGE: ");
+            m.push("type", c.kind);
+            m.push("summary", c.summary);
+            let breaking = c.breaking || message.contains("\nBREAKING CHANGE: ");
             if breaking {
                 m.push("breaking", "true");
             }
