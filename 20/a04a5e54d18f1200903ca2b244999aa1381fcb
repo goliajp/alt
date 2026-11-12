@@ -1,0 +1,17 @@
+schema: alt-meta/1
+type: refactor
+summary: replace regex in alt-cli with hand-written matchers
+author-type: human
+author: doracawl
+touched: Cargo.lock
+touched: Cargo.toml
+touched: crates/alt-cli/Cargo.toml
+touched: crates/alt-cli/src/lib.rs
+touched: crates/alt-cli/src/meta.rs
+touched: crates/alt-cli/src/patterns.rs
+touched: crates/alt-cli/src/patterns/secrets.rs
+touched: crates/alt-cli/src/patterns/word.rs
+touched: crates/alt-cli/src/precommit.rs
+touched: crates/alt-cli/tests/fixtures/patterns/matches.txt
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/patterns.rs
