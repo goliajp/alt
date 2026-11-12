@@ -1,8 +1,8 @@
 //! Pure browser authentication boundaries. Persistence, authorization and rate
 //! admission belong to the instance adapter; this crate performs no network I/O.
 use alt_crypto::argon2::{Params, PasswordHash};
+use alt_url::{Host, Url};
 use std::net::IpAddr;
-use url::{Host, Url};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {

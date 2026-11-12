@@ -257,7 +257,7 @@ fn cloud_http_refresh_outage_revocation_and_browser_identity() {
             .unwrap()
             .contains("HttpOnly; SameSite=Lax")
     );
-    let location = url::Url::parse(start.header("Location").unwrap()).unwrap();
+    let location = alt_url::Url::parse(start.header("Location").unwrap()).unwrap();
     assert_eq!(
         location.origin().ascii_serialization(),
         runtime.audience().control_origin.as_str()
@@ -413,7 +413,7 @@ fn cloud_http_refresh_outage_revocation_and_browser_identity() {
         .next()
         .unwrap()
         .to_owned();
-    let location = url::Url::parse(start.header("Location").unwrap()).unwrap();
+    let location = alt_url::Url::parse(start.header("Location").unwrap()).unwrap();
     let args: std::collections::BTreeMap<_, _> = location.query_pairs().into_owned().collect();
     let callback = format!(
         "{}/web/login/callback?ticket={}&state={}",

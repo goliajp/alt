@@ -141,10 +141,10 @@ fn root_kind(kind: RecordKind) -> &'static str {
 }
 impl Transport {
     pub fn new(origin: &str, token: String, options: Options) -> Result<Self> {
-        let url = url::Url::parse(origin).map_err(|_| Error::Invalid("server origin"))?;
+        let url = alt_url::Url::parse(origin).map_err(|_| Error::Invalid("server origin"))?;
         let loopback = match url.host() {
-            Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
-            Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+            Some(alt_url::Host::Ipv4(ip)) => ip.is_loopback(),
+            Some(alt_url::Host::Ipv6(ip)) => ip.is_loopback(),
             _ => false,
         };
         if url.scheme() != "https"

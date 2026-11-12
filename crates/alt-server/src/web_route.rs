@@ -69,7 +69,7 @@ fn arguments(query: Option<&str>, allowed: &[&str]) -> Result<BTreeMap<String, S
         return Err(Error::Limit("query bytes"));
     }
     let mut result = BTreeMap::new();
-    for (key, value) in url::form_urlencoded::parse(query.as_bytes()) {
+    for (key, value) in alt_url::form::parse(query.as_bytes()) {
         if !allowed.contains(&key.as_ref())
             || result
                 .insert(key.into_owned(), value.into_owned())

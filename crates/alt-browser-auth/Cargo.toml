@@ -7,7 +7,7 @@ license.workspace = true
 alt-crypto.workspace = true
 alt-hash.workspace = true
 alt-os.workspace = true
-url.workspace = true
+alt-url.workspace = true
 [[test]]
 name = "it"
 path = "tests/it/main.rs"
