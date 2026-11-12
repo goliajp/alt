@@ -138,18 +138,13 @@ fn postgres_command(config: &Config, program: &str) -> Result<Command> {
     Ok(command)
 }
 fn append<W: Write>(
-    archive: &mut tar::Builder<W>,
+    archive: &mut alt_tar::Builder<W>,
     name: &str,
     file: &mut (impl Read + Seek),
 ) -> Result<FileDigest> {
     let description = digest(file)?;
-    let mut header = tar::Header::new_gnu();
-    header.set_size(description.bytes);
-    header.set_mode(0o600);
-    header.set_mtime(0);
-    header.set_cksum();
     archive
-        .append_data(&mut header, name, file)
+        .append_file(name.as_bytes(), 0o600, 0, description.bytes, file)
         .map_err(|_| Error::File)?;
     Ok(description)
 }
@@ -255,7 +250,7 @@ fn create_inner(
             .spawn()
             .map_err(|_| Error::Config("age encryption tool unavailable"))?,
     );
-    let mut archive = tar::Builder::new(encrypt.0.stdin.take().ok_or(Error::File)?);
+    let mut archive = alt_tar::Builder::new(encrypt.0.stdin.take().ok_or(Error::File)?);
     let mut files = BTreeMap::new();
     files.insert(
         "database.dump".into(),
@@ -302,8 +297,7 @@ fn create_inner(
         }
         files.insert(name, description);
     }
-    archive.finish().map_err(|_| Error::File)?;
-    drop(archive);
+    drop(archive.finish().map_err(|_| Error::File)?);
     checked(&mut encrypt)?;
     payload.sync_all().map_err(|_| Error::File)?;
     let catalog = snapshot.catalog().clone();
@@ -460,15 +454,14 @@ pub fn verify(
             .spawn()
             .map_err(|_| Error::Config("age decryption tool unavailable"))?,
     );
-    let mut archive = tar::Archive::new(decrypt.0.stdout.take().ok_or(Error::File)?);
-    for item in archive
-        .entries()
-        .map_err(|_| Error::Config("backup archive"))?
+    let mut archive = alt_tar::Archive::new(decrypt.0.stdout.take().ok_or(Error::File)?);
+    while let Some(mut item) = archive
+        .next_entry()
+        .map_err(|_| Error::Config("backup archive entry"))?
     {
-        let mut item = item.map_err(|_| Error::Config("backup archive entry"))?;
-        let name = String::from_utf8(item.path_bytes().into_owned())
+        let name = String::from_utf8(item.path().to_vec())
             .map_err(|_| Error::Config("backup archive path"))?;
-        if !item.header().entry_type().is_file() || !expected.remove(&name) {
+        if item.kind() != alt_tar::Kind::File || !expected.remove(&name) {
             return Err(Error::Config("unexpected or duplicate archive entry"));
         }
         let expected_file = &manifest.files[&name];
@@ -486,7 +479,7 @@ pub fn verify(
             .mode(0o600)
             .open(destination)
             .map_err(|_| Error::File)?;
-        let count = std::io::copy(&mut item, &mut file).map_err(|_| Error::File)?;
+        let count = item.copy_to(&mut file).map_err(|_| Error::File)?;
         let actual = digest(&mut file)?;
         if count != expected_file.bytes || actual.blake3 != expected_file.blake3 {
             return Err(Error::Config("archive entry checksum"));

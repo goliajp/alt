@@ -1,0 +1,8 @@
+[package]
+name = "alt-tar"
+description = "Streaming tar reading and writing (ustar, PAX, GNU long names), with no dependencies"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
