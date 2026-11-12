@@ -7,6 +7,7 @@ mod delegation;
 mod faults;
 mod json;
 mod maintenance;
+mod pack_sweep;
 mod provenance;
 mod registration;
 mod schema_20;
