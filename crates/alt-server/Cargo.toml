@@ -39,7 +39,7 @@ tokio = {version="1",features=["rt-multi-thread","net","time","sync","macros","s
 alt-base64.workspace = true
 clap.workspace = true
 futures-util = "0.3"
-tar = "0.4"
+alt-tar.workspace = true
 tokio-util = {version="0.7",features=["io"]}
 
 [dev-dependencies]

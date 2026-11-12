@@ -69,6 +69,7 @@ alt-wire = { path = "crates/alt-wire" }
 alt-wire-http = { path = "crates/alt-wire-http" }
 alt-worktree = { path = "crates/alt-worktree" }
 alt-zstd = { path = "crates/alt-zstd" }
+alt-tar = { path = "crates/alt-tar" }
 alt-testutil = { path = "crates/alt-testutil" }
 
 clap = { version = "4", features = ["derive"] }
