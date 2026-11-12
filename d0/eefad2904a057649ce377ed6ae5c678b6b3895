@@ -1,0 +1,21 @@
+schema: alt-meta/1
+type: feat
+summary: convert international host names to ASCII in alt-url
+author-type: human
+author: doracawl
+touched: crates/alt-url/LICENSE-UNICODE.md
+touched: crates/alt-url/examples/parse_speed.rs
+touched: crates/alt-url/src/error.rs
+touched: crates/alt-url/src/host.rs
+touched: crates/alt-url/src/idna.rs
+touched: crates/alt-url/src/idna/nfc.rs
+touched: crates/alt-url/src/idna/punycode.rs
+touched: crates/alt-url/src/idna/tables.rs
+touched: crates/alt-url/src/idna/validate.rs
+touched: crates/alt-url/src/lib.rs
+touched: crates/alt-url/tests/data/README.md
+touched: crates/alt-url/tests/data/idna-test-v2.txt
+touched: crates/alt-url/tests/it/idna.rs
+touched: crates/alt-url/tests/it/main.rs
+touched: crates/alt-url/tests/it/origins.rs
+touched: crates/alt-url/tests/it/wpt.rs
