@@ -1,0 +1,18 @@
+schema: alt-meta/1
+type: fix
+summary: plan statements whose cost follows their parameters for those values
+author-type: human
+author: doracawl
+touched: crates/alt-pg/src/client.rs
+touched: crates/alt-pg/src/link.rs
+touched: crates/alt-pg/src/transaction.rs
+touched: crates/alt-pg/src/wire.rs
+touched: crates/alt-pg/tests/it/cache.rs
+touched: crates/alt-server-store/src/database.rs
+touched: crates/alt-server-store/src/gc.rs
+touched: crates/alt-server-store/src/lib.rs
+touched: crates/alt-server-store/src/pack_native.rs
+touched: crates/alt-server-store/src/pack_view.rs
+touched: crates/alt-server-store/src/portable/capture.rs
+touched: crates/alt-server-store/tests/it/database.rs
+touched: crates/alt-server-store/tests/it/database/pack_view.rs
