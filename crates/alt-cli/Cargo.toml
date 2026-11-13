@@ -62,7 +62,7 @@ alt-worktree.workspace = true
 alt-base64.workspace = true
 alt-bytes.workspace = true
 alt-args.workspace = true
-encoding_rs.workspace = true
+torajs-encoding.workspace = true
 alt-json.workspace = true
 alt-json-serde.workspace = true
 

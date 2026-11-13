@@ -16,14 +16,11 @@ fn reencode(data: &[u8]) -> Cow<'_, [u8]> {
     if enc.eq_ignore_ascii_case(b"utf-8") || enc.eq_ignore_ascii_case(b"utf8") {
         return Cow::Owned(strip_encoding_header(data));
     }
-    let Some(encoding) = encoding_rs::Encoding::for_label(enc) else {
-        return Cow::Borrowed(data); // unknown charset: keep as-is, like git
-    };
-    let (converted, _, had_errors) = encoding.decode(data);
-    if had_errors {
-        return Cow::Borrowed(data);
+    // unknown charset or undecodable bytes: keep as-is, like git
+    match crate::charset::decode(enc, data) {
+        Some(converted) => Cow::Owned(strip_encoding_header(&converted)),
+        None => Cow::Borrowed(data),
     }
-    Cow::Owned(strip_encoding_header(converted.as_bytes()))
 }
 
 /// The value of a top-level `encoding` header, if any.

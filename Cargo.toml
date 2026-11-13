@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "vendor/golia-platform-contract", "vendor/golia-change-link", "vendor/golia-change-link-http"]
+members = ["crates/*", "vendor/golia-platform-contract", "vendor/golia-change-link", "vendor/golia-change-link-http", "vendor/torajs-encoding"]
 
 [workspace.package]
 version = "0.1.0"
@@ -78,7 +78,7 @@ alt-testutil = { path = "crates/alt-testutil" }
 
 criterion = "0.5"
 ed25519-dalek = { version = "2", default-features = false, features = ["std", "rand_core"] }
-encoding_rs = "0.8"
+torajs-encoding = { path = "vendor/torajs-encoding", version = "=0.1.0" }
 syn = { version = "2", features = ["full", "extra-traits"] }
 proc-macro2 = "1"
 ureq = { version = "2", default-features = false, features = ["tls"] }

@@ -5,6 +5,7 @@
 
 pub mod auth;
 pub mod blame;
+pub mod charset;
 pub mod ci;
 pub mod cli;
 pub mod client;
