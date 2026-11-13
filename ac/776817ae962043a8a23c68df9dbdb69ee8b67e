@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: chore
+summary: update vendored torajs-encoding
+author-type: human
+author: doracawl
+touched: vendor/torajs-encoding/README.md
+touched: vendor/torajs-encoding/src/big5.rs
+touched: vendor/torajs-encoding/src/cjk_index.rs
+touched: vendor/torajs-encoding/src/euc_jp.rs
+touched: vendor/torajs-encoding/src/euc_kr.rs
+touched: vendor/torajs-encoding/src/gb18030.rs
+touched: vendor/torajs-encoding/src/lead.rs
+touched: vendor/torajs-encoding/src/shift_jis.rs
+touched: vendor/torajs-encoding/src/sink.rs
