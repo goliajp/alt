@@ -1,0 +1,24 @@
+schema: alt-meta/1
+type: refactor
+summary: dispatch alt-server requests through an axum router
+author-type: human
+author: doracawl
+touched: Cargo.lock
+touched: crates/alt-server/Cargo.toml
+touched: crates/alt-server/src/http.rs
+touched: crates/alt-server/src/http/body.rs
+touched: crates/alt-server/src/http/connection.rs
+touched: crates/alt-server/src/http/device.rs
+touched: crates/alt-server/src/http/handle.rs
+touched: crates/alt-server/src/http/observation.rs
+touched: crates/alt-server/src/http/provision.rs
+touched: crates/alt-server/src/http/respond.rs
+touched: crates/alt-server/src/http/routes.rs
+touched: crates/alt-server/src/http/web.rs
+touched: crates/alt-server/src/http/web/cloud_login.rs
+touched: crates/alt-server/src/http/web/execute.rs
+touched: crates/alt-server/tests/it/database.rs
+touched: crates/alt-server/tests/it/database/dispatch.rs
+touched: crates/alt-server/tests/it/database/dispatch/cases.rs
+touched: crates/alt-server/tests/it/fixtures/http-dispatch.txt
+touched: scripts/gate.sh
