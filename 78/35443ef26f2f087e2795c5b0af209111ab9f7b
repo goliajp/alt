@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: refactor
+summary: decode legacy commit encodings with torajs-encoding
+author-type: human
+author: doracawl
+touched: Cargo.lock
+touched: Cargo.toml
+touched: crates/alt-cli/Cargo.toml
+touched: crates/alt-cli/src/charset.rs
+touched: crates/alt-cli/src/lib.rs
+touched: crates/alt-cli/src/log_cmd.rs
+touched: crates/alt-cli/tests/fixtures/charset/decode.txt
+touched: crates/alt-cli/tests/it/charset.rs
+touched: crates/alt-cli/tests/it/main.rs
