@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: disable sequential scans on server database connections
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/http.rs
+touched: crates/alt-server/tests/it/database/connections.rs
