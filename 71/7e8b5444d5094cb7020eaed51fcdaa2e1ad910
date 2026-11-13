@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: keep server database connections on cached generic plans
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/http.rs
