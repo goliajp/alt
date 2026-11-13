@@ -11,13 +11,15 @@ use crate::lead::{NO_COLUMN, Pair, Single, columns, lead_decoder};
 
 lead_decoder! {
     /// The decoder's state between chunks: Big5 leading.
-    Big5Decoder, is_lead, single, pair
+    Big5Decoder, is_lead, single, pair3, pair
 }
 
+#[inline(always)]
 fn is_lead(b: u8) -> bool {
     (0x81..=0xFE).contains(&b)
 }
 
+#[inline(always)]
 fn single(b: u8) -> Single {
     match b {
         0x00..=0x7F => Single::Char(char::from(b)),
@@ -28,6 +30,33 @@ fn single(b: u8) -> Single {
 /// The trailing bytes' columns, 157 to a row.
 static COLUMNS: [u8; 256] = columns(&[(0x40, 0x7E), (0xA1, 0xFE)]);
 
+/// `COLUMNS` as offsets that, added to a leading byte times 157, give
+/// the index into the stored entries: wrapping below the first pointer,
+/// and past every entry for a byte that cannot trail.
+static OFFSETS: [u16; 256] = {
+    let mut table = [u16::MAX; 256];
+    let mut b = 0;
+    while b < 256 {
+        if COLUMNS[b] != NO_COLUMN {
+            table[b] = (COLUMNS[b] as u16).wrapping_sub(0x81 * 157 + cjk_index::big5::FIRST as u16);
+        }
+        b += 1;
+    }
+    table
+};
+
+#[inline(always)]
+fn pair3(leading: u8, b: u8) -> u32 {
+    let at = (u32::from(leading) * 157 + u32::from(OFFSETS[usize::from(b)])) & 0xFFFF;
+    match cjk_index::big5::CODE_POINTS.get(at as usize) {
+        // a surrogate stands for a plane 2 entry
+        Some(&unit @ 0x800..) if unit & 0xF800 != 0xD800 => u32::from(unit),
+        _ => 0,
+    }
+}
+
+#[cold]
+#[inline(never)]
 fn pair(leading: u8, b: u8) -> Pair {
     let column = COLUMNS[usize::from(b)];
     if column == NO_COLUMN {
@@ -99,6 +128,24 @@ mod tests {
         assert_eq!(whole(b"\xA4\xFF", false), Ok("\u{FFFD}".into()));
         assert_eq!(whole(b"\xA4", false), Ok("\u{FFFD}".into()));
         assert_eq!(whole(b"\xA4", true), Err(DecodeError));
+    }
+
+    #[test]
+    fn the_longest_outputs_fit_the_room_reserved() {
+        // three bytes per byte and four per pair; the sink asserts every
+        // store fits in a debug build
+        let len = |input: &[u8], fatal| whole(input, fatal).map(|s| s.len());
+        assert_eq!(len(&[0xFF; 64], false), Ok(192));
+        assert_eq!(len(&b"\x88\x62".repeat(32), true), Ok(128));
+        assert_eq!(len(&b"\xA4\x7F".repeat(32), false), Ok(128));
+        assert_eq!(len(&b"\x87\x61".repeat(32), true), Ok(128));
+        // a carried leading byte's trail writes four, then three per byte
+        let mut chunk = Vec::from([0x62]);
+        chunk.extend([0xFF; 15]);
+        let mut d = Big5Decoder::from_bytes([0x88, 0, 0, 0]);
+        let mut out = Vec::new();
+        d.decode(&chunk, true, false, &mut out).expect("not fatal");
+        assert_eq!(out.len(), 4 + 3 * 15);
     }
 
     #[test]

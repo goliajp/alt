@@ -29,6 +29,10 @@ pub(crate) trait Bytes {
     /// What `b`, a byte that does not lead, decodes to without a
     /// leading byte before it.
     fn single(b: u8) -> Single;
+    /// The code point the leading byte `leading` and the byte `b`
+    /// decode to when it is one of U+0800 to U+FFFF, as most are; 0 for
+    /// any other answer, which [`Bytes::pair`] gives.
+    fn pair3(leading: u8, b: u8) -> u32;
     /// What the leading byte `leading` and the byte `b` decode to.
     fn pair(leading: u8, b: u8) -> Pair;
 }
@@ -45,7 +49,15 @@ pub(crate) fn decode<B: Bytes>(
     out: &mut Vec<u8>,
 ) -> Result<(), DecodeError> {
     let (is_lead, single, pair) = (B::is_lead, B::single, B::pair);
-    let mut s = Sink::new(out, input.len() + input.len() / 2);
+    // Room stays at least 7 bytes past 3 per unread byte: a step counts
+    // at most 3 bytes per byte it reads (a pair at most 4 for 2, an error
+    // and its restored ASCII trail 4 for 2), but for a carried leading
+    // byte's trail, up to 4 for 1, hence 8 up front. A store writes at
+    // most 4 bytes for a char or 3 for U+FFFD, and the bytes an ASCII
+    // word store writes past its count lie over unread bytes; the end's
+    // U+FFFD takes 3 of the 7.
+    let mut s = Sink::fixed(out, input.len().saturating_mul(3).saturating_add(8));
+    let n = input.len();
     let mut i = 0;
     if *lead != 0
         && let Some(&b) = input.first()
@@ -53,23 +65,23 @@ pub(crate) fn decode<B: Bytes>(
         finish(&mut s, pair(core::mem::take(lead), b), b, fatal)?;
         i = 1;
     }
-    loop {
-        if let Some(&[b, next]) = input.get(i..i + 2)
-            && is_lead(b)
-        {
-            i += 2;
-            finish(&mut s, pair(b, next), next, fatal)?;
-            continue;
-        }
-        let Some(&b) = input.get(i) else {
-            break;
-        };
-        if is_lead(b) {
-            *lead = b;
-            break;
-        }
+    while i < n {
+        let b = input[i];
         if b.is_ascii() {
             i = s.ascii_from::<LONE>(input, i, b);
+            continue;
+        }
+        if is_lead(b) {
+            if i + 1 == n {
+                *lead = b;
+                break;
+            }
+            let next = input[i + 1];
+            i += 2;
+            match B::pair3(b, next) {
+                0 => finish(&mut s, pair(b, next), next, fatal)?,
+                cp => s.three(cp),
+            }
             continue;
         }
         i += 1;
@@ -87,7 +99,7 @@ pub(crate) fn decode<B: Bytes>(
 
 /// Write what a leading byte and the byte `b` after it decoded to.
 #[inline(always)]
-fn finish(s: &mut Sink<'_>, decoded: Pair, b: u8, fatal: bool) -> Result<(), DecodeError> {
+fn finish(s: &mut Sink<'_, true>, decoded: Pair, b: u8, fatal: bool) -> Result<(), DecodeError> {
     match decoded {
         Some((c, second)) => {
             s.char(c);
@@ -130,7 +142,7 @@ pub(crate) const NO_COLUMN: u8 = 0xFF;
 
 /// A decoder whose whole state is one leading byte.
 macro_rules! lead_decoder {
-    ($(#[$doc:meta])* $name:ident, $is_lead:path, $single:path, $pair:path) => {
+    ($(#[$doc:meta])* $name:ident, $is_lead:path, $single:path, $pair3:path, $pair:path) => {
         $(#[$doc])*
         #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
         pub struct $name {
@@ -177,6 +189,11 @@ macro_rules! lead_decoder {
             #[inline(always)]
             fn single(b: u8) -> crate::lead::Single {
                 $single(b)
+            }
+
+            #[inline(always)]
+            fn pair3(leading: u8, b: u8) -> u32 {
+                $pair3(leading, b)
             }
 
             #[inline(always)]

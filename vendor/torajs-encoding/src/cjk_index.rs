@@ -13,7 +13,8 @@ pub(crate) mod jis0208;
 pub(crate) mod jis0212;
 
 /// The index code point (§5) of `pointer` in a BMP index stored from
-/// pointer `first` on.
+/// pointer `first` on. `code_points` is one of the generated index
+/// tables, which hold no surrogate.
 #[inline(always)]
 pub(crate) fn bmp(code_points: &[u16], first: usize, pointer: usize) -> Option<char> {
     match *code_points.get(pointer.checked_sub(first)?)? {

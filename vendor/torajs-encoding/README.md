@@ -33,6 +33,6 @@ at your option.
 ## Source
 
 Copied from `crates/torajs-encoding` of https://github.com/goliajp/torajs at
-commit `c4f101448a338768eeb5d90b3a46a223c21326e2`. `src/`, `tools/` and the
+commit `364abddc9725dd963a694427e60f4fafa2ec2f2a`. `src/`, `tools/` and the
 license files are unmodified; `Cargo.toml` states the values the original
 inherits from its workspace.

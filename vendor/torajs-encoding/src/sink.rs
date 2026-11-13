@@ -14,15 +14,16 @@ pub(crate) const HIGH: u64 = 0x8080_8080_8080_8080;
 pub(crate) const LONE: usize = 1;
 
 /// Appends to `out`: `ptr` and `cap` are its buffer and capacity, `len`
-/// its length as far as written.
-pub(crate) struct Sink<'a> {
+/// its length as far as written. A `FIXED` sink reserved room for its
+/// whole output up front and checks none on a push.
+pub(crate) struct Sink<'a, const FIXED: bool = false> {
     out: &'a mut Vec<u8>,
     ptr: *mut u8,
     cap: usize,
     len: usize,
 }
 
-impl Drop for Sink<'_> {
+impl<const FIXED: bool> Drop for Sink<'_, FIXED> {
     fn drop(&mut self) {
         // SAFETY: every byte below `len` was written by a push, each of
         // which made room for itself first
@@ -34,7 +35,22 @@ impl<'a> Sink<'a> {
     /// A sink appending to `out`, with room for `expect` bytes reserved
     /// up front.
     pub(crate) fn new(out: &'a mut Vec<u8>, expect: usize) -> Self {
-        out.reserve(expect);
+        Self::reserved(out, expect)
+    }
+}
+
+impl<'a> Sink<'a, true> {
+    /// A sink appending to `out` with room for `most` bytes, which no
+    /// sequence of pushes may exceed, counting the bytes a push writes
+    /// past what it counts.
+    pub(crate) fn fixed(out: &'a mut Vec<u8>, most: usize) -> Self {
+        Self::reserved(out, most)
+    }
+}
+
+impl<'a, const FIXED: bool> Sink<'a, FIXED> {
+    fn reserved(out: &'a mut Vec<u8>, n: usize) -> Self {
+        out.reserve(n);
         Sink {
             ptr: out.as_mut_ptr(),
             cap: out.capacity(),
@@ -46,7 +62,10 @@ impl<'a> Sink<'a> {
     /// Room for `n` more bytes.
     #[inline(always)]
     fn room(&mut self, n: usize) {
-        if self.cap - self.len < n {
+        if FIXED {
+            // the constructor's caller bounded every push sequence
+            debug_assert!(self.cap - self.len >= n, "a fixed sink overflowed");
+        } else if self.cap - self.len < n {
             (self.ptr, self.cap) = grow(self.out, self.len, n);
         }
     }
@@ -69,7 +88,8 @@ impl<'a> Sink<'a> {
     fn put<const N: usize>(&mut self, bytes: [u8; N], n: usize) {
         debug_assert!(n <= N);
         self.room(N);
-        // SAFETY: `room` left at least N bytes of capacity past `len`
+        // SAFETY: `room` left at least N bytes of capacity past `len`, or
+        // for a fixed sink its caller's bound did
         unsafe {
             let at = self.ptr.add(self.len);
             core::ptr::copy_nonoverlapping(bytes.as_ptr(), at, N);
@@ -108,6 +128,19 @@ impl<'a> Sink<'a> {
             ];
             self.put(b, 4);
         }
+    }
+
+    /// Append `cp`, U+0800 to U+FFFF and no surrogate, in UTF-8.
+    #[inline(always)]
+    pub(crate) fn three(&mut self, cp: u32) {
+        debug_assert!((0x800..0x1_0000).contains(&cp) && char::from_u32(cp).is_some());
+        let b = [
+            0xE0 | (cp >> 12) as u8,
+            0x80 | ((cp >> 6) & 0x3F) as u8,
+            0x80 | (cp & 0x3F) as u8,
+            0,
+        ];
+        self.put(b, 3);
     }
 
     /// Append `cp`, U+0080 to U+FFFF, in UTF-8.

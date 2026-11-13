@@ -11,7 +11,7 @@ use crate::lead::{NO_COLUMN, Pair, Single, columns, lead_decoder};
 
 lead_decoder! {
     /// The decoder's state between chunks: Shift_JIS leading.
-    ShiftJisDecoder, is_lead, single, pair
+    ShiftJisDecoder, is_lead, single, pair3, pair
 }
 
 /// The leading bytes' rows, then the trailing bytes' columns, 188 to a
@@ -19,10 +19,12 @@ lead_decoder! {
 static ROWS: [u8; 256] = columns(&[(0x81, 0x9F), (0xE0, 0xFC)]);
 static COLUMNS: [u8; 256] = columns(&[(0x40, 0x7E), (0x80, 0xFC)]);
 
+#[inline(always)]
 fn is_lead(b: u8) -> bool {
     ROWS[usize::from(b)] != NO_COLUMN
 }
 
+#[inline(always)]
 fn single(b: u8) -> Single {
     match b {
         0x00..=0x80 => Single::Char(char::from(b)),
@@ -34,6 +36,23 @@ fn single(b: u8) -> Single {
     }
 }
 
+#[inline(always)]
+fn pair3(leading: u8, b: u8) -> u32 {
+    let column = COLUMNS[usize::from(b)];
+    if column == NO_COLUMN {
+        return 0;
+    }
+    let pointer = usize::from(ROWS[usize::from(leading)]) * 188 + usize::from(column);
+    // no entry is a surrogate, and 0 marks none
+    const { assert!(cjk_index::jis0208::FIRST == 0) };
+    match cjk_index::jis0208::CODE_POINTS.get(pointer) {
+        Some(&unit @ 0x800..) => u32::from(unit),
+        _ => 0,
+    }
+}
+
+#[cold]
+#[inline(never)]
 fn pair(leading: u8, b: u8) -> Pair {
     let column = COLUMNS[usize::from(b)];
     if column == NO_COLUMN {

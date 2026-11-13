@@ -11,13 +11,15 @@ use crate::lead::{Pair, Single, lead_decoder};
 
 lead_decoder! {
     /// The decoder's state between chunks: EUC-KR leading.
-    EucKrDecoder, is_lead, single, pair
+    EucKrDecoder, is_lead, single, pair3, pair
 }
 
+#[inline(always)]
 fn is_lead(b: u8) -> bool {
     (0x81..=0xFE).contains(&b)
 }
 
+#[inline(always)]
 fn single(b: u8) -> Single {
     match b {
         0x00..=0x7F => Single::Char(char::from(b)),
@@ -25,6 +27,22 @@ fn single(b: u8) -> Single {
     }
 }
 
+#[inline(always)]
+fn pair3(leading: u8, b: u8) -> u32 {
+    if !(0x41..=0xFE).contains(&b) {
+        return 0;
+    }
+    let pointer = usize::from(leading - 0x81) * 190 + usize::from(b - 0x41);
+    // no entry is a surrogate, and 0 marks none
+    const { assert!(euc_kr::FIRST == 0) };
+    match euc_kr::CODE_POINTS.get(pointer) {
+        Some(&unit @ 0x800..) => u32::from(unit),
+        _ => 0,
+    }
+}
+
+#[cold]
+#[inline(never)]
 fn pair(leading: u8, b: u8) -> Pair {
     if !(0x41..=0xFE).contains(&b) {
         return None;

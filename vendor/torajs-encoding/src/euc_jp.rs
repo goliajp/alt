@@ -53,27 +53,32 @@ impl EucJpDecoder {
         out: &mut Vec<u8>,
     ) -> Result<(), DecodeError> {
         let mut s = Sink::new(out, input.len() + input.len() / 2);
+        let n = input.len();
         let mut i = 0;
         loop {
             if self.lead == 0 {
-                if let Some(&b) = input.get(i)
-                    && b.is_ascii()
-                {
-                    i = s.ascii_from::<LONE>(input, i, b);
-                    continue;
-                }
-                // a jis0208 pair with an entry, in one step
-                if let Some(&[leading @ 0xA1..=0xFE, b @ 0xA1..=0xFE]) = input.get(i..i + 2)
-                    && let Some(c) = jis0208_pair(leading, b)
-                {
-                    s.char(c);
-                    i += 2;
-                    continue;
+                while i < n {
+                    let b = input[i];
+                    if b.is_ascii() {
+                        i = s.ascii_from::<LONE>(input, i, b);
+                        continue;
+                    }
+                    // a jis0208 pair with an entry, in one step
+                    if i + 1 < n
+                        && let (leading @ 0xA1..=0xFE, b @ 0xA1..=0xFE) = (b, input[i + 1])
+                        && let cp @ 1.. = jis0208_pair3(leading, b)
+                    {
+                        s.three(cp);
+                        i += 2;
+                        continue;
+                    }
+                    break;
                 }
             }
-            let Some(&b) = input.get(i) else {
+            if i == n {
                 break;
-            };
+            }
+            let b = input[i];
             i += 1;
             s.with_vec(|out| self.byte(b, fatal, out))?;
         }
@@ -133,10 +138,17 @@ impl EucJpDecoder {
     }
 }
 
-/// The jis0208 code point of the pair `leading`, `b`, both 0xA1 to 0xFE.
+/// The jis0208 code point of the pair `leading`, `b`, both 0xA1 to
+/// 0xFE, when it is U+0800 or past, else 0.
 #[inline(always)]
-fn jis0208_pair(leading: u8, b: u8) -> Option<char> {
-    cjk_index::jis0208(usize::from(leading - 0xA1) * 94 + usize::from(b - 0xA1))
+fn jis0208_pair3(leading: u8, b: u8) -> u32 {
+    let pointer = usize::from(leading - 0xA1) * 94 + usize::from(b - 0xA1);
+    // no entry is a surrogate, and 0 marks none
+    const { assert!(cjk_index::jis0208::FIRST == 0) };
+    match cjk_index::jis0208::CODE_POINTS.get(pointer) {
+        Some(&unit @ 0x800..) => u32::from(unit),
+        _ => 0,
+    }
 }
 
 #[cfg(test)]

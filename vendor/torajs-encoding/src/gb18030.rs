@@ -61,27 +61,32 @@ impl Gb18030Decoder {
         out: &mut Vec<u8>,
     ) -> Result<(), DecodeError> {
         let mut s = Sink::new(out, input.len() + input.len() / 2);
+        let n = input.len();
         let mut i = 0;
         loop {
             if *self == Gb18030Decoder::default() {
-                if let Some(&b) = input.get(i)
-                    && b.is_ascii()
-                {
-                    i = s.ascii_from::<LONE>(input, i, b);
-                    continue;
-                }
-                // a two-byte sequence with an entry, in one step
-                if let Some(&[leading @ 0x81..=0xFE, b]) = input.get(i..i + 2)
-                    && let Some(c) = two_byte(leading, b)
-                {
-                    s.char(c);
-                    i += 2;
-                    continue;
+                while i < n {
+                    let b = input[i];
+                    if b.is_ascii() {
+                        i = s.ascii_from::<LONE>(input, i, b);
+                        continue;
+                    }
+                    // a two-byte sequence with an entry, in one step
+                    if i + 1 < n
+                        && (0x81..=0xFE).contains(&b)
+                        && let cp @ 1.. = two_byte3(b, input[i + 1])
+                    {
+                        s.three(cp);
+                        i += 2;
+                        continue;
+                    }
+                    break;
                 }
             }
-            let Some(&b) = input.get(i) else {
+            if i == n {
                 break;
-            };
+            }
+            let b = input[i];
             i += 1;
             s.with_vec(|out| self.byte(b, fatal, out))?;
         }
@@ -157,8 +162,24 @@ impl Gb18030Decoder {
     }
 }
 
-/// The code point of the two-byte sequence `leading` (0x81 to 0xFE), `b`.
+/// The code point of the two-byte sequence `leading` (0x81 to 0xFE),
+/// `b` when it is U+0800 or past, else 0.
 #[inline(always)]
+fn two_byte3(leading: u8, b: u8) -> u32 {
+    let offset = if b < 0x7F { 0x40 } else { 0x41 };
+    if !matches!(b, 0x40..=0x7E | 0x80..=0xFE) {
+        return 0;
+    }
+    let pointer = usize::from(leading - 0x81) * 190 + usize::from(b - offset);
+    // no entry is a surrogate, and 0 marks none
+    const { assert!(gb18030::FIRST == 0) };
+    match gb18030::CODE_POINTS.get(pointer) {
+        Some(&unit @ 0x800..) => u32::from(unit),
+        _ => 0,
+    }
+}
+
+/// The code point of the two-byte sequence `leading` (0x81 to 0xFE), `b`.
 fn two_byte(leading: u8, b: u8) -> Option<char> {
     let offset = if b < 0x7F { 0x40 } else { 0x41 };
     if !matches!(b, 0x40..=0x7E | 0x80..=0xFE) {
