@@ -62,8 +62,10 @@ impl StoreFactory {
         if timeout == 0 || timeout > 300_000 {
             return Err(Error::Limit("database statement timeout"));
         }
+        // a plan cached while a table is one page scans it sequentially and stays
+        // in use as the table grows, until statistics are collected again
         client.batch_execute(&format!(
-            "SET statement_timeout = {timeout}; SET lock_timeout = {timeout}"
+            "SET statement_timeout = {timeout}; SET lock_timeout = {timeout}; SET enable_seqscan = off"
         ))?;
         let mut store = Store::open(
             client,
