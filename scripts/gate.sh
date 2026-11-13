@@ -108,7 +108,7 @@ scoped_cargo() {
 # embedding crate anywhere in the dependency graph, and the only crates
 # allowed an HTTP dependency are the protocol transports (git wire, LFS,
 # authenticated server, fixed-origin Cloud client and paired change-link
-# transport). The server uses hyper for ingress; the Cloud adapter owns
+# transport). The server uses axum over hyper for ingress; the Cloud adapter owns
 # platform HTTP and golia-change-link-http owns peer delivery. Domain/store and public
 # contract crates remain isolated. A
 # future LLM integration lives in its own opt-in crate, `alt-llm-bridge`,
@@ -116,7 +116,7 @@ scoped_cargo() {
 LLM_CRATES='async-openai openai openai-api-rs anthropic anthropic-sdk
 misanthropy tiktoken-rs tokenizers llm llm-chain ollama-rs rust-bert
 candle-core candle-transformers ort fastembed genai langchain-rust'
-HTTP_CRATES='reqwest hyper ureq isahc surf attohttpc curl awc'
+HTTP_CRATES='reqwest hyper axum ureq isahc surf attohttpc curl awc'
 HTTP_OWNERS='alt-wire-http alt-lfs alt-server alt-cloud-client golia-change-link-http alt-llm-bridge'
 LLM_SOURCE='\b(openai|anthropic|claude|gemini|cohere|mistral|ollama|tiktoken|huggingface)\b|\bllm_|\buse llm\b|api\.openai\.com|api\.anthropic\.com|generativelanguage\.googleapis\.com'
 

@@ -31,8 +31,9 @@ alt-json-serde.workspace = true
 alt-pg.workspace = true
 alt-crypto.workspace = true
 ed25519-dalek.workspace = true
+axum = {version="0.8",default-features=false,features=["tokio"]}
 hyper = {version="1",features=["server","http1"]}
-hyper-util = {version="0.1",features=["tokio"]}
+hyper-util = {version="0.1",features=["tokio","service"]}
 http-body-util = "0.1"
 bytes = "1"
 tokio = {version="1",features=["rt-multi-thread","net","time","sync","macros","signal","io-util","fs"]}

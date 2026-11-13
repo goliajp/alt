@@ -12,21 +12,12 @@ fn unavailable() -> Response<ResponseBody> {
         Retry::SameRequest,
     )
 }
-pub(super) async fn handle(
-    request: Request<Incoming>,
-    state: Arc<State>,
-) -> Response<ResponseBody> {
+pub(super) async fn handle(request: Request, state: Arc<App>) -> Response<ResponseBody> {
     let Some(cloud) = state.factory.cloud.clone() else {
-        return failure(
-            404,
-            ErrorCode::InvalidRequest,
-            "Unknown endpoint",
-            None,
-            Retry::Never,
-        );
+        return unknown();
     };
     let headers = request.headers();
-    if request.method() != hyper::Method::POST
+    if request.method() != Method::POST
         || request.uri().query().is_some()
         || [header::COOKIE, header::ORIGIN, header::CONTENT_ENCODING]
             .iter()

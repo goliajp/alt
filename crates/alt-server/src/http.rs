@@ -1,4 +1,5 @@
 mod body;
+mod connection;
 mod device;
 mod encoding;
 mod file_body;
@@ -16,28 +17,27 @@ pub(crate) fn spawn_observed<T: Send + 'static>(
 mod pool;
 mod provision;
 mod respond;
+mod routes;
 mod web;
 use crate::{NativeOptions, Output, RequestAction, Route, execute_native, parse_route};
 use alt_remote_protocol::{ErrorCode, Failure, Limits, RequestKey, Retry};
 use alt_server_store::{ByteStore, Error, InstanceSpec, Store};
+use axum::{
+    body::Body,
+    extract::Request,
+    http::{HeaderMap, Method, Response, header},
+};
 use body::{BodyError, spool};
 use bytes::Bytes;
-use handle::handle;
-use http_body_util::{BodyExt, Full, combinators::UnsyncBoxBody};
-use hyper::{Request, Response, body::Incoming, header, server::conn::http1, service::service_fn};
-use hyper_util::rt::{TokioIo, TokioTimer};
-use respond::{failure, full, render_output, response, store_failure};
+use http_body_util::{BodyExt, Full};
+use respond::{ResponseBody, failure, full, render_output, response, store_failure, unknown};
 use std::{
-    convert::Infallible,
     io::{Seek, SeekFrom},
     sync::Arc,
     time::Duration,
 };
 use tokio::{io::AsyncWriteExt, net::TcpListener, sync::Semaphore};
 pub use web::WebOptions;
-
-type BoxError = Box<dyn std::error::Error + Send + Sync>;
-type ResponseBody = UnsyncBoxBody<Bytes, BoxError>;
 
 /// Persisted instance identity is required in every mode. Opening never calls
 /// initialization or local bootstrap when configuration/authorization is absent.
@@ -119,7 +119,7 @@ pub struct HttpOptions {
     pub connection_timeout: Duration,
     pub native: NativeOptions,
 }
-struct State {
+struct App {
     metrics: Arc<alt_server_telemetry::Metrics>,
     compaction: crate::compaction::Compaction,
     factory: pool::Pool,
@@ -128,7 +128,7 @@ struct State {
     browser: Option<WebOptions>,
     passwords: Arc<Semaphore>,
 }
-pub fn authorization(headers: &hyper::HeaderMap) -> Option<String> {
+pub fn authorization(headers: &HeaderMap) -> Option<String> {
     if headers.get_all(header::AUTHORIZATION).iter().count() != 1 {
         return None;
     }
@@ -208,7 +208,7 @@ pub async fn serve_with_browser(
     }
     let mut background = tokio::task::JoinSet::new();
     let connections = Arc::new(Semaphore::new(options.connections));
-    let state = Arc::new(State {
+    let state = Arc::new(App {
         metrics: alt_server_telemetry::Metrics::new(alt_server_telemetry::process_log_losses())
             .map_err(|_| std::io::Error::other("metrics initialization unavailable"))?,
         compaction: crate::compaction::Compaction::start(factory.clone()),
@@ -224,6 +224,7 @@ pub async fn serve_with_browser(
             state.metrics.clone(),
         ));
     }
+    let router = routes::router(state.clone());
     tokio::pin!(shutdown);
     loop {
         let (socket, peer) = tokio::select! {
@@ -242,25 +243,10 @@ pub async fn serve_with_browser(
         if socket.set_nodelay(true).is_err() {
             continue;
         }
-        let state = state.clone();
+        let (state, router) = (state.clone(), router.clone());
         tokio::spawn(async move {
             let _permit = permit;
-            let mut builder = http1::Builder::new();
-            builder
-                .timer(TokioTimer::new())
-                .header_read_timeout(state.options.header_timeout)
-                .max_headers(state.options.headers)
-                .max_buf_size(state.options.header_bytes);
-            let lifetime = state.options.connection_timeout;
-            let service = service_fn(move |request| {
-                let state = state.clone();
-                async move { Ok::<_, Infallible>(observation::handle(request, state, peer.ip()).await) }
-            });
-            let _ = tokio::time::timeout(
-                lifetime,
-                builder.serve_connection(TokioIo::new(socket), service),
-            )
-            .await;
+            connection::serve(socket, peer, router, &state.options).await;
         });
     }
 }

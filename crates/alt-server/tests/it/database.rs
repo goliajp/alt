@@ -7,6 +7,7 @@ mod change_links;
 mod chunks;
 mod cloud;
 mod connections;
+mod dispatch;
 mod git;
 mod json;
 mod native_client;

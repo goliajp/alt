@@ -3,7 +3,7 @@
 use super::*;
 use crate::web_route::WebRoute;
 use alt_server_telemetry::Route as MetricRoute;
-use alt_server_telemetry::{Id, Method, Metrics, ResponseObservation, Trace};
+use alt_server_telemetry::{Id, Method as TraceMethod, Metrics, ResponseObservation, Trace};
 
 tokio::task_local! { static REQUEST_TRACE: Trace; }
 pub(crate) fn current() -> Option<Trace> {
@@ -53,7 +53,7 @@ fn change(trace: &Trace, route: &crate::change_links::route::ChangeRoute) {
         bind_key(trace, &key);
     }
 }
-fn native(trace: &Trace, route: &Route) {
+pub(super) fn native(trace: &Trace, route: &Route) {
     match route {
         Route::Request(key, _) => bind_key(trace, key),
         Route::Begin(scope)
@@ -89,7 +89,7 @@ pub(super) fn web(route: &WebRoute) {
         _ => (),
     }
 }
-fn category(route: &Route) -> MetricRoute {
+pub(super) fn category(route: &Route) -> MetricRoute {
     match route {
         Route::Health => MetricRoute::Health,
         Route::Metrics => MetricRoute::Metrics,
@@ -121,60 +121,27 @@ fn category(route: &Route) -> MetricRoute {
         Route::ChangeLink(_) => MetricRoute::ChangeLink,
     }
 }
-pub(super) async fn handle(
-    request: Request<Incoming>,
-    state: Arc<State>,
-    peer: std::net::IpAddr,
-) -> Response<ResponseBody> {
-    let path = request.uri().path();
-    let native_route = parse_route(
-        request.method().as_str(),
-        path,
-        request.uri().query(),
-        &state.factory.instance.installation_id,
-    );
-    let route = if path == "/cloud/runtime/v1/health" {
-        MetricRoute::Provision
-    } else if matches!(
-        path,
-        "/oauth/device/code" | "/oauth/token" | "/oauth/revoke"
-    ) {
-        MetricRoute::Device
-    } else if path == "/livez" {
-        MetricRoute::Health
-    } else if state.browser.is_some() && path.starts_with("/web/") {
-        MetricRoute::Browser
-    } else if state
-        .browser
-        .as_ref()
-        .is_some_and(|b| b.assets.get(path).is_some())
-    {
-        MetricRoute::Asset
-    } else {
-        native_route
-            .as_ref()
-            .map(category)
-            .unwrap_or(MetricRoute::Unknown)
-    };
-    let trace = Trace::start(
+pub(super) fn start(state: &App, method: &Method, route: MetricRoute) -> Trace {
+    Trace::start(
         state.metrics.clone(),
         Id::new(&state.factory.instance.installation_id).expect("validated instance identity"),
         route,
-        Method::from_http(request.method().as_str()),
-    );
-    if let Some(route) = native_route {
-        native(&trace, &route);
-    }
+        TraceMethod::from_http(method.as_str()),
+    )
+}
+/// Runs the handler inside the trace and hands its response to the transport.
+pub(super) async fn respond(
+    trace: Trace,
+    work: impl Future<Output = Response<ResponseBody>>,
+) -> Response<Body> {
     let observation = ResponseObservation::new(trace.clone());
     let trace_header =
-        hyper::header::HeaderValue::from_str(trace.id()).expect("generated trace identifier");
-    let response = REQUEST_TRACE
-        .scope(trace, super::handle(request, state, peer))
-        .await;
+        header::HeaderValue::from_str(trace.id()).expect("generated trace identifier");
+    let response = REQUEST_TRACE.scope(trace, work).await;
     let (mut parts, body) = response.into_parts();
     parts.headers.insert("x-alt-trace-id", trace_header);
     let status = parts.status.as_u16();
-    Response::from_parts(parts, observation.body(body, status).boxed_unsync())
+    Response::from_parts(parts, Body::new(observation.body(body, status)))
 }
 
 pub(super) fn metrics(

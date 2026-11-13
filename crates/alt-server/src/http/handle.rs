@@ -12,44 +12,12 @@ pub(super) fn key(route: &Route) -> Option<RequestKey> {
     }
 }
 pub(super) async fn handle(
-    request: Request<Incoming>,
-    state: Arc<State>,
-    peer: std::net::IpAddr,
+    request: Request,
+    state: Arc<App>,
+    route: Option<Route>,
 ) -> Response<ResponseBody> {
-    if request.uri().path() == "/cloud/runtime/v1/health" {
-        return provision::handle(request, state).await;
-    }
-    if matches!(
-        request.uri().path(),
-        "/oauth/device/code" | "/oauth/token" | "/oauth/revoke"
-    ) {
-        return device::handle(request, state, peer).await;
-    }
-    if request.method() == hyper::Method::GET
-        && request.uri().path() == "/livez"
-        && request.uri().query().is_none()
-    {
-        return response(200, "application/json", full("{\"alive\":true}"));
-    }
-    if state.browser.as_ref().is_some_and(|browser| {
-        request.uri().path().starts_with("/web/")
-            || browser.assets.get(request.uri().path()).is_some()
-    }) {
-        return web::handle(request, state, peer).await;
-    }
-    let Some(route) = parse_route(
-        request.method().as_str(),
-        request.uri().path(),
-        request.uri().query(),
-        &state.factory.instance.installation_id,
-    ) else {
-        return failure(
-            404,
-            ErrorCode::InvalidRequest,
-            "Unknown endpoint",
-            None,
-            Retry::Never,
-        );
+    let Some(route) = route else {
+        return unknown();
     };
     let request_key = key(&route);
     if matches!(
@@ -89,28 +57,7 @@ pub(super) async fn handle(
         }
     };
     if route == Route::Health {
-        let factory = state.factory.clone();
-        return match tokio::time::timeout(
-            state.options.work_timeout,
-            spawn_observed(Phase::Authority, move || {
-                let _permit = permit;
-                // readiness means the schema and instance rows are current right now
-                factory
-                    .open()
-                    .and_then(|mut store| store.check_connection())
-            }),
-        )
-        .await
-        {
-            Ok(Ok(Ok(()))) => response(200, "application/json", full("{\"ready\":true}")),
-            _ => failure(
-                503,
-                ErrorCode::TemporarilyUnavailable,
-                "Instance is not ready",
-                None,
-                Retry::SameRequest,
-            ),
-        };
+        return ready(&state, permit).await;
     }
     let Some(token) = authorization(request.headers()) else {
         return failure(
@@ -122,50 +69,11 @@ pub(super) async fn handle(
         );
     };
     let gzip = request.headers().contains_key(header::CONTENT_ENCODING);
-    if gzip
-        && (!matches!(route, Route::GitUpload(_))
-            || request
-                .headers()
-                .get_all(header::CONTENT_ENCODING)
-                .iter()
-                .count()
-                != 1
-            || request
-                .headers()
-                .get(header::CONTENT_ENCODING)
-                .and_then(|value| value.to_str().ok())
-                .is_none_or(|value| !value.trim().eq_ignore_ascii_case("gzip")))
-    {
+    if let Some(message) = unsupported_media(&route, request.headers(), gzip) {
         return failure(
             415,
             ErrorCode::InvalidRequest,
-            "Content encoding is not supported",
-            request_key,
-            Retry::Never,
-        );
-    }
-    if (matches!(
-        route,
-        Route::Begin(_) | Route::IssueAgent | Route::Request(_, RequestAction::Approve)
-    ) || matches!(&route, Route::Portable(p) if p.has_json_body())
-        || matches!(&route, Route::ChangeLink(p) if p.has_json_body()))
-        && (request
-            .headers()
-            .get_all(header::CONTENT_TYPE)
-            .iter()
-            .count()
-            != 1
-            || request
-                .headers()
-                .get(header::CONTENT_TYPE)
-                .and_then(|value| value.to_str().ok())
-                .and_then(|value| value.split(';').next())
-                .is_none_or(|value| !value.trim().eq_ignore_ascii_case("application/json")))
-    {
-        return failure(
-            415,
-            ErrorCode::InvalidRequest,
-            "This endpoint requires application/json",
+            message,
             request_key,
             Retry::Never,
         );
@@ -251,6 +159,58 @@ pub(super) async fn handle(
             Retry::QueryOutcome,
         ),
     }
+}
+/// readiness means the schema and instance rows are current right now
+async fn ready(state: &App, permit: tokio::sync::OwnedSemaphorePermit) -> Response<ResponseBody> {
+    let factory = state.factory.clone();
+    match tokio::time::timeout(
+        state.options.work_timeout,
+        spawn_observed(Phase::Authority, move || {
+            let _permit = permit;
+            factory
+                .open()
+                .and_then(|mut store| store.check_connection())
+        }),
+    )
+    .await
+    {
+        Ok(Ok(Ok(()))) => response(200, "application/json", full("{\"ready\":true}")),
+        _ => failure(
+            503,
+            ErrorCode::TemporarilyUnavailable,
+            "Instance is not ready",
+            None,
+            Retry::SameRequest,
+        ),
+    }
+}
+/// why the encoding or media type of the request body is refused for this route
+fn unsupported_media(route: &Route, headers: &HeaderMap, gzip: bool) -> Option<&'static str> {
+    if gzip
+        && (!matches!(route, Route::GitUpload(_))
+            || headers.get_all(header::CONTENT_ENCODING).iter().count() != 1
+            || headers
+                .get(header::CONTENT_ENCODING)
+                .and_then(|value| value.to_str().ok())
+                .is_none_or(|value| !value.trim().eq_ignore_ascii_case("gzip")))
+    {
+        return Some("Content encoding is not supported");
+    }
+    if (matches!(
+        route,
+        Route::Begin(_) | Route::IssueAgent | Route::Request(_, RequestAction::Approve)
+    ) || matches!(route, Route::Portable(p) if p.has_json_body())
+        || matches!(route, Route::ChangeLink(p) if p.has_json_body()))
+        && (headers.get_all(header::CONTENT_TYPE).iter().count() != 1
+            || headers
+                .get(header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.split(';').next())
+                .is_none_or(|value| !value.trim().eq_ignore_ascii_case("application/json")))
+    {
+        return Some("This endpoint requires application/json");
+    }
+    None
 }
 /// Authenticates the caller for the route and bounds the body it may send. A Git
 /// request gets its repository view from the same statement.

@@ -11,10 +11,7 @@ impl From<std::io::Error> for BodyError {
         Self::Storage
     }
 }
-pub(super) async fn spool(
-    body: Incoming,
-    max: u64,
-) -> Result<alt_os::temp::NamedTempFile, BodyError> {
+pub(super) async fn spool(body: Body, max: u64) -> Result<alt_os::temp::NamedTempFile, BodyError> {
     let mut guard = observation::current().map(|trace| trace.phase(Phase::Upload));
     let result = spool_inner(body, max, guard.as_mut()).await;
     if let Some(guard) = guard {
@@ -28,7 +25,7 @@ pub(super) async fn spool(
     result
 }
 pub(super) async fn spool_inner(
-    mut body: Incoming,
+    mut body: Body,
     max: u64,
     mut guard: Option<&mut alt_server_telemetry::PhaseGuard>,
 ) -> Result<alt_os::temp::NamedTempFile, BodyError> {

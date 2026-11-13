@@ -77,15 +77,15 @@ fn callback(query: Option<&str>) -> Result<(Secret, String)> {
     Ok((ticket, state))
 }
 pub(super) async fn handle(
-    request: Request<Incoming>,
-    state: Arc<State>,
+    request: Request,
+    state: Arc<App>,
     peer: IpAddr,
 ) -> Response<ResponseBody> {
     let Some(cloud) = state.factory.cloud.clone() else {
         return store_failure(Error::Unauthorized, None);
     };
     let browser = state.browser.as_ref().expect("browser dispatch").clone();
-    if request.method() != hyper::Method::GET
+    if request.method() != Method::GET
         || request.headers().contains_key(header::AUTHORIZATION)
         || request.headers().contains_key(header::CONTENT_ENCODING)
     {

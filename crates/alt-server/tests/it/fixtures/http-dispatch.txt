@@ -1,0 +1,2196 @@
+>> native | GET /livez
+HTTP/1.1 200 OK
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 14
+date: <masked>
+
+{\"alive\":true}
+
+>> native | GET /livez?x=1
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /livez?
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /livez/
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | POST /livez
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | HEAD /livez
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+
+
+>> native | GET /healthz
+HTTP/1.1 200 OK
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 14
+date: <masked>
+
+{\"ready\":true}
+
+>> native | GET /healthz?x=1
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /healthz/
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | POST /healthz
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | HEAD /healthz
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+
+
+>> native | GET /oauth/device/code
+HTTP/1.1 400 Bad Request
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+pragma: no-cache
+referrer-policy: no-referrer
+x-alt-trace-id: <masked>
+connection: close
+content-length: 27
+date: <masked>
+
+{\"error\":\"invalid_request\"}
+
+>> native | POST /oauth/token
+HTTP/1.1 400 Bad Request
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+pragma: no-cache
+referrer-policy: no-referrer
+x-alt-trace-id: <masked>
+connection: close
+content-length: 27
+date: <masked>
+
+{\"error\":\"invalid_request\"}
+
+>> native | POST /oauth/revoke?x=1
+HTTP/1.1 400 Bad Request
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+pragma: no-cache
+referrer-policy: no-referrer
+x-alt-trace-id: <masked>
+connection: close
+content-length: 27
+date: <masked>
+
+{\"error\":\"invalid_request\"}
+
+>> native | GET /oauth/token/
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /cloud/runtime/v1/health
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | POST /cloud/runtime/v1/health [Authorization: Bearer $TOKEN] body={}
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /cloud/runtime/v1/health/
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /git/repository/info/refs?service=git-upload-pack
+HTTP/1.1 401 Unauthorized
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+www-authenticate: Basic realm="alt", charset="UTF-8"
+x-alt-trace-id: <masked>
+connection: close
+content-length: 93
+date: <masked>
+
+{\"code\":\"unauthenticated\",\"message\":\"Authentication required\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /git/repository/info/refs?service=git-upload-pack [Authorization: Bearer $TOKEN]
+HTTP/1.1 409 Conflict
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 149
+date: <masked>
+
+{\"code\":\"precondition_failed\",\"message\":\"The request precondition is not satisfied; inspect its current state\",\"request\":null,\"retry\":\"same_request\"}
+
+>> native | GET /git/repository/info/refs?service=git-upload-pack [Authorization: Basic $BASIC] [Git-Protocol: version=2]
+HTTP/1.1 200 OK
+content-type: application/x-git-upload-pack-advertisement
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 139
+date: <masked>
+
+001e# service=git-upload-pack\n0000000eversion 2\n0015agent=alt-server\n0013ls-refs=unborn\n0018fetch=wait-for-done\n0017object-format=sha1\n0000
+
+>> native | GET /git/repository/info/refs?service=git-receive-pack [Authorization: Bearer $TOKEN]
+HTTP/1.1 200 OK
+content-type: application/x-git-receive-pack-advertisement
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 193
+date: <masked>
+
+001f# service=git-receive-pack\n0000009a0000000000000000000000000000000000000000 capabilities^{}\x00report-status atomic delete-refs ofs-delta side-band-64k object-format=sha1 agent=alt-server\n0000
+
+>> native | GET /git/repository/info/refs?service=git-upload-pack&x=1 [Authorization: Bearer $TOKEN]
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /git/repository/info/refs?service=git-lfs [Authorization: Bearer $TOKEN]
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /git/repository/info/refs [Authorization: Bearer $TOKEN]
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /git/repository/info/refs/?service=git-upload-pack [Authorization: Bearer $TOKEN]
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | POST /git/repository/info/refs?service=git-upload-pack [Authorization: Bearer $TOKEN]
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | HEAD /git/repository/info/refs?service=git-upload-pack [Authorization: Bearer $TOKEN]
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+
+
+>> native | GET /git/%2e%2e/info/refs?service=git-upload-pack [Authorization: Bearer $TOKEN]
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /git/reposi%74ory/info/refs?service=git-upload-pack [Authorization: Bearer $TOKEN]
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /git//info/refs?service=git-upload-pack [Authorization: Bearer $TOKEN]
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /git/other/info/refs?service=git-upload-pack [Authorization: Bearer $TOKEN]
+HTTP/1.1 403 Forbidden
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 77
+date: <masked>
+
+{\"code\":\"forbidden\",\"message\":\"Access denied\",\"request\":null,\"retry\":\"never\"}
+
+>> native | POST /git/repository/git-upload-pack body=0000
+HTTP/1.1 401 Unauthorized
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+www-authenticate: Basic realm="alt", charset="UTF-8"
+x-alt-trace-id: <masked>
+connection: close
+content-length: 93
+date: <masked>
+
+{\"code\":\"unauthenticated\",\"message\":\"Authentication required\",\"request\":null,\"retry\":\"never\"}
+
+>> native | POST /git/repository/git-upload-pack [Authorization: Bearer $TOKEN] body=0000
+HTTP/1.1 409 Conflict
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 149
+date: <masked>
+
+{\"code\":\"precondition_failed\",\"message\":\"The request precondition is not satisfied; inspect its current state\",\"request\":null,\"retry\":\"same_request\"}
+
+>> native | POST /git/repository/git-upload-pack [Authorization: Bearer $TOKEN] [Git-Protocol: version=2] body=0014command=ls-refs\n0000
+HTTP/1.1 422 Unprocessable Entity
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 123
+date: <masked>
+
+{\"code\":\"integrity_error\",\"message\":\"Selected content or dependency validation failed\",\"request\":null,\"retry\":\"new_intent\"}
+
+>> native | POST /git/repository/git-upload-pack [Authorization: Bearer $TOKEN] [Expect: 100-continue] body=0000
+HTTP/1.1 100 Continue
+
+HTTP/1.1 409 Conflict
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 149
+date: <masked>
+
+{\"code\":\"precondition_failed\",\"message\":\"The request precondition is not satisfied; inspect its current state\",\"request\":null,\"retry\":\"same_request\"}
+
+>> native | POST /git/repository/git-upload-pack [Expect: 100-continue] body=0000
+HTTP/1.1 401 Unauthorized
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+www-authenticate: Basic realm="alt", charset="UTF-8"
+x-alt-trace-id: <masked>
+connection: close
+content-length: 93
+date: <masked>
+
+{\"code\":\"unauthenticated\",\"message\":\"Authentication required\",\"request\":null,\"retry\":\"never\"}
+
+>> native | POST /git/repository/git-upload-pack [Authorization: Bearer $TOKEN] [Content-Encoding: br] body=0000
+HTTP/1.1 415 Unsupported Media Type
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 103
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Content encoding is not supported\",\"request\":null,\"retry\":\"never\"}
+
+>> native | POST /git/repository/git-upload-pack?x=1 [Authorization: Bearer $TOKEN] body=0000
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /git/repository/git-upload-pack [Authorization: Bearer $TOKEN]
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | POST /git/repository/git-upload-pack/ [Authorization: Bearer $TOKEN] body=0000
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | POST /git/repository/git-receive-pack body=0000
+HTTP/1.1 401 Unauthorized
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+www-authenticate: Basic realm="alt", charset="UTF-8"
+x-alt-trace-id: <masked>
+connection: close
+content-length: 93
+date: <masked>
+
+{\"code\":\"unauthenticated\",\"message\":\"Authentication required\",\"request\":null,\"retry\":\"never\"}
+
+>> native | POST /git/repository/git-receive-pack [Authorization: Bearer $TOKEN] body=0000
+HTTP/1.1 200 OK
+content-type: application/x-git-receive-pack-result
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 0
+date: <masked>
+
+
+
+>> native | PUT /git/repository/git-receive-pack [Authorization: Bearer $TOKEN] body=0000
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /v1/capabilities
+HTTP/1.1 401 Unauthorized
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+www-authenticate: Basic realm="alt", charset="UTF-8"
+x-alt-trace-id: <masked>
+connection: close
+content-length: 93
+date: <masked>
+
+{\"code\":\"unauthenticated\",\"message\":\"Authentication required\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /v1/capabilities [Authorization: Bearer $TOKEN]
+HTTP/1.1 200 OK
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 641
+date: <masked>
+
+{\"capabilities\":{\"deployment_mode\":\"self_hosted\",\"features\":[\"git_smart_http\",\"publications\",\"task_records\",\"task_bundles_v1\",\"receipts\"],\"installation_id\":\"installation\",\"limits\":{\"chunk_bytes\":\"1000000\",\"graph_edges\":10000,\"graph_objects\":1000,\"manifest_entries\":1000,\"object_bytes\":\"10000000\",\"path_bytes\":4096,\"record_roots\":100,\"ref_updates\":100,\"request_bytes\":1000000,\"structured_bytes\":1000000,\"total_bytes\":\"100000000\",\"tree_paths\":1000,\"walk_steps\":100000},\"object_formats\":[\"sha1\"],\"protocol_max\":1,\"protocol_min\":1,\"runtime_generation\":\"1\"},\"receipt_public_key\":\"ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c\"}
+
+>> native | GET /v1/capabilities [Authorization: Basic $BASIC]
+HTTP/1.1 200 OK
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 641
+date: <masked>
+
+{\"capabilities\":{\"deployment_mode\":\"self_hosted\",\"features\":[\"git_smart_http\",\"publications\",\"task_records\",\"task_bundles_v1\",\"receipts\"],\"installation_id\":\"installation\",\"limits\":{\"chunk_bytes\":\"1000000\",\"graph_edges\":10000,\"graph_objects\":1000,\"manifest_entries\":1000,\"object_bytes\":\"10000000\",\"path_bytes\":4096,\"record_roots\":100,\"ref_updates\":100,\"request_bytes\":1000000,\"structured_bytes\":1000000,\"total_bytes\":\"100000000\",\"tree_paths\":1000,\"walk_steps\":100000},\"object_formats\":[\"sha1\"],\"protocol_max\":1,\"protocol_min\":1,\"runtime_generation\":\"1\"},\"receipt_public_key\":\"ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c\"}
+
+>> native | GET /v1/capabilities [Authorization: Bearer $TOKEN] [Authorization: Bearer $TOKEN]
+HTTP/1.1 401 Unauthorized
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+www-authenticate: Basic realm="alt", charset="UTF-8"
+x-alt-trace-id: <masked>
+connection: close
+content-length: 93
+date: <masked>
+
+{\"code\":\"unauthenticated\",\"message\":\"Authentication required\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /v1/capabilities [Authorization: Bearer alt1_short]
+HTTP/1.1 401 Unauthorized
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+www-authenticate: Basic realm="alt", charset="UTF-8"
+x-alt-trace-id: <masked>
+connection: close
+content-length: 93
+date: <masked>
+
+{\"code\":\"unauthenticated\",\"message\":\"Authentication required\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /v1/capabilities?x=1 [Authorization: Bearer $TOKEN]
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /v1/capabilities/ [Authorization: Bearer $TOKEN]
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /v1/%63apabilities [Authorization: Bearer $TOKEN]
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /v1/capabilities%2f [Authorization: Bearer $TOKEN]
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /v1\capabilities [Authorization: Bearer $TOKEN]
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET //v1/capabilities [Authorization: Bearer $TOKEN]
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | POST /v1/capabilities [Authorization: Bearer $TOKEN]
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | HEAD /v1/capabilities [Authorization: Bearer $TOKEN]
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+
+
+>> native | DELETE /v1/capabilities [Authorization: Bearer $TOKEN]
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | OPTIONS /v1/capabilities [Authorization: Bearer $TOKEN]
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /v1/capabilities [Authorization: Bearer $TOKEN] body=x
+HTTP/1.1 413 Payload Too Large
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 108
+date: <masked>
+
+{\"code\":\"quota_exceeded\",\"message\":\"Request body exceeds the selected bound\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /v1/portable/capabilities [Authorization: Bearer $TOKEN]
+HTTP/1.1 200 OK
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 319
+date: <masked>
+
+{\"bounds\":{\"blob_bytes\":\"10000000\",\"entries\":1000,\"import_ttl_ms\":\"60000\",\"metadata_bytes\":1000000,\"publications\":100,\"reads\":100000,\"total_bytes\":\"100000000\",\"work_bytes\":\"1000000000\"},\"installation_id\":\"installation\",\"receipt_public_key\":\"ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c\",\"version\":1}
+
+>> native | GET /v1/repositories/repository [Authorization: Bearer $TOKEN]
+HTTP/1.1 200 OK
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 220
+date: <masked>
+
+{\"default_branch\":\"refs/heads/main\",\"object_format\":\"sha1\",\"policy_version\":\"1\",\"refs\":{},\"revocation_generation\":\"2\",\"scope\":{\"installation_id\":\"installation\",\"recovery_epoch\":\"1\",\"repository_instance_id\":\"repository\"}}
+
+>> native | GET /v1/repositories/other [Authorization: Bearer $TOKEN]
+HTTP/1.1 403 Forbidden
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 77
+date: <masked>
+
+{\"code\":\"forbidden\",\"message\":\"Access denied\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /v1/repositories/re.pository [Authorization: Bearer $TOKEN]
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /v1/delegations [Authorization: Bearer $TOKEN]
+HTTP/1.1 200 OK
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 24
+date: <masked>
+
+{\"items\":[],\"next\":null}
+
+>> native | GET /v1/delegations?after=unknown [Authorization: Bearer $TOKEN]
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /v1/delegations [Authorization: Bearer $TOKEN] [Cookie: session=unrelated]
+HTTP/1.1 403 Forbidden
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 120
+date: <masked>
+
+{\"code\":\"forbidden\",\"message\":\"Use a terminal credential for native delegation requests\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /v1/delegations/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa [Authorization: Bearer $TOKEN]
+HTTP/1.1 403 Forbidden
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 77
+date: <masked>
+
+{\"code\":\"forbidden\",\"message\":\"Access denied\",\"request\":null,\"retry\":\"never\"}
+
+>> native | POST /v1/repositories/repository/epochs/1/requests [Authorization: Bearer $TOKEN] body={}
+HTTP/1.1 415 Unsupported Media Type
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 109
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"This endpoint requires application/json\",\"request\":null,\"retry\":\"never\"}
+
+>> native | POST /v1/repositories/repository/epochs/1/requests [Authorization: Bearer $TOKEN] [Content-Type: application/json] [Content-Type: application/json] body={}
+HTTP/1.1 415 Unsupported Media Type
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 109
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"This endpoint requires application/json\",\"request\":null,\"retry\":\"never\"}
+
+>> native | POST /v1/repositories/repository/epochs/1/requests [Authorization: Bearer $TOKEN] [Content-Type: application/json] body={}
+HTTP/1.1 400 Bad Request
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 113
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Invalid request encoding or protocol fields\",\"request\":null,\"retry\":\"never\"}
+
+>> native | POST /v1/repositories/repository/epochs/01/requests [Authorization: Bearer $TOKEN] [Content-Type: application/json] body={}
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | POST /v1/repositories/repository/epochs/0/requests [Authorization: Bearer $TOKEN] [Content-Type: application/json] body={}
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /v1/repositories/repository/epochs/1/requests/actor/request [Authorization: Bearer $TOKEN]
+HTTP/1.1 403 Forbidden
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 218
+date: <masked>
+
+{\"code\":\"forbidden\",\"message\":\"Access denied\",\"request\":{\"scope\":{\"installation_id\":\"installation\",\"repository_instance_id\":\"repository\",\"recovery_epoch\":\"1\"},\"actor_id\":\"actor\",\"request_id\":\"request\"},\"retry\":\"never\"}
+
+>> native | GET /v1/repositories/repository/epochs/1/requests/actor/request?actor=other [Authorization: Bearer $TOKEN]
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /v1/repositories/repository/epochs/1/content/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa [Authorization: Bearer $TOKEN]
+HTTP/1.1 403 Forbidden
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 77
+date: <masked>
+
+{\"code\":\"forbidden\",\"message\":\"Access denied\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /v1/repositories/repository/epochs/1/tasks/task [Authorization: Bearer $TOKEN]
+HTTP/1.1 200 OK
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 2
+date: <masked>
+
+[]
+
+>> native | POST /api/v1/change-links/inbox body={}
+HTTP/1.1 401 Unauthorized
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+www-authenticate: Basic realm="alt", charset="UTF-8"
+x-alt-trace-id: <masked>
+connection: close
+content-length: 93
+date: <masked>
+
+{\"code\":\"unauthenticated\",\"message\":\"Authentication required\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /api/v1/change-links/inbox [Authorization: Bearer $TOKEN]
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | POST /api/v1/change-links/inbox/ [Authorization: Bearer $TOKEN] body={}
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /v1
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /v1/
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /v2/capabilities
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /web/config
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /web/
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /index.html
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /v1/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa... (2048 bytes)
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET /v1/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa... (2049 bytes)
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | OPTIONS *
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | CONNECT alt.example.test:443
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | GET http://alt.example.test/livez
+HTTP/1.1 200 OK
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 14
+date: <masked>
+
+{\"alive\":true}
+
+>> native | GET /v1/capabilité
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> native | counters
+alt_http_response_bytes_total{route="capabilities"} 1669
+alt_http_response_bytes_total{route="change_link"} 93
+alt_http_response_bytes_total{route="delegation"} 221
+alt_http_response_bytes_total{route="device"} 81
+alt_http_response_bytes_total{route="git_advertise"} 651
+alt_http_response_bytes_total{route="git_receive"} 93
+alt_http_response_bytes_total{route="git_upload"} 710
+alt_http_response_bytes_total{route="health"} 300
+alt_http_response_bytes_total{route="portable"} 319
+alt_http_response_bytes_total{route="provision"} 172
+alt_http_response_bytes_total{route="repository"} 376
+alt_http_response_bytes_total{route="request"} 549
+alt_http_response_bytes_total{route="unknown"} 3956
+alt_http_responses_total{method="DELETE",route="unknown",status_class="4xx",transport="complete"} 1
+alt_http_responses_total{method="GET",route="capabilities",status_class="2xx",transport="complete"} 2
+alt_http_responses_total{method="GET",route="capabilities",status_class="4xx",transport="complete"} 4
+alt_http_responses_total{method="GET",route="delegation",status_class="2xx",transport="complete"} 1
+alt_http_responses_total{method="GET",route="delegation",status_class="4xx",transport="complete"} 2
+alt_http_responses_total{method="GET",route="device",status_class="4xx",transport="complete"} 1
+alt_http_responses_total{method="GET",route="git_advertise",status_class="2xx",transport="complete"} 2
+alt_http_responses_total{method="GET",route="git_advertise",status_class="4xx",transport="complete"} 3
+alt_http_responses_total{method="GET",route="health",status_class="2xx",transport="complete"} 3
+alt_http_responses_total{method="GET",route="health",status_class="4xx",transport="complete"} 2
+alt_http_responses_total{method="GET",route="portable",status_class="2xx",transport="complete"} 1
+alt_http_responses_total{method="GET",route="provision",status_class="4xx",transport="complete"} 1
+alt_http_responses_total{method="GET",route="repository",status_class="2xx",transport="complete"} 2
+alt_http_responses_total{method="GET",route="repository",status_class="4xx",transport="complete"} 2
+alt_http_responses_total{method="GET",route="request",status_class="4xx",transport="complete"} 1
+alt_http_responses_total{method="GET",route="unknown",status_class="4xx",transport="complete"} 33
+alt_http_responses_total{method="HEAD",route="health",status_class="4xx",transport="dropped"} 1
+alt_http_responses_total{method="HEAD",route="unknown",status_class="4xx",transport="dropped"} 3
+alt_http_responses_total{method="POST",route="change_link",status_class="4xx",transport="complete"} 1
+alt_http_responses_total{method="POST",route="device",status_class="4xx",transport="complete"} 2
+alt_http_responses_total{method="POST",route="git_receive",status_class="2xx",transport="complete"} 1
+alt_http_responses_total{method="POST",route="git_receive",status_class="4xx",transport="complete"} 1
+alt_http_responses_total{method="POST",route="git_upload",status_class="4xx",transport="complete"} 6
+alt_http_responses_total{method="POST",route="health",status_class="4xx",transport="complete"} 1
+alt_http_responses_total{method="POST",route="provision",status_class="4xx",transport="complete"} 1
+alt_http_responses_total{method="POST",route="request",status_class="4xx",transport="complete"} 3
+alt_http_responses_total{method="POST",route="unknown",status_class="4xx",transport="complete"} 8
+alt_http_responses_total{method="PUT",route="unknown",status_class="4xx",transport="complete"} 1
+alt_http_responses_total{method="other",route="unknown",status_class="4xx",transport="complete"} 3
+
+>> browser | GET /
+HTTP/1.1 200 OK
+content-type: text/html; charset=utf-8
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 33
+date: <masked>
+
+<!doctype html><title>alt</title>
+
+>> browser | GET /?x=1
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown resource\",\"request\":null,\"retry\":\"never\"}
+
+>> browser | GET /index.html
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> browser | GET /app.js
+HTTP/1.1 200 OK
+content-type: text/javascript; charset=utf-8
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 11
+date: <masked>
+
+export {};\n
+
+>> browser | GET /app.js/
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> browser | GET /app.js?x=1
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown resource\",\"request\":null,\"retry\":\"never\"}
+
+>> browser | POST /app.js
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown resource\",\"request\":null,\"retry\":\"never\"}
+
+>> browser | HEAD /
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+
+
+>> browser | HEAD /app.js
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+
+
+>> browser | GET /v1/shadow.js
+HTTP/1.1 200 OK
+content-type: text/javascript; charset=utf-8
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 7
+date: <masked>
+
+shadow\n
+
+>> browser | GET /git/repository/style.css
+HTTP/1.1 200 OK
+content-type: text/css; charset=utf-8
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 7
+date: <masked>
+
+body{}\n
+
+>> browser | GET /web/inside.js
+HTTP/1.1 409 Conflict
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 149
+date: <masked>
+
+{\"code\":\"precondition_failed\",\"message\":\"The request precondition is not satisfied; inspect its current state\",\"request\":null,\"retry\":\"same_request\"}
+
+>> browser | GET /app.j%73
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> browser | GET /missing.js
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> browser | GET /livez
+HTTP/1.1 200 OK
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 14
+date: <masked>
+
+{\"alive\":true}
+
+>> browser | POST /livez
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> browser | GET /healthz
+HTTP/1.1 200 OK
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 14
+date: <masked>
+
+{\"ready\":true}
+
+>> browser | GET /v1/capabilities
+HTTP/1.1 401 Unauthorized
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+www-authenticate: Basic realm="alt", charset="UTF-8"
+x-alt-trace-id: <masked>
+connection: close
+content-length: 93
+date: <masked>
+
+{\"code\":\"unauthenticated\",\"message\":\"Authentication required\",\"request\":null,\"retry\":\"never\"}
+
+>> browser | GET /v1/capabilities [Authorization: Bearer $TOKEN]
+HTTP/1.1 200 OK
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 641
+date: <masked>
+
+{\"capabilities\":{\"deployment_mode\":\"self_hosted\",\"features\":[\"git_smart_http\",\"publications\",\"task_records\",\"task_bundles_v1\",\"receipts\"],\"installation_id\":\"installation\",\"limits\":{\"chunk_bytes\":\"1000000\",\"graph_edges\":10000,\"graph_objects\":1000,\"manifest_entries\":1000,\"object_bytes\":\"10000000\",\"path_bytes\":4096,\"record_roots\":100,\"ref_updates\":100,\"request_bytes\":1000000,\"structured_bytes\":1000000,\"total_bytes\":\"100000000\",\"tree_paths\":1000,\"walk_steps\":100000},\"object_formats\":[\"sha1\"],\"protocol_max\":1,\"protocol_min\":1,\"runtime_generation\":\"1\"},\"receipt_public_key\":\"ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c\"}
+
+>> browser | GET /web/config
+HTTP/1.1 200 OK
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 60
+date: <masked>
+
+{\"deployment_mode\":\"self_hosted\",\"workspace_id\":\"workspace\"}
+
+>> browser | GET /web/config?x=1
+HTTP/1.1 409 Conflict
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 149
+date: <masked>
+
+{\"code\":\"precondition_failed\",\"message\":\"The request precondition is not satisfied; inspect its current state\",\"request\":null,\"retry\":\"same_request\"}
+
+>> browser | GET /web/config/
+HTTP/1.1 409 Conflict
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 149
+date: <masked>
+
+{\"code\":\"precondition_failed\",\"message\":\"The request precondition is not satisfied; inspect its current state\",\"request\":null,\"retry\":\"same_request\"}
+
+>> browser | POST /web/config
+HTTP/1.1 409 Conflict
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 149
+date: <masked>
+
+{\"code\":\"precondition_failed\",\"message\":\"The request precondition is not satisfied; inspect its current state\",\"request\":null,\"retry\":\"same_request\"}
+
+>> browser | HEAD /web/config
+HTTP/1.1 409 Conflict
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 149
+date: <masked>
+
+
+
+>> browser | GET /web/config [Authorization: Bearer $TOKEN]
+HTTP/1.1 401 Unauthorized
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 94
+date: <masked>
+
+{\"code\":\"unauthenticated\",\"message\":\"Sign in to this instance\",\"request\":null,\"retry\":\"never\"}
+
+>> browser | GET /web
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> browser | GET /web/
+HTTP/1.1 409 Conflict
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 149
+date: <masked>
+
+{\"code\":\"precondition_failed\",\"message\":\"The request precondition is not satisfied; inspect its current state\",\"request\":null,\"retry\":\"same_request\"}
+
+>> browser | GET /web/%2e
+HTTP/1.1 409 Conflict
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 149
+date: <masked>
+
+{\"code\":\"precondition_failed\",\"message\":\"The request precondition is not satisfied; inspect its current state\",\"request\":null,\"retry\":\"same_request\"}
+
+>> browser | GET /web/unknown
+HTTP/1.1 409 Conflict
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 149
+date: <masked>
+
+{\"code\":\"precondition_failed\",\"message\":\"The request precondition is not satisfied; inspect its current state\",\"request\":null,\"retry\":\"same_request\"}
+
+>> browser | GET /web/session
+HTTP/1.1 401 Unauthorized
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 94
+date: <masked>
+
+{\"code\":\"unauthenticated\",\"message\":\"Sign in to this instance\",\"request\":null,\"retry\":\"never\"}
+
+>> browser | GET /web/session [Cookie: __Host-alt_session=unknown]
+HTTP/1.1 401 Unauthorized
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 94
+date: <masked>
+
+{\"code\":\"unauthenticated\",\"message\":\"Sign in to this instance\",\"request\":null,\"retry\":\"never\"}
+
+>> browser | GET /web/repositories/repository
+HTTP/1.1 401 Unauthorized
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 94
+date: <masked>
+
+{\"code\":\"unauthenticated\",\"message\":\"Sign in to this instance\",\"request\":null,\"retry\":\"never\"}
+
+>> browser | GET /web/login/start
+HTTP/1.1 403 Forbidden
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 77
+date: <masked>
+
+{\"code\":\"forbidden\",\"message\":\"Access denied\",\"request\":null,\"retry\":\"never\"}
+
+>> browser | GET /web/login/callback?ticket=a&state=b
+HTTP/1.1 403 Forbidden
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 77
+date: <masked>
+
+{\"code\":\"forbidden\",\"message\":\"Access denied\",\"request\":null,\"retry\":\"never\"}
+
+>> browser | POST /web/login [Origin: https://other.example.test] [Content-Type: application/json] body={\"login_name\":\"a\",\"password\":\"b\"}
+HTTP/1.1 403 Forbidden
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 77
+date: <masked>
+
+{\"code\":\"forbidden\",\"message\":\"Access denied\",\"request\":null,\"retry\":\"never\"}
+
+>> browser | POST /web/login [Origin: https://workbench.example.test] body={}
+HTTP/1.1 415 Unsupported Media Type
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 124
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Use the required content type without content encoding\",\"request\":null,\"retry\":\"never\"}
+
+>> browser | POST /web/login [Origin: https://workbench.example.test] [Content-Type: application/json] [Content-Encoding: gzip] body={}
+HTTP/1.1 415 Unsupported Media Type
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 124
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Use the required content type without content encoding\",\"request\":null,\"retry\":\"never\"}
+
+>> browser | POST /web/login [Origin: https://workbench.example.test] [Content-Type: application/json] body={}
+HTTP/1.1 400 Bad Request
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 113
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Invalid request encoding or protocol fields\",\"request\":null,\"retry\":\"never\"}
+
+>> browser | POST /web/logout [Origin: https://workbench.example.test] [Content-Type: application/json] body={}
+HTTP/1.1 403 Forbidden
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 77
+date: <masked>
+
+{\"code\":\"forbidden\",\"message\":\"Access denied\",\"request\":null,\"retry\":\"never\"}
+
+>> browser | GET /oauth/device/code
+HTTP/1.1 400 Bad Request
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+pragma: no-cache
+referrer-policy: no-referrer
+x-alt-trace-id: <masked>
+connection: close
+content-length: 27
+date: <masked>
+
+{\"error\":\"invalid_request\"}
+
+>> browser | POST /oauth/device/code body=client_id=alt-cli
+HTTP/1.1 400 Bad Request
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+pragma: no-cache
+referrer-policy: no-referrer
+x-alt-trace-id: <masked>
+connection: close
+content-length: 27
+date: <masked>
+
+{\"error\":\"invalid_request\"}
+
+>> browser | POST /oauth/device/code [Content-Type: application/x-www-form-urlencoded] body=client_id=other
+HTTP/1.1 400 Bad Request
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+pragma: no-cache
+referrer-policy: no-referrer
+x-alt-trace-id: <masked>
+connection: close
+content-length: 26
+date: <masked>
+
+{\"error\":\"invalid_client\"}
+
+>> browser | POST /oauth/device/code?x=1 [Content-Type: application/x-www-form-urlencoded] body=client_id=other
+HTTP/1.1 400 Bad Request
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+pragma: no-cache
+referrer-policy: no-referrer
+x-alt-trace-id: <masked>
+connection: close
+content-length: 27
+date: <masked>
+
+{\"error\":\"invalid_request\"}
+
+>> browser | POST /oauth/device/code [Content-Type: application/x-www-form-urlencoded] [Authorization: Bearer $TOKEN] body=client_id=other
+HTTP/1.1 400 Bad Request
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+pragma: no-cache
+referrer-policy: no-referrer
+x-alt-trace-id: <masked>
+connection: close
+content-length: 27
+date: <masked>
+
+{\"error\":\"invalid_request\"}
+
+>> browser | POST /oauth/token [Content-Type: application/x-www-form-urlencoded] body=client_id=other
+HTTP/1.1 400 Bad Request
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+pragma: no-cache
+referrer-policy: no-referrer
+x-alt-trace-id: <masked>
+connection: close
+content-length: 26
+date: <masked>
+
+{\"error\":\"invalid_client\"}
+
+>> browser | POST /oauth/token [Content-Type: application/x-www-form-urlencoded] body=a=1&a=2
+HTTP/1.1 400 Bad Request
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+pragma: no-cache
+referrer-policy: no-referrer
+x-alt-trace-id: <masked>
+connection: close
+content-length: 27
+date: <masked>
+
+{\"error\":\"invalid_request\"}
+
+>> browser | POST /oauth/revoke [Content-Type: application/x-www-form-urlencoded] body=client_id=other
+HTTP/1.1 400 Bad Request
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+pragma: no-cache
+referrer-policy: no-referrer
+x-alt-trace-id: <masked>
+connection: close
+content-length: 26
+date: <masked>
+
+{\"error\":\"invalid_client\"}
+
+>> browser | HEAD /oauth/token
+HTTP/1.1 400 Bad Request
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+pragma: no-cache
+referrer-policy: no-referrer
+x-alt-trace-id: <masked>
+connection: close
+content-length: 27
+date: <masked>
+
+
+
+>> browser | GET /oauth/token/
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> browser | GET /oauth/device
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> browser | GET /cloud/runtime/v1/health
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> browser | counters
+alt_http_response_bytes_total{route="asset"} 316
+alt_http_response_bytes_total{route="browser"} 2148
+alt_http_response_bytes_total{route="capabilities"} 734
+alt_http_response_bytes_total{route="device"} 213
+alt_http_response_bytes_total{route="health"} 114
+alt_http_response_bytes_total{route="provision"} 86
+alt_http_response_bytes_total{route="unknown"} 602
+alt_http_responses_total{method="GET",route="asset",status_class="2xx",transport="complete"} 4
+alt_http_responses_total{method="GET",route="asset",status_class="4xx",transport="complete"} 2
+alt_http_responses_total{method="GET",route="browser",status_class="2xx",transport="complete"} 1
+alt_http_responses_total{method="GET",route="browser",status_class="4xx",transport="complete"} 12
+alt_http_responses_total{method="GET",route="capabilities",status_class="2xx",transport="complete"} 1
+alt_http_responses_total{method="GET",route="capabilities",status_class="4xx",transport="complete"} 1
+alt_http_responses_total{method="GET",route="device",status_class="4xx",transport="complete"} 1
+alt_http_responses_total{method="GET",route="health",status_class="2xx",transport="complete"} 2
+alt_http_responses_total{method="GET",route="provision",status_class="4xx",transport="complete"} 1
+alt_http_responses_total{method="GET",route="unknown",status_class="4xx",transport="complete"} 7
+alt_http_responses_total{method="HEAD",route="asset",status_class="4xx",transport="dropped"} 2
+alt_http_responses_total{method="HEAD",route="browser",status_class="4xx",transport="dropped"} 1
+alt_http_responses_total{method="HEAD",route="device",status_class="4xx",transport="dropped"} 1
+alt_http_responses_total{method="POST",route="asset",status_class="4xx",transport="complete"} 1
+alt_http_responses_total{method="POST",route="browser",status_class="4xx",transport="complete"} 6
+alt_http_responses_total{method="POST",route="device",status_class="4xx",transport="complete"} 7
+alt_http_responses_total{method="POST",route="health",status_class="4xx",transport="complete"} 1
+
+>> cloud | GET /cloud/runtime/v1/health
+HTTP/1.1 401 Unauthorized
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+www-authenticate: Basic realm="alt", charset="UTF-8"
+x-alt-trace-id: <masked>
+connection: close
+content-length: 101
+date: <masked>
+
+{\"code\":\"unauthenticated\",\"message\":\"Runtime authentication required\",\"request\":null,\"retry\":\"never\"}
+
+>> cloud | POST /cloud/runtime/v1/health body={}
+HTTP/1.1 401 Unauthorized
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+www-authenticate: Basic realm="alt", charset="UTF-8"
+x-alt-trace-id: <masked>
+connection: close
+content-length: 101
+date: <masked>
+
+{\"code\":\"unauthenticated\",\"message\":\"Runtime authentication required\",\"request\":null,\"retry\":\"never\"}
+
+>> cloud | POST /cloud/runtime/v1/health [Authorization: Bearer $TOKEN] [Content-Type: application/json] body={}
+HTTP/1.1 401 Unauthorized
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+www-authenticate: Basic realm="alt", charset="UTF-8"
+x-alt-trace-id: <masked>
+connection: close
+content-length: 101
+date: <masked>
+
+{\"code\":\"unauthenticated\",\"message\":\"Runtime authentication required\",\"request\":null,\"retry\":\"never\"}
+
+>> cloud | POST /cloud/runtime/v1/health [Authorization: Bearer abababababababababababababababababababababababababababababababab] body={}
+HTTP/1.1 415 Unsupported Media Type
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 83
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"JSON required\",\"request\":null,\"retry\":\"never\"}
+
+>> cloud | POST /cloud/runtime/v1/health [Authorization: Bearer abababababababababababababababababababababababababababababababab] [Content-Type: text/plain] body={}
+HTTP/1.1 415 Unsupported Media Type
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 83
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"JSON required\",\"request\":null,\"retry\":\"never\"}
+
+>> cloud | POST /cloud/runtime/v1/health [Authorization: Bearer abababababababababababababababababababababababababababababababab] [Content-Type: application/json] [Cookie: session=unrelated] body={}
+HTTP/1.1 401 Unauthorized
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+www-authenticate: Basic realm="alt", charset="UTF-8"
+x-alt-trace-id: <masked>
+connection: close
+content-length: 101
+date: <masked>
+
+{\"code\":\"unauthenticated\",\"message\":\"Runtime authentication required\",\"request\":null,\"retry\":\"never\"}
+
+>> cloud | POST /cloud/runtime/v1/health [Authorization: Bearer abababababababababababababababababababababababababababababababab] [Content-Type: application/json] body={}
+HTTP/1.1 503 Service Unavailable
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 113
+date: <masked>
+
+{\"code\":\"temporarily_unavailable\",\"message\":\"Runtime storage is not ready\",\"request\":null,\"retry\":\"same_request\"}
+
+>> cloud | POST /cloud/runtime/v1/health?x=1 [Authorization: Bearer abababababababababababababababababababababababababababababababab] [Content-Type: application/json] body={}
+HTTP/1.1 401 Unauthorized
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+www-authenticate: Basic realm="alt", charset="UTF-8"
+x-alt-trace-id: <masked>
+connection: close
+content-length: 101
+date: <masked>
+
+{\"code\":\"unauthenticated\",\"message\":\"Runtime authentication required\",\"request\":null,\"retry\":\"never\"}
+
+>> cloud | HEAD /cloud/runtime/v1/health [Authorization: Bearer abababababababababababababababababababababababababababababababab] [Content-Type: application/json]
+HTTP/1.1 401 Unauthorized
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+www-authenticate: Basic realm="alt", charset="UTF-8"
+x-alt-trace-id: <masked>
+connection: close
+content-length: 101
+date: <masked>
+
+
+
+>> cloud | GET /cloud/runtime/v1/health/
+HTTP/1.1 404 Not Found
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 86
+date: <masked>
+
+{\"code\":\"invalid_request\",\"message\":\"Unknown endpoint\",\"request\":null,\"retry\":\"never\"}
+
+>> cloud | GET /web/login/start?x=1
+HTTP/1.1 403 Forbidden
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 77
+date: <masked>
+
+{\"code\":\"forbidden\",\"message\":\"Access denied\",\"request\":null,\"retry\":\"never\"}
+
+>> cloud | POST /web/login/start
+HTTP/1.1 403 Forbidden
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 77
+date: <masked>
+
+{\"code\":\"forbidden\",\"message\":\"Access denied\",\"request\":null,\"retry\":\"never\"}
+
+>> cloud | GET /web/login/start [Authorization: Bearer $TOKEN]
+HTTP/1.1 403 Forbidden
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 77
+date: <masked>
+
+{\"code\":\"forbidden\",\"message\":\"Access denied\",\"request\":null,\"retry\":\"never\"}
+
+>> cloud | GET /web/login/callback
+HTTP/1.1 403 Forbidden
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 77
+date: <masked>
+
+{\"code\":\"forbidden\",\"message\":\"Access denied\",\"request\":null,\"retry\":\"never\"}
+
+>> cloud | GET /web/login/callback?ticket=a&state=b
+HTTP/1.1 403 Forbidden
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 77
+date: <masked>
+
+{\"code\":\"forbidden\",\"message\":\"Access denied\",\"request\":null,\"retry\":\"never\"}
+
+>> cloud | GET /web/config
+HTTP/1.1 200 OK
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+content-security-policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+referrer-policy: no-referrer
+x-frame-options: DENY
+cross-origin-resource-policy: same-origin
+x-alt-trace-id: <masked>
+connection: close
+content-length: 54
+date: <masked>
+
+{\"deployment_mode\":\"cloud\",\"workspace_id\":\"workspace\"}
+
+>> cloud | GET /v1/capabilities
+HTTP/1.1 401 Unauthorized
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+www-authenticate: Basic realm="alt", charset="UTF-8"
+x-alt-trace-id: <masked>
+connection: close
+content-length: 93
+date: <masked>
+
+{\"code\":\"unauthenticated\",\"message\":\"Authentication required\",\"request\":null,\"retry\":\"never\"}
+
+>> cloud | GET /livez
+HTTP/1.1 200 OK
+content-type: application/json
+cache-control: no-store
+x-content-type-options: nosniff
+x-alt-trace-id: <masked>
+connection: close
+content-length: 14
+date: <masked>
+
+{\"alive\":true}
+

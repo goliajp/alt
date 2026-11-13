@@ -1,10 +1,71 @@
 //! Responses: protocol failures, store errors and the outputs of executed requests.
 use super::*;
+use hyper::body::{Frame, SizeHint};
+use std::{
+    io,
+    pin::Pin,
+    task::{Context, Poll},
+};
 
+/// Every body a handler answers with, so that a response is boxed once, with its
+/// observation, when it is handed to the router.
+pub(super) enum ResponseBody {
+    Full(Full<Bytes>),
+    File(file_body::FileBody<tokio::fs::File>),
+    Pack(pack_body::PackBody),
+}
+impl hyper::body::Body for ResponseBody {
+    type Data = Bytes;
+    type Error = io::Error;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Bytes>, io::Error>>> {
+        match self.get_mut() {
+            Self::Full(body) => Pin::new(body)
+                .poll_frame(cx)
+                .map_err(|never| match never {}),
+            Self::File(body) => Pin::new(body).poll_frame(cx),
+            Self::Pack(body) => Pin::new(body).poll_frame(cx),
+        }
+    }
+    fn is_end_stream(&self) -> bool {
+        match self {
+            Self::Full(body) => body.is_end_stream(),
+            Self::File(body) => body.is_end_stream(),
+            Self::Pack(body) => body.is_end_stream(),
+        }
+    }
+    fn size_hint(&self) -> SizeHint {
+        match self {
+            Self::Full(body) => body.size_hint(),
+            Self::File(body) => body.size_hint(),
+            Self::Pack(body) => body.size_hint(),
+        }
+    }
+}
 pub(super) fn full(bytes: impl Into<Bytes>) -> ResponseBody {
-    Full::new(bytes.into())
-        .map_err(|never: Infallible| match never {})
-        .boxed_unsync()
+    ResponseBody::Full(Full::new(bytes.into()))
+}
+/// a file of known length, declared in the headers
+fn file(content_type: &str, file: std::fs::File, bytes: u64) -> Response<ResponseBody> {
+    let body = file_body::FileBody::new(tokio::fs::File::from_std(file), bytes);
+    let mut output = response(200, content_type, ResponseBody::File(body));
+    output
+        .headers_mut()
+        .insert(header::CONTENT_LENGTH, bytes.into());
+    output.extensions_mut().insert(connection::DeclaredLength);
+    output
+}
+pub(super) fn unknown() -> Response<ResponseBody> {
+    failure(
+        404,
+        ErrorCode::InvalidRequest,
+        "Unknown endpoint",
+        None,
+        Retry::Never,
+    )
 }
 pub(super) fn response(
     status: u16,
@@ -151,24 +212,13 @@ pub(super) fn render_output(
         Ok(Output::WholePack(pieces, checksum)) => response(
             200,
             "application/x-git-upload-pack-result",
-            pack_body::PackBody::new(pieces, checksum)
-                .map_err(|e| -> BoxError { Box::new(e) })
-                .boxed_unsync(),
+            ResponseBody::Pack(pack_body::PackBody::new(pieces, checksum)),
         ),
         Ok(Output::Temporary {
             content_type,
             bytes,
             file,
-        }) => {
-            let body = file_body::FileBody::new(tokio::fs::File::from_std(file.into_file()), bytes)
-                .map_err(|e| -> BoxError { Box::new(e) })
-                .boxed_unsync();
-            let mut output = response(200, content_type, body);
-            output
-                .headers_mut()
-                .insert(header::CONTENT_LENGTH, bytes.into());
-            output
-        }
+        }) => self::file(content_type, file.into_file(), bytes),
         Ok(Output::Json(value)) => match alt_json::to_vec(&value) {
             Ok(bytes) => response(200, "application/json", full(bytes)),
             Err(_) => failure(
@@ -188,13 +238,7 @@ pub(super) fn render_output(
                 Ok(file) => file,
                 Err(error) => return store_failure(error.into(), request_key),
             };
-            let body = file_body::FileBody::new(tokio::fs::File::from_std(file), bytes)
-                .map_err(|e| -> BoxError { Box::new(e) })
-                .boxed_unsync();
-            let mut output = response(200, "application/octet-stream", body);
-            output
-                .headers_mut()
-                .insert(header::CONTENT_LENGTH, bytes.into());
+            let mut output = self::file("application/octet-stream", file, bytes);
             output.headers_mut().insert(
                 "Alt-Content-Blake3",
                 digest.parse().expect("validated digest"),

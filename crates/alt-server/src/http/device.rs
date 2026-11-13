@@ -46,8 +46,8 @@ fn mapped(error: Error) -> DeviceError {
     }
 }
 pub(super) async fn handle(
-    request: Request<Incoming>,
-    state: Arc<State>,
+    request: Request,
+    state: Arc<App>,
     peer: std::net::IpAddr,
 ) -> Response<ResponseBody> {
     let mut result = inner(request, state, peer).await;
@@ -64,14 +64,14 @@ pub(super) async fn handle(
     result
 }
 async fn inner(
-    request: Request<Incoming>,
-    state: Arc<State>,
+    request: Request,
+    state: Arc<App>,
     peer: std::net::IpAddr,
 ) -> Response<ResponseBody> {
     let Some(browser) = state.browser.clone() else {
         return failure(DeviceError::InvalidRequest);
     };
-    if request.method() != hyper::Method::POST
+    if request.method() != Method::POST
         || request.uri().query().is_some()
         || [
             header::AUTHORIZATION,
