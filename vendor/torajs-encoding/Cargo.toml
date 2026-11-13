@@ -1,0 +1,10 @@
+[package]
+name = "torajs-encoding"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT OR Apache-2.0"
+description = "The WHATWG Encoding Standard's encodings and labels, with decoders to UTF-8 for the legacy single-byte and multi-byte (GBK, gb18030, Big5, EUC-JP, ISO-2022-JP, Shift_JIS, EUC-KR) encodings, x-user-defined and UTF-16LE / UTF-16BE. `no_std` + `alloc`, zero dependencies."
+readme = "README.md"
+
+[dependencies]
