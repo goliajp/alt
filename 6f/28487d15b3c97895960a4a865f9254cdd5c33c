@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: style
+summary: format the blake3 thread count
+author-type: human
+author: doracawl
+touched: crates/alt-hash/src/blake3.rs
