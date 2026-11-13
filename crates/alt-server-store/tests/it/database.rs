@@ -8,6 +8,7 @@ mod faults;
 mod json;
 mod maintenance;
 mod pack_sweep;
+mod pack_view;
 mod provenance;
 mod registration;
 mod schema_20;

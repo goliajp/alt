@@ -48,10 +48,20 @@ const VIEW_PREFIXES: &str = view!(
     "(SELECT string_agg(oid||' '||name,E'\\n') FROM alt_refs WHERE repository=$2 AND (name=(SELECT default_branch FROM alt_repositories WHERE id=$2) OR EXISTS(SELECT 1 FROM unnest($3::text[]) prefix WHERE starts_with(name,prefix))))",
     "false"
 );
+// Both are planned for the object ids they are given: a plan made for any array
+// tests a row against it one element at a time. Planning for an array hashes it,
+// which is faster to run than the subquery and slower to plan as the array grows.
 const VIEW_TIPS: &str = view!(
     "(SELECT string_agg(oid||' '||name,E'\\n') FROM alt_refs WHERE repository=$2 AND (oid=ANY($3::text[]) OR ($4::bool AND starts_with(name,'refs/tags/'))))",
     "EXISTS(SELECT 1 FROM alt_refs WHERE repository=$2 AND NOT oid=ANY($3::text[]))"
 );
+const VIEW_MANY_TIPS: &str = view!(
+    "(SELECT string_agg(oid||' '||name,E'\\n') FROM alt_refs WHERE repository=$2 AND (oid IN (SELECT unnest($3::text[])) OR ($4::bool AND starts_with(name,'refs/tags/'))))",
+    "EXISTS(SELECT 1 FROM alt_refs WHERE repository=$2 AND oid NOT IN (SELECT unnest($3::text[])))"
+);
+
+/// more wanted object ids than this are given to the view as a subquery
+pub const ARRAY_TIPS: usize = 3000;
 
 /// A read request on a repository with more references than this names the ones it
 /// needs before any are read.
@@ -175,9 +185,14 @@ impl Store {
             RefFilter::Prefixes(prefixes) => self
                 .client
                 .query_one(VIEW_PREFIXES, &[digest, &repository, &prefixes]),
-            RefFilter::Tips { wants, tags } => self
-                .client
-                .query_one(VIEW_TIPS, &[digest, &repository, &wants, &tags]),
+            RefFilter::Tips { wants, tags } => self.client.query_one_for_values(
+                if wants.len() > ARRAY_TIPS {
+                    VIEW_MANY_TIPS
+                } else {
+                    VIEW_TIPS
+                },
+                &[digest, &repository, &wants, &tags],
+            ),
         }?;
         let field = |index: usize| row.get::<_, Option<Jsonb>>(index).map(|json| json.0);
         let text =

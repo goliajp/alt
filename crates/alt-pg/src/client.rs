@@ -2,7 +2,7 @@ use crate::{
     Config, Error, Result, Row, ToSql,
     link::{Link, Sink},
     row::RowSet,
-    statement::Statements,
+    statement::{Statement, Statements},
     wire,
 };
 
@@ -13,6 +13,23 @@ use crate::{
 pub struct Client {
     pub(crate) link: Link,
     statements: Statements,
+    /// what switches planning to the parameter values at hand and back, once prepared
+    planning: Option<(Statement, Statement)>,
+}
+
+/// The setting is local to the transaction; the earlier value is kept aside so that
+/// the rest of an open transaction goes on with it.
+const PLAN_FOR_VALUES: &str = "SELECT set_config('alt_pg.plan_cache_mode',current_setting('plan_cache_mode'),true),set_config('plan_cache_mode','force_custom_plan',true)";
+const PLAN_AS_BEFORE: &str =
+    "SELECT set_config('plan_cache_mode',current_setting('alt_pg.plan_cache_mode'),true)";
+
+/// how a statement is planned
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Plan {
+    /// as the session's `plan_cache_mode` has it
+    Session,
+    /// for the parameter values of this execution
+    ForValues,
 }
 
 pub(crate) enum Fetch<'a> {
@@ -30,6 +47,7 @@ impl Client {
         Ok(Self {
             link: Link::open(config)?,
             statements: Statements::default(),
+            planning: None,
         })
     }
 
@@ -40,7 +58,7 @@ impl Client {
 
     pub fn query(&mut self, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<Vec<Row>> {
         let mut rows = Vec::new();
-        self.run(sql, params, true, Fetch::Rows(&mut rows))?;
+        self.run(sql, params, true, Plan::Session, Fetch::Rows(&mut rows))?;
         Ok(rows)
     }
 
@@ -54,7 +72,20 @@ impl Client {
 
     /// runs a statement and returns the number of rows it affected
     pub fn execute(&mut self, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<u64> {
-        self.run(sql, params, true, Fetch::Count)
+        self.run(sql, params, true, Plan::Session, Fetch::Count)
+    }
+
+    /// Like [`Client::query`], planned for these parameter values whatever the
+    /// session's `plan_cache_mode` says, in the same single round trip. For a
+    /// statement whose cost depends on the size of an array it is given.
+    pub fn query_for_values(
+        &mut self,
+        sql: &str,
+        params: &[&(dyn ToSql + Sync)],
+    ) -> Result<Vec<Row>> {
+        let mut rows = Vec::new();
+        self.run(sql, params, true, Plan::ForValues, Fetch::Rows(&mut rows))?;
+        Ok(rows)
     }
 
     /// runs one or more statements without parameters, discarding any rows
@@ -87,8 +118,16 @@ impl Client {
         sql: &str,
         params: &[&(dyn ToSql + Sync)],
         cached: bool,
+        plan: Plan,
         fetch: Fetch<'_>,
     ) -> Result<u64> {
+        if plan == Plan::ForValues && self.planning.is_none() {
+            let before = self.statements.next_id();
+            let before = self.link.prepare(PLAN_FOR_VALUES, before)?;
+            let after = self.statements.next_id();
+            let after = self.link.prepare(PLAN_AS_BEFORE, after)?;
+            self.planning = Some((before, after));
+        }
         let unnamed;
         let statement = if !cached {
             unnamed = self.link.prepare(sql, 0)?;
@@ -103,11 +142,17 @@ impl Client {
             }
             self.statements.get(sql).expect("statement just kept")
         };
+        let around = match (plan, &self.planning) {
+            (Plan::ForValues, Some((before, after))) => Some((before, after)),
+            _ => None,
+        };
         match fetch {
-            Fetch::Count => self.link.execute(statement, params, Sink::Discard),
+            Fetch::Count => self.link.execute(statement, params, around, Sink::Discard),
             Fetch::Rows(rows) => {
                 let mut set = RowSet::new(statement.columns.clone());
-                let affected = self.link.execute(statement, params, Sink::Rows(&mut set))?;
+                let affected =
+                    self.link
+                        .execute(statement, params, around, Sink::Rows(&mut set))?;
                 *rows = set.into_rows();
                 Ok(affected)
             }

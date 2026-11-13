@@ -53,7 +53,8 @@ fn stored_content(
     limits: PackageLimits,
 ) -> Result<BTreeMap<String, Blob>> {
     let bound = integer((limits.entries as u64).saturating_add(1))?;
-    let rows = tx.query("SELECT b.blake3,b.bytes,b.state FROM alt_blobs b WHERE b.repository=$1 AND EXISTS(SELECT 1 FROM alt_pins p WHERE p.repository=b.repository AND p.blake3=b.blake3 AND p.expires_at IS NULL AND p.pin_id NOT LIKE 'portable-export:%') ORDER BY b.blake3 LIMIT $2", &[&repository,&bound])?;
+    // the bound may take in every row or a few: the plan follows it
+    let rows = tx.query_for_values("SELECT b.blake3,b.bytes,b.state FROM alt_blobs b WHERE b.repository=$1 AND EXISTS(SELECT 1 FROM alt_pins p WHERE p.repository=b.repository AND p.blake3=b.blake3 AND p.expires_at IS NULL AND p.pin_id NOT LIKE 'portable-export:%') ORDER BY b.blake3 LIMIT $2", &[&repository,&bound])?;
     if rows.len() > limits.entries {
         return Err(Error::Limit("portable payload inventory"));
     }
