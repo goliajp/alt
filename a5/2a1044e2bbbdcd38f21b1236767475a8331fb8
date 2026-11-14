@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: perf
+summary: keep one buffer for decoded commit messages across a log
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/charset.rs
+touched: crates/alt-cli/src/log_cmd.rs
