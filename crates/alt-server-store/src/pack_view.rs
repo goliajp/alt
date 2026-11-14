@@ -61,7 +61,7 @@ const VIEW_MANY_TIPS: &str = view!(
 );
 
 /// more wanted object ids than this are given to the view as a subquery
-pub const ARRAY_TIPS: usize = 3000;
+pub const ARRAY_TIPS: usize = 2000;
 
 /// A read request on a repository with more references than this names the ones it
 /// needs before any are read.
