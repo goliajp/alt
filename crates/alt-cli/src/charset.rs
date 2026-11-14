@@ -14,7 +14,19 @@ use torajs_encoding::{Encoding, Family};
 /// encoding label). `None` when the label is unknown or `data` is not valid
 /// in that charset.
 pub fn decode(label: &[u8], data: &[u8]) -> Option<Vec<u8>> {
-    let mut family = Encoding::for_label(label)?.family();
+    let mut out = Vec::new();
+    decode_into(label, data, &mut out).then_some(out)
+}
+
+/// [`decode`] into a buffer the caller keeps: the decoders reserve room for the
+/// longest output an input can have, which is cheaper kept than asked for again
+/// for every commit. `out` holds the text when this returns true.
+pub fn decode_into(label: &[u8], data: &[u8], out: &mut Vec<u8>) -> bool {
+    out.clear();
+    let Some(encoding) = Encoding::for_label(label) else {
+        return false;
+    };
+    let mut family = encoding.family();
     let mut data = data;
     // a byte order mark overrides the label
     for (bom, marked) in [
@@ -27,11 +39,13 @@ pub fn decode(label: &[u8], data: &[u8]) -> Option<Vec<u8>> {
             break;
         }
     }
-    let mut out = Vec::new();
-    let o = &mut out;
+    let o = out;
     let decoded = match family {
         Family::Utf8 => {
-            o.extend_from_slice(std::str::from_utf8(data).ok()?.as_bytes());
+            let Ok(text) = std::str::from_utf8(data) else {
+                return false;
+            };
+            o.extend_from_slice(text.as_bytes());
             Ok(())
         }
         Family::SingleByte(index) => single_byte::decode(index, data, true, o),
@@ -47,7 +61,7 @@ pub fn decode(label: &[u8], data: &[u8]) -> Option<Vec<u8>> {
         Family::ShiftJis => ShiftJisDecoder::default().decode(data, true, true, o),
         Family::EucKr => EucKrDecoder::default().decode(data, true, true, o),
         // the replacement encoding decodes nothing but empty input
-        _ => return data.is_empty().then_some(out),
+        _ => return data.is_empty(),
     };
-    decoded.ok().map(|()| out)
+    decoded.is_ok()
 }

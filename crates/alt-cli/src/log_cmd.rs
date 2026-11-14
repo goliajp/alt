@@ -9,7 +9,7 @@ use alt_repo::Repository;
 /// with an `encoding` header is converted to UTF-8 (whole buffer) and the
 /// header line is dropped; same-encoding commits just lose the header; a
 /// failed conversion leaves the buffer untouched, header included.
-fn reencode(data: &[u8]) -> Cow<'_, [u8]> {
+fn reencode<'a>(data: &'a [u8], converted: &mut Vec<u8>) -> Cow<'a, [u8]> {
     let Some(enc) = encoding_header(data) else {
         return Cow::Borrowed(data);
     };
@@ -17,9 +17,10 @@ fn reencode(data: &[u8]) -> Cow<'_, [u8]> {
         return Cow::Owned(strip_encoding_header(data));
     }
     // unknown charset or undecodable bytes: keep as-is, like git
-    match crate::charset::decode(enc, data) {
-        Some(converted) => Cow::Owned(strip_encoding_header(&converted)),
-        None => Cow::Borrowed(data),
+    if crate::charset::decode_into(enc, data, converted) {
+        Cow::Owned(strip_encoding_header(converted))
+    } else {
+        Cow::Borrowed(data)
     }
 }
 
@@ -114,10 +115,11 @@ pub fn run(
 
     let notes = repo.resolve_ref(crate::meta::NOTES_REF)?;
     let mut first = true;
+    let mut converted = Vec::new();
     for item in repo.rev_walk(start)?.take(limit) {
         let (oid, _) = item?;
         let obj = repo.read_object(&oid)?.expect("walked oid exists");
-        let payload = reencode(&obj.data);
+        let payload = reencode(&obj.data, &mut converted);
         match args.pretty.as_str() {
             // raw shows the stored object as is
             "raw" => write_raw(out, &oid, &payload, &mut first)?,
