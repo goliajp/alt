@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: hand wanted object ids to the view as a subquery from two thousand up
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/pack_view.rs
