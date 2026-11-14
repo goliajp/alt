@@ -100,6 +100,16 @@ pub(crate) fn begin_transaction(out: &mut Vec<u8>) {
     execute(out);
 }
 
+/// binds and runs a prepared statement that takes no parameters; any rows come in binary
+pub(crate) fn run_plain(out: &mut Vec<u8>, id: u32) {
+    let at = begin(out, b'B');
+    out.push(0);
+    statement_name(out, id);
+    out.extend_from_slice(&[0, 0, 0, 0, 0, 1, 0, 1]);
+    finish(out, at).expect("a short message");
+    execute(out);
+}
+
 pub(crate) fn terminate(out: &mut Vec<u8>) {
     out.extend_from_slice(&[b'X', 0, 0, 0, 4]);
 }

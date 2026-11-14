@@ -70,7 +70,7 @@ impl Link {
         wire::sync(&mut self.out);
         self.send()?;
         let mut described = Described::default();
-        self.read(1, Sink::Description(&mut described))?;
+        self.read(1, 0, Sink::Description(&mut described))?;
         match (described.params, described.columns) {
             (Some(params), Some(columns)) => Ok(Statement {
                 id,
@@ -84,11 +84,14 @@ impl Link {
         }
     }
 
-    /// binds and runs a prepared statement in one round trip
+    /// Binds and runs a prepared statement in one round trip. The statements of
+    /// `around` take no parameters and run before and after it in the same request;
+    /// their results are dropped.
     pub fn execute(
         &mut self,
         statement: &Statement,
         params: &[&(dyn ToSql + Sync)],
+        around: Option<(&Statement, &Statement)>,
         sink: Sink<'_>,
     ) -> Result<u64> {
         if params.len() != statement.params.len() {
@@ -98,6 +101,11 @@ impl Link {
             });
         }
         self.start()?;
+        // the commands answered before this statement's: an opening BEGIN, the one before
+        let answer = u32::from(self.begin) + u32::from(around.is_some());
+        if let Some((before, _)) = around {
+            wire::run_plain(&mut self.out, before.id);
+        }
         let at = wire::begin(&mut self.out, b'B');
         self.out.push(0);
         wire::statement_name(&mut self.out, statement.id);
@@ -116,9 +124,12 @@ impl Link {
         self.out.extend_from_slice(&[0, 1, 0, 1]);
         wire::finish(&mut self.out, at)?;
         wire::execute(&mut self.out);
+        if let Some((_, after)) = around {
+            wire::run_plain(&mut self.out, after.id);
+        }
         wire::sync(&mut self.out);
         self.send()?;
-        self.read(1, sink)
+        self.read(1, answer, sink)
     }
 
     /// runs statements through the simple protocol and discards their rows
@@ -142,14 +153,15 @@ impl Link {
             wire::query(&mut self.out, &[sql])?;
         }
         self.send()?;
-        self.read(groups, Sink::Discard).map(drop)
+        self.read(groups, 0, Sink::Discard).map(drop)
     }
 
-    /// reads `groups` responses; the first server error is returned after
-    /// the last of them
-    pub(crate) fn read(&mut self, groups: u32, sink: Sink<'_>) -> Result<u64> {
+    /// Reads `groups` responses; the first server error is returned after the last
+    /// of them. Rows and the row count are those of the command at `answer`,
+    /// counting the commands that completed from zero.
+    pub(crate) fn read(&mut self, groups: u32, answer: u32, sink: Sink<'_>) -> Result<u64> {
         let mut failure = None;
-        match self.read_messages(groups, sink, &mut failure) {
+        match self.read_messages(groups, answer, sink, &mut failure) {
             Ok(affected) => {
                 self.inbox.relax();
                 match failure {
@@ -168,20 +180,29 @@ impl Link {
     fn read_messages(
         &mut self,
         mut groups: u32,
+        answer: u32,
         mut sink: Sink<'_>,
         failure: &mut Option<Box<crate::ServerError>>,
     ) -> Result<u64> {
         let mut affected = 0;
+        let mut completed = 0;
         loop {
             let (tag, range) = self.inbox.next(&mut self.stream)?;
             let body = self.inbox.bytes(range);
             match tag {
                 b'D' => {
-                    if let Sink::Rows(rows) = &mut sink {
+                    if let Sink::Rows(rows) = &mut sink
+                        && completed == answer
+                    {
                         rows.push(body)?;
                     }
                 }
-                b'C' => affected = wire::affected(body)?,
+                b'C' => {
+                    if completed == answer {
+                        affected = wire::affected(body)?;
+                    }
+                    completed += 1;
+                }
                 b'Z' => {
                     let &[status @ (b'I' | b'T' | b'E')] = body else {
                         return Err(Error::Protocol("transaction status"));
@@ -280,11 +301,11 @@ mod tests {
         stream.extend_from_slice(b"C\0\0\0\x0dUPDATE 3\0");
         stream.extend_from_slice(READY);
         let mut link = answered(&stream);
-        let error = link.read(1, Sink::Discard).unwrap_err();
+        let error = link.read(1, 0, Sink::Discard).unwrap_err();
         assert_eq!(error.code(), Some("22012"));
         assert!(!link.broken);
         assert_eq!(link.status, b'E');
-        assert_eq!(link.read(1, Sink::Discard).unwrap(), 3);
+        assert_eq!(link.read(1, 0, Sink::Discard).unwrap(), 3);
         assert_eq!(link.status, b'I');
     }
 
@@ -296,7 +317,7 @@ mod tests {
         stream.extend_from_slice(READY);
         let mut link = answered(&stream);
         assert_eq!(
-            link.read(2, Sink::Discard).unwrap_err().code(),
+            link.read(2, 0, Sink::Discard).unwrap_err().code(),
             Some("22012")
         );
         assert!(!link.broken);
@@ -306,7 +327,7 @@ mod tests {
     fn a_fatal_error_keeps_its_cause_and_ends_the_link() {
         let mut link = answered(ERROR);
         assert_eq!(
-            link.read(1, Sink::Discard).unwrap_err().code(),
+            link.read(1, 0, Sink::Discard).unwrap_err().code(),
             Some("22012")
         );
         assert!(link.broken);
@@ -328,7 +349,7 @@ mod tests {
         ] {
             let mut link = answered(response);
             let mut rows = RowSet::new(Arc::from(Vec::new()));
-            let result = link.read(1, Sink::Rows(&mut rows));
+            let result = link.read(1, 0, Sink::Rows(&mut rows));
             assert!(
                 matches!(result, Err(Error::Protocol(_) | Error::Io(_))),
                 "{response:?}"

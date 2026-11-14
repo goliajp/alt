@@ -14,7 +14,7 @@ mod pack_compaction;
 mod pack_native;
 pub use pack_compaction::PACK_RETIRED_GRACE_MS;
 mod pack_view;
-pub use pack_view::{DEFERRED_REFS, PackView, RefFilter, RefScope};
+pub use pack_view::{ARRAY_TIPS, DEFERRED_REFS, PackView, RefFilter, RefScope};
 mod packs;
 pub use packs::*;
 mod provenance;

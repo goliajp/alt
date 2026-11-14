@@ -33,7 +33,8 @@ impl Store {
         let current = snapshot(&mut tx, &self.spec, repository)?;
         require_admin(&mut tx, &self.spec, admin)?;
         let time = now(&mut tx)?;
-        for row in tx.query("SELECT epoch,actor_id,request_id,digest,reserved_bytes FROM alt_requests WHERE repository=$1 AND epoch=$4 AND state IN ('receiving','ready') AND expires_at<=$2 ORDER BY expires_at LIMIT $3 FOR UPDATE",&[&repository,&integer(time)?,&i64::from(limit),&integer(current.scope.recovery_epoch)?])? {
+        // how many requests have expired decides how the rows are best reached
+        for row in tx.query_for_values("SELECT epoch,actor_id,request_id,digest,reserved_bytes FROM alt_requests WHERE repository=$1 AND epoch=$4 AND state IN ('receiving','ready') AND expires_at<=$2 ORDER BY expires_at LIMIT $3 FOR UPDATE",&[&repository,&integer(time)?,&i64::from(limit),&integer(current.scope.recovery_epoch)?])? {
             let mut scope=current.scope.clone(); scope.recovery_epoch=unsigned(row.get(0))?;
             let key=RequestKey { scope,actor_id:row.get(1),request_id:row.get(2) };
             let state=RequestState::Expired {digest:row.get(3)};

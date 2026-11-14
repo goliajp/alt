@@ -18,6 +18,18 @@ impl Connection {
     pub fn query_one(&mut self, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<Row, Error> {
         self.client.query_one(sql, params)
     }
+    /// one statement outside any transaction block, planned for these parameter values
+    pub fn query_one_for_values(
+        &mut self,
+        sql: &str,
+        params: &[&(dyn ToSql + Sync)],
+    ) -> Result<Row, Error> {
+        let mut rows = self.client.query_for_values(sql, params)?.into_iter();
+        match (rows.next(), rows.next()) {
+            (Some(row), None) => Ok(row),
+            _ => Err(Error::RowCount),
+        }
+    }
     pub fn transaction(&mut self) -> Result<Transaction<'_>, Error> {
         Ok(Transaction {
             inner: self.client.transaction()?,
@@ -61,6 +73,21 @@ impl<'a> Transaction<'a> {
     }
     pub fn execute(&mut self, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<u64, Error> {
         self.inner.execute(sql, params)
+    }
+    /// planned for these parameter values; the other statements of the transaction are not
+    pub fn query_for_values(
+        &mut self,
+        sql: &str,
+        params: &[&(dyn ToSql + Sync)],
+    ) -> Result<Vec<Row>, Error> {
+        self.inner.query_for_values(sql, params)
+    }
+    pub fn execute_for_values(
+        &mut self,
+        sql: &str,
+        params: &[&(dyn ToSql + Sync)],
+    ) -> Result<u64, Error> {
+        self.inner.execute_for_values(sql, params)
     }
     pub fn batch_execute(&mut self, sql: &str) -> Result<(), Error> {
         self.raw_mut().batch_execute(sql)

@@ -1,6 +1,6 @@
 use crate::{
     Client, Result, Row, ToSql,
-    client::{Fetch, at_most_one},
+    client::{Fetch, Plan, at_most_one},
 };
 
 /// a transaction block on a borrowed connection, rolled back when dropped
@@ -29,8 +29,13 @@ impl<'a> Transaction<'a> {
 
     pub fn query(&mut self, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<Vec<Row>> {
         let mut rows = Vec::new();
-        self.client
-            .run(sql, params, self.cached, Fetch::Rows(&mut rows))?;
+        self.client.run(
+            sql,
+            params,
+            self.cached,
+            Plan::Session,
+            Fetch::Rows(&mut rows),
+        )?;
         Ok(rows)
     }
 
@@ -43,7 +48,32 @@ impl<'a> Transaction<'a> {
     }
 
     pub fn execute(&mut self, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<u64> {
-        self.client.run(sql, params, self.cached, Fetch::Count)
+        self.client
+            .run(sql, params, self.cached, Plan::Session, Fetch::Count)
+    }
+
+    /// like [`Transaction::query`], planned as [`Transaction::execute_for_values`] plans
+    pub fn query_for_values(
+        &mut self,
+        sql: &str,
+        params: &[&(dyn ToSql + Sync)],
+    ) -> Result<Vec<Row>> {
+        let mut rows = Vec::new();
+        self.client.run(
+            sql,
+            params,
+            self.cached,
+            Plan::ForValues,
+            Fetch::Rows(&mut rows),
+        )?;
+        Ok(rows)
+    }
+
+    /// Like [`Transaction::execute`], planned for these parameter values as
+    /// [`Client::query_for_values`] does; the rest of the transaction is planned as before.
+    pub fn execute_for_values(&mut self, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<u64> {
+        self.client
+            .run(sql, params, self.cached, Plan::ForValues, Fetch::Count)
     }
 
     pub fn batch_execute(&mut self, sql: &str) -> Result<()> {

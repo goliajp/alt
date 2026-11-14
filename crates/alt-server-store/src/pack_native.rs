@@ -245,7 +245,10 @@ pub(crate) fn release_content(
             "DELETE FROM alt_blob_locations WHERE repository=$1 AND blake3=ANY($2)",
             &[&repository, &released],
         )?;
-        tx.execute(
+        // No index leads with the digest, so every object row of the repository is
+        // tested against the array: through a hash table when the plan is made for
+        // the array, one element at a time when it is made for any array.
+        tx.execute_for_values(
             "DELETE FROM alt_objects o WHERE o.repository=$1 AND o.blake3=ANY($2) AND NOT EXISTS(SELECT 1 FROM alt_pins p WHERE p.repository=o.repository AND p.blake3=o.blake3 AND p.pin_id LIKE 'upload:%')",
             &[&repository, &batch],
         )?;
