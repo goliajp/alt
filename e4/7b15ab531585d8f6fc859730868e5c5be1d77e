@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: hold a file on another device than the snapshot to the earlier moment wherever it lies in the tree, and record stats through one tested rule
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/add.rs
+touched: crates/alt-cli/src/native/tree_state.rs
+touched: crates/alt-worktree/src/clock.rs
+touched: crates/alt-worktree/src/delta.rs
+touched: crates/alt-worktree/src/lib.rs
+touched: crates/alt-worktree/tests/it/delta.rs
