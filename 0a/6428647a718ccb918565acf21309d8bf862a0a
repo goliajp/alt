@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: fix
+summary: diff text with git's default algorithm and detect renames as git does
+author-type: human
+author: doracawl
+touched: Cargo.lock
+touched: crates/alt-diff/Cargo.toml
+touched: crates/alt-diff/src/compact.rs
+touched: crates/alt-diff/src/lib.rs
+touched: crates/alt-diff/src/middle.rs
+touched: crates/alt-diff/src/myers.rs
+touched: crates/alt-diff/src/rename.rs
+touched: crates/alt-diff/tests/it/git_hunks.rs
+touched: crates/alt-diff/tests/it/main.rs
