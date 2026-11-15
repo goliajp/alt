@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: keep the scale check's values consistent across its batches
+author-type: human
+author: doracawl
+touched: crates/alt-store/tests/it/index_runs.rs
