@@ -59,7 +59,7 @@ impl NativeRepo<'_> {
         let (delta, stamp) = self.scan_delta_within(&mut snapshot, true, &within)?;
         // a directory stands for every file under it, deleted ones
         // included (their removal is staged), as in git
-        for (spec, given) in specs.iter().zip(paths) {
+        for (spec, given) in specs.iter().zip(paths).filter(|(spec, _)| !spec.is_empty()) {
             let tracked = before
                 .entries
                 .iter()

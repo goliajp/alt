@@ -265,6 +265,14 @@ fn each_workspace_keeps_its_own_snapshot() {
 }
 
 #[test]
+fn adding_everything_in_an_empty_tree_stages_nothing() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    ok(alt(dir.path(), &["init"]));
+    assert_eq!(ok(alt(dir.path(), &["add", "."])), "staged 0 path(s)\n");
+    assert!(!alt(dir.path(), &["add", "missing"]).status.success());
+}
+
+#[test]
 fn adding_everything_counts_every_file_and_touches_only_what_changed() {
     let dir = repo();
     let root = dir.path();

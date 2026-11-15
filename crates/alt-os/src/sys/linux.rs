@@ -153,4 +153,7 @@ unsafe extern "C" {
         data: *const c_void,
     ) -> c_int;
     pub fn umount2(target: *const c_char, flags: c_int) -> c_int;
+    /// Fills `buf` with directory entries, each laid out as [`dirent`] with
+    /// a name of its own length; returns the bytes written, 0 at the end.
+    pub fn getdents64(fd: c_int, buf: *mut c_void, len: usize) -> isize;
 }

@@ -47,7 +47,7 @@ exit 0
 out| {"schema_version":1,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[{"path":"added.txt","change":"added"},{"path":"binary.bin","change":"modified"},{"path":"code.rs","change":"modified"},{"path":"edited.txt","change":"modified"},{"path":"gone.txt","change":"deleted"},{"path":"staged-gone.txt","change":"deleted"},{"path":"staged.txt","change":"modified"},{"path":"untracked \"q\".txt","change":"added"}],"unstaged":[],"untracked":[],"unmerged":[],"clean":false}
 $ [repo] alt undo --json
 exit 0
-out| {"operation_ids":["<id64:14>","<id64:15>"],"paths":[".gitignore","added.txt","binary.bin","code.rs","edited.txt","gone.txt","kept.txt","staged.txt","untracked \"q\".txt"],"request_id":"<id32:16>","schema_version":1,"undone":true}
+out| {"operation_ids":["<id64:14>","<id64:15>"],"paths":["binary.bin","code.rs","edited.txt","gone.txt","untracked \"q\".txt"],"request_id":"<id32:16>","schema_version":1,"undone":true}
 $ [repo] alt status --json
 exit 0
 out| {"schema_version":1,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[{"path":"added.txt","change":"added"},{"path":"staged-gone.txt","change":"deleted"},{"path":"staged.txt","change":"modified"}],"unstaged":[{"path":"binary.bin","change":"modified"},{"path":"code.rs","change":"modified"},{"path":"edited.txt","change":"modified"},{"path":"gone.txt","change":"deleted"}],"untracked":["untracked \"q\".txt"],"unmerged":[],"clean":false}
