@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: keep blame --follow accepted and record the argument bindings of the new blame and log flags
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli.rs
+touched: crates/alt-cli/tests/fixtures/args/bindings.txt
+touched: crates/alt-cli/tests/it/argument_bindings.rs
