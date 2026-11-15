@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: pair tree entries in git's order when collecting storage deltas on import
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/tree_changes.rs
+touched: crates/alt-git-codec/src/tree.rs
+touched: crates/alt-import/src/lib.rs
