@@ -130,6 +130,10 @@ impl DirFd {
     }
 
     /// `lstat` of `name` in this directory; `None` when nothing is there.
+    #[allow(
+        clippy::unnecessary_cast,
+        reason = "the field types differ between systems"
+    )]
     pub(crate) fn stat(&self, name: &CStr) -> io::Result<Option<FileStat>> {
         let mut st = std::mem::MaybeUninit::<sys::stat>::uninit();
         // SAFETY: `name` is NUL-terminated and `st` has room for one stat
@@ -271,6 +275,10 @@ impl DirFd {
     }
 }
 
+#[allow(
+    clippy::unnecessary_cast,
+    reason = "the constants' type differs between systems"
+)]
 pub(crate) fn kind_of(st_mode: u32) -> Kind {
     match st_mode & sys::S_IFMT as u32 {
         m if m == sys::S_IFDIR as u32 => Kind::Dir,

@@ -562,8 +562,8 @@ mod tests {
         for e in 0..4 {
             old.set_stat(e, Some(stat(e as u64 + 1)));
         }
-        for d in 0..3 {
-            old.dirs[d].tree = Some(oid(100 + d as u8));
+        for (d, dir) in old.dirs.iter_mut().enumerate() {
+            dir.tree = Some(oid(100 + d as u8));
         }
         // b/d changes content, e/g is new, e/f stays
         let after = index(&[("a", 1), ("b/c", 2), ("b/d", 9), ("e/f", 4), ("e/g", 5)]);
