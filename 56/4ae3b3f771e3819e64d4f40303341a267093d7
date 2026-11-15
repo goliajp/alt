@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: fix
+summary: a cache that cannot be written no longer fails the command
+author-type: human
+author: doracawl
+touched: crates/alt-odb/src/odb.rs
+touched: crates/alt-odb/src/odb/durable.rs
+touched: crates/alt-odb/tests/it/cache_failure.rs
+touched: crates/alt-odb/tests/it/main.rs
+touched: crates/alt-refs/src/lib.rs
+touched: crates/alt-refs/tests/it/cache_failure.rs
+touched: crates/alt-refs/tests/it/main.rs
+touched: crates/alt-store/src/index.rs
+touched: crates/alt-store/src/runs.rs
