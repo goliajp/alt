@@ -57,13 +57,11 @@ impl NativeRepo<'_> {
         // it had when it was staged holds what the index holds
         let mut snapshot = self.worktree_snapshot()?;
         let (delta, stamp) = self.scan_delta_within(&mut snapshot, true, &within)?;
-        // a directory stands for every file under it, deleted ones
-        // included (their removal is staged), as in git
+        // a path stands for itself and every file under it, deleted ones
+        // included (their removal is staged), as in git; a conflicted
+        // path is one the index knows, with or without its file
         for (spec, given) in specs.iter().zip(paths).filter(|(spec, _)| !spec.is_empty()) {
-            let tracked = before
-                .entries
-                .iter()
-                .any(|e| e.stage() == 0 && under(&e.path, spec));
+            let tracked = before.entries.iter().any(|e| under(&e.path, spec));
             let seen = delta
                 .untracked
                 .iter()
@@ -87,23 +85,25 @@ impl NativeRepo<'_> {
             .chain(&delta.deleted.iter().collect::<Vec<_>>())
             .map(|p| p.as_slice())
             .collect();
-        // a conflicted path with no file left is resolved as a removal when
-        // the whole tree is staged; naming it does not reach it
+        // a conflicted path among those named is resolved by what the
+        // working tree has there: the file when there is one (`unmerged`),
+        // a removal when there is none. git does the same whether the path
+        // is named, lies under a named directory or the whole tree is
+        // staged. The scan does not report a conflicted submodule without
+        // a directory as deleted, so those are dropped here
+        let resolved = |e: &&IndexEntry| e.stage() != 0 && named(&e.path);
         let mut entries: Vec<IndexEntry> = before
             .entries
             .iter()
-            .filter(|e| !acted.contains(e.path.as_slice()) && !(staging_all && e.stage() != 0))
+            .filter(|e| !acted.contains(e.path.as_slice()) && !resolved(e))
             .cloned()
             .collect();
-        let dropped: Vec<BString> = match staging_all {
-            true => before
-                .entries
-                .iter()
-                .filter(|e| e.stage() != 0 && !acted.contains(e.path.as_slice()))
-                .map(|e| e.path.clone())
-                .collect(),
-            false => Vec::new(),
-        };
+        let dropped: Vec<BString> = before
+            .entries
+            .iter()
+            .filter(|e| resolved(e) && !acted.contains(e.path.as_slice()))
+            .map(|e| e.path.clone())
+            .collect();
 
         // path gate: deny staging any path the policy excludes, *before*
         // writing a blob into the odb, so a denial has no side effect
