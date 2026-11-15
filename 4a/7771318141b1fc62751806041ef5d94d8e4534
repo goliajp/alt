@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: fix
+summary: reload the chunk store when a compaction removed a pack mid-read
+author-type: human
+author: doracawl
+touched: crates/alt-odb/tests/it/compact_readers.rs
+touched: crates/alt-odb/tests/it/main.rs
+touched: crates/alt-store/src/blob.rs
+touched: crates/alt-store/src/check.rs
+touched: crates/alt-store/src/fresh.rs
+touched: crates/alt-store/src/lib.rs
+touched: crates/alt-store/tests/it/compact_readers.rs
+touched: crates/alt-store/tests/it/main.rs
