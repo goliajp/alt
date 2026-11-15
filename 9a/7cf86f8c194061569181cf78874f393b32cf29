@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: assert what undo does after an aborted rebase and that a switch records the files it writes
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/scan_cache.rs
