@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: perf
+summary: tell the kernel that index runs and sealed packs are read at random
+author-type: human
+author: doracawl
+touched: crates/alt-os/src/map.rs
+touched: crates/alt-store/src/fresh.rs
+touched: crates/alt-store/src/lib.rs
+touched: crates/alt-store/src/packs.rs
+touched: crates/alt-store/src/runs.rs
