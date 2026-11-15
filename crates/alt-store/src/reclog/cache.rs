@@ -38,13 +38,14 @@ fn slot(key: &Key) -> usize {
 impl ReadCache {
     pub fn get(&self, key: &Key) -> Option<Record> {
         let slots = self.slots.lock().unwrap();
-        let held = slots.get(slot(key)..)?;
+        let at = slot(key);
+        let held = slots.get(at..at + SLOT_LEN)?;
         let len = u64::from_le_bytes(held[KEY_LEN..KEY_LEN + 8].try_into().unwrap()) as usize;
         if len == 0 || held[..KEY_LEN] != key[..] {
             return None;
         }
         let mut buf = [0u8; MAX_REC];
-        buf.copy_from_slice(&held[KEY_LEN + 8..SLOT_LEN]);
+        buf.copy_from_slice(&held[KEY_LEN + 8..]);
         Some(Record { buf, len })
     }
 

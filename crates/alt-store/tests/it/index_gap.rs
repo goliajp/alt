@@ -180,3 +180,28 @@ fn a_lookup_repeated_after_the_log_changed_sees_the_change() {
     assert_eq!(value(&log, 250), None);
     assert_eq!(value(&log, 199), Some(199));
 }
+
+#[test]
+fn a_few_lookups_behind_the_runs_keep_nothing_and_still_answer() {
+    use super::index_runs::key;
+    let dir = alt_os::temp::tempdir().unwrap();
+    let path = dir.path().join("log");
+    // among the keys, one whose first eight bytes are a multiple of every
+    // table size a cache of kept records might have up to 2^15 slots
+    let first =
+        (0..).find(|n| u64::from_le_bytes(key(*n)[..8].try_into().unwrap()) % (1 << 15) == 0);
+    let first: u64 = first.unwrap();
+    let (mut log, _) = RecLog::open(&path, LAYOUT).unwrap();
+    for n in first..first + 300 {
+        log.append(&record(n, n)).unwrap();
+    }
+    log.index_tail(true).unwrap();
+    drop(log);
+    // a fresh handle, as a short command has, before anything was kept
+    for n in [first, first + 1, first + 299] {
+        let (log, _) = RecLog::open(&path, LAYOUT).unwrap();
+        assert_eq!(value(&log, n), Some(n));
+        assert_eq!(value(&log, n), Some(n));
+        assert_eq!(value(&log, first + 300), None);
+    }
+}
