@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: fold repetition marks behind one another and bound how deep repetitions nest
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/syntax.rs
+touched: crates/alt-regex/tests/it/limits.rs
+touched: crates/alt-regex/tests/it/main.rs
