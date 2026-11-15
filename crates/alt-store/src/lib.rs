@@ -55,7 +55,7 @@ use alt_os::map::Mmap;
 
 use index::{ChunkIndex, Location};
 use pack::{ENC_DELTA, ENC_RAW, ENC_ZSTD, REC_HEADER_LEN, RecordHeader};
-use packs::{Active, idx_path, list_pack_seqs, load, pack_path};
+use packs::{Active, idx_path, list_pack_seqs, pack_path};
 
 /// Write-side cap on lineage-delta chain length. Later re-encoding of a
 /// base can stretch an existing chain past this — the cap is a cost
@@ -314,6 +314,8 @@ pub struct ChunkStore {
     /// see [`fresh`]: the lock opens run under, and this store reloaded
     open_lock: Option<PathBuf>,
     newer: OnceLock<Box<ChunkStore>>,
+    /// whether the index keeps the locations it finds (a long-lived handle)
+    keep: bool,
 }
 
 /// Repro/diagnostic knob (env `ALT_RELAXED_DURABILITY`): skip per-commit
@@ -375,11 +377,7 @@ impl ChunkStore {
         if !self.disk_changed()? {
             return Ok(());
         }
-        let (sealed, active, index) = load(&self.dir, None)?;
-        self.sealed = sealed;
-        self.active = active;
-        self.index = index;
-        Ok(())
+        self.reload()
     }
 
     /// The mapped bytes of sealed pack `seq`.
@@ -634,11 +632,8 @@ impl ChunkStore {
         // index starts over from its records. Ids are stable, so the delta
         // cache (keyed by id) stays valid across the relocation.
         drop(active);
-        let (sealed, active, index) = load(&self.dir, None)?;
-        self.sealed = sealed;
-        self.index = index;
+        self.reload()?;
         self.index_tail()?;
-        self.active = active;
         self.counters.bytes_superseded = 0;
 
         let after_seqs = list_pack_seqs(&self.dir)?;
@@ -998,10 +993,7 @@ impl ChunkStore {
         })?;
         self.active.write.set_len(ckpt.pack_len)?;
         self.active.write.sync_all()?;
-        let (sealed, active, index) = load(&self.dir, None)?;
-        self.sealed = sealed;
-        self.active = active;
-        self.index = index;
+        self.reload()?;
         self.cache.lock().unwrap().clear();
         Ok(())
     }

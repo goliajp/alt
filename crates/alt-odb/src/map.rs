@@ -132,6 +132,11 @@ impl ObjectMap {
         Ok(Self { log })
     }
 
+    /// See [`RecLog::keep_reads`].
+    pub fn keep_reads(&mut self) {
+        self.log.keep_reads();
+    }
+
     pub fn run_chain(&self) -> Vec<(u64, u64)> {
         self.log.run_chain()
     }

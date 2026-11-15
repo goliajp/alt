@@ -218,6 +218,9 @@ impl Odb {
     /// torn tail is handled correctly. Must not be called mid-batch (it is a
     /// request-boundary operation; a batch always reaches `flush` first).
     pub fn refresh(&mut self) -> Result<(), OdbError> {
+        // a handle that is refreshed is one that lives across requests
+        self.map.keep_reads();
+        self.blobs.keep_reads();
         self.acquire()?;
         self.release();
         Ok(())

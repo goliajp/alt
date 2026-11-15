@@ -63,6 +63,13 @@ impl RecLog {
         Ok(())
     }
 
+    /// For a handle that lives long and looks the same records up again
+    /// and again: records read from behind the runs are kept in memory
+    /// from now on.
+    pub fn keep_reads(&mut self) {
+        self.cache.enable();
+    }
+
     /// The log range of each index run, oldest first (see
     /// [`Runs::open_named`]).
     pub fn run_chain(&self) -> Vec<(u64, u64)> {

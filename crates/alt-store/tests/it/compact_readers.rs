@@ -86,3 +86,47 @@ fn a_reader_follows_one_compaction_after_another() {
         }
     }
 }
+
+#[test]
+fn a_handle_that_keeps_locations_follows_every_change_to_them() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let (opts, ids) = filled(dir.path());
+    let mut store = ChunkStore::open_with(dir.path(), opts).unwrap();
+    store.keep_reads();
+    let read_all = |store: &ChunkStore| {
+        for (n, id) in ids.iter().enumerate() {
+            assert_eq!(store.get(*id).unwrap(), chunk(n as u64), "chunk {n}");
+        }
+    };
+    // twice: the second pass finds every chunk where the first one did
+    read_all(&store);
+    read_all(&store);
+
+    // a chunk written again as a delta: its newer record is the one found
+    store.sync_from_disk().unwrap();
+    let delta = store.reencode_as_delta(ids[10], ids[11]).unwrap();
+    store.flush().unwrap();
+    read_all(&store);
+    store.index_tail().unwrap();
+    read_all(&store);
+    if delta {
+        assert_eq!(
+            store.stat(ids[10]).unwrap().encoding,
+            alt_store::Encoding::Delta
+        );
+    }
+
+    // every pack replaced: the locations kept so far point nowhere
+    store.compact().unwrap();
+    read_all(&store);
+    read_all(&store);
+
+    // new chunks, then cut back to before them
+    let mark = store.checkpoint();
+    let extra = store.put(&chunk(50_000)).unwrap();
+    assert_eq!(store.get(extra).unwrap(), chunk(50_000));
+    store.rewind(mark).unwrap();
+    assert!(!store.contains(extra).unwrap());
+    read_all(&store);
+    assert_eq!(store.check().unwrap(), CHUNKS);
+}

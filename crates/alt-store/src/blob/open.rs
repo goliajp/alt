@@ -67,6 +67,13 @@ impl BlobStore {
         Ok(self.map.get_or_init(|| map))
     }
 
+    /// For a handle that lives long: chunk locations found through the
+    /// index are kept in memory from now on (see
+    /// [`ChunkStore::keep_reads`]).
+    pub fn keep_reads(&mut self) {
+        self.chunks.keep_reads();
+    }
+
     /// Opens the blob map now rather than on first use.
     pub fn open_map(&self) -> Result<(), StoreError> {
         self.map().map(drop)

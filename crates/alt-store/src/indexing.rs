@@ -28,7 +28,27 @@ impl ChunkStore {
             cache: Mutex::new(DeltaCache::new()),
             open_lock: None,
             newer: OnceLock::new(),
+            keep: false,
         })
+    }
+
+    /// Reads the packs and the index again, as a fresh open would.
+    pub(crate) fn reload(&mut self) -> Result<(), StoreError> {
+        let (sealed, active, index) = load(&self.dir, None)?;
+        self.sealed = sealed;
+        self.active = active;
+        self.index = index;
+        if self.keep {
+            self.index.keep_reads();
+        }
+        Ok(())
+    }
+
+    /// For a handle that lives long and reads the same chunks again and
+    /// again: where the index found each one is kept in memory from now on.
+    pub fn keep_reads(&mut self) {
+        self.keep = true;
+        self.index.keep_reads();
     }
 
     /// Pack sequence numbers, ascending; the last is the active pack.
@@ -55,10 +75,7 @@ impl ChunkStore {
         // the runs on disk stop short of where this handle's tail begins
         // (their directory was removed while it was open): read the packs
         // again from where they stop now, then index
-        let (sealed, active, index) = load(&self.dir, None)?;
-        self.sealed = sealed;
-        self.active = active;
-        self.index = index;
+        self.reload()?;
         self.index_from_tail().map(drop)
     }
 
@@ -97,10 +114,7 @@ impl ChunkStore {
             Ok(loc) => Ok(loc.is_some()),
             Err(StoreError::Corrupt { .. } | StoreError::Io(_)) => {
                 self.index.clear()?;
-                let (sealed, active, index) = load(&self.dir, None)?;
-                self.sealed = sealed;
-                self.active = active;
-                self.index = index;
+                self.reload()?;
                 Ok(self.index.get(id)?.is_some())
             }
             Err(e) => Err(e),

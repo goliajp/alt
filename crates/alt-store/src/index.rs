@@ -4,6 +4,7 @@
 //! id they asked for.
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use alt_hash::IdMap;
 
@@ -12,6 +13,8 @@ use crate::{ChunkId, StoreError};
 
 /// Tail length, in records, from which a flush folds the tail into the runs.
 pub(crate) const INDEX_AT: usize = 256;
+/// Kept locations before the table is emptied and filled again.
+const KEPT_MAX: usize = 1 << 20;
 const OFFSET_BITS: u32 = 40;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,6 +47,10 @@ pub(crate) struct ChunkIndex {
     latest: IdMap<ChunkId, Location>,
     /// position just past the last record known
     end: u64,
+    /// locations found through the runs, kept once [`Self::keep_reads`]
+    /// was called: a handle that lives long finds the same chunks again
+    /// and again, and a search of the runs costs several cache misses
+    kept: Option<Mutex<IdMap<ChunkId, Location>>>,
 }
 
 impl ChunkIndex {
@@ -70,6 +77,7 @@ impl ChunkIndex {
             tail: Vec::new(),
             latest: IdMap::default(),
             end,
+            kept: None,
         })
     }
 
@@ -80,6 +88,10 @@ impl ChunkIndex {
 
     /// Notes a record at `loc` whose bytes stop at `end` in the same pack.
     pub fn insert(&mut self, id: ChunkId, loc: Location, end: u64) {
+        if let Some(kept) = &mut self.kept {
+            // written again: the record just appended is the one to find
+            kept.get_mut().unwrap().remove(&id);
+        }
         self.tail.push((id, loc));
         self.latest.insert(id, loc);
         self.end = Location {
@@ -101,10 +113,32 @@ impl ChunkIndex {
         if let Some(loc) = self.latest.get(&id) {
             return Ok(Some((*loc, false)));
         }
-        Ok(self
-            .runs
-            .find_last(&id.0)?
-            .map(|at| (Location::at(at), true)))
+        if let Some(kept) = &self.kept
+            && let Some(loc) = kept.lock().unwrap().get(&id)
+        {
+            return Ok(Some((*loc, true)));
+        }
+        let found = self.runs.find_last(&id.0)?.map(Location::at);
+        if let (Some(kept), Some(loc)) = (&self.kept, found) {
+            let mut kept = kept.lock().unwrap();
+            if kept.len() >= KEPT_MAX {
+                kept.clear();
+            }
+            kept.insert(id, loc);
+        }
+        Ok(found.map(|loc| (loc, true)))
+    }
+
+    /// Keeps the locations found through the runs from now on.
+    pub fn keep_reads(&mut self) {
+        self.kept.get_or_insert_default();
+    }
+
+    /// Drops the kept locations: the runs changed under them.
+    fn forget(&mut self) {
+        if let Some(kept) = &mut self.kept {
+            kept.get_mut().unwrap().clear();
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -209,6 +243,7 @@ impl ChunkIndex {
         }
         // the runs and the tail change together, so a failed write below
         // leaves the index whole
+        self.forget();
         self.runs = runs;
         self.tail.retain(|(_, loc)| loc.position() >= covered);
         self.latest = self.tail.iter().copied().collect();
@@ -228,11 +263,13 @@ impl ChunkIndex {
 
     /// Drops the runs reaching past `target`, before a pack is cut back.
     pub fn truncate(&mut self, target: Location) -> Result<(), StoreError> {
+        self.forget();
         self.runs.truncate(target.position())
     }
 
     /// Drops every run, before the packs they point into are replaced.
     pub fn clear(&mut self) -> Result<(), StoreError> {
+        self.forget();
         self.runs.truncate(0)
     }
 

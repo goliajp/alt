@@ -42,6 +42,9 @@ impl ChunkStore {
             None => open()?,
         };
         fresh.open_lock = self.open_lock.clone();
+        if self.keep {
+            fresh.keep_reads();
+        }
         Ok(self.newer.get_or_init(|| Box::new(fresh)))
     }
 
