@@ -186,6 +186,16 @@ pub fn scan_indexed_paths(
         })?;
         let abs = root.join(rel);
         let meta = match std::fs::symlink_metadata(&abs) {
+            // a submodule's commit is its own state: the placeholder
+            // directory, or its absence, is not a change to this repository
+            Ok(m) if idx.mode == 0o160000 && m.is_dir() => {
+                out.push(gitlink(idx));
+                continue;
+            }
+            Err(e) if idx.mode == 0o160000 && e.kind() == std::io::ErrorKind::NotFound => {
+                out.push(gitlink(idx));
+                continue;
+            }
             Ok(m) => m,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 // file deleted from working tree → don't push; changes()
@@ -229,6 +239,14 @@ pub fn scan_indexed_paths(
     }
     out.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(out)
+}
+
+fn gitlink(idx: &alt_git_index::IndexEntry) -> WorkEntry {
+    WorkEntry {
+        path: idx.path.clone(),
+        oid: idx.oid,
+        mode: idx.mode,
+    }
 }
 
 /// The index's paths and every directory above them. Ignore rules only

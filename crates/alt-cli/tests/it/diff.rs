@@ -631,3 +631,63 @@ clap = "4"
         "unchanged dependencies must not appear: {text}"
     );
 }
+
+/// A git repository whose only commit holds `a.txt` and a submodule entry
+/// at `sub`, imported into a fresh alt work tree.
+fn imported_with_submodule(src: &Path, dst: &Path) {
+    ok(git(src, &["init", "-q", "-b", "main", "."]));
+    ok(git(src, &["config", "user.email", "t@e"]));
+    ok(git(src, &["config", "user.name", "t"]));
+    std::fs::write(src.join("a.txt"), "one\ntwo\n").unwrap();
+    ok(git(src, &["add", "a.txt"]));
+    ok(git(
+        src,
+        &[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            "160000,1111111111111111111111111111111111111111,sub",
+        ],
+    ));
+    ok(git(src, &["commit", "-qm", "base"]));
+    ok(alt(src, &["import", dst.to_str().unwrap()]));
+}
+
+#[test]
+fn diff_skips_an_untouched_submodule_entry() {
+    let (src, dst) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
+    imported_with_submodule(src.path(), dst.path());
+    let root = dst.path();
+    assert!(root.join("sub").is_dir(), "placeholder directory");
+    assert!(ok(alt(root, &["diff"])).is_empty(), "clean tree => no diff");
+
+    std::fs::write(root.join("a.txt"), "one\ntwo\nthree\n").unwrap();
+    let out = ok(alt(root, &["diff"]));
+    assert!(out.contains("diff --git a/a.txt b/a.txt"), "{out}");
+    assert!(out.contains("+three"), "{out}");
+    assert!(!out.contains("sub"), "{out}");
+
+    // without the placeholder the entry is still not a change, as in status
+    std::fs::remove_dir(root.join("sub")).unwrap();
+    assert!(!ok(alt(root, &["diff"])).contains("sub"));
+}
+
+#[test]
+fn diff_shows_a_submodule_replaced_by_a_file_as_git_does() {
+    let (src, dst) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
+    imported_with_submodule(src.path(), dst.path());
+    for root in [src.path(), dst.path()] {
+        let _ = std::fs::remove_dir(root.join("sub"));
+        std::fs::write(root.join("sub"), "now a file\n").unwrap();
+    }
+    let ours = ok(alt(dst.path(), &["diff"]));
+    let theirs = ok(git(src.path(), &["-c", "core.pager=cat", "diff"]));
+    assert!(ours.contains("-Subproject commit 1111111111111111111111111111111111111111"));
+    assert_eq!(hunk_body(&ours), hunk_body(&theirs));
+}
