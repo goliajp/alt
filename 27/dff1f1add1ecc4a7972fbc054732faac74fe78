@@ -1,0 +1,18 @@
+schema: alt-meta/1
+type: feat
+summary: add alt-regex, POSIX regular expressions matched in linear time
+author-type: human
+author: doracawl
+touched: Cargo.lock
+touched: Cargo.toml
+touched: crates/alt-regex/Cargo.toml
+touched: crates/alt-regex/src/class.rs
+touched: crates/alt-regex/src/dfa.rs
+touched: crates/alt-regex/src/lib.rs
+touched: crates/alt-regex/src/literal.rs
+touched: crates/alt-regex/src/pike.rs
+touched: crates/alt-regex/src/program.rs
+touched: crates/alt-regex/src/syntax.rs
+touched: crates/alt-regex/tests/it/main.rs
+touched: crates/alt-regex/tests/it/pathological.rs
+touched: crates/alt-regex/tests/it/regcomp.rs
