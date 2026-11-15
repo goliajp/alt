@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: assert how a git that ends on a filter process that is gone ends
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/filter_process.rs
