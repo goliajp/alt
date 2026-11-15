@@ -437,3 +437,60 @@ fn blob_store_reopens_from_its_index() {
         assert_eq!(&store.get(*id).unwrap(), blob);
     }
 }
+
+/// Opening and looking up in a record log the size a repository of the
+/// Linux kernel's order would have. Prints timings; asserts only results.
+#[test]
+#[ignore = "writes a log of ten million records (about 0.9 GB with its index)"]
+fn record_log_at_ten_million_records() {
+    use std::time::Instant;
+
+    let dir = alt_os::temp::tempdir().unwrap();
+    let path = dir.path().join("log");
+    let total = 10_000_000u64;
+    // grown the way a repository grows: one large batch, then small ones
+    let mut next = 0u64;
+    for batch in [total - 40_000, 30_000, 9_000, 700, 300] {
+        let (mut log, _) = RecLog::open(&path, LAYOUT).unwrap();
+        for n in next..next + batch {
+            log.append(&record(n, n)).unwrap();
+        }
+        next += batch;
+        let started = Instant::now();
+        log.index_tail(true).unwrap();
+        println!("indexed a batch of {batch} in {:?}", started.elapsed());
+    }
+    fill(&path, total..total + 100, false);
+
+    let mut opens = Vec::new();
+    for _ in 0..21 {
+        let started = Instant::now();
+        let (log, _) = RecLog::open(&path, LAYOUT).unwrap();
+        opens.push(started.elapsed());
+        assert_eq!(log.count() as u64, total + 100);
+    }
+    opens.sort();
+    println!("open: median {:?}, fastest {:?}", opens[10], opens[0]);
+
+    let (log, _) = RecLog::open(&path, LAYOUT).unwrap();
+    let started = Instant::now();
+    let probes = 100_000u64;
+    for i in 0..probes {
+        let n = i * 99_991 % (total + 100);
+        assert_eq!(value(&log, n), Some(n));
+    }
+    println!(
+        "lookup of a present key: {:?} each",
+        started.elapsed() / probes as u32
+    );
+    let started = Instant::now();
+    for i in 0..probes {
+        assert_eq!(value(&log, total + 1_000 + i), None);
+    }
+    println!(
+        "lookup of an absent key: {:?} each",
+        started.elapsed() / probes as u32
+    );
+    let runs = fs::read_dir(dir.path().join("log.idx")).unwrap().count();
+    println!("index runs: {runs}");
+}

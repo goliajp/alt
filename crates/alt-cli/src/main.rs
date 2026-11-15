@@ -5,7 +5,7 @@
 //! alternate signal stack, probing the standard descriptors) costs about
 //! twenty system calls on every invocation and buys only a friendlier
 //! message on stack overflow; what a command relies on is done here.
-#![no_main]
+#![cfg_attr(not(test), no_main)]
 
 use alt_cli::cli::{self, Command};
 use alt_cli::daemon::Response;
@@ -15,6 +15,7 @@ use alt_cli::native::{self, Identity, Store};
 use alt_repo::Repository;
 use std::io::Write;
 
+#[cfg(not(test))]
 #[unsafe(no_mangle)]
 pub extern "C" fn main(
     _argc: std::ffi::c_int,
@@ -27,7 +28,18 @@ pub extern "C" fn main(
     let Ok(response) = std::panic::catch_unwind(run) else {
         return 101;
     };
-    // nothing flushes standard output after `main` returns
+    deliver(&response).into()
+}
+
+/// The test harness brings its own entry point.
+#[cfg(test)]
+fn main() -> std::process::ExitCode {
+    deliver(&run()).into()
+}
+
+/// Writes a command's output and gives its exit status.
+fn deliver(response: &Response) -> u8 {
+    // nothing flushes standard output after the C `main` returns
     let delivered = (|| {
         let mut out = std::io::stdout().lock();
         out.write_all(&response.stdout)?;
@@ -35,7 +47,7 @@ pub extern "C" fn main(
         std::io::stderr().lock().write_all(&response.stderr)
     })();
     if delivered.is_ok() {
-        response.exit_code.into()
+        response.exit_code
     } else {
         75
     }
