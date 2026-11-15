@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: a configured diff driver replaces the built-in one of its name
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/funcname.rs
