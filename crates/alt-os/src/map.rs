@@ -17,11 +17,7 @@ unsafe extern "C" {
         offset: i64,
     ) -> *mut c_void;
     fn munmap(address: *mut c_void, length: usize) -> c_int;
-    fn madvise(address: *mut c_void, length: usize, advice: c_int) -> c_int;
 }
-
-const MADV_NORMAL: c_int = 0;
-const MADV_RANDOM: c_int = 1;
 
 /// A whole file mapped read-only and shared.
 ///
@@ -75,22 +71,6 @@ impl Mmap {
             start: NonNull::new(address.cast()).expect("mapping address"),
             length,
         })
-    }
-
-    /// Tells the kernel the mapping is read a little here and a little
-    /// there (`random`), or front to back as mappings are by default. On a
-    /// page fault the kernel otherwise maps the sixteen pages around the
-    /// one asked for; for a lookup that wants one page of a large file
-    /// that is most of what the lookup costs. Advice only: failure changes
-    /// nothing.
-    pub fn expect_reads(&self, random: bool) {
-        if self.length == 0 {
-            return;
-        }
-        let advice = if random { MADV_RANDOM } else { MADV_NORMAL };
-        // SAFETY: the range is exactly this mapping, and the advice does
-        // not change what any address in it reads as
-        unsafe { madvise(self.start.as_ptr().cast(), self.length, advice) };
     }
 }
 

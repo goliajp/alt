@@ -113,7 +113,7 @@ pub fn run(
         return run_json(out, repo, start, limit);
     }
 
-    let notes = repo.resolve_ref(crate::meta::NOTES_REF)?;
+    let notes = crate::meta::Notes::of(repo)?;
     let mut first = true;
     let mut converted = Vec::new();
     let mut walk = repo.rev_walk(start)?;
@@ -123,7 +123,7 @@ pub fn run(
         match args.pretty.as_str() {
             // raw shows the stored object as is
             "raw" => write_raw(out, &oid, &payload, &mut first)?,
-            "oneline" => match note_message(repo, notes, oid)? {
+            "oneline" => match crate::meta::Notes::message(&notes, repo, oid)? {
                 Some(m) => write_oneline(out, &oid, format!("\n\n{m}").as_bytes())?,
                 None => write_oneline(out, &oid, &payload)?,
             },
@@ -462,21 +462,6 @@ fn emit_file_stanza(
     Ok(())
 }
 
-/// The message a commit's metadata note puts in place of its own, if any.
-fn note_message(
-    repo: &Repository,
-    notes: Option<ObjectId>,
-    oid: ObjectId,
-) -> Result<Option<String>, Box<dyn std::error::Error>> {
-    let Some(notes) = notes else {
-        return Ok(None);
-    };
-    let read = |id: ObjectId| -> crate::meta::ReadResult {
-        Ok(repo.read_object(&id)?.map(|o| (o.kind, o.data.to_vec())))
-    };
-    Ok(crate::meta::find(&read, oid.algo(), notes, oid)?.and_then(|m| m.message))
-}
-
 /// `log --json`: `{schema_version, commits:[{oid, tree, parents, author,
 /// committer, message, note_message}]}`. `author`/`committer` are the raw
 /// ident lines (`Name <email> ts tz`); `message` is the full commit message,
@@ -488,7 +473,7 @@ fn run_json(
     limit: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crate::json::Json;
-    let notes = repo.resolve_ref(crate::meta::NOTES_REF)?;
+    let notes = crate::meta::Notes::of(repo)?;
     let mut commits = Vec::new();
     for item in repo.rev_walk(start)?.take(limit) {
         let (oid, commit) = item?;
@@ -512,7 +497,7 @@ fn run_json(
             ("message", Json::str(commit.message())),
             (
                 "note_message",
-                note_message(repo, notes, oid)?.map_or(Json::Null, Json::str),
+                crate::meta::Notes::message(&notes, repo, oid)?.map_or(Json::Null, Json::str),
             ),
         ]));
     }
