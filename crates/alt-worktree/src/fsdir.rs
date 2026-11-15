@@ -47,6 +47,28 @@ impl Listing {
         self.items[i].2
     }
 
+    /// Takes an entry as a directory listing gives it: its NUL-terminated
+    /// name and its type. One whose type the listing leaves open is noted
+    /// in `unknown`.
+    fn add(&mut self, name: &[u8], d_type: u8, unknown: &mut Vec<usize>) {
+        if name == b".\0" || name == b"..\0" {
+            return;
+        }
+        let kind = match d_type {
+            DT_DIR => Kind::Dir,
+            DT_REG => Kind::File,
+            DT_LNK => Kind::Link,
+            DT_UNKNOWN => {
+                unknown.push(self.items.len());
+                Kind::Other
+            }
+            _ => Kind::Other,
+        };
+        let at = self.bytes.len() as u32;
+        self.bytes.extend_from_slice(name);
+        self.items.push((at, name.len() as u32 - 1, kind));
+    }
+
     pub(crate) fn sort(&mut self) {
         let bytes = &self.bytes;
         self.items.sort_unstable_by(|a, b| {
@@ -183,32 +205,20 @@ impl DirFd {
     pub(crate) fn names(&mut self) -> io::Result<Listing> {
         let mut listing = Listing::default();
         let mut unknown = Vec::new();
-        let mut add = |name: &[u8], d_type: u8| {
-            if name == b".\0" || name == b"..\0" {
-                return;
-            }
-            let kind = match d_type {
-                DT_DIR => Kind::Dir,
-                DT_REG => Kind::File,
-                DT_LNK => Kind::Link,
-                DT_UNKNOWN => {
-                    unknown.push(listing.items.len());
-                    Kind::Other
-                }
-                _ => Kind::Other,
-            };
-            let at = listing.bytes.len() as u32;
-            listing.bytes.extend_from_slice(name);
-            listing.items.push((at, name.len() as u32 - 1, kind));
-        };
-        self.each_entry(&mut add)?;
-        // a filesystem that does not say what an entry is
-        for i in unknown {
+        self.each_entry(&mut |name, d_type| listing.add(name, d_type, &mut unknown))?;
+        self.resolve(&mut listing, &unknown)?;
+        Ok(listing)
+    }
+
+    /// Asks `lstat` what the entries `unknown` are: a filesystem need not
+    /// say in its listing. One that is gone by now stays what it was.
+    fn resolve(&self, listing: &mut Listing, unknown: &[usize]) -> io::Result<()> {
+        for &i in unknown {
             if let Some(st) = self.stat(listing.c_name(i))? {
                 listing.items[i].2 = kind_of(st.mode);
             }
         }
-        Ok(listing)
+        Ok(())
     }
 
     /// Calls `add` with every entry's NUL-terminated name and type. The
@@ -343,5 +353,53 @@ mod tests {
         assert!(dir.open_at(c"l").unwrap().is_none());
         assert!(dir.open_at(c"missing").unwrap().is_none());
         assert_eq!(dir.read(c"l").unwrap(), b"x");
+    }
+
+    #[test]
+    fn an_entry_listed_without_its_type_is_asked_for_by_stat() {
+        let tmp = alt_os::temp::tempdir().unwrap();
+        std::fs::write(tmp.path().join("f"), b"x").unwrap();
+        std::fs::create_dir(tmp.path().join("d")).unwrap();
+        std::os::unix::fs::symlink("d", tmp.path().join("l")).unwrap();
+        let dir = DirFd::open(tmp.path()).unwrap();
+        let mut listing = Listing::default();
+        let mut unknown = Vec::new();
+        let entries: [(&[u8], u8); 7] = [
+            (b".\0", DT_DIR),
+            (b"..\0", DT_UNKNOWN),
+            (b"f\0", DT_UNKNOWN),
+            (b"known\0", DT_REG),
+            (b"d\0", DT_UNKNOWN),
+            (b"l\0", DT_UNKNOWN),
+            (b"gone\0", DT_UNKNOWN),
+        ];
+        for (name, d_type) in entries {
+            listing.add(name, d_type, &mut unknown);
+        }
+        assert_eq!(unknown, vec![0, 2, 3, 4]);
+        let kinds = |listing: &Listing| -> Vec<(Vec<u8>, Kind)> {
+            (0..listing.len())
+                .map(|i| (listing.name(i).to_vec(), listing.kind(i)))
+                .collect()
+        };
+        assert!(kinds(&listing).iter().all(|(name, kind)| {
+            *kind
+                == if name == b"known" {
+                    Kind::File
+                } else {
+                    Kind::Other
+                }
+        }));
+        dir.resolve(&mut listing, &unknown).unwrap();
+        assert_eq!(
+            kinds(&listing),
+            vec![
+                (b"f".to_vec(), Kind::File),
+                (b"known".to_vec(), Kind::File),
+                (b"d".to_vec(), Kind::Dir),
+                (b"l".to_vec(), Kind::Link),
+                (b"gone".to_vec(), Kind::Other),
+            ]
+        );
     }
 }

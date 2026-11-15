@@ -190,17 +190,14 @@ fn a_file_whose_stat_is_recorded_is_not_read_again() {
     scan(root, &mut snapshot, &options(true, LATER)).unwrap();
     snapshot.changed = false;
 
-    // unreadable now: a scan that opened it would fail
-    std::fs::set_permissions(
-        root.join("docs/guide.md"),
-        std::fs::Permissions::from_mode(0o000),
-    )
-    .unwrap();
+    // other content now: a scan that read the file would report it changed
+    write(root, "docs/guide.md", "not what the index holds\n");
     let meta = std::fs::symlink_metadata(root.join("docs/guide.md")).unwrap();
     let at = (0..snapshot.entries.len())
         .find(|&i| snapshot.path(i) == b"docs/guide.md")
         .unwrap();
-    // chmod moved ctime and the mode; put the recorded stat in line with it
+    // the rewrite moved the stat; record the new one as the stat the
+    // entry's content was last seen with
     snapshot.set_stat(at, Some(alt_worktree::FileStat::of(&meta)));
     snapshot.changed = false;
     let delta = scan(root, &mut snapshot, &options(true, LATER)).unwrap();
