@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: perf
+summary: read the notes trees once for a whole log, and drop the read-at-random advice
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/log_cmd.rs
+touched: crates/alt-cli/src/meta.rs
+touched: crates/alt-cli/src/meta/lookup.rs
+touched: crates/alt-os/src/map.rs
+touched: crates/alt-store/src/fresh.rs
+touched: crates/alt-store/src/lib.rs
+touched: crates/alt-store/src/packs.rs
+touched: crates/alt-store/src/runs.rs
