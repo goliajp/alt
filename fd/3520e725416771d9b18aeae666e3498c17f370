@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: remove the temporary snapshot and clock probe files a killed command left behind
+author-type: human
+author: doracawl
+touched: crates/alt-worktree/src/control.rs
+touched: crates/alt-worktree/src/delta.rs
+touched: crates/alt-worktree/src/lib.rs
+touched: crates/alt-worktree/src/snapshot.rs
