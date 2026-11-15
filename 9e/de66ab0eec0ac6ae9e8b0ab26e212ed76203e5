@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: refactor
+summary: keep the new tests and the abbreviator accessor out of files already over the size limit
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/diff.rs
+touched: crates/alt-cli/tests/it/diff_git.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/recovery_kinds.rs
+touched: crates/alt-cli/tests/it/undo_add.rs
+touched: crates/alt-repo/src/lib.rs
+touched: crates/alt-repo/src/odb.rs
