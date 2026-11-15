@@ -31,9 +31,10 @@ pub struct BlobMap {
 }
 
 impl BlobMap {
-    /// Opens `<dir>/blobmap`, creating it (and the directory) if missing.
-    pub fn open(dir: &Path) -> Result<Self, StoreError> {
-        let (log, created) = RecLog::open(&dir.join("blobmap"), LAYOUT)?;
+    /// Opens `<dir>/blobmap`, creating it (and the directory) if missing;
+    /// `named` are its index runs when the caller has them on record.
+    pub fn open_with_runs(dir: &Path, named: Option<&[(u64, u64)]>) -> Result<Self, StoreError> {
+        let (log, created) = RecLog::open_with_runs(&dir.join("blobmap"), LAYOUT, named)?;
         if created {
             fsync_dir(dir)?;
         }
@@ -70,6 +71,10 @@ impl BlobMap {
 
     pub fn index_pending(&self) -> bool {
         self.log.index_pending()
+    }
+
+    pub fn run_chain(&self) -> Vec<(u64, u64)> {
+        self.log.run_chain()
     }
 
     pub fn get(&self, blob: BlobId) -> Result<Option<(ChunkId, u64)>, StoreError> {

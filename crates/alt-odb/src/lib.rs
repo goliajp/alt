@@ -18,6 +18,7 @@
 
 mod check;
 mod error;
+mod head;
 mod lock;
 mod map;
 mod odb;

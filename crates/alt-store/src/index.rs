@@ -52,11 +52,16 @@ impl ChunkIndex {
     pub fn open(
         store_dir: &Path,
         base: Location,
+        named: Option<&[(u64, u64)]>,
         guard_at: impl Fn(Location) -> Option<Guard>,
     ) -> Result<Self, StoreError> {
         let dir = store_dir.join("chunks.idx");
         let base = base.position();
-        let runs = Runs::open(&dir, base, |end| guard_at(Location::at(end)))?;
+        let guard = |end| guard_at(Location::at(end));
+        let runs = match named {
+            Some(named) => Runs::open_named(&dir, base, named, guard)?,
+            None => Runs::open(&dir, base, guard)?,
+        };
         let end = runs.covered();
         Ok(Self {
             dir,
@@ -138,6 +143,11 @@ impl ChunkIndex {
                 .map(|(id, loc)| (*id, loc.offset)),
         );
         entries
+    }
+
+    /// The range of each run, oldest first (see [`Runs::open_named`]).
+    pub fn chain(&self) -> Vec<(u64, u64)> {
+        self.runs.chain()
     }
 
     /// Re-hashes the run files against their checksums.

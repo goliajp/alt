@@ -1,10 +1,50 @@
 //! Folding a chunk store's newly appended records into its index runs.
 
 use crate::index::Location;
-use crate::packs::{self, load};
-use crate::{ChunkId, ChunkStore, StoreError, relaxed_durability};
+use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
+
+use crate::packs::{self, Known, load};
+use crate::{ChunkId, ChunkStore, Counters, DeltaCache, Options, StoreError, relaxed_durability};
 
 impl ChunkStore {
+    /// Opens the store in `dir`; `known` names its packs and index runs
+    /// when the caller has them on record (see [`Known`]).
+    pub fn open_known(
+        dir: impl Into<PathBuf>,
+        opts: Options,
+        known: Option<&Known>,
+    ) -> Result<Self, StoreError> {
+        let dir = dir.into();
+        let (sealed, active, index) = load(&dir, known)?;
+        Ok(Self {
+            dir,
+            opts,
+            sealed,
+            active,
+            index,
+            unsynced: false,
+            counters: Counters::default(),
+            cache: Mutex::new(DeltaCache::new()),
+            open_lock: None,
+            newer: OnceLock::new(),
+        })
+    }
+
+    /// Pack sequence numbers, ascending; the last is the active pack.
+    pub fn pack_seqs(&self) -> Vec<u32> {
+        self.sealed
+            .keys()
+            .copied()
+            .chain([self.active.seq])
+            .collect()
+    }
+
+    /// The chunk index's runs (see [`crate::runs::Runs::open_named`]).
+    pub fn run_chain(&self) -> Vec<(u64, u64)> {
+        self.index.chain()
+    }
+
     /// Moves the records appended since the last index run into a new run,
     /// once there are enough of them. Run under the odb write lock, after
     /// `sync_from_disk`, so every record on disk is known here.
@@ -15,7 +55,7 @@ impl ChunkStore {
         // the runs on disk stop short of where this handle's tail begins
         // (their directory was removed while it was open): read the packs
         // again from where they stop now, then index
-        let (sealed, active, index) = load(&self.dir)?;
+        let (sealed, active, index) = load(&self.dir, None)?;
         self.sealed = sealed;
         self.active = active;
         self.index = index;
@@ -57,7 +97,7 @@ impl ChunkStore {
             Ok(loc) => Ok(loc.is_some()),
             Err(StoreError::Corrupt { .. } | StoreError::Io(_)) => {
                 self.index.clear()?;
-                let (sealed, active, index) = load(&self.dir)?;
+                let (sealed, active, index) = load(&self.dir, None)?;
                 self.sealed = sealed;
                 self.active = active;
                 self.index = index;

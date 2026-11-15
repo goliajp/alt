@@ -12,6 +12,8 @@
 //! Reads re-hash the assembled bytes against the blob id, on top of the
 //! per-chunk re-hash the chunk store already does.
 
+mod open;
+
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
@@ -70,6 +72,8 @@ pub struct BlobStore {
     /// opened by the first blob that is not a single chunk, or the first
     /// write: most reads never need it
     map: OnceLock<BlobMap>,
+    /// the map's index runs, when the opener was told them
+    map_runs: Option<Vec<(u64, u64)>>,
     dir: PathBuf,
     opts: BlobOptions,
     /// The lock file of the database this store sits under, if any. Opening
@@ -83,64 +87,6 @@ pub struct BlobStore {
 }
 
 impl BlobStore {
-    pub fn open(dir: impl Into<PathBuf>) -> Result<Self, StoreError> {
-        Self::open_with(dir, BlobOptions::default())
-    }
-
-    pub fn open_with(dir: impl Into<PathBuf>, opts: BlobOptions) -> Result<Self, StoreError> {
-        let store = Self::open_deferred(dir, opts)?;
-        store.map()?;
-        Ok(store)
-    }
-
-    /// Opens the chunk store and leaves the blob map for the first call
-    /// that needs it — which is then also where a damaged map is reported.
-    pub fn open_deferred(dir: impl Into<PathBuf>, opts: BlobOptions) -> Result<Self, StoreError> {
-        assert!(opts.fanout >= 2, "manifest fanout must be at least 2");
-        let dir = dir.into();
-        let chunks = ChunkStore::open_with(&dir, opts.chunks)?;
-        Ok(Self {
-            chunks,
-            map: OnceLock::new(),
-            dir,
-            opts,
-            open_lock: None,
-            exclusive: false,
-        })
-    }
-
-    /// Names the lock file writers of this store append under; the store
-    /// must have been opened under that lock, shared.
-    pub fn guard_opens(&mut self, lock: PathBuf) {
-        self.open_lock = Some(self.chunks.guard_opens(lock));
-    }
-
-    /// The write batch that began with `sync_from_disk` is over and its lock
-    /// released.
-    pub fn end_batch(&mut self) {
-        self.exclusive = false;
-    }
-
-    pub(crate) fn map(&self) -> Result<&BlobMap, StoreError> {
-        if let Some(map) = self.map.get() {
-            return Ok(map);
-        }
-        let open = || BlobMap::open(&self.dir.join("manifests"));
-        let map = match &self.open_lock {
-            Some(lock) if !self.exclusive => crate::pack::with_shared_lock(lock, open)?,
-            _ => open()?,
-        };
-        Ok(self.map.get_or_init(|| map))
-    }
-
-    fn map_mut(&mut self) -> Result<&mut BlobMap, StoreError> {
-        self.map()?;
-        Ok(self
-            .map
-            .get_mut()
-            .expect("the blob map was opened just above"))
-    }
-
     /// Stores a byte stream, deduplicating chunk-wise against everything
     /// already in the store.
     pub fn put(&mut self, data: &[u8]) -> Result<BlobId, StoreError> {

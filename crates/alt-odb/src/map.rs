@@ -123,8 +123,17 @@ pub struct ObjectMap {
 
 impl ObjectMap {
     pub fn open(path: &Path) -> Result<Self, OdbError> {
-        let (log, _) = RecLog::open(path, LAYOUT).map_err(lift)?;
+        Self::open_with_runs(path, None)
+    }
+
+    /// The same, opening the index runs `named` by name.
+    pub fn open_with_runs(path: &Path, named: Option<&[(u64, u64)]>) -> Result<Self, OdbError> {
+        let (log, _) = RecLog::open_with_runs(path, LAYOUT, named).map_err(lift)?;
         Ok(Self { log })
+    }
+
+    pub fn run_chain(&self) -> Vec<(u64, u64)> {
+        self.log.run_chain()
     }
 
     pub fn append(&mut self, entry: MapEntry) -> Result<(), OdbError> {

@@ -40,6 +40,7 @@ pub mod runs;
 pub use blob::{BlobOptions, BlobSink, BlobStore, StoreCheckpoint};
 pub use check::StoreChecked;
 pub use pack::with_shared_lock;
+pub use packs::Known;
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt;
@@ -359,20 +360,7 @@ impl ChunkStore {
     }
 
     pub fn open_with(dir: impl Into<PathBuf>, opts: Options) -> Result<Self, StoreError> {
-        let dir = dir.into();
-        let (sealed, active, index) = load(&dir)?;
-        Ok(Self {
-            dir,
-            opts,
-            sealed,
-            active,
-            index,
-            unsynced: false,
-            counters: Counters::default(),
-            cache: Mutex::new(DeltaCache::new()),
-            open_lock: None,
-            newer: OnceLock::new(),
-        })
+        Self::open_known(dir.into(), opts, None)
     }
 
     /// Reconciles in-memory state with the packs on disk (another process may
@@ -387,7 +375,7 @@ impl ChunkStore {
         if !self.disk_changed()? {
             return Ok(());
         }
-        let (sealed, active, index) = load(&self.dir)?;
+        let (sealed, active, index) = load(&self.dir, None)?;
         self.sealed = sealed;
         self.active = active;
         self.index = index;
@@ -646,7 +634,7 @@ impl ChunkStore {
         // index starts over from its records. Ids are stable, so the delta
         // cache (keyed by id) stays valid across the relocation.
         drop(active);
-        let (sealed, active, index) = load(&self.dir)?;
+        let (sealed, active, index) = load(&self.dir, None)?;
         self.sealed = sealed;
         self.index = index;
         self.index_tail()?;
@@ -1010,7 +998,7 @@ impl ChunkStore {
         })?;
         self.active.write.set_len(ckpt.pack_len)?;
         self.active.write.sync_all()?;
-        let (sealed, active, index) = load(&self.dir)?;
+        let (sealed, active, index) = load(&self.dir, None)?;
         self.sealed = sealed;
         self.active = active;
         self.index = index;

@@ -105,6 +105,16 @@ impl RecLog {
     /// Opens the log at `path`, creating it when missing; the second value
     /// says whether it was created. Index runs live in `<path>.idx/`.
     pub fn open(path: &Path, layout: Layout) -> Result<(Self, bool), StoreError> {
+        Self::open_with_runs(path, layout, None)
+    }
+
+    /// The same, opening the index runs `named` (see [`Runs::open_named`])
+    /// instead of reading the index directory.
+    pub fn open_with_runs(
+        path: &Path,
+        layout: Layout,
+        named: Option<&[(u64, u64)]>,
+    ) -> Result<(Self, bool), StoreError> {
         assert!(layout.rec_len <= MAX_REC && layout.rec_len > 8);
         let mut idx_dir = path.as_os_str().to_owned();
         idx_dir.push(".idx");
@@ -150,9 +160,11 @@ impl RecLog {
             return Err(StoreError::Format(layout.bad_version));
         }
 
-        let runs = Runs::open(&idx_dir, HEADER_LEN as u64, |end| {
-            guard_at(&file, &layout, size, end)
-        })?;
+        let guard = |end| guard_at(&file, &layout, size, end);
+        let runs = match named {
+            Some(named) => Runs::open_named(&idx_dir, HEADER_LEN as u64, named, guard)?,
+            None => Runs::open(&idx_dir, HEADER_LEN as u64, guard)?,
+        };
         let mut this = Self {
             layout,
             file,

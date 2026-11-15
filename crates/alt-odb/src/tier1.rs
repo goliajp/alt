@@ -44,8 +44,10 @@ pub(crate) struct Tier1Map {
 }
 
 impl Tier1Map {
-    pub fn open(dir: &Path) -> Result<Self, StoreError> {
-        let (log, created) = RecLog::open(&dir.join("tier1"), LAYOUT)?;
+    /// Opens `<dir>/tier1`, creating it if missing; `named` are its index
+    /// runs when the caller has them on record.
+    pub fn open(dir: &Path, named: Option<&[(u64, u64)]>) -> Result<Self, StoreError> {
+        let (log, created) = RecLog::open_with_runs(&dir.join("tier1"), LAYOUT, named)?;
         if created {
             fsync_dir(dir)?;
         }
@@ -88,6 +90,10 @@ impl Tier1Map {
     ) -> Result<u64, E> {
         self.log
             .check(|rec| each(BlobId(rec[..32].try_into().unwrap())))
+    }
+
+    pub fn run_chain(&self) -> Vec<(u64, u64)> {
+        self.log.run_chain()
     }
 
     pub fn contains(&self, blob: BlobId) -> Result<bool, StoreError> {

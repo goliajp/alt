@@ -62,6 +62,12 @@ impl RecLog {
         Ok(())
     }
 
+    /// The log range of each index run, oldest first (see
+    /// [`Runs::open_named`]).
+    pub fn run_chain(&self) -> Vec<(u64, u64)> {
+        self.runs.chain()
+    }
+
     /// Whether the tail is long enough for [`Self::index_tail`] to act.
     pub fn index_pending(&self) -> bool {
         self.tail.len() / self.layout.rec_len >= INDEX_AT

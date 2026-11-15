@@ -11,6 +11,7 @@ use alt_git_codec::{ObjectId, ObjectKind, RawObject};
 use alt_prism::Registry;
 use alt_store::{BlobOptions, BlobStore, CompactReport, StoreError};
 
+use crate::head::Head;
 use crate::lock::{hold_exclusive, lock_shared, release_exclusive, try_hold_exclusive, unlock};
 use crate::map::{MapEntry, ObjectMap};
 use crate::tier1::{self, Tier1Map};
@@ -43,6 +44,9 @@ pub(crate) struct Odb {
     /// The advisory write lock; `held` tracks whether this batch owns it.
     pub(crate) lock: File,
     pub(crate) held: bool,
+    /// What the lock file says about the store's files (see [`Head`]), as
+    /// last read or written by this handle.
+    pub(crate) head: Head,
     /// Group commit: a separate lock around the fsync, and a marker recording
     /// how far each append file is durable. A batch fsyncs only if no other
     /// writer already made its appends durable — so N concurrent commits
@@ -75,6 +79,7 @@ impl Odb {
         let lock_path = alt_dir.join("odb.lock");
         let open_lock = || {
             OpenOptions::new()
+                .read(true)
                 .create(true)
                 .truncate(false)
                 .write(true)
@@ -92,16 +97,17 @@ impl Odb {
         // another process's exclusive append. Without this, an open scanning a
         // writer's half-written record truncates it and corrupts the store.
         lock_shared(&lock)?;
+        let head = Head::read(&lock);
         type Opened = (BlobStore, ObjectMap, OnceLock<Tier1Map>);
         let opened = (|| -> Result<Opened, OdbError> {
-            let store = alt_dir.join("store");
-            let (blobs, tier1) = if late {
-                (BlobStore::open_deferred(store, opts)?, OnceLock::new())
+            let blobs = BlobStore::open_deferred(alt_dir.join("store"), opts, Some(&head.store))?;
+            let tier1 = if late {
+                OnceLock::new()
             } else {
-                let tier1 = Tier1Map::open(&alt_dir)?;
-                (BlobStore::open_with(store, opts)?, OnceLock::from(tier1))
+                blobs.open_map()?;
+                OnceLock::from(Tier1Map::open(&alt_dir, head.tier1.as_deref())?)
             };
-            let map = ObjectMap::open(&alt_dir.join("map.alt"))?;
+            let map = ObjectMap::open_with_runs(&alt_dir.join("map.alt"), head.map.as_deref())?;
             Ok((blobs, map, tier1))
         })();
         let _ = unlock(&lock);
@@ -115,6 +121,7 @@ impl Odb {
             registry: default_registry(),
             lock,
             held: false,
+            head,
             sync_lock_path: alt_dir.join("odb.sync.lock"),
             durable_path: alt_dir.join("odb.durable"),
             defer: false,
@@ -152,7 +159,7 @@ impl Odb {
         if let Some(tier1) = self.tier1.get() {
             return Ok(tier1);
         }
-        let open = || Tier1Map::open(&self.alt_dir);
+        let open = || Tier1Map::open(&self.alt_dir, self.head.tier1.as_deref());
         let tier1 = if self.held {
             open()?
         } else {
@@ -196,6 +203,7 @@ impl Odb {
     /// Releases the write lock (best-effort; the fd closing also releases it).
     fn release(&mut self) {
         if self.held {
+            self.save_head();
             release_exclusive(&self.lock);
             self.held = false;
             self.blobs.end_batch();

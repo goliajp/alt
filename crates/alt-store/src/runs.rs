@@ -34,6 +34,8 @@ use alt_os::map::Mmap;
 use crate::StoreError;
 use crate::run_write::write_run;
 
+mod named;
+
 pub const KEY_LEN: usize = 32;
 /// How many log bytes before a run's end its guard holds, at most.
 pub const GUARD_SPAN: usize = 4096;
@@ -397,16 +399,10 @@ impl Runs {
         fs::rename(&tmp, &path)?;
         // nothing changes in memory until the new run is in hand
         let run = Run::load(path, start, end)?.ok_or(CORRUPT)?;
-        let merged: Vec<Run> = self.runs.drain(keep..).collect();
+        drop(self.runs.drain(keep..));
         self.runs.push(run);
-        for old in merged {
-            // one left behind is outside the chain: the next writer's
-            // sweep takes it
-            if remove_if_present(&old.path).is_err() {
-                self.stale.push(old.path);
-            }
-        }
-        Ok(())
+        // the merged runs go, and with them anything a dead writer left
+        self.sweep()
     }
 
     /// Drops the runs that reach past `target`, before the log is cut back

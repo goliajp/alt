@@ -161,16 +161,51 @@ pub(crate) fn map_sealed(dir: &Path, seq: u32) -> Result<Mmap, StoreError> {
     Ok(map)
 }
 
+/// What an opener can be told about a store's files, so that it opens them
+/// by name instead of reading directories. It is advice: each part is
+/// checked against the files, and a part that does not hold (the store
+/// changed since it was recorded) is found out by reading the directory.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Known {
+    /// pack sequence numbers, ascending; the last one is the active pack
+    pub packs: Option<Vec<u32>>,
+    /// the chunk index's runs (see [`crate::runs::Runs::open_named`])
+    pub chunk_runs: Option<Vec<(u64, u64)>>,
+    /// the blob map's runs
+    pub map_runs: Option<Vec<(u64, u64)>>,
+}
+
 /// Loads the on-disk pack set: the index runs, then every record they do
 /// not cover — the rest of the pack they stop in and all later packs.
-pub(crate) fn load(dir: &Path) -> Result<PackState, StoreError> {
-    let seqs = match list_pack_seqs(dir) {
-        Err(StoreError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
-            std::fs::create_dir_all(dir)?;
-            Vec::new()
+pub(crate) fn load(dir: &Path, known: Option<&Known>) -> Result<PackState, StoreError> {
+    match load_from(dir, known) {
+        // a named pack that is not there: the names are out of date
+        Err(StoreError::Io(e)) if known.is_some() && e.kind() == std::io::ErrorKind::NotFound => {
+            load_from(dir, None)
         }
-        listed => listed?,
+        loaded => loaded,
+    }
+}
+
+fn load_from(dir: &Path, known: Option<&Known>) -> Result<PackState, StoreError> {
+    let named = known
+        .and_then(|known| known.packs.as_deref())
+        // a pack after the last one named was added since they were recorded
+        .filter(|seqs| {
+            seqs.last()
+                .is_some_and(|last| !pack_path(dir, last + 1).exists())
+        });
+    let seqs = match named {
+        Some(seqs) => seqs.to_vec(),
+        None => match list_pack_seqs(dir) {
+            Err(StoreError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
+                std::fs::create_dir_all(dir)?;
+                Vec::new()
+            }
+            listed => listed?,
+        },
     };
+    let runs = known.and_then(|known| known.chunk_runs.as_deref());
     let mut sealed = BTreeMap::new();
     let first = Location {
         seq: seqs.first().copied().unwrap_or(1),
@@ -180,7 +215,7 @@ pub(crate) fn load(dir: &Path) -> Result<PackState, StoreError> {
     let (&active_seq, sealed_seqs) = match seqs.split_last() {
         Some((last, rest)) => (last, rest),
         None => {
-            let index = ChunkIndex::open(dir, first, |loc| guard_at(dir, loc))?;
+            let index = ChunkIndex::open(dir, first, runs, |loc| guard_at(dir, loc))?;
             let mut active = create_active(&pack_path(dir, 1))?;
             active.seq = 1;
             pack::fsync_dir(dir)?;
@@ -191,7 +226,7 @@ pub(crate) fn load(dir: &Path) -> Result<PackState, StoreError> {
     // serves their guard check too
     let read = File::open(pack_path(dir, active_seq))?;
     let size = read.metadata()?.len();
-    let mut index = ChunkIndex::open(dir, first, |loc| {
+    let mut index = ChunkIndex::open(dir, first, runs, |loc| {
         if loc.seq == active_seq {
             guard_in(&read, size, loc.offset)
         } else {
