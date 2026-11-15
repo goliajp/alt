@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: read the system's and the user's git configuration beneath the repository's
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/settings.rs
+touched: crates/alt-cli/tests/it/git_settings.rs
+touched: crates/alt-cli/tests/it/main.rs
