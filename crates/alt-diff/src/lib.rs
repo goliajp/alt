@@ -1,16 +1,21 @@
-//! Line-level text diff using the **histogram** algorithm — git's default
-//! since 2.x, a refinement of patience diff that anchors on rare lines for
-//! cleaner hunks than Myers. Plus unified-diff (`@@ … @@`) formatting and
-//! binary detection.
+//! Line-level text diff, unified-diff (`@@ … @@`) formatting and binary
+//! detection. Two algorithms, each where git uses it: [`myers`] for diffs
+//! shown to people (`diff`, `log -p`, `show`, `blame`), where the changed
+//! lines have to be the ones git reports, and histogram ([`diff_lines`])
+//! for three-way merges.
 //!
 //! Pure logic: no business types, no I/O. Bytes in, structured edits / unified
 //! text out. Correctness invariant (fuzzed): applying the returned edits to
 //! `old` reproduces `new`, for any input.
 
 pub mod binary;
+mod compact;
 mod histogram;
+mod middle;
+pub mod myers;
 pub mod part_aware;
 pub mod perceptual;
+pub mod rename;
 pub mod structured;
 
 use std::ops::Range;
@@ -101,6 +106,9 @@ pub struct Hunk {
     pub old_len: usize,
     pub new_start: usize,
     pub new_len: usize,
+    /// What the hunk is part of, shown after the `@@` header: the nearest
+    /// line above it that starts a section, as git's default rule finds it.
+    pub section: Option<Vec<u8>>,
     /// `(tag, line)` where tag is b' ' (context), b'-' (removed), b'+' (added).
     pub lines: Vec<(u8, Vec<u8>)>,
 }
@@ -110,7 +118,7 @@ pub struct Hunk {
 pub fn hunks(old: &[u8], new: &[u8], context: usize) -> Vec<Hunk> {
     let a = split_lines(old);
     let b = split_lines(new);
-    let edits = diff_lines(&a, &b);
+    let edits = myers::diff_lines(&a, &b);
     if edits.is_empty() {
         return Vec::new();
     }
@@ -125,10 +133,39 @@ pub fn hunks(old: &[u8], new: &[u8], context: usize) -> Vec<Hunk> {
         }
     }
 
-    groups
+    let mut hunks: Vec<Hunk> = groups
         .into_iter()
         .map(|g| build_hunk(&a, &b, &g, context))
-        .collect()
+        .collect();
+    // each hunk looks upward from its first line for a section start, as
+    // far as the previous hunk looked from; with none found, the previous
+    // hunk's section still stands
+    let mut section = None;
+    let mut searched = 0;
+    for h in &mut hunks {
+        let first = h.old_start.saturating_sub(1).min(a.len());
+        if let Some(found) = a[searched..first]
+            .iter()
+            .rev()
+            .find_map(|l| section_start(l))
+        {
+            section = Some(found);
+        }
+        searched = first;
+        h.section = section.map(<[u8]>::to_vec);
+    }
+    hunks
+}
+
+/// A line that starts a section by git's default rule: one beginning with
+/// a letter, `_` or `$`. Returns what the hunk header shows of it.
+fn section_start(line: &[u8]) -> Option<&[u8]> {
+    let first = *line.first()?;
+    if !(first.is_ascii_alphabetic() || first == b'_' || first == b'$') {
+        return None;
+    }
+    let shown = &line[..line.len().min(80)];
+    Some(shown.trim_ascii_end())
 }
 
 fn build_hunk(a: &[&[u8]], b: &[&[u8]], group: &[&Edit], context: usize) -> Hunk {
@@ -166,6 +203,7 @@ fn build_hunk(a: &[&[u8]], b: &[&[u8]], group: &[&Edit], context: usize) -> Hunk
         old_len: old_to - old_from,
         new_start: new_from + 1,
         new_len: new_to - new_from,
+        section: None,
         lines,
     }
 }
@@ -182,14 +220,19 @@ pub fn write_unified(out: &mut Vec<u8>, old: &[u8], new: &[u8], context: usize) 
     let old_no_nl = !old.is_empty() && !old.ends_with(b"\n");
     let new_no_nl = !new.is_empty() && !new.ends_with(b"\n");
     for h in &hs {
-        out.extend_from_slice(
-            format!(
-                "@@ -{} +{} @@\n",
-                range_str(h.old_start, h.old_len),
-                range_str(h.new_start, h.new_len)
-            )
-            .as_bytes(),
+        let header = format!(
+            "@@ -{} +{} @@",
+            range_str(h.old_start, h.old_len),
+            range_str(h.new_start, h.new_len)
         );
+        out.extend_from_slice(header.as_bytes());
+        if let Some(section) = h.section.as_deref().filter(|s| !s.is_empty()) {
+            // git builds the header in 128 bytes
+            let room = 126usize.saturating_sub(header.len());
+            out.push(b' ');
+            out.extend_from_slice(&section[..section.len().min(room)]);
+        }
+        out.push(b'\n');
         let n = h.lines.len();
         for (idx, (tag, line)) in h.lines.iter().enumerate() {
             out.push(*tag);

@@ -188,6 +188,7 @@ dependencies = [
  "alt-cdc",
  "alt-deflate",
  "alt-inflate",
+ "alt-os",
 ]
 
 [[package]]
