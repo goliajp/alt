@@ -140,10 +140,12 @@ impl NativeRepo<'_> {
         content: &[u8],
     ) -> Option<Vec<u8>> {
         converter.to_store(path, content, &|| {
-            let staged = index
-                .entries
+            // the index is ordered by path, then stage
+            let from = index.entries.partition_point(|e| e.path.as_slice() < path);
+            let staged = index.entries[from..]
                 .iter()
-                .find(|e| e.stage() == 0 && e.path.as_slice() == path);
+                .take_while(|e| e.path.as_slice() == path)
+                .find(|e| e.stage() == 0);
             match staged.map(|e| self.blob_bytes(e.oid)) {
                 Some(Ok(blob)) => attributes::stored_with_crlf(&blob),
                 Some(Err(e)) => {
