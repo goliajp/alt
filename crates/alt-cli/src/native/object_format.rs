@@ -14,3 +14,11 @@ impl Store {
         Ok(*self.algo.get_or_init(|| algo))
     }
 }
+
+impl NativeRepo<'_> {
+    /// Writes the tree of `entries` into the store and returns its id.
+    pub(super) fn store_tree(&mut self, entries: &[WorkEntry]) -> Res<ObjectId> {
+        let algo = self.store.algo()?;
+        Ok(write_tree(&mut self.store.odb, entries, algo)?)
+    }
+}

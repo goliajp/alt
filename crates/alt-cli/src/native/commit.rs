@@ -251,8 +251,7 @@ impl NativeRepo<'_> {
             )
             .into());
         }
-        let algo = self.store.algo()?;
-        Ok(write_tree(&mut self.store.odb, &staged, algo)?)
+        self.store_tree(&staged)
     }
 
     /// Stores a commit (signed when the sign policy asks for it) and moves
