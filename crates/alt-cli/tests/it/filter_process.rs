@@ -6,7 +6,8 @@ use std::process::{Command, Output};
 
 /// A filter process that swaps letters thirteen places along. Its
 /// arguments are the file it logs to and what it can do; a path with
-/// `refuse` in it gets an error, one with `abort` ends that side.
+/// `refuse` in it gets an error, one with `abort` ends that side, and
+/// the other words make it break the protocol in one way each.
 const FILTER: &str = r#"
 import sys
 log = open(sys.argv[1], 'a')
@@ -34,6 +35,7 @@ def say(*texts):
     for text in texts:
         write(text.encode() + b'\n')
     flush()
+once = can[:1] == ['once']
 assert lines() == ['git-filter-client', 'version=2']
 say('git-filter-server', 'version=2')
 asked = lines()
@@ -60,7 +62,29 @@ while True:
     if 'abort' in path:
         say('status=abort')
         continue
-    say('status=success')
+    if once and 'ended' not in open(sys.argv[1]).read():
+        log.write('ended\n')
+        log.flush()
+        sys.exit(1)
+    if 'flood' in path:
+        out.write(b'zzzz' + b'x' * 400000)
+        out.flush()
+    if 'short' in path:
+        out.write(b'0003')
+        out.flush()
+    if 'plus' in path:
+        out.write(b'+013status=success\n')
+        flush()
+    else:
+        say('status=success')
+    if 'long' in path:
+        out.write(b'fff5' + b'x' * 65521)
+        flush()
+    if 'regret' in path:
+        write(b'half')
+        flush()
+        say('status=error')
+        continue
     result = content.translate(table)
     for at in range(0, len(result), 65516):
         write(result[at:at + 65516])
@@ -86,6 +110,37 @@ fn run(tool: &str, repo: &Path, log: &Path, args: &[&str]) -> Output {
         .args(args)
         .output()
         .unwrap()
+}
+
+/// As `run`, for a command that may never end: it is given half a
+/// minute.
+fn run_within_limit(tool: &str, repo: &Path, log: &Path, args: &[&str]) -> Output {
+    use std::process::Stdio;
+    let program = match tool {
+        "git" => "git".into(),
+        _ => std::path::PathBuf::from(env!("CARGO_BIN_EXE_alt")),
+    };
+    let mut child = Command::new(program)
+        .current_dir(repo)
+        .env("FILTER_LOG", log)
+        .env("ALT_NO_DAEMON", "1")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let begun = std::time::Instant::now();
+    while child.try_wait().unwrap().is_none() {
+        if begun.elapsed() > std::time::Duration::from_secs(30) {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("{tool} {args:?} did not end");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    child.wait_with_output().unwrap()
 }
 
 fn ok(o: Output) -> String {
@@ -303,4 +358,104 @@ fn a_required_filter_process_that_fails_stops_the_command() {
     assert!(!refused.status.success());
     let message = String::from_utf8_lossy(&refused.stderr).into_owned();
     assert!(message.contains("clean filter 'rot' failed"), "{message}");
+}
+
+#[test]
+fn a_success_the_process_takes_back_leaves_the_file_as_it_is() {
+    let pair = imported("clean", false, &[("c.txt", "Plain\n")]);
+    for root in [&pair.src, &pair.dst] {
+        std::fs::write(root.join("regret.r"), "Two\n").unwrap();
+        std::fs::write(root.join("fine.r"), "Hello\n").unwrap();
+    }
+    ok(pair.git(&["add", "."]));
+    ok(pair.alt(&["add", "."]));
+    ok(pair.git(&["commit", "-qm", "taken back"]));
+    ok(pair.alt(&["commit", "-m", "taken back"]));
+    assert_eq!(pair.tree("alt"), pair.tree("git"));
+    assert_eq!(ok(pair.alt(&["show", "HEAD:regret.r"])), "Two\n");
+    assert_eq!(ok(pair.alt(&["show", "HEAD:fine.r"])), "Uryyb\n");
+}
+
+#[test]
+fn a_process_that_ends_is_started_again_for_the_next_file() {
+    let pair = imported("clean", false, &[("c.txt", "Plain\n")]);
+    // this one ends at the first file it is asked about
+    let script = pair.logs[0].with_file_name("filter.py");
+    let command = format!("python3 '{}' \"$FILTER_LOG\" once clean", script.display());
+    ok(pair.git(&["config", "filter.rot.process", &command]));
+    ok(pair.alt(&["config", "filter.rot.process", &command]));
+    let names = ["a.r", "b.r", "k.r", "p.r", "y.r", "z.r"];
+    for root in [&pair.src, &pair.dst] {
+        for name in names {
+            std::fs::write(root.join(name), "Hello\n").unwrap();
+        }
+    }
+    for log in &pair.logs {
+        std::fs::write(log, "").unwrap();
+    }
+    ok(pair.git(&["add", "."]));
+    ok(pair.alt(&["add", "."]));
+    let logs = [pair.log(0), pair.log(1)];
+    ok(pair.git(&["commit", "-qm", "ended"]));
+    ok(pair.alt(&["commit", "-m", "ended"]));
+    // which file comes first differs between the tools; each stores
+    // that one as it is and the others cleaned by a second process
+    for (tool, show) in [(0, "git"), (1, "alt")] {
+        let log = &logs[tool];
+        let starts = log.iter().filter(|l| *l == "start").count();
+        assert_eq!(starts, 2, "{show}: {log:?}");
+        let stored = |name: &str| match tool {
+            0 => ok(pair.git(&["show", &format!("HEAD:{name}")])),
+            _ => ok(pair.alt(&["show", &format!("HEAD:{name}")])),
+        };
+        let cleaned = names.iter().filter(|n| stored(n) == "Uryyb\n").count();
+        let as_it_is = names.iter().filter(|n| stored(n) == "Hello\n").count();
+        assert_eq!((cleaned, as_it_is), (5, 1), "{show}: {log:?}");
+    }
+}
+
+#[test]
+fn a_packet_of_no_allowed_length_ends_the_command_as_in_git() {
+    for (name, said) in [
+        ("short.r", "protocol error: bad line length 3"),
+        ("plus.r", "protocol error: bad line length character: +013"),
+        ("long.r", "protocol error: bad line length 65521"),
+        ("flood.r", "protocol error: bad line length character: zzzz"),
+    ] {
+        // not even a filter that may fail is let off
+        let pair = imported("clean", false, &[("c.txt", "Plain\n")]);
+        for root in [&pair.src, &pair.dst] {
+            std::fs::write(root.join(name), "Two\n".repeat(40_000)).unwrap();
+        }
+        let theirs = run_within_limit("git", &pair.src, &pair.logs[0], &["add", "."]);
+        let ours = run_within_limit("alt", &pair.dst, &pair.logs[1], &["add", "."]);
+        for (tool, refused) in [("git", theirs), ("alt", ours)] {
+            let message = String::from_utf8_lossy(&refused.stderr).into_owned();
+            assert!(!refused.status.success(), "{tool} on {name}");
+            assert!(message.contains(said), "{tool} on {name}: {message}");
+        }
+    }
+}
+
+#[test]
+fn a_process_that_does_not_start_is_reported_for_each_file_and_leaves_them_as_they_are() {
+    let pair = imported("clean", false, &[("c.txt", "Plain\n")]);
+    ok(pair.git(&["config", "filter.rot.process", "no-such-filter --here"]));
+    ok(pair.alt(&["config", "filter.rot.process", "no-such-filter --here"]));
+    for root in [&pair.src, &pair.dst] {
+        std::fs::write(root.join("a.r"), "One\n").unwrap();
+        std::fs::write(root.join("b.r"), "Two\n").unwrap();
+    }
+    let said = "error: initialization for subprocess 'no-such-filter --here' failed";
+    let mut times = Vec::new();
+    for added in [pair.git(&["add", "."]), pair.alt(&["add", "."])] {
+        let message = String::from_utf8_lossy(&added.stderr).into_owned();
+        assert!(added.status.success(), "{message}");
+        times.push(message.matches(said).count());
+    }
+    assert_eq!(times, [2, 2]);
+    ok(pair.git(&["commit", "-qm", "unfiltered"]));
+    ok(pair.alt(&["commit", "-m", "unfiltered"]));
+    assert_eq!(pair.tree("alt"), pair.tree("git"));
+    assert_eq!(ok(pair.alt(&["show", "HEAD:a.r"])), "One\n");
 }

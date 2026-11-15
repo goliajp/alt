@@ -15,7 +15,7 @@ use crate::git_settings::read_if_file;
 
 mod filter_process;
 
-use filter_process::FilterProcess;
+use filter_process::{FilterProcess, Malformed};
 
 /// The commands of one `filter.<name>` section.
 #[derive(Default)]
@@ -49,9 +49,8 @@ pub(super) struct Converter {
     fixed: Vec<Layer>,
     config: EolConfig,
     drivers: HashMap<Vec<u8>, Driver>,
-    /// the filter processes started so far, by driver; `None` for one
-    /// that could not be started
-    processes: RefCell<HashMap<Vec<u8>, Option<FilterProcess>>>,
+    /// the filter processes running, by driver
+    processes: RefCell<HashMap<Vec<u8>, FilterProcess>>,
     /// what the clean filter last made of each path, with the digest of
     /// the content it was given: a file is scanned and then stored, and
     /// both must see the same result
@@ -269,7 +268,7 @@ impl Converter {
                 None => {
                     let cleaned = match self.filter(name, driver, "clean", path, content) {
                         Ok(cleaned) => cleaned,
-                        Err(e) if driver.required => {
+                        Err(e) if driver.required || e.is::<Malformed>() => {
                             self.fail(e);
                             return None;
                         }
@@ -313,7 +312,7 @@ impl Converter {
             match self.filter(name, driver, "smudge", path, out.as_deref().unwrap_or(blob)) {
                 Ok(Some(smudged)) => out = Some(smudged),
                 Ok(None) => {}
-                Err(e) if driver.required => return Err(e),
+                Err(e) if driver.required || e.is::<Malformed>() => return Err(e),
                 Err(_) => {}
             }
         }
@@ -348,25 +347,8 @@ impl Converter {
                 .map(|command| self.run(command, path, content))
                 .transpose();
         };
-        let mut processes = self.processes.borrow_mut();
-        let process = processes
-            .entry(name.to_vec())
-            .or_insert_with(|| FilterProcess::start(command, &self.root).ok());
-        let shown = String::from_utf8_lossy(name);
-        let failed = || format!("{side} filter '{shown}' failed");
-        let process = process.as_mut().ok_or_else(failed)?;
-        match process.apply(side, path, content) {
-            Ok(Some(filtered)) => Ok(Some(filtered)),
-            // as in git, a file the process leaves alone counts as a
-            // failure of the filter
-            Ok(None) => Err(failed().into()),
-            Err(e) => {
-                // the conversation is out of step: the process is of no
-                // more use
-                processes.insert(name.to_vec(), None);
-                Err(e)
-            }
-        }
+        let processes = &mut self.processes.borrow_mut();
+        filter_process::through(processes, name, command, &self.root, side, path, content)
     }
 
     /// Runs a filter command through the shell, as git does: `%f` in it
