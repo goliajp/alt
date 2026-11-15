@@ -1,7 +1,8 @@
 use std::cmp::Reverse;
-use std::collections::{BinaryHeap, HashSet};
+use std::collections::BinaryHeap;
 
 use alt_git_codec::{Commit, ObjectId};
+use alt_hash::IdSet;
 
 use crate::{RepoError, Repository};
 
@@ -11,7 +12,7 @@ use crate::{RepoError, Repository};
 pub struct RevWalk<'r> {
     repo: &'r Repository,
     queue: BinaryHeap<Queued>,
-    seen: HashSet<ObjectId>,
+    seen: IdSet<ObjectId>,
     seq: u64,
 }
 
@@ -44,7 +45,7 @@ impl<'r> RevWalk<'r> {
         let mut walk = Self {
             repo,
             queue: BinaryHeap::new(),
-            seen: HashSet::new(),
+            seen: IdSet::default(),
             seq: 0,
         };
         walk.push(start)?;

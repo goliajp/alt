@@ -16,7 +16,7 @@ mod snapshot;
 mod state;
 mod tx;
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use alt_git_codec::ObjectId;
@@ -64,7 +64,7 @@ pub struct RefStore {
     /// it lets a retried write be detected and not applied twice. Only the
     /// recent (post-snapshot) keys are kept — long enough for any in-flight
     /// retry, which happens within one client invocation.
-    by_key: HashMap<IdemKey, OpId>,
+    by_key: BTreeMap<IdemKey, OpId>,
 }
 
 impl RefStore {
@@ -90,7 +90,7 @@ impl RefStore {
             None => (Refs::default(), 0, 0, 0),
         };
 
-        let mut by_key = HashMap::new();
+        let mut by_key = BTreeMap::new();
         for op in &recent[replay_from..] {
             if let Some(tx) = tx::parse_tx(&op.payload)? {
                 refs.apply(&tx.changes, true)?;
@@ -382,7 +382,7 @@ impl RefStore {
 fn fold_new(
     refs: &mut Refs,
     applied: &mut usize,
-    by_key: &mut HashMap<IdemKey, OpId>,
+    by_key: &mut BTreeMap<IdemKey, OpId>,
     ops: &[alt_oplog::Op],
 ) -> Result<(), RefError> {
     for op in &ops[*applied..] {

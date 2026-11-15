@@ -136,7 +136,7 @@ impl OpLog {
 
         // only the read needs the lock; verifying the copy does not
         lock_shared(&file)?;
-        let raw = read_log(&mut file, anchor);
+        let raw = read_log(&file, anchor);
         let _ = unlock(&file);
         let mut scan = scan(raw?)?;
         if scan.needs_repair() {
@@ -145,7 +145,6 @@ impl OpLog {
             let _ = unlock(&file);
             scan = repaired?;
         }
-        file.seek(SeekFrom::Start(scan.valid_len))?;
         Ok(Self {
             file,
             base: scan.base,
@@ -301,11 +300,7 @@ impl OpLog {
         if size <= self.len_bytes {
             return Ok(());
         }
-        let tail = read_at(
-            &mut self.file,
-            self.len_bytes,
-            (size - self.len_bytes) as usize,
-        )?;
+        let tail = read_at(&self.file, self.len_bytes, (size - self.len_bytes) as usize)?;
 
         let head = self.head().unwrap_or(ROOT);
         let known = self.ops.len();
@@ -366,8 +361,7 @@ impl OpLog {
             return Ok(full);
         }
         // the records before the anchor never change; no lock needed
-        let mut data = vec![0u8; base.end as usize];
-        read_prefix(&self.file, &mut data)?;
+        let data = read_at(&self.file, 0, base.end as usize)?;
         check_header(&data)?;
         let mut all = Vec::new();
         let replayed = replay_records(&data, HEADER_LEN.min(data.len()), ROOT, &mut all)?;
@@ -459,21 +453,6 @@ impl OpLog {
         let _ = unlock(&sync_lock);
         result
     }
-}
-
-/// Reads the first `buf.len()` bytes of the file without moving the cursor
-/// the writer appends at.
-#[cfg(unix)]
-fn read_prefix(file: &File, buf: &mut [u8]) -> std::io::Result<()> {
-    use std::os::unix::fs::FileExt;
-    file.read_exact_at(buf, 0)
-}
-
-#[cfg(not(unix))]
-fn read_prefix(file: &File, buf: &mut [u8]) -> std::io::Result<()> {
-    let mut file = file.try_clone()?;
-    file.seek(SeekFrom::Start(0))?;
-    file.read_exact(buf)
 }
 
 /// Repro/diagnostic knob (env `ALT_RELAXED_DURABILITY`): skip per-commit

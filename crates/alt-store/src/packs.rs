@@ -2,9 +2,9 @@
 //! active one for append (crash recovery included), and bringing the chunk
 //! index up to date with whatever its runs do not cover yet.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
-use std::io::{Seek, SeekFrom, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -51,50 +51,55 @@ pub(crate) fn list_pack_seqs(dir: &Path) -> Result<Vec<u32>, StoreError> {
 
 /// The 16 bytes before `loc` in its pack, when the pack reaches that far.
 pub(crate) fn guard_at(dir: &Path, loc: Location) -> Option<Guard> {
-    if loc.offset < (pack::HEADER_LEN + REC_HEADER_LEN) as u64 {
-        return None;
-    }
     let file = File::open(pack_path(dir, loc.seq)).ok()?;
-    if file.metadata().ok()?.len() < loc.offset {
+    let size = file.metadata().ok()?.len();
+    guard_in(&file, size, loc.offset)
+}
+
+/// The 16 bytes before `offset` in an open pack of `size` bytes.
+fn guard_in(pack: &File, size: u64, offset: u64) -> Option<Guard> {
+    if offset < (pack::HEADER_LEN + REC_HEADER_LEN) as u64 || size < offset {
         return None;
     }
     let mut guard = [0u8; GUARD_LEN];
-    pack::read_exact_at(&file, &mut guard, loc.offset - GUARD_LEN as u64).ok()?;
+    pack::read_exact_at(pack, &mut guard, offset - GUARD_LEN as u64).ok()?;
     Some(guard)
 }
 
-/// Opens (or creates) the active pack: validates the header, walks the
-/// records from offset `from` (where the index runs stop, or the first
-/// record), and truncates any torn tail so the writer starts at a clean
-/// offset. Returns the pack and the records walked.
+/// Creates the active pack with its header. Another process bringing the
+/// same fresh store up may have created it first; it is then opened as is.
+pub(crate) fn create_active(path: &Path) -> Result<Active, StoreError> {
+    match OpenOptions::new().create_new(true).append(true).open(path) {
+        Ok(mut write) => {
+            write.write_all(&pack::file_header())?;
+            write.sync_all()?;
+            Ok(Active {
+                seq: 0, // caller fills in
+                write,
+                read: File::open(path)?,
+                len: pack::HEADER_LEN as u64,
+            })
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            let read = File::open(path)?;
+            let size = read.metadata()?.len();
+            Ok(open_active(path, read, size, pack::HEADER_LEN as u64)?.0)
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Opens the active pack through its read handle `read` (`size` bytes
+/// long): validates the header, walks the records from offset `from`
+/// (where the index runs stop, or the first record), and truncates any torn
+/// tail so the writer starts at a clean offset. Returns the pack and the
+/// records walked.
 pub(crate) fn open_active(
     path: &Path,
-    create: bool,
+    read: File,
+    size: u64,
     from: u64,
 ) -> Result<(Active, Vec<(pack::RecordHeader, u64)>), StoreError> {
-    if create {
-        // create-new can lose a race to another process bringing the same
-        // fresh store up; if it already exists, fall through and open it.
-        match OpenOptions::new().create_new(true).write(true).open(path) {
-            Ok(mut write) => {
-                write.write_all(&pack::file_header())?;
-                write.sync_all()?;
-                let read = File::open(path)?;
-                let active = Active {
-                    seq: 0, // caller fills in
-                    write,
-                    read,
-                    len: pack::HEADER_LEN as u64,
-                };
-                return Ok((active, Vec::new()));
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(e) => return Err(e.into()),
-        }
-    }
-
-    let read = File::open(path)?;
-    let size = read.metadata()?.len();
     let mut head = [0u8; pack::HEADER_LEN];
     let have = (size as usize).min(pack::HEADER_LEN);
     pack::read_exact_at(&read, &mut head[..have], 0)?;
@@ -115,7 +120,8 @@ pub(crate) fn open_active(
         }
     };
 
-    let mut write = OpenOptions::new().write(true).open(path)?;
+    // append mode: writes land at the end wherever a truncation moved it
+    let mut write = OpenOptions::new().append(true).open(path)?;
     if valid_len == 0 {
         write.set_len(0)?;
         write.write_all(&pack::file_header())?;
@@ -132,7 +138,6 @@ pub(crate) fn open_active(
         write.set_len(valid_len)?;
         write.sync_all()?;
     }
-    write.seek(SeekFrom::Start(valid_len))?;
     let active = Active {
         seq: 0,
         write,
@@ -144,7 +149,7 @@ pub(crate) fn open_active(
 
 /// The in-memory pack state a chunk store holds: sealed packs (mapped on
 /// first read), the active pack (open for append), and the chunk index.
-pub(crate) type PackState = (HashMap<u32, OnceLock<Mmap>>, Active, ChunkIndex);
+pub(crate) type PackState = (BTreeMap<u32, OnceLock<Mmap>>, Active, ChunkIndex);
 
 /// Maps a sealed pack and checks its header.
 pub(crate) fn map_sealed(dir: &Path, seq: u32) -> Result<Mmap, StoreError> {
@@ -164,22 +169,33 @@ pub(crate) fn load(dir: &Path) -> Result<PackState, StoreError> {
         }
         listed => listed?,
     };
-    let mut sealed = HashMap::new();
+    let mut sealed = BTreeMap::new();
     let first = Location {
         seq: seqs.first().copied().unwrap_or(1),
         offset: pack::HEADER_LEN as u64,
     };
-    let mut index = ChunkIndex::open(dir, first, |loc| guard_at(dir, loc))?;
 
     let (&active_seq, sealed_seqs) = match seqs.split_last() {
         Some((last, rest)) => (last, rest),
         None => {
-            let (mut active, _) = open_active(&pack_path(dir, 1), true, first.offset)?;
+            let index = ChunkIndex::open(dir, first, |loc| guard_at(dir, loc))?;
+            let mut active = create_active(&pack_path(dir, 1))?;
             active.seq = 1;
             pack::fsync_dir(dir)?;
             return Ok((sealed, active, index));
         }
     };
+    // the index runs usually stop in the active pack: its one read handle
+    // serves their guard check too
+    let read = File::open(pack_path(dir, active_seq))?;
+    let size = read.metadata()?.len();
+    let mut index = ChunkIndex::open(dir, first, |loc| {
+        if loc.seq == active_seq {
+            guard_in(&read, size, loc.offset)
+        } else {
+            guard_at(dir, loc)
+        }
+    })?;
     let covered = index.covered();
     let from = |seq: u32| {
         if seq == covered.seq {
@@ -224,7 +240,8 @@ pub(crate) fn load(dir: &Path) -> Result<PackState, StoreError> {
         let _ = sealed.get(&seq).unwrap().set(map);
     }
 
-    let (mut active, recs) = open_active(&pack_path(dir, active_seq), false, from(active_seq))?;
+    let (mut active, recs) =
+        open_active(&pack_path(dir, active_seq), read, size, from(active_seq))?;
     active.seq = active_seq;
     for (hdr, offset) in recs {
         let loc = Location {

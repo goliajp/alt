@@ -7,7 +7,6 @@
 //! runs is verified on open, where a torn final record (crash mid-append)
 //! is cut off and any other bad record is reported as corruption.
 
-use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::ops::Deref;
@@ -16,6 +15,7 @@ use std::path::{Path, PathBuf};
 use crate::StoreError;
 use crate::pack::read_exact_at;
 use crate::runs::{GUARD_LEN, Guard, Key, Runs};
+use alt_hash::IdMap;
 
 const HEADER_LEN: usize = 5;
 const MAX_REC: usize = 96;
@@ -80,8 +80,8 @@ pub struct RecLog {
     runs: Runs,
     /// records in `[runs.covered(), len)`, verified
     tail: Vec<u8>,
-    tail_keys: HashMap<Key, u32>,
-    tail_second: HashMap<Key, Vec<u32>>,
+    tail_keys: IdMap<Key, u32>,
+    tail_second: IdMap<Key, Vec<u32>>,
     len: u64,
     unsynced: bool,
 }
@@ -155,8 +155,8 @@ impl RecLog {
             idx_dir,
             runs,
             tail: Vec::new(),
-            tail_keys: HashMap::new(),
-            tail_second: HashMap::new(),
+            tail_keys: IdMap::default(),
+            tail_second: IdMap::default(),
             len: size,
             unsynced: false,
         };

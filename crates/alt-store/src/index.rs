@@ -3,8 +3,9 @@
 //! of what the packs say: reads check the record they land on against the
 //! id they asked for.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+use alt_hash::IdMap;
 
 use crate::runs::{Guard, Key, Runs};
 use crate::{ChunkId, StoreError};
@@ -40,7 +41,7 @@ pub(crate) struct ChunkIndex {
     runs: Runs,
     /// records past the runs, in append order
     tail: Vec<(ChunkId, Location)>,
-    latest: HashMap<ChunkId, Location>,
+    latest: IdMap<ChunkId, Location>,
     /// position just past the last record known
     end: u64,
 }
@@ -62,7 +63,7 @@ impl ChunkIndex {
             base,
             runs,
             tail: Vec::new(),
-            latest: HashMap::new(),
+            latest: IdMap::default(),
             end,
         })
     }
@@ -95,8 +96,9 @@ impl ChunkIndex {
     }
 
     /// Every chunk's current location.
-    pub fn all(&self) -> HashMap<ChunkId, Location> {
-        let mut all = HashMap::with_capacity(self.runs.count() + self.tail.len());
+    pub fn all(&self) -> IdMap<ChunkId, Location> {
+        let mut all = IdMap::default();
+        all.reserve(self.runs.count() + self.tail.len());
         self.runs.for_each(|key, position| {
             let id = ChunkId(key.try_into().unwrap());
             let loc = Location::at(position);

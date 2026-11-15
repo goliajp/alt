@@ -509,6 +509,7 @@ dependencies = [
  "alt-git-config",
  "alt-git-pack",
  "alt-git-refs",
+ "alt-hash",
  "alt-import",
  "alt-odb",
  "alt-os",

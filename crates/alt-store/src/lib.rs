@@ -35,7 +35,7 @@ pub mod runs;
 pub use blob::{BlobOptions, BlobSink, BlobStore, StoreCheckpoint};
 pub use pack::with_shared_lock;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
@@ -43,11 +43,12 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, OnceLock};
 
+use alt_hash::IdMap;
 use alt_os::map::Mmap;
 
 use index::{ChunkIndex, Location};
 use pack::{ENC_DELTA, ENC_RAW, ENC_ZSTD, REC_HEADER_LEN, RecordHeader};
-use packs::{Active, idx_path, list_pack_seqs, load, open_active, pack_path};
+use packs::{Active, idx_path, list_pack_seqs, load, pack_path};
 
 /// Write-side cap on lineage-delta chain length. Later re-encoding of a
 /// base can stretch an existing chain past this — the cap is a cost
@@ -239,7 +240,7 @@ impl Verify {
 
 /// Bounded, insertion-order cache of resolved delta bases.
 struct DeltaCache {
-    map: HashMap<ChunkId, Arc<Vec<u8>>>,
+    map: IdMap<ChunkId, Arc<Vec<u8>>>,
     order: VecDeque<ChunkId>,
     bytes: usize,
 }
@@ -247,7 +248,7 @@ struct DeltaCache {
 impl DeltaCache {
     fn new() -> Self {
         Self {
-            map: HashMap::new(),
+            map: IdMap::default(),
             order: VecDeque::new(),
             bytes: 0,
         }
@@ -296,7 +297,7 @@ pub struct ChunkStore {
     dir: PathBuf,
     opts: Options,
     /// sealed packs by sequence number, mapped on first read
-    sealed: HashMap<u32, OnceLock<Mmap>>,
+    sealed: BTreeMap<u32, OnceLock<Mmap>>,
     active: Active,
     index: ChunkIndex,
     /// whether this handle appended anything a drop should still fsync
@@ -586,8 +587,7 @@ impl ChunkStore {
         self.sealed.insert(self.active.seq, OnceLock::new());
 
         let seq = self.active.seq + 1;
-        let (mut active, _) =
-            open_active(&pack_path(&self.dir, seq), true, pack::HEADER_LEN as u64)?;
+        let mut active = packs::create_active(&pack_path(&self.dir, seq))?;
         active.seq = seq;
         pack::fsync_dir(&self.dir)?;
         self.active = active;
@@ -641,12 +641,7 @@ impl ChunkStore {
 
         // a fresh empty active above the compacted pack
         let active_seq = comp_seq + 1;
-        let (mut active, _) = open_active(
-            &pack_path(&self.dir, active_seq),
-            true,
-            pack::HEADER_LEN as u64,
-        )?;
-        active.seq = active_seq;
+        let active = packs::create_active(&pack_path(&self.dir, active_seq))?;
         pack::fsync_dir(&self.dir)?;
 
         // compacted pack + active are durable: now drop the index runs that

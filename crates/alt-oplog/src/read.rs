@@ -2,7 +2,7 @@
 //! and repairing a torn tail.
 
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Seek, SeekFrom, Write};
 
 use crate::scan::{CHECKSUM_LEN, HEADER_LEN, check_header, file_header, replay_records};
 use crate::{Anchor, Op, OpLogError, ROOT};
@@ -33,7 +33,20 @@ impl Scan {
     }
 }
 
-pub(crate) fn read_at(file: &mut File, at: u64, len: usize) -> std::io::Result<Vec<u8>> {
+/// Reads `len` bytes at offset `at` without moving the cursor the writer
+/// appends at.
+#[cfg(unix)]
+pub(crate) fn read_at(file: &File, at: u64, len: usize) -> std::io::Result<Vec<u8>> {
+    use std::os::unix::fs::FileExt;
+    let mut data = vec![0u8; len];
+    file.read_exact_at(&mut data, at)?;
+    Ok(data)
+}
+
+#[cfg(not(unix))]
+pub(crate) fn read_at(file: &File, at: u64, len: usize) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut file = file.try_clone()?;
     let mut data = vec![0u8; len];
     file.seek(SeekFrom::Start(at))?;
     file.read_exact(&mut data)?;
@@ -43,7 +56,7 @@ pub(crate) fn read_at(file: &mut File, at: u64, len: usize) -> std::io::Result<V
 /// Reads what an open has to verify: everything after `anchor` when the
 /// record it names still ends where it says (the checksum closing a record
 /// is the op id's first bytes), the whole file otherwise.
-pub(crate) fn read_log(file: &mut File, anchor: Option<Anchor>) -> std::io::Result<Raw> {
+pub(crate) fn read_log(file: &File, anchor: Option<Anchor>) -> std::io::Result<Raw> {
     let size = file.metadata()?.len();
     if let Some(anchor) = anchor
         && anchor.end <= size
