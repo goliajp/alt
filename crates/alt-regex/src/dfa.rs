@@ -13,8 +13,11 @@ use crate::syntax::Look;
 const UNKNOWN: u32 = 0;
 /// Set on the name of a state some path has matched in.
 const MATCH: u32 = 1 << 31;
-/// The table is thrown away and begun again past this many states.
-const MAX_STATES: usize = 10_000;
+/// The table is thrown away and begun again once the states built take
+/// more bytes than this.
+const MAX_BYTES: usize = 2 << 20;
+/// What a state takes besides its instructions and its row.
+const STATE_BYTES: usize = 64;
 
 pub struct Cache {
     /// Whether a match may begin at every position, or only where the
@@ -28,6 +31,8 @@ pub struct Cache {
     table: Vec<u32>,
     /// The length of a row, which names the dead state.
     width: u32,
+    /// What the states built so far take, about.
+    bytes: usize,
     /// The state a search starts in: inside the text, and at its start.
     first: [u32; 2],
     /// Stamps instructions a closure has visited.
@@ -44,6 +49,7 @@ impl Cache {
             states: Vec::new(),
             table: Vec::new(),
             width: 0,
+            bytes: 0,
             first: [UNKNOWN; 2],
             visited: Vec::new(),
             stamp: 0,
@@ -55,6 +61,7 @@ impl Cache {
         self.names.clear();
         self.states.clear();
         self.table.clear();
+        self.bytes = 0;
         self.first = [UNKNOWN; 2];
     }
 
@@ -110,6 +117,8 @@ impl Cache {
             .any(|&pc| matches!(prog.insts[pc as usize], Inst::Match));
         let name = self.table.len() as u32 | if matched { MATCH } else { 0 };
         let set: Box<[u32]> = set.into();
+        // the instructions are kept twice, as the state and as its name
+        self.bytes += STATE_BYTES + 4 * (2 * set.len() + self.width as usize);
         self.states.push(set.clone());
         self.table
             .resize(self.table.len() + self.width as usize, UNKNOWN);
@@ -140,7 +149,7 @@ impl Cache {
             set.sort_unstable();
             set.dedup();
         }
-        if self.states.len() >= MAX_STATES {
+        if self.bytes >= MAX_BYTES {
             self.clear();
             return self.name(prog, set);
         }

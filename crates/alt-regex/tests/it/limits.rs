@@ -112,3 +112,17 @@ fn the_number_of_groups_and_the_length_of_a_pattern_are_bounded() {
     let long = within(Duration::from_secs(1), &b"a".repeat((1 << 18) + 1));
     assert_eq!(long.err(), Some(Error::TooBig));
 }
+
+#[test]
+fn the_tables_of_a_search_are_bounded_in_bytes_whatever_the_states_hold() {
+    // each state of this one holds some two thousand instructions
+    let re = Regex::new(b"(a|b)*a(a|b){2000}c").unwrap();
+    let mut text = vec![b'a'; 9_000];
+    let most = crate::most_held(|| {
+        assert!(!re.is_match(&text));
+        assert_eq!(re.find(&text), None);
+    });
+    assert!(most < 24 << 20, "{most} bytes");
+    text.push(b'c');
+    assert_eq!(re.find(&text), Some(0..9_001));
+}
