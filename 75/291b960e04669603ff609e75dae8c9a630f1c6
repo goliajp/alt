@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: perf
+summary: list directories with getdents64 on linux, stage nothing in an empty tree
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/add.rs
+touched: crates/alt-cli/tests/fixtures/cli/uncommitted-changes.txt
+touched: crates/alt-cli/tests/it/scan_cache.rs
+touched: crates/alt-os/src/sys/linux.rs
+touched: crates/alt-worktree/src/fsdir.rs
