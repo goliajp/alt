@@ -2,6 +2,13 @@
 
 use super::*;
 
+/// What the working-tree side of a diff is read with: the index its paths
+/// came from, and the attribute files that say how content is stored.
+struct Worktree<'a> {
+    index: &'a Index,
+    attrs: eol::WorktreeAttributes,
+}
+
 impl NativeRepo<'_> {
     /// `alt diff` (index → working tree) or `alt diff --cached` (HEAD →
     /// index): a git-style unified diff of the tracked changes. With `json`,
@@ -12,24 +19,22 @@ impl NativeRepo<'_> {
     pub fn diff(&self, cached: bool, json: bool, semantic: bool, out: &mut impl Write) -> Res<()> {
         // old side is always read from the object store; the new side is the
         // index (cached) or the live working tree (default).
-        let (old, new, new_on_disk, show_added) = if cached {
-            (
-                self.head_entries()?,
-                index_entries(&self.index()?),
-                false,
-                true,
-            )
+        let raw = self.index()?;
+        let disk = (!cached).then(|| Worktree {
+            index: &raw,
+            attrs: eol::WorktreeAttributes::new(&self.root),
+        });
+        let disk = disk.as_ref();
+        let (old, new, show_added) = if cached {
+            (self.head_entries()?, index_entries(&raw), true)
         } else {
-            let raw = self.index()?;
             // Sparse-from-index: no directory walk. One stat per
             // indexed path, only read+hash on a stat mismatch. Untracked
             // files are not in `alt diff`'s output (show_added=false), so
             // skipping the dir traversal is correct — same shape git diff
             // uses. Drops `alt diff` on a clean 50k-file monorepo from
             // seconds to ≤100 ms.
-            let work = self.scan_index_paths(&raw)?;
-            let index = index_entries(&raw);
-            (index, work, true, false)
+            (index_entries(&raw), self.scan_index_paths(&raw)?, false)
         };
 
         let changes: Vec<_> = alt_worktree::changes(&old, &new)
@@ -39,7 +44,7 @@ impl NativeRepo<'_> {
             .collect();
 
         if json {
-            return self.diff_json(&changes, new_on_disk, semantic, out);
+            return self.diff_json(&changes, disk, semantic, out);
         }
         let mut buf = Vec::new();
         for ch in &changes {
@@ -56,10 +61,10 @@ impl NativeRepo<'_> {
                         old: None,
                         ..ch.clone()
                     };
-                    self.emit_file_diff(&mut buf, &removed, new_on_disk, semantic)?;
-                    self.emit_file_diff(&mut buf, &added, new_on_disk, semantic)?;
+                    self.emit_file_diff(&mut buf, &removed, disk, semantic)?;
+                    self.emit_file_diff(&mut buf, &added, disk, semantic)?;
                 }
-                _ => self.emit_file_diff(&mut buf, ch, new_on_disk, semantic)?,
+                _ => self.emit_file_diff(&mut buf, ch, disk, semantic)?,
             }
         }
         out.write_all(&buf)?;
@@ -74,15 +79,15 @@ impl NativeRepo<'_> {
     fn diff_json(
         &self,
         changes: &[alt_worktree::Change],
-        new_on_disk: bool,
+        disk: Option<&Worktree<'_>>,
         semantic: bool,
         out: &mut impl Write,
     ) -> Res<()> {
         use crate::json::Json;
         let mut files = Vec::with_capacity(changes.len());
         for ch in changes {
-            let old_bytes = self.side_bytes(ch.old, false)?;
-            let new_bytes = self.side_bytes(ch.new, new_on_disk)?;
+            let old_bytes = self.side_bytes(ch.old, None)?;
+            let new_bytes = self.side_bytes(ch.new, disk)?;
             let status = match (ch.old, ch.new) {
                 (None, _) => "added",
                 (_, None) => "deleted",
@@ -170,12 +175,12 @@ impl NativeRepo<'_> {
         &self,
         buf: &mut Vec<u8>,
         ch: &alt_worktree::Change,
-        new_on_disk: bool,
+        disk: Option<&Worktree<'_>>,
         semantic: bool,
     ) -> Res<()> {
         let path = ch.path;
-        let old_bytes = self.side_bytes(ch.old, false)?;
-        let new_bytes = self.side_bytes(ch.new, new_on_disk)?;
+        let old_bytes = self.side_bytes(ch.old, None)?;
+        let new_bytes = self.side_bytes(ch.new, disk)?;
 
         buf.extend_from_slice(format!("diff --git a/{path} b/{path}\n").as_bytes());
         match (ch.old, ch.new) {
@@ -308,24 +313,23 @@ impl NativeRepo<'_> {
 
     /// The content one side of a change is diffed as. A gitlink has no blob
     /// in this store: it diffs as the line git prints for a submodule.
-    fn side_bytes(&self, side: Option<&WorkEntry>, on_disk: bool) -> Res<Vec<u8>> {
-        match side {
-            None => Ok(Vec::new()),
-            Some(w) if w.mode == 0o160000 => {
+    fn side_bytes(&self, side: Option<&WorkEntry>, disk: Option<&Worktree<'_>>) -> Res<Vec<u8>> {
+        match (side, disk) {
+            (None, _) => Ok(Vec::new()),
+            (Some(w), _) if w.mode == 0o160000 => {
                 Ok(format!("Subproject commit {}\n", w.oid).into_bytes())
             }
-            Some(w) if on_disk => {
+            (Some(w), Some(disk)) => {
                 let content = self.read_for(w)?;
                 if w.mode == 0o120000 {
                     return Ok(content);
                 }
                 // compared as it would be stored, as the old side is
-                let attrs = eol::WorktreeAttributes::new(&self.root);
-                let stored = self.eol_to_store(&attrs, &self.index()?, &w.path, &content);
-                attrs.check()?;
+                let stored = self.eol_to_store(&disk.attrs, disk.index, &w.path, &content);
+                disk.attrs.check()?;
                 Ok(stored.unwrap_or(content))
             }
-            Some(w) => self.blob_bytes(w.oid),
+            (Some(w), None) => self.blob_bytes(w.oid),
         }
     }
 }
