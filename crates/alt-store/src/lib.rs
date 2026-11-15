@@ -25,6 +25,7 @@ mod check;
 /// Lineage delta codec (zstd ref-prefix / patch-from). Public as a
 /// primitive — reused by the store's encode/decode and benched directly.
 pub mod delta;
+pub mod held;
 mod idx;
 mod index;
 mod indexing;

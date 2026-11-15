@@ -140,15 +140,7 @@ pub fn with_shared_lock<T>(
     f: impl FnOnce() -> Result<T, StoreError>,
 ) -> Result<T, StoreError> {
     let lock = File::open(path)?;
-    alt_os::sys::flock(&lock, alt_os::sys::LOCK_SH)?;
+    crate::held::lock_shared(&lock)?;
     // closing the descriptor releases the lock
-    f()
-}
-
-#[cfg(not(unix))]
-pub fn with_shared_lock<T>(
-    _path: &Path,
-    f: impl FnOnce() -> Result<T, StoreError>,
-) -> Result<T, StoreError> {
     f()
 }

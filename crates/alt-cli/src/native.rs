@@ -203,16 +203,7 @@ impl StoreSink {
         // cloned fd would let one concurrent barrier unlock another's lock.
         // Closing the fd releases it on both success and error.
         let _barrier = std::fs::File::open(&self.odb_lock)?;
-        #[cfg(unix)]
-        {
-            loop {
-                match alt_os::sys::flock(&_barrier, alt_os::sys::LOCK_SH) {
-                    Ok(()) => break,
-                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
-                    Err(error) => return Err(error.into()),
-                }
-            }
-        }
+        alt_odb::held::lock_shared(&_barrier)?;
         self.odb.fsync()?;
         self.oplog.sync_all()?;
         Ok(())

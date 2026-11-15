@@ -11,7 +11,7 @@ use alt_git_codec::{ObjectId, ObjectKind, RawObject};
 use alt_prism::Registry;
 use alt_store::{BlobOptions, BlobStore, CompactReport, StoreError};
 
-use crate::lock::{lock_exclusive, lock_shared, try_lock_exclusive, unlock};
+use crate::lock::{hold_exclusive, lock_shared, release_exclusive, try_hold_exclusive, unlock};
 use crate::map::{MapEntry, ObjectMap};
 use crate::tier1::{self, Tier1Map};
 use crate::{BlobId, OdbError, default_registry};
@@ -129,7 +129,7 @@ impl Odb {
     /// indexed by whoever opens it next, unless a writer is at work.
     fn index_stale_tails(&mut self) -> Result<(), OdbError> {
         let pending = self.blobs.index_pending() || self.map.index_pending();
-        if !pending || !try_lock_exclusive(&self.lock)? {
+        if !pending || !try_hold_exclusive(&self.lock)? {
             return Ok(());
         }
         self.held = true;
@@ -182,7 +182,7 @@ impl Odb {
         if self.held {
             return Ok(());
         }
-        lock_exclusive(&self.lock)?;
+        hold_exclusive(&self.lock)?;
         self.held = true;
         self.blobs.sync_from_disk()?;
         if let Some(tier1) = self.tier1.get_mut() {
@@ -195,7 +195,7 @@ impl Odb {
     /// Releases the write lock (best-effort; the fd closing also releases it).
     fn release(&mut self) {
         if self.held {
-            let _ = unlock(&self.lock);
+            release_exclusive(&self.lock);
             self.held = false;
             self.blobs.end_batch();
         }
