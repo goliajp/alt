@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: refactor
+summary: move working tree scanning into its own module
+author-type: human
+author: doracawl
+touched: crates/alt-worktree/src/lib.rs
+touched: crates/alt-worktree/src/scan.rs
