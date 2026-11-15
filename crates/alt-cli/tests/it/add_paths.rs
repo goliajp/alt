@@ -296,3 +296,42 @@ fn a_submodule_that_checked_out_another_commit_is_reported_and_staged() {
     );
     assert!(ok(alt(dst, &["status"])).contains("nothing to commit"));
 }
+
+#[test]
+fn a_file_under_a_directory_that_became_a_file_can_be_staged_by_name() {
+    let (ours, theirs) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
+    ok(alt(ours.path(), &["init", "."]));
+    ok(git(theirs.path(), &["init", "-q", "."]));
+    for (root, run) in [
+        (ours.path(), &alt as &dyn Fn(&Path, &[&str]) -> Output),
+        (theirs.path(), &git),
+    ] {
+        write(root, "node/a.txt", "a\n");
+        write(root, "node/b.txt", "b\n");
+        write(root, "other/c.txt", "c\n");
+        ok(run(root, &["add", "."]));
+        ok(run(root, &["commit", "-m", "base"]));
+        std::fs::remove_dir_all(root.join("node")).unwrap();
+        write(root, "node", "now a file\n");
+        // only the one path: its removal is staged, the rest is not
+        ok(run(root, &["add", "node/a.txt"]));
+        ok(run(root, &["commit", "-m", "drop one file"]));
+
+        // through a symlink a path cannot be named, in either tool
+        std::fs::remove_dir_all(root.join("other")).unwrap();
+        std::os::unix::fs::symlink("node", root.join("other")).unwrap();
+        let refused = run(root, &["add", "other/c.txt"]);
+        assert!(!refused.status.success());
+        let message = String::from_utf8_lossy(&refused.stderr).into_owned();
+        assert!(message.contains("is beyond a symbolic link"), "{message}");
+    }
+    assert_eq!(
+        tree_line(&ok(alt(ours.path(), &["cat-file", "-p", "HEAD"]))),
+        tree_line(&ok(git(theirs.path(), &["cat-file", "-p", "HEAD"])))
+    );
+    let status = ok(alt(ours.path(), &["status"]));
+    assert!(status.contains("deleted:   node/b.txt"), "{status}");
+}

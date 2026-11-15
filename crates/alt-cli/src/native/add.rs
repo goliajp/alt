@@ -19,6 +19,17 @@ impl NativeRepo<'_> {
         let lfs = self.lfs_rules()?;
         let attrs = self.converter()?;
         let specs: Vec<&str> = paths.iter().map(|p| pathspec(p)).collect();
+        // a path named through a symlink is not a path of this tree
+        for (spec, given) in specs.iter().zip(paths) {
+            let parents = spec.match_indices('/').map(|(at, _)| &spec[..at]);
+            if parents.into_iter().any(|p| self.root.join(p).is_symlink()) {
+                return Err(crate::machine::Failure::refusal(
+                    "precondition_failed",
+                    format!("pathspec '{given}' is beyond a symbolic link"),
+                )
+                .into());
+            }
+        }
         // what lies inside a submodule is the submodule's to add
         for (spec, given) in specs.iter().zip(paths) {
             let inside = before.entries.iter().find(|e| {

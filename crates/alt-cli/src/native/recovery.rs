@@ -208,10 +208,12 @@ impl NativeRepo<'_> {
         Ok(bytes)
     }
 
-    /// The working-tree state at `path`, one of the `guarded` paths of an
-    /// index change. A path beneath a guarded file holds nothing.
-    fn path_guard(&self, path: &BString, guarded: &dyn Fn(&[u8]) -> bool) -> Res<PathGuard> {
-        if self.validate_path_among(path, guarded)? {
+    /// The working-tree state at `path`, as an index change records it. A
+    /// path beneath a file or a symlink holds nothing; an index change
+    /// writes nothing to the working tree, so nothing can pass through
+    /// such a parent.
+    fn path_guard(&self, path: &BString) -> Res<PathGuard> {
+        if self.validate_path_among(path, &|_| true)? {
             return Ok(PathGuard {
                 path: path.to_vec(),
                 state: None,
@@ -247,11 +249,8 @@ impl NativeRepo<'_> {
     }
 
     fn check_guards(&self, guards: &[PathGuard]) -> Res<()> {
-        let paths: std::collections::HashSet<&[u8]> =
-            guards.iter().map(|g| g.path.as_slice()).collect();
         for guard in guards {
-            let actual =
-                self.path_guard(&BString::from(guard.path.clone()), &|p| paths.contains(p))?;
+            let actual = self.path_guard(&BString::from(guard.path.clone()))?;
             if actual != *guard {
                 return Err(crate::machine::Failure::refusal(
                     "precondition_failed",
@@ -329,8 +328,6 @@ impl NativeRepo<'_> {
             )
             .into());
         }
-        let paths: std::collections::HashSet<&[u8]> =
-            touched.iter().map(|p| p.as_slice()).collect();
         let intent = IndexIntent {
             version: 1,
             workspace: self.workspace_identity()?,
@@ -339,7 +336,7 @@ impl NativeRepo<'_> {
             after: self.snapshot(&after)?,
             worktree: touched
                 .iter()
-                .map(|p| self.path_guard(p, &|q| paths.contains(q)))
+                .map(|p| self.path_guard(p))
                 .collect::<Res<_>>()?,
             inverse_of,
         };
