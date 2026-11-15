@@ -68,6 +68,15 @@ impl NativeRepo<'_> {
         self.converter_over(Tree::Stored(layers))
     }
 
+    /// A converter under the given `.gitattributes` files, each with the
+    /// directory it lies in.
+    pub(super) fn converter_under(&self, files: &[(&[u8], &[u8])]) -> Res<Converter> {
+        let layers = files
+            .iter()
+            .map(|(dir, content)| Layer::parse(content, dir));
+        self.converter_over(Tree::Stored(layers.collect()))
+    }
+
     fn converter_over(&self, tree: Tree) -> Res<Converter> {
         let settings = self.settings()?;
         let text = |key: &str| settings.get_str("core", None, key).map(|v| v.to_vec());

@@ -271,7 +271,27 @@ impl NativeRepo<'_> {
     /// bytes, then an index carrying stage-0 entries for clean paths and
     /// stage 1/2/3 entries for conflicted ones (so git tools see the merge).
     pub(super) fn write_conflicted(&mut self, resolved: &[Resolved]) -> Res<()> {
-        let attrs = self.converter()?;
+        // converted under the attribute files of the merge result, as a
+        // checkout of it would be: those on disk are from before the merge
+        let mut files: Vec<(&[u8], Vec<u8>)> = Vec::new();
+        for r in resolved {
+            let dir = match r.path.as_slice() {
+                b".gitattributes" => &b""[..],
+                p => match p.strip_suffix(b"/.gitattributes") {
+                    Some(dir) => dir,
+                    None => continue,
+                },
+            };
+            match (&r.worktree, &r.entry) {
+                (Some(bytes), _) => files.push((dir, bytes.clone())),
+                (None, Some(e)) if e.mode & 0o170000 == 0o100000 => {
+                    files.push((dir, self.blob_bytes(e.oid)?));
+                }
+                _ => {}
+            }
+        }
+        let files: Vec<(&[u8], &[u8])> = files.iter().map(|(d, c)| (*d, c.as_slice())).collect();
+        let attrs = self.converter_under(&files)?;
         for r in resolved {
             let abs = self.abs(&r.path)?;
             if let Some(bytes) = &r.worktree {
