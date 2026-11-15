@@ -68,4 +68,5 @@ mod cli_matrix;
 mod corpus_cli;
 mod corpus_history;
 mod funcname;
+mod git_settings;
 mod recovery_kinds;
