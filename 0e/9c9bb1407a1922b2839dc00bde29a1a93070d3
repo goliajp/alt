@@ -1,0 +1,15 @@
+schema: alt-meta/1
+type: fix
+summary: quote paths in patch headers and lengthen an abbreviated id that another object shares
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/file_header.rs
+touched: crates/alt-cli/src/lib.rs
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/diff.rs
+touched: crates/alt-cli/src/native/settings.rs
+touched: crates/alt-cli/src/patch.rs
+touched: crates/alt-cli/tests/it/log_patch.rs
+touched: crates/alt-odb/src/abbrev.rs
+touched: crates/alt-odb/src/lib.rs
+touched: crates/alt-repo/src/lib.rs
