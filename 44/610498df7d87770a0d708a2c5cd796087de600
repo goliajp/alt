@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: perf
+summary: intern diff lines with a seeded folding hash
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/blame/walk.rs
+touched: crates/alt-diff/src/fold.rs
+touched: crates/alt-diff/src/lib.rs
+touched: crates/alt-diff/src/myers.rs
