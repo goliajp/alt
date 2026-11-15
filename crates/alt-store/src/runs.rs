@@ -331,15 +331,20 @@ impl Runs {
         Ok(())
     }
 
-    /// Indexes the log range `[covered, end)`. The caller holds the log's
+    /// Indexes the log range `[from, end)`, which must begin where the runs
+    /// stop: `entries` holds every record in it. The caller holds the log's
     /// write lock. Older runs that the new one outgrows are merged into it.
     pub fn extend(
         &mut self,
         entries: &[(Key, u64)],
+        from: u64,
         end: u64,
         guard: Guard,
         durable: bool,
     ) -> Result<(), StoreError> {
+        if from != self.covered() {
+            return Err(StoreError::Format("index run would leave records out"));
+        }
         self.remove_stale()?;
         let mut fresh: Vec<[u8; ENTRY_LEN]> = entries
             .iter()

@@ -170,15 +170,22 @@ impl ChunkIndex {
     /// Moves the tail into the runs. Run under the write lock with every
     /// record on disk already in the tail; `guard` is the 16 pack bytes
     /// before [`Self::pending`], `guard_at` reads the same for any position.
+    ///
+    /// Returns false, having changed nothing, when the runs on disk stop
+    /// short of where this handle's tail begins: a run written now would
+    /// claim records it has no entries for. The caller reloads and retries.
     pub fn index_tail(
         &mut self,
         guard: Guard,
         guard_at: impl Fn(Location) -> Option<Guard>,
         durable: bool,
-    ) -> Result<(), StoreError> {
+    ) -> Result<bool, StoreError> {
         // another process may have indexed part of our tail already
         let mut runs = Runs::open(&self.dir, self.base, |end| guard_at(Location::at(end)))?;
         let covered = runs.covered();
+        if covered < self.runs.covered() {
+            return Ok(false);
+        }
         self.tail.retain(|(_, loc)| loc.position() >= covered);
         if self.tail.len() >= INDEX_AT {
             let entries: Vec<(Key, u64)> = self
@@ -186,12 +193,12 @@ impl ChunkIndex {
                 .iter()
                 .map(|(id, loc)| (id.0, loc.position()))
                 .collect();
-            runs.extend(&entries, self.end, guard, durable)?;
+            runs.extend(&entries, covered, self.end, guard, durable)?;
             self.tail.clear();
         }
         self.runs = runs;
         self.latest = self.tail.iter().copied().collect();
-        Ok(())
+        Ok(true)
     }
 
     /// Drops the runs reaching past `target`, before a pack is cut back.

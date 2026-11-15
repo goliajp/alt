@@ -9,7 +9,7 @@ use alt_store::reclog::{self, INDEX_AT, Layout, RecLog};
 use alt_store::runs::{Guard, Key, Runs};
 use alt_store::{BlobStore, ChunkId, ChunkStore, Options, StoreError};
 
-fn key(n: u64) -> Key {
+pub(crate) fn key(n: u64) -> Key {
     *alt_hash::blake3::hash(&n.to_le_bytes()).as_bytes()
 }
 
@@ -38,7 +38,8 @@ fn runs_find_what_was_indexed_across_merges_and_reopen() {
     for batch in [70_000u64, 300, 300, 5, 9_000, 1, 1, 1] {
         let entries: Vec<(Key, u64)> = (end..end + batch).map(|n| (key(n), n)).collect();
         end += batch;
-        runs.extend(&entries, end, guard(end), true).unwrap();
+        runs.extend(&entries, end - batch, end, guard(end), true)
+            .unwrap();
     }
     assert_eq!(runs.covered(), end);
     assert_eq!(runs.count() as u64, end);
@@ -61,12 +62,14 @@ fn a_key_indexed_twice_reports_every_position_and_the_latest() {
     let mut runs = open_runs(dir.path(), 0);
     runs.extend(
         &[(key(1), 10), (key(2), 20), (key(1), 30)],
+        0,
         40,
         guard(40),
         false,
     )
     .unwrap();
-    runs.extend(&[(key(1), 50)], 60, guard(60), false).unwrap();
+    runs.extend(&[(key(1), 50)], 40, 60, guard(60), false)
+        .unwrap();
     assert_eq!(positions(&runs, &key(1)), vec![10, 30, 50]);
     assert_eq!(runs.find_last(&key(1)).unwrap(), Some(50));
     assert_eq!(runs.find_last(&key(2)).unwrap(), Some(20));
@@ -86,8 +89,8 @@ fn runs_past_a_cut_back_log_are_dropped_and_then_removed() {
     let dir = alt_os::temp::tempdir().unwrap();
     let mut runs = open_runs(dir.path(), 0);
     let first: Vec<(Key, u64)> = (0..5_000).map(|n| (key(n), n)).collect();
-    runs.extend(&first, 5_000, guard(5_000), false).unwrap();
-    runs.extend(&[(key(5_000), 5_000)], 5_001, guard(5_001), false)
+    runs.extend(&first, 0, 5_000, guard(5_000), false).unwrap();
+    runs.extend(&[(key(5_000), 5_000)], 5_000, 5_001, guard(5_001), false)
         .unwrap();
     assert_eq!(runs.run_count(), 2);
 
@@ -115,7 +118,8 @@ fn a_damaged_run_is_reported_or_ignored_never_trusted() {
     let dir = alt_os::temp::tempdir().unwrap();
     let mut runs = open_runs(dir.path(), 0);
     let entries: Vec<(Key, u64)> = (0..2_000).map(|n| (key(n), n)).collect();
-    runs.extend(&entries, 2_000, guard(2_000), false).unwrap();
+    runs.extend(&entries, 0, 2_000, guard(2_000), false)
+        .unwrap();
     drop(runs);
     let path = fs::read_dir(dir.path())
         .unwrap()
@@ -148,8 +152,8 @@ fn a_damaged_run_is_reported_or_ignored_never_trusted() {
     assert_eq!(open_runs(dir.path(), 2_000).covered(), 0);
 }
 
-const REC_LEN: usize = 48;
-const LAYOUT: Layout = Layout {
+pub(crate) const REC_LEN: usize = 48;
+pub(crate) const LAYOUT: Layout = Layout {
     magic: *b"TEST",
     version: 1,
     rec_len: REC_LEN,
@@ -160,7 +164,7 @@ const LAYOUT: Layout = Layout {
     keys: |rec| (rec[..32].try_into().unwrap(), None),
 };
 
-fn record(n: u64, value: u64) -> [u8; REC_LEN] {
+pub(crate) fn record(n: u64, value: u64) -> [u8; REC_LEN] {
     let mut rec = [0u8; REC_LEN];
     rec[..32].copy_from_slice(&key(n));
     rec[32..40].copy_from_slice(&value.to_le_bytes());
@@ -169,7 +173,7 @@ fn record(n: u64, value: u64) -> [u8; REC_LEN] {
     rec
 }
 
-fn value(log: &RecLog, n: u64) -> Option<u64> {
+pub(crate) fn value(log: &RecLog, n: u64) -> Option<u64> {
     log.get(&key(n))
         .unwrap()
         .map(|rec| u64::from_le_bytes(rec[32..40].try_into().unwrap()))
@@ -316,7 +320,7 @@ fn record_log_torn_tail_after_the_index_is_cut_off() {
     assert_eq!(value(&log, 10), None);
 }
 
-fn chunk(n: u64) -> Vec<u8> {
+pub(crate) fn chunk(n: u64) -> Vec<u8> {
     let mut data = key(n).to_vec();
     data.extend_from_slice(&[n as u8; 100]);
     data

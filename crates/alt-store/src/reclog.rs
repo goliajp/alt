@@ -8,6 +8,7 @@
 //! is cut off and any other bad record is reported as corruption.
 
 mod check;
+mod sync;
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -348,80 +349,6 @@ impl RecLog {
         self.unsynced = true;
         self.len += rec.len() as u64;
         self.push_tail(rec);
-        Ok(())
-    }
-
-    /// Folds in records another writer appended since our last read. Run
-    /// under the write lock: a torn tail there is a crashed writer's.
-    pub fn sync_from_disk(&mut self) -> Result<(), StoreError> {
-        self.runs.remove_stale()?;
-        let size = self.file.metadata()?.len();
-        if size <= self.len {
-            return Ok(());
-        }
-        let rec_len = self.layout.rec_len;
-        let mut data = vec![0u8; (size - self.len) as usize];
-        read_exact_at(&self.file, &mut data, self.len)?;
-        let mut at = 0usize;
-        while let Some(rec) = data.get(at..at + rec_len) {
-            if !self.layout.intact(rec) {
-                break;
-            }
-            at += rec_len;
-        }
-        let new_len = self.len + at as u64;
-        if at < data.len() {
-            self.file.set_len(new_len)?;
-            self.file.sync_all()?;
-        }
-        self.push_tail(&data[..at]);
-        self.len = new_len;
-        Ok(())
-    }
-
-    /// Whether the tail is long enough for [`Self::index_tail`] to act.
-    pub fn index_pending(&self) -> bool {
-        self.tail.len() / self.layout.rec_len >= INDEX_AT
-    }
-
-    /// Moves a long enough tail into the index runs. Run under the write
-    /// lock, after `sync_from_disk`, so the log holds nothing we have not
-    /// seen. `durable` fsyncs the new run before it replaces the old ones.
-    pub fn index_tail(&mut self, durable: bool) -> Result<(), StoreError> {
-        let rec_len = self.layout.rec_len;
-        if !self.index_pending() {
-            return Ok(());
-        }
-        // another process may have indexed part of our tail already
-        let (file, layout, size) = (&self.file, &self.layout, self.len);
-        let mut runs = Runs::open(&self.idx_dir, HEADER_LEN as u64, |end| {
-            guard_at(file, layout, size, end)
-        })?;
-        let covered = runs.covered();
-        let tail_start = self.len - self.tail.len() as u64;
-        let skip = covered.saturating_sub(tail_start) as usize;
-        let rest = &self.tail[skip.min(self.tail.len())..];
-        if rest.len() / rec_len >= INDEX_AT {
-            let mut entries = Vec::with_capacity(rest.len() / rec_len);
-            let mut position = self.len - rest.len() as u64;
-            for rec in rest.chunks_exact(rec_len) {
-                let (key, second) = (self.layout.keys)(rec);
-                entries.push((key, position));
-                if let Some(second) = second {
-                    entries.push((second, position | SECONDARY));
-                }
-                position += rec_len as u64;
-            }
-            let guard: Guard = rest[rest.len() - GUARD_LEN..].try_into().unwrap();
-            runs.extend(&entries, self.len, guard, durable)?;
-        }
-        let keep = (self.len - runs.covered()) as usize;
-        let kept = self.tail.split_off(self.tail.len() - keep);
-        self.runs = runs;
-        self.tail.clear();
-        self.tail_keys.clear();
-        self.tail_second.clear();
-        self.push_tail(&kept);
         Ok(())
     }
 

@@ -27,6 +27,7 @@ mod check;
 pub mod delta;
 mod idx;
 mod index;
+mod indexing;
 mod node;
 mod pack;
 mod packs;
@@ -383,29 +384,6 @@ impl ChunkStore {
         self.active = active;
         self.index = index;
         Ok(())
-    }
-
-    /// Moves the records appended since the last index run into a new run,
-    /// once there are enough of them. Run under the odb write lock, after
-    /// `sync_from_disk`, so every record on disk is known here.
-    pub fn index_tail(&mut self) -> Result<(), StoreError> {
-        let Some(end) = self.index.pending() else {
-            return Ok(());
-        };
-        let dir = &self.dir;
-        let guard =
-            packs::guard_at(dir, end).ok_or(StoreError::Format("pack shorter than its index"))?;
-        self.index.index_tail(
-            guard,
-            |loc| packs::guard_at(dir, loc),
-            !relaxed_durability(),
-        )
-    }
-
-    /// Whether enough records sit past the index runs for
-    /// [`Self::index_tail`] to act.
-    pub fn index_pending(&self) -> bool {
-        self.index.pending().is_some()
     }
 
     /// The mapped bytes of sealed pack `seq`.
