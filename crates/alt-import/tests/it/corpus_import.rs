@@ -26,7 +26,7 @@ fn verify_repo_against_store(repo_dir: &Path, alt_dir: &Path) -> u64 {
         for entry in entries {
             let path = entry.unwrap().path();
             if path.extension().is_some_and(|e| e == "pack") {
-                let indexed = IndexedPack::open(&path, repo.algo()).unwrap();
+                let indexed = IndexedPack::open(&path, repo.algo().unwrap()).unwrap();
                 let idx = indexed.idx();
                 let mut order: Vec<(u64, u32)> = (0..idx.len())
                     .map(|i| (idx.offset_at(i).unwrap(), i))
