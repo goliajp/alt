@@ -8,6 +8,7 @@
 
 pub mod attributes;
 mod cachetree;
+mod control;
 #[cfg(unix)]
 mod delta;
 #[cfg(unix)]

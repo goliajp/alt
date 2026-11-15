@@ -416,9 +416,7 @@ impl Snapshot {
     /// Puts the snapshot at `path` in one step. It is not synced: a file
     /// that did not reach the disk whole fails its checksum and is ignored.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
-        let tmp = path.with_extension(format!("tmp{}", std::process::id()));
-        std::fs::write(&tmp, self.encode())?;
-        std::fs::rename(&tmp, path)
+        crate::control::put(path, &self.encode())
     }
 }
 

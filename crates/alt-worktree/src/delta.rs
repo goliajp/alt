@@ -89,7 +89,7 @@ impl FileStat {
 /// another filesystem, whose clock may be coarser or run apart, the moment
 /// is taken three seconds early.
 pub fn clock_stamp(control: &Path, root: &Path) -> std::io::Result<Stamp> {
-    let probe = control.join(format!(".clock{}", std::process::id()));
+    let probe = crate::control::clock_probe(control);
     std::fs::write(&probe, b"\n")?;
     let meta = std::fs::metadata(&probe)?;
     std::fs::remove_file(&probe)?;
