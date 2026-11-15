@@ -52,7 +52,7 @@ pub struct Cache {
     scratch: Vec<usize>,
 }
 
-fn holds(look: Look, text: &[u8], at: usize) -> bool {
+pub fn holds(look: Look, text: &[u8], at: usize) -> bool {
     let word = ByteSet::word();
     let before = at > 0 && word.contains(text[at - 1]);
     let after = at < text.len() && word.contains(text[at]);

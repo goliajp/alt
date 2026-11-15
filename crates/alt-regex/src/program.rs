@@ -28,6 +28,10 @@ pub struct Program {
     pub anchored: bool,
     /// The only conditions are on the two ends of the text.
     pub plain_looks: bool,
+    /// For each instruction that more than one path leads into, its
+    /// number among those; the others have none.
+    pub joins: Vec<u32>,
+    pub join_count: u32,
     /// Bytes no instruction tells apart share a class.
     pub classes: [u8; 256],
     /// One byte of each class.
@@ -56,6 +60,7 @@ pub fn compile(node: &Node, groups: u32) -> Result<Program, Error> {
         _ => true,
     });
     let (classes, members) = classes(&c.insts, &c.sets);
+    let (joins, join_count) = joins(&c.insts, start);
     Ok(Program {
         insts: c.insts,
         sets: c.sets,
@@ -63,6 +68,8 @@ pub fn compile(node: &Node, groups: u32) -> Result<Program, Error> {
         groups,
         anchored: anchored(node),
         plain_looks,
+        joins,
+        join_count,
         classes,
         members,
     })
@@ -78,6 +85,36 @@ fn anchored(node: &Node) -> bool {
         Node::Repeat(inner, min, _) => *min > 0 && anchored(inner),
         _ => false,
     }
+}
+
+/// No number: the instruction is reached one way only.
+pub const NO_JOIN: u32 = u32::MAX;
+
+fn joins(insts: &[Inst], start: u32) -> (Vec<u32>, u32) {
+    let mut ways = vec![0u32; insts.len()];
+    ways[start as usize] = 1;
+    for inst in insts {
+        match *inst {
+            Inst::Set(_, next)
+            | Inst::Byte(_, next)
+            | Inst::Save(_, next)
+            | Inst::Look(_, next) => ways[next as usize] += 1,
+            Inst::Split(first, second) => {
+                ways[first as usize] += 1;
+                ways[second as usize] += 1;
+            }
+            Inst::Match => {}
+        }
+    }
+    let mut count = 0;
+    let numbered = |ways: u32| match ways > 1 {
+        true => {
+            count += 1;
+            count - 1
+        }
+        false => NO_JOIN,
+    };
+    (ways.into_iter().map(numbered).collect(), count)
 }
 
 fn classes(insts: &[Inst], sets: &[ByteSet]) -> ([u8; 256], Vec<u8>) {

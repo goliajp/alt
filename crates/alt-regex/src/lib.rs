@@ -9,6 +9,7 @@
 //! Texts are bytes. A multi-byte character is the bytes it is made of,
 //! and letters outside ASCII have no case.
 
+mod backtrack;
 mod class;
 mod dfa;
 mod literal;
@@ -86,12 +87,27 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-struct Caches {
+/// Storage the searches with one pattern reuse. A thread that searches
+/// often keeps its own and passes it to the `_with` methods; the others
+/// share one inside the pattern, behind a lock.
+pub struct Cache {
     /// for a match that begins anywhere
     scan: dfa::Cache,
     /// for a match that begins where the search does
     fixed: dfa::Cache,
     pike: pike::Cache,
+    backtrack: backtrack::Cache,
+}
+
+impl Default for Cache {
+    fn default() -> Self {
+        Cache {
+            scan: dfa::Cache::new(true),
+            fixed: dfa::Cache::new(false),
+            pike: pike::Cache::default(),
+            backtrack: backtrack::Cache::default(),
+        }
+    }
 }
 
 /// A compiled pattern.
@@ -99,21 +115,36 @@ pub struct Regex {
     prog: program::Program,
     /// Bytes every match contains.
     literal: Option<Vec<u8>>,
-    caches: Mutex<Caches>,
+    /// The capture slots of the match in the empty text, if it has one.
+    on_empty: Option<Vec<usize>>,
+    cache: Mutex<Cache>,
 }
 
 /// Where a match and its groups lie in the text.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Captures {
-    slots: Vec<usize>,
+    slots: Slots,
 }
+
+/// The slots of a few groups lie in the value itself.
+#[derive(Clone, PartialEq, Eq, Debug)]
+enum Slots {
+    Few([usize; FEW]),
+    Many(Vec<usize>),
+}
+
+const FEW: usize = 8;
 
 impl Captures {
     /// The span of group `index`; group 0 is the whole match. `None` for
     /// a group that took no part in the match.
     pub fn get(&self, index: usize) -> Option<Range<usize>> {
-        let from = *self.slots.get(2 * index)?;
-        let to = *self.slots.get(2 * index + 1)?;
+        let slots = match &self.slots {
+            Slots::Few(slots) => slots.as_slice(),
+            Slots::Many(slots) => slots.as_slice(),
+        };
+        let from = *slots.get(2 * index)?;
+        let to = *slots.get(2 * index + 1)?;
         (from != pike::UNSET && to != pike::UNSET).then_some(from..to)
     }
 }
@@ -126,14 +157,18 @@ impl Regex {
 
     pub fn with_options(pattern: &[u8], options: Options) -> Result<Self, Error> {
         let (node, groups) = syntax::parse(pattern, options)?;
+        let prog = program::compile(&node, groups)?;
+        let anchored = prog.anchored;
+        // a text with nothing in it is common, and always answered alike
+        let mut slots = vec![pike::UNSET; 2 * (groups as usize + 1)];
+        let matched = pike::search(&prog, &mut pike::Cache::default(), b"", None, &mut slots);
         Ok(Regex {
-            prog: program::compile(&node, groups)?,
-            literal: literal::required(&node),
-            caches: Mutex::new(Caches {
-                scan: dfa::Cache::new(true),
-                fixed: dfa::Cache::new(false),
-                pike: pike::Cache::default(),
-            }),
+            prog,
+            on_empty: matched.then_some(slots),
+            // a pattern tied to the start of the text is refused within a
+            // few bytes anyway; looking through the text first costs more
+            literal: literal::required(&node).filter(|_| !anchored),
+            cache: Mutex::default(),
         })
     }
 
@@ -148,51 +183,52 @@ impl Regex {
             .is_some_and(|literal| text.find(literal).is_none())
     }
 
+    fn shared(&self) -> std::sync::MutexGuard<'_, Cache> {
+        self.cache.lock().expect("a search does not panic")
+    }
+
     /// Whether the pattern matches anywhere in `text`.
     pub fn is_match(&self, text: &[u8]) -> bool {
-        if self.excluded(text) {
-            return false;
+        !self.excluded(text) && self.decide(&mut self.shared(), text)
+    }
+
+    /// As [`Regex::is_match`], with the caller's storage.
+    pub fn is_match_with(&self, cache: &mut Cache, text: &[u8]) -> bool {
+        !self.excluded(text) && self.decide(cache, text)
+    }
+
+    fn decide(&self, cache: &mut Cache, text: &[u8]) -> bool {
+        if text.is_empty() {
+            return self.on_empty.is_some();
         }
-        let mut caches = self.caches.lock().expect("a search does not panic");
-        if self.tabled(text) {
-            return dfa::earliest_end(&self.prog, &mut caches.scan, text).is_some();
+        if self.prog.plain_looks {
+            return dfa::earliest_end(&self.prog, &mut cache.scan, text).is_some();
         }
         pike::search(
             &self.prog,
-            &mut caches.pike,
+            &mut cache.pike,
             text,
             None,
             &mut [pike::UNSET; 2],
         )
     }
 
-    /// Whether a search of `text` can go by the tables of states.
-    fn tabled(&self, text: &[u8]) -> bool {
-        self.prog.plain_looks && !text.is_empty()
-    }
-
     /// Where the earliest match begins and where the longest one from
     /// there ends, as far as the tables could tell; `None` when there is
-    /// no match. The text is one the tables can search. A caller that
-    /// has no use for the end does not `want_end`.
-    fn locate(
-        &self,
-        caches: &mut Caches,
-        text: &[u8],
-        want_end: bool,
-    ) -> Option<(Option<usize>, Option<usize>)> {
-        // a match ends by here, so the earliest one begins by here
-        let ends = dfa::earliest_end(&self.prog, &mut caches.scan, text)?;
-        if self.prog.anchored && !want_end {
-            return Some((Some(0), None));
-        }
-        let ends = if self.prog.anchored { 0 } else { ends };
+    /// no match. The text is one the tables can search.
+    fn locate(&self, cache: &mut Cache, text: &[u8]) -> Option<(Option<usize>, Option<usize>)> {
         // trying each start costs what the text is long in the usual
         // case; a pattern for which it costs more is left to the slower,
         // steady search
         let mut work = 8 * text.len() + 64;
+        if self.prog.anchored {
+            let end = dfa::longest(&self.prog, &mut cache.fixed, text, 0, &mut work)?;
+            return Some((Some(0), Some(end)));
+        }
+        // a match ends by here, so the earliest one begins by here
+        let ends = dfa::earliest_end(&self.prog, &mut cache.scan, text)?;
         for from in 0..=ends {
-            if let Some(end) = dfa::longest(&self.prog, &mut caches.fixed, text, from, &mut work) {
+            if let Some(end) = dfa::longest(&self.prog, &mut cache.fixed, text, from, &mut work) {
                 return Some((Some(from), Some(end)));
             }
             if work == 0 {
@@ -202,22 +238,57 @@ impl Regex {
         Some((None, None))
     }
 
-    /// The earliest match in `text`, and of those the longest.
-    pub fn find(&self, text: &[u8]) -> Option<Range<usize>> {
-        if self.excluded(text) {
-            return None;
+    /// Fills `slots` with the capture slots of the earliest, longest
+    /// match; false when there is none.
+    fn search(&self, cache: &mut Cache, text: &[u8], slots: &mut [usize]) -> bool {
+        if text.is_empty() {
+            let Some(known) = &self.on_empty else {
+                return false;
+            };
+            slots.copy_from_slice(&known[..slots.len()]);
+            return true;
         }
-        let mut caches = self.caches.lock().expect("a search does not panic");
+        if self.excluded(text) {
+            return false;
+        }
         let mut from = None;
-        if self.tabled(text) {
-            let (begins, ends) = self.locate(&mut caches, text, true)?;
+        if self.prog.plain_looks {
+            // most texts match nothing, which the tables tell fastest;
+            // and where a match lies, which leaves only its groups
+            let Some((begins, ends)) = self.locate(cache, text) else {
+                return false;
+            };
             if let (Some(begins), Some(ends)) = (begins, ends) {
-                return Some(begins..ends);
+                if slots.len() == 2 {
+                    slots.copy_from_slice(&[begins, ends]);
+                    return true;
+                }
+                if backtrack::fits(&self.prog, ends - begins) {
+                    let prog = &self.prog;
+                    return backtrack::captures(
+                        prog,
+                        &mut cache.backtrack,
+                        text,
+                        begins,
+                        ends,
+                        slots,
+                    );
+                }
             }
             from = begins;
         }
+        pike::search(&self.prog, &mut cache.pike, text, from, slots)
+    }
+
+    /// The earliest match in `text`, and of those the longest.
+    pub fn find(&self, text: &[u8]) -> Option<Range<usize>> {
+        self.find_with(&mut self.shared(), text)
+    }
+
+    /// As [`Regex::find`], with the caller's storage.
+    pub fn find_with(&self, cache: &mut Cache, text: &[u8]) -> Option<Range<usize>> {
         let mut slots = [pike::UNSET; 2];
-        pike::search(&self.prog, &mut caches.pike, text, from, &mut slots)
+        self.search(cache, text, &mut slots)
             .then(|| slots[0]..slots[1])
     }
 
@@ -229,26 +300,29 @@ impl Regex {
     /// As [`Regex::captures`], recording only the groups up to number
     /// `last`: fewer groups to carry make a faster search.
     pub fn captures_upto(&self, text: &[u8], last: usize) -> Option<Captures> {
-        if self.excluded(text) {
-            return None;
-        }
-        let last = last.min(self.groups());
-        if last == 0 {
-            let whole = self.find(text)?;
-            return Some(Captures {
-                slots: vec![whole.start, whole.end],
+        self.captures_upto_with(&mut self.shared(), text, last)
+    }
+
+    /// As [`Regex::captures_upto`], with the caller's storage.
+    pub fn captures_upto_with(
+        &self,
+        cache: &mut Cache,
+        text: &[u8],
+        last: usize,
+    ) -> Option<Captures> {
+        let width = 2 * (last.min(self.groups()) + 1);
+        if width <= FEW {
+            let mut few = [pike::UNSET; FEW];
+            let found = self.search(cache, text, &mut few[..width]);
+            return found.then_some(Captures {
+                slots: Slots::Few(few),
             });
         }
-        let mut caches = self.caches.lock().expect("a search does not panic");
-        // most texts match nothing, which the tables tell fastest; and
-        // where a match begins, which spares following the groups before
-        let from = match self.tabled(text) {
-            true => self.locate(&mut caches, text, false)?.0,
-            false => None,
-        };
-        let mut slots = vec![pike::UNSET; 2 * (last + 1)];
-        pike::search(&self.prog, &mut caches.pike, text, from, &mut slots)
-            .then_some(Captures { slots })
+        let mut slots = vec![pike::UNSET; width];
+        let found = self.search(cache, text, &mut slots);
+        found.then_some(Captures {
+            slots: Slots::Many(slots),
+        })
     }
 }
 
@@ -329,6 +403,37 @@ mod tests {
     }
 
     #[test]
+    fn both_ways_of_finding_the_groups_agree() {
+        for (pattern, text) in [
+            ("(a|ab)(c|bcd)(d*)", "abcd"),
+            ("(a*)*(b|ab)", "aaab"),
+            ("((x?)y?)*z", "xyyxz"),
+            ("^(.*)(.*)$", "hello"),
+            ("(a{1,2}){2,3}(a*)", "aaaaa"),
+            ("(()|a)+b", "aab"),
+        ] {
+            let re = Regex::new(pattern.as_bytes()).unwrap();
+            let text = text.as_bytes();
+            let mut by_steps = vec![pike::UNSET; 2 * (re.groups() + 1)];
+            let stepped =
+                pike::search(&re.prog, &mut Default::default(), text, None, &mut by_steps);
+            assert!(stepped, "{pattern}");
+            let mut by_paths = vec![pike::UNSET; by_steps.len()];
+            let (from, to) = (by_steps[0], by_steps[1]);
+            let cache = &mut backtrack::Cache::default();
+            assert!(backtrack::captures(
+                &re.prog,
+                cache,
+                text,
+                from,
+                to,
+                &mut by_paths
+            ));
+            assert_eq!(by_paths, by_steps, "{pattern}");
+        }
+    }
+
+    #[test]
     fn find_gives_the_whole_match_of_captures() {
         for (pattern, text) in [
             ("(b+)c?", "abbbcd"),
@@ -352,9 +457,10 @@ mod tests {
 
     #[test]
     fn a_text_without_the_required_bytes_is_refused_before_matching() {
-        let re = Regex::new(b"^[ \t]*static [a-z]+").unwrap();
+        let re = Regex::new(b"[ \t]*static [a-z]+").unwrap();
         assert_eq!(re.literal.as_deref(), Some(&b"static "[..]));
         assert!(!re.is_match(b"int main(void)"));
         assert!(re.is_match(b"\tstatic int x"));
+        assert!(Regex::new(b"^static [a-z]+").unwrap().literal.is_none());
     }
 }

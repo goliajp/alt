@@ -1,16 +1,17 @@
-//! Deciding whether a text matches with a deterministic automaton whose
-//! states are built as the text first reaches them: a table lookup per
-//! byte once they are. A state is the set of instructions the paths of
-//! the nondeterministic automaton could be at.
+//! Deciding whether and where a text matches with a deterministic
+//! automaton whose states are built as the text first reaches them: a
+//! table lookup per byte once they are. A state is the set of
+//! instructions the paths of the nondeterministic automaton could be at.
 
 use std::collections::HashMap;
 
 use crate::program::{Inst, Program};
 use crate::syntax::Look;
 
+/// A state is named by where its row begins in the table. The first row
+/// stands for a state not built yet, the second for the dead state.
 const UNKNOWN: u32 = 0;
-const DEAD: u32 = 1;
-/// Set on the number of a state some path has matched in.
+/// Set on the name of a state some path has matched in.
 const MATCH: u32 = 1 << 31;
 /// The table is thrown away and begun again past this many states.
 const MAX_STATES: usize = 10_000;
@@ -19,13 +20,14 @@ pub struct Cache {
     /// Whether a match may begin at every position, or only where the
     /// search starts.
     anywhere: bool,
-    ids: HashMap<Box<[u32]>, u32>,
-    /// The instructions of each state; the first two stand for the
-    /// unknown and the dead state.
+    names: HashMap<Box<[u32]>, u32>,
+    /// The instructions of each state, in the order of their rows.
     states: Vec<Box<[u32]>>,
-    /// The state after each state on each class of byte, and at the end
-    /// of the text.
+    /// A row per state: the state after it on each class of byte, and
+    /// last what it comes to at the end of the text.
     table: Vec<u32>,
+    /// The length of a row, which names the dead state.
+    width: u32,
     /// The state a search starts in: inside the text, and at its start.
     first: [u32; 2],
     /// Stamps instructions a closure has visited.
@@ -38,9 +40,10 @@ impl Cache {
     pub fn new(anywhere: bool) -> Self {
         Cache {
             anywhere,
-            ids: HashMap::new(),
+            names: HashMap::new(),
             states: Vec::new(),
             table: Vec::new(),
+            width: 0,
             first: [UNKNOWN; 2],
             visited: Vec::new(),
             stamp: 0,
@@ -49,7 +52,7 @@ impl Cache {
     }
 
     fn clear(&mut self) {
-        self.ids.clear();
+        self.names.clear();
         self.states.clear();
         self.table.clear();
         self.first = [UNKNOWN; 2];
@@ -60,7 +63,7 @@ impl Cache {
         let at_start = from == 0;
         if self.first[usize::from(at_start)] == UNKNOWN {
             let set = self.closure(prog, &[prog.start], at_start, false);
-            self.first[usize::from(at_start)] = self.intern(prog, set);
+            self.first[usize::from(at_start)] = self.name(prog, set);
         }
         self.first[usize::from(at_start)]
     }
@@ -89,33 +92,40 @@ impl Cache {
         out
     }
 
-    fn intern(&mut self, prog: &Program, set: Vec<u32>) -> u32 {
-        if set.is_empty() {
-            return DEAD;
-        }
-        if let Some(&id) = self.ids.get(set.as_slice()) {
-            return id;
-        }
+    /// The name of the state that is this set of instructions.
+    fn name(&mut self, prog: &Program, set: Vec<u32>) -> u32 {
         if self.states.is_empty() {
+            self.width = prog.members.len() as u32 + 1;
             self.states.extend([Box::default(), Box::default()]);
-            self.table.resize(2 * (prog.members.len() + 1), UNKNOWN);
+            self.table.resize(2 * self.width as usize, UNKNOWN);
+        }
+        if set.is_empty() {
+            return self.width;
+        }
+        if let Some(&name) = self.names.get(set.as_slice()) {
+            return name;
         }
         let matched = set
             .iter()
             .any(|&pc| matches!(prog.insts[pc as usize], Inst::Match));
-        let id = self.states.len() as u32 | if matched { MATCH } else { 0 };
+        let name = self.table.len() as u32 | if matched { MATCH } else { 0 };
         let set: Box<[u32]> = set.into();
         self.states.push(set.clone());
         self.table
-            .resize(self.table.len() + prog.members.len() + 1, UNKNOWN);
-        self.ids.insert(set, id);
-        id
+            .resize(self.table.len() + self.width as usize, UNKNOWN);
+        self.names.insert(set, name);
+        name
+    }
+
+    fn set(&self, state: u32) -> &[u32] {
+        &self.states[(state / self.width) as usize]
     }
 
     /// The state after `state` on a byte of class `class`.
     fn step(&mut self, prog: &Program, state: u32, class: usize) -> u32 {
         let byte = prog.members[class];
-        let seeds: Vec<u32> = self.states[(state & !MATCH) as usize]
+        let seeds: Vec<u32> = self
+            .set(state)
             .iter()
             .filter_map(|&pc| match prog.insts[pc as usize] {
                 Inst::Byte(b, next) if b == byte => Some(next),
@@ -132,31 +142,63 @@ impl Cache {
         }
         if self.states.len() >= MAX_STATES {
             self.clear();
-            return self.intern(prog, set);
+            return self.name(prog, set);
         }
-        let next = self.intern(prog, set);
-        let state = (state & !MATCH) as usize;
-        self.table[state * (prog.members.len() + 1) + class] = next;
+        let next = self.name(prog, set);
+        self.table[state as usize + class] = next;
         next
     }
 
     /// Whether `state`, reached at the end of the text, is a match there.
-    fn finish(&mut self, prog: &Program, state: u32) -> u32 {
-        let seeds: Vec<u32> = self.states[(state & !MATCH) as usize]
-            .iter()
-            .filter_map(|&pc| match prog.insts[pc as usize] {
-                Inst::Look(Look::TextEnd, next) => Some(next),
-                _ => None,
-            })
-            .collect();
-        let set = self.closure(prog, &seeds, false, true);
-        let matched = set
-            .iter()
-            .any(|&pc| matches!(prog.insts[pc as usize], Inst::Match));
-        let next = if matched { DEAD | MATCH } else { DEAD };
-        let width = prog.members.len() + 1;
-        self.table[(state & !MATCH) as usize * width + width - 1] = next;
-        next
+    fn finish(&mut self, prog: &Program, state: u32) -> bool {
+        let last = state as usize + self.width as usize - 1;
+        if self.table[last] == UNKNOWN {
+            let seeds: Vec<u32> = self
+                .set(state)
+                .iter()
+                .filter_map(|&pc| match prog.insts[pc as usize] {
+                    Inst::Look(Look::TextEnd, next) => Some(next),
+                    _ => None,
+                })
+                .collect();
+            let set = self.closure(prog, &seeds, false, true);
+            let matched = set
+                .iter()
+                .any(|&pc| matches!(prog.insts[pc as usize], Inst::Match));
+            self.table[last] = self.width | if matched { MATCH } else { 0 };
+        }
+        self.table[last] & MATCH != 0
+    }
+
+    /// Whether a state is one a search goes on from without a second
+    /// look: built, alive and not a match.
+    fn plain(&self, state: u32) -> bool {
+        state.wrapping_sub(self.width + 1) < MATCH - self.width - 1
+    }
+
+    /// Follows the table from `state` over `text` from `at` for as long
+    /// as the states are plain. Returns the position reached, the state
+    /// there, and the entry that stopped the run: of the byte at that
+    /// position, or nothing at the end of the text.
+    fn run(
+        &self,
+        prog: &Program,
+        text: &[u8],
+        mut at: usize,
+        mut state: u32,
+    ) -> (usize, u32, Option<u32>) {
+        let table = self.table.as_slice();
+        let floor = self.width + 1;
+        let plain = MATCH - floor;
+        while let Some(&b) = text.get(at) {
+            let next = table[state as usize + usize::from(prog.classes[usize::from(b)])];
+            if next.wrapping_sub(floor) >= plain {
+                return (at, state, Some(next));
+            }
+            state = next;
+            at += 1;
+        }
+        (at, state, None)
     }
 }
 
@@ -165,32 +207,28 @@ impl Cache {
 /// conditions are on the ends of the text, and the cache is one for
 /// matches that begin anywhere.
 pub fn earliest_end(prog: &Program, cache: &mut Cache, text: &[u8]) -> Option<usize> {
-    let width = prog.members.len() + 1;
     let mut state = cache.start(prog, 0);
-    for (at, &b) in text.iter().enumerate() {
-        if state & MATCH != 0 {
-            return Some(at);
+    if !cache.plain(state) {
+        return (state & MATCH != 0).then_some(0);
+    }
+    let mut at = 0;
+    loop {
+        let (reached, before, stopped) = cache.run(prog, text, at, state);
+        let Some(mut next) = stopped else {
+            return cache.finish(prog, before).then_some(text.len());
+        };
+        if next == UNKNOWN {
+            let class = usize::from(prog.classes[usize::from(text[reached])]);
+            next = cache.step(prog, before, class);
         }
-        if state == DEAD {
+        if next & MATCH != 0 {
+            return Some(reached + 1);
+        }
+        if next == cache.width {
             return None;
         }
-        let class = usize::from(prog.classes[usize::from(b)]);
-        state = match cache.table[state as usize * width + class] {
-            UNKNOWN => cache.step(prog, state, class),
-            known => known,
-        };
+        (at, state) = (reached + 1, next);
     }
-    if state & MATCH != 0 {
-        return Some(text.len());
-    }
-    if state == DEAD {
-        return None;
-    }
-    let end = match cache.table[state as usize * width + width - 1] {
-        UNKNOWN => cache.finish(prog, state),
-        known => known,
-    };
-    (end & MATCH != 0).then_some(text.len())
 }
 
 /// Where the longest match that begins exactly at `from` ends, with a
@@ -203,36 +241,37 @@ pub fn longest(
     from: usize,
     work: &mut usize,
 ) -> Option<usize> {
-    let width = prog.members.len() + 1;
     let mut state = cache.start(prog, from);
     let mut last = None;
-    for (at, &b) in text.iter().enumerate().skip(from) {
-        if state & MATCH != 0 {
-            last = Some(at);
+    if !cache.plain(state) {
+        if state & MATCH == 0 {
+            return None;
         }
-        if state == DEAD {
+        last = Some(from);
+        state &= !MATCH;
+    }
+    let mut at = from;
+    loop {
+        let (reached, before, stopped) = cache.run(prog, text, at, state);
+        let Some(mut next) = stopped else {
+            *work = work.saturating_sub(reached - from);
+            return match cache.finish(prog, before) {
+                true => Some(text.len()),
+                false => last,
+            };
+        };
+        if next == UNKNOWN {
+            let class = usize::from(prog.classes[usize::from(text[reached])]);
+            next = cache.step(prog, before, class);
+        }
+        if next == cache.width {
+            *work = work.saturating_sub(reached + 1 - from);
             return last;
         }
-        *work = work.saturating_sub(1);
-        let class = usize::from(prog.classes[usize::from(b)]);
-        state = match cache.table[(state & !MATCH) as usize * width + class] {
-            UNKNOWN => cache.step(prog, state, class),
-            known => known,
-        };
-    }
-    if state == DEAD {
-        return last;
-    }
-    if state & MATCH != 0 {
-        return Some(text.len());
-    }
-    let end = match cache.table[state as usize * width + width - 1] {
-        UNKNOWN => cache.finish(prog, state),
-        known => known,
-    };
-    if end & MATCH != 0 {
-        Some(text.len())
-    } else {
-        last
+        if next & MATCH != 0 {
+            last = Some(reached + 1);
+            next &= !MATCH;
+        }
+        (at, state) = (reached + 1, next);
     }
 }

@@ -37,7 +37,15 @@ pub fn builtin() -> impl Iterator<Item = (&'static str, bool, &'static [&'static
 
 /// One driver's pattern: the expressions of its lines, tried in order.
 pub struct Finder {
-    lines: Vec<(bool, Regex)>,
+    lines: Vec<Line>,
+}
+
+struct Line {
+    /// a line this expression matches starts nothing
+    negated: bool,
+    expression: Regex,
+    /// the expression's storage, kept here so that no search waits for it
+    cache: RefCell<alt_regex::Cache>,
 }
 
 impl Finder {
@@ -52,7 +60,11 @@ impl Finder {
                 let shown = String::from_utf8_lossy(expression);
                 format!("Invalid regexp to look for hunk header: {shown}: {e}")
             })?;
-            lines.push((negated, compiled));
+            lines.push(Line {
+                negated,
+                expression: compiled,
+                cache: RefCell::default(),
+            });
         }
         Ok(Finder { lines })
     }
@@ -66,8 +78,14 @@ impl Finder {
             Some(rest) => rest.strip_suffix(b"\r").unwrap_or(rest),
             None => line,
         };
-        for (negated, expression) in &self.lines {
-            let Some(found) = expression.captures_upto(line, 1) else {
+        for Line {
+            negated,
+            expression,
+            cache,
+        } in &self.lines
+        {
+            let mut cache = cache.borrow_mut();
+            let Some(found) = expression.captures_upto_with(&mut cache, line, 1) else {
                 continue;
             };
             if *negated {
