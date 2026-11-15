@@ -27,6 +27,7 @@ mod checkout_recovery;
 mod cherry_pick;
 pub mod commit;
 mod diff;
+mod eol;
 mod http_auth;
 mod identity;
 mod lfs;
@@ -1823,7 +1824,7 @@ impl<'a> NativeRepo<'a> {
     /// git's plain `clone` (no `--recurse-submodules`) by ensuring the
     /// placeholder directory exists and stopping there. Submodule
     /// fetch/checkout is not implemented; this only avoids the materialise crash.
-    fn materialize(&self, w: &WorkEntry) -> Res<()> {
+    fn materialize(&self, w: &WorkEntry, attrs: &eol::WorktreeAttributes) -> Res<()> {
         let abs = self.abs(&w.path)?;
         if w.mode == 0o160000 {
             if abs.symlink_metadata().is_ok_and(|m| !m.is_dir()) {
@@ -1848,7 +1849,7 @@ impl<'a> NativeRepo<'a> {
         } else {
             let content = match alt_lfs::Pointer::parse(&obj.data) {
                 Some(p) => self.lfs_content(&p)?,
-                None => None,
+                None => attrs.to_worktree(&w.path, &obj.data)?,
             };
             crate::durable::write(&abs, content.as_deref().unwrap_or(&obj.data))?;
             set_exec(&abs, w.mode == 0o100755)?;

@@ -17,6 +17,7 @@ impl NativeRepo<'_> {
         // the index decides which ignored paths are tracked and so still count
         let scan = self.scan_tree(&self.index()?)?;
         let lfs = self.lfs_rules()?;
+        let attrs = eol::WorktreeAttributes::new(&self.root);
         let specs: Vec<&str> = paths.iter().map(|p| pathspec(p)).collect();
         let staging_all = specs.iter().any(|p| p.is_empty());
 
@@ -104,7 +105,7 @@ impl NativeRepo<'_> {
                 // before the index is even written).
                 let path_str = w.path.to_str().unwrap_or("");
                 self.ensure_path_allowed(path_str)?;
-                let bytes = self.staged_bytes(w, lfs.as_ref())?;
+                let bytes = self.staged_bytes(w, lfs.as_ref(), &attrs, &before)?;
                 self.store.odb.put(w.oid, ObjectKind::Blob, &bytes)?;
                 entries.push(self.make_entry(w)?);
                 staged += 1;

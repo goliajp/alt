@@ -271,6 +271,7 @@ impl NativeRepo<'_> {
     /// bytes, then an index carrying stage-0 entries for clean paths and
     /// stage 1/2/3 entries for conflicted ones (so git tools see the merge).
     pub(super) fn write_conflicted(&mut self, resolved: &[Resolved]) -> Res<()> {
+        let attrs = eol::WorktreeAttributes::new(&self.root);
         for r in resolved {
             let abs = self.abs(&r.path)?;
             if let Some(bytes) = &r.worktree {
@@ -280,10 +281,11 @@ impl NativeRepo<'_> {
                 if abs.symlink_metadata().is_ok() {
                     crate::durable::remove_file(&abs)?;
                 }
-                crate::durable::write(&abs, bytes)?;
+                let converted = attrs.to_worktree(&r.path, bytes)?;
+                crate::durable::write(&abs, converted.as_deref().unwrap_or(bytes))?;
             } else {
                 match &r.entry {
-                    Some(e) => self.materialize(e)?,
+                    Some(e) => self.materialize(e, &attrs)?,
                     None => {
                         if abs.symlink_metadata().is_ok() {
                             crate::durable::remove_file(&abs)?;

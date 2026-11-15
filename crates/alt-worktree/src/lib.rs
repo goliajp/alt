@@ -6,6 +6,7 @@
 //! Domain-aware (it knows git object kinds and the index) but bound to no
 //! specific command.
 
+pub mod attributes;
 mod ignore;
 
 use std::path::Path;

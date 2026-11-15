@@ -19,6 +19,7 @@ mod credential_helper;
 mod daemon_client;
 mod daemon_server;
 mod diff;
+mod eol;
 mod fetch;
 mod flow;
 mod flow_enforce;

@@ -296,7 +296,17 @@ impl NativeRepo<'_> {
             Some(w) if w.mode == 0o160000 => {
                 Ok(format!("Subproject commit {}\n", w.oid).into_bytes())
             }
-            Some(w) if on_disk => self.read_for(w),
+            Some(w) if on_disk => {
+                let content = self.read_for(w)?;
+                if w.mode == 0o120000 {
+                    return Ok(content);
+                }
+                // compared as it would be stored, as the old side is
+                let attrs = eol::WorktreeAttributes::new(&self.root);
+                let stored = self.eol_to_store(&attrs, &self.index()?, &w.path, &content);
+                attrs.check()?;
+                Ok(stored.unwrap_or(content))
+            }
             Some(w) => self.blob_bytes(w.oid),
         }
     }

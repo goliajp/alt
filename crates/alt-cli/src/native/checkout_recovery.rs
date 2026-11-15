@@ -266,6 +266,7 @@ impl NativeRepo<'_> {
             .collect();
         // paths found as a file or symlink: the preflight has made sure
         // nothing but a tracked path stands above another as a non-directory
+        let attrs = self.tree_attributes(target)?;
         let mut files_on_disk: std::collections::HashSet<&[u8]> = std::collections::HashSet::new();
         let mut files = Vec::new();
         for path in paths {
@@ -284,7 +285,7 @@ impl NativeRepo<'_> {
             }
             let after = targets
                 .get(path)
-                .map(|t| self.target_state(t))
+                .map(|t| self.target_state(t, &attrs))
                 .transpose()?;
             // Submodule directories are not owned by the repository checkout.
             if before.as_ref().is_some_and(|s| s.mode == 0o160000) && after.is_none() {

@@ -8,7 +8,7 @@ use alt_worktree::{scan_indexed_paths, scan_worktree_with_index};
 
 use alt_lfs::Pointer;
 use alt_odb::BlobId;
-use alt_worktree::{Clean, PathMatcher};
+use alt_worktree::PathMatcher;
 
 use super::*;
 
@@ -32,48 +32,55 @@ impl NativeRepo<'_> {
         Ok((!patterns.is_empty()).then(|| PathMatcher::new(patterns)))
     }
 
-    /// Scans the working tree against `index`, LFS paths seen as pointers.
+    /// Scans the working tree against `index`, each file seen as it would
+    /// be stored: an LFS path as its pointer, text with its line endings
+    /// normalized.
     pub(super) fn scan_tree(&self, index: &Index) -> Res<Vec<WorkEntry>> {
         let rules = self.lfs_rules()?;
-        let clean = |path: &[u8], content: &[u8]| lfs_clean(rules.as_ref()?, path, content);
-        let filter: Option<Clean<'_>> = rules.is_some().then_some(&clean);
-        Ok(scan_worktree_with_index(
-            &self.root,
-            index,
-            self.store.algo,
-            filter,
-        )?)
+        let attrs = eol::WorktreeAttributes::new(&self.root);
+        let clean = |path: &[u8], content: &[u8]| {
+            let pointer = rules.as_ref().and_then(|r| lfs_clean(r, path, content));
+            pointer.or_else(|| self.eol_to_store(&attrs, index, path, content))
+        };
+        let scan = scan_worktree_with_index(&self.root, index, self.store.algo, Some(&clean))?;
+        attrs.check()?;
+        Ok(scan)
     }
 
     /// Like [`scan_tree`](Self::scan_tree) but only over the index's paths.
     pub(super) fn scan_index_paths(&self, index: &Index) -> Res<Vec<WorkEntry>> {
         let rules = self.lfs_rules()?;
-        let clean = |path: &[u8], content: &[u8]| lfs_clean(rules.as_ref()?, path, content);
-        let filter: Option<Clean<'_>> = rules.is_some().then_some(&clean);
-        Ok(scan_indexed_paths(
-            &self.root,
-            index,
-            self.store.algo,
-            filter,
-        )?)
+        let attrs = eol::WorktreeAttributes::new(&self.root);
+        let clean = |path: &[u8], content: &[u8]| {
+            let pointer = rules.as_ref().and_then(|r| lfs_clean(r, path, content));
+            pointer.or_else(|| self.eol_to_store(&attrs, index, path, content))
+        };
+        let scan = scan_indexed_paths(&self.root, index, self.store.algo, Some(&clean))?;
+        attrs.check()?;
+        Ok(scan)
     }
 
     /// The bytes to store for a working-tree file: for an LFS path its
-    /// pointer, with the content itself kept in the LFS store.
+    /// pointer, with the content itself kept in the LFS store; for text,
+    /// the content with its line endings normalized.
     pub(super) fn staged_bytes(
         &mut self,
         w: &WorkEntry,
         rules: Option<&PathMatcher>,
+        attrs: &eol::WorktreeAttributes,
+        index: &Index,
     ) -> Res<Vec<u8>> {
         let content = self.read_for(w)?;
-        let rules = rules.filter(|_| w.mode != 0o120000);
-        match rules.and_then(|r| lfs_clean(r, &w.path, &content)) {
-            Some(pointer) => {
-                self.lfs_store(&content)?;
-                Ok(pointer)
-            }
-            None => Ok(content),
+        if w.mode == 0o120000 {
+            return Ok(content);
         }
+        if let Some(pointer) = rules.and_then(|r| lfs_clean(r, &w.path, &content)) {
+            self.lfs_store(&content)?;
+            return Ok(pointer);
+        }
+        let stored = self.eol_to_store(attrs, index, &w.path, &content);
+        attrs.check()?;
+        Ok(stored.unwrap_or(content))
     }
 
     /// The content a pointer names, when the store has it.
