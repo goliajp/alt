@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: perf
+summary: abbreviate object ids from groups by leading bytes instead of scanning the map per id
+author-type: human
+author: doracawl
+touched: crates/alt-odb/src/abbrev.rs
+touched: crates/alt-worktree/src/ignore.rs
