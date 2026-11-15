@@ -30,6 +30,7 @@ pub extern "C" fn main(
 ) -> std::ffi::c_int {
     // before anything is opened: a file must never become standard output
     alt_os::stdio::fill_closed();
+    alt_os::heap::keep_freed_memory();
     // a closed output pipe is reported as a failed write, not a signal
     alt_os::sys::ignore_signal(alt_os::sys::SIGPIPE);
     alt_os::stack::report_overflow();

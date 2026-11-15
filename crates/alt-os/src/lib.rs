@@ -2,6 +2,7 @@
 //! the system C library directly.
 //!
 //! - [`random`]: bytes from the operating system's generator
+//! - [`heap`]: keeping freed memory with the process
 //! - [`map`]: read-only file mappings
 //! - [`stack`]: reporting a stack overflow of the main thread
 //! - [`stdio`]: `/dev/null` on standard descriptors that start out closed
@@ -19,6 +20,7 @@
 )))]
 compile_error!("alt-os supports Linux (glibc) and macOS on x86_64 and aarch64 only");
 
+pub mod heap;
 pub mod map;
 pub mod random;
 pub mod stack;

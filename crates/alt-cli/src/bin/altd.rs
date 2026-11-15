@@ -29,6 +29,8 @@ fn main() -> std::process::ExitCode {
 
 #[cfg(unix)]
 fn main() -> std::process::ExitCode {
+    // every request allocates and frees the same memory again
+    alt_os::heap::keep_freed_memory();
     match unix::run() {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(e) => {
