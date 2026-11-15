@@ -4,7 +4,8 @@
 //! finds the main thread's stack guard by reading `/proc/self/maps` and
 //! probes the standard descriptors, about twenty system calls on every
 //! invocation; what a command relies on (a closed pipe as a write error, a
-//! report when the stack overflows) is set up here in four.
+//! report when the stack overflows, `/dev/null` on a standard descriptor
+//! that was closed) is set up here in five.
 #![cfg_attr(not(test), no_main)]
 
 use alt_cli::cli::{self, Command};
@@ -21,6 +22,8 @@ pub extern "C" fn main(
     _argc: std::ffi::c_int,
     _argv: *const *const std::ffi::c_char,
 ) -> std::ffi::c_int {
+    // before anything is opened: a file must never become standard output
+    alt_os::stdio::fill_closed();
     // a closed output pipe is reported as a failed write, not a signal
     alt_os::sys::ignore_signal(alt_os::sys::SIGPIPE);
     alt_os::stack::report_overflow();

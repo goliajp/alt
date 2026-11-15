@@ -12,6 +12,7 @@ mod charset;
 mod cherry_pick;
 mod ci_validate;
 mod clone;
+mod closed_fds;
 mod commit_loop;
 mod commit_meta;
 mod config;
