@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: make two filter process tests independent of file order and of the git installed
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/filter_process.rs
