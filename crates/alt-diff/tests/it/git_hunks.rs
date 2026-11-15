@@ -117,7 +117,10 @@ fn check(dir: &Path, seed: u64, lines: usize, variety: usize, edits: usize) {
     let mut rng = Rng(seed);
     let old = old_file(&mut rng, lines, variety);
     let new = new_file(&mut rng, &old, edits, variety);
-    let (old, new) = (join(&old, seed % 3 != 0), join(&new, seed % 5 != 0));
+    let (old, new) = (
+        join(&old, !seed.is_multiple_of(3)),
+        join(&new, !seed.is_multiple_of(5)),
+    );
     assert_eq!(
         ours(&old, &new),
         git_hunks(dir, &old, &new),
