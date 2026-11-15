@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: refactor
+summary: split add into the checks on its paths, the staging of files and the rest
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/add.rs
