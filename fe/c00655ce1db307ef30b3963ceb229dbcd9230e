@@ -1,0 +1,18 @@
+schema: alt-meta/1
+type: fix
+summary: apply gitattributes line-ending rules on checkout and when staging
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/add.rs
+touched: crates/alt-cli/src/native/checkout_files.rs
+touched: crates/alt-cli/src/native/checkout_recovery.rs
+touched: crates/alt-cli/src/native/diff.rs
+touched: crates/alt-cli/src/native/eol.rs
+touched: crates/alt-cli/src/native/lfs.rs
+touched: crates/alt-cli/src/native/merge.rs
+touched: crates/alt-cli/tests/it/eol.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-worktree/src/attributes.rs
+touched: crates/alt-worktree/src/ignore.rs
+touched: crates/alt-worktree/src/lib.rs
