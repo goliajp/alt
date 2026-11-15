@@ -112,7 +112,7 @@ impl BlobStore {
     /// Names the lock file writers of this store append under; the store
     /// must have been opened under that lock, shared.
     pub fn guard_opens(&mut self, lock: PathBuf) {
-        self.open_lock = Some(lock);
+        self.open_lock = Some(self.chunks.guard_opens(lock));
     }
 
     /// The write batch that began with `sync_from_disk` is over and its lock

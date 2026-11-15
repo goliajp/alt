@@ -2,6 +2,7 @@
 
 mod blob_store;
 mod chunk_store;
+mod compact_readers;
 mod corpus_blobs;
 mod index_gap;
 mod index_runs;

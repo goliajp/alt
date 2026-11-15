@@ -25,6 +25,7 @@ mod check;
 /// Lineage delta codec (zstd ref-prefix / patch-from). Public as a
 /// primitive — reused by the store's encode/decode and benched directly.
 pub mod delta;
+mod fresh;
 pub mod held;
 mod idx;
 mod index;
@@ -309,6 +310,9 @@ pub struct ChunkStore {
     unsynced: bool,
     counters: Counters,
     cache: Mutex<DeltaCache>,
+    /// see [`fresh`]: the lock opens run under, and this store reloaded
+    open_lock: Option<PathBuf>,
+    newer: OnceLock<Box<ChunkStore>>,
 }
 
 /// Repro/diagnostic knob (env `ALT_RELAXED_DURABILITY`): skip per-commit
@@ -366,6 +370,8 @@ impl ChunkStore {
             unsynced: false,
             counters: Counters::default(),
             cache: Mutex::new(DeltaCache::new()),
+            open_lock: None,
+            newer: OnceLock::new(),
         })
     }
 
@@ -376,6 +382,7 @@ impl ChunkStore {
     /// write. Counters and the delta cache (keyed by stable ids) survive a
     /// reload.
     pub fn sync_from_disk(&mut self) -> Result<(), StoreError> {
+        self.newer.take();
         self.index.remove_stale()?;
         if !self.disk_changed()? {
             return Ok(());
@@ -667,7 +674,7 @@ impl ChunkStore {
     /// boundary (export → `git fsck` + the round-trip fidelity matrix), a
     /// different trust context than a daily read. Use [`verify_chunk`] /
     /// `alt fsck` to scrub.
-    pub fn for_each_decoded(&self, mut f: impl FnMut(ChunkId, &[u8])) -> Result<(), StoreError> {
+    fn each_decoded_here(&self, mut f: impl FnMut(ChunkId, &[u8])) -> Result<(), StoreError> {
         // chain forest: full records are roots, each delta hangs off the
         // base it names
         let index = self.index.all();
@@ -760,7 +767,7 @@ impl ChunkStore {
     /// mmap for the common full-record case (the bulk blob-assembly read).
     /// Multi-chunk blob data and manifest nodes are full records, so they
     /// take the fast path; a delta falls back to the general chain resolve.
-    pub(crate) fn decode_chunk_unverified(&self, id: ChunkId) -> Result<Vec<u8>, StoreError> {
+    fn decode_unverified_here(&self, id: ChunkId) -> Result<Vec<u8>, StoreError> {
         let loc = self.locate(id)?;
         if self.read_header(id, loc)?.encoding == ENC_DELTA {
             self.resolve(id, Verify::None)
@@ -786,7 +793,7 @@ impl ChunkStore {
         self.resolve(id, Verify::None)
     }
 
-    fn resolve(&self, id: ChunkId, verify: Verify) -> Result<Vec<u8>, StoreError> {
+    fn resolve_here(&self, id: ChunkId, verify: Verify) -> Result<Vec<u8>, StoreError> {
         // descend: collect delta frames until a full record or a cached
         // base; iterative so chain length never threatens the stack
         let mut frames: Vec<(ChunkId, u32, Vec<u8>)> = Vec::new();
@@ -900,7 +907,7 @@ impl ChunkStore {
     }
 
     /// On-disk accounting for one chunk (encoding and stored size).
-    pub fn stat(&self, id: ChunkId) -> Result<ChunkStat, StoreError> {
+    fn stat_here(&self, id: ChunkId) -> Result<ChunkStat, StoreError> {
         let loc = self.locate(id)?;
         let header = self.read_header(id, loc)?;
         let encoding = match header.encoding {

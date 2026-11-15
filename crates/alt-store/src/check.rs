@@ -40,6 +40,10 @@ impl ChunkStore {
     /// records, and the chunk index must name exactly these records.
     /// Returns how many records there are.
     pub fn check(&self) -> Result<u64, StoreError> {
+        self.pinned()?.check_here()
+    }
+
+    fn check_here(&self) -> Result<u64, StoreError> {
         self.index.verify_runs()?;
         let mut records = 0u64;
         let mut indexed = 0usize;
