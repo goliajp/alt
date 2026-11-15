@@ -157,6 +157,50 @@ fn text(rng: &mut Rng) -> Vec<u8> {
     (0..len).map(|_| b"aabbc x."[rng.below(8)]).collect()
 }
 
+type Spans = Vec<Option<(usize, usize)>>;
+type Question = (Vec<u8>, Options, Vec<Vec<u8>>);
+/// For each text its spans; `None` for a pattern that is refused.
+type Answer = Option<Vec<Option<Spans>>>;
+
+/// The C library on a thread of its own. For some patterns it never
+/// answers; it is then left behind and another takes its place.
+struct Oracle {
+    ask: std::sync::mpsc::Sender<Question>,
+    answer: std::sync::mpsc::Receiver<Answer>,
+}
+
+impl Oracle {
+    fn start() -> Self {
+        let (ask, asked) = std::sync::mpsc::channel::<Question>();
+        let (answered, answer) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for (pattern, options, texts) in asked {
+                let theirs = Theirs::new(&pattern, options);
+                let compiled = theirs.0.is_some();
+                let reply = compiled.then(|| texts.iter().map(|t| theirs.spans(t)).collect());
+                if answered.send(reply).is_err() {
+                    break;
+                }
+            }
+        });
+        Oracle { ask, answer }
+    }
+
+    /// What the C library says, unless it takes longer than a pattern
+    /// of this size ever should.
+    fn ask(&mut self, question: Question) -> Option<Answer> {
+        self.ask
+            .send(question)
+            .expect("the thread waits for questions");
+        let patience = std::time::Duration::from_secs(20);
+        let reply = self.answer.recv_timeout(patience).ok();
+        if reply.is_none() {
+            *self = Oracle::start();
+        }
+        reply
+    }
+}
+
 /// What a run of random patterns came to.
 #[derive(Default, Debug)]
 struct Tally {
@@ -168,6 +212,8 @@ struct Tally {
     differences: Vec<String>,
     /// a few of the matches whose groups lie elsewhere
     other_groups: Vec<String>,
+    /// patterns the C library did not answer for
+    unanswered: Vec<String>,
 }
 
 impl Tally {
@@ -181,6 +227,7 @@ impl Tally {
     fn settle(self, least: usize) -> Self {
         assert!(self.differences.is_empty(), "{:#?}", self.differences);
         assert!(self.compiled > least, "{self:?}");
+        assert!(self.unanswered.len() * 1000 < self.compiled, "{self:?}");
         println!("{self:?}");
         self
     }
@@ -192,6 +239,7 @@ impl Tally {
 fn compare(seed: u64, count: usize, options: Options) -> Tally {
     let mut rng = Rng(seed);
     let mut tally = Tally::default();
+    let mut oracle = Oracle::start();
     for _ in 0..count {
         // the anchors stand at the ends of the pattern, and there are no
         // word edges: inside a repeated group the C library loses track
@@ -199,24 +247,28 @@ fn compare(seed: u64, count: usize, options: Options) -> Tally {
         let mut pat = String::from(rng.pick(&["", "", "", "^"]));
         let _ = pattern(&mut rng, 2, &mut pat);
         pat.push_str(rng.pick(&["", "", "", "$"]));
-        let theirs = Theirs::new(pat.as_bytes(), options);
+        let texts: Vec<Vec<u8>> = (0..6).map(|_| text(&mut rng)).collect();
+        let Some(theirs) = oracle.ask((pat.clone().into_bytes(), options, texts.clone())) else {
+            tally.unanswered.push(pat);
+            continue;
+        };
         let ours = Regex::with_options(pat.as_bytes(), options);
-        if ours.is_ok() != theirs.0.is_some() {
+        if ours.is_ok() != theirs.is_some() {
             tally.differs(format!("pattern {pat:?}: ours {:?}", ours.as_ref().err()));
             continue;
         }
-        let Ok(ours) = ours else { continue };
+        let (Ok(ours), Some(theirs)) = (ours, theirs) else {
+            continue;
+        };
         tally.compiled += 1;
-        for _ in 0..6 {
-            let text = text(&mut rng);
-            let shown = String::from_utf8_lossy(&text);
-            let expected = theirs.spans(&text);
+        for (text, expected) in texts.iter().zip(theirs) {
+            let shown = String::from_utf8_lossy(text);
             let wanted = expected.as_ref().and_then(|spans| spans[0]);
-            if ours.is_match(&text) != expected.is_some() {
+            if ours.is_match(text) != expected.is_some() {
                 tally.differs(format!("{pat:?} on {shown:?}: theirs {wanted:?}"));
                 continue;
             }
-            let found = ours.captures(&text);
+            let found = ours.captures(text);
             let got = found
                 .as_ref()
                 .and_then(|c| c.get(0))
@@ -227,7 +279,7 @@ fn compare(seed: u64, count: usize, options: Options) -> Tally {
                 ));
                 continue;
             }
-            let located = ours.find(&text).map(|r| (r.start, r.end));
+            let located = ours.find(text).map(|r| (r.start, r.end));
             if located != got {
                 tally.differs(format!(
                     "find of {pat:?} on {shown:?}: {located:?} not {got:?}"

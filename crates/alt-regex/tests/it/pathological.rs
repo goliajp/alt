@@ -14,7 +14,7 @@ fn nested_repetitions_take_time_linear_in_the_text_long() {
         "^(a+)+$",
         "(a?){40}a{40}[bc]",
         "((a{1,3}){1,3}){1,3}[bc]",
-        "\\b(a|aa)+\\b[bc]",
+        "\\b(a|aa)+\\B[bc]",
     ] {
         let re = Regex::new(pattern.as_bytes()).unwrap();
         let mut costs = Vec::new();
@@ -46,6 +46,6 @@ fn a_pattern_that_explodes_when_backtracked_is_answered_at_once() {
     let text = vec![b'a'; 2_000];
     assert!(!re.is_match(&text));
     assert!(re.captures(&text).is_none());
-    let re = Regex::new(b"\\b(a|aa)+\\b[bc]").unwrap();
+    let re = Regex::new(b"\\b(a|aa)+\\B[bc]").unwrap();
     assert!(!re.is_match(&text));
 }
