@@ -390,6 +390,9 @@ fn a_score_against_the_letter_decides_what_counts_as_moved_or_copied() {
         &["-M100000", "-C", "-C3"],
         &["-C", "-C", "-C100000"],
         &["-Mx", "-C0"],
+        &["-M100000", "-M"],
+        &["-C100000", "-C", "-C"],
+        &["-M100000", "-Mtrue"],
     ] {
         let args =
             |tail: &[&'static str]| -> Vec<&'static str> { [&["blame"], flags, tail].concat() };
@@ -411,4 +414,8 @@ fn a_score_against_the_letter_decides_what_counts_as_moved_or_copied() {
     // no number, or zero, is the usual score
     assert_eq!(seen[6][12], short(base));
     assert_eq!(seen[6][24], short(others));
+    // a letter alone leaves the score written before it
+    assert_eq!(seen[7][12], short(moved));
+    assert_eq!(seen[8][24], short(gathered));
+    assert_eq!(seen[9][12], short(base));
 }

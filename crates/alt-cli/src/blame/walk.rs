@@ -70,11 +70,12 @@ impl Default for Options {
 impl Options {
     /// The options `-M` and `-C` ask for, each a list of what was written
     /// against the letter each time it was given: nothing, or a score. As
-    /// in git the last score counts, and one that is no number or zero
-    /// leaves the usual score in place.
+    /// in git the last score written counts, a letter alone changes none,
+    /// and a score that is no number or zero is the usual one.
     pub fn of(moves: &[String], copies: &[String]) -> Self {
         let score = |given: &[String], usual: usize| {
-            let last = given.last().and_then(|text| text.parse::<usize>().ok());
+            let last = given.iter().rev().find(|text| !text.is_empty());
+            let last = last.and_then(|text| text.parse::<usize>().ok());
             last.filter(|score| *score > 0).unwrap_or(usual)
         };
         let usual = Options::default();

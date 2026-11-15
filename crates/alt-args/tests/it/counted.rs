@@ -81,11 +81,11 @@ fn an_attached_flag_keeps_what_is_written_against_its_letter() {
         Ok::<_, String>((moves, verbose, path))
     };
     assert!(trace(&["file"]).unwrap().0.is_empty());
-    assert_eq!(trace(&["-M", "file"]).unwrap().0, ["true"]);
+    assert_eq!(trace(&["-M", "file"]).unwrap().0, [""]);
     assert_eq!(trace(&["-M40", "file"]).unwrap().0, ["40"]);
     // a bare one takes nothing from the next word, and may be repeated
     let (moves, verbose, path) = trace(&["-M", "-vM7", "file"]).unwrap();
-    assert_eq!(moves, ["true", "7"]);
+    assert_eq!(moves, ["", "7"]);
     assert!(verbose && path == "file");
     assert_eq!(trace(&["-Mv", "file"]).unwrap().0, ["v"]);
 }

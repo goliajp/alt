@@ -200,6 +200,11 @@ impl Level<'_> {
                 self.record(at, vec![attached.to_owned()])?;
                 break;
             }
+            if arg.kind == Kind::Attached {
+                // nothing against the letter: told apart from any value
+                self.record(at, vec![String::new()])?;
+                continue;
+            }
             if !arg.takes_value() {
                 self.record(at, vec!["true".to_owned()])?;
                 continue;
