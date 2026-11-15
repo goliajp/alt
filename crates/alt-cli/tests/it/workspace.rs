@@ -3,7 +3,7 @@
 //! separate processes — the real multi-agent scenario.
 
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 
 fn alt(cwd: &Path, args: &[&str]) -> Output {
     crate::alt_command()

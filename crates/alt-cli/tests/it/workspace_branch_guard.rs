@@ -4,7 +4,7 @@
 //! HEAD and its next commit would undo the move.
 
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 
 fn alt(cwd: &Path, args: &[&str]) -> Output {
     crate::alt_command()

@@ -1,7 +1,7 @@
 use alt_json::{Value, json};
 use std::{
     path::{Path, PathBuf},
-    process::{Command, Output},
+    process::Output,
 };
 fn run(root: &Path, args: &[&str]) -> Output {
     crate::alt_command()

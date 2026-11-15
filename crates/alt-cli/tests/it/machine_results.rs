@@ -1,7 +1,7 @@
 //! Machine results and whole-command receipts are identical across transports.
 use alt_json::Value;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 
 const ID: &str = "0123456789abcdef0123456789abcdef";
 

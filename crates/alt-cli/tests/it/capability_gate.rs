@@ -4,7 +4,7 @@
 //! byte as before — the gates are silent until policy says otherwise.
 
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 
 fn alt_as(repo: &Path, args: &[&str], principal_id: &str) -> Output {
     crate::alt_command()

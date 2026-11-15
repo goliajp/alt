@@ -6,7 +6,7 @@
 //! is not an error — a fresh repo has nothing to validate).
 
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 
 fn alt(cwd: &Path, args: &[&str]) -> Output {
     crate::alt_command()

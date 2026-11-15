@@ -5,7 +5,7 @@
 //! toward "any state-changing op is reversible".
 
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 
 pub(super) fn alt(repo: &Path, args: &[&str]) -> Output {
     crate::alt_command()

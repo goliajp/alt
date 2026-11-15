@@ -3,7 +3,7 @@
 //! agents a machine-readable verdict without committing.
 
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 
 fn alt(repo: &Path, args: &[&str]) -> Output {
     crate::alt_command()
