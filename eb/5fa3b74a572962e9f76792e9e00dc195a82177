@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: list directories through the getdents64 system call so that glibc older than 2.30 still links
+author-type: human
+author: doracawl
+touched: crates/alt-os/src/sys/linux.rs
