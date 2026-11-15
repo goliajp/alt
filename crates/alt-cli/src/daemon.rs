@@ -31,6 +31,16 @@ pub const FORWARDED_ENV: &[&str] = &[
     "VISUAL",
     "EDITOR",
     "ALT_NO_CREDENTIAL_HELPER",
+    // where the configuration outside the repository lies
+    "HOME",
+    "XDG_CONFIG_HOME",
+    "GIT_CONFIG_NOSYSTEM",
+    "GIT_CONFIG_SYSTEM",
+    "GIT_CONFIG_GLOBAL",
+    // which character set texts are in
+    "LC_ALL",
+    "LC_CTYPE",
+    "LANG",
 ];
 
 /// A client-chosen idempotency token: 16 bytes, unique per command invocation

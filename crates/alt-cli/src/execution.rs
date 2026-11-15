@@ -112,6 +112,7 @@ impl Execution {
         repo: &alt_repo::Repository,
     ) -> (Response, Vec<String>) {
         let capture = crate::diagnostics::Capture::start(self.parsed.json);
+        let _caller = self.identity.outer_environment();
         let mut stdout = Vec::new();
         let result = (|| -> Res<u8> {
             let (directory, _) =

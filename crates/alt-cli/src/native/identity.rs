@@ -122,6 +122,9 @@ pub struct Identity {
     pub(super) controlling: Option<String>,
     pub(super) protected_override: bool,
     execution_environment: std::collections::BTreeMap<String, String>,
+    /// what the caller has of the variables the configuration outside
+    /// the repository is found by
+    outer_environment: Vec<(String, String)>,
 }
 
 impl Identity {
@@ -169,7 +172,17 @@ impl Identity {
             .into_iter()
             .filter_map(|key| get(key).map(|value| (key.to_owned(), value)))
             .collect(),
+            outer_environment: crate::git_settings::CALLER_ENV
+                .iter()
+                .filter_map(|key| get(key).map(|value| ((*key).to_owned(), value)))
+                .collect(),
         }
+    }
+
+    /// The caller's variables for the configuration outside the
+    /// repository, to read them by while its command runs.
+    pub fn outer_environment(&self) -> crate::git_settings::Caller {
+        crate::git_settings::Caller::new(self.outer_environment.clone())
     }
 
     pub fn binding(&self) -> alt_json::Value {

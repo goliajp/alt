@@ -18,7 +18,7 @@ impl NativeRepo<'_> {
             let ctx = alt_git_config::IncludeContext {
                 git_dir: Some(dir),
                 branch,
-                home: std::env::var_os("HOME").map(PathBuf::from),
+                home: crate::git_settings::home(),
             };
             entries.extend(alt_git_config::Config::load(&file, &ctx)?.entries);
         }

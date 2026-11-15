@@ -2,6 +2,8 @@
 //! user's, which a repository's own configuration is read on top of, and
 //! the attribute files that lie outside the tree.
 
+use std::cell::RefCell;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use alt_bytes::BString;
@@ -10,13 +12,57 @@ use alt_worktree::attributes::Layer;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
-fn env_path(name: &str) -> Option<PathBuf> {
-    std::env::var_os(name)
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
+/// The variables that say where the configuration outside a repository
+/// lies and which character set texts are in. A command run for another
+/// process reads them from that process.
+pub const CALLER_ENV: &[&str] = &[
+    "HOME",
+    "XDG_CONFIG_HOME",
+    "GIT_CONFIG_NOSYSTEM",
+    "GIT_CONFIG_SYSTEM",
+    "GIT_CONFIG_GLOBAL",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LANG",
+];
+
+thread_local! {
+    /// the variables of the process this thread runs a command for
+    static CALLER: RefCell<Option<Vec<(String, String)>>> = const { RefCell::new(None) };
 }
 
-fn home() -> Option<PathBuf> {
+/// While it lives, this thread reads the variables of [`CALLER_ENV`]
+/// from the ones it was made with and not from the process.
+pub struct Caller(Option<Vec<(String, String)>>);
+
+impl Caller {
+    pub fn new(env: Vec<(String, String)>) -> Self {
+        Caller(CALLER.replace(Some(env)))
+    }
+}
+
+impl Drop for Caller {
+    fn drop(&mut self) {
+        CALLER.set(self.0.take());
+    }
+}
+
+/// A variable of [`CALLER_ENV`] as the caller has it.
+pub(crate) fn var(name: &str) -> Option<OsString> {
+    CALLER.with_borrow(|caller| match caller {
+        Some(env) => env
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| OsString::from(value)),
+        None => std::env::var_os(name),
+    })
+}
+
+fn env_path(name: &str) -> Option<PathBuf> {
+    var(name).filter(|v| !v.is_empty()).map(PathBuf::from)
+}
+
+pub(crate) fn home() -> Option<PathBuf> {
     env_path("HOME")
 }
 
@@ -38,8 +84,8 @@ pub(crate) fn outer(git_dir: Option<PathBuf>, branch: Option<BString>) -> Res<Ve
         branch,
         home: home(),
     };
-    let no_system = std::env::var("GIT_CONFIG_NOSYSTEM").is_ok_and(|v| {
-        let v = v.to_ascii_lowercase();
+    let no_system = var("GIT_CONFIG_NOSYSTEM").is_some_and(|v| {
+        let v = v.to_string_lossy().to_ascii_lowercase();
         matches!(v.as_str(), "true" | "yes" | "on") || v.parse::<i64>().is_ok_and(|n| n != 0)
     });
     let mut files = Vec::new();

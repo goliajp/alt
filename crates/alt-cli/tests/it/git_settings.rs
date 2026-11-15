@@ -163,3 +163,54 @@ fn the_environment_can_turn_the_outer_configuration_off() {
     assert_eq!(std::fs::read(src.join("a.txt")).unwrap(), b"one\ntwo\n");
     assert_eq!(std::fs::read(dst.join("a.txt")).unwrap(), b"one\ntwo\n");
 }
+
+/// `alt` in `repo` through the repository's daemon, which this starts
+/// when none runs and which ends by itself soon after its last command.
+fn through_daemon(home: &Path, repo: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_alt"))
+        .current_dir(repo)
+        .env("HOME", home)
+        .env("GIT_CONFIG_SYSTEM", home.join("system"))
+        .env_remove("XDG_CONFIG_HOME")
+        .env_remove("GIT_CONFIG_NOSYSTEM")
+        .env_remove("GIT_CONFIG_GLOBAL")
+        .env_remove("ALT_NO_DAEMON")
+        .env("ALT_DAEMON_IDLE_MS", "1500")
+        .args(args)
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn a_command_through_the_daemon_reads_the_configuration_of_its_caller() {
+    let dirs = [0; 3].map(|_| alt_os::temp::tempdir().unwrap());
+    let (first, second, repo) = (dirs[0].path(), dirs[1].path(), dirs[2].path());
+    let driver = |pattern: &str| format!("[diff \"custom\"]\n\txfuncname = \"{pattern}\"\n");
+    write(first, ".gitconfig", &driver("^(section .*)$"));
+    write(second, ".gitconfig", &driver("^ *(section .*)$"));
+    let alt = |args: &[&str]| ok(at_home("alt", first, repo, args));
+    alt(&["init", "."]);
+    write(repo, ".gitattributes", "*.x diff=custom\n");
+    write(repo, "notes.x", &notes(""));
+    alt(&["add", "."]);
+    alt(&["commit", "-m", "base"]);
+    write(repo, "notes.x", &notes("!"));
+
+    let socket = repo.join(".alt/daemon.sock");
+    for (home, section) in [(first, "section one"), (second, "section two")] {
+        let served = ok(through_daemon(home, repo, &["diff"]));
+        assert!(
+            std::os::unix::net::UnixStream::connect(&socket).is_ok(),
+            "no daemon served the command"
+        );
+        let head = served.lines().rfind(|l| l.starts_with("@@")).unwrap();
+        assert!(head.ends_with(section), "{head}");
+        assert_eq!(served, ok(at_home("alt", home, repo, &["diff"])));
+    }
+    // the daemon this started is gone before the test is
+    let begun = std::time::Instant::now();
+    while socket.exists() {
+        assert!(begun.elapsed().as_secs() < 20, "the daemon stays");
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
