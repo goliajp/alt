@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: test
+summary: prove unread files without permissions, cover the listing fallback for unknown entry types and the tree comparison
+author-type: human
+author: doracawl
+touched: crates/alt-worktree/src/cachetree.rs
+touched: crates/alt-worktree/src/fsdir.rs
+touched: crates/alt-worktree/tests/it/delta.rs
