@@ -185,6 +185,39 @@ fn hunk_headers_name_sections_by_the_diff_driver_as_git_does() {
 }
 
 #[test]
+fn a_configured_pattern_replaces_the_built_in_one_of_its_name() {
+    let (src, dst) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
+    let (src, dst) = (src.path(), dst.path());
+    ok(git(src, &["init", "-q", "-b", "main", "."]));
+    std::fs::write(src.join(".gitattributes"), "*.py diff=python\n").unwrap();
+    ok(git(
+        src,
+        &["config", "diff.python.xfuncname", "^(class .*)$"],
+    ));
+    let (name, heads, body) = FILES[1];
+    std::fs::write(src.join(name), sections(heads, body)).unwrap();
+    ok(git(src, &["add", "."]));
+    ok(git(src, &["commit", "-qm", "base"]));
+    ok(alt(src, &["import", dst.to_str().unwrap()]));
+    for root in [src, dst] {
+        let changed = sections(heads, body).replace("_9;", "_9; # changed");
+        std::fs::write(root.join(name), changed).unwrap();
+    }
+    let theirs = ok(git(src, &["diff"]));
+    let ours = ok(alt(dst, &["diff"]));
+    assert_eq!(hunk_headers(&ours), hunk_headers(&theirs));
+    // the built-in pattern would have named the methods
+    let named: Vec<&str> = hunk_headers(&ours)
+        .iter()
+        .map(|h| h.rsplit("@@ ").next().unwrap())
+        .collect();
+    assert_eq!(named, ["class Thing:"; 3]);
+}
+
+#[test]
 fn a_pattern_that_does_not_compile_is_reported() {
     let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
