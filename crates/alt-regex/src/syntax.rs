@@ -35,6 +35,10 @@ pub enum Node {
 const DUP_MAX: u32 = 0x7fff;
 /// The deepest nesting of groups and of repetitions around one atom.
 const MAX_DEPTH: u32 = 200;
+/// The most groups a pattern may have.
+pub const MAX_GROUPS: u32 = 0x7fff;
+/// The longest pattern read, in bytes.
+pub const MAX_PATTERN: usize = 1 << 18;
 
 struct Parser<'a> {
     pat: &'a [u8],
@@ -46,6 +50,9 @@ struct Parser<'a> {
 
 /// Parses `pat` into its tree and the number of groups in it.
 pub fn parse(pat: &[u8], opts: Options) -> Result<(Node, u32), Error> {
+    if pat.len() > MAX_PATTERN {
+        return Err(Error::TooBig);
+    }
     let mut p = Parser {
         pat,
         at: 0,
@@ -291,6 +298,9 @@ impl<'a> Parser<'a> {
     /// A group, behind its opening parenthesis.
     fn group(&mut self) -> Result<Node, Error> {
         self.groups += 1;
+        if self.groups > MAX_GROUPS {
+            return Err(Error::TooBig);
+        }
         let number = self.groups;
         self.depth += 1;
         if self.depth > MAX_DEPTH {

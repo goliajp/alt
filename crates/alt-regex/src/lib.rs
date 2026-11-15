@@ -115,8 +115,9 @@ pub struct Regex {
     prog: program::Program,
     /// Bytes every match contains.
     literal: Option<Vec<u8>>,
-    /// The capture slots of the match in the empty text, if it has one.
-    on_empty: Option<Vec<usize>>,
+    /// The first capture slots of the match in the empty text, if it has
+    /// one.
+    on_empty: Option<[usize; FEW]>,
     cache: Mutex<Cache>,
 }
 
@@ -160,8 +161,10 @@ impl Regex {
         let prog = program::compile(&node, groups)?;
         let anchored = prog.anchored;
         // a text with nothing in it is common, and always answered alike
-        let mut slots = vec![pike::UNSET; 2 * (groups as usize + 1)];
-        let matched = pike::search(&prog, &mut pike::Cache::default(), b"", None, &mut slots);
+        let mut slots = [pike::UNSET; FEW];
+        let width = FEW.min(2 * (groups as usize + 1));
+        let cache = &mut pike::Cache::default();
+        let matched = pike::search(&prog, cache, b"", None, &mut slots[..width]);
         Ok(Regex {
             prog,
             on_empty: matched.then_some(slots),
@@ -245,8 +248,11 @@ impl Regex {
             let Some(known) = &self.on_empty else {
                 return false;
             };
-            slots.copy_from_slice(&known[..slots.len()]);
-            return true;
+            if slots.len() <= FEW {
+                slots.copy_from_slice(&known[..slots.len()]);
+                return true;
+            }
+            return backtrack::captures(&self.prog, &mut cache.backtrack, text, 0, 0, slots);
         }
         if self.excluded(text) {
             return false;

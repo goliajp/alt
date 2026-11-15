@@ -3,7 +3,7 @@
 //! work per byte bounded by the size of the pattern.
 
 use crate::class::ByteSet;
-use crate::program::{Inst, Program};
+use crate::program::{Inst, NO_JOIN, Program};
 use crate::syntax::Look;
 
 /// A position no group has.
@@ -15,15 +15,16 @@ struct Threads {
     /// Where each instruction sits in `order`, when it is in the set.
     place: Vec<u32>,
     order: Vec<u32>,
-    /// The capture slots of each path, in the order of `order`.
+    /// The capture slots of each path that waits at an instruction, by
+    /// the row of the instruction.
     slots: Vec<usize>,
 }
 
 impl Threads {
-    fn reset(&mut self, insts: usize, width: usize) {
+    fn reset(&mut self, insts: usize, rows: usize, width: usize) {
         self.place.resize(insts, 0);
         self.order.clear();
-        self.slots.resize(insts * width, UNSET);
+        self.slots.resize(rows * width, UNSET);
     }
 
     fn contains(&self, pc: u32) -> bool {
@@ -31,10 +32,9 @@ impl Threads {
         self.order.get(at) == Some(&pc)
     }
 
-    fn insert(&mut self, pc: u32) -> usize {
+    fn insert(&mut self, pc: u32) {
         self.place[pc as usize] = self.order.len() as u32;
         self.order.push(pc);
-        self.order.len() - 1
     }
 }
 
@@ -90,7 +90,7 @@ fn follow(
             Frame::Explore(pc) if list.contains(pc) => continue,
             Frame::Explore(pc) => pc,
         };
-        let index = list.insert(pc);
+        list.insert(pc);
         match prog.insts[pc as usize] {
             Inst::Split(first, second) => {
                 stack.push(Frame::Explore(second));
@@ -110,7 +110,8 @@ fn follow(
                 }
             }
             Inst::Set(..) | Inst::Byte(..) | Inst::Match => {
-                list.slots[index * width..][..width].copy_from_slice(slots);
+                let row = prog.rows[pc as usize] as usize;
+                list.slots[row * width..][..width].copy_from_slice(slots);
             }
         }
     }
@@ -134,8 +135,8 @@ pub fn search(
         stack,
         scratch,
     } = cache;
-    now.reset(prog.insts.len(), width);
-    next.reset(prog.insts.len(), width);
+    now.reset(prog.insts.len(), prog.row_count as usize, width);
+    next.reset(prog.insts.len(), prog.row_count as usize, width);
     scratch.clear();
     scratch.resize(width, UNSET);
     let mut matched = false;
@@ -149,12 +150,17 @@ pub fn search(
             break;
         }
         for index in 0..now.order.len() {
-            let slots = &now.slots[index * width..][..width];
+            let pc = now.order[index] as usize;
+            let row = prog.rows[pc] as usize;
+            if row == NO_JOIN as usize {
+                continue;
+            }
+            let slots = &now.slots[row * width..][..width];
             // a path that began behind the match found cannot replace it
             if matched && slots[0] > found[0] {
                 continue;
             }
-            let target = match prog.insts[now.order[index] as usize] {
+            let target = match prog.insts[pc] {
                 Inst::Match => {
                     let better = !matched || slots[0] < found[0] || at > found[1];
                     if better {
