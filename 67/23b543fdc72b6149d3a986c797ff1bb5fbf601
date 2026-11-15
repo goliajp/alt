@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: fix
+summary: reload a held handle when the index runs on disk fall behind it
+author-type: human
+author: doracawl
+touched: crates/alt-store/src/index.rs
+touched: crates/alt-store/src/indexing.rs
+touched: crates/alt-store/src/lib.rs
+touched: crates/alt-store/src/reclog.rs
+touched: crates/alt-store/src/reclog/sync.rs
+touched: crates/alt-store/src/runs.rs
+touched: crates/alt-store/tests/it/index_gap.rs
+touched: crates/alt-store/tests/it/index_runs.rs
+touched: crates/alt-store/tests/it/main.rs
