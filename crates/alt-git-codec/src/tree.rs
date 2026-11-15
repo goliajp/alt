@@ -33,6 +33,37 @@ impl TreeEntry {
 }
 
 impl Tree {
+    /// The mode and id of the entry called `name` in raw tree data,
+    /// without building the entry list: for a caller that follows one
+    /// path through many trees.
+    pub fn find(
+        data: &[u8],
+        algo: HashAlgo,
+        name: &[u8],
+    ) -> Result<Option<(u32, ObjectId)>, ObjectParseError> {
+        let raw_len = algo.raw_len();
+        let mut rest = data;
+        while !rest.is_empty() {
+            let sp = rest
+                .find_byte(b' ')
+                .ok_or(ObjectParseError::Tree("entry without space after mode"))?;
+            let nul = rest[sp + 1..]
+                .find_byte(0)
+                .ok_or(ObjectParseError::Tree("entry name not NUL-terminated"))?;
+            let after = sp + 1 + nul + 1;
+            if rest.len() < after + raw_len {
+                return Err(ObjectParseError::Tree("truncated entry oid"));
+            }
+            if &rest[sp + 1..sp + 1 + nul] == name {
+                let mode = EntryMode::from_bytes(&rest[..sp])?.value();
+                let oid = ObjectId::from_bytes(algo, &rest[after..after + raw_len]).unwrap();
+                return Ok(Some((mode, oid)));
+            }
+            rest = &rest[after + raw_len..];
+        }
+        Ok(None)
+    }
+
     /// Parses tree data; `algo` determines the raw oid width.
     pub fn parse(data: &[u8], algo: HashAlgo) -> Result<Self, ObjectParseError> {
         let raw_len = algo.raw_len();

@@ -202,10 +202,14 @@ pub enum Command {
         path: String,
         /// Revision to start the walk from (default `HEAD`).
         rev: Option<String>,
-        /// Accepted for compatibility and without effect: a renamed file
-        /// is always followed, as in git.
-        #[arg(short = 'M', long = "follow")]
-        follow: bool,
+        /// Trace lines moved within the file to where they were before.
+        #[arg(short = 'M')]
+        moves: bool,
+        /// Trace lines copied from files changed in the same commit; twice,
+        /// from any file when the blamed file is created; three times, from
+        /// any file in every commit. Implies -M.
+        #[arg(short = 'C', action = count)]
+        copies: u8,
     },
     /// Show or change the metadata recorded with a commit (kept in git
     /// notes under refs/notes/alt/meta; the commit itself never changes)
@@ -1528,16 +1532,25 @@ pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, head: &str, out: &mut
                 let commit_oid = repo
                     .rev_parse(rev_part)?
                     .ok_or_else(|| format!("bad revision '{rev_part}'"))?;
-                let blob = show_resolve_blob(repo, commit_oid, path_part)?;
+                let blob = crate::tree_changes::blob_at(repo, commit_oid, path_part)?;
                 out.write_all(&blob)?;
                 return Ok(());
             }
             let args = crate::log_cmd::LogArgs::for_show(spec, *json);
             crate::log_cmd::run(out, repo, args)?;
         }
-        Command::Blame { path, rev, .. } => {
+        Command::Blame {
+            path,
+            rev,
+            moves,
+            copies,
+        } => {
             let spec = at_head(rev.as_deref().unwrap_or("HEAD"));
-            crate::blame::run(out, repo, path, &spec)?;
+            let options = crate::blame::Options {
+                moves: *moves || *copies > 0,
+                copies: *copies,
+            };
+            crate::blame::run(out, repo, path, &spec, options)?;
         }
         Command::Config {
             key,
@@ -1614,54 +1627,6 @@ pub fn workspace_head(cwd: &Path, workspace: Option<&str>) -> Res<String> {
         Err(e) if workspace.is_some() => Err(e),
         Err(_) => Ok("HEAD".to_owned()),
     }
-}
-
-/// Resolve `<commit>:<path>` to a blob's bytes. Walks the commit's
-/// tree segment-by-segment, refusing to descend past a non-tree entry
-/// and refusing the final entry if it's a tree (use `alt cat-file -p`
-/// for tree dumps).
-fn show_resolve_blob(
-    repo: &Repository,
-    commit_oid: ObjectId,
-    path: &str,
-) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    use alt_git_codec::{ObjectKind, Tree};
-    let commit = repo.read_commit(&commit_oid)?;
-    let mut current = commit
-        .tree()
-        .ok_or_else(|| format!("commit {commit_oid} has no tree"))?;
-    let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-    if segments.is_empty() {
-        return Err("empty path".into());
-    }
-    for (i, seg) in segments.iter().enumerate() {
-        let obj = repo
-            .read_object(&current)?
-            .ok_or_else(|| format!("tree {current} missing"))?;
-        if obj.kind != ObjectKind::Tree {
-            return Err(format!("{current} is not a tree").into());
-        }
-        let tree = Tree::parse(&obj.data, repo.algo())?;
-        let entry = tree
-            .entries
-            .iter()
-            .find(|e| String::from_utf8_lossy(e.name.as_slice()) == **seg)
-            .ok_or_else(|| format!("path '{path}' not found at {commit_oid}"))?;
-        if i == segments.len() - 1 {
-            if entry.mode.value() == 0o040000 {
-                return Err(format!("'{path}' is a tree, not a blob").into());
-            }
-            let blob_obj = repo
-                .read_object(&entry.oid)?
-                .ok_or_else(|| format!("blob {} missing", entry.oid))?;
-            return Ok(blob_obj.data);
-        }
-        if entry.mode.value() != 0o040000 {
-            return Err(format!("'{seg}' is not a directory in path '{path}'").into());
-        }
-        current = entry.oid;
-    }
-    Err("unreachable".into())
 }
 
 fn resolve(repo: &Repository, spec: &str) -> Result<ObjectId, String> {

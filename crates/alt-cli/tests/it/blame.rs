@@ -249,10 +249,6 @@ fn blame_follows_a_renamed_file() {
     assert_eq!(ours[4], base[..8], "through both renames");
     assert_eq!(ours[9], renamed[..8]);
     assert!(!ours.contains(&moved[..8].to_owned()));
-
-    // -M is accepted and changes nothing
-    let plain = ok(alt(dst, &["blame", "dir/new.txt"]));
-    assert_eq!(ok(alt(dst, &["blame", "-M", "dir/new.txt"])), plain);
 }
 
 #[test]
@@ -278,4 +274,94 @@ fn blame_at_revision_uses_that_history_only() {
     for line in &lines {
         assert!(line.starts_with(s1), "got: {line}");
     }
+}
+
+/// Twelve lines that each carry enough text to be searched for.
+fn paragraph(tag: &str) -> Vec<String> {
+    (1..=12)
+        .map(|n| format!("{tag} sentence number {n} with words"))
+        .collect()
+}
+
+/// A history in which lines move within a file and between files:
+/// `main.txt` has its second paragraph moved to the top, receives a
+/// paragraph cut out of `other.txt` in the same commit, and one copied
+/// from `library.txt`, which that commit does not touch.
+fn moved_and_copied(src: &Path) -> Vec<String> {
+    git(src, 1000, &["init", "-q", "-b", "main", "."]);
+    let (first, second) = (paragraph("first"), paragraph("second"));
+    put(src, "main.txt", &[first.clone(), second.clone()].concat());
+    let base = commit(src, 1000, "base");
+    put(
+        src,
+        "other.txt",
+        &[paragraph("other"), paragraph("donated")].concat(),
+    );
+    put(src, "library.txt", &paragraph("library"));
+    let others = commit(src, 1100, "two more files");
+
+    put(src, "main.txt", &[second, first].concat());
+    let moved = commit(src, 1200, "second paragraph first");
+
+    let mut text: Vec<String> = fs::read_to_string(src.join("main.txt"))
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect();
+    text.extend(paragraph("donated"));
+    text.extend(paragraph("library"));
+    text.push("written here".to_owned());
+    put(src, "main.txt", &text);
+    put(src, "other.txt", &paragraph("other"));
+    let gathered = commit(src, 1300, "gather paragraphs");
+    vec![base, others, moved, gathered]
+}
+
+#[test]
+fn blame_traces_moved_and_copied_lines_as_git_does() {
+    let (src, dst) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
+    let (src, dst) = (src.path(), dst.path());
+    let commits = moved_and_copied(src);
+    let (base, others, moved, gathered) = (&commits[0], &commits[1], &commits[2], &commits[3]);
+    ok(alt(src, &["import", dst.to_str().unwrap()]));
+    let first8 = |text: String| -> Vec<String> {
+        text.lines()
+            .map(|l| l.trim_start_matches('^')[..8].to_owned())
+            .collect()
+    };
+    let mut seen = Vec::new();
+    for flags in [
+        &[][..],
+        &["-M"],
+        &["-C"],
+        &["-C", "-C"],
+        &["-C", "-C", "-C"],
+    ] {
+        let args =
+            |tail: &[&'static str]| -> Vec<&'static str> { [&["blame"], flags, tail].concat() };
+        let ours = first8(ok(alt(dst, &args(&["main.txt"]))));
+        let theirs = first8(git(src, 0, &args(&["-l", "--root", "main.txt"])));
+        assert_eq!(ours, theirs, "blame {flags:?}");
+        seen.push(ours);
+    }
+    let short = |c: &String| c[..8].to_owned();
+    // plainly, the paragraph that changed places belongs to the commit that
+    // moved it; with -M it is traced to where it was written
+    assert_eq!(seen[0][12], short(moved));
+    assert_eq!(seen[1][12], short(base));
+    assert_eq!(seen[0][0], short(base));
+    // lines cut out of a file the same commit changed: -C finds them
+    assert_eq!(seen[1][24], short(gathered));
+    assert_eq!(seen[2][24], short(others));
+    // lines copied from a file the commit left alone: only from -C -C -C
+    assert_eq!(seen[3][36], short(gathered));
+    assert_eq!(seen[4][36], short(others));
+    assert_eq!(
+        seen[4][48],
+        short(gathered),
+        "the line written in that commit"
+    );
 }

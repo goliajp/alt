@@ -240,7 +240,8 @@ pub(crate) fn pair_renames(repo: &Repository, changes: Vec<Changed>) -> Res<Vec<
     Ok(out)
 }
 
-/// The blob (or link) at `path` in a tree, when the path is a file there.
+/// The file at `path` in a tree, when the path is a file there. Only the
+/// trees on the way are read, and none of them parsed in full.
 pub(crate) fn file_at(repo: &Repository, tree: ObjectId, path: &[u8]) -> Res<Option<TreeFile>> {
     let mut current = tree;
     let mut parts = path.split(|&b| b == b'/').peekable();
@@ -248,21 +249,61 @@ pub(crate) fn file_at(repo: &Repository, tree: ObjectId, path: &[u8]) -> Res<Opt
         let obj = repo
             .read_object(&current)?
             .ok_or_else(|| format!("tree {current} missing"))?;
-        let tree = Tree::parse(&obj.data, repo.algo())?;
-        let Some(entry) = tree.entries.iter().find(|e| e.name.as_slice() == part) else {
+        let Some((mode, oid)) = Tree::find(&obj.data, repo.algo(), part)? else {
             return Ok(None);
         };
-        let is_tree = entry.mode.object_kind() == ObjectKind::Tree;
-        match (parts.peek().is_some(), is_tree) {
-            (true, true) => current = entry.oid,
-            (false, false) => {
-                return Ok(Some(TreeFile {
-                    oid: entry.oid,
-                    mode: entry.mode.value(),
-                }));
-            }
+        match (parts.peek().is_some(), mode == 0o040000) {
+            (true, true) => current = oid,
+            (false, false) => return Ok(Some(TreeFile { oid, mode })),
             _ => return Ok(None),
         }
     }
     Ok(None)
+}
+
+/// Resolve `<commit>:<path>` to a blob's bytes. Walks the commit's
+/// tree segment-by-segment, refusing to descend past a non-tree entry
+/// and refusing the final entry if it's a tree (use `alt cat-file -p`
+/// for tree dumps).
+pub(crate) fn blob_at(
+    repo: &Repository,
+    commit_oid: ObjectId,
+    path: &str,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let commit = repo.read_commit(&commit_oid)?;
+    let mut current = commit
+        .tree()
+        .ok_or_else(|| format!("commit {commit_oid} has no tree"))?;
+    let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    if segments.is_empty() {
+        return Err("empty path".into());
+    }
+    for (i, seg) in segments.iter().enumerate() {
+        let obj = repo
+            .read_object(&current)?
+            .ok_or_else(|| format!("tree {current} missing"))?;
+        if obj.kind != ObjectKind::Tree {
+            return Err(format!("{current} is not a tree").into());
+        }
+        let tree = Tree::parse(&obj.data, repo.algo())?;
+        let entry = tree
+            .entries
+            .iter()
+            .find(|e| String::from_utf8_lossy(e.name.as_slice()) == **seg)
+            .ok_or_else(|| format!("path '{path}' not found at {commit_oid}"))?;
+        if i == segments.len() - 1 {
+            if entry.mode.value() == 0o040000 {
+                return Err(format!("'{path}' is a tree, not a blob").into());
+            }
+            let blob_obj = repo
+                .read_object(&entry.oid)?
+                .ok_or_else(|| format!("blob {} missing", entry.oid))?;
+            return Ok(blob_obj.data);
+        }
+        if entry.mode.value() != 0o040000 {
+            return Err(format!("'{seg}' is not a directory in path '{path}'").into());
+        }
+        current = entry.oid;
+    }
+    Err("unreachable".into())
 }
