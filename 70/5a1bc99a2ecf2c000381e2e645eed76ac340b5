@@ -1,0 +1,17 @@
+schema: alt-meta/1
+type: feat
+summary: take a score against the letter of blame -M and -C
+author-type: human
+author: doracawl
+touched: crates/alt-args-derive/src/field.rs
+touched: crates/alt-args-derive/src/generate.rs
+touched: crates/alt-args-derive/src/lib.rs
+touched: crates/alt-args/src/level.rs
+touched: crates/alt-args/src/spec.rs
+touched: crates/alt-args/src/validate.rs
+touched: crates/alt-args/tests/it/counted.rs
+touched: crates/alt-cli/src/blame/moved.rs
+touched: crates/alt-cli/src/blame/walk.rs
+touched: crates/alt-cli/src/cli.rs
+touched: crates/alt-cli/tests/fixtures/args/bindings.txt
+touched: crates/alt-cli/tests/it/blame.rs
