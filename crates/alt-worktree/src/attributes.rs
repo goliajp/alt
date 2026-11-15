@@ -7,6 +7,8 @@
 //! read, with the macros that can set them (`binary`, and `[attr]`
 //! definitions). Where no attribute decides, `core.autocrlf` does.
 
+use std::collections::HashMap;
+
 use crate::ignore::glob_match;
 
 /// How a path's content is converted, following git's attribute rules on a
@@ -200,20 +202,9 @@ pub fn lookup<'a>(
     // the repository's own file decides first, then the deepest file in
     // the tree, the user's file last; within a file the last line
     layers.sort_by_key(|l| std::cmp::Reverse((l.source, l.base.len())));
-    let (mut text, mut eol, mut crlf, mut ident, mut filter) = (None, None, None, None, None);
-    let mut see = |name: &[u8], state: &State| {
-        let slot = match name {
-            b"text" => &mut text,
-            b"eol" => &mut eol,
-            b"crlf" => &mut crlf,
-            b"ident" => &mut ident,
-            b"filter" => &mut filter,
-            _ => return,
-        };
-        if slot.is_none() {
-            *slot = Some(state.clone());
-        }
-    };
+    // the first state met for an attribute stands; later files and
+    // earlier lines cannot change it
+    let mut states: HashMap<&[u8], &State> = HashMap::new();
     for layer in &layers {
         let Some(rel) = below(path, &layer.base) else {
             continue;
@@ -221,27 +212,38 @@ pub fn lookup<'a>(
         let name = rel.rsplit(|&b| b == b'/').next().unwrap_or(rel);
         for line in layer.lines.iter().rev() {
             let subject = if line.anchored { rel } else { name };
-            if !glob_match(&line.pattern, subject) {
-                continue;
-            }
-            for (attr, state) in line.settings.iter().rev() {
-                // a macro that is set stands for its definition
-                if *state == State::Set {
-                    for (inner, inner_state) in expand(&layers, attr).iter().rev() {
-                        see(inner, inner_state);
-                    }
-                }
-                see(attr, state);
+            if glob_match(&line.pattern, subject) {
+                fill(&mut states, &line.settings, &layers);
             }
         }
     }
+    let state = |name: &[u8]| states.get(name).map(|s| (*s).clone());
     PathAttributes {
-        conversion: decide(text, crlf, eol, config),
-        ident: ident == Some(State::Set),
-        filter: match filter {
+        conversion: decide(state(b"text"), state(b"crlf"), state(b"eol"), config),
+        ident: state(b"ident") == Some(State::Set),
+        filter: match state(b"filter") {
             Some(State::Value(name)) => Some(name),
             _ => None,
         },
+    }
+}
+
+/// Records the settings of one matching line, last first. A macro that
+/// comes out set stands for its definition, which is recorded in turn; one
+/// that an earlier-read line has already unset is not expanded.
+fn fill<'l>(
+    states: &mut HashMap<&'l [u8], &'l State>,
+    settings: &'l Settings,
+    layers: &[&'l Layer],
+) {
+    for (attr, state) in settings.iter().rev() {
+        if states.contains_key(attr.as_slice()) {
+            continue;
+        }
+        states.insert(attr, state);
+        if *state == State::Set {
+            fill(states, expand(layers, attr), layers);
+        }
     }
 }
 
@@ -254,11 +256,11 @@ fn below<'p>(path: &'p [u8], base: &[u8]) -> Option<&'p [u8]> {
 
 /// The settings a macro stands for: its last definition in the file of
 /// highest precedence that defines it, or the built-in `binary`.
-fn expand<'l>(layers: &[&'l Layer], name: &[u8]) -> &'l [(Vec<u8>, State)] {
+fn expand<'l>(layers: &[&'l Layer], name: &[u8]) -> &'l Settings {
     static BINARY: std::sync::OnceLock<Settings> = std::sync::OnceLock::new();
     let defined = layers.iter().find_map(|layer| {
         let found = layer.macros.iter().rev().find(|(n, _)| n == name);
-        found.map(|(_, settings)| settings.as_slice())
+        found.map(|(_, settings)| settings)
     });
     match (defined, name) {
         (Some(settings), _) => settings,
@@ -268,7 +270,10 @@ fn expand<'l>(layers: &[&'l Layer], name: &[u8]) -> &'l [(Vec<u8>, State)] {
                 .map(|n| (n.to_vec(), State::Unset))
                 .collect()
         }),
-        _ => &[],
+        _ => {
+            static NONE: Settings = Vec::new();
+            &NONE
+        }
     }
 }
 
@@ -578,6 +583,34 @@ mod tests {
                 ident: false,
                 filter: None,
             }
+        );
+    }
+
+    #[test]
+    fn a_macro_is_expanded_only_where_it_comes_out_set() {
+        // the later line unsets the macro itself: nothing is expanded
+        assert_eq!(
+            conv(
+                &[("", "* eol=crlf\n*.bin binary\n*.bin -binary\n")],
+                "a.bin"
+            ),
+            Conversion::TextCrlf
+        );
+        assert_eq!(
+            conv(&[("", "* eol=crlf\n*.bin binary\n")], "a.bin"),
+            Conversion::Binary
+        );
+        // a macro whose definition names another macro
+        let nested = "[attr]raw binary\n[attr]asset raw\n* eol=crlf\n*.dat asset\n";
+        assert_eq!(conv(&[("", nested)], "a.dat"), Conversion::Binary);
+        // what the line sets after the macro wins over the expansion
+        assert_eq!(
+            conv(&[("", "*.x binary text eol=crlf\n")], "a.x"),
+            Conversion::TextCrlf
+        );
+        assert_eq!(
+            conv(&[("", "*.x text binary\n")], "a.x"),
+            Conversion::Binary
         );
     }
 
