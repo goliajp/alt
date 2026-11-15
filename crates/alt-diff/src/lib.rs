@@ -256,7 +256,14 @@ pub fn write_unified_with(
             // git builds the header in 128 bytes
             let room = 126usize.saturating_sub(header.len());
             out.push(b' ');
-            out.extend_from_slice(&section[..section.len().min(room)]);
+            let shown = &section[..section.len().min(room)];
+            // and prints it as far as it is UTF-8: a character the cut
+            // went through is dropped, with whatever follows bad bytes
+            let valid = match std::str::from_utf8(shown) {
+                Ok(_) => shown.len(),
+                Err(e) => e.valid_up_to(),
+            };
+            out.extend_from_slice(&shown[..valid]);
         }
         out.push(b'\n');
         let n = h.lines.len();
@@ -439,5 +446,20 @@ mod tests {
                 assert!(w[0].old.end <= w[1].old.start, "overlap: {edits:?}");
             }
         }
+    }
+
+    #[test]
+    fn a_hunk_header_stops_before_a_character_the_cut_went_through() {
+        // 40 two-byte letters behind an ASCII one: the 80-byte cut falls
+        // inside the last of them
+        let head = format!("x{}", "\u{438}".repeat(45));
+        let body: String = (0..8).map(|i| format!(" line {i}\n")).collect();
+        let old = format!("{head}\n{body}");
+        let new = old.replace(" line 6", " line six");
+        let mut out = Vec::new();
+        assert!(write_unified(&mut out, old.as_bytes(), new.as_bytes(), 3));
+        let header = out.split(|&b| b == b'\n').next().unwrap();
+        let shown = std::str::from_utf8(header).expect("whole characters only");
+        assert_eq!(shown, format!("@@ -5,5 +5,5 @@ x{}", "\u{438}".repeat(39)));
     }
 }
