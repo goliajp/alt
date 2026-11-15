@@ -202,10 +202,8 @@ pub enum Command {
         path: String,
         /// Revision to start the walk from (default `HEAD`).
         rev: Option<String>,
-        /// Follow file renames: when the path doesn't exist in a parent
-        /// commit, search that commit's tree for the most similar blob
-        /// and continue blaming under that name. Match threshold: 80%
-        /// of lines (matches git's default `-M50`).
+        /// Accepted for compatibility and without effect: a renamed file
+        /// is always followed, as in git.
         #[arg(short = 'M', long = "follow")]
         follow: bool,
     },
@@ -1537,9 +1535,9 @@ pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, head: &str, out: &mut
             let args = crate::log_cmd::LogArgs::for_show(spec, *json);
             crate::log_cmd::run(out, repo, args)?;
         }
-        Command::Blame { path, rev, follow } => {
+        Command::Blame { path, rev, .. } => {
             let spec = at_head(rev.as_deref().unwrap_or("HEAD"));
-            crate::blame::run(out, repo, path, &spec, *follow)?;
+            crate::blame::run(out, repo, path, &spec)?;
         }
         Command::Config {
             key,

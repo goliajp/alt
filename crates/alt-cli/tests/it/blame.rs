@@ -1,7 +1,5 @@
-//! `alt blame <path>`: line-by-line origin attribution by walking
-//! first-parent and diffing each commit's file content against its
-//! parent's. Lines surviving unchanged inherit the parent's commit as
-//! their origin; lines changed at a commit stay attributed to it.
+//! `alt blame <path>`: each line is attributed to the commit that
+//! introduced it, through merges and renames, as `git blame` does.
 
 use std::fs;
 use std::path::Path;
@@ -93,58 +91,168 @@ fn blame_missing_file_fails_clearly() {
     assert!(err.contains("not found"), "stderr: {err}");
 }
 
+fn git(repo: &Path, date: u32, args: &[&str]) -> String {
+    let stamp = format!("@{date} +0000");
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_AUTHOR_NAME", "tester")
+        .env("GIT_AUTHOR_EMAIL", "t@e")
+        .env("GIT_COMMITTER_NAME", "tester")
+        .env("GIT_COMMITTER_EMAIL", "t@e")
+        .env("GIT_AUTHOR_DATE", &stamp)
+        .env("GIT_COMMITTER_DATE", &stamp)
+        .args(args)
+        .output()
+        .unwrap();
+    ok(out)
+}
+
+fn numbered(lines: std::ops::RangeInclusive<u32>) -> Vec<String> {
+    lines.map(|n| format!("line {n}")).collect()
+}
+
+fn put(repo: &Path, file: &str, lines: &[String]) {
+    fs::write(repo.join(file), lines.join("\n") + "\n").unwrap();
+}
+
+/// Commits everything in the work tree at `date`, returning the commit.
+fn commit(repo: &Path, date: u32, message: &str) -> String {
+    git(repo, date, &["add", "-A"]);
+    git(repo, date, &["commit", "-qm", message]);
+    git(repo, date, &["rev-parse", "HEAD"]).trim().to_owned()
+}
+
+/// The commit each line of `file` is attributed to, by alt (in the import
+/// of `src` at `dst`) and by git, as eight hex digits.
+fn attributions(src: &Path, dst: &Path, file: &str) -> (Vec<String>, Vec<String>) {
+    ok(alt(src, &["import", dst.to_str().unwrap()]));
+    let first8 = |text: String| -> Vec<String> {
+        text.lines()
+            .map(|l| l.trim_start_matches('^')[..8].to_owned())
+            .collect()
+    };
+    (
+        first8(ok(alt(dst, &["blame", file]))),
+        first8(git(src, 0, &["blame", "-l", "--root", file])),
+    )
+}
+
 #[test]
-fn blame_follows_renames_with_dash_m() {
-    let tmp = alt_os::temp::tempdir().unwrap();
-    ok(alt(tmp.path(), &["init"]));
-    fs::write(
-        tmp.path().join("old.txt"),
-        "alpha\nbeta\ngamma\ndelta\nepsilon\n",
-    )
-    .unwrap();
-    ok(alt(tmp.path(), &["add", "old.txt"]));
-    ok(alt(tmp.path(), &["commit", "-m", "add old"]));
-    let c1 = ok(alt(tmp.path(), &["rev-parse", "HEAD"]))
-        .trim()
-        .to_string();
+fn blame_looks_through_a_merge_at_the_commits_of_both_sides() {
+    let (src, dst) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
+    let (src, dst) = (src.path(), dst.path());
+    git(src, 1000, &["init", "-q", "-b", "main", "."]);
+    let mut lines = numbered(1..=12);
+    put(src, "f.txt", &lines);
+    let base = commit(src, 1000, "base");
 
-    // Rename + edit the last line.
-    fs::rename(tmp.path().join("old.txt"), tmp.path().join("new.txt")).unwrap();
-    fs::write(
-        tmp.path().join("new.txt"),
-        "alpha\nbeta\ngamma\ndelta\nZETA\n",
-    )
-    .unwrap();
-    // alt doesn't have a single `mv` command yet; the existing rename
-    // shows up as an old.txt deletion + new.txt addition in the index.
-    // Tell alt about both.
-    ok(alt(tmp.path(), &["add", "old.txt"])); // records the delete
-    ok(alt(tmp.path(), &["add", "new.txt"]));
-    ok(alt(tmp.path(), &["commit", "-m", "rename + edit"]));
-    let c2 = ok(alt(tmp.path(), &["rev-parse", "HEAD"]))
-        .trim()
-        .to_string();
+    git(src, 1100, &["switch", "-q", "-c", "side"]);
+    let mut side = lines.clone();
+    side[1] = "side two".into();
+    side.push("side tail".into());
+    put(src, "f.txt", &side);
+    let on_side = commit(src, 1100, "side edits");
 
-    // Without -M, every line is attributed to the rename commit (the
-    // walker has no way to find the file in the parent under its old
-    // name).
-    let plain = ok(alt(tmp.path(), &["blame", "new.txt"]));
-    let s2 = &c2[..8];
-    let unique: std::collections::HashSet<&str> = plain.lines().map(|l| &l[..8]).collect();
-    assert_eq!(unique.len(), 1, "plain blame attributes one commit");
-    assert!(unique.contains(s2));
+    git(src, 1200, &["switch", "-q", "main"]);
+    lines[9] = "main ten".into();
+    put(src, "f.txt", &lines);
+    let on_main = commit(src, 1200, "main edit");
+    git(
+        src,
+        1300,
+        &["merge", "-q", "--no-ff", "-m", "merge side", "side"],
+    );
 
-    // With -M, unchanged lines should reach back to c1 under old.txt;
-    // the edited line stays at c2.
-    let follow = ok(alt(tmp.path(), &["blame", "-M", "new.txt"]));
-    let s1 = &c1[..8];
-    let lines: Vec<&str> = follow.lines().collect();
-    assert_eq!(lines.len(), 5, "five lines");
-    assert!(lines[0].starts_with(s1), "alpha → c1: {}", lines[0]);
-    assert!(lines[1].starts_with(s1), "beta → c1: {}", lines[1]);
-    assert!(lines[2].starts_with(s1), "gamma → c1: {}", lines[2]);
-    assert!(lines[3].starts_with(s1), "delta → c1: {}", lines[3]);
-    assert!(lines[4].starts_with(s2), "ZETA → c2: {}", lines[4]);
+    let mut merged: Vec<String> = fs::read_to_string(src.join("f.txt"))
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect();
+    merged[4] = "after five".into();
+    put(src, "f.txt", &merged);
+    let after = commit(src, 1400, "after the merge");
+
+    let (ours, theirs) = attributions(src, dst, "f.txt");
+    assert_eq!(ours, theirs);
+    assert_eq!(ours[0], base[..8]);
+    assert_eq!(ours[1], on_side[..8], "a line changed on the merged branch");
+    assert_eq!(ours[12], on_side[..8]);
+    assert_eq!(ours[9], on_main[..8]);
+    assert_eq!(ours[4], after[..8]);
+}
+
+#[test]
+fn blame_follows_a_file_taken_whole_from_the_second_parent() {
+    let (src, dst) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
+    let (src, dst) = (src.path(), dst.path());
+    git(src, 1000, &["init", "-q", "-b", "main", "."]);
+    let lines = numbered(1..=8);
+    put(src, "f.txt", &lines);
+    put(src, "other.txt", &lines);
+    commit(src, 1000, "base");
+    git(src, 1100, &["switch", "-q", "-c", "side"]);
+    let mut side = lines.clone();
+    side[3] = "side four".into();
+    put(src, "f.txt", &side);
+    let on_side = commit(src, 1100, "side edit");
+    git(src, 1200, &["switch", "-q", "main"]);
+    put(src, "other.txt", &numbered(1..=9));
+    commit(src, 1200, "main touches another file");
+    git(
+        src,
+        1300,
+        &["merge", "-q", "--no-ff", "-m", "merge side", "side"],
+    );
+
+    let (ours, theirs) = attributions(src, dst, "f.txt");
+    assert_eq!(ours, theirs);
+    assert_eq!(ours[3], on_side[..8]);
+}
+
+#[test]
+fn blame_follows_a_renamed_file() {
+    let (src, dst) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
+    let (src, dst) = (src.path(), dst.path());
+    git(src, 1000, &["init", "-q", "-b", "main", "."]);
+    let mut lines = numbered(1..=10);
+    put(src, "old.txt", &lines);
+    put(src, "unrelated.txt", &["something else".to_owned()]);
+    let base = commit(src, 1000, "base");
+
+    fs::rename(src.join("old.txt"), src.join("new.txt")).unwrap();
+    lines[9] = "renamed ten".into();
+    put(src, "new.txt", &lines);
+    let renamed = commit(src, 1100, "rename and edit");
+
+    fs::create_dir(src.join("dir")).unwrap();
+    fs::rename(src.join("new.txt"), src.join("dir/new.txt")).unwrap();
+    let moved = commit(src, 1200, "move without a change");
+    lines[0] = "later one".into();
+    put(src, "dir/new.txt", &lines);
+    let later = commit(src, 1300, "edit after the move");
+
+    let (ours, theirs) = attributions(src, dst, "dir/new.txt");
+    assert_eq!(ours, theirs);
+    assert_eq!(ours[0], later[..8]);
+    assert_eq!(ours[4], base[..8], "through both renames");
+    assert_eq!(ours[9], renamed[..8]);
+    assert!(!ours.contains(&moved[..8].to_owned()));
+
+    // -M is accepted and changes nothing
+    let plain = ok(alt(dst, &["blame", "dir/new.txt"]));
+    assert_eq!(ok(alt(dst, &["blame", "-M", "dir/new.txt"])), plain);
 }
 
 #[test]

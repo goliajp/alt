@@ -251,3 +251,30 @@ pub(crate) fn pair_renames(repo: &Repository, changes: Vec<Changed>) -> Res<Vec<
     }
     Ok(out)
 }
+
+/// The blob (or link) at `path` in a tree, when the path is a file there.
+pub(crate) fn file_at(repo: &Repository, tree: ObjectId, path: &[u8]) -> Res<Option<TreeFile>> {
+    let mut current = tree;
+    let mut parts = path.split(|&b| b == b'/').peekable();
+    while let Some(part) = parts.next() {
+        let obj = repo
+            .read_object(&current)?
+            .ok_or_else(|| format!("tree {current} missing"))?;
+        let tree = Tree::parse(&obj.data, repo.algo())?;
+        let Some(entry) = tree.entries.iter().find(|e| e.name.as_slice() == part) else {
+            return Ok(None);
+        };
+        let is_tree = entry.mode.object_kind() == ObjectKind::Tree;
+        match (parts.peek().is_some(), is_tree) {
+            (true, true) => current = entry.oid,
+            (false, false) => {
+                return Ok(Some(TreeFile {
+                    oid: entry.oid,
+                    mode: entry.mode.value(),
+                }));
+            }
+            _ => return Ok(None),
+        }
+    }
+    Ok(None)
+}
