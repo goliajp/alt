@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: fix
+summary: print commit patches and diff headers the way git does
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/lib.rs
+touched: crates/alt-cli/src/log_cmd.rs
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/diff.rs
+touched: crates/alt-cli/src/patch.rs
+touched: crates/alt-cli/src/tree_changes.rs
+touched: crates/alt-cli/tests/it/diff.rs
+touched: crates/alt-cli/tests/it/log_patch.rs
+touched: crates/alt-repo/src/lib.rs
