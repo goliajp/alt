@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: look up ignore rules that name one path instead of matching each
+author-type: human
+author: doracawl
+touched: crates/alt-worktree/src/ignore.rs
