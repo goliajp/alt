@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: a handle held open keeps the runs another writer recorded
+author-type: human
+author: doracawl
+touched: crates/alt-odb/tests/it/head_record.rs
