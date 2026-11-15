@@ -21,7 +21,7 @@
 //! after which a version 2 file replaces them.
 
 use std::collections::BTreeMap;
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::Path;
 
@@ -105,10 +105,22 @@ pub fn write<'a>(
         .unwrap();
     buf.extend_from_slice(&check);
 
-    // readers refresh the snapshot too: one temp file per process
-    let tmp = path.with_extension(format!("tmp.{}", std::process::id()));
-    File::create(&tmp)?.write_all(&buf)?;
-    fs::rename(&tmp, path)?;
+    // readers refresh the snapshot too, any number at once, in one process
+    // or in several that may share process ids: each writes a file no one
+    // else can have, created exclusively
+    let mut nonce = [0u8; 8];
+    alt_os::random::fill(&mut nonce);
+    let tmp = path.with_extension(format!("tmp.{:016x}", u64::from_le_bytes(nonce)));
+    let written = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp)
+        .and_then(|mut file| file.write_all(&buf))
+        .and_then(|()| fs::rename(&tmp, path));
+    if let Err(e) = written {
+        let _ = fs::remove_file(&tmp);
+        return Err(e.into());
+    }
     Ok(buf.len() as u64)
 }
 
@@ -203,4 +215,83 @@ pub fn read(path: &Path) -> Option<Snapshot> {
         refs: Refs::from_base(refs),
         len,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    fn verifies(map: &[u8]) -> bool {
+        map.len() > 8
+            && alt_hash::blake3::hash(&map[..map.len() - 8]).as_bytes()[..8] == map[map.len() - 8..]
+    }
+
+    /// Two stores in one process (two threads) refresh the same snapshot:
+    /// every write goes through, and a snapshot a reader has mapped and
+    /// verified is never written to again.
+    #[test]
+    fn concurrent_writers_in_one_process_never_share_a_temporary_file() {
+        let dir = alt_os::temp::tempdir().unwrap();
+        let path = dir.path().join("snapshot");
+        let stop = Arc::new(AtomicBool::new(false));
+        let writers: Vec<_> = (0..2u8)
+            .map(|writer| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    for round in 0..400u64 {
+                        let refs: Vec<(String, RefTarget)> = (0..50 + round % 200)
+                            .map(|n| {
+                                let target =
+                                    RefTarget::Symbolic(format!("refs/x/{writer}/{round}"));
+                                (format!("refs/heads/b{n:04}"), target)
+                            })
+                            .collect();
+                        let anchor = Anchor {
+                            op: OpId([writer; 32]),
+                            start: round,
+                            end: round + 1,
+                            count: round + 1,
+                        };
+                        let listed = refs.iter().map(|(name, target)| (name.as_str(), target));
+                        write(&path, &anchor, refs.len(), listed)
+                            .unwrap_or_else(|e| panic!("writer {writer} round {round}: {e:?}"));
+                    }
+                })
+            })
+            .collect();
+        let reader = {
+            let (path, stop) = (path.clone(), Arc::clone(&stop));
+            std::thread::spawn(move || {
+                let mut held = Vec::new();
+                while !stop.load(Ordering::Relaxed) {
+                    let Ok(file) = File::open(&path) else {
+                        continue;
+                    };
+                    let map = unsafe { Mmap::map(&file).unwrap() };
+                    if verifies(&map) {
+                        held.push(map);
+                    }
+                    if held.len() > 64 {
+                        held.remove(0);
+                    }
+                    for map in &held {
+                        assert!(verifies(map), "a snapshot changed after it was read");
+                    }
+                }
+            })
+        };
+        for writer in writers {
+            writer.join().unwrap();
+        }
+        stop.store(true, Ordering::Relaxed);
+        reader.join().unwrap();
+        assert!(read(&path).is_some());
+        let left: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(left, ["snapshot"], "no temporary file is left behind");
+    }
 }
