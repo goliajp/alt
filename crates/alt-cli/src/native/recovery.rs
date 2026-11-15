@@ -226,7 +226,10 @@ impl NativeRepo<'_> {
                 };
                 Some((mode, hash(&std::fs::read(abs)?)))
             }
-            Ok(_) => return Err("recovery does not support special files or directories".into()),
+            // a directory is recorded as present, never by content: a
+            // submodule placeholder, or a tracked file replaced by a directory
+            Ok(meta) if meta.is_dir() => Some((0o160000, String::new())),
+            Ok(_) => return Err("recovery does not support special files".into()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
             Err(e) => return Err(e.into()),
         };

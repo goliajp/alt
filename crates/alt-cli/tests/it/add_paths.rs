@@ -120,3 +120,73 @@ fn a_commit_that_changes_nothing_is_refused_unless_asked_for() {
     ok(alt(root, &["commit", "--allow-empty", "-m", "on purpose"]));
     assert_ne!(ok(alt(root, &["rev-parse", "main"])), before);
 }
+
+#[test]
+fn add_keeps_a_submodule_entry() {
+    let (src, dst) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
+    let (src, dst) = (src.path(), dst.path());
+    ok(git(src, &["init", "-q", "-b", "main", "."]));
+    write(src, "a.txt", "one\n");
+    write(src, "dir/b.txt", "two\n");
+    ok(git(src, &["add", "."]));
+    ok(git(
+        src,
+        &[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            "160000,1111111111111111111111111111111111111111,sub",
+        ],
+    ));
+    ok(git(src, &["commit", "-qm", "base"]));
+    ok(alt(src, &["import", dst.to_str().unwrap()]));
+    std::fs::create_dir(src.join("sub")).unwrap();
+
+    // the whole tree, then the submodule path by name
+    for (round, spec) in [".", "sub"].into_iter().enumerate() {
+        for root in [src, dst] {
+            write(root, "a.txt", &format!("edit {round}\n"));
+        }
+        ok(alt(dst, &["add", spec]));
+        ok(alt(dst, &["add", "a.txt"]));
+        ok(alt(dst, &["commit", "-m", "edit"]));
+        ok(git(src, &["add", "."]));
+        ok(git(src, &["commit", "-qm", "edit"]));
+        assert_eq!(
+            tree_line(&ok(alt(dst, &["cat-file", "-p", "HEAD"]))),
+            tree_line(&ok(git(src, &["cat-file", "-p", "HEAD"]))),
+            "after add {spec}"
+        );
+    }
+    assert!(ok(alt(dst, &["status"])).contains("nothing to commit"));
+}
+
+#[test]
+fn add_stages_a_file_replaced_by_a_directory() {
+    let (ours, theirs) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
+    ok(alt(ours.path(), &["init", "."]));
+    ok(git(theirs.path(), &["init", "-q", "."]));
+    for (root, run) in [
+        (ours.path(), &alt as &dyn Fn(&Path, &[&str]) -> Output),
+        (theirs.path(), &git),
+    ] {
+        write(root, "node", "a file\n");
+        write(root, "keep.txt", "k\n");
+        ok(run(root, &["add", "."]));
+        ok(run(root, &["commit", "-m", "base"]));
+        std::fs::remove_file(root.join("node")).unwrap();
+        write(root, "node/inner.txt", "now a directory\n");
+        ok(run(root, &["add", "."]));
+        ok(run(root, &["commit", "-m", "file becomes directory"]));
+    }
+    assert_eq!(
+        tree_line(&ok(alt(ours.path(), &["cat-file", "-p", "HEAD"]))),
+        tree_line(&ok(git(theirs.path(), &["cat-file", "-p", "HEAD"])))
+    );
+}

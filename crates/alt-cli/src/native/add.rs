@@ -29,8 +29,19 @@ impl NativeRepo<'_> {
             .into_iter()
             .filter(|e| e.stage() == 0)
             .collect();
+        // a submodule is not scanned: its entry stays as recorded unless the
+        // working tree now holds a file at or under its path
+        let kept_gitlinks: std::collections::BTreeSet<BString> = prior_stage_zero
+            .iter()
+            .filter(|e| e.mode == 0o160000 && !occupied(&scan, &e.path))
+            .map(|e| e.path.clone())
+            .collect();
         let mut entries: Vec<IndexEntry> = if staging_all {
-            Vec::new()
+            prior_stage_zero
+                .iter()
+                .filter(|e| kept_gitlinks.contains(&e.path))
+                .cloned()
+                .collect()
         } else {
             before.entries.clone()
         };
@@ -72,11 +83,19 @@ impl NativeRepo<'_> {
                 .iter()
                 .map(|e| e.path.clone())
                 .chain(scan.iter().map(|w| w.path.clone()))
+                .filter(|p| !kept_gitlinks.contains(p))
                 .collect()
         } else {
-            targets.iter().cloned().collect()
+            targets
+                .iter()
+                .filter(|p| !kept_gitlinks.contains(*p))
+                .cloned()
+                .collect()
         };
         for rel in &targets {
+            if kept_gitlinks.contains(rel) {
+                continue;
+            }
             entries.retain(|e| &e.path != rel);
             if let Some(w) = scan.iter().find(|w| &w.path == rel) {
                 // path gate: deny staging any path the policy excludes,
@@ -116,6 +135,17 @@ impl NativeRepo<'_> {
         }
         Ok(())
     }
+}
+
+/// Whether the path-sorted `scan` holds `path` itself or a file beneath it.
+fn occupied(scan: &[WorkEntry], path: &BString) -> bool {
+    if scan.binary_search_by(|w| w.path.cmp(path)).is_ok() {
+        return true;
+    }
+    let mut dir = path.to_vec();
+    dir.push(b'/');
+    let at = scan.partition_point(|w| w.path.as_slice() < dir.as_slice());
+    scan.get(at).is_some_and(|w| w.path.starts_with(&dir))
 }
 
 /// A path argument relative to the working-tree root, without `./` in front
