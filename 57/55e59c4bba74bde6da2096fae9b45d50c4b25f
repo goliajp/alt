@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: convert the files of a conflicted merge under the merged attribute files
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/convert.rs
+touched: crates/alt-cli/src/native/merge.rs
+touched: crates/alt-cli/tests/it/eol.rs
