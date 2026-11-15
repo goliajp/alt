@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: perf
+summary: keep records a process reads again and again from behind the index runs
+author-type: human
+author: doracawl
+touched: crates/alt-store/src/reclog.rs
+touched: crates/alt-store/src/reclog/cache.rs
+touched: crates/alt-store/src/reclog/sync.rs
+touched: crates/alt-store/tests/it/index_gap.rs
