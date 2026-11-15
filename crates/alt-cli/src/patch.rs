@@ -90,13 +90,15 @@ pub(crate) enum Section {
 }
 
 /// How this repository prints names and ids.
-pub(crate) fn style(repo: &Repository) -> Res<Style<'_>> {
+/// `head` is the ref that stands for `HEAD` in this workspace.
+pub(crate) fn style<'r>(repo: &'r Repository, head: &str) -> Res<Style<'r>> {
     // where the copy of the git configuration and its files are kept
     let kept = match repo.is_native() {
         true => repo.git_dir().join("git-import"),
         false => repo.git_dir().to_path_buf(),
     };
-    let settings = crate::git_settings::layered(repo.config(), Some(kept.clone()), None)?;
+    let branch = repo.branch_of(head)?;
+    let settings = crate::git_settings::layered(repo.config(), Some(kept.clone()), branch)?;
     let quotepath = settings.get_bool("core", None, "quotepath");
     let info = kept.join("info/attributes");
     Ok(Style {

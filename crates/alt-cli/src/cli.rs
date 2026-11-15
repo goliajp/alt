@@ -1525,7 +1525,7 @@ pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, head: &str, out: &mut
                 return Err("one of -t, -s or -p is required".into());
             }
         }
-        Command::Log(args) => log_cmd::run(out, repo, args.clone().map_rev(at_head))?,
+        Command::Log(args) => log_cmd::run(out, repo, args.clone().map_rev(at_head), head)?,
         Command::Show { rev, json } => {
             let spec = at_head(rev.as_deref().unwrap_or("HEAD"));
             // `<rev>:<path>` selects a blob at `path` as of commit
@@ -1543,7 +1543,7 @@ pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, head: &str, out: &mut
                 return Ok(());
             }
             let args = crate::log_cmd::LogArgs::for_show(spec, *json);
-            crate::log_cmd::run(out, repo, args)?;
+            crate::log_cmd::run(out, repo, args, head)?;
         }
         Command::Blame {
             path,

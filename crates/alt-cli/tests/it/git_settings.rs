@@ -244,3 +244,215 @@ fn the_alt_the_tests_run_does_not_read_the_configuration_of_the_machine() {
     // the usual rule, a line that begins with a letter: not the driver
     assert!(head.ends_with("section one"), "{head}");
 }
+
+/// A git repository and its import into alt, each with `notes.x`
+/// committed and then changed, and a home directory for the two tools.
+struct Twin {
+    dirs: [alt_os::temp::TempDir; 3],
+}
+
+/// What a variable is for one command: set to this, or not set.
+type Env<'a> = &'a [(&'a str, Option<&'a str>)];
+
+const SECTION_TWO: &str = "[diff \"custom\"]\n\txfuncname = \"^ *(section two)$\"\n";
+
+impl Twin {
+    /// With `in_tree`, the files in the tree name the driver `custom`
+    /// for `notes.x`.
+    fn new(in_tree: bool) -> Twin {
+        let twin = Twin {
+            dirs: [0; 3].map(|_| alt_os::temp::tempdir().unwrap()),
+        };
+        ok(twin.run("git", &["init", "-q", "-b", "main", "."], &[]));
+        if in_tree {
+            write(twin.root("git"), ".gitattributes", "*.x diff=custom\n");
+        }
+        write(twin.root("git"), "notes.x", &notes(""));
+        ok(twin.run("git", &["add", "."], &[]));
+        ok(twin.run("git", &["commit", "-qm", "base"], &[]));
+        let target = twin.root("alt").to_str().unwrap().to_owned();
+        ok(at_home(
+            "alt",
+            twin.home(),
+            twin.root("git"),
+            &["import", &target],
+        ));
+        for tool in ["git", "alt"] {
+            write(twin.root(tool), "notes.x", &notes(" changed"));
+        }
+        twin
+    }
+
+    fn home(&self) -> &Path {
+        self.dirs[0].path()
+    }
+
+    fn root(&self, tool: &str) -> &Path {
+        self.dirs[if tool == "git" { 1 } else { 2 }].path()
+    }
+
+    fn run(&self, tool: &str, args: &[&str], env: Env) -> Output {
+        let mut command = match tool {
+            "git" => Command::new("git"),
+            _ => crate::alt_command(),
+        };
+        command
+            .current_dir(self.root(tool))
+            .env("HOME", self.home())
+            .env("GIT_CONFIG_SYSTEM", self.home().join("system"))
+            .env("ALT_NO_DAEMON", "1")
+            .env("GIT_AUTHOR_NAME", "tester")
+            .env("GIT_AUTHOR_EMAIL", "t@e")
+            .env("GIT_COMMITTER_NAME", "tester")
+            .env("GIT_COMMITTER_EMAIL", "t@e");
+        for name in [
+            "XDG_CONFIG_HOME",
+            "GIT_CONFIG_NOSYSTEM",
+            "GIT_CONFIG_GLOBAL",
+        ] {
+            command.env_remove(name);
+        }
+        for (name, value) in env {
+            match value {
+                Some(value) => command.env(name, value),
+                None => command.env_remove(name),
+            };
+        }
+        command.args(args).output().unwrap()
+    }
+
+    /// What follows the last `@@` of the patch both tools print, which
+    /// they must print alike.
+    fn section(&self, args: &[&str], env: Env) -> String {
+        let last = |tool: &str| {
+            let patch = ok(self.run(tool, args, env));
+            let head = patch.lines().rfind(|l| l.starts_with("@@")).unwrap();
+            head.rsplit("@@").next().unwrap().trim().to_owned()
+        };
+        let (ours, theirs) = (last("alt"), last("git"));
+        assert_eq!(ours, theirs, "{args:?} with {env:?}");
+        ours
+    }
+
+    /// The error both tools end `args` with; the message of alt.
+    fn refused(&self, args: &[&str], env: Env) -> String {
+        let theirs = self.run("git", args, env);
+        let ours = self.run("alt", args, env);
+        assert!(!theirs.status.success(), "git runs {args:?} with {env:?}");
+        assert!(!ours.status.success(), "alt runs {args:?} with {env:?}");
+        String::from_utf8_lossy(&ours.stderr).into_owned()
+    }
+}
+
+#[test]
+fn a_configuration_file_the_user_may_not_read_is_passed_over_and_a_broken_one_named() {
+    use std::os::unix::fs::PermissionsExt;
+    let twin = Twin::new(true);
+    let file = twin.home().join(".gitconfig");
+    write(twin.home(), ".gitconfig", SECTION_TWO);
+    assert_eq!(twin.section(&["diff"], &[]), "section two");
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let section = twin.section(&["diff"], &[]);
+    // the superuser reads any file
+    if std::fs::read(&file).is_err() {
+        assert_eq!(section, "section one");
+    }
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+    write(
+        twin.home(),
+        ".gitconfig",
+        "[core]\n\tquotepath = false\n[diff\n",
+    );
+    let message = twin.refused(&["diff"], &[]);
+    let named = format!("bad config line 3 in file {}", file.display());
+    assert!(message.contains(&named), "{message}");
+    let theirs = twin.run("git", &["diff"], &[]);
+    assert!(String::from_utf8_lossy(&theirs.stderr).contains(&named));
+}
+
+#[test]
+fn a_variable_set_to_nothing_names_no_configuration_file() {
+    let twin = Twin::new(true);
+    write(twin.home(), ".gitconfig", SECTION_TWO);
+    assert_eq!(twin.section(&["diff"], &[]), "section two");
+    let none = &[("GIT_CONFIG_GLOBAL", Some(""))];
+    assert_eq!(twin.section(&["diff"], none), "section one");
+    std::fs::remove_file(twin.home().join(".gitconfig")).unwrap();
+    write(twin.home(), "system", SECTION_TWO);
+    assert_eq!(twin.section(&["diff"], &[]), "section two");
+    let none = &[("GIT_CONFIG_SYSTEM", Some(""))];
+    assert_eq!(twin.section(&["diff"], none), "section one");
+}
+
+#[test]
+fn the_file_in_the_home_directory_is_read_after_the_one_in_the_config_directory() {
+    let twin = Twin::new(true);
+    let item = "[diff \"custom\"]\n\txfuncname = \"^ *(item 3)$\"\n";
+    write(twin.home(), "xdg/git/config", SECTION_TWO);
+    let xdg = twin.home().join("xdg");
+    let env = &[("XDG_CONFIG_HOME", xdg.to_str())];
+    assert_eq!(twin.section(&["diff"], env), "section two");
+    write(twin.home(), ".gitconfig", item);
+    assert_eq!(twin.section(&["diff"], env), "item 3");
+    // and the usual place of the first is beneath the home directory
+    std::fs::remove_file(twin.home().join(".gitconfig")).unwrap();
+    write(twin.home(), ".config/git/config", item);
+    assert_eq!(twin.section(&["diff"], &[]), "item 3");
+    assert_eq!(twin.section(&["diff"], env), "section two");
+}
+
+#[test]
+fn without_a_home_directory_no_file_is_found_there_and_a_path_into_it_is_an_error() {
+    let twin = Twin::new(true);
+    write(twin.home(), ".gitconfig", SECTION_TWO);
+    write(twin.home(), ".config/git/config", SECTION_TWO);
+    let homeless = &[("HOME", None)];
+    assert_eq!(twin.section(&["diff"], homeless), "section one");
+    for tool in ["git", "alt"] {
+        ok(twin.run(tool, &["config", "core.attributesFile", "~/attrs"], &[]));
+    }
+    assert_eq!(twin.section(&["diff"], &[]), "section two");
+    let message = twin.refused(&["diff"], homeless);
+    let said = "failed to expand user dir in: '~/attrs'";
+    assert!(message.contains(said), "{message}");
+
+    let twin = Twin::new(true);
+    for tool in ["git", "alt"] {
+        ok(twin.run(tool, &["config", "include.path", "~/more"], &[]));
+    }
+    write(twin.home(), "more", SECTION_TWO);
+    assert_eq!(twin.section(&["diff"], &[]), "section two");
+    let message = twin.refused(&["diff"], homeless);
+    let said = "could not expand include path '~/more'";
+    assert!(message.contains(said), "{message}");
+}
+
+#[test]
+fn the_users_attributes_file_is_read_through_a_symlink() {
+    let twin = Twin::new(false);
+    let config = format!("{SECTION_TWO}[core]\n\tattributesFile = ~/attrs\n");
+    write(twin.home(), ".gitconfig", &config);
+    assert_eq!(twin.section(&["diff"], &[]), "section one");
+    write(twin.home(), "kept/attributes", "*.x diff=custom\n");
+    std::os::unix::fs::symlink("kept/attributes", twin.home().join("attrs")).unwrap();
+    assert_eq!(twin.section(&["diff"], &[]), "section two");
+}
+
+#[test]
+fn a_file_included_on_a_branch_applies_to_the_patches_of_a_log() {
+    let twin = Twin::new(true);
+    let config = "[includeIf \"onbranch:main\"]\n\tpath = main.inc\n\
+                  [includeIf \"onbranch:other\"]\n\tpath = other.inc\n";
+    write(twin.home(), ".gitconfig", config);
+    write(twin.home(), "main.inc", SECTION_TWO);
+    write(
+        twin.home(),
+        "other.inc",
+        "[diff \"custom\"]\n\txfuncname = \"^ *(item 3)$\"\n",
+    );
+    ok(twin.run("git", &["commit", "-qam", "changed"], &[]));
+    ok(twin.run("alt", &["add", "."], &[]));
+    ok(twin.run("alt", &["commit", "-m", "changed"], &[]));
+    assert_eq!(twin.section(&["log", "-p", "-n", "1"], &[]), "section two");
+    assert_eq!(twin.section(&["show"], &[]), "section two");
+}

@@ -104,10 +104,12 @@ impl LogArgs {
     }
 }
 
+/// `head` is the ref that stands for `HEAD` in this workspace.
 pub fn run(
     out: &mut impl Write,
     repo: &Repository,
     args: LogArgs,
+    head: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let start = repo
         .rev_parse(&args.rev)?
@@ -122,7 +124,7 @@ pub fn run(
     let mut first = true;
     let mut converted = Vec::new();
     // one for the whole log: it learns which ids share a prefix as it goes
-    let style = crate::patch::style(repo)?;
+    let style = crate::patch::style(repo, head)?;
     for item in repo.rev_walk(start)?.take(limit) {
         let (oid, _) = item?;
         let obj = repo.read_object(&oid)?.expect("walked oid exists");

@@ -89,12 +89,16 @@ pub(crate) fn outer(git_dir: Option<PathBuf>, branch: Option<BString>) -> Res<Ve
         matches!(v.as_str(), "true" | "yes" | "on") || v.parse::<i64>().is_ok_and(|n| n != 0)
     });
     let mut files = Vec::new();
+    // a variable set to nothing names no file, and no other is read
+    // in its place
     if !no_system {
-        files
-            .push(env_path("GIT_CONFIG_SYSTEM").unwrap_or_else(|| PathBuf::from("/etc/gitconfig")));
+        files.push(match var("GIT_CONFIG_SYSTEM") {
+            Some(named) => PathBuf::from(named),
+            None => PathBuf::from("/etc/gitconfig"),
+        });
     }
-    match env_path("GIT_CONFIG_GLOBAL") {
-        Some(only) => files.push(only),
+    match var("GIT_CONFIG_GLOBAL") {
+        Some(only) => files.push(PathBuf::from(only)),
         None => {
             files.extend(user_dir().map(|dir| dir.join("config")));
             files.extend(home().map(|h| h.join(".gitconfig")));
@@ -102,6 +106,11 @@ pub(crate) fn outer(git_dir: Option<PathBuf>, branch: Option<BString>) -> Res<Ve
     }
     let mut entries = Vec::new();
     for file in files.iter().filter(|f| f.is_file()) {
+        // as in git, a file the user may not read is passed over
+        let denied = |e: std::io::Error| e.kind() == std::io::ErrorKind::PermissionDenied;
+        if std::fs::File::open(file).is_err_and(denied) {
+            continue;
+        }
         entries.extend(Config::load(file, &ctx)?.entries);
     }
     Ok(entries)
@@ -127,9 +136,19 @@ pub(crate) fn read_if_file(path: PathBuf) -> Res<Option<Vec<u8>>> {
     }
 }
 
+/// The content of a file, through a symlink too; `None` when there is
+/// no such file.
+fn read_followed(path: PathBuf) -> Res<Option<Vec<u8>>> {
+    match path.is_file() {
+        true => Ok(Some(std::fs::read(path)?)),
+        false => Ok(None),
+    }
+}
+
 /// The attribute files outside the tree: the user's, at
 /// `core.attributesFile` or in the user's git directory, and the
-/// repository's own at `info`.
+/// repository's own at `info`. Unlike the files in the tree, git reads
+/// these through a symlink.
 pub(crate) fn outer_attributes(settings: &Config, info: &Path) -> Res<Vec<Layer>> {
     let mut layers = Vec::new();
     let user = match settings.get_str("core", None, "attributesfile") {
@@ -137,15 +156,18 @@ pub(crate) fn outer_attributes(settings: &Config, info: &Path) -> Res<Vec<Layer>
             let path = std::str::from_utf8(path).map_err(|_| "core.attributesFile is not UTF-8")?;
             Some(match (path.strip_prefix("~/"), home()) {
                 (Some(rest), Some(home)) => home.join(rest),
+                (Some(_), None) => {
+                    return Err(format!("failed to expand user dir in: '{path}'").into());
+                }
                 _ => PathBuf::from(path),
             })
         }
         None => user_dir().map(|dir| dir.join("attributes")),
     };
-    if let Some(content) = user.map(read_if_file).transpose()?.flatten() {
+    if let Some(content) = user.map(read_followed).transpose()?.flatten() {
         layers.push(Layer::global(&content));
     }
-    if let Some(content) = read_if_file(info.to_path_buf())? {
+    if let Some(content) = read_followed(info.to_path_buf())? {
         layers.push(Layer::info(&content));
     }
     Ok(layers)
