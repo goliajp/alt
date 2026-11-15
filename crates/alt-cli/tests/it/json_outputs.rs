@@ -96,7 +96,7 @@ impl Scene {
     }
 
     pub fn command(&self) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_alt"));
+        let mut command = crate::alt_command();
         command
             .current_dir(self.path(""))
             .env_clear()

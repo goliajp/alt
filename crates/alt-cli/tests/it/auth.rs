@@ -49,7 +49,7 @@ fn auth_is_repository_independent_and_refuses_to_overwrite_credentials() {
     let file = root.path().join("saved.json");
     let sentinel = b"existing private content";
     std::fs::write(&file, sentinel).unwrap();
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_alt"))
+    let output = crate::alt_command()
         .current_dir(root.path())
         .args([
             "auth",
@@ -93,7 +93,7 @@ fn auth_resumes_after_process_death_with_issued_token_and_expired_device_request
     let file = root.path().join("credential.json");
     let journal = root.path().join("credential.json.login");
     let start = |resume: bool| {
-        let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_alt"));
+        let mut command = crate::alt_command();
         command
             .current_dir(root.path())
             .args(["auth", "login", "--server", &origin, "--credential-file"])
@@ -242,7 +242,7 @@ fn auth_delegate_reuses_exact_private_intent_after_process_death_during_registra
     let plan = root.path().join("plan.json");
     std::fs::write(&plan,json!({"purpose":"Read selected repository","agent_session":"session-a","lifetime_seconds":300,"scope":{"repository":{"installation_id":"instance","repository_instance_id":"repository","recovery_epoch":"1"},"grants":[],"publish_records":false}}).to_string()).unwrap();
     let start = |resume: bool| {
-        let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_alt"));
+        let mut cmd = crate::alt_command();
         cmd.current_dir(root.path())
             .args(["auth", "delegate", "--credential-file"])
             .arg(&parent_file)

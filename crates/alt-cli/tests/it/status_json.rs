@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
 fn alt(repo: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alt"))
+    crate::alt_command()
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", "tester")
@@ -86,7 +86,7 @@ fn agent_principal_surfaces_via_status_json() {
     ok(alt(root, &["add", "."]));
     ok(alt(root, &["commit", "-m", "base"]));
 
-    let out = Command::new(env!("CARGO_BIN_EXE_alt"))
+    let out = crate::alt_command()
         .current_dir(root)
         .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", "bot")

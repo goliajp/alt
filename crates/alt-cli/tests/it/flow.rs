@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 fn alt(repo: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alt"))
+    crate::alt_command()
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", "tester")
@@ -115,7 +115,7 @@ fn finish_with_diverged_develop_makes_a_merge_commit() {
     ok(alt(root, &["switch", "develop"]));
     std::fs::write(root.join("fd.txt"), "develop\n").unwrap();
     ok(alt(root, &["add", "."]));
-    let out = Command::new(env!("CARGO_BIN_EXE_alt"))
+    let out = crate::alt_command()
         .current_dir(root)
         .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", "tester")

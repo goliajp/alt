@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 fn alt(cwd: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alt"))
+    crate::alt_command()
         .current_dir(cwd)
         .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", "tester")
@@ -29,7 +29,7 @@ fn ok(o: Output) -> String {
 /// back-to-back, which is what surfaces concurrency races that fsync's spacing
 /// would otherwise hide — the env is set on the child only (sound).
 fn alt_fast(cwd: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alt"))
+    crate::alt_command()
         .current_dir(cwd)
         .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", "tester")

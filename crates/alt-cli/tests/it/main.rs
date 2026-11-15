@@ -71,3 +71,13 @@ mod filter_process;
 mod funcname;
 mod git_settings;
 mod recovery_kinds;
+
+/// The `alt` binary under test, kept from the git configuration of the
+/// machine the tests run on, as the git they compare it with is. A test
+/// of that configuration gives the command a home of its own.
+pub fn alt_command() -> std::process::Command {
+    let mut alt = std::process::Command::new(env!("CARGO_BIN_EXE_alt"));
+    alt.env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null");
+    alt
+}

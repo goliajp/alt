@@ -6,7 +6,7 @@ use std::process::{Command, Output};
 const ID: &str = "0123456789abcdef0123456789abcdef";
 
 fn run(root: &Path, args: &[&str], daemon: bool) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_alt"));
+    let mut command = crate::alt_command();
     command
         .current_dir(root)
         .args(args)
@@ -193,7 +193,7 @@ fn request_binding_rejects_another_workspace_or_principal() {
     let args = ["--request-id", ID, "add", ".", "--json"];
     assert!(run(root.path(), &args, false).status.success());
     error(&run(workspace.path(), &args, false), 1, "request_mismatch");
-    let output = Command::new(env!("CARGO_BIN_EXE_alt"))
+    let output = crate::alt_command()
         .current_dir(root.path())
         .args(args)
         .env("ALT_NO_DAEMON", "1")
@@ -210,7 +210,7 @@ fn request_binding_rejects_another_workspace_or_principal() {
 fn non_utf8_argument_has_exact_bytes_without_creating_a_request() {
     use std::os::unix::ffi::OsStringExt;
     let root = fixture();
-    let output = Command::new(env!("CARGO_BIN_EXE_alt"))
+    let output = crate::alt_command()
         .current_dir(root.path())
         .arg("add")
         .arg(std::ffi::OsString::from_vec(vec![b'a', 0xff]))

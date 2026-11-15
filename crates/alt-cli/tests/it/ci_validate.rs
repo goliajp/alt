@@ -9,7 +9,7 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 fn alt(cwd: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alt"))
+    crate::alt_command()
         .current_dir(cwd)
         .env("ALT_NO_DAEMON", "1")
         .args(args)

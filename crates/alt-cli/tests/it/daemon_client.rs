@@ -19,7 +19,7 @@ use alt_cli::daemon;
 /// `ALT_NO_DAEMON=1` to force the direct path. A short idle timeout is forwarded
 /// to any daemon the client spawns, so it self-exits instead of lingering.
 fn alt(cwd: &Path, args: &[&str], daemon: bool) -> Output {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_alt"));
+    let mut cmd = crate::alt_command();
     cmd.current_dir(cwd)
         .env("GIT_AUTHOR_NAME", "tester")
         .env("GIT_AUTHOR_EMAIL", "t@e")
@@ -226,7 +226,7 @@ fn commit_metadata_through_the_daemon_takes_the_callers_controlling() {
     let commit_as = |file: &str, controlling: &str| {
         std::fs::write(root.join(file), "x\n").unwrap();
         ok(alt(root, &["add", file], true));
-        let o = Command::new(env!("CARGO_BIN_EXE_alt"))
+        let o = crate::alt_command()
             .current_dir(root)
             .env("GIT_AUTHOR_NAME", "tester")
             .env("GIT_AUTHOR_EMAIL", "t@e")

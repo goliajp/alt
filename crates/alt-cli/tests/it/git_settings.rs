@@ -12,7 +12,7 @@ fn at_home(tool: &str, home: &Path, repo: &Path, args: &[&str]) -> Output {
             git
         }
         _ => {
-            let mut alt = Command::new(env!("CARGO_BIN_EXE_alt"));
+            let mut alt = crate::alt_command();
             alt.current_dir(repo).env("ALT_NO_DAEMON", "1");
             alt
         }
@@ -167,7 +167,7 @@ fn the_environment_can_turn_the_outer_configuration_off() {
 /// `alt` in `repo` through the repository's daemon, which this starts
 /// when none runs and which ends by itself soon after its last command.
 fn through_daemon(home: &Path, repo: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alt"))
+    crate::alt_command()
         .current_dir(repo)
         .env("HOME", home)
         .env("GIT_CONFIG_SYSTEM", home.join("system"))
@@ -213,4 +213,34 @@ fn a_command_through_the_daemon_reads_the_configuration_of_its_caller() {
         assert!(begun.elapsed().as_secs() < 20, "the daemon stays");
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
+}
+
+#[test]
+fn the_alt_the_tests_run_does_not_read_the_configuration_of_the_machine() {
+    let dirs = [0; 2].map(|_| alt_os::temp::tempdir().unwrap());
+    let (home, repo) = (dirs[0].path(), dirs[1].path());
+    // a machine whose user and system both name a driver for these files
+    let driver = "[diff \"custom\"]\n\txfuncname = \"^ *(section two)$\"\n";
+    write(home, ".gitconfig", driver);
+    write(home, "system", driver);
+    let alt = |args: &[&str]| {
+        let mut alt = crate::alt_command();
+        alt.current_dir(repo)
+            .env("HOME", home)
+            .env("ALT_NO_DAEMON", "1")
+            .env_remove("XDG_CONFIG_HOME")
+            .env("GIT_AUTHOR_NAME", "tester")
+            .env("GIT_AUTHOR_EMAIL", "t@e");
+        ok(alt.args(args).output().unwrap())
+    };
+    alt(&["init", "."]);
+    write(repo, ".gitattributes", "*.x diff=custom\n");
+    write(repo, "notes.x", &notes(""));
+    alt(&["add", "."]);
+    alt(&["commit", "-m", "base"]);
+    write(repo, "notes.x", &notes("!"));
+    let shown = alt(&["diff"]);
+    let head = shown.lines().rfind(|l| l.starts_with("@@")).unwrap();
+    // the usual rule, a line that begins with a letter: not the driver
+    assert!(head.ends_with("section one"), "{head}");
 }

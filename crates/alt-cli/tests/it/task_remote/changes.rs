@@ -405,7 +405,7 @@ fn interrupted_creation(
             request.join("response.bin")
         };
         let log = server._root.path().join(format!("repair-{phase}.log"));
-        let mut command = Command::new(env!("CARGO_BIN_EXE_alt"));
+        let mut command = crate::alt_command();
         command
             .current_dir(work)
             .args(arguments)

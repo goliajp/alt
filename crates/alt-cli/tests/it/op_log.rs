@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 fn alt(repo: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alt"))
+    crate::alt_command()
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", "alice")
@@ -17,7 +17,7 @@ fn alt(repo: &Path, args: &[&str]) -> Output {
 }
 
 fn alt_as_agent(repo: &Path, args: &[&str], agent_id: &str, session: &str) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alt"))
+    crate::alt_command()
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", agent_id)
