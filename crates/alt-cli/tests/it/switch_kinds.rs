@@ -171,3 +171,26 @@ fn switch_leaves_alone_the_files_both_branches_share() {
     ok(alt(root, &["switch", "flat"]));
     assert_eq!(inode("keep.txt"), before, "keep.txt was written again");
 }
+
+#[cfg(unix)]
+#[test]
+fn switch_refuses_to_write_beneath_an_untracked_symlink() {
+    let outside = alt_os::temp::tempdir().unwrap();
+    let dir = alt_os::temp::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+    write(root, "keep.txt", "k\n");
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "base"]));
+    ok(alt(root, &["switch", "-c", "deeper"]));
+    write(root, "dir/inner.txt", "inner\n");
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "a directory"]));
+    ok(alt(root, &["switch", "main"]));
+    // nobody tracks this link: a checkout must not follow it
+    std::os::unix::fs::symlink(outside.path(), root.join("dir")).unwrap();
+    let refused = alt(root, &["switch", "deeper"]);
+    assert!(!refused.status.success());
+    assert!(!outside.path().join("inner.txt").exists());
+    assert!(ok(alt(root, &["status"])).contains("On branch main"));
+}
