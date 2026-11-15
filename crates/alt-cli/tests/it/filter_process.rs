@@ -234,19 +234,31 @@ fn a_process_that_cannot_or_will_not_filter_a_file_leaves_it_as_it_is() {
         std::fs::write(root.join("z.r"), "Three\n").unwrap();
     }
     ok(pair.git(&["add", "."]));
-    ok(pair.alt(&["add", "."]));
-    // a file the process gives up on is stored as it is; it is the only
-    // file of its command, so no other file comes before or after it
-    for root in [&pair.src, &pair.dst] {
-        std::fs::write(root.join("abort.r"), "Two\n").unwrap();
-    }
-    ok(pair.git(&["add", "."]));
     ok(pair.git(&["commit", "-qm", "edit"]));
     ok(pair.alt(&["add", "."]));
     ok(pair.alt(&["commit", "-m", "edit"]));
     assert_eq!(pair.tree("alt"), pair.tree("git"));
-    assert_eq!(ok(pair.alt(&["show", "HEAD:abort.r"])), "Two\n");
     assert_eq!(ok(pair.alt(&["show", "HEAD:a.r"])), "Bar\n");
+    assert_eq!(ok(pair.alt(&["show", "HEAD:refuse.r"])), "Kept\n");
+}
+
+#[test]
+fn a_process_that_gives_up_cleans_nothing_more_in_that_command() {
+    // the only filtered file, so that neither tool looks at another one
+    // behind it: a process that has given up filters nothing more
+    let pair = imported("clean", false, &[("c.txt", "Plain\n")]);
+    for root in [&pair.src, &pair.dst] {
+        std::fs::write(root.join("abort.r"), "Two\n").unwrap();
+    }
+    ok(pair.git(&["add", "."]));
+    ok(pair.alt(&["add", "."]));
+    for tool in 0..2 {
+        assert!(pair.log(tool).contains(&"clean abort.r".to_owned()));
+    }
+    ok(pair.git(&["commit", "-qm", "gave up"]));
+    ok(pair.alt(&["commit", "-m", "gave up"]));
+    assert_eq!(pair.tree("alt"), pair.tree("git"));
+    assert_eq!(ok(pair.alt(&["show", "HEAD:abort.r"])), "Two\n");
 }
 
 #[test]
