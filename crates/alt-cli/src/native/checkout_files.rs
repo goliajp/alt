@@ -218,7 +218,7 @@ impl NativeRepo<'_> {
                     let link = temp.path().join("link");
                     symlink_to(&bytes, &link)?;
                     crate::durable::rename(link, &abs)?;
-                    self.note_written(path, &abs)?;
+                    self.note_written(path, &abs, state)?;
                     std::fs::File::open(parent)?.sync_all()?;
                 } else {
                     use std::os::unix::fs::PermissionsExt;
@@ -230,7 +230,7 @@ impl NativeRepo<'_> {
                         ))?;
                     tmp.as_file().sync_all()?;
                     tmp.persist(&abs)?;
-                    self.note_written(path, &abs)?;
+                    self.note_written(path, &abs, state)?;
                     std::fs::File::open(parent)?.sync_all()?;
                 }
             }
@@ -253,10 +253,17 @@ impl NativeRepo<'_> {
     }
 
     /// Remembers what a file looks like right after the checkout wrote it,
-    /// for the snapshot of the index the checkout ends with.
-    fn note_written(&self, path: &BString, abs: &Path) -> Res<()> {
-        let stat = alt_worktree::FileStat::of(&std::fs::symlink_metadata(abs)?);
-        self.written.borrow_mut().push((path.clone(), stat));
+    /// for the snapshot of the index the checkout ends with. Only a file
+    /// written as the checkout planned from a tree's entries counts: an
+    /// undo or a recovery writes back what it once found there, which
+    /// need not be what the index holds.
+    fn note_written(&self, path: &BString, abs: &Path, state: &FileState) -> Res<()> {
+        let planned = self.planned.borrow();
+        let as_planned = planned.as_ref().and_then(|p| p.files.get(path.as_slice()));
+        if as_planned == Some(&(state.mode, state.contents.clone())) {
+            let stat = alt_worktree::FileStat::of(&std::fs::symlink_metadata(abs)?);
+            self.written.borrow_mut().push((path.clone(), stat));
+        }
         Ok(())
     }
 

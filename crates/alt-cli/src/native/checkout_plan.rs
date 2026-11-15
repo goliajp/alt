@@ -134,6 +134,7 @@ impl NativeRepo<'_> {
         let mut visible = Visible::default();
         let mut ignored = Vec::new();
         let mut files = Vec::new();
+        let mut planned = std::collections::HashMap::new();
         for path in paths {
             let beneath_file = path
                 .iter()
@@ -152,6 +153,9 @@ impl NativeRepo<'_> {
                 .get(path)
                 .map(|t| self.target_state(t, &attrs))
                 .transpose()?;
+            if let Some(state) = &after {
+                planned.insert(path.to_vec(), (state.mode, state.contents.clone()));
+            }
             // Submodule directories are not owned by the repository checkout.
             if before.as_ref().is_some_and(|s| s.mode == 0o160000) && after.is_none() {
                 continue;
@@ -198,12 +202,17 @@ impl NativeRepo<'_> {
             entries,
             extensions: Vec::new(),
         };
+        let index_after = self.snapshot(&canonical_index(index_after, self.store.algo))?;
+        *self.planned.borrow_mut() = Some(super::tree_state::Planned {
+            index: index_after.clone(),
+            files: planned,
+        });
         Ok(CheckoutIntent {
             version: 1,
             workspace: self.workspace_identity()?,
             request_id: self.request_id.map(|id| crate::machine::hex(&id)),
             index_before: self.snapshot(&canonical_index(self.index()?, self.store.algo))?,
-            index_after: self.snapshot(&canonical_index(index_after, self.store.algo))?,
+            index_after,
             files,
         })
     }

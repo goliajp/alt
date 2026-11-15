@@ -47,6 +47,14 @@ fn hold(path: &Path, snapshot: &Snapshot) {
     map.insert(path.to_path_buf(), Held { file, snapshot });
 }
 
+/// A checkout worked out from the entries of a tree.
+pub(super) struct Planned {
+    /// the snapshot id of the index it ends with
+    pub(super) index: String,
+    /// the mode and the content snapshot it writes at each path
+    pub(super) files: std::collections::HashMap<Vec<u8>, (u32, String)>,
+}
+
 /// What `status` and the commands that ask the same questions work from.
 pub(super) struct TreeState {
     pub(super) snapshot: Snapshot,
@@ -154,7 +162,13 @@ impl NativeRepo<'_> {
     /// current tick of the clock is left out and read by the next scan.
     pub(super) fn snapshot_checked_out(&self, index: &[u8]) -> Res<()> {
         let algo = self.store.algo;
-        let written = std::mem::take(&mut *self.written.borrow_mut());
+        let mut written = std::mem::take(&mut *self.written.borrow_mut());
+        // only where this is the index the planned checkout ends with do
+        // the files it wrote hold what the entries name
+        let planned = self.planned.borrow_mut().take();
+        if !planned.is_some_and(|p| p.index == recovery::hash(index)) {
+            written.clear();
+        }
         let parsed = Index::parse(index, algo)?;
         let prior =
             held(&self.snapshot_path()).or_else(|| Snapshot::load(&self.snapshot_path(), algo));

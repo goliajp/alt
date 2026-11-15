@@ -653,6 +653,9 @@ pub struct NativeRepo<'a> {
     checkout_intent: Option<checkout_recovery::CheckoutIntent>,
     /// the files a checkout wrote, each with its stat right after
     written: std::cell::RefCell<Vec<(BString, alt_worktree::FileStat)>>,
+    /// the checkout this command worked out from the entries of a tree:
+    /// the index it ends with, and what it writes at each path
+    planned: std::cell::RefCell<Option<tree_state::Planned>>,
 }
 
 impl<'a> NativeRepo<'a> {
@@ -678,6 +681,7 @@ impl<'a> NativeRepo<'a> {
             inverse_of: None,
             checkout_intent: None,
             written: std::cell::RefCell::default(),
+            planned: std::cell::RefCell::default(),
         }
     }
 

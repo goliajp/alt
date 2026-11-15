@@ -297,3 +297,84 @@ fn adding_everything_counts_every_file_and_touches_only_what_changed() {
     assert_eq!(ok(alt(root, &["add", "."])), "staged 4 path(s)\n");
     assert_eq!(ok(alt(root, &["add", "src"])), "staged 2 path(s)\n");
 }
+
+/// What `status` and `diff` say with the snapshot and after it is deleted.
+fn cache_agrees(root: &Path, at: &str) {
+    let seen = |args: &[&str]| {
+        let o = alt(root, args);
+        (
+            o.status.code(),
+            String::from_utf8_lossy(&o.stdout).into_owned(),
+        )
+    };
+    let with = (seen(&["status"]), seen(&["diff"]));
+    let _ = std::fs::remove_file(root.join(".alt/index.scan"));
+    let without = (seen(&["status"]), seen(&["diff"]));
+    assert_eq!(with, without, "{at}");
+}
+
+/// A history where reverting or replaying `second` conflicts in `c.txt`
+/// and changes `r.txt` cleanly; returns the id of `second`.
+fn conflicting(root: &Path) -> String {
+    ok(alt(root, &["init"]));
+    write(root, "c.txt", "c1\n");
+    write(root, "r.txt", "r1\n");
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "first"]));
+    ok(alt(root, &["switch", "-c", "side"]));
+    write(root, "c.txt", "c2\n");
+    write(root, "r.txt", "r2\n");
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "second"]));
+    let second = ok(alt(root, &["rev-parse", "HEAD"])).trim().to_owned();
+    write(root, "c.txt", "c3\n");
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "third"]));
+    second
+}
+
+#[test]
+fn an_undo_that_writes_back_an_edited_file_does_not_hide_the_edit() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let root = dir.path();
+    let second = conflicting(root);
+    // stops in c.txt; r.txt goes back to r1 and is staged
+    assert!(!alt(root, &["revert", &second]).status.success());
+    assert_eq!(std::fs::read_to_string(root.join("r.txt")).unwrap(), "r1\n");
+    write(root, "r.txt", "edited and not added\n");
+    cache_agrees(root, "edited during the revert");
+    ok(alt(root, &["revert", "--abort"]));
+    cache_agrees(root, "after the abort");
+    ok(alt(root, &["undo"]));
+    assert_eq!(
+        std::fs::read_to_string(root.join("r.txt")).unwrap(),
+        "edited and not added\n"
+    );
+    let status = ok(alt(root, &["status"]));
+    assert!(status.contains("modified:   r.txt"), "{status}");
+    assert!(ok(alt(root, &["diff"])).contains("+edited and not added"));
+    cache_agrees(root, "after the undo");
+}
+
+#[test]
+fn an_aborted_rebase_and_its_undo_leave_no_edit_unseen() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let root = dir.path();
+    conflicting(root);
+    ok(alt(root, &["switch", "main"]));
+    write(root, "c.txt", "c on main\n");
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "main moves"]));
+    ok(alt(root, &["switch", "side"]));
+    // stops in c.txt at the first commit replayed; r.txt is already r2
+    assert!(!alt(root, &["rebase", "main"]).status.success());
+    cache_agrees(root, "stopped");
+    write(root, "r.txt", "edited and not added\n");
+    cache_agrees(root, "edited during the rebase");
+    ok(alt(root, &["rebase", "--abort"]));
+    cache_agrees(root, "after the abort");
+    let _ = alt(root, &["undo"]);
+    cache_agrees(root, "after the undo");
+    write(root, "r.txt", "edited again\n");
+    cache_agrees(root, "edited afterwards");
+}
