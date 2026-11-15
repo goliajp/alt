@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: feat
+summary: trace moved and copied lines in blame with -M and -C
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/blame.rs
+touched: crates/alt-cli/src/blame/moved.rs
+touched: crates/alt-cli/src/blame/walk.rs
+touched: crates/alt-cli/src/cli.rs
+touched: crates/alt-cli/src/tree_changes.rs
+touched: crates/alt-cli/tests/it/blame.rs
+touched: crates/alt-git-codec/src/tree.rs
