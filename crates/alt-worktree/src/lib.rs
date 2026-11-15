@@ -11,7 +11,9 @@ pub mod ident;
 mod ignore;
 mod scan;
 
-pub use scan::{Clean, PathMatcher, scan_indexed_paths, scan_worktree, scan_worktree_with_index};
+pub use scan::{
+    Clean, PathMatcher, SubmoduleHead, scan_indexed_paths, scan_worktree, scan_worktree_with_index,
+};
 
 use alt_bytes::{BString, ByteSlice};
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind, Tree};

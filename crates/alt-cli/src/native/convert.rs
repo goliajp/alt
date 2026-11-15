@@ -206,6 +206,25 @@ impl Converter {
         }
     }
 
+    /// The commit the repository in the submodule directory `dir` has
+    /// checked out; `None` when the directory holds no repository. A
+    /// repository that cannot be read is a failure kept for
+    /// [`check`](Self::check).
+    pub(super) fn submodule_head(&self, dir: &Path) -> Option<ObjectId> {
+        let holds = |name: &str| dir.join(name).symlink_metadata().is_ok();
+        if !holds(".git") && !holds(".alt") {
+            return None;
+        }
+        let head = alt_repo::Repository::discover(dir).and_then(|repo| repo.resolve_ref("HEAD"));
+        match head {
+            Ok(oid) => oid,
+            Err(e) => {
+                self.fail(e.into());
+                None
+            }
+        }
+    }
+
     fn fail(&self, e: Box<dyn std::error::Error>) {
         self.failed.borrow_mut().get_or_insert(e);
     }

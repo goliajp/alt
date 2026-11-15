@@ -1803,7 +1803,10 @@ impl<'a> NativeRepo<'a> {
         let index = index_entries(&raw);
         let worktree = self.scan_tree(&raw)?;
         let st = status(&head, &index, &worktree);
-        if !st.staged.is_empty() || !st.unstaged.is_empty() {
+        // a submodule that checked out another commit is not overwritten:
+        // a checkout never touches what is inside it
+        let submodule = |p: &BString| index.iter().any(|e| e.path == *p && e.mode == 0o160000);
+        if !st.staged.is_empty() || st.unstaged.iter().any(|(p, _)| !submodule(p)) {
             return Err(crate::machine::Failure::refusal(
                 "precondition_failed",
                 format!("your local changes would be overwritten by {action}; commit them first"),

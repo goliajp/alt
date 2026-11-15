@@ -42,7 +42,14 @@ impl NativeRepo<'_> {
             let pointer = rules.as_ref().and_then(|r| lfs_clean(r, path, content));
             pointer.or_else(|| self.stored_form(&attrs, index, path, content))
         };
-        let scan = scan_worktree_with_index(&self.root, index, self.store.algo, Some(&clean))?;
+        let head = |dir: &Path| attrs.submodule_head(dir);
+        let scan = scan_worktree_with_index(
+            &self.root,
+            index,
+            self.store.algo,
+            Some(&clean),
+            Some(&head),
+        )?;
         attrs.check()?;
         Ok(scan)
     }
@@ -55,7 +62,14 @@ impl NativeRepo<'_> {
             let pointer = rules.as_ref().and_then(|r| lfs_clean(r, path, content));
             pointer.or_else(|| self.stored_form(&attrs, index, path, content))
         };
-        let scan = scan_indexed_paths(&self.root, index, self.store.algo, Some(&clean))?;
+        let head = |dir: &Path| attrs.submodule_head(dir);
+        let scan = scan_indexed_paths(
+            &self.root,
+            index,
+            self.store.algo,
+            Some(&clean),
+            Some(&head),
+        )?;
         attrs.check()?;
         Ok(scan)
     }

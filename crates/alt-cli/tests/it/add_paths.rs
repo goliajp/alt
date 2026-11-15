@@ -190,3 +190,109 @@ fn add_stages_a_file_replaced_by_a_directory() {
         tree_line(&ok(git(theirs.path(), &["cat-file", "-p", "HEAD"])))
     );
 }
+
+fn copy_tree(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        match entry.file_type().unwrap().is_dir() {
+            true => copy_tree(&entry.path(), &target),
+            false => drop(std::fs::copy(entry.path(), target).unwrap()),
+        }
+    }
+}
+
+/// A git repository with a file and a submodule entry at `sub`, and its
+/// alt import.
+fn with_submodule(src: &Path, dst: &Path) {
+    ok(git(src, &["init", "-q", "-b", "main", "."]));
+    write(src, "a.txt", "one\n");
+    ok(git(src, &["add", "."]));
+    ok(git(
+        src,
+        &[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            "160000,1111111111111111111111111111111111111111,sub",
+        ],
+    ));
+    ok(git(src, &["commit", "-qm", "base"]));
+    ok(alt(src, &["import", dst.to_str().unwrap()]));
+}
+
+#[test]
+fn add_leaves_files_in_a_submodule_directory_to_the_submodule() {
+    let (src, dst) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
+    let (src, dst) = (src.path(), dst.path());
+    with_submodule(src, dst);
+    // files in the directory, but no repository: neither tool takes them
+    for root in [src, dst] {
+        write(root, "sub/inner.txt", "belongs to the submodule\n");
+        write(root, "sub/deep/more.txt", "so does this\n");
+        write(root, "a.txt", "two\n");
+    }
+    for spec in [".", "sub"] {
+        ok(alt(dst, &["add", spec]));
+    }
+    ok(alt(dst, &["commit", "-m", "edit"]));
+    ok(git(src, &["add", "."]));
+    ok(git(src, &["commit", "-qm", "edit"]));
+    assert_eq!(
+        tree_line(&ok(alt(dst, &["cat-file", "-p", "HEAD"]))),
+        tree_line(&ok(git(src, &["cat-file", "-p", "HEAD"])))
+    );
+    assert!(ok(alt(dst, &["status"])).contains("nothing to commit"));
+
+    let inside = alt(dst, &["add", "sub/inner.txt"]);
+    assert!(!inside.status.success());
+    let message = String::from_utf8_lossy(&inside.stderr).into_owned();
+    assert!(message.contains("is in submodule 'sub'"), "{message}");
+}
+
+#[test]
+fn a_submodule_that_checked_out_another_commit_is_reported_and_staged() {
+    let (src, dst) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
+    let (src, dst) = (src.path(), dst.path());
+    with_submodule(src, dst);
+    // the same repository in both submodule directories
+    let sub = src.join("sub");
+    std::fs::create_dir_all(&sub).unwrap();
+    ok(git(&sub, &["init", "-q", "-b", "main", "."]));
+    write(&sub, "inner.txt", "content of the submodule\n");
+    ok(git(&sub, &["add", "."]));
+    ok(git(&sub, &["commit", "-qm", "in the submodule"]));
+    let head = ok(git(&sub, &["rev-parse", "HEAD"]));
+    copy_tree(&sub, &dst.join("sub"));
+
+    let status = ok(alt(dst, &["status"]));
+    assert!(status.contains("modified:   sub"), "{status}");
+    let diff = ok(alt(dst, &["diff"]));
+    assert!(
+        diff.contains(&format!("+Subproject commit {}", head.trim())),
+        "{diff}"
+    );
+    assert!(!diff.contains("inner.txt"), "{diff}");
+    // it does not stand in the way of a switch, which leaves it alone
+    ok(alt(dst, &["branch", "other"]));
+    ok(alt(dst, &["switch", "other"]));
+    ok(alt(dst, &["switch", "main"]));
+    assert!(ok(alt(dst, &["status"])).contains("modified:   sub"));
+
+    ok(alt(dst, &["add", "."]));
+    ok(alt(dst, &["commit", "-m", "move the submodule"]));
+    ok(git(src, &["add", "."]));
+    ok(git(src, &["commit", "-qm", "move the submodule"]));
+    assert_eq!(
+        tree_line(&ok(alt(dst, &["cat-file", "-p", "HEAD"]))),
+        tree_line(&ok(git(src, &["cat-file", "-p", "HEAD"])))
+    );
+    assert!(ok(alt(dst, &["status"])).contains("nothing to commit"));
+}

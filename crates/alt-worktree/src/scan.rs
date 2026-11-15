@@ -27,6 +27,7 @@ pub fn scan_worktree(root: &Path, algo: HashAlgo) -> Result<Vec<WorkEntry>, Work
         cache: None,
         tracked: &tracked,
         clean: None,
+        head: None,
     };
     scan_dir(&ctx, root, false, &mut stack, &mut out)?;
     out.sort_by(|a, b| a.path.cmp(&b.path));
@@ -50,6 +51,7 @@ pub fn scan_worktree_with_index(
     index: &Index,
     algo: HashAlgo,
     clean: Option<Clean<'_>>,
+    head: Option<SubmoduleHead<'_>>,
 ) -> Result<Vec<WorkEntry>, WorktreeError> {
     let mut by_path: std::collections::HashMap<&BString, &alt_git_index::IndexEntry> =
         std::collections::HashMap::with_capacity(index.entries.len());
@@ -67,6 +69,7 @@ pub fn scan_worktree_with_index(
         cache: Some(&by_path),
         tracked: &tracked,
         clean,
+        head,
     };
     scan_dir(&ctx, root, false, &mut stack, &mut out)?;
     out.sort_by(|a, b| a.path.cmp(&b.path));
@@ -93,6 +96,7 @@ pub fn scan_indexed_paths(
     index: &Index,
     algo: HashAlgo,
     clean: Option<Clean<'_>>,
+    head: Option<SubmoduleHead<'_>>,
 ) -> Result<Vec<WorkEntry>, WorktreeError> {
     let mut out = Vec::with_capacity(index.entries.len());
     for idx in &index.entries {
@@ -107,10 +111,15 @@ pub fn scan_indexed_paths(
         })?;
         let abs = root.join(rel);
         let meta = match std::fs::symlink_metadata(&abs) {
-            // a submodule's commit is its own state: the placeholder
-            // directory, or its absence, is not a change to this repository
+            // a submodule changes this repository only by checking out
+            // another commit; the placeholder directory, or its absence,
+            // is no change
             Ok(m) if idx.mode == 0o160000 && m.is_dir() => {
-                out.push(gitlink(idx));
+                let checked_out = head.and_then(|head| head(&abs));
+                out.push(WorkEntry {
+                    oid: checked_out.unwrap_or(idx.oid),
+                    ..gitlink(idx)
+                });
                 continue;
             }
             Err(e) if idx.mode == 0o160000 && e.kind() == std::io::ErrorKind::NotFound => {
@@ -177,6 +186,8 @@ fn gitlink(idx: &alt_git_index::IndexEntry) -> WorkEntry {
 struct Tracked {
     files: std::collections::HashSet<BString>,
     dirs: std::collections::HashSet<BString>,
+    /// the paths the index records as submodules
+    gitlinks: std::collections::HashSet<BString>,
 }
 
 impl Tracked {
@@ -191,6 +202,9 @@ impl Tracked {
                 }
             }
             t.files.insert(e.path.clone());
+            if e.mode == 0o160000 && e.stage() == 0 {
+                t.gitlinks.insert(e.path.clone());
+            }
         }
         t
     }
@@ -203,7 +217,12 @@ struct ScanCtx<'a> {
     cache: Option<&'a StatCache<'a>>,
     tracked: &'a Tracked,
     clean: Option<Clean<'a>>,
+    head: Option<SubmoduleHead<'a>>,
 }
+
+/// What a submodule directory has checked out: the commit its HEAD names,
+/// or `None` when the directory holds no repository.
+pub type SubmoduleHead<'a> = &'a dyn Fn(&Path) -> Option<ObjectId>;
 
 /// A clean filter, as git's filter drivers have: given a path and the
 /// working-tree bytes, the bytes to store instead, or `None` to store the
@@ -281,6 +300,20 @@ fn scan_dir(
             // recurse, and don't synthesize a worktree entry for it: the
             // submodule's HEAD oid is owned by the submodule, not us.
             // status() filters spurious Deleted reports against the index.
+            // The same holds for a directory the index records as a
+            // submodule, with or without a repository in it: whatever lies
+            // there is not this repository's to add. What it reports is
+            // the commit the submodule has checked out.
+            if tracked.gitlinks.contains(&rel_b) {
+                if let Some(oid) = ctx.head.and_then(|head| head(&path)) {
+                    out.push(WorkEntry {
+                        path: rel_b,
+                        oid,
+                        mode: 0o160000,
+                    });
+                }
+                continue;
+            }
             if is_submodule_dir(&path) {
                 continue;
             }

@@ -19,6 +19,23 @@ impl NativeRepo<'_> {
         let lfs = self.lfs_rules()?;
         let attrs = self.converter()?;
         let specs: Vec<&str> = paths.iter().map(|p| pathspec(p)).collect();
+        // what lies inside a submodule is the submodule's to add
+        for (spec, given) in specs.iter().zip(paths) {
+            let inside = before.entries.iter().find(|e| {
+                e.mode == 0o160000
+                    && spec
+                        .as_bytes()
+                        .strip_prefix(e.path.as_slice())
+                        .is_some_and(|rest| rest.starts_with(b"/"))
+            });
+            if let Some(sub) = inside {
+                return Err(crate::machine::Failure::refusal(
+                    "precondition_failed",
+                    format!("pathspec '{given}' is in submodule '{}'", sub.path),
+                )
+                .into());
+            }
+        }
         let staging_all = specs.iter().any(|p| p.is_empty());
 
         // snapshot the prior stage-0 entries — both the starting point for
@@ -105,8 +122,12 @@ impl NativeRepo<'_> {
                 // before the index is even written).
                 let path_str = w.path.to_str().unwrap_or("");
                 self.ensure_path_allowed(path_str)?;
-                let bytes = self.staged_bytes(w, lfs.as_ref(), &attrs, &before)?;
-                self.store.odb.put(w.oid, ObjectKind::Blob, &bytes)?;
+                // a submodule is recorded by the commit it has checked
+                // out, which lives in its own store
+                if w.mode != 0o160000 {
+                    let bytes = self.staged_bytes(w, lfs.as_ref(), &attrs, &before)?;
+                    self.store.odb.put(w.oid, ObjectKind::Blob, &bytes)?;
+                }
                 entries.push(self.make_entry(w)?);
                 staged += 1;
             } // a path that vanished from the tree is dropped (staged deletion)
