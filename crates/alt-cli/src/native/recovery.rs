@@ -208,8 +208,15 @@ impl NativeRepo<'_> {
         Ok(bytes)
     }
 
-    fn path_guard(&self, path: &BString) -> Res<PathGuard> {
-        self.validate_recovery_path(path)?;
+    /// The working-tree state at `path`, one of the `guarded` paths of an
+    /// index change. A path beneath a guarded file holds nothing.
+    fn path_guard(&self, path: &BString, guarded: &dyn Fn(&[u8]) -> bool) -> Res<PathGuard> {
+        if self.validate_path_among(path, guarded)? {
+            return Ok(PathGuard {
+                path: path.to_vec(),
+                state: None,
+            });
+        }
         let abs = self.abs(path)?;
         let state = match std::fs::symlink_metadata(&abs) {
             Ok(meta) if meta.file_type().is_symlink() => {
@@ -240,8 +247,11 @@ impl NativeRepo<'_> {
     }
 
     fn check_guards(&self, guards: &[PathGuard]) -> Res<()> {
+        let paths: std::collections::HashSet<&[u8]> =
+            guards.iter().map(|g| g.path.as_slice()).collect();
         for guard in guards {
-            let actual = self.path_guard(&BString::from(guard.path.clone()))?;
+            let actual =
+                self.path_guard(&BString::from(guard.path.clone()), &|p| paths.contains(p))?;
             if actual != *guard {
                 return Err(crate::machine::Failure::refusal(
                     "precondition_failed",
@@ -319,6 +329,8 @@ impl NativeRepo<'_> {
             )
             .into());
         }
+        let paths: std::collections::HashSet<&[u8]> =
+            touched.iter().map(|p| p.as_slice()).collect();
         let intent = IndexIntent {
             version: 1,
             workspace: self.workspace_identity()?,
@@ -327,7 +339,7 @@ impl NativeRepo<'_> {
             after: self.snapshot(&after)?,
             worktree: touched
                 .iter()
-                .map(|p| self.path_guard(p))
+                .map(|p| self.path_guard(p, &|q| paths.contains(q)))
                 .collect::<Res<_>>()?,
             inverse_of,
         };
@@ -561,103 +573,6 @@ impl NativeRepo<'_> {
         let operation = result?;
         if let Some(intent) = intent {
             self.apply_prepared_checkout(operation, &intent)?;
-        }
-        Ok(())
-    }
-
-    pub(super) fn validate_recovery_path(&self, bytes: &BString) -> Res<()> {
-        let path = std::str::from_utf8(bytes).map_err(|_| "unsupported non-UTF-8 recovery path")?;
-        if path.is_empty()
-            || path
-                .split('/')
-                .any(|c| c.is_empty() || matches!(c, "." | ".." | ".alt" | ".git"))
-            || Path::new(path).is_absolute()
-        {
-            return Err(crate::machine::Failure::refusal(
-                "precondition_failed",
-                "unsafe recovery path",
-            )
-            .into());
-        }
-        let abs = self.root.join(path);
-        let mut parent = abs.parent();
-        while let Some(p) = parent {
-            if p == self.root {
-                break;
-            }
-            match p.symlink_metadata() {
-                Ok(m) if m.file_type().is_symlink() || !m.is_dir() => {
-                    return Err(crate::machine::Failure::refusal(
-                        "precondition_failed",
-                        "recovery path traverses an unsafe parent",
-                    )
-                    .into());
-                }
-                Ok(_) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => return Err(e.into()),
-            }
-            parent = p.parent();
-        }
-        Ok(())
-    }
-
-    pub(super) fn preflight_checkout(&self, old: &[WorkEntry], target: &[WorkEntry]) -> Res<()> {
-        let old_paths: std::collections::HashSet<_> = old.iter().map(|e| &e.path).collect();
-        for entry in old.iter().chain(target) {
-            self.validate_recovery_path(&entry.path)?;
-        }
-        for entry in target {
-            let path = self.abs(&entry.path)?;
-            self.ensure_path_allowed(
-                std::str::from_utf8(&entry.path)
-                    .map_err(|_| "unsupported non-UTF-8 checkout path")?,
-            )?;
-            if entry.mode != 0o160000 && path.symlink_metadata().is_ok_and(|m| m.is_dir()) {
-                return Err(crate::machine::Failure::refusal(
-                    "precondition_failed",
-                    "checkout target is occupied by a directory",
-                )
-                .into());
-            }
-            if entry.mode != 0o160000
-                && !old_paths.contains(&entry.path)
-                && path.symlink_metadata().is_ok()
-            {
-                return Err(format!(
-                    "untracked working tree file '{}' would be overwritten",
-                    entry.path
-                )
-                .into());
-            }
-            let mut parent = path.parent();
-            while let Some(p) = parent {
-                if p == self.root {
-                    break;
-                }
-                match p.symlink_metadata() {
-                    Ok(m) if !m.is_dir() || m.file_type().is_symlink() => {
-                        return Err(crate::machine::Failure::refusal(
-                            "precondition_failed",
-                            "checkout parent is not a safe directory",
-                        )
-                        .into());
-                    }
-                    Ok(_) => {}
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(e) => return Err(e.into()),
-                }
-                parent = p.parent();
-            }
-            if entry.mode != 0o160000 && self.store.odb.get(&entry.oid)?.is_none() {
-                return Err("missing checkout object".into());
-            }
-        }
-        for entry in old {
-            self.ensure_path_allowed(
-                std::str::from_utf8(&entry.path)
-                    .map_err(|_| "unsupported non-UTF-8 checkout path")?,
-            )?;
         }
         Ok(())
     }

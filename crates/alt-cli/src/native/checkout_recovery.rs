@@ -9,17 +9,17 @@ pub(super) const COMPLETE_CHECKOUT: u8 = 0x33;
 
 #[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
-struct FileState {
-    mode: u32,
-    contents: String,
+pub(super) struct FileState {
+    pub(super) mode: u32,
+    pub(super) contents: String,
 }
 
 #[derive(Clone, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
-struct FileChange {
-    path: Vec<u8>,
-    before: Option<FileState>,
-    after: Option<FileState>,
+pub(super) struct FileChange {
+    pub(super) path: Vec<u8>,
+    pub(super) before: Option<FileState>,
+    pub(super) after: Option<FileState>,
 }
 
 #[derive(Clone, alt_json::ToJson, alt_json::FromJson)]
@@ -31,7 +31,7 @@ pub(super) struct CheckoutIntent {
     pub(super) request_id: Option<String>,
     index_before: String,
     index_after: String,
-    files: Vec<FileChange>,
+    pub(super) files: Vec<FileChange>,
 }
 
 /// A complete tracked prestate for a multi-step operation such as rebase.
@@ -110,81 +110,12 @@ impl NativeRepo<'_> {
         Ok(())
     }
 
-    fn file_state(&self, path: &BString, persist: bool) -> Res<Option<FileState>> {
-        use std::os::unix::{ffi::OsStrExt, fs::PermissionsExt};
-        let abs = self.abs(path)?;
-        match abs.symlink_metadata() {
-            Ok(meta) if meta.file_type().is_symlink() => {
-                let bytes = std::fs::read_link(abs)?;
-                Ok(Some(FileState {
-                    mode: 0o120000,
-                    contents: if persist {
-                        self.snapshot(bytes.as_os_str().as_bytes())?
-                    } else {
-                        hash(bytes.as_os_str().as_bytes())
-                    },
-                }))
-            }
-            Ok(meta) if meta.is_file() => {
-                let mode = if meta.permissions().mode() & 0o111 != 0 {
-                    0o100755
-                } else {
-                    0o100644
-                };
-                Ok(Some(FileState {
-                    mode,
-                    contents: {
-                        let bytes = std::fs::read(abs)?;
-                        if persist {
-                            self.snapshot(&bytes)?
-                        } else {
-                            hash(&bytes)
-                        }
-                    },
-                }))
-            }
-            Ok(meta) if meta.is_dir() => Ok(Some(FileState {
-                mode: 0o160000,
-                contents: String::new(),
-            })),
-            Ok(_) => Err("checkout encountered unsupported special file".into()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(e.into()),
-        }
-    }
-
-    fn target_state(&self, entry: &WorkEntry) -> Res<FileState> {
-        if entry.mode == 0o160000 {
-            return Ok(FileState {
-                mode: entry.mode,
-                contents: String::new(),
-            });
-        }
-        let object = self
-            .store
-            .odb
-            .get(&entry.oid)?
-            .ok_or("missing checkout object")?;
-        let bytes = if entry.mode != 0o120000 {
-            match alt_lfs::Pointer::parse(&object.data) {
-                Some(pointer) => self.lfs_content(&pointer)?.unwrap_or(object.data),
-                None => object.data,
-            }
-        } else {
-            object.data
-        };
-        Ok(FileState {
-            mode: entry.mode,
-            contents: self.snapshot(&bytes)?,
-        })
-    }
-
     pub(super) fn snapshot_workspace(&self) -> Res<String> {
         let index = self.index()?;
         let mut files = Vec::new();
         for entry in &index.entries {
-            self.validate_recovery_path(&entry.path)?;
-            files.push((entry.path.to_vec(), self.file_state(&entry.path, true)?));
+            let state = self.observed(&entry.path, true, entry.mode == 0o160000, &|_| false)?;
+            files.push((entry.path.to_vec(), state));
         }
         let snapshot = WorkspaceSnapshot {
             version: 1,
@@ -208,12 +139,20 @@ impl NativeRepo<'_> {
             .cloned()
             .chain(index.entries.iter().map(|e| e.path.to_vec()))
             .collect();
+        let gitlinks: std::collections::HashSet<&[u8]> = index
+            .entries
+            .iter()
+            .filter(|e| e.mode == 0o160000)
+            .map(|e| e.path.as_slice())
+            .collect();
         let mut files = Vec::new();
-        for path in paths {
+        for path in &paths {
             let path_bytes = BString::from(path.clone());
-            self.validate_recovery_path(&path_bytes)?;
-            let before = before.get(&path).cloned().flatten();
-            let after = self.file_state(&path_bytes, true)?;
+            let before = before.get(path).cloned().flatten();
+            let gitlink = gitlinks.contains(path.as_slice())
+                || before.as_ref().is_some_and(|s| s.mode == 0o160000);
+            let after = self.observed(&path_bytes, true, gitlink, &|p| paths.contains(p))?;
+            let path = path.clone();
             if before != after {
                 files.push(FileChange {
                     path,
@@ -272,9 +211,10 @@ impl NativeRepo<'_> {
             )
             .into());
         }
+        let paths: std::collections::HashSet<&[u8]> =
+            intent.files.iter().map(|c| c.path.as_slice()).collect();
         for change in &intent.files {
             let path = BString::from(change.path.clone());
-            self.validate_recovery_path(&path)?;
             self.ensure_path_allowed(
                 std::str::from_utf8(&path).map_err(|_| "unsupported non-UTF-8 recovery path")?,
             )?;
@@ -283,7 +223,7 @@ impl NativeRepo<'_> {
                     self.read_snapshot(&state.contents)?;
                 }
             }
-            if self.file_state(&path, false)? != change.after {
+            if self.observed_among(&paths, change)? != change.after {
                 return Err(crate::machine::Failure::refusal(
                     "precondition_failed",
                     "recovery precondition failed: working-tree path changed",
@@ -318,9 +258,30 @@ impl NativeRepo<'_> {
             target.iter().map(|t| (&t.path, t)).collect();
         let paths: std::collections::BTreeSet<_> =
             old.iter().chain(target).map(|e| &e.path).collect();
+        let gitlinks: std::collections::HashSet<&BString> = old
+            .iter()
+            .chain(target)
+            .filter(|e| e.mode == 0o160000)
+            .map(|e| &e.path)
+            .collect();
+        // paths found as a file or symlink: the preflight has made sure
+        // nothing but a tracked path stands above another as a non-directory
+        let mut files_on_disk: std::collections::HashSet<&[u8]> = std::collections::HashSet::new();
         let mut files = Vec::new();
         for path in paths {
-            let before = self.file_state(path, true)?;
+            let beneath_file = path
+                .iter()
+                .enumerate()
+                .any(|(at, b)| *b == b'/' && files_on_disk.contains(&path.as_slice()[..at]));
+            let before = match beneath_file {
+                true => None,
+                false => self
+                    .file_state(path, true)?
+                    .filter(|s| s.mode != 0o160000 || gitlinks.contains(path)),
+            };
+            if before.is_some() && !gitlinks.contains(path) {
+                files_on_disk.insert(path.as_slice());
+            }
             let after = targets
                 .get(path)
                 .map(|t| self.target_state(t))
@@ -369,64 +330,6 @@ impl NativeRepo<'_> {
         })
     }
 
-    fn apply_file_state(&self, path: &BString, state: &Option<FileState>) -> Res<()> {
-        let abs = self.abs(path)?;
-        match state {
-            None => {
-                crate::durable::remove_file(&abs)?;
-                if let Some(parent) = abs.parent() {
-                    std::fs::File::open(parent)?.sync_all()?;
-                }
-                self.prune_empty_dirs(abs.parent());
-            }
-            Some(state) if state.mode == 0o160000 => {
-                std::fs::create_dir_all(&abs)?;
-                std::fs::File::open(&abs)?.sync_all()?;
-                if let Some(parent) = abs.parent() {
-                    std::fs::File::open(parent)?.sync_all()?;
-                }
-            }
-            Some(state) => {
-                let bytes = self.read_snapshot(&state.contents)?;
-                let parent = abs.parent().ok_or("checkout path has no parent")?;
-                std::fs::create_dir_all(parent)?;
-                if state.mode == 0o120000 {
-                    let temp = alt_os::temp::tempdir_in(parent)?;
-                    let link = temp.path().join("link");
-                    symlink_to(&bytes, &link)?;
-                    crate::durable::rename(link, &abs)?;
-                    std::fs::File::open(parent)?.sync_all()?;
-                } else {
-                    use std::os::unix::fs::PermissionsExt;
-                    let mut tmp = alt_os::temp::NamedTempFile::new_in(parent)?;
-                    tmp.write_all(&bytes)?;
-                    tmp.as_file()
-                        .set_permissions(std::fs::Permissions::from_mode(
-                            if state.mode == 0o100755 { 0o755 } else { 0o644 },
-                        ))?;
-                    tmp.as_file().sync_all()?;
-                    tmp.persist(&abs)?;
-                    std::fs::File::open(parent)?.sync_all()?;
-                }
-            }
-        }
-        // Newly created or removed directory entries must reach disk too,
-        // all the way back to the existing workspace root.
-        let mut parent = abs.parent();
-        while let Some(path) = parent {
-            match std::fs::File::open(path) {
-                Ok(dir) => dir.sync_all()?,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => return Err(e.into()),
-            }
-            if path == self.root {
-                break;
-            }
-            parent = path.parent();
-        }
-        Ok(())
-    }
-
     pub(super) fn finish_interrupted_checkout(
         &mut self,
         operation: OpId,
@@ -441,9 +344,10 @@ impl NativeRepo<'_> {
         }
         // Check every path and snapshot before changing the first byte.
         let mut outstanding = Vec::new();
+        let paths: std::collections::HashSet<&[u8]> =
+            intent.files.iter().map(|c| c.path.as_slice()).collect();
         for change in &intent.files {
             let path = BString::from(change.path.clone());
-            self.validate_recovery_path(&path)?;
             self.ensure_path_allowed(
                 std::str::from_utf8(&path).map_err(|_| "unsupported non-UTF-8 recovery path")?,
             )?;
@@ -452,7 +356,7 @@ impl NativeRepo<'_> {
                     self.read_snapshot(&state.contents)?;
                 }
             }
-            let actual = self.file_state(&path, false)?;
+            let actual = self.observed_among(&paths, change)?;
             if actual != change.before && actual != change.after {
                 return Err(crate::machine::Failure::refusal(
                     "precondition_failed",
@@ -476,9 +380,8 @@ impl NativeRepo<'_> {
             )
             .into());
         }
-        for change in outstanding {
-            self.apply_file_state(&BString::from(change.path.clone()), &change.after)?;
-        }
+        self.ensure_directories_replaceable(&intent)?;
+        self.apply_changes(outstanding.iter().copied())?;
         if current != intent.index_after {
             durable_write(&self.index_path, &after)?;
         }
@@ -525,8 +428,10 @@ impl NativeRepo<'_> {
         self.store.odb.flush()?;
         self.store.sink()?.fsync_all()?;
         // Validate the entire affected set before the first file replacement.
+        let paths: std::collections::HashSet<&[u8]> =
+            intent.files.iter().map(|c| c.path.as_slice()).collect();
         for change in &intent.files {
-            if self.file_state(&BString::from(change.path.clone()), false)? != change.before {
+            if self.observed_among(&paths, change)? != change.before {
                 return Err(crate::machine::Failure::refusal(
                     "precondition_failed",
                     "checkout precondition changed after preparation",
@@ -541,9 +446,8 @@ impl NativeRepo<'_> {
             )
             .into());
         }
-        for change in &intent.files {
-            self.apply_file_state(&BString::from(change.path.clone()), &change.after)?;
-        }
+        self.ensure_directories_replaceable(intent)?;
+        self.apply_changes(intent.files.iter())?;
         durable_write(&self.index_path, &self.read_snapshot(&intent.index_after)?)?;
         self.store.refs.record_op(
             &self.id.actor("checkout"),

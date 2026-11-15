@@ -1,0 +1,350 @@
+//! What a checkout reads from and writes to the working tree, one path at a
+//! time, and the checks that run before the first write.
+
+use super::checkout_recovery::{CheckoutIntent, FileChange, FileState};
+use super::*;
+use recovery::hash;
+
+impl NativeRepo<'_> {
+    pub(super) fn file_state(&self, path: &BString, persist: bool) -> Res<Option<FileState>> {
+        use std::os::unix::{ffi::OsStrExt, fs::PermissionsExt};
+        let abs = self.abs(path)?;
+        match abs.symlink_metadata() {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                let bytes = std::fs::read_link(abs)?;
+                Ok(Some(FileState {
+                    mode: 0o120000,
+                    contents: if persist {
+                        self.snapshot(bytes.as_os_str().as_bytes())?
+                    } else {
+                        hash(bytes.as_os_str().as_bytes())
+                    },
+                }))
+            }
+            Ok(meta) if meta.is_file() => {
+                let mode = if meta.permissions().mode() & 0o111 != 0 {
+                    0o100755
+                } else {
+                    0o100644
+                };
+                Ok(Some(FileState {
+                    mode,
+                    contents: {
+                        let bytes = std::fs::read(abs)?;
+                        if persist {
+                            self.snapshot(&bytes)?
+                        } else {
+                            hash(&bytes)
+                        }
+                    },
+                }))
+            }
+            Ok(meta) if meta.is_dir() => Ok(Some(FileState {
+                mode: 0o160000,
+                contents: String::new(),
+            })),
+            Ok(_) => Err("checkout encountered unsupported special file".into()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// What a checkout that manages the `owned` paths finds at `path`.
+    /// Nothing lives beneath an owned file or symlink. A directory is a
+    /// submodule placeholder where `gitlink` expects one; anywhere else it
+    /// only holds other paths and is not content itself.
+    pub(super) fn observed(
+        &self,
+        path: &BString,
+        persist: bool,
+        gitlink: bool,
+        owned: &dyn Fn(&[u8]) -> bool,
+    ) -> Res<Option<FileState>> {
+        if self.validate_path_among(path, owned)? {
+            return Ok(None);
+        }
+        Ok(self
+            .file_state(path, persist)?
+            .filter(|state| state.mode != 0o160000 || gitlink))
+    }
+
+    /// [`observed`](Self::observed) for one recorded change among `paths`,
+    /// the paths of every change of the same checkout.
+    pub(super) fn observed_among(
+        &self,
+        paths: &std::collections::HashSet<&[u8]>,
+        change: &FileChange,
+    ) -> Res<Option<FileState>> {
+        let gitlink = [&change.before, &change.after]
+            .into_iter()
+            .flatten()
+            .any(|state| state.mode == 0o160000);
+        self.observed(&BString::from(change.path.clone()), false, gitlink, &|p| {
+            paths.contains(p)
+        })
+    }
+
+    pub(super) fn target_state(&self, entry: &WorkEntry) -> Res<FileState> {
+        if entry.mode == 0o160000 {
+            return Ok(FileState {
+                mode: entry.mode,
+                contents: String::new(),
+            });
+        }
+        let object = self
+            .store
+            .odb
+            .get(&entry.oid)?
+            .ok_or("missing checkout object")?;
+        let bytes = if entry.mode != 0o120000 {
+            match alt_lfs::Pointer::parse(&object.data) {
+                Some(pointer) => self.lfs_content(&pointer)?.unwrap_or(object.data),
+                None => object.data,
+            }
+        } else {
+            object.data
+        };
+        Ok(FileState {
+            mode: entry.mode,
+            contents: self.snapshot(&bytes)?,
+        })
+    }
+
+    /// Applies recorded changes, removals first: a path can only turn from
+    /// a directory into a file, or back, once the old side is out of the way.
+    pub(super) fn apply_changes<'c>(
+        &self,
+        changes: impl Iterator<Item = &'c FileChange> + Clone,
+    ) -> Res<()> {
+        let removed = |c: &&FileChange| c.after.is_none();
+        for change in changes.clone().filter(removed) {
+            self.apply_file_state(&BString::from(change.path.clone()), &change.after)?;
+        }
+        for change in changes.filter(|c| !removed(c)) {
+            self.apply_file_state(&BString::from(change.path.clone()), &change.after)?;
+        }
+        Ok(())
+    }
+
+    /// Refuses, before anything is written, a change that would put a file
+    /// where a directory still holds something the changes do not remove.
+    pub(super) fn ensure_directories_replaceable(&self, intent: &CheckoutIntent) -> Res<()> {
+        let removed: std::collections::HashSet<&[u8]> = intent
+            .files
+            .iter()
+            .filter(|c| c.after.is_none())
+            .map(|c| c.path.as_slice())
+            .collect();
+        for change in &intent.files {
+            if change.after.as_ref().is_some_and(|s| s.mode != 0o160000) {
+                self.ensure_replaceable(&BString::from(change.path.clone()), &|p| {
+                    removed.contains(p)
+                })?;
+            }
+        }
+        Ok(())
+    }
+
+    /// A directory at `path` may give way to a file only when every file in
+    /// it is one the checkout `removes`.
+    fn ensure_replaceable(&self, path: &BString, removes: &dyn Fn(&[u8]) -> bool) -> Res<()> {
+        let abs = self.abs(path)?;
+        if !abs.symlink_metadata().is_ok_and(|m| m.is_dir()) {
+            return Ok(());
+        }
+        let mut stack = vec![abs];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir)? {
+                let entry = entry?;
+                if entry.file_type()?.is_dir() {
+                    stack.push(entry.path());
+                    continue;
+                }
+                let inner = entry.path();
+                let rel = inner
+                    .strip_prefix(&self.root)
+                    .map_err(|_| "path outside root")?;
+                if !removes(rel.as_os_str().as_encoded_bytes()) {
+                    return Err(crate::machine::Failure::refusal(
+                        "precondition_failed",
+                        format!("checkout target '{path}' is a directory holding untracked files"),
+                    )
+                    .into());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn apply_file_state(&self, path: &BString, state: &Option<FileState>) -> Res<()> {
+        let abs = self.abs(path)?;
+        match state {
+            None => {
+                crate::durable::remove_file(&abs)?;
+                if let Some(parent) = abs.parent() {
+                    std::fs::File::open(parent)?.sync_all()?;
+                }
+                self.prune_empty_dirs(abs.parent());
+            }
+            Some(state) if state.mode == 0o160000 => {
+                if abs.symlink_metadata().is_ok_and(|m| !m.is_dir()) {
+                    crate::durable::remove_file(&abs)?;
+                }
+                std::fs::create_dir_all(&abs)?;
+                std::fs::File::open(&abs)?.sync_all()?;
+                if let Some(parent) = abs.parent() {
+                    std::fs::File::open(parent)?.sync_all()?;
+                }
+            }
+            Some(state) => {
+                let bytes = self.read_snapshot(&state.contents)?;
+                let parent = abs.parent().ok_or("checkout path has no parent")?;
+                std::fs::create_dir_all(parent)?;
+                remove_empty_directories(&abs)?;
+                if state.mode == 0o120000 {
+                    let temp = alt_os::temp::tempdir_in(parent)?;
+                    let link = temp.path().join("link");
+                    symlink_to(&bytes, &link)?;
+                    crate::durable::rename(link, &abs)?;
+                    std::fs::File::open(parent)?.sync_all()?;
+                } else {
+                    use std::os::unix::fs::PermissionsExt;
+                    let mut tmp = alt_os::temp::NamedTempFile::new_in(parent)?;
+                    tmp.write_all(&bytes)?;
+                    tmp.as_file()
+                        .set_permissions(std::fs::Permissions::from_mode(
+                            if state.mode == 0o100755 { 0o755 } else { 0o644 },
+                        ))?;
+                    tmp.as_file().sync_all()?;
+                    tmp.persist(&abs)?;
+                    std::fs::File::open(parent)?.sync_all()?;
+                }
+            }
+        }
+        // Newly created or removed directory entries must reach disk too,
+        // all the way back to the existing workspace root.
+        let mut parent = abs.parent();
+        while let Some(path) = parent {
+            match std::fs::File::open(path) {
+                Ok(dir) => dir.sync_all()?,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.into()),
+            }
+            if path == self.root {
+                break;
+            }
+            parent = path.parent();
+        }
+        Ok(())
+    }
+
+    /// Checks that `bytes` names a path inside the working tree whose
+    /// parents are real directories. A parent that is a file or a symlink
+    /// is accepted only when the operation owns it, since it is then
+    /// removed before anything is written beneath; the result says whether
+    /// there is such a parent.
+    pub(super) fn validate_path_among(
+        &self,
+        bytes: &BString,
+        owned: &dyn Fn(&[u8]) -> bool,
+    ) -> Res<bool> {
+        let path = std::str::from_utf8(bytes).map_err(|_| "unsupported non-UTF-8 recovery path")?;
+        if path.is_empty()
+            || path
+                .split('/')
+                .any(|c| c.is_empty() || matches!(c, "." | ".." | ".alt" | ".git"))
+            || Path::new(path).is_absolute()
+        {
+            return Err(crate::machine::Failure::refusal(
+                "precondition_failed",
+                "unsafe recovery path",
+            )
+            .into());
+        }
+        let mut beneath_owned = false;
+        // outermost parent first: nothing past a symlink is looked at
+        let mut end = 0;
+        while let Some(at) = path[end..].find('/') {
+            end += at;
+            let parent = &path[..end];
+            end += 1;
+            match self.root.join(parent).symlink_metadata() {
+                Ok(m) if m.is_dir() => {}
+                Ok(_) if owned(parent.as_bytes()) => {
+                    beneath_owned = true;
+                    break;
+                }
+                Ok(_) => {
+                    return Err(crate::machine::Failure::refusal(
+                        "precondition_failed",
+                        "recovery path traverses an unsafe parent",
+                    )
+                    .into());
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => break,
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Ok(beneath_owned)
+    }
+
+    pub(super) fn preflight_checkout(&self, old: &[WorkEntry], target: &[WorkEntry]) -> Res<()> {
+        let old_paths: std::collections::HashSet<&[u8]> =
+            old.iter().map(|e| e.path.as_slice()).collect();
+        let tracked = |p: &[u8]| old_paths.contains(p);
+        for entry in old {
+            self.validate_path_among(&entry.path, &tracked)?;
+        }
+        for entry in target {
+            let beneath_tracked = self.validate_path_among(&entry.path, &tracked)?;
+            self.ensure_path_allowed(
+                std::str::from_utf8(&entry.path)
+                    .map_err(|_| "unsupported non-UTF-8 checkout path")?,
+            )?;
+            let on_disk = match beneath_tracked {
+                true => None,
+                false => self.abs(&entry.path)?.symlink_metadata().ok(),
+            };
+            match on_disk {
+                Some(m) if m.is_dir() && entry.mode != 0o160000 => {
+                    self.ensure_replaceable(&entry.path, &tracked)?;
+                }
+                Some(m) if !m.is_dir() && !old_paths.contains(entry.path.as_slice()) => {
+                    return Err(format!(
+                        "untracked working tree file '{}' would be overwritten",
+                        entry.path
+                    )
+                    .into());
+                }
+                _ => {}
+            }
+            if entry.mode != 0o160000 && self.store.odb.get(&entry.oid)?.is_none() {
+                return Err("missing checkout object".into());
+            }
+        }
+        for entry in old {
+            self.ensure_path_allowed(
+                std::str::from_utf8(&entry.path)
+                    .map_err(|_| "unsupported non-UTF-8 checkout path")?,
+            )?;
+        }
+        Ok(())
+    }
+}
+
+/// Removes `path` when it is a directory with nothing but empty directories
+/// inside; a file anywhere in it is an error.
+fn remove_empty_directories(path: &Path) -> Res<()> {
+    if !path.symlink_metadata().is_ok_and(|m| m.is_dir()) {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(path)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            return Err("checkout target is occupied by a directory".into());
+        }
+        remove_empty_directories(&entry.path())?;
+    }
+    std::fs::remove_dir(path)?;
+    Ok(())
+}
