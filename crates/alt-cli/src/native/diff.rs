@@ -62,13 +62,15 @@ impl NativeRepo<'_> {
         if json {
             return self.diff_json(&changes, disk, semantic, out);
         }
+        let settings = self.settings()?;
+        let info = self.store.alt_dir.join("git-import/info/attributes");
         let style = Style {
-            quotepath: self
-                .settings()?
+            quotepath: settings
                 .get_bool("core", None, "quotepath")
                 .transpose()?
                 .unwrap_or(true),
             abbrev: Some(self.store.odb.abbrev()),
+            sections: crate::funcname::Sections::new(Some(&self.root), &info, &settings)?,
         };
         let mut buf = Vec::new();
         for pair in self.pairs(&changes, cached)? {
@@ -361,7 +363,13 @@ impl NativeRepo<'_> {
 
         // the file header belongs to the hunks: none without them
         let mut hunks = Vec::new();
-        if alt_diff::write_unified(&mut hunks, &old_bytes, &new_bytes, 3) {
+        let regular = |w: &&WorkEntry| w.mode & 0o170000 == 0o100000;
+        let paths = [
+            pair.old.filter(regular).map(|_| pair.old_path.as_bytes()),
+            pair.new.filter(regular).map(|_| pair.new_path.as_bytes()),
+        ];
+        let sections = &style.sections;
+        if sections.write_hunks(&mut hunks, paths, &old_bytes, &new_bytes)? {
             header.write_hunk_names(buf, style)?;
             buf.extend_from_slice(&hunks);
         }

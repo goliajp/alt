@@ -114,9 +114,18 @@ pub struct Hunk {
     pub lines: Vec<(u8, Vec<u8>)>,
 }
 
+/// Tells whether a line starts a section, and what a hunk header shows of
+/// it. The line comes with its line ending.
+pub type SectionStart<'f> = &'f dyn for<'l> Fn(&'l [u8]) -> Option<&'l [u8]>;
+
 /// Groups edits into unified-diff hunks with `context` lines of surrounding
 /// context, merging hunks whose contexts touch (git's behaviour).
 pub fn hunks(old: &[u8], new: &[u8], context: usize) -> Vec<Hunk> {
+    hunks_with(old, new, context, &section_start)
+}
+
+/// As [`hunks`], with the caller's rule for what starts a section.
+pub fn hunks_with(old: &[u8], new: &[u8], context: usize, starts: SectionStart<'_>) -> Vec<Hunk> {
     let a = split_lines(old);
     let b = split_lines(new);
     let edits = myers::diff_lines(&a, &b);
@@ -145,11 +154,7 @@ pub fn hunks(old: &[u8], new: &[u8], context: usize) -> Vec<Hunk> {
     let mut searched = 0;
     for h in &mut hunks {
         let first = h.old_start.saturating_sub(1).min(a.len());
-        if let Some(found) = a[searched..first]
-            .iter()
-            .rev()
-            .find_map(|l| section_start(l))
-        {
+        if let Some(found) = a[searched..first].iter().rev().find_map(|l| starts(l)) {
             section = Some(found);
         }
         searched = first;
@@ -160,13 +165,22 @@ pub fn hunks(old: &[u8], new: &[u8], context: usize) -> Vec<Hunk> {
 
 /// A line that starts a section by git's default rule: one beginning with
 /// a letter, `_` or `$`. Returns what the hunk header shows of it.
-fn section_start(line: &[u8]) -> Option<&[u8]> {
+pub fn section_start(line: &[u8]) -> Option<&[u8]> {
     let first = *line.first()?;
     if !(first.is_ascii_alphabetic() || first == b'_' || first == b'$') {
         return None;
     }
-    let shown = &line[..line.len().min(80)];
-    Some(shown.trim_ascii_end())
+    Some(section_text(line))
+}
+
+/// What a hunk header shows of the text that names a section: its first
+/// 80 bytes, without trailing white space.
+pub fn section_text(text: &[u8]) -> &[u8] {
+    let mut shown = &text[..text.len().min(80)];
+    while let [rest @ .., b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c] = shown {
+        shown = rest;
+    }
+    shown
 }
 
 fn build_hunk(a: &[&[u8]], b: &[&[u8]], group: &[&Edit], context: usize) -> Hunk {
@@ -214,7 +228,18 @@ fn build_hunk(a: &[&[u8]], b: &[&[u8]], group: &[&Edit], context: usize) -> Hunk
 /// missing final newline on either side is annotated git-style with a
 /// `\ No newline at end of file` marker.
 pub fn write_unified(out: &mut Vec<u8>, old: &[u8], new: &[u8], context: usize) -> bool {
-    let hs = hunks(old, new, context);
+    write_unified_with(out, old, new, context, &section_start)
+}
+
+/// As [`write_unified`], with the caller's rule for what starts a section.
+pub fn write_unified_with(
+    out: &mut Vec<u8>,
+    old: &[u8],
+    new: &[u8],
+    context: usize,
+    starts: SectionStart<'_>,
+) -> bool {
+    let hs = hunks_with(old, new, context, starts);
     if hs.is_empty() {
         return false;
     }

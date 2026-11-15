@@ -11,6 +11,7 @@ use alt_worktree::attributes::{self, AutoCrlf, CoreEol, EolConfig, Layer, PathAt
 use alt_worktree::ident;
 
 use super::*;
+use crate::git_settings::read_if_file;
 
 /// The commands of one `filter.<name>` section.
 #[derive(Default)]
@@ -110,23 +111,8 @@ impl NativeRepo<'_> {
                 _ => {}
             }
         }
-        let mut fixed = Vec::new();
-        let home = std::env::var_os("HOME").map(PathBuf::from);
-        let global = match text("attributesfile") {
-            Some(path) => Some(expand_home(&path, home.as_deref())?),
-            None => std::env::var_os("XDG_CONFIG_HOME")
-                .filter(|v| !v.is_empty())
-                .map(PathBuf::from)
-                .or_else(|| home.as_ref().map(|h| h.join(".config")))
-                .map(|config| config.join("git").join("attributes")),
-        };
-        if let Some(content) = global.map(read_if_file).transpose()?.flatten() {
-            fixed.push(Layer::global(&content));
-        }
         let info = self.store.alt_dir.join("git-import/info/attributes");
-        if let Some(content) = read_if_file(info)? {
-            fixed.push(Layer::info(&content));
-        }
+        let fixed = crate::git_settings::outer_attributes(&settings, &info)?;
         Ok(Converter {
             root: self.root.clone(),
             tree,
@@ -164,24 +150,6 @@ impl NativeRepo<'_> {
                 None => false,
             }
         })
-    }
-}
-
-/// A path from the configuration, `~/` standing for the home directory.
-fn expand_home(path: &[u8], home: Option<&Path>) -> Res<PathBuf> {
-    let path = std::str::from_utf8(path).map_err(|_| "core.attributesFile is not UTF-8")?;
-    Ok(match (path.strip_prefix("~/"), home) {
-        (Some(rest), Some(home)) => home.join(rest),
-        _ => PathBuf::from(path),
-    })
-}
-
-/// The content of a regular file; `None` when there is no such file. A
-/// symlink is not followed, as git does not follow one either.
-fn read_if_file(path: PathBuf) -> Res<Option<Vec<u8>>> {
-    match path.symlink_metadata() {
-        Ok(meta) if meta.is_file() => Ok(Some(std::fs::read(path)?)),
-        _ => Ok(None),
     }
 }
 

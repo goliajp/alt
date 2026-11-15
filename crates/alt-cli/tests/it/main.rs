@@ -67,4 +67,5 @@ mod auth;
 mod cli_matrix;
 mod corpus_cli;
 mod corpus_history;
+mod funcname;
 mod recovery_kinds;

@@ -33,5 +33,7 @@ mod tree_changes;
 
 pub mod execution;
 mod file_header;
+pub mod funcname;
+mod git_settings;
 
 pub mod durable;

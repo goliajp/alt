@@ -103,6 +103,8 @@ pub struct PathAttributes {
     pub ident: bool,
     /// the name of the filter driver the content goes through
     pub filter: Option<Vec<u8>>,
+    /// the name of the diff driver the path is compared with
+    pub diff: Option<Vec<u8>>,
 }
 
 /// One attributes file.
@@ -222,6 +224,10 @@ pub fn lookup<'a>(
         conversion: decide(state(b"text"), state(b"crlf"), state(b"eol"), config),
         ident: state(b"ident") == Some(State::Set),
         filter: match state(b"filter") {
+            Some(State::Value(name)) => Some(name),
+            _ => None,
+        },
+        diff: match state(b"diff") {
             Some(State::Value(name)) => Some(name),
             _ => None,
         },
@@ -582,6 +588,7 @@ mod tests {
                 conversion: Conversion::Binary,
                 ident: false,
                 filter: None,
+                diff: None,
             }
         );
     }

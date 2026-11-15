@@ -1,0 +1,258 @@
+//! What a hunk is part of, the text behind the `@@` of its header: the
+//! nearest line above it that the diff driver of the file takes for the
+//! start of a function or section. A driver is named by the `diff`
+//! attribute of the path; its pattern comes from `diff.<name>.xfuncname`
+//! or `diff.<name>.funcname`, or is one of the built-in ones.
+
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
+
+use alt_bytes::ByteSlice;
+use alt_git_config::Config;
+use alt_regex::{Options, Regex, Syntax};
+use alt_worktree::attributes::{self, AutoCrlf, CoreEol, EolConfig, Layer};
+
+use crate::git_settings::{outer_attributes, read_if_file};
+
+mod drivers;
+
+type Res<T> = Result<T, Box<dyn std::error::Error>>;
+
+/// A driver that comes with the program.
+pub(crate) struct Builtin {
+    pub(crate) name: &'static str,
+    pub(crate) ignore_case: bool,
+    /// One expression each; `!` in front marks lines that start nothing.
+    pub(crate) lines: &'static [&'static str],
+}
+
+/// The built-in drivers.
+pub fn builtin() -> impl Iterator<Item = (&'static str, bool, &'static [&'static str])> {
+    drivers::BUILTIN
+        .iter()
+        .map(|b| (b.name, b.ignore_case, b.lines))
+}
+
+/// One driver's pattern: the expressions of its lines, tried in order.
+pub struct Finder {
+    lines: Vec<(bool, Regex)>,
+}
+
+impl Finder {
+    pub fn new(pattern: &[u8], options: Options) -> Res<Self> {
+        let mut lines = Vec::new();
+        for line in pattern.split(|&b| b == b'\n') {
+            let (negated, expression) = match line.strip_prefix(b"!") {
+                Some(rest) => (true, rest),
+                None => (false, line),
+            };
+            let compiled = Regex::with_options(expression, options).map_err(|e| {
+                let shown = String::from_utf8_lossy(expression);
+                format!("Invalid regexp to look for hunk header: {shown}: {e}")
+            })?;
+            lines.push((negated, compiled));
+        }
+        Ok(Finder { lines })
+    }
+
+    /// What the hunk header shows of `line` when it starts a section:
+    /// the first group of the first expression that matches, or the
+    /// whole match of one without a group. A line that a `!` expression
+    /// matches first starts nothing.
+    pub fn section<'l>(&self, line: &'l [u8]) -> Option<&'l [u8]> {
+        let line = match line.strip_suffix(b"\n") {
+            Some(rest) => rest.strip_suffix(b"\r").unwrap_or(rest),
+            None => line,
+        };
+        for (negated, expression) in &self.lines {
+            let Some(found) = expression.captures_upto(line, 1) else {
+                continue;
+            };
+            if *negated {
+                return None;
+            }
+            let span = found.get(1).or(found.get(0)).expect("the whole match");
+            return Some(alt_diff::section_text(&line[span]));
+        }
+        None
+    }
+}
+
+/// The drivers of one repository, and which path has which.
+pub(crate) struct Sections {
+    root: Option<PathBuf>,
+    /// the user's attributes file and the repository's own
+    outer: Vec<Layer>,
+    /// the `.gitattributes` of each directory asked about so far
+    files: RefCell<HashMap<Vec<u8>, Option<Rc<Layer>>>>,
+    configured: HashMap<Vec<u8>, (Vec<u8>, Syntax)>,
+    finders: RefCell<HashMap<Vec<u8>, Option<Rc<Finder>>>>,
+}
+
+impl Sections {
+    /// The drivers under `settings`, for the working tree at `root`;
+    /// `info` is the repository's own attributes file.
+    pub(crate) fn new(root: Option<&Path>, info: &Path, settings: &Config) -> Res<Self> {
+        let mut configured = HashMap::new();
+        for e in settings.entries.iter().filter(|e| e.section == "diff") {
+            let (Some(name), Some(value)) = (&e.subsection, &e.value) else {
+                continue;
+            };
+            let syntax = match e.key.as_str() {
+                "xfuncname" => Syntax::Extended,
+                "funcname" => Syntax::Basic,
+                _ => continue,
+            };
+            // the later of the two keys stands, whichever it is
+            configured.insert(name.to_vec(), (value.to_vec(), syntax));
+        }
+        Ok(Sections {
+            root: root.map(Path::to_path_buf),
+            outer: outer_attributes(settings, info)?,
+            files: RefCell::default(),
+            configured,
+            finders: RefCell::default(),
+        })
+    }
+
+    fn file(&self, dir: &[u8]) -> Res<Option<Rc<Layer>>> {
+        if let Some(known) = self.files.borrow().get(dir) {
+            return Ok(known.clone());
+        }
+        let file = match (&self.root, dir.to_path()) {
+            (Some(root), Ok(dir)) => read_if_file(root.join(dir).join(".gitattributes"))?,
+            _ => None,
+        };
+        let layer = file
+            .map(|content| Rc::new(Layer::parse(&content, dir)))
+            .filter(|layer| !layer.is_empty());
+        self.files.borrow_mut().insert(dir.to_vec(), layer.clone());
+        Ok(layer)
+    }
+
+    /// The name of the driver the attributes give `path`.
+    fn driver(&self, path: &[u8]) -> Res<Vec<u8>> {
+        let mut files = Vec::new();
+        files.extend(self.file(b"")?);
+        for (at, _) in path.iter().enumerate().filter(|(_, b)| **b == b'/') {
+            files.extend(self.file(&path[..at])?);
+        }
+        let layers = self.outer.iter().chain(files.iter().map(Rc::as_ref));
+        let unused = EolConfig {
+            autocrlf: AutoCrlf::False,
+            eol: CoreEol::Native,
+        };
+        let named = attributes::lookup(layers, path, &unused).diff;
+        Ok(named.unwrap_or_else(|| b"default".to_vec()))
+    }
+
+    /// The pattern of the driver `path` has; `None` when it has none and
+    /// git's plain rule applies.
+    pub(crate) fn of(&self, path: &[u8]) -> Res<Option<Rc<Finder>>> {
+        let name = self.driver(path)?;
+        if let Some(known) = self.finders.borrow().get(&name) {
+            return Ok(known.clone());
+        }
+        let builtin = || drivers::BUILTIN.iter().find(|b| b.name.as_bytes() == name);
+        let finder = match (self.configured.get(&name), builtin()) {
+            (Some((pattern, syntax)), _) => {
+                let options = Options {
+                    syntax: *syntax,
+                    ..Options::default()
+                };
+                Some(Finder::new(pattern, options)?)
+            }
+            (None, Some(builtin)) => {
+                let options = Options {
+                    ignore_case: builtin.ignore_case,
+                    ..Options::default()
+                };
+                Some(Finder::new(builtin.lines.join("\n").as_bytes(), options)?)
+            }
+            (None, None) => None,
+        };
+        let finder = finder.map(Rc::new);
+        self.finders.borrow_mut().insert(name, finder.clone());
+        Ok(finder)
+    }
+
+    /// Writes the hunks between two contents of a file, as
+    /// [`alt_diff::write_unified`] does, their headers naming sections
+    /// by the driver of the old path, or else of the new one. A side
+    /// that is not a regular file has no path here.
+    pub(crate) fn write_hunks(
+        &self,
+        out: &mut Vec<u8>,
+        paths: [Option<&[u8]>; 2],
+        old: &[u8],
+        new: &[u8],
+    ) -> Res<bool> {
+        let mut finder = None;
+        for path in paths.into_iter().flatten() {
+            if finder.is_none() {
+                finder = self.of(path)?;
+            }
+        }
+        Ok(match finder {
+            Some(finder) => {
+                alt_diff::write_unified_with(out, old, new, 3, &|line| finder.section(line))
+            }
+            None => alt_diff::write_unified(out, old, new, 3),
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn finder(name: &str) -> Finder {
+        let builtin = drivers::BUILTIN.iter().find(|b| b.name == name).unwrap();
+        let options = Options {
+            ignore_case: builtin.ignore_case,
+            ..Options::default()
+        };
+        Finder::new(builtin.lines.join("\n").as_bytes(), options).unwrap()
+    }
+
+    #[test]
+    fn every_built_in_pattern_compiles() {
+        assert_eq!(drivers::BUILTIN.len(), 27);
+        for builtin in drivers::BUILTIN {
+            finder(builtin.name);
+        }
+    }
+
+    #[test]
+    fn a_driver_shows_its_group_and_skips_what_it_excludes() {
+        let cpp = finder("cpp");
+        let shown = |line: &str| cpp.section(line.as_bytes()).map(|s| s.to_vec());
+        assert_eq!(
+            shown("static int run(void)\r\n"),
+            Some(b"static int run(void)".to_vec())
+        );
+        assert_eq!(shown("  indented(void)\n"), None);
+        // a label is a line the first, negated expression takes away
+        assert_eq!(shown("out:\n"), None);
+        assert_eq!(shown("public:\n"), None);
+        let python = finder("python");
+        let shown = python.section(b"    def run(self):   \n").unwrap();
+        assert_eq!(shown, b"def run(self):");
+        let ada = finder("ada");
+        assert_eq!(
+            ada.section(b"  PROCEDURE Main is\n").unwrap(),
+            b"PROCEDURE Main is"
+        );
+    }
+
+    #[test]
+    fn a_pattern_without_a_group_shows_the_whole_match_cut_to_eighty_bytes() {
+        let finder = Finder::new(b"!^skip\n^[a-z]+ .*", Options::default()).unwrap();
+        assert_eq!(finder.section(b"skip this line\n"), None);
+        let long = format!("name {}\n", "x".repeat(200));
+        assert_eq!(finder.section(long.as_bytes()).unwrap().len(), 80);
+        assert!(Finder::new(b"^(a", Options::default()).is_err());
+    }
+}
