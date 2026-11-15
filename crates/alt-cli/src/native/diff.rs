@@ -60,7 +60,7 @@ impl NativeRepo<'_> {
             .collect();
 
         if json {
-            return self.diff_json(&changes, disk, semantic, out);
+            return self.diff_json(&self.pairs(&changes, cached)?, disk, semantic, out);
         }
         let settings = self.settings()?;
         let info = self.store.alt_dir.join("git-import/info/attributes");
@@ -163,19 +163,21 @@ impl NativeRepo<'_> {
     /// for; the field is `null` otherwise (including non-`--semantic` runs).
     fn diff_json(
         &self,
-        changes: &[alt_worktree::Change],
+        pairs: &[Pair<'_>],
         disk: Option<&Worktree<'_>>,
         semantic: bool,
         out: &mut impl Write,
     ) -> Res<()> {
         use crate::json::Json;
-        let mut files = Vec::with_capacity(changes.len());
-        for ch in changes {
+        let mut files = Vec::with_capacity(pairs.len());
+        for ch in pairs {
             let old_bytes = self.side_bytes(ch.old, None)?;
             let new_bytes = self.side_bytes(ch.new, disk)?;
+            let renamed = ch.old_path != ch.new_path;
             let status = match (ch.old, ch.new) {
                 (None, _) => "added",
                 (_, None) => "deleted",
+                _ if renamed => "renamed",
                 _ => "modified",
             };
             let binary = alt_diff::is_binary(&old_bytes) || alt_diff::is_binary(&new_bytes);
@@ -216,7 +218,7 @@ impl NativeRepo<'_> {
                 Json::Null
             };
             let ast_diff_field = if semantic && !binary {
-                ast_diff_json(ch.path.as_bytes(), &old_bytes, &new_bytes)
+                ast_diff_json(ch.new_path.as_bytes(), &old_bytes, &new_bytes)
             } else {
                 Json::Null
             };
@@ -228,8 +230,8 @@ impl NativeRepo<'_> {
                 Some(w) => Json::str(format!("{:06o}", w.mode)),
                 None => Json::Null,
             };
-            files.push(Json::Object(vec![
-                ("path", Json::str(ch.path)),
+            let mut fields = vec![
+                ("path", Json::str(ch.new_path)),
                 ("status", Json::str(status)),
                 ("old_oid", oid(ch.old)),
                 ("new_oid", oid(ch.new)),
@@ -241,7 +243,16 @@ impl NativeRepo<'_> {
                 ("perceptual_diff", perceptual_diff_field),
                 ("part_diff", part_diff_field),
                 ("ast_diff", ast_diff_field),
-            ]));
+            ];
+            // a renamed file says where it was and how alike the two are
+            if renamed {
+                fields.insert(1, ("old_path", Json::str(ch.old_path)));
+                let similarity = ch
+                    .similarity
+                    .map_or(Json::Null, |s| Json::Num(i64::from(s)));
+                fields.push(("similarity", similarity));
+            }
+            files.push(Json::Object(fields));
         }
         let doc = Json::Object(vec![
             ("schema_version", Json::Num(1)),
