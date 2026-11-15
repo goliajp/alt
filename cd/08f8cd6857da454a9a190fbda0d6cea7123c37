@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: test
+summary: compare basic expressions, anchors, word edges, larger counts and utf-8 texts with the c library
+author-type: human
+author: doracawl
+touched: crates/alt-regex/tests/it/regcomp.rs
+touched: crates/alt-regex/tests/it/regcomp/random.rs
+touched: crates/alt-regex/tests/it/regcomp/utf8.rs
