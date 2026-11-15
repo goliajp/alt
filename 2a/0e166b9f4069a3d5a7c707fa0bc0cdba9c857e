@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: read the index and the attribute files once per diff
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/diff.rs
