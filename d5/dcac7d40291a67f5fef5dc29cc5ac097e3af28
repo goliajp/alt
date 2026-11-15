@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: link alt to a fixed address and bind its imports on first call
+author-type: human
+author: doracawl
+touched: crates/alt-cli/build.rs
