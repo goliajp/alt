@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: report a main thread stack overflow from the c entry
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/main.rs
+touched: crates/alt-os/Cargo.toml
+touched: crates/alt-os/src/lib.rs
+touched: crates/alt-os/src/stack.rs
+touched: crates/alt-os/tests/it/main.rs
