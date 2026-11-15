@@ -276,7 +276,12 @@ impl NativeRepo<'_> {
                 }
             }
             let actual = self.observed_among(&paths, change)?;
-            if actual != change.before && actual != change.after {
+            // a path that changes between a submodule directory and a file
+            // is absent for a moment: the one goes before the other comes
+            let kinds =
+                [&change.before, &change.after].map(|s| s.as_ref().map(|s| s.mode == 0o160000));
+            let between = actual.is_none() && matches!(kinds, [Some(a), Some(b)] if a != b);
+            if actual != change.before && actual != change.after && !between {
                 return Err(crate::machine::Failure::refusal(
                     "precondition_failed",
                     "recovery precondition failed: path matches neither recorded state",
