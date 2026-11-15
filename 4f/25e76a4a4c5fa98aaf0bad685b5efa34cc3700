@@ -1,0 +1,18 @@
+schema: alt-meta/1
+type: feat
+summary: match the characters of a utf-8 text as the c library does in a utf-8 locale
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/funcname.rs
+touched: crates/alt-cli/src/git_settings.rs
+touched: crates/alt-regex/src/backref.rs
+touched: crates/alt-regex/src/backtrack.rs
+touched: crates/alt-regex/src/bracket.rs
+touched: crates/alt-regex/src/chars.rs
+touched: crates/alt-regex/src/error.rs
+touched: crates/alt-regex/src/lib.rs
+touched: crates/alt-regex/src/pike.rs
+touched: crates/alt-regex/src/program.rs
+touched: crates/alt-regex/src/syntax.rs
+touched: crates/alt-regex/src/tables.rs
+touched: crates/alt-regex/src/utf8.rs
