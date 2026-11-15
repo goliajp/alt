@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: use is_multiple_of in the diff comparison tests
+author-type: human
+author: doracawl
+touched: crates/alt-diff/tests/it/git_hunks.rs
