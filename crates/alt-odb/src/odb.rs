@@ -132,11 +132,13 @@ impl Odb {
         Ok(odb)
     }
 
-    /// A store whose logs have outgrown their index runs — written before
-    /// the runs existed, or by a writer that died before its flush — is
-    /// indexed by whoever opens it next, unless a writer is at work.
+    /// A store whose logs have outgrown their index runs, or that has no
+    /// head record — written by a program that keeps neither, or by a
+    /// writer that died before its flush — gets both from whoever opens it
+    /// next, unless a writer is at work.
     fn index_stale_tails(&mut self) -> Result<(), OdbError> {
-        let pending = self.blobs.index_pending() || self.map.index_pending();
+        let pending =
+            self.blobs.index_pending() || self.map.index_pending() || self.head == Head::default();
         if !pending || !try_hold_exclusive(&self.lock)? {
             return Ok(());
         }
