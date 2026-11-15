@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: perf
+summary: build the normalized arguments only for a write and search notes trees in place
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/execution.rs
+touched: crates/alt-cli/src/machine.rs
+touched: crates/alt-cli/src/meta/lookup.rs
+touched: crates/alt-cli/tests/it/argument_bindings.rs
+touched: crates/alt-git-codec/src/tree.rs
+touched: crates/alt-store/src/reclog.rs
