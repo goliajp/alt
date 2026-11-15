@@ -35,9 +35,11 @@ alt show
 alt show HEAD~1 --json
 {"subcommand":{"arguments":{"subcommand":null,"values":{"Show":["726576","6a736f6e"],"json":["74727565"],"rev":["484541447e31"]}},"name":"show"},"values":{}}
 alt blame f.txt HEAD -M
-{"subcommand":{"arguments":{"subcommand":null,"values":{"Blame":["70617468","726576","666f6c6c6f77"],"follow":["74727565"],"path":["662e747874"],"rev":["48454144"]}},"name":"blame"},"values":{}}
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Blame":["70617468","726576","6d6f766573"],"follow":["66616c7365"],"moves":["74727565"],"path":["662e747874"],"rev":["48454144"]}},"name":"blame"},"values":{}}
+alt blame f.txt -C -C
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Blame":["70617468","636f70696573","636f70696573"],"copies":["74727565","74727565"],"follow":["66616c7365"],"moves":["66616c7365"],"path":["662e747874"]}},"name":"blame"},"values":{}}
 alt blame f.txt --follow
-{"subcommand":{"arguments":{"subcommand":null,"values":{"Blame":["70617468","666f6c6c6f77"],"follow":["74727565"],"path":["662e747874"]}},"name":"blame"},"values":{}}
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Blame":["70617468","666f6c6c6f77"],"follow":["74727565"],"moves":["66616c7365"],"path":["662e747874"]}},"name":"blame"},"values":{}}
 alt meta show
 {"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"json":["66616c7365"],"rev":["48454144"]}},"name":"show"},"values":{}},"name":"meta"},"values":{}}
 alt meta show abc --json
@@ -199,15 +201,15 @@ alt cat-file abc
 alt rev-parse HEAD
 {"subcommand":{"arguments":{"subcommand":null,"values":{"RevParse":["726576"],"rev":["48454144"]}},"name":"rev-parse"},"values":{}}
 alt log
-{"subcommand":{"arguments":{"subcommand":null,"values":{"json":["66616c7365"],"patch":["66616c7365"],"pretty":["6f6e656c696e65"],"rev":["48454144"]}},"name":"log"},"values":{}}
+{"subcommand":{"arguments":{"subcommand":null,"values":{"combined":["66616c7365"],"json":["66616c7365"],"patch":["66616c7365"],"pretty":["6f6e656c696e65"],"rev":["48454144"]}},"name":"log"},"values":{}}
 alt log -n 3 --json -p main
-{"subcommand":{"arguments":{"subcommand":null,"values":{"LogArgs":["6d61785f636f756e74","6a736f6e","7061746368","726576"],"json":["74727565"],"max_count":["33"],"patch":["74727565"],"pretty":["6f6e656c696e65"],"rev":["6d61696e"]}},"name":"log"},"values":{}}
+{"subcommand":{"arguments":{"subcommand":null,"values":{"LogArgs":["6d61785f636f756e74","6a736f6e","7061746368","726576"],"combined":["66616c7365"],"json":["74727565"],"max_count":["33"],"patch":["74727565"],"pretty":["6f6e656c696e65"],"rev":["6d61696e"]}},"name":"log"},"values":{}}
 alt log --pretty raw --patch
-{"subcommand":{"arguments":{"subcommand":null,"values":{"LogArgs":["707265747479","7061746368"],"json":["66616c7365"],"patch":["74727565"],"pretty":["726177"],"rev":["48454144"]}},"name":"log"},"values":{}}
+{"subcommand":{"arguments":{"subcommand":null,"values":{"LogArgs":["707265747479","7061746368"],"combined":["66616c7365"],"json":["66616c7365"],"patch":["74727565"],"pretty":["726177"],"rev":["48454144"]}},"name":"log"},"values":{}}
 alt log --pretty=raw -n3
-{"subcommand":{"arguments":{"subcommand":null,"values":{"LogArgs":["707265747479","6d61785f636f756e74"],"json":["66616c7365"],"max_count":["33"],"patch":["66616c7365"],"pretty":["726177"],"rev":["48454144"]}},"name":"log"},"values":{}}
+{"subcommand":{"arguments":{"subcommand":null,"values":{"LogArgs":["707265747479","6d61785f636f756e74"],"combined":["66616c7365"],"json":["66616c7365"],"max_count":["33"],"patch":["66616c7365"],"pretty":["726177"],"rev":["48454144"]}},"name":"log"},"values":{}}
 alt log -pn3
-{"subcommand":{"arguments":{"subcommand":null,"values":{"LogArgs":["7061746368","6d61785f636f756e74"],"json":["66616c7365"],"max_count":["33"],"patch":["74727565"],"pretty":["6f6e656c696e65"],"rev":["48454144"]}},"name":"log"},"values":{}}
+{"subcommand":{"arguments":{"subcommand":null,"values":{"LogArgs":["7061746368","6d61785f636f756e74"],"combined":["66616c7365"],"json":["66616c7365"],"max_count":["33"],"patch":["74727565"],"pretty":["6f6e656c696e65"],"rev":["48454144"]}},"name":"log"},"values":{}}
 alt intake src dst
 {"subcommand":{"arguments":{"subcommand":null,"values":{"Intake":["736f75726365","746172676574"],"git":["2f7573722f62696e2f676974"],"json":["66616c7365"],"source":["737263"],"target":["647374"]}},"name":"intake"},"values":{"json":["66616c7365"]}}
 alt intake src dst --git /opt/git --json
@@ -371,9 +373,9 @@ alt add -- -x
 alt commit --decision d1 -m x --decision=d2 -n --meta=k=v
 {"subcommand":{"arguments":{"subcommand":null,"values":{"Commit":["6465636973696f6e73","6d657373616765","6465636973696f6e73","6e6f5f766572696679","6578747261"],"allow_empty":["66616c7365"],"amend":["66616c7365"],"decisions":["6431","6432"],"extra":["6b3d76"],"json":["66616c7365"],"message":["78"],"no_edit":["66616c7365"],"no_verify":["74727565"],"validate":["66616c7365"]}},"name":"commit"},"values":{}}
 alt log main -n 2
-{"subcommand":{"arguments":{"subcommand":null,"values":{"LogArgs":["726576","6d61785f636f756e74"],"json":["66616c7365"],"max_count":["32"],"patch":["66616c7365"],"pretty":["6f6e656c696e65"],"rev":["6d61696e"]}},"name":"log"},"values":{}}
+{"subcommand":{"arguments":{"subcommand":null,"values":{"LogArgs":["726576","6d61785f636f756e74"],"combined":["66616c7365"],"json":["66616c7365"],"max_count":["32"],"patch":["66616c7365"],"pretty":["6f6e656c696e65"],"rev":["6d61696e"]}},"name":"log"},"values":{}}
 alt log -n=2
-{"subcommand":{"arguments":{"subcommand":null,"values":{"LogArgs":["6d61785f636f756e74"],"json":["66616c7365"],"max_count":["32"],"patch":["66616c7365"],"pretty":["6f6e656c696e65"],"rev":["48454144"]}},"name":"log"},"values":{}}
+{"subcommand":{"arguments":{"subcommand":null,"values":{"LogArgs":["6d61785f636f756e74"],"combined":["66616c7365"],"json":["66616c7365"],"max_count":["32"],"patch":["66616c7365"],"pretty":["6f6e656c696e65"],"rev":["48454144"]}},"name":"log"},"values":{}}
 alt tag -am msg v1
 {"subcommand":{"arguments":{"subcommand":null,"values":{"Tag":["616e6e6f74617465","6d657373616765","6e616d65"],"annotate":["74727565"],"json":["66616c7365"],"message":["6d7367"],"name":["7631"]}},"name":"tag"},"values":{}}
 alt tag -ma v1
@@ -443,4 +445,4 @@ alt commit -m -
 alt switch -
 {"subcommand":{"arguments":{"subcommand":null,"values":{"Switch":["6e616d65"],"create":["66616c7365"],"json":["66616c7365"],"name":["2d"]}},"name":"switch"},"values":{}}
 alt log -
-{"subcommand":{"arguments":{"subcommand":null,"values":{"LogArgs":["726576"],"json":["66616c7365"],"patch":["66616c7365"],"pretty":["6f6e656c696e65"],"rev":["2d"]}},"name":"log"},"values":{}}
+{"subcommand":{"arguments":{"subcommand":null,"values":{"LogArgs":["726576"],"combined":["66616c7365"],"json":["66616c7365"],"patch":["66616c7365"],"pretty":["6f6e656c696e65"],"rev":["2d"]}},"name":"log"},"values":{}}

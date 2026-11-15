@@ -205,6 +205,10 @@ pub enum Command {
         /// Trace lines moved within the file to where they were before.
         #[arg(short = 'M')]
         moves: bool,
+        /// Accepted for command lines written before renames were always
+        /// followed; it changes nothing.
+        #[arg(long = "follow")]
+        follow: bool,
         /// Trace lines copied from files changed in the same commit; twice,
         /// from any file when the blamed file is created; three times, from
         /// any file in every commit. Implies -M.
@@ -1544,6 +1548,7 @@ pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, head: &str, out: &mut
             rev,
             moves,
             copies,
+            follow: _,
         } => {
             let spec = at_head(rev.as_deref().unwrap_or("HEAD"));
             let options = crate::blame::Options {
