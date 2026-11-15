@@ -6,6 +6,10 @@ use alt_worktree::{Delta, FileStat, Snapshot, Untracked};
 
 use super::*;
 
+mod plan;
+
+use plan::{plan, present};
+
 /// Whether `path` is what `spec` names or lies beneath it; the empty spec
 /// is the whole tree.
 fn under(path: &[u8], spec: &str) -> bool {
@@ -79,80 +83,13 @@ impl NativeRepo<'_> {
         let (delta, clock) = self.scan_delta_within(&mut snapshot, Untracked::All, &within)?;
         all_match(&specs, paths, &before, &delta)?;
 
-        // the paths whose entries change: taken from the working tree, or dropped
-        let again = |e: &&IndexEntry| e.stage() == 0 && e.mode != 0o160000 && named(&e.path);
-        let taken: Vec<&BString> = match renormalize {
-            true => before
-                .entries
-                .iter()
-                .filter(again)
-                .map(|e| &e.path)
-                .collect(),
-            false => delta
-                .changed
-                .iter()
-                .map(|w| &w.path)
-                .chain(&delta.untracked)
-                .chain(&delta.unmerged)
-                .collect(),
-        };
-        let deleted: &[BString] = match renormalize {
-            true => &[],
-            false => &delta.deleted,
-        };
-        let acted: HashSet<&[u8]> = taken
-            .iter()
-            .copied()
-            .chain(deleted)
-            .map(|p| p.as_slice())
-            .collect();
-        // a conflicted path among those named is resolved by what the
-        // working tree has there: the file when there is one (`unmerged`),
-        // a removal when there is none. git does the same whether the path
-        // is named, lies under a named directory or the whole tree is
-        // staged. The scan does not report a conflicted submodule without
-        // a directory as deleted, so those are dropped here
-        let resolved = |e: &&IndexEntry| !renormalize && e.stage() != 0 && named(&e.path);
-        let mut entries: Vec<IndexEntry> = before
-            .entries
-            .iter()
-            .filter(|e| !acted.contains(e.path.as_slice()) && !resolved(e))
-            .cloned()
-            .collect();
-        let dropped = before
-            .entries
-            .iter()
-            .filter(|e| resolved(e) && !acted.contains(e.path.as_slice()))
-            .map(|e| e.path.clone());
-        let mut touched: Vec<BString> = acted
-            .iter()
-            .map(|p| BString::from(*p))
-            .chain(dropped)
-            .collect();
-        touched.sort();
-        touched.dedup();
-
-        // every file of the named part of the tree counts as staged,
-        // changed or not
-        let present = |e: &&IndexEntry| {
-            e.stage() == 0
-                && named(&e.path)
-                && (e.mode != 0o160000 || delta.submodules.contains(&e.path))
-        };
-        let unchanged = |e: &&IndexEntry| !acted.contains(e.path.as_slice());
-        let staged = before
-            .entries
-            .iter()
-            .filter(present)
-            .filter(unchanged)
-            .count()
-            + taken.len();
-
+        let plan = plan(&before, &delta, renormalize, &named);
         // path gate: deny staging any path the policy excludes, *before*
         // writing a blob into the odb, so a denial has no side effect
         if !self.caps.path_allow.is_empty() {
-            let gone: HashSet<&[u8]> = deleted.iter().map(|p| p.as_slice()).collect();
+            let gone: HashSet<&[u8]> = plan.deleted.iter().map(|p| p.as_slice()).collect();
             let stays = |e: &&IndexEntry| !gone.contains(e.path.as_slice());
+            let present = |e: &&IndexEntry| present(e, &delta, &named);
             for e in before.entries.iter().filter(present).filter(stays) {
                 self.ensure_path_allowed(e.path.to_str().unwrap_or(""))?;
             }
@@ -164,7 +101,8 @@ impl NativeRepo<'_> {
             extensions: Vec::new(),
         };
         let staged_now = if renormalize { &none } else { &before };
-        let stats = self.stage_files(&taken, &delta, staged_now, &mut entries)?;
+        let mut entries = plan.entries;
+        let stats = self.stage_files(&plan.taken, &delta, staged_now, &mut entries)?;
         self.store.odb.flush()?;
         entries.sort_by(|a, b| a.path.cmp(&b.path).then(a.stage().cmp(&b.stage())));
         let after = Index {
@@ -172,24 +110,42 @@ impl NativeRepo<'_> {
             entries,
             extensions: Vec::new(),
         };
-        if after.entries != before.entries {
-            let mut next = Snapshot::of_index(&after, &[], self.store.algo, Some(&snapshot));
-            self.write_index_transaction(before, after, &touched, None)?;
-            let raw = self.store.algo.raw_len();
-            next.index_id = tree_state::index_checksum(&self.index_path, raw)?.unwrap_or_default();
-            for (path, stat) in stats {
-                next.settle_path(&path, stat, &clock);
-            }
-            next.fill_trees();
-            self.keep_snapshot(&next);
-        } else {
-            self.keep_snapshot(&snapshot);
-        }
+        let staged = plan.staged;
+        let touched = plan.touched;
+        self.put_staged(before, after, &touched, &snapshot, stats, &clock)?;
         if json {
             crate::json::emit(out, vec![("staged", crate::json::Json::Num(staged as i64))])?;
         } else {
             writeln!(out, "staged {staged} path(s)")?;
         }
+        Ok(())
+    }
+
+    /// Puts the index `after` in place of `before` where they differ, and
+    /// keeps the snapshot of what is then in place, with the stat each
+    /// staged file had before it was read.
+    fn put_staged(
+        &mut self,
+        before: Index,
+        after: Index,
+        touched: &[BString],
+        snapshot: &Snapshot,
+        stats: Vec<(BString, FileStat)>,
+        clock: &alt_worktree::Clock,
+    ) -> Res<()> {
+        if after.entries == before.entries {
+            self.keep_snapshot(snapshot);
+            return Ok(());
+        }
+        let mut next = Snapshot::of_index(&after, &[], self.store.algo, Some(snapshot));
+        self.write_index_transaction(before, after, touched, None)?;
+        let raw = self.store.algo.raw_len();
+        next.index_id = tree_state::index_checksum(&self.index_path, raw)?.unwrap_or_default();
+        for (path, stat) in stats {
+            next.settle_path(&path, stat, clock);
+        }
+        next.fill_trees();
+        self.keep_snapshot(&next);
         Ok(())
     }
 
