@@ -258,7 +258,7 @@ impl RecLog {
         if let Some(&at) = self.tail_keys.get(key) {
             return Ok(Some(self.copy(self.tail_record(at))));
         }
-        if let Some(rec) = self.cache.get(key) {
+        if let Some(rec) = self.cache.get(key, self.layout.rec_len) {
             return Ok(Some(rec));
         }
         let mut last = None;
