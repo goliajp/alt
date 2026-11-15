@@ -69,8 +69,20 @@ pub(crate) fn var(name: &str) -> Option<OsString> {
             .iter()
             .find(|(key, _)| key == name)
             .map(|(_, value)| OsString::from(value)),
-        None => std::env::var_os(name),
+        None => unnamed(name),
     })
+}
+
+#[cfg(not(test))]
+fn unnamed(name: &str) -> Option<OsString> {
+    std::env::var_os(name)
+}
+
+/// A unit test that names no caller has no home, no locale and no
+/// system configuration: the machine it runs on has no say in it.
+#[cfg(test)]
+fn unnamed(name: &str) -> Option<OsString> {
+    (name == "GIT_CONFIG_NOSYSTEM").then(|| OsString::from("1"))
 }
 
 fn env_path(name: &str) -> Option<PathBuf> {
@@ -191,6 +203,19 @@ pub(crate) fn outer_attributes(settings: &Config, info: &Path) -> Res<Vec<Layer>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_test_without_a_caller_reads_no_configuration_of_the_machine() {
+        assert!(std::env::var_os("HOME").is_some());
+        assert_eq!(home(), None);
+        assert_eq!(outer(None, None).unwrap().len(), 0);
+        assert!(!utf8_locale());
+        let named = vec![("HOME".to_owned(), "/nowhere".to_owned())];
+        let caller = Caller::new(named);
+        assert_eq!(home(), Some(PathBuf::from("/nowhere")));
+        drop(caller);
+        assert_eq!(home(), None);
+    }
 
     #[test]
     fn the_locale_says_whether_texts_are_utf8() {
