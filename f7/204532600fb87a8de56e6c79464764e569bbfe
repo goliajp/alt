@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: read the head tree by its id in the mixed version tests
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/mixed_versions.rs
