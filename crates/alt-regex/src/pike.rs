@@ -3,7 +3,7 @@
 //! work per byte bounded by the size of the pattern.
 
 use crate::class::ByteSet;
-use crate::program::{Inst, NO_JOIN, Program};
+use crate::program::{Inst, NO_JOIN, Program, close};
 use crate::syntax::Look;
 
 /// A position no group has.
@@ -41,6 +41,8 @@ impl Threads {
 enum Frame {
     Explore(u32),
     Restore(usize, usize),
+    /// put every slot back from the top of the copies kept
+    Whole,
 }
 
 /// Storage a search reuses.
@@ -50,6 +52,8 @@ pub struct Cache {
     next: Threads,
     stack: Vec<Frame>,
     scratch: Vec<usize>,
+    /// whole sets of slots, to put back
+    kept: Vec<usize>,
 }
 
 pub fn holds(look: Look, text: &[u8], at: usize) -> bool {
@@ -70,11 +74,14 @@ pub fn holds(look: Look, text: &[u8], at: usize) -> bool {
 
 /// Adds the path at `pc`, and every path reachable from it without
 /// consuming a byte, to `list`.
+#[allow(clippy::too_many_arguments)]
 fn follow(
     prog: &Program,
     list: &mut Threads,
     stack: &mut Vec<Frame>,
+    kept: &mut Vec<usize>,
     slots: &mut [usize],
+    captures: usize,
     pc: u32,
     text: &[u8],
     at: usize,
@@ -87,6 +94,11 @@ fn follow(
                 slots[slot] = old;
                 continue;
             }
+            Frame::Whole => {
+                slots.copy_from_slice(&kept[kept.len() - width..]);
+                kept.truncate(kept.len() - width);
+                continue;
+            }
             Frame::Explore(pc) if list.contains(pc) => continue,
             Frame::Explore(pc) => pc,
         };
@@ -96,9 +108,14 @@ fn follow(
                 stack.push(Frame::Explore(second));
                 stack.push(Frame::Explore(first));
             }
-            Inst::Save(slot, next) => {
+            Inst::Save(slot, next) | Inst::SaveOpt(slot, next) => {
                 let slot = slot as usize;
-                if slot < width {
+                if slot < captures && prog.snapshots {
+                    kept.extend_from_slice(slots);
+                    stack.push(Frame::Whole);
+                    let opt = matches!(prog.insts[pc as usize], Inst::SaveOpt(..));
+                    close(prog, slots, captures, slot, at, opt);
+                } else if slot < captures {
                     stack.push(Frame::Restore(slot, slots[slot]));
                     slots[slot] = at;
                 }
@@ -130,13 +147,20 @@ pub fn search(
     only: Option<usize>,
     found: &mut [usize],
 ) -> bool {
-    let width = found.len();
+    let captures = found.len();
+    let width = if prog.snapshots {
+        2 * captures
+    } else {
+        captures
+    };
     let Cache {
         now,
         next,
         stack,
         scratch,
+        kept,
     } = cache;
+    kept.clear();
     now.reset(prog.insts.len(), prog.row_count as usize, width);
     next.reset(prog.insts.len(), prog.row_count as usize, width);
     scratch.clear();
@@ -146,7 +170,9 @@ pub fn search(
     for at in from..=text.len() {
         if !matched && (at == from || (only.is_none() && !prog.anchored)) {
             scratch.fill(UNSET);
-            follow(prog, now, stack, scratch, prog.start, text, at);
+            follow(
+                prog, now, stack, kept, scratch, captures, prog.start, text, at,
+            );
         }
         if now.order.is_empty() {
             break;
@@ -166,7 +192,7 @@ pub fn search(
                 Inst::Match => {
                     let better = !matched || slots[0] < found[0] || at > found[1];
                     if better {
-                        found.copy_from_slice(slots);
+                        found.copy_from_slice(&slots[..captures]);
                         found[1] = at;
                         matched = true;
                     }
@@ -183,7 +209,17 @@ pub fn search(
                 _ => continue,
             };
             scratch.copy_from_slice(slots);
-            follow(prog, next, stack, scratch, target, text, at + 1);
+            follow(
+                prog,
+                next,
+                stack,
+                kept,
+                scratch,
+                captures,
+                target,
+                text,
+                at + 1,
+            );
         }
         std::mem::swap(now, next);
         next.order.clear();

@@ -80,7 +80,9 @@ pub fn search(prog: &Program, text: &[u8], only: Option<usize>, found: &mut [usi
                         stack.push(Frame::Step(second, at));
                         pc = first;
                     }
-                    Inst::Save(slot, next) => {
+                    // what a group last matched is what its reference
+                    // matches again, also where the group took nothing
+                    Inst::Save(slot, next) | Inst::SaveOpt(slot, next) => {
                         let slot = slot as usize;
                         stack.push(Frame::Slot(slot, slots[slot]));
                         slots[slot] = at;

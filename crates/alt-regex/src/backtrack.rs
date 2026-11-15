@@ -6,7 +6,7 @@
 //! times text.
 
 use crate::pike::holds;
-use crate::program::{Inst, NO_JOIN, Program};
+use crate::program::{Inst, NO_JOIN, Program, close};
 
 /// The most bits of visited marks a search may need.
 const MAX_MARKS: usize = 1 << 21;
@@ -14,6 +14,8 @@ const MAX_MARKS: usize = 1 << 21;
 enum Frame {
     Step(u32, usize),
     Restore(usize, usize),
+    /// put every slot back from the top of the copies kept
+    Whole,
 }
 
 /// Storage a search reuses.
@@ -21,6 +23,11 @@ enum Frame {
 pub struct Cache {
     visited: Vec<u64>,
     stack: Vec<Frame>,
+    /// the slots with their snapshot behind them, for a program that
+    /// keeps one
+    both: Vec<usize>,
+    /// whole sets of slots, to put back
+    kept: Vec<usize>,
 }
 
 /// Whether a match of `len` bytes is small enough to search this way.
@@ -38,8 +45,36 @@ pub fn captures(
     to: usize,
     slots: &mut [usize],
 ) -> bool {
+    let captures = slots.len();
+    if !prog.snapshots {
+        return paths(prog, cache, text, from, to, slots, captures);
+    }
+    let mut both = std::mem::take(&mut cache.both);
+    both.clear();
+    both.resize(2 * captures, crate::pike::UNSET);
+    let found = paths(prog, cache, text, from, to, &mut both, captures);
+    slots.copy_from_slice(&both[..captures]);
+    cache.both = both;
+    found
+}
+
+fn paths(
+    prog: &Program,
+    cache: &mut Cache,
+    text: &[u8],
+    from: usize,
+    to: usize,
+    slots: &mut [usize],
+    captures: usize,
+) -> bool {
     let span = to - from + 1;
-    let Cache { visited, stack } = cache;
+    let Cache {
+        visited,
+        stack,
+        kept,
+        ..
+    } = cache;
+    kept.clear();
     visited.clear();
     visited.resize((prog.join_count as usize * span).div_ceil(64), 0);
     stack.clear();
@@ -48,6 +83,11 @@ pub fn captures(
         let (mut pc, mut at) = match frame {
             Frame::Restore(slot, old) => {
                 slots[slot] = old;
+                continue;
+            }
+            Frame::Whole => {
+                slots.copy_from_slice(&kept[kept.len() - slots.len()..]);
+                kept.truncate(kept.len() - slots.len());
                 continue;
             }
             Frame::Step(pc, at) => (pc, at),
@@ -71,9 +111,14 @@ pub fn captures(
                     stack.push(Frame::Step(second, at));
                     pc = first;
                 }
-                Inst::Save(slot, next) => {
+                Inst::Save(slot, next) | Inst::SaveOpt(slot, next) => {
                     let slot = slot as usize;
-                    if slot < slots.len() {
+                    if slot < captures && prog.snapshots {
+                        kept.extend_from_slice(slots);
+                        stack.push(Frame::Whole);
+                        let opt = matches!(prog.insts[pc as usize], Inst::SaveOpt(..));
+                        close(prog, slots, captures, slot, at, opt);
+                    } else if slot < captures {
                         stack.push(Frame::Restore(slot, slots[slot]));
                         slots[slot] = at;
                     }

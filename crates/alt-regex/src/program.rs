@@ -15,6 +15,9 @@ pub enum Inst {
     Split(u32, u32),
     /// Record the position in a capture slot.
     Save(u32, u32),
+    /// Record the end of a group that a repetition may leave out and
+    /// that may match nothing: see [`close`].
+    SaveOpt(u32, u32),
     Look(Look, u32),
     /// Consume what this group matched, letters in either case if asked.
     BackRef(u32, bool, u32),
@@ -32,6 +35,10 @@ pub struct Program {
     pub plain_looks: bool,
     /// Some instruction is a back-reference.
     pub backrefs: bool,
+    /// Some group ends in [`Inst::SaveOpt`]: a path carries, behind its
+    /// capture slots, what they were when a group last closed around
+    /// something.
+    pub snapshots: bool,
     /// For each instruction that more than one path leads into, its
     /// number among those; the others have none.
     pub joins: Vec<u32>,
@@ -77,6 +84,7 @@ pub fn compile(node: &Node, groups: u32, ignore_case: bool) -> Result<Program, E
         _ => true,
     });
     let backrefs = c.insts.iter().any(|i| matches!(i, Inst::BackRef(..)));
+    let snapshots = c.insts.iter().any(|i| matches!(i, Inst::SaveOpt(..)));
     let (rows, row_count) = rows(&c.insts);
     if row_count as usize * 2 * (groups as usize + 1) > MAX_SLOTS {
         return Err(Error::TooBig);
@@ -91,6 +99,7 @@ pub fn compile(node: &Node, groups: u32, ignore_case: bool) -> Result<Program, E
         anchored: anchored(node),
         plain_looks,
         backrefs,
+        snapshots,
         joins,
         join_count,
         rows,
@@ -98,6 +107,41 @@ pub fn compile(node: &Node, groups: u32, ignore_case: bool) -> Result<Program, E
         classes,
         members,
     })
+}
+
+/// Records position `at` in capture slot `slot` of a path, as the C
+/// library keeps its registers. `slots` holds the `width` capture slots
+/// in use and, for a program with snapshots, as many again: what the
+/// first were when a group last closed around something. A group that
+/// closes around nothing, in a turn of a repetition that could have been
+/// left out and behind an earlier match of the group, puts every slot
+/// back to that.
+pub fn close(prog: &Program, slots: &mut [usize], width: usize, slot: usize, at: usize, opt: bool) {
+    if !prog.snapshots || slot % 2 == 0 {
+        slots[slot] = at;
+        return;
+    }
+    let (now, kept) = slots.split_at_mut(width);
+    if now[slot - 1] < at {
+        now[slot] = at;
+        kept.copy_from_slice(now);
+    } else if opt && kept[slot - 1] != usize::MAX {
+        now.copy_from_slice(kept);
+    } else {
+        now[slot] = at;
+    }
+}
+
+/// Whether `node` can match without consuming a byte.
+fn nullable(node: &Node) -> bool {
+    match node {
+        Node::Empty | Node::Look(_) | Node::BackRef(_) => true,
+        Node::Set(_) => false,
+        Node::Group(inner, _) => nullable(inner),
+        Node::Concat(items) => items.iter().all(nullable),
+        Node::Alt(branches) => branches.iter().any(nullable),
+        Node::Repeat(inner, min, _) => *min == 0 || nullable(inner),
+    }
 }
 
 /// Whether nothing can match before `node` except at the start of the text.
@@ -123,6 +167,7 @@ fn joins(insts: &[Inst], start: u32) -> (Vec<u32>, u32) {
             Inst::Set(_, next)
             | Inst::Byte(_, next)
             | Inst::Save(_, next)
+            | Inst::SaveOpt(_, next)
             | Inst::BackRef(_, _, next)
             | Inst::Look(_, next) => ways[next as usize] += 1,
             Inst::Split(first, second) => {
@@ -238,6 +283,18 @@ impl Compiler {
         }
     }
 
+    /// A copy of `inner` that its repetition may leave out.
+    fn optional(&mut self, inner: &Node, next: u32) -> Result<u32, Error> {
+        match inner {
+            Node::Group(body, number) if nullable(body) => {
+                let close = self.push(Inst::SaveOpt(2 * number + 1, next))?;
+                let body = self.node(body, close)?;
+                self.push(Inst::Save(2 * number, body))
+            }
+            _ => self.node(inner, next),
+        }
+    }
+
     fn repeat(
         &mut self,
         inner: &Node,
@@ -247,18 +304,42 @@ impl Compiler {
     ) -> Result<u32, Error> {
         let mut entry = match max {
             // the loop: once more, or on
-            None => {
+            None if !nullable(inner) => {
                 let split = self.push(Inst::Split(next, next))?;
                 let body = self.node(inner, split)?;
                 self.insts[split as usize] = Inst::Split(body, next);
                 split
             }
-            // the optional copies, each reachable only through the one before
+            // a turn that takes nothing comes back to where it began, and
+            // no path goes through an instruction twice at one place:
+            // behind a turn the choice is made at an instruction of its
+            // own, so that one such turn is taken and then left
+            None => {
+                let again = self.push(Inst::Split(next, next))?;
+                let body = self.optional(inner, again)?;
+                self.insts[again as usize] = Inst::Split(body, next);
+                self.push(Inst::Split(body, next))?
+            }
+            // the optional copies, wired as the C library wires them:
+            // of fewer copies than there may be, the last ones are the
+            // ones taken, each entered only behind the one before it
             Some(max) => {
+                let mut bodies = Vec::new();
+                let mut behind = next;
+                for copy in (min..max).rev() {
+                    // the C library marks the first of them only
+                    behind = match copy == min {
+                        true => self.optional(inner, behind)?,
+                        false => self.node(inner, behind)?,
+                    };
+                    bodies.push(behind);
+                }
+                bodies.reverse();
                 let mut entry = next;
-                for _ in min..max {
-                    let body = self.node(inner, entry)?;
-                    entry = self.push(Inst::Split(body, next))?;
+                for (at, body) in bodies.iter().enumerate() {
+                    let without = bodies.get(at + 1).copied().unwrap_or(next);
+                    let with = if at == 0 { *body } else { entry };
+                    entry = self.push(Inst::Split(with, without))?;
                 }
                 entry
             }

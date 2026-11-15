@@ -458,3 +458,54 @@ fn back_references_match_as_the_c_library_matches_them() {
     assert_eq!(compared, 17 * texts.len());
     assert!(differ.is_empty(), "{}", differ.join("\n"));
 }
+
+/// Patterns whose groups could lie in more than one place.
+const AMBIGUOUS: [(&str, &str); 22] = [
+    ("(a|ab)(c|bcd)(d*)", "abcd"),
+    ("^([a-z]+|[a-z]+ [a-z]+)( .*)?$", "foo bar baz"),
+    ("(a|ab)(bc|c)?", "abc"),
+    ("((a)|b)*", "ab"),
+    ("(a*)*", "b"),
+    ("(a*)+", "b"),
+    ("(a*)*b", "aab"),
+    // fewer copies than a count allows
+    ("(.*)?ab{0,1}(.+){,2}$", "bbcca.c x"),
+    ("(.ab{2})*([^ab]+){,2}", "cxaa.cba "),
+    ("^(([^a]+)+){,2}.+", "bxc.ba. "),
+    ("c\\W?(([b-c]{,2}.[^ab]+){1,2}){,2}", "axcxxa "),
+    ("b*|([ab]{0,1}[^a]{1,2}[^ab]+){,2}[^[:space:]b]?", "bc. .bb"),
+    // a turn of a repetition that takes nothing
+    ("b(a{0,1}){1,2}", "abacc."),
+    ("(\\(*[b-c]?){1,2}$", "bab"),
+    ("((c*)?\\({,2}(.?){2}){1,2}a{0,1}", "ca"),
+    (
+        "((a{,2}a{0,1})?){1,2}(.{1,2}a*)?(.?[]a]+\\(){0,1}$",
+        "bb. baa b",
+    ),
+    ("^(a{2}([^[:space:]b]?\\.{0,1}){1,2}){1,2} {,2}", "aacb"),
+    ("([[:alpha:]]{2,}|c{,2}c{,2}x?){2,}x{0,1}", "x.a .b"),
+    ("(\\s{0,1}b*[ab]*){1,2}$", "a"),
+    // a repetition that takes nothing at all
+    ("\\.?( ab{2,}[[:alpha:]]|b?c{0,1})*", "a"),
+    ("^.{2}(([^a]{1,2})+[a-c]{1,2}c*|c{,2})*[a-c]?", "bab"),
+    ("(a?)*(b?)+", "x"),
+];
+
+#[test]
+fn groups_lie_where_the_c_library_puts_them() {
+    let mut differ = Vec::new();
+    for (pat, text) in AMBIGUOUS {
+        let theirs = Theirs::new(pat.as_bytes(), Options::default());
+        let ours = Regex::new(pat.as_bytes()).unwrap();
+        let expected = theirs.spans(text.as_bytes());
+        let expected = expected.map(|spans| spans[..=ours.groups()].to_vec());
+        let found = ours.captures(text.as_bytes()).map(|found| {
+            let span = |i| found.get(i).map(|r| (r.start, r.end));
+            (0..=ours.groups()).map(span).collect::<Vec<_>>()
+        });
+        if found != expected {
+            differ.push(format!("{pat:?} on {text:?}: {found:?} not {expected:?}"));
+        }
+    }
+    assert!(differ.is_empty(), "{}", differ.join("\n"));
+}

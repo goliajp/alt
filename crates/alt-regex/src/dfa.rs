@@ -87,7 +87,7 @@ impl Cache {
             }
             match prog.insts[pc as usize] {
                 Inst::Split(first, second) => self.stack.extend([second, first]),
-                Inst::Save(_, next) => self.stack.push(next),
+                Inst::Save(_, next) | Inst::SaveOpt(_, next) => self.stack.push(next),
                 Inst::Look(Look::TextStart, next) if at_start => self.stack.push(next),
                 Inst::Look(Look::TextEnd, next) if at_end => self.stack.push(next),
                 Inst::Look(Look::TextStart, _) | Inst::BackRef(..) => {}
