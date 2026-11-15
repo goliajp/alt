@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: expand an attribute macro only where it comes out set, and macros within macros
+author-type: human
+author: doracawl
+touched: crates/alt-worktree/src/attributes.rs
