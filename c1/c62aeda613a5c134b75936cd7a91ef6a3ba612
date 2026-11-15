@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: test
+summary: compare the hunk headers of every built-in driver and of configured patterns with git
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/fixtures/funcname/lines.txt
+touched: crates/alt-cli/tests/it/funcname_drivers.rs
+touched: crates/alt-cli/tests/it/main.rs
