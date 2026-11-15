@@ -358,8 +358,8 @@ fn lineage_pass(
 /// content changed between two trees: the changed tree pair itself plus,
 /// recursively, every changed sub-tree and blob. Tree objects are highly
 /// similar across commits, so delta'ing them is the main volume win.
-/// Order anomalies or shape changes just skip a pair — a missed edge
-/// only costs compression, never correctness.
+/// Shape changes just skip a pair — a missed edge only costs compression,
+/// never correctness.
 fn diff_trees(
     odb: &NativeOdb,
     old: ObjectId,
@@ -384,7 +384,7 @@ fn diff_trees(
     let (mut i, mut j) = (0, 0);
     while i < old_tree.entries.len() && j < new_tree.entries.len() {
         let (oe, ne) = (&old_tree.entries[i], &new_tree.entries[j]);
-        match oe.name.cmp(&ne.name) {
+        match oe.tree_order(ne) {
             std::cmp::Ordering::Less => i += 1,
             std::cmp::Ordering::Greater => j += 1,
             std::cmp::Ordering::Equal => {
@@ -414,4 +414,59 @@ fn convert_target(target: alt_git_refs::RefTarget) -> Result<RefTarget, ImportEr
                 .to_owned(),
         ),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn put(odb: &mut NativeOdb, kind: ObjectKind, bytes: &[u8]) -> ObjectId {
+        let id = ObjectId::hash_object(HashAlgo::Sha1, kind, bytes);
+        odb.put(id, kind, bytes).unwrap();
+        id
+    }
+
+    fn tree(odb: &mut NativeOdb, entries: &[(&str, &str, ObjectId)]) -> ObjectId {
+        let mut bytes = Vec::new();
+        for (mode, name, oid) in entries {
+            bytes.extend_from_slice(mode.as_bytes());
+            bytes.push(b' ');
+            bytes.extend_from_slice(name.as_bytes());
+            bytes.push(0);
+            bytes.extend_from_slice(oid.as_bytes());
+        }
+        put(odb, ObjectKind::Tree, &bytes)
+    }
+
+    #[test]
+    fn a_changed_directory_is_paired_across_a_file_named_like_it() {
+        // `notes` sorts after `notes-new.txt` inside a tree; walking the
+        // two trees by plain name would step past the directory
+        let dir = alt_os::temp::tempdir().unwrap();
+        let mut odb = NativeOdb::open(dir.path()).unwrap();
+        let (a1, a2) = (
+            put(&mut odb, ObjectKind::Blob, b"one\n"),
+            put(&mut odb, ObjectKind::Blob, b"two\n"),
+        );
+        let beside = put(&mut odb, ObjectKind::Blob, b"beside\n");
+        let (notes1, notes2) = (
+            tree(&mut odb, &[("100644", "a.txt", a1)]),
+            tree(&mut odb, &[("100644", "a.txt", a2)]),
+        );
+        let old = tree(&mut odb, &[("40000", "notes", notes1)]);
+        let new = tree(
+            &mut odb,
+            &[
+                ("100644", "notes-new.txt", beside),
+                ("40000", "notes", notes2),
+            ],
+        );
+        odb.flush().unwrap();
+        let mut edges = Vec::new();
+        diff_trees(&odb, old, new, HashAlgo::Sha1, &mut edges).unwrap();
+        assert_eq!(
+            edges,
+            vec![(old, new, true), (notes1, notes2, true), (a1, a2, false)]
+        );
+    }
 }

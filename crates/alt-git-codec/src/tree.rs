@@ -18,6 +18,20 @@ pub struct TreeEntry {
     pub oid: ObjectId,
 }
 
+impl TreeEntry {
+    /// The order entries have inside a tree: by name, a directory comparing
+    /// as if its name ended in `/`. Two trees walked in step have to be
+    /// compared this way: by plain name `lib` sorts before `lib-old.c`,
+    /// in a tree after it. A file and a directory of one name are unequal.
+    pub fn tree_order(&self, other: &TreeEntry) -> core::cmp::Ordering {
+        let key = |e: &TreeEntry| {
+            let slash = e.mode.is_tree().then_some(b'/');
+            e.name.iter().copied().chain(slash).collect::<Vec<u8>>()
+        };
+        key(self).cmp(&key(other))
+    }
+}
+
 impl Tree {
     /// Parses tree data; `algo` determines the raw oid width.
     pub fn parse(data: &[u8], algo: HashAlgo) -> Result<Self, ObjectParseError> {

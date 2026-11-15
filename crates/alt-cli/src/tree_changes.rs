@@ -57,7 +57,7 @@ fn tree_diff(
     let (mut i, mut j) = (0, 0);
     while i < old_entries.len() || j < new_entries.len() {
         let cmp = match (old_entries.get(i), new_entries.get(j)) {
-            (Some(o), Some(n)) => entry_order(o, n),
+            (Some(o), Some(n)) => o.tree_order(n),
             (Some(_), None) => std::cmp::Ordering::Less,
             (None, Some(_)) => std::cmp::Ordering::Greater,
             (None, None) => break,
@@ -113,18 +113,6 @@ fn tree_diff(
         }
     }
     Ok(())
-}
-
-/// The order entries have inside a tree: by name, a directory comparing as
-/// if its name ended in `/`. Walking two trees in step has to use it: by
-/// plain name `lib` sorts before `lib-old.c`, in a tree after it, and the
-/// directory would be taken for removed on one side and added on the other.
-fn entry_order(a: &alt_git_codec::TreeEntry, b: &alt_git_codec::TreeEntry) -> std::cmp::Ordering {
-    let key = |e: &alt_git_codec::TreeEntry| {
-        let slash = (e.mode.object_kind() == ObjectKind::Tree).then_some(b'/');
-        e.name.iter().copied().chain(slash).collect::<Vec<u8>>()
-    };
-    key(a).cmp(&key(b))
 }
 
 /// For an entry that exists on only one side (pure add or pure delete),
