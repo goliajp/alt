@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: record the stat of a checked-out file only when it was written from the index entry
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/checkout_files.rs
+touched: crates/alt-cli/src/native/checkout_plan.rs
+touched: crates/alt-cli/src/native/tree_state.rs
+touched: crates/alt-cli/tests/it/scan_cache.rs
