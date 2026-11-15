@@ -1,0 +1,17 @@
+schema: alt-meta/1
+type: perf
+summary: fewer system calls on open: digest-keyed maps, positioned reads, one pack handle
+author-type: human
+author: doracawl
+touched: Cargo.lock
+touched: crates/alt-hash/src/ident.rs
+touched: crates/alt-hash/src/lib.rs
+touched: crates/alt-oplog/src/lib.rs
+touched: crates/alt-oplog/src/read.rs
+touched: crates/alt-refs/src/lib.rs
+touched: crates/alt-repo/Cargo.toml
+touched: crates/alt-repo/src/revwalk.rs
+touched: crates/alt-store/src/index.rs
+touched: crates/alt-store/src/lib.rs
+touched: crates/alt-store/src/packs.rs
+touched: crates/alt-store/src/reclog.rs
