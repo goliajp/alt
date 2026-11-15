@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: keep the score of blame -M and -C when the letter is given again alone
+author-type: human
+author: doracawl
+touched: crates/alt-args/src/level.rs
+touched: crates/alt-args/tests/it/counted.rs
+touched: crates/alt-cli/src/blame/walk.rs
+touched: crates/alt-cli/tests/it/blame.rs
