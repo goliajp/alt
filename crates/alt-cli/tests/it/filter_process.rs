@@ -243,9 +243,9 @@ fn a_process_that_cannot_or_will_not_filter_a_file_leaves_it_as_it_is() {
 }
 
 #[test]
-fn a_process_that_gives_up_cleans_nothing_more_in_that_command() {
-    // the only filtered file, so that neither tool looks at another one
-    // behind it: a process that has given up filters nothing more
+fn a_file_the_process_gives_up_on_is_stored_as_it_is_as_in_git() {
+    // the only filtered file: which files come behind it differs
+    // between the tools
     let pair = imported("clean", false, &[("c.txt", "Plain\n")]);
     for root in [&pair.src, &pair.dst] {
         std::fs::write(root.join("abort.r"), "Two\n").unwrap();
@@ -259,6 +259,38 @@ fn a_process_that_gives_up_cleans_nothing_more_in_that_command() {
     ok(pair.alt(&["commit", "-m", "gave up"]));
     assert_eq!(pair.tree("alt"), pair.tree("git"));
     assert_eq!(ok(pair.alt(&["show", "HEAD:abort.r"])), "Two\n");
+}
+
+#[test]
+fn after_a_process_gives_up_no_other_file_of_the_command_is_cleaned() {
+    let pair = imported("clean", false, &[("c.txt", "Plain\n")]);
+    let others = ["a.r", "b.r", "k.r", "p.r", "y.r", "z.r"];
+    std::fs::write(pair.dst.join("m-abort.r"), "Two\n").unwrap();
+    for name in others {
+        std::fs::write(pair.dst.join(name), "Hello\n").unwrap();
+    }
+    std::fs::write(&pair.logs[1], "").unwrap();
+    ok(pair.alt(&["add", "."]));
+    let log = pair.log(1);
+    let gave_up = log.iter().position(|l| l == "clean m-abort.r");
+    let gave_up = gave_up.unwrap_or_else(|| panic!("{log:?}"));
+    // the process is asked nothing behind the file it gave up on
+    assert_eq!(&log[gave_up + 1..], &[] as &[String], "{log:?}");
+    ok(pair.alt(&["commit", "-m", "gave up"]));
+    assert_eq!(ok(pair.alt(&["show", "HEAD:m-abort.r"])), "Two\n");
+    // what it was asked before is stored cleaned, the rest as it is
+    let mut left_alone = 0;
+    for name in others {
+        let cleaned = log[..gave_up].contains(&format!("clean {name}"));
+        let stored = ok(pair.alt(&["show", &format!("HEAD:{name}")]));
+        let expected = if cleaned { "Uryyb\n" } else { "Hello\n" };
+        assert_eq!(stored, expected, "{name}: {log:?}");
+        left_alone += usize::from(!cleaned);
+    }
+    assert!(
+        left_alone > 0,
+        "no file came behind the one given up on: {log:?}"
+    );
 }
 
 #[test]
