@@ -356,8 +356,14 @@ fn an_undo_that_writes_back_an_edited_file_does_not_hide_the_edit() {
     cache_agrees(root, "after the undo");
 }
 
+/// `rebase --abort` never puts a file back that it did not plan from a
+/// tree: it checks out the branch as it was, and where the working tree
+/// already holds that content the file is left alone, so an edit made
+/// while the rebase was stopped stays in place. Its last ref change, HEAD
+/// leaving the scratch ref, records no checkout to invert, so the `undo`
+/// that follows is refused and writes nothing either.
 #[test]
-fn an_aborted_rebase_and_its_undo_leave_no_edit_unseen() {
+fn an_aborted_rebase_keeps_an_edit_and_its_undo_is_refused() {
     let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     conflicting(root);
@@ -372,9 +378,57 @@ fn an_aborted_rebase_and_its_undo_leave_no_edit_unseen() {
     write(root, "r.txt", "edited and not added\n");
     cache_agrees(root, "edited during the rebase");
     ok(alt(root, &["rebase", "--abort"]));
+    let edited = "On branch side\nChanges not staged for commit:\n\tmodified:   r.txt\n";
+    assert_eq!(status(root), edited);
     cache_agrees(root, "after the abort");
-    let _ = alt(root, &["undo"]);
-    cache_agrees(root, "after the undo");
-    write(root, "r.txt", "edited again\n");
-    cache_agrees(root, "edited afterwards");
+    let undo = alt(root, &["undo"]);
+    assert_eq!(undo.status.code(), Some(1));
+    let said = String::from_utf8_lossy(&undo.stderr);
+    assert!(said.contains("automatic undo refused"), "{said}");
+    assert_eq!(
+        std::fs::read_to_string(root.join("r.txt")).unwrap(),
+        "edited and not added\n"
+    );
+    assert_eq!(std::fs::read_to_string(root.join("c.txt")).unwrap(), "c3\n");
+    assert_eq!(status(root), edited);
+    cache_agrees(root, "after the refused undo");
+}
+
+/// The stat the snapshot holds for `path`, when it is the one the file
+/// shows now.
+fn recorded(root: &Path, path: &str) -> bool {
+    let scan = root.join(".alt/index.scan");
+    let snapshot = alt_worktree::Snapshot::load(&scan, alt_git_codec::HashAlgo::Sha1).unwrap();
+    let at = snapshot.find(path.as_bytes()).unwrap();
+    let now = alt_worktree::FileStat::of(&std::fs::symlink_metadata(root.join(path)).unwrap());
+    snapshot.entries[at].stat == Some(now)
+}
+
+#[test]
+fn a_switch_records_the_stat_of_the_files_it_writes() {
+    let dir = repo();
+    let root = dir.path();
+    ok(alt(root, &["switch", "-c", "other"]));
+    write(root, "a.txt", "other\n");
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "other"]));
+    // a file written within the tick of the clock the switch ends in is
+    // left for the next scan to record, so one switch may record nothing
+    let mut seen = false;
+    for round in 0..20 {
+        let to = if round % 2 == 0 { "main" } else { "other" };
+        ok(alt(root, &["switch", to]));
+        if recorded(root, "a.txt") {
+            seen = true;
+            // the status that follows has nothing to learn
+            let scan = std::fs::read(root.join(".alt/index.scan")).unwrap();
+            assert_eq!(
+                status(root),
+                format!("On branch {to}\nnothing to commit, working tree clean\n")
+            );
+            assert_eq!(std::fs::read(root.join(".alt/index.scan")).unwrap(), scan);
+            break;
+        }
+    }
+    assert!(seen, "no switch recorded the stat of the file it wrote");
 }
