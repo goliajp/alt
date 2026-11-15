@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: the next writer removes run and snapshot temporary files a crash left
+author-type: human
+author: doracawl
+touched: crates/alt-refs/src/snapshot.rs
+touched: crates/alt-refs/tests/it/cache_failure.rs
+touched: crates/alt-store/src/runs.rs
+touched: crates/alt-store/tests/it/index_gap.rs
