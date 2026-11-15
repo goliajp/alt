@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: open /dev/null on standard descriptors that start out closed
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/main.rs
+touched: crates/alt-cli/tests/it/closed_fds.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-os/src/lib.rs
+touched: crates/alt-os/src/stdio.rs
