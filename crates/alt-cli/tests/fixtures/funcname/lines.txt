@@ -128,3 +128,13 @@ int.
 x
 
 	 
+    public void Méthode(int a)
+def café(self):
+func naïve(größe int) {
+class Ünïcode:
+sub größe {
+static int straße(void)
+# Überschrift
+function déjà_vu() {
+fn 関数(x: u32) -> u32 {
+PROCEDURE ÉTÉ;
