@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: perf
+summary: enter alt through the c runtime main, skipping the std start-up probes
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/main.rs
+touched: crates/alt-os/src/sys.rs
