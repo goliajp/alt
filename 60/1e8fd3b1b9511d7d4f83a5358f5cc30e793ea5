@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: a checkout does not write beneath an untracked symlink
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/switch_kinds.rs
