@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: keep the test harness entry point of the alt binary
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/main.rs
+touched: crates/alt-store/tests/it/index_runs.rs
