@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: attribute blame lines through merges and renames as git does
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/blame.rs
+touched: crates/alt-cli/src/cli.rs
+touched: crates/alt-cli/src/tree_changes.rs
+touched: crates/alt-cli/tests/it/blame.rs
