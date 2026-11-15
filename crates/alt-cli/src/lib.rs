@@ -20,6 +20,7 @@ pub mod log_cmd;
 pub mod machine;
 pub mod meta;
 pub mod native;
+mod patch;
 pub mod patterns;
 pub mod policy;
 pub mod portable;
@@ -27,6 +28,7 @@ pub mod precommit;
 pub mod quote;
 pub mod request;
 pub mod runner;
+mod tree_changes;
 
 pub mod execution;
 

@@ -3,6 +3,7 @@
 //! chunk-diff summary + a perceptual hint when the content is a kind we
 //! recognise — so a binary-asset history doesn't blow up the terminal.
 
+use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
 
@@ -153,4 +154,170 @@ fn log_patch_first_commit_shows_all_files_as_additions() {
     assert!(log.contains("diff --git a/hello.txt b/hello.txt"), "{log}");
     assert!(log.contains("new file mode 100644"), "{log}");
     assert!(log.contains("+hello"), "{log}");
+}
+
+fn git_at(repo: &Path, date: u32, args: &[&str]) -> String {
+    let stamp = format!("@{date} +0000");
+    ok(Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_AUTHOR_NAME", "tester")
+        .env("GIT_AUTHOR_EMAIL", "t@e")
+        .env("GIT_COMMITTER_NAME", "tester")
+        .env("GIT_COMMITTER_EMAIL", "t@e")
+        .env("GIT_AUTHOR_DATE", &stamp)
+        .env("GIT_COMMITTER_DATE", &stamp)
+        .args(args)
+        .output()
+        .unwrap())
+}
+
+fn commit_all(repo: &Path, date: u32, message: &str) {
+    git_at(repo, date, &["add", "-A"]);
+    git_at(repo, date, &["commit", "-qm", message]);
+}
+
+fn source_file(sections: u32) -> String {
+    let mut text = String::new();
+    for s in 1..=sections {
+        text.push_str(&format!("fn section_{s}() {{\n"));
+        for l in 1..=6 {
+            text.push_str(&format!("    step_{s}_{l}();\n"));
+        }
+        text.push_str("}\n\n");
+    }
+    text
+}
+
+/// A history with every kind of change a patch can show, built by git.
+fn varied_history(src: &Path) {
+    let put = |rel: &str, text: &str| {
+        let p = src.join(rel);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, text).unwrap();
+    };
+    git_at(src, 1000, &["init", "-q", "-b", "main", "."]);
+    put("a.rs", &source_file(4));
+    put("b.txt", "goes away\n");
+    put("dir/c.rs", &source_file(3));
+    put("script.sh", "#!/bin/sh\necho hi\n");
+    put("kept.txt", "same\n");
+    commit_all(src, 1000, "base");
+
+    put(
+        "a.rs",
+        &source_file(4).replace("step_3_4();", "changed_3_4();"),
+    );
+    fs::remove_file(src.join("b.txt")).unwrap();
+    put("new.txt", "brand new\nwithout a final newline");
+    commit_all(src, 1100, "edit, delete, add");
+
+    git_at(src, 1150, &["switch", "-q", "-c", "side"]);
+    put("side.txt", "from the side\n");
+    commit_all(src, 1150, "side work");
+    git_at(src, 1200, &["switch", "-q", "main"]);
+
+    fs::rename(src.join("dir/c.rs"), src.join("dir/renamed.rs")).unwrap();
+    put(
+        "dir/renamed.rs",
+        &source_file(3).replace("step_2_2();", "renamed_2_2();"),
+    );
+    fs::create_dir(src.join("moved")).unwrap();
+    fs::rename(src.join("kept.txt"), src.join("moved/kept.txt")).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(src.join("script.sh"), fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    commit_all(src, 1200, "rename with an edit, plain move, mode change");
+
+    git_at(
+        src,
+        1300,
+        &["merge", "-q", "--no-ff", "-m", "merge side", "side"],
+    );
+
+    fs::remove_file(src.join("new.txt")).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink("a.rs", src.join("new.txt")).unwrap();
+    put("empty", "");
+    put("a.rs", &source_file(4).replace("    step_1_1();\n", ""));
+    commit_all(
+        src,
+        1400,
+        "file becomes a link, empty file, edit at the top",
+    );
+}
+
+#[test]
+fn log_patch_matches_git_for_every_kind_of_change() {
+    let (src, dst) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
+    let (src, dst) = (src.path(), dst.path());
+    varied_history(src);
+    ok(alt(src, &["import", dst.to_str().unwrap()]));
+
+    let ours = ok(alt(dst, &["log", "-p"]));
+    let theirs = git_at(src, 0, &["log", "-p", "--pretty=oneline"]);
+    assert_eq!(ours, theirs);
+    // spot checks, so that the comparison is not two empty outputs
+    assert!(ours.contains("similarity index"), "{ours}");
+    assert!(ours.contains("rename from kept.txt\nrename to moved/kept.txt\n"));
+    assert!(ours.contains("@@ fn section_3() {"), "{ours}");
+    assert!(ours.contains("old mode 100644\nnew mode 100755\n"));
+    assert!(ours.contains("deleted file mode 100644\n"));
+    assert!(ours.contains("new file mode 120000\n"));
+
+    let raw = ok(alt(dst, &["log", "-p", "--pretty", "raw"]));
+    assert_eq!(raw, git_at(src, 0, &["log", "-p", "--pretty=raw"]));
+}
+
+#[test]
+fn show_prints_no_patch_for_a_merge_commit() {
+    let (src, dst) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
+    let (src, dst) = (src.path(), dst.path());
+    varied_history(src);
+    ok(alt(src, &["import", dst.to_str().unwrap()]));
+    let merge = git_at(src, 0, &["rev-parse", "HEAD~1"]);
+    let shown = ok(alt(dst, &["show", merge.trim()]));
+    assert!(shown.contains("merge side"), "{shown}");
+    assert!(!shown.contains("diff --git"), "{shown}");
+    // a commit with one parent still shows its patch, set apart by a blank line
+    let plain = ok(alt(dst, &["show", "HEAD"]));
+    assert_eq!(plain, git_at(src, 0, &["show", "--pretty=raw", "HEAD"]));
+}
+
+#[test]
+fn log_patch_keeps_a_directory_apart_from_files_named_like_it() {
+    // in a tree `notes` (a directory) sorts after `notes-old.txt` and
+    // `notes.txt`; taking it for a plain name would report its files as
+    // removed and added again
+    let (src, dst) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
+    let (src, dst) = (src.path(), dst.path());
+    git_at(src, 1000, &["init", "-q", "-b", "main", "."]);
+    fs::create_dir(src.join("notes")).unwrap();
+    fs::write(src.join("notes/a.txt"), "kept as it is\n").unwrap();
+    fs::write(src.join("m.txt"), "m\n").unwrap();
+    commit_all(src, 1000, "base");
+    fs::write(src.join("notes-old.txt"), "beside the directory\n").unwrap();
+    fs::write(src.join("notes.txt"), "also beside it\n").unwrap();
+    commit_all(src, 1100, "files named like the directory");
+    ok(alt(src, &["import", dst.to_str().unwrap()]));
+
+    let ours = ok(alt(dst, &["log", "-p", "-n", "1"]));
+    assert_eq!(
+        ours,
+        git_at(src, 0, &["log", "-p", "--pretty=oneline", "-n", "1"])
+    );
+    assert!(!ours.contains("notes/a.txt"), "{ours}");
 }

@@ -76,11 +76,7 @@ fn diff_unstaged_and_cached_match_git_hunks() {
     ok(git(groot, &["commit", "-qm", "first"]));
     std::fs::write(groot.join("f.txt"), "line1\nCHANGED\nline3\nline4\n").unwrap();
     let gdiff = ok(git(groot, &["-c", "core.pager=cat", "diff"]));
-    assert_eq!(
-        hunk_body(&unstaged),
-        hunk_body(&gdiff),
-        "hunk body must match git"
-    );
+    assert_eq!(unstaged, gdiff, "the whole diff must match git");
 
     // before staging, --cached is empty; after add it shows the staged change
     assert!(
@@ -89,11 +85,7 @@ fn diff_unstaged_and_cached_match_git_hunks() {
     );
     ok(alt(root, &["add", "."]));
     let cached = ok(alt(root, &["diff", "--cached"]));
-    assert_eq!(
-        hunk_body(&cached),
-        hunk_body(&gdiff),
-        "staged hunk matches git"
-    );
+    assert_eq!(cached, gdiff, "staged diff matches git");
     // and now the working tree matches the index, so unstaged is empty
     assert!(ok(alt(root, &["diff"])).is_empty(), "work tree == index");
 
@@ -110,7 +102,7 @@ fn diff_unstaged_and_cached_match_git_hunks() {
     ok(alt(root, &["add", "."]));
     let bin = ok(alt(root, &["diff", "--cached"]));
     assert!(
-        bin.contains("Binary files a/b.bin and b/b.bin differ"),
+        bin.contains("Binary files /dev/null and b/b.bin differ"),
         "{bin}"
     );
     // human view also gets a chunk-diff summary line — counts and

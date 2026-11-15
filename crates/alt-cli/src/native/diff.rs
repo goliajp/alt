@@ -191,9 +191,30 @@ impl NativeRepo<'_> {
             }
             _ => {}
         }
-        let o7 = abbrev(ch.old.map(|w| w.oid));
-        let n7 = abbrev(ch.new.map(|w| w.oid));
-        buf.extend_from_slice(format!("index {o7}..{n7}\n").as_bytes());
+        let (old_oid, new_oid) = (ch.old.map(|w| w.oid), ch.new.map(|w| w.oid));
+        if old_oid == new_oid {
+            return Ok(()); // only the mode changed
+        }
+        let digits = crate::patch::abbrev_len(self.store.odb.len());
+        let short = |oid: Option<ObjectId>| match oid {
+            Some(oid) => oid.to_string()[..digits].to_owned(),
+            None => "0".repeat(digits),
+        };
+        let mode = match (ch.old, ch.new) {
+            (Some(o), Some(n)) if o.mode == n.mode => format!(" {:06o}", o.mode),
+            _ => String::new(),
+        };
+        buf.extend_from_slice(
+            format!("index {}..{}{mode}\n", short(old_oid), short(new_oid)).as_bytes(),
+        );
+        let old_name = match ch.old {
+            Some(_) => format!("a/{path}"),
+            None => "/dev/null".to_owned(),
+        };
+        let new_name = match ch.new {
+            Some(_) => format!("b/{path}"),
+            None => "/dev/null".to_owned(),
+        };
 
         // when --semantic is set and we have a parser for this path,
         // render the AST-level summary in place of the unified hunks. A
@@ -234,7 +255,7 @@ impl NativeRepo<'_> {
             // this exact wording); then a chunk-diff summary so the
             // human view answers "how much is genuinely shared" too.
             buf.extend_from_slice(
-                format!("Binary files a/{path} and b/{path} differ\n").as_bytes(),
+                format!("Binary files {old_name} and {new_name} differ\n").as_bytes(),
             );
             let cd = alt_diff::binary::chunk_diff(
                 &old_bytes,
@@ -276,15 +297,12 @@ impl NativeRepo<'_> {
             return Ok(());
         }
 
-        match ch.old {
-            Some(_) => buf.extend_from_slice(format!("--- a/{path}\n").as_bytes()),
-            None => buf.extend_from_slice(b"--- /dev/null\n"),
+        // the file header belongs to the hunks: none without them
+        let mut hunks = Vec::new();
+        if alt_diff::write_unified(&mut hunks, &old_bytes, &new_bytes, 3) {
+            buf.extend_from_slice(format!("--- {old_name}\n+++ {new_name}\n").as_bytes());
+            buf.extend_from_slice(&hunks);
         }
-        match ch.new {
-            Some(_) => buf.extend_from_slice(format!("+++ b/{path}\n").as_bytes()),
-            None => buf.extend_from_slice(b"+++ /dev/null\n"),
-        }
-        alt_diff::write_unified(buf, &old_bytes, &new_bytes, 3);
         Ok(())
     }
 

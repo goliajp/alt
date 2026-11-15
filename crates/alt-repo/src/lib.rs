@@ -391,6 +391,14 @@ impl Repository {
         }
     }
 
+    /// How many git objects the store holds; `None` for git-backed repos.
+    pub fn object_count(&self) -> Option<usize> {
+        match &self.backend {
+            Backend::Git { .. } => None,
+            Backend::Alt(alt) => Some(alt.odb.len()),
+        }
+    }
+
     /// Aggregate storage report over every object alt holds for this
     /// repo. `Ok(None)` for git-backed repos.
     pub fn storage_stats(&self) -> Result<Option<alt_odb::StorageStats>, RepoError> {

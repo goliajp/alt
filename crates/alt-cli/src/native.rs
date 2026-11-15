@@ -4374,13 +4374,6 @@ fn default_fetch_refspec(name: &str) -> String {
 }
 
 /// A 7-hex-char object id abbreviation, or all-zero for an absent side.
-fn abbrev(oid: Option<ObjectId>) -> String {
-    match oid {
-        Some(o) => o.to_string()[..7].to_owned(),
-        None => "0000000".to_owned(),
-    }
-}
-
 fn empty_index() -> Index {
     Index {
         version: 2,
