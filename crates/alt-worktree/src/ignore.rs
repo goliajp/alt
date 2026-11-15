@@ -263,17 +263,10 @@ fn matches_rule(rule: &Rule, rel: &[u8]) -> bool {
     if rule.anchored {
         glob_match(pattern, rel)
     } else {
-        // Unanchored single-component pattern: match against the basename
-        // and against every full prefix component to honour git's "anywhere"
-        // semantics. Equivalent to `**/pattern`.
-        let basename = match rel.iter().rposition(|&b| b == b'/') {
-            Some(p) => &rel[p + 1..],
-            None => rel,
-        };
-        glob_match(pattern, basename)
-            || rel
-                .split(|&b| b == b'/')
-                .any(|seg| glob_match(pattern, seg))
+        // an unanchored pattern matches any component of the path, the
+        // last one included: the same as `**/pattern`
+        rel.split(|&b| b == b'/')
+            .any(|seg| glob_match(pattern, seg))
     }
 }
 
