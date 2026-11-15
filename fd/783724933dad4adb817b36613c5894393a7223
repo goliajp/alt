@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: keep submodule entries out of the working tree diff
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/diff.rs
+touched: crates/alt-cli/tests/it/diff.rs
+touched: crates/alt-worktree/src/lib.rs
