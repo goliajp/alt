@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: keep capture slots only where a path waits and bound groups and pattern length
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/lib.rs
+touched: crates/alt-regex/src/pike.rs
+touched: crates/alt-regex/src/program.rs
+touched: crates/alt-regex/src/syntax.rs
+touched: crates/alt-regex/tests/it/limits.rs
+touched: crates/alt-regex/tests/it/main.rs
