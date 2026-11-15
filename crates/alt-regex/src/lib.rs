@@ -5,22 +5,42 @@
 //! the earliest and of those the longest, and it is found in time linear
 //! in the length of the text however the pattern is built.
 //!
+//! The GNU C library is the reference on every system: which patterns
+//! are refused, what matches and where each group lies are what its
+//! `regcomp` and `regexec` give, also where the C library of the system
+//! at hand gives something else. The tests that compare the two are
+//! therefore built only where the GNU C library is the C library.
+//!
 //! A pattern with a back-reference is no longer regular. It is matched
 //! by trying its paths one after another, up to a fixed number of steps;
 //! a text that would take more is reported as not matching.
 //!
-//! Texts are bytes. A multi-byte character is the bytes it is made of,
-//! and letters outside ASCII have no case.
+//! Texts are bytes, as in the locale `C`: a multi-byte character is the
+//! bytes it is made of, and letters outside ASCII have no case. With
+//! [`Options::utf8`] a text is UTF-8 and is matched as in the locale
+//! `C.UTF-8` of the GNU C library 2.41: `.`, a bracket expression, a
+//! class, `\w` and the edges of words take whole characters, and case
+//! is ignored by reading pattern and text in upper case. The classes and
+//! the upper-case forms are those of Unicode 16.0.0. That locale orders
+//! no character outside ASCII, so a range that ends in one is refused.
+//! Its characters go on past Unicode, to forms of six bytes. A byte
+//! that begins no character matches only the same byte written in the
+//! pattern; no `.`, class or bracket expression takes it.
 
 mod analysis;
 mod backref;
 mod backtrack;
+mod bracket;
+mod chars;
 mod class;
 mod dfa;
+mod error;
 mod literal;
 mod pike;
 mod program;
 mod syntax;
+mod tables;
+mod utf8;
 
 use std::ops::Range;
 use std::sync::Mutex;
@@ -28,6 +48,7 @@ use std::sync::Mutex;
 use alt_bytes::ByteSlice;
 
 pub use class::ByteSet;
+pub use error::Error;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Syntax {
@@ -46,51 +67,10 @@ pub struct Options {
     /// `^` and `$` also match around a newline inside the text, and
     /// neither `.` nor a negated bracket expression matches one.
     pub newline: bool,
+    /// The text is UTF-8 and is matched character by character, as the
+    /// C library does in a UTF-8 locale; otherwise byte by byte.
+    pub utf8: bool,
 }
-
-/// Why a pattern was refused.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Error {
-    /// A parenthesis without its partner.
-    Paren,
-    /// A bracket expression without its end.
-    Bracket,
-    /// A malformed `{m,n}`.
-    Brace,
-    /// A repetition with nothing to repeat.
-    Repeat,
-    /// A backslash at the end of the pattern.
-    Escape,
-    /// A range that ends before it begins.
-    Range,
-    /// An unknown character class name.
-    Class,
-    /// A collating element of more than one byte.
-    Collate,
-    /// A back-reference to a group that is not complete where it stands.
-    BackReference,
-    /// A pattern too large to compile.
-    TooBig,
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Error::Paren => "unmatched parenthesis",
-            Error::Bracket => "unterminated bracket expression",
-            Error::Brace => "invalid repetition count",
-            Error::Repeat => "repetition with nothing to repeat",
-            Error::Escape => "trailing backslash",
-            Error::Range => "invalid range end",
-            Error::Class => "invalid character class name",
-            Error::Collate => "invalid collating element",
-            Error::BackReference => "invalid back reference",
-            Error::TooBig => "regular expression too big",
-        })
-    }
-}
-
-impl std::error::Error for Error {}
 
 /// Storage the searches with one pattern reuse. A thread that searches
 /// often keeps its own and passes it to the `_with` methods; the others
@@ -162,8 +142,8 @@ impl Regex {
     }
 
     pub fn with_options(pattern: &[u8], options: Options) -> Result<Self, Error> {
-        let (node, groups) = syntax::parse(pattern, options)?;
-        let prog = program::compile(&node, groups, options.ignore_case)?;
+        let (node, groups, shape) = syntax::parse_shaped(pattern, options)?;
+        let prog = program::compile(&node, groups, options, shape)?;
         let anchored = prog.anchored;
         // a text with nothing in it is common, and always answered alike
         let mut slots = [pike::UNSET; FEW];

@@ -81,7 +81,16 @@ pub struct Cache {
     kept: Vec<usize>,
 }
 
-pub fn holds(look: Look, text: &[u8], at: usize) -> bool {
+/// Whether the condition holds at `at`; `utf8` for a text matched
+/// character by character.
+pub fn holds(look: Look, text: &[u8], at: usize, utf8: bool) -> bool {
+    let edge = !matches!(
+        look,
+        Look::TextStart | Look::TextEnd | Look::LineStart | Look::LineEnd
+    );
+    if utf8 && edge {
+        return crate::chars::holds(look, text, at);
+    }
     let word = ByteSet::word();
     let before = at > 0 && word.contains(text[at - 1]);
     let after = at < text.len() && word.contains(text[at]);
@@ -159,7 +168,7 @@ fn follow(
                 stack.push(Frame::Explore(next, behind));
             }
             Inst::Look(look, next) => {
-                if holds(look, text, at) {
+                if holds(look, text, at, prog.utf8) {
                     stack.push(Frame::Explore(next, prog.mixed_ends));
                 }
             }
@@ -205,14 +214,19 @@ pub fn search(
     let mut matched = false;
     let from = only.unwrap_or(0);
     for at in from..=text.len() {
-        if !matched && (at == from || (only.is_none() && !prog.anchored)) {
+        let begins = at == from || (only.is_none() && !prog.anchored);
+        if !matched && begins && !(prog.apart && crate::chars::inside(text, at)) {
             scratch.fill(UNSET);
             follow(
                 prog, now, stack, kept, scratch, captures, prog.start, text, at,
             );
         }
         if now.order.is_empty() {
-            break;
+            // nothing lives, and nothing begins later
+            if matched || only.is_some() || prog.anchored {
+                break;
+            }
+            continue;
         }
         for index in 0..now.order.len() {
             let pc = now.order[index] as usize;

@@ -1,10 +1,10 @@
 //! The pattern as a nondeterministic automaton: instructions a matcher
 //! steps through, several at once.
 
-use crate::Error;
 use crate::analysis::{classes, joins, mixed_ends, rows};
 use crate::class::ByteSet;
-use crate::syntax::{Look, Node};
+use crate::syntax::{Look, Node, Shape};
+use crate::{Error, Options};
 
 #[derive(Clone, Copy, Debug)]
 pub enum Inst {
@@ -30,6 +30,10 @@ pub struct Program {
     pub sets: Vec<ByteSet>,
     pub start: u32,
     pub groups: u32,
+    /// The text is UTF-8, matched character by character.
+    pub utf8: bool,
+    /// No match begins inside a character.
+    pub apart: bool,
     /// Every match begins at the start of the text.
     pub anchored: bool,
     /// The only conditions are on the two ends of the text.
@@ -74,12 +78,12 @@ struct Compiler {
     copied: bool,
 }
 
-pub fn compile(node: &Node, groups: u32, ignore_case: bool) -> Result<Program, Error> {
+pub fn compile(node: &Node, groups: u32, options: Options, shape: Shape) -> Result<Program, Error> {
     let mut c = Compiler {
         insts: Vec::new(),
         sets: Vec::new(),
         work: 0,
-        ignore_case,
+        ignore_case: options.ignore_case,
         copied: false,
     };
     let end = c.push(Inst::Match)?;
@@ -90,6 +94,8 @@ pub fn compile(node: &Node, groups: u32, ignore_case: bool) -> Result<Program, E
         Inst::Look(look, _) => matches!(look, Look::TextStart | Look::TextEnd),
         _ => true,
     });
+    // the tables begin a match at any byte
+    let plain_looks = plain_looks && !(shape.apart && shape.strays);
     let backrefs = c.insts.iter().any(|i| matches!(i, Inst::BackRef(..)));
     let snapshots = c.insts.iter().any(|i| matches!(i, Inst::SaveOpt(..)));
     let (rows, row_count) = rows(&c.insts);
@@ -104,6 +110,8 @@ pub fn compile(node: &Node, groups: u32, ignore_case: bool) -> Result<Program, E
         sets: c.sets,
         start,
         groups,
+        utf8: options.utf8,
+        apart: shape.apart,
         anchored: anchored(node),
         plain_looks,
         backrefs,
@@ -303,7 +311,7 @@ mod tests {
 
     fn program(pat: &str) -> Program {
         let (node, groups) = parse(pat.as_bytes(), Options::default()).unwrap();
-        compile(&node, groups, false).unwrap()
+        compile(&node, groups, Options::default(), Shape::default()).unwrap()
     }
 
     #[test]
@@ -342,7 +350,10 @@ mod tests {
         assert_eq!(large - small, 27);
         assert!(program("a{2,4}").insts.len() > small);
         let (node, groups) = parse(b"((a{1000}){1000}){10}", Options::default()).unwrap();
-        assert!(matches!(compile(&node, groups, false), Err(Error::TooBig)));
+        assert!(matches!(
+            compile(&node, groups, Options::default(), Shape::default()),
+            Err(Error::TooBig)
+        ));
         assert!(!program("\\bx").plain_looks && program("^x$").plain_looks);
     }
 }

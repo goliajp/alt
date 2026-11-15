@@ -47,6 +47,21 @@ impl Drop for Caller {
     }
 }
 
+/// Whether the caller's locale has its texts in UTF-8: the first of
+/// `LC_ALL`, `LC_CTYPE` and `LANG` that is set says so, in the character
+/// set its value names.
+pub(crate) fn utf8_locale() -> bool {
+    let set = |name| var(name).filter(|value| !value.is_empty());
+    let Some(locale) = ["LC_ALL", "LC_CTYPE", "LANG"].into_iter().find_map(set) else {
+        return false;
+    };
+    let locale = locale.to_string_lossy();
+    let charset = locale.split_once('.').map_or("", |(_, rest)| rest);
+    let charset = charset.split('@').next().unwrap_or("");
+    let letters = charset.bytes().filter(u8::is_ascii_alphanumeric);
+    letters.map(|b| b.to_ascii_lowercase()).eq(*b"utf8")
+}
+
 /// A variable of [`CALLER_ENV`] as the caller has it.
 pub(crate) fn var(name: &str) -> Option<OsString> {
     CALLER.with_borrow(|caller| match caller {
@@ -171,4 +186,32 @@ pub(crate) fn outer_attributes(settings: &Config, info: &Path) -> Res<Vec<Layer>
         layers.push(Layer::info(&content));
     }
     Ok(layers)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_locale_says_whether_texts_are_utf8() {
+        let says = |pairs: &[(&str, &str)]| {
+            let env = pairs.iter().map(|(k, v)| (k.to_string(), v.to_string()));
+            let _caller = Caller::new(env.collect());
+            utf8_locale()
+        };
+        assert!(says(&[("LANG", "en_US.UTF-8")]));
+        assert!(says(&[("LC_ALL", "C.utf8")]));
+        assert!(says(&[("LC_CTYPE", "de_DE.UTF-8@euro")]));
+        assert!(!says(&[("LANG", "C")]));
+        assert!(!says(&[("LANG", "en_US.ISO-8859-1")]));
+        assert!(!says(&[]));
+        // the first that is set stands, also against the others
+        assert!(!says(&[("LC_ALL", "C"), ("LANG", "en_US.UTF-8")]));
+        assert!(says(&[
+            ("LC_ALL", ""),
+            ("LC_CTYPE", "C.UTF-8"),
+            ("LANG", "C")
+        ]));
+        assert!(!says(&[("LC_CTYPE", "POSIX"), ("LANG", "en_US.UTF-8")]));
+    }
 }

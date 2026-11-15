@@ -40,6 +40,9 @@ pub fn search(prog: &Program, text: &[u8], only: Option<usize>, found: &mut [usi
         false => text.len(),
     };
     for from in first..=last {
+        if prog.apart && crate::chars::inside(text, from) {
+            continue;
+        }
         // whether a match was found, and whether behind a condition
         let mut matched = None;
         slots.fill(UNSET);
@@ -93,18 +96,26 @@ pub fn search(prog: &Program, text: &[u8], only: Option<usize>, found: &mut [usi
                         slots[slot] = at;
                         pc = next;
                     }
-                    Inst::Look(look, next) if holds(look, text, at) => (pc, behind) = (next, true),
+                    Inst::Look(look, next) if holds(look, text, at, prog.utf8) => {
+                        (pc, behind) = (next, true)
+                    }
                     Inst::BackRef(group, fold, next) => {
                         let (from, to) = (slots[2 * group as usize], slots[2 * group as usize + 1]);
                         if from == UNSET || to == UNSET {
                             break;
                         }
-                        let again = text.get(at..at + (to - from));
-                        if !again.is_some_and(|again| same(again, &text[from..to], fold)) {
+                        let taken = match fold && prog.utf8 {
+                            true => crate::chars::again(&text[at..], &text[from..to]),
+                            false => text
+                                .get(at..at + (to - from))
+                                .is_some_and(|again| same(again, &text[from..to], fold))
+                                .then_some(to - from),
+                        };
+                        let Some(taken) = taken else {
                             break;
-                        }
-                        behind &= to == from;
-                        (pc, at) = (next, at + (to - from));
+                        };
+                        behind &= taken == 0;
+                        (pc, at) = (next, at + taken);
                     }
                     Inst::Match => {
                         // of two paths as long, the C library keeps one

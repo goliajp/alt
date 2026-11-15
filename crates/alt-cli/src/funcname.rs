@@ -112,6 +112,9 @@ pub(crate) struct Sections {
     files: RefCell<HashMap<Vec<u8>, Option<Rc<Layer>>>>,
     configured: HashMap<Vec<u8>, (Vec<u8>, Syntax)>,
     finders: RefCell<HashMap<Vec<u8>, Option<Rc<Finder>>>>,
+    /// lines are matched character by character, as git does in a
+    /// UTF-8 locale
+    utf8: bool,
 }
 
 impl Sections {
@@ -137,6 +140,7 @@ impl Sections {
             files: RefCell::default(),
             configured,
             finders: RefCell::default(),
+            utf8: crate::git_settings::utf8_locale(),
         })
     }
 
@@ -212,6 +216,7 @@ impl Sections {
             (Some((pattern, syntax)), _) => {
                 let options = Options {
                     syntax: *syntax,
+                    utf8: self.utf8,
                     ..Options::default()
                 };
                 Some(Finder::new(pattern, options)?)
@@ -219,6 +224,7 @@ impl Sections {
             (None, Some(builtin)) => {
                 let options = Options {
                     ignore_case: builtin.ignore_case,
+                    utf8: self.utf8,
                     ..Options::default()
                 };
                 Some(Finder::new(builtin.lines.join("\n").as_bytes(), options)?)

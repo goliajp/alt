@@ -144,7 +144,9 @@ fn paths(
                     }
                     pc = next;
                 }
-                Inst::Look(look, next) if !(plain && at == to) && holds(look, text, at) => {
+                Inst::Look(look, next)
+                    if !(plain && at == to) && holds(look, text, at, prog.utf8) =>
+                {
                     pc = next
                 }
                 Inst::Match if at == to => return true,

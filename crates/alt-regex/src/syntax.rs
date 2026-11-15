@@ -3,7 +3,7 @@
 //! accepts in both.
 
 use crate::class::ByteSet;
-use crate::{Error, Options, Syntax};
+use crate::{Error, Options, Syntax, bracket, utf8};
 
 /// A condition on a position that consumes nothing.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -50,31 +50,66 @@ struct Parser<'a> {
     depth: u32,
     /// the groups whose closing parenthesis has been read
     complete: Vec<u32>,
+    /// whether a period was read, and whether something the C library
+    /// cannot match byte by byte in a UTF-8 text
+    period: bool,
+    complex: bool,
+    strays: bool,
+    /// see [`utf8::period`]
+    loose: bool,
+}
+
+/// What the matchers need to know of a pattern besides its tree.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct Shape {
+    /// The C library reads the pattern character by character, so a
+    /// match begins only where a character does. Otherwise it matches
+    /// bytes, also a UTF-8 text.
+    pub apart: bool,
+    /// A byte written in the pattern goes on a character and begins
+    /// none.
+    pub strays: bool,
 }
 
 /// Parses `pat` into its tree and the number of groups in it.
+#[cfg(test)]
 pub fn parse(pat: &[u8], opts: Options) -> Result<(Node, u32), Error> {
+    parse_shaped(pat, opts).map(|(node, groups, _)| (node, groups))
+}
+
+/// As [`parse`], with the shape of the pattern.
+pub fn parse_shaped(pat: &[u8], opts: Options) -> Result<(Node, u32, Shape), Error> {
     if pat.len() > MAX_PATTERN {
         return Err(Error::TooBig);
     }
-    let mut p = Parser {
-        pat,
-        at: 0,
-        opts,
-        groups: 0,
-        depth: 0,
-        complete: Vec::new(),
+    let read = |loose: bool| {
+        let mut p = Parser {
+            pat,
+            at: 0,
+            opts,
+            groups: 0,
+            depth: 0,
+            complete: Vec::new(),
+            period: false,
+            complex: opts.ignore_case,
+            strays: false,
+            loose,
+        };
+        let node = p.alternation()?;
+        if p.at < pat.len() {
+            return Err(Error::Paren);
+        }
+        let shape = Shape {
+            apart: opts.utf8 && p.complex,
+            strays: p.strays,
+        };
+        Ok((node, p.groups, shape, p.period))
     };
-    let node = p.alternation()?;
-    if p.at < pat.len() {
-        return Err(Error::Paren);
+    let (node, groups, shape, period) = read(false)?;
+    if opts.utf8 && period && !shape.apart {
+        return read(true).map(|(node, groups, shape, _)| (node, groups, shape));
     }
-    Ok((node, p.groups))
-}
-
-enum Element {
-    Byte(u8),
-    Set(ByteSet),
+    Ok((node, groups, shape))
 }
 
 impl<'a> Parser<'a> {
@@ -217,7 +252,14 @@ impl<'a> Parser<'a> {
         Ok((min, max))
     }
 
-    fn literal(&self, b: u8) -> Node {
+    /// What the literal that the byte just read begins matches.
+    fn literal(&mut self, b: u8) -> Node {
+        if self.opts.utf8 {
+            let (node, len) = utf8::literal(&self.pat[self.at - 1..], self.opts.ignore_case);
+            self.at += len - 1;
+            self.strays |= (0x80..=0xbf).contains(&b);
+            return node;
+        }
         let mut set = ByteSet::byte(b);
         if self.opts.ignore_case {
             set.fold_case();
@@ -239,7 +281,11 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn any(&self) -> Node {
+    fn any(&mut self) -> Node {
+        if self.opts.utf8 {
+            self.period = true;
+            return utf8::period(self.opts.newline, self.loose);
+        }
         let mut set = ByteSet::full();
         set.remove(0);
         if self.opts.newline {
@@ -281,11 +327,21 @@ impl<'a> Parser<'a> {
             return Err(Error::Escape);
         };
         self.at += 2;
-        let negated = |mut set: ByteSet| {
-            set.negate();
+        self.complex |= matches!(c, b'w' | b'W' | b's' | b'S' | b'b' | b'B' | b'<' | b'>');
+        let utf8 = self.opts.utf8;
+        let named = |name: &[u8], negated: bool| {
+            if utf8 {
+                return utf8::named(name, negated);
+            }
+            let mut set = match name {
+                b"alnum" => ByteSet::word(),
+                _ => ByteSet::class(name).expect("a known class"),
+            };
+            if negated {
+                set.negate();
+            }
             Node::Set(set)
         };
-        let space = ByteSet::class(b"space").expect("a known class");
         Ok(match c {
             b'1'..=b'9' => {
                 let number = u32::from(c - b'0');
@@ -294,10 +350,8 @@ impl<'a> Parser<'a> {
                 }
                 Node::BackRef(number)
             }
-            b'w' => Node::Set(ByteSet::word()),
-            b'W' => negated(ByteSet::word()),
-            b's' => Node::Set(space),
-            b'S' => negated(space),
+            b'w' | b'W' => named(b"alnum", c == b'W'),
+            b's' | b'S' => named(b"space", c == b'S'),
             b'b' => Node::Look(Look::WordBoundary),
             b'B' => Node::Look(Look::NotWordBoundary),
             b'<' => Node::Look(Look::WordStart),
@@ -312,6 +366,12 @@ impl<'a> Parser<'a> {
     }
 
     /// A group, behind its opening parenthesis.
+    fn bracket(&mut self) -> Result<Node, Error> {
+        let (node, complex) = bracket::parse(self.pat, &mut self.at, self.opts)?;
+        self.complex |= complex;
+        Ok(node)
+    }
+
     fn group(&mut self) -> Result<Node, Error> {
         self.groups += 1;
         if self.groups > MAX_GROUPS {
@@ -330,77 +390,6 @@ impl<'a> Parser<'a> {
         self.depth -= 1;
         self.complete.push(number);
         Ok(Node::Group(Box::new(inner), number))
-    }
-
-    /// A bracket expression, behind its opening bracket.
-    fn bracket(&mut self) -> Result<Node, Error> {
-        let negate = self.peek() == Some(b'^');
-        if negate {
-            self.at += 1;
-        }
-        let mut set = ByteSet::empty();
-        let mut first = true;
-        loop {
-            match self.peek() {
-                None => return Err(Error::Bracket),
-                Some(b']') if !first => break,
-                Some(_) => {}
-            }
-            first = false;
-            let from = match self.element()? {
-                Element::Set(class) => {
-                    set.union(&class);
-                    continue;
-                }
-                Element::Byte(b) => b,
-            };
-            let ranged = matches!(self.rest(), [b'-', next, ..] if *next != b']');
-            if !ranged {
-                set.insert(from);
-                continue;
-            }
-            self.at += 1;
-            match self.element()? {
-                Element::Byte(to) if to >= from => set.insert_range(from, to),
-                _ => return Err(Error::Range),
-            }
-        }
-        self.at += 1;
-        if self.opts.ignore_case {
-            set.fold_case();
-        }
-        if negate {
-            set.negate();
-            if self.opts.newline {
-                set.remove(b'\n');
-            }
-        }
-        Ok(Node::Set(set))
-    }
-
-    /// One member of a bracket expression: a byte, or a named class.
-    fn element(&mut self) -> Result<Element, Error> {
-        let rest = self.rest();
-        let kind = match rest {
-            [b'[', kind @ (b':' | b'=' | b'.'), ..] => *kind,
-            [b, ..] => {
-                self.at += 1;
-                return Ok(Element::Byte(*b));
-            }
-            [] => return Err(Error::Bracket),
-        };
-        let body = &rest[2..];
-        let Some(len) = body.windows(2).position(|w| w == [kind, b']']) else {
-            return Err(Error::Bracket);
-        };
-        let name = &body[..len];
-        self.at += len + 4;
-        match (kind, name) {
-            (b':', _) => ByteSet::class(name).map(Element::Set).ok_or(Error::Class),
-            (b'=', [b]) => Ok(Element::Set(ByteSet::byte(*b))),
-            (_, [b]) => Ok(Element::Byte(*b)),
-            _ => Err(Error::Collate),
-        }
     }
 }
 
