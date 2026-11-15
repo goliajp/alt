@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: do not follow a .gitignore that is a symlink
+author-type: human
+author: doracawl
+touched: crates/alt-worktree/src/walk.rs
+touched: crates/alt-worktree/tests/it/delta.rs
