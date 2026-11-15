@@ -41,7 +41,10 @@ pub const LOCK_UN: c_int = 8;
 
 pub const SIGINT: c_int = 2;
 pub const SIGKILL: c_int = 9;
+pub const SIGPIPE: c_int = 13;
 pub const SIGTERM: c_int = 15;
+/// The `signal` handler value that discards a signal.
+pub const SIG_IGN: sighandler_t = 1;
 
 pub const POLLIN: c_short = 0x1;
 
@@ -99,6 +102,14 @@ pub fn kill(pid: pid_t, signal: c_int) -> io::Result<()> {
         return Err(io::Error::last_os_error());
     }
     Ok(())
+}
+
+/// Makes the process discard `signum` from now on: a write to a closed pipe
+/// then fails with an error instead of ending the process.
+pub fn ignore_signal(signum: c_int) {
+    // SAFETY: installing the ignore disposition runs no handler code and
+    // takes no pointers
+    unsafe { signal(signum, SIG_IGN) };
 }
 
 /// Sets the calling thread's `errno` to zero, for the calls that report an

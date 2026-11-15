@@ -1,4 +1,12 @@
 //! Direct and daemon commands share parsing, failures, and durable receipts.
+//!
+//! The C runtime calls `main` directly. The standard library's own start-up
+//! (finding the main thread's stack guard through `/proc/self/maps`, an
+//! alternate signal stack, probing the standard descriptors) costs about
+//! twenty system calls on every invocation and buys only a friendlier
+//! message on stack overflow; what a command relies on is done here.
+#![no_main]
+
 use alt_cli::cli::{self, Command};
 use alt_cli::daemon::Response;
 use alt_cli::execution::Execution;
@@ -6,19 +14,31 @@ use alt_cli::machine::{self, Failure};
 use alt_cli::native::{self, Identity, Store};
 use alt_repo::Repository;
 use std::io::Write;
-use std::process::ExitCode;
 
-fn main() -> ExitCode {
-    let response = run();
-    let delivered = std::io::stdout()
-        .lock()
-        .write_all(&response.stdout)
-        .and_then(|()| std::io::stderr().lock().write_all(&response.stderr));
-    ExitCode::from(if delivered.is_ok() {
-        response.exit_code
+#[unsafe(no_mangle)]
+pub extern "C" fn main(
+    _argc: std::ffi::c_int,
+    _argv: *const *const std::ffi::c_char,
+) -> std::ffi::c_int {
+    // a closed output pipe is reported as a failed write, not a signal
+    #[cfg(unix)]
+    alt_os::sys::ignore_signal(alt_os::sys::SIGPIPE);
+    // a panic leaves with the status the standard runtime gives it
+    let Ok(response) = std::panic::catch_unwind(run) else {
+        return 101;
+    };
+    // nothing flushes standard output after `main` returns
+    let delivered = (|| {
+        let mut out = std::io::stdout().lock();
+        out.write_all(&response.stdout)?;
+        out.flush()?;
+        std::io::stderr().lock().write_all(&response.stderr)
+    })();
+    if delivered.is_ok() {
+        response.exit_code.into()
     } else {
         75
-    })
+    }
 }
 
 fn run() -> Response {
