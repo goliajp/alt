@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: perf
+summary: stat the files of a large directory on several threads
+author-type: human
+author: doracawl
+touched: crates/alt-worktree/src/walk.rs
+touched: crates/alt-worktree/tests/it/delta.rs
