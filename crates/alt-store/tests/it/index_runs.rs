@@ -450,7 +450,8 @@ fn record_log_at_ten_million_records() {
     let total = 10_000_000u64;
     // grown the way a repository grows: one large batch, then small ones
     let mut next = 0u64;
-    for batch in [total - 40_000, 30_000, 9_000, 700, 300] {
+    // the last hundred stay in the tail: too few to index
+    for batch in [total - 40_000, 30_000, 9_000, 700, 300, 100] {
         let (mut log, _) = RecLog::open(&path, LAYOUT).unwrap();
         for n in next..next + batch {
             log.append(&record(n, n)).unwrap();
@@ -460,7 +461,6 @@ fn record_log_at_ten_million_records() {
         log.index_tail(true).unwrap();
         println!("indexed a batch of {batch} in {:?}", started.elapsed());
     }
-    fill(&path, total..total + 100, false);
 
     let mut opens = Vec::new();
     for _ in 0..21 {
