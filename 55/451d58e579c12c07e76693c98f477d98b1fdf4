@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: resolve a conflicted path whose file is gone as a removal when add names it, as git does
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/add.rs
+touched: crates/alt-cli/tests/it/add_conflict.rs
+touched: crates/alt-cli/tests/it/main.rs
