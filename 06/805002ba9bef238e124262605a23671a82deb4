@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: end the command on a malformed filter packet and never wait for a filter still writing
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/convert.rs
+touched: crates/alt-cli/src/native/convert/filter_process.rs
+touched: crates/alt-cli/tests/it/filter_process.rs
