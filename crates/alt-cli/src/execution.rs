@@ -30,7 +30,7 @@ pub fn binding(
     let cwd = std::fs::canonicalize(cwd)?;
     let root = std::fs::canonicalize(coord.root())?;
     let relative = cwd.strip_prefix(&root).unwrap_or(&cwd);
-    let value = json!({"version":1,"arguments":parsed.normalized,"repository":repository,
+    let value = json!({"version":1,"arguments":parsed.normalized(),"repository":repository,
         "workspace":workspace,"cwd_bytes":machine::hex(relative.as_os_str().as_encoded_bytes()),"identity":identity.binding()});
     Ok((alt_dir, repository, workspace, value))
 }

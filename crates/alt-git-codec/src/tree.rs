@@ -48,6 +48,37 @@ impl Tree {
         Ok(Self { entries })
     }
 
+    /// The object the entry called `name` points at in tree `data`, found
+    /// without building the tree. Entries are checked up to the one found.
+    pub fn entry_named(
+        data: &[u8],
+        algo: HashAlgo,
+        name: &[u8],
+    ) -> Result<Option<ObjectId>, ObjectParseError> {
+        let raw_len = algo.raw_len();
+        let mut rest = data;
+        while !rest.is_empty() {
+            let sp = rest
+                .find_byte(b' ')
+                .ok_or(ObjectParseError::Tree("entry without space after mode"))?;
+            EntryMode::from_bytes(&rest[..sp])?;
+            rest = &rest[sp + 1..];
+            let nul = rest
+                .find_byte(0)
+                .ok_or(ObjectParseError::Tree("entry name not NUL-terminated"))?;
+            let found = rest[..nul] == *name;
+            rest = &rest[nul + 1..];
+            if rest.len() < raw_len {
+                return Err(ObjectParseError::Tree("truncated entry oid"));
+            }
+            if found {
+                return Ok(ObjectId::from_bytes(algo, &rest[..raw_len]).ok());
+            }
+            rest = &rest[raw_len..];
+        }
+        Ok(None)
+    }
+
     pub fn serialize_into(&self, out: &mut Vec<u8>) {
         for entry in &self.entries {
             out.extend_from_slice(entry.mode.as_bytes());
@@ -190,5 +221,29 @@ mod tests {
         ] {
             assert!(Tree::parse(&data, HashAlgo::Sha1).is_err(), "{data:?}");
         }
+    }
+
+    #[test]
+    fn finds_an_entry_by_name_without_building_the_tree() {
+        let algo = HashAlgo::Sha1;
+        let first = ObjectId::hash_object(algo, ObjectKind::Blob, b"first");
+        let second = ObjectId::hash_object(algo, ObjectKind::Blob, b"second");
+        let mut data = entry_bytes("40000", b"ab", &first);
+        data.extend(entry_bytes("100644", b"abc", &second));
+        assert_eq!(Tree::entry_named(&data, algo, b"ab").unwrap(), Some(first));
+        assert_eq!(
+            Tree::entry_named(&data, algo, b"abc").unwrap(),
+            Some(second)
+        );
+        assert_eq!(Tree::entry_named(&data, algo, b"a").unwrap(), None);
+        assert_eq!(Tree::entry_named(&[], algo, b"a").unwrap(), None);
+
+        // a damaged entry before the one looked for is an error, as in a parse
+        let mut damaged = b"100648 x\0".to_vec();
+        damaged.extend_from_slice(first.as_bytes());
+        damaged.extend(entry_bytes("100644", b"abc", &second));
+        assert!(Tree::entry_named(&damaged, algo, b"abc").is_err());
+        let cut = &data[..data.len() - 1];
+        assert!(Tree::entry_named(cut, algo, b"abc").is_err());
     }
 }

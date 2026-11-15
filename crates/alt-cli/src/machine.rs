@@ -100,8 +100,16 @@ impl Failure {
 
 pub struct Parsed {
     pub cli: Cli,
-    pub normalized: Value,
+    matches: Matches,
     pub json: bool,
+}
+
+impl Parsed {
+    /// The arguments in the one form every spelling of them shares. Only a
+    /// write binds its request to it, so it is built on demand.
+    pub fn normalized(&self) -> Value {
+        canonical_matches(&self.matches)
+    }
 }
 
 /// Parse without exiting or writing to inherited streams. An error path keeps
@@ -138,8 +146,8 @@ pub fn parse(args: Vec<OsString>) -> Result<Parsed, Response> {
     })?;
     Ok(Parsed {
         cli: Cli::from_matches(&matches),
-        normalized: canonical_matches(&matches),
         json: matches_json(&matches),
+        matches,
     })
 }
 
@@ -386,14 +394,14 @@ mod tests {
         };
         let plain = parse_args(&["alt", "workspace", "add", "task", "/tmp/task"]);
         assert!(!plain.json);
-        assert_eq!(plain.normalized["values"]["json"], json!([hex(b"false")]));
+        assert_eq!(plain.normalized()["values"]["json"], json!([hex(b"false")]));
         let before = parse_args(&["alt", "workspace", "--json", "add", "task", "/tmp/task"]);
         let after = parse_args(&["alt", "workspace", "add", "task", "/tmp/task", "--json"]);
         assert!(before.json && after.json);
         let repeated = parse_args(&["alt", "workspace", "add", "task", "/tmp/task", "--json"]);
-        assert_eq!(repeated.normalized, after.normalized);
-        assert_eq!(after.normalized["values"]["json"], json!([hex(b"true")]));
-        assert_ne!(plain.normalized, after.normalized);
+        assert_eq!(repeated.normalized(), after.normalized());
+        assert_eq!(after.normalized()["values"]["json"], json!([hex(b"true")]));
+        assert_ne!(plain.normalized(), after.normalized());
         let runner = parse_args(&["alt", "runner", "execute", "spec.json", "--json"]);
         assert!(runner.json);
     }

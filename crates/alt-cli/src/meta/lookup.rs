@@ -9,14 +9,19 @@ use std::collections::hash_map::Entry;
 use alt_git_codec::{HashAlgo, ObjectId, Tree};
 use alt_repo::Repository;
 
-use super::{Meta, NOTES_REF, Read, ReadResult, Res, commit_tree, tree_at};
+use super::{Meta, NOTES_REF, Read, ReadResult, Res, commit_tree};
 
 /// The notes of one notes commit. Its root tree is read once, each fan-out
-/// tree the first time a commit under it is asked for.
+/// tree the first time a commit under it is asked for; both stay as stored
+/// and are searched in place.
 pub struct Notes {
     algo: HashAlgo,
-    root: Tree,
-    dirs: RefCell<HashMap<ObjectId, Tree>>,
+    root: Vec<u8>,
+    dirs: RefCell<HashMap<ObjectId, Vec<u8>>>,
+}
+
+fn tree_data(read: &Read, id: ObjectId) -> Res<Vec<u8>> {
+    Ok(read(id)?.ok_or("notes tree missing from store")?.1)
 }
 
 fn reader(repo: &Repository) -> impl Fn(ObjectId) -> ReadResult + '_ {
@@ -27,7 +32,7 @@ impl Notes {
     pub fn open(read: &Read, algo: HashAlgo, notes: ObjectId) -> Res<Self> {
         Ok(Self {
             algo,
-            root: tree_at(read, algo, commit_tree(read, notes)?)?,
+            root: tree_data(read, commit_tree(read, notes)?)?,
             dirs: RefCell::default(),
         })
     }
@@ -43,18 +48,17 @@ impl Notes {
     /// The note for `target`, flat or fanned out.
     pub fn find(&self, read: &Read, target: ObjectId) -> Res<Option<Meta>> {
         let hex = target.to_string();
-        let named =
-            |tree: &Tree, name: &[u8]| tree.entries.iter().find(|e| e.name == name).map(|e| e.oid);
-        let blob = match named(&self.root, hex.as_bytes()) {
+        let (fan, rest) = hex.as_bytes().split_at(2);
+        let blob = match Tree::entry_named(&self.root, self.algo, hex.as_bytes())? {
             Some(blob) => Some(blob),
-            None => match named(&self.root, &hex.as_bytes()[..2]) {
+            None => match Tree::entry_named(&self.root, self.algo, fan)? {
                 Some(dir) => {
                     let mut dirs = self.dirs.borrow_mut();
                     let tree = match dirs.entry(dir) {
                         Entry::Occupied(known) => known.into_mut(),
-                        Entry::Vacant(new) => new.insert(tree_at(read, self.algo, dir)?),
+                        Entry::Vacant(new) => new.insert(tree_data(read, dir)?),
                     };
-                    named(tree, &hex.as_bytes()[2..])
+                    Tree::entry_named(tree, self.algo, rest)?
                 }
                 None => None,
             },

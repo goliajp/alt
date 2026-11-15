@@ -219,6 +219,7 @@ impl RecLog {
         let rec_len = self.layout.rec_len;
         let first = (self.tail.len() / rec_len) as u32;
         self.tail.extend_from_slice(records);
+        self.tail_keys.reserve(records.len() / rec_len);
         for (at, rec) in (first..).zip(records.chunks_exact(rec_len)) {
             let (key, second) = (self.layout.keys)(rec);
             self.tail_keys.insert(key, at);
