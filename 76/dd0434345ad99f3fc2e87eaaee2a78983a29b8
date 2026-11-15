@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: perf
+summary: abbreviate ids against one sorted list for a whole log
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/log_cmd.rs
+touched: crates/alt-cli/src/patch.rs
