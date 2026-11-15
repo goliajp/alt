@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: show the combined diff of a merge in show and log -p --cc
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/combined.rs
+touched: crates/alt-cli/src/file_header.rs
+touched: crates/alt-cli/src/lib.rs
+touched: crates/alt-cli/src/log_cmd.rs
+touched: crates/alt-cli/src/patch.rs
+touched: crates/alt-cli/tests/it/log_patch.rs
