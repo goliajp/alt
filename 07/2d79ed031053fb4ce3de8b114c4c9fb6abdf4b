@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: pair renamed files in diff --cached
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/diff.rs
+touched: crates/alt-cli/tests/it/diff.rs
