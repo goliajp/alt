@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: drop index runs past a rewind point by listing the directory
+author-type: human
+author: doracawl
+touched: crates/alt-store/src/lib.rs
+touched: crates/alt-store/src/run_write.rs
+touched: crates/alt-store/src/runs.rs
