@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: feat
+summary: report a renamed file as one entry in the JSON diff
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/diff.rs
+touched: crates/alt-cli/tests/it/diff_git.rs
