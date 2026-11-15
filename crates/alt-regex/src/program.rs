@@ -66,6 +66,8 @@ struct Compiler {
     sets: Vec<ByteSet>,
     work: usize,
     ignore_case: bool,
+    /// inside a copy of a repeated expression other than its first
+    copied: bool,
 }
 
 pub fn compile(node: &Node, groups: u32, ignore_case: bool) -> Result<Program, Error> {
@@ -74,6 +76,7 @@ pub fn compile(node: &Node, groups: u32, ignore_case: bool) -> Result<Program, E
         sets: Vec::new(),
         work: 0,
         ignore_case,
+        copied: false,
     };
     let end = c.push(Inst::Match)?;
     let close = c.push(Inst::Save(1, end))?;
@@ -117,7 +120,7 @@ pub fn compile(node: &Node, groups: u32, ignore_case: bool) -> Result<Program, E
 /// left out and behind an earlier match of the group, puts every slot
 /// back to that.
 pub fn close(prog: &Program, slots: &mut [usize], width: usize, slot: usize, at: usize, opt: bool) {
-    if !prog.snapshots || slot % 2 == 0 {
+    if !prog.snapshots || slot.is_multiple_of(2) {
         slots[slot] = at;
         return;
     }
@@ -283,16 +286,22 @@ impl Compiler {
         }
     }
 
-    /// A copy of `inner` that its repetition may leave out.
-    fn optional(&mut self, inner: &Node, next: u32) -> Result<u32, Error> {
-        match inner {
-            Node::Group(body, number) if nullable(body) => {
+    /// One of the copies a repetition is made of. The C library marks
+    /// a group that a repetition may leave out, the first such copy
+    /// only, and a copy made of another loses the marks inside it.
+    fn copy(&mut self, inner: &Node, next: u32, marked: bool, made: bool) -> Result<u32, Error> {
+        let outside = self.copied;
+        self.copied = outside || made;
+        let entry = match inner {
+            Node::Group(body, number) if marked && !outside && nullable(body) => {
                 let close = self.push(Inst::SaveOpt(2 * number + 1, next))?;
                 let body = self.node(body, close)?;
                 self.push(Inst::Save(2 * number, body))
             }
             _ => self.node(inner, next),
-        }
+        };
+        self.copied = outside;
+        entry
     }
 
     fn repeat(
@@ -316,7 +325,7 @@ impl Compiler {
             // own, so that one such turn is taken and then left
             None => {
                 let again = self.push(Inst::Split(next, next))?;
-                let body = self.optional(inner, again)?;
+                let body = self.copy(inner, again, true, min > 0)?;
                 self.insts[again as usize] = Inst::Split(body, next);
                 self.push(Inst::Split(body, next))?
             }
@@ -327,11 +336,8 @@ impl Compiler {
                 let mut bodies = Vec::new();
                 let mut behind = next;
                 for copy in (min..max).rev() {
-                    // the C library marks the first of them only
-                    behind = match copy == min {
-                        true => self.optional(inner, behind)?,
-                        false => self.node(inner, behind)?,
-                    };
+                    let first = copy == min;
+                    behind = self.copy(inner, behind, first, !first || min > 0)?;
                     bodies.push(behind);
                 }
                 bodies.reverse();
@@ -344,8 +350,8 @@ impl Compiler {
                 entry
             }
         };
-        for _ in 0..min {
-            entry = self.node(inner, entry)?;
+        for copy in (0..min).rev() {
+            entry = self.copy(inner, entry, false, copy > 0)?;
         }
         Ok(entry)
     }
