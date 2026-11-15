@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: undo reports only the paths an add changed
+author-type: human
+author: doracawl
+touched: crates/alt-worktree/src/fsdir.rs
+touched: crates/alt-worktree/src/snapshot.rs
