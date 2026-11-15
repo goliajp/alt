@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: repeat nothing as nothing and bound the work of compiling a pattern
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/program.rs
+touched: crates/alt-regex/src/syntax.rs
+touched: crates/alt-regex/tests/it/limits.rs
