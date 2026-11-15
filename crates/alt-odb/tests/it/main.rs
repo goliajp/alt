@@ -4,6 +4,7 @@ mod cache_failure;
 mod compact_readers;
 mod corpus_objects;
 mod full_check;
+mod merge_readers;
 mod odb_index;
 mod odb_lifecycle;
 mod second_handle;
