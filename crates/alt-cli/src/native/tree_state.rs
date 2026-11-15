@@ -123,7 +123,7 @@ impl NativeRepo<'_> {
         snapshot: &mut Snapshot,
         untracked: bool,
         within: &[&[u8]],
-    ) -> Res<(Delta, alt_worktree::Stamp)> {
+    ) -> Res<(Delta, alt_worktree::Clock)> {
         // built when the first file has to be read
         let tools: OnceCell<Res<(Option<PathMatcher>, convert::Converter)>> = OnceCell::new();
         let get = || {
@@ -141,20 +141,19 @@ impl NativeRepo<'_> {
         };
         let head = |dir: &Path| get().and_then(|(_, attrs)| attrs.submodule_head(dir));
         let control = self.index_path.parent().ok_or("index has no directory")?;
-        // where the clock cannot be read nothing is recorded as unchanged
-        let stamp = alt_worktree::clock_stamp(control, &self.root).unwrap_or((i64::MIN, 0));
+        let clock = alt_worktree::Clock::read(control).unwrap_or(alt_worktree::Clock::UNREADABLE);
         let options = ScanOptions {
             untracked,
             within,
             clean: Some(&clean),
             head: Some(&head),
-            stamp,
+            clock,
         };
         let delta = alt_worktree::scan(&self.root, snapshot, &options)?;
         if let Some(tools) = tools.into_inner() {
             tools?.1.check()?;
         }
-        Ok((delta, stamp))
+        Ok((delta, clock))
     }
 
     /// After a checkout put `index` in place: the snapshot of that index,
@@ -175,13 +174,9 @@ impl NativeRepo<'_> {
         let id = &index[index.len() - algo.raw_len()..];
         let mut next = Snapshot::of_index(&parsed, id, algo, prior.as_ref());
         let control = self.index_path.parent().ok_or("index has no directory")?;
-        let stamp = alt_worktree::clock_stamp(control, &self.root).unwrap_or((i64::MIN, 0));
+        let clock = alt_worktree::Clock::read(control).unwrap_or(alt_worktree::Clock::UNREADABLE);
         for (path, stat) in written {
-            if stat.settled(stamp)
-                && let Some(at) = next.find(&path)
-            {
-                next.set_stat(at, Some(stat));
-            }
+            next.settle_path(&path, stat, &clock);
         }
         next.fill_trees();
         self.keep_snapshot(&next);

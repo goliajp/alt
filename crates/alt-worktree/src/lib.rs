@@ -8,6 +8,8 @@
 
 pub mod attributes;
 mod cachetree;
+#[cfg(unix)]
+mod clock;
 mod control;
 #[cfg(unix)]
 mod delta;
@@ -22,7 +24,9 @@ mod walk;
 
 pub use cachetree::Staged;
 #[cfg(unix)]
-pub use delta::{CleanTracked, Delta, ScanOptions, Stamp, clock_stamp, scan};
+pub use clock::{Clock, Stamp};
+#[cfg(unix)]
+pub use delta::{CleanTracked, Delta, ScanOptions, scan};
 pub use snapshot::{Dir, Entry, FileStat, Snapshot};
 
 pub use scan::{Clean, PathMatcher, SubmoduleHead, scan_worktree, scan_worktree_with_index};

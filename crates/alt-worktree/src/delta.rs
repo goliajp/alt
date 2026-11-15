@@ -9,6 +9,7 @@ use std::path::Path;
 use alt_bytes::BString;
 use alt_git_codec::{ObjectId, ObjectKind};
 
+use crate::clock::Clock;
 use crate::fsdir::{Kind, kind_of};
 use crate::ignore::IgnoreStack;
 use crate::scan::SubmoduleHead;
@@ -23,9 +24,6 @@ const BATCH_BYTES: u64 = 64 << 20;
 /// or `None` to store the file as it is.
 pub type CleanTracked<'a> = &'a dyn Fn(&[u8], &[u8], ObjectId) -> Option<Vec<u8>>;
 
-/// A moment of a filesystem's clock.
-pub type Stamp = (i64, u32);
-
 pub struct ScanOptions<'a> {
     /// look for files the index does not have
     pub untracked: bool,
@@ -37,7 +35,7 @@ pub struct ScanOptions<'a> {
     /// when the scan began: a file changed at or after it is compared but
     /// not recorded as unchanged, because a later change within the same
     /// tick of the clock would leave its stat as it is
-    pub stamp: Stamp,
+    pub clock: Clock,
 }
 
 /// The paths where the working tree differs from the index, each list in
@@ -76,28 +74,6 @@ impl FileStat {
             _ => 0o100644,
         }
     }
-
-    /// Whether the file was last changed before `stamp`, so that any later
-    /// change shows in its stat.
-    pub fn settled(&self, stamp: Stamp) -> bool {
-        self.mtime < stamp && self.ctime < stamp
-    }
-}
-
-/// The current moment of the clock that stamps files in `control`, the
-/// directory the snapshot lives in. When the working tree at `root` is on
-/// another filesystem, whose clock may be coarser or run apart, the moment
-/// is taken three seconds early.
-pub fn clock_stamp(control: &Path, root: &Path) -> std::io::Result<Stamp> {
-    let probe = crate::control::clock_probe(control);
-    std::fs::write(&probe, b"\n")?;
-    let meta = std::fs::metadata(&probe)?;
-    std::fs::remove_file(&probe)?;
-    let apart = std::fs::metadata(root)?.dev() != meta.dev();
-    Ok((
-        meta.mtime() - 3 * i64::from(apart),
-        meta.mtime_nsec() as u32,
-    ))
 }
 
 /// Compares the working tree at `root` with `snapshot`, recording in the
@@ -226,9 +202,7 @@ fn compare(
             };
             let entry = &snapshot.entries[i];
             if oid == entry.oid && mode == entry.mode {
-                if st.settled(opts.stamp) {
-                    snapshot.set_stat(i, Some(st));
-                }
+                snapshot.settle(i, st, &opts.clock);
             } else {
                 delta.changed.push(WorkEntry {
                     path: BString::from(snapshot.path(i)),

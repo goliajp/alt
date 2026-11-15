@@ -9,7 +9,7 @@ use alt_bytes::BString;
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
 use alt_git_index::{Index, IndexEntry};
 use alt_worktree::{
-    ChangeKind, Delta, ScanOptions, Snapshot, Stamp, index_entries, scan, scan_worktree,
+    ChangeKind, Clock, Delta, ScanOptions, Snapshot, Stamp, index_entries, scan, scan_worktree,
     scan_worktree_with_index, status,
 };
 
@@ -49,13 +49,15 @@ fn index_of(root: &Path) -> Index {
     }
 }
 
-fn options(untracked: bool, stamp: Stamp) -> ScanOptions<'static> {
+/// A scan that began at `now` by the clock of the filesystem under test.
+fn options(untracked: bool, now: Stamp) -> ScanOptions<'static> {
+    let dev = std::fs::metadata(std::env::temp_dir()).unwrap().dev();
     ScanOptions {
         untracked,
         within: &[],
         clean: None,
         head: None,
-        stamp,
+        clock: Clock { now, dev },
     }
 }
 
@@ -264,22 +266,6 @@ fn a_file_changed_within_the_tick_of_the_scan_is_not_recorded() {
     let next: Stamp = (meta.mtime().max(meta.ctime()) + 1, 0);
     scan(root, &mut snapshot, &options(false, next)).unwrap();
     assert!(snapshot.entries[0].stat.is_some());
-}
-
-#[test]
-fn the_clock_stamp_is_not_before_a_file_written_earlier() {
-    let dir = alt_os::temp::tempdir().unwrap();
-    let root = dir.path();
-    write(root, "f.txt", "one\n");
-    std::thread::sleep(std::time::Duration::from_millis(30));
-    let stamp = alt_worktree::clock_stamp(root, root).unwrap();
-    let meta = std::fs::metadata(root.join("f.txt")).unwrap();
-    assert!((meta.mtime(), meta.mtime_nsec() as u32) < stamp);
-    assert_eq!(
-        std::fs::read_dir(root).unwrap().count(),
-        1,
-        "the probe file is gone"
-    );
 }
 
 #[test]

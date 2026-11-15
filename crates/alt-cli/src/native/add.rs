@@ -76,7 +76,7 @@ impl NativeRepo<'_> {
         // only what differs from the index is read: a file with the stat
         // it had when it was staged holds what the index holds
         let mut snapshot = self.worktree_snapshot()?;
-        let (delta, stamp) = self.scan_delta_within(&mut snapshot, true, &within)?;
+        let (delta, clock) = self.scan_delta_within(&mut snapshot, true, &within)?;
         all_match(&specs, paths, &before, &delta)?;
 
         // the paths whose entries change: taken from the working tree, or dropped
@@ -178,11 +178,7 @@ impl NativeRepo<'_> {
             let raw = self.store.algo.raw_len();
             next.index_id = tree_state::index_checksum(&self.index_path, raw)?.unwrap_or_default();
             for (path, stat) in stats {
-                if stat.settled(stamp)
-                    && let Some(at) = next.find(&path)
-                {
-                    next.set_stat(at, Some(stat));
-                }
+                next.settle_path(&path, stat, &clock);
             }
             next.fill_trees();
             self.keep_snapshot(&next);
