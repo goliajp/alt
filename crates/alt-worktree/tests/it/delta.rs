@@ -460,3 +460,34 @@ fn a_directory_of_many_files_looked_at_on_several_threads_matches_the_full_scan(
         assert_eq!(view(&delta).0, unstaged);
     }
 }
+
+#[test]
+fn an_ignore_file_that_is_a_symlink_is_not_followed() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let root = dir.path();
+    write(root, "tracked.txt", "t\n");
+    let index = index_of(root);
+    let mut snapshot = Snapshot::of_index(&index, b"id", ALGO, None);
+    write(root, "rules", "*.log\n");
+    write(root, "a/x.log", "x\n");
+    write(root, "b/y.log", "y\n");
+    write(root, "c/sub/z.log", "z\n");
+    // one that leads nowhere, one that leads to rules, one in an untracked directory
+    symlink("missing", root.join("a/.gitignore")).unwrap();
+    symlink("../rules", root.join("b/.gitignore")).unwrap();
+    symlink("nowhere", root.join("c/sub/.gitignore")).unwrap();
+    let delta = scan(root, &mut snapshot, &options(true, LATER)).unwrap();
+    let names: Vec<String> = delta.untracked.iter().map(|p| p.to_string()).collect();
+    assert_eq!(
+        names,
+        [
+            "a/.gitignore",
+            "a/x.log",
+            "b/.gitignore",
+            "b/y.log",
+            "c/sub/.gitignore",
+            "c/sub/z.log",
+            "rules"
+        ]
+    );
+}

@@ -448,7 +448,11 @@ fn ignore_file(
     base: &[u8],
     ignore: &IgnoreStack,
 ) -> io::Result<Option<IgnoreStack>> {
-    let Some(item) = names.find(b".gitignore", false) else {
+    // a symlink is not followed, as git does not follow one in the tree
+    let Some(item) = names
+        .find(b".gitignore", false)
+        .filter(|&item| names.kind(item) == Kind::File)
+    else {
         return Ok(None);
     };
     let content = fd.read(names.c_name(item))?;
