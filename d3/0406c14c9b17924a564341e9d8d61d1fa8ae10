@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: keep a filter process that gives up apart from files it would be asked about again
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/filter_process.rs
