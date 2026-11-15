@@ -10,12 +10,6 @@ impl NativeRepo<'_> {
         self.lock_workspace()?;
         self.ensure_no_pending_recovery()?;
         let before = self.index()?;
-        // add re-reads + re-puts every staged path anyway; the stat-cache
-        // fast path would save the scan-time hash but lose to read_for +
-        // odb.put on the next line. Wins for a smarter add are tracked
-        // separately (the same-oid short-circuit in odb.put helps a bit).
-        // the index decides which ignored paths are tracked and so still count
-        let scan = self.scan_tree(&self.index()?)?;
         let lfs = self.lfs_rules()?;
         let attrs = self.converter()?;
         let specs: Vec<&str> = paths.iter().map(|p| pathspec(p)).collect();
@@ -48,101 +42,119 @@ impl NativeRepo<'_> {
             }
         }
         let staging_all = specs.iter().any(|p| p.is_empty());
-
-        // snapshot the prior stage-0 entries — both the starting point for
-        // the new index and the "old" side of every IndexChange we'll
-        // record in the op log so `alt undo` can roll a stray `add` back.
-        let prior_stage_zero: Vec<IndexEntry> = self
-            .index()?
-            .entries
-            .into_iter()
-            .filter(|e| e.stage() == 0)
-            .collect();
-        // a submodule is not scanned: its entry stays as recorded unless the
-        // working tree now holds a file at or under its path
-        let kept_gitlinks: std::collections::BTreeSet<BString> = prior_stage_zero
-            .iter()
-            .filter(|e| e.mode == 0o160000 && !occupied(&scan, &e.path))
-            .map(|e| e.path.clone())
-            .collect();
-        let mut entries: Vec<IndexEntry> = if staging_all {
-            prior_stage_zero
-                .iter()
-                .filter(|e| kept_gitlinks.contains(&e.path))
-                .cloned()
-                .collect()
-        } else {
-            before.entries.clone()
+        let within: Vec<&[u8]> = match staging_all {
+            true => Vec::new(),
+            false => specs.iter().map(|s| s.as_bytes()).collect(),
         };
+        let under = |path: &[u8], spec: &str| {
+            spec.is_empty()
+                || path == spec.as_bytes()
+                || (path.starts_with(spec.as_bytes()) && path.get(spec.len()) == Some(&b'/'))
+        };
+        let named = |path: &[u8]| specs.iter().any(|spec| under(path, spec));
 
-        let mut staged = 0;
-        let targets: Vec<BString> = if staging_all {
-            scan.iter().map(|w| w.path.clone()).collect()
-        } else {
-            // a directory stands for every file under it, deleted ones
-            // included (their removal is staged), as in git
-            let mut targets = std::collections::BTreeSet::new();
-            for (spec, given) in specs.iter().zip(paths) {
-                let under = |path: &BString| {
-                    path.as_slice() == spec.as_bytes()
-                        || (path.starts_with(spec.as_bytes())
-                            && path.get(spec.len()) == Some(&b'/'))
-                };
-                let matched: Vec<BString> = scan
-                    .iter()
-                    .map(|w| &w.path)
-                    .chain(prior_stage_zero.iter().map(|e| &e.path))
-                    .filter(|p| under(p))
-                    .cloned()
-                    .collect();
-                if matched.is_empty() {
-                    return Err(format!("pathspec '{given}' did not match any files").into());
-                }
-                targets.extend(matched);
+        // only what differs from the index is read: a file with the stat
+        // it had when it was staged holds what the index holds
+        let mut snapshot = self.worktree_snapshot()?;
+        let (delta, stamp) = self.scan_delta_within(&mut snapshot, true, &within)?;
+        // a directory stands for every file under it, deleted ones
+        // included (their removal is staged), as in git
+        for (spec, given) in specs.iter().zip(paths) {
+            let tracked = before
+                .entries
+                .iter()
+                .any(|e| e.stage() == 0 && under(&e.path, spec));
+            let seen = delta
+                .untracked
+                .iter()
+                .chain(&delta.unmerged)
+                .any(|p| under(p, spec));
+            if !tracked && !seen {
+                return Err(format!("pathspec '{given}' did not match any files").into());
             }
-            targets.into_iter().collect()
-        };
-        // Touched paths are the union of "what changed in `entries`" — for
-        // staging_all it's the whole prior + everything in scan; for the
-        // explicit path form it's just the listed targets. We compute the
-        // change list after the index is rewritten so old/new come from
-        // the actual entries the index will hold.
-        let touched_paths: std::collections::BTreeSet<BString> = if staging_all {
-            prior_stage_zero
+        }
+
+        // the paths whose entries change: taken from the working tree, or dropped
+        let taken: Vec<&BString> = delta
+            .changed
+            .iter()
+            .map(|w| &w.path)
+            .chain(&delta.untracked)
+            .chain(&delta.unmerged)
+            .collect();
+        let acted: std::collections::HashSet<&[u8]> = taken
+            .iter()
+            .chain(&delta.deleted.iter().collect::<Vec<_>>())
+            .map(|p| p.as_slice())
+            .collect();
+        // a conflicted path with no file left is resolved as a removal when
+        // the whole tree is staged; naming it does not reach it
+        let mut entries: Vec<IndexEntry> = before
+            .entries
+            .iter()
+            .filter(|e| !acted.contains(e.path.as_slice()) && !(staging_all && e.stage() != 0))
+            .cloned()
+            .collect();
+        let dropped: Vec<BString> = match staging_all {
+            true => before
+                .entries
                 .iter()
+                .filter(|e| e.stage() != 0 && !acted.contains(e.path.as_slice()))
                 .map(|e| e.path.clone())
-                .chain(scan.iter().map(|w| w.path.clone()))
-                .filter(|p| !kept_gitlinks.contains(p))
-                .collect()
-        } else {
-            targets
-                .iter()
-                .filter(|p| !kept_gitlinks.contains(*p))
-                .cloned()
-                .collect()
+                .collect(),
+            false => Vec::new(),
         };
-        for rel in &targets {
-            if kept_gitlinks.contains(rel) {
+
+        // path gate: deny staging any path the policy excludes, *before*
+        // writing a blob into the odb, so a denial has no side effect
+        if !self.caps.path_allow.is_empty() {
+            let gone: std::collections::HashSet<&[u8]> =
+                delta.deleted.iter().map(|p| p.as_slice()).collect();
+            let kept = |e: &&IndexEntry| e.mode != 0o160000 || delta.submodules.contains(&e.path);
+            for e in before.entries.iter().filter(kept) {
+                if e.stage() == 0 && named(&e.path) && !gone.contains(e.path.as_slice()) {
+                    self.ensure_path_allowed(e.path.to_str().unwrap_or(""))?;
+                }
+            }
+        }
+        let moved: std::collections::HashMap<&[u8], &WorkEntry> = delta
+            .changed
+            .iter()
+            .filter(|w| w.mode == 0o160000)
+            .map(|w| (w.path.as_slice(), w))
+            .collect();
+        let unread = ObjectId::hash_object(self.store.algo, ObjectKind::Blob, b"");
+        let mut stats = Vec::new();
+        for path in taken {
+            self.ensure_path_allowed(path.to_str().unwrap_or(""))?;
+            // a submodule is recorded by the commit it has checked out,
+            // which lives in its own store
+            if let Some(w) = moved.get(path.as_slice()) {
+                entries.push(staged_entry(path, w.oid, w.mode));
                 continue;
             }
-            entries.retain(|e| &e.path != rel);
-            if let Some(w) = scan.iter().find(|w| &w.path == rel) {
-                // path gate: deny staging any path the policy excludes,
-                // *before* writing the blob into the odb — so a denial costs
-                // no on-disk side effect (the odb put would otherwise persist
-                // before the index is even written).
-                let path_str = w.path.to_str().unwrap_or("");
-                self.ensure_path_allowed(path_str)?;
-                // a submodule is recorded by the commit it has checked
-                // out, which lives in its own store
-                if w.mode != 0o160000 {
-                    let bytes = self.staged_bytes(w, lfs.as_ref(), &attrs, &before)?;
-                    self.store.odb.put(w.oid, ObjectKind::Blob, &bytes)?;
-                }
-                entries.push(self.make_entry(w)?);
-                staged += 1;
-            } // a path that vanished from the tree is dropped (staged deletion)
+            let stat = alt_worktree::FileStat::of(&std::fs::symlink_metadata(self.abs(path)?)?);
+            // the id is known once the stored form is: not used until then
+            let file = WorkEntry {
+                path: path.clone(),
+                oid: unread,
+                mode: stat.git_mode(),
+            };
+            let bytes = self.staged_bytes(&file, lfs.as_ref(), &attrs, &before)?;
+            let oid = ObjectId::hash_object(self.store.algo, ObjectKind::Blob, &bytes);
+            self.store.odb.put(oid, ObjectKind::Blob, &bytes)?;
+            entries.push(staged_entry(path, oid, file.mode));
+            stats.push((path.clone(), stat));
         }
+        // every file of the named part of the tree counts as staged,
+        // changed or not
+        let present = before
+            .entries
+            .iter()
+            .filter(|e| e.stage() == 0 && named(&e.path) && !acted.contains(e.path.as_slice()))
+            .filter(|e| e.mode != 0o160000 || delta.submodules.contains(&e.path))
+            .count();
+        let staged = present + delta.changed.len() + delta.untracked.len() + delta.unmerged.len();
 
         self.store.odb.flush()?;
         entries.sort_by(|a, b| a.path.cmp(&b.path).then(a.stage().cmp(&b.stage())));
@@ -151,15 +163,30 @@ impl NativeRepo<'_> {
             entries,
             extensions: Vec::new(),
         };
-        if recovery::canonical_index(before.clone(), self.store.algo)
-            != recovery::canonical_index(after.clone(), self.store.algo)
-        {
-            self.write_index_transaction(
-                before,
-                after,
-                &touched_paths.into_iter().collect::<Vec<_>>(),
-                None,
-            )?;
+        if after.entries != before.entries {
+            let mut next =
+                alt_worktree::Snapshot::of_index(&after, &[], self.store.algo, Some(&snapshot));
+            let mut touched: Vec<BString> = acted
+                .iter()
+                .map(|p| BString::from(*p))
+                .chain(dropped)
+                .collect();
+            touched.sort();
+            touched.dedup();
+            self.write_index_transaction(before, after, &touched, None)?;
+            let raw = self.store.algo.raw_len();
+            next.index_id = tree_state::index_checksum(&self.index_path, raw)?.unwrap_or_default();
+            for (path, stat) in stats {
+                if stat.settled(stamp)
+                    && let Some(at) = next.find(&path)
+                {
+                    next.set_stat(at, Some(stat));
+                }
+            }
+            next.fill_trees();
+            self.keep_snapshot(&next);
+        } else {
+            self.keep_snapshot(&snapshot);
         }
         if json {
             crate::json::emit(out, vec![("staged", crate::json::Json::Num(staged as i64))])?;
@@ -170,15 +197,23 @@ impl NativeRepo<'_> {
     }
 }
 
-/// Whether the path-sorted `scan` holds `path` itself or a file beneath it.
-fn occupied(scan: &[WorkEntry], path: &BString) -> bool {
-    if scan.binary_search_by(|w| w.path.cmp(path)).is_ok() {
-        return true;
+/// An index entry for staged content. The index keeps no stat: what the
+/// working-tree file looked like is the snapshot's to remember.
+fn staged_entry(path: &BString, oid: ObjectId, mode: u32) -> IndexEntry {
+    IndexEntry {
+        ctime: (0, 0),
+        mtime: (0, 0),
+        dev: 0,
+        ino: 0,
+        mode,
+        uid: 0,
+        gid: 0,
+        size: 0,
+        oid,
+        flags: path.len().min(0x0FFF) as u16,
+        extended_flags: None,
+        path: path.clone(),
     }
-    let mut dir = path.to_vec();
-    dir.push(b'/');
-    let at = scan.partition_point(|w| w.path.as_slice() < dir.as_slice());
-    scan.get(at).is_some_and(|w| w.path.starts_with(&dir))
 }
 
 /// A path argument relative to the working-tree root, without `./` in front

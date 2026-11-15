@@ -46,6 +46,7 @@ mod read_json;
 mod rebase;
 mod remote;
 mod revert;
+mod scan_cache;
 mod show;
 mod status_json;
 mod switch_kinds;

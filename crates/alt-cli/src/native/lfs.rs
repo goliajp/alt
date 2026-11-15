@@ -4,7 +4,7 @@
 //! holds the real files, and paths `.gitattributes` marks `filter=lfs` are
 //! turned back into pointers whenever the tree is scanned or staged.
 
-use alt_worktree::{scan_indexed_paths, scan_worktree_with_index};
+use alt_worktree::scan_worktree_with_index;
 
 use alt_lfs::Pointer;
 use alt_odb::BlobId;
@@ -44,26 +44,6 @@ impl NativeRepo<'_> {
         };
         let head = |dir: &Path| attrs.submodule_head(dir);
         let scan = scan_worktree_with_index(
-            &self.root,
-            index,
-            self.store.algo,
-            Some(&clean),
-            Some(&head),
-        )?;
-        attrs.check()?;
-        Ok(scan)
-    }
-
-    /// Like [`scan_tree`](Self::scan_tree) but only over the index's paths.
-    pub(super) fn scan_index_paths(&self, index: &Index) -> Res<Vec<WorkEntry>> {
-        let rules = self.lfs_rules()?;
-        let attrs = self.converter()?;
-        let clean = |path: &[u8], content: &[u8]| {
-            let pointer = rules.as_ref().and_then(|r| lfs_clean(r, path, content));
-            pointer.or_else(|| self.stored_form(&attrs, index, path, content))
-        };
-        let head = |dir: &Path| attrs.submodule_head(dir);
-        let scan = scan_indexed_paths(
             &self.root,
             index,
             self.store.algo,
@@ -282,7 +262,7 @@ impl NativeRepo<'_> {
 
 /// git-lfs's clean step: an LFS path's content becomes its pointer; content
 /// that already is a pointer stays as it is.
-fn lfs_clean(rules: &PathMatcher, path: &[u8], content: &[u8]) -> Option<Vec<u8>> {
+pub(super) fn lfs_clean(rules: &PathMatcher, path: &[u8], content: &[u8]) -> Option<Vec<u8>> {
     if !rules.matches(path) || Pointer::parse(content).is_some() {
         return None;
     }

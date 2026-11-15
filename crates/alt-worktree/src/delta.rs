@@ -1,0 +1,242 @@
+//! What the working tree holds that the index does not say: the scan
+//! behind `status`, `diff` and `add`. Files whose stat is the one recorded
+//! in the snapshot are not read; the rest are hashed, several at a time.
+
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::MetadataExt;
+use std::path::Path;
+
+use alt_bytes::BString;
+use alt_git_codec::{ObjectId, ObjectKind};
+
+use crate::fsdir::{Kind, kind_of};
+use crate::ignore::IgnoreStack;
+use crate::scan::SubmoduleHead;
+use crate::snapshot::{FileStat, Snapshot};
+use crate::{WorkEntry, WorktreeError, walk};
+
+/// Content read for comparison is held in memory at most this much at a time.
+const BATCH_BYTES: u64 = 64 << 20;
+
+/// A clean filter for a tracked file: given its path, the working-tree
+/// bytes and the blob the index has for it, the bytes to store instead,
+/// or `None` to store the file as it is.
+pub type CleanTracked<'a> = &'a dyn Fn(&[u8], &[u8], ObjectId) -> Option<Vec<u8>>;
+
+/// A moment of a filesystem's clock.
+pub type Stamp = (i64, u32);
+
+pub struct ScanOptions<'a> {
+    /// look for files the index does not have
+    pub untracked: bool,
+    /// the paths to look at, each with everything beneath it; the whole
+    /// tree when empty
+    pub within: &'a [&'a [u8]],
+    pub clean: Option<CleanTracked<'a>>,
+    pub head: Option<SubmoduleHead<'a>>,
+    /// when the scan began: a file changed at or after it is compared but
+    /// not recorded as unchanged, because a later change within the same
+    /// tick of the clock would leave its stat as it is
+    pub stamp: Stamp,
+}
+
+/// The paths where the working tree differs from the index, each list in
+/// path order.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Delta {
+    /// tracked paths whose file has other content or another mode, as the
+    /// working tree has them
+    pub changed: Vec<WorkEntry>,
+    /// tracked paths with no file in place
+    pub deleted: Vec<BString>,
+    pub untracked: Vec<BString>,
+    /// conflicted paths with a file in place
+    pub unmerged: Vec<BString>,
+    /// submodule paths whose directory holds a checked-out repository
+    pub submodules: Vec<BString>,
+}
+
+impl FileStat {
+    pub fn of(meta: &std::fs::Metadata) -> FileStat {
+        FileStat {
+            mtime: (meta.mtime(), meta.mtime_nsec() as u32),
+            ctime: (meta.ctime(), meta.ctime_nsec() as u32),
+            dev: meta.dev(),
+            ino: meta.ino(),
+            size: meta.size(),
+            mode: meta.mode(),
+        }
+    }
+
+    /// The git mode of a file or symlink with this stat.
+    pub fn git_mode(&self) -> u32 {
+        match kind_of(self.mode) {
+            Kind::Link => 0o120000,
+            _ if self.mode & 0o111 != 0 => 0o100755,
+            _ => 0o100644,
+        }
+    }
+
+    /// Whether the file was last changed before `stamp`, so that any later
+    /// change shows in its stat.
+    pub fn settled(&self, stamp: Stamp) -> bool {
+        self.mtime < stamp && self.ctime < stamp
+    }
+}
+
+/// The current moment of the clock that stamps files in `control`, the
+/// directory the snapshot lives in. When the working tree at `root` is on
+/// another filesystem, whose clock may be coarser or run apart, the moment
+/// is taken three seconds early.
+pub fn clock_stamp(control: &Path, root: &Path) -> std::io::Result<Stamp> {
+    let probe = control.join(format!(".clock{}", std::process::id()));
+    std::fs::write(&probe, b"\n")?;
+    let meta = std::fs::metadata(&probe)?;
+    std::fs::remove_file(&probe)?;
+    let apart = std::fs::metadata(root)?.dev() != meta.dev();
+    Ok((
+        meta.mtime() - 3 * i64::from(apart),
+        meta.mtime_nsec() as u32,
+    ))
+}
+
+/// Compares the working tree at `root` with `snapshot`, recording in the
+/// snapshot the stat of every file found to hold its entry's content.
+pub fn scan(
+    root: &Path,
+    snapshot: &mut Snapshot,
+    opts: &ScanOptions<'_>,
+) -> Result<Delta, WorktreeError> {
+    let ignore = match opts.untracked {
+        true => IgnoreStack::with_global_excludes()?,
+        false => IgnoreStack::new(),
+    };
+    let mut found = walk::walk(root, snapshot, opts.untracked, opts.within, &ignore)?;
+    let mut delta = Delta::default();
+    found.suspects.sort_unstable_by_key(|s| s.0);
+    compare(
+        root,
+        snapshot,
+        opts,
+        &found.suspects,
+        &mut found.deleted,
+        &mut delta,
+    )?;
+    for &i in &found.gitlinks {
+        let i = i as usize;
+        let path = snapshot.path(i);
+        let dir = root.join(std::ffi::OsStr::from_bytes(path));
+        let Some(oid) = opts.head.and_then(|head| head(&dir)) else {
+            continue;
+        };
+        delta.submodules.push(BString::from(path));
+        if oid != snapshot.entries[i].oid {
+            delta.changed.push(WorkEntry {
+                path: BString::from(path),
+                oid,
+                mode: 0o160000,
+            });
+        }
+    }
+    delta.submodules.sort();
+    let paths = |entries: &mut Vec<u32>| {
+        entries.sort_unstable();
+        let mut paths: Vec<BString> = entries
+            .iter()
+            .map(|&i| BString::from(snapshot.path(i as usize)))
+            .collect();
+        paths.dedup();
+        paths
+    };
+    delta.deleted = paths(&mut found.deleted);
+    delta.unmerged = paths(&mut found.unmerged);
+    found.untracked.sort_unstable();
+    delta.untracked = found.untracked.into_iter().map(BString::from).collect();
+    delta.changed.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(delta)
+}
+
+/// A suspect's content as the working tree has it, with its blob id.
+struct Read {
+    content: Vec<u8>,
+    oid: ObjectId,
+}
+
+/// Reads the files that do not show their recorded stat and sorts them
+/// into changed, deleted and unchanged.
+fn compare(
+    root: &Path,
+    snapshot: &mut Snapshot,
+    opts: &ScanOptions<'_>,
+    suspects: &[(u32, FileStat)],
+    deleted: &mut Vec<u32>,
+    delta: &mut Delta,
+) -> Result<(), WorktreeError> {
+    let algo = snapshot.algo;
+    let mut rest = suspects;
+    while !rest.is_empty() {
+        let mut bytes = 0;
+        let take = rest
+            .iter()
+            .take_while(|(_, st)| {
+                bytes += st.size;
+                bytes <= BATCH_BYTES
+            })
+            .count()
+            .max(1);
+        let (batch, later) = rest.split_at(take);
+        rest = later;
+        let view = &*snapshot;
+        let read = |&(i, st): &(u32, FileStat)| -> std::io::Result<Option<Read>> {
+            let path = root.join(std::ffi::OsStr::from_bytes(view.path(i as usize)));
+            let content = match kind_of(st.mode) {
+                Kind::Link => {
+                    std::fs::read_link(&path).map(|t| t.into_os_string().into_encoded_bytes())
+                }
+                _ => std::fs::read(&path),
+            };
+            match content {
+                Ok(content) => Ok(Some(Read {
+                    oid: ObjectId::hash_object(algo, ObjectKind::Blob, &content),
+                    content,
+                })),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(e) => Err(e),
+            }
+        };
+        let grain = if batch.len() >= 64 { 4 } else { batch.len() };
+        let reads = alt_threads::map(batch, grain, read);
+        for (&(i, st), read) in batch.iter().zip(reads) {
+            let Some(read) = read? else {
+                deleted.push(i);
+                continue;
+            };
+            let i = i as usize;
+            let mode = st.git_mode();
+            let staged = snapshot.entries[i].oid;
+            let cleaned = match mode {
+                0o120000 => None,
+                _ => opts
+                    .clean
+                    .and_then(|f| f(snapshot.path(i), &read.content, staged)),
+            };
+            let oid = match cleaned {
+                Some(stored) => ObjectId::hash_object(algo, ObjectKind::Blob, &stored),
+                None => read.oid,
+            };
+            let entry = &snapshot.entries[i];
+            if oid == entry.oid && mode == entry.mode {
+                if st.settled(opts.stamp) {
+                    snapshot.set_stat(i, Some(st));
+                }
+            } else {
+                delta.changed.push(WorkEntry {
+                    path: BString::from(snapshot.path(i)),
+                    oid,
+                    mode,
+                });
+            }
+        }
+    }
+    Ok(())
+}

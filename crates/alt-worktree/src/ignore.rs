@@ -61,9 +61,9 @@ pub(crate) struct IgnoreLayer {
 /// A stack of `IgnoreLayer`s — the root layer at index 0, the deepest
 /// active layer at the top. `is_ignored` consults the top first; if no
 /// layer matches the path, it is not ignored.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct IgnoreStack {
-    layers: Vec<IgnoreLayer>,
+    layers: Vec<std::sync::Arc<IgnoreLayer>>,
 }
 
 impl IgnoreStack {
@@ -86,7 +86,16 @@ impl IgnoreStack {
     }
 
     pub(crate) fn push(&mut self, layer: IgnoreLayer) {
-        self.layers.push(layer);
+        self.layers.push(std::sync::Arc::new(layer));
+    }
+
+    /// This stack with `layer` on top, for a walk that goes down several
+    /// directories at once.
+    #[cfg(unix)]
+    pub(crate) fn with(&self, layer: std::sync::Arc<IgnoreLayer>) -> Self {
+        let mut stack = self.clone();
+        stack.layers.push(layer);
+        stack
     }
 
     pub(crate) fn pop(&mut self) {

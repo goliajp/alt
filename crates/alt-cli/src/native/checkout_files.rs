@@ -218,6 +218,7 @@ impl NativeRepo<'_> {
                     let link = temp.path().join("link");
                     symlink_to(&bytes, &link)?;
                     crate::durable::rename(link, &abs)?;
+                    self.note_written(path, &abs)?;
                     std::fs::File::open(parent)?.sync_all()?;
                 } else {
                     use std::os::unix::fs::PermissionsExt;
@@ -229,6 +230,7 @@ impl NativeRepo<'_> {
                         ))?;
                     tmp.as_file().sync_all()?;
                     tmp.persist(&abs)?;
+                    self.note_written(path, &abs)?;
                     std::fs::File::open(parent)?.sync_all()?;
                 }
             }
@@ -247,6 +249,14 @@ impl NativeRepo<'_> {
             }
             parent = path.parent();
         }
+        Ok(())
+    }
+
+    /// Remembers what a file looks like right after the checkout wrote it,
+    /// for the snapshot of the index the checkout ends with.
+    fn note_written(&self, path: &BString, abs: &Path) -> Res<()> {
+        let stat = alt_worktree::FileStat::of(&std::fs::symlink_metadata(abs)?);
+        self.written.borrow_mut().push((path.clone(), stat));
         Ok(())
     }
 

@@ -7,13 +7,24 @@
 //! specific command.
 
 pub mod attributes;
+mod cachetree;
+#[cfg(unix)]
+mod delta;
+#[cfg(unix)]
+mod fsdir;
 pub mod ident;
 mod ignore;
 mod scan;
+mod snapshot;
+#[cfg(unix)]
+mod walk;
 
-pub use scan::{
-    Clean, PathMatcher, SubmoduleHead, scan_indexed_paths, scan_worktree, scan_worktree_with_index,
-};
+pub use cachetree::Staged;
+#[cfg(unix)]
+pub use delta::{CleanTracked, Delta, ScanOptions, Stamp, clock_stamp, scan};
+pub use snapshot::{Dir, Entry, FileStat, Snapshot};
+
+pub use scan::{Clean, PathMatcher, SubmoduleHead, scan_worktree, scan_worktree_with_index};
 
 use alt_bytes::{BString, ByteSlice};
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind, Tree};

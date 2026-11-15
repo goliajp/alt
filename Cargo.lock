@@ -795,11 +795,13 @@ dependencies = [
  "alt-bytes",
  "alt-git-codec",
  "alt-git-index",
+ "alt-hash",
  "alt-import",
  "alt-odb",
  "alt-os",
  "alt-repo",
  "alt-testutil",
+ "alt-threads",
 ]
 
 [[package]]

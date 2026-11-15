@@ -18,7 +18,7 @@ struct Pair<'a> {
 /// What the working-tree side of a diff is read with: the index its paths
 /// came from, and the attribute files that say how content is stored.
 struct Worktree<'a> {
-    index: &'a Index,
+    snapshot: &'a alt_worktree::Snapshot,
     attrs: convert::Converter,
 }
 
@@ -32,26 +32,44 @@ impl NativeRepo<'_> {
     pub fn diff(&self, cached: bool, json: bool, semantic: bool, out: &mut impl Write) -> Res<()> {
         // old side is always read from the object store; the new side is the
         // index (cached) or the live working tree (default).
-        let raw = self.index()?;
-        let disk = match cached {
-            true => None,
-            false => Some(Worktree {
-                index: &raw,
+        let mut scanned = None;
+        let (old, new, show_added): (Vec<WorkEntry>, Vec<WorkEntry>, bool) = if cached {
+            let staged = self.staged_changes()?;
+            let side = |pick: fn(alt_worktree::Staged) -> Option<WorkEntry>| {
+                staged.iter().cloned().filter_map(pick).collect()
+            };
+            (side(|s| s.old), side(|s| s.new), true)
+        } else {
+            // no directory listing: one stat per indexed path, and only a
+            // file whose stat changed is read. Untracked files are not in
+            // `alt diff`'s output, as they are not in git's
+            let mut snapshot = self.worktree_snapshot()?;
+            let delta = self.scan_delta(&mut snapshot, false)?;
+            self.keep_snapshot(&snapshot);
+            let mut old: Vec<WorkEntry> = delta
+                .changed
+                .iter()
+                .map(|w| &w.path)
+                .chain(&delta.deleted)
+                .filter_map(|p| snapshot.find(p))
+                .map(|i| WorkEntry {
+                    path: BString::from(snapshot.path(i)),
+                    oid: snapshot.entries[i].oid,
+                    mode: snapshot.entries[i].mode,
+                })
+                .collect();
+            old.sort_by(|a, b| a.path.cmp(&b.path));
+            scanned = Some(snapshot);
+            (old, delta.changed, false)
+        };
+        let disk = match &scanned {
+            Some(snapshot) => Some(Worktree {
+                snapshot,
                 attrs: self.converter()?,
             }),
+            None => None,
         };
         let disk = disk.as_ref();
-        let (old, new, show_added) = if cached {
-            (self.head_entries()?, index_entries(&raw), true)
-        } else {
-            // Sparse-from-index: no directory walk. One stat per
-            // indexed path, only read+hash on a stat mismatch. Untracked
-            // files are not in `alt diff`'s output (show_added=false), so
-            // skipping the dir traversal is correct — same shape git diff
-            // uses. Drops `alt diff` on a clean 50k-file monorepo from
-            // seconds to ≤100 ms.
-            (index_entries(&raw), self.scan_index_paths(&raw)?, false)
-        };
 
         let changes: Vec<_> = alt_worktree::changes(&old, &new)
             .into_iter()
@@ -382,7 +400,11 @@ impl NativeRepo<'_> {
                     return Ok(content);
                 }
                 // compared as it would be stored, as the old side is
-                let stored = self.stored_form(&disk.attrs, disk.index, &w.path, &content);
+                let staged = disk
+                    .snapshot
+                    .find(&w.path)
+                    .map(|i| disk.snapshot.entries[i].oid);
+                let stored = self.stored_form_of(&disk.attrs, staged, &w.path, &content);
                 disk.attrs.check()?;
                 Ok(stored.unwrap_or(content))
             }

@@ -15,8 +15,8 @@ use alt_refs::{IdemKey, OpId, RefChange, RefPolicy, RefStore, RefTarget};
 use crate::policy::{Capabilities, Policy};
 use alt_bytes::{BString, ByteSlice};
 use alt_worktree::{
-    ChangeKind, Sig, WorkEntry, build_commit_bytes, flatten_tree, index_entries, status,
-    write_commit, write_tree,
+    ChangeKind, Sig, WorkEntry, build_commit_bytes, flatten_tree, index_entries, write_commit,
+    write_tree,
 };
 use http_auth::{build_transport, http_auth};
 
@@ -46,6 +46,8 @@ mod revert;
 mod sequence_editor;
 mod settings;
 mod task;
+mod tree_state;
+pub use tree_state::hold_snapshots;
 mod workspace;
 pub use workspace::resolve_workspace;
 
@@ -649,6 +651,8 @@ pub struct NativeRepo<'a> {
     write_lock: Option<std::fs::File>,
     inverse_of: Option<String>,
     checkout_intent: Option<checkout_recovery::CheckoutIntent>,
+    /// the files a checkout wrote, each with its stat right after
+    written: std::cell::RefCell<Vec<(BString, alt_worktree::FileStat)>>,
 }
 
 impl<'a> NativeRepo<'a> {
@@ -673,6 +677,7 @@ impl<'a> NativeRepo<'a> {
             write_lock: None,
             inverse_of: None,
             checkout_intent: None,
+            written: std::cell::RefCell::default(),
         }
     }
 
@@ -1212,21 +1217,9 @@ impl<'a> NativeRepo<'a> {
     /// the stable structured schema instead of the human view.
     pub fn status(&self, json: bool, out: &mut impl Write) -> Res<()> {
         let branch = self.head_branch()?;
-        let head = self.head_entries()?;
-        let raw = self.index()?;
-        let unmerged: std::collections::BTreeSet<BString> = raw
-            .entries
-            .iter()
-            .filter(|e| e.stage() > 0)
-            .map(|e| e.path.clone())
-            .collect();
-        let index = index_entries(&raw);
-        // Stat cache fast path: skip the read+hash on any file whose
-        // mtime/ctime/size/dev/ino/mode still matches the index entry —
-        // git's classic optimisation; on a 50k-file monorepo clean run
-        // this drops `alt status` from seconds to milliseconds.
-        let worktree = self.scan_tree(&raw)?;
-        let mut st = status(&head, &index, &worktree);
+        let state = self.tree_state(true)?;
+        let unmerged = state.unmerged();
+        let mut st = state.status();
         // unmerged paths are reported in their own section, not as
         // staged/unstaged/untracked noise driven by the missing stage-0 entry
         st.staged.retain(|(p, _)| !unmerged.contains(p));
@@ -1798,15 +1791,11 @@ impl<'a> NativeRepo<'a> {
     /// Refuses `action` if any tracked file has staged or unstaged changes, so
     /// a tree-rewriting operation never clobbers uncommitted work.
     fn ensure_clean(&self, action: &str) -> Res<()> {
-        let head = self.head_entries()?;
-        let raw = self.index()?;
-        let index = index_entries(&raw);
-        let worktree = self.scan_tree(&raw)?;
-        let st = status(&head, &index, &worktree);
+        let state = self.tree_state(false)?;
         // a submodule that checked out another commit is not overwritten:
         // a checkout never touches what is inside it
-        let submodule = |p: &BString| index.iter().any(|e| e.path == *p && e.mode == 0o160000);
-        if !st.staged.is_empty() || st.unstaged.iter().any(|(p, _)| !submodule(p)) {
+        let changed = state.delta.changed.iter().any(|w| w.mode != 0o160000);
+        if !state.staged.is_empty() || changed || !state.delta.deleted.is_empty() {
             return Err(crate::machine::Failure::refusal(
                 "precondition_failed",
                 format!("your local changes would be overwritten by {action}; commit them first"),
