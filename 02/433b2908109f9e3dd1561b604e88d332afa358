@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: refactor
+summary: move manifest nodes out of the blob store module
+author-type: human
+author: doracawl
+touched: crates/alt-store/src/blob.rs
+touched: crates/alt-store/src/lib.rs
+touched: crates/alt-store/src/node.rs
+touched: crates/alt-store/src/reclog.rs
+touched: crates/alt-store/src/runs.rs
