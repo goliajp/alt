@@ -19,6 +19,7 @@ fn arg_item(arg: &ArgField) -> String {
     let kind = match arg.shape {
         Shape::Flag => "Flag",
         Shape::Count => "Count",
+        Shape::Attached => "Attached",
         Shape::Required | Shape::Optional => "Single",
         Shape::Repeated => "Multiple",
     };
@@ -32,7 +33,7 @@ fn arg_item(arg: &ArgField) -> String {
         ),
     };
     let (possible, check) = match (&arg.shape, &arg.possible, &arg.parser) {
-        (Shape::Flag | Shape::Count, _, _) => {
+        (Shape::Flag | Shape::Count | Shape::Attached, _, _) => {
             ("&[]".to_owned(), "::core::option::Option::None".to_owned())
         }
         (_, Some(possible), _) => (list(possible), "::core::option::Option::None".to_owned()),
@@ -80,6 +81,7 @@ fn arg_value(arg: &ArgField) -> String {
     match arg.shape {
         Shape::Flag => format!("m.flag({id})"),
         Shape::Count => format!("m.count({id}) as {}", arg.value_type),
+        Shape::Attached => format!("m.all({id}).to_vec()"),
         Shape::Required => format!("m.required({id}, {parse})"),
         Shape::Optional => format!("m.optional({id}, {parse})"),
         Shape::Repeated => format!("m.repeated({id}, {parse})"),

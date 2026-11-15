@@ -9,12 +9,6 @@ use super::Res;
 use super::walk::{Board, CommitInfo, Entry};
 use crate::tree_changes::{self, TreeFile};
 
-/// A run of lines has to hold more letters and digits than this to count
-/// as moved within the file.
-const MOVE_SCORE: usize = 20;
-/// The same, for lines copied from another file.
-const COPY_SCORE: usize = 40;
-
 /// An entry cut in three: the middle is found in a parent's file, at the
 /// line `found`; what is in front of it and behind it is not.
 #[derive(Clone, Copy)]
@@ -40,22 +34,28 @@ impl Board<'_> {
         }
         let mut small = Vec::new();
         let mut pending = std::mem::take(&mut self.origins[at].pending);
-        self.set_aside(&mut pending, &mut small, MOVE_SCORE);
+        self.set_aside(&mut pending, &mut small, options.move_score);
         for &parent in takers.iter().flatten() {
             if pending.is_empty() {
                 break;
             }
             let blob = self.blob(self.origins[parent].file.oid)?;
-            pending = self.search(pending, &mut small, MOVE_SCORE, &[(parent, blob)])?;
+            pending = self.search(pending, &mut small, options.move_score, &[(parent, blob)])?;
         }
         if options.copies > 0 {
-            self.set_aside(&mut pending, &mut small, COPY_SCORE);
+            // what was too little to count as moved may be enough to
+            // count as copied
+            if options.copy_score < options.move_score {
+                pending.append(&mut small);
+                pending.sort_by_key(|e| e.line);
+            }
+            self.set_aside(&mut pending, &mut small, options.copy_score);
             for (i, &parent) in info.parents.iter().enumerate() {
                 if pending.is_empty() {
                     break;
                 }
                 let files = self.copy_sources(at, info, parent, takers[i])?;
-                pending = self.search(pending, &mut small, COPY_SCORE, &files)?;
+                pending = self.search(pending, &mut small, options.copy_score, &files)?;
             }
         }
         pending.extend(small);

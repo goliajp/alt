@@ -202,18 +202,20 @@ pub enum Command {
         path: String,
         /// Revision to start the walk from (default `HEAD`).
         rev: Option<String>,
-        /// Trace lines moved within the file to where they were before.
-        #[arg(short = 'M')]
-        moves: bool,
+        /// Trace lines moved within the file. A number against the letter
+        /// is how many letters and digits they must carry (20 if absent).
+        #[arg(short = 'M', action = attached)]
+        moves: Vec<String>,
         /// Accepted for command lines written before renames were always
         /// followed; it changes nothing.
         #[arg(long = "follow")]
         follow: bool,
         /// Trace lines copied from files changed in the same commit; twice,
         /// from any file when the blamed file is created; three times, from
-        /// any file in every commit. Implies -M.
-        #[arg(short = 'C', action = count)]
-        copies: u8,
+        /// any file in every commit. Implies -M. A number against the
+        /// letter works as for -M (40 if absent).
+        #[arg(short = 'C', action = attached)]
+        copies: Vec<String>,
     },
     /// Show or change the metadata recorded with a commit (kept in git
     /// notes under refs/notes/alt/meta; the commit itself never changes)
@@ -1551,10 +1553,7 @@ pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, head: &str, out: &mut
             follow: _,
         } => {
             let spec = at_head(rev.as_deref().unwrap_or("HEAD"));
-            let options = crate::blame::Options {
-                moves: *moves || *copies > 0,
-                copies: *copies,
-            };
+            let options = crate::blame::Options::of(moves, copies);
             crate::blame::run(out, repo, path, &spec, options)?;
         }
         Command::Config {

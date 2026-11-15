@@ -15,6 +15,9 @@ pub(crate) enum Shape {
     Flag,
     /// a flag counted into an integer field
     Count,
+    /// a flag given bare or with a value against its letter, each
+    /// appearance kept as text
+    Attached,
     Required,
     Optional,
     Repeated,
@@ -148,8 +151,10 @@ impl ArgField {
                 "default_value_t" => arg.preset = Preset::Expression(entry.text()?),
                 "action" if entry.text()? == "set" => shape = Shape::Required,
                 "action" if entry.text()? == "count" => shape = Shape::Count,
+                "action" if entry.text()? == "attached" => shape = Shape::Attached,
                 "action" => {
-                    return Err(Error::new(entry.span, "the actions are `set` and `count`"));
+                    let known = "the actions are `set`, `count` and `attached`";
+                    return Err(Error::new(entry.span, known));
                 }
                 "value_parser" => match entry.list()? {
                     Some(list) => arg.possible = Some(list),
@@ -174,8 +179,8 @@ impl ArgField {
         if matches!(shape, Shape::Required) && matches!(arg.preset, Preset::None) {
             arg.required = true;
         }
-        if matches!(shape, Shape::Flag | Shape::Count) && arg.long.is_none() && arg.short.is_none()
-        {
+        let flag = matches!(shape, Shape::Flag | Shape::Count | Shape::Attached);
+        if flag && arg.long.is_none() && arg.short.is_none() {
             return Err(Error::new(field.span, "a flag needs `long` or `short`"));
         }
         arg.shape = shape;

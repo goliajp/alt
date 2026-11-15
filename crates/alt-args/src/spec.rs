@@ -30,6 +30,9 @@ pub enum Kind {
     Flag,
     /// a flag that may be given several times; how often is its value
     Count,
+    /// a flag that may be given several times, each time bare or with a
+    /// value written against its letter (`-C`, `-C40`)
+    Attached,
     /// one value
     Single,
     /// any number of values

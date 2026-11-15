@@ -133,7 +133,7 @@ fn defaults(scope: &Scope, entries: &mut Vec<Matched>) {
             continue;
         }
         let value = match (slot.arg.kind, &slot.arg.preset) {
-            (Kind::Help | Kind::Version | Kind::Count, _) => continue,
+            (Kind::Help | Kind::Version | Kind::Count | Kind::Attached, _) => continue,
             (Kind::Flag, _) => "false".to_owned(),
             (_, Preset::Text(text)) => (*text).to_owned(),
             (_, Preset::Computed(compute)) => compute(),
