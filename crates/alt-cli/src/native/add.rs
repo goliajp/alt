@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use alt_worktree::{Delta, FileStat, Snapshot};
+use alt_worktree::{Delta, FileStat, Snapshot, Untracked};
 
 use super::*;
 
@@ -76,7 +76,7 @@ impl NativeRepo<'_> {
         // only what differs from the index is read: a file with the stat
         // it had when it was staged holds what the index holds
         let mut snapshot = self.worktree_snapshot()?;
-        let (delta, clock) = self.scan_delta_within(&mut snapshot, true, &within)?;
+        let (delta, clock) = self.scan_delta_within(&mut snapshot, Untracked::All, &within)?;
         all_match(&specs, paths, &before, &delta)?;
 
         // the paths whose entries change: taken from the working tree, or dropped

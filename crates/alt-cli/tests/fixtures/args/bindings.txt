@@ -22,6 +22,10 @@ alt status
 {"subcommand":{"arguments":{"subcommand":null,"values":{"json":["66616c7365"]}},"name":"status"},"values":{}}
 alt status --json
 {"subcommand":{"arguments":{"subcommand":null,"values":{"Status":["6a736f6e"],"json":["74727565"]}},"name":"status"},"values":{}}
+alt status -uno
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Status":["756e747261636b65645f66696c6573"],"json":["66616c7365"],"untracked_files":["6e6f"]}},"name":"status"},"values":{}}
+alt status --untracked-files
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Status":["756e747261636b65645f66696c6573"],"json":["66616c7365"],"untracked_files":["616c6c"]}},"name":"status"},"values":{}}
 alt branch
 {"subcommand":{"arguments":{"subcommand":null,"values":{"json":["66616c7365"],"remotes":["66616c7365"]}},"name":"branch"},"values":{}}
 alt branch new

@@ -163,6 +163,17 @@ pub enum Command {
     },
     /// Show the working tree status
     Status {
+        /// Which untracked files to show: `no`, `normal` (a directory with
+        /// nothing tracked in it as one path) or `all`; `all` when the
+        /// option is given without a mode, `normal` without the option
+        #[arg(
+            short = 'u',
+            long = "untracked-files",
+            value_name = "MODE",
+            default_missing_value = "all",
+            value_parser = ["no", "normal", "all"]
+        )]
+        untracked_files: Option<String>,
         /// Emit a stable JSON object instead of the human-readable view
         #[arg(long)]
         json: bool,
@@ -1310,7 +1321,10 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
                 repo.commit(message.as_deref().unwrap_or_default(), opts, *json, out)?
             }
         }
-        Command::Status { json } => repo.status(*json, out)?,
+        Command::Status {
+            untracked_files,
+            json,
+        } => repo.status(untracked_files.as_deref(), *json, out)?,
         Command::Branch {
             name,
             delete,

@@ -21,6 +21,8 @@ mod ignore;
 mod scan;
 mod snapshot;
 #[cfg(unix)]
+mod untracked;
+#[cfg(unix)]
 mod walk;
 
 pub use cachetree::Staged;
@@ -29,6 +31,8 @@ pub use clock::{Clock, Stamp};
 #[cfg(unix)]
 pub use delta::{CleanTracked, Delta, ScanOptions, scan};
 pub use snapshot::{Dir, Entry, FileStat, Snapshot};
+#[cfg(unix)]
+pub use untracked::Untracked;
 
 pub use scan::{Clean, PathMatcher, SubmoduleHead, scan_worktree, scan_worktree_with_index};
 

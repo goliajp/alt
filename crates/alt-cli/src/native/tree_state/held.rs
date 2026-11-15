@@ -105,10 +105,14 @@ mod tests {
         assert!(shelf.get(&dir.path().join("other.scan")).is_none());
 
         // another process writes the file anew: the same bytes even, but
-        // not the file the copy was taken from
+        // not the file the copy was taken from. The replaced files are
+        // kept under other names, so that none of them gives its inode,
+        // and with it possibly its whole stat, to a later one
+        std::fs::hard_link(&path, dir.path().join("first")).unwrap();
         first.save(&path).unwrap();
         assert!(shelf.get(&path).is_none());
         let second = snapshot(b"second");
+        std::fs::hard_link(&path, dir.path().join("again")).unwrap();
         second.save(&path).unwrap();
         assert!(shelf.get(&path).is_none());
         shelf.put(&path, &second);

@@ -9,8 +9,8 @@ use alt_bytes::BString;
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
 use alt_git_index::{Index, IndexEntry};
 use alt_worktree::{
-    ChangeKind, Clock, Delta, ScanOptions, Snapshot, Stamp, index_entries, scan, scan_worktree,
-    scan_worktree_with_index, status,
+    ChangeKind, Clock, Delta, ScanOptions, Snapshot, Stamp, Untracked, index_entries, scan,
+    scan_worktree, scan_worktree_with_index, status,
 };
 
 const ALGO: HashAlgo = HashAlgo::Sha1;
@@ -53,7 +53,10 @@ fn index_of(root: &Path) -> Index {
 fn options(untracked: bool, now: Stamp) -> ScanOptions<'static> {
     let dev = std::fs::metadata(std::env::temp_dir()).unwrap().dev();
     ScanOptions {
-        untracked,
+        untracked: match untracked {
+            true => Untracked::All,
+            false => Untracked::No,
+        },
         within: &[],
         clean: None,
         head: None,

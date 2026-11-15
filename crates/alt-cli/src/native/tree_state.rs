@@ -6,7 +6,7 @@
 use std::cell::OnceCell;
 use std::os::unix::fs::FileExt;
 
-use alt_worktree::{Delta, PathMatcher, ScanOptions, Snapshot, Staged};
+use alt_worktree::{Delta, PathMatcher, ScanOptions, Snapshot, Staged, Untracked};
 
 use super::*;
 
@@ -78,7 +78,7 @@ impl NativeRepo<'_> {
     /// Scans the working tree against `snapshot`, each file seen as it
     /// would be stored: an LFS path as its pointer, text with its line
     /// endings normalized.
-    pub(super) fn scan_delta(&self, snapshot: &mut Snapshot, untracked: bool) -> Res<Delta> {
+    pub(super) fn scan_delta(&self, snapshot: &mut Snapshot, untracked: Untracked) -> Res<Delta> {
         Ok(self.scan_delta_within(snapshot, untracked, &[])?.0)
     }
 
@@ -89,7 +89,7 @@ impl NativeRepo<'_> {
     pub(super) fn scan_delta_within(
         &self,
         snapshot: &mut Snapshot,
-        untracked: bool,
+        untracked: Untracked,
         within: &[&[u8]],
     ) -> Res<(Delta, alt_worktree::Clock)> {
         // built when the first file has to be read
@@ -168,9 +168,9 @@ impl NativeRepo<'_> {
         ))
     }
 
-    /// HEAD, index and working tree compared. `untracked` says whether
-    /// files the index does not have are looked for.
-    pub(super) fn tree_state(&self, untracked: bool) -> Res<TreeState> {
+    /// HEAD, index and working tree compared. `untracked` says which of
+    /// the files the index does not have are looked for.
+    pub(super) fn tree_state(&self, untracked: Untracked) -> Res<TreeState> {
         let mut snapshot = self.worktree_snapshot()?;
         snapshot.fill_trees();
         let staged = snapshot.staged(&self.store.odb, self.head_tree()?)?;

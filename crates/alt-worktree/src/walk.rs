@@ -10,6 +10,7 @@ use std::sync::Arc;
 use crate::fsdir::{DirFd, Kind, Listing, kind_of};
 use crate::ignore::{self, IgnoreStack};
 use crate::snapshot::{FileStat, Snapshot};
+use crate::untracked::Untracked;
 
 /// Directories with fewer entries beneath them are walked by one thread.
 const SPLIT: u32 = 512;
@@ -43,15 +44,16 @@ impl Found {
     }
 }
 
-struct Walk<'a> {
+pub(crate) struct Walk<'a> {
     snapshot: &'a Snapshot,
     /// the paths to look at, each with everything beneath it; all when empty
     within: &'a [&'a [u8]],
+    pub(crate) untracked: Untracked,
 }
 
 /// How a path stands to the paths a walk is limited to.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Reach {
+pub(crate) enum Reach {
     /// one of them, or beneath one
     Inside,
     /// a directory above one
@@ -67,17 +69,22 @@ struct Below {
     reach: Reach,
 }
 
-/// Walks the tree at `root`. With `untracked`, directories are listed and
-/// the files the index does not have are reported; without, each index
-/// entry is looked up by name and nothing else is seen.
+/// Walks the tree at `root`. Where untracked files are asked for,
+/// directories are listed and what the index does not have is reported;
+/// where not, each index entry is looked up by name and nothing else is
+/// seen.
 pub(crate) fn walk(
     root: &Path,
     snapshot: &Snapshot,
-    untracked: bool,
+    untracked: Untracked,
     within: &[&[u8]],
     ignore: &IgnoreStack,
 ) -> io::Result<Found> {
-    let walk = Walk { snapshot, within };
+    let walk = Walk {
+        snapshot,
+        within,
+        untracked,
+    };
     let reach = match within.is_empty() {
         true => Reach::Inside,
         false => Reach::Above,
@@ -85,8 +92,8 @@ pub(crate) fn walk(
     let mut found = Found::default();
     let dir = DirFd::open(root)?;
     match untracked {
-        true => walk.listed(dir, 0, ignore, false, reach, &mut found)?,
-        false => walk.unlisted(&dir, 0, reach, &mut found)?,
+        Untracked::No => walk.unlisted(&dir, 0, reach, &mut found)?,
+        _ => walk.listed(dir, 0, ignore, false, reach, &mut found)?,
     }
     Ok(found)
 }
@@ -103,7 +110,7 @@ fn beneath(path: &[u8], dir: &[u8]) -> bool {
 }
 
 impl Walk<'_> {
-    fn reach(&self, parent: Reach, path: &[u8]) -> Option<Reach> {
+    pub(crate) fn reach(&self, parent: Reach, path: &[u8]) -> Option<Reach> {
         if parent == Reach::Inside || self.within.iter().any(|w| *w == path || beneath(path, w)) {
             return Some(Reach::Inside);
         }
@@ -370,7 +377,7 @@ impl Walk<'_> {
                         path.push(b'/');
                     }
                     path.extend_from_slice(names.name(below.item));
-                    self.untracked_dir(sub, &mut path, ignore, below.reach, &mut found.untracked)?;
+                    self.untracked_in(sub, &mut path, ignore, below.reach, &mut found.untracked)?;
                 }
                 (None, None) => {}
             }
@@ -378,52 +385,9 @@ impl Walk<'_> {
         };
         self.below(dir, &below, visit, found)
     }
-
-    /// Every file beneath a directory the index knows nothing in, less
-    /// what the ignore rules hide. A directory holding a repository is
-    /// skipped.
-    fn untracked_dir(
-        &self,
-        mut fd: DirFd,
-        path: &mut Vec<u8>,
-        ignore: &IgnoreStack,
-        reach: Reach,
-        out: &mut Vec<Vec<u8>>,
-    ) -> io::Result<()> {
-        let mut names = fd.names()?;
-        names.sort();
-        if holds_repository(&names) {
-            return Ok(());
-        }
-        let own = ignore_file(&fd, &names, path, ignore)?;
-        let ignore = own.as_ref().unwrap_or(ignore);
-        for item in 0..names.len() {
-            let name = names.name(item);
-            if name == b".alt" {
-                continue;
-            }
-            let mark = path.len();
-            path.push(b'/');
-            path.extend_from_slice(name);
-            let is_dir = names.kind(item) == Kind::Dir;
-            match self.reach(reach, path) {
-                Some(reach) if is_dir && !ignore.is_ignored(path, true) => {
-                    if let Some(sub) = fd.open_at(names.c_name(item))? {
-                        self.untracked_dir(sub, path, ignore, reach, out)?;
-                    }
-                }
-                Some(Reach::Inside) if !is_dir && !ignore.is_ignored(path, false) => {
-                    out.push(path.clone())
-                }
-                _ => {}
-            }
-            path.truncate(mark);
-        }
-        Ok(())
-    }
 }
 
-fn holds_repository(names: &Listing) -> bool {
+pub(crate) fn holds_repository(names: &Listing) -> bool {
     names
         .find(b".git", false)
         .or(names.find(b".git", true))
@@ -442,7 +406,7 @@ fn with_name(path: &mut Vec<u8>, name: &[u8], f: impl FnOnce(&[u8])) {
 }
 
 /// The ignore rules with this directory's `.gitignore` on top, when it has one.
-fn ignore_file(
+pub(crate) fn ignore_file(
     fd: &DirFd,
     names: &Listing,
     base: &[u8],

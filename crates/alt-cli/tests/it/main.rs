@@ -52,6 +52,7 @@ mod scan_cache;
 mod scan_daemon;
 mod show;
 mod status_json;
+mod status_untracked;
 mod switch_kinds;
 mod tag;
 mod task_delivery;

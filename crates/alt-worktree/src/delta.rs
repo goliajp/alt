@@ -14,6 +14,7 @@ use crate::fsdir::{Kind, kind_of};
 use crate::ignore::IgnoreStack;
 use crate::scan::SubmoduleHead;
 use crate::snapshot::{FileStat, Snapshot};
+use crate::untracked::Untracked;
 use crate::{WorkEntry, WorktreeError, walk};
 
 /// Content read for comparison is held in memory at most this much at a time.
@@ -25,8 +26,8 @@ const BATCH_BYTES: u64 = 64 << 20;
 pub type CleanTracked<'a> = &'a dyn Fn(&[u8], &[u8], ObjectId) -> Option<Vec<u8>>;
 
 pub struct ScanOptions<'a> {
-    /// look for files the index does not have
-    pub untracked: bool,
+    /// which files the index does not have to look for
+    pub untracked: Untracked,
     /// the paths to look at, each with everything beneath it; the whole
     /// tree when empty
     pub within: &'a [&'a [u8]],
@@ -47,6 +48,9 @@ pub struct Delta {
     pub changed: Vec<WorkEntry>,
     /// tracked paths with no file in place
     pub deleted: Vec<BString>,
+    /// the files the index does not have; where the scan was asked to, a
+    /// directory with nothing tracked in it stands for its files, as its
+    /// path with a `/` at the end
     pub untracked: Vec<BString>,
     /// conflicted paths with a file in place
     pub unmerged: Vec<BString>,
@@ -84,8 +88,8 @@ pub fn scan(
     opts: &ScanOptions<'_>,
 ) -> Result<Delta, WorktreeError> {
     let ignore = match opts.untracked {
-        true => IgnoreStack::with_global_excludes()?,
-        false => IgnoreStack::new(),
+        Untracked::No => IgnoreStack::new(),
+        _ => IgnoreStack::with_global_excludes()?,
     };
     let mut found = walk::walk(root, snapshot, opts.untracked, opts.within, &ignore)?;
     let mut delta = Delta::default();

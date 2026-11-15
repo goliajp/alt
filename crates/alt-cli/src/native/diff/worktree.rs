@@ -17,7 +17,7 @@ impl NativeRepo<'_> {
     /// are not in `alt diff`'s output, as they are not in git's.
     pub(super) fn worktree_sides(&self) -> Res<(Vec<WorkEntry>, Vec<WorkEntry>, Worktree)> {
         let mut snapshot = self.worktree_snapshot()?;
-        let delta = self.scan_delta(&mut snapshot, false)?;
+        let delta = self.scan_delta(&mut snapshot, alt_worktree::Untracked::No)?;
         self.keep_snapshot(&snapshot);
         let mut old: Vec<WorkEntry> = delta
             .changed

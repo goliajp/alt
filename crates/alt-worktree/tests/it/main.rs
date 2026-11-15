@@ -4,3 +4,5 @@
 mod delta;
 mod ignore_scan;
 mod status_interop;
+#[cfg(unix)]
+mod untracked;
