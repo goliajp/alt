@@ -203,8 +203,13 @@ impl Runs {
             Ok(listing) => {
                 for entry in listing {
                     let entry = entry?;
-                    if let Some((start, end)) = entry.file_name().to_str().and_then(parse_name) {
+                    let name = entry.file_name();
+                    if let Some((start, end)) = name.to_str().and_then(parse_name) {
                         found.push((start, end, entry.path()));
+                    } else if name.as_encoded_bytes().ends_with(b".run.tmp") {
+                        // runs are written under the log's write lock, so
+                        // one seen here was left by a writer that died
+                        found.push((u64::MAX, 0, entry.path()));
                     }
                 }
             }

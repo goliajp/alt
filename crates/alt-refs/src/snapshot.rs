@@ -121,7 +121,34 @@ pub fn write<'a>(
         let _ = fs::remove_file(&tmp);
         return Err(e.into());
     }
+    remove_leftovers(path);
     Ok(buf.len() as u64)
+}
+
+/// A writer that died between creating its temporary file and renaming it
+/// left that file behind. Snapshots are written without a lock, so another
+/// writer's file may be in use right now: only ones older than any write
+/// takes are removed.
+fn remove_leftovers(path: &Path) {
+    const DEAD_AFTER: std::time::Duration = std::time::Duration::from_secs(60);
+    let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
+        return;
+    };
+    let mut prefix = name.as_encoded_bytes().to_vec();
+    prefix.extend_from_slice(b".tmp.");
+    let Ok(listing) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in listing.flatten() {
+        let dead = entry.file_name().as_encoded_bytes().starts_with(&prefix)
+            && entry
+                .metadata()
+                .and_then(|meta| meta.modified())
+                .is_ok_and(|at| at.elapsed().is_ok_and(|age| age > DEAD_AFTER));
+        if dead {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
 }
 
 /// One ref at `data[*at..]`; advances `at` past it.

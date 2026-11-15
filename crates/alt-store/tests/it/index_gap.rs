@@ -118,3 +118,29 @@ fn chunk_store_indexes_everything_after_its_index_dir_is_removed() {
     store.flush().unwrap();
     assert_eq!(store.check().unwrap(), 600);
 }
+
+#[test]
+fn a_run_temporary_file_left_by_a_crash_is_removed_by_the_next_writer() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let path = dir.path().join("log");
+    let (mut log, _) = RecLog::open(&path, LAYOUT).unwrap();
+    for n in 0..300 {
+        log.append(&record(n, n)).unwrap();
+    }
+    log.index_tail(true).unwrap();
+    drop(log);
+
+    let leftover = dir.path().join("log.idx/000000000005-00000000ffff.run.tmp");
+    fs::write(&leftover, b"half a run").unwrap();
+    // a reader leaves it: only a writer, under the lock, knows it is dead
+    let (log, _) = RecLog::open(&path, LAYOUT).unwrap();
+    assert_eq!(value(&log, 7), Some(7));
+    drop(log);
+    assert!(leftover.exists());
+
+    let (mut log, _) = RecLog::open(&path, LAYOUT).unwrap();
+    log.sync_from_disk().unwrap();
+    log.append(&record(300, 300)).unwrap();
+    assert!(!leftover.exists(), "the leftover is gone");
+    assert_eq!(value(&log, 300), Some(300));
+}

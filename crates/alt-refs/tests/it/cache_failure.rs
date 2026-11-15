@@ -44,3 +44,32 @@ fn a_snapshot_that_cannot_be_written_fails_neither_open_nor_commit() {
     drop(store);
     assert_eq!(RefStore::open(dir.path()).unwrap().oplog().len(), 1500);
 }
+
+#[test]
+fn a_snapshot_temporary_file_left_by_a_crash_is_removed_by_the_next_writer() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let mut store = RefStore::open(dir.path()).unwrap();
+    churn(&mut store, 0, 3);
+    store.snapshot().unwrap();
+
+    let refs = dir.path().join("refs");
+    let old = refs.join("snapshot.tmp.4242");
+    let fresh = refs.join("snapshot.tmp.00000000deadbeef");
+    for path in [&old, &fresh] {
+        std::fs::write(path, b"half a snapshot").unwrap();
+    }
+    // one from long ago, one that could be another writer's, just started
+    let long_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    std::fs::File::options()
+        .write(true)
+        .open(&old)
+        .unwrap()
+        .set_modified(long_ago)
+        .unwrap();
+
+    churn(&mut store, 3, 1);
+    store.snapshot().unwrap();
+    assert!(!old.exists(), "the leftover is gone");
+    assert!(fresh.exists(), "a file that may be in use is left alone");
+    assert!(refs.join("snapshot").exists());
+}
