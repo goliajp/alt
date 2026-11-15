@@ -9,6 +9,7 @@ pub mod charset;
 pub mod ci;
 pub mod cli;
 pub mod client;
+mod combined;
 pub mod commit_sign;
 pub mod config_cmd;
 pub mod daemon;

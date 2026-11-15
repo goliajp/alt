@@ -292,7 +292,7 @@ fn log_patch_matches_git_for_every_kind_of_change() {
 }
 
 #[test]
-fn show_prints_no_patch_for_a_merge_commit() {
+fn show_prints_no_patch_for_a_merge_that_only_took_sides() {
     let (src, dst) = (
         alt_os::temp::tempdir().unwrap(),
         alt_os::temp::tempdir().unwrap(),
@@ -303,10 +303,157 @@ fn show_prints_no_patch_for_a_merge_commit() {
     let merge = git_at(src, 0, &["rev-parse", "HEAD~1"]);
     let shown = ok(alt(dst, &["show", merge.trim()]));
     assert!(shown.contains("merge side"), "{shown}");
-    assert!(!shown.contains("diff --git"), "{shown}");
+    assert!(!shown.contains("diff --"), "{shown}");
+    assert_eq!(
+        shown,
+        git_at(src, 0, &["show", "--pretty=raw", merge.trim()])
+    );
     // a commit with one parent still shows its patch, set apart by a blank line
     let plain = ok(alt(dst, &["show", "HEAD"]));
     assert_eq!(plain, git_at(src, 0, &["show", "--pretty=raw", "HEAD"]));
+}
+
+/// A merge whose result is written by hand: `main` and `side` both changed
+/// `code.rs`, and the merge commit holds whatever `resolve` leaves in the
+/// work tree on top of main's side.
+fn hand_merged(src: &Path, resolve: &dyn Fn(&Path, &str, &str)) {
+    git_at(src, 1000, &["init", "-q", "-b", "main", "."]);
+    let base = source_file(6);
+    fs::write(src.join("code.rs"), &base).unwrap();
+    fs::write(src.join("both-drop.txt"), "dropped by the merge\n").unwrap();
+    fs::write(src.join("side-only.txt"), "one\ntwo\nthree\n").unwrap();
+    fs::write(src.join("blob.bin"), b"\0base").unwrap();
+    commit_all(src, 1000, "base");
+    git_at(src, 1100, &["switch", "-q", "-c", "side"]);
+    let side = base
+        .replace("step_2_3();", "side_2_3();")
+        .replace("    step_5_1();\n", "")
+        .replace("fn section_6() {", "fn section_6() { // side");
+    fs::write(src.join("code.rs"), &side).unwrap();
+    fs::write(src.join("side-only.txt"), "one\nTWO\nthree\n").unwrap();
+    fs::write(src.join("both-drop.txt"), "changed on side\n").unwrap();
+    fs::write(src.join("blob.bin"), b"\0side").unwrap();
+    commit_all(src, 1100, "side");
+    git_at(src, 1200, &["switch", "-q", "main"]);
+    let main = base
+        .replace("step_2_3();", "main_2_3();")
+        .replace("step_4_4();", "main_4_4();");
+    fs::write(src.join("code.rs"), &main).unwrap();
+    fs::write(src.join("both-drop.txt"), "changed on main\n").unwrap();
+    fs::write(src.join("blob.bin"), b"\0main").unwrap();
+    commit_all(src, 1200, "main");
+    git_at(
+        src,
+        1300,
+        &["merge", "-q", "-s", "ours", "--no-commit", "side"],
+    );
+    resolve(src, &main, &side);
+    commit_all(src, 1300, "merge by hand");
+}
+
+#[test]
+fn show_prints_the_combined_diff_of_a_merge_as_git_does() {
+    let (src, dst) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
+    let (src, dst) = (src.path(), dst.path());
+    hand_merged(src, &|root, main, side| {
+        // both versions of the contested line are replaced, side's removal
+        // and comment are taken, and one line is the merge's own
+        let merged = main
+            .replace("main_2_3();", "merged_2_3();")
+            .replace("    step_5_1();\n", "")
+            .replace("fn section_6() {", "fn section_6() { // side")
+            .replace("step_1_2();", "only_the_merge_1_2();");
+        assert_ne!(merged, side);
+        fs::write(root.join("code.rs"), merged).unwrap();
+        fs::write(root.join("side-only.txt"), "one\nTWO\nthree\n").unwrap();
+        fs::remove_file(root.join("both-drop.txt")).unwrap();
+        fs::write(root.join("blob.bin"), b"\0merged").unwrap();
+        fs::write(root.join("born in the merge.txt"), "new\nfile\n").unwrap();
+    });
+    ok(alt(src, &["import", dst.to_str().unwrap()]));
+
+    let ours = ok(alt(dst, &["show", "HEAD"]));
+    assert_eq!(ours, git_at(src, 0, &["show", "--pretty=raw", "HEAD"]));
+    // what must be there, so that two empty outputs do not pass
+    assert!(ours.contains("diff --cc code.rs\n"), "{ours}");
+    assert!(ours.contains("\n@@@ -"), "{ours}");
+    assert!(ours.contains("\n++    merged_2_3();\n"), "{ours}");
+    assert!(ours.contains("\n -    side_2_3();\n"), "{ours}");
+    assert!(ours.contains("deleted file mode 100644,100644\n"), "{ours}");
+    assert!(ours.contains("diff --cc blob.bin\n"), "{ours}");
+    assert!(ours.contains("Binary files differ\n"), "{ours}");
+    assert!(
+        ours.contains("diff --cc \"born in the merge.txt\"\n")
+            || ours.contains("diff --cc born in the merge.txt\n")
+    );
+    assert!(
+        !ours.contains("side-only.txt"),
+        "taken whole from one side: {ours}"
+    );
+
+    // the binary file's summary line is alt's own; the rest is git's
+    let log = |args: &[&str]| -> String {
+        let text = ok(alt(dst, args));
+        let kept = text.lines().filter(|l| !l.starts_with("chunks: "));
+        kept.map(|l| format!("{l}\n")).collect()
+    };
+    assert_eq!(
+        log(&["log", "-p", "--cc"]),
+        git_at(src, 0, &["log", "-p", "--cc", "--pretty=oneline"])
+    );
+    // without --cc a merge has no patch in the log
+    assert_eq!(
+        log(&["log", "-p"]),
+        git_at(src, 0, &["log", "-p", "--pretty=oneline"])
+    );
+}
+
+#[test]
+fn combined_diff_of_a_merge_of_three_branches_matches_git() {
+    let (src, dst) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
+    let (src, dst) = (src.path(), dst.path());
+    git_at(src, 1000, &["init", "-q", "-b", "main", "."]);
+    let base = source_file(5);
+    fs::write(src.join("code.rs"), &base).unwrap();
+    commit_all(src, 1000, "base");
+    for (date, branch, from, to) in [
+        (1100, "one", "step_1_3();", "one_1_3();"),
+        (1200, "two", "step_3_3();", "two_3_3();"),
+    ] {
+        git_at(src, date, &["switch", "-q", "-c", branch, "main"]);
+        fs::write(src.join("code.rs"), base.replace(from, to)).unwrap();
+        commit_all(src, date, branch);
+    }
+    git_at(src, 1300, &["switch", "-q", "main"]);
+    fs::write(
+        src.join("code.rs"),
+        base.replace("step_5_3();", "main_5_3();"),
+    )
+    .unwrap();
+    commit_all(src, 1300, "main");
+    git_at(
+        src,
+        1400,
+        &["merge", "-q", "-s", "ours", "--no-commit", "one", "two"],
+    );
+    let merged = base
+        .replace("step_1_3();", "one_1_3();")
+        .replace("step_3_3();", "octopus_3_3();")
+        .replace("step_5_3();", "main_5_3();")
+        .replace("    step_4_6();\n", "");
+    fs::write(src.join("code.rs"), merged).unwrap();
+    commit_all(src, 1400, "three way");
+    ok(alt(src, &["import", dst.to_str().unwrap()]));
+    let ours = ok(alt(dst, &["show", "HEAD"]));
+    assert_eq!(ours, git_at(src, 0, &["show", "--pretty=raw", "HEAD"]));
+    assert!(ours.contains("\n@@@@ -"), "{ours}");
+    assert!(ours.contains("\n+++    octopus_3_3();\n"), "{ours}");
 }
 
 #[test]

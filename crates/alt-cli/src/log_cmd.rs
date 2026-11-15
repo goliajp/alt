@@ -69,6 +69,10 @@ pub struct LogArgs {
     /// the terminal). Ignored with --json.
     #[arg(short = 'p', long = "patch")]
     patch: bool,
+    /// with -p, show for a merge commit the combined diff of what the
+    /// merge itself changed (hunks that differ from every parent)
+    #[arg(long = "cc")]
+    combined: bool,
     /// start revision
     #[arg(default_value = "HEAD")]
     rev: String,
@@ -85,6 +89,7 @@ impl LogArgs {
             max_count: Some(1),
             json,
             patch: !json,
+            combined: true,
             rev,
         }
     }
@@ -134,11 +139,12 @@ pub fn run(
             }
         }
         if args.patch {
-            // a blank line sets the patch apart from every header but the
-            // one-line one, as in git
+            // as in git, a blank line sets a patch apart from every header
+            // but the one-line one, and a combined diff from any header
+            use crate::patch::Section;
             let mut patch = Vec::new();
-            crate::patch::write_commit(&mut patch, repo, &oid)?;
-            if !patch.is_empty() && args.pretty != "oneline" {
+            let shown = crate::patch::write_commit(&mut patch, repo, &oid, args.combined)?;
+            if shown == Section::Combined || (shown == Section::Patch && args.pretty != "oneline") {
                 out.write_all(b"\n")?;
             }
             out.write_all(&patch)?;

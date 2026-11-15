@@ -1,6 +1,7 @@
 //! The patch of a commit as `log -p` and `show` print it: one `diff --git`
-//! stanza per changed file against the first parent, renames paired, in
-//! git's layout. A merge commit prints no patch.
+//! stanza per changed file against the parent, renames paired, in git's
+//! layout. A merge commit prints a combined diff where one is asked for,
+//! and nothing otherwise.
 
 use std::io::Write;
 
@@ -13,19 +14,33 @@ use crate::tree_changes::{self, FileDiff, TreeFile};
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
 /// Writes the patch `commit` makes to its parent, or to the empty tree
-/// for a root commit. Nothing is written for a merge: what a merge changes
-/// is in the commits it merges.
-pub(crate) fn write_commit(out: &mut impl Write, repo: &Repository, commit: &ObjectId) -> Res<()> {
+/// for a root commit. What a merge changes is in the commits it merges:
+/// with `combined` it shows what the merge itself decided, as git's
+/// `--cc` does, and without it nothing.
+pub(crate) fn write_commit(
+    out: &mut Vec<u8>,
+    repo: &Repository,
+    commit: &ObjectId,
+    combined: bool,
+) -> Res<Section> {
     let parsed = read_commit(repo, commit)?;
-    let mut parents = parsed.parents();
-    let old_tree = match (parents.next(), parents.next()) {
-        (_, Some(_)) => return Ok(()),
-        (Some(parent), None) => read_commit(repo, &parent)?.tree(),
-        (None, _) => None,
-    };
     let new_tree = parsed
         .tree()
         .ok_or_else(|| format!("commit {commit} has no tree header"))?;
+    let parents: Vec<ObjectId> = parsed.parents().collect();
+    let old_tree = match parents.as_slice() {
+        [] => None,
+        [parent] => read_commit(repo, parent)?.tree(),
+        _ if !combined => return Ok(Section::None),
+        _ => {
+            let mut trees = Vec::new();
+            for parent in &parents {
+                trees.push(read_commit(repo, parent)?.tree());
+            }
+            crate::combined::write(out, repo, new_tree, &trees, &style(repo)?)?;
+            return Ok(Section::Combined);
+        }
+    };
     let changes = tree_changes::changes(repo, old_tree, Some(new_tree))?;
     let style = style(repo)?;
     for file in tree_changes::pair_renames(repo, changes)? {
@@ -40,7 +55,10 @@ pub(crate) fn write_commit(out: &mut impl Write, repo: &Repository, commit: &Obj
             _ => write_file(out, repo, &file, &style)?,
         }
     }
-    Ok(())
+    Ok(match out.is_empty() {
+        true => Section::None,
+        false => Section::Patch,
+    })
 }
 
 fn read_commit(repo: &Repository, oid: &ObjectId) -> Res<Commit> {
@@ -59,6 +77,16 @@ fn split(file: &FileDiff) -> (FileDiff, FileDiff) {
         similarity: None,
     };
     (half(file.old, None), half(None, file.new))
+}
+
+/// What a commit shows after its header.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Section {
+    None,
+    /// the patch against the parent
+    Patch,
+    /// the combined diff of a merge, which may be empty
+    Combined,
 }
 
 /// How this repository prints names and ids.

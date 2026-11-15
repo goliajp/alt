@@ -22,7 +22,7 @@ pub(crate) struct Style<'a> {
 }
 
 impl Style<'_> {
-    fn short(&self, oid: Option<ObjectId>) -> String {
+    pub(crate) fn short(&self, oid: Option<ObjectId>) -> String {
         match (oid, &self.abbrev) {
             (Some(oid), Some(abbrev)) => abbrev.of(&oid),
             (Some(oid), None) => oid.to_string()[..7].to_owned(),
@@ -33,7 +33,7 @@ impl Style<'_> {
 
     /// `prefix` and `path` as one name, in double quotes with C escapes
     /// when the path has bytes that need them.
-    fn name(&self, prefix: &str, path: &[u8]) -> Vec<u8> {
+    pub(crate) fn name(&self, prefix: &str, path: &[u8]) -> Vec<u8> {
         let mut whole = prefix.as_bytes().to_vec();
         whole.extend_from_slice(path);
         let mut out = Vec::new();
