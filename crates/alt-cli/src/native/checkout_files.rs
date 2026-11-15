@@ -156,9 +156,19 @@ impl NativeRepo<'_> {
     /// A directory at `path` may give way to a file only when every file in
     /// it is one the checkout `removes`.
     fn ensure_replaceable(&self, path: &BString, removes: &dyn Fn(&[u8]) -> bool) -> Res<()> {
+        match self.files_beneath(path)?.iter().all(|f| removes(f)) {
+            true => Ok(()),
+            false => Err(holds_untracked(path)),
+        }
+    }
+
+    /// The files in the directory at `path`, relative to the root; none
+    /// when there is no directory there.
+    pub(super) fn files_beneath(&self, path: &BString) -> Res<Vec<BString>> {
         let abs = self.abs(path)?;
+        let mut found = Vec::new();
         if !abs.symlink_metadata().is_ok_and(|m| m.is_dir()) {
-            return Ok(());
+            return Ok(found);
         }
         let mut stack = vec![abs];
         while let Some(dir) = stack.pop() {
@@ -172,16 +182,10 @@ impl NativeRepo<'_> {
                 let rel = inner
                     .strip_prefix(&self.root)
                     .map_err(|_| "path outside root")?;
-                if !removes(rel.as_os_str().as_encoded_bytes()) {
-                    return Err(crate::machine::Failure::refusal(
-                        "precondition_failed",
-                        format!("checkout target '{path}' is a directory holding untracked files"),
-                    )
-                    .into());
-                }
+                found.push(BString::from(rel.as_os_str().as_encoded_bytes()));
             }
         }
-        Ok(())
+        Ok(found)
     }
 
     fn apply_file_state(&self, path: &BString, state: &Option<FileState>) -> Res<()> {
@@ -295,49 +299,6 @@ impl NativeRepo<'_> {
         }
         Ok(beneath_owned)
     }
-
-    pub(super) fn preflight_checkout(&self, old: &[WorkEntry], target: &[WorkEntry]) -> Res<()> {
-        let old_paths: std::collections::HashSet<&[u8]> =
-            old.iter().map(|e| e.path.as_slice()).collect();
-        let tracked = |p: &[u8]| old_paths.contains(p);
-        for entry in old {
-            self.validate_path_among(&entry.path, &tracked)?;
-        }
-        for entry in target {
-            let beneath_tracked = self.validate_path_among(&entry.path, &tracked)?;
-            self.ensure_path_allowed(
-                std::str::from_utf8(&entry.path)
-                    .map_err(|_| "unsupported non-UTF-8 checkout path")?,
-            )?;
-            let on_disk = match beneath_tracked {
-                true => None,
-                false => self.abs(&entry.path)?.symlink_metadata().ok(),
-            };
-            match on_disk {
-                Some(m) if m.is_dir() && entry.mode != 0o160000 => {
-                    self.ensure_replaceable(&entry.path, &tracked)?;
-                }
-                Some(m) if !m.is_dir() && !old_paths.contains(entry.path.as_slice()) => {
-                    return Err(format!(
-                        "untracked working tree file '{}' would be overwritten",
-                        entry.path
-                    )
-                    .into());
-                }
-                _ => {}
-            }
-            if entry.mode != 0o160000 && self.store.odb.get(&entry.oid)?.is_none() {
-                return Err("missing checkout object".into());
-            }
-        }
-        for entry in old {
-            self.ensure_path_allowed(
-                std::str::from_utf8(&entry.path)
-                    .map_err(|_| "unsupported non-UTF-8 checkout path")?,
-            )?;
-        }
-        Ok(())
-    }
 }
 
 /// Removes `path` when it is a directory with nothing but empty directories
@@ -355,4 +316,12 @@ fn remove_empty_directories(path: &Path) -> Res<()> {
     }
     std::fs::remove_dir(path)?;
     Ok(())
+}
+
+pub(super) fn holds_untracked(path: &BString) -> Box<dyn std::error::Error> {
+    crate::machine::Failure::refusal(
+        "precondition_failed",
+        format!("checkout target '{path}' is a directory holding untracked files"),
+    )
+    .into()
 }

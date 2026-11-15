@@ -131,3 +131,43 @@ fn switch_turns_a_symlink_into_a_directory_without_writing_through_it() {
     assert_eq!(read(outside.path(), "a.txt"), "outside\n");
     assert!(clean(root));
 }
+
+#[test]
+fn switch_removes_ignored_files_with_a_directory_that_becomes_a_file() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let root = dir.path();
+    write(root, ".gitignore", "*.log\n");
+    two_kinds(root, &|root| write(root, "node", "flat\n"));
+    ok(alt(root, &["switch", "tree"]));
+    write(root, "node/deep/build.log", "ignored output\n");
+
+    // as in git, ignored files do not hold the directory in place
+    ok(alt(root, &["switch", "flat"]));
+    assert_eq!(read(root, "node"), "flat\n");
+    assert!(clean(root));
+
+    // they were recorded with the switch, so taking it back restores them
+    ok(alt(root, &["undo"]));
+    assert_eq!(read(root, "node/deep/build.log"), "ignored output\n");
+    assert_eq!(read(root, "node/a.txt"), "a\n");
+
+    // next to an untracked file that is not ignored, nothing is removed
+    write(root, "node/deep/notes.txt", "not tracked\n");
+    assert!(!alt(root, &["switch", "flat"]).status.success());
+    assert_eq!(read(root, "node/deep/build.log"), "ignored output\n");
+    assert_eq!(read(root, "node/deep/notes.txt"), "not tracked\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn switch_leaves_alone_the_files_both_branches_share() {
+    use std::os::unix::fs::MetadataExt;
+    let dir = alt_os::temp::tempdir().unwrap();
+    let root = dir.path();
+    two_kinds(root, &|root| write(root, "node", "flat\n"));
+    let inode = |rel: &str| std::fs::metadata(root.join(rel)).unwrap().ino();
+    let before = inode("keep.txt");
+    ok(alt(root, &["switch", "tree"]));
+    ok(alt(root, &["switch", "flat"]));
+    assert_eq!(inode("keep.txt"), before, "keep.txt was written again");
+}

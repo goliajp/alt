@@ -23,6 +23,7 @@ use http_auth::{build_transport, http_auth};
 mod add;
 mod bisect;
 mod checkout_files;
+mod checkout_plan;
 mod checkout_recovery;
 mod cherry_pick;
 pub mod commit;

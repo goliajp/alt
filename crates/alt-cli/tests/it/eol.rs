@@ -177,3 +177,30 @@ fn switch_writes_crlf_for_the_target_tree() {
     assert_eq!(read(dst, "run.bat"), b"one\n");
     assert!(ok(alt(dst, &["status"])).contains("nothing to commit"));
 }
+
+#[test]
+fn switch_between_branches_that_differ_only_in_attributes_rewrites_nothing() {
+    let (src, dst) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
+    let (src, dst) = (src.path(), dst.path());
+    ok(git(src, &["init", "-q", "-b", "main", "."]));
+    write(src, "run.bat", b"one\ntwo\n");
+    write(src, ".gitattributes", b"*.bat -text\n");
+    ok(git(src, &["add", "."]));
+    ok(git(src, &["commit", "-qm", "stored as it is"]));
+    ok(git(src, &["switch", "-q", "-c", "rules"]));
+    write(src, ".gitattributes", b"*.bat eol=crlf\n");
+    ok(git(src, &["add", "."]));
+    ok(git(src, &["commit", "-qm", "only the rule changes"]));
+    ok(git(src, &["switch", "-q", "main"]));
+    ok(alt(src, &["import", dst.to_str().unwrap()]));
+
+    // the file is the same blob on both branches: neither tool touches it
+    ok(alt(dst, &["switch", "rules"]));
+    ok(git(src, &["switch", "-q", "rules"]));
+    assert_eq!(read(dst, "run.bat"), b"one\ntwo\n");
+    assert_eq!(read(dst, "run.bat"), read(src, "run.bat"));
+    assert_eq!(read(dst, ".gitattributes"), b"*.bat eol=crlf\n");
+}

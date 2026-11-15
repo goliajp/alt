@@ -25,12 +25,12 @@ pub(super) struct FileChange {
 #[derive(Clone, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub(super) struct CheckoutIntent {
-    version: u32,
+    pub(super) version: u32,
     pub(super) workspace: WorkspaceIdentity,
     #[json(default)]
     pub(super) request_id: Option<String>,
-    index_before: String,
-    index_after: String,
+    pub(super) index_before: String,
+    pub(super) index_after: String,
     pub(super) files: Vec<FileChange>,
 }
 
@@ -246,88 +246,6 @@ impl NativeRepo<'_> {
                     after: change.before.clone(),
                 })
                 .collect(),
-        })
-    }
-
-    pub(super) fn prepare_checkout(
-        &self,
-        old: &[WorkEntry],
-        target: &[WorkEntry],
-    ) -> Res<CheckoutIntent> {
-        let targets: std::collections::BTreeMap<_, _> =
-            target.iter().map(|t| (&t.path, t)).collect();
-        let paths: std::collections::BTreeSet<_> =
-            old.iter().chain(target).map(|e| &e.path).collect();
-        let gitlinks: std::collections::HashSet<&BString> = old
-            .iter()
-            .chain(target)
-            .filter(|e| e.mode == 0o160000)
-            .map(|e| &e.path)
-            .collect();
-        // paths found as a file or symlink: the preflight has made sure
-        // nothing but a tracked path stands above another as a non-directory
-        let attrs = self.tree_attributes(target)?;
-        let mut files_on_disk: std::collections::HashSet<&[u8]> = std::collections::HashSet::new();
-        let mut files = Vec::new();
-        for path in paths {
-            let beneath_file = path
-                .iter()
-                .enumerate()
-                .any(|(at, b)| *b == b'/' && files_on_disk.contains(&path.as_slice()[..at]));
-            let before = match beneath_file {
-                true => None,
-                false => self
-                    .file_state(path, true)?
-                    .filter(|s| s.mode != 0o160000 || gitlinks.contains(path)),
-            };
-            if before.is_some() && !gitlinks.contains(path) {
-                files_on_disk.insert(path.as_slice());
-            }
-            let after = targets
-                .get(path)
-                .map(|t| self.target_state(t, &attrs))
-                .transpose()?;
-            // Submodule directories are not owned by the repository checkout.
-            if before.as_ref().is_some_and(|s| s.mode == 0o160000) && after.is_none() {
-                continue;
-            }
-            if before != after {
-                files.push(FileChange {
-                    path: path.to_vec(),
-                    before,
-                    after,
-                });
-            }
-        }
-        let entries = target
-            .iter()
-            .map(|entry| IndexEntry {
-                ctime: (0, 0),
-                mtime: (0, 0),
-                dev: 0,
-                ino: 0,
-                mode: entry.mode,
-                uid: 0,
-                gid: 0,
-                size: 0,
-                oid: entry.oid,
-                flags: entry.path.len().min(0x0fff) as u16,
-                extended_flags: None,
-                path: entry.path.clone(),
-            })
-            .collect();
-        let index_after = Index {
-            version: 2,
-            entries,
-            extensions: Vec::new(),
-        };
-        Ok(CheckoutIntent {
-            version: 1,
-            workspace: self.workspace_identity()?,
-            request_id: self.request_id.map(|id| crate::machine::hex(&id)),
-            index_before: self.snapshot(&canonical_index(self.index()?, self.store.algo))?,
-            index_after: self.snapshot(&canonical_index(index_after, self.store.algo))?,
-            files,
         })
     }
 
