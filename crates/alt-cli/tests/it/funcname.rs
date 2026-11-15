@@ -305,3 +305,107 @@ fn built_in_patterns_match_as_the_c_library_matches_them() {
     }
     assert!(compared > 6_000 && matched > 300, "{compared} {matched}");
 }
+
+/// A git repository with `files` committed under `attributes` and the
+/// settings `config`, and its import into alt; then each file is given
+/// its second content in both.
+fn changed(
+    attributes: &str,
+    config: &[(&str, &str)],
+    files: &[(&str, &[u8], &[u8])],
+) -> [alt_os::temp::TempDir; 2] {
+    let dirs = [0; 2].map(|_| alt_os::temp::tempdir().unwrap());
+    let (src, dst) = (dirs[0].path(), dirs[1].path());
+    ok(git(src, &["init", "-q", "-b", "main", "."]));
+    std::fs::write(src.join(".gitattributes"), attributes).unwrap();
+    for (key, value) in config {
+        ok(git(src, &["config", key, value]));
+    }
+    for (name, before, _) in files {
+        std::fs::write(src.join(name), before).unwrap();
+    }
+    ok(git(src, &["add", "."]));
+    ok(git(src, &["commit", "-qm", "base"]));
+    ok(alt(src, &["import", dst.to_str().unwrap()]));
+    for root in [src, dst] {
+        for (name, _, after) in files {
+            std::fs::write(root.join(name), after).unwrap();
+        }
+    }
+    dirs
+}
+
+#[test]
+fn a_pattern_whose_last_expression_is_negated_is_refused_as_in_git() {
+    let before = sections(&["one", "two"], "line");
+    let after = before.replace("_9;", "_9; changed");
+    let files = [("a.x", before.as_bytes(), after.as_bytes())];
+    let config = [("diff.odd.xfuncname", "^(one)$\n!^two")];
+    let dirs = changed("*.x diff=odd\n", &config, &files);
+    let theirs = git(dirs[0].path(), &["diff"]);
+    let ours = alt(dirs[1].path(), &["diff"]);
+    let said = "Last expression must not be negated: !^two";
+    for (tool, refused) in [("git", theirs), ("alt", ours)] {
+        let message = String::from_utf8_lossy(&refused.stderr).into_owned();
+        assert!(!refused.status.success(), "{tool}");
+        assert!(message.contains(said), "{tool}: {message}");
+    }
+}
+
+#[test]
+fn a_form_feed_at_the_end_of_a_section_line_stays_in_the_hunk_header() {
+    let before = sections(&["one \x0c", "two\x0b \t", "  three\x0c\x0c "], "  ");
+    let after = before.replace("_9;", "_9; changed");
+    let files = [
+        ("a.x", before.as_bytes(), after.as_bytes()),
+        ("plain.txt", before.as_bytes(), after.as_bytes()),
+    ];
+    let config = [("diff.custom.xfuncname", "^ *([a-z]+.*)$")];
+    let dirs = changed("*.x diff=custom\n", &config, &files);
+    let theirs = ok(git(dirs[0].path(), &["diff"]));
+    let ours = ok(alt(dirs[1].path(), &["diff"]));
+    assert_eq!(hunk_headers(&ours), hunk_headers(&theirs));
+    let headers = hunk_headers(&ours);
+    assert!(headers[0].ends_with("@@ one \x0c"), "{headers:?}");
+    assert!(headers[2].ends_with("@@ three\x0c\x0c"), "{headers:?}");
+    assert!(headers[1].ends_with("@@ two\x0b"), "{headers:?}");
+    assert!(headers[3].ends_with("@@ one \x0c"), "{headers:?}");
+}
+
+#[test]
+fn the_diff_attribute_set_or_unset_decides_what_is_binary() {
+    let text = sections(&["one"], "line");
+    let binary = text.replace("_3;", "_3\0;");
+    let files = [
+        ("text.unset", text.as_bytes(), &b"changed\n"[..]),
+        ("binary.set", binary.as_bytes(), &b"changed\0\n"[..]),
+        ("binary.other", binary.as_bytes(), &b"changed\0\n"[..]),
+    ];
+    let dirs = changed("*.unset -diff\n*.set diff\n", &[], &files);
+    let shown = |patch: String| -> Vec<String> {
+        let kept = patch.lines().filter(|l| {
+            let body = l.starts_with(['+', '-', ' ', '@']);
+            body || l.starts_with("Binary files") || l.starts_with("diff --git")
+        });
+        kept.map(str::to_owned).collect()
+    };
+    let theirs = shown(ok(git(dirs[0].path(), &["diff"])));
+    let ours = shown(ok(alt(dirs[1].path(), &["diff"])));
+    assert_eq!(ours, theirs);
+    let notice = |name: &str| format!("Binary files a/{name} and b/{name} differ");
+    assert!(ours.contains(&notice("text.unset")), "{ours:?}");
+    assert!(ours.contains(&notice("binary.other")), "{ours:?}");
+    assert!(!ours.contains(&notice("binary.set")), "{ours:?}");
+    assert!(ours.contains(&"+changed\0".to_owned()), "{ours:?}");
+    // and so for what a commit changed
+    ok(git(dirs[0].path(), &["commit", "-qam", "changed"]));
+    ok(alt(dirs[1].path(), &["add", "."]));
+    ok(alt(dirs[1].path(), &["commit", "-m", "changed"]));
+    let theirs = shown(ok(git(dirs[0].path(), &["show", "--format="])));
+    let ours = shown(ok(alt(dirs[1].path(), &["show"])));
+    let ours: Vec<String> = ours
+        .into_iter()
+        .skip_while(|l| !l.starts_with("diff --git"))
+        .collect();
+    assert_eq!(ours, theirs);
+}

@@ -143,11 +143,6 @@ fn write_file(
     }
     let old_bytes = content(repo, file.old.as_ref())?;
     let new_bytes = content(repo, file.new.as_ref())?;
-    if alt_diff::is_binary(&old_bytes) || alt_diff::is_binary(&new_bytes) {
-        header.write_binary_notice(out, style)?;
-        return write_binary_summary(out, &old_bytes, &new_bytes);
-    }
-    let mut hunks = Vec::new();
     let regular = |f: &TreeFile| f.mode & 0o170000 == 0o100000;
     let paths = [
         file.old
@@ -160,6 +155,11 @@ fn write_file(
             .map(|_| header.new_path),
     ];
     let sections = &style.sections;
+    if sections.binary(paths, &old_bytes, &new_bytes)? {
+        header.write_binary_notice(out, style)?;
+        return write_binary_summary(out, &old_bytes, &new_bytes);
+    }
+    let mut hunks = Vec::new();
     if sections.write_hunks(&mut hunks, paths, &old_bytes, &new_bytes)? {
         header.write_hunk_names(out, style)?;
         out.write_all(&hunks)?;

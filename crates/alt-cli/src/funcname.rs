@@ -12,7 +12,7 @@ use std::rc::Rc;
 use alt_bytes::ByteSlice;
 use alt_git_config::Config;
 use alt_regex::{Options, Regex, Syntax};
-use alt_worktree::attributes::{self, AutoCrlf, CoreEol, EolConfig, Layer};
+use alt_worktree::attributes::{self, AutoCrlf, CoreEol, DiffAttribute, EolConfig, Layer};
 
 use crate::git_settings::{outer_attributes, read_if_file};
 
@@ -51,11 +51,16 @@ struct Line {
 impl Finder {
     pub fn new(pattern: &[u8], options: Options) -> Res<Self> {
         let mut lines = Vec::new();
-        for line in pattern.split(|&b| b == b'\n') {
+        let count = pattern.split(|&b| b == b'\n').count();
+        for (at, line) in pattern.split(|&b| b == b'\n').enumerate() {
             let (negated, expression) = match line.strip_prefix(b"!") {
                 Some(rest) => (true, rest),
                 None => (false, line),
             };
+            if negated && at + 1 == count {
+                let shown = String::from_utf8_lossy(line);
+                return Err(format!("Last expression must not be negated: {shown}").into());
+            }
             let compiled = Regex::with_options(expression, options).map_err(|e| {
                 let shown = String::from_utf8_lossy(expression);
                 format!("Invalid regexp to look for hunk header: {shown}: {e}")
@@ -150,8 +155,8 @@ impl Sections {
         Ok(layer)
     }
 
-    /// The name of the driver the attributes give `path`.
-    fn driver(&self, path: &[u8]) -> Res<Vec<u8>> {
+    /// What the attributes say of comparing `path`.
+    fn attribute(&self, path: &[u8]) -> Res<DiffAttribute> {
         let mut files = Vec::new();
         files.extend(self.file(b"")?);
         for (at, _) in path.iter().enumerate().filter(|(_, b)| **b == b'/') {
@@ -162,14 +167,43 @@ impl Sections {
             autocrlf: AutoCrlf::False,
             eol: CoreEol::Native,
         };
-        let named = attributes::lookup(layers, path, &unused).diff;
-        Ok(named.unwrap_or_else(|| b"default".to_vec()))
+        Ok(attributes::lookup(layers, path, &unused).diff)
+    }
+
+    /// Whether the two sides of a file are compared as binary: by the
+    /// `diff` attribute of each side's path where it is set or unset,
+    /// else by the content. A side that is not a regular file has no
+    /// path here.
+    pub(crate) fn binary(&self, paths: [Option<&[u8]>; 2], old: &[u8], new: &[u8]) -> Res<bool> {
+        for (path, content) in paths.into_iter().zip([old, new]) {
+            let said = path.map(|path| self.said_binary(path)).transpose()?;
+            if said
+                .flatten()
+                .unwrap_or_else(|| alt_diff::is_binary(content))
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// What the `diff` attribute of `path` says of comparing it as
+    /// binary, when it is set or unset.
+    pub(crate) fn said_binary(&self, path: &[u8]) -> Res<Option<bool>> {
+        Ok(match self.attribute(path)? {
+            DiffAttribute::Unset => Some(true),
+            DiffAttribute::Set => Some(false),
+            _ => None,
+        })
     }
 
     /// The pattern of the driver `path` has; `None` when it has none and
     /// git's plain rule applies.
     pub(crate) fn of(&self, path: &[u8]) -> Res<Option<Rc<Finder>>> {
-        let name = self.driver(path)?;
+        let name = match self.attribute(path)? {
+            DiffAttribute::Named(name) => name,
+            _ => b"default".to_vec(),
+        };
         if let Some(known) = self.finders.borrow().get(&name) {
             return Ok(known.clone());
         }

@@ -174,10 +174,11 @@ pub fn section_start(line: &[u8]) -> Option<&[u8]> {
 }
 
 /// What a hunk header shows of the text that names a section: its first
-/// 80 bytes, without trailing white space.
+/// 80 bytes, without the trailing blanks git takes for such: spaces,
+/// tabs and line ends, not the other white space.
 pub fn section_text(text: &[u8]) -> &[u8] {
     let mut shown = &text[..text.len().min(80)];
-    while let [rest @ .., b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c] = shown {
+    while let [rest @ .., b' ' | b'\t' | b'\n' | b'\r'] = shown {
         shown = rest;
     }
     shown

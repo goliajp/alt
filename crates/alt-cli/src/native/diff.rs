@@ -64,9 +64,6 @@ impl NativeRepo<'_> {
             .filter(|ch| ch.old.is_some() || show_added)
             .collect();
 
-        if json {
-            return self.diff_json(&self.pairs(&changes, cached)?, disk, semantic, out);
-        }
         let settings = self.settings()?;
         let info = self.store.alt_dir.join("git-import/info/attributes");
         let style = Style {
@@ -77,6 +74,10 @@ impl NativeRepo<'_> {
             abbrev: Some(self.store.odb.abbrev()),
             sections: crate::funcname::Sections::new(Some(&self.root), &info, &settings)?,
         };
+        if json {
+            let pairs = self.pairs(&changes, cached)?;
+            return self.diff_json(&pairs, disk, semantic, &style.sections, out);
+        }
         let mut buf = Vec::new();
         for pair in self.pairs(&changes, cached)? {
             // a path that changed kind (file, symlink, submodule) is shown
@@ -171,6 +172,7 @@ impl NativeRepo<'_> {
         pairs: &[Pair<'_>],
         disk: Option<&Worktree<'_>>,
         semantic: bool,
+        sections: &crate::funcname::Sections,
         out: &mut impl Write,
     ) -> Res<()> {
         use crate::json::Json;
@@ -185,7 +187,12 @@ impl NativeRepo<'_> {
                 _ if renamed => "renamed",
                 _ => "modified",
             };
-            let binary = alt_diff::is_binary(&old_bytes) || alt_diff::is_binary(&new_bytes);
+            let regular = |w: &&WorkEntry| w.mode & 0o170000 == 0o100000;
+            let paths = [
+                ch.old.filter(regular).map(|_| ch.old_path.as_bytes()),
+                ch.new.filter(regular).map(|_| ch.new_path.as_bytes()),
+            ];
+            let binary = sections.binary(paths, &old_bytes, &new_bytes)?;
             let hunks = if binary {
                 Vec::new()
             } else {
@@ -297,6 +304,13 @@ impl NativeRepo<'_> {
         }
         let old_bytes = self.side_bytes(pair.old, None)?;
         let new_bytes = self.side_bytes(pair.new, disk)?;
+        let regular = |w: &&WorkEntry| w.mode & 0o170000 == 0o100000;
+        let paths = [
+            pair.old.filter(regular).map(|_| pair.old_path.as_bytes()),
+            pair.new.filter(regular).map(|_| pair.new_path.as_bytes()),
+        ];
+        let sections = &style.sections;
+        let binary = sections.binary(paths, &old_bytes, &new_bytes)?;
 
         // when --semantic is set and we have a parser for this path,
         // render the AST-level summary in place of the unified hunks. A
@@ -304,8 +318,7 @@ impl NativeRepo<'_> {
         // diff body — the caller never loses signal, only sometimes the
         // semantic resolution.
         if semantic
-            && !alt_diff::is_binary(&old_bytes)
-            && !alt_diff::is_binary(&new_bytes)
+            && !binary
             && let Some(lang) = lang_for(path.as_bytes())
             && let (Ok(old_s), Ok(new_s)) = (
                 std::str::from_utf8(&old_bytes),
@@ -322,8 +335,7 @@ impl NativeRepo<'_> {
         // `summary_for_path` (.json content-detect + .toml explicit).
         // Parse failures fall through to the line diff — no signal loss.
         if semantic
-            && !alt_diff::is_binary(&old_bytes)
-            && !alt_diff::is_binary(&new_bytes)
+            && !binary
             && let Ok(path_str) = std::str::from_utf8(path.as_bytes())
             && let Some(structured) =
                 alt_diff::structured::summary_for_path(path_str, &old_bytes, &new_bytes)
@@ -332,7 +344,7 @@ impl NativeRepo<'_> {
             return Ok(());
         }
 
-        if alt_diff::is_binary(&old_bytes) || alt_diff::is_binary(&new_bytes) {
+        if binary {
             // git-compat line first (existing tests + muscle memory key off
             // this exact wording); then a chunk-diff summary so the
             // human view answers "how much is genuinely shared" too.
@@ -379,12 +391,6 @@ impl NativeRepo<'_> {
 
         // the file header belongs to the hunks: none without them
         let mut hunks = Vec::new();
-        let regular = |w: &&WorkEntry| w.mode & 0o170000 == 0o100000;
-        let paths = [
-            pair.old.filter(regular).map(|_| pair.old_path.as_bytes()),
-            pair.new.filter(regular).map(|_| pair.new_path.as_bytes()),
-        ];
-        let sections = &style.sections;
         if sections.write_hunks(&mut hunks, paths, &old_bytes, &new_bytes)? {
             header.write_hunk_names(buf, style)?;
             buf.extend_from_slice(&hunks);

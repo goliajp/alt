@@ -121,7 +121,8 @@ fn write_file(
             ..Line::default()
         })
         .collect();
-    let mut binary = alt_diff::is_binary(&result);
+    let said = style.sections.said_binary(path)?;
+    let mut binary = said.unwrap_or_else(|| alt_diff::is_binary(&result));
     for (i, old) in olds.iter().enumerate() {
         // a parent with the same content as an earlier one reads the same
         if let Some(j) = (0..i).find(|&j| olds[j].map(|f| f.oid) == old.map(|f| f.oid)) {
@@ -129,7 +130,7 @@ fn write_file(
             continue;
         }
         let parent = content(repo, *old)?;
-        binary |= alt_diff::is_binary(&parent);
+        binary |= said.is_none() && alt_diff::is_binary(&parent);
         compare(&mut table, count, i, &parent, &result);
     }
     let mode = |f: Option<TreeFile>| f.map_or(0, |f| f.mode);
