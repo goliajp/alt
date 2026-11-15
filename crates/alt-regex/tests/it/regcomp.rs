@@ -460,7 +460,7 @@ fn back_references_match_as_the_c_library_matches_them() {
 }
 
 /// Patterns whose groups could lie in more than one place.
-const AMBIGUOUS: [(&str, &str); 22] = [
+const AMBIGUOUS: [(&str, &str); 27] = [
     ("(a|ab)(c|bcd)(d*)", "abcd"),
     ("^([a-z]+|[a-z]+ [a-z]+)( .*)?$", "foo bar baz"),
     ("(a|ab)(bc|c)?", "abc"),
@@ -485,6 +485,12 @@ const AMBIGUOUS: [(&str, &str); 22] = [
     ("^(a{2}([^[:space:]b]?\\.{0,1}){1,2}){1,2} {,2}", "aacb"),
     ("([[:alpha:]]{2,}|c{,2}c{,2}x?){2,}x{0,1}", "x.a .b"),
     ("(\\s{0,1}b*[ab]*){1,2}$", "a"),
+    // a copy of a repetition, in which no group is marked
+    ("((c*)?\\({,2}(.?){2}){1,2}a{0,1}", "b abax"),
+    ("(\\w{,2}[ab]{,2}){,2}", "b b."),
+    ("^(b?[^a]{,2}){2}([a-c]?){,2}", ".a bba.x"),
+    ("[[:alpha:]]((b*){1,2}a[^a]{0,1})+(c*)", "aa.ab."),
+    ("([ab](c{0,1}){1,2}.{0,1}){2,}\\.*", ".a.b ab"),
     // a repetition that takes nothing at all
     ("\\.?( ab{2,}[[:alpha:]]|b?c{0,1})*", "a"),
     ("^.{2}(([^a]{1,2})+[a-c]{1,2}c*|c{,2})*[a-c]?", "bab"),

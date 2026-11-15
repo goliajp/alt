@@ -315,7 +315,7 @@ impl Compiler {
             // the loop: once more, or on
             None if !nullable(inner) => {
                 let split = self.push(Inst::Split(next, next))?;
-                let body = self.node(inner, split)?;
+                let body = self.copy(inner, split, false, min > 0)?;
                 self.insts[split as usize] = Inst::Split(body, next);
                 split
             }
