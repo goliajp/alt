@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: refuse a negated last expression, keep a form feed in a hunk header and compare by the diff attribute as git does
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/combined.rs
+touched: crates/alt-cli/src/funcname.rs
+touched: crates/alt-cli/src/native/diff.rs
+touched: crates/alt-cli/src/patch.rs
+touched: crates/alt-cli/tests/it/funcname.rs
+touched: crates/alt-diff/src/lib.rs
+touched: crates/alt-worktree/src/attributes.rs
