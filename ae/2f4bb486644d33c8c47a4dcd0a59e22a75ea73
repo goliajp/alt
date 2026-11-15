@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: write each ref snapshot through a temporary file of its own
+author-type: human
+author: doracawl
+touched: crates/alt-refs/src/snapshot.rs
