@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: ask the C library on a thread that can be left behind when it does not answer
+author-type: human
+author: doracawl
+touched: crates/alt-regex/tests/it/pathological.rs
+touched: crates/alt-regex/tests/it/regcomp.rs
