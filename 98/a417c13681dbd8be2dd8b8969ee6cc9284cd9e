@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: find a path's staged content by binary search when storing text
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/convert.rs
