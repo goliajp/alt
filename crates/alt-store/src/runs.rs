@@ -22,26 +22,25 @@
 //! longer matches the log (the log was cut back and regrown) is dropped.
 
 use std::fs::{self, File};
-use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use alt_os::map::Mmap;
 
 use crate::StoreError;
+use crate::run_write::write_run;
 
 pub const KEY_LEN: usize = 32;
 pub const GUARD_LEN: usize = 16;
 pub type Key = [u8; KEY_LEN];
 pub type Guard = [u8; GUARD_LEN];
 
-const ENTRY_LEN: usize = KEY_LEN + 8;
-const MAGIC: [u8; 4] = *b"ALTR";
-const VERSION: u8 = 1;
-const HEADER_LEN: usize = 56;
+pub(crate) const ENTRY_LEN: usize = KEY_LEN + 8;
+pub(crate) const MAGIC: [u8; 4] = *b"ALTR";
+pub(crate) const VERSION: u8 = 1;
+pub(crate) const HEADER_LEN: usize = 56;
 /// A new run absorbs every older neighbour smaller than this many times its
 /// own size, so run counts stay logarithmic in the log length.
 const MERGE_RATIO: usize = 8;
-const WIDE_FANOUT_FROM: usize = 1 << 16;
 
 const CORRUPT: StoreError = StoreError::Format("index run corrupt");
 
@@ -70,7 +69,7 @@ fn parse_name(name: &str) -> Option<(u64, u64)> {
     ))
 }
 
-fn check8(data: &[u8]) -> [u8; 8] {
+pub(crate) fn check8(data: &[u8]) -> [u8; 8] {
     alt_hash::blake3::hash(data).as_bytes()[..8]
         .try_into()
         .unwrap()
@@ -374,25 +373,41 @@ impl Runs {
         let merged: Vec<Run> = self.runs.drain(keep..).collect();
         let run = Run::load(path, start, end)?.ok_or(CORRUPT)?;
         for old in merged {
-            fs::remove_file(&old.path)?;
+            remove_if_present(&old.path)?;
         }
         self.runs.push(run);
         Ok(())
     }
 
     /// Drops the runs that reach past `target`, before the log is cut back
-    /// to it. The removal is made durable so a dropped run cannot reappear
-    /// under a log that has since regrown.
+    /// to it: every such file in the directory, not only the ones this
+    /// handle loaded (another process may have merged them since). The
+    /// removal is made durable so a dropped run cannot reappear under a log
+    /// that has since regrown.
     pub fn truncate(&mut self, target: u64) -> Result<(), StoreError> {
         self.remove_stale()?;
-        let keep = self.runs.iter().take_while(|run| run.end <= target).count();
-        if keep == self.runs.len() {
-            return Ok(());
+        self.runs.retain(|run| run.end <= target);
+        let listing = match fs::read_dir(&self.dir) {
+            Ok(listing) => listing,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(e.into()),
+        };
+        let mut removed = false;
+        for entry in listing {
+            let entry = entry?;
+            let past = entry
+                .file_name()
+                .to_str()
+                .and_then(parse_name)
+                .is_some_and(|(_, end)| end > target);
+            if past {
+                remove_if_present(&entry.path())?;
+                removed = true;
+            }
         }
-        for run in self.runs.drain(keep..) {
-            fs::remove_file(&run.path)?;
+        if removed {
+            crate::pack::fsync_dir(&self.dir)?;
         }
-        crate::pack::fsync_dir(&self.dir)?;
         Ok(())
     }
 
@@ -403,80 +418,17 @@ impl Runs {
             return Ok(());
         }
         for path in self.stale.drain(..) {
-            match fs::remove_file(&path) {
-                Ok(()) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => return Err(e.into()),
-            }
+            remove_if_present(&path)?;
         }
         crate::pack::fsync_dir(&self.dir)?;
         Ok(())
     }
 }
 
-/// Streams the bytewise merge of the sorted `sources` into a run file.
-fn write_run(
-    path: &Path,
-    sources: &mut [&[u8]],
-    total: usize,
-    start: u64,
-    end: u64,
-    guard: Guard,
-    durable: bool,
-) -> Result<(), StoreError> {
-    if u32::try_from(total).is_err() {
-        return Err(StoreError::Format("index run too large"));
+/// Another process holding the lock earlier may have removed it already.
+fn remove_if_present(path: &Path) -> Result<(), StoreError> {
+    match fs::remove_file(path) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
+        _ => Ok(()),
     }
-    let bits: u8 = if total >= WIDE_FANOUT_FROM { 16 } else { 8 };
-    let mut header = [0u8; HEADER_LEN];
-    header[..4].copy_from_slice(&MAGIC);
-    header[4] = VERSION;
-    header[5] = bits;
-    header[8..16].copy_from_slice(&(total as u64).to_le_bytes());
-    header[16..24].copy_from_slice(&start.to_le_bytes());
-    header[24..32].copy_from_slice(&end.to_le_bytes());
-    header[32..48].copy_from_slice(&guard);
-    let check = check8(&header[..48]);
-    header[48..].copy_from_slice(&check);
-
-    let mut out = BufWriter::with_capacity(1 << 20, File::create(path)?);
-    let mut hasher = alt_hash::blake3::Hasher::new();
-    out.write_all(&header)?;
-    let mut buckets = vec![0u32; 1usize << bits];
-    loop {
-        let mut pick: Option<usize> = None;
-        for (i, source) in sources.iter().enumerate() {
-            if source.is_empty() {
-                continue;
-            }
-            if pick.is_none_or(|p| source[..ENTRY_LEN] < sources[p][..ENTRY_LEN]) {
-                pick = Some(i);
-            }
-        }
-        let Some(pick) = pick else { break };
-        let (entry, rest) = sources[pick].split_at(ENTRY_LEN);
-        sources[pick] = rest;
-        let prefix = if bits == 8 {
-            entry[0] as usize
-        } else {
-            u16::from_be_bytes([entry[0], entry[1]]) as usize
-        };
-        buckets[prefix] += 1;
-        hasher.update(entry);
-        out.write_all(entry)?;
-    }
-    let mut running = 0u32;
-    for bucket in &mut buckets {
-        running += *bucket;
-        *bucket = running;
-        let bytes = running.to_le_bytes();
-        hasher.update(&bytes);
-        out.write_all(&bytes)?;
-    }
-    out.write_all(&hasher.finalize().as_bytes()[..8])?;
-    let file = out.into_inner().map_err(|e| e.into_error())?;
-    if durable {
-        file.sync_all()?;
-    }
-    Ok(())
 }

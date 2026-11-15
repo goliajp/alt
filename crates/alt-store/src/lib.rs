@@ -30,6 +30,7 @@ mod node;
 mod pack;
 mod packs;
 pub mod reclog;
+mod run_write;
 pub mod runs;
 
 pub use blob::{BlobOptions, BlobSink, BlobStore, StoreCheckpoint};
