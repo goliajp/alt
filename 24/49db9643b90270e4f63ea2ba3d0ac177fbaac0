@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: perf
+summary: load neither libm nor libgcc_s at start
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/main.rs
+touched: crates/alt-cli/src/precommit.rs
+touched: crates/alt-zstd/src/enc/fse.rs
