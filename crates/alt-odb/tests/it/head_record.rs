@@ -143,3 +143,38 @@ fn a_reader_gives_a_store_without_a_record_one() {
     assert!(fs::read(&lock).unwrap().starts_with(b"ALTH"));
     holds(tmp.path(), 400);
 }
+
+#[test]
+fn a_handle_held_open_keeps_what_another_writer_recorded() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let lock = tmp.path().join("odb.lock");
+    let mut held = NativeOdb::open_with(tmp.path(), opts()).unwrap();
+    let (oid, data) = object(100_000);
+    held.put(oid, ObjectKind::Blob, &data).unwrap();
+    held.flush().unwrap();
+
+    // another writer indexes a few hundred objects and records the runs
+    put(tmp.path(), 0..400);
+    let recorded = fs::read(&lock).unwrap();
+
+    // the first handle writes again: one more record, no new run, so the
+    // record of runs and packs must come out as the other writer left it
+    let (oid, data) = object(100_001);
+    held.put(oid, ObjectKind::Blob, &data).unwrap();
+    held.flush().unwrap();
+    assert_eq!(fs::read(&lock).unwrap(), recorded);
+    drop(held);
+    holds_all(tmp.path(), (0..400).chain([100_000, 100_001]));
+}
+
+fn holds_all(dir: &Path, objects: impl Iterator<Item = usize>) {
+    let odb = NativeOdb::deferred(dir);
+    for n in objects {
+        let (oid, data) = object(n);
+        assert_eq!(
+            odb.get(&oid).unwrap().map(|o| o.data),
+            Some(data),
+            "object {n}"
+        );
+    }
+}
