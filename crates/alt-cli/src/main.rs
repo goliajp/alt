@@ -27,8 +27,10 @@ pub extern "C" fn main(
     // a closed output pipe is reported as a failed write, not a signal
     alt_os::sys::ignore_signal(alt_os::sys::SIGPIPE);
     alt_os::stack::report_overflow();
-    // a panic leaves with the status the standard runtime gives it
+    // a panic leaves with the status the standard runtime gives it, and
+    // with whatever was printed before it
     let Ok(response) = std::panic::catch_unwind(run) else {
+        let _ = std::io::stdout().flush();
         return 101;
     };
     deliver(&response).into()
