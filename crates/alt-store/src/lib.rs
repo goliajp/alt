@@ -26,6 +26,7 @@ mod blobmap;
 pub mod delta;
 mod idx;
 mod index;
+mod node;
 mod pack;
 mod packs;
 pub mod reclog;

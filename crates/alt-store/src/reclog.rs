@@ -197,15 +197,14 @@ impl RecLog {
 
     fn push_tail(&mut self, records: &[u8]) {
         let rec_len = self.layout.rec_len;
-        let mut at = (self.tail.len() / rec_len) as u32;
+        let first = (self.tail.len() / rec_len) as u32;
         self.tail.extend_from_slice(records);
-        for rec in records.chunks_exact(rec_len) {
+        for (at, rec) in (first..).zip(records.chunks_exact(rec_len)) {
             let (key, second) = (self.layout.keys)(rec);
             self.tail_keys.insert(key, at);
             if let Some(second) = second {
                 self.tail_second.entry(second).or_default().push(at);
             }
-            at += 1;
         }
     }
 
