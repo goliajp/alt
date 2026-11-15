@@ -15,6 +15,7 @@ mod control;
 mod delta;
 #[cfg(unix)]
 mod fsdir;
+mod glob;
 pub mod ident;
 mod ignore;
 mod scan;

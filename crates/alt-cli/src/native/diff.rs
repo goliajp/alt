@@ -15,12 +15,9 @@ struct Pair<'a> {
     similarity: Option<u32>,
 }
 
-/// What the working-tree side of a diff is read with: the index its paths
-/// came from, and the attribute files that say how content is stored.
-struct Worktree<'a> {
-    snapshot: &'a alt_worktree::Snapshot,
-    attrs: convert::Converter,
-}
+mod worktree;
+
+use worktree::Worktree;
 
 impl NativeRepo<'_> {
     /// `alt diff` (index → working tree) or `alt diff --cached` (HEAD →
@@ -32,48 +29,22 @@ impl NativeRepo<'_> {
     pub fn diff(&self, cached: bool, json: bool, semantic: bool, out: &mut impl Write) -> Res<()> {
         // old side is always read from the object store; the new side is the
         // index (cached) or the live working tree (default).
-        let mut scanned = None;
-        let (old, new, show_added): (Vec<WorkEntry>, Vec<WorkEntry>, bool) = if cached {
+        let (old, new, disk): (Vec<WorkEntry>, Vec<WorkEntry>, Option<Worktree>) = if cached {
             let staged = self.staged_changes()?;
             let side = |pick: fn(alt_worktree::Staged) -> Option<WorkEntry>| {
                 staged.iter().cloned().filter_map(pick).collect()
             };
-            (side(|s| s.old), side(|s| s.new), true)
+            (side(|s| s.old), side(|s| s.new), None)
         } else {
-            // no directory listing: one stat per indexed path, and only a
-            // file whose stat changed is read. Untracked files are not in
-            // `alt diff`'s output, as they are not in git's
-            let mut snapshot = self.worktree_snapshot()?;
-            let delta = self.scan_delta(&mut snapshot, false)?;
-            self.keep_snapshot(&snapshot);
-            let mut old: Vec<WorkEntry> = delta
-                .changed
-                .iter()
-                .map(|w| &w.path)
-                .chain(&delta.deleted)
-                .filter_map(|p| snapshot.find(p))
-                .map(|i| WorkEntry {
-                    path: BString::from(snapshot.path(i)),
-                    oid: snapshot.entries[i].oid,
-                    mode: snapshot.entries[i].mode,
-                })
-                .collect();
-            old.sort_by(|a, b| a.path.cmp(&b.path));
-            scanned = Some(snapshot);
-            (old, delta.changed, false)
+            let (old, new, disk) = self.worktree_sides()?;
+            (old, new, Some(disk))
         };
-        let disk = match &scanned {
-            Some(snapshot) => Some(Worktree {
-                snapshot,
-                attrs: self.converter()?,
-            }),
-            None => None,
-        };
+        // a working-tree file with no index entry is untracked, not a diff
+        let show_added = cached;
         let disk = disk.as_ref();
 
         let changes: Vec<_> = alt_worktree::changes(&old, &new)
             .into_iter()
-            // a working-tree file with no index entry is untracked, not a diff
             .filter(|ch| ch.old.is_some() || show_added)
             .collect();
 
@@ -180,7 +151,7 @@ impl NativeRepo<'_> {
     fn diff_json(
         &self,
         changes: &[alt_worktree::Change],
-        disk: Option<&Worktree<'_>>,
+        disk: Option<&Worktree>,
         semantic: bool,
         out: &mut impl Write,
     ) -> Res<()> {
@@ -276,7 +247,7 @@ impl NativeRepo<'_> {
         &self,
         buf: &mut Vec<u8>,
         pair: &Pair<'_>,
-        disk: Option<&Worktree<'_>>,
+        disk: Option<&Worktree>,
         semantic: bool,
         style: &Style<'_>,
     ) -> Res<()> {
@@ -388,26 +359,13 @@ impl NativeRepo<'_> {
 
     /// The content one side of a change is diffed as. A gitlink has no blob
     /// in this store: it diffs as the line git prints for a submodule.
-    fn side_bytes(&self, side: Option<&WorkEntry>, disk: Option<&Worktree<'_>>) -> Res<Vec<u8>> {
+    fn side_bytes(&self, side: Option<&WorkEntry>, disk: Option<&Worktree>) -> Res<Vec<u8>> {
         match (side, disk) {
             (None, _) => Ok(Vec::new()),
             (Some(w), _) if w.mode == 0o160000 => {
                 Ok(format!("Subproject commit {}\n", w.oid).into_bytes())
             }
-            (Some(w), Some(disk)) => {
-                let content = self.read_for(w)?;
-                if w.mode == 0o120000 {
-                    return Ok(content);
-                }
-                // compared as it would be stored, as the old side is
-                let staged = disk
-                    .snapshot
-                    .find(&w.path)
-                    .map(|i| disk.snapshot.entries[i].oid);
-                let stored = self.stored_form_of(&disk.attrs, staged, &w.path, &content);
-                disk.attrs.check()?;
-                Ok(stored.unwrap_or(content))
-            }
+            (Some(w), Some(disk)) => self.worktree_bytes(w, disk),
             (Some(w), None) => self.blob_bytes(w.oid),
         }
     }
