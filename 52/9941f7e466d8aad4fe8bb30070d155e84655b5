@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: feat
+summary: accept alt log -<n> as a commit count
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/log_cmd.rs
+touched: crates/alt-cli/src/machine.rs
+touched: crates/alt-cli/tests/it/show.rs
