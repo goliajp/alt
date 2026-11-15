@@ -285,7 +285,7 @@ fn recovery_workspace_name_reuse_cannot_claim_the_old_instance() {
     ok(alt(&peer, &["add", "f"]));
     let completion = {
         let log = alt_oplog::OpLog::open(&root.join(".alt/oplog")).unwrap();
-        log.ops().last().unwrap().payload.clone()
+        log.ops().unwrap().last().unwrap().payload.clone()
     };
     let id_path = root.join(".alt/workspaces/peer/workspace-id");
     let previous_id = std::fs::read(&id_path).unwrap();
@@ -459,10 +459,10 @@ fn recovery_reads_the_frozen_legacy_frame_chain_without_rewriting_it() {
         let refs = alt_refs::RefStore::open(dir.path()).unwrap();
         assert!(refs.len() >= 3);
         assert_eq!(
-            refs.last_op().unwrap().payload,
+            refs.last_op().unwrap().unwrap().payload,
             include_bytes!("fixtures/legacy-index-v1.bin")
         );
-        assert!(refs.oplog().ops().len() >= 6);
+        assert!(refs.oplog().ops().unwrap().len() >= 6);
     }
     assert_eq!(std::fs::read(oplog_dir.join("log")).unwrap(), bytes);
 }
@@ -587,7 +587,7 @@ fn ref_undo_refuses_legacy_missing_or_unknown_effects_without_mutation() {
         ok(alt(root, &["add", "."]));
         ok(alt(root, &["commit", "-m", "base"]));
         let mut refs = alt_refs::RefStore::open(root.join(".alt")).unwrap();
-        let tx = alt_refs::parse_tx(&refs.last_op().unwrap().payload)
+        let tx = alt_refs::parse_tx(&refs.last_op().unwrap().unwrap().payload)
             .unwrap()
             .unwrap();
         let mut context: alt_json::Value = alt_json::from_slice(&tx.context.unwrap()).unwrap();

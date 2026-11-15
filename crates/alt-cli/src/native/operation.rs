@@ -17,7 +17,7 @@ impl NativeRepo<'_> {
         self.store
             .refs
             .oplog()
-            .ops()
+            .ops()?
             .iter()
             .find(|op| op.id.to_string() == id)
             .cloned()
@@ -25,7 +25,7 @@ impl NativeRepo<'_> {
     }
 
     fn operation_complete(&self, id: OpId, kind: u8) -> Res<bool> {
-        for op in self.store.refs.oplog().ops().iter().rev() {
+        for op in self.store.refs.oplog().ops()?.iter().rev() {
             if op.payload.first() != Some(&kind) {
                 continue;
             }
@@ -177,7 +177,7 @@ impl NativeRepo<'_> {
             Err(e) => return Err(e.into()),
         };
         let mut ops = Vec::new();
-        for op in self.store.refs.oplog().ops() {
+        for op in self.store.refs.oplog().ops()? {
             let (workspace, completed, _) = self.operation_info(op)?;
             if !completed
                 && workspace

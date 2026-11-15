@@ -35,6 +35,7 @@ fn crash_child_workload() {
     let mut n = store
         .oplog()
         .ops()
+        .unwrap()
         .iter()
         .filter(|op| op.actor == "crash-child")
         .count() as u64;
@@ -109,6 +110,7 @@ fn kill_dash_nine_leaves_state_transactional() {
         let txs = store
             .oplog()
             .ops()
+            .unwrap()
             .iter()
             .filter(|op| op.actor == "crash-child")
             .count() as u64;

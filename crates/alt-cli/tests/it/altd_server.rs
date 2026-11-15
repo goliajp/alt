@@ -2935,7 +2935,7 @@ fn altd_server_rejected_push_does_not_leave_orphan_objects() {
 
     let baseline_count = {
         let odb = alt_odb::NativeOdb::open(origin.join(".alt")).unwrap();
-        odb.len()
+        odb.len().unwrap()
     };
     let baseline_map_size = std::fs::metadata(origin.join(".alt").join("map.alt"))
         .unwrap()
@@ -3019,7 +3019,7 @@ fn altd_server_rejected_push_does_not_leave_orphan_objects() {
 
     let after_count = {
         let odb = alt_odb::NativeOdb::open(origin.join(".alt")).unwrap();
-        odb.len()
+        odb.len().unwrap()
     };
     let after_map_size = std::fs::metadata(origin.join(".alt").join("map.alt"))
         .unwrap()

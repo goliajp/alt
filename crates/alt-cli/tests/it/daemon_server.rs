@@ -472,7 +472,7 @@ fn daemon_routes_structured_principal_to_oplog_per_request() {
 
     let log = OpLog::open(&root.join(".alt/oplog")).unwrap();
     let mut seen: Vec<String> = Vec::new();
-    for op in log.ops() {
+    for op in log.ops().unwrap() {
         let (p, _verb) = Principal::parse_actor(&op.actor);
         if p.kind == PrincipalKind::Agent {
             seen.push(p.id);
@@ -843,7 +843,11 @@ fn daemon_enforces_capability_policy_for_restricted_agent() {
     std::fs::write(root.join(".alt/policy"), "agent:rover -> read-only\n").unwrap();
 
     let d = Daemon::start(&root.join(".alt"));
-    let oplen_before = OpLog::open(&root.join(".alt/oplog")).unwrap().ops().len();
+    let oplen_before = OpLog::open(&root.join(".alt/oplog"))
+        .unwrap()
+        .ops()
+        .unwrap()
+        .len();
 
     // restricted agent's write goes through the daemon socket — denied
     let env = vec![
@@ -868,7 +872,11 @@ fn daemon_enforces_capability_policy_for_restricted_agent() {
 
     // the rejected write left no op log entry — zero on-disk side effect
     drop(d);
-    let oplen_after = OpLog::open(&root.join(".alt/oplog")).unwrap().ops().len();
+    let oplen_after = OpLog::open(&root.join(".alt/oplog"))
+        .unwrap()
+        .ops()
+        .unwrap()
+        .len();
     assert_eq!(
         oplen_after, oplen_before,
         "denied write must not append any op"

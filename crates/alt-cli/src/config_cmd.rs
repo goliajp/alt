@@ -31,7 +31,7 @@ pub fn run(
         return unset_one(repo, unset_key, out);
     }
     if list {
-        return list_all(repo.config(), out);
+        return list_all(repo.config()?, out);
     }
     let Some(key) = key else {
         return Err("usage: alt config <key> [<value>] | --list | --unset <key>".into());
@@ -39,7 +39,7 @@ pub fn run(
     if let Some(new_value) = value {
         return set_one(repo, key, new_value, out);
     }
-    let cfg = repo.config();
+    let cfg = repo.config()?;
     let (section, subsection, name) = split_key(key)?;
     let value = cfg
         .get_str(&section, subsection.as_deref(), &name)

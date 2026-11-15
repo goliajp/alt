@@ -155,7 +155,7 @@ pub fn import_git(
 
     // --- objects: packed first (bulk), then loose ---
     let mut seen = 0u64;
-    let before = odb.len() as u64;
+    let before = odb.len()? as u64;
     let algo = repo.algo();
     let objects_dir = repo.git_dir().join("objects");
 
@@ -270,7 +270,7 @@ pub fn import_git(
 
     Ok(ImportReport {
         objects_seen: seen,
-        objects_new: odb.len() as u64 - before,
+        objects_new: odb.len()? as u64 - before,
         refs_seen,
         refs_changed,
         lineage_deltas,

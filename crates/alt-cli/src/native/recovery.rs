@@ -252,7 +252,7 @@ impl NativeRepo<'_> {
 
     fn pending_index(&self, identity: &WorkspaceIdentity) -> Res<Option<(OpId, IndexIntent)>> {
         let mut completed = std::collections::HashSet::new();
-        for op in self.store.refs.oplog().ops().iter().rev() {
+        for op in self.store.refs.oplog().ops()?.iter().rev() {
             match op.payload.first() {
                 Some(&COMPLETE) => {
                     let done: Completion = decode(&op.payload, COMPLETE)?;
@@ -412,7 +412,7 @@ impl NativeRepo<'_> {
             .store
             .refs
             .oplog()
-            .ops()
+            .ops()?
             .last()
             .ok_or_else(|| {
                 crate::machine::Failure::refusal("precondition_failed", "nothing to undo")
@@ -432,7 +432,7 @@ impl NativeRepo<'_> {
                 .store
                 .refs
                 .oplog()
-                .ops()
+                .ops()?
                 .iter()
                 .find(|op| op.id.to_string() == done.prepared)
                 .ok_or("missing checkout intent")?
@@ -443,7 +443,7 @@ impl NativeRepo<'_> {
         match last.payload.first() {
             Some(&COMPLETE) => {
                 let done: Completion = decode(&last.payload, COMPLETE)?;
-                let prepared = self.store.refs.oplog().ops().iter()
+                let prepared = self.store.refs.oplog().ops()?.iter()
                     .find(|op| op.id.to_string() == done.prepared).ok_or("missing recovery intent")?;
                 let intent: IndexIntent = decode(&prepared.payload, PREPARE)?;
                 if intent.workspace != workspace { return Err(crate::machine::Failure::refusal("precondition_failed", "last operation belongs to a different workspace instance; select its workspace").into()); }

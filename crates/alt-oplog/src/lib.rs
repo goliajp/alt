@@ -22,169 +22,55 @@
 //! Pure-logic crate, business-agnostic: payloads are opaque bytes; what an
 //! op *means* (ref updates, imports, …) is the caller's encoding.
 
-use std::collections::HashMap;
-use std::fmt;
+mod lock;
+mod op;
+mod read;
+mod scan;
+
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::Path;
+use std::io::{Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
-const MAGIC: [u8; 4] = *b"ALTL";
-const VERSION: u8 = 1;
-const HEADER_LEN: usize = 5;
-/// parent 32 + change_id 32 + timestamp 8 + actor_len 2 + payload_len 4.
-const BODY_FIXED_LEN: usize = 78;
-const CHECKSUM_LEN: usize = 8;
+pub use op::{Op, OpId, OpLogError, ROOT};
 
-#[derive(Debug)]
-pub enum OpLogError {
-    Io(std::io::Error),
-    Format(&'static str),
-    TooLarge(usize),
-}
+use lock::{lock_exclusive, lock_shared, unlock};
+use read::{read_at, read_log, scan, scan_and_repair};
+use scan::{CHECKSUM_LEN, HEADER_LEN, check_header, encode_body, replay_records};
 
-impl std::fmt::Display for OpLogError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Io(_) => f.write_str("io"),
-            Self::Format(v) => write!(f, "oplog format: {v}"),
-            Self::TooLarge(v) => write!(f, "op too large: {v} bytes"),
-        }
-    }
-}
-
-impl std::error::Error for OpLogError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Io(e) => Some(e),
-            _ => None,
-        }
-    }
-}
-
-impl From<std::io::Error> for OpLogError {
-    fn from(e: std::io::Error) -> Self {
-        Self::Io(e)
-    }
-}
-
-/// BLAKE3 of an op's body — its identity in the chain.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct OpId(pub [u8; 32]);
-
-/// The parent named by the first op in a log.
-pub const ROOT: OpId = OpId([0u8; 32]);
-
-impl fmt::Display for OpId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for b in self.0 {
-            write!(f, "{b:02x}")?;
-        }
-        Ok(())
-    }
-}
-
-impl fmt::Debug for OpId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "OpId({self})")
-    }
-}
-
-/// One recorded operation.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Op {
-    pub id: OpId,
-    pub parent: OpId,
-    /// Reserved for the change-identity model; zeros until then.
-    pub change_id: [u8; 32],
-    pub timestamp_ms: u64,
-    /// Who performed the op — human or agent identity string.
-    pub actor: String,
-    /// Opaque to the log; the caller's encoding of what happened.
-    pub payload: Vec<u8>,
-}
-
-impl Op {
-    /// Decode an original operation body, preserving its content identity.
-    /// This validates framing, not the authority or meaning of its payload.
-    pub fn from_body(body: &[u8]) -> Result<Self, OpLogError> {
-        parse_body(body)
-    }
-
-    /// Return the exact canonical body of this operation for a scoped source
-    /// proof. Reject edited fields rather than silently changing its identity.
-    pub fn body(&self) -> Result<Vec<u8>, OpLogError> {
-        if self.actor.len() > u16::MAX as usize || self.payload.len() > u32::MAX as usize {
-            return Err(OpLogError::Format("operation field exceeds encoding limit"));
-        }
-        let mut body = encode_body(&self.parent, self.timestamp_ms, &self.actor, &self.payload);
-        body[32..64].copy_from_slice(&self.change_id);
-        if alt_hash::blake3::hash(&body).as_bytes() != &self.id.0 {
-            return Err(OpLogError::Format(
-                "operation body differs from its identity",
-            ));
-        }
-        Ok(body)
-    }
-}
-
-fn encode_body(parent: &OpId, timestamp_ms: u64, actor: &str, payload: &[u8]) -> Vec<u8> {
-    let mut body = Vec::with_capacity(BODY_FIXED_LEN + actor.len() + payload.len());
-    body.extend_from_slice(&parent.0);
-    body.extend_from_slice(&[0u8; 32]); // change_id, reserved
-    body.extend_from_slice(&timestamp_ms.to_le_bytes());
-    body.extend_from_slice(&(actor.len() as u16).to_le_bytes());
-    body.extend_from_slice(actor.as_bytes());
-    body.extend_from_slice(&(payload.len() as u32).to_le_bytes());
-    body.extend_from_slice(payload);
-    body
-}
-
-fn parse_body(body: &[u8]) -> Result<Op, OpLogError> {
-    if body.len() < BODY_FIXED_LEN {
-        return Err(OpLogError::Format("op body too short"));
-    }
-    let mut parent = [0u8; 32];
-    parent.copy_from_slice(&body[..32]);
-    let mut change_id = [0u8; 32];
-    change_id.copy_from_slice(&body[32..64]);
-    let timestamp_ms = u64::from_le_bytes(body[64..72].try_into().unwrap());
-    let actor_len = u16::from_le_bytes(body[72..74].try_into().unwrap()) as usize;
-    let rest = &body[74..];
-    if rest.len() < actor_len + 4 {
-        return Err(OpLogError::Format("op actor length mismatch"));
-    }
-    let actor = std::str::from_utf8(&rest[..actor_len])
-        .map_err(|_| OpLogError::Format("op actor is not utf-8"))?
-        .to_owned();
-    let payload_len =
-        u32::from_le_bytes(rest[actor_len..actor_len + 4].try_into().unwrap()) as usize;
-    let payload = &rest[actor_len + 4..];
-    if payload.len() != payload_len {
-        return Err(OpLogError::Format("op payload length mismatch"));
-    }
-    Ok(Op {
-        id: OpId(*alt_hash::blake3::hash(body).as_bytes()),
-        parent: OpId(parent),
-        change_id,
-        timestamp_ms,
-        actor,
-        payload: payload.to_vec(),
-    })
+/// A place in the log to start reading from instead of its first record:
+/// the op whose record occupies bytes `start..end`, being op number `count`
+/// of the chain (counting from one). Whoever derives state from the log up
+/// to an op (the ref snapshot) keeps one, so a later open replays only what
+/// came after.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Anchor {
+    pub op: OpId,
+    pub start: u64,
+    pub end: u64,
+    pub count: u64,
 }
 
 /// The append-only operation log under `<dir>/log`.
 pub struct OpLog {
     file: File,
+    /// Set when the log was opened at an anchor: the ops up to and including
+    /// it are not in `ops`.
+    base: Option<Anchor>,
+    /// The ops after `base` (all of them without one), in chain order.
     ops: Vec<Op>,
-    by_id: HashMap<OpId, u32>,
+    /// The whole chain, read on first use when `base` hides part of it.
+    full: OnceLock<Vec<Op>>,
     /// Byte offset just past the last record we have replayed — where the
     /// next record goes, absent a concurrent writer. Lets `append` read only
     /// the tail another process may have added, rather than the whole file.
     len_bytes: u64,
+    /// Byte offset where the last record starts.
+    last_start: u64,
     /// Group commit: a lock around the fsync + a marker of how far the log is
     /// durable, so N concurrent committers coalesce to ~1 fsync.
-    sync_lock: File,
-    durable_path: std::path::PathBuf,
+    sync_lock_path: PathBuf,
+    durable_path: PathBuf,
     /// Deferred durability (the daemon): when set, `sync` skips its inline
     /// fsync (the daemon's group-commit coordinator fsyncs off the write path,
     /// via [`OpLog::sync_handle`], so concurrent appends overlap the fsync).
@@ -194,6 +80,8 @@ pub struct OpLog {
     defer: bool,
     /// Counts deferred writes, so the daemon can tell whether a request wrote.
     write_count: u64,
+    /// Whether this handle appended anything a drop should still fsync.
+    unsynced: bool,
 }
 
 /// The durable byte length from the marker file (0 when missing).
@@ -212,197 +100,64 @@ fn write_durable(path: &Path, len: u64) -> std::io::Result<()> {
     std::fs::rename(&tmp, path)
 }
 
-/// Walks length-prefixed records in `data[from..]`, verifying the hash chain
-/// continues from `prev_head`, pushing each op into `ops`/`by_id`. Returns the
-/// offset just past the last whole, valid record (so the caller can truncate a
-/// torn tail). A corrupt record that is not the final one is real corruption.
-fn replay_records(
-    data: &[u8],
-    from: usize,
-    mut prev_head: OpId,
-    ops: &mut Vec<Op>,
-    by_id: &mut HashMap<OpId, u32>,
-) -> Result<usize, OpLogError> {
-    let mut at = from;
-    let mut valid = from;
-    while let Some(len_bytes) = data.get(at..at + 4) {
-        let body_len = u32::from_le_bytes(len_bytes.try_into().unwrap()) as usize;
-        let Some(rec) = data.get(at + 4..at + 4 + body_len + CHECKSUM_LEN) else {
-            break; // torn record at EOF
-        };
-        let (body, check) = rec.split_at(body_len);
-        let hash = alt_hash::blake3::hash(body);
-        if hash.as_bytes()[..CHECKSUM_LEN] != *check {
-            if at + 4 + body_len + CHECKSUM_LEN == data.len() {
-                break; // torn final record: caller truncates
-            }
-            return Err(OpLogError::Format("oplog record corrupt"));
-        }
-        let op = parse_body(body)?;
-        if op.parent != prev_head {
-            return Err(OpLogError::Format("oplog chain broken"));
-        }
-        prev_head = op.id;
-        by_id.insert(op.id, ops.len() as u32);
-        ops.push(op);
-        at += 4 + body_len + CHECKSUM_LEN;
-        valid = at;
-    }
-    Ok(valid)
-}
-
-/// One pass over the whole log file: the verified ops, and where the last
-/// whole record ends against how long the file is.
-struct Scan {
-    ops: Vec<Op>,
-    by_id: HashMap<OpId, u32>,
-    valid_len: u64,
-    file_len: u64,
-}
-
-impl Scan {
-    /// A new log without its header yet, or a torn tail to cut.
-    fn needs_repair(&self) -> bool {
-        self.valid_len < HEADER_LEN as u64 || self.valid_len < self.file_len
-    }
-}
-
-fn read_all(file: &mut File) -> std::io::Result<Vec<u8>> {
-    let mut data = Vec::new();
-    file.seek(SeekFrom::Start(0))?;
-    file.read_to_end(&mut data)?;
-    Ok(data)
-}
-
-/// Verifies and replays a snapshot of the file taken under the lock.
-fn scan(data: &[u8]) -> Result<Scan, OpLogError> {
-    // a crash between create and the header fsync can leave a short
-    // file; anything that is not a header prefix is foreign
-    if data.len() < HEADER_LEN {
-        if !file_header().starts_with(data) {
-            return Err(OpLogError::Format("bad oplog header"));
-        }
-    } else {
-        if data[..4] != MAGIC {
-            return Err(OpLogError::Format("bad oplog header"));
-        }
-        if data[4] != VERSION {
-            return Err(OpLogError::Format("unsupported oplog version"));
-        }
-    }
-
-    let mut ops = Vec::new();
-    let mut by_id = HashMap::new();
-    // a record that runs past EOF (torn length field or torn body) ends
-    // the walk; the caller truncates back to the last whole record
-    let start = HEADER_LEN.min(data.len());
-    let valid_len = replay_records(data, start, ROOT, &mut ops, &mut by_id)? as u64;
-    Ok(Scan {
-        ops,
-        by_id,
-        valid_len,
-        file_len: data.len() as u64,
-    })
-}
-
-/// Rescans and repairs; the caller holds the exclusive lock.
-fn scan_and_repair(file: &mut File) -> Result<Scan, OpLogError> {
-    let mut scan = scan(&read_all(file)?)?;
-    if scan.valid_len < HEADER_LEN as u64 {
-        file.set_len(0)?;
-        file.seek(SeekFrom::Start(0))?;
-        file.write_all(&file_header())?;
-        file.sync_all()?;
-        scan.valid_len = HEADER_LEN as u64;
-    } else if scan.valid_len < scan.file_len {
-        file.set_len(scan.valid_len)?;
-        file.sync_all()?;
-    }
-    scan.file_len = scan.valid_len;
-    Ok(scan)
-}
-
-/// Takes an exclusive advisory lock on the log file for the duration of one
-/// append. `flock` is per-open-file-description and auto-releases when the fd
-/// closes (incl. a crash), so there are no stale lock files. Non-unix has no
-/// cross-process lock yet — single-writer there (documented limitation).
-#[cfg(unix)]
-fn lock_exclusive(file: &File) -> std::io::Result<()> {
-    alt_os::sys::flock(file, alt_os::sys::LOCK_EX)
-}
-
-#[cfg(unix)]
-fn lock_shared(file: &File) -> std::io::Result<()> {
-    alt_os::sys::flock(file, alt_os::sys::LOCK_SH)
-}
-
-#[cfg(unix)]
-fn unlock(file: &File) -> std::io::Result<()> {
-    alt_os::sys::flock(file, alt_os::sys::LOCK_UN)
-}
-
-#[cfg(not(unix))]
-fn lock_exclusive(_file: &File) -> std::io::Result<()> {
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn lock_shared(_file: &File) -> std::io::Result<()> {
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn unlock(_file: &File) -> std::io::Result<()> {
-    Ok(())
-}
-
 impl OpLog {
     /// Opens (or creates) the log in `dir`, replaying and verifying the
     /// whole chain. A torn tail is truncated; a broken chain or corrupt
     /// record refuses to open.
+    pub fn open(dir: &Path) -> Result<Self, OpLogError> {
+        Self::open_at(dir, None)
+    }
+
+    /// Opens (or creates) the log in `dir`, replaying and verifying only the
+    /// records after `anchor` when the log still holds the anchor's record
+    /// where the anchor says; the whole chain otherwise. The ops before the
+    /// anchor are read (and verified) on the first call that needs them.
     ///
     /// The file is read under a shared lock: writers append under the
     /// exclusive one, so a short tail seen here is a crashed writer's, never
     /// a live append in flight. Repairing it (or writing the header of a new log)
     /// retakes the lock exclusively and rescans, since another opener may
     /// have repaired it or a writer appended in between.
-    pub fn open(dir: &Path) -> Result<Self, OpLogError> {
-        std::fs::create_dir_all(dir)?;
+    pub fn open_at(dir: &Path, anchor: Option<Anchor>) -> Result<Self, OpLogError> {
         let path = dir.join("log");
-        let sync_lock = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(dir.join("sync.lock"))?;
-        let durable_path = dir.join("durable");
-        let mut file = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(&path)?;
+        let mut file = match OpenOptions::new().read(true).write(true).open(&path) {
+            Ok(file) => file,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                std::fs::create_dir_all(dir)?;
+                OpenOptions::new()
+                    .create(true)
+                    .truncate(false)
+                    .read(true)
+                    .write(true)
+                    .open(&path)?
+            }
+            Err(e) => return Err(e.into()),
+        };
 
         // only the read needs the lock; verifying the copy does not
         lock_shared(&file)?;
-        let data = read_all(&mut file);
+        let raw = read_log(&mut file, anchor);
         let _ = unlock(&file);
-        let mut scan = scan(&data?)?;
+        let mut scan = scan(raw?)?;
         if scan.needs_repair() {
             lock_exclusive(&file)?;
-            let repaired = scan_and_repair(&mut file);
+            let repaired = scan_and_repair(&mut file, anchor);
             let _ = unlock(&file);
             scan = repaired?;
         }
         file.seek(SeekFrom::Start(scan.valid_len))?;
         Ok(Self {
             file,
+            base: scan.base,
             ops: scan.ops,
-            by_id: scan.by_id,
+            full: OnceLock::new(),
             len_bytes: scan.valid_len,
-            sync_lock,
-            durable_path,
+            last_start: scan.last_start,
+            sync_lock_path: dir.join("sync.lock"),
+            durable_path: dir.join("durable"),
             defer: false,
             write_count: 0,
+            unsynced: false,
         })
     }
 
@@ -433,11 +188,12 @@ impl OpLog {
     }
 
     /// Catches up, then validates+builds the payload, then appends — the whole
-    /// read-modify-write under one exclusive lock. `build` is called with every
-    /// op that exists *now* (post-catch-up) so a higher layer (e.g. the ref
-    /// store) can fold concurrent ops into its own state and CAS-validate its
-    /// transaction against the true current state, atomically with the append.
-    /// `build` returning `Err` aborts cleanly with nothing written.
+    /// read-modify-write under one exclusive lock. `build` is called with the
+    /// ops [`Self::recent`] holds *now* (post-catch-up) so a higher layer
+    /// (e.g. the ref store) can fold concurrent ops into its own state and
+    /// CAS-validate its transaction against the true current state,
+    /// atomically with the append. `build` returning `Err` aborts cleanly
+    /// with nothing written.
     pub fn append_checked<F, E>(
         &mut self,
         actor: &str,
@@ -517,6 +273,8 @@ impl OpLog {
         rec.extend_from_slice(&hash.as_bytes()[..CHECKSUM_LEN]);
         self.file.seek(SeekFrom::Start(self.len_bytes))?;
         self.file.write_all(&rec)?;
+        self.unsynced = true;
+        self.last_start = self.len_bytes;
         self.len_bytes += rec.len() as u64;
 
         let op = Op {
@@ -527,7 +285,9 @@ impl OpLog {
             actor: actor.to_owned(),
             payload: payload.to_vec(),
         };
-        self.by_id.insert(op.id, self.ops.len() as u32);
+        if let Some(full) = self.full.get_mut() {
+            full.push(op.clone());
+        }
         self.ops.push(op);
         Ok(OpId(*hash.as_bytes()))
     }
@@ -541,14 +301,23 @@ impl OpLog {
         if size <= self.len_bytes {
             return Ok(());
         }
-        let mut tail = vec![0u8; (size - self.len_bytes) as usize];
-        self.file.seek(SeekFrom::Start(self.len_bytes))?;
-        self.file.read_exact(&mut tail)?;
+        let tail = read_at(
+            &mut self.file,
+            self.len_bytes,
+            (size - self.len_bytes) as usize,
+        )?;
 
         let head = self.head().unwrap_or(ROOT);
-        let valid = replay_records(&tail, 0, head, &mut self.ops, &mut self.by_id)? as u64;
-        let new_len = self.len_bytes + valid;
-        if valid < tail.len() as u64 {
+        let known = self.ops.len();
+        let replayed = replay_records(&tail, 0, head, &mut self.ops)?;
+        if let Some(full) = self.full.get_mut() {
+            full.extend_from_slice(&self.ops[known..]);
+        }
+        if let Some(start) = replayed.last_start {
+            self.last_start = self.len_bytes + start as u64;
+        }
+        let new_len = self.len_bytes + replayed.valid as u64;
+        if replayed.valid < tail.len() {
             self.file.set_len(new_len)?; // drop a crashed writer's torn record
             self.file.sync_all()?;
         }
@@ -558,29 +327,75 @@ impl OpLog {
 
     /// The latest op — the state the log currently describes.
     pub fn head(&self) -> Option<OpId> {
-        self.ops.last().map(|op| op.id)
+        self.ops
+            .last()
+            .map(|op| op.id)
+            .or(self.base.map(|anchor| anchor.op))
     }
 
-    /// All ops in chain order — the replay basis.
-    pub fn ops(&self) -> &[Op] {
+    /// The anchor naming the current head, for a later [`Self::open_at`].
+    pub fn anchor(&self) -> Option<Anchor> {
+        let op = self.head()?;
+        Some(Anchor {
+            op,
+            start: self.last_start,
+            end: self.len_bytes,
+            count: self.len() as u64,
+        })
+    }
+
+    /// Whether the log was opened at an anchor, so [`Self::recent`] starts
+    /// after it rather than at the first op.
+    pub fn anchored(&self) -> bool {
+        self.base.is_some()
+    }
+
+    /// The ops this handle replayed on open and since: those after the
+    /// anchor it was opened at, or all of them without one.
+    pub fn recent(&self) -> &[Op] {
         &self.ops
     }
 
-    pub fn get(&self, id: &OpId) -> Option<&Op> {
-        self.by_id.get(id).map(|&at| &self.ops[at as usize])
+    /// All ops in chain order — the replay basis. On a log opened at an
+    /// anchor the first call reads and verifies the part before it.
+    pub fn ops(&self) -> Result<&[Op], OpLogError> {
+        let Some(base) = self.base else {
+            return Ok(&self.ops);
+        };
+        if let Some(full) = self.full.get() {
+            return Ok(full);
+        }
+        // the records before the anchor never change; no lock needed
+        let mut data = vec![0u8; base.end as usize];
+        read_prefix(&self.file, &mut data)?;
+        check_header(&data)?;
+        let mut all = Vec::new();
+        let replayed = replay_records(&data, HEADER_LEN.min(data.len()), ROOT, &mut all)?;
+        if replayed.valid as u64 != base.end
+            || all.len() as u64 != base.count
+            || all.last().map(|op| op.id) != Some(base.op)
+        {
+            return Err(OpLogError::Format("oplog does not lead to its anchor"));
+        }
+        all.extend_from_slice(&self.ops);
+        Ok(self.full.get_or_init(|| all))
     }
 
-    /// Position of an op in chain order (for replaying from a snapshot).
-    pub fn index_of(&self, id: &OpId) -> Option<usize> {
-        self.by_id.get(id).map(|&at| at as usize)
+    pub fn get(&self, id: &OpId) -> Result<Option<&Op>, OpLogError> {
+        Ok(self.ops()?.iter().find(|op| op.id == *id))
     }
 
     pub fn len(&self) -> usize {
-        self.ops.len()
+        self.base.map_or(0, |anchor| anchor.count as usize) + self.ops.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.ops.is_empty()
+        self.len() == 0
+    }
+
+    /// Bytes up to our write cursor.
+    pub fn appended_len(&self) -> u64 {
+        self.len_bytes
     }
 
     /// Durability point for everything appended so far. Group commit: fsync
@@ -626,7 +441,12 @@ impl OpLog {
         if read_durable(&self.durable_path) >= target {
             return Ok(());
         }
-        lock_exclusive(&self.sync_lock)?;
+        let sync_lock = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&self.sync_lock_path)?;
+        lock_exclusive(&sync_lock)?;
         let result = (|| -> Result<(), OpLogError> {
             if read_durable(&self.durable_path) >= target {
                 return Ok(());
@@ -636,9 +456,24 @@ impl OpLog {
             write_durable(&self.durable_path, eof)?;
             Ok(())
         })();
-        let _ = unlock(&self.sync_lock);
+        let _ = unlock(&sync_lock);
         result
     }
+}
+
+/// Reads the first `buf.len()` bytes of the file without moving the cursor
+/// the writer appends at.
+#[cfg(unix)]
+fn read_prefix(file: &File, buf: &mut [u8]) -> std::io::Result<()> {
+    use std::os::unix::fs::FileExt;
+    file.read_exact_at(buf, 0)
+}
+
+#[cfg(not(unix))]
+fn read_prefix(file: &File, buf: &mut [u8]) -> std::io::Result<()> {
+    let mut file = file.try_clone()?;
+    file.seek(SeekFrom::Start(0))?;
+    file.read_exact(buf)
 }
 
 /// Repro/diagnostic knob (env `ALT_RELAXED_DURABILITY`): skip per-commit
@@ -650,12 +485,10 @@ pub fn relaxed_durability() -> bool {
 impl Drop for OpLog {
     fn drop(&mut self) {
         // best-effort durability; explicit sync() is the checked path
-        let _ = self.file.sync_all();
+        if self.unsynced {
+            let _ = self.file.sync_all();
+        }
     }
-}
-
-fn file_header() -> [u8; HEADER_LEN] {
-    [MAGIC[0], MAGIC[1], MAGIC[2], MAGIC[3], VERSION]
 }
 
 #[cfg(test)]
@@ -664,7 +497,7 @@ mod tests {
 
     #[test]
     fn source_body_preserves_reserved_fields_and_refuses_identity_changes() {
-        let mut raw = encode_body(&ROOT, 42, "source actor", b"source payload");
+        let mut raw = scan::encode_body(&ROOT, 42, "source actor", b"source payload");
         raw[32..64].fill(7);
         let op = Op::from_body(&raw).unwrap();
         assert_eq!(op.change_id, [7; 32]);
@@ -692,10 +525,10 @@ mod tests {
         let a = log.append("alice", 1000, b"op a").unwrap();
         let b = log.append("agent/7", 2000, b"op b").unwrap();
         assert_eq!(log.head(), Some(b));
-        assert_eq!(log.ops()[0].parent, ROOT);
-        assert_eq!(log.ops()[1].parent, a);
-        assert_eq!(log.get(&a).unwrap().payload, b"op a");
-        assert_eq!(log.get(&b).unwrap().actor, "agent/7");
+        assert_eq!(log.ops().unwrap()[0].parent, ROOT);
+        assert_eq!(log.ops().unwrap()[1].parent, a);
+        assert_eq!(log.get(&a).unwrap().unwrap().payload, b"op a");
+        assert_eq!(log.get(&b).unwrap().unwrap().actor, "agent/7");
     }
 
     #[test]
@@ -722,8 +555,8 @@ mod tests {
         let dir = alt_os::temp::tempdir().unwrap();
         let mut log = OpLog::open(dir.path()).unwrap();
         let id = log.append("", 0, b"").unwrap();
-        assert_eq!(log.get(&id).unwrap().actor, "");
-        assert_eq!(log.get(&id).unwrap().payload, b"");
+        assert_eq!(log.get(&id).unwrap().unwrap().actor, "");
+        assert_eq!(log.get(&id).unwrap().unwrap().payload, b"");
     }
 
     #[test]
@@ -737,11 +570,11 @@ mod tests {
         let a1 = a.append("a", 1, b"a1").unwrap();
         // b still thinks the log is empty; its append must catch up to a1 first
         let b1 = b.append("b", 2, b"b1").unwrap();
-        assert_eq!(b.get(&b1).unwrap().parent, a1, "b1 chains onto a1");
+        assert_eq!(b.get(&b1).unwrap().unwrap().parent, a1, "b1 chains onto a1");
 
         // and a, in turn, catches up to b1 on its next append
         let a2 = a.append("a", 3, b"a2").unwrap();
-        assert_eq!(a.get(&a2).unwrap().parent, b1, "a2 chains onto b1");
+        assert_eq!(a.get(&a2).unwrap().unwrap().parent, b1, "a2 chains onto b1");
 
         // a fresh reader sees a single unbroken chain of all three
         let reopened = OpLog::open(dir.path()).unwrap();
@@ -794,7 +627,7 @@ mod tests {
             "no op lost and none duplicated"
         );
         let mut seen: std::collections::HashSet<Vec<u8>> = std::collections::HashSet::new();
-        for op in log.ops() {
+        for op in log.ops().unwrap() {
             assert!(
                 seen.insert(op.payload.clone()),
                 "duplicate op {:?}",

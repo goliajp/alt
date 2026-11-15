@@ -62,11 +62,11 @@ fn corpus_objects_round_trip_through_native_odb() {
     odb.flush().unwrap();
     assert!(objects > 0, "corpus must contain objects");
 
-    let c = odb.blobs().counters();
+    let c = odb.blobs().unwrap().counters();
     eprintln!(
         "corpus object account: {objects} objects ({} mapped), \
          {} chunk puts ({} dedup hits), {} bytes in, {} bytes written",
-        odb.len(),
+        odb.len().unwrap(),
         c.puts,
         c.dedup_hits,
         c.bytes_in,

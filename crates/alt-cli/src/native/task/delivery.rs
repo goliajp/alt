@@ -443,7 +443,7 @@ impl NativeRepo<'_> {
             .store
             .refs
             .oplog()
-            .ops()
+            .ops()?
             .iter()
             .filter(|op| {
                 requests::operation_request(op).ok().flatten().as_deref()
@@ -608,7 +608,7 @@ impl NativeRepo<'_> {
             ));
         }
         let mut found = None;
-        for op in self.store.refs.oplog().ops() {
+        for op in self.store.refs.oplog().ops()? {
             let Some(tx) = alt_refs::parse_tx(&op.payload)? else {
                 continue;
             };

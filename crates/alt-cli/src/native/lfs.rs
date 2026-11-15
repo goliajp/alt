@@ -190,7 +190,7 @@ impl NativeRepo<'_> {
                 .iter()
                 .find(|r| r.name == remote)
                 .ok_or_else(|| format!("no such remote '{remote}'"))?;
-            let url = alt_repo::Repository::discover(&self.store.alt_dir)?.rewrite_url(&r.url);
+            let url = alt_repo::Repository::discover(&self.store.alt_dir)?.rewrite_url(&r.url)?;
             let auth = http_auth(remote, &url).map(|a| (a.username, a.token));
             let client = alt_lfs::Client::new(alt_lfs::endpoint_for(&url), auth);
             for (_, content) in client.download(&missing)? {

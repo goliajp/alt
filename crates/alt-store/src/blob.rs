@@ -141,7 +141,7 @@ impl BlobStore {
     /// already in the store.
     pub fn put(&mut self, data: &[u8]) -> Result<BlobId, StoreError> {
         let id = BlobId::of(data);
-        if self.contains(id) {
+        if self.contains(id)? {
             return Ok(id);
         }
 
@@ -210,7 +210,7 @@ impl BlobStore {
         mode: ChunkRead,
         hash_boundary: bool,
     ) -> Result<Vec<u8>, StoreError> {
-        let Some((root, total_len)) = self.map.get(id) else {
+        let Some((root, total_len)) = self.map.get(id)? else {
             // no manifest: the blob is a single chunk under the same hash
             let chunk = ChunkId(id.0);
             let res = match mode {
@@ -249,7 +249,7 @@ impl BlobStore {
     /// storage-view endpoint needs to surface tier / encoding /
     /// physical bytes per chunk.
     pub fn leaf_chunks(&self, id: BlobId) -> Result<Vec<ChunkId>, StoreError> {
-        let Some((root, _total_len)) = self.map.get(id) else {
+        let Some((root, _total_len)) = self.map.get(id)? else {
             // single-chunk blob: chunk id coincides with blob id
             return Ok(vec![ChunkId(id.0)]);
         };
@@ -313,8 +313,8 @@ impl BlobStore {
         Ok(())
     }
 
-    pub fn contains(&self, id: BlobId) -> bool {
-        self.map.contains(id) || self.chunks.contains(ChunkId(id.0))
+    pub fn contains(&self, id: BlobId) -> Result<bool, StoreError> {
+        Ok(self.map.contains(id)? || self.chunks.contains(ChunkId(id.0))?)
     }
 
     /// Re-encodes `blob` as a lineage delta against `base` when both are
@@ -322,11 +322,11 @@ impl BlobStore {
     /// and lineage wins). Multi-chunk blobs already dedup chunk-wise, so
     /// they are left alone. Returns whether a re-encoding happened.
     pub fn lineage_delta(&mut self, blob: BlobId, base: BlobId) -> Result<bool, StoreError> {
-        if blob == base || self.map.contains(blob) || self.map.contains(base) {
+        if blob == base || self.map.contains(blob)? || self.map.contains(base)? {
             return Ok(false);
         }
         let (blob, base) = (ChunkId(blob.0), ChunkId(base.0));
-        if !self.chunks.contains(blob) || !self.chunks.contains(base) {
+        if !self.chunks.contains(blob)? || !self.chunks.contains(base)? {
             return Ok(false);
         }
         self.chunks.reencode_as_delta(blob, base)
@@ -346,7 +346,7 @@ impl BlobStore {
 
     /// Whether `id` is a multi-chunk blob (has a manifest). Single-chunk
     /// blobs are stored directly as one chunk under the same address.
-    pub fn is_multi_chunk(&self, id: BlobId) -> bool {
+    pub fn is_multi_chunk(&self, id: BlobId) -> Result<bool, StoreError> {
         self.map.contains(id)
     }
 
@@ -366,6 +366,19 @@ impl BlobStore {
     pub fn sync_from_disk(&mut self) -> Result<(), StoreError> {
         self.chunks.sync_from_disk()?;
         self.map.sync_from_disk()
+    }
+
+    /// Whether [`Self::index_tail`] has anything to do.
+    pub fn index_pending(&self) -> bool {
+        self.chunks.index_pending() || self.map.index_pending()
+    }
+
+    /// Folds the records appended since the last index runs into new runs,
+    /// once there are enough of them. Called by the odb under its write lock
+    /// at the end of a batch.
+    pub fn index_tail(&mut self) -> Result<(), StoreError> {
+        self.chunks.index_tail()?;
+        self.map.index_tail()
     }
 
     /// Raw fsync of chunks then the blob map, in that order — so a crash never
@@ -466,7 +479,7 @@ mod tests {
         let ids: Vec<BlobId> = cases.iter().map(|c| store.put(c).unwrap()).collect();
         for (case, id) in cases.iter().zip(&ids) {
             assert_eq!(*id, BlobId::of(case));
-            assert!(store.contains(*id));
+            assert!(store.contains(*id).unwrap());
             assert_eq!(&store.get(*id).unwrap(), case);
         }
     }
@@ -532,25 +545,34 @@ mod tests {
         let after_multi = random_bytes(2 << 20, 12);
         let id_after = store.put(&after).unwrap();
         let id_after_multi = store.put(&after_multi).unwrap();
-        assert!(store.contains(id_after));
-        assert!(store.contains(id_after_multi));
+        assert!(store.contains(id_after).unwrap());
+        assert!(store.contains(id_after_multi).unwrap());
         store.rewind(ckpt).unwrap();
-        assert!(store.contains(id_before), "pre-checkpoint blob survives");
-        assert!(store.contains(id_multi), "pre-checkpoint multi survives");
+        assert!(
+            store.contains(id_before).unwrap(),
+            "pre-checkpoint blob survives"
+        );
+        assert!(
+            store.contains(id_multi).unwrap(),
+            "pre-checkpoint multi survives"
+        );
         assert_eq!(&store.get(id_before).unwrap(), &before);
         assert_eq!(&store.get(id_multi).unwrap(), &multi);
-        assert!(!store.contains(id_after), "post-checkpoint blob gone");
         assert!(
-            !store.contains(id_after_multi),
+            !store.contains(id_after).unwrap(),
+            "post-checkpoint blob gone"
+        );
+        assert!(
+            !store.contains(id_after_multi).unwrap(),
             "post-checkpoint multi gone"
         );
         // re-open from disk: state matches the rewound view
         drop(store);
         let store = BlobStore::open(dir.path()).unwrap();
-        assert!(store.contains(id_before));
-        assert!(store.contains(id_multi));
-        assert!(!store.contains(id_after));
-        assert!(!store.contains(id_after_multi));
+        assert!(store.contains(id_before).unwrap());
+        assert!(store.contains(id_multi).unwrap());
+        assert!(!store.contains(id_after).unwrap());
+        assert!(!store.contains(id_after_multi).unwrap());
     }
 
     #[test]
@@ -560,12 +582,12 @@ mod tests {
         let ckpt = store.checkpoint();
         let data = random_bytes(1 << 20, 13);
         let id = store.put(&data).unwrap();
-        assert!(store.contains(id));
+        assert!(store.contains(id).unwrap());
         store.rewind(ckpt).unwrap();
-        assert!(!store.contains(id));
+        assert!(!store.contains(id).unwrap());
         drop(store);
         let store = BlobStore::open(dir.path()).unwrap();
-        assert!(!store.contains(id));
+        assert!(!store.contains(id).unwrap());
     }
 
     #[test]

@@ -92,7 +92,7 @@ impl NativeRepo<'_> {
         {
             return Err(refused("run collection response record mismatch"));
         }
-        for op in self.store.refs.oplog().ops() {
+        for op in self.store.refs.oplog().ops()? {
             if op.payload.first() != Some(&TASK_OPERATION)
                 || !completion.operations.contains(&op.id.to_string())
             {
@@ -113,7 +113,7 @@ impl NativeRepo<'_> {
     pub(super) fn local_collected_evidence_complete(&self, evidence: &Evidence) -> Res<bool> {
         let id = evidence.id()?;
         // Read without reopening the store lock already held by the caller.
-        for op in self.store.refs.oplog().ops() {
+        for op in self.store.refs.oplog().ops()? {
             if op.payload.first() != Some(&TASK_OPERATION) {
                 continue;
             }

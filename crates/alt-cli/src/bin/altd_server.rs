@@ -1230,7 +1230,7 @@ fn handle_receive_pack(
         // need to pile up at await_durable in a tight enough window to
         // coalesce, and even a few hundred µs of extra syscalls per
         // push spread them past the leader's fsync.
-        let pre = g.odb().cursor();
+        let pre = g.odb().cursor()?;
         let result: Result<(), String> = match (&prepared, sig_block.is_some(), pack_bytes_streamed)
         {
             (None, true, _) => Ok(()),
@@ -1251,7 +1251,7 @@ fn handle_receive_pack(
             Err(e) => Err(format!("index-pack: {e}")),
         };
         // Same cheap snapshot for the post-ingest cursor.
-        let post = g.odb().cursor();
+        let post = g.odb().cursor()?;
         (pre, post, result)
     };
 

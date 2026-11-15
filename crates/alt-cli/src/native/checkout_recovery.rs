@@ -65,7 +65,7 @@ impl NativeRepo<'_> {
         let mut completed = std::collections::HashSet::new();
         // Identity is only allocated on writes, after the capability gate.
         let identity = self.workspace_identity()?;
-        for op in self.store.refs.oplog().ops().iter().rev() {
+        for op in self.store.refs.oplog().ops()?.iter().rev() {
             match op.payload.first() {
                 Some(&COMPLETE_CHECKOUT) => {
                     let done: CheckoutDone = decode(&op.payload, COMPLETE_CHECKOUT)?;

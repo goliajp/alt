@@ -73,7 +73,7 @@ impl Store {
     /// Opens (does not create) the store whose control dir is `alt_dir`.
     pub fn open(alt_dir: PathBuf) -> Res<Self> {
         Ok(Self {
-            odb: NativeOdb::open(&alt_dir)?,
+            odb: NativeOdb::deferred(&alt_dir),
             refs: RefStore::open(&alt_dir)?,
             policy: Policy::load(&alt_dir)?,
             algo: alt_repo::native_object_format(&alt_dir)?,
@@ -1937,7 +1937,7 @@ impl<'a> NativeRepo<'a> {
         let target_kind = self
             .store
             .odb
-            .lookup(&target)
+            .lookup(&target)?
             .map(|e| e.kind)
             .ok_or_else(|| format!("target {target} not in the object store"))?;
         let type_str = match target_kind {
@@ -3052,7 +3052,7 @@ impl<'a> NativeRepo<'a> {
         // git-smart-http transport can take them.
         let rewritten_url = {
             let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
-            repo.rewrite_url(&remote.url)
+            repo.rewrite_url(&remote.url)?
         };
         let transport = build_transport(&remote.name, &rewritten_url);
 
@@ -3315,7 +3315,7 @@ impl<'a> NativeRepo<'a> {
         // git-smart-http transport can take them.
         let rewritten_url = {
             let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
-            repo.rewrite_url(&remote.url)
+            repo.rewrite_url(&remote.url)?
         };
         let transport = build_transport(&remote.name, &rewritten_url);
 
@@ -3584,7 +3584,7 @@ impl<'a> NativeRepo<'a> {
         let oplog = alt_oplog::OpLog::open(&self.store.alt_dir.join("oplog"))?;
         let limit = max_count.unwrap_or(usize::MAX);
         // newest first matches `alt log` and what an auditor naturally wants
-        let entries: Vec<&alt_oplog::Op> = oplog.ops().iter().rev().take(limit).collect();
+        let entries: Vec<&alt_oplog::Op> = oplog.ops()?.iter().rev().take(limit).collect();
 
         // when --verify is asked, pre-compute the verdict for each op id
         // up front so the per-op rendering doesn't pay an N×M cost

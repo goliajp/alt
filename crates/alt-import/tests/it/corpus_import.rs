@@ -167,13 +167,13 @@ fn killed_import_recovers_and_converges() {
         );
         let odb = NativeOdb::open(&alt_dir).unwrap();
         // whatever was mapped must read back (spot-check a sample)
-        let sample: Vec<_> = odb.entries().take(64).cloned().collect();
+        let sample: Vec<_> = odb.entries().unwrap().into_iter().take(64).collect();
         for entry in &sample {
             let raw = odb.get(&entry.git).unwrap().unwrap();
             assert_eq!(raw.kind, entry.kind);
             assert_eq!(raw.data.len() as u64, entry.size);
         }
-        assert!(!sample.is_empty() || odb.is_empty());
+        assert!(!sample.is_empty() || odb.is_empty().unwrap());
     }
 
     // re-run to completion and verify full convergence

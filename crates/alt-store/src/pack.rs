@@ -66,15 +66,15 @@ pub fn check_file_header(data: &[u8]) -> Result<(), StoreError> {
     Ok(())
 }
 
-/// Walks records sequentially and returns every structurally complete one
-/// plus the byte length of that valid prefix. A record cut short by a crash
-/// (or any garbage after the last complete record) ends the walk — for the
-/// active pack the caller truncates to the valid prefix; for a sealed pack a
-/// prefix shorter than the file is corruption.
-pub fn scan(data: &[u8]) -> Result<(Vec<(RecordHeader, u64)>, u64), StoreError> {
-    check_file_header(data)?;
+/// Walks records sequentially from offset `from` (a record boundary) and
+/// returns every structurally complete one plus the offset where that valid
+/// run of records ends. A record cut short by a crash (or any garbage after
+/// the last complete record) ends the walk — for the active pack the caller
+/// truncates there; for a sealed pack stopping short of the file's end is
+/// corruption.
+pub fn scan_from(data: &[u8], from: usize) -> (Vec<(RecordHeader, u64)>, u64) {
     let mut entries = Vec::new();
-    let mut at = HEADER_LEN;
+    let mut at = from;
     while let Some(hdr_bytes) = data.get(at..at + REC_HEADER_LEN) {
         let hdr = RecordHeader::parse(hdr_bytes.try_into().unwrap());
         if hdr.encoding > ENC_RESERVED_MAX {
@@ -89,7 +89,7 @@ pub fn scan(data: &[u8]) -> Result<(Vec<(RecordHeader, u64)>, u64), StoreError> 
         entries.push((hdr, at as u64));
         at = end;
     }
-    Ok((entries, at as u64))
+    (entries, at as u64)
 }
 
 /// Positioned read that leaves the file cursor alone (the writer owns it).

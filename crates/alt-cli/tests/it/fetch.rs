@@ -163,7 +163,7 @@ fn alt_fetch_round_trips_against_git_upload_pack() {
     assert!(!server_oids.is_empty(), "server repo has no objects?");
     for oid in &server_oids {
         assert!(
-            odb.contains(oid),
+            odb.contains(oid).unwrap(),
             "alt odb missing object {oid} that server has"
         );
     }

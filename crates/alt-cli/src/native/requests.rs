@@ -10,7 +10,7 @@ impl Coord {
 impl Store {
     pub fn legacy_request(&self, id: &IdemKey) -> Res<bool> {
         // The ref snapshot's key cache does not cover older history.
-        for op in self.refs.oplog().ops() {
+        for op in self.refs.oplog().ops()? {
             if let Some(tx) = alt_refs::parse_tx(&op.payload)?
                 && tx.key.as_ref() == Some(id)
             {
@@ -22,7 +22,7 @@ impl Store {
 
     pub fn request_operations(&self, id: &str) -> Res<Vec<String>> {
         let mut operations = Vec::new();
-        for op in self.refs.oplog().ops() {
+        for op in self.refs.oplog().ops()? {
             if operation_request(op)?.as_deref() == Some(id) {
                 operations.push(op.id.to_string());
             }

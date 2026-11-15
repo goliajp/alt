@@ -1,0 +1,106 @@
+//! Reading the log file for an open: what has to be read, verifying it,
+//! and repairing a torn tail.
+
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom, Write};
+
+use crate::scan::{CHECKSUM_LEN, HEADER_LEN, check_header, file_header, replay_records};
+use crate::{Anchor, Op, OpLogError, ROOT};
+
+/// Bytes read from the log file under its lock, not yet verified.
+pub(crate) struct Raw {
+    /// the anchor the read started after, when it still matches the file
+    pub base: Option<Anchor>,
+    /// file offset of `data[0]`
+    at: u64,
+    data: Vec<u8>,
+}
+
+/// The verified ops of a [`Raw`] read, and where the last whole record ends
+/// against how long the file is.
+pub(crate) struct Scan {
+    pub base: Option<Anchor>,
+    pub ops: Vec<Op>,
+    pub valid_len: u64,
+    pub last_start: u64,
+    pub file_len: u64,
+}
+
+impl Scan {
+    /// A new log without its header yet, or a torn tail to cut.
+    pub fn needs_repair(&self) -> bool {
+        self.valid_len < HEADER_LEN as u64 || self.valid_len < self.file_len
+    }
+}
+
+pub(crate) fn read_at(file: &mut File, at: u64, len: usize) -> std::io::Result<Vec<u8>> {
+    let mut data = vec![0u8; len];
+    file.seek(SeekFrom::Start(at))?;
+    file.read_exact(&mut data)?;
+    Ok(data)
+}
+
+/// Reads what an open has to verify: everything after `anchor` when the
+/// record it names still ends where it says (the checksum closing a record
+/// is the op id's first bytes), the whole file otherwise.
+pub(crate) fn read_log(file: &mut File, anchor: Option<Anchor>) -> std::io::Result<Raw> {
+    let size = file.metadata()?.len();
+    if let Some(anchor) = anchor
+        && anchor.end <= size
+        && anchor.start + 4 + (CHECKSUM_LEN as u64) <= anchor.end
+        && read_at(file, anchor.end - CHECKSUM_LEN as u64, CHECKSUM_LEN)?
+            == anchor.op.0[..CHECKSUM_LEN]
+    {
+        return Ok(Raw {
+            base: Some(anchor),
+            at: anchor.end,
+            data: read_at(file, anchor.end, (size - anchor.end) as usize)?,
+        });
+    }
+    Ok(Raw {
+        base: None,
+        at: 0,
+        data: read_at(file, 0, size as usize)?,
+    })
+}
+
+/// Verifies and replays a read taken under the lock.
+pub(crate) fn scan(raw: Raw) -> Result<Scan, OpLogError> {
+    let mut ops = Vec::new();
+    let (from, head, last_start) = match raw.base {
+        Some(anchor) => (0, anchor.op, anchor.start),
+        None => {
+            check_header(&raw.data)?;
+            (HEADER_LEN.min(raw.data.len()), ROOT, 0)
+        }
+    };
+    // a record that runs past EOF (torn length field or torn body) ends
+    // the walk; the caller truncates back to the last whole record
+    let replayed = replay_records(&raw.data, from, head, &mut ops)?;
+    Ok(Scan {
+        base: raw.base,
+        ops,
+        valid_len: raw.at + replayed.valid as u64,
+        last_start: replayed
+            .last_start
+            .map_or(last_start, |start| raw.at + start as u64),
+        file_len: raw.at + raw.data.len() as u64,
+    })
+}
+
+/// Rescans and repairs; the caller holds the exclusive lock.
+pub(crate) fn scan_and_repair(file: &mut File, anchor: Option<Anchor>) -> Result<Scan, OpLogError> {
+    let mut scan = scan(read_log(file, anchor)?)?;
+    if scan.valid_len < HEADER_LEN as u64 {
+        file.set_len(0)?;
+        file.seek(SeekFrom::Start(0))?;
+        file.write_all(&file_header())?;
+        file.sync_all()?;
+        scan.valid_len = HEADER_LEN as u64;
+    } else if scan.valid_len < scan.file_len {
+        file.set_len(scan.valid_len)?;
+        file.sync_all()?;
+    }
+    scan.file_len = scan.valid_len;
+    Ok(scan)
+}

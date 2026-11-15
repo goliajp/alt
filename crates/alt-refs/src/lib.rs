@@ -11,148 +11,21 @@
 //! rebuild and is pure cache — missing, corrupt, or orphaned snapshots are
 //! ignored and rewritten.
 
+mod policy;
 mod snapshot;
+mod state;
 mod tx;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use alt_git_codec::ObjectId;
-use alt_oplog::{OpLog, OpLogError};
+use alt_oplog::OpLog;
+use state::Refs;
 
 pub use alt_oplog::OpId;
+pub use policy::{RefError, RefPolicy, StateCheck};
 pub use tx::{IdemKey, PAYLOAD_REF_TX, ParsedTx, RefChange, parse_tx};
-
-#[derive(Debug)]
-pub enum RefError {
-    Io(std::io::Error),
-    OpLog(OpLogError),
-    Format(&'static str),
-    Conflict {
-        name: String,
-    },
-    SymrefDepth(String),
-    ReservedPayload(u8),
-    /// The capability gate denied this transaction. The string names the ref
-    /// (or `<read-only>` for a blanket deny) so the operator can act on the
-    /// audit message.
-    CapabilityDenied(String),
-    /// The caller's [`RefPolicy::state_check`] refused the transaction
-    /// against the current ref state.
-    Rejected(String),
-}
-
-impl std::fmt::Display for RefError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Io(_) => f.write_str("io"),
-            Self::OpLog(_) => f.write_str("oplog"),
-            Self::Format(what) => write!(f, "ref format: {what}"),
-            Self::Conflict { name } => write!(f, "ref {name}: expected state does not match"),
-            Self::SymrefDepth(name) => write!(f, "symref chain too deep resolving {name}"),
-            Self::ReservedPayload(kind) => {
-                write!(f, "payload kind {kind} is reserved for ref transactions")
-            }
-            Self::CapabilityDenied(what) => write!(f, "capability denied: {what}"),
-            Self::Rejected(reason) => write!(f, "{reason}"),
-        }
-    }
-}
-
-impl std::error::Error for RefError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Io(e) => Some(e),
-            Self::OpLog(e) => Some(e),
-            Self::Format(_)
-            | Self::Conflict { .. }
-            | Self::SymrefDepth(_)
-            | Self::ReservedPayload(_)
-            | Self::CapabilityDenied(_)
-            | Self::Rejected(_) => None,
-        }
-    }
-}
-
-impl From<std::io::Error> for RefError {
-    fn from(e: std::io::Error) -> Self {
-        Self::Io(e)
-    }
-}
-
-impl From<OpLogError> for RefError {
-    fn from(e: OpLogError) -> Self {
-        Self::OpLog(e)
-    }
-}
-
-/// Per-call capability gate for ref-affecting transactions. The store invokes
-/// it inside the append lock, after the CAS catch-up and before the actual
-/// validate, so a denial aborts the transaction with zero on-disk side effect
-/// — no oplog write, no idempotency-index update.
-///
-/// Layered intentionally as a thin callback type so `alt-refs` stays oblivious
-/// to where the policy comes from (alt-cli has its own glob / [`Capabilities`]
-/// model). The *ref-shaped* gates live here (read-only + branch
-/// namespace); force and path gates live in [`NativeRepo`] where ancestry and
-/// working-tree paths are already in scope.
-///
-/// [`Capabilities`]: ../alt_cli/policy/struct.Capabilities.html
-/// [`NativeRepo`]: ../alt_cli/native/struct.NativeRepo.html
-pub struct RefPolicy<'a> {
-    /// If `true`, every ref change is denied.
-    pub read_only: bool,
-    /// `Some(f)` constrains writable ref names to those `f` accepts. `None`
-    /// (the common case: no policy file, or no rule matched) is "any name OK".
-    pub is_branch_allowed: Option<&'a dyn Fn(&str) -> bool>,
-    /// `Some(f)` vets the transaction against the ref state it would apply
-    /// to: `f` sees every ref as it stands after catching up on other
-    /// writers, inside the same lock, so the verdict cannot go stale before
-    /// the write. `Err(reason)` aborts it as [`RefError::Rejected`].
-    pub state_check: Option<&'a StateCheck>,
-}
-
-/// See [`RefPolicy::state_check`].
-pub type StateCheck = dyn Fn(&BTreeMap<String, RefTarget>, &[RefChange]) -> Result<(), String>;
-
-impl RefPolicy<'_> {
-    /// The unconstrained policy: any ref, any direction. Pass this (or simply
-    /// `None` to [`commit_idempotent`]) when the caller has no policy to apply
-    /// — tests, imports, the legacy `commit` shim.
-    pub fn full() -> RefPolicy<'static> {
-        RefPolicy {
-            read_only: false,
-            is_branch_allowed: None,
-            state_check: None,
-        }
-    }
-
-    fn check(
-        &self,
-        refs: &BTreeMap<String, RefTarget>,
-        changes: &[RefChange],
-    ) -> Result<(), RefError> {
-        if self.read_only && !changes.is_empty() {
-            return Err(RefError::CapabilityDenied(
-                "<read-only>: principal cannot write any ref".into(),
-            ));
-        }
-        if let Some(allow) = self.is_branch_allowed {
-            for c in changes {
-                if !allow(&c.name) {
-                    return Err(RefError::CapabilityDenied(format!(
-                        "{}: principal cannot write this ref",
-                        c.name
-                    )));
-                }
-            }
-        }
-        if let Some(f) = self.state_check {
-            f(refs, changes).map_err(RefError::Rejected)?;
-        }
-        Ok(())
-    }
-}
 
 /// What a ref points at.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -166,15 +39,23 @@ const MAX_SYMREF_DEPTH: usize = 5;
 
 /// Write a snapshot every this many ops (replay-cost ceiling).
 const SNAPSHOT_EVERY: usize = 1024;
+/// Also write one once this many log bytes follow the last snapshot — or
+/// half the snapshot's own size, when that is more: opening hashes every
+/// byte after the snapshot, and reads the snapshot itself anyway.
+const SNAPSHOT_BYTES: u64 = 16 << 10;
 
 /// Transactional ref state over the oplog.
 pub struct RefStore {
     oplog: OpLog,
     snapshot_path: PathBuf,
-    refs: BTreeMap<String, RefTarget>,
+    refs: Refs,
     ops_since_snapshot: usize,
-    /// How many oplog ops are already folded into `refs`. Lets a commit, under
-    /// the append lock, replay only the ops another writer added since — so a
+    /// Log offset the snapshot on disk reaches, and that snapshot's size.
+    snapshot_end: u64,
+    snapshot_len: u64,
+    /// How many of the oplog's recent ops (those it replayed on open and
+    /// since) are already folded into `refs`. Lets a commit, under the
+    /// append lock, replay only the ops another writer added since — so a
     /// transaction CAS-validates against the true current state, not a stale
     /// in-memory snapshot.
     applied: usize,
@@ -192,41 +73,63 @@ impl RefStore {
     /// transactions past the snapshot point.
     pub fn open(alt_dir: impl Into<PathBuf>) -> Result<Self, RefError> {
         let alt_dir = alt_dir.into();
-        let oplog = OpLog::open(&alt_dir.join("oplog"))?;
-        let refs_dir = alt_dir.join("refs");
-        std::fs::create_dir_all(&refs_dir)?;
-        let snapshot_path = refs_dir.join("snapshot");
+        let snapshot_path = alt_dir.join("refs").join("snapshot");
+        let snapshot = snapshot::read(&snapshot_path);
+        let anchor = snapshot.as_ref().and_then(|snap| snap.anchor);
+        let oplog = OpLog::open_at(&alt_dir.join("oplog"), anchor)?;
 
-        let (mut refs, replay_from) = match snapshot::read(&snapshot_path) {
-            // the snapshot is only usable if its op is still in the chain
-            Some((at_op, refs)) => match oplog.index_of(&at_op) {
-                Some(index) => (refs, index + 1),
-                None => (BTreeMap::new(), 0),
+        let recent = oplog.recent();
+        let (mut refs, replay_from, snapshot_end, snapshot_len) = match snapshot {
+            Some(snap) if oplog.anchored() => (
+                Refs::from_base(snap.refs),
+                0,
+                anchor.map_or(0, |a| a.end),
+                snap.len,
+            ),
+            // the whole log was replayed: the snapshot is only usable if its
+            // op is still in the chain
+            Some(snap) => match recent.iter().position(|op| op.id == snap.at_op) {
+                Some(index) => (Refs::from_base(snap.refs), index + 1, 0, snap.len),
+                None => (Refs::default(), 0, 0, 0),
             },
-            None => (BTreeMap::new(), 0),
+            None => (Refs::default(), 0, 0, 0),
         };
 
-        let mut ops_since_snapshot = 0;
         let mut by_key = HashMap::new();
-        for op in &oplog.ops()[replay_from..] {
+        for op in &recent[replay_from..] {
             if let Some(tx) = tx::parse_tx(&op.payload)? {
-                apply_changes(&mut refs, &tx.changes, true)?;
+                refs.apply(&tx.changes, true)?;
                 if let Some(k) = tx.key {
                     by_key.insert(k, op.id);
                 }
             }
-            ops_since_snapshot += 1;
         }
 
-        let applied = oplog.len();
-        Ok(Self {
+        let mut store = Self {
+            ops_since_snapshot: recent.len() - replay_from,
+            applied: recent.len(),
             oplog,
             snapshot_path,
             refs,
-            ops_since_snapshot,
-            applied,
+            snapshot_end,
+            snapshot_len,
             by_key,
-        })
+        };
+        // a reader refreshes a snapshot that has fallen behind (or predates
+        // anchors), so the next open is short whoever runs it
+        if store.snapshot_is_due() {
+            store.snapshot()?;
+        }
+        Ok(store)
+    }
+
+    fn snapshot_is_due(&self) -> bool {
+        if self.ops_since_snapshot == 0 {
+            return false;
+        }
+        let behind = self.oplog.appended_len().saturating_sub(self.snapshot_end);
+        self.ops_since_snapshot >= SNAPSHOT_EVERY
+            || behind >= SNAPSHOT_BYTES.max(self.snapshot_len / 2)
     }
 
     /// Applies one atomic transaction: all expected-old values must match
@@ -291,7 +194,7 @@ impl RefStore {
                     if let Some(p) = policy {
                         p.check(refs, changes)?;
                     }
-                    apply_changes(&mut refs.clone(), changes, false)?;
+                    refs.check(changes, false)?;
                     Ok(match context {
                         Some(context) => tx::encode_scoped_tx(changes, key, context),
                         None => tx::encode_tx(changes, key),
@@ -300,11 +203,11 @@ impl RefStore {
         self.oplog.sync()?;
         // our own op is durable now; fold it into the map, the cursor, and the
         // idempotency index (so a retry with the same key is detected)
-        apply_changes(&mut self.refs, changes, false)?;
+        self.refs.apply(changes, false)?;
         if let Some(k) = key {
             self.by_key.insert(k, op_id);
         }
-        self.applied = self.oplog.len();
+        self.applied = self.oplog.recent().len();
         self.note_op()?;
         Ok(op_id)
     }
@@ -338,7 +241,7 @@ impl RefStore {
                     Ok(owned)
                 })?;
         self.oplog.sync()?;
-        self.applied = self.oplog.len();
+        self.applied = self.oplog.recent().len();
         self.note_op()?;
         Ok(op_id)
     }
@@ -353,7 +256,7 @@ impl RefStore {
             &mut self.refs,
             &mut self.applied,
             &mut self.by_key,
-            self.oplog.ops(),
+            self.oplog.recent(),
         )?;
         Ok(())
     }
@@ -380,7 +283,7 @@ impl RefStore {
 
     fn note_op(&mut self) -> Result<(), RefError> {
         self.ops_since_snapshot += 1;
-        if self.ops_since_snapshot >= SNAPSHOT_EVERY {
+        if self.snapshot_is_due() {
             self.snapshot()?;
         }
         Ok(())
@@ -389,10 +292,24 @@ impl RefStore {
     /// Writes the snapshot now (also happens automatically every
     /// [`SNAPSHOT_EVERY`] ops).
     pub fn snapshot(&mut self) -> Result<(), RefError> {
-        let Some(head) = self.oplog.head() else {
+        let Some(head) = self.oplog.anchor() else {
             return Ok(()); // nothing to anchor a snapshot to
         };
-        snapshot::write(&self.snapshot_path, &head, &self.refs)?;
+        // every op the log holds must be in `refs` first: another writer's
+        // ops are folded in under the append lock, not here
+        if self.applied != self.oplog.recent().len() {
+            return Ok(());
+        }
+        if let Some(dir) = self.snapshot_path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        self.snapshot_len = snapshot::write(
+            &self.snapshot_path,
+            &head,
+            self.refs.len(),
+            self.refs.iter(),
+        )?;
+        self.snapshot_end = head.end;
         self.ops_since_snapshot = 0;
         Ok(())
     }
@@ -417,9 +334,7 @@ impl RefStore {
 
     /// All refs in name order.
     pub fn iter(&self) -> impl Iterator<Item = (&str, &RefTarget)> {
-        self.refs
-            .iter()
-            .map(|(name, target)| (name.as_str(), target))
+        self.refs.iter()
     }
 
     pub fn len(&self) -> usize {
@@ -427,7 +342,7 @@ impl RefStore {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.refs.is_empty()
+        self.refs.len() == 0
     }
 
     /// The op the current state corresponds to.
@@ -444,7 +359,7 @@ impl RefStore {
     /// last op is a ref tx. `None` when no ref transaction has ever been
     /// recorded.
     pub fn last_transaction(&self) -> Result<Option<Vec<RefChange>>, RefError> {
-        for op in self.oplog.ops().iter().rev() {
+        for op in self.oplog.ops()?.iter().rev() {
             if let Some(tx) = tx::parse_tx(&op.payload)? {
                 return Ok(Some(tx.changes));
             }
@@ -457,62 +372,33 @@ impl RefStore {
     /// restore index entries; anything else → refuse). Distinct from
     /// `last_transaction`, which scans past non-ref ops; this is whatever
     /// happened most recently.
-    pub fn last_op(&self) -> Option<&alt_oplog::Op> {
-        self.oplog.ops().last()
+    pub fn last_op(&self) -> Result<Option<&alt_oplog::Op>, RefError> {
+        match self.oplog.recent().last() {
+            Some(op) => Ok(Some(op)),
+            None => Ok(self.oplog.ops()?.last()),
+        }
     }
 }
 
-/// Folds the oplog ops not yet applied to `refs` (`ops[*applied..]`) into the
+/// Folds the oplog's recent ops not yet applied to `refs` (`ops[*applied..]`) into the
 /// map — ref transactions only, re-verifying each — and advances the cursor.
 /// Run under the append lock so it sees (and chains onto) the true current
 /// state another writer may have produced.
 fn fold_new(
-    refs: &mut BTreeMap<String, RefTarget>,
+    refs: &mut Refs,
     applied: &mut usize,
     by_key: &mut HashMap<IdemKey, OpId>,
     ops: &[alt_oplog::Op],
 ) -> Result<(), RefError> {
     for op in &ops[*applied..] {
         if let Some(tx) = tx::parse_tx(&op.payload)? {
-            apply_changes(refs, &tx.changes, true)?;
+            refs.apply(&tx.changes, true)?;
             if let Some(k) = tx.key {
                 by_key.insert(k, op.id);
             }
         }
     }
     *applied = ops.len();
-    Ok(())
-}
-
-/// Applies changes to a map, enforcing expected-old values. `replaying`
-/// only changes the error: a mismatch during replay means the log and the
-/// derived state diverged (corruption), not a caller conflict.
-fn apply_changes(
-    refs: &mut BTreeMap<String, RefTarget>,
-    changes: &[RefChange],
-    replaying: bool,
-) -> Result<(), RefError> {
-    for change in changes {
-        if refs.get(&change.name) != change.old.as_ref() {
-            return Err(if replaying {
-                RefError::Format("ref state diverged during replay")
-            } else {
-                RefError::Conflict {
-                    name: change.name.clone(),
-                }
-            });
-        }
-    }
-    for change in changes {
-        match &change.new {
-            Some(target) => {
-                refs.insert(change.name.clone(), target.clone());
-            }
-            None => {
-                refs.remove(&change.name);
-            }
-        }
-    }
     Ok(())
 }
 

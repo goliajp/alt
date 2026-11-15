@@ -6,56 +6,27 @@
 //! discovery, object reads, rev-parse, revision walking — over either
 //! backend: a `.git` directory or a native `.alt` store.
 
+mod alt_backend;
 mod object_format;
 mod odb;
 mod revwalk;
+mod ssh_url;
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
+use alt_backend::AltBackend;
 use alt_bytes::{BString, ByteSlice};
 use alt_git_codec::{Commit, HashAlgo, LooseStore, ObjectId, ObjectKind, RawObject, Tag, Tree};
 use alt_git_config::{Config, IncludeContext};
 use alt_git_pack::IndexedPack;
 use alt_git_refs::{RefStore, RefTarget};
-use alt_odb::NativeOdb;
 pub use object_format::native_object_format;
 use object_format::object_format;
+use ssh_url::builtin_ssh_to_https;
 
 pub use revwalk::RevWalk;
-
-/// Built-in fallback for SSH-style URLs against well-known git
-/// hosting endpoints whose HTTPS path mirrors the SSH path.
-/// Recognises both forms git accepts:
-///   git@github.com:user/repo.git
-///   ssh://git@github.com/user/repo.git
-/// → https://github.com/user/repo.git
-///
-/// Returns `None` for anything that isn't on the allow-list — keeps
-/// the surface predictable; users with non-listed hosts can configure
-/// `[url "X"] insteadOf = Y` explicitly.
-fn builtin_ssh_to_https(url: &str) -> Option<String> {
-    const HOSTS: &[&str] = &[
-        "github.com",
-        "gitlab.com",
-        "bitbucket.org",
-        "codeberg.org",
-        "git.sr.ht",
-    ];
-    for host in HOSTS {
-        // `git@host:path`
-        let scp_prefix = format!("git@{host}:");
-        if let Some(path) = url.strip_prefix(&scp_prefix) {
-            return Some(format!("https://{host}/{path}"));
-        }
-        // `ssh://git@host/path`
-        let ssh_prefix = format!("ssh://git@{host}/");
-        if let Some(path) = url.strip_prefix(&ssh_prefix) {
-            return Some(format!("https://{host}/{path}"));
-        }
-    }
-    None
-}
 
 /// Where objects and refs actually come from.
 enum Backend {
@@ -67,17 +38,14 @@ enum Backend {
     Alt(Box<AltBackend>),
 }
 
-struct AltBackend {
-    odb: NativeOdb,
-    refs: alt_refs::RefStore,
-}
-
 pub struct Repository {
     /// The backing store directory: `.git` or `.alt`.
     repo_dir: PathBuf,
     work_tree: Option<PathBuf>,
     algo: HashAlgo,
-    config: Config,
+    /// set on open for a git repository; a native store reads it on first
+    /// use
+    config: OnceLock<Config>,
     backend: Backend,
 }
 
@@ -156,7 +124,7 @@ impl Repository {
             repo_dir: git_dir,
             work_tree,
             algo,
-            config,
+            config: OnceLock::from(config),
             backend: Backend::Git {
                 refs,
                 loose: LooseStore::new(&objects),
@@ -180,33 +148,17 @@ impl Repository {
         let config_path = alt_dir.join("git-import/config");
         let algo = object_format(&config_path)?;
 
-        let refs = alt_refs::RefStore::open(&alt_dir)?;
-        let branch = match refs.get("HEAD") {
-            Some(alt_refs::RefTarget::Symbolic(name)) => name
-                .strip_prefix("refs/heads/")
-                .map(|short| BString::from(short.as_bytes().to_vec())),
-            _ => None,
+        let backend = AltBackend {
+            alt_dir: alt_dir.clone(),
+            odb: OnceLock::new(),
+            refs: OnceLock::new(),
         };
-        let config = if config_path.is_file() {
-            // include paths resolve relative to the preserved copy; the
-            // original .git is gone by design (no coexistence)
-            let ctx = IncludeContext {
-                git_dir: Some(alt_dir.join("git-import")),
-                branch,
-                home: std::env::var_os("HOME").map(PathBuf::from),
-            };
-            Config::load(&config_path, &ctx)?
-        } else {
-            Config::default()
-        };
-
-        let odb = NativeOdb::open(&alt_dir)?;
         Ok(Self {
             repo_dir: alt_dir,
             work_tree,
             algo,
-            config,
-            backend: Backend::Alt(Box::new(AltBackend { odb, refs })),
+            config: OnceLock::new(),
+            backend: Backend::Alt(Box::new(backend)),
         })
     }
 
@@ -242,9 +194,9 @@ impl Repository {
     ///
     /// in the repo's git config (or `~/.gitconfig`) and the SSH URL
     /// is rewritten to HTTPS before the transport ever sees it.
-    pub fn rewrite_url(&self, url: &str) -> String {
+    pub fn rewrite_url(&self, url: &str) -> Result<String, RepoError> {
         let mut best: Option<(usize, String, String)> = None;
-        for entry in &self.config.entries {
+        for entry in &self.config()?.entries {
             if entry.section != "url" {
                 continue;
             }
@@ -268,20 +220,27 @@ impl Repository {
             }
         }
         if let Some((tlen, _trigger, replacement)) = best {
-            return format!("{replacement}{}", &url[tlen..]);
+            return Ok(format!("{replacement}{}", &url[tlen..]));
         }
         if let Some(rewritten) = builtin_ssh_to_https(url) {
-            return rewritten;
+            return Ok(rewritten);
         }
-        url.to_owned()
+        Ok(url.to_owned())
     }
 
     pub fn rewrite_url_static(url: &str) -> Option<String> {
         builtin_ssh_to_https(url)
     }
 
-    pub fn config(&self) -> &Config {
-        &self.config
+    pub fn config(&self) -> Result<&Config, RepoError> {
+        if let Some(config) = self.config.get() {
+            return Ok(config);
+        }
+        let config = match &self.backend {
+            Backend::Alt(alt) => alt.load_config()?,
+            Backend::Git { .. } => Config::default(),
+        };
+        Ok(self.config.get_or_init(|| config))
     }
 
     /// Brings a held-open repository up to date with writes other processes
@@ -295,8 +254,12 @@ impl Repository {
         let algo = self.algo;
         match &mut self.backend {
             Backend::Alt(alt) => {
-                alt.odb.refresh()?;
-                alt.refs.refresh()?;
+                if let Some(odb) = alt.odb.get_mut() {
+                    odb.refresh()?;
+                }
+                if let Some(refs) = alt.refs.get_mut() {
+                    refs.refresh()?;
+                }
             }
             Backend::Git { refs, packs, .. } => {
                 *refs = RefStore::open(repo_dir, algo)?;
@@ -337,8 +300,9 @@ impl Repository {
                 }
             }
             Backend::Alt(alt) => {
-                for (name, target) in alt.refs.iter() {
-                    let Some(oid) = alt.refs.resolve(name)? else {
+                let refs = alt.refs()?;
+                for (name, target) in refs.iter() {
+                    let Some(oid) = refs.resolve(name)? else {
                         continue;
                     };
                     let symref_target = match target {
@@ -357,7 +321,7 @@ impl Repository {
     pub fn resolve_ref(&self, name: &str) -> Result<Option<ObjectId>, RepoError> {
         match &self.backend {
             Backend::Git { refs, .. } => Ok(refs.resolve(name)?),
-            Backend::Alt(alt) => Ok(alt.refs.resolve(name)?),
+            Backend::Alt(alt) => Ok(alt.refs()?.resolve(name)?),
         }
     }
 
@@ -376,7 +340,7 @@ impl Repository {
                     Err(e) => Err(e.into()),
                 }
             }
-            Backend::Alt(alt) => Ok(alt.odb.get(oid)?),
+            Backend::Alt(alt) => Ok(alt.odb()?.get(oid)?),
         }
     }
 
@@ -387,7 +351,7 @@ impl Repository {
     pub fn storage_view(&self, oid: &ObjectId) -> Result<Option<alt_odb::StorageView>, RepoError> {
         match &self.backend {
             Backend::Git { .. } => Ok(None),
-            Backend::Alt(alt) => Ok(alt.odb.storage_view(oid)?),
+            Backend::Alt(alt) => Ok(alt.odb()?.storage_view(oid)?),
         }
     }
 
@@ -396,7 +360,7 @@ impl Repository {
     pub fn storage_stats(&self) -> Result<Option<alt_odb::StorageStats>, RepoError> {
         match &self.backend {
             Backend::Git { .. } => Ok(None),
-            Backend::Alt(alt) => Ok(Some(alt.odb.storage_stats()?)),
+            Backend::Alt(alt) => Ok(Some(alt.odb()?.storage_stats()?)),
         }
     }
 
@@ -545,7 +509,7 @@ impl Repository {
     fn resolve_short_oid(&self, prefix: &str) -> Result<Option<ObjectId>, RepoError> {
         match &self.backend {
             Backend::Alt(alt) => {
-                let matches = alt.odb.lookup_by_prefix(prefix, 4);
+                let matches = alt.odb()?.lookup_by_prefix(prefix, 4)?;
                 if matches.is_empty() {
                     Ok(None)
                 } else if matches.len() == 1 {

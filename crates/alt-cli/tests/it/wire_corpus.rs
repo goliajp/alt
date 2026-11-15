@@ -152,7 +152,7 @@ fn alt_fetch_resolves_corpus_packs_byte_exact() {
         let odb = NativeOdb::open(&alt_dir).unwrap();
         let mut missing = 0;
         for oid in &server_oids {
-            if !odb.contains(oid) {
+            if !odb.contains(oid).unwrap() {
                 missing += 1;
             }
         }

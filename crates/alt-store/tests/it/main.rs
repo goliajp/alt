@@ -3,3 +3,4 @@
 mod blob_store;
 mod chunk_store;
 mod corpus_blobs;
+mod index_runs;

@@ -18,7 +18,7 @@ fn reopen_sees_flushed_objects() {
         odb.flush().unwrap();
     }
     let odb = NativeOdb::open(dir.path()).unwrap();
-    assert_eq!(odb.len(), 1);
+    assert_eq!(odb.len().unwrap(), 1);
     assert_eq!(odb.get(&oid).unwrap().unwrap().data, data);
 }
 

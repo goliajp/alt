@@ -1686,7 +1686,7 @@ fn pretty_print<W: Write>(
     match obj.kind {
         ObjectKind::Tree => {
             let quotepath = repo
-                .config()
+                .config()?
                 .get_bool("core", None, "quotepath")
                 .transpose()?
                 .unwrap_or(true);

@@ -139,7 +139,8 @@ pub fn snapshot(
 ) -> Result<Snapshot> {
     validate_config(config)?;
     let objects = odb
-        .entries()
+        .entries()?
+        .iter()
         .map(|entry| Ok((entry.git.to_string(), object_identity(odb, entry.git)?)))
         .collect::<Result<_>>()?;
     let snapshot = Snapshot {

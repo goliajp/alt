@@ -1135,7 +1135,13 @@ fn source_integration_requires_exact_attributed_ref_operation_and_completion() {
         )
         .unwrap();
     let mut memory = Memory::default();
-    let raw = refs.oplog().get(&operation).unwrap().body().unwrap();
+    let raw = refs
+        .oplog()
+        .get(&operation)
+        .unwrap()
+        .unwrap()
+        .body()
+        .unwrap();
     let dummy = memory.put(vec![]);
     let mut integration = alt_task::Integration {
         schema_version: 1,

@@ -82,7 +82,13 @@ pub(super) fn completed(
     let checked = alt_task_service::check_source(record, &proof, &raw, maximum)?;
     if let TaskRecord::Integration(integration) = record {
         let mut matched = None;
-        for op in repo.store.refs.oplog().ops() {
+        let ops = repo
+            .store
+            .refs
+            .oplog()
+            .ops()
+            .map_err(|_| Error::Invalid("local operation log"))?;
+        for op in ops {
             if !completion.operations.contains(&op.id.to_string()) {
                 continue;
             }
@@ -246,6 +252,7 @@ impl Source for LocalSource<'_, '_> {
                 .refs
                 .oplog()
                 .ops()
+                .map_err(|_| Error::Invalid("local operation log"))?
                 .iter()
                 .find(|op| op.id.to_string() == id)
                 .ok_or(Error::Invalid("recovered operation missing"))?;
