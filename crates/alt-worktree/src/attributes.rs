@@ -1,9 +1,11 @@
-//! `.gitattributes` line-ending rules: which paths are text, and how their
-//! line endings differ between the object store and the working tree.
+//! Git attributes that change how content is stored: which paths are
+//! text and how their line endings differ between the object store and the
+//! working tree, which carry an `$Id$` keyword, and which go through a
+//! filter.
 //!
-//! Only the `text`, `eol` and legacy `crlf` attributes are read, plus the
-//! macros that can set them (`binary`, and `[attr]` definitions in the root
-//! file). A path no rule covers is stored and checked out byte for byte.
+//! The `text`, `eol`, legacy `crlf`, `ident` and `filter` attributes are
+//! read, with the macros that can set them (`binary`, and `[attr]`
+//! definitions). Where no attribute decides, `core.autocrlf` does.
 
 use crate::ignore::glob_match;
 
@@ -43,9 +45,68 @@ struct Line {
     settings: Settings,
 }
 
-/// One `.gitattributes` file.
+/// Where an attributes file comes from. A later kind overrides an earlier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+enum Source {
+    /// the user's file, `core.attributesFile`
+    Global,
+    /// a `.gitattributes` file in the tree
+    #[default]
+    Tree,
+    /// the repository's own `info/attributes`
+    Info,
+}
+
+/// The line-ending settings of the repository's configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct EolConfig {
+    pub autocrlf: AutoCrlf,
+    pub eol: CoreEol,
+}
+
+/// `core.autocrlf`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AutoCrlf {
+    #[default]
+    False,
+    True,
+    Input,
+}
+
+/// `core.eol`. The native line ending is LF.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CoreEol {
+    #[default]
+    Native,
+    Lf,
+    Crlf,
+}
+
+impl EolConfig {
+    /// Whether text without an `eol` attribute is checked out with CRLF.
+    fn text_is_crlf(&self) -> bool {
+        match self.autocrlf {
+            AutoCrlf::True => true,
+            AutoCrlf::Input => false,
+            AutoCrlf::False => self.eol == CoreEol::Crlf,
+        }
+    }
+}
+
+/// What the attributes say about storing one path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PathAttributes {
+    pub conversion: Conversion,
+    /// `$Id$` is expanded to the blob id on checkout
+    pub ident: bool,
+    /// the name of the filter driver the content goes through
+    pub filter: Option<Vec<u8>>,
+}
+
+/// One attributes file.
 #[derive(Debug, Clone, Default)]
 pub struct Layer {
+    source: Source,
     /// directory holding the file, relative to the root, without a
     /// trailing slash; empty for the root
     base: Vec<u8>,
@@ -54,10 +115,27 @@ pub struct Layer {
 }
 
 impl Layer {
-    /// Parses the file found in directory `base`. Macro definitions count
-    /// only in the root file, as in git.
+    /// Parses the `.gitattributes` file found in directory `base`. Macro
+    /// definitions count only in the root file, as in git.
     pub fn parse(content: &[u8], base: &[u8]) -> Layer {
+        Layer::from(content, base, Source::Tree)
+    }
+
+    /// Parses the user's attributes file, which every `.gitattributes`
+    /// file overrides.
+    pub fn global(content: &[u8]) -> Layer {
+        Layer::from(content, b"", Source::Global)
+    }
+
+    /// Parses the repository's `info/attributes`, which overrides every
+    /// other file.
+    pub fn info(content: &[u8]) -> Layer {
+        Layer::from(content, b"", Source::Info)
+    }
+
+    fn from(content: &[u8], base: &[u8], source: Source) -> Layer {
         let mut layer = Layer {
+            source,
             base: base.to_vec(),
             ..Layer::default()
         };
@@ -109,23 +187,27 @@ fn setting(word: &[u8]) -> (Vec<u8>, State) {
     }
 }
 
-/// The conversion for `path` (relative to the root, `/`-separated) under
-/// `layers`: the attribute files of the root and of every directory above
-/// the path, in any order.
-pub fn conversion<'a>(layers: impl IntoIterator<Item = &'a Layer>, path: &[u8]) -> Conversion {
+/// What the attributes say about `path` (relative to the root,
+/// `/`-separated) under `layers`: the user's file, the attribute files of
+/// the root and of every directory above the path, and the repository's
+/// own file, in any order.
+pub fn lookup<'a>(
+    layers: impl IntoIterator<Item = &'a Layer>,
+    path: &[u8],
+    config: &EolConfig,
+) -> PathAttributes {
     let mut layers: Vec<&Layer> = layers.into_iter().collect();
-    if layers.is_empty() {
-        return Conversion::Binary;
-    }
-    // the deepest file decides first, and within a file the last line
-    layers.sort_by_key(|l| std::cmp::Reverse(l.base.len()));
-    let root = layers.iter().find(|l| l.base.is_empty());
-    let (mut text, mut eol, mut crlf) = (None, None, None);
+    // the repository's own file decides first, then the deepest file in
+    // the tree, the user's file last; within a file the last line
+    layers.sort_by_key(|l| std::cmp::Reverse((l.source, l.base.len())));
+    let (mut text, mut eol, mut crlf, mut ident, mut filter) = (None, None, None, None, None);
     let mut see = |name: &[u8], state: &State| {
         let slot = match name {
             b"text" => &mut text,
             b"eol" => &mut eol,
             b"crlf" => &mut crlf,
+            b"ident" => &mut ident,
+            b"filter" => &mut filter,
             _ => return,
         };
         if slot.is_none() {
@@ -145,7 +227,7 @@ pub fn conversion<'a>(layers: impl IntoIterator<Item = &'a Layer>, path: &[u8]) 
             for (attr, state) in line.settings.iter().rev() {
                 // a macro that is set stands for its definition
                 if *state == State::Set {
-                    for (inner, inner_state) in expand(root, attr).iter().rev() {
+                    for (inner, inner_state) in expand(&layers, attr).iter().rev() {
                         see(inner, inner_state);
                     }
                 }
@@ -153,7 +235,14 @@ pub fn conversion<'a>(layers: impl IntoIterator<Item = &'a Layer>, path: &[u8]) 
             }
         }
     }
-    decide(text, crlf, eol)
+    PathAttributes {
+        conversion: decide(text, crlf, eol, config),
+        ident: ident == Some(State::Set),
+        filter: match filter {
+            Some(State::Value(name)) => Some(name),
+            _ => None,
+        },
+    }
 }
 
 fn below<'p>(path: &'p [u8], base: &[u8]) -> Option<&'p [u8]> {
@@ -163,15 +252,13 @@ fn below<'p>(path: &'p [u8], base: &[u8]) -> Option<&'p [u8]> {
     path.strip_prefix(base)?.strip_prefix(b"/")
 }
 
-fn expand<'l>(root: Option<&&'l Layer>, name: &[u8]) -> &'l [(Vec<u8>, State)] {
+/// The settings a macro stands for: its last definition in the file of
+/// highest precedence that defines it, or the built-in `binary`.
+fn expand<'l>(layers: &[&'l Layer], name: &[u8]) -> &'l [(Vec<u8>, State)] {
     static BINARY: std::sync::OnceLock<Settings> = std::sync::OnceLock::new();
-    let defined = root.and_then(|layer| {
-        layer
-            .macros
-            .iter()
-            .rev()
-            .find(|(n, _)| n == name)
-            .map(|(_, settings)| settings.as_slice())
+    let defined = layers.iter().find_map(|layer| {
+        let found = layer.macros.iter().rev().find(|(n, _)| n == name);
+        found.map(|(_, settings)| settings.as_slice())
     });
     match (defined, name) {
         (Some(settings), _) => settings,
@@ -185,12 +272,17 @@ fn expand<'l>(root: Option<&&'l Layer>, name: &[u8]) -> &'l [(Vec<u8>, State)] {
     }
 }
 
-fn decide(text: Option<State>, legacy: Option<State>, eol: Option<State>) -> Conversion {
+fn decide(
+    text: Option<State>,
+    legacy: Option<State>,
+    eol: Option<State>,
+    config: &EolConfig,
+) -> Conversion {
     // `text` (or the older `crlf`): set, unset, `input` or `auto`
     let kind = |state: &Option<State>| match state {
         Some(State::Set) => Some("text"),
         Some(State::Unset) => Some("binary"),
-        Some(State::Value(v)) if v == b"input" => Some("text"),
+        Some(State::Value(v)) if v == b"input" => Some("input"),
         Some(State::Value(v)) if v == b"auto" => Some("auto"),
         _ => None,
     };
@@ -199,13 +291,24 @@ fn decide(text: Option<State>, legacy: Option<State>, eol: Option<State>) -> Con
         Some(State::Value(v)) if v == b"lf" => Some(false),
         _ => None,
     };
+    let (text_crlf, auto_crlf) = (Conversion::TextCrlf, Conversion::AutoCrlf);
     match (kind(&text).or_else(|| kind(&legacy)), crlf) {
-        (Some("binary"), _) | (None, None) => Conversion::Binary,
-        (Some("auto"), Some(true)) => Conversion::AutoCrlf,
-        (Some("auto"), _) => Conversion::AutoInput,
+        (Some("binary"), _) => Conversion::Binary,
+        (Some("auto"), Some(true)) => auto_crlf,
+        (Some("auto"), Some(false)) => Conversion::AutoInput,
+        (Some("auto"), None) if config.text_is_crlf() => auto_crlf,
+        (Some("auto"), None) => Conversion::AutoInput,
         // `eol` alone marks the path as text
-        (_, Some(true)) => Conversion::TextCrlf,
-        (_, _) => Conversion::TextInput,
+        (_, Some(true)) => text_crlf,
+        (_, Some(false)) | (Some("input"), None) => Conversion::TextInput,
+        (Some(_), None) if config.text_is_crlf() => text_crlf,
+        (Some(_), None) => Conversion::TextInput,
+        // no attribute says anything: the configuration decides
+        (None, None) => match config.autocrlf {
+            AutoCrlf::False => Conversion::Binary,
+            AutoCrlf::True => auto_crlf,
+            AutoCrlf::Input => Conversion::AutoInput,
+        },
     }
 }
 
@@ -323,7 +426,7 @@ mod tests {
             .iter()
             .map(|(base, text)| Layer::parse(text.as_bytes(), base.as_bytes()))
             .collect();
-        conversion(&layers, path.as_bytes())
+        lookup(&layers, path.as_bytes(), &EolConfig::default()).conversion
     }
 
     #[test]
@@ -397,6 +500,85 @@ mod tests {
         // a macro defined below the root is not a macro
         let files = [("", "\n"), ("sub", "[attr]win eol=crlf\n*.bat win\n")];
         assert_eq!(conv(&files, "sub/a.bat"), Conversion::Binary);
+    }
+
+    #[test]
+    fn the_configuration_decides_where_no_attribute_does() {
+        let with = |autocrlf, eol, rules: &str, path: &str| {
+            let layers = [Layer::parse(rules.as_bytes(), b"")];
+            lookup(&layers, path.as_bytes(), &EolConfig { autocrlf, eol }).conversion
+        };
+        let (off, native) = (AutoCrlf::False, CoreEol::Native);
+        assert_eq!(
+            with(AutoCrlf::True, native, "", "a.c"),
+            Conversion::AutoCrlf
+        );
+        assert_eq!(
+            with(AutoCrlf::Input, native, "", "a.c"),
+            Conversion::AutoInput
+        );
+        assert_eq!(with(off, CoreEol::Crlf, "", "a.c"), Conversion::Binary);
+        // text without an eol attribute follows core.eol, and autocrlf first
+        assert_eq!(
+            with(off, CoreEol::Crlf, "* text\n", "a.c"),
+            Conversion::TextCrlf
+        );
+        assert_eq!(
+            with(off, CoreEol::Lf, "* text\n", "a.c"),
+            Conversion::TextInput
+        );
+        assert_eq!(
+            with(AutoCrlf::True, CoreEol::Lf, "* text\n", "a.c"),
+            Conversion::TextCrlf
+        );
+        assert_eq!(
+            with(AutoCrlf::Input, CoreEol::Crlf, "* text\n", "a.c"),
+            Conversion::TextInput
+        );
+        assert_eq!(
+            with(off, CoreEol::Crlf, "* text=auto\n", "a.c"),
+            Conversion::AutoCrlf
+        );
+        // an attribute still wins over the configuration
+        assert_eq!(
+            with(AutoCrlf::True, native, "* -text\n", "a.c"),
+            Conversion::Binary
+        );
+        assert_eq!(
+            with(AutoCrlf::True, native, "* eol=lf\n", "a.c"),
+            Conversion::TextInput
+        );
+        assert_eq!(
+            with(AutoCrlf::True, native, "* text=input\n", "a.c"),
+            Conversion::TextInput
+        );
+    }
+
+    #[test]
+    fn the_users_file_is_overridden_and_the_repositorys_own_file_overrides() {
+        let layers = [
+            Layer::parse(b"*.txt eol=lf ident\n", b""),
+            Layer::global(b"*.txt eol=crlf filter=g\n*.md eol=crlf\n[attr]win eol=crlf\n"),
+            Layer::parse(b"*.txt -ident\n", b"sub"),
+            Layer::info(b"keep.txt eol=crlf\n*.bat win\n"),
+        ];
+        let at = |path: &str| lookup(&layers, path.as_bytes(), &EolConfig::default());
+        assert_eq!(at("a.txt").conversion, Conversion::TextInput);
+        assert_eq!(at("a.txt").filter.as_deref(), Some(&b"g"[..]));
+        assert!(at("a.txt").ident);
+        assert!(!at("sub/a.txt").ident);
+        assert_eq!(at("a.md").conversion, Conversion::TextCrlf);
+        assert_eq!(at("sub/keep.txt").conversion, Conversion::TextCrlf);
+        // a macro from the user's file, used in the repository's own
+        assert_eq!(at("run.bat").conversion, Conversion::TextCrlf);
+        assert_eq!(
+            at("other.c"),
+            PathAttributes {
+                conversion: Conversion::Binary,
+                ident: false,
+                filter: None,
+            }
+        );
     }
 
     #[test]

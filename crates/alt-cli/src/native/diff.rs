@@ -19,7 +19,7 @@ struct Pair<'a> {
 /// came from, and the attribute files that say how content is stored.
 struct Worktree<'a> {
     index: &'a Index,
-    attrs: eol::WorktreeAttributes,
+    attrs: convert::Converter,
 }
 
 impl NativeRepo<'_> {
@@ -33,10 +33,13 @@ impl NativeRepo<'_> {
         // old side is always read from the object store; the new side is the
         // index (cached) or the live working tree (default).
         let raw = self.index()?;
-        let disk = (!cached).then(|| Worktree {
-            index: &raw,
-            attrs: eol::WorktreeAttributes::new(&self.root),
-        });
+        let disk = match cached {
+            true => None,
+            false => Some(Worktree {
+                index: &raw,
+                attrs: self.converter()?,
+            }),
+        };
         let disk = disk.as_ref();
         let (old, new, show_added) = if cached {
             (self.head_entries()?, index_entries(&raw), true)
@@ -379,7 +382,7 @@ impl NativeRepo<'_> {
                     return Ok(content);
                 }
                 // compared as it would be stored, as the old side is
-                let stored = self.eol_to_store(&disk.attrs, disk.index, &w.path, &content);
+                let stored = self.stored_form(&disk.attrs, disk.index, &w.path, &content);
                 disk.attrs.check()?;
                 Ok(stored.unwrap_or(content))
             }

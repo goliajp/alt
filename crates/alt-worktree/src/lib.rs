@@ -7,6 +7,7 @@
 //! specific command.
 
 pub mod attributes;
+pub mod ident;
 mod ignore;
 mod scan;
 

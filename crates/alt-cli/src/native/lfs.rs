@@ -37,10 +37,10 @@ impl NativeRepo<'_> {
     /// normalized.
     pub(super) fn scan_tree(&self, index: &Index) -> Res<Vec<WorkEntry>> {
         let rules = self.lfs_rules()?;
-        let attrs = eol::WorktreeAttributes::new(&self.root);
+        let attrs = self.converter()?;
         let clean = |path: &[u8], content: &[u8]| {
             let pointer = rules.as_ref().and_then(|r| lfs_clean(r, path, content));
-            pointer.or_else(|| self.eol_to_store(&attrs, index, path, content))
+            pointer.or_else(|| self.stored_form(&attrs, index, path, content))
         };
         let scan = scan_worktree_with_index(&self.root, index, self.store.algo, Some(&clean))?;
         attrs.check()?;
@@ -50,10 +50,10 @@ impl NativeRepo<'_> {
     /// Like [`scan_tree`](Self::scan_tree) but only over the index's paths.
     pub(super) fn scan_index_paths(&self, index: &Index) -> Res<Vec<WorkEntry>> {
         let rules = self.lfs_rules()?;
-        let attrs = eol::WorktreeAttributes::new(&self.root);
+        let attrs = self.converter()?;
         let clean = |path: &[u8], content: &[u8]| {
             let pointer = rules.as_ref().and_then(|r| lfs_clean(r, path, content));
-            pointer.or_else(|| self.eol_to_store(&attrs, index, path, content))
+            pointer.or_else(|| self.stored_form(&attrs, index, path, content))
         };
         let scan = scan_indexed_paths(&self.root, index, self.store.algo, Some(&clean))?;
         attrs.check()?;
@@ -67,7 +67,7 @@ impl NativeRepo<'_> {
         &mut self,
         w: &WorkEntry,
         rules: Option<&PathMatcher>,
-        attrs: &eol::WorktreeAttributes,
+        attrs: &convert::Converter,
         index: &Index,
     ) -> Res<Vec<u8>> {
         let content = self.read_for(w)?;
@@ -78,7 +78,7 @@ impl NativeRepo<'_> {
             self.lfs_store(&content)?;
             return Ok(pointer);
         }
-        let stored = self.eol_to_store(attrs, index, &w.path, &content);
+        let stored = self.stored_form(attrs, index, &w.path, &content);
         attrs.check()?;
         Ok(stored.unwrap_or(content))
     }

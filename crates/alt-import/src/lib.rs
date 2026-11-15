@@ -267,6 +267,13 @@ pub fn import_git(
         fs::create_dir_all(&dst_dir)?;
         fs::copy(&config_src, dst_dir.join("config"))?;
     }
+    // the repository's own attributes decide how files are checked out
+    let attributes_src = repo.git_dir().join("info/attributes");
+    if attributes_src.is_file() {
+        let dst_dir = alt_dir.join("git-import/info");
+        fs::create_dir_all(&dst_dir)?;
+        fs::copy(&attributes_src, dst_dir.join("attributes"))?;
+    }
 
     Ok(ImportReport {
         objects_seen: seen,

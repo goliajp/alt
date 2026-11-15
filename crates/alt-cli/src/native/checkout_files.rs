@@ -85,11 +85,11 @@ impl NativeRepo<'_> {
     }
 
     /// The working-tree state `entry` is checked out as, under the
-    /// attribute files `attrs` of the tree it belongs to.
+    /// attributes of the tree it belongs to.
     pub(super) fn target_state(
         &self,
         entry: &WorkEntry,
-        attrs: &[alt_worktree::attributes::Layer],
+        attrs: &convert::Converter,
     ) -> Res<FileState> {
         if entry.mode == 0o160000 {
             return Ok(FileState {
@@ -105,9 +105,9 @@ impl NativeRepo<'_> {
         let bytes = if entry.mode != 0o120000 {
             match alt_lfs::Pointer::parse(&object.data) {
                 Some(pointer) => self.lfs_content(&pointer)?.unwrap_or(object.data),
-                None => {
-                    eol::eol_to_worktree(attrs, &entry.path, &object.data).unwrap_or(object.data)
-                }
+                None => attrs
+                    .to_worktree(&entry.path, &object.data)?
+                    .unwrap_or(object.data),
             }
         } else {
             object.data

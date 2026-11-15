@@ -271,7 +271,7 @@ impl NativeRepo<'_> {
     /// bytes, then an index carrying stage-0 entries for clean paths and
     /// stage 1/2/3 entries for conflicted ones (so git tools see the merge).
     pub(super) fn write_conflicted(&mut self, resolved: &[Resolved]) -> Res<()> {
-        let attrs = eol::WorktreeAttributes::new(&self.root);
+        let attrs = self.converter()?;
         for r in resolved {
             let abs = self.abs(&r.path)?;
             if let Some(bytes) = &r.worktree {

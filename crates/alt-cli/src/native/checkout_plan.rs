@@ -127,7 +127,7 @@ impl NativeRepo<'_> {
             .filter(|e| e.mode == 0o160000)
             .map(|e| &e.path)
             .collect();
-        let attrs = self.tree_attributes(target)?;
+        let attrs = self.converter_for(target)?;
         // paths found as a file or symlink: the preflight has made sure
         // nothing but a tracked path stands above another as a non-directory
         let mut files_on_disk: std::collections::HashSet<&[u8]> = std::collections::HashSet::new();

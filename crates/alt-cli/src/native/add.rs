@@ -17,7 +17,7 @@ impl NativeRepo<'_> {
         // the index decides which ignored paths are tracked and so still count
         let scan = self.scan_tree(&self.index()?)?;
         let lfs = self.lfs_rules()?;
-        let attrs = eol::WorktreeAttributes::new(&self.root);
+        let attrs = self.converter()?;
         let specs: Vec<&str> = paths.iter().map(|p| pathspec(p)).collect();
         let staging_all = specs.iter().any(|p| p.is_empty());
 

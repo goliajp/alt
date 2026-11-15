@@ -204,3 +204,174 @@ fn switch_between_branches_that_differ_only_in_attributes_rewrites_nothing() {
     assert_eq!(read(dst, "run.bat"), read(src, "run.bat"));
     assert_eq!(read(dst, ".gitattributes"), b"*.bat eol=crlf\n");
 }
+
+/// Runs `tool` with `home` as the home directory, where git and alt both
+/// look for the user's attributes file.
+fn at_home(tool: &str, home: &Path, repo: &Path, args: &[&str]) -> Output {
+    let program = match tool {
+        "alt" => env!("CARGO_BIN_EXE_alt"),
+        other => other,
+    };
+    Command::new(program)
+        .current_dir(repo)
+        .env("HOME", home)
+        .env_remove("XDG_CONFIG_HOME")
+        .env("ALT_NO_DAEMON", "1")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_AUTHOR_NAME", "tester")
+        .env("GIT_AUTHOR_EMAIL", "t@e")
+        .env("GIT_COMMITTER_NAME", "tester")
+        .env("GIT_COMMITTER_EMAIL", "t@e")
+        .args(args)
+        .output()
+        .unwrap()
+}
+
+/// Builds a git repository holding `files` under the given configuration
+/// and attribute files, imports it, and checks at every step that alt
+/// leaves the same bytes in the working tree and the same tree in the
+/// store as git: after checkout, and after the same edit is committed.
+fn agrees_with_git(
+    config: &[(&str, &str)],
+    info: Option<&str>,
+    global: Option<&str>,
+    files: &[(&str, &[u8])],
+    edit: &[u8],
+) {
+    let (home, src, dst) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
+    let (home, src, dst) = (home.path(), src.path(), dst.path());
+    let git = |args: &[&str]| ok(at_home("git", home, src, args));
+    let alt = |args: &[&str]| ok(at_home("alt", home, dst, args));
+    if let Some(text) = global {
+        write(home, ".config/git/attributes", text.as_bytes());
+    }
+    git(&["init", "-q", "-b", "main", "."]);
+    for (key, value) in config {
+        git(&["config", key, value]);
+    }
+    if let Some(text) = info {
+        write(src, ".git/info/attributes", text.as_bytes());
+    }
+    for (path, content) in files {
+        write(src, path, content);
+    }
+    git(&["add", "."]);
+    git(&["commit", "-qm", "base"]);
+    // checked out afresh, so that git has converted every file
+    for (path, _) in files {
+        std::fs::remove_file(src.join(path)).unwrap();
+    }
+    git(&["checkout", "-q", "--", "."]);
+    ok(at_home(
+        "alt",
+        home,
+        src,
+        &["import", dst.to_str().unwrap()],
+    ));
+    for (path, _) in files {
+        assert_eq!(read(dst, path), read(src, path), "{path} after checkout");
+    }
+    assert!(alt(&["status"]).contains("nothing to commit"));
+    assert!(alt(&["diff"]).is_empty());
+
+    for (path, _) in files.iter().filter(|(p, _)| !p.ends_with(".gitattributes")) {
+        for root in [src, dst] {
+            let mut content = read(root, path);
+            content.extend_from_slice(edit);
+            write(root, path, &content);
+        }
+    }
+    alt(&["add", "."]);
+    alt(&["commit", "-m", "edit"]);
+    git(&["add", "."]);
+    git(&["commit", "-qm", "edit"]);
+    assert_eq!(
+        tree(&|a| at_home("alt", home, dst, a)),
+        tree(&|a| at_home("git", home, src, a))
+    );
+    assert!(alt(&["status"]).contains("nothing to commit"));
+}
+
+const TEXTS: [(&str, &[u8]); 4] = [
+    ("unix.txt", b"one\ntwo\n"),
+    ("dos.txt", b"one\r\ntwo\r\n"),
+    ("data.bin", b"a\n\0b\n"),
+    ("sub/deep.c", b"int x;\n"),
+];
+
+#[test]
+fn core_autocrlf_converts_what_looks_like_text() {
+    for value in ["true", "input"] {
+        agrees_with_git(&[("core.autocrlf", value)], None, None, &TEXTS, b"more\r\n");
+    }
+}
+
+#[test]
+fn core_eol_sets_the_line_ending_of_text_files() {
+    let mut files = TEXTS.to_vec();
+    files.push((".gitattributes", b"* text=auto\n*.c text\n"));
+    for value in ["crlf", "lf"] {
+        agrees_with_git(&[("core.eol", value)], None, None, &files, b"more\n");
+    }
+}
+
+#[test]
+fn the_repositorys_and_the_users_attribute_files_are_read() {
+    let mut files = TEXTS.to_vec();
+    files.push((".gitattributes", b"*.c eol=crlf\n"));
+    // the user's file is the weakest, the repository's own the strongest
+    agrees_with_git(
+        &[],
+        Some("sub/*.c eol=lf\n"),
+        Some("*.txt eol=crlf\n*.c eol=lf\n"),
+        &files,
+        b"more\r\n",
+    );
+    // core.attributesFile names the user's file
+    let named = alt_os::temp::tempdir().unwrap();
+    write(named.path(), "attrs", b"*.txt eol=crlf\n");
+    let path = named.path().join("attrs");
+    agrees_with_git(
+        &[("core.attributesFile", path.to_str().unwrap())],
+        None,
+        None,
+        &TEXTS,
+        b"more\r\n",
+    );
+}
+
+#[test]
+fn the_ident_keyword_is_expanded_on_checkout() {
+    let files: [(&str, &[u8]); 3] = [
+        (".gitattributes", b"*.c ident\n"),
+        ("a.c", b"/* $Id$ */\nint a;\n"),
+        ("b.txt", b"$Id$ stays\n"),
+    ];
+    agrees_with_git(&[], None, None, &files, b"/* $Id: stale $ */\n");
+}
+
+#[test]
+fn filter_commands_run_on_checkout_and_when_staging() {
+    let files: [(&str, &[u8]); 3] = [
+        (
+            ".gitattributes",
+            b"*.up filter=upper\n*.gone filter=missing\n",
+        ),
+        ("shout.up", b"quiet words\n"),
+        ("plain.gone", b"no such driver\n"),
+    ];
+    agrees_with_git(
+        &[
+            ("filter.upper.clean", "tr A-Z a-z"),
+            ("filter.upper.smudge", "tr a-z A-Z"),
+        ],
+        None,
+        None,
+        &files,
+        b"MORE Words\n",
+    );
+}
