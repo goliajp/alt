@@ -32,6 +32,8 @@ impl Entry {
     pub fn display_key(&self) -> String {
         match &self.subsection {
             Some(sub) => format!("{}.{}.{}", self.section, sub, self.key),
+            // a variable written before any section
+            None if self.section.is_empty() => self.key.clone(),
             None => format!("{}.{}", self.section, self.key),
         }
     }
@@ -154,6 +156,11 @@ pub enum ConfigError {
     Syntax(&'static str),
     Value(&'static str),
     IncludeDepth,
+    /// A line of a file that is no configuration.
+    Line(usize, std::path::PathBuf),
+    /// An included path in a home directory nobody has, and the file
+    /// that includes it.
+    IncludePath(String, std::path::PathBuf),
 }
 
 impl std::fmt::Display for ConfigError {
@@ -163,6 +170,13 @@ impl std::fmt::Display for ConfigError {
             Self::Syntax(v) => write!(f, "config syntax: {v}"),
             Self::Value(v) => write!(f, "config value: {v}"),
             Self::IncludeDepth => write!(f, "include depth exceeds {}", include::MAX_INCLUDE_DEPTH),
+            Self::Line(line, file) => {
+                write!(f, "bad config line {line} in file {}", file.display())
+            }
+            Self::IncludePath(path, file) => {
+                let file = file.display();
+                write!(f, "could not expand include path '{path}' in file {file}")
+            }
         }
     }
 }

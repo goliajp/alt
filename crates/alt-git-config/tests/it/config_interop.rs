@@ -153,3 +153,56 @@ fn includes_and_include_if_match_git() {
     assert_eq!(m("conditional").as_deref(), Some("yes"), "gitdir true");
     assert_eq!(m("onmain").as_deref(), Some("yes"), "onbranch glob");
 }
+
+#[test]
+fn files_at_the_edges_of_the_syntax_are_read_or_refused_as_git_does() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let file = tmp.path().join("cfg");
+    let path = file.to_str().unwrap();
+    for text in [
+        &b"\xef\xbb\xbf[a]\nx = 1\n"[..],
+        b"x = 1\n[a]\ny=2\n",
+        b"[a]\nflag # said\ny=2\n",
+        b"[a]\nflag;said\n",
+        b"[a]\r\nflag\r\nx = 1\r\ny = a\\\r\nb\r\n",
+        b"[a]\nx = 1\\",
+        b"[a]\nx = \x0b1\x0c\n",
+        b"[a \"b\" ]\nx=1\n",
+        b"[]\nx=1\n",
+        b"[a\t\"b\"]\nx=1\n",
+        b"[a]\nx = \"a\nb\"\n",
+        b"[a \"b\\\"c\\\\d\\e\"]\nx=1\n",
+        b"[A.B.c]\nx=1\n",
+        b"[a]\nx_y=1\n",
+        b"[a]\n1x=1\n",
+        b"[a]\nx = 1",
+        b"[a] x = 1\n",
+        b"[a] # said\nx=1\n",
+        b"[ a ]\nx=1\n",
+        b"[a \"b\nc\"]\nx=1\n",
+        b"[a]\nx=\n",
+        b"[a]\nx y = 1\n",
+        b"[core\n",
+        b"[a]\n\nx = bad\\z\n",
+        b"[a]\nx = 1\n[b]\ny = \"open\n",
+    ] {
+        fs::write(&file, text).unwrap();
+        let shown = String::from_utf8_lossy(text).into_owned();
+        let git = Command::new("git")
+            .args(["config", "--file", path, "--list", "-z"])
+            .output()
+            .unwrap();
+        match Config::load(&file, &IncludeContext::default()) {
+            Ok(config) => {
+                assert!(git.status.success(), "git refuses {shown:?}");
+                let theirs = git_list(&["config", "--file", path, "--list", "-z"]);
+                assert_eq!(ours(&config), theirs, "{shown:?}");
+            }
+            Err(refused) => {
+                let said = String::from_utf8_lossy(&git.stderr).into_owned();
+                assert!(!git.status.success(), "git reads {shown:?}: {refused}");
+                assert_eq!(format!("fatal: {refused}\n"), said, "{shown:?}");
+            }
+        }
+    }
+}
