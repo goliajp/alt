@@ -86,6 +86,26 @@ refused. New operations whose complete recovery effects are not recorded refuse
 automatic undo as well. Upgrade does not rewrite these bytes or attribute them
 to the current workspace. Unknown/corrupt payloads are not silently skipped.
 
+## Check the store
+
+Commands verify the records they read and no others: a lookup goes through an
+index to one record, and opening a repository starts from the ref snapshot
+rather than the first operation. Damage in a record that nothing reads is
+therefore silent until something does. To read all of them:
+
+```sh
+alt fsck
+alt fsck --json
+```
+
+It decodes and hashes every stored chunk, reassembles every large blob, hashes
+every object to its Git id, compares each index with the file it indexes,
+verifies the whole operation log and replays it against the refs. It exits 0
+after printing how many records of each kind it verified, and non-zero at the
+first record that fails, naming it. It changes nothing; indexes and the ref
+snapshot are caches that the next writer rebuilds, while a damaged record in a
+log or pack is lost data to restore from another copy.
+
 ## Preserve data and exit to Git
 
 A complete recovery copy must preserve the native `.alt` store, its private
