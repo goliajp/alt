@@ -55,6 +55,7 @@ impl RecLog {
         }
         // another process indexed the first part of the tail held here
         let kept = self.tail.split_off((covered - held_from) as usize);
+        self.cache.clear();
         self.tail.clear();
         self.tail_keys.clear();
         self.tail_second.clear();
@@ -102,6 +103,7 @@ impl RecLog {
         let guard = guard_at(&self.file, &self.layout, self.len, self.len)
             .ok_or(StoreError::Format(self.layout.corrupt))?;
         self.runs.extend(&entries, from, self.len, guard, durable)?;
+        self.cache.clear();
         self.tail.clear();
         self.tail_keys.clear();
         self.tail_second.clear();

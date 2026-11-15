@@ -144,3 +144,39 @@ fn a_run_temporary_file_left_by_a_crash_is_removed_by_the_next_writer() {
     assert!(!leftover.exists(), "the leftover is gone");
     assert_eq!(value(&log, 300), Some(300));
 }
+
+#[test]
+fn a_lookup_repeated_after_the_log_changed_sees_the_change() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let path = dir.path().join("log");
+    let (mut log, _) = RecLog::open(&path, LAYOUT).unwrap();
+    for n in 0..300 {
+        log.append(&record(n, n)).unwrap();
+    }
+    log.index_tail(true).unwrap();
+    // read from behind the runs often enough for the records to be kept:
+    // from then on an answer may be a kept one
+    for _ in 0..3 {
+        for n in 0..300 {
+            assert_eq!(value(&log, n), Some(n));
+        }
+    }
+
+    // the key written again: the newer record wins while it is in the
+    // tail, and after it has moved behind the runs
+    for n in 300..600 {
+        log.append(&record(if n == 300 { 7 } else { n }, n))
+            .unwrap();
+    }
+    assert_eq!(value(&log, 7), Some(300));
+    log.index_tail(true).unwrap();
+    assert_eq!(value(&log, 7), Some(300));
+    assert_eq!(value(&log, 250), Some(250));
+
+    // cut back to the first 200 records: what was kept past them is gone
+    let cut = log.appended_len() - 400 * record(0, 0).len() as u64;
+    log.rewind(cut).unwrap();
+    assert_eq!(value(&log, 7), Some(7));
+    assert_eq!(value(&log, 250), None);
+    assert_eq!(value(&log, 199), Some(199));
+}

@@ -7,6 +7,7 @@
 //! runs is verified on open, where a torn final record (crash mid-append)
 //! is cut off and any other bad record is reported as corruption.
 
+mod cache;
 mod check;
 mod sync;
 
@@ -85,6 +86,7 @@ pub struct RecLog {
     tail: Vec<u8>,
     tail_keys: IdMap<Key, u32>,
     tail_second: IdMap<Key, Vec<u32>>,
+    cache: cache::ReadCache,
     len: u64,
     unsynced: bool,
 }
@@ -173,6 +175,7 @@ impl RecLog {
             tail: Vec::new(),
             tail_keys: IdMap::default(),
             tail_second: IdMap::default(),
+            cache: cache::ReadCache::default(),
             len: size,
             unsynced: false,
         };
@@ -203,6 +206,7 @@ impl RecLog {
             self.file.sync_all()?;
         }
         data.truncate(at);
+        self.cache.clear();
         self.tail.clear();
         self.tail_keys.clear();
         self.tail_second.clear();
@@ -254,6 +258,9 @@ impl RecLog {
         if let Some(&at) = self.tail_keys.get(key) {
             return Ok(Some(self.copy(self.tail_record(at))));
         }
+        if let Some(rec) = self.cache.get(key) {
+            return Ok(Some(rec));
+        }
         let mut last = None;
         self.runs.find_each(key, |position| {
             if position & SECONDARY == 0 {
@@ -267,6 +274,7 @@ impl RecLog {
         if (self.layout.keys)(&rec).0 != *key {
             return Err(StoreError::Format(self.layout.corrupt));
         }
+        self.cache.put(*key, &rec);
         Ok(Some(rec))
     }
 
