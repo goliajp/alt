@@ -342,14 +342,17 @@ impl Runs {
         durable: bool,
     ) -> Result<(), StoreError> {
         self.remove_stale()?;
-        let mut fresh = Vec::with_capacity(entries.len() * ENTRY_LEN);
-        for (key, position) in entries {
-            fresh.extend_from_slice(key);
-            fresh.extend_from_slice(&position.to_be_bytes());
-        }
-        let mut order: Vec<&[u8]> = fresh.chunks_exact(ENTRY_LEN).collect();
-        order.sort_unstable();
-        let fresh: Vec<u8> = order.concat();
+        let mut fresh: Vec<[u8; ENTRY_LEN]> = entries
+            .iter()
+            .map(|(key, position)| {
+                let mut entry = [0u8; ENTRY_LEN];
+                entry[..KEY_LEN].copy_from_slice(key);
+                entry[KEY_LEN..].copy_from_slice(&position.to_be_bytes());
+                entry
+            })
+            .collect();
+        fresh.sort_unstable();
+        let fresh = fresh.as_flattened();
 
         let mut keep = self.runs.len();
         let mut total = entries.len();
@@ -364,7 +367,7 @@ impl Runs {
         let tmp = path.with_extension("run.tmp");
         {
             let mut sources: Vec<&[u8]> = self.runs[keep..].iter().map(Run::entries).collect();
-            sources.push(&fresh);
+            sources.push(fresh);
             write_run(&tmp, &mut sources, total, start, end, guard, durable)?;
         }
         fs::rename(&tmp, &path)?;
