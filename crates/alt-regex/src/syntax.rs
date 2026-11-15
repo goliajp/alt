@@ -33,6 +33,7 @@ pub enum Node {
 
 /// The largest repetition count, as in the C library.
 const DUP_MAX: u32 = 0x7fff;
+/// The deepest nesting of groups and of repetitions around one atom.
 const MAX_DEPTH: u32 = 200;
 
 struct Parser<'a> {
@@ -123,6 +124,7 @@ impl<'a> Parser<'a> {
     }
 
     fn repeats(&mut self, mut atom: Node) -> Result<Node, Error> {
+        let mut nested = 0;
         loop {
             let rest = self.rest();
             let (skip, bounds) = match (self.ere(), rest) {
@@ -140,7 +142,23 @@ impl<'a> Parser<'a> {
                 Some(bounds) => bounds,
                 None => self.interval()?,
             };
-            atom = Node::Repeat(Box::new(atom), min, max);
+            atom = match atom {
+                _ if (min, max) == (1, Some(1)) => atom,
+                // `*`, `+` and `?` behind one another are one of them
+                Node::Repeat(inner, low @ 0..=1, high @ (None | Some(1)))
+                    if min <= 1 && matches!(max, None | Some(1)) =>
+                {
+                    let once = high.is_some() && max.is_some();
+                    Node::Repeat(inner, low * min, once.then_some(1))
+                }
+                _ => {
+                    nested += 1;
+                    if self.depth + nested > MAX_DEPTH {
+                        return Err(Error::TooBig);
+                    }
+                    Node::Repeat(Box::new(atom), min, max)
+                }
+            };
         }
     }
 
