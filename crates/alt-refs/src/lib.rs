@@ -109,7 +109,8 @@ impl RefStore {
         // a reader refreshes a snapshot that has fallen behind (or predates
         // anchors), so the next open is short whoever runs it
         if store.snapshot_is_due() {
-            store.snapshot()?;
+            // a cache: where it cannot be written, the open still stands
+            let _ = store.snapshot();
         }
         Ok(store)
     }
@@ -275,7 +276,8 @@ impl RefStore {
     fn note_op(&mut self) -> Result<(), RefError> {
         self.ops_since_snapshot += 1;
         if self.snapshot_is_due() {
-            self.snapshot()?;
+            // the operation is in the log already; the snapshot is a cache
+            let _ = self.snapshot();
         }
         Ok(())
     }

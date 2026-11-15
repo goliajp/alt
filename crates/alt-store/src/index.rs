@@ -181,23 +181,27 @@ impl ChunkIndex {
         durable: bool,
     ) -> Result<bool, StoreError> {
         // another process may have indexed part of our tail already
-        let mut runs = Runs::open(&self.dir, self.base, |end| guard_at(Location::at(end)))?;
+        let runs = Runs::open(&self.dir, self.base, |end| guard_at(Location::at(end)))?;
         let covered = runs.covered();
         if covered < self.runs.covered() {
             return Ok(false);
         }
+        // the runs and the tail change together, so a failed write below
+        // leaves the index whole
+        self.runs = runs;
         self.tail.retain(|(_, loc)| loc.position() >= covered);
+        self.latest = self.tail.iter().copied().collect();
         if self.tail.len() >= INDEX_AT {
             let entries: Vec<(Key, u64)> = self
                 .tail
                 .iter()
                 .map(|(id, loc)| (id.0, loc.position()))
                 .collect();
-            runs.extend(&entries, covered, self.end, guard, durable)?;
+            self.runs
+                .extend(&entries, covered, self.end, guard, durable)?;
             self.tail.clear();
+            self.latest.clear();
         }
-        self.runs = runs;
-        self.latest = self.tail.iter().copied().collect();
         Ok(true)
     }
 

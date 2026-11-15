@@ -59,12 +59,12 @@ impl Odb {
         let target = [pack, blobmap, self.map.appended_len()];
         // still under the append lock: fold what this batch (and any writer
         // before it) appended into the index runs, so the next open does not
-        // have to scan it
-        let indexed = self.index_tails();
+        // have to scan it. The runs are a cache: failing to write them must
+        // not keep the batch from its fsync
+        let _ = self.index_tails();
         // release the exclusive append lock first, so other writers append (and
         // pile onto the same fsync) instead of waiting behind my durability
         self.release();
-        indexed?;
 
         if alt_store::relaxed_durability() {
             return Ok(());

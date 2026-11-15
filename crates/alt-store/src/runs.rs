@@ -375,12 +375,17 @@ impl Runs {
             write_run(&tmp, &mut sources, total, start, end, guard, durable)?;
         }
         fs::rename(&tmp, &path)?;
-        let merged: Vec<Run> = self.runs.drain(keep..).collect();
+        // nothing changes in memory until the new run is in hand
         let run = Run::load(path, start, end)?.ok_or(CORRUPT)?;
-        for old in merged {
-            remove_if_present(&old.path)?;
-        }
+        let merged: Vec<Run> = self.runs.drain(keep..).collect();
         self.runs.push(run);
+        for old in merged {
+            // one left behind is outside the chain: the next writer's
+            // sweep takes it
+            if remove_if_present(&old.path).is_err() {
+                self.stale.push(old.path);
+            }
+        }
         Ok(())
     }
 
