@@ -1,0 +1,23 @@
+schema: alt-meta/1
+type: feat
+summary: status shows an untracked directory as one line and takes git's --untracked-files modes
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli.rs
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/add.rs
+touched: crates/alt-cli/src/native/diff/worktree.rs
+touched: crates/alt-cli/src/native/status.rs
+touched: crates/alt-cli/src/native/tree_state.rs
+touched: crates/alt-cli/src/native/tree_state/held.rs
+touched: crates/alt-cli/tests/fixtures/args/bindings.txt
+touched: crates/alt-cli/tests/it/argument_bindings.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/status_untracked.rs
+touched: crates/alt-worktree/src/delta.rs
+touched: crates/alt-worktree/src/lib.rs
+touched: crates/alt-worktree/src/untracked.rs
+touched: crates/alt-worktree/src/walk.rs
+touched: crates/alt-worktree/tests/it/delta.rs
+touched: crates/alt-worktree/tests/it/main.rs
+touched: crates/alt-worktree/tests/it/untracked.rs
