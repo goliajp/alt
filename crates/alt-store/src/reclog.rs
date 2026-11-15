@@ -7,6 +7,8 @@
 //! runs is verified on open, where a torn final record (crash mid-append)
 //! is cut off and any other bad record is reported as corruption.
 
+mod check;
+
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::ops::Deref;

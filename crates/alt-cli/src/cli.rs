@@ -444,6 +444,15 @@ pub enum Command {
         #[arg(long, global = true)]
         json: bool,
     },
+    /// Read and verify every record the repository stores: each chunk,
+    /// blob and object against its hash, each index against the file it
+    /// indexes, the whole operation log, and the refs against a replay of
+    /// that log. Exits non-zero at the first record that fails.
+    Fsck {
+        /// Emit the record counts as a JSON object
+        #[arg(long)]
+        json: bool,
+    },
     /// Verify the `alt-sig` header on one or more commit objects.
     /// With no args, walks the current branch's commit chain back to root
     /// (newest first). Each row is one of:
@@ -654,98 +663,6 @@ pub struct CatFileArgs {
     #[arg(short = 'p', group = "op")]
     pretty: bool,
     object: String,
-}
-
-/// `alt ci validate` — load every requested workflow.toml (or scan
-/// `.alt/ci/*/workflow.toml` when `paths` is empty), run the
-/// parser + linter, and print one diagnostic per line. Returns a
-/// non-zero exit code when any diagnostic is an error; warnings alone
-/// still exit 0. Repository-agnostic: this is a file-tier lint, not a
-/// store operation, so `alt ci validate` works in any directory.
-pub fn ci_validate<W: Write>(
-    cwd: &Path,
-    paths: &[std::path::PathBuf],
-    json: bool,
-    out: &mut W,
-) -> Res<u8> {
-    use crate::ci;
-
-    let files: Vec<std::path::PathBuf> = if paths.is_empty() {
-        let mut found = Vec::new();
-        let ci_dir = cwd.join(".alt").join("ci");
-        if let Ok(read) = std::fs::read_dir(&ci_dir) {
-            for entry in read.flatten() {
-                let candidate = entry.path().join("workflow.toml");
-                if candidate.is_file() {
-                    found.push(candidate);
-                }
-            }
-            found.sort();
-        }
-        if found.is_empty() {
-            writeln!(
-                out,
-                "no workflow.toml files found under .alt/ci/<name>/workflow.toml"
-            )?;
-            return Ok(0);
-        }
-        found
-    } else {
-        paths.to_vec()
-    };
-
-    let mut error_count = 0usize;
-    for file in &files {
-        let display = file.display().to_string();
-        let src = match std::fs::read_to_string(file) {
-            Ok(s) => s,
-            Err(e) => {
-                if json {
-                    let row = crate::json::Json::Object(vec![
-                        ("file", crate::json::Json::str(&display)),
-                        ("severity", crate::json::Json::str("error")),
-                        (
-                            "message",
-                            crate::json::Json::str(format!("cannot read: {e}")),
-                        ),
-                    ]);
-                    row.write(out)?;
-                    writeln!(out)?;
-                } else {
-                    writeln!(out, "{display}: error: cannot read: {e}")?;
-                }
-                error_count += 1;
-                continue;
-            }
-        };
-        let (wf, mut diags) = ci::parse_workflow(&src);
-        diags.extend(ci::lint(&wf));
-        for diag in diags {
-            let (line, col) = diag.at.resolve(&src);
-            if diag.severity == ci::Severity::Error {
-                error_count += 1;
-            }
-            if json {
-                let row = crate::json::Json::Object(vec![
-                    ("file", crate::json::Json::str(&display)),
-                    ("line", crate::json::Json::Num(line as i64)),
-                    ("col", crate::json::Json::Num(col as i64)),
-                    ("severity", crate::json::Json::str(diag.severity.as_str())),
-                    ("message", crate::json::Json::str(&diag.message)),
-                ]);
-                row.write(out)?;
-                writeln!(out)?;
-            } else {
-                writeln!(
-                    out,
-                    "{display}:{line}:{col}: {sev}: {msg}",
-                    sev = diag.severity.as_str(),
-                    msg = diag.message
-                )?;
-            }
-        }
-    }
-    Ok(if error_count > 0 { 1 } else { 0 })
 }
 
 #[derive(Subcommand, Debug)]
@@ -1134,6 +1051,7 @@ pub fn is_native(cmd: &Command) -> bool {
             | Command::Identity { .. }
             | Command::OpLog { .. }
             | Command::Verify { .. }
+            | Command::Fsck { .. }
     )
 }
 
@@ -1209,6 +1127,7 @@ pub fn mutates_command(cmd: &Command) -> bool {
             | Command::Diff { .. }
             | Command::OpLog { .. }
             | Command::Verify { .. }
+            | Command::Fsck { .. }
             | Command::Commit { validate: true, .. }
             | Command::Branch {
                 name: None,
@@ -1592,6 +1511,7 @@ pub fn run_on_store<W: Write>(
 ) -> Res<u8> {
     match &cli.command {
         Command::Init { .. } => Err("the daemon does not serve 'init'".into()),
+        Command::Fsck { json } => crate::fsck::run(store, *json, out),
         c if is_native(c) => {
             let (_alt_dir, coord) = native::resolve_workspace(cwd, cli.workspace.as_deref())?;
             // Execution has already claimed the whole request. The id here

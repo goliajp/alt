@@ -121,7 +121,7 @@ impl BlobStore {
         self.exclusive = false;
     }
 
-    fn map(&self) -> Result<&BlobMap, StoreError> {
+    pub(crate) fn map(&self) -> Result<&BlobMap, StoreError> {
         if let Some(map) = self.map.get() {
             return Ok(map);
         }

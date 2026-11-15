@@ -193,6 +193,15 @@ impl ObjectMap {
         Ok(out)
     }
 
+    /// Full check of the log (see [`RecLog::check`]); `each` sees every
+    /// entry.
+    pub fn check(
+        &self,
+        mut each: impl FnMut(MapEntry) -> Result<(), OdbError>,
+    ) -> Result<u64, OdbError> {
+        self.log.check(|rec| each(MapEntry::parse(rec)?))
+    }
+
     /// All entries in append order.
     pub fn entries(&self) -> Result<Vec<MapEntry>, OdbError> {
         let mut out = Vec::with_capacity(self.log.count());

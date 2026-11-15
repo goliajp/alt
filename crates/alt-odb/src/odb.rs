@@ -307,7 +307,7 @@ impl Odb {
     /// Materialises a stored blob, recomposing through the prism registry
     /// when it lives in Tier 1. The recomposed bytes' BLAKE3 is checked
     /// against `alt` so a corrupted recipe or part surfaces here.
-    fn fetch_blob(&self, alt: BlobId) -> Result<Vec<u8>, OdbError> {
+    pub(crate) fn fetch_blob(&self, alt: BlobId) -> Result<Vec<u8>, OdbError> {
         // stored verbatim is the common case; only a blob that is not can
         // be a decomposed one
         match self.blobs.get(alt) {

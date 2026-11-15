@@ -11,6 +11,7 @@
 //! rebuild and is pure cache — missing, corrupt, or orphaned snapshots are
 //! ignored and rewritten.
 
+mod check;
 mod policy;
 mod snapshot;
 mod state;
@@ -24,6 +25,7 @@ use alt_oplog::OpLog;
 use state::Refs;
 
 pub use alt_oplog::OpId;
+pub use check::RefsChecked;
 pub use policy::{RefError, RefPolicy, StateCheck};
 pub use tx::{IdemKey, PAYLOAD_REF_TX, ParsedTx, RefChange, parse_tx};
 
@@ -91,18 +93,12 @@ impl RefStore {
         };
 
         let mut by_key = BTreeMap::new();
-        for op in &recent[replay_from..] {
-            if let Some(tx) = tx::parse_tx(&op.payload)? {
-                refs.apply(&tx.changes, true)?;
-                if let Some(k) = tx.key {
-                    by_key.insert(k, op.id);
-                }
-            }
-        }
+        let mut applied = replay_from;
+        fold_new(&mut refs, &mut applied, &mut by_key, recent)?;
 
         let mut store = Self {
             ops_since_snapshot: recent.len() - replay_from,
-            applied: recent.len(),
+            applied,
             oplog,
             snapshot_path,
             refs,

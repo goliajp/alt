@@ -129,6 +129,38 @@ impl ChunkIndex {
         entries
     }
 
+    /// Re-hashes the run files against their checksums.
+    pub fn verify_runs(&self) -> Result<(), StoreError> {
+        self.runs.verify()
+    }
+
+    /// Entries the runs hold.
+    pub fn run_entries(&self) -> usize {
+        self.runs.count()
+    }
+
+    /// Checks that the index knows the record a pack walk found at `loc`,
+    /// and resolves its id to that record or a later one. Says whether the
+    /// record is one the runs cover.
+    pub fn check_record(&self, id: ChunkId, loc: Location) -> Result<bool, StoreError> {
+        let position = loc.position();
+        let missing = StoreError::Format("chunk index misses a record");
+        let latest = self.get(id)?.ok_or(missing)?;
+        if latest.position() < position {
+            return Err(StoreError::Format("chunk index names a superseded record"));
+        }
+        if position >= self.runs.covered() {
+            return Ok(false);
+        }
+        let mut found = false;
+        self.runs.find_each(&id.0, |at| found |= at == position)?;
+        if found {
+            Ok(true)
+        } else {
+            Err(StoreError::Format("chunk index misses a record"))
+        }
+    }
+
     /// The position a run written now would end at, when the tail is long
     /// enough to be worth one.
     pub fn pending(&self) -> Option<Location> {

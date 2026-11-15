@@ -16,10 +16,12 @@
 //! recorded at import would otherwise survive until export), and reads
 //! inherit the blob layer's BLAKE3 verification.
 
+mod check;
 mod error;
 mod lock;
 mod map;
 mod odb;
+mod registry;
 mod storage_view;
 mod tier1;
 
@@ -27,37 +29,18 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use alt_git_codec::{ObjectId, ObjectKind, RawObject};
-use alt_prism::Registry;
 use alt_store::{BlobOptions, BlobStore, CompactReport, StoreCheckpoint};
 
 pub use alt_store::BlobId;
+pub use check::OdbChecked;
 pub use error::OdbError;
 pub use map::{MapEntry, ObjectMap};
 use odb::Odb;
 pub use odb::OdbSink;
+pub use registry::default_registry;
 pub use storage_view::{
     ChunkInfo, ChunkLayout, PrismStats, StorageStats, StorageView, Tier1Layout,
 };
-
-/// The production prism set, registered into every freshly opened
-/// [`NativeOdb`]. Centralised here so a reader and a writer always agree on
-/// which prisms a stored Tier 1 record might invoke — adding a prism to
-/// production is a single edit, and stores opened by any tool recompose the
-/// same blobs.
-///
-/// Order is priority (`Registry::register` is hot-first). [`alt_prism_deflate::DeflatePrism`]
-/// is currently the only entry: the "universal key", since most binary asset containers wrap deflate streams that defeat
-/// CDC dedup otherwise.
-pub fn default_registry() -> Registry {
-    let mut r = Registry::new();
-    // Hot-first registration order. Signatures are disjoint (PK / 89PNG
-    // / zlib magic), so any order works for correctness; this one
-    // is hot-first.
-    r.register(Box::new(alt_prism_zip::ZipPrism));
-    r.register(Box::new(alt_prism_png::PngPrism));
-    r.register(Box::new(alt_prism_deflate::DeflatePrism));
-    r
-}
 
 /// A point-in-time write cursor of a [`NativeOdb`] for [`NativeOdb::rewind`]:
 /// snapshots each append file's current length (chunks pack, blobmap, tier1,

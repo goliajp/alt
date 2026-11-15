@@ -21,6 +21,7 @@
 
 mod blob;
 mod blobmap;
+mod check;
 /// Lineage delta codec (zstd ref-prefix / patch-from). Public as a
 /// primitive — reused by the store's encode/decode and benched directly.
 pub mod delta;
@@ -34,6 +35,7 @@ mod run_write;
 pub mod runs;
 
 pub use blob::{BlobOptions, BlobSink, BlobStore, StoreCheckpoint};
+pub use check::StoreChecked;
 pub use pack::with_shared_lock;
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -799,23 +801,10 @@ impl ChunkStore {
         self.resolve(id, Verify::Boundary)
     }
 
-    /// Deep scrub: resolve `id` re-hashing every layer from disk (bypassing
-    /// the read cache), so corruption is localized to the failing layer
-    /// rather than only detected at the boundary. The fsck path.
-    pub fn verify_chunk(&self, id: ChunkId) -> Result<(), StoreError> {
-        self.resolve(id, Verify::Deep).map(drop)
-    }
-
     /// Resolves a chunk with no hashing (structural checks only). Internal:
     /// the caller must verify at a higher boundary — the blob hash.
     pub(crate) fn read_unverified(&self, id: ChunkId) -> Result<Vec<u8>, StoreError> {
         self.resolve(id, Verify::None)
-    }
-
-    /// Resolves a chunk re-hashing every layer; the bytes are returned so the
-    /// blob deep-verify can reassemble and check the blob boundary too.
-    pub(crate) fn read_deep(&self, id: ChunkId) -> Result<Vec<u8>, StoreError> {
-        self.resolve(id, Verify::Deep)
     }
 
     fn resolve(&self, id: ChunkId, verify: Verify) -> Result<Vec<u8>, StoreError> {

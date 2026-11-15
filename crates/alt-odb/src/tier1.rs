@@ -80,6 +80,16 @@ impl Tier1Map {
             .map(|rec| BlobId(rec[32..64].try_into().unwrap())))
     }
 
+    /// Full check of the log (see [`RecLog::check`]); `each` sees every
+    /// decomposed blob.
+    pub fn check<E: From<StoreError>>(
+        &self,
+        mut each: impl FnMut(BlobId) -> Result<(), E>,
+    ) -> Result<u64, E> {
+        self.log
+            .check(|rec| each(BlobId(rec[..32].try_into().unwrap())))
+    }
+
     pub fn contains(&self, blob: BlobId) -> Result<bool, StoreError> {
         self.log.contains(&blob.0)
     }
