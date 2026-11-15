@@ -1,0 +1,16 @@
+schema: alt-meta/1
+type: perf
+summary: a refreshed handle keeps the records and chunk locations it has looked up
+author-type: human
+author: doracawl
+touched: crates/alt-odb/src/map.rs
+touched: crates/alt-odb/src/odb.rs
+touched: crates/alt-store/src/blob/open.rs
+touched: crates/alt-store/src/fresh.rs
+touched: crates/alt-store/src/index.rs
+touched: crates/alt-store/src/indexing.rs
+touched: crates/alt-store/src/lib.rs
+touched: crates/alt-store/src/reclog/cache.rs
+touched: crates/alt-store/src/reclog/sync.rs
+touched: crates/alt-store/tests/it/compact_readers.rs
+touched: crates/alt-store/tests/it/index_gap.rs
