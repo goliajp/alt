@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: drop the marks in the looped copy of a repetition whose body takes something
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/program.rs
+touched: crates/alt-regex/tests/it/regcomp.rs
