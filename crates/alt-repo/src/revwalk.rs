@@ -23,6 +23,9 @@ pub struct RevWalk<'r> {
     pending: Vec<ObjectId>,
 }
 
+/// A commit of the walk: its id, the parsed commit and the object's bytes.
+pub type Walked = (ObjectId, Commit, Vec<u8>);
+
 struct Queued {
     date: i64,
     order: Reverse<u64>,
@@ -95,7 +98,7 @@ impl<'r> RevWalk<'r> {
 
     /// The next commit with the bytes of its object, for a caller that
     /// prints them and would otherwise read the object again.
-    pub fn next_with_data(&mut self) -> Option<Result<(ObjectId, Commit, Vec<u8>), RepoError>> {
+    pub fn next_with_data(&mut self) -> Option<Result<Walked, RepoError>> {
         for parent in std::mem::take(&mut self.pending) {
             if let Err(e) = self.push(parent) {
                 return Some(Err(e));
