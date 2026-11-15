@@ -10,42 +10,10 @@ use alt_worktree::{Delta, PathMatcher, ScanOptions, Snapshot, Staged};
 
 use super::*;
 
-/// A snapshot kept in memory by a process that serves many commands, with
-/// what its file looked like when it was read or written. Another process
-/// that replaces the file makes the copy stale; a stale copy only knows
-/// less, since every entry still says which content its stat goes with.
-struct Held {
-    file: alt_worktree::FileStat,
-    snapshot: Snapshot,
-}
+mod held;
 
-static HELD: std::sync::Mutex<Option<std::collections::HashMap<PathBuf, Held>>> =
-    std::sync::Mutex::new(None);
-
-/// From now on this process keeps the snapshots it reads and writes, and
-/// reads a snapshot file again only after it was replaced. For the daemon.
-pub fn hold_snapshots() {
-    HELD.lock().unwrap().get_or_insert_default();
-}
-
-fn held(path: &Path) -> Option<Snapshot> {
-    let guard = HELD.lock().unwrap();
-    let held = guard.as_ref()?.get(path)?;
-    let now = alt_worktree::FileStat::of(&std::fs::symlink_metadata(path).ok()?);
-    (now == held.file).then(|| held.snapshot.clone())
-}
-
-fn hold(path: &Path, snapshot: &Snapshot) {
-    let mut guard = HELD.lock().unwrap();
-    let Some(map) = guard.as_mut() else { return };
-    let Ok(meta) = std::fs::symlink_metadata(path) else {
-        return;
-    };
-    let mut snapshot = snapshot.clone();
-    snapshot.changed = false;
-    let file = alt_worktree::FileStat::of(&meta);
-    map.insert(path.to_path_buf(), Held { file, snapshot });
-}
+use held::HELD;
+pub use held::hold_snapshots;
 
 /// A checkout worked out from the entries of a tree.
 pub(super) struct Planned {
@@ -75,9 +43,9 @@ impl NativeRepo<'_> {
     pub(super) fn worktree_snapshot(&self) -> Res<Snapshot> {
         let algo = self.store.algo;
         let path = self.snapshot_path();
-        let prior = held(&path).or_else(|| {
+        let prior = HELD.get(&path).or_else(|| {
             let read = Snapshot::load(&path, algo)?;
-            hold(&path, &read);
+            HELD.put(&path, &read);
             Some(read)
         });
         if let Some(snapshot) = &prior
@@ -103,7 +71,7 @@ impl NativeRepo<'_> {
     pub(super) fn keep_snapshot(&self, snapshot: &Snapshot) {
         let path = self.snapshot_path();
         if snapshot.changed && snapshot.save(&path).is_ok() {
-            hold(&path, snapshot);
+            HELD.put(&path, snapshot);
         }
     }
 
@@ -169,8 +137,8 @@ impl NativeRepo<'_> {
             written.clear();
         }
         let parsed = Index::parse(index, algo)?;
-        let prior =
-            held(&self.snapshot_path()).or_else(|| Snapshot::load(&self.snapshot_path(), algo));
+        let path = self.snapshot_path();
+        let prior = HELD.get(&path).or_else(|| Snapshot::load(&path, algo));
         let id = &index[index.len() - algo.raw_len()..];
         let mut next = Snapshot::of_index(&parsed, id, algo, prior.as_ref());
         let control = self.index_path.parent().ok_or("index has no directory")?;

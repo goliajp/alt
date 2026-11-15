@@ -49,6 +49,7 @@ mod rebase;
 mod remote;
 mod revert;
 mod scan_cache;
+mod scan_daemon;
 mod show;
 mod status_json;
 mod switch_kinds;
