@@ -14,6 +14,9 @@ use crate::snapshot::{FileStat, Snapshot};
 /// Directories with fewer entries beneath them are walked by one thread.
 const SPLIT: u32 = 512;
 
+/// A directory with fewer files of its own has them looked at by one thread.
+const MANY_FILES: usize = 256;
+
 /// What a walk found to differ from the snapshot. Entries are named by
 /// their position in it.
 #[derive(Default)]
@@ -183,6 +186,7 @@ impl Walk<'_> {
     /// Walks an index directory without listing it: one stat per entry.
     fn unlisted(&self, fd: &DirFd, dir: usize, reach: Reach, found: &mut Found) -> io::Result<()> {
         let mut below = Vec::new();
+        let mut files = Vec::new();
         for child in self.children(dir) {
             let Some(reach) = self.reach(reach, self.path(&child)) else {
                 continue;
@@ -190,19 +194,25 @@ impl Walk<'_> {
             let name = CString::new(self.name(dir, &child)).map_err(io::Error::other)?;
             match child {
                 Child::File(..) if reach != Reach::Inside => {}
-                Child::File(first, end) => match fd.stat(&name)? {
-                    None => self.gone(first, end, reach, found),
-                    Some(st) if kind_of(st.mode) == Kind::Dir => {
-                        match self.snapshot.entries[first].mode == 0o160000 {
-                            true => found.gitlinks.push(first as u32),
-                            false => self.gone(first, end, reach, found),
-                        }
-                    }
-                    Some(st) => self.tracked(first, end, st, found),
-                },
+                Child::File(first, end) => files.push((first, end, name)),
                 Child::Dir(c) => below.push((c, name, reach)),
             }
         }
+        let stat = |(first, end, name): &(usize, usize, CString), found: &mut Found| {
+            let (first, end) = (*first, *end);
+            match fd.stat(name)? {
+                None => self.gone(first, end, Reach::Inside, found),
+                Some(st) if kind_of(st.mode) == Kind::Dir => {
+                    match self.snapshot.entries[first].mode == 0o160000 {
+                        true => found.gitlinks.push(first as u32),
+                        false => self.gone(first, end, Reach::Inside, found),
+                    }
+                }
+                Some(st) => self.tracked(first, end, st, found),
+            }
+            Ok(())
+        };
+        self.files(&files, stat, found)?;
         let visit = |(c, name, reach): &(usize, CString, Reach)| -> io::Result<Found> {
             let mut found = Found::default();
             match fd.open_at(name)? {
@@ -212,6 +222,29 @@ impl Walk<'_> {
             Ok(found)
         };
         self.below(dir, &below, visit, found)
+    }
+
+    /// Looks at the files of one directory with `stat`, on several threads
+    /// when there are many.
+    fn files<T: Sync>(
+        &self,
+        files: &[T],
+        stat: impl Fn(&T, &mut Found) -> io::Result<()> + Sync,
+        found: &mut Found,
+    ) -> io::Result<()> {
+        if files.len() < MANY_FILES {
+            return files.iter().try_for_each(|file| stat(file, found));
+        }
+        let parts: Vec<&[T]> = files.chunks(MANY_FILES / 4).collect();
+        let each = |part: &&[T]| -> io::Result<Found> {
+            let mut found = Found::default();
+            part.iter().try_for_each(|file| stat(file, &mut found))?;
+            Ok(found)
+        };
+        for part in alt_threads::map(&parts, 1, each) {
+            found.absorb(part?);
+        }
+        Ok(())
     }
 
     /// Runs `visit` over what lies below a directory, on several threads
@@ -258,6 +291,7 @@ impl Walk<'_> {
         let ignore = own.as_ref().unwrap_or(ignore);
         let mut taken = vec![false; names.len()];
         let mut below = Vec::new();
+        let mut files = Vec::new();
         for child in self.children(dir) {
             let Some(reach) = self.reach(reach, self.path(&child)) else {
                 continue;
@@ -277,12 +311,7 @@ impl Walk<'_> {
                         continue;
                     };
                     taken[item] = true;
-                    match fd.stat(names.c_name(item))? {
-                        Some(st) if kind_of(st.mode) != Kind::Dir => {
-                            self.tracked(first, end, st, found)
-                        }
-                        _ => self.gone(first, end, reach, found),
-                    }
+                    files.push((first, end, item));
                 }
                 Child::Dir(c) => match names.find(name, true) {
                     Some(item) => {
@@ -298,6 +327,14 @@ impl Walk<'_> {
                 },
             }
         }
+        let stat = |&(first, end, item): &(usize, usize, usize), found: &mut Found| {
+            match fd.stat(names.c_name(item))? {
+                Some(st) if kind_of(st.mode) != Kind::Dir => self.tracked(first, end, st, found),
+                _ => self.gone(first, end, Reach::Inside, found),
+            }
+            Ok(())
+        };
+        self.files(&files, stat, found)?;
         if !hidden {
             let mut path = base.to_vec();
             for item in (0..names.len()).filter(|&i| !taken[i]) {

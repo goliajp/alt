@@ -433,3 +433,30 @@ fn a_scan_limited_to_some_paths_reports_nothing_outside_them() {
         }
     }
 }
+
+#[test]
+fn a_directory_of_many_files_looked_at_on_several_threads_matches_the_full_scan() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let root = dir.path();
+    for f in 0..700 {
+        write(root, &format!("flat/f{f:03}.txt"), &format!("{f}\n"));
+    }
+    let index = index_of(root);
+    let mut snapshot = Snapshot::of_index(&index, b"id", ALGO, None);
+    for untracked in [true, false] {
+        assert_eq!(
+            scan(root, &mut snapshot, &options(untracked, LATER)).unwrap(),
+            Delta::default()
+        );
+    }
+    for f in (0..700).step_by(50) {
+        write(root, &format!("flat/f{f:03}.txt"), "changed\n");
+        std::fs::remove_file(root.join(format!("flat/f{:03}.txt", f + 1))).unwrap();
+    }
+    for untracked in [true, false] {
+        let delta = scan(root, &mut snapshot, &options(untracked, LATER)).unwrap();
+        assert_eq!((delta.changed.len(), delta.deleted.len()), (14, 14));
+        let (unstaged, _) = full_scan_view(root, &index);
+        assert_eq!(view(&delta).0, unstaged);
+    }
+}
