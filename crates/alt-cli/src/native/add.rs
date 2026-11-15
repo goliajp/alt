@@ -36,6 +36,31 @@ impl NativeRepo<'_> {
     /// `alt add <paths>`: stage the given paths (or everything for `.`),
     /// updating the index to match the working tree.
     pub fn add(&mut self, paths: &[String], json: bool, out: &mut impl Write) -> Res<()> {
+        self.stage(paths, false, json, out)
+    }
+
+    /// `alt add --renormalize <paths>`, as in git: every tracked file
+    /// among the paths is stored again the way the attributes and settings
+    /// now in force clean it, whatever the index holds for it. A file that
+    /// kept its stat is not looked at otherwise, so a change of the rules
+    /// alone reaches the index only this way. Untracked files, conflicted
+    /// paths and submodules are left as they are, and a tracked file that
+    /// is gone is an error.
+    pub fn renormalize(&mut self, paths: &[String], json: bool, out: &mut impl Write) -> Res<()> {
+        if paths.is_empty() {
+            writeln!(out, "Nothing specified, nothing added.")?;
+            return Ok(());
+        }
+        self.stage(paths, true, json, out)
+    }
+
+    fn stage(
+        &mut self,
+        paths: &[String],
+        renormalize: bool,
+        json: bool,
+        out: &mut impl Write,
+    ) -> Res<()> {
         self.ensure_writable("add")?;
         self.lock_workspace()?;
         self.ensure_no_pending_recovery()?;
@@ -55,17 +80,30 @@ impl NativeRepo<'_> {
         all_match(&specs, paths, &before, &delta)?;
 
         // the paths whose entries change: taken from the working tree, or dropped
-        let taken: Vec<&BString> = delta
-            .changed
-            .iter()
-            .map(|w| &w.path)
-            .chain(&delta.untracked)
-            .chain(&delta.unmerged)
-            .collect();
+        let again = |e: &&IndexEntry| e.stage() == 0 && e.mode != 0o160000 && named(&e.path);
+        let taken: Vec<&BString> = match renormalize {
+            true => before
+                .entries
+                .iter()
+                .filter(again)
+                .map(|e| &e.path)
+                .collect(),
+            false => delta
+                .changed
+                .iter()
+                .map(|w| &w.path)
+                .chain(&delta.untracked)
+                .chain(&delta.unmerged)
+                .collect(),
+        };
+        let deleted: &[BString] = match renormalize {
+            true => &[],
+            false => &delta.deleted,
+        };
         let acted: HashSet<&[u8]> = taken
             .iter()
             .copied()
-            .chain(&delta.deleted)
+            .chain(deleted)
             .map(|p| p.as_slice())
             .collect();
         // a conflicted path among those named is resolved by what the
@@ -74,7 +112,7 @@ impl NativeRepo<'_> {
         // is named, lies under a named directory or the whole tree is
         // staged. The scan does not report a conflicted submodule without
         // a directory as deleted, so those are dropped here
-        let resolved = |e: &&IndexEntry| e.stage() != 0 && named(&e.path);
+        let resolved = |e: &&IndexEntry| !renormalize && e.stage() != 0 && named(&e.path);
         let mut entries: Vec<IndexEntry> = before
             .entries
             .iter()
@@ -113,13 +151,20 @@ impl NativeRepo<'_> {
         // path gate: deny staging any path the policy excludes, *before*
         // writing a blob into the odb, so a denial has no side effect
         if !self.caps.path_allow.is_empty() {
-            let gone: HashSet<&[u8]> = delta.deleted.iter().map(|p| p.as_slice()).collect();
+            let gone: HashSet<&[u8]> = deleted.iter().map(|p| p.as_slice()).collect();
             let stays = |e: &&IndexEntry| !gone.contains(e.path.as_slice());
             for e in before.entries.iter().filter(present).filter(stays) {
                 self.ensure_path_allowed(e.path.to_str().unwrap_or(""))?;
             }
         }
-        let stats = self.stage_files(&taken, &delta, &before, &mut entries)?;
+        // stored anew, a file is cleaned without regard to what is staged
+        let none = Index {
+            version: 2,
+            entries: Vec::new(),
+            extensions: Vec::new(),
+        };
+        let staged_now = if renormalize { &none } else { &before };
+        let stats = self.stage_files(&taken, &delta, staged_now, &mut entries)?;
         self.store.odb.flush()?;
         entries.sort_by(|a, b| a.path.cmp(&b.path).then(a.stage().cmp(&b.stage())));
         let after = Index {
@@ -204,7 +249,9 @@ impl NativeRepo<'_> {
                 entries.push(staged_entry(path, w.oid, w.mode));
                 continue;
             }
-            let stat = FileStat::of(&std::fs::symlink_metadata(self.abs(path)?)?);
+            let meta = std::fs::symlink_metadata(self.abs(path)?)
+                .map_err(|e| format!("unable to stat '{path}': {e}"))?;
+            let stat = FileStat::of(&meta);
             // the id is known once the stored form is: not used until then
             let file = WorkEntry {
                 path: path.clone(),

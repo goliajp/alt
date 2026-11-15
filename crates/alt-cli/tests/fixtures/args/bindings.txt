@@ -6,6 +6,8 @@ alt add a b --json
 {"subcommand":{"arguments":{"subcommand":null,"values":{"Add":["7061746873","6a736f6e"],"json":["74727565"],"paths":["61","62"]}},"name":"add"},"values":{}}
 alt add .
 {"subcommand":{"arguments":{"subcommand":null,"values":{"Add":["7061746873"],"json":["66616c7365"],"paths":["2e"]}},"name":"add"},"values":{}}
+alt add --renormalize .
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Add":["72656e6f726d616c697a65","7061746873"],"json":["66616c7365"],"paths":["2e"],"renormalize":["74727565"]}},"name":"add"},"values":{}}
 alt commit -m msg
 {"subcommand":{"arguments":{"subcommand":null,"values":{"Commit":["6d657373616765"],"allow_empty":["66616c7365"],"amend":["66616c7365"],"json":["66616c7365"],"message":["6d7367"],"no_edit":["66616c7365"],"no_verify":["66616c7365"],"validate":["66616c7365"]}},"name":"commit"},"values":{}}
 alt commit -mmsg --allow-empty -n

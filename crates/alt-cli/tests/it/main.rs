@@ -2,6 +2,7 @@
 mod add_conflict;
 mod add_ignore;
 mod add_paths;
+mod add_renormalize;
 mod altd_server;
 mod amend;
 mod argument_bindings;

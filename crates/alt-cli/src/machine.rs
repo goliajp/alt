@@ -165,6 +165,11 @@ fn canonical_matches(matches: &Matches) -> Value {
             args.insert(entry.id, vec![hex(raw.as_bytes())]);
             continue;
         }
+        // a flag that came after bindings were first recorded binds only
+        // when it is set: the commands recorded before it keep theirs
+        if entry.id == "renormalize" && entry.values.iter().all(|v| v.as_bytes() == b"false") {
+            continue;
+        }
         args.insert(
             entry.id,
             entry

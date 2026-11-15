@@ -17,5 +17,5 @@ fn bindings_match_the_recorded_ones() {
         assert_eq!(actual, expected, "{command}");
         checked += 1;
     }
-    assert_eq!(checked, 224);
+    assert_eq!(checked, 225);
 }

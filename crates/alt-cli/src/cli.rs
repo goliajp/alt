@@ -120,6 +120,10 @@ pub enum Command {
     Add {
         /// Paths to stage; `.` stages the whole working tree
         paths: Vec<String>,
+        /// Store every tracked file among the paths again, as the
+        /// attributes and line-ending settings now in force clean it
+        #[arg(long)]
+        renormalize: bool,
         /// Emit a structured JSON result instead of the human line
         #[arg(long)]
         json: bool,
@@ -1268,7 +1272,14 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
         Command::Candidate { op, json } => repo.candidate_command(op, *json, out)?,
         Command::Evidence { op, json } => repo.evidence_command(op, *json, out)?,
         Command::Request { op, json } => repo.request_query(op, *json, out)?,
-        Command::Add { paths, json } => repo.add(paths, *json, out)?,
+        Command::Add {
+            paths,
+            renormalize,
+            json,
+        } => match renormalize {
+            true => repo.renormalize(paths, *json, out)?,
+            false => repo.add(paths, *json, out)?,
+        },
         Command::Commit {
             validate: true,
             json,
