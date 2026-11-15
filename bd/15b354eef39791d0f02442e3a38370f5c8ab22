@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: keep the unit tests from the git configuration and locale of the machine
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/git_settings.rs
