@@ -15,9 +15,10 @@ impl NativeRepo<'_> {
         // odb.put on the next line. Wins for a smarter add are tracked
         // separately (the same-oid short-circuit in odb.put helps a bit).
         // the index decides which ignored paths are tracked and so still count
-        let scan = self.scan_tree(&self.index()?)?;
-        let lfs = self.lfs_rules()?;
+        // one converter scans and stores: a filter runs once for a file
         let attrs = self.converter()?;
+        let scan = self.scan_tree_with(&attrs, &self.index()?)?;
+        let lfs = self.lfs_rules()?;
         let specs: Vec<&str> = paths.iter().map(|p| pathspec(p)).collect();
         // a path named through a symlink is not a path of this tree
         for (spec, given) in specs.iter().zip(paths) {

@@ -36,11 +36,20 @@ impl NativeRepo<'_> {
     /// be stored: an LFS path as its pointer, text with its line endings
     /// normalized.
     pub(super) fn scan_tree(&self, index: &Index) -> Res<Vec<WorkEntry>> {
+        self.scan_tree_with(&self.converter()?, index)
+    }
+
+    /// As [`scan_tree`](Self::scan_tree), converting with `attrs`: the
+    /// converter the caller goes on to store the files with.
+    pub(super) fn scan_tree_with(
+        &self,
+        attrs: &convert::Converter,
+        index: &Index,
+    ) -> Res<Vec<WorkEntry>> {
         let rules = self.lfs_rules()?;
-        let attrs = self.converter()?;
         let clean = |path: &[u8], content: &[u8]| {
             let pointer = rules.as_ref().and_then(|r| lfs_clean(r, path, content));
-            pointer.or_else(|| self.stored_form(&attrs, index, path, content))
+            pointer.or_else(|| self.stored_form(attrs, index, path, content))
         };
         let head = |dir: &Path| attrs.submodule_head(dir);
         let scan = scan_worktree_with_index(
@@ -55,12 +64,15 @@ impl NativeRepo<'_> {
     }
 
     /// Like [`scan_tree`](Self::scan_tree) but only over the index's paths.
-    pub(super) fn scan_index_paths(&self, index: &Index) -> Res<Vec<WorkEntry>> {
+    pub(super) fn scan_index_paths(
+        &self,
+        attrs: &convert::Converter,
+        index: &Index,
+    ) -> Res<Vec<WorkEntry>> {
         let rules = self.lfs_rules()?;
-        let attrs = self.converter()?;
         let clean = |path: &[u8], content: &[u8]| {
             let pointer = rules.as_ref().and_then(|r| lfs_clean(r, path, content));
-            pointer.or_else(|| self.stored_form(&attrs, index, path, content))
+            pointer.or_else(|| self.stored_form(attrs, index, path, content))
         };
         let head = |dir: &Path| attrs.submodule_head(dir);
         let scan = scan_indexed_paths(

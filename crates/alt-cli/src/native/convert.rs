@@ -13,14 +13,24 @@ use alt_worktree::ident;
 use super::*;
 use crate::git_settings::read_if_file;
 
+mod filter_process;
+
+use filter_process::FilterProcess;
+
 /// The commands of one `filter.<name>` section.
 #[derive(Default)]
 struct Driver {
     clean: Option<Vec<u8>>,
     smudge: Option<Vec<u8>>,
+    /// a command that stays running and does both, in place of the two
+    process: Option<Vec<u8>>,
     /// a failing command is an error instead of leaving the content as is
     required: bool,
 }
+
+/// The digest of a file's content and what the clean filter made of it;
+/// `None` when the filter left it as it was.
+type Cleaned = ([u8; 32], Option<Vec<u8>>);
 
 /// Where the `.gitattributes` files are read from.
 enum Tree {
@@ -39,6 +49,13 @@ pub(super) struct Converter {
     fixed: Vec<Layer>,
     config: EolConfig,
     drivers: HashMap<Vec<u8>, Driver>,
+    /// the filter processes started so far, by driver; `None` for one
+    /// that could not be started
+    processes: RefCell<HashMap<Vec<u8>, Option<FilterProcess>>>,
+    /// what the clean filter last made of each path, with the digest of
+    /// the content it was given: a file is scanned and then stored, and
+    /// both must see the same result
+    cleaned: RefCell<HashMap<Vec<u8>, Cleaned>>,
     algo: HashAlgo,
     failed: RefCell<Option<Box<dyn std::error::Error>>>,
 }
@@ -102,6 +119,7 @@ impl NativeRepo<'_> {
             match e.key.as_str() {
                 "clean" => driver.clean = Some(value.to_vec()),
                 "smudge" => driver.smudge = Some(value.to_vec()),
+                "process" => driver.process = Some(value.to_vec()),
                 "required" => {
                     driver.required = settings
                         .get_bool("filter", Some(name.as_slice()), "required")
@@ -119,6 +137,8 @@ impl NativeRepo<'_> {
             fixed,
             config: EolConfig { autocrlf, eol },
             drivers,
+            processes: RefCell::default(),
+            cleaned: RefCell::default(),
             algo: self.store.algo,
             failed: RefCell::default(),
         })
@@ -241,17 +261,25 @@ impl Converter {
     ) -> Option<Vec<u8>> {
         let attrs = self.attributes(path);
         let mut out: Option<Vec<u8>> = None;
-        if let Some(driver) = self.driver(&attrs)
-            && let Some(command) = &driver.clean
-        {
-            match self.run(command, path, content) {
-                Ok(cleaned) => out = Some(cleaned),
-                Err(e) if driver.required => {
-                    self.fail(e);
-                    return None;
+        if let Some((name, driver)) = self.driver(&attrs) {
+            let digest = *alt_hash::blake3::hash(content).as_bytes();
+            let known = self.cleaned.borrow().get(path).cloned();
+            out = match known.filter(|(of, _)| *of == digest) {
+                Some((_, cleaned)) => cleaned,
+                None => {
+                    let cleaned = match self.filter(name, driver, "clean", path, content) {
+                        Ok(cleaned) => cleaned,
+                        Err(e) if driver.required => {
+                            self.fail(e);
+                            return None;
+                        }
+                        Err(_) => None,
+                    };
+                    let kept = (digest, cleaned.clone());
+                    self.cleaned.borrow_mut().insert(path.to_vec(), kept);
+                    cleaned
                 }
-                Err(_) => {}
-            }
+            };
         }
         let current = out.as_deref().unwrap_or(content);
         if let Some(normal) = attributes::to_store(attrs.conversion, current, stored_crlf) {
@@ -281,11 +309,10 @@ impl Converter {
         {
             out = Some(ended);
         }
-        if let Some(driver) = self.driver(&attrs)
-            && let Some(command) = &driver.smudge
-        {
-            match self.run(command, path, out.as_deref().unwrap_or(blob)) {
-                Ok(smudged) => out = Some(smudged),
+        if let Some((name, driver)) = self.driver(&attrs) {
+            match self.filter(name, driver, "smudge", path, out.as_deref().unwrap_or(blob)) {
+                Ok(Some(smudged)) => out = Some(smudged),
+                Ok(None) => {}
                 Err(e) if driver.required => return Err(e),
                 Err(_) => {}
             }
@@ -293,10 +320,53 @@ impl Converter {
         Ok(out)
     }
 
-    fn driver(&self, attrs: &PathAttributes) -> Option<&Driver> {
+    fn driver<'a>(&'a self, attrs: &'a PathAttributes) -> Option<(&'a [u8], &'a Driver)> {
         let name = attrs.filter.as_deref()?;
         // alt keeps LFS content itself
-        (name != b"lfs").then(|| self.drivers.get(name)).flatten()
+        let driver = (name != b"lfs").then(|| self.drivers.get(name)).flatten()?;
+        Some((name, driver))
+    }
+
+    /// `content` through the `clean` or `smudge` side of a driver: its
+    /// process when it has one, else the command of that side. `None`
+    /// when the driver has no command for the side.
+    fn filter(
+        &self,
+        name: &[u8],
+        driver: &Driver,
+        side: &str,
+        path: &[u8],
+        content: &[u8],
+    ) -> Res<Option<Vec<u8>>> {
+        let Some(command) = &driver.process else {
+            let command = match side {
+                "clean" => &driver.clean,
+                _ => &driver.smudge,
+            };
+            return command
+                .as_ref()
+                .map(|command| self.run(command, path, content))
+                .transpose();
+        };
+        let mut processes = self.processes.borrow_mut();
+        let process = processes
+            .entry(name.to_vec())
+            .or_insert_with(|| FilterProcess::start(command, &self.root).ok());
+        let shown = String::from_utf8_lossy(name);
+        let failed = || format!("{side} filter '{shown}' failed");
+        let process = process.as_mut().ok_or_else(failed)?;
+        match process.apply(side, path, content) {
+            Ok(Some(filtered)) => Ok(Some(filtered)),
+            // as in git, a file the process leaves alone counts as a
+            // failure of the filter
+            Ok(None) => Err(failed().into()),
+            Err(e) => {
+                // the conversation is out of step: the process is of no
+                // more use
+                processes.insert(name.to_vec(), None);
+                Err(e)
+            }
+        }
     }
 
     /// Runs a filter command through the shell, as git does: `%f` in it

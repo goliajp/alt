@@ -50,7 +50,12 @@ impl NativeRepo<'_> {
             // skipping the dir traversal is correct — same shape git diff
             // uses. Drops `alt diff` on a clean 50k-file monorepo from
             // seconds to ≤100 ms.
-            (index_entries(&raw), self.scan_index_paths(&raw)?, false)
+            let attrs = &disk.expect("the working tree side").attrs;
+            (
+                index_entries(&raw),
+                self.scan_index_paths(attrs, &raw)?,
+                false,
+            )
         };
 
         let changes: Vec<_> = alt_worktree::changes(&old, &new)
