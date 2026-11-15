@@ -1,0 +1,23 @@
+schema: alt-meta/1
+type: perf
+summary: record packs and index runs in the lock file so an open lists no directory
+author-type: human
+author: doracawl
+touched: crates/alt-odb/src/head.rs
+touched: crates/alt-odb/src/lib.rs
+touched: crates/alt-odb/src/map.rs
+touched: crates/alt-odb/src/odb.rs
+touched: crates/alt-odb/src/tier1.rs
+touched: crates/alt-odb/tests/it/head_record.rs
+touched: crates/alt-odb/tests/it/main.rs
+touched: crates/alt-store/src/blob.rs
+touched: crates/alt-store/src/blob/open.rs
+touched: crates/alt-store/src/blobmap.rs
+touched: crates/alt-store/src/index.rs
+touched: crates/alt-store/src/indexing.rs
+touched: crates/alt-store/src/lib.rs
+touched: crates/alt-store/src/packs.rs
+touched: crates/alt-store/src/reclog.rs
+touched: crates/alt-store/src/reclog/sync.rs
+touched: crates/alt-store/src/runs.rs
+touched: crates/alt-store/src/runs/named.rs
