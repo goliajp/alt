@@ -10,6 +10,7 @@
 
 pub mod binary;
 mod compact;
+pub mod fold;
 mod histogram;
 mod middle;
 pub mod myers;

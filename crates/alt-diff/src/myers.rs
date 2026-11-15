@@ -68,7 +68,11 @@ pub fn diff_without_context(old: &[u8], new: &[u8]) -> Vec<Edit> {
 }
 
 fn classify<'a>(a: &'a [&'a [u8]], b: &'a [&'a [u8]]) -> (Side<'a>, Side<'a>) {
-    let mut classes: std::collections::HashMap<&[u8], u32> = std::collections::HashMap::new();
+    let mut classes: std::collections::HashMap<&[u8], u32, crate::fold::FoldState> =
+        std::collections::HashMap::with_capacity_and_hasher(
+            a.len() + b.len(),
+            crate::fold::FoldState,
+        );
     let mut class_of = |line: &'a [u8]| {
         let next = classes.len() as u32;
         *classes.entry(line).or_insert(next)

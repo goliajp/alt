@@ -1,14 +1,18 @@
 //! The walk through history: which commit each line comes from.
 
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::BinaryHeap;
 use std::rc::Rc;
 
 use alt_bytes::BString;
 use alt_diff::Edit;
+use alt_diff::fold::FoldState;
 use alt_git_codec::{ObjectId, ObjectKind};
 use alt_repo::Repository;
 
 use super::Res;
+
+/// Maps keyed by object ids, which need no careful hashing.
+type HashMap<K, V> = std::collections::HashMap<K, V, FoldState>;
 use crate::tree_changes::{self, TreeFile};
 
 /// A run of lines of the blamed file that are, so far, traced to the same
@@ -70,12 +74,12 @@ impl<'r> Board<'r> {
             repo,
             options,
             origins: Vec::new(),
-            by_key: HashMap::new(),
-            by_commit: HashMap::new(),
-            commits: HashMap::new(),
+            by_key: HashMap::default(),
+            by_commit: HashMap::default(),
+            commits: HashMap::default(),
             queue: BinaryHeap::new(),
             queued: 0,
-            blobs: HashMap::new(),
+            blobs: HashMap::default(),
             content: Rc::default(),
             starts: Vec::new(),
         }
