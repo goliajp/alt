@@ -157,8 +157,13 @@ pub(crate) fn map_sealed(dir: &Path, seq: u32) -> Result<Mmap, StoreError> {
 /// Loads the on-disk pack set: the index runs, then every record they do
 /// not cover — the rest of the pack they stop in and all later packs.
 pub(crate) fn load(dir: &Path) -> Result<PackState, StoreError> {
-    std::fs::create_dir_all(dir)?;
-    let seqs = list_pack_seqs(dir)?;
+    let seqs = match list_pack_seqs(dir) {
+        Err(StoreError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir_all(dir)?;
+            Vec::new()
+        }
+        listed => listed?,
+    };
     let mut sealed = HashMap::new();
     let first = Location {
         seq: seqs.first().copied().unwrap_or(1),

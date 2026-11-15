@@ -23,7 +23,7 @@ impl Odb {
         let size = entry.size;
 
         // Tier 1: prism record present in tier1 map.
-        let tier1 = if let Some(record_id) = self.tier1.get(blob_id)? {
+        let tier1 = if let Some(record_id) = self.tier1()?.get(blob_id)? {
             let record_bytes = self
                 .blobs
                 .get_unverified(record_id)
@@ -118,7 +118,7 @@ impl Odb {
                 continue;
             }
 
-            let tier1_record_id = self.tier1.get(blob_id)?;
+            let tier1_record_id = self.tier1()?.get(blob_id)?;
             if let Some(record_id) = tier1_record_id {
                 stats.tier1_count += 1;
                 let record_bytes = self

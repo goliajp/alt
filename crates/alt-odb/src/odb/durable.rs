@@ -55,7 +55,7 @@ impl Odb {
     /// pointing at lost content.
     pub fn flush(&mut self) -> Result<(), OdbError> {
         // my durability target = how far my appends reached in each file
-        let (pack, blobmap) = self.blobs.appended_lens();
+        let (pack, blobmap) = self.blobs.appended_lens()?;
         let target = [pack, blobmap, self.map.appended_len()];
         // still under the append lock: fold what this batch (and any writer
         // before it) appended into the index runs, so the next open does not
@@ -83,7 +83,9 @@ impl Odb {
             return Ok(());
         }
         self.blobs.index_tail()?;
-        self.tier1.index_tail()?;
+        if let Some(tier1) = self.tier1.get_mut() {
+            tier1.index_tail()?;
+        }
         self.map.index_tail()
     }
 
@@ -98,7 +100,7 @@ impl Odb {
         self.acquire()?;
         let snapshot = self.cursor();
         self.release();
-        Ok(snapshot)
+        snapshot
     }
 
     /// Cheap cursor snapshot of the in-memory write offsets, without touching
@@ -110,12 +112,12 @@ impl Odb {
     /// commit slip in?". Two extra syscalls saved per receive-pack request,
     /// which is what keeps the group-commit coalescing test still green
     /// with the rewind window in place.
-    pub fn cursor(&self) -> OdbCheckpoint {
-        OdbCheckpoint {
-            blobs: self.blobs.checkpoint(),
-            tier1_len: self.tier1.appended_len(),
+    pub fn cursor(&self) -> Result<OdbCheckpoint, OdbError> {
+        Ok(OdbCheckpoint {
+            blobs: self.blobs.checkpoint()?,
+            tier1_len: self.tier1()?.appended_len(),
             map_len: self.map.appended_len(),
-        }
+        })
     }
 
     /// Rolls every odb write since `ckpt` back: truncates each append file to
@@ -128,12 +130,12 @@ impl Odb {
     /// are left in the store.
     pub fn rewind(&mut self, ckpt: OdbCheckpoint) -> Result<(), OdbError> {
         self.blobs.rewind(ckpt.blobs)?;
-        self.tier1.rewind(ckpt.tier1_len)?;
+        self.tier1_mut()?.rewind(ckpt.tier1_len)?;
         self.map.rewind(ckpt.map_len)?;
         // marker reflects what is durable; after truncations + fsyncs, that's
         // exactly the rewound EOFs. Without this, a subsequent flush could
         // covers()-skip its fsync against a stale-larger marker.
-        let (pack, blobmap) = self.blobs.appended_lens();
+        let (pack, blobmap) = self.blobs.appended_lens()?;
         write_durable(&self.durable_path, [pack, blobmap, self.map.appended_len()])?;
         Ok(())
     }
@@ -156,7 +158,7 @@ impl Odb {
     pub fn sink(&self) -> Result<OdbSink, OdbError> {
         Ok(OdbSink {
             blobs: self.blobs.sink()?,
-            tier1: self.tier1.sync_handle()?,
+            tier1: self.tier1()?.sync_handle()?,
             map: self.map.sync_handle()?,
         })
     }
@@ -193,7 +195,10 @@ impl Odb {
                 let (pf, bf) = self.blobs.file_lens()?;
                 let eofs = [pf, bf, self.map.file_len()?];
                 self.blobs.fsync()?; // chunks then blobmap, in order
-                self.tier1.sync()?; // then tier1 (references blob ids above)
+                // then tier1 (references blob ids above)
+                if let Some(tier1) = self.tier1.get_mut() {
+                    tier1.sync()?;
+                }
                 self.map.fsync()?; // then map.alt (may reference tier1 ids)
                 write_durable(&self.durable_path, eofs)?;
                 Ok(())

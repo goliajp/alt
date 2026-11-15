@@ -192,3 +192,119 @@ fn concurrent_writers_keep_one_consistent_index() {
         }
     }
 }
+
+fn random_bytes(len: usize, seed: u64) -> Vec<u8> {
+    let mut out = Vec::with_capacity(len + 8);
+    let mut state = seed;
+    while out.len() < len {
+        state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut z = state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        out.extend_from_slice(&(z ^ (z >> 31)).to_le_bytes());
+    }
+    out.truncate(len);
+    out
+}
+
+fn blob(data: &[u8]) -> ObjectId {
+    ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, data)
+}
+
+/// A small object, one stored as many chunks, and one stored decomposed.
+fn three_kinds() -> [Vec<u8>; 3] {
+    use alt_prism::Prism;
+    let payload = b"a binary asset wrapped in a zlib stream, long enough to pay off".repeat(8);
+    let zlib = alt_prism_deflate::DeflatePrism
+        .recompose(&[1], &[&payload])
+        .unwrap();
+    [b"small".to_vec(), random_bytes(3 << 20, 7), zlib]
+}
+
+#[test]
+fn a_deferred_store_reads_every_kind_of_blob() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let kinds = three_kinds();
+    {
+        let mut odb = NativeOdb::open(dir.path()).unwrap();
+        for data in &kinds {
+            odb.put(blob(data), ObjectKind::Blob, data).unwrap();
+        }
+        odb.flush().unwrap();
+    }
+    assert!(
+        fs::metadata(dir.path().join("store/manifests/blobmap"))
+            .unwrap()
+            .len()
+            > 5
+    );
+    assert!(fs::metadata(dir.path().join("tier1")).unwrap().len() > 5);
+
+    let odb = NativeOdb::deferred(dir.path());
+    for data in &kinds {
+        assert_eq!(&odb.get(&blob(data)).unwrap().unwrap().data, data);
+    }
+    assert!(odb.get(&blob(b"absent")).unwrap().is_none());
+    // a second handle writing through the deferred path sees them all
+    let mut odb = NativeOdb::deferred(dir.path());
+    for data in &kinds {
+        odb.put(blob(data), ObjectKind::Blob, data).unwrap();
+    }
+    odb.flush().unwrap();
+    assert_eq!(NativeOdb::open(dir.path()).unwrap().len().unwrap(), 3);
+}
+
+#[test]
+fn a_deferred_store_reports_a_damaged_blob_map_when_it_is_needed() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let kinds = three_kinds();
+    let more = random_bytes(3 << 20, 8);
+    {
+        let mut odb = NativeOdb::open(dir.path()).unwrap();
+        for data in kinds.iter().chain([&more]) {
+            odb.put(blob(data), ObjectKind::Blob, data).unwrap();
+        }
+        odb.flush().unwrap();
+    }
+    let path = dir.path().join("store/manifests/blobmap");
+    let mut bytes = fs::read(&path).unwrap();
+    bytes[5 + 10] ^= 0xff; // inside the first of two records
+    fs::write(&path, &bytes).unwrap();
+
+    assert!(
+        NativeOdb::open(dir.path()).is_err(),
+        "a full open checks it"
+    );
+    let odb = NativeOdb::deferred(dir.path());
+    assert_eq!(odb.get(&blob(&kinds[0])).unwrap().unwrap().data, kinds[0]);
+    assert!(odb.get(&blob(&kinds[1])).is_err());
+}
+
+#[test]
+fn a_map_opened_late_inside_a_write_batch_drops_a_torn_tail_first() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let first = random_bytes(3 << 20, 1);
+    let second = random_bytes(3 << 20, 2);
+    {
+        let mut odb = NativeOdb::open(dir.path()).unwrap();
+        odb.put(blob(&first), ObjectKind::Blob, &first).unwrap();
+        odb.flush().unwrap();
+    }
+    // a writer died mid-append: half a record after the whole one
+    let path = dir.path().join("store/manifests/blobmap");
+    OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap()
+        .write_all(&[0xaa; 37])
+        .unwrap();
+    {
+        let mut odb = NativeOdb::deferred(dir.path());
+        odb.put(blob(&second), ObjectKind::Blob, &second).unwrap();
+        odb.flush().unwrap();
+    }
+    assert_eq!(fs::metadata(&path).unwrap().len(), 5 + 2 * 80);
+    let odb = NativeOdb::open(dir.path()).unwrap();
+    assert_eq!(odb.get(&blob(&first)).unwrap().unwrap().data, first);
+    assert_eq!(odb.get(&blob(&second)).unwrap().unwrap().data, second);
+}

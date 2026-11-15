@@ -12,9 +12,9 @@ use crate::RepoError;
 
 pub(crate) struct AltBackend {
     pub alt_dir: PathBuf,
-    /// opened by the first read of an object: a command that only looks at
-    /// refs never touches the object store
-    pub odb: OnceLock<NativeOdb>,
+    /// opens its files as reads first need them: a command that only
+    /// looks at refs never touches the object store
+    pub odb: NativeOdb,
     /// opened by the first read of a ref
     pub refs: OnceLock<alt_refs::RefStore>,
 }
@@ -48,13 +48,5 @@ impl AltBackend {
             home: std::env::var_os("HOME").map(PathBuf::from),
         };
         Ok(Config::load(&config_path, &ctx)?)
-    }
-
-    pub fn odb(&self) -> Result<&NativeOdb, RepoError> {
-        if let Some(odb) = self.odb.get() {
-            return Ok(odb);
-        }
-        let odb = NativeOdb::open(&self.alt_dir)?;
-        Ok(self.odb.get_or_init(|| odb))
     }
 }

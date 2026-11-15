@@ -32,6 +32,7 @@ pub mod reclog;
 pub mod runs;
 
 pub use blob::{BlobOptions, BlobSink, BlobStore, StoreCheckpoint};
+pub use pack::with_shared_lock;
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
@@ -526,6 +527,9 @@ impl ChunkStore {
     /// Appends one record and points the index at it (a re-encode
     /// supersedes the previous location).
     fn append_record(&mut self, header: &RecordHeader, payload: &[u8]) -> Result<(), StoreError> {
+        // a run left behind by a pack that was cut back must be gone before
+        // the pack regrows under it
+        self.index.remove_stale()?;
         let offset = self.active.len;
         if let Err(e) = self.append(&header.encode(), payload) {
             // chop any torn bytes so the next append starts at a clean offset

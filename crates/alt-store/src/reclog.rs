@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::io::{Seek, SeekFrom, Write};
+use std::io::Write;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
@@ -107,13 +107,18 @@ impl RecLog {
         let idx_dir = PathBuf::from(idx_dir);
         let header = layout.header();
 
-        let (mut file, created) = match OpenOptions::new().read(true).write(true).open(path) {
+        // append mode: every write lands at the end of the file, wherever a
+        // truncation moved it, so the cursor is never positioned
+        let (mut file, created) = match OpenOptions::new().read(true).append(true).open(path) {
             Ok(file) => (file, false),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                if let Some(dir) = path.parent() {
+                    std::fs::create_dir_all(dir)?;
+                }
                 let mut file = OpenOptions::new()
                     .create_new(true)
                     .read(true)
-                    .write(true)
+                    .append(true)
                     .open(path)?;
                 file.write_all(&header)?;
                 file.sync_all()?;
@@ -132,7 +137,6 @@ impl RecLog {
                 return Err(StoreError::Format(layout.bad_header));
             }
             file.set_len(0)?;
-            file.seek(SeekFrom::Start(0))?;
             file.write_all(&header)?;
             file.sync_all()?;
             size = HEADER_LEN as u64;
@@ -187,7 +191,6 @@ impl RecLog {
         self.tail_keys.clear();
         self.tail_second.clear();
         self.len = valid;
-        self.file.seek(SeekFrom::Start(valid))?;
         self.push_tail(&data);
         Ok(())
     }
@@ -337,6 +340,9 @@ impl RecLog {
     /// Appends one record (checksum included) at the write cursor.
     pub fn append(&mut self, rec: &[u8]) -> Result<(), StoreError> {
         debug_assert_eq!(rec.len(), self.layout.rec_len);
+        // a run left behind by a log that was cut back must be gone before
+        // the log regrows under it
+        self.runs.remove_stale()?;
         self.file.write_all(rec)?;
         self.unsynced = true;
         self.len += rec.len() as u64;
@@ -369,7 +375,6 @@ impl RecLog {
         }
         self.push_tail(&data[..at]);
         self.len = new_len;
-        self.file.seek(SeekFrom::Start(new_len))?;
         Ok(())
     }
 

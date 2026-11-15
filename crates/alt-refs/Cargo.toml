@@ -9,6 +9,4 @@ license.workspace = true
 alt-git-codec.workspace = true
 alt-hash.workspace = true
 alt-oplog.workspace = true
-
-[dev-dependencies]
 alt-os.workspace = true

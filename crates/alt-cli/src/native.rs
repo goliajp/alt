@@ -1815,7 +1815,11 @@ impl<'a> NativeRepo<'a> {
         let mut tags: Vec<(String, Option<String>)> = Vec::new();
         for (name, _) in self.store.refs.iter() {
             if let Some(short) = name.strip_prefix("refs/tags/") {
-                let oid = self.store.refs.resolve(name)?.map(|o| o.to_string());
+                // only the JSON listing shows what a tag points at
+                let oid = match json {
+                    true => self.store.refs.resolve(name)?.map(|o| o.to_string()),
+                    false => None,
+                };
                 tags.push((short.to_string(), oid));
             }
         }

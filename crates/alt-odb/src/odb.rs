@@ -5,10 +5,11 @@ mod durable;
 
 use std::fs::{File, OpenOptions};
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use alt_git_codec::{ObjectId, ObjectKind, RawObject};
 use alt_prism::Registry;
-use alt_store::{BlobOptions, BlobStore, CompactReport};
+use alt_store::{BlobOptions, BlobStore, CompactReport, StoreError};
 
 use crate::lock::{lock_exclusive, lock_shared, try_lock_exclusive, unlock};
 use crate::map::{MapEntry, ObjectMap};
@@ -27,9 +28,11 @@ pub use durable::OdbSink;
 pub(crate) struct Odb {
     pub(crate) blobs: BlobStore,
     pub(crate) map: ObjectMap,
-    /// Tier 1 (prismatic) bookkeeping. Always present; empty when no prism
-    /// fires (which is the case when the registry is empty, the default).
-    pub(crate) tier1: Tier1Map,
+    /// Tier 1 (prismatic) bookkeeping; empty when no prism ever fired.
+    /// Opened by the first blob that is not stored verbatim, or the first
+    /// write: most reads never need it.
+    pub(crate) tier1: OnceLock<Tier1Map>,
+    pub(crate) alt_dir: PathBuf,
     /// Prism pipeline: a `put` whose data round-trips through one of these
     /// is recorded in `tier1` and stored as deduplicated parts; everything
     /// else falls through to Tier 0 ([`alt_prism::Registry::decompose_verified`]
@@ -61,31 +64,54 @@ pub(crate) struct Odb {
 
 impl Odb {
     /// Opens (or creates) the database under the `.alt` root directory.
-    pub fn open_with(alt_dir: impl Into<PathBuf>, opts: BlobOptions) -> Result<Self, OdbError> {
+    /// With `late`, the blob map and the Tier 1 map are left for the first
+    /// call that needs them (where damage to them is then reported).
+    pub fn open_with(
+        alt_dir: impl Into<PathBuf>,
+        opts: BlobOptions,
+        late: bool,
+    ) -> Result<Self, OdbError> {
         let alt_dir = alt_dir.into();
-        std::fs::create_dir_all(&alt_dir)?;
-        let lock = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(alt_dir.join("odb.lock"))?;
+        let lock_path = alt_dir.join("odb.lock");
+        let open_lock = || {
+            OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .write(true)
+                .open(&lock_path)
+        };
+        let lock = match open_lock() {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                std::fs::create_dir_all(&alt_dir)?;
+                open_lock()?
+            }
+            other => other?,
+        };
         // Open the append files (active pack, blobmap, map.alt — read and
         // crash-recovered here) under a shared lock, so the open never overlaps
         // another process's exclusive append. Without this, an open scanning a
         // writer's half-written record truncates it and corrupts the store.
         lock_shared(&lock)?;
-        let opened = (|| -> Result<(BlobStore, ObjectMap, Tier1Map), OdbError> {
-            let blobs = BlobStore::open_with(alt_dir.join("store"), opts)?;
+        type Opened = (BlobStore, ObjectMap, OnceLock<Tier1Map>);
+        let opened = (|| -> Result<Opened, OdbError> {
+            let store = alt_dir.join("store");
+            let (blobs, tier1) = if late {
+                (BlobStore::open_deferred(store, opts)?, OnceLock::new())
+            } else {
+                let tier1 = Tier1Map::open(&alt_dir)?;
+                (BlobStore::open_with(store, opts)?, OnceLock::from(tier1))
+            };
             let map = ObjectMap::open(&alt_dir.join("map.alt"))?;
-            let tier1 = Tier1Map::open(&alt_dir)?;
             Ok((blobs, map, tier1))
         })();
         let _ = unlock(&lock);
-        let (blobs, map, tier1) = opened?;
+        let (mut blobs, map, tier1) = opened?;
+        blobs.guard_opens(lock_path);
         let mut odb = Self {
             blobs,
             map,
             tier1,
+            alt_dir: alt_dir.clone(),
             registry: default_registry(),
             lock,
             held: false,
@@ -102,20 +128,44 @@ impl Odb {
     /// the runs existed, or by a writer that died before its flush — is
     /// indexed by whoever opens it next, unless a writer is at work.
     fn index_stale_tails(&mut self) -> Result<(), OdbError> {
-        let pending =
-            self.blobs.index_pending() || self.tier1.index_pending() || self.map.index_pending();
+        let pending = self.blobs.index_pending() || self.map.index_pending();
         if !pending || !try_lock_exclusive(&self.lock)? {
             return Ok(());
         }
         self.held = true;
         let indexed = (|| {
             self.blobs.sync_from_disk()?;
-            self.tier1.sync_from_disk()?;
             self.map.sync_from_disk()?;
+            // every log of such a store, opened so far or not
+            self.tier1_mut()?;
             self.index_tails()
         })();
         self.release();
         indexed
+    }
+
+    /// The Tier 1 map, opened on first use. Opening repairs a torn tail,
+    /// which must not overlap a writer's append: without the write lock in
+    /// hand the open runs under the shared one, like the open of the store.
+    pub(crate) fn tier1(&self) -> Result<&Tier1Map, OdbError> {
+        if let Some(tier1) = self.tier1.get() {
+            return Ok(tier1);
+        }
+        let open = || Tier1Map::open(&self.alt_dir);
+        let tier1 = if self.held {
+            open()?
+        } else {
+            alt_store::with_shared_lock(&self.alt_dir.join("odb.lock"), open)?
+        };
+        Ok(self.tier1.get_or_init(|| tier1))
+    }
+
+    pub(crate) fn tier1_mut(&mut self) -> Result<&mut Tier1Map, OdbError> {
+        self.tier1()?;
+        Ok(self
+            .tier1
+            .get_mut()
+            .expect("the tier1 map was opened just above"))
     }
 
     /// Append an extra prism on top of the default-registered set. Useful
@@ -135,7 +185,9 @@ impl Odb {
         lock_exclusive(&self.lock)?;
         self.held = true;
         self.blobs.sync_from_disk()?;
-        self.tier1.sync_from_disk()?;
+        if let Some(tier1) = self.tier1.get_mut() {
+            tier1.sync_from_disk()?;
+        }
         self.map.sync_from_disk()?;
         Ok(())
     }
@@ -145,6 +197,7 @@ impl Odb {
         if self.held {
             let _ = unlock(&self.lock);
             self.held = false;
+            self.blobs.end_batch();
         }
     }
 
@@ -205,7 +258,7 @@ impl Odb {
 
     /// Reads back what [`Self::put_content`] stored, `None` when absent.
     pub fn get_content(&self, id: BlobId) -> Result<Option<Vec<u8>>, OdbError> {
-        if !self.tier1.contains(id)? && !self.blobs.contains(id)? {
+        if !self.blobs.contains(id)? && !self.tier1()?.contains(id)? {
             return Ok(None);
         }
         self.fetch_blob(id).map(Some)
@@ -216,7 +269,7 @@ impl Odb {
     /// re-hash) and by any future writer that already trusts the blob id.
     fn put_blob(&mut self, data: &[u8]) -> Result<BlobId, OdbError> {
         let id = BlobId::of(data);
-        if self.tier1.contains(id)? || self.blobs.contains(id)? {
+        if self.blobs.contains(id)? || self.tier1()?.contains(id)? {
             return Ok(id); // already stored, either tier
         }
         if let Some(t1) = self.registry.decompose_verified(data) {
@@ -226,7 +279,7 @@ impl Odb {
             }
             let record = tier1::encode_record(t1.prism, &t1.decomposition.recipe, &part_ids);
             let record_id = self.blobs.put(&record)?;
-            self.tier1.append(id, record_id)?;
+            self.tier1_mut()?.append(id, record_id)?;
             Ok(id)
         } else {
             Ok(self.blobs.put(data)?)
@@ -255,8 +308,14 @@ impl Odb {
     /// when it lives in Tier 1. The recomposed bytes' BLAKE3 is checked
     /// against `alt` so a corrupted recipe or part surfaces here.
     fn fetch_blob(&self, alt: BlobId) -> Result<Vec<u8>, OdbError> {
-        let Some(record_id) = self.tier1.get(alt)? else {
-            return Ok(self.blobs.get(alt)?);
+        // stored verbatim is the common case; only a blob that is not can
+        // be a decomposed one
+        match self.blobs.get(alt) {
+            Err(StoreError::BlobNotFound(_)) => {}
+            other => return Ok(other?),
+        }
+        let Some(record_id) = self.tier1()?.get(alt)? else {
+            return Err(StoreError::BlobNotFound(alt).into());
         };
         let record = self.blobs.get(record_id)?;
         let (prism, recipe, part_ids) =
@@ -348,7 +407,7 @@ impl Odb {
                 }
             })?;
         for entry in &entries {
-            if self.tier1.contains(entry.alt)? {
+            if self.tier1()?.contains(entry.alt)? {
                 // Tier 1: recompose through the registry; fetch_blob does the
                 // recompose+rehash so we never emit silently-wrong bytes.
                 let bytes = self.fetch_blob(entry.alt)?;

@@ -1,65 +1,142 @@
-//! The ref map in memory: the snapshot as it sits in its file (names are
-//! read in place, found by binary search) under the refs changed since.
-//! Opening costs one pass over the snapshot's bytes and nothing per ref
-//! beyond that, however many refs a command then looks at.
+//! The ref map in memory: the snapshot file as it sits on disk, read one
+//! block of refs at a time as lookups reach them, under the refs changed
+//! since. Opening costs the snapshot's checksum and nothing per ref.
 
 use std::collections::BTreeMap;
 use std::iter::Peekable;
+use std::sync::OnceLock;
 
+use alt_os::map::Mmap;
+
+use crate::snapshot::parse_entry;
 use crate::tx::RefChange;
 use crate::{RefError, RefTarget};
 
-/// The refs of a snapshot file, kept in the file's encoding.
-#[derive(Default)]
-pub(crate) struct Base {
-    data: Vec<u8>,
-    /// offset and length of each name in `data`, names ascending
+/// Refs per block of a snapshot file.
+pub(crate) const BLOCK: usize = 64;
+
+/// One block of a snapshot, parsed.
+struct Block {
+    /// offset and length of each name in the file
     names: Vec<(u32, u16)>,
     targets: Vec<RefTarget>,
 }
 
+/// The refs of a snapshot file, parsed block by block on first use.
+pub(crate) struct Base {
+    map: Mmap,
+    /// offset of the block table in `map`
+    table: usize,
+    count: usize,
+    /// where the refs end in `map`
+    end: usize,
+    blocks: Vec<OnceLock<Block>>,
+}
+
 impl Base {
-    /// `names` must be valid UTF-8 ranges of `data` in ascending name order,
-    /// one per target.
-    pub fn new(data: Vec<u8>, names: Vec<(u32, u16)>, targets: Vec<RefTarget>) -> Self {
+    /// `map` is a checksum-verified snapshot whose block table at `table`
+    /// lies inside `map[..end]`.
+    pub fn new(map: Mmap, table: usize, count: usize, end: usize) -> Self {
+        let blocks = (0..count.div_ceil(BLOCK))
+            .map(|_| OnceLock::new())
+            .collect();
         Self {
-            data,
-            names,
-            targets,
+            map,
+            table,
+            count,
+            end,
+            blocks,
         }
     }
 
-    fn name(&self, at: usize) -> &str {
-        let (start, len) = self.names[at];
-        let bytes = &self.data[start as usize..start as usize + len as usize];
-        // SAFETY: the snapshot reader validated every name as UTF-8
+    fn start(&self, block: usize) -> usize {
+        if block == self.blocks.len() {
+            return self.end;
+        }
+        let at = self.table + block * 4;
+        u32::from_le_bytes(self.map[at..at + 4].try_into().unwrap()) as usize
+    }
+
+    /// The first name of a block, read without parsing the block.
+    fn first_name(&self, block: usize) -> &[u8] {
+        let at = self.start(block);
+        let name = self.map.get(at..at + 2).and_then(|len| {
+            let len = u16::from_le_bytes(len.try_into().unwrap()) as usize;
+            self.map.get(at + 2..at + 2 + len)
+        });
+        name.unwrap_or_default()
+    }
+
+    fn block(&self, block: usize) -> &Block {
+        self.blocks[block].get_or_init(|| {
+            let data = &self.map[..self.start(block + 1).min(self.end)];
+            let mut at = self.start(block).min(data.len());
+            let mut names = Vec::with_capacity(BLOCK);
+            let mut targets = Vec::with_capacity(BLOCK);
+            // a snapshot that passed its checksum holds whole entries
+            while names.len() < BLOCK && at < data.len() {
+                let Some((name, target)) = parse_entry(data, &mut at) else {
+                    break;
+                };
+                names.push((
+                    (at - target_len(&target) - name.len()) as u32,
+                    name.len() as u16,
+                ));
+                targets.push(target);
+            }
+            Block { names, targets }
+        })
+    }
+
+    fn name(&self, block: &Block, at: usize) -> &str {
+        let (start, len) = block.names[at];
+        let bytes = &self.map[start as usize..start as usize + len as usize];
+        // SAFETY: `parse_entry` validated this range as UTF-8 when the
+        // block was parsed, and the mapping is never written
         unsafe { std::str::from_utf8_unchecked(bytes) }
     }
 
-    fn find(&self, name: &str) -> Option<usize> {
-        let (mut lo, mut hi) = (0, self.names.len());
+    fn get(&self, name: &str) -> Option<&RefTarget> {
+        // the last block whose first name is not above `name`
+        let (mut lo, mut hi) = (0, self.blocks.len());
         while lo < hi {
             let mid = lo + (hi - lo) / 2;
-            let (start, len) = self.names[mid];
-            let found = &self.data[start as usize..start as usize + len as usize];
-            match found.cmp(name.as_bytes()) {
-                std::cmp::Ordering::Less => lo = mid + 1,
-                std::cmp::Ordering::Greater => hi = mid,
-                std::cmp::Ordering::Equal => return Some(mid),
+            if self.first_name(mid) <= name.as_bytes() {
+                lo = mid + 1;
+            } else {
+                hi = mid;
             }
         }
-        None
+        let block = self.block(lo.checked_sub(1)?);
+        let at = block
+            .names
+            .binary_search_by(|&(start, len)| {
+                self.map[start as usize..start as usize + len as usize].cmp(name.as_bytes())
+            })
+            .ok()?;
+        Some(&block.targets[at])
     }
 
     fn iter(&self) -> impl Iterator<Item = (&str, &RefTarget)> {
-        (0..self.names.len()).map(|at| (self.name(at), &self.targets[at]))
+        (0..self.blocks.len()).flat_map(move |i| {
+            let block = self.block(i);
+            (0..block.names.len()).map(move |at| (self.name(block, at), &block.targets[at]))
+        })
     }
 }
 
-/// Every ref as it stands: `base` overlaid with `changed`.
+/// Encoded size of a target, as `parse_entry` consumed it.
+fn target_len(target: &RefTarget) -> usize {
+    match target {
+        RefTarget::Oid(oid) => 2 + oid.as_bytes().len(),
+        RefTarget::Symbolic(sym) => 3 + sym.len(),
+    }
+}
+
+/// Every ref as it stands: the snapshot `base` overlaid with `changed`.
 #[derive(Default)]
 pub(crate) struct Refs {
-    base: Base,
+    base: Option<Base>,
     /// refs set or (`None`) deleted since `base`
     changed: BTreeMap<String, Option<RefTarget>>,
 }
@@ -67,30 +144,42 @@ pub(crate) struct Refs {
 impl Refs {
     pub fn from_base(base: Base) -> Self {
         Self {
-            base,
+            base: Some(base),
             changed: BTreeMap::new(),
+        }
+    }
+
+    pub fn from_changes(changed: BTreeMap<String, Option<RefTarget>>) -> Self {
+        Self {
+            base: None,
+            changed,
         }
     }
 
     pub fn get(&self, name: &str) -> Option<&RefTarget> {
         match self.changed.get(name) {
             Some(target) => target.as_ref(),
-            None => self.base.find(name).map(|at| &self.base.targets[at]),
+            None => self.base.as_ref()?.get(name),
         }
     }
 
     /// All refs in name order.
     pub fn iter(&self) -> impl Iterator<Item = (&str, &RefTarget)> {
         Merged {
-            base: self.base.iter().peekable(),
+            base: self.base.iter().flat_map(Base::iter).peekable(),
             changed: self.changed.iter().peekable(),
         }
     }
 
     pub fn len(&self) -> usize {
-        let mut len = self.base.names.len();
+        let in_base = |name: &str| {
+            self.base
+                .as_ref()
+                .is_some_and(|base| base.get(name).is_some())
+        };
+        let mut len = self.base.as_ref().map_or(0, |base| base.count);
         for (name, target) in &self.changed {
-            match (self.base.find(name).is_some(), target.is_some()) {
+            match (in_base(name), target.is_some()) {
                 (false, true) => len += 1,
                 (true, false) => len -= 1,
                 _ => {}

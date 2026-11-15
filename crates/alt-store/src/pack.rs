@@ -131,3 +131,24 @@ pub fn fsync_dir(dir: &Path) -> io::Result<()> {
 pub fn fsync_dir(_dir: &Path) -> io::Result<()> {
     Ok(())
 }
+
+/// Runs `f` holding a shared advisory lock on the file at `path`, through a
+/// descriptor of its own so other holders in this process are unaffected.
+#[cfg(unix)]
+pub fn with_shared_lock<T>(
+    path: &Path,
+    f: impl FnOnce() -> Result<T, StoreError>,
+) -> Result<T, StoreError> {
+    let lock = File::open(path)?;
+    alt_os::sys::flock(&lock, alt_os::sys::LOCK_SH)?;
+    // closing the descriptor releases the lock
+    f()
+}
+
+#[cfg(not(unix))]
+pub fn with_shared_lock<T>(
+    _path: &Path,
+    f: impl FnOnce() -> Result<T, StoreError>,
+) -> Result<T, StoreError> {
+    f()
+}

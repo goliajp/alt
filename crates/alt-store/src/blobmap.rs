@@ -33,7 +33,6 @@ pub struct BlobMap {
 impl BlobMap {
     /// Opens `<dir>/blobmap`, creating it (and the directory) if missing.
     pub fn open(dir: &Path) -> Result<Self, StoreError> {
-        std::fs::create_dir_all(dir)?;
         let (log, created) = RecLog::open(&dir.join("blobmap"), LAYOUT)?;
         if created {
             fsync_dir(dir)?;

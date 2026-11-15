@@ -278,3 +278,113 @@ fn writers_through_separate_handles_see_each_others_transactions() {
     assert_eq!(b.oplog().ops().unwrap().len(), 460);
     assert_eq!(all_refs(&RefStore::open(dir.path()).unwrap()), all_refs(&a));
 }
+
+#[test]
+fn lookups_and_listing_across_snapshot_blocks_match_the_replayed_state() {
+    use std::collections::BTreeMap;
+
+    let dir = alt_os::temp::tempdir().unwrap();
+    let mut expect: BTreeMap<String, RefTarget> = BTreeMap::new();
+    let name = |n: u32| format!("refs/tags/v{:04}", n * 7 % 1000);
+    {
+        let mut store = RefStore::open(dir.path()).unwrap();
+        // several blocks of refs, created in an order unlike their names
+        for n in 0..700u32 {
+            let target = oid((n % 251) as u8);
+            store
+                .commit("a", n as u64, &[set(&name(n), None, target)])
+                .unwrap();
+            expect.insert(name(n), RefTarget::Oid(target));
+        }
+        let head = RefChange {
+            name: "HEAD".into(),
+            old: None,
+            new: Some(RefTarget::Symbolic(name(3))),
+        };
+        store.commit("a", 700, &[head]).unwrap();
+        expect.insert("HEAD".into(), RefTarget::Symbolic(name(3)));
+        store.snapshot().unwrap();
+    }
+    let check = |store: &RefStore, expect: &BTreeMap<String, RefTarget>| {
+        assert_eq!(store.len(), expect.len());
+        let listed: Vec<(String, RefTarget)> = all_refs(store);
+        let wanted: Vec<(String, RefTarget)> =
+            expect.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        assert!(listed == wanted, "listing differs from the expected map");
+        for (name, target) in expect {
+            assert_eq!(store.get(name), Some(target), "{name}");
+        }
+        for absent in [
+            "",
+            "A",
+            "refs/tags/v",
+            "refs/tags/v0000x",
+            "refs/tags/v9999",
+            "zzz",
+        ] {
+            assert_eq!(store.get(absent), None, "{absent:?}");
+        }
+        assert_eq!(store.resolve("HEAD").unwrap(), Some(oid(3)));
+    };
+
+    let mut store = RefStore::open(dir.path()).unwrap();
+    assert!(store.oplog().anchored());
+    assert!(store.oplog().recent().is_empty());
+    check(&store, &expect);
+
+    // changes on top of the snapshot: deletions, replacements, new names
+    // before, between and after the snapshot's own
+    for n in (0..700u32).step_by(9) {
+        let old = expect.remove(&name(n));
+        let change = RefChange {
+            name: name(n),
+            old,
+            new: None,
+        };
+        store.commit("a", 1_000 + n as u64, &[change]).unwrap();
+    }
+    for n in (1..700u32).step_by(13) {
+        let Some(old) = expect.get(&name(n)).cloned() else {
+            continue;
+        };
+        store
+            .commit("a", 2_000 + n as u64, &[set(&name(n), Some(old), oid(250))])
+            .unwrap();
+        expect.insert(name(n), RefTarget::Oid(oid(250)));
+    }
+    for extra in ["AAA", "refs/heads/main", "refs/tags/v0500a", "zz/last"] {
+        store
+            .commit("a", 3_000, &[set(extra, None, oid(9))])
+            .unwrap();
+        expect.insert(extra.into(), RefTarget::Oid(oid(9)));
+    }
+    check(&store, &expect);
+    drop(store);
+    check(&RefStore::open(dir.path()).unwrap(), &expect);
+
+    // and the same state without any snapshot
+    fs::remove_file(dir.path().join("refs/snapshot")).unwrap();
+    check(&RefStore::open(dir.path()).unwrap(), &expect);
+}
+
+#[test]
+fn a_damaged_snapshot_is_ignored_whatever_part_is_hit() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let path = dir.path().join("refs/snapshot");
+    {
+        let mut store = RefStore::open(dir.path()).unwrap();
+        churn(&mut store, 0, 300);
+        store.snapshot().unwrap();
+    }
+    let expect = all_refs(&RefStore::open(dir.path()).unwrap());
+    let good = fs::read(&path).unwrap();
+    // header, block table, a ref in the middle, the checksum
+    for at in [6, 70, good.len() / 2, good.len() - 1] {
+        let mut bad = good.clone();
+        bad[at] ^= 0x10;
+        fs::write(&path, &bad).unwrap();
+        let store = RefStore::open(dir.path()).unwrap();
+        assert!(!store.oplog().anchored(), "byte {at}");
+        assert!(all_refs(&store) == expect, "byte {at}");
+    }
+}

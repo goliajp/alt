@@ -45,7 +45,6 @@ pub(crate) struct Tier1Map {
 
 impl Tier1Map {
     pub fn open(dir: &Path) -> Result<Self, StoreError> {
-        std::fs::create_dir_all(dir)?;
         let (log, created) = RecLog::open(&dir.join("tier1"), LAYOUT)?;
         if created {
             fsync_dir(dir)?;
@@ -72,10 +71,6 @@ impl Tier1Map {
     /// are enough of them. Run under the odb write lock.
     pub fn index_tail(&mut self) -> Result<(), StoreError> {
         self.log.index_tail(!alt_store::relaxed_durability())
-    }
-
-    pub fn index_pending(&self) -> bool {
-        self.log.index_pending()
     }
 
     pub fn get(&self, blob: BlobId) -> Result<Option<BlobId>, StoreError> {

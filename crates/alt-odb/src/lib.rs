@@ -86,6 +86,8 @@ pub struct NativeOdb {
     alt_dir: PathBuf,
     opts: BlobOptions,
     odb: OnceLock<Odb>,
+    /// whether the store's less used files wait for their own first use
+    late: bool,
     defer: bool,
 }
 
@@ -100,6 +102,7 @@ impl NativeOdb {
             alt_dir: alt_dir.into(),
             opts,
             odb: OnceLock::new(),
+            late: false,
             defer: false,
         };
         this.odb()?;
@@ -107,18 +110,22 @@ impl NativeOdb {
     }
 
     /// Names the database under the `.alt` root directory without opening
-    /// it; the first read or write does (and reports what an open would).
+    /// it. Each of its files is opened by the first read or write that
+    /// needs it, which is also where damage to that file is reported; a
+    /// read of an ordinary object touches only the chunk store and
+    /// `map.alt`.
     pub fn deferred(alt_dir: impl Into<PathBuf>) -> Self {
         Self {
             alt_dir: alt_dir.into(),
             opts: BlobOptions::default(),
             odb: OnceLock::new(),
+            late: true,
             defer: false,
         }
     }
 
     fn start(&self) -> Result<Odb, OdbError> {
-        let mut odb = Odb::open_with(&self.alt_dir, self.opts)?;
+        let mut odb = Odb::open_with(&self.alt_dir, self.opts, self.late)?;
         odb.set_defer_durability(self.defer);
         Ok(odb)
     }
@@ -299,7 +306,7 @@ impl NativeOdb {
     /// caller already holds a write barrier and just wants a post-batch
     /// snapshot to compare against the pre-batch one.
     pub fn cursor(&self) -> Result<OdbCheckpoint, OdbError> {
-        Ok(self.odb()?.cursor())
+        self.odb()?.cursor()
     }
 
     /// Rolls every odb write since `ckpt` back: truncates each append file to
