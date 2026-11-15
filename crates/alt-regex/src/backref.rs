@@ -11,7 +11,9 @@ use crate::program::{Inst, Program};
 pub const MAX_STEPS: usize = 1 << 22;
 
 enum Frame {
-    Step(u32, usize),
+    /// an instruction, a position, and whether a condition was met
+    /// since the last byte
+    Step(u32, usize, bool),
     Slot(usize, usize),
     /// where a loop was last entered on this path
     Loop(u32, usize),
@@ -38,12 +40,13 @@ pub fn search(prog: &Program, text: &[u8], only: Option<usize>, found: &mut [usi
         false => text.len(),
     };
     for from in first..=last {
-        let mut matched = false;
+        // whether a match was found, and whether behind a condition
+        let mut matched = None;
         slots.fill(UNSET);
         entered.fill(UNSET);
-        stack.push(Frame::Step(prog.start, from));
+        stack.push(Frame::Step(prog.start, from, false));
         'paths: while let Some(frame) = stack.pop() {
-            let (mut pc, mut at) = match frame {
+            let (mut pc, mut at, mut behind) = match frame {
                 Frame::Slot(slot, old) => {
                     slots[slot] = old;
                     continue;
@@ -52,7 +55,7 @@ pub fn search(prog: &Program, text: &[u8], only: Option<usize>, found: &mut [usi
                     entered[pc as usize] = old;
                     continue;
                 }
-                Frame::Step(pc, at) => (pc, at),
+                Frame::Step(pc, at, behind) => (pc, at, behind),
             };
             loop {
                 if steps == 0 {
@@ -60,13 +63,15 @@ pub fn search(prog: &Program, text: &[u8], only: Option<usize>, found: &mut [usi
                 }
                 steps -= 1;
                 match prog.insts[pc as usize] {
-                    Inst::Byte(b, next) if text.get(at) == Some(&b) => (pc, at) = (next, at + 1),
+                    Inst::Byte(b, next) if text.get(at) == Some(&b) => {
+                        (pc, at, behind) = (next, at + 1, false)
+                    }
                     Inst::Set(set, next)
                         if text
                             .get(at)
                             .is_some_and(|&b| prog.sets[set as usize].contains(b)) =>
                     {
-                        (pc, at) = (next, at + 1)
+                        (pc, at, behind) = (next, at + 1, false)
                     }
                     Inst::Split(first, second) => {
                         // behind a turn of a loop that took nothing, the
@@ -77,7 +82,7 @@ pub fn search(prog: &Program, text: &[u8], only: Option<usize>, found: &mut [usi
                             continue;
                         }
                         stack.push(Frame::Loop(pc, before));
-                        stack.push(Frame::Step(second, at));
+                        stack.push(Frame::Step(second, at, behind));
                         pc = first;
                     }
                     // what a group last matched is what its reference
@@ -88,7 +93,7 @@ pub fn search(prog: &Program, text: &[u8], only: Option<usize>, found: &mut [usi
                         slots[slot] = at;
                         pc = next;
                     }
-                    Inst::Look(look, next) if holds(look, text, at) => pc = next,
+                    Inst::Look(look, next) if holds(look, text, at) => (pc, behind) = (next, true),
                     Inst::BackRef(group, fold, next) => {
                         let (from, to) = (slots[2 * group as usize], slots[2 * group as usize + 1]);
                         if from == UNSET || to == UNSET {
@@ -98,15 +103,22 @@ pub fn search(prog: &Program, text: &[u8], only: Option<usize>, found: &mut [usi
                         if !again.is_some_and(|again| same(again, &text[from..to], fold)) {
                             break;
                         }
+                        behind &= to == from;
                         (pc, at) = (next, at + (to - from));
                     }
                     Inst::Match => {
-                        if !matched || at > best[1] {
+                        // of two paths as long, the C library keeps one
+                        // that ends without a condition behind it
+                        let better = match matched {
+                            None => true,
+                            Some(was) => at > best[1] || (at == best[1] && was && !behind),
+                        };
+                        if better {
                             best.copy_from_slice(&slots);
                             best[1] = at;
-                            matched = true;
+                            matched = Some(behind);
                         }
-                        if at == text.len() {
+                        if at == text.len() && !(behind && prog.mixed_ends) {
                             break 'paths;
                         }
                         break;
@@ -116,7 +128,7 @@ pub fn search(prog: &Program, text: &[u8], only: Option<usize>, found: &mut [usi
             }
         }
         stack.clear();
-        if matched {
+        if matched.is_some() {
             found.copy_from_slice(&best[..found.len()]);
             return true;
         }

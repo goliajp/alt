@@ -47,17 +47,36 @@ pub fn captures(
 ) -> bool {
     let captures = slots.len();
     if !prog.snapshots {
-        return paths(prog, cache, text, from, to, slots, captures);
+        return preferred(prog, cache, text, from, to, slots, captures);
     }
     let mut both = std::mem::take(&mut cache.both);
     both.clear();
     both.resize(2 * captures, crate::pike::UNSET);
-    let found = paths(prog, cache, text, from, to, &mut both, captures);
+    let found = preferred(prog, cache, text, from, to, &mut both, captures);
     slots.copy_from_slice(&both[..captures]);
     cache.both = both;
     found
 }
 
+/// The path the C library keeps: one that ends without a condition
+/// behind its last byte, when the pattern has both kinds and the match
+/// has such a path.
+fn preferred(
+    prog: &Program,
+    cache: &mut Cache,
+    text: &[u8],
+    from: usize,
+    to: usize,
+    slots: &mut [usize],
+    captures: usize,
+) -> bool {
+    (prog.mixed_ends && paths(prog, cache, text, from, to, slots, captures, true))
+        || paths(prog, cache, text, from, to, slots, captures, false)
+}
+
+/// With `plain`, a path that meets a condition at the end of the match
+/// is given up.
+#[allow(clippy::too_many_arguments)]
 fn paths(
     prog: &Program,
     cache: &mut Cache,
@@ -66,6 +85,7 @@ fn paths(
     to: usize,
     slots: &mut [usize],
     captures: usize,
+    plain: bool,
 ) -> bool {
     let span = to - from + 1;
     let Cache {
@@ -124,7 +144,9 @@ fn paths(
                     }
                     pc = next;
                 }
-                Inst::Look(look, next) if holds(look, text, at) => pc = next,
+                Inst::Look(look, next) if !(plain && at == to) && holds(look, text, at) => {
+                    pc = next
+                }
                 Inst::Match if at == to => return true,
                 _ => break,
             }

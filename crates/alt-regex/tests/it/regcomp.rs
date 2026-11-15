@@ -206,12 +206,9 @@ impl Oracle {
 struct Tally {
     compiled: usize,
     matches: usize,
-    /// matches whose groups all lie where the C library puts them
-    same_groups: usize,
-    /// where the two disagree on a pattern, on a match or on its span
+    /// where the two disagree on a pattern, on a match, on its span or
+    /// on the span of a group
     differences: Vec<String>,
-    /// a few of the matches whose groups lie elsewhere
-    other_groups: Vec<String>,
     /// patterns the C library did not answer for
     unanswered: Vec<String>,
 }
@@ -234,8 +231,8 @@ impl Tally {
 }
 
 /// Runs `count` random patterns. Whether a pattern compiles, whether a
-/// text matches and where the whole match lies must agree; where the
-/// groups lie is counted.
+/// text matches and where the match and each of its groups lie must
+/// agree.
 fn compare(seed: u64, count: usize, options: Options) -> Tally {
     let mut rng = Rng(seed);
     let mut tally = Tally::default();
@@ -289,12 +286,12 @@ fn compare(seed: u64, count: usize, options: Options) -> Tally {
                 let groups = (0..=ours.groups().min(GROUPS - 1))
                     .all(|i| found.get(i).map(|r| (r.start, r.end)) == expected[i]);
                 tally.matches += 1;
-                tally.same_groups += usize::from(groups);
-                if !groups && tally.other_groups.len() < 12 {
+                if !groups {
                     let ours: Vec<_> = (0..=ours.groups()).map(|i| found.get(i)).collect();
                     let theirs = &expected[..=ours.len() - 1];
-                    let example = format!("{pat:?} on {shown:?}: ours {ours:?} theirs {theirs:?}");
-                    tally.other_groups.push(example);
+                    tally.differs(format!(
+                        "{pat:?} on {shown:?}: ours {ours:?} theirs {theirs:?}"
+                    ));
                 }
             }
         }
@@ -460,7 +457,7 @@ fn back_references_match_as_the_c_library_matches_them() {
 }
 
 /// Patterns whose groups could lie in more than one place.
-const AMBIGUOUS: [(&str, &str); 27] = [
+const AMBIGUOUS: [(&str, &str); 44] = [
     ("(a|ab)(c|bcd)(d*)", "abcd"),
     ("^([a-z]+|[a-z]+ [a-z]+)( .*)?$", "foo bar baz"),
     ("(a|ab)(bc|c)?", "abc"),
@@ -495,14 +492,39 @@ const AMBIGUOUS: [(&str, &str); 27] = [
     ("\\.?( ab{2,}[[:alpha:]]|b?c{0,1})*", "a"),
     ("^.{2}(([^a]{1,2})+[a-c]{1,2}c*|c{,2})*[a-c]?", "bab"),
     ("(a?)*(b?)+", "x"),
+    // a branch that ends behind a condition, with nothing taken since,
+    // gives way to one that does not
+    ("(a)$|a", "a"),
+    ("(a\\>)|a", "a"),
+    ("^(a*)|b", "a"),
+    ("(^)|x*", ""),
+    ("(^)|($)", ""),
+    ("($)|(^)", ""),
+    ("(a)$|(a)\\>", "a"),
+    ("(^a)|(a)", "a"),
+    ("(a$)|(a)", "a"),
+    ("(a)($)|(a)", "a"),
+    ("((a)$)|(a)", "a"),
+    ("(a$|a)", "a"),
+    ("(a$|a)($)", "a"),
+    ("x(^)|x()", "x"),
+    ("^a*a*|(b?)\\.{,2}", "xa"),
+    ("^(a*)|a*[^ab]{0,1}a?|a*ac$", "bcx. bbba"),
+    ("b|(a)$|a", "ba"),
 ];
 
 #[test]
 fn groups_lie_where_the_c_library_puts_them() {
     let mut differ = Vec::new();
-    for (pat, text) in AMBIGUOUS {
-        let theirs = Theirs::new(pat.as_bytes(), Options::default());
-        let ours = Regex::new(pat.as_bytes()).unwrap();
+    // with lines told apart the groups are found the other way
+    let lines = Options {
+        newline: true,
+        ..Options::default()
+    };
+    let both = [Options::default(), lines];
+    for (options, (pat, text)) in both.iter().flat_map(|o| AMBIGUOUS.map(|case| (*o, case))) {
+        let theirs = Theirs::new(pat.as_bytes(), options);
+        let ours = Regex::with_options(pat.as_bytes(), options).unwrap();
         let expected = theirs.spans(text.as_bytes());
         let expected = expected.map(|spans| spans[..=ours.groups()].to_vec());
         let found = ours.captures(text.as_bytes()).map(|found| {

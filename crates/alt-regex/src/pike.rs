@@ -18,13 +18,37 @@ struct Threads {
     /// The capture slots of each path that waits at an instruction, by
     /// the row of the instruction.
     slots: Vec<usize>,
+    /// The instructions reached behind a condition, with nothing
+    /// consumed since, that do not wait for a byte: a path without the
+    /// condition may still pass them.
+    behind: Vec<u32>,
+    reached: Vec<u32>,
+    /// A path came to the match that way; its slots are the last row.
+    late: bool,
 }
 
 impl Threads {
     fn reset(&mut self, insts: usize, rows: usize, width: usize) {
         self.place.resize(insts, 0);
+        self.behind.resize(insts, 0);
+        self.slots.resize((rows + 1) * width, UNSET);
+        self.clear();
+    }
+
+    fn clear(&mut self) {
         self.order.clear();
-        self.slots.resize(rows * width, UNSET);
+        self.reached.clear();
+        self.late = false;
+    }
+
+    fn passed(&self, pc: u32) -> bool {
+        let at = self.behind[pc as usize] as usize;
+        self.reached.get(at) == Some(&pc)
+    }
+
+    fn pass(&mut self, pc: u32) {
+        self.behind[pc as usize] = self.reached.len() as u32;
+        self.reached.push(pc);
     }
 
     fn contains(&self, pc: u32) -> bool {
@@ -39,7 +63,8 @@ impl Threads {
 }
 
 enum Frame {
-    Explore(u32),
+    /// an instruction, and whether a condition was met on the way
+    Explore(u32, bool),
     Restore(usize, usize),
     /// put every slot back from the top of the copies kept
     Whole,
@@ -87,9 +112,9 @@ fn follow(
     at: usize,
 ) {
     let width = slots.len();
-    stack.push(Frame::Explore(pc));
+    stack.push(Frame::Explore(pc, false));
     while let Some(frame) = stack.pop() {
-        let pc = match frame {
+        let (pc, behind) = match frame {
             Frame::Restore(slot, old) => {
                 slots[slot] = old;
                 continue;
@@ -99,14 +124,26 @@ fn follow(
                 kept.truncate(kept.len() - width);
                 continue;
             }
-            Frame::Explore(pc) if list.contains(pc) => continue,
-            Frame::Explore(pc) => pc,
+            Frame::Explore(pc, _) if list.contains(pc) => continue,
+            Frame::Explore(pc, true) if list.passed(pc) => continue,
+            Frame::Explore(pc, behind) => (pc, behind),
         };
-        list.insert(pc);
-        match prog.insts[pc as usize] {
+        let inst = prog.insts[pc as usize];
+        match (behind, inst) {
+            (true, Inst::Match) => {
+                list.pass(pc);
+                list.late = true;
+                let row = prog.row_count as usize;
+                list.slots[row * width..][..width].copy_from_slice(slots);
+                continue;
+            }
+            (false, _) | (true, Inst::Set(..) | Inst::Byte(..)) => list.insert(pc),
+            (true, _) => list.pass(pc),
+        }
+        match inst {
             Inst::Split(first, second) => {
-                stack.push(Frame::Explore(second));
-                stack.push(Frame::Explore(first));
+                stack.push(Frame::Explore(second, behind));
+                stack.push(Frame::Explore(first, behind));
             }
             Inst::Save(slot, next) | Inst::SaveOpt(slot, next) => {
                 let slot = slot as usize;
@@ -119,11 +156,11 @@ fn follow(
                     stack.push(Frame::Restore(slot, slots[slot]));
                     slots[slot] = at;
                 }
-                stack.push(Frame::Explore(next));
+                stack.push(Frame::Explore(next, behind));
             }
             Inst::Look(look, next) => {
                 if holds(look, text, at) {
-                    stack.push(Frame::Explore(next));
+                    stack.push(Frame::Explore(next, prog.mixed_ends));
                 }
             }
             // a pattern with one is not searched this way
@@ -221,8 +258,22 @@ pub fn search(
                 at + 1,
             );
         }
+        // a path that came to the match behind a condition is kept when
+        // none that began as early came without one
+        if now.late {
+            let slots = &now.slots[prog.row_count as usize * width..][..width];
+            let better = match matched {
+                false => true,
+                true => slots[0] < found[0] || (slots[0] == found[0] && at > found[1]),
+            };
+            if better {
+                found.copy_from_slice(&slots[..captures]);
+                found[1] = at;
+                matched = true;
+            }
+        }
         std::mem::swap(now, next);
-        next.order.clear();
+        next.clear();
     }
     matched
 }

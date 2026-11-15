@@ -2,6 +2,7 @@
 //! steps through, several at once.
 
 use crate::Error;
+use crate::analysis::{classes, joins, mixed_ends, rows};
 use crate::class::ByteSet;
 use crate::syntax::{Look, Node};
 
@@ -39,6 +40,9 @@ pub struct Program {
     /// capture slots, what they were when a group last closed around
     /// something.
     pub snapshots: bool,
+    /// A match can end behind a condition and without one: see
+    /// [`mixed_ends`].
+    pub mixed_ends: bool,
     /// For each instruction that more than one path leads into, its
     /// number among those; the others have none.
     pub joins: Vec<u32>,
@@ -94,6 +98,7 @@ pub fn compile(node: &Node, groups: u32, ignore_case: bool) -> Result<Program, E
     }
     let (classes, members) = classes(&c.insts, &c.sets);
     let (joins, join_count) = joins(&c.insts, start);
+    let mixed_ends = mixed_ends(&c.insts, start);
     Ok(Program {
         insts: c.insts,
         sets: c.sets,
@@ -103,6 +108,7 @@ pub fn compile(node: &Node, groups: u32, ignore_case: bool) -> Result<Program, E
         plain_looks,
         backrefs,
         snapshots,
+        mixed_ends,
         joins,
         join_count,
         rows,
@@ -161,74 +167,6 @@ fn anchored(node: &Node) -> bool {
 
 /// No number: the instruction is reached one way only.
 pub const NO_JOIN: u32 = u32::MAX;
-
-fn joins(insts: &[Inst], start: u32) -> (Vec<u32>, u32) {
-    let mut ways = vec![0u32; insts.len()];
-    ways[start as usize] = 1;
-    for inst in insts {
-        match *inst {
-            Inst::Set(_, next)
-            | Inst::Byte(_, next)
-            | Inst::Save(_, next)
-            | Inst::SaveOpt(_, next)
-            | Inst::BackRef(_, _, next)
-            | Inst::Look(_, next) => ways[next as usize] += 1,
-            Inst::Split(first, second) => {
-                ways[first as usize] += 1;
-                ways[second as usize] += 1;
-            }
-            Inst::Match => {}
-        }
-    }
-    let mut count = 0;
-    let numbered = |ways: u32| match ways > 1 {
-        true => {
-            count += 1;
-            count - 1
-        }
-        false => NO_JOIN,
-    };
-    (ways.into_iter().map(numbered).collect(), count)
-}
-
-fn rows(insts: &[Inst]) -> (Vec<u32>, u32) {
-    let mut count = 0;
-    let numbered = |inst: &Inst| match inst {
-        Inst::Set(..) | Inst::Byte(..) | Inst::Match => {
-            count += 1;
-            count - 1
-        }
-        _ => NO_JOIN,
-    };
-    (insts.iter().map(numbered).collect(), count)
-}
-
-fn classes(insts: &[Inst], sets: &[ByteSet]) -> ([u8; 256], Vec<u8>) {
-    let mut singles = ByteSet::empty();
-    for inst in insts {
-        if let Inst::Byte(b, _) = inst {
-            singles.insert(*b);
-        }
-    }
-    let mut seen: Vec<(Vec<bool>, bool, u8)> = Vec::new();
-    let mut classes = [0u8; 256];
-    let mut members = Vec::new();
-    for b in 0..=255u8 {
-        // a byte matched on its own is a class of its own
-        let own = singles.contains(b);
-        let key: Vec<bool> = sets.iter().map(|set| set.contains(b)).collect();
-        let known = seen
-            .iter()
-            .position(|(k, single, _)| !own && !*single && *k == key);
-        let class = known.unwrap_or_else(|| {
-            seen.push((key, own, b));
-            members.push(b);
-            seen.len() - 1
-        });
-        classes[usize::from(b)] = u8::try_from(class).expect("at most 256 classes");
-    }
-    (classes, members)
-}
 
 impl Compiler {
     fn push(&mut self, inst: Inst) -> Result<u32, Error> {

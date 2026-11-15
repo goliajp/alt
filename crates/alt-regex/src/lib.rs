@@ -12,6 +12,7 @@
 //! Texts are bytes. A multi-byte character is the bytes it is made of,
 //! and letters outside ASCII have no case.
 
+mod analysis;
 mod backref;
 mod backtrack;
 mod class;
@@ -430,6 +431,10 @@ mod tests {
             ("^(.*)(.*)$", "hello"),
             ("(a{1,2}){2,3}(a*)", "aaaaa"),
             ("(()|a)+b", "aab"),
+            ("(a)$|a", "a"),
+            ("(^)|x*", ""),
+            ("x(^)|x()", "x"),
+            ("b|(a)$|a", "ba"),
         ] {
             let re = Regex::new(pattern.as_bytes()).unwrap();
             let text = text.as_bytes();
