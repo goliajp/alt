@@ -56,6 +56,11 @@ pub(crate) struct Rule {
 pub(crate) struct IgnoreLayer {
     pub(crate) base: Vec<u8>,
     rules: Vec<Rule>,
+    /// the rules that name one path and nothing else, by that path: their
+    /// positions in `rules`, in order
+    exact: std::collections::HashMap<Vec<u8>, Vec<u32>>,
+    /// the positions of all other rules, in order
+    general: Vec<u32>,
 }
 
 /// A stack of `IgnoreLayer`s — the root layer at index 0, the deepest
@@ -171,9 +176,26 @@ pub(crate) fn parse_layer(content: &[u8], base: &[u8]) -> IgnoreLayer {
             anchored,
         });
     }
+    let mut exact: std::collections::HashMap<Vec<u8>, Vec<u32>> = Default::default();
+    let mut general = Vec::new();
+    for (at, rule) in rules.iter().enumerate() {
+        let literal = !rule
+            .pattern
+            .bytes()
+            .any(|b| matches!(b, b'*' | b'?' | b'[' | b'\\'));
+        match rule.anchored && literal {
+            true => exact
+                .entry(rule.pattern.clone().into_bytes())
+                .or_default()
+                .push(at as u32),
+            false => general.push(at as u32),
+        }
+    }
     IgnoreLayer {
         base: base.to_vec(),
         rules,
+        exact,
+        general,
     }
 }
 
@@ -201,16 +223,22 @@ fn match_layer(layer: &IgnoreLayer, path: &[u8], is_dir: bool) -> Option<bool> {
     // at `layer.base`. If the path doesn't sit under the layer's base, no
     // rule in this layer can match.
     let rel = strip_base(path, &layer.base)?;
-    let mut decision = None;
-    for rule in &layer.rules {
-        if rule.dir_only && !is_dir {
-            continue;
-        }
-        if matches_rule(rule, rel) {
-            decision = Some(!rule.negate);
-        }
-    }
-    decision
+    let applies = |at: &&u32| !layer.rules[**at as usize].dir_only || is_dir;
+    // the last rule that matches decides
+    let named = layer
+        .exact
+        .get(rel)
+        .and_then(|at| at.iter().rev().find(applies));
+    let general = layer
+        .general
+        .iter()
+        .rev()
+        .take_while(|at| named.is_none_or(|n| *at > n))
+        .filter(applies)
+        .find(|at| matches_rule(&layer.rules[**at as usize], rel));
+    general
+        .or(named)
+        .map(|at| !layer.rules[*at as usize].negate)
 }
 
 fn strip_base<'p>(path: &'p [u8], base: &[u8]) -> Option<&'p [u8]> {
@@ -413,6 +441,48 @@ fn named_class(name: &[u8], c: u8) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_last_matching_rule_decides_whatever_its_form() {
+        let text = b"/out\n*.log\n!/keep.log\n/keep.log\n!keep.*\n/dir/\n/a/b\n!/a/b\nb\n/x.tmp\n!*.tmp\n/x.tmp\n";
+        let layer = parse_layer(text, b"");
+        // every rule in order, the last match kept
+        let slow = |path: &[u8], is_dir: bool| {
+            let mut decision = None;
+            for rule in &layer.rules {
+                if (!rule.dir_only || is_dir) && matches_rule(rule, path) {
+                    decision = Some(!rule.negate);
+                }
+            }
+            decision
+        };
+        for path in [
+            &b"out"[..],
+            b"keep.log",
+            b"other.log",
+            b"dir",
+            b"a/b",
+            b"a/c",
+            b"b",
+            b"x.tmp",
+            b"y.tmp",
+            b"none",
+        ] {
+            for is_dir in [false, true] {
+                assert_eq!(
+                    match_layer(&layer, path, is_dir),
+                    slow(path, is_dir),
+                    "{:?}",
+                    path
+                );
+            }
+        }
+        assert_eq!(match_layer(&layer, b"out", false), Some(true));
+        assert_eq!(match_layer(&layer, b"keep.log", false), Some(false));
+        assert_eq!(match_layer(&layer, b"dir", false), None);
+        assert_eq!(match_layer(&layer, b"x.tmp", false), Some(true));
+        assert_eq!(match_layer(&layer, b"a/b", false), Some(true));
+    }
 
     #[test]
     fn bracket_classes_match_one_character() {
