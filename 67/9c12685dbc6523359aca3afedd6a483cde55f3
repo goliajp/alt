@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: bound the tables of a search by the bytes they take
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/dfa.rs
+touched: crates/alt-regex/tests/it/limits.rs
