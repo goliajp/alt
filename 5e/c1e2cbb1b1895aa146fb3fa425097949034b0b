@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: perf
+summary: find a commit's note in the root notes tree by binary search
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/meta/lookup.rs
+touched: crates/alt-git-codec/src/tree.rs
