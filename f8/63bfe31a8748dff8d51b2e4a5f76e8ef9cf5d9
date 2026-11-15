@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: sort a new index run's entries in place
+author-type: human
+author: doracawl
+touched: crates/alt-store/src/runs.rs
