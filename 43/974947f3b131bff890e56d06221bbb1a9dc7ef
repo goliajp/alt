@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: say what fsck reports on failure
+author-type: human
+author: doracawl
+touched: docs/recovery.md
