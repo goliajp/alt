@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: describe alt fsck in the recovery guide
+author-type: human
+author: doracawl
+touched: docs/recovery.md
