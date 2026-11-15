@@ -683,3 +683,51 @@ fn diff_shows_a_submodule_replaced_by_a_file_as_git_does() {
     assert!(ours.contains("-Subproject commit 1111111111111111111111111111111111111111"));
     assert_eq!(hunk_body(&ours), hunk_body(&theirs));
 }
+
+#[test]
+fn diff_cached_pairs_a_renamed_file_as_git_does() {
+    let (src, dst) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
+    let (src, dst) = (src.path(), dst.path());
+    ok(git(src, &["init", "-q", "-b", "main", "."]));
+    ok(git(src, &["config", "user.email", "t@e"]));
+    ok(git(src, &["config", "user.name", "t"]));
+    let body: String = (1..=12).map(|n| format!("line {n}\n")).collect();
+    std::fs::write(src.join("old name.txt"), &body).unwrap();
+    std::fs::write(src.join("plain.txt"), "stays\n").unwrap();
+    std::fs::write(src.join("gone.txt"), "nothing like the others\n").unwrap();
+    ok(git(src, &["add", "."]));
+    ok(git(src, &["commit", "-qm", "base"]));
+    ok(alt(src, &["import", dst.to_str().unwrap()]));
+
+    for root in [src, dst] {
+        std::fs::remove_file(root.join("old name.txt")).unwrap();
+        std::fs::create_dir(root.join("sub")).unwrap();
+        std::fs::write(
+            root.join("sub/new.txt"),
+            body.replace("line 7\n", "seven\n"),
+        )
+        .unwrap();
+        std::fs::rename(root.join("plain.txt"), root.join("sub/plain.txt")).unwrap();
+        std::fs::remove_file(root.join("gone.txt")).unwrap();
+        std::fs::write(root.join("fresh.txt"), "new content\n").unwrap();
+    }
+    ok(alt(dst, &["add", "."]));
+    ok(git(src, &["add", "-A"]));
+    let ours = ok(alt(dst, &["diff", "--cached"]));
+    assert_eq!(
+        ours,
+        ok(git(src, &["-c", "core.pager=cat", "diff", "--cached"]))
+    );
+    assert!(
+        ours.contains("rename from old name.txt\nrename to sub/new.txt\n"),
+        "{ours}"
+    );
+    assert!(
+        ours.contains("similarity index 100%\nrename from plain.txt\n"),
+        "{ours}"
+    );
+    assert!(ours.contains("deleted file mode 100644"), "{ours}");
+}

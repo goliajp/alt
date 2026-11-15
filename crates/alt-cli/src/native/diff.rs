@@ -68,7 +68,7 @@ impl NativeRepo<'_> {
             abbrev: Some(self.store.odb.abbrev()),
         };
         let mut buf = Vec::new();
-        for pair in self.pairs(&changes) {
+        for pair in self.pairs(&changes, cached)? {
             // a path that changed kind (file, symlink, submodule) is shown
             // as a removal followed by an addition, as git does
             let kind = |w: &WorkEntry| w.mode & 0o170000;
@@ -86,8 +86,15 @@ impl NativeRepo<'_> {
         Ok(())
     }
 
-    /// The changes as the patch shows them.
-    fn pairs<'c>(&self, changes: &'c [alt_worktree::Change<'c>]) -> Vec<Pair<'c>> {
+    /// The changes as the patch shows them. Between HEAD and the index a
+    /// removed file and an added file that are one file renamed become one
+    /// entry, reported at the new path, as in git; the working tree never
+    /// adds a file to a diff, so there is nothing to pair there.
+    fn pairs<'c>(
+        &self,
+        changes: &'c [alt_worktree::Change<'c>],
+        cached: bool,
+    ) -> Res<Vec<Pair<'c>>> {
         let plain = |ch: &'c alt_worktree::Change<'c>| Pair {
             old_path: ch.path,
             new_path: ch.path,
@@ -95,7 +102,53 @@ impl NativeRepo<'_> {
             new: ch.new,
             similarity: None,
         };
-        changes.iter().map(plain).collect()
+        if !cached {
+            return Ok(changes.iter().map(plain).collect());
+        }
+        use alt_diff::rename::File;
+        let side = |removed: bool| -> Vec<&'c alt_worktree::Change<'c>> {
+            changes
+                .iter()
+                .filter(|ch| match (ch.old, ch.new) {
+                    (Some(_), None) => removed,
+                    (None, Some(_)) => !removed,
+                    _ => false,
+                })
+                .collect()
+        };
+        let (removed, added) = (side(true), side(false));
+        let file = |ch: &&'c alt_worktree::Change<'c>| {
+            let w = ch.old.or(ch.new).expect("one side exists");
+            File {
+                path: ch.path.as_slice(),
+                id: w.oid.as_bytes(),
+                mode: w.mode,
+            }
+        };
+        let sources: Vec<File<'_>> = removed.iter().map(file).collect();
+        let targets: Vec<File<'_>> = added.iter().map(file).collect();
+        let mut load = |source: bool, i: usize| -> Res<Vec<u8>> {
+            let ch = if source { removed[i] } else { added[i] };
+            self.blob_bytes(ch.old.or(ch.new).expect("one side exists").oid)
+        };
+        let renames = alt_diff::rename::detect(&sources, &targets, &mut load)?;
+        let mut pairs = Vec::with_capacity(changes.len());
+        for ch in changes {
+            if renames.iter().any(|r| std::ptr::eq(removed[r.src], ch)) {
+                continue;
+            }
+            let from = renames.iter().find(|r| std::ptr::eq(added[r.dst], ch));
+            pairs.push(match from {
+                Some(r) => Pair {
+                    old_path: removed[r.src].path,
+                    old: removed[r.src].old,
+                    similarity: Some(r.percent()),
+                    ..plain(ch)
+                },
+                None => plain(ch),
+            });
+        }
+        Ok(pairs)
     }
 
     /// Builds the `diff --json` document: `{schema_version, files:[…]}`, one
