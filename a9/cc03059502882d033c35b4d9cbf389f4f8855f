@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: perf
+summary: read each commit once in a history walk and none past the last one shown
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/log_cmd.rs
+touched: crates/alt-repo/src/revwalk.rs
