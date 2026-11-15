@@ -1,10 +1,10 @@
 //! Direct and daemon commands share parsing, failures, and durable receipts.
 //!
 //! The C runtime calls `main` directly. The standard library's own start-up
-//! (finding the main thread's stack guard through `/proc/self/maps`, an
-//! alternate signal stack, probing the standard descriptors) costs about
-//! twenty system calls on every invocation and buys only a friendlier
-//! message on stack overflow; what a command relies on is done here.
+//! finds the main thread's stack guard by reading `/proc/self/maps` and
+//! probes the standard descriptors, about twenty system calls on every
+//! invocation; what a command relies on (a closed pipe as a write error, a
+//! report when the stack overflows) is set up here in four.
 #![cfg_attr(not(test), no_main)]
 
 use alt_cli::cli::{self, Command};
@@ -22,8 +22,8 @@ pub extern "C" fn main(
     _argv: *const *const std::ffi::c_char,
 ) -> std::ffi::c_int {
     // a closed output pipe is reported as a failed write, not a signal
-    #[cfg(unix)]
     alt_os::sys::ignore_signal(alt_os::sys::SIGPIPE);
+    alt_os::stack::report_overflow();
     // a panic leaves with the status the standard runtime gives it
     let Ok(response) = std::panic::catch_unwind(run) else {
         return 101;
@@ -252,7 +252,7 @@ fn run() -> Response {
             Command::Ci {
                 op: cli::CiOp::Validate { paths },
                 json,
-            } => return cli::ci_validate(&cwd, paths, *json, &mut out),
+            } => return alt_cli::ci_cmd::ci_validate(&cwd, paths, *json, &mut out),
             command => {
                 let (repo, head) = match native::resolve_workspace(
                     &cwd,

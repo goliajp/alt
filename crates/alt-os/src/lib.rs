@@ -3,6 +3,7 @@
 //!
 //! - [`random`]: bytes from the operating system's generator
 //! - [`map`]: read-only file mappings
+//! - [`stack`]: reporting a stack overflow of the main thread
 //! - [`sys`]: the constants, structures and functions of the C interface that
 //!   the workspace calls
 //! - [`temp`]: temporary files and directories
@@ -19,5 +20,6 @@ compile_error!("alt-os supports Linux (glibc) and macOS on x86_64 and aarch64 on
 
 pub mod map;
 pub mod random;
+pub mod stack;
 pub mod sys;
 pub mod temp;

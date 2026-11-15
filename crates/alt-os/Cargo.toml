@@ -6,3 +6,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+
+[[test]]
+name = "it"
+path = "tests/it/main.rs"
+# the stack overflow check has to run on the process's main thread
+harness = false
