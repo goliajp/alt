@@ -1,0 +1,25 @@
+schema: alt-meta/1
+type: perf
+summary: defer refs, config and the less used store files until a read needs them
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-odb/src/lib.rs
+touched: crates/alt-odb/src/odb.rs
+touched: crates/alt-odb/src/odb/durable.rs
+touched: crates/alt-odb/src/storage_view.rs
+touched: crates/alt-odb/src/tier1.rs
+touched: crates/alt-odb/tests/it/odb_index.rs
+touched: crates/alt-refs/Cargo.toml
+touched: crates/alt-refs/src/lib.rs
+touched: crates/alt-refs/src/snapshot.rs
+touched: crates/alt-refs/src/state.rs
+touched: crates/alt-refs/tests/it/refs_lifecycle.rs
+touched: crates/alt-repo/src/alt_backend.rs
+touched: crates/alt-repo/src/lib.rs
+touched: crates/alt-store/src/blob.rs
+touched: crates/alt-store/src/blobmap.rs
+touched: crates/alt-store/src/lib.rs
+touched: crates/alt-store/src/pack.rs
+touched: crates/alt-store/src/packs.rs
+touched: crates/alt-store/src/reclog.rs
