@@ -33,7 +33,7 @@ fn walk(node: &Node, run: &mut Vec<u8>, best: &mut Vec<u8>) {
             walk(inner, run, best);
             close(run, best);
         }
-        Node::Alt(_) | Node::Repeat(..) => close(run, best),
+        Node::Alt(_) | Node::Repeat(..) | Node::BackRef(_) => close(run, best),
     }
 }
 

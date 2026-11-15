@@ -27,6 +27,8 @@ pub enum Node {
     Group(Box<Node>, u32),
     Concat(Vec<Node>),
     Alt(Vec<Node>),
+    /// What the group of this number matched, once more.
+    BackRef(u32),
     /// At least `.1` and at most `.2` repetitions.
     Repeat(Box<Node>, u32, Option<u32>),
 }
@@ -46,6 +48,8 @@ struct Parser<'a> {
     opts: Options,
     groups: u32,
     depth: u32,
+    /// the groups whose closing parenthesis has been read
+    complete: Vec<u32>,
 }
 
 /// Parses `pat` into its tree and the number of groups in it.
@@ -59,6 +63,7 @@ pub fn parse(pat: &[u8], opts: Options) -> Result<(Node, u32), Error> {
         opts,
         groups: 0,
         depth: 0,
+        complete: Vec::new(),
     };
     let node = p.alternation()?;
     if p.at < pat.len() {
@@ -101,10 +106,15 @@ impl<'a> Parser<'a> {
     }
 
     fn alternation(&mut self) -> Result<Node, Error> {
+        let before = self.complete.len();
         let mut branches = vec![self.concat()?];
         while self.at_alt() {
             self.at += if self.ere() { 1 } else { 2 };
+            // as in the C library, a branch cannot refer to a group of
+            // a branch beside it
+            let beside = self.complete.split_off(before);
             branches.push(self.concat()?);
+            self.complete.extend(beside);
         }
         Ok(match branches.len() {
             1 => branches.pop().expect("one branch"),
@@ -277,7 +287,13 @@ impl<'a> Parser<'a> {
         };
         let space = ByteSet::class(b"space").expect("a known class");
         Ok(match c {
-            b'1'..=b'9' => return Err(Error::BackReference),
+            b'1'..=b'9' => {
+                let number = u32::from(c - b'0');
+                if !self.complete.contains(&number) {
+                    return Err(Error::BackReference);
+                }
+                Node::BackRef(number)
+            }
             b'w' => Node::Set(ByteSet::word()),
             b'W' => negated(ByteSet::word()),
             b's' => Node::Set(space),
@@ -312,6 +328,7 @@ impl<'a> Parser<'a> {
         }
         self.at += if self.ere() { 1 } else { 2 };
         self.depth -= 1;
+        self.complete.push(number);
         Ok(Node::Group(Box::new(inner), number))
     }
 
@@ -490,7 +507,13 @@ mod tests {
         );
         assert_eq!(bre("a\\)"), Err(Error::Paren));
         assert_eq!(ere("a\\"), Err(Error::Escape));
-        assert_eq!(ere("(a)\\1"), Err(Error::BackReference));
+        let again = Node::Concat(vec![Node::Group(Box::new(lit(b'a')), 1), Node::BackRef(1)]);
+        assert_eq!(ere("(a)\\1").unwrap().0, again);
+        assert_eq!(bre("\\(a\\)\\1").unwrap().0, again);
+        // only to a group that is complete
+        for pat in ["\\1(a)", "(a\\1)", "(a)\\2", "\\1", "(a)|b\\1"] {
+            assert_eq!(ere(pat), Err(Error::BackReference), "{pat}");
+        }
     }
 
     #[test]

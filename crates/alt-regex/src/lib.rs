@@ -1,14 +1,18 @@
 //! POSIX regular expressions over byte strings.
 //!
 //! Both the basic and the extended syntax are read, with the operators
-//! the GNU C library adds to them, except back-references: with those a
-//! pattern is no longer regular. A match is the one `regexec` reports,
+//! the GNU C library adds to them. A match is the one `regexec` reports,
 //! the earliest and of those the longest, and it is found in time linear
 //! in the length of the text however the pattern is built.
+//!
+//! A pattern with a back-reference is no longer regular. It is matched
+//! by trying its paths one after another, up to a fixed number of steps;
+//! a text that would take more is reported as not matching.
 //!
 //! Texts are bytes. A multi-byte character is the bytes it is made of,
 //! and letters outside ASCII have no case.
 
+mod backref;
 mod backtrack;
 mod class;
 mod dfa;
@@ -62,7 +66,7 @@ pub enum Error {
     Class,
     /// A collating element of more than one byte.
     Collate,
-    /// A back-reference, which this matcher does not have.
+    /// A back-reference to a group that is not complete where it stands.
     BackReference,
     /// A pattern too large to compile.
     TooBig,
@@ -79,7 +83,7 @@ impl std::fmt::Display for Error {
             Error::Range => "invalid range end",
             Error::Class => "invalid character class name",
             Error::Collate => "invalid collating element",
-            Error::BackReference => "back-references are not supported",
+            Error::BackReference => "invalid back reference",
             Error::TooBig => "regular expression too big",
         })
     }
@@ -158,13 +162,16 @@ impl Regex {
 
     pub fn with_options(pattern: &[u8], options: Options) -> Result<Self, Error> {
         let (node, groups) = syntax::parse(pattern, options)?;
-        let prog = program::compile(&node, groups)?;
+        let prog = program::compile(&node, groups, options.ignore_case)?;
         let anchored = prog.anchored;
         // a text with nothing in it is common, and always answered alike
         let mut slots = [pike::UNSET; FEW];
         let width = FEW.min(2 * (groups as usize + 1));
         let cache = &mut pike::Cache::default();
-        let matched = pike::search(&prog, cache, b"", None, &mut slots[..width]);
+        let matched = match prog.backrefs {
+            true => backref::search(&prog, b"", None, &mut slots[..width]),
+            false => pike::search(&prog, cache, b"", None, &mut slots[..width]),
+        };
         Ok(Regex {
             prog,
             on_empty: matched.then_some(slots),
@@ -203,6 +210,9 @@ impl Regex {
     fn decide(&self, cache: &mut Cache, text: &[u8]) -> bool {
         if text.is_empty() {
             return self.on_empty.is_some();
+        }
+        if self.prog.backrefs {
+            return backref::search(&self.prog, text, None, &mut [pike::UNSET; 2]);
         }
         if self.prog.plain_looks {
             return dfa::earliest_end(&self.prog, &mut cache.scan, text).is_some();
@@ -244,6 +254,9 @@ impl Regex {
     /// Fills `slots` with the capture slots of the earliest, longest
     /// match; false when there is none.
     fn search(&self, cache: &mut Cache, text: &[u8], slots: &mut [usize]) -> bool {
+        if self.prog.backrefs {
+            return !self.excluded(text) && backref::search(&self.prog, text, None, slots);
+        }
         if text.is_empty() {
             let Some(known) = &self.on_empty else {
                 return false;
@@ -468,5 +481,55 @@ mod tests {
         assert!(!re.is_match(b"int main(void)"));
         assert!(re.is_match(b"\tstatic int x"));
         assert!(Regex::new(b"^static [a-z]+").unwrap().literal.is_none());
+    }
+
+    #[test]
+    fn a_back_reference_matches_what_its_group_matched() {
+        assert_eq!(spans("(a)\\1", "xaab"), Some(vec![Some(1..3), Some(1..2)]));
+        assert_eq!(spans("(a)\\1", "aba"), None);
+        assert_eq!(
+            spans("^(.+)\\1$", "abcabc"),
+            Some(vec![Some(0..6), Some(0..3)])
+        );
+        assert_eq!(spans("^(.+)\\1$", "abcabd"), None);
+        // the longest match of the earliest start, not the first path's
+        assert_eq!(
+            spans("(a|ab)\\1", "abab"),
+            Some(vec![Some(0..4), Some(0..2)])
+        );
+        assert_eq!(
+            spans("(a*)\\1", "aaaaa"),
+            Some(vec![Some(0..4), Some(0..2)])
+        );
+        assert_eq!(
+            spans("(a)(b)\\2\\1", "abba"),
+            Some(vec![Some(0..4), Some(0..1), Some(1..2)])
+        );
+        // a group that took no part matches nothing again
+        assert_eq!(spans("((a)|b)\\2", "b"), None);
+        assert_eq!(spans("(a*)*\\1", "b"), Some(vec![Some(0..0), Some(0..0)]));
+        let any_case = Options {
+            ignore_case: true,
+            ..Options::default()
+        };
+        let re = Regex::with_options(b"(a)\\1", any_case).unwrap();
+        assert_eq!(re.find(b"xAa"), Some(1..3));
+        let basic = Options {
+            syntax: Syntax::Basic,
+            ..Options::default()
+        };
+        let re = Regex::with_options(b"^\\(a*\\)b\\1$", basic).unwrap();
+        assert!(re.is_match(b"aabaa") && !re.is_match(b"aaba"));
+    }
+
+    #[test]
+    fn a_back_reference_search_gives_up_at_its_bound_and_says_no() {
+        // every way of splitting the text is tried before the end fails
+        let re = Regex::new(b"^(a|aa)+\\1b$").unwrap();
+        assert!(re.is_match(b"aaaab"));
+        let begun = std::time::Instant::now();
+        assert!(!re.is_match(&[b'a'; 200]));
+        assert!(re.captures(&[b'a'; 200]).is_none());
+        assert!(begun.elapsed() < std::time::Duration::from_secs(20));
     }
 }

@@ -109,6 +109,8 @@ fn follow(
                     stack.push(Frame::Explore(next));
                 }
             }
+            // a pattern with one is not searched this way
+            Inst::BackRef(..) => {}
             Inst::Set(..) | Inst::Byte(..) | Inst::Match => {
                 let row = prog.rows[pc as usize] as usize;
                 list.slots[row * width..][..width].copy_from_slice(slots);

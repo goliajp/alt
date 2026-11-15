@@ -90,7 +90,7 @@ impl Cache {
                 Inst::Save(_, next) => self.stack.push(next),
                 Inst::Look(Look::TextStart, next) if at_start => self.stack.push(next),
                 Inst::Look(Look::TextEnd, next) if at_end => self.stack.push(next),
-                Inst::Look(Look::TextStart, _) => {}
+                Inst::Look(Look::TextStart, _) | Inst::BackRef(..) => {}
                 // waits in the state for the end of the text
                 Inst::Look(..) | Inst::Set(..) | Inst::Byte(..) | Inst::Match => out.push(pc),
             }

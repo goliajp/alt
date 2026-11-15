@@ -390,3 +390,71 @@ fn hand_picked_patterns_are_accepted_or_refused_as_the_c_library_does() {
         }
     }
 }
+
+#[test]
+fn back_references_match_as_the_c_library_matches_them() {
+    let extended = Options::default();
+    let basic = Options {
+        syntax: Syntax::Basic,
+        ..extended
+    };
+    let any_case = Options {
+        ignore_case: true,
+        ..extended
+    };
+    let cases = [
+        ("(a)\\1", extended),
+        ("(a*)\\1", extended),
+        ("^(.+)\\1$", extended),
+        ("(a|ab)\\1", extended),
+        ("(a)(b)\\2\\1", extended),
+        ("(a*)*\\1", extended),
+        ("(a|b)*\\1", extended),
+        ("(a)\\1*", extended),
+        ("(a)\\1{2}", extended),
+        ("(ab|a)(bc|c)?\\1", extended),
+        ("(a)|b\\1", extended),
+        ("((a)|b)\\2", extended),
+        ("((a)|b)*\\2", extended),
+        ("(a)\\1", any_case),
+        ("([a-c]+)x\\1", any_case),
+        ("\\(a\\)\\1", basic),
+        ("\\(a*\\)b\\1", basic),
+        ("\\(a\\)\\(b\\)*\\2", basic),
+        ("\\1(a)", extended),
+        ("(a\\1)", extended),
+        ("(a)\\2", extended),
+        ("\\1", basic),
+    ];
+    let texts = [
+        "", "a", "aa", "aaa", "aaaa", "aaaaa", "ab", "abab", "abba", "aba", "abcabc", "b", "bb",
+        "xaab", "aabaa", "aA", "Aa", "abcab", "abcbc", "abxAB", "ba", "abb",
+    ];
+    let mut compared = 0;
+    let mut differ = Vec::new();
+    for (pat, options) in cases {
+        let theirs = Theirs::new(pat.as_bytes(), options);
+        let ours = Regex::with_options(pat.as_bytes(), options);
+        assert_eq!(ours.is_ok(), theirs.0.is_some(), "{pat:?}");
+        let Ok(ours) = ours else { continue };
+        for text in texts {
+            let expected = theirs.spans(text.as_bytes());
+            // for a repeated group that may be empty the C library reports
+            // spans that no match has, one with an end before its start:
+            // there only the whole match is compared
+            let groups = if pat == "(a*)*\\1" { 0 } else { ours.groups() };
+            let expected = expected.map(|spans| spans[..=groups].to_vec());
+            let found = ours.captures(text.as_bytes()).map(|found| {
+                let span = |i| found.get(i).map(|r| (r.start, r.end));
+                (0..=groups).map(span).collect::<Vec<_>>()
+            });
+            if found != expected {
+                differ.push(format!("{pat:?} on {text:?}: {found:?} not {expected:?}"));
+            }
+            assert_eq!(ours.is_match(text.as_bytes()), found.is_some());
+            compared += 1;
+        }
+    }
+    assert_eq!(compared, 17 * texts.len());
+    assert!(differ.is_empty(), "{}", differ.join("\n"));
+}

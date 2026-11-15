@@ -16,6 +16,8 @@ pub enum Inst {
     /// Record the position in a capture slot.
     Save(u32, u32),
     Look(Look, u32),
+    /// Consume what this group matched, letters in either case if asked.
+    BackRef(u32, bool, u32),
     Match,
 }
 
@@ -28,6 +30,8 @@ pub struct Program {
     pub anchored: bool,
     /// The only conditions are on the two ends of the text.
     pub plain_looks: bool,
+    /// Some instruction is a back-reference.
+    pub backrefs: bool,
     /// For each instruction that more than one path leads into, its
     /// number among those; the others have none.
     pub joins: Vec<u32>,
@@ -54,13 +58,15 @@ struct Compiler {
     insts: Vec<Inst>,
     sets: Vec<ByteSet>,
     work: usize,
+    ignore_case: bool,
 }
 
-pub fn compile(node: &Node, groups: u32) -> Result<Program, Error> {
+pub fn compile(node: &Node, groups: u32, ignore_case: bool) -> Result<Program, Error> {
     let mut c = Compiler {
         insts: Vec::new(),
         sets: Vec::new(),
         work: 0,
+        ignore_case,
     };
     let end = c.push(Inst::Match)?;
     let close = c.push(Inst::Save(1, end))?;
@@ -70,6 +76,7 @@ pub fn compile(node: &Node, groups: u32) -> Result<Program, Error> {
         Inst::Look(look, _) => matches!(look, Look::TextStart | Look::TextEnd),
         _ => true,
     });
+    let backrefs = c.insts.iter().any(|i| matches!(i, Inst::BackRef(..)));
     let (rows, row_count) = rows(&c.insts);
     if row_count as usize * 2 * (groups as usize + 1) > MAX_SLOTS {
         return Err(Error::TooBig);
@@ -83,6 +90,7 @@ pub fn compile(node: &Node, groups: u32) -> Result<Program, Error> {
         groups,
         anchored: anchored(node),
         plain_looks,
+        backrefs,
         joins,
         join_count,
         rows,
@@ -115,6 +123,7 @@ fn joins(insts: &[Inst], start: u32) -> (Vec<u32>, u32) {
             Inst::Set(_, next)
             | Inst::Byte(_, next)
             | Inst::Save(_, next)
+            | Inst::BackRef(_, _, next)
             | Inst::Look(_, next) => ways[next as usize] += 1,
             Inst::Split(first, second) => {
                 ways[first as usize] += 1;
@@ -204,6 +213,7 @@ impl Compiler {
             Node::Empty => Ok(next),
             Node::Set(set) => self.set(set, next),
             Node::Look(look) => self.push(Inst::Look(*look, next)),
+            Node::BackRef(group) => self.push(Inst::BackRef(*group, self.ignore_case, next)),
             Node::Group(inner, number) => {
                 let close = self.push(Inst::Save(2 * number + 1, next))?;
                 let body = self.node(inner, close)?;
@@ -268,7 +278,7 @@ mod tests {
 
     fn program(pat: &str) -> Program {
         let (node, groups) = parse(pat.as_bytes(), Options::default()).unwrap();
-        compile(&node, groups).unwrap()
+        compile(&node, groups, false).unwrap()
     }
 
     #[test]
@@ -307,7 +317,7 @@ mod tests {
         assert_eq!(large - small, 27);
         assert!(program("a{2,4}").insts.len() > small);
         let (node, groups) = parse(b"((a{1000}){1000}){10}", Options::default()).unwrap();
-        assert!(matches!(compile(&node, groups), Err(Error::TooBig)));
+        assert!(matches!(compile(&node, groups, false), Err(Error::TooBig)));
         assert!(!program("\\bx").plain_looks && program("^x$").plain_looks);
     }
 }
