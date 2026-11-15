@@ -121,6 +121,8 @@ pub fn run(
     let notes = repo.resolve_ref(crate::meta::NOTES_REF)?;
     let mut first = true;
     let mut converted = Vec::new();
+    // one for the whole log: it learns which ids share a prefix as it goes
+    let style = crate::patch::style(repo)?;
     for item in repo.rev_walk(start)?.take(limit) {
         let (oid, _) = item?;
         let obj = repo.read_object(&oid)?.expect("walked oid exists");
@@ -143,7 +145,7 @@ pub fn run(
             // but the one-line one, and a combined diff from any header
             use crate::patch::Section;
             let mut patch = Vec::new();
-            let shown = crate::patch::write_commit(&mut patch, repo, &oid, args.combined)?;
+            let shown = crate::patch::write_commit(&mut patch, repo, &oid, args.combined, &style)?;
             if shown == Section::Combined || (shown == Section::Patch && args.pretty != "oneline") {
                 out.write_all(b"\n")?;
             }

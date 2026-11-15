@@ -22,6 +22,7 @@ pub(crate) fn write_commit(
     repo: &Repository,
     commit: &ObjectId,
     combined: bool,
+    style: &Style<'_>,
 ) -> Res<Section> {
     let parsed = read_commit(repo, commit)?;
     let new_tree = parsed
@@ -37,22 +38,21 @@ pub(crate) fn write_commit(
             for parent in &parents {
                 trees.push(read_commit(repo, parent)?.tree());
             }
-            crate::combined::write(out, repo, new_tree, &trees, &style(repo)?)?;
+            crate::combined::write(out, repo, new_tree, &trees, style)?;
             return Ok(Section::Combined);
         }
     };
     let changes = tree_changes::changes(repo, old_tree, Some(new_tree))?;
-    let style = style(repo)?;
     for file in tree_changes::pair_renames(repo, changes)? {
         let kind = |f: &TreeFile| f.mode & 0o170000;
         match (&file.old, &file.new) {
             // a path that changed kind is a removal, then an addition
             (Some(old), Some(new)) if kind(old) != kind(new) => {
                 let (removed, added) = split(&file);
-                write_file(out, repo, &removed, &style)?;
-                write_file(out, repo, &added, &style)?;
+                write_file(out, repo, &removed, style)?;
+                write_file(out, repo, &added, style)?;
             }
-            _ => write_file(out, repo, &file, &style)?,
+            _ => write_file(out, repo, &file, style)?,
         }
     }
     Ok(match out.is_empty() {
