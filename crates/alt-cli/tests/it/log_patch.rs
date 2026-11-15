@@ -204,6 +204,9 @@ fn varied_history(src: &Path) {
     put("dir/c.rs", &source_file(3));
     put("script.sh", "#!/bin/sh\necho hi\n");
     put("kept.txt", "same\n");
+    put("with space.txt", "one\n");
+    put("caf\u{e9} \"q\".txt", "one\n");
+    put("dir/tab\there.txt", "one\n");
     commit_all(src, 1000, "base");
 
     put(
@@ -212,7 +215,10 @@ fn varied_history(src: &Path) {
     );
     fs::remove_file(src.join("b.txt")).unwrap();
     put("new.txt", "brand new\nwithout a final newline");
-    commit_all(src, 1100, "edit, delete, add");
+    put("with space.txt", "two\n");
+    put("caf\u{e9} \"q\".txt", "two\n");
+    fs::rename(src.join("dir/tab\there.txt"), src.join("dir/tab moved.txt")).unwrap();
+    commit_all(src, 1100, "edit, delete, add, names that need quoting");
 
     git_at(src, 1150, &["switch", "-q", "-c", "side"]);
     put("side.txt", "from the side\n");
@@ -266,6 +272,15 @@ fn log_patch_matches_git_for_every_kind_of_change() {
     assert_eq!(ours, theirs);
     // spot checks, so that the comparison is not two empty outputs
     assert!(ours.contains("similarity index"), "{ours}");
+    assert!(ours.contains("--- a/with space.txt\t\n"), "{ours}");
+    assert!(
+        ours.contains("rename from \"dir/tab\\there.txt\"\n"),
+        "{ours}"
+    );
+    assert!(
+        ours.contains("diff --git \"a/caf\\303\\251 \\\"q\\\".txt\""),
+        "{ours}"
+    );
     assert!(ours.contains("rename from kept.txt\nrename to moved/kept.txt\n"));
     assert!(ours.contains("@@ fn section_3() {"), "{ours}");
     assert!(ours.contains("old mode 100644\nnew mode 100755\n"));

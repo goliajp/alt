@@ -1,6 +1,19 @@
 //! `alt diff`: index to working tree, or HEAD to index with `--cached`.
 
 use super::*;
+use crate::file_header::{FileHeader, Side, Style};
+
+/// One file of a patch: a change in place, or a file moved from
+/// `old_path` to `new_path`.
+#[derive(Clone, Copy)]
+struct Pair<'a> {
+    old_path: &'a BString,
+    new_path: &'a BString,
+    old: Option<&'a WorkEntry>,
+    new: Option<&'a WorkEntry>,
+    /// similarity of a renamed file, in percent
+    similarity: Option<u32>,
+}
 
 /// What the working-tree side of a diff is read with: the index its paths
 /// came from, and the attribute files that say how content is stored.
@@ -46,29 +59,43 @@ impl NativeRepo<'_> {
         if json {
             return self.diff_json(&changes, disk, semantic, out);
         }
+        let style = Style {
+            quotepath: self
+                .settings()?
+                .get_bool("core", None, "quotepath")
+                .transpose()?
+                .unwrap_or(true),
+            abbrev: Some(self.store.odb.abbrev()),
+        };
         let mut buf = Vec::new();
-        for ch in &changes {
+        for pair in self.pairs(&changes) {
             // a path that changed kind (file, symlink, submodule) is shown
             // as a removal followed by an addition, as git does
             let kind = |w: &WorkEntry| w.mode & 0o170000;
-            match (ch.old, ch.new) {
+            match (pair.old, pair.new) {
                 (Some(o), Some(n)) if kind(o) != kind(n) => {
-                    let removed = alt_worktree::Change {
-                        new: None,
-                        ..ch.clone()
-                    };
-                    let added = alt_worktree::Change {
-                        old: None,
-                        ..ch.clone()
-                    };
-                    self.emit_file_diff(&mut buf, &removed, disk, semantic)?;
-                    self.emit_file_diff(&mut buf, &added, disk, semantic)?;
+                    let removed = Pair { new: None, ..pair };
+                    let added = Pair { old: None, ..pair };
+                    self.emit_file_diff(&mut buf, &removed, disk, semantic, &style)?;
+                    self.emit_file_diff(&mut buf, &added, disk, semantic, &style)?;
                 }
-                _ => self.emit_file_diff(&mut buf, ch, disk, semantic)?,
+                _ => self.emit_file_diff(&mut buf, &pair, disk, semantic, &style)?,
             }
         }
         out.write_all(&buf)?;
         Ok(())
+    }
+
+    /// The changes as the patch shows them.
+    fn pairs<'c>(&self, changes: &'c [alt_worktree::Change<'c>]) -> Vec<Pair<'c>> {
+        let plain = |ch: &'c alt_worktree::Change<'c>| Pair {
+            old_path: ch.path,
+            new_path: ch.path,
+            old: ch.old,
+            new: ch.new,
+            similarity: None,
+        };
+        changes.iter().map(plain).collect()
     }
 
     /// Builds the `diff --json` document: `{schema_version, files:[…]}`, one
@@ -174,52 +201,28 @@ impl NativeRepo<'_> {
     fn emit_file_diff(
         &self,
         buf: &mut Vec<u8>,
-        ch: &alt_worktree::Change,
+        pair: &Pair<'_>,
         disk: Option<&Worktree<'_>>,
         semantic: bool,
+        style: &Style<'_>,
     ) -> Res<()> {
-        let path = ch.path;
-        let old_bytes = self.side_bytes(ch.old, None)?;
-        let new_bytes = self.side_bytes(ch.new, disk)?;
-
-        buf.extend_from_slice(format!("diff --git a/{path} b/{path}\n").as_bytes());
-        match (ch.old, ch.new) {
-            (None, Some(w)) => {
-                buf.extend_from_slice(format!("new file mode {:06o}\n", w.mode).as_bytes());
-            }
-            (Some(w), None) => {
-                buf.extend_from_slice(format!("deleted file mode {:06o}\n", w.mode).as_bytes());
-            }
-            (Some(o), Some(n)) if o.mode != n.mode => {
-                buf.extend_from_slice(format!("old mode {:06o}\n", o.mode).as_bytes());
-                buf.extend_from_slice(format!("new mode {:06o}\n", n.mode).as_bytes());
-            }
-            _ => {}
+        let path = pair.new_path;
+        let side = |w: &WorkEntry| Side {
+            oid: w.oid,
+            mode: w.mode,
+        };
+        let header = FileHeader {
+            old_path: pair.old_path,
+            new_path: pair.new_path,
+            old: pair.old.map(side),
+            new: pair.new.map(side),
+            similarity: pair.similarity,
+        };
+        if !header.write(buf, style)? {
+            return Ok(()); // moved or re-moded without a change of content
         }
-        let (old_oid, new_oid) = (ch.old.map(|w| w.oid), ch.new.map(|w| w.oid));
-        if old_oid == new_oid {
-            return Ok(()); // only the mode changed
-        }
-        let digits = crate::patch::abbrev_len(self.store.odb.len());
-        let short = |oid: Option<ObjectId>| match oid {
-            Some(oid) => oid.to_string()[..digits].to_owned(),
-            None => "0".repeat(digits),
-        };
-        let mode = match (ch.old, ch.new) {
-            (Some(o), Some(n)) if o.mode == n.mode => format!(" {:06o}", o.mode),
-            _ => String::new(),
-        };
-        buf.extend_from_slice(
-            format!("index {}..{}{mode}\n", short(old_oid), short(new_oid)).as_bytes(),
-        );
-        let old_name = match ch.old {
-            Some(_) => format!("a/{path}"),
-            None => "/dev/null".to_owned(),
-        };
-        let new_name = match ch.new {
-            Some(_) => format!("b/{path}"),
-            None => "/dev/null".to_owned(),
-        };
+        let old_bytes = self.side_bytes(pair.old, None)?;
+        let new_bytes = self.side_bytes(pair.new, disk)?;
 
         // when --semantic is set and we have a parser for this path,
         // render the AST-level summary in place of the unified hunks. A
@@ -259,9 +262,7 @@ impl NativeRepo<'_> {
             // git-compat line first (existing tests + muscle memory key off
             // this exact wording); then a chunk-diff summary so the
             // human view answers "how much is genuinely shared" too.
-            buf.extend_from_slice(
-                format!("Binary files {old_name} and {new_name} differ\n").as_bytes(),
-            );
+            header.write_binary_notice(buf, style)?;
             let cd = alt_diff::binary::chunk_diff(
                 &old_bytes,
                 &new_bytes,
@@ -305,7 +306,7 @@ impl NativeRepo<'_> {
         // the file header belongs to the hunks: none without them
         let mut hunks = Vec::new();
         if alt_diff::write_unified(&mut hunks, &old_bytes, &new_bytes, 3) {
-            buf.extend_from_slice(format!("--- {old_name}\n+++ {new_name}\n").as_bytes());
+            header.write_hunk_names(buf, style)?;
             buf.extend_from_slice(&hunks);
         }
         Ok(())

@@ -391,11 +391,12 @@ impl Repository {
         }
     }
 
-    /// How many git objects the store holds; `None` for git-backed repos.
-    pub fn object_count(&self) -> Option<usize> {
+    /// Abbreviates object ids against the objects of this store; `None`
+    /// for git-backed repos.
+    pub fn abbrev(&self) -> Option<alt_odb::Abbrev<'_>> {
         match &self.backend {
             Backend::Git { .. } => None,
-            Backend::Alt(alt) => Some(alt.odb.len()),
+            Backend::Alt(alt) => Some(alt.odb.abbrev()),
         }
     }
 
