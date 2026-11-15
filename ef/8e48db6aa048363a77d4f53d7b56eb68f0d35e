@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: perf
+summary: keep freed memory with the process instead of faulting it in again
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd.rs
+touched: crates/alt-cli/src/main.rs
+touched: crates/alt-os/src/heap.rs
+touched: crates/alt-os/src/lib.rs
+touched: crates/alt-os/tests/it/main.rs
