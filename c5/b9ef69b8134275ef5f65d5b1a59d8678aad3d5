@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: recover a checkout interrupted while a file and a submodule change places
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/checkout_recovery.rs
+touched: crates/alt-cli/tests/it/undo_add.rs
