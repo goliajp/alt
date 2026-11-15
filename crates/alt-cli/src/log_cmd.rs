@@ -116,10 +116,10 @@ pub fn run(
     let notes = repo.resolve_ref(crate::meta::NOTES_REF)?;
     let mut first = true;
     let mut converted = Vec::new();
-    for item in repo.rev_walk(start)?.take(limit) {
-        let (oid, _) = item?;
-        let obj = repo.read_object(&oid)?.expect("walked oid exists");
-        let payload = reencode(&obj.data, &mut converted);
+    let mut walk = repo.rev_walk(start)?;
+    for item in std::iter::from_fn(|| walk.next_with_data()).take(limit) {
+        let (oid, _, data) = item?;
+        let payload = reencode(&data, &mut converted);
         match args.pretty.as_str() {
             // raw shows the stored object as is
             "raw" => write_raw(out, &oid, &payload, &mut first)?,
@@ -491,9 +491,7 @@ fn run_json(
     let notes = repo.resolve_ref(crate::meta::NOTES_REF)?;
     let mut commits = Vec::new();
     for item in repo.rev_walk(start)?.take(limit) {
-        let (oid, _) = item?;
-        let obj = repo.read_object(&oid)?.expect("walked oid exists");
-        let commit = alt_git_codec::Commit::parse(&obj.data)?;
+        let (oid, commit) = item?;
         let opt = |v: Option<&alt_bytes::BStr>| match v {
             Some(s) => Json::str(s),
             None => Json::Null,
