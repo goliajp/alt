@@ -65,13 +65,25 @@ fn same_reads(old: &Path, repo: &Path) {
         &["branch"],
         &["rev-parse", "HEAD"],
         &["cat-file", "-p", "HEAD"],
-        &["cat-file", "-p", "HEAD^{tree}"],
     ] {
         let by_old = ok(run(old, repo, args));
         let by_new = ok(run(&new, repo, args));
         assert_eq!(by_old, by_new, "alt {args:?}");
     }
+    assert_eq!(head_tree(old, repo), head_tree(&new, repo));
     ok(run(&new, repo, &["fsck"]));
+}
+
+/// The entries of the tree of `HEAD`, as `bin` prints them.
+fn head_tree(bin: &Path, repo: &Path) -> String {
+    let commit = ok(run(bin, repo, &["cat-file", "-p", "HEAD"]));
+    let tree = commit
+        .lines()
+        .next()
+        .unwrap()
+        .strip_prefix("tree ")
+        .unwrap();
+    ok(run(bin, repo, &["cat-file", "-p", tree]))
 }
 
 #[test]
@@ -100,8 +112,11 @@ fn old_and_new_take_turns_writing() {
     same_reads(&old, repo);
     assert_eq!(ok(run(&new, repo, &["log"])).lines().count(), 13);
     // every file either of them committed is in the tree both see
-    let tree = ok(run(&old, repo, &["cat-file", "-p", "HEAD^{tree}"]));
-    assert_eq!(tree.lines().count(), 930, "930 files committed");
+    assert_eq!(
+        head_tree(&old, repo).lines().count(),
+        930,
+        "930 files committed"
+    );
 }
 
 #[test]
@@ -152,8 +167,11 @@ fn old_and_new_write_at_the_same_time() {
         same_reads(&old, dir);
         let log = ok(run(&new, dir, &["log"]));
         assert_eq!(log.lines().count(), ROUNDS + 1, "{name}: {log}");
-        let tree = ok(run(&new, dir, &["cat-file", "-p", "HEAD^{tree}"]));
-        assert_eq!(tree.lines().count(), 300 + 12 * ROUNDS, "{name}");
+        assert_eq!(
+            head_tree(&new, dir).lines().count(),
+            300 + 12 * ROUNDS,
+            "{name}"
+        );
     }
     same_reads(&old, &repo);
 }
