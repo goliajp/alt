@@ -453,13 +453,18 @@ fn a_process_that_does_not_start_is_reported_for_each_file_and_leaves_them_as_th
     assert!(added.status.success(), "{message}");
     assert_eq!(message.matches(said).count(), 2, "{message}");
     ok(pair.alt(&["commit", "-m", "unfiltered"]));
-    // an older git ends the command here; a later one goes on
+    // git 2.47 reads the greeting of the process in a way that ends the
+    // command when the process is gone; git 2.56 reports it and goes on
     let theirs = pair.git(&["add", "."]);
+    let message = String::from_utf8_lossy(&theirs.stderr).into_owned();
     if theirs.status.success() {
-        let message = String::from_utf8_lossy(&theirs.stderr).into_owned();
         assert_eq!(message.matches(said).count(), 2, "{message}");
         ok(pair.git(&["commit", "-qm", "unfiltered"]));
         assert_eq!(pair.tree("alt"), pair.tree("git"));
+    } else {
+        let ended = "fatal: the remote end hung up unexpectedly";
+        assert!(message.contains(ended), "{message}");
+        assert!(!message.contains(said), "{message}");
     }
     assert_eq!(ok(pair.alt(&["show", "HEAD:a.r"])), "One\n");
 }
