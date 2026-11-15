@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: test
+summary: cover the snapshots a daemon holds in memory, alone and through a running daemon
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/tree_state.rs
+touched: crates/alt-cli/src/native/tree_state/held.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/scan_daemon.rs
