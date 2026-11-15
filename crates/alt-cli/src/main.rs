@@ -8,6 +8,12 @@
 //! that was closed) is set up here in five.
 #![cfg_attr(not(test), no_main)]
 
+// the unwinder is linked in rather than loaded: one shared library fewer
+// to map and bind at every start
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+#[link(name = "gcc_eh", kind = "static")]
+unsafe extern "C" {}
+
 use alt_cli::cli::{self, Command};
 use alt_cli::daemon::Response;
 use alt_cli::execution::Execution;
