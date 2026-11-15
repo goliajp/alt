@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: let add keep submodule entries and stage a file replaced by a directory
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/add.rs
+touched: crates/alt-cli/src/native/recovery.rs
+touched: crates/alt-cli/tests/it/add_paths.rs
