@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: look a key up in an empty table of kept records without panicking
+author-type: human
+author: doracawl
+touched: crates/alt-store/src/reclog/cache.rs
+touched: crates/alt-store/tests/it/index_gap.rs
