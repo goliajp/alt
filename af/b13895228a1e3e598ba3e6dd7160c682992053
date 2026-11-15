@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: read and refuse a configuration file as git does and name the file and line of an error
+author-type: human
+author: doracawl
+touched: crates/alt-git-config/src/include.rs
+touched: crates/alt-git-config/src/lib.rs
+touched: crates/alt-git-config/src/parse.rs
+touched: crates/alt-git-config/tests/it/config_interop.rs
