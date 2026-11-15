@@ -36,6 +36,7 @@ def say(*texts):
         write(text.encode() + b'\n')
     flush()
 once = can[:1] == ['once']
+gives_up = can[:1] == ['gives-up']
 assert lines() == ['git-filter-client', 'version=2']
 say('git-filter-server', 'version=2')
 asked = lines()
@@ -56,6 +57,11 @@ while True:
     path = request['pathname']
     log.write(request['command'] + ' ' + path + '\n')
     log.flush()
+    if gives_up and 'gave up' not in open(sys.argv[1]).read():
+        log.write('gave up\n')
+        log.flush()
+        say('status=abort')
+        continue
     if 'refuse' in path:
         say('status=error')
         continue
@@ -319,33 +325,28 @@ fn a_file_the_process_gives_up_on_is_stored_as_it_is_as_in_git() {
 #[test]
 fn after_a_process_gives_up_no_other_file_of_the_command_is_cleaned() {
     let pair = imported("clean", false, &[("c.txt", "Plain\n")]);
-    let others = ["a.r", "b.r", "k.r", "p.r", "y.r", "z.r"];
-    std::fs::write(pair.dst.join("m-abort.r"), "Two\n").unwrap();
-    for name in others {
+    // this one gives up at the first file it is asked about, whichever
+    let script = pair.logs[0].with_file_name("filter.py");
+    let command = format!(
+        "python3 '{}' \"$FILTER_LOG\" gives-up clean",
+        script.display()
+    );
+    ok(pair.alt(&["config", "filter.rot.process", &command]));
+    let names = ["a.r", "b.r", "k.r", "m.r", "p.r", "y.r", "z.r"];
+    for name in names {
         std::fs::write(pair.dst.join(name), "Hello\n").unwrap();
     }
     std::fs::write(&pair.logs[1], "").unwrap();
     ok(pair.alt(&["add", "."]));
-    let log = pair.log(1);
-    let gave_up = log.iter().position(|l| l == "clean m-abort.r");
-    let gave_up = gave_up.unwrap_or_else(|| panic!("{log:?}"));
     // the process is asked nothing behind the file it gave up on
-    assert_eq!(&log[gave_up + 1..], &[] as &[String], "{log:?}");
+    let log = pair.log(1);
+    assert_eq!(log.len(), 3, "{log:?}");
+    assert_eq!((log[0].as_str(), log[2].as_str()), ("start", "gave up"));
     ok(pair.alt(&["commit", "-m", "gave up"]));
-    assert_eq!(ok(pair.alt(&["show", "HEAD:m-abort.r"])), "Two\n");
-    // what it was asked before is stored cleaned, the rest as it is
-    let mut left_alone = 0;
-    for name in others {
-        let cleaned = log[..gave_up].contains(&format!("clean {name}"));
+    for name in names {
         let stored = ok(pair.alt(&["show", &format!("HEAD:{name}")]));
-        let expected = if cleaned { "Uryyb\n" } else { "Hello\n" };
-        assert_eq!(stored, expected, "{name}: {log:?}");
-        left_alone += usize::from(!cleaned);
+        assert_eq!(stored, "Hello\n", "{name}: {log:?}");
     }
-    assert!(
-        left_alone > 0,
-        "no file came behind the one given up on: {log:?}"
-    );
 }
 
 #[test]
@@ -447,15 +448,18 @@ fn a_process_that_does_not_start_is_reported_for_each_file_and_leaves_them_as_th
         std::fs::write(root.join("b.r"), "Two\n").unwrap();
     }
     let said = "error: initialization for subprocess 'no-such-filter --here' failed";
-    let mut times = Vec::new();
-    for added in [pair.git(&["add", "."]), pair.alt(&["add", "."])] {
-        let message = String::from_utf8_lossy(&added.stderr).into_owned();
-        assert!(added.status.success(), "{message}");
-        times.push(message.matches(said).count());
-    }
-    assert_eq!(times, [2, 2]);
-    ok(pair.git(&["commit", "-qm", "unfiltered"]));
+    let added = pair.alt(&["add", "."]);
+    let message = String::from_utf8_lossy(&added.stderr).into_owned();
+    assert!(added.status.success(), "{message}");
+    assert_eq!(message.matches(said).count(), 2, "{message}");
     ok(pair.alt(&["commit", "-m", "unfiltered"]));
-    assert_eq!(pair.tree("alt"), pair.tree("git"));
+    // an older git ends the command here; a later one goes on
+    let theirs = pair.git(&["add", "."]);
+    if theirs.status.success() {
+        let message = String::from_utf8_lossy(&theirs.stderr).into_owned();
+        assert_eq!(message.matches(said).count(), 2, "{message}");
+        ok(pair.git(&["commit", "-qm", "unfiltered"]));
+        assert_eq!(pair.tree("alt"), pair.tree("git"));
+    }
     assert_eq!(ok(pair.alt(&["show", "HEAD:a.r"])), "One\n");
 }
