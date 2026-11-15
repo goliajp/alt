@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 
 use crate::StoreError;
 use crate::pack::read_exact_at;
-use crate::runs::{GUARD_LEN, Guard, Key, Runs};
+use crate::runs::{GUARD_SPAN, Guard, Key, Runs};
 use alt_hash::IdMap;
 
 const HEADER_LEN: usize = 5;
@@ -95,8 +95,9 @@ fn guard_at(file: &File, layout: &Layout, size: u64, end: u64) -> Option<Guard> 
     {
         return None;
     }
-    let mut guard = [0u8; GUARD_LEN];
-    read_exact_at(file, &mut guard, end - GUARD_LEN as u64).ok()?;
+    let span = end.min(GUARD_SPAN as u64);
+    let mut guard = vec![0u8; span as usize];
+    read_exact_at(file, &mut guard, end - span).ok()?;
     Some(guard)
 }
 
@@ -104,7 +105,7 @@ impl RecLog {
     /// Opens the log at `path`, creating it when missing; the second value
     /// says whether it was created. Index runs live in `<path>.idx/`.
     pub fn open(path: &Path, layout: Layout) -> Result<(Self, bool), StoreError> {
-        assert!(layout.rec_len <= MAX_REC && layout.rec_len >= GUARD_LEN);
+        assert!(layout.rec_len <= MAX_REC && layout.rec_len > 8);
         let mut idx_dir = path.as_os_str().to_owned();
         idx_dir.push(".idx");
         let idx_dir = PathBuf::from(idx_dir);

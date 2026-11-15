@@ -431,7 +431,7 @@ impl ChunkStore {
         let id = ChunkId::of(data);
         self.counters.puts += 1;
         self.counters.bytes_in += data.len() as u64;
-        if self.index.get(id)?.is_some() {
+        if self.stored(id)? {
             self.counters.dedup_hits += 1;
             return Ok(id);
         }
@@ -903,7 +903,7 @@ impl ChunkStore {
     }
 
     pub fn contains(&self, id: ChunkId) -> Result<bool, StoreError> {
-        Ok(self.index.get(id)?.is_some())
+        Ok(self.reading(|store| store.located(id))?.is_some())
     }
 
     /// On-disk accounting for one chunk (encoding and stored size).

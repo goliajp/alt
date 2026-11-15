@@ -12,14 +12,19 @@
 //!
 //! ```text
 //! [magic "ALTR"][version u8][fanout bits u8][reserved 2]
-//! [count u64][start u64][end u64][guard 16][header checksum 8]
+//! [count u64][start u64][end u64][guard len u32][reserved 12]
+//! [header checksum 8]
 //! count x [key 32][position u64 big-endian]   sorted bytewise
 //! (1 << fanout bits) x [u32]                  entries with prefix <= i
-//! [checksum 8]                                over entries + fanout
+//! [guard]
+//! [checksum 8]                                over everything after the header
 //! ```
 //!
-//! The guard is the 16 log bytes just before `end`: a run whose guard no
-//! longer matches the log (the log was cut back and regrown) is dropped.
+//! The guard is a copy of the log bytes just before `end`, up to
+//! [`GUARD_SPAN`] of them: a run whose guard no longer matches the log (the
+//! log was cut back and regrown) is dropped. It cannot tell a log changed
+//! only further back than that, which is why a hit is still checked against
+//! the record it points at before anything is concluded from it.
 
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
@@ -30,13 +35,16 @@ use crate::StoreError;
 use crate::run_write::write_run;
 
 pub const KEY_LEN: usize = 32;
-pub const GUARD_LEN: usize = 16;
+/// How many log bytes before a run's end its guard holds, at most.
+pub const GUARD_SPAN: usize = 4096;
 pub type Key = [u8; KEY_LEN];
-pub type Guard = [u8; GUARD_LEN];
+/// The log bytes just before a position: the last [`GUARD_SPAN`] of them,
+/// or all there are.
+pub type Guard = Vec<u8>;
 
 pub(crate) const ENTRY_LEN: usize = KEY_LEN + 8;
 pub(crate) const MAGIC: [u8; 4] = *b"ALTR";
-pub(crate) const VERSION: u8 = 1;
+pub(crate) const VERSION: u8 = 2;
 pub(crate) const HEADER_LEN: usize = 56;
 /// A new run absorbs every older neighbour smaller than this many times its
 /// own size, so run counts stay logarithmic in the log length.
@@ -51,7 +59,7 @@ struct Run {
     end: u64,
     count: usize,
     bits: u8,
-    guard: Guard,
+    guard_len: usize,
 }
 
 fn run_name(start: u64, end: u64) -> String {
@@ -94,17 +102,18 @@ impl Run {
         let count = u64::from_le_bytes(map[8..16].try_into().unwrap()) as usize;
         let head_start = u64::from_le_bytes(map[16..24].try_into().unwrap());
         let head_end = u64::from_le_bytes(map[24..32].try_into().unwrap());
+        let guard_len = u32::from_le_bytes(map[32..36].try_into().unwrap()) as usize;
         let expect = count
             .checked_mul(ENTRY_LEN)
-            .and_then(|n| n.checked_add(HEADER_LEN + (4usize << bits) + 8));
+            .and_then(|n| n.checked_add(HEADER_LEN + (4usize << bits) + guard_len + 8));
         if !(bits == 8 || bits == 16)
+            || guard_len > GUARD_SPAN
             || head_start != start
             || head_end != end
             || expect != Some(map.len())
         {
             return Ok(None);
         }
-        let guard = map[32..48].try_into().unwrap();
         Ok(Some(Self {
             map,
             path,
@@ -112,8 +121,13 @@ impl Run {
             end,
             count,
             bits,
-            guard,
+            guard_len,
         }))
+    }
+
+    fn guard(&self) -> &[u8] {
+        let end = self.map.len() - 8;
+        &self.map[end - self.guard_len..end]
     }
 
     fn entries(&self) -> &[u8] {
@@ -191,8 +205,9 @@ pub struct Runs {
 }
 
 impl Runs {
-    /// Loads the chain that starts at `base`. `guard_at(end)` returns the 16
-    /// log bytes before `end`, or `None` when the log is shorter than that.
+    /// Loads the chain that starts at `base`. `guard_at(end)` returns the log
+    /// bytes before `end` (see [`Guard`]), or `None` when the log does not
+    /// reach that far.
     pub fn open(
         dir: &Path,
         base: u64,
@@ -241,7 +256,7 @@ impl Runs {
         }
         let mut stale: Vec<PathBuf> = found.into_iter().map(|(_, _, path)| path).collect();
         while let Some(last) = runs.last() {
-            if guard_at(last.end) == Some(last.guard) {
+            if guard_at(last.end).as_deref() == Some(last.guard()) {
                 break;
             }
             stale.push(runs.pop().unwrap().path);
@@ -377,7 +392,7 @@ impl Runs {
         {
             let mut sources: Vec<&[u8]> = self.runs[keep..].iter().map(Run::entries).collect();
             sources.push(fresh);
-            write_run(&tmp, &mut sources, total, start, end, guard, durable)?;
+            write_run(&tmp, &mut sources, total, start, end, &guard, durable)?;
         }
         fs::rename(&tmp, &path)?;
         // nothing changes in memory until the new run is in hand

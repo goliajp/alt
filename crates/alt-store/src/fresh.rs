@@ -47,7 +47,7 @@ impl ChunkStore {
 
     /// Runs `read` against the newest state, loading a newer one for as
     /// long as it fails on a pack that is gone.
-    fn reading<T>(
+    pub(crate) fn reading<T>(
         &self,
         mut read: impl FnMut(&ChunkStore) -> Result<T, StoreError>,
     ) -> Result<T, StoreError> {

@@ -1,7 +1,8 @@
 //! Folding a chunk store's newly appended records into its index runs.
 
+use crate::index::Location;
 use crate::packs::{self, load};
-use crate::{ChunkStore, StoreError, relaxed_durability};
+use crate::{ChunkId, ChunkStore, StoreError, relaxed_durability};
 
 impl ChunkStore {
     /// Moves the records appended since the last index run into a new run,
@@ -33,6 +34,37 @@ impl ChunkStore {
             |loc| packs::guard_at(dir, loc),
             !relaxed_durability(),
         )
+    }
+
+    /// Where `id` is stored. An answer that comes from the index runs is
+    /// confirmed against the pack: the runs are a cache whose guard covers
+    /// only the end of what they index.
+    pub(crate) fn located(&self, id: ChunkId) -> Result<Option<Location>, StoreError> {
+        let Some((loc, from_runs)) = self.index.find(id)? else {
+            return Ok(None);
+        };
+        if from_runs {
+            self.read_header(id, loc)?;
+        }
+        Ok(Some(loc))
+    }
+
+    /// Whether `id` is stored, for a writer about to skip writing it. Runs
+    /// that name a record which is not there are dropped and the index
+    /// built again from the packs: a write is never skipped on their word.
+    pub(crate) fn stored(&mut self, id: ChunkId) -> Result<bool, StoreError> {
+        match self.located(id) {
+            Ok(loc) => Ok(loc.is_some()),
+            Err(StoreError::Corrupt { .. } | StoreError::Io(_)) => {
+                self.index.clear()?;
+                let (sealed, active, index) = load(&self.dir)?;
+                self.sealed = sealed;
+                self.active = active;
+                self.index = index;
+                Ok(self.index.get(id)?.is_some())
+            }
+            Err(e) => Err(e),
+        }
     }
 
     /// Whether enough records sit past the index runs for

@@ -3,7 +3,7 @@
 use super::{HEADER_LEN, INDEX_AT, RecLog, SECONDARY, guard_at};
 use crate::StoreError;
 use crate::pack::read_exact_at;
-use crate::runs::{GUARD_LEN, Guard, Runs};
+use crate::runs::Runs;
 
 impl RecLog {
     /// Folds in records another writer appended since our last read. Run
@@ -93,7 +93,8 @@ impl RecLog {
             }
             position += rec_len as u64;
         }
-        let guard: Guard = self.tail[self.tail.len() - GUARD_LEN..].try_into().unwrap();
+        let guard = guard_at(&self.file, &self.layout, self.len, self.len)
+            .ok_or(StoreError::Format(self.layout.corrupt))?;
         self.runs.extend(&entries, from, self.len, guard, durable)?;
         self.tail.clear();
         self.tail_keys.clear();

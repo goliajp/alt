@@ -12,7 +12,7 @@ use alt_os::map::Mmap;
 
 use crate::index::{ChunkIndex, Location};
 use crate::pack::{self, REC_HEADER_LEN};
-use crate::runs::{GUARD_LEN, Guard};
+use crate::runs::{GUARD_SPAN, Guard};
 use crate::{StoreError, idx};
 
 pub(crate) struct Active {
@@ -49,20 +49,22 @@ pub(crate) fn list_pack_seqs(dir: &Path) -> Result<Vec<u32>, StoreError> {
     Ok(seqs)
 }
 
-/// The 16 bytes before `loc` in its pack, when the pack reaches that far.
+/// The bytes before `loc` in its pack that guard an index run ending there,
+/// when the pack reaches that far.
 pub(crate) fn guard_at(dir: &Path, loc: Location) -> Option<Guard> {
     let file = File::open(pack_path(dir, loc.seq)).ok()?;
     let size = file.metadata().ok()?.len();
     guard_in(&file, size, loc.offset)
 }
 
-/// The 16 bytes before `offset` in an open pack of `size` bytes.
+/// The same in an open pack of `size` bytes.
 fn guard_in(pack: &File, size: u64, offset: u64) -> Option<Guard> {
     if offset < (pack::HEADER_LEN + REC_HEADER_LEN) as u64 || size < offset {
         return None;
     }
-    let mut guard = [0u8; GUARD_LEN];
-    pack::read_exact_at(pack, &mut guard, offset - GUARD_LEN as u64).ok()?;
+    let span = offset.min(GUARD_SPAN as u64);
+    let mut guard = vec![0u8; span as usize];
+    pack::read_exact_at(pack, &mut guard, offset - span).ok()?;
     Some(guard)
 }
 

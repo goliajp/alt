@@ -85,10 +85,21 @@ impl ChunkIndex {
     }
 
     pub fn get(&self, id: ChunkId) -> Result<Option<Location>, StoreError> {
+        Ok(self.find(id)?.map(|(loc, _)| loc))
+    }
+
+    /// Where `id` is, and whether that comes from the runs rather than
+    /// from records this handle read itself. The runs are trusted on the
+    /// strength of their guard alone, so what follows from a hit in them
+    /// (above all skipping a write) wants the record looked at first.
+    pub fn find(&self, id: ChunkId) -> Result<Option<(Location, bool)>, StoreError> {
         if let Some(loc) = self.latest.get(&id) {
-            return Ok(Some(*loc));
+            return Ok(Some((*loc, false)));
         }
-        Ok(self.runs.find_last(&id.0)?.map(Location::at))
+        Ok(self
+            .runs
+            .find_last(&id.0)?
+            .map(|at| (Location::at(at), true)))
     }
 
     pub fn is_empty(&self) -> bool {
@@ -168,8 +179,8 @@ impl ChunkIndex {
     }
 
     /// Moves the tail into the runs. Run under the write lock with every
-    /// record on disk already in the tail; `guard` is the 16 pack bytes
-    /// before [`Self::pending`], `guard_at` reads the same for any position.
+    /// record on disk already in the tail; `guard` is the pack bytes before
+    /// [`Self::pending`], `guard_at` reads the same for any position.
     ///
     /// Returns false, having changed nothing, when the runs on disk stop
     /// short of where this handle's tail begins: a run written now would

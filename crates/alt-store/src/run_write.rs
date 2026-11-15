@@ -5,7 +5,7 @@ use std::io::{BufWriter, Write};
 use std::path::Path;
 
 use crate::StoreError;
-use crate::runs::{ENTRY_LEN, Guard, HEADER_LEN, MAGIC, VERSION, check8};
+use crate::runs::{ENTRY_LEN, HEADER_LEN, MAGIC, VERSION, check8};
 
 /// Entries from which a run's fanout table is keyed by two bytes.
 const WIDE_FANOUT_FROM: usize = 1 << 16;
@@ -17,7 +17,7 @@ pub(crate) fn write_run(
     total: usize,
     start: u64,
     end: u64,
-    guard: Guard,
+    guard: &[u8],
     durable: bool,
 ) -> Result<(), StoreError> {
     if u32::try_from(total).is_err() {
@@ -31,7 +31,7 @@ pub(crate) fn write_run(
     header[8..16].copy_from_slice(&(total as u64).to_le_bytes());
     header[16..24].copy_from_slice(&start.to_le_bytes());
     header[24..32].copy_from_slice(&end.to_le_bytes());
-    header[32..48].copy_from_slice(&guard);
+    header[32..36].copy_from_slice(&(guard.len() as u32).to_le_bytes());
     let check = check8(&header[..48]);
     header[48..].copy_from_slice(&check);
 
@@ -69,6 +69,8 @@ pub(crate) fn write_run(
         hasher.update(&bytes);
         out.write_all(&bytes)?;
     }
+    hasher.update(guard);
+    out.write_all(guard)?;
     out.write_all(&hasher.finalize().as_bytes()[..8])?;
     let file = out.into_inner().map_err(|e| e.into_error())?;
     if durable {

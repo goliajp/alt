@@ -14,7 +14,7 @@ pub(crate) fn key(n: u64) -> Key {
 }
 
 fn guard(n: u64) -> Guard {
-    key(n)[..16].try_into().unwrap()
+    key(n)[..16].to_vec()
 }
 
 /// Opens runs over a pretend log whose guard at `end` is `guard(end)` up to
@@ -104,7 +104,7 @@ fn runs_past_a_cut_back_log_are_dropped_and_then_removed() {
     assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
 
     // same length, different bytes before the end: the run does not apply
-    let other = Runs::open(dir.path(), 0, |_| Some([0u8; 16])).unwrap();
+    let other = Runs::open(dir.path(), 0, |_| Some(vec![0u8; 16])).unwrap();
     assert_eq!(other.covered(), 0);
 
     let mut cut = open_runs(dir.path(), 5_000);
