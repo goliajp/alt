@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: keep the path that ends without a condition behind it where the C library keeps it
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/analysis.rs
+touched: crates/alt-regex/src/backref.rs
+touched: crates/alt-regex/src/backtrack.rs
+touched: crates/alt-regex/src/lib.rs
+touched: crates/alt-regex/src/pike.rs
+touched: crates/alt-regex/src/program.rs
+touched: crates/alt-regex/tests/it/regcomp.rs
