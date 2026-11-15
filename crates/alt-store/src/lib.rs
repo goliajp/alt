@@ -393,6 +393,14 @@ impl ChunkStore {
         Ok(cell.get_or_init(|| map))
     }
 
+    /// Puts sealed pack `seq`, already mapped, back to the kernel's
+    /// default of reading ahead.
+    fn read_ahead(&self, seq: u32) {
+        if let Some(map) = self.sealed.get(&seq).and_then(|cell| cell.get()) {
+            map.expect_reads(false);
+        }
+    }
+
     fn locate(&self, id: ChunkId) -> Result<Location, StoreError> {
         self.index.get(id)?.ok_or(StoreError::NotFound(id))
     }

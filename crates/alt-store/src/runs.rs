@@ -94,6 +94,8 @@ impl Run {
             Err(e) => return Err(e.into()),
         };
         let map = unsafe { Mmap::map(&file)? };
+        // a lookup reads one or two pages out of megabytes
+        map.expect_reads(true);
         if map.len() < HEADER_LEN || map[..4] != MAGIC || map[4] != VERSION {
             return Ok(None);
         }

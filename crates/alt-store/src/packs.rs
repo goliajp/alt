@@ -157,6 +157,8 @@ pub(crate) type PackState = (BTreeMap<u32, OnceLock<Mmap>>, Active, ChunkIndex);
 pub(crate) fn map_sealed(dir: &Path, seq: u32) -> Result<Mmap, StoreError> {
     let file = File::open(pack_path(dir, seq))?;
     let map = unsafe { Mmap::map(&file)? };
+    // a chunk read wants the pages of one record out of a gigabyte
+    map.expect_reads(true);
     pack::check_file_header(&map)?;
     Ok(map)
 }

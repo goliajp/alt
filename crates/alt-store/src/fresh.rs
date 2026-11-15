@@ -68,10 +68,11 @@ impl ChunkStore {
     pub(crate) fn pinned(&self) -> Result<&ChunkStore, StoreError> {
         let mut store = self.newest();
         loop {
+            // what follows reads the packs from end to end
             let mapped = store
                 .sealed
                 .keys()
-                .try_for_each(|seq| store.sealed_pack(*seq).map(drop));
+                .try_for_each(|seq| store.sealed_pack(*seq).map(|_| store.read_ahead(*seq)));
             match mapped {
                 Err(e) if pack_gone(&e) => store = store.reloaded()?,
                 Err(e) => return Err(e),
