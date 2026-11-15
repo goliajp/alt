@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: refactor
+summary: name the walker's item type
+author-type: human
+author: doracawl
+touched: crates/alt-repo/src/revwalk.rs
