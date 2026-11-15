@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: place the groups of a match where the C library places them
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/backref.rs
+touched: crates/alt-regex/src/backtrack.rs
+touched: crates/alt-regex/src/dfa.rs
+touched: crates/alt-regex/src/pike.rs
+touched: crates/alt-regex/src/program.rs
+touched: crates/alt-regex/tests/it/regcomp.rs
