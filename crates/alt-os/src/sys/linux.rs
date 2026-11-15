@@ -153,6 +153,8 @@ unsafe extern "C" {
         data: *const c_void,
     ) -> c_int;
     pub fn umount2(target: *const c_char, flags: c_int) -> c_int;
+    pub fn inotify_init1(flags: c_int) -> c_int;
+    pub fn inotify_add_watch(fd: c_int, pathname: *const c_char, mask: u32) -> c_int;
     fn syscall(number: c_long, ...) -> c_long;
 }
 

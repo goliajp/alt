@@ -11,6 +11,7 @@ use alt_worktree::{Delta, PathMatcher, ScanOptions, Snapshot, Staged, Untracked}
 use super::*;
 
 mod held;
+mod watching;
 
 use held::HELD;
 pub use held::hold_snapshots;
@@ -117,7 +118,15 @@ impl NativeRepo<'_> {
             head: Some(&head),
             clock,
         };
-        let delta = alt_worktree::scan(&self.root, snapshot, &options)?;
+        // a watched tree holds its answer with directories as one path
+        let watched = match within.is_empty() && untracked != Untracked::All {
+            true => watching::watched_scan(&self.root, snapshot, &options)?,
+            false => None,
+        };
+        let delta = match watched {
+            Some(delta) => delta,
+            None => alt_worktree::scan(&self.root, snapshot, &options)?,
+        };
         if let Some(tools) = tools.into_inner() {
             tools?.1.check()?;
         }

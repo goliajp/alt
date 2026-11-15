@@ -13,17 +13,17 @@ use alt_worktree::{
     scan_worktree, scan_worktree_with_index, status,
 };
 
-const ALGO: HashAlgo = HashAlgo::Sha1;
+pub(crate) const ALGO: HashAlgo = HashAlgo::Sha1;
 const LATER: Stamp = (i64::MAX, 0);
 
-fn write(root: &Path, path: &str, content: &str) {
+pub(crate) fn write(root: &Path, path: &str, content: &str) {
     let abs = root.join(path);
     std::fs::create_dir_all(abs.parent().unwrap()).unwrap();
     std::fs::write(abs, content).unwrap();
 }
 
 /// An index holding the working tree as it is now.
-fn index_of(root: &Path) -> Index {
+pub(crate) fn index_of(root: &Path) -> Index {
     let entries = scan_worktree(root, ALGO)
         .unwrap()
         .into_iter()
@@ -88,7 +88,7 @@ fn view(delta: &Delta) -> View {
     (unstaged, delta.untracked.clone())
 }
 
-fn fixture(root: &Path) {
+pub(crate) fn fixture(root: &Path) {
     write(root, ".gitignore", "*.log\n/build/\n");
     write(root, "a.txt", "a\n");
     write(root, "a/x.txt", "x\n");
@@ -102,7 +102,7 @@ fn fixture(root: &Path) {
     symlink("a.txt", root.join("link")).unwrap();
 }
 
-fn change(root: &Path) {
+pub(crate) fn change(root: &Path) {
     write(root, "a.txt", "changed\n");
     std::fs::remove_file(root.join("docs/old.md")).unwrap();
     std::fs::remove_dir_all(root.join("src/deep")).unwrap();

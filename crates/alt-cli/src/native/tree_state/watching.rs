@@ -1,0 +1,58 @@
+//! The working trees a process that serves many commands watches for
+//! changes, so that a scan looks only where something happened.
+
+use std::path::Path;
+
+use alt_worktree::{Delta, ScanOptions, Snapshot};
+
+use super::Res;
+
+/// The most directories watched in one tree, when the environment sets
+/// one: every directory takes a watch out of what the system allows the
+/// user. A tree with more is scanned in full each time.
+#[cfg(target_os = "linux")]
+fn most_directories() -> usize {
+    std::env::var("ALT_WATCH_MAX_DIRS")
+        .ok()
+        .and_then(|most| most.parse().ok())
+        .unwrap_or(usize::MAX)
+}
+
+/// By root; `None` for a tree that cannot be watched.
+#[cfg(target_os = "linux")]
+static WATCHED: std::sync::Mutex<
+    Option<std::collections::HashMap<std::path::PathBuf, Option<alt_worktree::Watched>>>,
+> = std::sync::Mutex::new(None);
+
+/// The scan of the whole tree at `root`, from the events since the last
+/// one where the tree is watched. `None` where it is not: in a process
+/// that serves one command, and for a tree that could not be watched or
+/// can no longer be; the caller then scans the tree itself.
+#[cfg(target_os = "linux")]
+pub(super) fn watched_scan(
+    root: &Path,
+    snapshot: &mut Snapshot,
+    options: &ScanOptions<'_>,
+) -> Res<Option<Delta>> {
+    if !super::HELD.started() {
+        return Ok(None);
+    }
+    let mut guard = WATCHED.lock().unwrap();
+    let trees = guard.get_or_insert_default();
+    let tree = trees
+        .entry(root.to_path_buf())
+        .or_insert_with(|| alt_worktree::Watched::start(root, most_directories()).ok());
+    let Some(watched) = tree else {
+        return Ok(None);
+    };
+    let delta = watched.scan(root, snapshot, options)?;
+    if delta.is_none() {
+        *tree = None;
+    }
+    Ok(delta)
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(super) fn watched_scan(_: &Path, _: &mut Snapshot, _: &ScanOptions<'_>) -> Res<Option<Delta>> {
+    Ok(None)
+}

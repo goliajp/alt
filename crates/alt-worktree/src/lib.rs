@@ -24,6 +24,8 @@ mod snapshot;
 mod untracked;
 #[cfg(unix)]
 mod walk;
+#[cfg(target_os = "linux")]
+mod watch;
 
 pub use cachetree::Staged;
 #[cfg(unix)]
@@ -33,6 +35,8 @@ pub use delta::{CleanTracked, Delta, ScanOptions, scan};
 pub use snapshot::{Dir, Entry, FileStat, Snapshot};
 #[cfg(unix)]
 pub use untracked::Untracked;
+#[cfg(target_os = "linux")]
+pub use watch::Watched;
 
 pub use scan::{Clean, PathMatcher, SubmoduleHead, scan_worktree, scan_worktree_with_index};
 

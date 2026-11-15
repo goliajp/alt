@@ -41,7 +41,7 @@ pub struct ScanOptions<'a> {
 
 /// The paths where the working tree differs from the index, each list in
 /// path order.
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Delta {
     /// tracked paths whose file has other content or another mode, as the
     /// working tree has them
@@ -56,6 +56,33 @@ pub struct Delta {
     pub unmerged: Vec<BString>,
     /// submodule paths whose directory holds a checked-out repository
     pub submodules: Vec<BString>,
+}
+
+impl Delta {
+    /// Replaces what this holds at the paths `within` and beneath them by
+    /// `fresh`, the result of a scan limited to those paths.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn replace_within(&mut self, within: &[&[u8]], fresh: Delta) {
+        let stays = |path: &BString| {
+            !within.iter().any(|w| {
+                path.as_slice() == *w || (path.starts_with(w) && path.get(w.len()) == Some(&b'/'))
+            })
+        };
+        self.changed.retain(|w| stays(&w.path));
+        self.changed.extend(fresh.changed);
+        self.changed.sort_by(|a, b| a.path.cmp(&b.path));
+        let lists = [
+            (&mut self.deleted, fresh.deleted),
+            (&mut self.untracked, fresh.untracked),
+            (&mut self.unmerged, fresh.unmerged),
+            (&mut self.submodules, fresh.submodules),
+        ];
+        for (list, fresh) in lists {
+            list.retain(stays);
+            list.extend(fresh);
+            list.sort();
+        }
+    }
 }
 
 impl FileStat {

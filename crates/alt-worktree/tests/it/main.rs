@@ -6,3 +6,5 @@ mod ignore_scan;
 mod status_interop;
 #[cfg(unix)]
 mod untracked;
+#[cfg(target_os = "linux")]
+mod watch;

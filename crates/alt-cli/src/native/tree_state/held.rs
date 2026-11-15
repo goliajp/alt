@@ -36,6 +36,12 @@ impl Shelf {
         self.0.lock().unwrap().get_or_insert_default();
     }
 
+    /// Whether this process was told to hold snapshots.
+    #[cfg(target_os = "linux")]
+    pub(super) fn started(&self) -> bool {
+        self.0.lock().unwrap().is_some()
+    }
+
     /// The snapshot held for the file at `path`, when the file is still
     /// the one it was taken from or written to.
     pub(super) fn get(&self, path: &Path) -> Option<Snapshot> {
