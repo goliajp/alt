@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: one repository written by this build and an older one
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/mixed_versions.rs
