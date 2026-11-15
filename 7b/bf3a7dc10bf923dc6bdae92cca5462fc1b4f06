@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: a filter process that gives up is asked for no other file of the command
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/filter_process.rs
