@@ -96,6 +96,7 @@ dependencies = [
  "alt-portable",
  "alt-provenance",
  "alt-refs",
+ "alt-regex",
  "alt-remote-protocol",
  "alt-repo",
  "alt-repository-service",
@@ -488,6 +489,13 @@ dependencies = [
  "alt-hash",
  "alt-oplog",
  "alt-os",
+]
+
+[[package]]
+name = "alt-regex"
+version = "0.1.0"
+dependencies = [
+ "alt-bytes",
 ]
 
 [[package]]
