@@ -1,8 +1,12 @@
-//! The same patterns and texts given to this crate and to the C
+//! The same patterns and texts given to this crate and to the GNU C
 //! library's `regcomp` and `regexec`: both must accept the same patterns
-//! and report the same match.
+//! and report the same match. The GNU C library is the reference on
+//! every system, so these tests are built only where it is the C library.
 
-use std::ffi::{CString, c_char, c_int};
+use std::ffi::{CString, c_char, c_int, c_void};
+
+mod random;
+mod utf8;
 
 use alt_regex::{Options, Regex, Syntax};
 
@@ -27,6 +31,19 @@ unsafe extern "C" {
         flags: c_int,
     ) -> c_int;
     fn regfree(compiled: *mut Compiled);
+    fn newlocale(mask: c_int, locale: *const c_char, base: *mut c_void) -> *mut c_void;
+    fn uselocale(locale: *mut c_void) -> *mut c_void;
+}
+
+/// Puts the calling thread in a UTF-8 locale, where the C library
+/// matches character by character. Code points order its ranges there.
+fn in_utf8_locale() {
+    const CTYPE_AND_COLLATE: c_int = 1 << 0 | 1 << 3;
+    // SAFETY: the name ends in NUL, and the locale is never freed
+    let made = unsafe { newlocale(CTYPE_AND_COLLATE, c"C.UTF-8".as_ptr(), std::ptr::null_mut()) };
+    assert!(!made.is_null(), "the locale C.UTF-8 is not installed");
+    // SAFETY: a locale that newlocale made
+    unsafe { uselocale(made) };
 }
 
 const EXTENDED: c_int = 1;
@@ -76,250 +93,6 @@ impl Drop for Theirs {
             // SAFETY: compiled by regcomp and freed once
             unsafe { regfree(compiled) };
         }
-    }
-}
-
-struct Rng(u64);
-
-impl Rng {
-    fn next(&mut self) -> u64 {
-        self.0 ^= self.0 << 13;
-        self.0 ^= self.0 >> 7;
-        self.0 ^= self.0 << 17;
-        self.0
-    }
-
-    fn below(&mut self, n: usize) -> usize {
-        (self.next() % n as u64) as usize
-    }
-
-    fn pick<'a>(&mut self, of: &[&'a str]) -> &'a str {
-        of[self.below(of.len())]
-    }
-}
-
-/// A random extended expression; says whether it can match nothing.
-/// Nothing that can match the empty string is repeated without bound:
-/// the C library may then never answer.
-fn pattern(rng: &mut Rng, depth: u32, out: &mut String) -> bool {
-    let pieces = 1 + rng.below(3);
-    let mut all_empty = true;
-    for _ in 0..pieces {
-        // whether the piece can be empty; none for a piece no repetition
-        // can be written behind
-        let empty = match rng.below(if depth == 0 { 6 } else { 9 }) {
-            0..=2 => {
-                out.push_str(rng.pick(&["a", "b", "c", "ab", "."]));
-                Some(false)
-            }
-            3 => {
-                let sets = ["[ab]", "[^a]", "[a-c]", "[[:alpha:]]", "[^[:space:]b]"];
-                out.push_str(rng.pick(&sets));
-                Some(false)
-            }
-            4 => {
-                out.push_str(rng.pick(&["[b-c]", "[^ab]", "[[:space:]x]", "[]a]"]));
-                Some(false)
-            }
-            5 => {
-                out.push_str(rng.pick(&["\\w", "\\W", "\\s", " ", "\\.", "\\(", "x"]));
-                Some(false)
-            }
-            6 | 7 => {
-                out.push('(');
-                let empty = pattern(rng, depth - 1, out);
-                out.push(')');
-                Some(empty)
-            }
-            _ => {
-                let left = pattern(rng, depth - 1, out);
-                out.push('|');
-                let right = pattern(rng, depth - 1, out);
-                all_empty &= left || right;
-                continue;
-            }
-        };
-        let bounded = ["", "", "", "?", "{2}", "{1,2}", "{0,1}", "{,2}"];
-        let unbounded = ["*", "+", "{2,}"];
-        let repeat = match (empty, rng.below(11)) {
-            (Some(false), 8..) => unbounded[rng.below(3)],
-            (_, at) => bounded[at % 8],
-        };
-        out.push_str(repeat);
-        let optional = matches!(repeat, "*" | "?" | "{0,1}" | "{,2}");
-        all_empty &= empty == Some(true) || optional;
-    }
-    all_empty
-}
-
-fn text(rng: &mut Rng) -> Vec<u8> {
-    let len = rng.below(10);
-    (0..len).map(|_| b"aabbc x."[rng.below(8)]).collect()
-}
-
-type Spans = Vec<Option<(usize, usize)>>;
-type Question = (Vec<u8>, Options, Vec<Vec<u8>>);
-/// For each text its spans; `None` for a pattern that is refused.
-type Answer = Option<Vec<Option<Spans>>>;
-
-/// The C library on a thread of its own. For some patterns it never
-/// answers; it is then left behind and another takes its place.
-struct Oracle {
-    ask: std::sync::mpsc::Sender<Question>,
-    answer: std::sync::mpsc::Receiver<Answer>,
-}
-
-impl Oracle {
-    fn start() -> Self {
-        let (ask, asked) = std::sync::mpsc::channel::<Question>();
-        let (answered, answer) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            for (pattern, options, texts) in asked {
-                let theirs = Theirs::new(&pattern, options);
-                let compiled = theirs.0.is_some();
-                let reply = compiled.then(|| texts.iter().map(|t| theirs.spans(t)).collect());
-                if answered.send(reply).is_err() {
-                    break;
-                }
-            }
-        });
-        Oracle { ask, answer }
-    }
-
-    /// What the C library says, unless it takes longer than a pattern
-    /// of this size ever should.
-    fn ask(&mut self, question: Question) -> Option<Answer> {
-        self.ask
-            .send(question)
-            .expect("the thread waits for questions");
-        let patience = std::time::Duration::from_secs(20);
-        let reply = self.answer.recv_timeout(patience).ok();
-        if reply.is_none() {
-            *self = Oracle::start();
-        }
-        reply
-    }
-}
-
-/// What a run of random patterns came to.
-#[derive(Default, Debug)]
-struct Tally {
-    compiled: usize,
-    matches: usize,
-    /// where the two disagree on a pattern, on a match, on its span or
-    /// on the span of a group
-    differences: Vec<String>,
-    /// patterns the C library did not answer for
-    unanswered: Vec<String>,
-}
-
-impl Tally {
-    fn differs(&mut self, what: String) {
-        if self.differences.len() < 40 {
-            self.differences.push(what);
-        }
-    }
-
-    /// Fails with every difference found, and says how the groups fared.
-    fn settle(self, least: usize) -> Self {
-        assert!(self.differences.is_empty(), "{:#?}", self.differences);
-        assert!(self.compiled > least, "{self:?}");
-        assert!(self.unanswered.len() * 1000 < self.compiled, "{self:?}");
-        println!("{self:?}");
-        self
-    }
-}
-
-/// Runs `count` random patterns. Whether a pattern compiles, whether a
-/// text matches and where the match and each of its groups lie must
-/// agree.
-fn compare(seed: u64, count: usize, options: Options) -> Tally {
-    let mut rng = Rng(seed);
-    let mut tally = Tally::default();
-    let mut oracle = Oracle::start();
-    for _ in 0..count {
-        // the anchors stand at the ends of the pattern, and there are no
-        // word edges: inside a repeated group the C library loses track
-        // of either
-        let mut pat = String::from(rng.pick(&["", "", "", "^"]));
-        let _ = pattern(&mut rng, 2, &mut pat);
-        pat.push_str(rng.pick(&["", "", "", "$"]));
-        let texts: Vec<Vec<u8>> = (0..6).map(|_| text(&mut rng)).collect();
-        let Some(theirs) = oracle.ask((pat.clone().into_bytes(), options, texts.clone())) else {
-            tally.unanswered.push(pat);
-            continue;
-        };
-        let ours = Regex::with_options(pat.as_bytes(), options);
-        if ours.is_ok() != theirs.is_some() {
-            tally.differs(format!("pattern {pat:?}: ours {:?}", ours.as_ref().err()));
-            continue;
-        }
-        let (Ok(ours), Some(theirs)) = (ours, theirs) else {
-            continue;
-        };
-        tally.compiled += 1;
-        for (text, expected) in texts.iter().zip(theirs) {
-            let shown = String::from_utf8_lossy(text);
-            let wanted = expected.as_ref().and_then(|spans| spans[0]);
-            if ours.is_match(text) != expected.is_some() {
-                tally.differs(format!("{pat:?} on {shown:?}: theirs {wanted:?}"));
-                continue;
-            }
-            let found = ours.captures(text);
-            let got = found
-                .as_ref()
-                .and_then(|c| c.get(0))
-                .map(|r| (r.start, r.end));
-            if got != wanted {
-                tally.differs(format!(
-                    "{pat:?} on {shown:?}: ours {got:?} theirs {wanted:?}"
-                ));
-                continue;
-            }
-            let located = ours.find(text).map(|r| (r.start, r.end));
-            if located != got {
-                tally.differs(format!(
-                    "find of {pat:?} on {shown:?}: {located:?} not {got:?}"
-                ));
-            }
-            if let (Some(found), Some(expected)) = (found, expected) {
-                let groups = (0..=ours.groups().min(GROUPS - 1))
-                    .all(|i| found.get(i).map(|r| (r.start, r.end)) == expected[i]);
-                tally.matches += 1;
-                if !groups {
-                    let ours: Vec<_> = (0..=ours.groups()).map(|i| found.get(i)).collect();
-                    let theirs = &expected[..=ours.len() - 1];
-                    tally.differs(format!(
-                        "{pat:?} on {shown:?}: ours {ours:?} theirs {theirs:?}"
-                    ));
-                }
-            }
-        }
-    }
-    tally
-}
-
-#[test]
-fn random_extended_expressions_match_as_the_c_library_does() {
-    compare(0x9e3779b97f4a7c15, 30_000, Options::default()).settle(15_000);
-    let any_case = Options {
-        ignore_case: true,
-        ..Options::default()
-    };
-    compare(0x2545f4914f6cdd1d, 10_000, any_case).settle(5_000);
-    let lines = Options {
-        newline: true,
-        ..Options::default()
-    };
-    compare(0xd1342543de82ef95, 10_000, lines).settle(5_000);
-}
-
-#[test]
-#[ignore = "three million random patterns, needs --release"]
-fn random_extended_expressions_match_as_the_c_library_does_long() {
-    for seed in 1..=3u64 {
-        let seed = seed.wrapping_mul(0x9e3779b97f4a7c15) | 1;
-        compare(seed, 1_000_000, Options::default()).settle(500_000);
     }
 }
 
