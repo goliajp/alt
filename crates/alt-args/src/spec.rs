@@ -28,6 +28,8 @@ pub enum Item {
 pub enum Kind {
     /// present or absent
     Flag,
+    /// a flag that may be given several times; how often is its value
+    Count,
     /// one value
     Single,
     /// any number of values
