@@ -946,7 +946,7 @@ fn build_pack_for_fetch(
     }
     let count = u32::try_from(surviving.len())
         .map_err(|_| "outgoing object set exceeds u32 (server-side)")?;
-    let mut writer = alt_git_pack::PackWriter::create(dir.path(), repo.algo(), count)?;
+    let mut writer = alt_git_pack::PackWriter::create(dir.path(), repo.algo()?, count)?;
     for (oid, kind, obj) in &surviving {
         writer.add(*oid, *kind, &obj.data)?;
     }

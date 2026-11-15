@@ -9,7 +9,7 @@ use alt_testutil as common;
 
 fn assert_repo_matches(repo_path: &Path, algo: HashAlgo) {
     let repo = Repository::discover(repo_path).unwrap();
-    assert_eq!(repo.algo(), algo);
+    assert_eq!(repo.algo().unwrap(), algo);
 
     // rev-parse over the DWIM forms
     for spec in ["HEAD", "main", "feat", "v0", "refs/heads/main"] {

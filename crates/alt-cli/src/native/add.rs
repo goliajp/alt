@@ -99,8 +99,8 @@ impl NativeRepo<'_> {
             entries,
             extensions: Vec::new(),
         };
-        if recovery::canonical_index(before.clone(), self.store.algo)
-            != recovery::canonical_index(after.clone(), self.store.algo)
+        if recovery::canonical_index(before.clone(), self.store.algo()?)
+            != recovery::canonical_index(after.clone(), self.store.algo()?)
         {
             self.write_index_transaction(
                 before,

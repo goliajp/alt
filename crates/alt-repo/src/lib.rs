@@ -42,7 +42,9 @@ pub struct Repository {
     /// The backing store directory: `.git` or `.alt`.
     repo_dir: PathBuf,
     work_tree: Option<PathBuf>,
-    algo: HashAlgo,
+    /// set on open for a git repository; a native store reads the config
+    /// that says it only when something asks
+    algo: OnceLock<HashAlgo>,
     /// set on open for a git repository; a native store reads it on first
     /// use
     config: OnceLock<Config>,
@@ -123,7 +125,7 @@ impl Repository {
         Ok(Self {
             repo_dir: git_dir,
             work_tree,
-            algo,
+            algo: OnceLock::from(algo),
             config: OnceLock::from(config),
             backend: Backend::Git {
                 refs,
@@ -145,9 +147,6 @@ impl Repository {
     }
 
     fn open_alt_dir(alt_dir: PathBuf, work_tree: Option<PathBuf>) -> Result<Self, RepoError> {
-        let config_path = alt_dir.join("git-import/config");
-        let algo = object_format(&config_path)?;
-
         let backend = AltBackend {
             alt_dir: alt_dir.clone(),
             odb: alt_odb::NativeOdb::deferred(&alt_dir),
@@ -156,7 +155,7 @@ impl Repository {
         Ok(Self {
             repo_dir: alt_dir,
             work_tree,
-            algo,
+            algo: OnceLock::new(),
             config: OnceLock::new(),
             backend: Backend::Alt(Box::new(backend)),
         })
@@ -176,8 +175,13 @@ impl Repository {
         self.work_tree.as_deref()
     }
 
-    pub fn algo(&self) -> HashAlgo {
-        self.algo
+    /// The hash algorithm of the repository's object ids.
+    pub fn algo(&self) -> Result<HashAlgo, RepoError> {
+        if let Some(algo) = self.algo.get() {
+            return Ok(*algo);
+        }
+        let algo = object_format(&self.repo_dir.join("git-import/config"))?;
+        Ok(*self.algo.get_or_init(|| algo))
     }
 
     /// Apply git's `[url "X"] insteadOf = Y` rewrite rules to `url`.
@@ -251,7 +255,6 @@ impl Repository {
     /// loaded once at open and not reloaded here.
     pub fn refresh(&mut self) -> Result<(), RepoError> {
         let repo_dir = &self.repo_dir;
-        let algo = self.algo;
         match &mut self.backend {
             Backend::Alt(alt) => {
                 alt.odb.refresh()?;
@@ -260,6 +263,7 @@ impl Repository {
                 }
             }
             Backend::Git { refs, packs, .. } => {
+                let algo = object_format(&repo_dir.join("config"))?;
                 *refs = RefStore::open(repo_dir, algo)?;
                 *packs = odb::open_packs(&repo_dir.join("objects").join("pack"), algo)?;
             }
@@ -472,8 +476,8 @@ impl Repository {
         if spec.is_empty() {
             return Ok(None);
         }
-        if spec.len() == self.algo.hex_len()
-            && let Ok(oid) = ObjectId::from_hex(spec.as_bytes())
+        if let Ok(oid) = ObjectId::from_hex(spec.as_bytes())
+            && oid.algo() == self.algo()?
         {
             return Ok(Some(oid));
         }
@@ -495,8 +499,8 @@ impl Repository {
         // AmbiguousShortOid when multiple objects match, so the caller
         // surfaces a clear message instead of a silent miss.
         if spec.len() >= 4
-            && spec.len() < self.algo.hex_len()
             && spec.chars().all(|c| c.is_ascii_hexdigit())
+            && spec.len() < self.algo()?.hex_len()
             && let Some(oid) = self.resolve_short_oid(spec)?
         {
             return Ok(Some(oid));
@@ -575,7 +579,7 @@ impl Repository {
                 continue;
             };
             out.push((oid, obj.kind));
-            for child in object_children(oid, &obj, self.algo)? {
+            for child in object_children(oid, &obj, oid.algo())? {
                 if !uninteresting.contains(&child) {
                     work.push(child);
                 }
@@ -590,7 +594,7 @@ impl Repository {
         let Some(obj) = self.read_object(&oid)? else {
             return Ok(());
         };
-        for child in object_children(oid, &obj, self.algo)? {
+        for child in object_children(oid, &obj, oid.algo())? {
             stack.push(child);
         }
         Ok(())

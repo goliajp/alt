@@ -40,7 +40,7 @@ impl NativeRepo<'_> {
         Ok(scan_worktree_with_index(
             &self.root,
             index,
-            self.store.algo,
+            self.store.algo()?,
             filter,
         )?)
     }
@@ -53,7 +53,7 @@ impl NativeRepo<'_> {
         Ok(scan_indexed_paths(
             &self.root,
             index,
-            self.store.algo,
+            self.store.algo()?,
             filter,
         )?)
     }
@@ -169,7 +169,7 @@ impl NativeRepo<'_> {
             }
             written += 1;
         }
-        save_index(&self.index_path, &index, self.store.algo)?;
+        save_index(&self.index_path, &index, self.store.algo()?)?;
         Ok(written)
     }
 

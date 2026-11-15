@@ -255,7 +255,8 @@ impl NativeRepo<'_> {
             ));
         }
         let entries: Vec<WorkEntry> = resolved.into_iter().filter_map(|r| r.entry).collect();
-        let tree = write_tree(&mut self.store.odb, &entries, self.store.algo)?;
+        let algo = self.store.algo()?;
+        let tree = write_tree(&mut self.store.odb, &entries, algo)?;
         let old = index_entries(&self.index()?);
         self.checkout(&old, &entries)?;
         Ok(Picked::Clean(tree))

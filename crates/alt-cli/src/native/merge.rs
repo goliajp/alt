@@ -93,7 +93,7 @@ impl NativeRepo<'_> {
                 .map(|(_, e)| e.mode)
                 .ok_or("conflict without either side")?;
             let bytes = r.worktree.ok_or("conflict without content")?;
-            let oid = ObjectId::hash_object(self.store.algo, ObjectKind::Blob, &bytes);
+            let oid = ObjectId::hash_object(self.store.algo()?, ObjectKind::Blob, &bytes);
             self.store.odb.put(oid, ObjectKind::Blob, &bytes)?;
             out.push(WorkEntry {
                 path: r.path,
@@ -181,7 +181,8 @@ impl NativeRepo<'_> {
                 };
                 let m = alt_merge::merge(&base_bytes, &ours_bytes, &theirs_bytes, &labels);
                 if m.is_clean() {
-                    let oid = ObjectId::hash_object(self.store.algo, ObjectKind::Blob, &m.content);
+                    let oid =
+                        ObjectId::hash_object(self.store.algo()?, ObjectKind::Blob, &m.content);
                     self.store.odb.put(oid, ObjectKind::Blob, &m.content)?;
                     Ok(Resolved::clean(
                         path.clone(),
@@ -311,7 +312,7 @@ impl NativeRepo<'_> {
                 entries,
                 extensions: Vec::new(),
             },
-            self.store.algo,
+            self.store.algo()?,
         )?;
         Ok(())
     }

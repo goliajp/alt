@@ -63,7 +63,8 @@ impl NativeRepo<'_> {
         // read through `repo` before the store starts its write batch
         let head_commit = repo.read_commit(&head_oid)?;
         let entries: Vec<WorkEntry> = resolved.iter().filter_map(|r| r.entry.clone()).collect();
-        let tree = write_tree(&mut self.store.odb, &entries, self.store.algo)?;
+        let algo = self.store.algo()?;
+        let tree = write_tree(&mut self.store.odb, &entries, algo)?;
 
         // Did the cherry-pick actually change anything? If the resulting
         // tree matches HEAD's, there's nothing to commit.
@@ -113,7 +114,7 @@ impl NativeRepo<'_> {
             &author_sig,
             &committer,
             &msg,
-            self.store.algo,
+            algo,
         )?;
         self.store.odb.flush()?;
         self.advance_branch_checkout(&head_ref, head_oid, commit, &old, &entries)?;

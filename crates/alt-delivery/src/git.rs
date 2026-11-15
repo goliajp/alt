@@ -270,7 +270,7 @@ pub fn intake(source: &Path, target: &Path, git: &Path) -> Result<IntakeReport> 
         .iter()
         .map(|(n, t)| (n.to_owned(), render(t)))
         .collect();
-    let baseline = snapshot(&odb, selected, &config_bytes(&alt_dir)?, repo.algo())?;
+    let baseline = snapshot(&odb, selected, &config_bytes(&alt_dir)?, repo.algo()?)?;
     // Every ref graph must be complete, even if it is not the checkout HEAD.
     closure(
         &odb,
@@ -305,7 +305,7 @@ pub fn intake(source: &Path, target: &Path, git: &Path) -> Result<IntakeReport> 
         .iter()
         .map(|(path, e)| alt_git_index_entry(path, e))
         .collect::<Result<_>>()?;
-    write_index(&alt_dir, &entries, repo.algo())?;
+    write_index(&alt_dir, &entries, repo.algo()?)?;
     drop(refs);
     drop(odb);
     publish_directory(staging.path(), &target)?;

@@ -251,7 +251,8 @@ impl NativeRepo<'_> {
             )
             .into());
         }
-        Ok(write_tree(&mut self.store.odb, &staged, self.store.algo)?)
+        let algo = self.store.algo()?;
+        Ok(write_tree(&mut self.store.odb, &staged, algo)?)
     }
 
     /// Stores a commit (signed when the sign policy asks for it) and moves
@@ -273,7 +274,7 @@ impl NativeRepo<'_> {
         if let Some(signed) = self.maybe_sign_commit_bytes(&bytes)? {
             bytes = signed;
         }
-        let commit = ObjectId::hash_object(self.store.algo, ObjectKind::Commit, &bytes);
+        let commit = ObjectId::hash_object(self.store.algo()?, ObjectKind::Commit, &bytes);
         self.store.odb.put(commit, ObjectKind::Commit, &bytes)?;
         self.store.odb.flush()?;
         let note = self.meta_for(c.message, c.tree, c.parents, meta)?;

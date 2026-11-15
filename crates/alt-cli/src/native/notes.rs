@@ -30,7 +30,7 @@ impl NativeRepo<'_> {
             Some(&p) => self.commit_entries(p)?,
             None => Vec::new(),
         };
-        let after = flatten_tree(&self.store.odb, tree, self.store.algo)?;
+        let after = flatten_tree(&self.store.odb, tree, self.store.algo()?)?;
         let old: std::collections::HashMap<&BString, (ObjectId, u32)> =
             before.iter().map(|e| (&e.path, (e.oid, e.mode))).collect();
         let mut touched: Vec<String> = after
@@ -76,7 +76,7 @@ impl NativeRepo<'_> {
         let read = |id: ObjectId| -> meta::ReadResult {
             Ok(odb.get(&id)?.map(|o| (o.kind, o.data.to_vec())))
         };
-        meta::find(&read, self.store.algo, tip, commit)
+        meta::find(&read, self.store.algo()?, tip, commit)
     }
 
     /// Writes `note` for `target` on the current notes tip and returns the
@@ -88,7 +88,7 @@ impl NativeRepo<'_> {
         self.store.odb.refresh()?;
         let (name, email) = self.id.sig();
         let signature = format!("{name} <{email}> {} +0000", now_ms() / 1000);
-        let algo = self.store.algo;
+        let algo = self.store.algo()?;
         let odb = std::cell::RefCell::new(&mut self.store.odb);
         let read = |id: ObjectId| -> meta::ReadResult {
             Ok(odb.borrow().get(&id)?.map(|o| (o.kind, o.data.to_vec())))

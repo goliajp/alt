@@ -134,7 +134,7 @@ fn corpus_roundtrip_l1_fidelity() {
         }
         repos += 1;
         let repo = Repository::discover(&repo_dir).unwrap();
-        let algo = repo.algo();
+        let algo = repo.algo().unwrap();
 
         let alt_root = alt_os::temp::tempdir().unwrap();
         let alt_dir = alt_root.path().join(".alt");

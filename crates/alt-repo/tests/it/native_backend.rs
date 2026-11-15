@@ -37,7 +37,7 @@ fn read_api_is_equivalent_across_backends() {
     let alt = Repository::discover(alt_root.path()).unwrap();
     assert!(!git.is_native());
     assert!(alt.is_native());
-    assert_eq!(git.algo(), alt.algo());
+    assert_eq!(git.algo().unwrap(), alt.algo().unwrap());
 
     // rev-parse equivalence over the DWIM space
     for spec in ["HEAD", "main", "feat", "v0", "refs/heads/main"] {

@@ -310,7 +310,7 @@ fn read_tree(repo: &Repository, oid: ObjectId) -> Res<Tree> {
     if obj.kind != ObjectKind::Tree {
         return Err(format!("{oid} is not a tree").into());
     }
-    Ok(Tree::parse(&obj.data, repo.algo())?)
+    Ok(Tree::parse(&obj.data, repo.algo()?)?)
 }
 
 fn read_blob_bytes(repo: &Repository, oid: ObjectId) -> Res<Vec<u8>> {

@@ -213,7 +213,7 @@ impl NativeRepo<'_> {
                 "runner scratch must be outside existing repositories",
             ));
         }
-        if self.store.algo != HashAlgo::Sha1 {
+        if self.store.algo()? != HashAlgo::Sha1 {
             return Err(refused("runner source snapshot currently requires SHA-1"));
         }
         // Request IDs are scoped to a repository/workspace; transport paths
@@ -242,7 +242,7 @@ impl NativeRepo<'_> {
             snapshot.odb.put(*oid, ObjectKind::Blob, &object.data)?;
         }
         snapshot.odb.flush()?;
-        save_index(&root.join(".alt/index"), &self.index()?, self.store.algo)?;
+        save_index(&root.join(".alt/index"), &self.index()?, self.store.algo()?)?;
         drop(snapshot);
         let control = root.join(alt_runner::CONTROL);
         fs::create_dir(&control)?;

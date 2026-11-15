@@ -156,7 +156,7 @@ pub fn import_git(
     // --- objects: packed first (bulk), then loose ---
     let mut seen = 0u64;
     let before = odb.len()? as u64;
-    let algo = repo.algo();
+    let algo = repo.algo()?;
     let objects_dir = repo.git_dir().join("objects");
 
     let pack_dir = objects_dir.join("pack");

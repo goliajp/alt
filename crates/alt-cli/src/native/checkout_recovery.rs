@@ -189,7 +189,7 @@ impl NativeRepo<'_> {
         let snapshot = WorkspaceSnapshot {
             version: 1,
             workspace: self.workspace_identity()?,
-            index: self.snapshot(&canonical_index(index, self.store.algo))?,
+            index: self.snapshot(&canonical_index(index, self.store.algo()?))?,
             files,
         };
         self.snapshot(&alt_json::to_vec(&snapshot)?)
@@ -200,7 +200,7 @@ impl NativeRepo<'_> {
         if snapshot.version != 1 || snapshot.workspace != self.workspace_identity()? {
             return Err("invalid workspace recovery snapshot".into());
         }
-        Index::parse(&self.read_snapshot(&snapshot.index)?, self.store.algo)?;
+        Index::parse(&self.read_snapshot(&snapshot.index)?, self.store.algo()?)?;
         let index = self.index()?;
         let before: std::collections::BTreeMap<_, _> = snapshot.files.into_iter().collect();
         let paths: std::collections::BTreeSet<_> = before
@@ -227,7 +227,7 @@ impl NativeRepo<'_> {
             workspace: snapshot.workspace,
             request_id: self.request_id.map(|id| crate::machine::hex(&id)),
             index_before: snapshot.index,
-            index_after: self.snapshot(&canonical_index(index, self.store.algo))?,
+            index_after: self.snapshot(&canonical_index(index, self.store.algo()?))?,
             files,
         })
     }
@@ -263,9 +263,9 @@ impl NativeRepo<'_> {
             .into());
         }
         for id in [&intent.index_before, &intent.index_after] {
-            Index::parse(&self.read_snapshot(id)?, self.store.algo)?;
+            Index::parse(&self.read_snapshot(id)?, self.store.algo()?)?;
         }
-        if hash(&canonical_index(self.index()?, self.store.algo)) != intent.index_after {
+        if hash(&canonical_index(self.index()?, self.store.algo()?)) != intent.index_after {
             return Err(crate::machine::Failure::refusal(
                 "precondition_failed",
                 "recovery precondition failed: index changed",
@@ -363,8 +363,8 @@ impl NativeRepo<'_> {
             version: 1,
             workspace: self.workspace_identity()?,
             request_id: self.request_id.map(|id| crate::machine::hex(&id)),
-            index_before: self.snapshot(&canonical_index(self.index()?, self.store.algo))?,
-            index_after: self.snapshot(&canonical_index(index_after, self.store.algo))?,
+            index_before: self.snapshot(&canonical_index(self.index()?, self.store.algo()?))?,
+            index_after: self.snapshot(&canonical_index(index_after, self.store.algo()?))?,
             files,
         })
     }
@@ -466,9 +466,9 @@ impl NativeRepo<'_> {
         }
         let before = self.read_snapshot(&intent.index_before)?;
         let after = self.read_snapshot(&intent.index_after)?;
-        Index::parse(&before, self.store.algo)?;
-        Index::parse(&after, self.store.algo)?;
-        let current = hash(&canonical_index(self.index()?, self.store.algo));
+        Index::parse(&before, self.store.algo()?)?;
+        Index::parse(&after, self.store.algo()?)?;
+        let current = hash(&canonical_index(self.index()?, self.store.algo()?));
         if current != intent.index_before && current != intent.index_after {
             return Err(crate::machine::Failure::refusal(
                 "precondition_failed",
@@ -534,7 +534,7 @@ impl NativeRepo<'_> {
                 .into());
             }
         }
-        if hash(&canonical_index(self.index()?, self.store.algo)) != intent.index_before {
+        if hash(&canonical_index(self.index()?, self.store.algo()?)) != intent.index_before {
             return Err(crate::machine::Failure::refusal(
                 "precondition_failed",
                 "checkout index changed after preparation",

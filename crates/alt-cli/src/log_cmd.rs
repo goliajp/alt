@@ -183,7 +183,7 @@ fn tree_diff(
             if obj.kind != ObjectKind::Tree {
                 return Err(format!("{oid} is not a tree").into());
             }
-            Ok(Tree::parse(&obj.data, repo.algo())?.entries)
+            Ok(Tree::parse(&obj.data, repo.algo()?)?.entries)
         };
 
     let old_entries = match old {
@@ -474,7 +474,7 @@ fn note_message(
     let read = |id: ObjectId| -> crate::meta::ReadResult {
         Ok(repo.read_object(&id)?.map(|o| (o.kind, o.data.to_vec())))
     };
-    Ok(crate::meta::find(&read, repo.algo(), notes, oid)?.and_then(|m| m.message))
+    Ok(crate::meta::find(&read, oid.algo(), notes, oid)?.and_then(|m| m.message))
 }
 
 /// `log --json`: `{schema_version, commits:[{oid, tree, parents, author,

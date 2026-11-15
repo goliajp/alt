@@ -307,9 +307,9 @@ impl NativeRepo<'_> {
     ) -> Res<OpId> {
         self.lock_workspace()?;
         self.ensure_no_pending_recovery()?;
-        let before = canonical_index(before, self.store.algo);
-        let after = canonical_index(after, self.store.algo);
-        if canonical_index(self.index()?, self.store.algo) != before {
+        let before = canonical_index(before, self.store.algo()?);
+        let after = canonical_index(after, self.store.algo()?);
+        if canonical_index(self.index()?, self.store.algo()?) != before {
             return Err(crate::machine::Failure::refusal(
                 "precondition_failed",
                 "index changed while preparing operation",
@@ -375,9 +375,9 @@ impl NativeRepo<'_> {
         }
         let before = self.read_snapshot(&intent.before)?;
         let after = self.read_snapshot(&intent.after)?;
-        Index::parse(&before, self.store.algo)?;
-        Index::parse(&after, self.store.algo)?;
-        let current = hash(&canonical_index(self.index()?, self.store.algo));
+        Index::parse(&before, self.store.algo()?)?;
+        Index::parse(&after, self.store.algo()?)?;
+        let current = hash(&canonical_index(self.index()?, self.store.algo()?));
         if current != intent.before && current != intent.after {
             return Err(crate::machine::Failure::refusal(
                 "precondition_failed",
@@ -448,7 +448,7 @@ impl NativeRepo<'_> {
                 let intent: IndexIntent = decode(&prepared.payload, PREPARE)?;
                 if intent.workspace != workspace { return Err(crate::machine::Failure::refusal("precondition_failed", "last operation belongs to a different workspace instance; select its workspace").into()); }
                 if intent.version != 1 || done.version != 1 { return Err(crate::machine::Failure::refusal("unsupported_record", "unsupported recovery record").into()); }
-                if hash(&canonical_index(self.index()?, self.store.algo)) != intent.after {
+                if hash(&canonical_index(self.index()?, self.store.algo()?)) != intent.after {
                     return Err(crate::machine::Failure::refusal("precondition_failed", "recovery precondition failed: index changed").into());
                 }
                 self.check_guards(&intent.worktree)?;

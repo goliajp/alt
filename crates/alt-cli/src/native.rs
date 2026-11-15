@@ -34,6 +34,7 @@ mod op_log;
 mod operation;
 use op_log::render_op_log_json;
 pub mod notes;
+mod object_format;
 use merge::Resolved;
 mod rebase;
 mod recovery;
@@ -61,7 +62,7 @@ pub struct Store {
     alt_dir: PathBuf,
     odb: NativeOdb,
     refs: RefStore,
-    algo: HashAlgo,
+    algo: std::sync::OnceLock<HashAlgo>,
     /// The repository's capability policy, loaded from `<alt-dir>/policy`. A missing
     /// file → [`Policy::empty`] (every principal gets [`Capabilities::full`]),
     /// the zero-regression default. Daemon re-reads in [`refresh`](Self::refresh)
@@ -76,7 +77,7 @@ impl Store {
             odb: NativeOdb::deferred(&alt_dir),
             refs: RefStore::open(&alt_dir)?,
             policy: Policy::load(&alt_dir)?,
-            algo: alt_repo::native_object_format(&alt_dir)?,
+            algo: std::sync::OnceLock::new(),
             alt_dir,
         })
     }
@@ -1086,7 +1087,7 @@ impl<'a> NativeRepo<'a> {
         // Servers that didn't advertise a nonce (older ones) get the
         // legacy payload — backward-compat.
         let payload =
-            alt_wire::canonical_push_payload_with_nonce(updates, server_nonce, self.store.algo);
+            alt_wire::canonical_push_payload_with_nonce(updates, server_nonce, self.store.algo()?);
         let sig = sec.sign(&payload);
         // .to_text() includes a trailing newline; the wire cap list can
         // not carry one, so strip it before declaring the cap
@@ -1155,7 +1156,7 @@ impl<'a> NativeRepo<'a> {
     }
 
     fn index(&self) -> Res<Index> {
-        match Index::open(&self.index_path, self.store.algo) {
+        match Index::open(&self.index_path, self.store.algo()?) {
             Ok(i) => Ok(i),
             Err(alt_git_index::IndexError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
                 Ok(empty_index())
@@ -1281,7 +1282,7 @@ impl<'a> NativeRepo<'a> {
         let tree = alt_git_codec::Commit::parse(&obj.data)?
             .tree()
             .ok_or("commit has no tree")?;
-        Ok(flatten_tree(&self.store.odb, tree, self.store.algo)?)
+        Ok(flatten_tree(&self.store.odb, tree, self.store.algo()?)?)
     }
 
     /// `alt diff` (index → working tree) or `alt diff --cached` (HEAD →
@@ -1959,7 +1960,7 @@ impl<'a> NativeRepo<'a> {
             "+0000",
             &msg,
         );
-        let tag_oid = ObjectId::hash_object(self.store.algo, ObjectKind::Tag, &bytes);
+        let tag_oid = ObjectId::hash_object(self.store.algo()?, ObjectKind::Tag, &bytes);
         self.store.odb.put(tag_oid, ObjectKind::Tag, &bytes)?;
         self.store.odb.flush()?;
 
@@ -2303,7 +2304,8 @@ impl<'a> NativeRepo<'a> {
         }
 
         let entries: Vec<WorkEntry> = resolved.iter().filter_map(|r| r.entry.clone()).collect();
-        let tree = write_tree(&mut self.store.odb, &entries, self.store.algo)?;
+        let algo = self.store.algo()?;
+        let tree = write_tree(&mut self.store.odb, &entries, algo)?;
         let when = (now_ms() / 1000) as i64;
         let (name, email) = self.id.sig();
         let sig = Sig {
@@ -2320,7 +2322,7 @@ impl<'a> NativeRepo<'a> {
             &sig,
             &sig,
             &msg,
-            self.store.algo,
+            algo,
         )?;
         self.store.odb.flush()?;
         Ok(MergeOutcome::Merged { commit, entries })
@@ -3317,7 +3319,8 @@ impl<'a> NativeRepo<'a> {
         // v1 ref advertisement: the receive-pack endpoint speaks v1 even
         // when we ask for v2 (push isn't in protocol v2 in upstream git)
         let ad_bytes = transport.info_refs(alt_wire_http::Service::ReceivePack)?;
-        let ad = alt_wire::parse_v1_ref_advertisement(&mut ad_bytes.as_slice(), self.store.algo)?;
+        let ad =
+            alt_wire::parse_v1_ref_advertisement(&mut ad_bytes.as_slice(), self.store.algo()?)?;
         if !ad.supports("report-status") {
             return Err("remote does not support report-status".into());
         }
@@ -3427,7 +3430,8 @@ impl<'a> NativeRepo<'a> {
         } else {
             let count =
                 u32::try_from(outgoing.len()).map_err(|_| "outgoing object set exceeds u32")?;
-            let mut writer = alt_git_pack::PackWriter::create(&pack_dir, self.store.algo, count)?;
+            let mut writer =
+                alt_git_pack::PackWriter::create(&pack_dir, self.store.algo()?, count)?;
             for (oid, kind) in &outgoing {
                 let obj = repo
                     .read_object(oid)?
@@ -3470,7 +3474,7 @@ impl<'a> NativeRepo<'a> {
             &mut body,
             &updates,
             &caps_refs,
-            self.store.algo,
+            self.store.algo()?,
             &pack_bytes,
         )?;
         let resp = transport.command(alt_wire_http::Service::ReceivePack, &body)?;

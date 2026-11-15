@@ -1563,7 +1563,7 @@ fn show_resolve_blob(
         if obj.kind != ObjectKind::Tree {
             return Err(format!("{current} is not a tree").into());
         }
-        let tree = Tree::parse(&obj.data, repo.algo())?;
+        let tree = Tree::parse(&obj.data, repo.algo()?)?;
         let entry = tree
             .entries
             .iter()
@@ -1610,7 +1610,7 @@ fn pretty_print<W: Write>(
                 .get_bool("core", None, "quotepath")
                 .transpose()?
                 .unwrap_or(true);
-            let tree = Tree::parse(&obj.data, repo.algo())?;
+            let tree = Tree::parse(&obj.data, repo.algo()?)?;
             for entry in &tree.entries {
                 write!(
                     out,
