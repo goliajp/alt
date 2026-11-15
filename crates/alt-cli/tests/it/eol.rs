@@ -383,17 +383,23 @@ fn a_conflicted_merge_converts_under_the_merged_attribute_file() {
         alt_os::temp::tempdir().unwrap(),
     );
     let (src, dst) = (src.path(), dst.path());
+    // one changed file is written before `.gitattributes`, one after
+    let changed = ["+early.dat", "late.dat"];
     ok(git(src, &["init", "-q", "-b", "main", "."]));
     write(src, ".gitattributes", b"*.dat eol=crlf\n");
-    write(src, "a.dat", b"one\ntwo\n");
+    for f in changed {
+        write(src, f, b"one\ntwo\n");
+    }
     write(src, "keep.dat", b"left\nalone\n");
     write(src, "c.txt", b"base\n");
     ok(git(src, &["add", "."]));
     ok(git(src, &["commit", "-qm", "base"]));
     ok(git(src, &["switch", "-q", "-c", "theirs"]));
-    // their side stops converting .dat files, and changes one of them
+    // their side stops converting .dat files, and changes two of them
     write(src, ".gitattributes", b"*.dat -text\n");
-    write(src, "a.dat", b"one\ntwo\nthree\n");
+    for f in changed {
+        write(src, f, b"one\ntwo\nthree\n");
+    }
     write(src, "c.txt", b"theirs\n");
     ok(git(src, &["add", "."]));
     ok(git(src, &["commit", "-qm", "theirs"]));
@@ -401,27 +407,32 @@ fn a_conflicted_merge_converts_under_the_merged_attribute_file() {
     write(src, "c.txt", b"ours\n");
     ok(git(src, &["add", "."]));
     ok(git(src, &["commit", "-qm", "ours"]));
-    for f in ["a.dat", "keep.dat"] {
+    for f in changed.into_iter().chain(["keep.dat"]) {
         std::fs::remove_file(src.join(f)).unwrap();
     }
     ok(git(src, &["checkout", "-q", "--", "."]));
     ok(alt(src, &["import", dst.to_str().unwrap()]));
-    assert_eq!(read(dst, "a.dat"), b"one\r\ntwo\r\n");
+    assert_eq!(read(dst, "late.dat"), b"one\r\ntwo\r\n");
 
     // c.txt conflicts in both tools
     assert!(!git(src, &["merge", "-q", "theirs"]).status.success());
     assert!(!alt(dst, &["merge", "theirs"]).status.success());
     assert_eq!(read(dst, ".gitattributes"), b"*.dat -text\n");
-    // the changed file is written as the merged rule says: as stored
-    assert_eq!(read(src, "a.dat"), b"one\ntwo\nthree\n");
-    assert_eq!(read(dst, "a.dat"), read(src, "a.dat"));
-    // and resolving the conflict commits the same tree as git
+    // the changed files are written as the merged rule says: as stored
+    for f in changed {
+        assert_eq!(read(src, f), b"one\ntwo\nthree\n", "{f}");
+        assert_eq!(read(dst, f), read(src, f), "{f}");
+    }
+    // and the file the merge does not change is not written again
+    assert_eq!(read(src, "keep.dat"), b"left\r\nalone\r\n");
+    assert_eq!(read(dst, "keep.dat"), read(src, "keep.dat"));
+    // resolving the conflict commits the same tree as git
     for (root, run) in [
         (dst, &alt as &dyn Fn(&Path, &[&str]) -> Output),
         (src, &git),
     ] {
         write(root, "c.txt", b"resolved\n");
-        ok(run(root, &["add", "."]));
+        ok(run(root, &["add", "c.txt"]));
         ok(run(root, &["commit", "-m", "merged"]));
     }
     assert_eq!(tree(&|a| alt(dst, a)), tree(&|a| git(src, a)));

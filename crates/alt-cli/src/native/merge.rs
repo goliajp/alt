@@ -292,7 +292,23 @@ impl NativeRepo<'_> {
         }
         let files: Vec<(&[u8], &[u8])> = files.iter().map(|(d, c)| (*d, c.as_slice())).collect();
         let attrs = self.converter_under(&files)?;
+        // a path the merge leaves as it was keeps its file and its index
+        // entry: only what changes is written
+        let was: std::collections::HashMap<BString, IndexEntry> = self
+            .index()?
+            .entries
+            .into_iter()
+            .filter(|e| e.stage() == 0)
+            .map(|e| (e.path.clone(), e))
+            .collect();
+        let kept = |r: &Resolved| match (&r.entry, was.get(&r.path)) {
+            (Some(e), Some(was)) => !r.conflicted && e.oid == was.oid && e.mode == was.mode,
+            _ => false,
+        };
         for r in resolved {
+            if kept(r) {
+                continue;
+            }
             let abs = self.abs(&r.path)?;
             if let Some(bytes) = &r.worktree {
                 if let Some(parent) = abs.parent() {
@@ -322,6 +338,8 @@ impl NativeRepo<'_> {
                 for (stage, w) in &r.stages {
                     entries.push(stage_entry(w, *stage));
                 }
+            } else if kept(r) {
+                entries.push(was[&r.path].clone());
             } else if let Some(e) = &r.entry {
                 entries.push(self.make_entry(e)?);
             }
