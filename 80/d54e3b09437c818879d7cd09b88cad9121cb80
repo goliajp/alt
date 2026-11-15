@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: check out a path that changes between a directory and a file or symlink
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/checkout_files.rs
+touched: crates/alt-cli/src/native/checkout_recovery.rs
+touched: crates/alt-cli/src/native/recovery.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/switch_kinds.rs
