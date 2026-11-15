@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: drop the marks of optional groups inside the copies of a repetition as the C library does
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/program.rs
