@@ -102,7 +102,7 @@ It decodes and hashes every stored chunk, reassembles every large blob, hashes
 every object to its Git id, compares each index with the file it indexes,
 verifies the whole operation log and replays it against the refs. It exits 0
 after printing how many records of each kind it verified, and non-zero at the
-first record that fails, naming it. It changes nothing; indexes and the ref
+first record that fails, saying what failed. It changes nothing; indexes and the ref
 snapshot are caches that the next writer rebuilds, while a damaged record in a
 log or pack is lost data to restore from another copy.
 
