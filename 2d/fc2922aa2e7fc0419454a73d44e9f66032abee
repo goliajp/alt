@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: feat
+summary: let an option take its value only when attached and fall back to a set value without one
+author-type: human
+author: doracawl
+touched: crates/alt-args-derive/src/field.rs
+touched: crates/alt-args-derive/src/generate.rs
+touched: crates/alt-args-derive/src/lib.rs
+touched: crates/alt-args/src/help.rs
+touched: crates/alt-args/src/level.rs
+touched: crates/alt-args/src/spec.rs
+touched: crates/alt-args/tests/it/main.rs
+touched: crates/alt-args/tests/it/optional_value.rs
