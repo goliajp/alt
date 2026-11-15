@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: follow the fallible object format in the import corpus test
+author-type: human
+author: doracawl
+touched: crates/alt-import/tests/it/corpus_import.rs
