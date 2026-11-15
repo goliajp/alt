@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: end the function name in a hunk header at its last whole UTF-8 character
+author-type: human
+author: doracawl
+touched: crates/alt-diff/src/lib.rs
