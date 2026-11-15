@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: leave paths both trees share alone on checkout and drop ignored files with a directory that becomes a file
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/checkout_files.rs
+touched: crates/alt-cli/src/native/checkout_plan.rs
+touched: crates/alt-cli/src/native/checkout_recovery.rs
+touched: crates/alt-cli/tests/it/eol.rs
+touched: crates/alt-cli/tests/it/switch_kinds.rs
