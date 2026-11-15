@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: find the configuration outside a repository where git finds it and pass over what git passes over
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli.rs
+touched: crates/alt-cli/src/git_settings.rs
+touched: crates/alt-cli/src/log_cmd.rs
+touched: crates/alt-cli/src/patch.rs
+touched: crates/alt-cli/tests/it/git_settings.rs
+touched: crates/alt-repo/src/lib.rs
