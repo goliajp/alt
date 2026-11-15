@@ -143,6 +143,9 @@ impl<'a> Parser<'a> {
                 None => self.interval()?,
             };
             atom = match atom {
+                // no repetition of nothing is more than nothing
+                Node::Empty => Node::Empty,
+                _ if max == Some(0) => Node::Empty,
                 _ if (min, max) == (1, Some(1)) => atom,
                 // `*`, `+` and `?` behind one another are one of them
                 Node::Repeat(inner, low @ 0..=1, high @ (None | Some(1)))

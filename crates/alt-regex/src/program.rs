@@ -40,16 +40,20 @@ pub struct Program {
 
 /// More instructions than this is refused.
 const MAX_INSTS: usize = 400_000;
+/// More steps through the tree of the pattern than this is refused.
+const MAX_WORK: usize = 4 * MAX_INSTS;
 
 struct Compiler {
     insts: Vec<Inst>,
     sets: Vec<ByteSet>,
+    work: usize,
 }
 
 pub fn compile(node: &Node, groups: u32) -> Result<Program, Error> {
     let mut c = Compiler {
         insts: Vec::new(),
         sets: Vec::new(),
+        work: 0,
     };
     let end = c.push(Inst::Match)?;
     let close = c.push(Inst::Save(1, end))?;
@@ -167,6 +171,10 @@ impl Compiler {
 
     /// Compiles `node` to go on at `next`; returns where it begins.
     fn node(&mut self, node: &Node, next: u32) -> Result<u32, Error> {
+        self.work += 1;
+        if self.work > MAX_WORK {
+            return Err(Error::TooBig);
+        }
         match node {
             Node::Empty => Ok(next),
             Node::Set(set) => self.set(set, next),

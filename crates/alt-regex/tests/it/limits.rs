@@ -62,3 +62,18 @@ fn counted_repetitions_nest_to_a_depth_and_no_deeper() {
     pattern.extend(b")?".repeat(150));
     assert!(Regex::new(&pattern).unwrap().is_match(b"a"));
 }
+
+#[test]
+fn a_repetition_of_nothing_costs_nothing() {
+    let limit = Duration::from_secs(1);
+    let re = within(limit, b"^a{0}{32767}{32767}{32767}{32767}b$").unwrap();
+    assert!(re.is_match(b"b") && !re.is_match(b"ab"));
+    let re = within(limit, b"^(a){0}{32767}{32767}b$").unwrap();
+    assert_eq!(re.captures(b"b").unwrap().get(1), None);
+    assert_eq!(re.groups(), 1);
+    // groups around nothing still make instructions, and too many
+    let grown = within(limit, b"((a{0}){32767}){32767}");
+    assert_eq!(grown.err(), Some(Error::TooBig));
+    let grown = within(limit, b"((a{0}|b{0}){32767}){32767}");
+    assert_eq!(grown.err(), Some(Error::TooBig));
+}
