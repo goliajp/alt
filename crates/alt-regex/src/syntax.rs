@@ -154,8 +154,7 @@ impl<'a> Parser<'a> {
         let mut items = Vec::new();
         let mut tall = 0;
         while self.at < self.pat.len() && !self.at_alt() && !self.at_close() {
-            // nothing to repeat yet: at the start, or behind an anchor
-            let fresh = matches!(items.last(), None | Some(Node::Look(_)));
+            let fresh = items.is_empty();
             self.tall = 0;
             let atom = self.atom(fresh)?;
             if let Node::Class(block) = &atom {
@@ -205,6 +204,11 @@ impl<'a> Parser<'a> {
                 Some(bounds) => bounds,
                 None => self.interval()?,
             };
+            // as in the C library, a basic expression takes no star and
+            // no interval behind another repetition
+            if !self.ere() && matches!(self.rest(), [b'*', ..] | [b'\\', b'{', ..]) {
+                return Err(Error::Repeat);
+            }
             atom = match atom {
                 // no repetition of nothing is more than nothing
                 Node::Empty => Node::Empty,
@@ -289,7 +293,8 @@ impl<'a> Parser<'a> {
                 _ => Ok(self.literal(b)),
             };
         }
-        // in a basic expression an anchor is one only at the edge of a branch
+        // in a basic expression an anchor is one only at the edge of a
+        // branch: a circumflex behind another anchor stands for itself
         let last = matches!(self.rest(), [] | [b'\\', b')' | b'|', ..]);
         match b {
             b'^' if fresh => Ok(self.start()),
@@ -374,6 +379,60 @@ mod tests {
         let (node, groups) = bre("(a|b)+").unwrap();
         assert_eq!(groups, 0);
         assert_eq!(node, Node::Concat(b"(a|b)+".map(lit).to_vec()));
+    }
+
+    #[test]
+    fn a_basic_expression_takes_no_star_or_interval_behind_a_repetition() {
+        let refused = [
+            "^[a-z ]**(",
+            "a*\\{1,2\\}",
+            "a\\+*",
+            "a\\{1,2\\}\\{3\\}",
+            "a\\{0\\}*",
+            "***",
+        ];
+        for pat in refused {
+            assert_eq!(bre(pat), Err(Error::Repeat), "{pat}");
+        }
+        for pat in [
+            "a*\\+",
+            "a*\\?",
+            "a\\+\\?",
+            "a\\{1,2\\}\\+",
+            "^**",
+            "\\(a*\\)*",
+        ] {
+            assert!(bre(pat).is_ok(), "{pat}");
+        }
+        assert!(ere("a*{1,2}{3}*").is_ok());
+    }
+
+    #[test]
+    fn a_circumflex_anchors_a_basic_expression_only_where_a_branch_begins() {
+        let start = Node::Look(Look::TextStart);
+        let caret = lit(b'^');
+        assert_eq!(
+            bre("^^").unwrap().0,
+            Node::Concat(vec![start.clone(), caret.clone()])
+        );
+        let word = Node::Look(Look::WordBoundary);
+        assert_eq!(
+            bre("\\b^").unwrap().0,
+            Node::Concat(vec![word, caret.clone()])
+        );
+        let first = Node::Look(Look::WordStart);
+        assert_eq!(
+            bre("\\<^").unwrap().0,
+            Node::Concat(vec![first, caret.clone()])
+        );
+        let twice = Node::Repeat(Box::new(caret), 1, Some(2));
+        assert_eq!(
+            bre("^^\\{1,2\\}").unwrap().0,
+            Node::Concat(vec![start.clone(), twice])
+        );
+        let branches = Node::Alt(vec![lit(b'a'), Node::Concat(vec![start, lit(b'b')])]);
+        assert_eq!(bre("a\\|^b").unwrap().0, branches);
+        assert_eq!(bre("^\\{1,2\\}"), Err(Error::Repeat));
     }
 
     #[test]

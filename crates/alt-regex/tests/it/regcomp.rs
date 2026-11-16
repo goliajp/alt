@@ -114,7 +114,7 @@ fn accepted_alike(cases: &[(&str, Options)]) {
         let Ok(ours) = ours else { continue };
         let texts = [
             "", "a", "*a", "aa", "ab", "b", "a+b?", "a|b", "aab", "a)", "]", "x ab.", "cab a b",
-            "ab ", "_", "B", "-", "z", "Z", "^", "`",
+            "ab ", "_", "B", "-", "z", "Z", "^", "`", "^a", "^^", "a^", "a**",
         ];
         for text in texts {
             let expected = theirs.spans(text.as_bytes()).map(|spans| spans[0]);
@@ -161,6 +161,25 @@ fn hand_picked_patterns_are_accepted_or_refused_as_the_c_library_does() {
         ("a\\)", basic),
         ("a\\+b\\?", basic),
         ("a\\|b", basic),
+        // no star and no interval behind another repetition
+        ("^[a-z ]**(", basic),
+        ("a*\\{1,2\\}", basic),
+        ("a\\+*", basic),
+        ("a\\{1,2\\}\\{3\\}", basic),
+        ("a\\{0\\}*", basic),
+        ("a*\\+", basic),
+        ("a\\{1,2\\}\\?", basic),
+        ("^**", basic),
+        // a circumflex anchors only where a branch begins
+        ("^^", basic),
+        ("^^a", basic),
+        ("\\b^", basic),
+        ("\\<^a", basic),
+        ("^^\\{1,2\\}", basic),
+        ("^\\{1,2\\}", basic),
+        ("b\\|^a", basic),
+        ("\\(^a\\)", basic),
+        ("\\(a\\)^", basic),
         ("\\bab\\b", Options::default()),
         ("\\<a", Options::default()),
         ("b\\>", Options::default()),

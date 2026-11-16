@@ -36,9 +36,15 @@ fn repetition_marks_behind_one_another_are_one_repetition() {
         syntax: Syntax::Basic,
         ..Options::default()
     };
+    // a basic expression takes no star behind another repetition
     let mut pattern = b"a".to_vec();
-    pattern.extend(std::iter::repeat_n(b'*', 100_000));
+    pattern.extend(b"\\+".repeat(50_000));
     assert!(Regex::with_options(&pattern, basic).is_ok());
+    pattern.push(b'*');
+    assert_eq!(
+        Regex::with_options(&pattern, basic).err(),
+        Some(Error::Repeat)
+    );
 }
 
 #[test]

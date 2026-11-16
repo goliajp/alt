@@ -83,24 +83,25 @@ fn a_pattern_that_does_not_compile_is_refused_in_the_words_of_git() {
     let write = |root: &Path, mark: &str| {
         std::fs::write(root.join("broken.txt"), body("head", mark, "\n")).unwrap();
     };
-    let prepare = |root: &Path| {
-        write(root, "");
-        std::fs::write(root.join(".gitattributes"), format!("{}\n", lines[0].1)).unwrap();
-        ok(run(
-            "git",
-            root,
-            "C",
-            &["config", "diff.x.xfuncname", "^(unclosed"],
-        ));
-    };
-    let dirs = pair(prepare, |root: &Path| write(root, " changed"));
-    let theirs = run("git", dirs[0].path(), "C", &["diff"]);
-    let ours = run("alt", dirs[1].path(), "C", &["diff"]);
-    assert!(!theirs.status.success() && !ours.status.success());
-    assert_eq!(
-        String::from_utf8_lossy(&ours.stderr),
-        String::from_utf8_lossy(&theirs.stderr)
-    );
+    // the second is one only as a basic expression: a star behind a star
+    let refused = [("xfuncname", "^(unclosed"), ("funcname", "^[a-z ]**(")];
+    for (kind, pattern) in refused {
+        let prepare = |root: &Path| {
+            write(root, "");
+            std::fs::write(root.join(".gitattributes"), format!("{}\n", lines[0].1)).unwrap();
+            let key = format!("diff.x.{kind}");
+            ok(run("git", root, "C", &["config", &key, pattern]));
+        };
+        let dirs = pair(prepare, |root: &Path| write(root, " changed"));
+        let theirs = run("git", dirs[0].path(), "C", &["diff"]);
+        let ours = run("alt", dirs[1].path(), "C", &["diff"]);
+        assert_eq!(theirs.status.code(), Some(128), "{pattern}");
+        assert_eq!(ours.status.code(), Some(128), "{pattern}");
+        assert_eq!(
+            String::from_utf8_lossy(&ours.stderr),
+            String::from_utf8_lossy(&theirs.stderr)
+        );
+    }
 }
 
 #[test]
