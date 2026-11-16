@@ -36,6 +36,7 @@ pub use identity::{Identity, Principal, PrincipalKind};
 mod merge;
 mod op_log;
 mod operation;
+mod push_pack;
 use op_log::render_op_log_json;
 pub mod notes;
 mod object_format;
@@ -3138,37 +3139,7 @@ impl<'a> NativeRepo<'a> {
         let excludes: Vec<ObjectId> = ad.refs.values().copied().collect();
         let outgoing = repo.reachable_objects(&local_tips, &excludes)?;
 
-        // write a plain pack (no deltas) of the outgoing set into a
-        // scratch dir under `<alt-dir>/tmp_push/`; we don't need it as a
-        // stored pack, just as the wire body, so it's removed after the
-        // request completes
-        let pack_dir = self
-            .store
-            .alt_dir
-            .join("tmp_push")
-            .join(format!("push-{remote_name}"));
-        std::fs::create_dir_all(&pack_dir)?;
-        let pack_bytes = if outgoing.is_empty() {
-            // a delete-only push or no-op push still needs to send
-            // *something* per the v1 protocol — but in practice servers
-            // accept an empty body when no commands ship a pack
-            Vec::new()
-        } else {
-            let count =
-                u32::try_from(outgoing.len()).map_err(|_| "outgoing object set exceeds u32")?;
-            let mut writer =
-                alt_git_pack::PackWriter::create(&pack_dir, self.store.algo()?, count)?;
-            for (oid, kind) in &outgoing {
-                let obj = repo
-                    .read_object(oid)?
-                    .ok_or_else(|| format!("outgoing object {oid} not in odb"))?;
-                writer.add(*oid, *kind, &obj.data)?;
-            }
-            let written = writer.finish()?;
-            std::fs::read(&written.pack_path)?
-        };
-        // best-effort cleanup; not fatal if the dir is busy
-        let _ = crate::durable::remove_dir_all(&pack_dir);
+        let pack_bytes = self.push_pack(&repo, remote_name, &outgoing)?;
 
         // capabilities to declare on the push request
         let agent = format!("agent=alt/{}", env!("CARGO_PKG_VERSION"));

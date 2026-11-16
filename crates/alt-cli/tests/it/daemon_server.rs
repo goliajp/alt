@@ -831,8 +831,6 @@ fn daemon_picks_up_policy_edits_on_the_next_request() {
 /// (the gate fires before any oplog/idempotency state is touched).
 #[test]
 fn daemon_enforces_capability_policy_for_restricted_agent() {
-    use alt_oplog::OpLog;
-
     let repo = alt_os::temp::tempdir().unwrap();
     let root = repo.path();
     ok(alt(root, &["init", "."]));
@@ -843,11 +841,7 @@ fn daemon_enforces_capability_policy_for_restricted_agent() {
     std::fs::write(root.join(".alt/policy"), "agent:rover -> read-only\n").unwrap();
 
     let d = Daemon::start(&root.join(".alt"));
-    let oplen_before = OpLog::open(&root.join(".alt/oplog"))
-        .unwrap()
-        .ops()
-        .unwrap()
-        .len();
+    let oplen_before = super::op_log::op_count(root);
 
     // restricted agent's write goes through the daemon socket — denied
     let env = vec![
@@ -872,11 +866,7 @@ fn daemon_enforces_capability_policy_for_restricted_agent() {
 
     // the rejected write left no op log entry — zero on-disk side effect
     drop(d);
-    let oplen_after = OpLog::open(&root.join(".alt/oplog"))
-        .unwrap()
-        .ops()
-        .unwrap()
-        .len();
+    let oplen_after = super::op_log::op_count(root);
     assert_eq!(
         oplen_after, oplen_before,
         "denied write must not append any op"

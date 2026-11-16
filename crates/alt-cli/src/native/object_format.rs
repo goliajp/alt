@@ -13,6 +13,13 @@ impl Store {
         let algo = alt_repo::native_object_format(&self.alt_dir)?;
         Ok(*self.algo.get_or_init(|| algo))
     }
+
+    /// Stores `bytes` as a blob and returns its id.
+    pub(super) fn put_blob(&mut self, bytes: &[u8]) -> Res<ObjectId> {
+        let oid = ObjectId::hash_object(self.algo()?, ObjectKind::Blob, bytes);
+        self.odb.put(oid, ObjectKind::Blob, bytes)?;
+        Ok(oid)
+    }
 }
 
 impl NativeRepo<'_> {

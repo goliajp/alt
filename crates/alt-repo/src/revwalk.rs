@@ -45,8 +45,8 @@ impl Eq for Queued {}
 impl Ord for Queued {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // max-heap: newest date pops first; among equal dates the smallest
-        // sequence number (= earliest queued) pops first via `Reverse`.
-        // Sequence numbers are unique, so they settle every tie
+        // sequence number (= earliest queued) pops first via `Reverse`;
+        // sequence numbers are unique, so they settle every tie
         self.date
             .cmp(&other.date)
             .then(self.order.cmp(&other.order))

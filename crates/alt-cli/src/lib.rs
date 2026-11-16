@@ -19,6 +19,7 @@ pub mod fsck;
 pub mod group_commit;
 pub mod index_tx;
 pub mod json;
+mod log2;
 pub mod log_cmd;
 pub mod log_count;
 pub mod machine;
