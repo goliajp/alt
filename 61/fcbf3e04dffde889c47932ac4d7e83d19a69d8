@@ -1,0 +1,17 @@
+schema: alt-meta/1
+type: fix
+summary: refuse to append to a log that ends short of its synced records
+author-type: human
+author: doracawl
+touched: crates/alt-odb/src/check.rs
+touched: crates/alt-odb/src/error.rs
+touched: crates/alt-odb/src/odb.rs
+touched: crates/alt-odb/src/odb/open.rs
+touched: crates/alt-odb/src/odb/settle.rs
+touched: crates/alt-odb/tests/it/dangling.rs
+touched: crates/alt-oplog/src/lib.rs
+touched: crates/alt-oplog/src/op.rs
+touched: crates/alt-oplog/src/synced.rs
+touched: crates/alt-oplog/tests/it/lost.rs
+touched: crates/alt-oplog/tests/it/main.rs
+touched: docs/recovery.md
