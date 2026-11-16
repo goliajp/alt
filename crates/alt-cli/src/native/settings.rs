@@ -38,12 +38,37 @@ impl NativeRepo<'_> {
     /// yield to the other's first: the user's, which `core.excludesFile`
     /// names, and the repository's own.
     pub(super) fn exclude_files(&self, settings: &alt_git_config::Config) -> Res<Vec<PathBuf>> {
-        let user = match self.named_file(settings, "excludesfile")? {
-            Some(named) => named,
-            None => alt_worktree::default_excludes_file(),
-        };
+        let user = self
+            .user_excludes(settings)?
+            .map(|named| self.root.join(named));
         let info = self.store.alt_dir.join("git-import/info/exclude");
         Ok(user.into_iter().chain([info]).collect())
+    }
+
+    /// The user's ignore file as it is named: a relative path is one in
+    /// the working tree.
+    fn user_excludes(&self, settings: &alt_git_config::Config) -> Res<Option<PathBuf>> {
+        match self.named_file(settings, "excludesfile")? {
+            Some(named) => Ok(named),
+            None => Ok(alt_worktree::default_excludes_file()),
+        }
+    }
+
+    /// Ends the command where a directory stands in place of an ignore
+    /// file outside the working tree, with the words git has for it. git
+    /// ends there every command that sets up its ignore rules, whether or
+    /// not it then looks for untracked files.
+    pub fn ensure_exclude_files(&self) -> Res<()> {
+        let user = self.user_excludes(&self.settings()?)?;
+        let info = self.store.alt_dir.join("git-import/info/exclude");
+        let info = info.strip_prefix(&self.root).unwrap_or(&info).to_owned();
+        for named in user.into_iter().chain([info]) {
+            if self.root.join(&named).is_dir() {
+                let named = named.display();
+                return Err(fatal(format!("cannot use {named} as an exclude file")));
+            }
+        }
+        Ok(())
     }
 
     /// The attribute files outside the working tree: the user's, which
@@ -53,7 +78,7 @@ impl NativeRepo<'_> {
         settings: &alt_git_config::Config,
     ) -> Res<(Option<PathBuf>, PathBuf)> {
         let user = match self.named_file(settings, "attributesfile")? {
-            Some(named) => named,
+            Some(named) => named.map(|named| self.root.join(named)),
             None => std::env::var_os("XDG_CONFIG_HOME")
                 .filter(|v| !v.is_empty())
                 .map(PathBuf::from)
@@ -66,7 +91,7 @@ impl NativeRepo<'_> {
 
     /// The file the setting `key` of the `core` section names, as git
     /// reads it: `None` when it is not set, no file when it is set to
-    /// nothing, a relative path as one in the working tree. A key without
+    /// nothing. A relative path is one in the working tree. A key without
     /// a value is an error, and so is a home directory that is not known.
     fn named_file(
         &self,
@@ -81,7 +106,7 @@ impl NativeRepo<'_> {
                 Err(fatal(format!("bad config variable 'core.{key}'")))
             }
             Some(Some(path)) if path.is_empty() => Ok(Some(None)),
-            Some(Some(path)) => Ok(Some(Some(self.root.join(expand_user(path)?)))),
+            Some(Some(path)) => Ok(Some(Some(expand_user(path)?))),
         }
     }
 

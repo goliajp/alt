@@ -1242,6 +1242,19 @@ pub fn mutates_command(cmd: &Command) -> bool {
     )
 }
 
+/// The commands for which git sets up its ignore rules before anything
+/// else, and so ends where one of the files they are in cannot be one.
+fn sets_up_excludes(cmd: &Command) -> bool {
+    use Command::{Add, Commit, Diff, Status, Switch};
+    match cmd {
+        Add { args } => !args.renormalize,
+        Commit { validate, .. } => !validate,
+        Diff { cached, .. } => *cached,
+        Switch { create, .. } => !create,
+        _ => matches!(cmd, Status { .. }),
+    }
+}
+
 pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> Res<u8> {
     if matches!(
         cmd,
@@ -1256,6 +1269,9 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
             "interactive rebase requires an editor and is unavailable in JSON mode",
         )
         .into());
+    }
+    if sets_up_excludes(cmd) {
+        repo.ensure_exclude_files()?;
     }
     if mutates_command(cmd) && !matches!(cmd, Command::Operation { .. }) {
         repo.begin_workspace_write()?;

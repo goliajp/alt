@@ -49,23 +49,25 @@ fn a_removed_workspace_gives_its_watches_back() {
 }
 
 #[test]
-fn what_only_a_look_for_untracked_files_fails_on_fails_no_other_command() {
+fn a_tree_is_watched_as_before_once_its_ignore_file_can_be_read_again() {
     let (dir, _stop) = served();
     let root = dir.path();
     write(root, "a.txt", "changed\n");
     agree(root, "changed");
-    // the user's ignore file cannot be read: a directory is in its place
+    // the user's ignore file cannot be read: a directory is in its place,
+    // which ends every command that sets up the ignore rules
     std::fs::create_dir_all(root.join(".alt/test-config/git/ignore")).unwrap();
-    for daemon in [true, false] {
-        let status = output(root, &["status"], daemon);
-        assert!(!status.status.success(), "daemon: {daemon}");
+    let ended: [&[&str]; 3] = [&["status"], &["status", "-uno"], &["diff", "--cached"]];
+    for args in ended {
+        for daemon in [true, false] {
+            let said = output(root, args, daemon);
+            let stderr = String::from_utf8_lossy(&said.stderr);
+            assert_eq!(said.status.code(), Some(128), "{args:?} daemon: {daemon}");
+            assert!(stderr.contains("git/ignore as an exclude file"), "{stderr}");
+        }
     }
-    let others: [&[&str]; 3] = [&["status", "-uno"], &["diff"], &["diff", "--cached"]];
-    for args in others {
-        assert_eq!(run(root, args, true), run(root, args, false), "{args:?}");
-    }
-    assert!(run(root, &["status", "-uno"], true).contains("modified:   a.txt"));
     write(root, "src/lib.rs", "changed as well\n");
+    assert_eq!(run(root, &["diff"], true), run(root, &["diff"], false));
     assert!(run(root, &["diff"], true).contains("src/lib.rs"));
     std::fs::remove_dir(root.join(".alt/test-config/git/ignore")).unwrap();
     assert!(agree(root, "readable again").contains("modified:   src/lib.rs"));

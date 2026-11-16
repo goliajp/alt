@@ -26,6 +26,7 @@ mod daemon_server;
 mod diff;
 mod diff_git;
 mod eol;
+mod exclude_dirs;
 mod fetch;
 mod flow;
 mod flow_enforce;
