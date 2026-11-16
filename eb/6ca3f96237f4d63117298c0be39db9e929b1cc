@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: time a pattern again before saying it took too long to compile
+author-type: human
+author: doracawl
+touched: crates/alt-regex/tests/it/limits.rs
