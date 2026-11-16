@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: perf
+summary: take a character of one byte at the first place of a set without its table
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/block.rs
+touched: crates/alt-regex/src/program.rs
