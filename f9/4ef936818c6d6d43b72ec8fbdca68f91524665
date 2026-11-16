@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: compare the groups of every random match unless the pattern itself holds a byte that is no character
+author-type: human
+author: doracawl
+touched: crates/alt-regex/tests/it/regcomp/random.rs
