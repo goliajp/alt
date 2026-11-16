@@ -38,8 +38,11 @@ const SETS: [&[u8]; 9] = [
 ];
 const ESCAPES: [&[u8]; 7] = [b"\\w", b"\\W", b"\\s", b" ", b"\\.", b"\\S", b"x"];
 /// Characters of two, three and four bytes, with and without case, and
-/// bytes that are no character, alone and in sets.
-const WIDE: [&[u8]; 16] = [
+/// a byte that is no character, alone and in sets. A byte that goes on
+/// a character is not written alone: where it lies inside a character
+/// of the text the C library finds it behind some patterns and not
+/// behind others, `.?\xa9` and not `.*\xa9` in `\xc3\xa9`.
+const WIDE: [&[u8]; 15] = [
     "é".as_bytes(),
     "É".as_bytes(),
     "ı".as_bytes(),
@@ -53,7 +56,6 @@ const WIDE: [&[u8]; 16] = [
     "[[:alpha:]_]".as_bytes(),
     "[aé€]".as_bytes(),
     b"\xe9",
-    b"\xa9",
     b"[a\xe9]",
     b"[\x80-\xff]",
 ];
@@ -80,12 +82,18 @@ impl Writer<'_> {
         }
     }
 
-    /// A random expression; says whether it can match nothing. Nothing
+    /// A random expression; says whether it may match nothing. Nothing
     /// that can match the empty string is repeated without bound: the C
-    /// library may then never answer.
+    /// library may then never answer, and where it does it leaves a
+    /// loop behind a turn that took nothing before it tries the other
+    /// branches of that turn, so that for `(|a)+(a*b)` on `aaab` it
+    /// gives the first group to the third `a`.
     fn expression(&mut self, depth: u32) -> bool {
         let pieces = 1 + self.rng.below(3);
+        // whether the branch being written can be empty so far, and
+        // whether one before it may
         let mut all_empty = true;
+        let mut before = false;
         for _ in 0..pieces {
             let kinds = if depth == 0 { 7 } else { 10 };
             let empty = match self.rng.below(kinds) {
@@ -124,7 +132,10 @@ impl Writer<'_> {
                     let left = self.expression(depth - 1);
                     self.op(b"|");
                     let right = self.expression(depth - 1);
-                    all_empty &= left || right;
+                    // the branch ends in the left side, and the right
+                    // side begins the next
+                    before |= left || right;
+                    all_empty = right;
                     continue;
                 }
             };
@@ -140,7 +151,7 @@ impl Writer<'_> {
             let optional = matches!(repeat, b"*" | b"?" | b"{0,1}" | b"{,2}");
             all_empty &= empty == Some(true) || optional;
         }
-        all_empty
+        before || all_empty
     }
 
     /// Atoms that each take something, with the edges of words and
@@ -172,7 +183,9 @@ impl Writer<'_> {
     }
 
     /// A whole pattern: expressions with, now and then, an anchor
-    /// before, between and behind them; or a flat one.
+    /// before and behind them; or a flat one. Behind a group that may
+    /// be left out the C library does not hold an anchor to what it
+    /// means either.
     fn pattern(mut self) -> Vec<u8> {
         if self.rng.below(4) == 0 {
             return self.flat();
@@ -180,12 +193,11 @@ impl Writer<'_> {
         let parts = 1 + self.rng.below(2);
         for part in 0..=parts {
             if self.rng.below(4) == 0 {
-                let edge = match part {
-                    0 => EDGES[0],
-                    _ if part == parts => EDGES[1],
-                    _ => EDGES[self.rng.below(2)],
-                };
-                self.out.extend(edge);
+                match part {
+                    0 => self.out.extend(EDGES[0]),
+                    _ if part == parts => self.out.extend(EDGES[1]),
+                    _ => {}
+                }
             }
             if part < parts {
                 self.expression(2);
@@ -363,7 +375,13 @@ pub fn compare(seed: u64, count: usize, options: Options) -> Tally {
             if located != got {
                 tally.differs(format!("find of {pat} on {shown}: {located:?} not {got:?}"));
             }
-            if let Some(expected) = expected {
+            // where a period could take a byte that is no character,
+            // the C library lets it when it places the groups of a
+            // match found without: for `.|(\xe9)` on that byte it gives
+            // the group nothing
+            let stray = |(from, to): (usize, usize)| std::str::from_utf8(&text[from..to]).is_err();
+            let loose = options.utf8 && pat.contains('.') && got.is_some_and(stray);
+            if let Some(expected) = expected.filter(|_| !loose) {
                 let last = ours.groups().min(GROUPS - 1);
                 let ours: Vec<_> = (0..=last).map(span).collect();
                 tally.matches += 1;
