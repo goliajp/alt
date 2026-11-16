@@ -63,6 +63,19 @@
 //! - A group that is repeated, may match nothing and is referred back
 //!   to. `(a*)*\1` on `aaa`: the C library reports a group that ends
 //!   before it begins; here it is the empty one at 3.
+//! - A back-reference in a pattern that repeats without bound what may
+//!   match nothing. To find the groups the C library walks one path
+//!   and, come back to where it stood with nothing taken, ends the
+//!   walk there: the groups behind that place are reported as taking
+//!   no part. `x?*(a)\1` on `aa`: the match and no first group there;
+//!   here the group is the first `a`. Of two paths that a match has,
+//!   the two may also keep different ones.
+//! - Without [`Options::newline`], an anchor beside a newline in the
+//!   text. Where the C library steps from byte to byte it takes a
+//!   newline for the end of a line whether or not it was asked to, and
+//!   where it looks at the text it does not: `a$.` on `a`, a newline
+//!   and `b` matches the first two bytes there, `a$` and `(a$).`
+//!   nothing. Here such an anchor holds at the ends of the text only.
 //! - Without regard to case, a text with a character whose upper-case
 //!   form has fewer bytes (the dotless i, the long s) and, later, a
 //!   byte that is no character. `x` on the long s, `x` and the byte

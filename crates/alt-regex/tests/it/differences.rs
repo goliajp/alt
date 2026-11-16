@@ -9,7 +9,7 @@ type Spans = Option<&'static [Option<(usize, usize)>]>;
 /// text, and the match with its groups.
 type Case = (bool, bool, &'static [u8], &'static [u8], Spans);
 
-pub const CASES: [Case; 11] = [
+pub const CASES: [Case; 14] = [
     // an anchor or the edge of a word inside or behind a repetition
     (false, false, b"a*\\B", b"xa", Some(&[Some((1, 1))])),
     (false, false, b"(\\ba){2,}", b"aaa", None),
@@ -28,6 +28,17 @@ pub const CASES: [Case; 11] = [
         b"aaa",
         Some(&[Some((0, 3)), Some((3, 3))]),
     ),
+    // a back-reference where what may match nothing is repeated
+    (
+        false,
+        false,
+        b"x?*(a)\\1",
+        b"aa",
+        Some(&[Some((0, 2)), Some((0, 1))]),
+    ),
+    // an anchor beside a newline that is no end of a line
+    (false, false, b"a$.", b"a\nb", None),
+    (false, false, b".^b", b"a\nb", None),
     // a character with a shorter upper-case form, then a byte that is
     // no character
     (true, true, b"x", b"\xc5\xbfx\xf0", Some(&[Some((2, 3))])),
