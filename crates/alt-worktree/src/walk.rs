@@ -19,22 +19,16 @@ const SPLIT: u32 = 512;
 const MANY_FILES: usize = 256;
 
 mod found;
+mod reach;
 pub(crate) use found::Found;
+pub(crate) use reach::Reach;
+use reach::Within;
 
 pub(crate) struct Walk<'a> {
     snapshot: &'a Snapshot,
-    /// the paths to look at, each with everything beneath it; all when empty
-    within: &'a [&'a [u8]],
+    /// the paths to look at; all when there are none
+    within: Within<'a>,
     pub(crate) untracked: Untracked,
-}
-
-/// How a path stands to the paths a walk is limited to.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Reach {
-    /// one of them, or beneath one
-    Inside,
-    /// a directory above one
-    Above,
 }
 
 /// A directory in the one being walked, which takes a walk of its own:
@@ -59,7 +53,7 @@ pub(crate) fn walk(
 ) -> io::Result<Found> {
     let walk = Walk {
         snapshot,
-        within,
+        within: Within::new(within),
         untracked,
     };
     let reach = match within.is_empty() {
@@ -82,19 +76,9 @@ enum Child {
     Dir(usize),
 }
 
-fn beneath(path: &[u8], dir: &[u8]) -> bool {
-    path.len() > dir.len() && path[dir.len()] == b'/' && path.starts_with(dir)
-}
-
 impl Walk<'_> {
     pub(crate) fn reach(&self, parent: Reach, path: &[u8]) -> Option<Reach> {
-        if parent == Reach::Inside || self.within.iter().any(|w| *w == path || beneath(path, w)) {
-            return Some(Reach::Inside);
-        }
-        self.within
-            .iter()
-            .any(|w| beneath(w, path))
-            .then_some(Reach::Above)
+        self.within.reach(parent, path)
     }
 
     fn children(&self, dir: usize) -> impl Iterator<Item = Child> + '_ {

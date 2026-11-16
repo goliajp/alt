@@ -11,6 +11,7 @@ use alt_worktree::{Delta, PathMatcher, ScanOptions, Snapshot, Staged, Untracked}
 use super::*;
 
 mod held;
+mod lists;
 mod watching;
 pub(super) use watching::wrote_file;
 
@@ -94,6 +95,29 @@ impl NativeRepo<'_> {
         untracked: Untracked,
         within: &[&[u8]],
     ) -> Res<(Delta, alt_worktree::Clock)> {
+        self.scanning(untracked, within, |options, settings| {
+            // a watched tree holds its answer with directories as one path
+            let watched = match within.is_empty() && untracked != Untracked::All {
+                true => watching::watched_scan(&self.root, snapshot, options, settings)?,
+                false => None,
+            };
+            match watched {
+                Some(delta) => Ok(delta),
+                None => Ok(alt_worktree::scan(&self.root, snapshot, options)?),
+            }
+        })
+    }
+
+    /// Runs `scan` with what a scan of this tree goes by: its options, and
+    /// the files outside the tree that decide how a file compares with
+    /// what else decides it. Also returns the moment the options were
+    /// made for.
+    fn scanning<R>(
+        &self,
+        untracked: Untracked,
+        within: &[&[u8]],
+        scan: impl FnOnce(&ScanOptions<'_>, (&[&Path], &[u8])) -> Res<R>,
+    ) -> Res<(R, alt_worktree::Clock)> {
         // built when the first file has to be read
         let tools: OnceCell<Res<(Option<PathMatcher>, convert::Converter)>> = OnceCell::new();
         let get = || {
@@ -114,6 +138,7 @@ impl NativeRepo<'_> {
         let clock = alt_worktree::Clock::read(control).unwrap_or(alt_worktree::Clock::UNREADABLE);
         let inputs = self.scan_inputs()?;
         let excludes: Vec<&Path> = inputs.excludes.iter().map(PathBuf::as_path).collect();
+        let files: Vec<&Path> = inputs.files.iter().map(PathBuf::as_path).collect();
         let options = ScanOptions {
             untracked,
             within,
@@ -122,24 +147,33 @@ impl NativeRepo<'_> {
             excludes: &excludes,
             clock,
         };
-        // a watched tree holds its answer with directories as one path
-        let watched = match within.is_empty() && untracked != Untracked::All {
-            true => {
-                let files: Vec<&Path> = inputs.files.iter().map(PathBuf::as_path).collect();
-                let branch = self.head_branch()?.into_bytes();
-                let settings = (files.as_slice(), branch.as_slice());
-                watching::watched_scan(&self.root, snapshot, &options, settings)?
-            }
-            false => None,
+        let found = scan(&options, (files.as_slice(), inputs.branch.as_slice()));
+        let converted = match tools.into_inner() {
+            Some(tools) => tools.and_then(|(_, attrs)| attrs.check()),
+            None => Ok(()),
         };
-        let delta = match watched {
-            Some(delta) => delta,
-            None => alt_worktree::scan(&self.root, snapshot, &options)?,
-        };
-        if let Some(tools) = tools.into_inner() {
-            tools?.1.check()?;
+        if found.is_err() || converted.is_err() {
+            // a file that could not be compared is in no answer worth holding
+            watching::forget(&self.root);
         }
-        Ok((delta, clock))
+        let found = found?;
+        converted?;
+        Ok((found, clock))
+    }
+
+    /// After this process put the index of `next` where that of `prior`
+    /// stood: where the tree is watched, what is held for it is brought to
+    /// the new index by a scan of the paths that differ, so that the next
+    /// command finds its answer.
+    fn follow_index(&self, prior: &Snapshot, next: &mut Snapshot) {
+        if !watching::watches(&self.root) {
+            return;
+        }
+        // what is held is a cache: where this fails, the next command scans
+        let _ = self.scanning(Untracked::Normal, &[], |options, settings| {
+            watching::index_replaced(&self.root, prior, next, options, settings);
+            Ok(())
+        });
     }
 
     /// After a checkout put `index` in place: the snapshot of that index,
@@ -165,6 +199,9 @@ impl NativeRepo<'_> {
             next.settle_path(&path, stat, &clock);
         }
         next.fill_trees();
+        if let Some(prior) = &prior {
+            self.follow_index(prior, &mut next);
+        }
         self.keep_snapshot(&next);
         Ok(())
     }
@@ -208,48 +245,6 @@ impl NativeRepo<'_> {
         let staged = snapshot.staged(&self.store.odb, self.head_tree()?)?;
         self.keep_snapshot(&snapshot);
         Ok(staged)
-    }
-}
-
-impl TreeState {
-    /// The three lists `status` prints.
-    pub(super) fn status(&self) -> alt_worktree::Status {
-        let kind = |s: &Staged| match (&s.old, &s.new) {
-            (None, _) => ChangeKind::Added,
-            (_, None) => ChangeKind::Deleted,
-            _ => ChangeKind::Modified,
-        };
-        let mut unstaged: Vec<(BString, ChangeKind)> = self
-            .delta
-            .changed
-            .iter()
-            .map(|w| (w.path.clone(), ChangeKind::Modified))
-            .chain(
-                self.delta
-                    .deleted
-                    .iter()
-                    .map(|p| (p.clone(), ChangeKind::Deleted)),
-            )
-            .collect();
-        unstaged.sort_by(|a, b| a.0.cmp(&b.0));
-        alt_worktree::Status {
-            staged: self
-                .staged
-                .iter()
-                .map(|s| (s.path.clone(), kind(s)))
-                .collect(),
-            unstaged,
-            untracked: self.delta.untracked.clone(),
-        }
-    }
-
-    /// The paths with a conflict in the index.
-    pub(super) fn unmerged(&self) -> std::collections::BTreeSet<BString> {
-        let s = &self.snapshot;
-        (0..s.entries.len())
-            .filter(|&i| s.entries[i].stage() > 0)
-            .map(|i| BString::from(s.path(i)))
-            .collect()
     }
 }
 

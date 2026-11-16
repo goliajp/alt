@@ -2,18 +2,49 @@
 //! changes, so that a scan looks only where something happened.
 
 #[cfg(not(target_os = "linux"))]
-use std::path::Path;
-
+pub(in crate::native) use unwatched::wrote_file;
 #[cfg(not(target_os = "linux"))]
-use alt_worktree::{Delta, ScanOptions, Snapshot};
+pub(super) use unwatched::{forget, index_replaced, watched_scan, watches};
 
-#[cfg(not(target_os = "linux"))]
-use super::Res;
-
-#[cfg(target_os = "linux")]
-pub(super) use linux::watched_scan;
 #[cfg(target_os = "linux")]
 pub(in crate::native) use linux::wrote_file;
+#[cfg(target_os = "linux")]
+pub(super) use linux::{forget, index_replaced, watched_scan, watches};
+
+#[cfg(not(target_os = "linux"))]
+mod unwatched {
+    use std::path::Path;
+
+    use alt_worktree::{Delta, ScanOptions, Snapshot};
+
+    use super::super::Res;
+
+    pub(in crate::native) fn wrote_file(_: &Path) {}
+
+    pub(in crate::native::tree_state) fn watches(_: &Path) -> bool {
+        false
+    }
+
+    pub(in crate::native::tree_state) fn forget(_: &Path) {}
+
+    pub(in crate::native::tree_state) fn index_replaced(
+        _: &Path,
+        _: &Snapshot,
+        _: &mut Snapshot,
+        _: &ScanOptions<'_>,
+        _: (&[&Path], &[u8]),
+    ) {
+    }
+
+    pub(in crate::native::tree_state) fn watched_scan(
+        _: &Path,
+        _: &mut Snapshot,
+        _: &ScanOptions<'_>,
+        _: (&[&Path], &[u8]),
+    ) -> Res<Option<Delta>> {
+        Ok(None)
+    }
+}
 
 #[cfg(target_os = "linux")]
 mod linux {
@@ -134,23 +165,87 @@ mod linux {
         options: &ScanOptions<'_>,
         settings: (&[&Path], &[u8]),
     ) -> Res<Option<Delta>> {
-        if !super::super::HELD.started() {
-            return Ok(None);
+        match super::super::HELD.started() {
+            true => Ok(scan_tree(root, snapshot, options, settings)),
+            false => Ok(None),
         }
+    }
+
+    /// Scans the tree at `root` under its own lock, watching it from now
+    /// on when that is due.
+    fn scan_tree(
+        root: &Path,
+        snapshot: &mut Snapshot,
+        options: &ScanOptions<'_>,
+        settings: (&[&Path], &[u8]),
+    ) -> Option<Delta> {
         let tree = tree(root);
         let mut state = locked(&tree);
         if due(&state, || Basis::of(root)) {
             *state = start(root, snapshot, options);
         }
-        let State::Watched(watched) = &mut *state else {
-            return Ok(None);
+        answer(&mut state, root, snapshot, options, settings)
+    }
+
+    /// What a tree in `state` answers when it is watched. One that gives
+    /// no answer is not watched from then on.
+    fn answer(
+        state: &mut State,
+        root: &Path,
+        snapshot: &mut Snapshot,
+        options: &ScanOptions<'_>,
+        settings: (&[&Path], &[u8]),
+    ) -> Option<Delta> {
+        let State::Watched(watched) = state else {
+            return None;
         };
         let delta = watched.scan(root, snapshot, options, settings.0, settings.1);
         if delta.is_none() {
             let basis = (!watched.out_of_watches()).then(|| Basis::of(root));
             *state = State::Off(basis);
         }
-        Ok(delta)
+        delta
+    }
+
+    /// The tree at `root`, when this process has scanned it before.
+    fn known(root: &Path) -> Option<Tree> {
+        let guard = TREES.lock().unwrap_or_else(PoisonError::into_inner);
+        guard.as_ref().and_then(|trees| trees.get(root)).cloned()
+    }
+
+    /// Whether the tree at `root` is watched.
+    pub(in crate::native::tree_state) fn watches(root: &Path) -> bool {
+        known(root).is_some_and(|tree| matches!(*locked(&tree), State::Watched(_)))
+    }
+
+    /// For the watched tree at `root`, whose index this process replaced:
+    /// the index of `snapshot` stands where that of `prior` stood. The
+    /// tree is scanned where the two differ and where events name a path,
+    /// and holds the answer for the command that asks next.
+    pub(in crate::native::tree_state) fn index_replaced(
+        root: &Path,
+        prior: &Snapshot,
+        snapshot: &mut Snapshot,
+        options: &ScanOptions<'_>,
+        settings: (&[&Path], &[u8]),
+    ) {
+        let Some(tree) = known(root) else {
+            return;
+        };
+        let mut state = locked(&tree);
+        if let State::Watched(watched) = &mut *state {
+            watched.index_replaced(prior, snapshot);
+        }
+        answer(&mut state, root, snapshot, options, settings);
+    }
+
+    /// Drops the answer held for the tree at `root`.
+    pub(in crate::native::tree_state) fn forget(root: &Path) {
+        if let Some(tree) = known(root)
+            && let State::Watched(watched) = &mut *locked(&tree)
+        {
+            watched.forget();
+        }
     }
 
     /// Called for every file a command writes to the tree at `root`: now
@@ -162,11 +257,7 @@ mod linux {
         if !written.is_multiple_of(256) || !super::super::HELD.started() {
             return;
         }
-        let tree = {
-            let guard = TREES.lock().unwrap_or_else(PoisonError::into_inner);
-            guard.as_ref().and_then(|trees| trees.get(root)).cloned()
-        };
-        if let Some(tree) = tree
+        if let Some(tree) = known(root)
             && let State::Watched(watched) = &mut *locked(&tree)
         {
             watched.absorb();
@@ -213,6 +304,84 @@ mod linux {
             assert!(matches!(failed(95), State::Off(Some(_))));
         }
 
+        /// A tree with one file, which does not hold what the snapshot
+        /// returned says it holds: a scan reads it.
+        fn changed_tree() -> (alt_os::temp::TempDir, Snapshot) {
+            use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
+            let dir = alt_os::temp::tempdir().unwrap();
+            std::fs::create_dir(dir.path().join(".alt")).unwrap();
+            std::fs::write(dir.path().join("a.txt"), "changed\n").unwrap();
+            let entry = alt_git_index::IndexEntry {
+                ctime: (0, 0),
+                mtime: (0, 0),
+                dev: 0,
+                ino: 0,
+                mode: 0o100644,
+                uid: 0,
+                gid: 0,
+                size: 0,
+                oid: ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, b"staged\n"),
+                flags: 5,
+                extended_flags: None,
+                path: "a.txt".into(),
+            };
+            let index = alt_git_index::Index {
+                version: 2,
+                entries: vec![entry],
+                extensions: Vec::new(),
+            };
+            let snapshot = Snapshot::of_index(&index, b"index", HashAlgo::Sha1, None);
+            (dir, snapshot)
+        }
+
+        #[test]
+        fn a_scan_of_one_tree_keeps_no_scan_of_another_waiting() {
+            use std::sync::mpsc::channel;
+            use std::time::Duration;
+            let (one, mut first) = changed_tree();
+            let (other, mut second) = changed_tree();
+            fn options<'a>(
+                root: &Path,
+                clean: Option<alt_worktree::CleanTracked<'a>>,
+            ) -> ScanOptions<'a> {
+                ScanOptions {
+                    untracked: alt_worktree::Untracked::Normal,
+                    within: &[],
+                    clean,
+                    head: None,
+                    excludes: &[],
+                    clock: alt_worktree::Clock::read(&root.join(".alt")).unwrap(),
+                }
+            }
+            let (began, has_begun) = channel();
+            let (go, may_go) = channel::<()>();
+            let (answered, has_answered) = channel();
+            std::thread::scope(|scope| {
+                // the scan of the first tree stops where it reads the file
+                let (root, first) = (one.path(), &mut first);
+                let slow = scope.spawn(move || {
+                    let wait = |_: &[u8], _: &[u8], _: alt_git_codec::ObjectId| {
+                        began.send(()).unwrap();
+                        may_go.recv().unwrap();
+                        None
+                    };
+                    let options = options(root, Some(&wait));
+                    scan_tree(root, first, &options, (&[], b""))
+                });
+                has_begun.recv_timeout(Duration::from_secs(10)).unwrap();
+                scope.spawn(|| {
+                    let options = options(other.path(), None);
+                    let delta = scan_tree(other.path(), &mut second, &options, (&[], b""));
+                    answered.send(delta).unwrap();
+                });
+                let meanwhile = has_answered.recv_timeout(Duration::from_secs(10));
+                go.send(()).unwrap();
+                let delta = meanwhile.expect("the other tree is scanned while the first is");
+                assert_eq!(delta.expect("it is watched").changed.len(), 1);
+                assert_eq!(slow.join().unwrap().unwrap().changed.len(), 1);
+            });
+        }
+
         #[test]
         fn a_tree_whose_lock_a_panic_left_poisoned_is_not_watched_and_stays_usable() {
             let tree: Tree = Arc::new(Mutex::new(State::New));
@@ -232,17 +401,4 @@ mod linux {
             assert!(due(&locked(&other), || basis(7, "")));
         }
     }
-}
-
-#[cfg(not(target_os = "linux"))]
-pub(in crate::native) fn wrote_file(_: &Path) {}
-
-#[cfg(not(target_os = "linux"))]
-pub(super) fn watched_scan(
-    _: &Path,
-    _: &mut Snapshot,
-    _: &ScanOptions<'_>,
-    _: (&[&Path], &[u8]),
-) -> Res<Option<Delta>> {
-    Ok(None)
 }

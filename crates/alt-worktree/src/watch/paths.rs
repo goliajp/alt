@@ -35,7 +35,7 @@ pub(super) fn dirty_paths(paths: Vec<Vec<u8>>, snapshot: &Snapshot) -> Vec<Vec<u
         .filter(|&i| snapshot.entries[i].mode == 0o160000)
         .map(|i| snapshot.path(i))
         .collect();
-    let mut dirty: Vec<Vec<u8>> = paths
+    let mut named: Vec<Vec<u8>> = paths
         .into_iter()
         .map(|path| {
             let name = &path[parent(&path).len()..];
@@ -52,11 +52,16 @@ pub(super) fn dirty_paths(paths: Vec<Vec<u8>>, snapshot: &Snapshot) -> Vec<Vec<u
                 None => path,
             }
         })
-        .map(|path| outermost_untracked(path, snapshot))
         .collect();
+    // neighbours one after the other: what is known of a directory is
+    // known for the next path in it
+    named.sort_unstable();
+    named.dedup();
+    let mut lifted = Lifted::new(snapshot);
+    let mut dirty: Vec<Vec<u8>> = named.into_iter().map(|path| lifted.of(path)).collect();
     // a submodule can move to another commit without an event in this tree
     dirty.extend(gitlinks.iter().map(|g| g.to_vec()));
-    dirty.sort();
+    dirty.sort_unstable();
     dirty.dedup();
     let mut kept: Vec<Vec<u8>> = Vec::new();
     for path in dirty {
@@ -72,15 +77,52 @@ pub(super) fn dirty_paths(paths: Vec<Vec<u8>>, snapshot: &Snapshot) -> Vec<Vec<u
 
 /// A directory with nothing tracked in it is reported as one path, which
 /// stands or falls with any file beneath it: a change in there is looked
-/// at from the outermost such directory.
-fn outermost_untracked(path: Vec<u8>, snapshot: &Snapshot) -> Vec<u8> {
-    let slashes = path.iter().enumerate().filter(|(_, b)| **b == b'/');
-    for (at, _) in slashes {
-        if !tracked_in(snapshot, &path[..at]) {
-            return path[..at].to_vec();
+/// at from the outermost such directory. Asked for one path after the
+/// other, this looks a directory up in the index once for all the paths
+/// that follow one another in it.
+pub(super) struct Lifted<'a> {
+    snapshot: &'a Snapshot,
+    /// the path last looked up
+    last: Vec<u8>,
+    /// how much of it is the outermost directory with nothing tracked in
+    /// it; every directory above has something
+    cut: Option<usize>,
+}
+
+impl<'a> Lifted<'a> {
+    pub(super) fn new(snapshot: &'a Snapshot) -> Lifted<'a> {
+        Lifted {
+            snapshot,
+            last: Vec::new(),
+            cut: None,
         }
     }
-    path
+
+    /// `path`, or the outermost directory above it with nothing tracked
+    /// in it.
+    pub(super) fn of(&mut self, path: Vec<u8>) -> Vec<u8> {
+        let same = self.last.iter().zip(&path).take_while(|(a, b)| a == b);
+        let same = same.count();
+        if let Some(cut) = self.cut.filter(|&cut| cut < same) {
+            return path[..cut].to_vec();
+        }
+        // the directories both paths lie in are known to have something
+        let cut = (same..path.len())
+            .filter(|&at| path[at] == b'/')
+            .find(|&at| !tracked_in(self.snapshot, &path[..at]));
+        let lifted = match cut {
+            Some(cut) => path[..cut].to_vec(),
+            None => path.clone(),
+        };
+        self.last = path;
+        self.cut = cut;
+        lifted
+    }
+}
+
+#[cfg(test)]
+fn outermost_untracked(path: Vec<u8>, snapshot: &Snapshot) -> Vec<u8> {
+    Lifted::new(snapshot).of(path)
 }
 
 /// The first entry of the snapshot whose path `before` does not hold for.
@@ -97,13 +139,13 @@ fn partition(snapshot: &Snapshot, before: impl Fn(&[u8]) -> bool) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use alt_git_codec::HashAlgo;
     use alt_git_index::Index;
 
     /// A snapshot of an index with a file at each of `paths`.
-    fn tracking(paths: &[&str]) -> Snapshot {
+    pub(in crate::watch) fn tracking(paths: &[&str]) -> Snapshot {
         let entry = |path: &&str| alt_git_index::IndexEntry {
             ctime: (0, 0),
             mtime: (0, 0),
@@ -185,5 +227,33 @@ mod tests {
         assert_eq!(lifted("sr/x"), "sr");
         assert_eq!(lifted("src.rs/x"), "src.rs");
         assert_eq!(lifted("src-/x"), "src-");
+        // one after the other, in any order, each as it is by itself
+        let paths = [
+            "a/b/c.txt",
+            "a/b/x/y",
+            "a/b/x/z/w",
+            "a/b/y",
+            "a/new/deep/file",
+            "a/new/other",
+            "a/n",
+            "a.txt/x/y",
+            "a0/x",
+            "new/deep/er/file",
+            "new/deep/file",
+            "new",
+            "sr/x",
+            "src/new",
+            "src/new/x",
+            "src.rs/x",
+            "top.txt",
+            "a/b/x",
+            "a/b",
+            "a",
+        ];
+        let mut one_after_the_other = Lifted::new(&snapshot);
+        for path in paths.iter().chain(paths.iter().rev()) {
+            let got = one_after_the_other.of(path.as_bytes().to_vec());
+            assert_eq!(String::from_utf8(got).unwrap(), lifted(path), "{path}");
+        }
     }
 }

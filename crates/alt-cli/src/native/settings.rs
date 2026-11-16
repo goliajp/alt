@@ -4,10 +4,11 @@ use super::*;
 
 /// The files outside the working tree that a scan of it goes by.
 pub(super) struct ScanInputs {
-    /// those that decide how a file compares, there or not; which they
-    /// are also depends on the branch, since an `includeIf` of the
-    /// configuration may ask for it
+    /// those that decide how a file compares, there or not
     pub(super) files: Vec<PathBuf>,
+    /// the branch, where an `includeIf` of the configuration asks for
+    /// it: the same files then make other settings on another branch
+    pub(super) branch: Vec<u8>,
     /// the ignore files, a later one above an earlier
     pub(super) excludes: Vec<PathBuf>,
 }
@@ -18,8 +19,17 @@ impl NativeRepo<'_> {
         let (global, info) = self.attribute_files(&settings)?;
         files.extend(global);
         files.push(info);
+        let by_branch = settings.entries.iter().any(|e| {
+            let asks = |cond: &BString| cond.starts_with(b"onbranch:");
+            e.section == "includeif" && e.subsection.as_ref().is_some_and(asks)
+        });
+        let branch = match by_branch {
+            true => self.head_branch()?.into_bytes(),
+            false => Vec::new(),
+        };
         Ok(ScanInputs {
             files,
+            branch,
             excludes: self.exclude_files(&settings)?,
         })
     }

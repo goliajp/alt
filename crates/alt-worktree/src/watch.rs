@@ -6,20 +6,19 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::clock::Clock;
 use crate::delta::{Delta, ScanOptions};
 use crate::snapshot::{FileStat, Snapshot};
 use crate::untracked::Untracked;
+use held::{Cached, merged, replace_within, stats, sure};
 use paths::{beneath, dirty_paths, tracked};
 
 mod dirs;
+mod held;
 mod mounts;
+mod moved;
 #[path = "watch/linux.rs"]
 mod os;
 mod paths;
-
-/// More changed paths than this are answered by a full scan.
-const MANY_PATHS: usize = 256;
 
 /// What happened in the tree since the watcher was last asked.
 pub(crate) enum Changes {
@@ -40,16 +39,6 @@ pub fn watch_allowance() -> io::Result<usize> {
     Ok(all / 2)
 }
 
-struct Cached {
-    index_id: Vec<u8>,
-    /// the files outside the tree that decide what a scan answers, as
-    /// they were; `None` when one of them can change and look the same
-    outside: Option<Vec<Option<FileStat>>>,
-    /// what else decides it, as the caller put it
-    context: Vec<u8>,
-    delta: Delta,
-}
-
 pub struct Watched {
     watcher: os::Watcher,
     /// the index the watcher last chose its directories by
@@ -67,6 +56,8 @@ pub struct Watched {
     failed: bool,
     /// watching ended for want of watches
     full: bool,
+    /// how often the whole tree was scanned
+    whole: usize,
 }
 
 impl Watched {
@@ -99,6 +90,7 @@ impl Watched {
             absorbed: None,
             failed: false,
             full: false,
+            whole: 0,
         })
     }
 
@@ -121,6 +113,32 @@ impl Watched {
     /// and again each time events were lost.
     pub fn set_up(&self) -> usize {
         self.watcher.set_up
+    }
+
+    /// How often a scan looked at the whole tree.
+    pub fn scanned_whole(&self) -> usize {
+        self.whole
+    }
+
+    /// For a process that put the index of `next` where that of `prior`
+    /// stood: what is held as the answer for the one is held for the
+    /// other, and the paths whose entries differ are looked at by the
+    /// next scan. Without this, that scan looks at the whole tree.
+    pub fn index_replaced(&mut self, prior: &Snapshot, next: &Snapshot) {
+        let Some(cached) = &mut self.cached else {
+            return;
+        };
+        if cached.index_id != prior.index_id {
+            return;
+        }
+        cached.index_id.clone_from(&next.index_id);
+        let differing = Changes::Paths(moved::between(prior, next));
+        self.absorbed = Some(merged(self.absorbed.take(), differing));
+    }
+
+    /// Drops the answer held: the next scan looks at the whole tree.
+    pub fn forget(&mut self) {
+        self.cached = None;
     }
 
     /// Takes the events queued so far off the queue, to be answered for by
@@ -217,18 +235,20 @@ impl Watched {
                 if cached.index_id == snapshot.index_id
                     && cached.outside.as_ref() == Some(&outside)
                     && cached.context == context
-                    && dirty.len() <= MANY_PATHS
                     && dirty.iter().all(|p| !p.is_empty()) =>
             {
                 let mut delta = cached.delta;
                 if !dirty.is_empty() {
                     let within: Vec<&[u8]> = dirty.iter().map(Vec::as_slice).collect();
                     let fresh = crate::scan(root, snapshot, &whole(&within)).ok()?;
-                    delta.replace_within(&within, fresh);
+                    replace_within(&mut delta, &within, fresh);
                 }
                 delta
             }
-            _ => crate::scan(root, snapshot, &whole(&[])).ok()?,
+            _ => {
+                self.whole += 1;
+                crate::scan(root, snapshot, &whole(&[])).ok()?
+            }
         };
         Some(self.keep(snapshot, opts, outside, context, delta))
     }
@@ -267,6 +287,7 @@ impl Watched {
         outside: Vec<Option<FileStat>>,
         context: &[u8],
     ) -> Option<Delta> {
+        self.whole += 1;
         let (delta, seen) = crate::delta::scan_seeing(root, snapshot, whole).ok()?;
         let fresh = self.watcher.fill(seen, &|dir| tracked(snapshot, dir));
         let fresh = self.noting(fresh)?;
@@ -275,37 +296,4 @@ impl Watched {
         }
         Some(self.keep(snapshot, opts, outside, context, delta))
     }
-}
-
-/// What `earlier` and `later` tell together; more paths than a scan of
-/// them is worth stand for the whole tree.
-fn merged(earlier: Option<Changes>, later: Changes) -> Changes {
-    match (earlier, later) {
-        (None, later) => later,
-        // watched anew since: nothing is left to make up for
-        (_, Changes::All) => Changes::All,
-        (Some(Changes::Unknown), _) | (_, Changes::Unknown) => Changes::Unknown,
-        (Some(Changes::Paths(mut paths)), Changes::Paths(more)) => {
-            paths.extend(more);
-            match paths.len() > 4 * MANY_PATHS {
-                true => Changes::All,
-                false => Changes::Paths(paths),
-            }
-        }
-        _ => Changes::All,
-    }
-}
-
-/// What each of the files looks like now; `None` for one that is not there.
-fn stats(files: &[&Path]) -> Vec<Option<FileStat>> {
-    let stat = |path: &&Path| std::fs::metadata(path).ok().map(|m| FileStat::of(&m));
-    files.iter().map(stat).collect()
-}
-
-/// `stats` as something to tell a later change by: `None` when one of the
-/// files was written in the tick `clock` was read in or after it, since
-/// it can be written again in that tick and look the same.
-fn sure(stats: Vec<Option<FileStat>>, clock: &Clock) -> Option<Vec<Option<FileStat>>> {
-    let settled = stats.iter().flatten().all(|stat| clock.settled(stat));
-    settled.then_some(stats)
 }
