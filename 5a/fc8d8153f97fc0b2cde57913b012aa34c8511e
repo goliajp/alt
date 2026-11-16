@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: perf
+summary: read the read-past-damage switch from the environment without a static
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/past_damage.rs
+touched: crates/alt-oplog/src/settle.rs
+touched: crates/alt-store/src/past.rs
