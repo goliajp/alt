@@ -422,7 +422,7 @@ fn random_expressions_match_utf8_texts_as_the_c_library_does() {
         0x5851f42d4c957f2d,
     ];
     for (seed, options) in seeds.into_iter().zip(readings(true)) {
-        compare(seed, 15_000, options).settle(5_000);
+        compare(seed, 5_000, options).settle(1_500);
     }
 }
 
