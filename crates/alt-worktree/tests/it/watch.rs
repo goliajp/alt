@@ -16,7 +16,7 @@ struct Tree {
     watched: Watched,
 }
 
-fn options(untracked: Untracked, root: &Path) -> ScanOptions<'static> {
+pub(crate) fn options(untracked: Untracked, root: &Path) -> ScanOptions<'static> {
     ScanOptions {
         untracked,
         within: &[],
@@ -28,6 +28,19 @@ fn options(untracked: Untracked, root: &Path) -> ScanOptions<'static> {
     }
 }
 
+/// Starts watching as a command would that began just now.
+pub(crate) fn start(root: &Path, most: usize, snapshot: &Snapshot) -> std::io::Result<Watched> {
+    let opts = ScanOptions {
+        untracked: Untracked::Normal,
+        within: &[],
+        clean: None,
+        head: None,
+        // read off the tree itself, before anything in it is watched
+        clock: Clock::read(root).unwrap(),
+    };
+    Watched::start(root, most, snapshot, &opts)
+}
+
 impl Tree {
     fn new(fill: impl Fn(&Path)) -> Tree {
         let dir = alt_os::temp::tempdir().unwrap();
@@ -35,7 +48,7 @@ impl Tree {
         let index = index_of(dir.path());
         let snapshot = Snapshot::of_index(&index, b"one", ALGO, None);
         std::fs::create_dir(dir.path().join(".alt")).unwrap();
-        let watched = Watched::start(dir.path(), usize::MAX, &snapshot).unwrap();
+        let watched = start(dir.path(), usize::MAX, &snapshot).unwrap();
         let mut tree = Tree {
             dir,
             snapshot,
@@ -228,10 +241,10 @@ fn a_tree_with_more_directories_than_there_are_watches_is_not_watched() {
     fixture(dir.path());
     let snapshot = Snapshot::of_index(&index_of(dir.path()), b"one", ALGO, None);
     for most in [0, 1, 5] {
-        let refused = Watched::start(dir.path(), most, &snapshot).err().unwrap();
+        let refused = start(dir.path(), most, &snapshot).err().unwrap();
         assert_eq!(refused.raw_os_error(), Some(ENOSPC), "{most} watches");
     }
-    assert!(Watched::start(dir.path(), 6, &snapshot).is_ok());
+    assert!(start(dir.path(), 6, &snapshot).is_ok());
 }
 
 #[test]
@@ -241,7 +254,7 @@ fn a_watched_tree_that_outgrows_its_watches_says_so_and_loses_nothing() {
     fixture(root);
     let mut snapshot = Snapshot::of_index(&index_of(root), b"one", ALGO, None);
     std::fs::create_dir(root.join(".alt")).unwrap();
-    let mut watched = Watched::start(root, 6, &snapshot).unwrap();
+    let mut watched = start(root, 6, &snapshot).unwrap();
     let opts = options(Untracked::Normal, root);
     let first = watched.scan(root, &mut snapshot, &opts, &[], b"");
     assert_eq!(first, Some(Delta::default()));
@@ -297,7 +310,7 @@ fn a_root_named_through_a_link_follows_the_link_to_another_directory() {
     let link = dir.path().join("link");
     std::os::unix::fs::symlink(&one, &link).unwrap();
     let mut snapshot = Snapshot::of_index(&index_of(&one), b"one", ALGO, None);
-    let mut watched = Watched::start(&link, usize::MAX, &snapshot).unwrap();
+    let mut watched = start(&link, usize::MAX, &snapshot).unwrap();
     for (round, real) in [&one, &two, &two].into_iter().enumerate() {
         std::fs::remove_file(&link).unwrap();
         std::os::unix::fs::symlink(real, &link).unwrap();
@@ -329,13 +342,13 @@ fn a_directory_an_ignore_rule_hides_takes_no_watches() {
     let all = Snapshot::of_index(&index_of(root), b"all", ALGO, None);
     write(root, ".gitignore", "/target/\n");
     let fixture_only = Snapshot::of_index(&index_of(root), b"some", ALGO, None);
-    let refused = Watched::start(root, 5, &fixture_only).err().unwrap();
+    let refused = start(root, 5, &fixture_only).err().unwrap();
     assert_eq!(refused.raw_os_error(), Some(ENOSPC));
-    assert!(Watched::start(root, 6, &fixture_only).is_ok());
+    assert!(start(root, 6, &fixture_only).is_ok());
     // with files of it in the index it is looked into, and watched
-    let refused = Watched::start(root, 9, &all).err().unwrap();
+    let refused = start(root, 9, &all).err().unwrap();
     assert_eq!(refused.raw_os_error(), Some(ENOSPC));
-    assert!(Watched::start(root, 10, &all).is_ok());
+    assert!(start(root, 10, &all).is_ok());
 }
 
 #[test]
@@ -353,7 +366,7 @@ fn a_hidden_directory_is_watched_once_a_rule_or_the_index_brings_it_back() {
     build_output(root);
     std::fs::create_dir(root.join(".alt")).unwrap();
     let snapshot = Snapshot::of_index(&fewer, b"one", ALGO, None);
-    let watched = Watched::start(root, usize::MAX, &snapshot).unwrap();
+    let watched = start(root, usize::MAX, &snapshot).unwrap();
     let mut tree = Tree {
         dir,
         snapshot,

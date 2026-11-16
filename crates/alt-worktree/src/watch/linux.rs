@@ -18,8 +18,7 @@ use alt_os::sys;
 
 use super::mounts::{self, Mounts};
 use super::{Changes, beneath};
-use crate::ignore::{self, IgnoreStack};
-use crate::snapshot::FileStat;
+use crate::ignore::IgnoreStack;
 
 const IN_MODIFY: u32 = 0x2;
 const IN_ATTRIB: u32 = 0x4;
@@ -59,9 +58,7 @@ pub(crate) struct Watcher {
     /// the device and inode of the root: a root named through a symbolic
     /// link comes to name another directory without an event
     ident: (u64, u64),
-    /// the user's ignore file as it was when its rules were read
-    excludes: Option<FileStat>,
-    /// the rules of that file
+    /// the rules of the user's ignore file
     pub(super) ignore: IgnoreStack,
     /// the directories left unwatched
     pub(super) skipped: BTreeSet<Vec<u8>>,
@@ -128,8 +125,7 @@ impl Watcher {
             dirs: HashMap::new(),
             most,
             ident: ident(root)?,
-            excludes: None,
-            ignore: IgnoreStack::new(),
+            ignore: IgnoreStack::with_global_excludes()?,
             skipped: BTreeSet::new(),
             mounts: Mounts::open()?,
             set_up: 0,
@@ -148,10 +144,14 @@ impl Watcher {
         if mounts::elsewhere(&self.root)? || self.mounts.beneath(&self.root)? {
             return Err(io::ErrorKind::Unsupported.into());
         }
-        // the stat first: a file replaced while it is read differs next time
-        self.excludes = ignore::global_excludes_stat();
-        self.ignore = IgnoreStack::with_global_excludes()?;
         self.add_tree(Vec::new(), tracked)
+    }
+
+    /// Watches the tree anew, by the user's ignore file as it is now.
+    pub(crate) fn start_over(&mut self, tracked: Tracked) -> io::Result<()> {
+        self.ignore = IgnoreStack::with_global_excludes()?;
+        self.queue = instance()?;
+        self.establish(tracked)
     }
 
     /// Takes in one event: `mask` on the watch `wd`, about `name` in its
@@ -214,8 +214,7 @@ impl Watcher {
     /// Everything queued so far. An error means the tree cannot be watched
     /// any longer.
     pub(crate) fn changes(&mut self, tracked: Tracked) -> io::Result<Changes> {
-        let replaced =
-            ident(&self.root)? != self.ident || ignore::global_excludes_stat() != self.excludes;
+        let replaced = ident(&self.root)? != self.ident;
         if self.mounts.changed()? && self.mounts.beneath(&self.root)? {
             return Err(io::ErrorKind::Unsupported.into());
         }

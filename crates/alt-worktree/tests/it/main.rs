@@ -8,3 +8,5 @@ mod status_interop;
 mod untracked;
 #[cfg(target_os = "linux")]
 mod watch;
+#[cfg(target_os = "linux")]
+mod watch_inputs;

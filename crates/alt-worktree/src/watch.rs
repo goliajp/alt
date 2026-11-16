@@ -6,6 +6,7 @@
 use std::io;
 use std::path::Path;
 
+use crate::clock::Clock;
 use crate::delta::{Delta, ScanOptions};
 use crate::snapshot::{FileStat, Snapshot};
 use crate::untracked::Untracked;
@@ -37,8 +38,8 @@ pub fn watch_allowance() -> io::Result<usize> {
 struct Cached {
     index_id: Vec<u8>,
     /// the files outside the tree that decide what a scan answers, as
-    /// they were
-    outside: Vec<Option<FileStat>>,
+    /// they were; `None` when one of them can change and look the same
+    outside: Option<Vec<Option<FileStat>>>,
     /// what else decides it, as the caller put it
     context: Vec<u8>,
     delta: Delta,
@@ -49,6 +50,9 @@ pub struct Watched {
     /// the index the watcher last chose its directories by
     index_id: Vec<u8>,
     cached: Option<Cached>,
+    /// the user's ignore file as it was when the watcher read its rules;
+    /// `None` when it can change and look the same
+    rules: Option<Vec<Option<FileStat>>>,
     /// what was taken off the queue between two scans
     absorbed: Option<Changes>,
     /// the queue could not be read: the tree is no longer watched
@@ -62,11 +66,20 @@ impl Watched {
     /// that the system has no watches left for. Fails as well for a tree
     /// that events do not tell everything about. The first scan sees the
     /// whole tree, and it runs after every directory is being watched.
-    pub fn start(root: &Path, most: usize, snapshot: &Snapshot) -> io::Result<Watched> {
+    /// `opts` are those of the scan that follows.
+    pub fn start(
+        root: &Path,
+        most: usize,
+        snapshot: &Snapshot,
+        opts: &ScanOptions<'_>,
+    ) -> io::Result<Watched> {
+        // the stat first: a file replaced while it is read differs next time
+        let rules = rule_stats();
         Ok(Watched {
             watcher: os::Watcher::start(root, most, &|dir| tracked(snapshot, dir))?,
             index_id: snapshot.index_id.clone(),
             cached: None,
+            rules: sure(rules, &opts.clock),
             absorbed: None,
             failed: false,
         })
@@ -91,9 +104,19 @@ impl Watched {
     }
 
     /// What happened in the tree since this was last asked, the watches
-    /// brought in line with the index of `snapshot` first.
-    fn changes(&mut self, snapshot: &Snapshot) -> Option<Changes> {
+    /// brought in line with the ignore rules and the index of `snapshot`
+    /// first.
+    fn changes(&mut self, snapshot: &Snapshot, clock: &Clock) -> Option<Changes> {
         let tracked = |dir: &[u8]| tracked(snapshot, dir);
+        let rules = rule_stats();
+        if self.rules.as_ref() != Some(&rules) {
+            // other rules hide other directories
+            self.watcher.start_over(&tracked).ok()?;
+            self.rules = sure(rules, clock);
+            self.index_id.clone_from(&snapshot.index_id);
+            self.absorbed = None;
+            return Some(Changes::All);
+        }
         if self.index_id != snapshot.index_id {
             self.watcher.revisit(&tracked).ok()?;
             self.index_id.clone_from(&snapshot.index_id);
@@ -122,7 +145,7 @@ impl Watched {
             return None;
         }
         // before anything is looked at: an event that comes later is seen next time
-        let changes = self.changes(snapshot)?;
+        let changes = self.changes(snapshot, &opts.clock)?;
         let outside = stats(settings);
         // taken out: a scan that fails leaves nothing to build on
         let cached = self.cached.take();
@@ -140,7 +163,7 @@ impl Watched {
         let delta = match (dirty, cached) {
             (Some(dirty), Some(cached))
                 if cached.index_id == snapshot.index_id
-                    && cached.outside == outside
+                    && cached.outside.as_ref() == Some(&outside)
                     && cached.context == context
                     && dirty.len() <= MANY_PATHS
                     && dirty.iter().all(|p| !p.is_empty()) =>
@@ -157,7 +180,7 @@ impl Watched {
         };
         self.cached = Some(Cached {
             index_id: snapshot.index_id.clone(),
-            outside,
+            outside: sure(outside, &opts.clock),
             context: context.to_vec(),
             delta: delta.clone(),
         });
@@ -203,6 +226,20 @@ fn merged(earlier: Option<Changes>, later: Changes) -> Changes {
 fn stats(files: &[&Path]) -> Vec<Option<FileStat>> {
     let stat = |path: &&Path| std::fs::metadata(path).ok().map(|m| FileStat::of(&m));
     files.iter().map(stat).collect()
+}
+
+/// [`stats`] of the files the watcher reads ignore rules from.
+fn rule_stats() -> Vec<Option<FileStat>> {
+    let file = crate::ignore::global_excludes_path();
+    stats(&file.iter().map(|f| f.as_path()).collect::<Vec<_>>())
+}
+
+/// `stats` as something to tell a later change by: `None` when one of the
+/// files was written in the tick `clock` was read in or after it, since
+/// it can be written again in that tick and look the same.
+fn sure(stats: Vec<Option<FileStat>>, clock: &Clock) -> Option<Vec<Option<FileStat>>> {
+    let settled = stats.iter().flatten().all(|stat| clock.settled(stat));
+    settled.then_some(stats)
 }
 
 fn beneath(path: &[u8], dir: &[u8]) -> bool {

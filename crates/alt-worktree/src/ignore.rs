@@ -127,17 +127,9 @@ impl IgnoreStack {
     }
 }
 
-/// What the user's global excludes file looks like now, to tell when it
-/// has changed; `None` when there is none.
-#[cfg(target_os = "linux")]
-pub(crate) fn global_excludes_stat() -> Option<crate::snapshot::FileStat> {
-    let meta = std::fs::metadata(global_excludes_path()?).ok()?;
-    Some(crate::snapshot::FileStat::of(&meta))
-}
-
 /// git's global excludes file when `core.excludesFile` is unset. An empty
 /// variable counts as unset, as it does for git.
-fn global_excludes_path() -> Option<std::path::PathBuf> {
+pub(crate) fn global_excludes_path() -> Option<std::path::PathBuf> {
     let set = |k| std::env::var_os(k).filter(|v| !v.is_empty());
     let config = set("XDG_CONFIG_HOME")
         .map(std::path::PathBuf::from)

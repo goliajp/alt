@@ -35,7 +35,7 @@ pub(super) fn watched_scan(
     trees.retain(|at, _| at == root || at.join(".alt").exists());
     let tree = trees.entry(root.to_path_buf()).or_insert_with(|| {
         let most = alt_worktree::watch_allowance().ok()?;
-        alt_worktree::Watched::start(root, most, snapshot).ok()
+        alt_worktree::Watched::start(root, most, snapshot, options).ok()
     });
     let Some(watched) = tree else {
         return Ok(None);
