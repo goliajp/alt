@@ -66,6 +66,8 @@ pub(crate) struct Watcher {
     /// the directories left unwatched
     pub(super) skipped: BTreeSet<Vec<u8>>,
     mounts: Mounts,
+    /// how often the watches were set up from the root
+    pub(super) set_up: usize,
 }
 
 /// What the events read off the queue tell.
@@ -130,6 +132,7 @@ impl Watcher {
             ignore: IgnoreStack::new(),
             skipped: BTreeSet::new(),
             mounts: Mounts::open()?,
+            set_up: 0,
         };
         watcher.establish(tracked)?;
         Ok(watcher)
@@ -138,6 +141,7 @@ impl Watcher {
     /// Watches the tree from its root, on a queue with no watches yet.
     /// Fails for a tree that events do not tell everything about.
     fn establish(&mut self, tracked: Tracked) -> io::Result<()> {
+        self.set_up += 1;
         self.dirs.clear();
         self.skipped.clear();
         self.ident = ident(&self.root)?;

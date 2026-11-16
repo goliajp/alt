@@ -47,6 +47,25 @@ pub(super) fn watched_scan(
     Ok(delta)
 }
 
+/// Called for every file a command writes to the tree at `root`: now and
+/// then the events of a watched tree are taken off their queue, which
+/// holds fewer than a checkout of many files causes.
+#[cfg(target_os = "linux")]
+pub(in crate::native) fn wrote_file(root: &Path) {
+    static WRITTEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let written = WRITTEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if !written.is_multiple_of(256) || !super::HELD.started() {
+        return;
+    }
+    let mut guard = WATCHED.lock().unwrap();
+    if let Some(Some(watched)) = guard.as_mut().and_then(|trees| trees.get_mut(root)) {
+        watched.absorb();
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(in crate::native) fn wrote_file(_: &Path) {}
+
 #[cfg(not(target_os = "linux"))]
 pub(super) fn watched_scan(
     _: &Path,

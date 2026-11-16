@@ -405,3 +405,53 @@ fn attributes_and_settings_that_change_how_a_file_compares_reach_the_daemon() {
         std::fs::remove_file(&config).unwrap();
     }
 }
+
+/// The descriptors of the inotify instances the daemon holds.
+#[cfg(target_os = "linux")]
+fn instances(pid: i32) -> Vec<String> {
+    let mut held: Vec<String> = std::fs::read_dir(format!("/proc/{pid}/fd"))
+        .unwrap()
+        .map(|fd| fd.unwrap())
+        .filter(|fd| {
+            std::fs::read_link(fd.path()).is_ok_and(|to| to.to_string_lossy().contains("inotify"))
+        })
+        .map(|fd| fd.file_name().to_string_lossy().into_owned())
+        .collect();
+    held.sort();
+    held
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_switch_of_more_files_than_the_queue_holds_events_for_loses_none() {
+    let (dir, stop) = served();
+    let root = dir.path();
+    // the directories are there, and watched, on either branch
+    for d in 0..30 {
+        write(root, &format!("many/d{d}/kept.txt"), "kept\n");
+    }
+    run(root, &["add", "."], false);
+    run(root, &["commit", "-m", "directories"], false);
+    run(root, &["switch", "-c", "many"], true);
+    for f in 0..6000 {
+        write(root, &format!("many/d{}/f{f}.txt", f % 30), "x\n");
+    }
+    run(root, &["add", "."], false);
+    run(root, &["commit", "-m", "many"], false);
+    assert!(agree(root, "committed").contains("nothing to commit"));
+    let held = instances(stop.0);
+    assert_eq!(held.len(), 1);
+    for round in 0..2 {
+        run(root, &["switch", "main"], true);
+        assert!(!root.join("many/d7/f7.txt").exists());
+        assert!(agree(root, "without them").contains("nothing to commit"));
+        run(root, &["switch", "many"], true);
+        write(root, "many/d7/f7.txt", &format!("changed {round}\n"));
+        assert!(agree(root, "with them").contains("modified:   many/d7/f7.txt"));
+        write(root, "many/d7/f7.txt", "x\n");
+        assert!(agree(root, "restored").contains("nothing to commit"));
+    }
+    // a queue that ran over would have been replaced by another
+    assert_eq!(instances(stop.0), held);
+    assert_eq!(daemon_pid(root), stop.0);
+}

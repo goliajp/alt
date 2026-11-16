@@ -189,6 +189,7 @@ impl NativeRepo<'_> {
     }
 
     fn apply_file_state(&self, path: &BString, state: &Option<FileState>) -> Res<()> {
+        super::tree_state::wrote_file(&self.root);
         let abs = self.abs(path)?;
         match state {
             None => {

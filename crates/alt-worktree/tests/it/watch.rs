@@ -409,3 +409,26 @@ fn a_hidden_directory_that_is_renamed_or_made_again_is_followed() {
     );
     assert_eq!(tree.untracked(), ["src/build"]);
 }
+
+#[test]
+fn events_taken_off_the_queue_now_and_then_never_run_it_over() {
+    let mut tree = Tree::new(fixture);
+    // in directories that are watched, more than the queue holds
+    for f in 0..9000 {
+        let dir = ["src", "docs", "a"][f % 3];
+        write(tree.root(), &format!("{dir}/f{f}.txt"), "x\n");
+        if f % 500 == 0 {
+            tree.watched.absorb();
+        }
+    }
+    write(tree.root(), "a.txt", "changed among them\n");
+    let delta = tree.check();
+    assert_eq!(delta.changed.len(), 1);
+    assert_eq!(delta.untracked.len(), 9000);
+    assert_eq!(tree.watched.set_up(), 1, "no event was lost");
+    // what is absorbed without a scan in between is not forgotten
+    write(tree.root(), "src/lib.rs", "absorbed\n");
+    tree.watched.absorb();
+    tree.watched.absorb();
+    assert_eq!(tree.check().changed.len(), 2);
+}

@@ -47,6 +47,10 @@ pub struct Watched {
     /// the index the watcher last chose its directories by
     index_id: Vec<u8>,
     cached: Option<Cached>,
+    /// what was taken off the queue between two scans
+    absorbed: Option<Changes>,
+    /// the queue could not be read: the tree is no longer watched
+    failed: bool,
 }
 
 impl Watched {
@@ -61,7 +65,27 @@ impl Watched {
             watcher: os::Watcher::start(root, most, &|dir| tracked(snapshot, dir))?,
             index_id: snapshot.index_id.clone(),
             cached: None,
+            absorbed: None,
+            failed: false,
         })
+    }
+
+    /// How often the watches were set up from the root: once at the start,
+    /// and again each time events were lost.
+    pub fn set_up(&self) -> usize {
+        self.watcher.set_up
+    }
+
+    /// Takes the events queued so far off the queue, to be answered for by
+    /// the next scan. For a process that writes many files to the tree
+    /// itself, more than the queue holds: called every so often while it
+    /// does, it keeps the queue from running over.
+    pub fn absorb(&mut self) {
+        // the index is being replaced: every new directory is watched
+        match self.watcher.changes(&|_| true) {
+            Ok(more) => self.absorbed = Some(merged(self.absorbed.take(), more)),
+            Err(_) => self.failed = true,
+        }
     }
 
     /// What happened in the tree since this was last asked, the watches
@@ -72,7 +96,8 @@ impl Watched {
             self.watcher.revisit(&tracked).ok()?;
             self.index_id.clone_from(&snapshot.index_id);
         }
-        self.watcher.changes(&tracked).ok()
+        let fresh = self.watcher.changes(&tracked).ok()?;
+        Some(merged(self.absorbed.take(), fresh))
     }
 
     /// What [`scan`](crate::scan) of the whole tree returns for `opts`,
@@ -90,6 +115,9 @@ impl Watched {
         opts: &ScanOptions<'_>,
         settings: &[&Path],
     ) -> Option<Delta> {
+        if self.failed {
+            return None;
+        }
         // before anything is looked at: an event that comes later is seen next time
         let changes = self.changes(snapshot)?;
         let outside = stats(settings);
@@ -148,6 +176,22 @@ fn tracked_in(snapshot: &Snapshot, dir: &[u8]) -> bool {
 /// Whether the index has an entry beneath `dir` or at it, as a submodule is.
 fn tracked(snapshot: &Snapshot, dir: &[u8]) -> bool {
     tracked_in(snapshot, dir) || snapshot.find(dir).is_some()
+}
+
+/// What `earlier` and `later` tell together; more paths than a scan of
+/// them is worth stand for the whole tree.
+fn merged(earlier: Option<Changes>, later: Changes) -> Changes {
+    match (earlier, later) {
+        (None, later) => later,
+        (Some(Changes::Paths(mut paths)), Changes::Paths(more)) => {
+            paths.extend(more);
+            match paths.len() > 4 * MANY_PATHS {
+                true => Changes::All,
+                false => Changes::Paths(paths),
+            }
+        }
+        _ => Changes::All,
+    }
 }
 
 /// What each of the files looks like now; `None` for one that is not there.

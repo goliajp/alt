@@ -12,6 +12,7 @@ use super::*;
 
 mod held;
 mod watching;
+pub(super) use watching::wrote_file;
 
 use held::HELD;
 pub use held::hold_snapshots;
