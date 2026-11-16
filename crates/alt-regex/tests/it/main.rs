@@ -1,7 +1,9 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
+mod differences;
 mod hostile;
+mod ideal;
 mod limits;
 mod pathological;
 #[cfg(all(target_os = "linux", target_env = "gnu"))]

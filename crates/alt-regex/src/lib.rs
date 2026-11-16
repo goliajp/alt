@@ -23,9 +23,67 @@
 //! is ignored by reading pattern and text in upper case. The classes and
 //! the upper-case forms are those of Unicode 16.0.0. That locale orders
 //! no character outside ASCII, so a range that ends in one is refused.
-//! Its characters go on past Unicode, to forms of six bytes. A byte
-//! that begins no character matches only the same byte written in the
-//! pattern; no `.`, class or bracket expression takes it.
+//! Its characters go on past Unicode, to forms of six bytes.
+//!
+//! A text need not be UTF-8 throughout. A byte of the text that is part
+//! of no character is matched by the same byte written in the pattern,
+//! where that byte is part of no character either, and by nothing else:
+//! not by `.`, a class or a negated bracket expression. Beside the edge
+//! of a word it counts as the character of its value. Written in a
+//! bracket expression such a byte is no member, and as the end of a
+//! range it stands for the character of its value. A pattern of nothing
+//! but characters, `.`, anchors, groups, repetitions and bracket
+//! expressions that list characters of ASCII one by one, read with
+//! regard to case, is matched byte by byte, as the C library matches
+//! it: there `.` takes whatever is shaped like a character, and a match
+//! may begin inside one.
+//!
+//! # Where the GNU C library answers otherwise
+//!
+//! In these cases the C library goes against the meaning of its own
+//! operators or reports what no match has, and this crate does not
+//! follow it. Each is given with a pattern and a text; the tests hold
+//! both sides to what is said here.
+//!
+//! - An anchor or the edge of a word inside or behind something
+//!   repeated or left out. `a*\B` on `xa`: the C library gives the empty
+//!   match at 2, where a word ends; here it is at 1. `(\ba){2,}` matches
+//!   `aaa` there and nothing here; `(^a?){1,2}` matches `a` here and
+//!   nothing there.
+//! - The groups inside a repetition without bound of what may match
+//!   nothing. `(b{0,1}|[ab]{0,1})*a?` on `bbaxaa`: the last turn of the
+//!   group is the third byte here, the second there, though both find
+//!   the same whole match. For some such patterns the C library never
+//!   answers.
+//! - A group that is repeated, may match nothing and is referred back
+//!   to. `(a*)*\1` on `aaa`: the C library reports a group that ends
+//!   before it begins; here it is the empty one at 3.
+//! - Without regard to case, a text with a character whose upper-case
+//!   form has fewer bytes (the dotless i, the long s) and, later, a
+//!   byte that is no character. `x` on the long s, `x` and the byte
+//!   `f0`: no match there, the `x` here.
+//! - A byte of the pattern that is part of no character, met in the
+//!   text where a character begins with it. `\xf0[^a]` on a character
+//!   of four bytes that begins with `f0`: the C library lets the bracket
+//!   expression take the rest of that character; here nothing takes
+//!   part of a character, and there is no match.
+//! - Such a byte in the pattern, and the groups: `(.*).\xc3+` on `a`
+//!   and the two bytes `c3 9f`. The C library reports a group with a
+//!   start and no end; here it is the empty one at 0.
+//! - `.*` before a byte that goes on a character: `.*\xa9` on the two
+//!   bytes `c3 a9` matches the second byte here, as `.?\xa9` does in
+//!   both, and nothing there.
+//!
+//! What is bounded here and not there: a pattern of more than 262144
+//! bytes, of more than 32767 groups, with groups and repetitions nested
+//! more than 200 deep, or that comes to more than 400000 instructions
+//! is refused with [`Error::TooBig`], and a search with back-references
+//! that takes more than some four million steps reports no match.
+//!
+//! The classes, the upper-case forms and the order of characters are
+//! those of the one locale named above, whatever locale the process is
+//! in: the Turkish pairing of the dotted and dotless i, or an order of
+//! letters that makes `[a-é]` a range, is not to be had.
 
 mod analysis;
 mod backref;
@@ -39,14 +97,13 @@ mod error;
 mod literal;
 mod pike;
 mod program;
+mod search;
 mod syntax;
 mod tables;
 mod utf8;
 
 use std::ops::Range;
 use std::sync::Mutex;
-
-use alt_bytes::ByteSlice;
 
 pub use class::ByteSet;
 pub use error::Error;
@@ -169,12 +226,6 @@ impl Regex {
         self.prog.groups as usize
     }
 
-    fn excluded(&self, text: &[u8]) -> bool {
-        self.literal
-            .as_ref()
-            .is_some_and(|literal| text.find(literal).is_none())
-    }
-
     fn shared(&self) -> std::sync::MutexGuard<'_, Cache> {
         self.cache.lock().expect("a search does not panic")
     }
@@ -187,98 +238,6 @@ impl Regex {
     /// As [`Regex::is_match`], with the caller's storage.
     pub fn is_match_with(&self, cache: &mut Cache, text: &[u8]) -> bool {
         !self.excluded(text) && self.decide(cache, text)
-    }
-
-    fn decide(&self, cache: &mut Cache, text: &[u8]) -> bool {
-        if text.is_empty() {
-            return self.on_empty.is_some();
-        }
-        if self.prog.backrefs {
-            return backref::search(&self.prog, text, None, &mut [pike::UNSET; 2]);
-        }
-        if self.prog.plain_looks {
-            return dfa::earliest_end(&self.prog, &mut cache.scan, text).is_some();
-        }
-        pike::search(
-            &self.prog,
-            &mut cache.pike,
-            text,
-            None,
-            &mut [pike::UNSET; 2],
-        )
-    }
-
-    /// Where the earliest match begins and where the longest one from
-    /// there ends, as far as the tables could tell; `None` when there is
-    /// no match. The text is one the tables can search.
-    fn locate(&self, cache: &mut Cache, text: &[u8]) -> Option<(Option<usize>, Option<usize>)> {
-        // trying each start costs what the text is long in the usual
-        // case; a pattern for which it costs more is left to the slower,
-        // steady search
-        let mut work = 8 * text.len() + 64;
-        if self.prog.anchored {
-            let end = dfa::longest(&self.prog, &mut cache.fixed, text, 0, &mut work)?;
-            return Some((Some(0), Some(end)));
-        }
-        // a match ends by here, so the earliest one begins by here
-        let ends = dfa::earliest_end(&self.prog, &mut cache.scan, text)?;
-        for from in 0..=ends {
-            if let Some(end) = dfa::longest(&self.prog, &mut cache.fixed, text, from, &mut work) {
-                return Some((Some(from), Some(end)));
-            }
-            if work == 0 {
-                break;
-            }
-        }
-        Some((None, None))
-    }
-
-    /// Fills `slots` with the capture slots of the earliest, longest
-    /// match; false when there is none.
-    fn search(&self, cache: &mut Cache, text: &[u8], slots: &mut [usize]) -> bool {
-        if self.prog.backrefs {
-            return !self.excluded(text) && backref::search(&self.prog, text, None, slots);
-        }
-        if text.is_empty() {
-            let Some(known) = &self.on_empty else {
-                return false;
-            };
-            if slots.len() <= FEW {
-                slots.copy_from_slice(&known[..slots.len()]);
-                return true;
-            }
-            return backtrack::captures(&self.prog, &mut cache.backtrack, text, 0, 0, slots);
-        }
-        if self.excluded(text) {
-            return false;
-        }
-        let mut from = None;
-        if self.prog.plain_looks {
-            // most texts match nothing, which the tables tell fastest;
-            // and where a match lies, which leaves only its groups
-            let Some((begins, ends)) = self.locate(cache, text) else {
-                return false;
-            };
-            if let (Some(begins), Some(ends)) = (begins, ends) {
-                if slots.len() == 2 {
-                    slots.copy_from_slice(&[begins, ends]);
-                    return true;
-                }
-                if backtrack::fits(&self.prog, ends - begins) {
-                    let prog = &self.prog;
-                    return backtrack::captures(
-                        prog,
-                        &mut cache.backtrack,
-                        text,
-                        begins,
-                        ends,
-                        slots,
-                    );
-                }
-            }
-            from = begins;
-        }
-        pike::search(&self.prog, &mut cache.pike, text, from, slots)
     }
 
     /// The earliest match in `text`, and of those the longest.

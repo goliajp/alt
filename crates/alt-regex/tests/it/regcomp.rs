@@ -343,3 +343,30 @@ fn groups_lie_where_the_c_library_puts_them() {
     }
     assert!(differ.is_empty(), "{}", differ.join("\n"));
 }
+
+/// The list of differences in the documentation stays true of the C
+/// library at hand: a case it has come to answer as this crate does is
+/// no difference any more.
+#[test]
+fn the_c_library_answers_otherwise_where_the_documentation_says_so() {
+    for (ignore_case, utf8, pattern, text, _) in crate::differences::CASES {
+        let options = Options {
+            ignore_case,
+            utf8,
+            ..Options::default()
+        };
+        // on a thread of its own, which alone is put in the locale
+        let theirs = std::thread::spawn(move || {
+            if utf8 {
+                in_utf8_locale();
+            }
+            Theirs::new(pattern, options).spans(text)
+        });
+        let theirs = theirs.join().unwrap();
+        let ours = crate::differences::ours(ignore_case, utf8, pattern, text);
+        let theirs =
+            theirs.map(|spans| spans[..=ours.as_ref().map_or(0, |ours| ours.len() - 1)].to_vec());
+        let shown = format!("{} on {}", pattern.escape_ascii(), text.escape_ascii());
+        assert_ne!(ours, theirs, "{shown}");
+    }
+}
