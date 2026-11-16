@@ -1,0 +1,17 @@
+schema: alt-meta/1
+type: fix
+summary: bring the recorded file lengths down before a log is cut back
+author-type: human
+author: doracawl
+touched: crates/alt-odb/src/odb/open.rs
+touched: crates/alt-odb/src/synced.rs
+touched: crates/alt-odb/tests/it/synced_writers.rs
+touched: crates/alt-oplog/src/lib.rs
+touched: crates/alt-oplog/src/read.rs
+touched: crates/alt-oplog/src/synced.rs
+touched: crates/alt-oplog/tests/it/synced_writers.rs
+touched: crates/alt-store/src/lib.rs
+touched: crates/alt-store/src/packs.rs
+touched: crates/alt-store/src/reclog.rs
+touched: crates/alt-store/src/reclog/tail.rs
+touched: crates/alt-store/src/tail.rs
