@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: check every revert of a sequence before the first is made
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/path_gate.rs
+touched: crates/alt-cli/src/native/rebase.rs
+touched: crates/alt-cli/src/native/revert.rs
+touched: crates/alt-cli/tests/it/replay_refused.rs
