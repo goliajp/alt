@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: let a turn of an outer repetition enter the inner one again where a back-reference is searched
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/backref.rs
+touched: crates/alt-regex/src/lib.rs
