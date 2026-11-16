@@ -145,10 +145,20 @@ fn many_groups_are_compiled_and_searched_in_little_memory() {
 fn the_number_of_groups_and_the_length_of_a_pattern_are_bounded() {
     assert!(Regex::new(&b"()".repeat(32_767)).is_ok());
     assert_eq!(Regex::new(&b"()".repeat(32_768)).err(), Some(Error::TooBig));
-    // more groups than rows of capture slots may be kept for
+    // as many groups as there may be, each around something
+    let most = crate::most_held(|| {
+        let re = Regex::new(&b"(a)".repeat(32_767)).unwrap();
+        let text = [b'a'; 32_767];
+        let found = re.captures(&text).unwrap();
+        assert_eq!(found.get(32_767), Some(32_766..32_767));
+        assert_eq!(re.find(&text[1..]), None);
+    });
+    assert!(most < 32 << 20, "{most} bytes");
     let mut wide = b"(a)|".repeat(2_000);
     wide.push(b'b');
-    assert_eq!(Regex::new(&wide).err(), Some(Error::TooBig));
+    let re = Regex::new(&wide).unwrap();
+    assert_eq!(re.captures(b"xb").and_then(|c| c.get(0)), Some(1..2));
+    assert!(Regex::new(&b"(a|b)".repeat(20_000)).is_ok());
     assert!(Regex::new(&b"a".repeat(1 << 18)).is_ok());
     let long = within(Duration::from_secs(1), &b"a".repeat((1 << 18) + 1));
     assert_eq!(long.err(), Some(Error::TooBig));

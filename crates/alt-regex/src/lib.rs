@@ -79,9 +79,9 @@
 //!   bytes `c3 a9` matches the second byte here, as `.?\xa9` does in
 //!   both, and nothing there.
 //!
-//! What is bounded here and not there: a pattern of more than 262144
-//! bytes, of more than 32767 groups, with groups and repetitions nested
-//! more than 200 deep, that comes to more than 400000 instructions, or
+//! What is bounded here and not there, so that a pattern git takes may
+//! be refused here: a pattern of more than 262144 bytes, of more than
+//! 32767 groups, with groups and repetitions nested more than 200 deep, that comes to more than 400000 instructions, or
 //! whose tree and program together would hold more than 24 MiB is
 //! refused with [`Error::TooBig`]; no pattern holds more than some
 //! 32 MiB while it is compiled.

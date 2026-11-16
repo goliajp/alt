@@ -108,9 +108,6 @@ pub struct Program {
 pub const MAX_INSTS: usize = 400_000;
 /// More steps through the tree of the pattern than this is refused.
 const MAX_WORK: usize = 4 * MAX_INSTS;
-/// The most capture slots a pattern may come to: one row of all the
-/// slots for each instruction a path can wait at.
-const MAX_SLOTS: usize = 1 << 22;
 /// The bytes held beside each instruction: its join, how the match is
 /// reached from it, and the mark a search keeps of it.
 const BESIDE: usize = 9;
@@ -153,9 +150,6 @@ pub fn compile(node: &Node, groups: u32, options: Options, shape: Shape) -> Resu
     // the tables begin a match at any byte
     let plain_looks = plain_looks && !(shape.apart && shape.strays);
     let (row_count, left_behind) = counts(&c.insts);
-    if row_count as usize * 2 * (groups as usize + 1) > MAX_SLOTS {
-        return Err(Error::TooBig);
-    }
     let (classes, members) = classes(&c.insts, &c.sets);
     let exits: Vec<u32> = c.blocks.iter().map(|copied| copied.next).collect();
     let (joins, join_count) = joins(&c.insts, start, &exits);
