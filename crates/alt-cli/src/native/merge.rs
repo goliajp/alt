@@ -269,6 +269,8 @@ impl NativeRepo<'_> {
     /// bytes, then an index carrying stage-0 entries for clean paths and
     /// stage 1/2/3 entries for conflicted ones (so git tools see the merge).
     pub(super) fn write_conflicted(&mut self, resolved: &[Resolved]) -> Res<()> {
+        // the index written below names the blobs of the paths that merged
+        self.store.odb.flush_synced()?;
         // converted under the attribute files of the merge result, as a
         // checkout of it would be: those on disk are from before the merge
         let mut files: Vec<(&[u8], Vec<u8>)> = Vec::new();
@@ -350,8 +352,7 @@ impl NativeRepo<'_> {
                 extensions: Vec::new(),
             },
             self.store.algo()?,
-        )?;
-        Ok(())
+        )
     }
 }
 

@@ -368,7 +368,7 @@ impl NativeRepo<'_> {
         }
         let commit = ObjectId::hash_object(self.store.algo()?, ObjectKind::Commit, &bytes);
         self.store.odb.put(commit, ObjectKind::Commit, &bytes)?;
-        self.store.odb.flush()?;
+        self.store.odb.flush_synced()?;
         let note = self.meta_for(&message, tree, &[before_oid], &notes::MetaInput::default())?;
         let note_change = self.note_change(commit, &note)?;
         if note_change.old.as_ref().map(alt_delivery::render) != expected_notes {

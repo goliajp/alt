@@ -15,7 +15,7 @@ fn run(root: &Path, args: &[&str]) -> Output {
         .output()
         .unwrap()
 }
-fn ok(root: &Path, args: &[&str]) -> Output {
+pub(super) fn ok(root: &Path, args: &[&str]) -> Output {
     let output = run(root, args);
     assert!(
         output.status.success(),
@@ -27,16 +27,16 @@ fn ok(root: &Path, args: &[&str]) -> Output {
 fn value(root: &Path, args: &[&str]) -> Value {
     alt_json::from_slice(&ok(root, args).stdout).unwrap()
 }
-struct Fixture {
+pub(super) struct Fixture {
     _dir: alt_os::temp::TempDir,
     scratch: alt_os::temp::TempDir,
     main: PathBuf,
-    workspace: PathBuf,
-    task: String,
+    pub(super) workspace: PathBuf,
+    pub(super) task: String,
     candidate: String,
     profile: String,
 }
-fn fixture(script: &str) -> Fixture {
+pub(super) fn fixture(script: &str) -> Fixture {
     fixture_with_paths(script, &["source.txt"])
 }
 fn fixture_with_paths(script: &str, allowed_paths: &[&str]) -> Fixture {

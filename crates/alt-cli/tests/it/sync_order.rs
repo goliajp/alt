@@ -156,3 +156,71 @@ fn a_boundary_set_past_another_writers_op_syncs_its_objects_first() {
     direct.refs_mut().commit("direct", 0, &[change]).unwrap();
     assert_objects_recorded(&alt_dir, others_end);
 }
+
+/// A candidate record is a file of its own, written with its own fsync,
+/// and names the tree stored for it. A store whose fsyncs are left to a
+/// sink, as the daemon holds it, syncs that tree before the record.
+#[test]
+fn a_candidate_record_is_written_after_its_tree_is_synced() {
+    use alt_cli::cli::CandidateOp;
+    use alt_cli::native::{Identity, NativeRepo, resolve_workspace};
+
+    let f = super::task_delivery::fixture("exit 0\n");
+    std::fs::write(f.workspace.join("source.txt"), "another candidate\n").unwrap();
+    super::task_delivery::ok(&f.workspace, &["add", "source.txt"]);
+
+    let (alt_dir, coord) = resolve_workspace(&f.workspace, None).unwrap();
+    let mut store = Store::open(alt_dir).unwrap();
+    store.set_defer_durability(true);
+    let user = ("USER".to_owned(), "runner-test".to_owned());
+    let id = Identity::from_map(&[user]);
+    let mut repo = NativeRepo::attach(&mut store, coord, id, Some([7; 16]));
+    let create = CandidateOp::Create {
+        task: f.task.clone(),
+        parent: None,
+    };
+    let mut out = Vec::new();
+    repo.candidate_command(&create, true, &mut out).unwrap();
+    assert!(
+        store.odb().confirmed().unwrap(),
+        "the record was written before the tree it names was synced"
+    );
+}
+
+/// A merge that stops on a conflict leaves an index, written with its own
+/// fsync, that names the blobs of the paths it did merge.
+#[test]
+fn the_index_of_a_stopped_merge_is_written_after_its_blobs_are_synced() {
+    use super::unconfirmed::{alt, ok};
+    use alt_cli::native::{Identity, NativeRepo, resolve_workspace};
+
+    let root = alt_os::temp::tempdir().unwrap();
+    let repo = root.path();
+    let lines = |first: &str, last: &str| format!("{first}\n2\n3\n4\n5\n6\n7\n8\n{last}\n");
+    let commit = |both: &str, first: &str, last: &str| {
+        std::fs::write(repo.join("both.txt"), both).unwrap();
+        std::fs::write(repo.join("each.txt"), lines(first, last)).unwrap();
+        ok(alt(repo, &["add", "."]));
+        ok(alt(repo, &["commit", "-m", both]));
+    };
+    ok(alt(repo, &["init"]));
+    commit("base\n", "1", "9");
+    ok(alt(repo, &["switch", "-c", "theirs"]));
+    commit("theirs\n", "one", "9");
+    ok(alt(repo, &["switch", "main"]));
+    ok(alt(repo, &["switch", "-c", "ours"]));
+    commit("ours\n", "1", "nine");
+
+    let (alt_dir, coord) = resolve_workspace(repo, None).unwrap();
+    let mut store = Store::open(alt_dir).unwrap();
+    store.set_defer_durability(true);
+    let mut merging = NativeRepo::attach(&mut store, coord, Identity::from_env(), None);
+    let stopped = merging.merge("theirs", false, &mut Vec::new()).unwrap();
+    assert!(stopped, "the merge did not stop on the conflict");
+    let merged = std::fs::read_to_string(repo.join("each.txt")).unwrap();
+    assert_eq!(merged, lines("one", "nine"));
+    assert!(
+        store.odb().confirmed().unwrap(),
+        "the index was written before the blobs it names were synced"
+    );
+}

@@ -61,6 +61,28 @@ impl OdbSink {
 }
 
 impl NativeOdb {
+    /// [`Self::flush`] for a batch that something other than the
+    /// operation log is about to name (a file written with its own fsync):
+    /// the batch is synced when this returns, also where fsyncs are
+    /// otherwise left to a sink.
+    pub fn flush_synced(&mut self) -> Result<(), OdbError> {
+        self.flush()?;
+        if self.defer && !alt_store::relaxed_durability() {
+            self.sink()?.fsync()?;
+        }
+        Ok(())
+    }
+
+    /// Whether the marker records every record this handle holds as
+    /// synced. Reads the marker and takes no lock.
+    pub fn confirmed(&self) -> Result<bool, OdbError> {
+        let odb = self.odb()?;
+        let holds = odb.holds()?;
+        let marker = Marker::read(&odb.durable_path);
+        let recorded = |state: &synced::State| state.whole.reaches(&holds);
+        Ok(marker.trusted() && marker.recorded().is_some_and(recorded))
+    }
+
     /// Syncs what the database under `alt_dir` holds, whoever wrote it,
     /// and records that: for a caller about to record as synced something
     /// of another writer that names objects, which that writer stored

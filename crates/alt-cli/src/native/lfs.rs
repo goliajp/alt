@@ -115,9 +115,9 @@ impl NativeRepo<'_> {
             return Ok(pointer);
         }
         let id = self.store.odb.put_content(content)?;
-        self.store.odb.flush()?;
-        std::fs::create_dir_all(link.parent().expect("under .alt/lfs"))?;
         // the content is durable before the link names it
+        self.store.odb.flush_synced()?;
+        std::fs::create_dir_all(link.parent().expect("under .alt/lfs"))?;
         let tmp = link.with_extension(format!("tmp{}", std::process::id()));
         crate::durable::write(&tmp, id.0)?;
         crate::durable::rename(&tmp, &link)?;
@@ -287,4 +287,27 @@ fn lfs_clean(rules: &PathMatcher, path: &[u8], content: &[u8]) -> Option<Vec<u8>
         return None;
     }
     Some(Pointer::of(content).encode())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A store whose fsyncs are left to a sink, as the daemon holds it:
+    /// nothing else syncs the content before the link is written.
+    #[test]
+    fn content_is_synced_before_its_link_where_fsyncs_are_deferred() {
+        let dir = alt_os::temp::tempdir().unwrap();
+        init(Some(dir.path().to_owned()), &mut Vec::new()).unwrap();
+        let (alt_dir, coord) = resolve_workspace(dir.path(), None).unwrap();
+        let mut store = Store::open(alt_dir).unwrap();
+        store.set_defer_durability(true);
+        let mut repo = NativeRepo::attach(&mut store, coord, Identity::from_env(), None);
+        let pointer = repo.lfs_store(b"kept outside the object map").unwrap();
+        assert!(repo.lfs_link(&pointer.oid).exists());
+        assert!(
+            store.odb.confirmed().unwrap(),
+            "the link was written before its content was synced"
+        );
+    }
 }

@@ -69,7 +69,7 @@ impl NativeRepo<'_> {
                 let manifest_id = store.publish(&manifest)?;
                 let entries = index_entries(&self.index()?);
                 let tree = self.store_tree(&entries)?;
-                self.store.odb.flush()?;
+                self.store.odb.flush_synced()?;
                 let candidate = Candidate {
                     schema_version: 1,
                     task: task_id.clone(),
