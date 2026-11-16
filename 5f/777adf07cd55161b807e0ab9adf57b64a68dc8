@@ -1,0 +1,16 @@
+schema: alt-meta/1
+type: test
+summary: split the scan and watch test files that outgrew their size
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/scan_daemon.rs
+touched: crates/alt-cli/tests/it/scan_daemon_inputs.rs
+touched: crates/alt-cli/tests/it/scan_daemon_switch.rs
+touched: crates/alt-cli/tests/it/scan_daemon_watches.rs
+touched: crates/alt-worktree/tests/it/delta.rs
+touched: crates/alt-worktree/tests/it/delta_options.rs
+touched: crates/alt-worktree/tests/it/main.rs
+touched: crates/alt-worktree/tests/it/watch.rs
+touched: crates/alt-worktree/tests/it/watch_hidden.rs
+touched: crates/alt-worktree/tests/it/watch_root.rs
