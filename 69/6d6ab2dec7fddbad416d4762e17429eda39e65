@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: docs
+summary: list what the c library answers of a newline beside an anchor and of groups beside a back-reference
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/lib.rs
+touched: crates/alt-regex/tests/it/differences.rs
