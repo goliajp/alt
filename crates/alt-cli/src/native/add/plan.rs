@@ -27,15 +27,28 @@ pub(super) fn present(e: &IndexEntry, delta: &Delta, named: &dyn Fn(&[u8]) -> bo
 /// The files of `before` that cannot stay beside the files `taken`, as git
 /// has it: one whose name a taken path has for a directory, and one that
 /// lies beneath a taken path. A conflicted path stays with its stages.
+/// The index is in the order of its paths, and each is looked up in it.
 fn displaced<'a>(before: &'a Index, taken: &[&BString]) -> Vec<&'a [u8]> {
-    let files: HashSet<&[u8]> = taken.iter().map(|path| path.as_slice()).collect();
-    let dirs: HashSet<&[u8]> = taken.iter().flat_map(|path| above(path)).collect();
-    let clashes = |path: &[u8]| dirs.contains(path) || above(path).any(|d| files.contains(d));
-    let whole = before.entries.iter().filter(|e| e.stage() == 0);
-    whole
-        .map(|e| e.path.as_slice())
-        .filter(|path| !files.contains(path) && clashes(path))
-        .collect()
+    let entries = &before.entries;
+    let whole = |e: &&IndexEntry| e.stage() == 0;
+    let mut gone: Vec<&[u8]> = Vec::new();
+    for path in taken {
+        let path = path.as_slice();
+        for dir in above(path) {
+            let from = entries.partition_point(|e| e.path.as_slice() < dir);
+            let named = entries[from..].iter().take_while(|e| e.path.as_slice() == dir);
+            gone.extend(named.filter(whole).map(|e| e.path.as_slice()));
+        }
+        // what sorts before `path/`: the path, and a name that goes on
+        // with a byte below the slash
+        let goes_on = |name: &[u8]| name.starts_with(path) && name.get(path.len()) < Some(&b'/');
+        let from = entries.partition_point(|e| e.path.as_slice() <= path || goes_on(&e.path));
+        let beneath = |e: &&IndexEntry| e.path.get(path.len()) == Some(&b'/');
+        let inside = entries[from..].iter().take_while(|e| e.path.starts_with(path));
+        let inside = inside.take_while(beneath);
+        gone.extend(inside.filter(whole).map(|e| e.path.as_slice()));
+    }
+    gone
 }
 
 /// The directories `path` lies in, from the outermost.
