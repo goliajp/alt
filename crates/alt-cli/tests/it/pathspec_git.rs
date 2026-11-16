@@ -154,6 +154,17 @@ const CASES: &[&[&str]] = &[
     &["--renormalize", "f2.txt"],
     &["."],
     &["-f", "."],
+    &[":(glob)de**"],
+    &[":(top,glob)c{n}/s**/g2.txt"],
+    &[":(glob)sub**"],
+    &["[a-c-g]2.txt"],
+    &["[a-c-f]2.txt"],
+    &["[[:alpha:]]2.txt"],
+    &["[[:digit:]]2.txt"],
+    &["deep/g.txt/."],
+    &["deep/."],
+    &[":(top)c{n}/sub//f2.txt"],
+    &[":(top)//c{n}/sub"],
     // from here on the whole tree is named
     &[":!f2.txt"],
     &[":/!c{n}/top2.txt"],
@@ -179,7 +190,7 @@ fn add_reads_its_paths_as_git_reads_a_pathspec() {
         hidden += (code == Some(1) && lines[0].starts_with("The following paths")) as usize;
     }
     // the cases are what they are meant to be: git ends some, reports others
-    assert_eq!((ended, hidden), (19, 7));
+    assert_eq!((ended, hidden), (25, 7));
 }
 
 #[test]
@@ -245,4 +256,25 @@ fn add_names_a_repository_in_the_tree_as_git_names_it() {
         ["fatal: Pathspec 'mod/new.txt' is in submodule 'mod'"]
     );
     assert_eq!(add_alike(&trees, "", &["mod/"]).0, Some(0));
+}
+
+#[test]
+fn add_takes_a_repository_a_wildcard_names_as_git_takes_it() {
+    let trees = Trees::new();
+    for tree in TREES {
+        for name in ["mod1", "mod2", "mod3"] {
+            let inner = trees.at(tree).join(name);
+            std::fs::create_dir(&inner).unwrap();
+            assert!(git(&inner, &["init", "-q", "-b", "main"]).status.success());
+            write(&inner, "m.txt", "m\n");
+            assert!(git(&inner, &["add", "."]).status.success());
+            assert!(git(&inner, &["commit", "-qm", "m"]).status.success());
+        }
+    }
+    for args in [&["mod1/*"][..], &[":(glob)mod2/**"], &["-f", "mod3/*"]] {
+        let (code, lines) = add_alike(&trees, "", args);
+        assert_eq!(code, Some(0), "{args:?}");
+        assert_eq!(lines.len(), 1, "{args:?}: {lines:?}");
+        assert!(lines[0].starts_with("warning: adding embedded git repository: mod"));
+    }
 }

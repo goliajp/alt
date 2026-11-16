@@ -4,7 +4,7 @@
 
 #[derive(alt_args::Args)]
 pub struct Add {
-    /// Paths to stage; `.` stages the whole working tree
+    /// Paths to stage; `.` stages the directory the command runs in
     pub paths: Vec<String>,
     /// Store every tracked file among the paths again, as the
     /// attributes and line-ending settings now in force clean it
@@ -13,6 +13,14 @@ pub struct Add {
     /// Stage files that an ignore rule hides as well
     #[arg(short = 'f', long = "force")]
     pub forced: bool,
+    /// Stage what changed in the files the index has, and no new file:
+    /// in the whole tree when no path is given
+    #[arg(short = 'u', long)]
+    pub update: bool,
+    /// Stage every change, new files as well: in the whole tree when no
+    /// path is given
+    #[arg(short = 'A', long)]
+    pub all: bool,
     /// Emit a structured JSON result instead of the human line
     #[arg(long)]
     pub json: bool,

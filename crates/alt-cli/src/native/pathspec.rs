@@ -10,7 +10,7 @@ use super::Res;
 mod spec;
 mod wild;
 
-pub use spec::{Spec, named};
+pub use spec::{Spec, keep_named, named};
 
 /// Where `cwd` lies beneath the working tree at `root`: `sub/dir`, empty
 /// for the root itself and for a directory outside the tree.
@@ -24,14 +24,14 @@ pub fn prefix_of(root: &Path, cwd: &Path) -> String {
 /// without `.` or `..` in it and empty for the root itself; `None` when it
 /// leaves the tree. `:/` and `:(top)` in front start at the root, and so
 /// does an absolute path that leads into the tree at `root`.
-pub fn from_root(root: &Path, prefix: &str, given: &str) -> Option<String> {
+pub fn from_root(root: &Path, prefix: &str, given: &str) -> Res<Option<String>> {
     let top = given
         .strip_prefix(":/")
         .or_else(|| given.strip_prefix(":(top)"));
     match (top, given.starts_with('/')) {
-        (Some(rest), _) => plain("", rest),
-        (None, true) => absolute(root, &plain("", given)?),
-        (None, false) => plain(prefix, given),
+        (Some(rest), _) => Ok(plain("", rest)),
+        (None, true) => absolute(root, given),
+        (None, false) => Ok(plain(prefix, given)),
     }
 }
 
@@ -49,20 +49,43 @@ fn plain(base: &str, rest: &str) -> Option<String> {
     Some(names.join("/"))
 }
 
-/// What of the absolute path `/<given>` lies in the tree at `root`: what
-/// follows the root as it is written, or else what follows the shortest
-/// part of the path that is the root once its links are followed. A link
-/// further in is a path of the tree, as for git.
-fn absolute(root: &Path, given: &str) -> Option<String> {
+/// What of the absolute path `given` lies in the tree at `root`, its `.`
+/// and `..` taken out first: what follows the root as it is written, or
+/// else what follows the shortest part of the path that is the root once
+/// its links are followed. A link further in is a path of the tree, as
+/// for git, which follows the links of one part after another and ends
+/// where a name is missing that is not the last of its part.
+fn absolute(root: &Path, given: &str) -> Res<Option<String>> {
+    let Some(given) = plain("", given) else {
+        return Ok(None);
+    };
     let real = root.canonicalize().ok();
     let names: Vec<&str> = given.split('/').filter(|name| !name.is_empty()).collect();
     let upto = |n: usize| PathBuf::from(format!("/{}", names[..n].join("/")));
     let written = |n: &usize| upto(*n) == root || Some(upto(*n)) == real;
-    let linked = |n: &usize| real.is_some() && upto(*n).canonicalize().ok() == real;
-    let root_ends = (0..=names.len())
-        .find(written)
-        .or_else(|| (0..=names.len()).find(linked))?;
-    Some(names[root_ends..].join("/"))
+    let inside = |n: usize| Ok(Some(names[n..].join("/")));
+    if let Some(n) = (0..=names.len()).find(written) {
+        return inside(n);
+    }
+    let Some(real) = real else {
+        return Ok(None);
+    };
+    let mut followed = PathBuf::from("/");
+    for n in 1..=names.len() {
+        use std::io::ErrorKind::NotFound;
+        match upto(n).canonicalize() {
+            Ok(part) if part == real => return inside(n),
+            Ok(part) => followed = part,
+            Err(e) if e.kind() == NotFound && n == names.len() => {}
+            Err(e) => {
+                let at = followed.join(names[n - 1]);
+                let why = super::settings::reason(&e);
+                let said = format!("Invalid path '{}': {why}", at.display());
+                return Err(super::settings::fatal(said));
+            }
+        }
+    }
+    Ok(None)
 }
 
 /// `path`, which is relative to the root, as it is named from `prefix`.
@@ -133,23 +156,31 @@ impl Place {
         rev: Option<&str>,
         options: crate::blame::Options,
     ) -> Res<()> {
-        // git sets up its ignore rules for a blame, whatever it is of
+        // git sets up its ignore rules for a blame, whatever it is of,
+        // once it has found the revision and the path in it
         let control = match repo.is_native() {
             true => repo.git_dir().join("git-import"),
             false => repo.git_dir().to_owned(),
         };
         let info = control.join("info/exclude");
-        super::settings::ensure_exclude_files(repo.config(), &self.root, &info)?;
         let rev = rev.unwrap_or("HEAD");
         let path = self.written(given)?;
-        crate::blame::run(out, repo, &path, &self.at_head(rev), rev, options)
+        let at = self.at_head(rev);
+        let rules = super::settings::ensure_exclude_files(repo.config(), &self.root, &info);
+        if let Err(ended) = rules {
+            let known = |start| crate::tree_changes::blob_at(repo, start, &path).is_ok();
+            if repo.rev_parse(&at)?.is_some_and(known) {
+                return Err(ended);
+            }
+        }
+        crate::blame::run(out, repo, &path, &at, rev, options)
     }
 
     /// The path from the root that `given` names, read without magic; a
     /// `/` at its end stays.
     fn written(&self, given: &str) -> Res<String> {
         let path = match given.starts_with('/') {
-            true => plain("", given).and_then(|path| absolute(&self.root, &path)),
+            true => absolute(&self.root, given)?,
             false => plain(&self.prefix, given),
         };
         let path = path.ok_or_else(|| self.outside(given))?;
@@ -161,7 +192,7 @@ impl Place {
 
     /// The path from the root that a command run here names by `given`.
     pub fn path(&self, given: &str) -> Res<String> {
-        from_root(&self.root, &self.prefix, given).ok_or_else(|| self.outside(given))
+        from_root(&self.root, &self.prefix, given)?.ok_or_else(|| self.outside(given))
     }
 
     /// The file `rev:path` names. Only a path that starts with `./` or
@@ -190,7 +221,7 @@ mod tests {
     #[test]
     fn a_path_is_read_from_where_the_command_runs() {
         let root = Path::new("/r");
-        let read = |prefix, given| from_root(root, prefix, given);
+        let read = |prefix, given| from_root(root, prefix, given).unwrap();
         assert_eq!(read("", "a/b").as_deref(), Some("a/b"));
         assert_eq!(read("", "./a/").as_deref(), Some("a"));
         assert_eq!(read("sub", "f").as_deref(), Some("sub/f"));
@@ -219,7 +250,7 @@ mod tests {
         std::os::unix::fs::symlink(&root, dir.path().join("link")).unwrap();
         std::os::unix::fs::symlink("sub", root.join("inner")).unwrap();
         let link = dir.path().join("link");
-        let read = |root: &Path, given: String| from_root(root, "sub", &given);
+        let read = |root: &Path, given: String| from_root(root, "sub", &given).unwrap();
         let through = format!("{}/sub/f", link.display());
         assert_eq!(read(&root, through.clone()).as_deref(), Some("sub/f"));
         // a tree that is itself named through the link
@@ -231,6 +262,17 @@ mod tests {
         assert_eq!(read(&root, inner).as_deref(), Some("inner/f"));
         let beside = format!("{}/other", dir.path().display());
         assert_eq!(read(&root, beside), None);
+        // a name missing in the tree is a path of the tree all the same
+        let missing = format!("{}/nosuch/f", link.display());
+        assert_eq!(read(&root, missing).as_deref(), Some("nosuch/f"));
+        // one missing on the way there is where git ends
+        let astray = format!("{}/nosuch/tree/f", dir.path().display());
+        let ended = from_root(&root, "sub", &astray).unwrap_err().to_string();
+        let at = dir.path().canonicalize().unwrap().join("nosuch");
+        assert_eq!(
+            ended,
+            format!("Invalid path '{}': No such file or directory", at.display())
+        );
     }
 
     #[test]

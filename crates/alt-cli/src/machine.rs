@@ -35,6 +35,10 @@ impl std::error::Error for Failure {}
 /// ignore rule hides: its details name them under `ignored_paths`.
 pub const PATHS_IGNORED: &str = "paths_ignored";
 
+/// The kind of failure `add -u` ends with when a path given names a file
+/// the index has not, which it has said as git says it.
+pub const PATHS_UNKNOWN: &str = "paths_unknown";
+
 impl Failure {
     pub fn refusal(kind: &'static str, message: impl Into<String>) -> Self {
         Self {
@@ -98,7 +102,7 @@ impl Failure {
                 .unwrap_or_default();
             match self.kind {
                 // the command has said which paths, as git says it
-                PATHS_IGNORED => request,
+                PATHS_IGNORED | PATHS_UNKNOWN => request,
                 _ => format!("fatal: {}\n{request}", self.message),
             }
             .into_bytes()

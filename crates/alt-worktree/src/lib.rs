@@ -42,6 +42,7 @@ pub use untracked::{Untracked, hidden_by};
 #[cfg(target_os = "linux")]
 pub use watch::{Unanswered, Watched, watch_allowance};
 
+pub use glob::class_at;
 pub use ignore::default_excludes_file;
 pub use scan::{Clean, PathMatcher, SubmoduleHead, scan_worktree, scan_worktree_with_index};
 

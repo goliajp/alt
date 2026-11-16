@@ -171,11 +171,18 @@ fn renormalizing_names_what_it_is_given_as_git_does() {
             "{args:?}"
         );
     }
-    // git says so on its standard error, followed by a hint
+    // said on standard error, followed by a hint that names the program
     let said = git(g, &["add", "--renormalize"]);
-    let first = String::from_utf8_lossy(&said.stderr);
-    let first = first.lines().next().unwrap();
-    assert_eq!(ok(alt(a, &["add", "--renormalize"])), format!("{first}\n"));
+    let ours = alt(a, &["add", "--renormalize"]);
+    assert!(ours.status.success() && ours.stdout.is_empty());
+    let first = |output: &Output| {
+        output
+            .stderr
+            .split(|b| *b == b'\n')
+            .next()
+            .map(<[u8]>::to_vec)
+    };
+    assert_eq!(first(&ours), first(&said));
     for run in [
         alt(a, &["add", "--renormalize", "nope"]),
         git(g, &["add", "--renormalize", "nope"]),

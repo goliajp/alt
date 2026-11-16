@@ -4,6 +4,8 @@
 
 use std::path::Path;
 
+use alt_bytes::BString;
+
 use super::wild::Mode;
 use super::{absolute, plain};
 use crate::native::Res;
@@ -100,7 +102,7 @@ impl Spec {
         // from the top a path is taken as it is written
         let path = match (magic.top, rest.starts_with('/')) {
             (true, _) => Some(rest.trim_end_matches('/').to_owned()),
-            (false, true) => plain("", rest).and_then(|path| absolute(root, &path)),
+            (false, true) => absolute(root, rest)?,
             (false, false) => plain(prefix, rest),
         };
         let Some(path) = path else {
@@ -173,11 +175,22 @@ impl Spec {
         {
             return true;
         }
+        let plain = self.plain_len();
+        if plain == path.len() || self.dir {
+            return false;
+        }
+        // git takes what is written out off both before it matches
+        let (written, wild) = rest.split_at(plain - self.fixed);
         let mode = Mode {
             pathname: self.glob,
             fold_case: self.fold_case,
         };
-        self.plain_len() < path.len() && !self.dir && mode.matches(rest, free, true)
+        let tried = |free: &[u8]| match free.split_at_checked(written.len()) {
+            Some((start, text)) => self.same(start, written) && mode.matches(wild, text, true),
+            None => false,
+        };
+        // a directory reported as one path has its `/` for the wildcards
+        tried(free) || is_dir && tried(&[free, b"/"].concat())
     }
 
     /// The directory a scan has to look at to find everything this can
@@ -219,6 +232,31 @@ impl Spec {
     pub fn written_out(&self) -> bool {
         !self.glob && !self.fold_case
     }
+}
+
+/// Keeps of `names`, which are in order and not tracked, those the `specs`
+/// name the way git goes through them: once a path given is, as it is
+/// written, all of a name, it is tried on no name after that one. A path
+/// that takes away is tried on every name.
+pub fn keep_named(specs: &[Spec], names: &mut Vec<BString>) {
+    let mut spent = vec![false; specs.len()];
+    let none_names = !specs.is_empty() && specs.iter().all(|spec| spec.exclude);
+    names.retain(|name| {
+        let mut hit = [none_names, false];
+        for takes_away in [false, true] {
+            let tried = specs.iter().zip(&mut spent);
+            for (spec, spent) in tried.filter(|(spec, _)| spec.exclude == takes_away) {
+                if !*spent && spec.matches(name) {
+                    hit[takes_away as usize] = true;
+                    *spent = !takes_away && !spec.dir && spec.same(name, spec.path.as_bytes());
+                }
+            }
+            if !hit[0] {
+                return false;
+            }
+        }
+        !hit[1]
+    });
 }
 
 /// Whether `name` is among what the `specs` name together: what one of
@@ -292,6 +330,13 @@ mod tests {
         assert!(hit("sub/deep", ":(icase)../F.TXT", "sub/f.txt"));
         assert!(!hit("sub", "\\*.txt", "sub/f.txt"));
         assert!(hit("", ":/", "any/thing"));
+        // `**` right after what is written out stands for any directories
+        assert!(hit("sub", ":(glob)de**", "sub/deep/g.txt"));
+        assert!(hit("", ":(top,glob)s**/n3.txt", "sub/deep/n3.txt"));
+        assert!(!hit("sub", ":(glob)de*", "sub/deep/g.txt"));
+        assert!(hit("sub", "inner/*", "sub/inner/"));
+        assert!(hit("sub", ":(glob)inner/**", "sub/inner/"));
+        assert!(!hit("sub", "deep/.", "sub/deep"));
     }
 
     #[test]
@@ -305,6 +350,36 @@ mod tests {
         assert!(named(&specs(&[":!f.txt"]), b"top.txt"));
         assert!(!named(&specs(&[":!"]), b"sub/f.txt"));
         assert!(!named(&specs(&["f.txt"]), b"top.txt"));
+    }
+
+    #[test]
+    fn a_path_that_is_all_of_a_name_is_tried_on_no_later_name() {
+        let kept = |given: &[&str], names: &[&str]| {
+            let specs: Vec<Spec> = given.iter().map(|g| spec("sub", g)).collect();
+            let mut names: Vec<BString> = names.iter().map(|n| BString::from(*n)).collect();
+            keep_named(&specs, &mut names);
+            names.iter().map(|n| n.to_string()).collect::<Vec<_>>()
+        };
+        let names = [
+            "sub/!a.txt",
+            "sub/*.txt",
+            "sub/deep/n.txt",
+            "sub/n.txt",
+            "sub/x.md",
+        ];
+        assert_eq!(kept(&["*.txt"], &names), ["sub/!a.txt", "sub/*.txt"]);
+        assert_eq!(
+            kept(&["*.txt", "n.txt"], &names),
+            ["sub/!a.txt", "sub/*.txt", "sub/n.txt"]
+        );
+        assert_eq!(kept(&["\\*.txt"], &names), ["sub/*.txt"]);
+        assert_eq!(
+            kept(&[":(icase)*.TXT"], &names),
+            ["sub/!a.txt", "sub/*.txt"]
+        );
+        // what takes away goes on taking away
+        assert_eq!(kept(&[".", ":!*.txt"], &names), ["sub/x.md"]);
+        assert_eq!(kept(&[":!*.txt"], &names), ["sub/x.md"]);
     }
 
     #[test]

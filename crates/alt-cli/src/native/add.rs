@@ -20,6 +20,28 @@ struct Mode {
     renormalize: bool,
     /// what an ignore rule hides is staged as well
     force: bool,
+    /// only files the index has are staged
+    update: bool,
+}
+
+impl Mode {
+    /// What is not tracked is not looked for where it is not staged, and
+    /// then no ignore rule is read.
+    fn untracked(self) -> Untracked {
+        match (self.renormalize || self.update, self.force) {
+            (true, _) => Untracked::No,
+            (false, true) => Untracked::Hidden,
+            (false, false) => Untracked::All,
+        }
+    }
+}
+
+/// What a scan found among the paths given to an `add`.
+struct Found {
+    delta: Delta,
+    clock: alt_worktree::Clock,
+    /// the paths left alone because an ignore rule hides them
+    hidden: Vec<BString>,
 }
 
 impl NativeRepo<'_> {
@@ -32,6 +54,9 @@ impl NativeRepo<'_> {
     /// `alt add` as the command line has it. Where a path named is one an
     /// ignore rule hides, the others are staged all the same and the
     /// command ends as git does, with status 1 and the paths left alone.
+    /// Without a path nothing is staged, unless `-u` or `-A` asks for the
+    /// whole tree: `-u` stages what changed in the files the index has
+    /// and no new file.
     ///
     /// With `--renormalize`, as in git: every tracked file among the
     /// paths is stored again the way the attributes and settings now in
@@ -41,15 +66,26 @@ impl NativeRepo<'_> {
     /// paths and submodules are left as they are, and a tracked file that
     /// is gone is an error.
     pub fn add_paths(&mut self, args: &crate::worktree_args::Add, out: &mut impl Write) -> Res<()> {
-        if args.renormalize && args.paths.is_empty() {
-            writeln!(out, "Nothing specified, nothing added.")?;
+        if args.update && args.all {
+            let both = "options '-A' and '-u' cannot be used together";
+            return Err(settings::fatal(both.into()));
+        }
+        let whole = [":/".to_owned()];
+        let paths = match args.paths.is_empty() && (args.update || args.all) {
+            true => &whole[..],
+            false => &args.paths[..],
+        };
+        if paths.is_empty() {
+            let said = named::nothing_specified(&self.settings()?)?;
+            crate::diagnostics::emit(said.as_bytes())?;
             return Ok(());
         }
         let mode = Mode {
             renormalize: args.renormalize,
             force: args.forced,
+            update: args.update,
         };
-        self.stage(&args.paths, mode, args.json, out)
+        self.stage(paths, mode, args.json, out)
     }
 
     fn stage(&mut self, paths: &[String], mode: Mode, json: bool, out: &mut impl Write) -> Res<()> {
@@ -60,46 +96,13 @@ impl NativeRepo<'_> {
         let parse = |given: &String| Spec::parse(&self.root, &self.prefix, given);
         let specs: Vec<Spec> = paths.iter().map(parse).collect::<Res<_>>()?;
         self.ensure_reachable(&specs, &before)?;
-        let reach: Vec<&[u8]> = specs
-            .iter()
-            .filter(|spec| !spec.exclude)
-            .map(|spec| spec.reach().as_bytes())
-            .collect();
-        let within = match reach.iter().any(|dir| dir.is_empty()) {
-            true => &[][..],
-            false => &reach[..],
-        };
-        let named = |path: &[u8]| pathspec::named(&specs, path);
-        // what is not tracked is not looked for where it is not staged,
-        // and no ignore rule is read
-        let untracked = match (mode.renormalize, mode.force) {
-            (true, _) => Untracked::No,
-            (false, true) => Untracked::Hidden,
-            (false, false) => Untracked::All,
-        };
-
         // only what differs from the index is read: a file with the stat
         // it had when it was staged holds what the index holds
         let mut snapshot = self.worktree_snapshot()?;
-        let (mut delta, clock) = self.scan_delta_within(&mut snapshot, untracked, within)?;
-        self.ensure_matched(&specs, &before, &delta, mode.renormalize)?;
-        let hidden = match mode.renormalize || mode.force {
-            true => Vec::new(),
-            false => self.hidden(&specs, &before)?,
-        };
-        // the scan looked at more than is named where a path has wildcards
-        delta.changed.retain(|w| named(&w.path));
-        for list in [
-            &mut delta.deleted,
-            &mut delta.untracked,
-            &mut delta.unmerged,
-        ] {
-            list.retain(|path| named(path));
-        }
-        let embedded = match mode.renormalize {
-            true => Vec::new(),
-            false => self.take_embedded(&mut delta, &named)?,
-        };
+        let found = self.find(&specs, &before, mode, &mut snapshot)?;
+        let (mut delta, hidden) = (found.delta, found.hidden);
+        let named = |path: &[u8]| pathspec::named(&specs, path);
+        let embedded = self.take_embedded(&mut delta, &named)?;
         let advice = embedded::warning(&embedded, &self.settings()?)?;
 
         let plan = plan(&before, &delta, mode.renormalize, &named);
@@ -114,7 +117,7 @@ impl NativeRepo<'_> {
         let after = index_of(entries);
         let staged = plan.staged;
         let touched = plan.touched;
-        self.put_staged(before, after, &touched, &snapshot, stats, &clock)?;
+        self.put_staged(before, after, &touched, &snapshot, stats, &found.clock)?;
         if json {
             crate::json::emit(out, vec![("staged", crate::json::Json::Num(staged as i64))])?;
         } else {
@@ -128,6 +131,49 @@ impl NativeRepo<'_> {
             true => Ok(()),
             false => Err(named::left_alone(&hidden).into()),
         }
+    }
+
+    /// Scans where the `specs` reach and keeps what they name of it. A
+    /// path that names nothing ends the command, as for git.
+    fn find(
+        &self,
+        specs: &[Spec],
+        before: &Index,
+        mode: Mode,
+        snapshot: &mut Snapshot,
+    ) -> Res<Found> {
+        let reach = specs.iter().filter(|spec| !spec.exclude);
+        let reach: Vec<&[u8]> = reach.map(|spec| spec.reach().as_bytes()).collect();
+        let within = match reach.iter().any(|dir| dir.is_empty()) {
+            true => &[][..],
+            false => &reach[..],
+        };
+        let tracked_only = mode.renormalize || mode.update;
+        if !tracked_only {
+            named::ensure_walkable(specs)?;
+        }
+        let (mut delta, clock) = self.scan_delta_within(snapshot, mode.untracked(), within)?;
+        let known = match (mode.renormalize, mode.update) {
+            (true, _) => named::Known::Tracked,
+            (false, true) => named::Known::TrackedOrError,
+            (false, false) => named::Known::Any,
+        };
+        self.ensure_matched(specs, before, &delta, known)?;
+        let hidden = match tracked_only || mode.force {
+            true => Vec::new(),
+            false => self.hidden(specs, before)?,
+        };
+        // the scan looked at more than is named where a path has wildcards
+        let named = |path: &[u8]| pathspec::named(specs, path);
+        delta.changed.retain(|w| named(&w.path));
+        delta.deleted.retain(|path| named(path));
+        delta.unmerged.retain(|path| named(path));
+        pathspec::keep_named(specs, &mut delta.untracked);
+        Ok(Found {
+            delta,
+            clock,
+            hidden,
+        })
     }
 
     /// The path gate: denies staging any path the policy excludes, before
@@ -206,8 +252,9 @@ impl NativeRepo<'_> {
                 entries.push(staged_entry(path, w.oid, w.mode));
                 continue;
             }
-            let meta = std::fs::symlink_metadata(self.abs(path)?)
-                .map_err(|e| format!("unable to stat '{path}': {e}"))?;
+            let gone =
+                |e| settings::fatal(format!("unable to stat '{path}': {}", settings::reason(&e)));
+            let meta = std::fs::symlink_metadata(self.abs(path)?).map_err(gone)?;
             let stat = FileStat::of(&meta);
             // the id is known once the stored form is: not used until then
             let file = WorkEntry {

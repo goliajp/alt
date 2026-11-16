@@ -36,26 +36,54 @@ fn walked<'a>(specs: &'a [Spec], prefix: &'a str) -> &'a str {
     walked
 }
 
+/// What a path given to `add` may name.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum Known {
+    /// any file
+    Any,
+    /// a file of the index; a file there is that the index has not is
+    /// passed over
+    Tracked,
+    /// a file of the index, and a file the index has not is an error
+    TrackedOrError,
+}
+
+/// Ends the command where git ends its walk of the tree: on a path given
+/// from the top with a name of no length in the directories it leads
+/// through.
+pub(super) fn ensure_walkable(specs: &[Spec]) -> Res<()> {
+    let empty_name =
+        |dir: &str| !dir.starts_with('/') && (dir.ends_with('/') || dir.contains("//"));
+    match specs
+        .iter()
+        .any(|spec| !spec.exclude && empty_name(spec.walked()))
+    {
+        true => Err(settings::fatal("oops in prep_exclude".into())),
+        false => Ok(()),
+    }
+}
+
 impl NativeRepo<'_> {
     /// A path stands for itself and every file under it, deleted ones
     /// included (their removal is staged), as in git; a conflicted path
     /// is one the index knows, with or without its file. A path that
     /// names nothing is an error, unless it is written out and there is
-    /// something at it. With `tracked_only`, what is not in the index is
-    /// not named.
+    /// something at it: what `known` then has for a file the index has
+    /// not.
     pub(super) fn ensure_matched(
         &self,
         specs: &[Spec],
         before: &Index,
         delta: &Delta,
-        tracked_only: bool,
+        known: Known,
     ) -> Res<()> {
+        let mut unknown = Vec::new();
         let named = specs.iter().filter(|s| !s.exclude && !s.path.is_empty());
         for spec in named {
             let tracked = before.entries.iter().any(|e| spec.matches(&e.path));
             let new = delta.untracked.iter().chain(&delta.unmerged);
             let seen = |p: &BString| spec.matches(p) || inside_repository(p, &spec.path);
-            if tracked || (!tracked_only && new.into_iter().any(seen)) {
+            if tracked || (known == Known::Any && new.into_iter().any(seen)) {
                 continue;
             }
             let place = match spec.dir {
@@ -69,8 +97,12 @@ impl NativeRepo<'_> {
                     "pathspec '{given}' did not match any files"
                 )));
             }
+            unknown.push(spec.given.as_str());
         }
-        Ok(())
+        match unknown.is_empty() || known != Known::TrackedOrError {
+            true => Ok(()),
+            false => Err(not_known(&unknown)?.into()),
+        }
     }
 
     /// The paths git tells of because an ignore rule hides them: each the
@@ -133,6 +165,40 @@ impl NativeRepo<'_> {
         Ok(())
     }
 }
+
+/// git's error for each of the paths `given` that name no file of the
+/// index, and the failure a command ends with that has said them.
+fn not_known(given: &[&str]) -> Res<crate::machine::Failure> {
+    for given in given {
+        let said = format!("error: pathspec '{given}' did not match any file(s) known to git\n");
+        crate::diagnostics::emit(said.as_bytes())?;
+    }
+    let said = "a path names no file of the index";
+    let failure = crate::machine::Failure::refusal(crate::machine::PATHS_UNKNOWN, said);
+    Ok(crate::machine::Failure {
+        exit_code: 128,
+        ..failure
+    })
+}
+
+/// What `add` says when it is given no path, and how to add everything
+/// unless `advice.addEmptyPathspec` is off.
+pub(super) fn nothing_specified(settings: &alt_git_config::Config) -> Res<String> {
+    let advise = match settings.get_bool("advice", None, "addemptypathspec") {
+        Some(set) => set?,
+        None => true,
+    };
+    let mut said = String::from("Nothing specified, nothing added.\n");
+    if advise {
+        said.push_str(EMPTY_ADVICE);
+    }
+    Ok(said)
+}
+
+const EMPTY_ADVICE: &str = "\
+hint: Maybe you wanted to say 'alt add .'?
+hint: Disable this message with \"alt config advice.addEmptyPathspec false\"
+";
 
 /// What `add` says of the `paths` it left alone because an ignore rule
 /// hides them: git's list, each path as its bytes are, and how to add

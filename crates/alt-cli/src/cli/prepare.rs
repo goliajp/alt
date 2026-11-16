@@ -18,13 +18,14 @@ pub(super) fn prepare(repo: &mut NativeRepo, cmd: &Command) -> Res<()> {
         // a sequence under way is ended or gone on with all the same
         Rebase { upstream, .. } => upstream.is_some(),
         Revert { revs, .. } => !revs.is_empty(),
-        _ => matches!(cmd, Status { .. } | CherryPick { .. }),
+        _ => matches!(cmd, Status { .. }),
     };
     if excludes {
         repo.ensure_exclude_files()?;
     }
     match cmd {
         Merge { branch, .. } => repo.ensure_exclude_files_to_merge(branch)?,
+        CherryPick { rev, .. } => repo.ensure_exclude_files_to_pick(rev)?,
         // the tree to come is checked out by the rules that hold in it
         Workspace {
             op: WorkspaceOp::Add { path, .. },

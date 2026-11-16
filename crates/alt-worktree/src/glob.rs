@@ -106,7 +106,7 @@ fn glob_match_segment(pat: &[u8], text: &[u8]) -> bool {
 /// Matches `c` against the bracket class that opens at `pat[at]`: whether
 /// it is in the class, and where the pattern continues after the closing
 /// `]`. `None` when the class is never closed, which makes `[` literal.
-fn class_at(pat: &[u8], at: usize, c: u8) -> Option<(bool, usize)> {
+pub fn class_at(pat: &[u8], at: usize, c: u8) -> Option<(bool, usize)> {
     let mut i = at + 1;
     let negate = matches!(pat.get(i), Some(b'!' | b'^'));
     if negate {

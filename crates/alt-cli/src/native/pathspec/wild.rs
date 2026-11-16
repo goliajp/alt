@@ -31,12 +31,12 @@ impl Mode {
                 }
                 None => false,
             },
-            b'[' => match (class(rest), text.split_first()) {
-                (Some((set, rest)), Some((&c, after))) => {
-                    !(self.pathname && c == b'/')
-                        && set.has(c, self)
-                        && self.matches(rest, after, false)
-                }
+            b'[' => match text.split_first() {
+                Some((&c, after)) if !(self.pathname && c == b'/') => match self.in_set(pattern, c)
+                {
+                    Some((true, end)) => self.matches(&pattern[end..], after, false),
+                    _ => false,
+                },
                 _ => false,
             },
             _ => {
@@ -53,6 +53,24 @@ impl Mode {
                 }
             }
         }
+    }
+
+    /// Whether `c` is in the set `pattern` begins with, and where the
+    /// pattern goes on after it; `None` for a set that is not closed. With
+    /// case folded, a letter is in a set that has it in either case.
+    fn in_set(self, pattern: &[u8], c: u8) -> Option<(bool, usize)> {
+        let (is, end) = alt_worktree::class_at(pattern, 0, c)?;
+        if !self.fold_case {
+            return Some((is, end));
+        }
+        let other = match c.is_ascii_lowercase() {
+            true => c.to_ascii_uppercase(),
+            false => c.to_ascii_lowercase(),
+        };
+        let (other, _) = alt_worktree::class_at(pattern, 0, other)?;
+        // a set that leaves out has `c` when it leaves out neither case
+        let leaves_out = matches!(pattern.get(1), Some(b'!' | b'^'));
+        Some((if leaves_out { is && other } else { is || other }, end))
     }
 
     /// What follows a `*` in the pattern, against `text`.
@@ -80,53 +98,6 @@ impl Mode {
                 let begins = at > 0 && text[at - 1] == b'/' || at == 0 && at_start;
                 self.matches(after, &text[at..], begins)
             })
-    }
-}
-
-/// A set of characters, as written between `[` and `]`.
-struct Set<'a> {
-    negated: bool,
-    body: &'a [u8],
-}
-
-/// The set a pattern begins with after its `[`, and what follows the `]`.
-fn class(pattern: &[u8]) -> Option<(Set<'_>, &[u8])> {
-    let negated = matches!(pattern.first(), Some(b'!' | b'^'));
-    let body = &pattern[negated as usize..];
-    let mut at = 0;
-    loop {
-        match *body.get(at)? {
-            b']' if at > 0 => break,
-            b'\\' => at += 2,
-            _ => at += 1,
-        }
-    }
-    let set = Set {
-        negated,
-        body: &body[..at],
-    };
-    Some((set, &body[at + 1..]))
-}
-
-impl Set<'_> {
-    fn has(&self, c: u8, mode: Mode) -> bool {
-        let mut members = Vec::new();
-        let mut body = self.body.iter().copied().peekable();
-        while let Some(b) = body.next() {
-            match b {
-                b'\\' => members.push(body.next().unwrap_or(b'\\')),
-                b'-' if !members.is_empty() && body.peek().is_some() => {
-                    let from: u8 = *members.last().unwrap();
-                    let to = match body.next() {
-                        Some(b'\\') => body.next().unwrap_or(b'\\'),
-                        to => to.unwrap_or(from),
-                    };
-                    members.extend(from..=to);
-                }
-                b => members.push(b),
-            }
-        }
-        members.iter().any(|m| mode.same(*m, c)) != self.negated
     }
 }
 
@@ -170,10 +141,16 @@ mod tests {
         assert!(m(false, "\\*.txt", "*.txt"));
         assert!(!m(false, "\\*.txt", "a.txt"));
         assert!(!m(false, "[ab", "a"));
+        // what follows a range is not the start of another
+        assert!(m(false, "[a-c-e]x", "-x") && m(false, "[a-c-e]x", "ex"));
+        assert!(!m(false, "[a-c-e]x", "dx"));
+        assert!(m(false, "[[:alpha:]][[:digit:]]", "a1") && !m(false, "[[:alpha:]]", "1"));
+        assert!(m(false, "[![:digit:]]", "a") && !m(false, "[^[:digit:]x]", "x"));
         let fold = Mode {
             pathname: false,
             fold_case: true,
         };
         assert!(fold.matches(b"F[A-C].TXT", b"fb.txt", true));
+        assert!(!fold.matches(b"[!a-c]", b"B", true));
     }
 }

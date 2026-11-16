@@ -82,6 +82,17 @@ impl NativeRepo<'_> {
         }
     }
 
+    /// As `ensure_exclude_files`, for a cherry-pick of `rev`: a revision
+    /// that names nothing is what git finds wrong first, and the command
+    /// says so itself.
+    pub fn ensure_exclude_files_to_pick(&self, rev: &str) -> Res<()> {
+        let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
+        match repo.rev_parse(rev)? {
+            Some(_) => self.ensure_exclude_files(),
+            None => Ok(()),
+        }
+    }
+
     /// The attribute files outside the working tree: the user's, which
     /// `core.attributesFile` names, and the repository's own.
     pub(super) fn attribute_files(
@@ -178,6 +189,15 @@ pub(super) fn fatal(message: String) -> Box<dyn std::error::Error> {
         exit_code: 128,
         ..refusal
     })
+}
+
+/// What the system calls `error`, as git says it: without its number.
+pub(super) fn reason(error: &std::io::Error) -> String {
+    let said = error.to_string();
+    match said.find(" (os error") {
+        Some(at) => said[..at].to_owned(),
+        None => said,
+    }
 }
 
 /// A path from the configuration, as git expands it: `~/` stands for the

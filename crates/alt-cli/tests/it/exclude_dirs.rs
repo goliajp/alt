@@ -365,6 +365,12 @@ fn a_directory_in_place_of_an_ignore_file_ends_what_merges_replays_and_checks_ou
         ended(&["revert", "HEAD"], &["revert", "--no-edit", "HEAD"], 1);
         ended(&["rebase", "side"], &["rebase", "side"], 1);
         ended(&["blame", "a.txt"], &["blame", "a.txt"], 1);
+        // what is wrong with the command itself is what git says first
+        for wrong in [&["cherry-pick", "nosuch"][..], &["blame", "nosuch"]] {
+            let (_, code, fatal) = each(&trees, wrong, wrong);
+            assert_eq!((code, fatal.len()), (Some(128), 1), "{name}: {wrong:?}");
+            assert!(!fatal[0].contains("exclude file"), "{name}: {fatal:?}");
+        }
         let ours = ["workspace", "add", "beside", "{tree}", "side"];
         let theirs = ["worktree", "add", "{tree}", "side"];
         match name {

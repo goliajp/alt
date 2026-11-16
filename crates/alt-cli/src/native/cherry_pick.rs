@@ -14,7 +14,7 @@ impl NativeRepo<'_> {
         let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
         let target_oid = repo
             .rev_parse(rev)?
-            .ok_or_else(|| format!("bad revision '{rev}'"))?;
+            .ok_or_else(|| settings::fatal(format!("bad revision '{rev}'")))?;
         let target_commit = repo.read_commit(&target_oid)?;
         let target_parent = target_commit
             .parents()

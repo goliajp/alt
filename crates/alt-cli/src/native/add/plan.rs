@@ -46,6 +46,30 @@ fn above(path: &[u8]) -> impl Iterator<Item = &[u8]> {
     slashes.map(move |(at, _)| &path[..at])
 }
 
+/// The paths stored from the working tree: what the scan found changed,
+/// new or conflicted, or with `renormalize` every tracked file named.
+fn taken<'a>(
+    before: &'a Index,
+    delta: &'a Delta,
+    renormalize: bool,
+    named: &dyn Fn(&[u8]) -> bool,
+) -> Vec<&'a BString> {
+    let again = |e: &&IndexEntry| e.stage() == 0 && e.mode != 0o160000 && named(&e.path);
+    let changed = delta.changed.iter().map(|w| &w.path);
+    match renormalize {
+        true => before
+            .entries
+            .iter()
+            .filter(again)
+            .map(|e| &e.path)
+            .collect(),
+        false => changed
+            .chain(&delta.untracked)
+            .chain(&delta.unmerged)
+            .collect(),
+    }
+}
+
 /// Works out from the scan `delta` which paths are taken from the working
 /// tree and which entries of `before` go. With `renormalize` every tracked
 /// file among the named paths is taken, and nothing else is touched.
@@ -55,34 +79,14 @@ pub(super) fn plan<'a>(
     renormalize: bool,
     named: &dyn Fn(&[u8]) -> bool,
 ) -> Plan<'a> {
-    let again = |e: &&IndexEntry| e.stage() == 0 && e.mode != 0o160000 && named(&e.path);
-    let taken: Vec<&BString> = match renormalize {
-        true => before
-            .entries
-            .iter()
-            .filter(again)
-            .map(|e| &e.path)
-            .collect(),
-        false => delta
-            .changed
-            .iter()
-            .map(|w| &w.path)
-            .chain(&delta.untracked)
-            .chain(&delta.unmerged)
-            .collect(),
-    };
+    let taken = taken(before, delta, renormalize, named);
     let deleted: &[BString] = match renormalize {
         true => &[],
         false => &delta.deleted,
     };
     let displaced = displaced(before, &taken);
-    let acted: HashSet<&[u8]> = taken
-        .iter()
-        .copied()
-        .chain(deleted)
-        .map(|p| p.as_slice())
-        .chain(displaced)
-        .collect();
+    let acted = taken.iter().copied().chain(deleted);
+    let acted: HashSet<&[u8]> = acted.map(|p| p.as_slice()).chain(displaced).collect();
     // a conflicted path among those named is resolved by what the working
     // tree has there: the file when there is one (`unmerged`), a removal
     // when there is none. git does the same whether the path is named,
@@ -91,22 +95,15 @@ pub(super) fn plan<'a>(
     // deleted, so those are dropped here
     let resolved = |e: &&IndexEntry| !renormalize && e.stage() != 0 && named(&e.path);
     let unchanged = |e: &&IndexEntry| !acted.contains(e.path.as_slice());
-    let entries: Vec<IndexEntry> = before
+    let stays = before
         .entries
         .iter()
-        .filter(|e| unchanged(e) && !resolved(e))
-        .cloned()
-        .collect();
-    let dropped = before
-        .entries
-        .iter()
-        .filter(|e| resolved(e) && unchanged(e))
-        .map(|e| e.path.clone());
-    let mut touched: Vec<BString> = acted
-        .iter()
-        .map(|p| BString::from(*p))
-        .chain(dropped)
-        .collect();
+        .filter(|e| unchanged(e) && !resolved(e));
+    let entries: Vec<IndexEntry> = stays.cloned().collect();
+    let dropped = before.entries.iter();
+    let dropped = dropped.filter(|e| resolved(e) && unchanged(e));
+    let mut touched: Vec<BString> = acted.iter().map(|p| BString::from(*p)).collect();
+    touched.extend(dropped.map(|e| e.path.clone()));
     touched.sort();
     touched.dedup();
     let kept = before.entries.iter().filter(|e| present(e, delta, named));
