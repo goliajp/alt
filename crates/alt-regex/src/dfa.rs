@@ -134,7 +134,11 @@ impl Cache {
         &self.states[(state / self.width) as usize]
     }
 
-    /// The state after `state` on a byte of class `class`.
+    /// The state after `state` on a byte of class `class`, built the
+    /// first time a text comes to it: kept out of the searches, whose
+    /// loops then stay as small as they are written.
+    #[cold]
+    #[inline(never)]
     fn step(&mut self, prog: &Program, state: u32, class: usize) -> u32 {
         let byte = prog.members[class];
         let seeds: Vec<u32> = self
@@ -164,24 +168,32 @@ impl Cache {
     }
 
     /// Whether `state`, reached at the end of the text, is a match there.
+    #[inline]
     fn finish(&mut self, prog: &Program, state: u32) -> bool {
         let last = state as usize + self.width as usize - 1;
         if self.table[last] == UNKNOWN {
-            let seeds: Vec<u32> = self
-                .set(state)
-                .iter()
-                .filter_map(|&pc| match prog.insts[pc as usize] {
-                    Inst::Look(Look::TextEnd, next) => Some(next),
-                    _ => None,
-                })
-                .collect();
-            let set = self.closure(prog, &seeds, false, true);
-            let matched = set
-                .iter()
-                .any(|&pc| matches!(prog.insts[pc as usize], Inst::Match));
-            self.table[last] = self.width | if matched { MATCH } else { 0 };
+            self.settle(prog, state, last);
         }
         self.table[last] & MATCH != 0
+    }
+
+    /// Works out, once for a state, what the end of the text makes of it.
+    #[cold]
+    #[inline(never)]
+    fn settle(&mut self, prog: &Program, state: u32, last: usize) {
+        let seeds: Vec<u32> = self
+            .set(state)
+            .iter()
+            .filter_map(|&pc| match prog.insts[pc as usize] {
+                Inst::Look(Look::TextEnd, next) => Some(next),
+                _ => None,
+            })
+            .collect();
+        let set = self.closure(prog, &seeds, false, true);
+        let matched = set
+            .iter()
+            .any(|&pc| matches!(prog.insts[pc as usize], Inst::Match));
+        self.table[last] = self.width | if matched { MATCH } else { 0 };
     }
 
     /// Whether a state is one a search goes on from without a second
