@@ -184,7 +184,7 @@ impl ObjectMap {
     }
 
     /// Entries whose git oid starts with the given hex digits (lowercase),
-    /// at most `cap` of them.
+    /// one for each oid, at most `cap` of them.
     pub fn by_prefix(&self, hex: &str, cap: usize) -> Result<Vec<MapEntry>, OdbError> {
         let (mut lo, mut hi) = ([0u8; 32], [0xffu8; 32]);
         for (i, digit) in hex.bytes().enumerate() {
@@ -193,11 +193,13 @@ impl ObjectMap {
             lo[i / 2] |= nibble << shift;
             hi[i / 2] &= !(0xf << shift) | nibble << shift;
         }
-        let mut out = Vec::new();
+        let mut out: Vec<MapEntry> = Vec::new();
         // the padded key range also holds shorter oids ending in zeros
         for rec in self.log.range(&lo, &hi, usize::MAX).map_err(lift)? {
             let entry = MapEntry::parse(&rec)?;
-            if entry.git.to_string().starts_with(hex) {
+            // an object two writers stored at once has a record from each
+            let listed = out.iter().any(|seen| seen.git == entry.git);
+            if !listed && entry.git.to_string().starts_with(hex) {
                 out.push(entry);
                 if out.len() >= cap {
                     break;
