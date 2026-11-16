@@ -358,17 +358,9 @@ fn recovering_a_suboperation_does_not_complete_the_interrupted_request() {
         .status
         .success()
     );
-    let log_path = root.path().join(".alt/oplog/log");
-    let bytes = std::fs::read(&log_path).unwrap();
-    let (mut cursor, mut last) = (5, 5);
-    while cursor < bytes.len() {
-        last = cursor;
-        let length = u32::from_le_bytes(bytes[cursor..cursor + 4].try_into().unwrap()) as usize;
-        cursor += 4 + length + 8;
-    }
     // Crash fixture: index replacement survived, its operation completion and
     // whole-command receipt did not. Keep the request intent intact.
-    std::fs::write(&log_path, &bytes[..last]).unwrap();
+    super::crash_fixture::remove_final_log_frame(root.path());
     let directory = root.path().join(".alt/requests").join(ID);
     std::fs::remove_file(directory.join("completed.json")).unwrap();
     std::fs::remove_file(directory.join("response.bin")).unwrap();

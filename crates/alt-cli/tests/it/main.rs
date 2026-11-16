@@ -16,6 +16,7 @@ mod closed_fds;
 mod commit_loop;
 mod commit_meta;
 mod config;
+mod crash_fixture;
 mod credential_helper;
 mod daemon_client;
 mod daemon_server;

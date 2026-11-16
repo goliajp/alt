@@ -5,6 +5,8 @@
 //! toward "any state-changing op is reversible".
 
 use std::path::Path;
+
+pub(super) use super::crash_fixture::remove_final_log_frame;
 use std::process::{Command, Output};
 
 pub(super) fn alt(repo: &Path, args: &[&str]) -> Output {
@@ -239,17 +241,9 @@ fn recovery_missing_completion_survives_restart_and_blocks_mutation() {
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("f"), "staged").unwrap();
     ok(alt(root, &["add", "f"]));
-    let path = root.join(".alt/oplog/log");
-    let bytes = std::fs::read(&path).unwrap();
-    let mut cursor = 5;
-    let mut last = 5;
-    while cursor < bytes.len() {
-        last = cursor;
-        let n = u32::from_le_bytes(bytes[cursor..cursor + 4].try_into().unwrap()) as usize;
-        cursor += 4 + n + 8;
-    }
     // Reproduce a crash after atomic index replacement, before completion.
-    std::fs::write(&path, &bytes[..last]).unwrap();
+    remove_final_log_frame(root);
+    let path = root.join(".alt/oplog/log");
     let before = index_bytes(root);
     let log_before = std::fs::read(&path).unwrap();
     ok(alt(root, &["status", "--json"]));
@@ -337,19 +331,6 @@ fn recovery_add_preserves_unrelated_conflict_stages_and_undo_restores_them() {
     let restored = Index::parse(&index_bytes(root), HashAlgo::Sha1).unwrap();
     assert_eq!(restored.entries.len(), 1);
     assert_eq!(restored.entries[0].stage(), 1);
-}
-
-pub(super) fn remove_final_log_frame(root: &Path) {
-    let path = root.join(".alt/oplog/log");
-    let bytes = std::fs::read(&path).unwrap();
-    let mut cursor = 5;
-    let mut last = 5;
-    while cursor < bytes.len() {
-        last = cursor;
-        let len = u32::from_le_bytes(bytes[cursor..cursor + 4].try_into().unwrap()) as usize;
-        cursor += 4 + len + 8;
-    }
-    std::fs::write(path, &bytes[..last]).unwrap();
 }
 
 #[test]
