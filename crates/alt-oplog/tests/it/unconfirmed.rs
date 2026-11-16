@@ -140,6 +140,9 @@ fn a_reader_is_told_where_the_ops_start_and_changes_nothing() {
     assert_eq!(log.len(), 3);
     assert!(log.clamped());
     assert_eq!(files(dir.path()), before);
+    // the process reads this file short for as long as it runs: kept open,
+    // its inode is not given to the log of another test
+    std::mem::forget(log);
 }
 
 #[test]
