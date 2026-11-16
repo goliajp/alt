@@ -65,10 +65,18 @@ pub(crate) struct Watcher {
     mounts: Mounts,
     /// how often the watches were set up from the root
     pub(super) set_up: usize,
-    /// while the watches are gone over after events were lost: the
-    /// watches found in place, and the directories that had none or
-    /// another
-    pub(super) check: Option<(HashSet<i32>, Vec<Vec<u8>>)>,
+    pub(super) check: Check,
+}
+
+/// What is noted of each watch put on a directory while the watches are
+/// gone over after events were lost.
+#[derive(Default)]
+pub(super) struct Check {
+    pub(super) on: bool,
+    /// the watches found in place
+    pub(super) found: HashSet<i32>,
+    /// the directories that had no watch, or another
+    pub(super) fresh: Vec<Vec<u8>>,
 }
 
 /// What the events read off the queue tell.
@@ -140,7 +148,7 @@ impl Watcher {
             skipped: BTreeSet::new(),
             mounts: Mounts::open()?,
             set_up: 0,
-            check: None,
+            check: Check::default(),
         };
         watcher.establish(tracked)?;
         Ok(watcher)

@@ -10,7 +10,7 @@ use crate::watch::Tree;
 /// Causes more events than the queue holds, 16384 unless raised, in a
 /// directory that is watched; whatever happens after that leaves no event
 /// until the queue is read.
-fn flood(root: &Path) {
+pub(crate) fn flood(root: &Path) {
     for f in 0..9000 {
         write(root, &format!("src/flood{f}.txt"), "x\n");
     }

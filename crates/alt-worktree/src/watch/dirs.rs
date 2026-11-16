@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use alt_os::sys;
 
-use super::os::{ENOSPC, Tracked, WATCHED, Watcher, gone, join};
+use super::os::{Check, ENOSPC, Tracked, WATCHED, Watcher, gone, join};
 use crate::delta::Seen;
 use crate::ignore::{self, IgnoreLayer, IgnoreStack};
 
@@ -73,10 +73,10 @@ impl Watcher {
             };
         }
         let was = self.dirs.insert(wd, rel.to_vec());
-        if let Some((found, fresh)) = &mut self.check {
-            found.insert(wd);
+        if self.check.on {
+            self.check.found.insert(wd);
             if was.as_deref() != Some(rel) {
-                fresh.push(rel.to_vec());
+                self.check.fresh.push(rel.to_vec());
             }
         }
         match self.dirs.len() > self.most {
@@ -136,31 +136,42 @@ impl Watcher {
     /// After events were lost, with what a scan of the whole tree came by
     /// since: goes over the watches without walking the tree again where
     /// the scan has. Every directory the scan listed is given its watch
-    /// anew, since one that was moved away took its watch along; the
-    /// directories the scan did not look through are walked here; watches
-    /// on anything else are taken off. Returns the directories that were
-    /// not watched, or not under their name, while the scan listed them:
-    /// what happened in them since then is in no event.
-    pub(crate) fn fill(&mut self, seen: Seen, tracked: Tracked) -> io::Result<Vec<Vec<u8>>> {
-        self.check = Some(Default::default());
+    /// anew, since one that was moved away took its watch along; one that
+    /// had no watch, or not under its name, while the scan listed it is
+    /// walked here like the directories the scan did not look through,
+    /// watch first, because a directory made in it since is in no event
+    /// and in no listing; watches on anything else are taken off. Returns
+    /// the directories given a watch they did not have: the files made in
+    /// them since the scan are in no event either.
+    pub(crate) fn fill(&mut self, mut seen: Seen, tracked: Tracked) -> io::Result<Vec<Vec<u8>>> {
+        self.check = Check {
+            on: true,
+            ..Check::default()
+        };
         self.skipped = seen.passed.into_iter().collect();
+        // a directory before those in it, which a walk of it covers
+        seen.listed.sort_unstable();
         for rel in seen.listed {
+            let known = self.check.fresh.len();
             let abs = self.root.join(OsStr::from_bytes(&rel));
             self.watch(&abs, &rel)?;
+            if self.check.fresh.len() > known {
+                self.add_tree(rel, tracked)?;
+            }
         }
         for rel in seen.unwalked {
             self.add_tree(rel, tracked)?;
         }
-        let (found, fresh) = self.check.take().unwrap_or_default();
+        let check = std::mem::take(&mut self.check);
         self.dirs.retain(|wd, _| {
-            let kept = found.contains(wd);
+            let kept = check.found.contains(wd);
             if !kept {
                 // SAFETY: no pointers are passed
                 unsafe { sys::inotify_rm_watch(self.queue.as_raw_fd(), *wd) };
             }
             kept
         });
-        Ok(fresh)
+        Ok(check.fresh)
     }
 
     /// After the index changed: watches the directories left unwatched
