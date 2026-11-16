@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: read a hyphen and, without regard to case, a range inside brackets as the c library does
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/bracket.rs
+touched: crates/alt-regex/src/class.rs
+touched: crates/alt-regex/src/syntax.rs
+touched: crates/alt-regex/tests/it/regcomp.rs
