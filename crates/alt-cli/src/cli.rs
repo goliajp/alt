@@ -1242,17 +1242,24 @@ pub fn mutates_command(cmd: &Command) -> bool {
     )
 }
 
-/// The commands for which git sets up its ignore rules before anything
-/// else, and so ends where one of the files they are in cannot be one.
-fn sets_up_excludes(cmd: &Command) -> bool {
+/// What comes before any command: git sets up its ignore rules for some
+/// and ends there where one of the files they are in cannot be one.
+fn prepare(repo: &mut NativeRepo, cmd: &Command) -> Res<()> {
     use Command::{Add, Commit, Diff, Status, Switch};
-    match cmd {
+    let excludes = match cmd {
         Add { args } => !args.renormalize,
         Commit { validate, .. } => !validate,
         Diff { cached, .. } => *cached,
         Switch { create, .. } => !create,
         _ => matches!(cmd, Status { .. }),
+    };
+    if excludes {
+        repo.ensure_exclude_files()?;
     }
+    if mutates_command(cmd) && !matches!(cmd, Command::Operation { .. }) {
+        repo.begin_workspace_write()?;
+    }
+    Ok(())
 }
 
 pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> Res<u8> {
@@ -1270,12 +1277,7 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
         )
         .into());
     }
-    if sets_up_excludes(cmd) {
-        repo.ensure_exclude_files()?;
-    }
-    if mutates_command(cmd) && !matches!(cmd, Command::Operation { .. }) {
-        repo.begin_workspace_write()?;
-    }
+    prepare(repo, cmd)?;
     match cmd {
         Command::Task { op, json } => repo.task_command(op, *json, out)?,
         Command::Candidate { op, json } => repo.candidate_command(op, *json, out)?,
@@ -1537,15 +1539,7 @@ pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, at: &Place, out: &mut
                 if *json {
                     return Err("--json is not supported with <rev>:<path>".into());
                 }
-                let commit_oid = repo
-                    .rev_parse(rev_part)?
-                    .ok_or_else(|| format!("bad revision '{rev_part}'"))?;
-                // only `./` and `../` are read from where the command runs
-                let path = match path_part.starts_with("./") || path_part.starts_with("../") {
-                    true => at.path(path_part)?,
-                    false => path_part.to_owned(),
-                };
-                let blob = crate::tree_changes::blob_at(repo, commit_oid, &path)?;
+                let blob = at.blob(repo, rev_part, path_part)?;
                 out.write_all(&blob)?;
                 return Ok(());
             }

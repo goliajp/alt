@@ -110,6 +110,19 @@ impl Place {
         from_root(&self.root, &self.prefix, given).ok_or_else(|| self.outside(given))
     }
 
+    /// The file `rev:path` names. Only a path that starts with `./` or
+    /// `../` is read from where the command runs, as for git.
+    pub fn blob(&self, repo: &Repository, rev: &str, path: &str) -> Res<Vec<u8>> {
+        let commit = repo
+            .rev_parse(rev)?
+            .ok_or_else(|| format!("bad revision '{rev}'"))?;
+        let path = match path.starts_with("./") || path.starts_with("../") {
+            true => self.path(path)?,
+            false => path.to_owned(),
+        };
+        crate::tree_changes::blob_at(repo, commit, &path)
+    }
+
     fn outside(&self, given: &str) -> Box<dyn std::error::Error> {
         let root = self.root.display();
         super::settings::fatal(format!("'{given}' is outside repository at '{root}'"))

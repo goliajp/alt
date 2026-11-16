@@ -48,7 +48,6 @@ impl NativeRepo<'_> {
         if json {
             return render_status_json(out, short, &self.id.principal, &st, &unmerged);
         }
-        writeln!(out, "On branch {short}")?;
         // as git shows them: from where the command was run, unless
         // `status.relativePaths` is off
         let relative = self.settings()?.get_bool("status", None, "relativepaths");
@@ -56,46 +55,58 @@ impl NativeRepo<'_> {
             Some(Ok(false)) => "",
             _ => self.prefix.as_str(),
         };
-        let shown = |p: &BString| BString::from(pathspec::shown_from(prefix, p));
-        let mark = |k: ChangeKind| match k {
-            ChangeKind::Added => "new file:   ",
-            ChangeKind::Modified => "modified:   ",
-            ChangeKind::Deleted => "deleted:    ",
-            ChangeKind::TypeChanged => "typechange: ",
-        };
-        if !st.staged.is_empty() {
-            writeln!(out, "Changes to be committed:")?;
-            for (p, k) in &st.staged {
-                writeln!(out, "\t{}{}", mark(*k), shown(p))?;
-            }
-        }
-        if !conflicts.is_empty() {
-            writeln!(out, "Unmerged paths:")?;
-            for (p, stages) in &conflicts {
-                writeln!(out, "\t{}{}", conflict_mark(*stages), shown(p))?;
-            }
-        }
-        if !st.unstaged.is_empty() {
-            writeln!(out, "Changes not staged for commit:")?;
-            for (p, k) in &st.unstaged {
-                writeln!(out, "\t{}{}", mark(*k), shown(p))?;
-            }
-        }
-        if !st.untracked.is_empty() {
-            writeln!(out, "Untracked files:")?;
-            for p in &st.untracked {
-                writeln!(out, "\t{}", shown(p))?;
-            }
-        }
-        if unmerged.is_empty()
-            && st.staged.is_empty()
-            && st.unstaged.is_empty()
-            && st.untracked.is_empty()
-        {
-            writeln!(out, "nothing to commit, working tree clean")?;
-        }
-        Ok(())
+        writeln!(out, "On branch {short}")?;
+        render_status(out, prefix, &st, &conflicts)
     }
+}
+
+/// The long form of `status`: its paths as they are named from `prefix`,
+/// the conflicted ones after the staged ones, as for git.
+fn render_status(
+    out: &mut impl Write,
+    prefix: &str,
+    st: &alt_worktree::Status,
+    conflicts: &std::collections::BTreeMap<BString, u8>,
+) -> Res<()> {
+    let shown = |p: &BString| BString::from(pathspec::shown_from(prefix, p));
+    let mark = |k: ChangeKind| match k {
+        ChangeKind::Added => "new file:   ",
+        ChangeKind::Modified => "modified:   ",
+        ChangeKind::Deleted => "deleted:    ",
+        ChangeKind::TypeChanged => "typechange: ",
+    };
+    if !st.staged.is_empty() {
+        writeln!(out, "Changes to be committed:")?;
+        for (p, k) in &st.staged {
+            writeln!(out, "\t{}{}", mark(*k), shown(p))?;
+        }
+    }
+    if !conflicts.is_empty() {
+        writeln!(out, "Unmerged paths:")?;
+        for (p, stages) in conflicts {
+            writeln!(out, "\t{}{}", conflict_mark(*stages), shown(p))?;
+        }
+    }
+    if !st.unstaged.is_empty() {
+        writeln!(out, "Changes not staged for commit:")?;
+        for (p, k) in &st.unstaged {
+            writeln!(out, "\t{}{}", mark(*k), shown(p))?;
+        }
+    }
+    if !st.untracked.is_empty() {
+        writeln!(out, "Untracked files:")?;
+        for p in &st.untracked {
+            writeln!(out, "\t{}", shown(p))?;
+        }
+    }
+    if conflicts.is_empty()
+        && st.staged.is_empty()
+        && st.unstaged.is_empty()
+        && st.untracked.is_empty()
+    {
+        writeln!(out, "nothing to commit, working tree clean")?;
+    }
+    Ok(())
 }
 
 /// What git calls a conflicted path by the stages the index has for it:
