@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: compare with an older git only the built-in drivers it has as they are now
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/funcname_drivers.rs
