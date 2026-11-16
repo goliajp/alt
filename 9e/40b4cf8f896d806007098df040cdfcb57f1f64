@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: keep the loop over the table of states inside the search that runs it
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/dfa.rs
