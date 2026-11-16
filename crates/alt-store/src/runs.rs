@@ -367,6 +367,22 @@ impl Runs {
         if from != self.covered() {
             return Err(StoreError::Format("index run would leave records out"));
         }
+        // the runs are a cache: what goes wrong writing one is told apart
+        // from damage to the log
+        self.write_next(entries, end, guard, durable)
+            .map_err(|e| match e {
+                StoreError::Io(e) => StoreError::IndexWrite(e),
+                other => other,
+            })
+    }
+
+    fn write_next(
+        &mut self,
+        entries: &[(Key, u64)],
+        end: u64,
+        guard: Guard,
+        durable: bool,
+    ) -> Result<(), StoreError> {
         self.remove_stale()?;
         let mut fresh: Vec<[u8; ENTRY_LEN]> = entries
             .iter()

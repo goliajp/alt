@@ -7,6 +7,7 @@ use std::path::Path;
 use super::Odb;
 use crate::lock::{lock_exclusive, lock_shared, unlock};
 use crate::{OdbCheckpoint, OdbError};
+use alt_store::StoreError;
 
 /// The 3 durable EOFs (active pack, blobmap, map.alt) from the marker file;
 /// all-zero when missing (everything must be re-fsynced).
@@ -59,12 +60,12 @@ impl Odb {
         let target = [pack, blobmap, self.map.appended_len()];
         // still under the append lock: fold what this batch (and any writer
         // before it) appended into the index runs, so the next open does not
-        // have to scan it. The runs are a cache: failing to write them must
-        // not keep the batch from its fsync
-        let _ = self.index_tails();
+        // have to scan it
+        let indexed = self.index_tails();
         // release the exclusive append lock first, so other writers append (and
         // pile onto the same fsync) instead of waiting behind my durability
         self.release();
+        indexed?;
 
         if alt_store::relaxed_durability() {
             return Ok(());
@@ -78,15 +79,38 @@ impl Odb {
         self.sync_to(target)
     }
 
+    /// Folds long enough log tails into the index runs. A run is fsynced
+    /// as it is written, so the records it covers are fsynced first: no
+    /// crash leaves a run over records that were lost. The runs are a
+    /// cache: failing to write one is not an error, anything else is.
     pub(super) fn index_tails(&mut self) -> Result<(), OdbError> {
-        if !self.held {
+        let pending = self.blobs.index_pending()
+            || self.tier1.get().is_some_and(|tier1| tier1.index_pending())
+            || self.map.index_pending();
+        if !self.held || !pending {
             return Ok(());
         }
-        self.blobs.index_tail()?;
-        if let Some(tier1) = self.tier1.get_mut() {
-            tier1.index_tail()?;
+        if !alt_store::relaxed_durability() {
+            self.blobs.fsync()?;
+            if let Some(tier1) = self.tier1.get_mut() {
+                tier1.sync()?;
+            }
+            self.map.fsync()?;
         }
-        self.map.index_tail()
+        let indexed = (|| -> Result<(), StoreError> {
+            self.blobs.index_tail()?;
+            if let Some(tier1) = self.tier1.get_mut() {
+                tier1.index_tail()?;
+            }
+            Ok(())
+        })();
+        match indexed
+            .map_err(OdbError::from)
+            .and_then(|()| self.map.index_tail())
+        {
+            Err(OdbError::Store(StoreError::IndexWrite(_))) => Ok(()),
+            other => other,
+        }
     }
 
     /// Snapshots the write cursor across all three append files (chunks pack,

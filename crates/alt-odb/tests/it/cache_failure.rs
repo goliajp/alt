@@ -1,11 +1,12 @@
 //! The index runs are a cache: where they cannot be written (a read-only
 //! file system, a full disk) lookups get slower, and nothing else changes.
+//! Damage to the files they index, found while writing them, is reported.
 
 use std::os::unix::fs::symlink;
 use std::path::Path;
 
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
-use alt_odb::NativeOdb;
+use alt_odb::{NativeOdb, OdbError};
 
 fn object(n: usize) -> (ObjectId, Vec<u8>) {
     let data = format!("object {n} with no index\n").into_bytes();
@@ -77,4 +78,49 @@ fn a_flush_that_cannot_index_still_makes_the_batch_durable() {
     odb.flush().unwrap();
     drop(odb);
     holds(tmp.path(), 710);
+}
+
+#[test]
+fn a_flush_reports_damage_it_finds_while_indexing() {
+    use std::os::unix::fs::FileExt;
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let map = tmp.path().join("map.alt");
+    let mut odb = NativeOdb::open(tmp.path()).unwrap();
+    put(&mut odb, 0..600);
+    odb.flush().unwrap();
+
+    // record 100 of map.alt rots behind the runs, and the runs are lost
+    let file = std::fs::OpenOptions::new().write(true).open(&map).unwrap();
+    file.write_all_at(&[0xff], 5 + 100 * 82 + 70).unwrap();
+    std::fs::remove_dir_all(tmp.path().join("map.alt.idx")).unwrap();
+
+    put(&mut odb, 600..900);
+    let before = std::fs::metadata(&map).unwrap().len();
+    let flushed = odb.flush();
+    assert!(
+        matches!(flushed, Err(OdbError::Format("map.alt record corrupt"))),
+        "{flushed:?}"
+    );
+    assert_eq!(std::fs::metadata(&map).unwrap().len(), before);
+}
+
+#[test]
+fn an_open_reports_a_damaged_file_it_was_about_to_index() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    {
+        let mut odb = NativeOdb::open(tmp.path()).unwrap();
+        put(&mut odb, 0..700);
+        odb.flush().unwrap();
+    }
+    // a long tail to index, and a tier1 file that is not one
+    std::fs::remove_dir_all(tmp.path().join("map.alt.idx")).unwrap();
+    std::fs::write(tmp.path().join("tier1"), b"not a tier1 file").unwrap();
+    let opened = NativeOdb::deferred(tmp.path()).len();
+    assert!(
+        matches!(
+            opened,
+            Err(OdbError::Store(alt_store::StoreError::Format(_)))
+        ),
+        "{opened:?}"
+    );
 }

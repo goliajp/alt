@@ -75,6 +75,10 @@ impl Tier1Map {
         self.log.index_tail(!alt_store::relaxed_durability())
     }
 
+    pub fn index_pending(&self) -> bool {
+        self.log.index_pending()
+    }
+
     pub fn get(&self, blob: BlobId) -> Result<Option<BlobId>, StoreError> {
         Ok(self
             .log

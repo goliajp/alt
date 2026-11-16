@@ -127,8 +127,7 @@ impl Odb {
             defer: false,
             write_count: 0,
         };
-        // the runs are a cache: an open that cannot write them still opens
-        let _ = odb.index_stale_tails();
+        odb.index_stale_tails()?;
         Ok(odb)
     }
 
