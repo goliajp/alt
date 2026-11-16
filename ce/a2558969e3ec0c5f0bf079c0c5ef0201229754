@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: docs
+summary: list where the c library answers otherwise, with tests that hold both sides and the match posix defines
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/lib.rs
+touched: crates/alt-regex/src/search.rs
+touched: crates/alt-regex/tests/it/differences.rs
+touched: crates/alt-regex/tests/it/ideal.rs
+touched: crates/alt-regex/tests/it/main.rs
+touched: crates/alt-regex/tests/it/regcomp.rs
