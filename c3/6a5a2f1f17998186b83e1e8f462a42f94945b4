@@ -1,0 +1,18 @@
+schema: alt-meta/1
+type: refactor
+summary: keep the files and the push function this branch touched no longer than before
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/lib.rs
+touched: crates/alt-cli/src/log2.rs
+touched: crates/alt-cli/src/machine.rs
+touched: crates/alt-cli/src/machine/canonical.rs
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/merge.rs
+touched: crates/alt-cli/src/native/object_format.rs
+touched: crates/alt-cli/src/native/push_pack.rs
+touched: crates/alt-cli/src/precommit.rs
+touched: crates/alt-cli/tests/it/daemon_server.rs
+touched: crates/alt-cli/tests/it/op_log.rs
+touched: crates/alt-repo/src/revwalk.rs
+touched: crates/alt-task-service/tests/it/main.rs
