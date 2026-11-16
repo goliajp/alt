@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: test
+summary: judge by the rules of posix the groups the c library reports otherwise in repetitions of what may match nothing
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/lib.rs
+touched: crates/alt-regex/tests/it/differences.rs
+touched: crates/alt-regex/tests/it/ideal.rs
+touched: crates/alt-regex/tests/it/ideal/groups.rs
+touched: crates/alt-regex/tests/it/ideal/judged.rs
+touched: crates/alt-regex/tests/it/ideal/written.rs
+touched: crates/alt-regex/tests/it/regcomp.rs
+touched: crates/alt-regex/tests/it/regcomp/judged.rs
