@@ -9,7 +9,7 @@ use super::*;
 mod embedded;
 mod plan;
 
-use plan::{plan, present};
+use plan::{Plan, plan, present};
 
 /// Whether `path` is what `spec` names or lies beneath it; the empty spec
 /// is the whole tree.
@@ -94,32 +94,15 @@ impl NativeRepo<'_> {
         let advice = embedded::warning(&embedded, &self.settings()?)?;
 
         let plan = plan(&before, &delta, renormalize, &named);
-        // path gate: deny staging any path the policy excludes, *before*
-        // writing a blob into the odb, so a denial has no side effect
-        if !self.caps.path_allow.is_empty() {
-            let gone: HashSet<&[u8]> = plan.deleted.iter().map(|p| p.as_slice()).collect();
-            let stays = |e: &&IndexEntry| !gone.contains(e.path.as_slice());
-            let present = |e: &&IndexEntry| present(e, &delta, &named);
-            for e in before.entries.iter().filter(present).filter(stays) {
-                self.ensure_path_allowed(e.path.to_str().unwrap_or(""))?;
-            }
-        }
+        self.ensure_paths_allowed(&before, &plan, &delta, &named)?;
         // stored anew, a file is cleaned without regard to what is staged
-        let none = Index {
-            version: 2,
-            entries: Vec::new(),
-            extensions: Vec::new(),
-        };
+        let none = index_of(Vec::new());
         let staged_now = if renormalize { &none } else { &before };
         let mut entries = plan.entries;
         let stats = self.stage_files(&plan.taken, &delta, staged_now, &mut entries)?;
         self.store.odb.flush()?;
         entries.sort_by(|a, b| a.path.cmp(&b.path).then(a.stage().cmp(&b.stage())));
-        let after = Index {
-            version: 2,
-            entries,
-            extensions: Vec::new(),
-        };
+        let after = index_of(entries);
         let staged = plan.staged;
         let touched = plan.touched;
         self.put_staged(before, after, &touched, &snapshot, stats, &clock)?;
@@ -128,6 +111,27 @@ impl NativeRepo<'_> {
         } else {
             crate::diagnostics::emit(advice.as_bytes())?;
             writeln!(out, "staged {staged} path(s)")?;
+        }
+        Ok(())
+    }
+
+    /// The path gate: denies staging any path the policy excludes, before
+    /// a blob is written to the object store, so a denial has no side effect.
+    fn ensure_paths_allowed(
+        &self,
+        before: &Index,
+        plan: &Plan<'_>,
+        delta: &Delta,
+        named: &dyn Fn(&[u8]) -> bool,
+    ) -> Res<()> {
+        if self.caps.path_allow.is_empty() {
+            return Ok(());
+        }
+        let gone: HashSet<&[u8]> = plan.deleted.iter().map(|p| p.as_slice()).collect();
+        let stays = |e: &&IndexEntry| !gone.contains(e.path.as_slice());
+        let present = |e: &&IndexEntry| present(e, delta, named);
+        for e in before.entries.iter().filter(present).filter(stays) {
+            self.ensure_path_allowed(e.path.to_str().unwrap_or(""))?;
         }
         Ok(())
     }
@@ -228,6 +232,14 @@ impl NativeRepo<'_> {
             stats.push((path.clone(), stat));
         }
         Ok(stats)
+    }
+}
+
+fn index_of(entries: Vec<IndexEntry>) -> Index {
+    Index {
+        version: 2,
+        entries,
+        extensions: Vec::new(),
     }
 }
 

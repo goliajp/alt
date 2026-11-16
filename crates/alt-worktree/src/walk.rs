@@ -19,6 +19,7 @@ const SPLIT: u32 = 512;
 const MANY_FILES: usize = 256;
 
 mod found;
+mod listing;
 mod reach;
 pub(crate) use found::Found;
 pub(crate) use reach::Reach;
@@ -232,127 +233,6 @@ impl Walk<'_> {
             found.absorb(result?);
         }
         Ok(())
-    }
-
-    /// Walks an index directory by its listing, which also shows what the
-    /// index does not have. Inside an ignored directory (`hidden`) only the
-    /// tracked files count.
-    fn listed(
-        &self,
-        mut fd: DirFd,
-        dir: usize,
-        ignore: &IgnoreStack,
-        hidden: bool,
-        reach: Reach,
-        found: &mut Found,
-    ) -> io::Result<()> {
-        let mut names = fd.names()?;
-        names.sort();
-        let base = self.snapshot.dir_path(dir);
-        if !hidden {
-            found.listed.push(dir as u32);
-        }
-        let own = match hidden {
-            true => None,
-            false => ignore_file(&fd, &names, base, ignore)?,
-        };
-        let ignore = own.as_ref().unwrap_or(ignore);
-        let mut taken = vec![false; names.len()];
-        let mut below = Vec::new();
-        let mut files = Vec::new();
-        for child in self.children(dir) {
-            let Some(reach) = self.reach(reach, self.path(&child)) else {
-                continue;
-            };
-            let name = self.name(dir, &child);
-            match child {
-                Child::File(..) if reach != Reach::Inside => {}
-                Child::File(first, end) => {
-                    let gitlink = self.snapshot.entries[first].mode == 0o160000;
-                    if gitlink && let Some(item) = names.find(name, true) {
-                        taken[item] = true;
-                        found.gitlinks.push(first as u32);
-                        continue;
-                    }
-                    let Some(item) = names.find(name, false) else {
-                        self.gone(first, end, reach, found);
-                        continue;
-                    };
-                    taken[item] = true;
-                    files.push((first, end, item));
-                }
-                Child::Dir(c) => match names.find(name, true) {
-                    Some(item) => {
-                        taken[item] = true;
-                        let inside = hidden;
-                        let hidden = hidden || ignore.is_ignored(self.snapshot.dir_path(c), true);
-                        if hidden && !inside {
-                            found.unwalked.push(self.snapshot.dir_path(c).to_vec());
-                        }
-                        below.push(Below {
-                            item,
-                            tracked: Some((c, hidden)),
-                            reach,
-                        });
-                    }
-                    None => self.all_gone(c, reach, found),
-                },
-            }
-        }
-        let stat = |&(first, end, item): &(usize, usize, usize), found: &mut Found| {
-            match fd.stat(names.c_name(item))? {
-                Some(st) if kind_of(st.mode) != Kind::Dir => self.tracked(first, end, st, found),
-                _ => self.gone(first, end, Reach::Inside, found),
-            }
-            Ok(())
-        };
-        self.files(&files, stat, found)?;
-        if !hidden {
-            let mut path = base.to_vec();
-            for item in (0..names.len()).filter(|&i| !taken[i]) {
-                let name = names.name(item);
-                if name == b".alt" || name == b".git" {
-                    continue;
-                }
-                let is_dir = names.kind(item) == Kind::Dir;
-                with_name(&mut path, name, |path| match self.reach(reach, path) {
-                    Some(reach) if is_dir && !ignore.is_ignored(path, true) => {
-                        found.unwalked.push(path.to_vec());
-                        below.push(Below {
-                            item,
-                            tracked: None,
-                            reach,
-                        })
-                    }
-                    Some(Reach::Inside) if !is_dir && !ignore.is_ignored(path, false) => {
-                        found.untracked.push(path.to_vec())
-                    }
-                    Some(_) if is_dir => found.passed.push(path.to_vec()),
-                    _ => {}
-                });
-            }
-        }
-        let visit = |below: &Below| -> io::Result<Found> {
-            let mut found = Found::default();
-            let sub = fd.open_at(names.c_name(below.item))?;
-            match (below.tracked, sub) {
-                (Some((dir, hidden)), Some(sub)) => {
-                    self.listed(sub, dir, ignore, hidden, below.reach, &mut found)?
-                }
-                (Some((dir, _)), None) => self.all_gone(dir, below.reach, &mut found),
-                (None, Some(sub)) => {
-                    let mut path = base.to_vec();
-                    if !path.is_empty() {
-                        path.push(b'/');
-                    }
-                    path.extend_from_slice(names.name(below.item));
-                    self.untracked_in(sub, &mut path, ignore, below.reach, &mut found.untracked)?;
-                }
-                (None, None) => {}
-            }
-            Ok(found)
-        };
-        self.below(dir, &below, visit, found)
     }
 }
 

@@ -116,21 +116,7 @@ pub(crate) fn scan_seeing(
         _ => IgnoreStack::of_files(opts.excludes)?,
     };
     let mut found = walk::walk(root, snapshot, opts.untracked, opts.within, &ignore)?;
-    let view = &*snapshot;
-    let listed = found
-        .listed
-        .iter()
-        .map(|&d| view.dir_path(d as usize).to_vec());
-    let links = found
-        .gitlinks
-        .iter()
-        .map(|&i| view.path(i as usize).to_vec());
-    let unwalked = std::mem::take(&mut found.unwalked);
-    let seen = Seen {
-        listed: listed.collect(),
-        unwalked: unwalked.into_iter().chain(links).collect(),
-        passed: std::mem::take(&mut found.passed),
-    };
+    let seen = came_by(&mut found, snapshot);
     let mut delta = Delta::default();
     found.suspects.sort_unstable_by_key(|s| s.0);
     compare(
@@ -141,7 +127,48 @@ pub(crate) fn scan_seeing(
         &mut found.deleted,
         &mut delta,
     )?;
-    for &i in &found.gitlinks {
+    submodules(root, snapshot, opts, &found.gitlinks, &mut delta);
+    let paths = |entries: &mut Vec<u32>| {
+        entries.sort_unstable();
+        let mut paths: Vec<BString> = entries
+            .iter()
+            .map(|&i| BString::from(snapshot.path(i as usize)))
+            .collect();
+        paths.dedup();
+        paths
+    };
+    delta.deleted = paths(&mut found.deleted);
+    delta.unmerged = paths(&mut found.unmerged);
+    found.untracked.sort_unstable();
+    delta.untracked = found.untracked.into_iter().map(BString::from).collect();
+    delta.changed.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok((delta, seen))
+}
+
+/// The directories the walk that `found` is of came by.
+fn came_by(found: &mut walk::Found, snapshot: &Snapshot) -> Seen {
+    let listed = found.listed.iter();
+    let listed = listed.map(|&d| snapshot.dir_path(d as usize).to_vec());
+    let links = found.gitlinks.iter();
+    let links = links.map(|&i| snapshot.path(i as usize).to_vec());
+    let unwalked = std::mem::take(&mut found.unwalked);
+    Seen {
+        listed: listed.collect(),
+        unwalked: unwalked.into_iter().chain(links).collect(),
+        passed: std::mem::take(&mut found.passed),
+    }
+}
+
+/// Reports the submodule entries `gitlinks` whose directory holds a
+/// repository, as changed where it has another commit checked out.
+fn submodules(
+    root: &Path,
+    snapshot: &Snapshot,
+    opts: &ScanOptions<'_>,
+    gitlinks: &[u32],
+    delta: &mut Delta,
+) {
+    for &i in gitlinks {
         let i = i as usize;
         let path = snapshot.path(i);
         let dir = root.join(std::ffi::OsStr::from_bytes(path));
@@ -158,21 +185,6 @@ pub(crate) fn scan_seeing(
         }
     }
     delta.submodules.sort();
-    let paths = |entries: &mut Vec<u32>| {
-        entries.sort_unstable();
-        let mut paths: Vec<BString> = entries
-            .iter()
-            .map(|&i| BString::from(snapshot.path(i as usize)))
-            .collect();
-        paths.dedup();
-        paths
-    };
-    delta.deleted = paths(&mut found.deleted);
-    delta.unmerged = paths(&mut found.unmerged);
-    found.untracked.sort_unstable();
-    delta.untracked = found.untracked.into_iter().map(BString::from).collect();
-    delta.changed.sort_by(|a, b| a.path.cmp(&b.path));
-    Ok((delta, seen))
 }
 
 /// A suspect's content as the working tree has it, with its blob id.

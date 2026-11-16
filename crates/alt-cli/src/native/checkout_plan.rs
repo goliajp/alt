@@ -184,28 +184,7 @@ impl NativeRepo<'_> {
                 after: None,
             });
         }
-        let entries = target
-            .iter()
-            .map(|entry| IndexEntry {
-                ctime: (0, 0),
-                mtime: (0, 0),
-                dev: 0,
-                ino: 0,
-                mode: entry.mode,
-                uid: 0,
-                gid: 0,
-                size: 0,
-                oid: entry.oid,
-                flags: entry.path.len().min(0x0fff) as u16,
-                extended_flags: None,
-                path: entry.path.clone(),
-            })
-            .collect();
-        let index_after = Index {
-            version: 2,
-            entries,
-            extensions: Vec::new(),
-        };
+        let index_after = target_index(target);
         let index_after = self.snapshot(&canonical_index(index_after, self.store.algo))?;
         *self.planned.borrow_mut() = Some(super::tree_state::Planned {
             index: index_after.clone(),
@@ -219,6 +198,29 @@ impl NativeRepo<'_> {
             index_after,
             files,
         })
+    }
+}
+
+/// The index a checkout of `target` leaves in place.
+fn target_index(target: &[WorkEntry]) -> Index {
+    let entry = |entry: &WorkEntry| IndexEntry {
+        ctime: (0, 0),
+        mtime: (0, 0),
+        dev: 0,
+        ino: 0,
+        mode: entry.mode,
+        uid: 0,
+        gid: 0,
+        size: 0,
+        oid: entry.oid,
+        flags: entry.path.len().min(0x0fff) as u16,
+        extended_flags: None,
+        path: entry.path.clone(),
+    };
+    Index {
+        version: 2,
+        entries: target.iter().map(entry).collect(),
+        extensions: Vec::new(),
     }
 }
 
