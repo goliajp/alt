@@ -1,0 +1,17 @@
+schema: alt-meta/1
+type: fix
+summary: keep no path a file and a directory at once in the index or a tree
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/add/plan.rs
+touched: crates/alt-cli/src/native/checkout_plan.rs
+touched: crates/alt-cli/src/native/index_file.rs
+touched: crates/alt-cli/src/native/recovery.rs
+touched: crates/alt-cli/tests/it/add_clash.rs
+touched: crates/alt-cli/tests/it/byte_names.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-git-index/src/clash.rs
+touched: crates/alt-git-index/src/lib.rs
+touched: crates/alt-worktree/src/lib.rs
+touched: crates/alt-worktree/tests/it/status_interop.rs
