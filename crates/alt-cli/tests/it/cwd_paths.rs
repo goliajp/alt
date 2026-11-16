@@ -2,6 +2,7 @@
 //! in, as git reads it, and `status` shows its paths from there: the same
 //! by the daemon, which runs elsewhere, and without it.
 
+use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -57,6 +58,9 @@ impl Trees {
         assert!(git(&at("git"), &["commit", "-qm", "base"]).status.success());
         run(&at("served"), &["status"], true);
         let stop = Stop(daemon_pid(&at("served")));
+        for tree in ["direct", "served", "git"] {
+            symlink(at(tree), at(&format!("link-{tree}"))).unwrap();
+        }
         Trees { dir, _stop: stop }
     }
 
@@ -75,10 +79,7 @@ impl Trees {
     fn alt(&self, sub: &str, args: &[&str]) -> Said {
         let said = |tree: &str, daemon: bool| {
             let root = self.at(tree);
-            let args: Vec<String> = args
-                .iter()
-                .map(|a| a.replace("{}", &root_of(&root)))
-                .collect();
+            let args = placed(args, &root);
             let args: Vec<&str> = args.iter().map(String::as_str).collect();
             Said::of(&output(&root.join(sub), &args, daemon), &root)
         };
@@ -89,13 +90,23 @@ impl Trees {
 
     fn git(&self, sub: &str, args: &[&str]) -> Said {
         let root = self.at("git");
-        let args: Vec<String> = args
-            .iter()
-            .map(|a| a.replace("{}", &root_of(&root)))
-            .collect();
+        let args = placed(args, &root);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         Said::of(&git(&root.join(sub), &args), &root)
     }
+}
+
+/// `args` for the tree at `root`: `{}` stands for the tree, `{link}` for
+/// a symbolic link to it, `{name}` for the name of its directory.
+fn placed(args: &[&str], root: &Path) -> Vec<String> {
+    let real = root_of(root);
+    let (above, name) = real.rsplit_once('/').unwrap();
+    let place = |arg: &&str| {
+        arg.replace("{}", &real)
+            .replace("{link}", &format!("{above}/link-{name}"))
+            .replace("{name}", name)
+    };
+    args.iter().map(place).collect()
 }
 
 fn root_of(root: &Path) -> String {
@@ -114,7 +125,11 @@ struct Said {
 
 impl Said {
     fn of(output: &Output, root: &Path) -> Said {
-        let plain = |bytes: &[u8]| text(bytes).replace(&root_of(root), "<root>");
+        let link = placed(&["{link}"], root).remove(0);
+        let plain = |bytes: &[u8]| {
+            let said = text(bytes).replace(&link, "<link>");
+            said.replace(&root_of(root), "<root>")
+        };
         let fatal = plain(&output.stderr)
             .lines()
             .find(|line| line.starts_with("fatal:"))
@@ -162,6 +177,12 @@ fn add_reads_its_paths_from_the_directory_it_runs_in() {
         ("sub", ":(top)other"),
         ("sub", "{}/top{n}.txt"),
         ("sub", "{}/sub/../other"),
+        ("sub", "{link}/sub/f{n}.txt"),
+        ("sub", "{link}/top{n}.txt"),
+        ("sub", "{link}"),
+        ("sub", "{}/../{name}/top{n}.txt"),
+        ("sub", "{link}/../{name}/sub/../other"),
+        ("sub", "{link}/../outside"),
         ("sub", "sub/f{n}.txt"),
         ("sub", "nosuch"),
         ("sub", "../../outside"),
@@ -216,6 +237,23 @@ fn add_in_a_workspace_reads_its_paths_from_the_directory_it_runs_in() {
         assert_eq!(staged(&status), ["sub/new.txt"], "{tree}");
         // named from the tree of another workspace, there is no directory
         // of this one the command runs in
+        // a workspace made at a path through a link, named by either path
+        let beside = trees.at(&format!("beside-{tree}"));
+        std::fs::create_dir(&beside).unwrap();
+        symlink(&beside, trees.at(&format!("by-{tree}"))).unwrap();
+        let linked = trees.at(&format!("by-{tree}")).join("linked");
+        run(&root, &["branch", "more"], false);
+        let made = ["workspace", "add", "linked", linked.to_str().unwrap(), "more"];
+        run(&root, &made, false);
+        let real = beside.canonicalize().unwrap().join("linked");
+        for (n, named) in [&linked, &real].into_iter().enumerate() {
+            let file = format!("sub/new{n}.txt");
+            write(&real, &file, "new\n");
+            let path = named.join(&file);
+            run(&real.join("sub"), &["add", path.to_str().unwrap()], daemon);
+            let status = run(&real, &["status", "-uno"], daemon);
+            assert!(staged(&status).contains(&file), "{tree}: {named:?}");
+        }
         write(&root, "sub/new.txt", "new\n");
         run(
             &side.join("sub"),

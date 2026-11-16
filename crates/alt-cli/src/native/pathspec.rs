@@ -18,18 +18,23 @@ pub fn prefix_of(root: &Path, cwd: &Path) -> String {
 /// The path from the root of the tree that `given` names from `prefix`,
 /// without `.` or `..` in it and empty for the root itself; `None` when it
 /// leaves the tree. `:/` and `:(top)` in front start at the root, and so
-/// does an absolute path that lies beneath `root`.
+/// does an absolute path that leads into the tree at `root`.
 pub fn from_root(root: &Path, prefix: &str, given: &str) -> Option<String> {
     let top = given
         .strip_prefix(":/")
         .or_else(|| given.strip_prefix(":(top)"));
-    let (base, rest) = match (top, given.strip_prefix('/')) {
-        (Some(rest), _) => ("", rest),
-        (None, Some(_)) => ("", absolute(root, given)?),
-        (None, None) => (prefix, given),
-    };
-    let mut names: Vec<&str> = base.split('/').filter(|name| !name.is_empty()).collect();
-    for name in rest.split('/') {
+    match (top, given.starts_with('/')) {
+        (Some(rest), _) => plain("", rest),
+        (None, true) => absolute(root, &plain("", given)?),
+        (None, false) => plain(prefix, given),
+    }
+}
+
+/// `rest` as it is named from `base`, its `.` and `..` taken out; `None`
+/// where a `..` leads above where the names of `base` begin.
+fn plain(base: &str, rest: &str) -> Option<String> {
+    let mut names: Vec<&str> = Vec::new();
+    for name in base.split('/').chain(rest.split('/')) {
         match name {
             "" | "." => {}
             ".." => drop(names.pop()?),
@@ -39,11 +44,20 @@ pub fn from_root(root: &Path, prefix: &str, given: &str) -> Option<String> {
     Some(names.join("/"))
 }
 
-/// What of the absolute path `given` follows `root`. Names of `..` are
-/// left for the caller: those that leave the tree leave it there as well.
-fn absolute<'a>(root: &Path, given: &'a str) -> Option<&'a str> {
-    let rest = given.strip_prefix(root.to_str()?)?;
-    (rest.is_empty() || rest.starts_with('/')).then_some(rest)
+/// What of the absolute path `/<given>` lies in the tree at `root`: what
+/// follows the root as it is written, or else what follows the shortest
+/// part of the path that is the root once its links are followed. A link
+/// further in is a path of the tree, as for git.
+fn absolute(root: &Path, given: &str) -> Option<String> {
+    let real = root.canonicalize().ok();
+    let names: Vec<&str> = given.split('/').filter(|name| !name.is_empty()).collect();
+    let upto = |n: usize| PathBuf::from(format!("/{}", names[..n].join("/")));
+    let written = |n: &usize| upto(*n) == root || Some(upto(*n)) == real;
+    let linked = |n: &usize| real.is_some() && upto(*n).canonicalize().ok() == real;
+    let root_ends = (0..=names.len())
+        .find(written)
+        .or_else(|| (0..=names.len()).find(linked))?;
+    Some(names[root_ends..].join("/"))
 }
 
 /// `path`, which is relative to the root, as it is named from `prefix`.
@@ -152,6 +166,31 @@ mod tests {
         assert_eq!(read("sub", "/rest"), None);
         assert_eq!(read("sub", "/r/../x"), None);
         assert_eq!(read("", ".."), None);
+        assert_eq!(read("sub", "/r/../r/x").as_deref(), Some("x"));
+        assert_eq!(read("sub", "/x/../r/sub/../y").as_deref(), Some("y"));
+        assert_eq!(read("sub", "/../r"), None);
+    }
+
+    #[test]
+    fn an_absolute_path_through_a_link_to_the_tree_is_a_path_of_the_tree() {
+        let dir = alt_os::temp::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap().join("tree");
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::os::unix::fs::symlink(&root, dir.path().join("link")).unwrap();
+        std::os::unix::fs::symlink("sub", root.join("inner")).unwrap();
+        let link = dir.path().join("link");
+        let read = |root: &Path, given: String| from_root(root, "sub", &given);
+        let through = format!("{}/sub/f", link.display());
+        assert_eq!(read(&root, through.clone()).as_deref(), Some("sub/f"));
+        // a tree that is itself named through the link
+        assert_eq!(read(&link, through).as_deref(), Some("sub/f"));
+        let real = format!("{}/sub/f", root.display());
+        assert_eq!(read(&link, real).as_deref(), Some("sub/f"));
+        // a link inside the tree is not followed
+        let inner = format!("{}/inner/f", root.display());
+        assert_eq!(read(&root, inner).as_deref(), Some("inner/f"));
+        let beside = format!("{}/other", dir.path().display());
+        assert_eq!(read(&root, beside), None);
     }
 
     #[test]
