@@ -164,91 +164,93 @@ fn every_built_in_driver_names_the_sections_git_names() {
     }
 }
 
+/// A driver, lines of a file, and the section of the hunk behind each.
+type Later = (
+    &'static str,
+    &'static [&'static [u8]],
+    &'static [&'static str],
+);
+/// As git 2.56.1 names them.
+const LATER: [Later; 3] = [
+    (
+        "bash",
+        &[
+            b"run() {",
+            b"  my_func ( ) # note",
+            b"function build {",
+            b"function deploy() {",
+            b"function x",
+            b"echo not_a_function",
+            b"x=1 # ()",
+            b"local()name",
+        ],
+        &[
+            "run() {",
+            "my_func ( ) # note",
+            "function build {",
+            "function deploy() {",
+            "function deploy() {",
+            "function deploy() {",
+            "function deploy() {",
+            "local()name",
+        ],
+    ),
+    (
+        "ini",
+        &[
+            b"[core]",
+            b"  [remote \"origin\"] ; note",
+            b"[]",
+            b"key = value",
+            b"[section.sub]\ttrailing",
+            b"; [comment]",
+        ],
+        &[
+            "[core]",
+            "  [remote \\\"origin\\\"]",
+            "  [remote \\\"origin\\\"]",
+            "  [remote \\\"origin\\\"]",
+            "[section.sub]",
+            "[section.sub]",
+        ],
+    ),
+    (
+        "r",
+        &[
+            b"fit <- function(x) {",
+            b"  plot.all = function(...)",
+            b"_bad <- function()",
+            b"x <- 1",
+            b"Name2 <-function(a)",
+            b"^odd = function()",
+        ],
+        &[
+            "fit <- function(x) {",
+            "plot.all = function(...)",
+            "_bad <- function()",
+            "_bad <- function()",
+            "Name2 <-function(a)",
+            "^odd = function()",
+        ],
+    ),
+];
+
 /// The three drivers an older git has otherwise or not at all name the
 /// sections git 2.56.1 names, whichever git is at hand.
 #[test]
 fn the_drivers_an_older_git_lacks_name_the_sections_of_the_git_they_are_from() {
-    // a driver, lines of a file, and the section of the hunk behind each
-    type Case = (
-        &'static str,
-        &'static [&'static [u8]],
-        &'static [&'static str],
-    );
-    let cases: [Case; 3] = [
-        (
-            "bash",
-            &[
-                b"run() {",
-                b"  my_func ( ) # note",
-                b"function build {",
-                b"function deploy() {",
-                b"function x",
-                b"echo not_a_function",
-                b"x=1 # ()",
-                b"local()name",
-            ],
-            &[
-                "run() {",
-                "my_func ( ) # note",
-                "function build {",
-                "function deploy() {",
-                "function deploy() {",
-                "function deploy() {",
-                "function deploy() {",
-                "local()name",
-            ],
-        ),
-        (
-            "ini",
-            &[
-                b"[core]",
-                b"  [remote \"origin\"] ; note",
-                b"[]",
-                b"key = value",
-                b"[section.sub]\ttrailing",
-                b"; [comment]",
-            ],
-            &[
-                "[core]",
-                "  [remote \\\"origin\\\"]",
-                "  [remote \\\"origin\\\"]",
-                "  [remote \\\"origin\\\"]",
-                "[section.sub]",
-                "[section.sub]",
-            ],
-        ),
-        (
-            "r",
-            &[
-                b"fit <- function(x) {",
-                b"  plot.all = function(...)",
-                b"_bad <- function()",
-                b"x <- 1",
-                b"Name2 <-function(a)",
-                b"^odd = function()",
-            ],
-            &[
-                "fit <- function(x) {",
-                "plot.all = function(...)",
-                "_bad <- function()",
-                "_bad <- function()",
-                "Name2 <-function(a)",
-                "^odd = function()",
-            ],
-        ),
-    ];
     let files = |root: &Path, mark: &str| {
-        for (driver, heads, _) in cases {
+        for (driver, heads, _) in LATER {
             std::fs::write(root.join(format!("f.{driver}")), blocks(heads, mark)).unwrap();
         }
     };
     let prepare = |root: &Path| {
-        let attributes = cases.map(|(driver, ..)| format!("*.{driver} diff={driver}\n"));
+        let attributes = LATER.map(|(driver, ..)| format!("*.{driver} diff={driver}\n"));
         std::fs::write(root.join(".gitattributes"), attributes.concat()).unwrap();
         files(root, "");
     };
     let dirs = pair(prepare, |root| files(root, " changed"));
-    let expected = cases.iter().flat_map(|(_, _, sections)| sections.iter());
+    let expected = LATER.iter().flat_map(|(_, _, sections)| sections.iter());
     let expected: Vec<&str> = expected.copied().collect();
     for locale in locales() {
         let ours = hunk_headers(&ok(run("alt", dirs[1].path(), locale, &["diff"])));

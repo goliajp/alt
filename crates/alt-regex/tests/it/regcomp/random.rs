@@ -3,7 +3,8 @@
 
 use alt_regex::{Options, Regex, Syntax};
 
-use super::{GROUPS, Theirs, in_utf8_locale};
+use super::GROUPS;
+use super::oracle::Oracle;
 
 pub struct Rng(pub u64);
 
@@ -140,19 +141,24 @@ impl Writer<'_> {
                     continue;
                 }
             };
-            let bounded: [&[u8]; 10] = [
-                b"", b"", b"", b"?", b"{2}", b"{1,2}", b"{0,1}", b"{,2}", b"{3}", b"{2,4}",
-            ];
-            let unbounded: [&[u8]; 4] = [b"*", b"+", b"{2,}", b"{3,}"];
-            let repeat = match (empty, self.rng.below(14)) {
-                (Some(false), at @ 10..) => unbounded[at - 10],
-                (_, at) => bounded[at % 10],
-            };
-            self.op(repeat);
-            let optional = matches!(repeat, b"*" | b"?" | b"{0,1}" | b"{,2}");
-            all_empty &= empty == Some(true) || optional;
+            all_empty &= self.repeat(empty == Some(false)) || empty == Some(true);
         }
         before || all_empty
+    }
+
+    /// A repetition of what was just written, without bound only when
+    /// that takes something; says whether it may be left out.
+    fn repeat(&mut self, takes: bool) -> bool {
+        let bounded: [&[u8]; 10] = [
+            b"", b"", b"", b"?", b"{2}", b"{1,2}", b"{0,1}", b"{,2}", b"{3}", b"{2,4}",
+        ];
+        let unbounded: [&[u8]; 4] = [b"*", b"+", b"{2,}", b"{3,}"];
+        let repeat = match (takes, self.rng.below(14)) {
+            (true, at @ 10..) => unbounded[at - 10],
+            (_, at) => bounded[at % 10],
+        };
+        self.op(repeat);
+        matches!(repeat, b"*" | b"?" | b"{0,1}" | b"{,2}")
     }
 
     /// Atoms that each take something, with the edges of words and
@@ -246,54 +252,6 @@ fn text(rng: &mut Rng, options: Options) -> Vec<u8> {
     out
 }
 
-type Spans = Vec<Option<(usize, usize)>>;
-type Question = (Vec<u8>, Options, Vec<Vec<u8>>);
-/// For each text its spans; `None` for a pattern that is refused.
-type Answer = Option<Vec<Option<Spans>>>;
-
-/// The C library on a thread of its own. For some patterns it never
-/// answers; it is then left behind and another takes its place.
-struct Oracle {
-    ask: std::sync::mpsc::Sender<Question>,
-    answer: std::sync::mpsc::Receiver<Answer>,
-    utf8: bool,
-}
-
-impl Oracle {
-    fn start(utf8: bool) -> Self {
-        let (ask, asked) = std::sync::mpsc::channel::<Question>();
-        let (answered, answer) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            if utf8 {
-                in_utf8_locale();
-            }
-            for (pattern, options, texts) in asked {
-                let theirs = Theirs::new(&pattern, options);
-                let compiled = theirs.0.is_some();
-                let reply = compiled.then(|| texts.iter().map(|t| theirs.spans(t)).collect());
-                if answered.send(reply).is_err() {
-                    break;
-                }
-            }
-        });
-        Oracle { ask, answer, utf8 }
-    }
-
-    /// What the C library says, unless it takes longer than a pattern
-    /// of this size ever should.
-    fn ask(&mut self, question: Question) -> Option<Answer> {
-        self.ask
-            .send(question)
-            .expect("the thread waits for questions");
-        let patience = std::time::Duration::from_secs(20);
-        let reply = self.answer.recv_timeout(patience).ok();
-        if reply.is_none() {
-            *self = Oracle::start(self.utf8);
-        }
-        reply
-    }
-}
-
 /// What a run of random patterns came to.
 #[derive(Default, Debug)]
 pub struct Tally {
@@ -328,6 +286,24 @@ fn shown(bytes: &[u8]) -> String {
     bytes.escape_ascii().to_string()
 }
 
+/// A random pattern for texts read as `options` say.
+fn written(rng: &mut Rng, options: Options) -> Vec<u8> {
+    let writer = Writer {
+        rng,
+        basic: options.syntax == Syntax::Basic,
+        utf8: options.utf8,
+        out: Vec::new(),
+    };
+    writer.pattern()
+}
+
+/// Whether a character of `text` begins with the byte the patterns hold
+/// as no character: the C library then lets what follows that byte in
+/// the pattern take the rest of the character.
+fn taken_apart(text: &[u8]) -> bool {
+    text.windows(3).any(|w| w == b"\xe9\xa9\xa9")
+}
+
 /// Runs `count` random patterns. Whether a pattern compiles, whether a
 /// text matches and where the match and each of its groups lie must
 /// agree.
@@ -336,20 +312,17 @@ pub fn compare(seed: u64, count: usize, options: Options) -> Tally {
     let mut tally = Tally::default();
     let mut oracle = Oracle::start(options.utf8);
     for _ in 0..count {
-        let writer = Writer {
-            rng: &mut rng,
-            basic: options.syntax == Syntax::Basic,
-            utf8: options.utf8,
-            out: Vec::new(),
-        };
-        let pat = writer.pattern();
+        let pat = written(&mut rng, options);
         let texts: Vec<Vec<u8>> = (0..6).map(|_| text(&mut rng, options)).collect();
         let Some(theirs) = oracle.ask((pat.clone(), options, texts.clone())) else {
             tally.unanswered.push(shown(&pat));
             continue;
         };
         let ours = Regex::with_options(&pat, options);
-        let stray = std::str::from_utf8(&pat).is_err();
+        // for a pattern that holds a byte that is no character the C
+        // library reports groups no match has, one with an end before
+        // its start: `(.*).\xc3+` on `a\xc3\x9fbb`
+        let loose = options.utf8 && std::str::from_utf8(&pat).is_err();
         let pat = shown(&pat);
         if ours.is_ok() != theirs.is_some() {
             tally.differs(format!("pattern {pat}: ours {:?}", ours.as_ref().err()));
@@ -360,10 +333,7 @@ pub fn compare(seed: u64, count: usize, options: Options) -> Tally {
         };
         tally.compiled += 1;
         for (text, expected) in texts.iter().zip(theirs) {
-            // where a character of the text begins with the byte that
-            // the pattern holds as no character, the C library lets what
-            // follows in the pattern take the rest of that character
-            if options.utf8 && stray && text.windows(3).any(|w| w == b"\xe9\xa9\xa9") {
+            if loose && taken_apart(text) {
                 continue;
             }
             let shown = shown(text);
@@ -388,10 +358,6 @@ pub fn compare(seed: u64, count: usize, options: Options) -> Tally {
             if located != got {
                 tally.differs(format!("find of {pat} on {shown}: {located:?} not {got:?}"));
             }
-            // for a pattern that holds a byte that is no character the C
-            // library reports groups no match has, one with an end
-            // before its start: `(.*).\xc3+` on `a\xc3\x9fbb`
-            let loose = options.utf8 && stray;
             if let Some(expected) = expected.filter(|_| !loose) {
                 let last = ours.groups().min(GROUPS - 1);
                 let ours: Vec<_> = (0..=last).map(span).collect();

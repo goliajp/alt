@@ -5,6 +5,8 @@
 
 use std::ffi::{CString, c_char, c_int, c_void};
 
+mod groups;
+mod oracle;
 mod random;
 mod utf8;
 
@@ -96,34 +98,38 @@ impl Drop for Theirs {
     }
 }
 
+/// Both must accept or refuse each pattern, and find the same match in
+/// each of a few texts.
+fn accepted_alike(cases: &[(&str, Options)]) {
+    for &(pat, options) in cases {
+        let theirs = Theirs::new(pat.as_bytes(), options);
+        let ours = Regex::with_options(pat.as_bytes(), options);
+        assert_eq!(
+            ours.is_ok(),
+            theirs.0.is_some(),
+            "{pat:?}: ours {:?}",
+            ours.as_ref().err()
+        );
+        let Ok(ours) = ours else { continue };
+        let texts = [
+            "", "a", "*a", "aa", "ab", "b", "a+b?", "a|b", "aab", "a)", "]", "x ab.", "cab a b",
+            "ab ", "_", "B", "-", "z", "Z", "^", "`",
+        ];
+        for text in texts {
+            let expected = theirs.spans(text.as_bytes()).map(|spans| spans[0]);
+            let got = ours.find(text.as_bytes()).map(|r| Some((r.start, r.end)));
+            assert_eq!(got, expected, "{pat:?} on {text:?}");
+        }
+    }
+}
+
 #[test]
 fn hand_picked_patterns_are_accepted_or_refused_as_the_c_library_does() {
     let basic = Options {
         syntax: Syntax::Basic,
         ..Options::default()
     };
-    let any_case = Options {
-        ignore_case: true,
-        ..Options::default()
-    };
-    let cases: [(&str, Options); 50] = [
-        // a hyphen stands for itself only first or last in its brackets
-        ("[[:alpha:]-z]", Options::default()),
-        ("[[=a=]-z]", Options::default()),
-        ("[a-b-c]", Options::default()),
-        ("[a-a-z]", Options::default()),
-        ("[--z]", Options::default()),
-        ("[^-z]", Options::default()),
-        ("[a-z-]", Options::default()),
-        ("[[:alpha:]-]", Options::default()),
-        ("[]-a]", Options::default()),
-        // without regard to case a range is read in upper case
-        ("[A-z]", any_case),
-        ("[_-z]", any_case),
-        ("[a-Z]", any_case),
-        ("[Z-a]", any_case),
-        ("[a-_]", any_case),
-        ("[^[:lower:]_-a]", any_case),
+    accepted_alike(&[
         ("*a", Options::default()),
         ("a**", Options::default()),
         ("a|*b", Options::default()),
@@ -159,27 +165,34 @@ fn hand_picked_patterns_are_accepted_or_refused_as_the_c_library_does() {
         ("b\\>", Options::default()),
         ("a\\Bb", Options::default()),
         ("\\w+\\W\\s?", Options::default()),
-    ];
-    for (pat, options) in cases {
-        let theirs = Theirs::new(pat.as_bytes(), options);
-        let ours = Regex::with_options(pat.as_bytes(), options);
-        assert_eq!(
-            ours.is_ok(),
-            theirs.0.is_some(),
-            "{pat:?}: ours {:?}",
-            ours.as_ref().err()
-        );
-        let Ok(ours) = ours else { continue };
-        let texts = [
-            "", "a", "*a", "aa", "ab", "b", "a+b?", "a|b", "aab", "a)", "]", "x ab.", "cab a b",
-            "ab ", "_", "B", "-", "z", "Z", "^", "`",
-        ];
-        for text in texts {
-            let expected = theirs.spans(text.as_bytes()).map(|spans| spans[0]);
-            let got = ours.find(text.as_bytes()).map(|r| Some((r.start, r.end)));
-            assert_eq!(got, expected, "{pat:?} on {text:?}");
-        }
-    }
+    ]);
+}
+
+#[test]
+fn hyphens_and_ranges_inside_brackets_are_read_as_the_c_library_reads_them() {
+    let any_case = Options {
+        ignore_case: true,
+        ..Options::default()
+    };
+    accepted_alike(&[
+        // a hyphen stands for itself only first or last in its brackets
+        ("[[:alpha:]-z]", Options::default()),
+        ("[[=a=]-z]", Options::default()),
+        ("[a-b-c]", Options::default()),
+        ("[a-a-z]", Options::default()),
+        ("[--z]", Options::default()),
+        ("[^-z]", Options::default()),
+        ("[a-z-]", Options::default()),
+        ("[[:alpha:]-]", Options::default()),
+        ("[]-a]", Options::default()),
+        // without regard to case a range is read in upper case
+        ("[A-z]", any_case),
+        ("[_-z]", any_case),
+        ("[a-Z]", any_case),
+        ("[Z-a]", any_case),
+        ("[a-_]", any_case),
+        ("[^[:lower:]_-a]", any_case),
+    ]);
 }
 
 #[test]
@@ -247,100 +260,6 @@ fn back_references_match_as_the_c_library_matches_them() {
         }
     }
     assert_eq!(compared, 17 * texts.len());
-    assert!(differ.is_empty(), "{}", differ.join("\n"));
-}
-
-/// Patterns whose groups could lie in more than one place.
-const AMBIGUOUS: [(&str, &str); 55] = [
-    // a first branch of nothing is tried behind the second
-    ("|(b?)", ""),
-    ("a(|(b?))", "a"),
-    ("(|a)+(a*b)", "aaab"),
-    ("(a|)+(a*b)", "aaab"),
-    ("(()|a)+(a*b)", "aaab"),
-    ("(a{0}b{0}|(b?))", ""),
-    ("(|(a)|(b?))", ""),
-    ("((a?)||(b?))", ""),
-    ("(|a|ab)(b?)", "ab"),
-    ("(|(a))(|(a))", "a"),
-    ("(|(a)|b)*", "ab"),
-    ("(a|ab)(c|bcd)(d*)", "abcd"),
-    ("^([a-z]+|[a-z]+ [a-z]+)( .*)?$", "foo bar baz"),
-    ("(a|ab)(bc|c)?", "abc"),
-    ("((a)|b)*", "ab"),
-    ("(a*)*", "b"),
-    ("(a*)+", "b"),
-    ("(a*)*b", "aab"),
-    // fewer copies than a count allows
-    ("(.*)?ab{0,1}(.+){,2}$", "bbcca.c x"),
-    ("(.ab{2})*([^ab]+){,2}", "cxaa.cba "),
-    ("^(([^a]+)+){,2}.+", "bxc.ba. "),
-    ("c\\W?(([b-c]{,2}.[^ab]+){1,2}){,2}", "axcxxa "),
-    ("b*|([ab]{0,1}[^a]{1,2}[^ab]+){,2}[^[:space:]b]?", "bc. .bb"),
-    // a turn of a repetition that takes nothing
-    ("b(a{0,1}){1,2}", "abacc."),
-    ("(\\(*[b-c]?){1,2}$", "bab"),
-    ("((c*)?\\({,2}(.?){2}){1,2}a{0,1}", "ca"),
-    (
-        "((a{,2}a{0,1})?){1,2}(.{1,2}a*)?(.?[]a]+\\(){0,1}$",
-        "bb. baa b",
-    ),
-    ("^(a{2}([^[:space:]b]?\\.{0,1}){1,2}){1,2} {,2}", "aacb"),
-    ("([[:alpha:]]{2,}|c{,2}c{,2}x?){2,}x{0,1}", "x.a .b"),
-    ("(\\s{0,1}b*[ab]*){1,2}$", "a"),
-    // a copy of a repetition, in which no group is marked
-    ("((c*)?\\({,2}(.?){2}){1,2}a{0,1}", "b abax"),
-    ("(\\w{,2}[ab]{,2}){,2}", "b b."),
-    ("^(b?[^a]{,2}){2}([a-c]?){,2}", ".a bba.x"),
-    ("[[:alpha:]]((b*){1,2}a[^a]{0,1})+(c*)", "aa.ab."),
-    ("([ab](c{0,1}){1,2}.{0,1}){2,}\\.*", ".a.b ab"),
-    // a repetition that takes nothing at all
-    ("\\.?( ab{2,}[[:alpha:]]|b?c{0,1})*", "a"),
-    ("^.{2}(([^a]{1,2})+[a-c]{1,2}c*|c{,2})*[a-c]?", "bab"),
-    ("(a?)*(b?)+", "x"),
-    // a branch that ends behind a condition, with nothing taken since,
-    // gives way to one that does not
-    ("(a)$|a", "a"),
-    ("(a\\>)|a", "a"),
-    ("^(a*)|b", "a"),
-    ("(^)|x*", ""),
-    ("(^)|($)", ""),
-    ("($)|(^)", ""),
-    ("(a)$|(a)\\>", "a"),
-    ("(^a)|(a)", "a"),
-    ("(a$)|(a)", "a"),
-    ("(a)($)|(a)", "a"),
-    ("((a)$)|(a)", "a"),
-    ("(a$|a)", "a"),
-    ("(a$|a)($)", "a"),
-    ("x(^)|x()", "x"),
-    ("^a*a*|(b?)\\.{,2}", "xa"),
-    ("^(a*)|a*[^ab]{0,1}a?|a*ac$", "bcx. bbba"),
-    ("b|(a)$|a", "ba"),
-];
-
-#[test]
-fn groups_lie_where_the_c_library_puts_them() {
-    let mut differ = Vec::new();
-    // with lines told apart the groups are found the other way
-    let lines = Options {
-        newline: true,
-        ..Options::default()
-    };
-    let both = [Options::default(), lines];
-    for (options, (pat, text)) in both.iter().flat_map(|o| AMBIGUOUS.map(|case| (*o, case))) {
-        let theirs = Theirs::new(pat.as_bytes(), options);
-        let ours = Regex::with_options(pat.as_bytes(), options).unwrap();
-        let expected = theirs.spans(text.as_bytes());
-        let expected = expected.map(|spans| spans[..=ours.groups()].to_vec());
-        let found = ours.captures(text.as_bytes()).map(|found| {
-            let span = |i| found.get(i).map(|r| (r.start, r.end));
-            (0..=ours.groups()).map(span).collect::<Vec<_>>()
-        });
-        if found != expected {
-            differ.push(format!("{pat:?} on {text:?}: {found:?} not {expected:?}"));
-        }
-    }
     assert!(differ.is_empty(), "{}", differ.join("\n"));
 }
 

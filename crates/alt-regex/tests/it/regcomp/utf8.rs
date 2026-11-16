@@ -122,47 +122,48 @@ fn case_is_ignored_for_the_characters_the_c_library_ignores_it_for() {
     assert!(differ.is_empty(), "{}", differ.join("\n"));
 }
 
+const STRAY_PATTERNS: [&[u8]; 19] = [
+    b"\xbf",
+    b"\\>",
+    b"\\bx",
+    b".",
+    b"^.$",
+    b"^..$",
+    b"[^a]",
+    b"^[^a]*$",
+    b"\\W",
+    b"caf\xe9",
+    b"caf[\xe9]",
+    b"^caf.\\(",
+    b"^[a-z]+\\>",
+    b"\\<caf",
+    b"f\\b",
+    b"f\\B",
+    b"^[[:alpha:]_]+[^[:alpha:]]",
+    b"(.)\\1",
+    "^é".as_bytes(),
+];
+const STRAY_TEXTS: [&[u8]; 15] = [
+    b"\xfd\xbf\xbf\xbf\xbf\xbf",
+    b"\xf8\x88\x80\x80\xaa ",
+    b"\xfc\x84\x80\x80\x80\xb5x",
+    b"caf\xe9(void)",
+    "café(void)".as_bytes(),
+    b"\xe9",
+    b"\xc3",
+    b"\xa9\xa9",
+    b"\xed\xa0\x80",
+    b"\xf4\x90\x80\x80",
+    b"\xf8\x88\x80\x80\x80",
+    b"\xc0\x80",
+    b"caf\xa9 x",
+    b"f\xaa",
+    "éé".as_bytes(),
+];
+
 #[test]
 fn bytes_that_are_no_character_match_as_in_the_c_library() {
     in_utf8_locale();
-    let patterns: [&[u8]; 19] = [
-        b"\xbf",
-        b"\\>",
-        b"\\bx",
-        b".",
-        b"^.$",
-        b"^..$",
-        b"[^a]",
-        b"^[^a]*$",
-        b"\\W",
-        b"caf\xe9",
-        b"caf[\xe9]",
-        b"^caf.\\(",
-        b"^[a-z]+\\>",
-        b"\\<caf",
-        b"f\\b",
-        b"f\\B",
-        b"^[[:alpha:]_]+[^[:alpha:]]",
-        b"(.)\\1",
-        "^é".as_bytes(),
-    ];
-    let texts: [&[u8]; 15] = [
-        b"\xfd\xbf\xbf\xbf\xbf\xbf",
-        b"\xf8\x88\x80\x80\xaa ",
-        b"\xfc\x84\x80\x80\x80\xb5x",
-        b"caf\xe9(void)",
-        "café(void)".as_bytes(),
-        b"\xe9",
-        b"\xc3",
-        b"\xa9\xa9",
-        b"\xed\xa0\x80",
-        b"\xf4\x90\x80\x80",
-        b"\xf8\x88\x80\x80\x80",
-        b"\xc0\x80",
-        b"caf\xa9 x",
-        b"f\xaa",
-        "éé".as_bytes(),
-    ];
     let mut differ = Vec::new();
     for ignore_case in [false, true] {
         let options = Options {
@@ -170,10 +171,10 @@ fn bytes_that_are_no_character_match_as_in_the_c_library() {
             ignore_case,
             ..Options::default()
         };
-        for pattern in patterns {
+        for pattern in STRAY_PATTERNS {
             let ours = Regex::with_options(pattern, options).unwrap();
             let theirs = Theirs::new(pattern, options);
-            for text in texts {
+            for text in STRAY_TEXTS {
                 let found = ours.find(text).map(|r| (r.start, r.end));
                 let expected = theirs.spans(text).and_then(|spans| spans[0]);
                 if found != expected {
