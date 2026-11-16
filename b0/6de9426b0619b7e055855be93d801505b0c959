@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: say that the characters of a utf-8 text are those of one locale whichever is named
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/git_settings.rs
