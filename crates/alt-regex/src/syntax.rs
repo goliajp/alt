@@ -22,6 +22,9 @@ pub enum Look {
 pub enum Node {
     Empty,
     Set(ByteSet),
+    /// One character of a set that reaches beyond ASCII, in a UTF-8
+    /// text.
+    Class(std::sync::Arc<crate::block::Block>),
     Look(Look),
     /// A parenthesized subexpression and its number, from 1.
     Group(Box<Node>, u32),

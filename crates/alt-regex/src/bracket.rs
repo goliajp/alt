@@ -4,7 +4,7 @@
 use crate::chars::{self, CharSet};
 use crate::class::ByteSet;
 use crate::syntax::Node;
-use crate::{Error, Options, utf8};
+use crate::{Error, Options, block};
 
 /// One member of a bracket expression.
 enum Element<'a> {
@@ -48,17 +48,18 @@ fn element<'a>(pat: &'a [u8], at: &mut usize, utf8: bool) -> Result<Element<'a>,
     }
 }
 
-/// The members read so far, as bytes or as characters.
-enum Members {
+/// The members read so far, as bytes or as characters; of characters
+/// the classes by name.
+enum Members<'a> {
     Bytes(ByteSet),
-    Chars(Vec<(u32, u32)>),
+    Chars(Vec<(u32, u32)>, Vec<&'a [u8]>),
 }
 
-impl Members {
+impl Members<'_> {
     fn add(&mut self, from: u32, to: u32) {
         match self {
             Members::Bytes(set) => set.insert_range(from as u8, to as u8),
-            Members::Chars(ranges) => ranges.push((from, to)),
+            Members::Chars(ranges, _) => ranges.push((from, to)),
         }
     }
 }
@@ -66,10 +67,11 @@ impl Members {
 /// Reads a bracket expression behind its opening bracket. Says also
 /// whether it is more than a list of ASCII characters.
 pub fn parse(pat: &[u8], at: &mut usize, opts: Options) -> Result<(Node, bool), Error> {
+    let written = *at;
     let negate = pat.get(*at) == Some(&b'^');
     *at += usize::from(negate);
     let mut members = match opts.utf8 {
-        true => Members::Chars(Vec::new()),
+        true => Members::Chars(Vec::new(), Vec::new()),
         false => Members::Bytes(ByteSet::empty()),
     };
     // the pattern of a UTF-8 text is read in upper case
@@ -91,9 +93,9 @@ pub fn parse(pat: &[u8], at: &mut usize, opts: Options) -> Result<(Node, bool), 
                 plain = false;
                 match &mut members {
                     Members::Bytes(set) => set.union(&ByteSet::class(name).ok_or(Error::Class)?),
-                    Members::Chars(ranges) => {
-                        let class = chars::class(name, opts.ignore_case);
-                        ranges.extend(class.ok_or(Error::Class)?);
+                    Members::Chars(_, classes) => {
+                        ByteSet::class(name).ok_or(Error::Class)?;
+                        classes.push(name);
                     }
                 }
                 continue;
@@ -147,16 +149,23 @@ pub fn parse(pat: &[u8], at: &mut usize, opts: Options) -> Result<(Node, bool), 
             }
             Node::Set(set)
         }
-        Members::Chars(ranges) => {
-            let mut set = CharSet::new(ranges);
-            if opts.ignore_case {
-                set = set.folded();
-            }
-            if negate {
-                let newline: &[(u32, u32)] = if opts.newline { &[(0x0a, 0x0a)] } else { &[] };
-                set = set.negated().without(newline);
-            }
-            utf8::node(&set)
+        Members::Chars(mut ranges, classes) => {
+            let flags = 4 + u8::from(opts.ignore_case) + 2 * u8::from(opts.newline);
+            block::remembered(&pat[written..*at], flags, || {
+                for name in classes {
+                    let class = chars::class(name, opts.ignore_case);
+                    ranges.extend(class.expect("a known class"));
+                }
+                let mut set = CharSet::new(ranges);
+                if opts.ignore_case {
+                    set = set.folded();
+                }
+                if negate {
+                    let newline: &[(u32, u32)] = if opts.newline { &[(0x0a, 0x0a)] } else { &[] };
+                    set = set.negated().without(newline);
+                }
+                set
+            })
         }
     };
     Ok((node, !plain))

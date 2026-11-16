@@ -36,8 +36,10 @@ impl ByteSet {
     }
 
     pub fn insert_range(&mut self, from: u8, to: u8) {
-        for b in from..=to {
-            self.insert(b);
+        for word in from >> 6..=to >> 6 {
+            let low = if word == from >> 6 { from & 63 } else { 0 };
+            let high = if word == to >> 6 { to & 63 } else { 63 };
+            self.0[usize::from(word)] |= (u64::MAX >> (63 - high)) & (u64::MAX << low);
         }
     }
 
@@ -48,6 +50,28 @@ impl ByteSet {
     pub fn union(&mut self, other: &ByteSet) {
         for (mine, theirs) in self.0.iter_mut().zip(other.0) {
             *mine |= theirs;
+        }
+    }
+
+    pub fn intersect(&mut self, other: &ByteSet) {
+        for (mine, theirs) in self.0.iter_mut().zip(other.0) {
+            *mine &= theirs;
+        }
+    }
+
+    pub fn subtract(&mut self, other: &ByteSet) {
+        for (mine, theirs) in self.0.iter_mut().zip(other.0) {
+            *mine &= !theirs;
+        }
+    }
+
+    /// Calls `with` for each byte of the set, in order.
+    pub fn each(&self, mut with: impl FnMut(u8)) {
+        for (at, mut word) in self.0.into_iter().enumerate() {
+            while word != 0 {
+                with((at as u32 * 64 + word.trailing_zeros()) as u8);
+                word &= word - 1;
+            }
         }
     }
 
@@ -154,6 +178,30 @@ mod tests {
         assert_eq!(set.len(), 246);
         assert!(!set.contains(b'5') && set.contains(b'a') && set.contains(0xff));
         assert_eq!(ByteSet::byte(b'x').single(), Some(b'x'));
+        for (from, to) in [
+            (0u8, 255u8),
+            (5, 5),
+            (60, 70),
+            (63, 64),
+            (100, 200),
+            (64, 127),
+            (255, 255),
+        ] {
+            let mut ranged = ByteSet::empty();
+            ranged.insert_range(from, to);
+            assert_eq!(ranged.len(), u32::from(to - from) + 1);
+            assert!(ranged.contains(from) && ranged.contains(to));
+        }
+        let mut seen = Vec::new();
+        ByteSet::of(b"\x00a\x40\xff").each(|b| seen.push(b));
+        assert_eq!(seen, [0, 0x40, b'a', 0xff]);
+        let mut less = ByteSet::of(b"abc");
+        less.subtract(&ByteSet::of(b"bx"));
+        less.intersect(&ByteSet::of(b"acd"));
+        assert_eq!(less, ByteSet::of(b"ac"));
+        let mut none = ByteSet::empty();
+        none.insert_range(9, 8);
+        assert!(none.is_empty());
         assert_eq!(set.single(), None);
     }
 }

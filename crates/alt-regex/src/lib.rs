@@ -30,6 +30,7 @@
 mod analysis;
 mod backref;
 mod backtrack;
+mod block;
 mod bracket;
 mod chars;
 mod class;
@@ -400,6 +401,39 @@ mod tests {
         let re = Regex::with_options(b"^\\(a\\{2\\}\\)b+$", basic).unwrap();
         assert_eq!(re.captures(b"aab+").unwrap().get(1), Some(0..2));
         assert!(!re.is_match(b"aabb"));
+    }
+
+    #[test]
+    fn a_utf8_text_is_matched_character_by_character() {
+        let utf8 = Options {
+            utf8: true,
+            ..Options::default()
+        };
+        let re = |pattern: &str| Regex::with_options(pattern.as_bytes(), utf8).unwrap();
+        assert_eq!(re("^.$").find("é".as_bytes()), Some(0..2));
+        assert!(!Regex::new(b"^.$").unwrap().is_match("é".as_bytes()));
+        assert!(re("^[[:alpha:]_][[:alnum:]_]*$").is_match("Méthode".as_bytes()));
+        assert!(re("^[^x]$").is_match("€".as_bytes()));
+        assert_eq!(re("\\bé\\w+").find("x étude.".as_bytes()), Some(2..8));
+        assert!(!re("d\\b").is_match("idée".as_bytes()));
+        let found = re("(é+)(.)").captures("xééa".as_bytes()).unwrap();
+        assert_eq!((found.get(1), found.get(2)), (Some(1..5), Some(5..6)));
+        // a byte that begins no character is taken only by itself
+        assert!(!re("^[^x]$").is_match(b"\xe9") && !re("^.$").is_match(b"\xe9"));
+        assert!(
+            Regex::with_options(b"caf\xe9", utf8)
+                .unwrap()
+                .is_match(b"caf\xe9")
+        );
+        let any_case = Options {
+            ignore_case: true,
+            ..utf8
+        };
+        let re = Regex::with_options("^été$".as_bytes(), any_case).unwrap();
+        assert!(re.is_match("ÉTÉ".as_bytes()) && !re.is_match("ete".as_bytes()));
+        // the locale orders no character outside ASCII
+        let ranged = Regex::with_options("[é-ü]".as_bytes(), utf8);
+        assert_eq!(ranged.err(), Some(Error::Collate));
     }
 
     #[test]

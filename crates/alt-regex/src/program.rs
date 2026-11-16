@@ -2,11 +2,12 @@
 //! steps through, several at once.
 
 use crate::analysis::{classes, joins, mixed_ends, rows};
+use crate::block::{Block, EXIT};
 use crate::class::ByteSet;
 use crate::syntax::{Look, Node, Shape};
 use crate::{Error, Options};
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Inst {
     /// Consume one byte of the set with this index.
     Set(u32, u32),
@@ -76,6 +77,10 @@ struct Compiler {
     ignore_case: bool,
     /// inside a copy of a repeated expression other than its first
     copied: bool,
+    /// the blocks copied in: where each begins, ends and is entered
+    blocks: Vec<(u32, u32, u32)>,
+    /// each block met, with the number of its first set
+    met: Vec<(*const Block, u32)>,
 }
 
 pub fn compile(node: &Node, groups: u32, options: Options, shape: Shape) -> Result<Program, Error> {
@@ -85,6 +90,8 @@ pub fn compile(node: &Node, groups: u32, options: Options, shape: Shape) -> Resu
         work: 0,
         ignore_case: options.ignore_case,
         copied: false,
+        blocks: Vec::new(),
+        met: Vec::new(),
     };
     let end = c.push(Inst::Match)?;
     let close = c.push(Inst::Save(1, end))?;
@@ -103,7 +110,7 @@ pub fn compile(node: &Node, groups: u32, options: Options, shape: Shape) -> Resu
         return Err(Error::TooBig);
     }
     let (classes, members) = classes(&c.insts, &c.sets);
-    let (joins, join_count) = joins(&c.insts, start);
+    let (joins, join_count) = joins(&c.insts, start, &c.blocks);
     let mixed_ends = mixed_ends(&c.insts, start);
     Ok(Program {
         insts: c.insts,
@@ -153,7 +160,7 @@ pub fn close(prog: &Program, slots: &mut [usize], width: usize, slot: usize, at:
 fn nullable(node: &Node) -> bool {
     match node {
         Node::Empty | Node::Look(_) | Node::BackRef(_) => true,
-        Node::Set(_) => false,
+        Node::Set(_) | Node::Class(_) => false,
         Node::Group(inner, _) => nullable(inner),
         Node::Concat(items) => items.iter().all(nullable),
         Node::Alt(branches) => branches.iter().any(nullable),
@@ -197,6 +204,39 @@ impl Compiler {
         self.push(Inst::Set(u32::try_from(index).expect("few sets"), next))
     }
 
+    /// Copies the instructions of `block` in, to go on at `next`.
+    fn block(&mut self, block: &std::sync::Arc<Block>, next: u32) -> Result<u32, Error> {
+        self.work += block.insts.len();
+        if self.insts.len() + block.insts.len() > MAX_INSTS || self.work > MAX_WORK {
+            return Err(Error::TooBig);
+        }
+        let pointer = std::sync::Arc::as_ptr(block);
+        let sets = match self.met.iter().find(|(met, _)| *met == pointer) {
+            Some((_, sets)) => *sets,
+            None => {
+                let sets = u32::try_from(self.sets.len()).expect("few sets");
+                self.sets.extend(&block.sets);
+                self.met.push((pointer, sets));
+                sets
+            }
+        };
+        let base = u32::try_from(self.insts.len()).expect("below the limit");
+        let placed = |target: u32| match target {
+            EXIT => next,
+            target => base + target,
+        };
+        self.insts
+            .extend(block.insts.iter().map(|inst| match *inst {
+                Inst::Set(set, target) => Inst::Set(sets + set, placed(target)),
+                Inst::Byte(b, target) => Inst::Byte(b, placed(target)),
+                Inst::Split(first, second) => Inst::Split(placed(first), placed(second)),
+                other => other,
+            }));
+        let end = u32::try_from(self.insts.len()).expect("below the limit");
+        self.blocks.push((base, end, base + block.start));
+        Ok(base + block.start)
+    }
+
     /// Compiles `node` to go on at `next`; returns where it begins.
     fn node(&mut self, node: &Node, next: u32) -> Result<u32, Error> {
         self.work += 1;
@@ -206,6 +246,7 @@ impl Compiler {
         match node {
             Node::Empty => Ok(next),
             Node::Set(set) => self.set(set, next),
+            Node::Class(block) => self.block(block, next),
             Node::Look(look) => self.push(Inst::Look(*look, next)),
             Node::BackRef(group) => self.push(Inst::BackRef(*group, self.ignore_case, next)),
             Node::Group(inner, number) => {
