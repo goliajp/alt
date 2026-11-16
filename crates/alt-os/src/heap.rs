@@ -12,9 +12,18 @@
 
 /// Fixes the two limits high, so that freed memory stays with the process
 /// and is reused: blocks up to 32 MiB come from the heap, and the heap is
-/// trimmed only once 256 MiB of it are free. Call once, before threads
-/// are started. Does nothing where the allocator is not glibc's.
+/// trimmed only once 256 MiB of it are free. For a process that ends with
+/// its command. Call once, before threads are started. Does nothing where
+/// the allocator is not glibc's.
 pub fn keep_freed_memory() {
+    keep_freed_up_to(32 << 20, 256 << 20);
+}
+
+/// The same with limits of the caller's choosing, for a process that
+/// lives on: blocks up to `block` bytes come from the heap, and the heap
+/// is trimmed once `heap` bytes of it are free. What a request needs
+/// again and again stays; what one large request needed goes back.
+pub fn keep_freed_up_to(block: i32, heap: i32) {
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     {
         const M_TRIM_THRESHOLD: core::ffi::c_int = -1;
@@ -25,8 +34,10 @@ pub fn keep_freed_memory() {
         // SAFETY: mallopt takes two integers and only sets allocator
         // parameters; a value it refuses leaves the default in place
         unsafe {
-            mallopt(M_MMAP_THRESHOLD, 32 << 20);
-            mallopt(M_TRIM_THRESHOLD, 256 << 20);
+            mallopt(M_MMAP_THRESHOLD, block);
+            mallopt(M_TRIM_THRESHOLD, heap);
         }
     }
+    #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+    let _ = (block, heap);
 }
