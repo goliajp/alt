@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: perf
+summary: make the instructions of a set of characters once and copy them into each program
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/analysis.rs
+touched: crates/alt-regex/src/block.rs
+touched: crates/alt-regex/src/bracket.rs
+touched: crates/alt-regex/src/class.rs
+touched: crates/alt-regex/src/lib.rs
+touched: crates/alt-regex/src/literal.rs
+touched: crates/alt-regex/src/program.rs
+touched: crates/alt-regex/src/syntax.rs
+touched: crates/alt-regex/src/utf8.rs
