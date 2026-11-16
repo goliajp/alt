@@ -47,10 +47,11 @@ fn open_lock(alt_dir: &Path, read_only: bool) -> std::io::Result<File> {
 }
 
 /// What `log` not reading to its end means, from the marker's record of
-/// how far it was synced.
+/// how far it was synced; a cut of it brings the marker down first.
 fn tail(durable: &Path, read_only: bool, log: Log) -> Tail {
-    let durable = durable.to_owned();
-    let tail = Tail::synced_to(move |seq| Marker::read(&durable).recorded()?.whole.of(log, seq));
+    let (read, lowered) = (durable.to_owned(), durable.to_owned());
+    let tail = Tail::synced_to(move |seq| Marker::read(&read).recorded()?.whole.of(log, seq))
+        .before_cut(move |seq, at| synced::lower_eof(&lowered, log, seq, at));
     if read_only { tail.read_only() } else { tail }
 }
 

@@ -1,6 +1,8 @@
-//! Everything that changes `odb.durable` does so one at a time.
+//! Everything that changes `odb.durable` does so one at a time, and the
+//! marker never credits an fsync with bytes written after it.
 
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::Path;
 
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
@@ -32,6 +34,11 @@ fn put(odb: &mut NativeOdb, range: std::ops::Range<u32>) {
 
 fn lens(dir: &Path) -> [u64; 4] {
     FILES.map(|name| fs::metadata(dir.join(name)).unwrap().len())
+}
+
+fn append(path: &Path, bytes: &[u8]) {
+    let mut file = OpenOptions::new().append(true).open(path).unwrap();
+    file.write_all(bytes).unwrap();
 }
 
 #[test]
@@ -79,6 +86,44 @@ fn a_sink_and_an_inline_flush_record_side_by_side() {
     assert_eq!(errors, Vec::<String>::new());
     // each recorded how far it wrote and neither undid the other
     assert_eq!(recorded(&path).whole, lens(&path));
+}
+
+#[test]
+fn a_cut_takes_back_the_file_lengths_so_that_the_next_flush_syncs() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let mut odb = NativeOdb::open(dir.path()).unwrap();
+    put(&mut odb, 0..40);
+    // a dead writer's half record at the end of the pack and of map.alt
+    // when the fsync measures them
+    for name in [FILES[0], FILES[3]] {
+        append(&dir.path().join(name), &[0xcd; 500]);
+    }
+    odb.flush().unwrap();
+    drop(odb);
+    let with_tail = lens(dir.path());
+    let whole = recorded(dir.path()).whole;
+    assert_eq!(recorded(dir.path()).eof, with_tail);
+    assert_eq!(
+        (whole[0] + 500, whole[3] + 500),
+        (with_tail[0], with_tail[3])
+    );
+
+    // the open cuts the half records off
+    let mut odb = NativeOdb::open(dir.path()).unwrap();
+    assert_eq!(lens(dir.path()), whole);
+    assert_eq!(recorded(dir.path()).eof, whole, "lengths past the cut");
+    // what is written where they were is not on disk until it is fsynced
+    put(&mut odb, 100..101);
+    odb.flush().unwrap();
+    let after = recorded(dir.path());
+    assert!(
+        lens(dir.path())[0] < with_tail[0],
+        "the pack grew back less"
+    );
+    assert_eq!(
+        (after.eof, after.whole),
+        (lens(dir.path()), lens(dir.path()))
+    );
 }
 
 #[test]

@@ -12,12 +12,14 @@
 use std::sync::Arc;
 
 type SyncedLen = Arc<dyn Fn(u32) -> Option<u64> + Send + Sync>;
+type BeforeCut = Arc<dyn Fn(u32, u64) -> std::io::Result<()> + Send + Sync>;
 
 /// How a log's unreadable end is told from damage, and whether the file may
 /// be repaired at all.
 #[derive(Clone, Default)]
 pub struct Tail {
     synced: Option<SyncedLen>,
+    before_cut: Option<BeforeCut>,
     read_only: bool,
 }
 
@@ -29,8 +31,21 @@ impl Tail {
     pub fn synced_to(synced: impl Fn(u32) -> Option<u64> + Send + Sync + 'static) -> Self {
         Self {
             synced: Some(Arc::new(synced)),
+            before_cut: None,
             read_only: false,
         }
+    }
+
+    /// `before_cut` is called before a log is cut back, with the pack (as
+    /// for [`Self::synced_to`]) and the length the log is cut to. Whoever
+    /// keeps the lengths the log was fsynced at brings them down there:
+    /// what grows back past the cut was not covered by that fsync.
+    pub fn before_cut(
+        mut self,
+        before_cut: impl Fn(u32, u64) -> std::io::Result<()> + Send + Sync + 'static,
+    ) -> Self {
+        self.before_cut = Some(Arc::new(before_cut));
+        self
     }
 
     /// The same policy for an open that must leave every file as it is: an
@@ -43,6 +58,15 @@ impl Tail {
 
     pub(crate) fn is_read_only(&self) -> bool {
         self.read_only
+    }
+
+    /// Announces that the log (pack `seq` of a chunk store) is about to be
+    /// cut back to `at`.
+    pub(crate) fn cut(&self, seq: u32, at: u64) -> std::io::Result<()> {
+        match &self.before_cut {
+            Some(before_cut) => before_cut(seq, at),
+            None => Ok(()),
+        }
     }
 
     /// Whether a record that does not read at `at` is an unfinished write.

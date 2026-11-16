@@ -1,6 +1,8 @@
-//! Everything that changes the `durable` marker does so one at a time.
+//! Everything that changes the `durable` marker does so one at a time, and
+//! the marker never credits an fsync with bytes written after it.
 
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::Path;
 
 use alt_oplog::OpLog;
@@ -53,4 +55,58 @@ fn a_sink_and_an_inline_sync_record_side_by_side() {
     // each recorded how far it wrote and neither undid the other
     assert_eq!(recorded(&path).whole, len(&path));
     assert_eq!(OpLog::open(&path).unwrap().len() as u64, 2 * ROUNDS);
+}
+
+#[test]
+fn a_cut_takes_back_the_file_length_so_that_the_next_sync_syncs() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let mut log = OpLog::open(dir.path()).unwrap();
+    for n in 0..3u64 {
+        log.append("someone", n, b"payload").unwrap();
+    }
+    let whole = len(dir.path());
+    // a dead writer's half record at the end when the fsync measures the log
+    let mut file = OpenOptions::new()
+        .append(true)
+        .open(dir.path().join("log"))
+        .unwrap();
+    file.write_all(&[0xcd; 300]).unwrap();
+    log.sync().unwrap();
+    drop(log);
+    let before = recorded(dir.path());
+    assert_eq!((before.whole, before.eof), (whole, whole + 300));
+
+    // the open cuts the half record off
+    let mut log = OpLog::open(dir.path()).unwrap();
+    assert_eq!(len(dir.path()), whole);
+    assert_eq!(recorded(dir.path()).eof, whole, "a length past the cut");
+    // what is written where it was is not on disk until it is fsynced
+    log.append("someone", 9, b"after the cut").unwrap();
+    log.sync().unwrap();
+    let after = recorded(dir.path());
+    assert!(len(dir.path()) < whole + 300, "the log grew back less");
+    assert_eq!((after.eof, after.whole), (len(dir.path()), len(dir.path())));
+}
+
+#[test]
+fn a_writer_catching_up_cuts_the_same_way() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let mut held = OpLog::open(dir.path()).unwrap();
+    let mut log = OpLog::open(dir.path()).unwrap();
+    log.append("someone", 1, b"one").unwrap();
+    let whole = len(dir.path());
+    let mut file = OpenOptions::new()
+        .append(true)
+        .open(dir.path().join("log"))
+        .unwrap();
+    file.write_all(&[0xcd; 300]).unwrap();
+    log.sync().unwrap();
+    assert_eq!(recorded(dir.path()).eof, whole + 300);
+
+    held.append("someone", 2, b"two").unwrap();
+    assert_eq!(recorded(dir.path()).eof, whole);
+    held.sync().unwrap();
+    let after = recorded(dir.path());
+    assert_eq!((after.eof, after.whole), (len(dir.path()), len(dir.path())));
+    assert_eq!(OpLog::open(dir.path()).unwrap().len(), 2);
 }

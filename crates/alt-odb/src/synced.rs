@@ -136,6 +136,21 @@ impl Lens {
         }
     }
 
+    /// Brings the length of `log` (pack `seq` for the pack) down to `at`;
+    /// says whether it was past it.
+    fn lower(&mut self, log: Log, seq: u32, at: u64) -> bool {
+        let len = match log {
+            Log::Pack if seq != self.seq => return false,
+            Log::Pack => &mut self.pack,
+            Log::Blobmap => &mut self.blobmap,
+            Log::Tier1 => &mut self.tier1,
+            Log::Map => &mut self.map,
+        };
+        let past = *len > at;
+        *len = (*len).min(at);
+        past
+    }
+
     fn encode(&self, out: &mut Vec<u8>) {
         for len in [self.pack, self.blobmap, self.tier1, self.map] {
             out.extend_from_slice(&len.to_le_bytes());
@@ -374,6 +389,16 @@ pub(crate) fn record(
     })
 }
 
+/// Called before `log` (pack `seq` for the pack) is cut back to `at`: a
+/// file length recorded past the cut comes down first, so that what grows
+/// back there is not taken for bytes an fsync covered.
+pub(crate) fn lower_eof(path: &Path, log: Log, seq: u32, at: u64) -> std::io::Result<()> {
+    update(path, |marker| {
+        let mut state = *marker.recorded()?;
+        state.eof.lower(log, seq, at).then_some(state)
+    })
+}
+
 /// What a handle whose fsyncs are left to a sink (the daemon) last finished
 /// writing, for that sink to record once it has synced: the boundaries and
 /// the marker's generation when they were written.
@@ -576,6 +601,26 @@ mod tests {
             whole: lens(20),
             ..rewound
         };
+        assert_eq!(Marker::read(&path), Marker::Recorded(expected));
+    }
+
+    #[test]
+    fn a_cut_lowers_the_file_length_of_that_log_and_nothing_else() {
+        let dir = alt_os::temp::tempdir().unwrap();
+        let path = dir.path().join("odb.durable");
+        // nothing recorded: nothing to lower, and no marker is made up
+        lower_eof(&path, Log::Map, 0, 3).unwrap();
+        assert_eq!(Marker::read(&path), Marker::Absent);
+        set(&path, 100);
+        // another pack than the one recorded, and a cut past the length
+        lower_eof(&path, Log::Pack, 2, 40).unwrap();
+        lower_eof(&path, Log::Tier1, 0, 100).unwrap();
+        assert_eq!(serials(&path), [Some(1), None]);
+        lower_eof(&path, Log::Pack, 1, 40).unwrap();
+        lower_eof(&path, Log::Map, 0, 60).unwrap();
+        let mut expected = state(100);
+        expected.eof.pack = 40;
+        expected.eof.map = 60;
         assert_eq!(Marker::read(&path), Marker::Recorded(expected));
     }
 }

@@ -49,6 +49,7 @@ impl RecLog {
         let intact = self.intact_prefix(&data, from, end)?;
         if intact < data.len() {
             if !self.policy.is_read_only() {
+                self.policy.cut(0, from + intact as u64)?;
                 self.file.set_len(from + intact as u64)?;
                 self.file.sync_all()?;
             }

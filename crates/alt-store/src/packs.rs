@@ -159,6 +159,9 @@ pub(crate) fn open_active(
     } else {
         // append mode: writes land at the end wherever a truncation moved it
         let mut write = OpenOptions::new().append(true).open(path)?;
+        if valid_len < size {
+            walk.tail.cut(walk.seq, len)?;
+        }
         if valid_len == 0 {
             write.set_len(0)?;
             write.write_all(&pack::file_header())?;

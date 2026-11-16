@@ -337,8 +337,8 @@ impl OpLog {
         }
         let new_len = self.len_bytes + replayed.valid as u64;
         if replayed.valid < tail.len() {
-            self.file.set_len(new_len)?; // drop a crashed writer's unfinished record
-            self.file.sync_all()?;
+            // drop a crashed writer's unfinished record
+            synced::cut(&self.durable_path, &self.file, new_len)?;
         }
         self.len_bytes = new_len;
         Ok(())
@@ -472,6 +472,8 @@ impl OpLog {
             if marker.records(target) {
                 return Ok(());
             }
+            // a cut of the log waits for the sync lock: the length measured
+            // here is recorded before any cut brings it down
             let eof = match marker.recorded() {
                 Some(state) if state.eof >= target => None,
                 _ => {

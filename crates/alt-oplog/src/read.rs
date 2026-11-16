@@ -135,7 +135,9 @@ pub(crate) fn scan_and_repair(
 ) -> Result<Scan, OpLogError> {
     let mut scan = scan(read_log(file, anchor)?)?;
     if scan.valid_len < HEADER_LEN as u64 {
-        file.set_len(0)?;
+        if scan.file_len > 0 {
+            synced::cut(durable, file, 0)?;
+        }
         file.seek(SeekFrom::Start(0))?;
         file.write_all(&file_header())?;
         file.sync_all()?;
@@ -149,8 +151,7 @@ pub(crate) fn scan_and_repair(
         })?;
     } else if scan.valid_len < scan.file_len {
         unfinished(durable, scan.valid_len)?;
-        file.set_len(scan.valid_len)?;
-        file.sync_all()?;
+        synced::cut(durable, file, scan.valid_len)?;
     }
     scan.file_len = scan.valid_len;
     Ok(scan)

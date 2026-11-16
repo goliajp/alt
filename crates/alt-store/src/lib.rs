@@ -534,6 +534,7 @@ impl ChunkStore {
         let offset = self.active.len;
         if let Err(e) = self.append(&header.encode(), payload) {
             // chop any torn bytes so the next append starts at a clean offset
+            self.tail.cut(self.active.seq, self.active.len)?;
             self.active.write.set_len(self.active.len)?;
             self.active.write.seek(SeekFrom::Start(self.active.len))?;
             return Err(e.into());

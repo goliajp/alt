@@ -53,8 +53,8 @@ impl Layout {
 
     /// Checks the header of a log file and returns its length. A file a
     /// crash left shorter than its header gets the header written, unless
-    /// `read_only`, and counts as holding just that.
-    fn checked_len(&self, file: &mut File, read_only: bool) -> Result<u64, StoreError> {
+    /// `policy` is read-only, and counts as holding just that.
+    fn checked_len(&self, file: &mut File, policy: &Tail) -> Result<u64, StoreError> {
         let header = self.header();
         let size = file.metadata()?.len();
         let mut start = [0u8; HEADER_LEN];
@@ -73,7 +73,8 @@ impl Layout {
         if !header.starts_with(&start[..have]) {
             return Err(StoreError::Format(self.bad_header));
         }
-        if !read_only {
+        if !policy.is_read_only() {
+            policy.cut(0, HEADER_LEN as u64)?;
             file.set_len(0)?;
             file.write_all(&header)?;
             file.sync_all()?;
@@ -187,7 +188,7 @@ impl RecLog {
         } else {
             open_for_append(path, &header)?
         };
-        let size = layout.checked_len(&mut file, policy.is_read_only())?;
+        let size = layout.checked_len(&mut file, &policy)?;
 
         let guard = |end| guard_at(&file, &layout, size, end);
         let runs = match named {

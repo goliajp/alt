@@ -25,7 +25,7 @@
 //! current state, with the next serial, and is fdatasynced. A reader takes
 //! the valid slot with the larger serial, so a write a crash interrupted
 //! leaves the state before it. The file never claims more than is on disk:
-//! it is raised only after the fsync it records.
+//! it is raised only after the fsync it records and lowered before a cut.
 //!
 //! An older alt keeps the file length in the first 8 bytes and replaces the
 //! whole file; reading zero there, it fsyncs every time.
@@ -37,7 +37,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::OpLogError;
-use crate::lock::lock_exclusive;
+use crate::lock::{lock_exclusive, unlock};
 
 const MAGIC: [u8; 4] = *b"ALT2";
 const LEGACY_LEN: usize = 8;
@@ -229,6 +229,26 @@ pub(crate) fn record(path: &Path, whole: u64, eof: Option<u64>) -> std::io::Resu
             ..state
         })
     })
+}
+
+/// Cuts the log `file` back to `at`; the caller holds its exclusive lock.
+/// A file length recorded past the cut comes down first, so that what
+/// grows back there is not taken for bytes an fsync covered. The sync lock
+/// is held throughout: a committer that measured the file before the cut
+/// has recorded that length before it is brought down, not after.
+pub(crate) fn cut(durable: &Path, file: &File, at: u64) -> std::io::Result<()> {
+    let sync_lock = open_sync_lock(&durable.with_file_name("sync.lock"))?;
+    lock_exclusive(&sync_lock)?;
+    let cut = (|| {
+        update(durable, |marker| {
+            let state = marker.recorded()?;
+            (state.eof > at).then_some(State { eof: at, ..*state })
+        })?;
+        file.set_len(at)?;
+        file.sync_all()
+    })();
+    let _ = unlock(&sync_lock);
+    cut
 }
 
 pub(crate) fn open_sync_lock(path: &Path) -> std::io::Result<File> {
