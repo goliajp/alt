@@ -257,11 +257,28 @@ fn attempt() -> Response {
                     Err(_) => (Repository::discover(&cwd)?, "HEAD".to_owned()),
                 };
                 cli::run_git(&repo, command, &head, &mut out)?;
+                if !execution.writing {
+                    leave_to_exit(repo);
+                }
             }
         }
         Ok(0)
     })();
-    execution.finish(result, out, capture.finish(), &[])
+    let response = execution.finish(result, out, capture.finish(), &[]);
+    if !execution.writing && response.exit_code == 0 {
+        leave_to_exit(execution);
+    }
+    response
+}
+
+/// Leaves what a command that only read holds for the exit of the process
+/// to take down, which follows as soon as the answer is written: closing
+/// the files, unmapping and freeing one by one is work the exit does at
+/// once. Not for a handle that may have appended to a log, which syncs it
+/// when dropped: a [`Repository`] has no way to append, and an
+/// [`Execution`] of a command that does not write holds no file.
+fn leave_to_exit<T>(held: T) {
+    std::mem::forget(held);
 }
 
 /// Runs a command of the native store in this process: opens the store,
