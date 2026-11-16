@@ -9,7 +9,7 @@ use super::diff::{alt, ok};
 
 /// `git` with fixed names and dates, so that the same steps give the same
 /// commit wherever they are taken.
-fn git(repo: &Path, args: &[&str]) -> Output {
+pub(super) fn git(repo: &Path, args: &[&str]) -> Output {
     Command::new("git")
         .arg("-C")
         .arg(repo)
@@ -28,7 +28,7 @@ fn git(repo: &Path, args: &[&str]) -> Output {
 
 /// A git repository whose commit holds `a.txt` and a submodule entry at
 /// `sub`, and the alt working tree imported from it.
-fn pair() -> (alt_os::temp::TempDir, alt_os::temp::TempDir) {
+pub(super) fn pair() -> (alt_os::temp::TempDir, alt_os::temp::TempDir) {
     let (g, a) = (
         alt_os::temp::tempdir().unwrap(),
         alt_os::temp::tempdir().unwrap(),
@@ -45,7 +45,7 @@ fn pair() -> (alt_os::temp::TempDir, alt_os::temp::TempDir) {
 }
 
 /// `alt status`, `diff` and `diff --cached` say what git says.
-fn agree(g: &Path, a: &Path, at: &str) -> String {
+pub(super) fn agree(g: &Path, a: &Path, at: &str) -> String {
     for args in [&["diff"][..], &["diff", "--cached"]] {
         let theirs = ok(git(g, &[&["-c", "core.pager=cat"][..], args].concat()));
         assert_eq!(ok(alt(a, args)), theirs, "{args:?} {at}");
@@ -106,7 +106,7 @@ fn a_submodule_entry_without_its_directory_is_deleted_as_for_git() {
 }
 
 /// A repository with one commit at `at`, the same commit wherever it is made.
-fn embed(at: &Path) {
+pub(super) fn embed(at: &Path) {
     std::fs::create_dir_all(at).unwrap();
     ok(git(at, &["init", "-q", "-b", "main", "."]));
     std::fs::write(at.join("e.txt"), "its own\n").unwrap();
@@ -126,15 +126,10 @@ fn add_stages_a_repository_of_its_own_as_a_submodule_as_git_does() {
     }
     // named by itself, and found beneath a named directory
     ok(git(g, &["add", "emb"]));
-    let said = ok(alt(a, &["add", "emb"]));
-    assert_eq!(
-        said,
-        "warning: adding embedded git repository: emb\nstaged 1 path(s)\n"
-    );
+    assert_eq!(ok(alt(a, &["add", "emb"])), "staged 1 path(s)\n");
     assert_eq!(agree(g, a, "named"), "A  emb\n");
     ok(git(g, &["add", "deep"]));
-    let said = ok(alt(a, &["add", "deep/"]));
-    assert!(said.contains("adding embedded git repository: deep/er/emb\n"));
+    ok(alt(a, &["add", "deep/"]));
     assert_eq!(
         agree(g, a, "beneath a directory"),
         "A  deep/beside.txt\nA  deep/er/emb\nA  emb\n"

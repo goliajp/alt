@@ -1,7 +1,6 @@
 //! What a checkout will do, worked out before anything is written: the
 //! checks that can refuse it, and the list of paths it changes.
 
-use super::checkout_files::holds_untracked;
 use super::checkout_recovery::{CheckoutIntent, FileChange};
 use super::*;
 use recovery::canonical_index;
@@ -156,8 +155,13 @@ impl NativeRepo<'_> {
             if let Some(state) = &after {
                 planned.insert(path.to_vec(), (state.mode, state.contents.clone()));
             }
-            // Submodule directories are not owned by the repository checkout.
-            if before.as_ref().is_some_and(|s| s.mode == 0o160000) && after.is_none() {
+            // the directory of a submodule goes with its entry while it is
+            // empty; what it holds is not this checkout's to remove
+            if before.as_ref().is_some_and(|s| s.mode == 0o160000)
+                && after.is_none()
+                && std::fs::read_dir(self.abs(path)?)?.next().is_some()
+            {
+                left_in_place(path)?;
                 continue;
             }
             if directory && after.as_ref().is_some_and(|s| s.mode != 0o160000) {
@@ -216,4 +220,31 @@ impl NativeRepo<'_> {
             files,
         })
     }
+}
+
+/// Says of a submodule directory left in place what git says. A command
+/// that answers in JSON has no place for it.
+pub(super) fn left_in_place(path: &BString) -> Res<()> {
+    if !crate::diagnostics::json_mode() {
+        let said = format!("warning: unable to rmdir '{path}': Directory not empty\n");
+        crate::diagnostics::emit(said.as_bytes())?;
+    }
+    Ok(())
+}
+
+/// Removes the directory of a submodule at `abs`, which was empty when
+/// the checkout was planned; one that holds something by now stays.
+pub(super) fn remove_left_empty(abs: &Path, path: &BString) -> Res<()> {
+    match std::fs::remove_dir(abs) {
+        Err(e) if e.kind() == std::io::ErrorKind::DirectoryNotEmpty => left_in_place(path),
+        removed => Ok(removed?),
+    }
+}
+
+pub(super) fn holds_untracked(path: &BString) -> Box<dyn std::error::Error> {
+    crate::machine::Failure::refusal(
+        "precondition_failed",
+        format!("checkout target '{path}' is a directory holding untracked files"),
+    )
+    .into()
 }

@@ -1,6 +1,7 @@
 //! What a checkout reads from and writes to the working tree, one path at a
 //! time, and the checks that run before the first write.
 
+use super::checkout_plan::holds_untracked;
 use super::checkout_recovery::{CheckoutIntent, FileChange, FileState};
 use super::*;
 use recovery::hash;
@@ -193,7 +194,10 @@ impl NativeRepo<'_> {
         let abs = self.abs(path)?;
         match state {
             None => {
-                crate::durable::remove_file(&abs)?;
+                match abs.symlink_metadata().is_ok_and(|m| m.is_dir()) {
+                    true => super::checkout_plan::remove_left_empty(&abs, path)?,
+                    false => crate::durable::remove_file(&abs)?,
+                }
                 if let Some(parent) = abs.parent() {
                     std::fs::File::open(parent)?.sync_all()?;
                 }
@@ -334,12 +338,4 @@ fn remove_empty_directories(path: &Path) -> Res<()> {
     }
     std::fs::remove_dir(path)?;
     Ok(())
-}
-
-pub(super) fn holds_untracked(path: &BString) -> Box<dyn std::error::Error> {
-    crate::machine::Failure::refusal(
-        "precondition_failed",
-        format!("checkout target '{path}' is a directory holding untracked files"),
-    )
-    .into()
 }

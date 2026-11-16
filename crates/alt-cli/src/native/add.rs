@@ -91,6 +91,7 @@ impl NativeRepo<'_> {
         let (mut delta, clock) = self.scan_delta_within(&mut snapshot, Untracked::All, &within)?;
         all_match(&specs, paths, &before, &delta)?;
         let embedded = self.take_embedded(&mut delta, &named)?;
+        let advice = embedded::warning(&embedded, &self.settings()?)?;
 
         let plan = plan(&before, &delta, renormalize, &named);
         // path gate: deny staging any path the policy excludes, *before*
@@ -125,9 +126,7 @@ impl NativeRepo<'_> {
         if json {
             crate::json::emit(out, vec![("staged", crate::json::Json::Num(staged as i64))])?;
         } else {
-            for path in embedded {
-                writeln!(out, "warning: adding embedded git repository: {path}")?;
-            }
+            crate::diagnostics::emit(advice.as_bytes())?;
             writeln!(out, "staged {staged} path(s)")?;
         }
         Ok(())

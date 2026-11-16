@@ -44,3 +44,37 @@ impl NativeRepo<'_> {
         Ok(taken)
     }
 }
+
+/// What `add` says of the repositories at `paths` that it staged as
+/// submodules: git's warning for each, and once what it means, unless
+/// `advice.addEmbeddedRepo` is off. The steps git names are those of
+/// commands this program has.
+pub(super) fn warning(paths: &[BString], settings: &alt_git_config::Config) -> Res<String> {
+    let mut said = String::new();
+    let advise = match settings.get_bool("advice", None, "addembeddedrepo") {
+        Some(set) => set?,
+        None => true,
+    };
+    for (nth, path) in paths.iter().enumerate() {
+        said.push_str(&format!(
+            "warning: adding embedded git repository: {path}\n"
+        ));
+        if nth == 0 && advise {
+            said.push_str(ADVICE);
+        }
+    }
+    Ok(said)
+}
+
+const ADVICE: &str = "\
+hint: You've added another git repository inside your current repository.
+hint: Clones of the outer repository will not contain the contents of
+hint: the embedded repository and will not know how to obtain it.
+hint:
+hint: If you added this path by mistake, you can take it out of the
+hint: index again with:
+hint:
+hint: \talt undo
+hint:
+hint: Disable this message with \"alt config advice.addEmbeddedRepo false\"
+";
