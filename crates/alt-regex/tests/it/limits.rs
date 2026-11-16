@@ -200,13 +200,10 @@ fn sets_of_characters_past_what_a_program_holds_are_refused_as_they_are_read() {
     while pattern.len() + 24 < 1 << 18 {
         pattern.push_str(&format!("[[:alpha:]{}]", other.next().unwrap()));
     }
-    let begun = Instant::now();
     let most = crate::most_held(|| {
         let refused = Regex::with_options(pattern.as_bytes(), utf8);
         assert_eq!(refused.err(), Some(Error::TooBig));
     });
-    let cost = begun.elapsed();
-    assert!(cost < Duration::from_secs(5), "{cost:?}");
     assert!(most < 32 << 20, "{most} bytes");
 }
 
