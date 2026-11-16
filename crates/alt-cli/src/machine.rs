@@ -8,8 +8,10 @@ use alt_json::{Value, json};
 use crate::cli::Cli;
 use crate::daemon::Response;
 use bindings::canonical_matches;
+pub use kinds::{PATHS_FAILED, PATHS_IGNORED, PATHS_UNKNOWN};
 
 mod bindings;
+mod kinds;
 
 #[derive(Debug, Clone)]
 pub struct Failure {
@@ -30,18 +32,6 @@ impl std::fmt::Display for Failure {
 }
 
 impl std::error::Error for Failure {}
-
-/// The kind of failure `add` ends with when it left paths alone that an
-/// ignore rule hides: its details name them under `ignored_paths`.
-pub const PATHS_IGNORED: &str = "paths_ignored";
-
-/// The kind of failure `add -u` ends with when a path given names a file
-/// the index has not, which it has said as git says it.
-pub const PATHS_UNKNOWN: &str = "paths_unknown";
-
-/// The kind of failure `add` ends with when it could not store a path
-/// and has said which, as git says it.
-pub const PATHS_FAILED: &str = "paths_failed";
 
 impl Failure {
     pub fn refusal(kind: &'static str, message: impl Into<String>) -> Self {
@@ -105,7 +95,6 @@ impl Failure {
                 .map(|id| format!("request: {id}\n"))
                 .unwrap_or_default();
             match self.kind {
-                // the command has said which paths, as git says it
                 PATHS_IGNORED | PATHS_UNKNOWN | PATHS_FAILED => request,
                 _ => format!("fatal: {}\n{request}", self.message),
             }

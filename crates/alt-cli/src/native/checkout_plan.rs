@@ -178,8 +178,7 @@ impl NativeRepo<'_> {
                 after: None,
             });
         }
-        let index_after = target_index(target);
-        index_file::ensure_sound(&index_after)?;
+        let index_after = target_index(target)?;
         let index_after = self.snapshot(&canonical_index(index_after, self.store.algo))?;
         *self.planned.borrow_mut() = Some(super::tree_state::Planned {
             index: index_after.clone(),
@@ -196,8 +195,9 @@ impl NativeRepo<'_> {
     }
 }
 
-/// The index a checkout of `target` leaves in place.
-fn target_index(target: &[WorkEntry]) -> Index {
+/// The index a checkout of `target` leaves in place, refused where a path
+/// of it would be a file and a directory.
+fn target_index(target: &[WorkEntry]) -> Res<Index> {
     let entry = |entry: &WorkEntry| IndexEntry {
         ctime: (0, 0),
         mtime: (0, 0),
@@ -212,11 +212,13 @@ fn target_index(target: &[WorkEntry]) -> Index {
         extended_flags: None,
         path: entry.path.clone(),
     };
-    Index {
+    let index = Index {
         version: 2,
         entries: target.iter().map(entry).collect(),
         extensions: Vec::new(),
-    }
+    };
+    index_file::ensure_sound(&index)?;
+    Ok(index)
 }
 
 /// Says of a submodule directory left in place what git says. A command
