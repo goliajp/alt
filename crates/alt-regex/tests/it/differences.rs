@@ -9,7 +9,7 @@ type Spans = Option<&'static [Option<(usize, usize)>]>;
 /// text, and the match with its groups.
 type Case = (bool, bool, &'static [u8], &'static [u8], Spans);
 
-pub const CASES: [Case; 13] = [
+pub const CASES: [Case; 15] = [
     // an anchor or the edge of a word inside or behind a repetition
     (false, false, b"a*\\B", b"xa", Some(&[Some((1, 1))])),
     (false, false, b"(\\ba){2,}", b"aaa", None),
@@ -34,6 +34,20 @@ pub const CASES: [Case; 13] = [
         b"(()+(b{0,1}|ab*x?b?){2,})*",
         b"aaab",
         Some(&[Some((0, 4)), Some((0, 4)), Some((0, 0)), Some((2, 4))]),
+    ),
+    (
+        false,
+        false,
+        b"((b*)|a)*",
+        b"a",
+        Some(&[Some((0, 1)), Some((0, 1)), None]),
+    ),
+    (
+        false,
+        false,
+        b"((x|)*b){,2}",
+        b"xb",
+        Some(&[Some((0, 2)), Some((0, 2)), Some((0, 1))]),
     ),
     // such a group referred back to
     (

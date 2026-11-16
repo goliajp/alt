@@ -51,10 +51,15 @@
 //!   `aaa` there and nothing here; `(^a?){1,2}` matches `a` here and
 //!   nothing there.
 //! - The groups inside a repetition without bound of what may match
-//!   nothing. `(b{0,1}|[ab]{0,1})*a?` on `bbaxaa`: the last turn of the
-//!   group is the third byte here, the second there, though both find
-//!   the same whole match. For some such patterns the C library never
-//!   answers.
+//!   nothing; the whole match is the same. `(b{0,1}|[ab]{0,1})*a?` on
+//!   `bbaxaa`: the repetition there stops short of the third byte, which
+//!   it could take, and the group is the second; here it is the third.
+//!   `((b*)|a)*` on `a`: the C library reports the second group, of the
+//!   branch not taken, as empty at 0; here it took no part. Where POSIX
+//!   leaves open whether a last turn of nothing is taken, the C library
+//!   now and then takes it and this crate never: `((x|)*b){,2}` on `xb`
+//!   gives the second group that turn at 1 there, the `x` here. For
+//!   some such patterns the C library never answers.
 //! - A group that is repeated, may match nothing and is referred back
 //!   to. `(a*)*\1` on `aaa`: the C library reports a group that ends
 //!   before it begins; here it is the empty one at 3.

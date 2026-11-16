@@ -6,6 +6,7 @@
 use std::ffi::{CString, c_char, c_int, c_void};
 
 mod groups;
+mod judged;
 mod oracle;
 mod random;
 mod utf8;
