@@ -37,6 +37,9 @@ const CASES: &[(&str, &[&str])] = &[
     ("", &["-f", "sub"]),
     ("", &["-f", ".", ":!x.log"]),
     ("", &["--renormalize", "sub"]),
+    ("", &["kept.log"]),
+    ("", &["kept.log", "x.log"]),
+    ("", &["kept.log", "top.txt"]),
 ];
 
 /// The status a command ended with and what it wrote to stderr, without
@@ -50,7 +53,8 @@ fn said(output: &Output) -> (Option<i32>, Vec<&BStr>) {
 
 fn files(trees: &Trees) {
     for (n, _) in CASES.iter().enumerate() {
-        for file in ["top.txt", "sub/f.txt", "sub/deep/g.txt", "other/o.txt"] {
+        // `kept.log` is tracked before a rule comes to hide its name
+        for file in ["top.txt", "sub/f.txt", "sub/deep/g.txt", "other/o.txt", "kept.log"] {
             trees.write(&format!("c{n}/{file}"), "base\n");
         }
     }
@@ -58,7 +62,7 @@ fn files(trees: &Trees) {
     each(trees, &["commit", "-m", "cases"]);
     for (n, _) in CASES.iter().enumerate() {
         trees.write(&format!("c{n}/.gitignore"), "/sub/\n*.log\n");
-        for file in ["top.txt", "sub/f.txt", "sub/n.txt", "x.log", "other/o.txt"] {
+        for file in ["top.txt", "sub/f.txt", "sub/n.txt", "x.log", "other/o.txt", "kept.log"] {
             trees.write(&format!("c{n}/{file}"), "now\n");
         }
     }
@@ -91,7 +95,7 @@ fn add_tells_of_what_an_ignore_rule_hides_where_git_does() {
         told += (by_git.status.code() == Some(1)) as usize;
     }
     // git tells of a hidden path in these, and in the others it does not
-    assert_eq!(told, 16);
+    assert_eq!(told, 17);
 }
 
 #[test]
