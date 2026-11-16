@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: mark the synced markers as not holding while fsyncs are skipped
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/log_tails.rs
+touched: crates/alt-odb/src/odb/durable.rs
+touched: crates/alt-odb/src/synced.rs
+touched: crates/alt-oplog/src/lib.rs
+touched: crates/alt-oplog/src/synced.rs
+touched: docs/recovery.md
