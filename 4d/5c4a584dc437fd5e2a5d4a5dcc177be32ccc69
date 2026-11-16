@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: hold a rewind at its first marker write and see the note of the synced pack gone
+author-type: human
+author: doracawl
+touched: crates/alt-odb/tests/it/synced_note.rs
