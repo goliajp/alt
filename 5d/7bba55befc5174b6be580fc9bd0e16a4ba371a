@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: bound no time where a pattern of many sets is refused, which a busy machine does not keep
+author-type: human
+author: doracawl
+touched: crates/alt-regex/tests/it/limits.rs
