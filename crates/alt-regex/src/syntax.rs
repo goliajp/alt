@@ -7,37 +7,9 @@ use crate::program::MAX_INSTS;
 use crate::{Error, Options, Syntax, bracket, utf8};
 
 mod interval;
+mod tree;
 
-/// A condition on a position that consumes nothing.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Look {
-    TextStart,
-    TextEnd,
-    LineStart,
-    LineEnd,
-    WordBoundary,
-    NotWordBoundary,
-    WordStart,
-    WordEnd,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum Node {
-    Empty,
-    Set(ByteSet),
-    /// One character of a set that reaches beyond ASCII, in a UTF-8
-    /// text.
-    Class(std::sync::Arc<crate::block::Block>),
-    Look(Look),
-    /// A parenthesized subexpression and its number, from 1.
-    Group(Box<Node>, u32),
-    Concat(Vec<Node>),
-    Alt(Vec<Node>),
-    /// What the group of this number matched, once more.
-    BackRef(u32),
-    /// At least `.1` and at most `.2` repetitions.
-    Repeat(Box<Node>, u32, Option<u32>),
-}
+pub use tree::{Look, Node, Shape};
 
 /// The deepest nesting of groups and of repetitions, counted together:
 /// no walk of the tree goes deeper.
@@ -67,18 +39,6 @@ struct Parser<'a> {
     strays: bool,
     /// see [`utf8::period`]
     loose: bool,
-}
-
-/// What the matchers need to know of a pattern besides its tree.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub struct Shape {
-    /// The C library reads the pattern character by character, so a
-    /// match begins only where a character does. Otherwise it matches
-    /// bytes, also a UTF-8 text.
-    pub apart: bool,
-    /// A byte written in the pattern goes on a character and begins
-    /// none.
-    pub strays: bool,
 }
 
 /// Parses `pat` into its tree and the number of groups in it.
@@ -124,15 +84,6 @@ pub fn parse_shaped(pat: &[u8], opts: Options) -> Result<(Node, u32, Shape), Err
     Ok((node, groups, shape))
 }
 
-/// Whether nothing was written, or only repetitions of none.
-fn nothing(node: &Node) -> bool {
-    match node {
-        Node::Empty => true,
-        Node::Concat(items) => items.iter().all(nothing),
-        _ => false,
-    }
-}
-
 impl<'a> Parser<'a> {
     fn ere(&self) -> bool {
         self.opts.syntax == Syntax::Extended
@@ -176,7 +127,7 @@ impl<'a> Parser<'a> {
         }
         self.tall = tall;
         // the C library tries a first branch of nothing behind the second
-        if branches.len() > 1 && nothing(&branches[0]) {
+        if branches.len() > 1 && branches[0].nothing() {
             branches.swap(0, 1);
         }
         Ok(match branches.len() {
