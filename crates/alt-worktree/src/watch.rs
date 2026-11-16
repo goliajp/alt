@@ -10,11 +10,13 @@ use crate::clock::Clock;
 use crate::delta::{Delta, ScanOptions};
 use crate::snapshot::{FileStat, Snapshot};
 use crate::untracked::Untracked;
+use paths::{beneath, dirty_paths, tracked};
 
 mod dirs;
 mod mounts;
 #[path = "watch/linux.rs"]
 mod os;
+mod paths;
 
 /// More changed paths than this are answered by a full scan.
 const MANY_PATHS: usize = 256;
@@ -212,20 +214,6 @@ impl Watched {
     }
 }
 
-/// Whether the index has an entry beneath `dir`.
-fn tracked_in(snapshot: &Snapshot, dir: &[u8]) -> bool {
-    // the index is ordered by path: the entries beneath `dir` begin where
-    // `dir/` would stand
-    let key = [dir, b"/"].concat();
-    let first = partition(snapshot, |entry| entry < key.as_slice());
-    first < snapshot.entries.len() && beneath(snapshot.path(first), dir)
-}
-
-/// Whether the index has an entry beneath `dir` or at it, as a submodule is.
-fn tracked(snapshot: &Snapshot, dir: &[u8]) -> bool {
-    tracked_in(snapshot, dir) || snapshot.find(dir).is_some()
-}
-
 /// What `earlier` and `later` tell together; more paths than a scan of
 /// them is worth stand for the whole tree.
 fn merged(earlier: Option<Changes>, later: Changes) -> Changes {
@@ -254,175 +242,4 @@ fn stats(files: &[&Path]) -> Vec<Option<FileStat>> {
 fn sure(stats: Vec<Option<FileStat>>, clock: &Clock) -> Option<Vec<Option<FileStat>>> {
     let settled = stats.iter().flatten().all(|stat| clock.settled(stat));
     settled.then_some(stats)
-}
-
-fn beneath(path: &[u8], dir: &[u8]) -> bool {
-    path.len() > dir.len() && path[dir.len()] == b'/' && path.starts_with(dir)
-}
-
-fn parent(path: &[u8]) -> &[u8] {
-    match path.iter().rposition(|b| *b == b'/') {
-        Some(at) => &path[..at],
-        None => b"",
-    }
-}
-
-/// The paths to look at again for the reported `paths`; the empty path
-/// stands for the whole tree.
-fn dirty_paths(paths: Vec<Vec<u8>>, snapshot: &Snapshot) -> Vec<Vec<u8>> {
-    let gitlinks: Vec<&[u8]> = (0..snapshot.entries.len())
-        .filter(|&i| snapshot.entries[i].mode == 0o160000)
-        .map(|i| snapshot.path(i))
-        .collect();
-    let mut dirty: Vec<Vec<u8>> = paths
-        .into_iter()
-        .map(|path| {
-            let name = &path[parent(&path).len()..];
-            let name = name.strip_prefix(b"/").unwrap_or(name);
-            // ignore rules and attributes reach everything beneath their
-            // directory, and a repository in a directory changes what
-            // counts as its files
-            if matches!(name, b".gitignore" | b".gitattributes" | b".git" | b".alt") {
-                return parent(&path).to_vec();
-            }
-            // what a submodule has checked out is asked of the submodule itself
-            match gitlinks.iter().find(|g| beneath(&path, g)) {
-                Some(gitlink) => gitlink.to_vec(),
-                None => path,
-            }
-        })
-        .map(|path| outermost_untracked(path, snapshot))
-        .collect();
-    // a submodule can move to another commit without an event in this tree
-    dirty.extend(gitlinks.iter().map(|g| g.to_vec()));
-    dirty.sort();
-    dirty.dedup();
-    let mut kept: Vec<Vec<u8>> = Vec::new();
-    for path in dirty {
-        if !kept
-            .last()
-            .is_some_and(|k| k.is_empty() || beneath(&path, k))
-        {
-            kept.push(path);
-        }
-    }
-    kept
-}
-
-/// A directory with nothing tracked in it is reported as one path, which
-/// stands or falls with any file beneath it: a change in there is looked
-/// at from the outermost such directory.
-fn outermost_untracked(path: Vec<u8>, snapshot: &Snapshot) -> Vec<u8> {
-    let slashes = path.iter().enumerate().filter(|(_, b)| **b == b'/');
-    for (at, _) in slashes {
-        if !tracked_in(snapshot, &path[..at]) {
-            return path[..at].to_vec();
-        }
-    }
-    path
-}
-
-/// The first entry of the snapshot whose path `before` does not hold for.
-fn partition(snapshot: &Snapshot, before: impl Fn(&[u8]) -> bool) -> usize {
-    let (mut low, mut high) = (0, snapshot.entries.len());
-    while low < high {
-        let mid = low + (high - low) / 2;
-        match before(snapshot.path(mid)) {
-            true => low = mid + 1,
-            false => high = mid,
-        }
-    }
-    low
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use alt_git_codec::HashAlgo;
-    use alt_git_index::Index;
-
-    /// A snapshot of an index with a file at each of `paths`.
-    fn tracking(paths: &[&str]) -> Snapshot {
-        let entry = |path: &&str| alt_git_index::IndexEntry {
-            ctime: (0, 0),
-            mtime: (0, 0),
-            dev: 0,
-            ino: 0,
-            mode: 0o100644,
-            uid: 0,
-            gid: 0,
-            size: 0,
-            oid: alt_git_codec::ObjectId::hash_object(
-                HashAlgo::Sha1,
-                alt_git_codec::ObjectKind::Blob,
-                b"",
-            ),
-            flags: path.len() as u16,
-            extended_flags: None,
-            path: (*path).into(),
-        };
-        let index = Index {
-            version: 2,
-            entries: paths.iter().map(entry).collect(),
-            extensions: Vec::new(),
-        };
-        Snapshot::of_index(&index, b"", HashAlgo::Sha1, None)
-    }
-
-    #[test]
-    fn dirty_paths_cover_ignore_files_and_drop_what_lies_beneath_another() {
-        let snapshot = tracking(&["a/b/t", "a/bc/t", "a/x/t", "b/t", "t"]);
-        let paths = |given: &[&str]| -> Vec<String> {
-            let given = given.iter().map(|p| p.as_bytes().to_vec()).collect();
-            let dirty = dirty_paths(given, &snapshot);
-            dirty
-                .into_iter()
-                .map(|p| String::from_utf8(p).unwrap())
-                .collect()
-        };
-        assert_eq!(
-            paths(&["a/b/c", "a/b", "a/bc", "z", "z"]),
-            ["a/b", "a/bc", "z"]
-        );
-        assert_eq!(paths(&["a/.gitignore", "a/x/y", "b/.git"]), ["a", "b"]);
-        assert_eq!(paths(&["a/b/.gitattributes", "a/b/c"]), ["a/b"]);
-        assert_eq!(paths(&["x", ".gitignore", "a/b"]), [""]);
-        // in directories with nothing tracked: the outermost of them
-        assert_eq!(
-            paths(&["new/deep/file", "new/other", "a/new/.gitignore"]),
-            ["a/new", "new"]
-        );
-        assert!(paths(&[]).is_empty());
-    }
-
-    #[test]
-    fn a_path_in_an_untracked_directory_stands_for_the_outermost_one() {
-        let snapshot = tracking(&[
-            "a.txt",
-            "a/b/c.txt",
-            "a0",
-            "src-old/x",
-            "src.rs",
-            "src/lib.rs",
-        ]);
-        let lifted = |path: &str| {
-            String::from_utf8(outermost_untracked(path.as_bytes().to_vec(), &snapshot)).unwrap()
-        };
-        // in tracked directories all the way: the path itself
-        assert_eq!(lifted("top.txt"), "top.txt");
-        assert_eq!(lifted("a/new.txt"), "a/new.txt");
-        assert_eq!(lifted("a/b/c.txt"), "a/b/c.txt");
-        assert_eq!(lifted("src/new"), "src/new");
-        // the first directory on the way that has nothing tracked in it
-        assert_eq!(lifted("new/deep/er/file"), "new");
-        assert_eq!(lifted("a/new/deep/file"), "a/new");
-        assert_eq!(lifted("a/b/x/y"), "a/b/x");
-        // a tracked file is no tracked directory, nor is a name that only
-        // begins like one
-        assert_eq!(lifted("a.txt/x/y"), "a.txt");
-        assert_eq!(lifted("a0/x"), "a0");
-        assert_eq!(lifted("sr/x"), "sr");
-        assert_eq!(lifted("src.rs/x"), "src.rs");
-        assert_eq!(lifted("src-/x"), "src-");
-    }
 }
