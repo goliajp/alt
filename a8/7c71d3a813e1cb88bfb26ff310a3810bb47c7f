@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: give requests only to a daemon that declares it records what it syncs
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd.rs
+touched: crates/alt-cli/src/client.rs
+touched: crates/alt-cli/src/daemon_meta.rs
+touched: crates/alt-cli/src/lib.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/old_daemon.rs
+touched: crates/alt-cli/tests/it/sync_order.rs
