@@ -3,7 +3,7 @@ use std::path::Path;
 use alt_git_codec::HashAlgo;
 use alt_git_pack::IndexedPack;
 
-use crate::RepoError;
+use crate::{Backend, RepoError, Repository};
 
 /// Opens every `*.pack` under `objects/pack`.
 pub(crate) fn open_packs(pack_dir: &Path, algo: HashAlgo) -> Result<Vec<IndexedPack>, RepoError> {
@@ -20,4 +20,15 @@ pub(crate) fn open_packs(pack_dir: &Path, algo: HashAlgo) -> Result<Vec<IndexedP
         }
     }
     Ok(packs)
+}
+
+impl Repository {
+    /// Abbreviates object ids against the objects of this store; `None`
+    /// for git-backed repos.
+    pub fn abbrev(&self) -> Result<Option<alt_odb::Abbrev<'_>>, RepoError> {
+        Ok(match &self.backend {
+            Backend::Git { .. } => None,
+            Backend::Alt(alt) => Some(alt.odb.abbrev()?),
+        })
+    }
 }

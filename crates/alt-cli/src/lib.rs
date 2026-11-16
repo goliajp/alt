@@ -10,6 +10,7 @@ pub mod ci;
 pub mod ci_cmd;
 pub mod cli;
 pub mod client;
+mod combined;
 pub mod commit_sign;
 pub mod config_cmd;
 pub mod daemon;
@@ -23,6 +24,7 @@ pub mod log_count;
 pub mod machine;
 pub mod meta;
 pub mod native;
+mod patch;
 pub mod patterns;
 pub mod policy;
 pub mod portable;
@@ -30,7 +32,9 @@ pub mod precommit;
 pub mod quote;
 pub mod request;
 pub mod runner;
+mod tree_changes;
 
 pub mod execution;
+mod file_header;
 
 pub mod durable;

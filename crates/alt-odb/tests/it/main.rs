@@ -1,5 +1,6 @@
 //! Single integration-test binary for alt-odb.
 
+mod abbrev;
 mod cache_failure;
 mod compact_readers;
 mod corpus_objects;

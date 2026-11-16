@@ -83,7 +83,7 @@ impl Notes {
                         Entry::Occupied(known) => known.into_mut(),
                         Entry::Vacant(new) => new.insert(tree_data(read, dir)?),
                     };
-                    Tree::entry_named(tree, self.algo, rest)?
+                    Tree::find(tree, self.algo, rest)?.map(|(_, blob)| blob)
                 }
                 None => None,
             },

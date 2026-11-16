@@ -55,6 +55,11 @@ impl Matches {
         self.one(id) == Some("true")
     }
 
+    /// How many times a counted flag was given.
+    pub fn count(&self, id: &str) -> usize {
+        self.all(id).len()
+    }
+
     pub fn one(&self, id: &str) -> Option<&str> {
         self.all(id).first().map(String::as_str)
     }

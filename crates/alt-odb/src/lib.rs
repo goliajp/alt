@@ -16,6 +16,7 @@
 //! recorded at import would otherwise survive until export), and reads
 //! inherit the blob layer's BLAKE3 verification.
 
+mod abbrev;
 mod check;
 mod error;
 mod head;
@@ -32,6 +33,7 @@ use std::sync::OnceLock;
 use alt_git_codec::{ObjectId, ObjectKind, RawObject};
 use alt_store::{BlobOptions, BlobStore, CompactReport, StoreCheckpoint};
 
+pub use abbrev::Abbrev;
 pub use alt_store::{BlobId, held};
 pub use check::OdbChecked;
 pub use error::OdbError;

@@ -50,7 +50,7 @@ impl Level<'_> {
             return Err(Error::missing_value(arg));
         }
         let seen = self.entries.iter().any(|entry| entry.id == arg.id);
-        if seen && arg.kind != Kind::Multiple {
+        if seen && !matches!(arg.kind, Kind::Multiple | Kind::Count) {
             return Err(Error::repeated(self.scope, arg));
         }
         self.entry(arg.id);

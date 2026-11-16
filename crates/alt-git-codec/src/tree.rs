@@ -18,6 +18,20 @@ pub struct TreeEntry {
     pub oid: ObjectId,
 }
 
+impl TreeEntry {
+    /// The order entries have inside a tree: by name, a directory comparing
+    /// as if its name ended in `/`. Two trees walked in step have to be
+    /// compared this way: by plain name `lib` sorts before `lib-old.c`,
+    /// in a tree after it. A file and a directory of one name are unequal.
+    pub fn tree_order(&self, other: &TreeEntry) -> core::cmp::Ordering {
+        let key = |e: &TreeEntry| {
+            let slash = e.mode.is_tree().then_some(b'/');
+            e.name.iter().copied().chain(slash).collect::<Vec<u8>>()
+        };
+        key(self).cmp(&key(other))
+    }
+}
+
 impl Tree {
     /// Parses tree data; `algo` determines the raw oid width.
     pub fn parse(data: &[u8], algo: HashAlgo) -> Result<Self, ObjectParseError> {
@@ -42,17 +56,20 @@ impl Tree {
         }
     }
 
-    /// The object the entry called `name` points at in tree `data`, found
-    /// without building the tree. Entries are checked up to the one found.
-    pub fn entry_named(
+    /// The mode and id of the entry called `name` in tree `data`, found
+    /// without building the tree: for a caller that follows one path
+    /// through many trees. Entries are checked up to the one found.
+    pub fn find(
         data: &[u8],
         algo: HashAlgo,
         name: &[u8],
-    ) -> Result<Option<ObjectId>, ObjectParseError> {
+    ) -> Result<Option<(u32, ObjectId)>, ObjectParseError> {
         for entry in Self::raw_entries(data, algo) {
-            let (_, found, oid) = entry?;
+            let (mode, found, oid) = entry?;
             if found == name {
-                return Ok(ObjectId::from_bytes(algo, oid).ok());
+                return Ok(ObjectId::from_bytes(algo, oid)
+                    .ok()
+                    .map(|oid| (mode.value(), oid)));
             }
         }
         Ok(None)
@@ -251,20 +268,23 @@ mod tests {
         let second = ObjectId::hash_object(algo, ObjectKind::Blob, b"second");
         let mut data = entry_bytes("40000", b"ab", &first);
         data.extend(entry_bytes("100644", b"abc", &second));
-        assert_eq!(Tree::entry_named(&data, algo, b"ab").unwrap(), Some(first));
         assert_eq!(
-            Tree::entry_named(&data, algo, b"abc").unwrap(),
-            Some(second)
+            Tree::find(&data, algo, b"ab").unwrap(),
+            Some((0o40000, first))
         );
-        assert_eq!(Tree::entry_named(&data, algo, b"a").unwrap(), None);
-        assert_eq!(Tree::entry_named(&[], algo, b"a").unwrap(), None);
+        assert_eq!(
+            Tree::find(&data, algo, b"abc").unwrap(),
+            Some((0o100644, second))
+        );
+        assert_eq!(Tree::find(&data, algo, b"a").unwrap(), None);
+        assert_eq!(Tree::find(&[], algo, b"a").unwrap(), None);
 
         // a damaged entry before the one looked for is an error, as in a parse
         let mut damaged = b"100648 x\0".to_vec();
         damaged.extend_from_slice(first.as_bytes());
         damaged.extend(entry_bytes("100644", b"abc", &second));
-        assert!(Tree::entry_named(&damaged, algo, b"abc").is_err());
+        assert!(Tree::find(&damaged, algo, b"abc").is_err());
         let cut = &data[..data.len() - 1];
-        assert!(Tree::entry_named(cut, algo, b"abc").is_err());
+        assert!(Tree::find(cut, algo, b"abc").is_err());
     }
 }

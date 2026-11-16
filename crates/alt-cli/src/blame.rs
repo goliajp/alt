@@ -1,326 +1,70 @@
-//! `alt blame <path> [<rev>]`: line-by-line origin attribution for one
-//! file as of `<rev>` (default HEAD).
+//! `alt blame <path> [<rev>]`: for each line of a file, the commit that
+//! introduced it.
 //!
-//! Algorithm (classic git blame, first-parent only):
+//! The walk is git's. Every line starts out pending at the starting commit.
+//! A commit hands each pending line it did not change to the parent it took
+//! the line from: a parent holding the identical file takes them all;
+//! otherwise each parent in turn takes the lines its diff against the
+//! commit leaves unchanged. Lines no parent takes belong to the commit.
+//! Where a parent does not have the path, the file is followed across a
+//! rename. Commits are visited newest first, so the lines a commit receives
+//! from several children are settled together.
 //!
-//! 1. Read the file at `<rev>`, split it into lines, initially attribute
-//!    every line to `<rev>` itself.
-//! 2. Walk to the first parent. Read the same path there.
-//!    - If the parent doesn't carry that path, stop: every still-unattributed
-//!      line was introduced at `<rev>`.
-//!    - If the parent's blob oid matches, the file was unchanged between
-//!      this commit and its parent — rebase every still-unattributed
-//!      line's origin to the parent and recurse.
-//! 3. Otherwise run a line diff between parent and current content.
-//!    - Lines that appear inside an Edit's `new` range were
-//!      added/modified at this commit; they stay attributed to
-//!      `current_commit` and stop carrying back.
-//!    - Lines in the unchanged gaps move their attribution to the
-//!      parent and are tracked at the parent's line indices for the
-//!      next iteration.
-//! 4. Stop when every line has reached a commit whose parent does not
-//!    carry the line (origin is final), or when we reach a root commit.
-//!
-//! Out of scope (future work):
-//! - Detection of cross-file copy / move (`-M` / `-C` in git blame).
-//! - Walking merge parents non-trivially; we currently follow the first
-//!   parent only.
-//! - Author resolution lookups are O(history depth) — fine on small to
-//!   medium files. A repo-scale blame should cache commit metadata.
+//! With `-M` and `-C`, lines a commit moved within the file or copied
+//! from another file are traced on through where they came from.
+
+mod moved;
+mod walk;
 
 use std::collections::HashMap;
 use std::io::Write;
 
-use alt_diff::{diff_lines, split_lines};
-use alt_git_codec::{Commit, ObjectId, ObjectKind, Tree};
+use alt_diff::split_lines;
+use alt_git_codec::{Commit, ObjectId};
 use alt_repo::Repository;
+
+use walk::Board;
+pub use walk::Options;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
-#[derive(Debug, Clone)]
-struct BlameLine {
-    origin: ObjectId,
-    text: Vec<u8>,
-}
-
-/// `alt blame <path> [<rev>] [-M]`. Writes one row per line to `out`:
+/// `alt blame <path> [<rev>]`. Writes one row per line to `out`:
 /// `<short-oid> (<author-name> <YYYY-MM-DD> <line-no>) <line content>`
-///
-/// When `follow` is true, follow file renames: at each commit-step the
-/// walker checks whether the tracked path still exists in the parent
-/// commit and, if not, searches the parent's tree for the most
-/// similar blob (≥80% line overlap with the current content) and
-/// continues blaming under that name.
 pub fn run(
     out: &mut impl Write,
     repo: &Repository,
     path: &str,
     rev: &str,
-    follow: bool,
+    options: Options,
 ) -> Res<()> {
-    let start_commit = repo
+    let start = repo
         .rev_parse(rev)?
         .ok_or_else(|| format!("bad revision '{rev}'"))?;
-    let blamed = blame_file(repo, start_commit, path, follow)?;
+    let (content, origins) = Board::new(repo, options).blame(start, path)?;
     let mut author_cache: HashMap<ObjectId, (String, String)> = HashMap::new();
 
     let pad_oid = 8;
     let mut pad_author = 0;
-    for line in &blamed {
-        let (name, _) = author_for(repo, line.origin, &mut author_cache)?;
+    for origin in &origins {
+        let (name, _) = author_for(repo, *origin, &mut author_cache)?;
         pad_author = pad_author.max(name.len());
     }
 
-    for (i, line) in blamed.iter().enumerate() {
-        let (name, date) = author_for(repo, line.origin, &mut author_cache)?;
-        let short = line.origin.to_string();
+    for (i, (line, origin)) in split_lines(&content).iter().zip(&origins).enumerate() {
+        let (name, date) = author_for(repo, *origin, &mut author_cache)?;
+        let short = origin.to_string();
         let short = &short[..pad_oid.min(short.len())];
-        let mut text = String::from_utf8_lossy(&line.text).into_owned();
+        let mut text = String::from_utf8_lossy(line).into_owned();
         if text.ends_with('\n') {
             text.pop();
         }
         writeln!(
             out,
             "{short} ({name:<pad_author$} {date} {linenum:>4}) {text}",
-            short = short,
-            name = name,
-            date = date,
             linenum = i + 1,
-            pad_author = pad_author,
-            text = text,
         )?;
     }
     Ok(())
-}
-
-fn blame_file(repo: &Repository, start: ObjectId, path: &str, follow: bool) -> Res<Vec<BlameLine>> {
-    let mut current_segments: Vec<String> = path
-        .split('/')
-        .filter(|s| !s.is_empty())
-        .map(String::from)
-        .collect();
-    if current_segments.is_empty() {
-        return Err("empty path".into());
-    }
-
-    let mut current_commit = start;
-    let mut current_blob =
-        match resolve_path_blob(repo, current_commit, &segments_as_str(&current_segments))? {
-            Some(o) => o,
-            None => return Err(format!("path '{path}' not found in {start}").into()),
-        };
-    let mut current_content = read_blob_bytes(repo, current_blob)?;
-    let mut blame_lines: Vec<BlameLine> = split_lines(&current_content)
-        .iter()
-        .map(|l| BlameLine {
-            origin: current_commit,
-            text: l.to_vec(),
-        })
-        .collect();
-    let mut current_map: Vec<Option<usize>> = (0..blame_lines.len()).map(Some).collect();
-
-    loop {
-        // Stop if everything is finalised already.
-        if current_map.iter().all(Option::is_none) {
-            break;
-        }
-        let commit = repo.read_commit(&current_commit)?;
-        let Some(parent_commit) = commit.parents().next() else {
-            break;
-        };
-        let parent_blob_opt =
-            resolve_path_blob(repo, parent_commit, &segments_as_str(&current_segments))?;
-        let parent_blob = match parent_blob_opt {
-            Some(o) => o,
-            None => {
-                if follow {
-                    // Try to find a rename source: a blob in the
-                    // parent's tree that's ≥80% similar to the current
-                    // content.
-                    if let Some((new_segments, src_blob)) =
-                        find_rename_source(repo, parent_commit, &current_content)?
-                    {
-                        current_segments = new_segments;
-                        src_blob
-                    } else {
-                        break;
-                    }
-                } else {
-                    break;
-                }
-            }
-        };
-        if parent_blob == current_blob {
-            // No content change → just rebase to parent.
-            for idx in current_map.iter().flatten() {
-                blame_lines[*idx].origin = parent_commit;
-            }
-            current_commit = parent_commit;
-            continue;
-        }
-        let parent_content = read_blob_bytes(repo, parent_blob)?;
-        let parent_lines = split_lines(&parent_content);
-        let current_lines = split_lines(&current_content);
-        let edits = diff_lines(&parent_lines, &current_lines);
-
-        let mut new_map: Vec<Option<usize>> = vec![None; parent_lines.len()];
-        let mut cursor_old = 0usize;
-        let mut cursor_new = 0usize;
-        for edit in &edits {
-            // unchanged gap before this edit
-            while cursor_new < edit.new.start && cursor_old < edit.old.start {
-                if let Some(blame_idx) = current_map[cursor_new] {
-                    new_map[cursor_old] = Some(blame_idx);
-                    blame_lines[blame_idx].origin = parent_commit;
-                }
-                cursor_new += 1;
-                cursor_old += 1;
-            }
-            // edit.new lines: introduced/modified at current_commit;
-            // pin them and drop their carry-back.
-            for i in edit.new.clone() {
-                if let Some(blame_idx) = current_map[i] {
-                    blame_lines[blame_idx].origin = current_commit;
-                }
-            }
-            cursor_old = edit.old.end;
-            cursor_new = edit.new.end;
-        }
-        // trailing unchanged
-        while cursor_new < current_lines.len() && cursor_old < parent_lines.len() {
-            if let Some(blame_idx) = current_map[cursor_new] {
-                new_map[cursor_old] = Some(blame_idx);
-                blame_lines[blame_idx].origin = parent_commit;
-            }
-            cursor_new += 1;
-            cursor_old += 1;
-        }
-
-        current_commit = parent_commit;
-        current_blob = parent_blob;
-        current_content = parent_content;
-        current_map = new_map;
-    }
-
-    Ok(blame_lines)
-}
-
-fn segments_as_str(segments: &[String]) -> Vec<&str> {
-    segments.iter().map(String::as_str).collect()
-}
-
-/// Search `parent_commit`'s tree for a blob whose content is at least
-/// 80% line-overlap with `current_content`. Returns the path to it +
-/// the blob oid. Walks every file in the parent's tree, so it's O(N)
-/// in the parent's file count — fine for typical histories, would
-/// need a smarter index on a megarepo.
-fn find_rename_source(
-    repo: &Repository,
-    parent_commit: ObjectId,
-    current_content: &[u8],
-) -> Res<Option<(Vec<String>, ObjectId)>> {
-    const THRESHOLD_PERCENT: usize = 80;
-    let current_lines = alt_diff::split_lines(current_content);
-    if current_lines.is_empty() {
-        return Ok(None);
-    }
-    let current_set: std::collections::HashSet<&[u8]> = current_lines.iter().copied().collect();
-    let total = current_lines.len();
-
-    let commit = repo.read_commit(&parent_commit)?;
-    let Some(root_tree) = commit.tree() else {
-        return Ok(None);
-    };
-
-    let mut best: Option<(usize, Vec<String>, ObjectId)> = None;
-    let mut stack: Vec<(Vec<String>, ObjectId)> = vec![(Vec::new(), root_tree)];
-    while let Some((prefix, tree_oid)) = stack.pop() {
-        let tree = read_tree(repo, tree_oid)?;
-        for entry in tree.entries {
-            let mut path = prefix.clone();
-            path.push(String::from_utf8_lossy(entry.name.as_slice()).into_owned());
-            let is_tree = entry.mode.value() == 0o040000;
-            if is_tree {
-                stack.push((path, entry.oid));
-                continue;
-            }
-            let bytes = match read_blob_bytes(repo, entry.oid) {
-                Ok(b) => b,
-                Err(_) => continue,
-            };
-            let parent_lines = alt_diff::split_lines(&bytes);
-            if parent_lines.is_empty() {
-                continue;
-            }
-            let mut shared = 0usize;
-            for line in &parent_lines {
-                if current_set.contains(line) {
-                    shared += 1;
-                }
-            }
-            if shared * 100 / total < THRESHOLD_PERCENT {
-                continue;
-            }
-            let score = shared;
-            if best.as_ref().map(|(s, _, _)| score > *s).unwrap_or(true) {
-                best = Some((score, path, entry.oid));
-            }
-        }
-    }
-    Ok(best.map(|(_, p, o)| (p, o)))
-}
-
-fn resolve_path_blob(
-    repo: &Repository,
-    commit_oid: ObjectId,
-    segments: &[&str],
-) -> Res<Option<ObjectId>> {
-    let commit = repo.read_commit(&commit_oid)?;
-    let Some(mut current) = commit.tree() else {
-        return Ok(None);
-    };
-    for (i, seg) in segments.iter().enumerate() {
-        let tree = read_tree(repo, current)?;
-        let Some(entry) = tree
-            .entries
-            .iter()
-            .find(|e| String::from_utf8_lossy(e.name.as_slice()) == **seg)
-        else {
-            return Ok(None);
-        };
-        if i == segments.len() - 1 {
-            // last segment: must be a blob
-            if entry.mode.value() == 0o040000 {
-                return Ok(None);
-            }
-            return Ok(Some(entry.oid));
-        }
-        if entry.mode.value() != 0o040000 {
-            return Ok(None);
-        }
-        current = entry.oid;
-    }
-    Ok(None)
-}
-
-fn read_tree(repo: &Repository, oid: ObjectId) -> Res<Tree> {
-    let obj = repo
-        .read_object(&oid)?
-        .ok_or_else(|| format!("tree {oid} missing"))?;
-    if obj.kind != ObjectKind::Tree {
-        return Err(format!("{oid} is not a tree").into());
-    }
-    Ok(Tree::parse(&obj.data, repo.algo()?)?)
-}
-
-fn read_blob_bytes(repo: &Repository, oid: ObjectId) -> Res<Vec<u8>> {
-    let obj = repo
-        .read_object(&oid)?
-        .ok_or_else(|| format!("blob {oid} missing"))?;
-    if obj.kind != ObjectKind::Blob {
-        return Err(format!("{oid} is not a blob").into());
-    }
-    Ok(obj.data)
 }
 
 fn author_for(

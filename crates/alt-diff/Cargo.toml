@@ -1,6 +1,6 @@
 [package]
 name = "alt-diff"
-description = "Histogram line diff (git's default algorithm) + unified-diff formatting + chunk-level binary diff"
+description = "Line diff (git-compatible Myers, histogram) + unified-diff formatting + chunk-level binary diff"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,3 +11,4 @@ alt-inflate.workspace = true
 
 [dev-dependencies]
 alt-deflate.workspace = true
+alt-os.workspace = true

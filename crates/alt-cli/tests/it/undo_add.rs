@@ -7,7 +7,7 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
-fn alt(repo: &Path, args: &[&str]) -> Output {
+pub(super) fn alt(repo: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_alt"))
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
@@ -19,7 +19,7 @@ fn alt(repo: &Path, args: &[&str]) -> Output {
         .unwrap()
 }
 
-fn ok(o: Output) -> String {
+pub(super) fn ok(o: Output) -> String {
     assert!(
         o.status.success(),
         "stderr: {}",
@@ -28,7 +28,7 @@ fn ok(o: Output) -> String {
     String::from_utf8(o.stdout).unwrap()
 }
 
-fn staged_paths(repo: &Path) -> String {
+pub(super) fn staged_paths(repo: &Path) -> String {
     ok(alt(repo, &["status", "--json"]))
 }
 
@@ -127,7 +127,7 @@ fn undo_after_commit_still_inverts_the_ref_tx_not_the_index() {
     );
 }
 
-fn index_bytes(root: &Path) -> Vec<u8> {
+pub(super) fn index_bytes(root: &Path) -> Vec<u8> {
     std::fs::read(root.join(".alt/index")).unwrap()
 }
 
@@ -339,7 +339,7 @@ fn recovery_add_preserves_unrelated_conflict_stages_and_undo_restores_them() {
     assert_eq!(restored.entries[0].stage(), 1);
 }
 
-fn remove_final_log_frame(root: &Path) {
+pub(super) fn remove_final_log_frame(root: &Path) {
     let path = root.join(".alt/oplog/log");
     let bytes = std::fs::read(&path).unwrap();
     let mut cursor = 5;
@@ -405,7 +405,7 @@ fn recovery_prepared_index_without_replacement_is_not_reported_as_success() {
     assert!(staged_paths(root).contains("\"staged\":[{\"path\":\"f\""));
 }
 
-fn recover_pending(root: &Path) {
+pub(super) fn recover_pending(root: &Path) {
     let pending: alt_json::Value =
         alt_json::from_str(&ok(alt(root, &["operation", "pending", "--json"]))).unwrap();
     let operations = pending["operations"].as_array().unwrap();
