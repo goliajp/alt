@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: ask no first group of a pattern that refers to a later one
+author-type: human
+author: doracawl
+touched: crates/alt-regex/tests/it/held.rs
