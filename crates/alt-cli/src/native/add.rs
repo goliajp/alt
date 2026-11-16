@@ -171,6 +171,9 @@ impl NativeRepo<'_> {
         delta.deleted.retain(|path| named(path));
         delta.unmerged.retain(|path| named(path));
         pathspec::keep_named(specs, &mut delta.untracked);
+        if mode.update && !mode.renormalize {
+            self.take_replaced(&mut delta)?;
+        }
         Ok(Found {
             delta,
             clock,

@@ -45,6 +45,13 @@ impl NativeRepo<'_> {
             let gone =
                 |e| settings::fatal(format!("unable to stat '{path}': {}", settings::reason(&e)));
             let meta = std::fs::symlink_metadata(self.abs(path)?).map_err(gone)?;
+            let inner = meta
+                .is_dir()
+                .then(|| attrs.submodule_head(&self.abs(path).ok()?));
+            if let Some(Some(commit)) = inner {
+                entries.push(staged_entry(path, commit, 0o160000));
+                continue;
+            }
             if meta.is_dir() {
                 let why = [
                     b"error: '",

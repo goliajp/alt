@@ -53,6 +53,36 @@ impl NativeRepo<'_> {
     }
 }
 
+impl NativeRepo<'_> {
+    /// For `add -u`, which looks for no new file: a tracked file in whose
+    /// place a repository of its own stands, with a commit checked out, is
+    /// staged as that repository and not as gone, and without a warning,
+    /// as git stages it.
+    pub(super) fn take_replaced(&self, delta: &mut Delta) -> Res<()> {
+        let dir = |path: &BString| self.abs(path).is_ok_and(|at| at.is_dir());
+        if !delta.deleted.iter().any(dir) {
+            return Ok(());
+        }
+        let attrs = self.converter()?;
+        for path in std::mem::take(&mut delta.deleted) {
+            match attrs
+                .submodule_head(&self.abs(&path)?)
+                .filter(|_| dir(&path))
+            {
+                Some(oid) => delta.changed.push(WorkEntry {
+                    path,
+                    oid,
+                    mode: 0o160000,
+                }),
+                None => delta.deleted.push(path),
+            }
+        }
+        attrs.check()?;
+        delta.changed.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(())
+    }
+}
+
 /// What `add` says of the repositories at `paths` that it staged as
 /// submodules: git's warning for each, and once what it means, unless
 /// `advice.addEmbeddedRepo` is off; a path is said as its bytes are. Git names a command that takes the

@@ -77,10 +77,11 @@ impl NativeRepo<'_> {
         delta: &Delta,
         known: Known,
     ) -> Res<()> {
-        let mut unknown = Vec::new();
+        let (mut unknown, mut any_tracked) = (Vec::new(), false);
         let named = specs.iter().filter(|s| !s.exclude && !s.path.is_empty());
         for spec in named {
             let tracked = before.entries.iter().any(|e| spec.matches(&e.path));
+            any_tracked |= tracked;
             let new = delta.untracked.iter().chain(&delta.unmerged);
             let seen = |p: &BString| spec.matches(p) || inside_repository(p, &spec.path);
             if tracked || (known == Known::Any && new.into_iter().any(seen)) {
@@ -99,10 +100,21 @@ impl NativeRepo<'_> {
             }
             unknown.push(spec.given.as_str());
         }
-        match unknown.is_empty() || known != Known::TrackedOrError {
-            true => Ok(()),
-            false => Err(not_known(&unknown)?.into()),
+        if unknown.is_empty() || known != Known::TrackedOrError {
+            return Ok(());
         }
+        // git tries a path that takes away only on a file another path
+        // names, and tells of it as well when it tried it on none
+        let told = |spec: &&Spec| match spec.exclude {
+            true => !any_tracked,
+            false => unknown.contains(&spec.given.as_str()),
+        };
+        let told: Vec<&str> = specs
+            .iter()
+            .filter(told)
+            .map(|s| s.given.as_str())
+            .collect();
+        Err(not_known(&told)?.into())
     }
 
     /// The paths git tells of because an ignore rule hides them: each the

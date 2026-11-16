@@ -47,6 +47,12 @@ const CASES: &[&[&str]] = &[
     &["--renormalize", "d.txt"],
     &["--renormalize", "f.txt", "d.txt"],
     &["--renormalize", "*.txt", ":!g.txt"],
+    &["-u", "n.txt", ":(exclude)deep"],
+    &["-u", "f.txt", "n.txt", ":(exclude)deep"],
+    &["-u", ":(exclude)deep"],
+    &["-u", "r.txt"],
+    &["-u", "."],
+    &["-u", "e.txt"],
 ];
 
 /// The status a command ended with and what it wrote to stderr, without
@@ -61,13 +67,14 @@ pub(crate) fn said(output: &Output) -> (Option<i32>, Vec<&BStr>) {
 /// The files of case `n`, made and committed just before it runs: a case
 /// that stages in the whole tree leaves those of the cases to come alone.
 fn files(trees: &Trees, n: usize) {
-    for file in [
+    let tracked = [
         "top.txt",
         "sub/f.txt",
         "sub/g.txt",
         "sub/d.txt",
         "sub/deep/g.txt",
-    ] {
+    ];
+    for file in tracked.into_iter().chain(["sub/r.txt", "sub/e.txt"]) {
         trees.write(&format!("c{n}/{file}"), "base\n");
     }
     each(trees, &["add", &format!("c{n}")]);
@@ -82,7 +89,34 @@ fn files(trees: &Trees, n: usize) {
         std::fs::remove_file(sub.join("d.txt")).unwrap();
         std::fs::create_dir(sub.join("d.txt")).unwrap();
         std::fs::write(sub.join("d.txt/in.txt"), "in\n").unwrap();
+        repositories(trees, &sub);
     }
+}
+
+/// Puts a repository of its own where `r.txt` was in `sub`, with a commit,
+/// and one without where `e.txt` was: the same commit in every tree.
+fn repositories(trees: &Trees, sub: &std::path::Path) {
+    let made = trees.at("inner");
+    if !made.exists() {
+        std::fs::create_dir(&made).unwrap();
+        assert!(git(&made, &["init", "-q", "-b", "main"]).status.success());
+        let empty = ["commit", "-q", "--allow-empty", "-m", "inner"];
+        assert!(git(&made, &empty).status.success());
+    }
+    std::fs::remove_file(sub.join("r.txt")).unwrap();
+    let copy = std::process::Command::new("cp")
+        .arg("-r")
+        .arg(&made)
+        .arg(sub.join("r.txt"))
+        .status();
+    assert!(copy.unwrap().success());
+    std::fs::remove_file(sub.join("e.txt")).unwrap();
+    std::fs::create_dir(sub.join("e.txt")).unwrap();
+    assert!(
+        git(&sub.join("e.txt"), &["init", "-q", "-b", "main"])
+            .status
+            .success()
+    );
 }
 
 #[test]
@@ -110,7 +144,7 @@ fn add_without_a_path_and_with_update_or_all_does_what_git_does() {
         each(&trees, &["commit", "--allow-empty", "-m", "staged"]);
     }
     // the cases are what they are meant to be: git ends these
-    assert_eq!(ended, 13);
+    assert_eq!(ended, 20);
 }
 
 #[test]
