@@ -46,8 +46,12 @@ pub(crate) struct Tier1Map {
 impl Tier1Map {
     /// Opens `<dir>/tier1`, creating it if missing; `named` are its index
     /// runs when the caller has them on record.
-    pub fn open(dir: &Path, named: Option<&[(u64, u64)]>) -> Result<Self, StoreError> {
-        let (log, created) = RecLog::open_with_runs(&dir.join("tier1"), LAYOUT, named)?;
+    pub fn open(
+        dir: &Path,
+        named: Option<&[(u64, u64)]>,
+        tail: alt_store::Tail,
+    ) -> Result<Self, StoreError> {
+        let (log, created) = RecLog::open_with_runs(&dir.join("tier1"), LAYOUT, named, tail)?;
         if created {
             fsync_dir(dir)?;
         }
@@ -116,10 +120,17 @@ impl Tier1Map {
     /// → record mapping appended past that point. Used by [`super::NativeOdb::rewind`]
     /// to roll back a failed write batch.
     pub fn rewind(&mut self, target_len: u64) -> Result<(), StoreError> {
+        self.check_rewind(target_len)?;
+        self.log.rewind(target_len)
+    }
+
+    /// Whether [`Self::rewind`] to `target_len` can go ahead (see
+    /// [`RecLog::check_rewind`]).
+    pub fn check_rewind(&self, target_len: u64) -> Result<(), StoreError> {
         if target_len > self.log.appended_len() {
             return Err(StoreError::Format("tier1 rewind target above cursor"));
         }
-        self.log.rewind(target_len)
+        self.log.check_rewind(target_len).map(drop)
     }
 
     /// An independent fd to the tier1 file for the daemon's off-write-path

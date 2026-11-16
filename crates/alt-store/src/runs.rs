@@ -422,6 +422,12 @@ impl Runs {
         self.sweep()
     }
 
+    /// Where the runs [`Self::truncate`] would keep for `target` stop.
+    pub fn covered_up_to(&self, target: u64) -> u64 {
+        let kept = self.runs.iter().take_while(|run| run.end <= target);
+        kept.last().map_or(self.base, |run| run.end)
+    }
+
     /// Drops the runs that reach past `target`, before the log is cut back
     /// to it: every such file in the directory, not only the ones this
     /// handle loaded (another process may have merged them since). The

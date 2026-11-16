@@ -123,13 +123,19 @@ pub struct ObjectMap {
 
 impl ObjectMap {
     pub fn open(path: &Path) -> Result<Self, OdbError> {
-        Self::open_with_runs(path, None)
+        Ok(Self::open_with_runs(path, None, alt_store::Tail::default())?.0)
     }
 
-    /// The same, opening the index runs `named` by name.
-    pub fn open_with_runs(path: &Path, named: Option<&[(u64, u64)]>) -> Result<Self, OdbError> {
-        let (log, _) = RecLog::open_with_runs(path, LAYOUT, named).map_err(lift)?;
-        Ok(Self { log })
+    /// The same, opening the index runs `named` by name and reading a log
+    /// that does not read to its end as `tail` says; the second value says
+    /// whether the map was created.
+    pub fn open_with_runs(
+        path: &Path,
+        named: Option<&[(u64, u64)]>,
+        tail: alt_store::Tail,
+    ) -> Result<(Self, bool), OdbError> {
+        let (log, created) = RecLog::open_with_runs(path, LAYOUT, named, tail).map_err(lift)?;
+        Ok((Self { log }, created))
     }
 
     /// See [`RecLog::keep_reads`].
@@ -270,10 +276,17 @@ impl ObjectMap {
     /// a record boundary and not below the file header. Fsyncs the truncation
     /// so it's durable on recovery.
     pub fn rewind(&mut self, target_len: u64) -> Result<(), OdbError> {
+        self.check_rewind(target_len)?;
+        self.log.rewind(target_len).map_err(lift)
+    }
+
+    /// Whether [`Self::rewind`] to `target_len` can go ahead (see
+    /// [`RecLog::check_rewind`]).
+    pub fn check_rewind(&self, target_len: u64) -> Result<(), OdbError> {
         if target_len > self.log.appended_len() {
             return Err(OdbError::Format("map.alt rewind target above cursor"));
         }
-        self.log.rewind(target_len).map_err(lift)
+        self.log.check_rewind(target_len).map(drop).map_err(lift)
     }
 
     /// The map's true on-disk size.

@@ -88,6 +88,18 @@ impl Store {
         })
     }
 
+    /// Opens the store to be read and nothing else (`alt fsck`): no file
+    /// under `alt_dir` is created, repaired or rebuilt.
+    pub fn open_read_only(alt_dir: PathBuf) -> Res<Self> {
+        Ok(Self {
+            odb: NativeOdb::read_only(&alt_dir),
+            refs: RefStore::open_read_only(&alt_dir)?,
+            policy: Policy::load(&alt_dir)?,
+            algo: std::sync::OnceLock::new(),
+            alt_dir,
+        })
+    }
+
     /// The control directory (`…/.alt`).
     pub fn alt_dir(&self) -> &Path {
         &self.alt_dir
@@ -199,7 +211,7 @@ impl Store {
 /// Store`. New object appends wait until both data and log are synchronized.
 pub struct StoreSink {
     odb: alt_odb::OdbSink,
-    oplog: std::fs::File,
+    oplog: alt_oplog::OpLogSink,
     odb_lock: PathBuf,
 }
 
@@ -215,7 +227,7 @@ impl StoreSink {
         let _barrier = std::fs::File::open(&self.odb_lock)?;
         alt_odb::held::lock_shared(&_barrier)?;
         self.odb.fsync()?;
-        self.oplog.sync_all()?;
+        self.oplog.fsync()?;
         Ok(())
     }
 }

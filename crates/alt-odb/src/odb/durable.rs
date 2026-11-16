@@ -1,43 +1,15 @@
 //! Durability of the object database: the group-commit fsync and its
 //! marker, write cursors, and rolling a batch back.
 
-use std::fs::OpenOptions;
-use std::path::Path;
+use std::fs::{File, OpenOptions};
+use std::path::PathBuf;
 
 use super::Odb;
 use crate::lock::{lock_exclusive, lock_shared, unlock};
+use crate::synced::{Deferred, Lens, Marker};
+use crate::tier1::Tier1Map;
 use crate::{OdbCheckpoint, OdbError};
 use alt_store::StoreError;
-
-/// The 3 durable EOFs (active pack, blobmap, map.alt) from the marker file;
-/// all-zero when missing (everything must be re-fsynced).
-fn read_durable(path: &Path) -> [u64; 3] {
-    match std::fs::read(path) {
-        Ok(b) if b.len() >= 24 => [
-            u64::from_le_bytes(b[0..8].try_into().unwrap()),
-            u64::from_le_bytes(b[8..16].try_into().unwrap()),
-            u64::from_le_bytes(b[16..24].try_into().unwrap()),
-        ],
-        _ => [0; 3],
-    }
-}
-
-/// Atomically records the durable EOFs (temp + rename) so a lock-free reader
-/// sees the old or new value, never a torn one. Written only after the fsync,
-/// so the marker never claims durability that has not happened.
-fn write_durable(path: &Path, eofs: [u64; 3]) -> std::io::Result<()> {
-    let mut buf = [0u8; 24];
-    buf[0..8].copy_from_slice(&eofs[0].to_le_bytes());
-    buf[8..16].copy_from_slice(&eofs[1].to_le_bytes());
-    buf[16..24].copy_from_slice(&eofs[2].to_le_bytes());
-    let tmp = path.with_extension("durable.tmp");
-    std::fs::write(&tmp, buf)?;
-    std::fs::rename(&tmp, path)
-}
-
-fn covers(durable: [u64; 3], target: [u64; 3]) -> bool {
-    durable[0] >= target[0] && durable[1] >= target[1] && durable[2] >= target[2]
-}
 
 impl Odb {
     /// Finish an unfinished object batch, including after a command error.
@@ -56,8 +28,7 @@ impl Odb {
     /// pointing at lost content.
     pub fn flush(&mut self) -> Result<(), OdbError> {
         // my durability target = how far my appends reached in each file
-        let (pack, blobmap) = self.blobs.appended_lens()?;
-        let target = [pack, blobmap, self.map.appended_len()];
+        let target = self.appended()?;
         // still under the append lock: fold what this batch (and any writer
         // before it) appended into the index runs, so the next open does not
         // have to scan it
@@ -72,11 +43,35 @@ impl Odb {
         }
         if self.defer {
             // the daemon's group-commit coordinator fsyncs off the write path
-            // (via `sink`); here we only note that a write happened
+            // (via `sink`) and then records how far this batch reached
             self.write_count += 1;
+            let whole = self.appended_whole()?;
+            self.deferred.lock().unwrap().lens = Some(whole);
             return Ok(());
         }
         self.sync_to(target)
+    }
+
+    /// The record boundaries this handle's appends reached. A file it has
+    /// not opened it has not appended to: zero, short of any length.
+    fn appended(&self) -> Result<Lens, OdbError> {
+        let (seq, pack, blobmap) = self.blobs.checkpoint()?.lens();
+        Ok(Lens {
+            seq,
+            pack,
+            blobmap,
+            tier1: self.tier1.get().map_or(0, Tier1Map::appended_len),
+            map: self.map.appended_len(),
+        })
+    }
+
+    /// The same with every file opened: boundaries in all four.
+    fn appended_whole(&self) -> Result<Lens, OdbError> {
+        let tier1 = self.tier1()?.appended_len();
+        Ok(Lens {
+            tier1,
+            ..self.appended()?
+        })
     }
 
     /// Folds long enough log tails into the index runs. A run is fsynced
@@ -90,6 +85,9 @@ impl Odb {
         if !self.held || !pending {
             return Ok(());
         }
+        // indexing the blob store opens its map: opened here, it is
+        // fsynced with the rest before a run is built over it
+        self.blobs.open_map()?;
         if !alt_store::relaxed_durability() {
             self.blobs.fsync()?;
             if let Some(tier1) = self.tier1.get_mut() {
@@ -145,22 +143,53 @@ impl Odb {
     }
 
     /// Rolls every odb write since `ckpt` back: truncates each append file to
-    /// its captured length, drops the affected in-memory indices, fsyncs the
-    /// new lengths, and resets the durable marker so a fresh crash recovery
-    /// won't claim a longer durable extent than now exists. Held under the odb
-    /// write lock — call it with the same lock that produced `ckpt`. Used by
-    /// the server's receive-pack path to undo a pack ingest when the signature
-    /// / policy / ref-tx gate downstream rejects the push: no orphan objects
-    /// are left in the store.
+    /// its captured length, drops the affected in-memory indices and fsyncs
+    /// the new lengths. Used by the server's receive-pack path to undo a
+    /// pack ingest when the signature / policy / ref-tx gate downstream
+    /// rejects the push: no orphan objects are left in the store.
+    ///
+    /// Runs under the write lock, taken here unless the batch holds it.
+    /// What stays of each file is read first: damage there fails the
+    /// rewind with every file, index run and the marker as they were.
     pub fn rewind(&mut self, ckpt: OdbCheckpoint) -> Result<(), OdbError> {
+        let held = self.held;
+        self.acquire()?;
+        let rewound = self.rewind_locked(ckpt);
+        if !held {
+            self.release();
+        }
+        rewound
+    }
+
+    fn rewind_locked(&mut self, ckpt: OdbCheckpoint) -> Result<(), OdbError> {
+        self.blobs.check_rewind(ckpt.blobs)?;
+        self.tier1()?.check_rewind(ckpt.tier1_len)?;
+        self.map.check_rewind(ckpt.map_len)?;
+        let (seq, pack, blobmap) = ckpt.blobs.lens();
+        let after = Lens {
+            seq,
+            pack,
+            blobmap,
+            tier1: ckpt.tier1_len,
+            map: ckpt.map_len,
+        };
+        {
+            // a sink that read the batch's lengths must not record them
+            let mut pending = self.deferred.lock().unwrap();
+            pending.lens = None;
+            pending.rewinds += 1;
+        }
+        // the marker comes down before the files do: it never claims more
+        // than they hold, whichever step a crash interrupts
+        if let Some(marker) = Marker::read(&self.durable_path) {
+            let eofs = [0, 1, 2].map(|at| marker.eofs[at].min([pack, blobmap, ckpt.map_len][at]));
+            Marker::write(&self.durable_path, eofs, marker.whole.map(|w| w.min(after)))?;
+        }
         self.blobs.rewind(ckpt.blobs)?;
         self.tier1_mut()?.rewind(ckpt.tier1_len)?;
         self.map.rewind(ckpt.map_len)?;
-        // marker reflects what is durable; after truncations + fsyncs, that's
-        // exactly the rewound EOFs. Without this, a subsequent flush could
-        // covers()-skip its fsync against a stale-larger marker.
-        let (pack, blobmap) = self.blobs.appended_lens()?;
-        write_durable(&self.durable_path, [pack, blobmap, self.map.appended_len()])?;
+        // each cut was fsynced: the files are synced to exactly these lengths
+        Marker::write_whole(&self.durable_path, after)?;
         Ok(())
     }
 
@@ -184,6 +213,9 @@ impl Odb {
             blobs: self.blobs.sink()?,
             tier1: self.tier1()?.sync_handle()?,
             map: self.map.sync_handle()?,
+            deferred: self.deferred.clone(),
+            lock_path: self.alt_dir.join("odb.lock"),
+            durable_path: self.durable_path.clone(),
         })
     }
 
@@ -192,13 +224,12 @@ impl Odb {
     /// references their Tier 1 blob ids), then `map.alt`, so a crash never
     /// leaves a durable identity record pointing at lost content). One
     /// fsync covers my appends and any concurrent ones; the marker then
-    /// lets the others skip theirs. The 3-tuple marker stays the same —
-    /// tier1 isn't tracked in it because it's a small, append-only file
-    /// with cheap fsync and unconditionally syncing it preserves backward
-    /// compatibility with stores written before Tier 1 existed.
-    fn sync_to(&mut self, target: [u64; 3]) -> Result<(), OdbError> {
+    /// lets the others skip theirs, and each of them still records how far
+    /// its own records reach.
+    fn sync_to(&mut self, target: Lens) -> Result<(), OdbError> {
         // fast path: another writer already fsynced past my appends
-        if covers(read_durable(&self.durable_path), target) {
+        let recorded = |marker: Marker| marker.covers(&target) && marker.records(&target);
+        if Marker::read(&self.durable_path).is_some_and(recorded) {
             return Ok(());
         }
         let sync_lock = OpenOptions::new()
@@ -208,14 +239,37 @@ impl Odb {
             .open(&self.sync_lock_path)?;
         lock_exclusive(&sync_lock)?;
         let result = (|| -> Result<(), OdbError> {
-            if covers(read_durable(&self.durable_path), target) {
+            let marker = Marker::read(&self.durable_path);
+            if marker.is_some_and(recorded) {
                 return Ok(());
             }
+            // a marker without record boundaries gets them for every file
+            let target = match marker.and_then(|marker| marker.whole) {
+                Some(_) => target,
+                None => self.appended_whole()?,
+            };
             // Otherwise a concurrent writer could append a map entry after
             // its content file was synchronized but before map.alt's fsync.
             // The batch released its exclusive lock before entering sync_to.
             lock_shared(&self.lock)?;
-            let synced = (|| -> Result<(), OdbError> {
+            let synced = self.sync_locked(target);
+            let _ = unlock(&self.lock);
+            synced
+        })();
+        let _ = unlock(&sync_lock);
+        result
+    }
+
+    /// Under the sync lock and the shared append lock (so no rewind is
+    /// under way): fsyncs unless that has been done, and records it.
+    fn sync_locked(&mut self, target: Lens) -> Result<(), OdbError> {
+        let marker = Marker::read(&self.durable_path);
+        let whole = marker
+            .and_then(|marker| marker.whole)
+            .map_or(target, |whole| whole.max(target));
+        let eofs = match marker {
+            Some(marker) if marker.covers(&target) => marker.eofs,
+            _ => {
                 let (pf, bf) = self.blobs.file_lens()?;
                 let eofs = [pf, bf, self.map.file_len()?];
                 self.blobs.fsync()?; // chunks then blobmap, in order
@@ -224,14 +278,15 @@ impl Odb {
                     tier1.sync()?;
                 }
                 self.map.fsync()?; // then map.alt (may reference tier1 ids)
-                write_durable(&self.durable_path, eofs)?;
-                Ok(())
-            })();
-            let _ = unlock(&self.lock);
-            synced
-        })();
-        let _ = unlock(&sync_lock);
-        result
+                match marker {
+                    // a later pack than mine was synced: its length stays
+                    Some(marker) if whole.seq != target.seq => [marker.eofs[0], eofs[1], eofs[2]],
+                    _ => eofs,
+                }
+            }
+        };
+        Marker::write(&self.durable_path, eofs, Some(whole))?;
+        Ok(())
     }
 }
 
@@ -241,15 +296,42 @@ impl Odb {
 /// daemon fsyncs without `&mut NativeOdb` and appends overlap the fsync.
 pub struct OdbSink {
     blobs: alt_store::BlobSink,
-    tier1: std::fs::File,
-    map: std::fs::File,
+    tier1: File,
+    map: File,
+    deferred: Deferred,
+    lock_path: PathBuf,
+    durable_path: PathBuf,
 }
 
 impl OdbSink {
+    /// Fsyncs the files, then records in the marker how far the handle
+    /// this sink was made from had written whole batches before the fsync.
     pub fn fsync(&self) -> Result<(), OdbError> {
+        let (lens, rewinds) = {
+            let pending = self.deferred.lock().unwrap();
+            (pending.lens, pending.rewinds)
+        };
         self.blobs.fsync()?;
         self.tier1.sync_all()?;
         self.map.sync_all()?;
+        let Some(lens) = lens else {
+            return Ok(());
+        };
+        // a rewind holds the append lock exclusively: it is over or has not
+        // begun, and its count tells which
+        let lock = File::open(&self.lock_path)?;
+        lock_shared(&lock)?;
+        if self.deferred.lock().unwrap().rewinds != rewinds {
+            return Ok(());
+        }
+        let marker = Marker::read(&self.durable_path);
+        if marker.is_some_and(|marker| marker.records(&lens)) {
+            return Ok(());
+        }
+        let whole = marker
+            .and_then(|marker| marker.whole)
+            .map_or(lens, |whole| whole.max(lens));
+        Marker::write_whole(&self.durable_path, whole)?;
         Ok(())
     }
 }

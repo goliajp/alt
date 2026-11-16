@@ -4,8 +4,8 @@
 //!
 //! Each record ends in an 8-byte checksum over the rest of it. Records
 //! behind the runs are verified when a lookup reads them; the tail past the
-//! runs is verified on open, where a torn final record (crash mid-append)
-//! is cut off and any other bad record is reported as corruption.
+//! runs is verified on open, where a record that does not read is cut off
+//! as an unfinished append or reported as corruption (see [`Tail`]).
 
 mod cache;
 mod check;
@@ -17,9 +17,9 @@ use std::io::Write;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
-use crate::StoreError;
 use crate::pack::read_exact_at;
 use crate::runs::{GUARD_SPAN, Guard, Key, Runs};
+use crate::{StoreError, Tail};
 use alt_hash::IdMap;
 use tail::End;
 
@@ -49,6 +49,36 @@ impl Layout {
     fn header(&self) -> [u8; HEADER_LEN] {
         let m = self.magic;
         [m[0], m[1], m[2], m[3], self.version]
+    }
+
+    /// Checks the header of a log file and returns its length. A file a
+    /// crash left shorter than its header gets the header written, unless
+    /// `read_only`, and counts as holding just that.
+    fn checked_len(&self, file: &mut File, read_only: bool) -> Result<u64, StoreError> {
+        let header = self.header();
+        let size = file.metadata()?.len();
+        let mut start = [0u8; HEADER_LEN];
+        let have = (size as usize).min(HEADER_LEN);
+        read_exact_at(file, &mut start[..have], 0)?;
+        if have == HEADER_LEN {
+            return if start[..4] != self.magic {
+                Err(StoreError::Format(self.bad_header))
+            } else if start[4] != self.version {
+                Err(StoreError::Format(self.bad_version))
+            } else {
+                Ok(size)
+            };
+        }
+        // anything that is not a header prefix is foreign
+        if !header.starts_with(&start[..have]) {
+            return Err(StoreError::Format(self.bad_header));
+        }
+        if !read_only {
+            file.set_len(0)?;
+            file.write_all(&header)?;
+            file.sync_all()?;
+        }
+        Ok(HEADER_LEN as u64)
     }
 
     fn intact(&self, rec: &[u8]) -> bool {
@@ -91,6 +121,30 @@ pub struct RecLog {
     cache: cache::ReadCache,
     len: u64,
     unsynced: bool,
+    policy: Tail,
+}
+
+/// Opens the log for append, creating it with its header when missing; the
+/// second value says whether it was created. Append mode: every write lands
+/// at the end of the file, wherever a truncation moved it.
+fn open_for_append(path: &Path, header: &[u8]) -> Result<(File, bool), StoreError> {
+    match OpenOptions::new().read(true).append(true).open(path) {
+        Ok(file) => Ok((file, false)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            let mut file = OpenOptions::new()
+                .create_new(true)
+                .read(true)
+                .append(true)
+                .open(path)?;
+            file.write_all(header)?;
+            file.sync_all()?;
+            Ok((file, true))
+        }
+        Err(e) => Err(e.into()),
+    }
 }
 
 fn guard_at(file: &File, layout: &Layout, size: u64, end: u64) -> Option<Guard> {
@@ -109,15 +163,18 @@ impl RecLog {
     /// Opens the log at `path`, creating it when missing; the second value
     /// says whether it was created. Index runs live in `<path>.idx/`.
     pub fn open(path: &Path, layout: Layout) -> Result<(Self, bool), StoreError> {
-        Self::open_with_runs(path, layout, None)
+        Self::open_with_runs(path, layout, None, Tail::default())
     }
 
     /// The same, opening the index runs `named` (see [`Runs::open_named`])
-    /// instead of reading the index directory.
+    /// instead of reading the index directory, and treating a record that
+    /// does not read as `policy` says. A read-only open creates nothing: a
+    /// log that is not there is an error.
     pub fn open_with_runs(
         path: &Path,
         layout: Layout,
         named: Option<&[(u64, u64)]>,
+        policy: Tail,
     ) -> Result<(Self, bool), StoreError> {
         assert!(layout.rec_len <= MAX_REC && layout.rec_len > 8);
         let mut idx_dir = path.as_os_str().to_owned();
@@ -125,44 +182,12 @@ impl RecLog {
         let idx_dir = PathBuf::from(idx_dir);
         let header = layout.header();
 
-        // append mode: every write lands at the end of the file, wherever a
-        // truncation moved it, so the cursor is never positioned
-        let (mut file, created) = match OpenOptions::new().read(true).append(true).open(path) {
-            Ok(file) => (file, false),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                if let Some(dir) = path.parent() {
-                    std::fs::create_dir_all(dir)?;
-                }
-                let mut file = OpenOptions::new()
-                    .create_new(true)
-                    .read(true)
-                    .append(true)
-                    .open(path)?;
-                file.write_all(&header)?;
-                file.sync_all()?;
-                (file, true)
-            }
-            Err(e) => return Err(e.into()),
+        let (mut file, created) = if policy.is_read_only() {
+            (File::open(path)?, false)
+        } else {
+            open_for_append(path, &header)?
         };
-        let mut size = file.metadata()?.len();
-        let mut start = [0u8; HEADER_LEN];
-        let have = (size as usize).min(HEADER_LEN);
-        read_exact_at(&file, &mut start[..have], 0)?;
-        if have < HEADER_LEN {
-            // a crash between create and the header fsync can leave a short
-            // file; anything that is not a header prefix is foreign
-            if !header.starts_with(&start[..have]) {
-                return Err(StoreError::Format(layout.bad_header));
-            }
-            file.set_len(0)?;
-            file.write_all(&header)?;
-            file.sync_all()?;
-            size = HEADER_LEN as u64;
-        } else if start[..4] != layout.magic {
-            return Err(StoreError::Format(layout.bad_header));
-        } else if start[4] != layout.version {
-            return Err(StoreError::Format(layout.bad_version));
-        }
+        let size = layout.checked_len(&mut file, policy.is_read_only())?;
 
         let guard = |end| guard_at(&file, &layout, size, end);
         let runs = match named {
@@ -180,6 +205,7 @@ impl RecLog {
             cache: cache::ReadCache::default(),
             len: size,
             unsynced: false,
+            policy,
         };
         this.load_tail(size, End::MaybeTorn)?;
         Ok((this, created))
@@ -370,22 +396,6 @@ impl RecLog {
     /// An independent fd to the log file, for an off-write-path fsync.
     pub fn sync_handle(&self) -> Result<File, StoreError> {
         Ok(self.file.try_clone()?)
-    }
-
-    /// Cuts the log back to `target_len` (an earlier `appended_len`) and
-    /// fsyncs the cut. Index runs reaching past the target go first.
-    pub fn rewind(&mut self, target_len: u64) -> Result<(), StoreError> {
-        let drop = self.len.checked_sub(target_len);
-        if target_len < HEADER_LEN as u64
-            || !drop.is_some_and(|n| n.is_multiple_of(self.layout.rec_len as u64))
-        {
-            return Err(StoreError::Format(self.layout.bad_rewind));
-        }
-        self.runs.truncate(target_len)?;
-        self.file.set_len(target_len)?;
-        self.file.sync_all()?;
-        // these records were all written whole: none of them is cut
-        self.load_tail(target_len, End::Whole)
     }
 }
 

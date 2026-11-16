@@ -85,9 +85,6 @@ impl Tier1Map {
         let mut valid_len = at as u64;
         while let Some(rec) = data.get(at..at + REC_LEN) {
             if checksum(&rec[..CHECKED_LEN]) != rec[CHECKED_LEN..] {
-                if at + REC_LEN == data.len() {
-                    break; // torn final record
-                }
                 return Err(StoreError::Format("tier1 record corrupt"));
             }
             let blob = BlobId(rec[..32].try_into().unwrap());
@@ -103,9 +100,11 @@ impl Tier1Map {
             file.write_all(&file_header())?;
             file.sync_all()?;
         } else {
+            // this store keeps no record of how far the file was synced, so
+            // a record that does not read cannot be told from damage: it is
+            // reported and the file left as it is
             if valid_len < data.len() as u64 {
-                file.set_len(valid_len)?;
-                file.sync_all()?;
+                return Err(StoreError::Format("tier1 record corrupt"));
             }
             file.seek(SeekFrom::Start(valid_len))?;
         }

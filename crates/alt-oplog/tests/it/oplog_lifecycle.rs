@@ -67,6 +67,7 @@ fn corrupt_record_mid_file_refuses_to_open() {
         let mut log = OpLog::open(dir.path()).unwrap();
         log.append("a", 1, b"one").unwrap();
         log.append("a", 2, b"two").unwrap();
+        log.sync().unwrap();
     }
 
     let path = log_path(dir.path());
@@ -211,7 +212,11 @@ fn a_torn_tail_after_an_anchor_is_truncated() {
     let dir = alt_os::temp::tempdir().unwrap();
     grow(dir.path(), 0..4);
     let anchor = OpLog::open(dir.path()).unwrap().anchor().unwrap();
-    grow(dir.path(), 4..6);
+    // two appends that were never synced, the second cut short
+    let mut log = OpLog::open(dir.path()).unwrap();
+    log.append("writer", 4, b"op 4").unwrap();
+    log.append("writer", 5, b"op 5").unwrap();
+    std::mem::forget(log);
     let path = log_path(dir.path());
     let size = fs::metadata(&path).unwrap().len();
     OpenOptions::new()

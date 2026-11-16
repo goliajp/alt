@@ -207,7 +207,10 @@ fn run() -> Response {
         let opened = (|| -> Result<_, Box<dyn std::error::Error>> {
             let (dir, coord) =
                 native::resolve_workspace(&cwd, execution.parsed.cli.workspace.as_deref())?;
-            let store = Store::open(dir.clone())?;
+            let store = match execution.parsed.cli.command {
+                Command::Fsck { .. } => Store::open_read_only(dir.clone())?,
+                _ => Store::open(dir.clone())?,
+            };
             let repo = Repository::open_alt(dir, Some(coord.root().to_owned()))?;
             Ok((store, repo))
         })();

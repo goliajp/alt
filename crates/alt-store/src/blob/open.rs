@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 use super::{BlobOptions, BlobStore};
 use crate::blobmap::BlobMap;
 use crate::packs::Known;
-use crate::{ChunkStore, StoreError};
+use crate::{ChunkStore, StoreError, Tail};
 
 impl BlobStore {
     pub fn open(dir: impl Into<PathBuf>) -> Result<Self, StoreError> {
@@ -14,7 +14,7 @@ impl BlobStore {
     }
 
     pub fn open_with(dir: impl Into<PathBuf>, opts: BlobOptions) -> Result<Self, StoreError> {
-        let store = Self::open_deferred(dir, opts, None)?;
+        let store = Self::open_deferred(dir, opts, None, [Tail::default(), Tail::default()])?;
         store.map()?;
         Ok(store)
     }
@@ -22,19 +22,24 @@ impl BlobStore {
     /// Opens the chunk store and leaves the blob map for the first call
     /// that needs it — which is then also where a damaged map is reported.
     /// `known` names the store's packs and index runs when the caller has
-    /// them on record, which saves reading the directories.
+    /// them on record, which saves reading the directories. `tails` say
+    /// what a chunk pack and the blob map that do not read to their ends
+    /// mean, in that order.
     pub fn open_deferred(
         dir: impl Into<PathBuf>,
         opts: BlobOptions,
         known: Option<&Known>,
+        tails: [Tail; 2],
     ) -> Result<Self, StoreError> {
+        let [chunk_tail, map_tail] = tails;
         assert!(opts.fanout >= 2, "manifest fanout must be at least 2");
         let dir = dir.into();
-        let chunks = ChunkStore::open_known(&dir, opts.chunks, known)?;
+        let chunks = ChunkStore::open_known(&dir, opts.chunks, known, chunk_tail)?;
         Ok(Self {
             chunks,
             map: OnceLock::new(),
             map_runs: known.and_then(|known| known.map_runs.clone()),
+            map_tail,
             dir,
             opts,
             open_lock: None,
@@ -58,8 +63,10 @@ impl BlobStore {
         if let Some(map) = self.map.get() {
             return Ok(map);
         }
-        let open =
-            || BlobMap::open_with_runs(&self.dir.join("manifests"), self.map_runs.as_deref());
+        let open = || {
+            let runs = self.map_runs.as_deref();
+            BlobMap::open_with_runs(&self.dir.join("manifests"), runs, self.map_tail.clone())
+        };
         let map = match &self.open_lock {
             Some(lock) if !self.exclusive => crate::pack::with_shared_lock(lock, open)?,
             _ => open()?,

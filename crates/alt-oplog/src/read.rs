@@ -3,8 +3,10 @@
 
 use std::fs::File;
 use std::io::{Seek, SeekFrom, Write};
+use std::path::Path;
 
 use crate::scan::{CHECKSUM_LEN, HEADER_LEN, check_header, file_header, replay_records};
+use crate::synced::Marker;
 use crate::{Anchor, Op, OpLogError, ROOT};
 
 /// Bytes read from the log file under its lock, not yet verified.
@@ -87,8 +89,8 @@ pub(crate) fn scan(raw: Raw) -> Result<Scan, OpLogError> {
             (HEADER_LEN.min(raw.data.len()), ROOT, 0)
         }
     };
-    // a record that runs past EOF (torn length field or torn body) ends
-    // the walk; the caller truncates back to the last whole record
+    // a record that does not read ends the walk; the caller tells an
+    // unfinished append from damage
     let replayed = replay_records(&raw.data, from, head, &mut ops)?;
     Ok(Scan {
         base: raw.base,
@@ -101,8 +103,36 @@ pub(crate) fn scan(raw: Raw) -> Result<Scan, OpLogError> {
     })
 }
 
-/// Rescans and repairs; the caller holds the exclusive lock.
-pub(crate) fn scan_and_repair(file: &mut File, anchor: Option<Anchor>) -> Result<Scan, OpLogError> {
+impl Scan {
+    /// The scan of a log that is only read: an unfinished append at its
+    /// end is passed over, damage is reported, the file stays as it is.
+    pub fn unrepaired(mut self, durable: &Path) -> Result<Self, OpLogError> {
+        if self.valid_len >= HEADER_LEN as u64 && self.valid_len < self.file_len {
+            unfinished(durable, self.valid_len)?;
+        }
+        self.file_len = self.valid_len;
+        Ok(self)
+    }
+}
+
+/// A record that does not read at `at`: an append that never finished when
+/// the log was not synced that far, damage otherwise.
+pub(crate) fn unfinished(durable: &Path, at: u64) -> Result<(), OpLogError> {
+    if Marker::unfinished(durable, at) {
+        Ok(())
+    } else {
+        Err(OpLogError::Format("oplog record corrupt"))
+    }
+}
+
+/// Rescans and repairs; the caller holds the exclusive lock. A new log
+/// gets its header and its marker; an unfinished append is cut off; damage
+/// is reported and nothing is cut.
+pub(crate) fn scan_and_repair(
+    file: &mut File,
+    anchor: Option<Anchor>,
+    durable: &Path,
+) -> Result<Scan, OpLogError> {
     let mut scan = scan(read_log(file, anchor)?)?;
     if scan.valid_len < HEADER_LEN as u64 {
         file.set_len(0)?;
@@ -110,7 +140,11 @@ pub(crate) fn scan_and_repair(file: &mut File, anchor: Option<Anchor>) -> Result
         file.write_all(&file_header())?;
         file.sync_all()?;
         scan.valid_len = HEADER_LEN as u64;
+        if Marker::read(durable).is_none() {
+            Marker::write(durable, scan.valid_len, scan.valid_len)?;
+        }
     } else if scan.valid_len < scan.file_len {
+        unfinished(durable, scan.valid_len)?;
         file.set_len(scan.valid_len)?;
         file.sync_all()?;
     }

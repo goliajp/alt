@@ -9,7 +9,7 @@ use std::path::Path;
 
 use crate::pack::fsync_dir;
 use crate::reclog::{self, Layout, RecLog};
-use crate::{BlobId, ChunkId, StoreError};
+use crate::{BlobId, ChunkId, StoreError, Tail};
 
 /// Record: blob id 32 + manifest root 32 + total_len u64 + checksum 8.
 const REC_LEN: usize = 80;
@@ -32,9 +32,14 @@ pub struct BlobMap {
 
 impl BlobMap {
     /// Opens `<dir>/blobmap`, creating it (and the directory) if missing;
-    /// `named` are its index runs when the caller has them on record.
-    pub fn open_with_runs(dir: &Path, named: Option<&[(u64, u64)]>) -> Result<Self, StoreError> {
-        let (log, created) = RecLog::open_with_runs(&dir.join("blobmap"), LAYOUT, named)?;
+    /// `named` are its index runs when the caller has them on record, and
+    /// `tail` what a log that does not read to its end means.
+    pub fn open_with_runs(
+        dir: &Path,
+        named: Option<&[(u64, u64)]>,
+        tail: Tail,
+    ) -> Result<Self, StoreError> {
+        let (log, created) = RecLog::open_with_runs(&dir.join("blobmap"), LAYOUT, named, tail)?;
         if created {
             fsync_dir(dir)?;
         }
@@ -123,6 +128,15 @@ impl BlobMap {
     /// dropping every record appended past that point. Followed by an fsync
     /// so the truncation is durable: callers (the odb rewind path) rely on
     /// this to be torn-tail-free on recovery.
+    /// Whether [`Self::rewind`] to `target_len` can go ahead (see
+    /// [`RecLog::check_rewind`]).
+    pub fn check_rewind(&self, target_len: u64) -> Result<(), StoreError> {
+        if target_len > self.log.appended_len() {
+            return Err(StoreError::Format("blobmap rewind target above cursor"));
+        }
+        self.log.check_rewind(target_len).map(drop)
+    }
+
     pub fn rewind(&mut self, target_len: u64) -> Result<(), StoreError> {
         if target_len > self.log.appended_len() {
             return Err(StoreError::Format("blobmap rewind target above cursor"));

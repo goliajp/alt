@@ -4,7 +4,7 @@
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 
-use alt_store::{BlobId, BlobStore, StoreError};
+use alt_store::{BlobId, BlobOptions, BlobStore, StoreError, Tail};
 
 /// Deterministic pseudo-random bytes (splitmix64 stream).
 fn random_bytes(len: usize, seed: u64) -> Vec<u8> {
@@ -54,7 +54,12 @@ fn torn_blobmap_tail_is_dropped_and_reput_heals_cheaply() {
     f.write_all(&[0xEE; 30]).unwrap();
     drop(f);
 
-    let store = BlobStore::open(dir.path()).unwrap();
+    // the map was synced as far as its header: its records can be cut
+    let open = || {
+        let tails = [Tail::default(), super::synced(5)];
+        BlobStore::open_deferred(dir.path(), BlobOptions::default(), None, tails)
+    };
+    let store = open().unwrap();
     assert_eq!(
         store.get(id).unwrap(),
         big,
@@ -72,7 +77,7 @@ fn torn_blobmap_tail_is_dropped_and_reput_heals_cheaply() {
         .set_len(size - 40)
         .unwrap();
 
-    let mut store = BlobStore::open(dir.path()).unwrap();
+    let mut store = open().unwrap();
     assert!(matches!(store.get(id), Err(StoreError::BlobNotFound(_))));
     let before = store.counters().bytes_written;
     let again = store.put(&big).unwrap();

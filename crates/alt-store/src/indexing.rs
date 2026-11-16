@@ -5,18 +5,22 @@ use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
 use crate::packs::{self, Known, load};
-use crate::{ChunkId, ChunkStore, Counters, DeltaCache, Options, StoreError, relaxed_durability};
+use crate::{
+    ChunkId, ChunkStore, Counters, DeltaCache, Options, StoreError, Tail, relaxed_durability,
+};
 
 impl ChunkStore {
     /// Opens the store in `dir`; `known` names its packs and index runs
-    /// when the caller has them on record (see [`Known`]).
+    /// when the caller has them on record (see [`Known`]); `tail` says what
+    /// to do about a pack that does not read to its end.
     pub fn open_known(
         dir: impl Into<PathBuf>,
         opts: Options,
         known: Option<&Known>,
+        tail: Tail,
     ) -> Result<Self, StoreError> {
         let dir = dir.into();
-        let (sealed, active, index) = load(&dir, known)?;
+        let (sealed, active, index) = load(&dir, known, &tail)?;
         Ok(Self {
             dir,
             opts,
@@ -29,12 +33,13 @@ impl ChunkStore {
             open_lock: None,
             newer: OnceLock::new(),
             keep: false,
+            tail,
         })
     }
 
     /// Reads the packs and the index again, as a fresh open would.
     pub(crate) fn reload(&mut self) -> Result<(), StoreError> {
-        self.reload_from(load(&self.dir, None)?)
+        self.reload_from(load(&self.dir, None, &self.tail)?)
     }
 
     /// The same, for the holder of the write lock that has already folded
@@ -42,7 +47,7 @@ impl ChunkStore {
     /// pack can be a torn one, so a pack that does not read to its end is
     /// reported as damaged and nothing is cut off it.
     pub(crate) fn reload_whole(&mut self) -> Result<(), StoreError> {
-        self.reload_from(packs::load_from(&self.dir, None, true)?)
+        self.reload_from(packs::load_from(&self.dir, None, true, &self.tail)?)
     }
 
     fn reload_from(&mut self, state: packs::PackState) -> Result<(), StoreError> {

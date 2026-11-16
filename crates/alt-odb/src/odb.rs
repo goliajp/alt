@@ -2,20 +2,24 @@
 //! and the prism pipeline. [`crate::NativeOdb`] opens one on first use.
 
 mod durable;
+mod open;
 
-use std::fs::{File, OpenOptions};
+pub(crate) use open::Mode;
+
+use std::fs::File;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use alt_git_codec::{ObjectId, ObjectKind, RawObject};
 use alt_prism::Registry;
-use alt_store::{BlobOptions, BlobStore, CompactReport, StoreError};
+use alt_store::{BlobStore, CompactReport, StoreError, Tail};
 
 use crate::head::Head;
-use crate::lock::{hold_exclusive, lock_shared, release_exclusive, try_hold_exclusive, unlock};
+use crate::lock::{hold_exclusive, release_exclusive};
 use crate::map::{MapEntry, ObjectMap};
+use crate::synced::Deferred;
 use crate::tier1::{self, Tier1Map};
-use crate::{BlobId, OdbError, default_registry};
+use crate::{BlobId, OdbError};
 
 pub use durable::OdbSink;
 
@@ -64,119 +68,14 @@ pub(crate) struct Odb {
     /// (and thus needs to wait for the group-commit fsync) without inspecting
     /// the command.
     pub(crate) write_count: u64,
+    /// What a deferred flush last finished writing, for the sink to record.
+    pub(crate) deferred: Deferred,
+    /// What a Tier 1 map that does not read to its end means, for the open
+    /// on first use.
+    pub(crate) tier1_tail: Tail,
 }
 
 impl Odb {
-    /// Opens (or creates) the database under the `.alt` root directory.
-    /// With `late`, the blob map and the Tier 1 map are left for the first
-    /// call that needs them (where damage to them is then reported).
-    pub fn open_with(
-        alt_dir: impl Into<PathBuf>,
-        opts: BlobOptions,
-        late: bool,
-    ) -> Result<Self, OdbError> {
-        let alt_dir = alt_dir.into();
-        let lock_path = alt_dir.join("odb.lock");
-        let open_lock = || {
-            OpenOptions::new()
-                .read(true)
-                .create(true)
-                .truncate(false)
-                .write(true)
-                .open(&lock_path)
-        };
-        let lock = match open_lock() {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                std::fs::create_dir_all(&alt_dir)?;
-                open_lock()?
-            }
-            other => other?,
-        };
-        // Open the append files (active pack, blobmap, map.alt — read and
-        // crash-recovered here) under a shared lock, so the open never overlaps
-        // another process's exclusive append. Without this, an open scanning a
-        // writer's half-written record truncates it and corrupts the store.
-        lock_shared(&lock)?;
-        let head = Head::read(&lock);
-        type Opened = (BlobStore, ObjectMap, OnceLock<Tier1Map>);
-        let opened = (|| -> Result<Opened, OdbError> {
-            let blobs = BlobStore::open_deferred(alt_dir.join("store"), opts, Some(&head.store))?;
-            let tier1 = if late {
-                OnceLock::new()
-            } else {
-                blobs.open_map()?;
-                OnceLock::from(Tier1Map::open(&alt_dir, head.tier1.as_deref())?)
-            };
-            let map = ObjectMap::open_with_runs(&alt_dir.join("map.alt"), head.map.as_deref())?;
-            Ok((blobs, map, tier1))
-        })();
-        let _ = unlock(&lock);
-        let (mut blobs, map, tier1) = opened?;
-        blobs.guard_opens(lock_path);
-        let mut odb = Self {
-            blobs,
-            map,
-            tier1,
-            alt_dir: alt_dir.clone(),
-            registry: default_registry(),
-            lock,
-            held: false,
-            head,
-            sync_lock_path: alt_dir.join("odb.sync.lock"),
-            durable_path: alt_dir.join("odb.durable"),
-            defer: false,
-            write_count: 0,
-        };
-        odb.index_stale_tails()?;
-        Ok(odb)
-    }
-
-    /// A store whose logs have outgrown their index runs, or that has no
-    /// head record — written by a program that keeps neither, or by a
-    /// writer that died before its flush — gets both from whoever opens it
-    /// next, unless a writer is at work.
-    fn index_stale_tails(&mut self) -> Result<(), OdbError> {
-        let pending =
-            self.blobs.index_pending() || self.map.index_pending() || self.head == Head::default();
-        if !pending || !try_hold_exclusive(&self.lock)? {
-            return Ok(());
-        }
-        self.held = true;
-        let indexed = (|| {
-            self.blobs.sync_from_disk()?;
-            self.map.sync_from_disk()?;
-            // every log of such a store, opened so far or not
-            self.tier1_mut()?;
-            self.index_tails()
-        })();
-        self.release();
-        indexed
-    }
-
-    /// The Tier 1 map, opened on first use. Opening repairs a torn tail,
-    /// which must not overlap a writer's append: without the write lock in
-    /// hand the open runs under the shared one, like the open of the store.
-    pub(crate) fn tier1(&self) -> Result<&Tier1Map, OdbError> {
-        if let Some(tier1) = self.tier1.get() {
-            return Ok(tier1);
-        }
-        let open = || Tier1Map::open(&self.alt_dir, self.head.tier1.as_deref());
-        let tier1 = if self.held {
-            open()?
-        } else {
-            alt_store::with_shared_lock(&self.alt_dir.join("odb.lock"), open)?
-        };
-        Ok(self.tier1.get_or_init(|| tier1))
-    }
-
-    pub(crate) fn tier1_mut(&mut self) -> Result<&mut Tier1Map, OdbError> {
-        self.tier1()?;
-        Ok(self
-            .tier1
-            .get_mut()
-            .expect("the tier1 map was opened just above"))
-    }
-
     /// Append an extra prism on top of the default-registered set. Useful
     /// in tests; production code relies on [`default_registry`] capturing
     /// the canonical set so every reader can recompose what any writer

@@ -15,9 +15,10 @@
 //! ```
 //!
 //! The checksum is the op id's own prefix, so verifying a record and
-//! computing its id are one hash. A torn tail (crash mid-append) is
-//! truncated on open; a bad record anywhere else is corruption and is
-//! reported, never silently skipped.
+//! computing its id are one hash. A record that does not read is cut off
+//! on open when it lies past where the log was last synced (an append
+//! that never finished); anywhere else it is corruption and is reported,
+//! never silently skipped or cut.
 //!
 //! Pure-logic crate, business-agnostic: payloads are opaque bytes; what an
 //! op *means* (ref updates, imports, …) is the caller's encoding.
@@ -26,17 +27,21 @@ mod lock;
 mod op;
 mod read;
 mod scan;
+mod synced;
 
 use std::fs::{File, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
 
 pub use op::{Op, OpId, OpLogError, ROOT};
+pub use synced::OpLogSink;
 
 use lock::{lock_exclusive, lock_shared, unlock};
-use read::{read_at, read_log, scan, scan_and_repair};
+use read::{read_at, read_log, scan, scan_and_repair, unfinished};
 use scan::{CHECKSUM_LEN, HEADER_LEN, check_header, encode_body, replay_records};
+use synced::Marker;
 
 /// A place in the log to start reading from instead of its first record:
 /// the op whose record occupies bytes `start..end`, being op number `count`
@@ -82,22 +87,9 @@ pub struct OpLog {
     write_count: u64,
     /// Whether this handle appended anything a drop should still fsync.
     unsynced: bool,
-}
-
-/// The durable byte length from the marker file (0 when missing).
-fn read_durable(path: &Path) -> u64 {
-    match std::fs::read(path) {
-        Ok(b) if b.len() >= 8 => u64::from_le_bytes(b[..8].try_into().unwrap()),
-        _ => 0,
-    }
-}
-
-/// Atomically records the durable length (temp + rename), written only after
-/// the fsync so the marker never claims durability that has not happened.
-fn write_durable(path: &Path, len: u64) -> std::io::Result<()> {
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, len.to_le_bytes())?;
-    std::fs::rename(&tmp, path)
+    /// How far this handle's deferred appends reach, for its sink to record
+    /// once it has fsynced.
+    deferred: Arc<AtomicU64>,
 }
 
 impl OpLog {
@@ -141,23 +133,40 @@ impl OpLog {
         let mut scan = scan(raw?)?;
         if scan.needs_repair() {
             lock_exclusive(&file)?;
-            let repaired = scan_and_repair(&mut file, anchor);
+            let repaired = scan_and_repair(&mut file, anchor, &dir.join("durable"));
             let _ = unlock(&file);
             scan = repaired?;
         }
-        Ok(Self {
+        Ok(Self::opened(dir, file, scan))
+    }
+
+    /// Opens the log in `dir` to be read and nothing else: nothing is
+    /// created or repaired, and an unfinished append at the end of the log
+    /// is passed over.
+    pub fn open_read_only(dir: &Path, anchor: Option<Anchor>) -> Result<Self, OpLogError> {
+        let file = File::open(dir.join("log"))?;
+        lock_shared(&file)?;
+        let raw = read_log(&file, anchor);
+        let _ = unlock(&file);
+        let scan = scan(raw?)?.unrepaired(&dir.join("durable"))?;
+        Ok(Self::opened(dir, file, scan))
+    }
+
+    fn opened(dir: &Path, file: File, scan: read::Scan) -> Self {
+        Self {
             file,
             base: scan.base,
             ops: scan.ops,
             full: OnceLock::new(),
-            len_bytes: scan.valid_len,
+            len_bytes: scan.valid_len.max(HEADER_LEN as u64),
             last_start: scan.last_start,
             sync_lock_path: dir.join("sync.lock"),
             durable_path: dir.join("durable"),
             defer: false,
             write_count: 0,
             unsynced: false,
-        })
+            deferred: Arc::default(),
+        }
     }
 
     /// Appends one op, chaining it onto the **current on-disk head**, and
@@ -304,7 +313,22 @@ impl OpLog {
 
         let head = self.head().unwrap_or(ROOT);
         let known = self.ops.len();
-        let replayed = replay_records(&tail, 0, head, &mut self.ops)?;
+        let replayed = replay_records(&tail, 0, head, &mut self.ops);
+        let replayed = replayed.and_then(|replayed| {
+            let new_len = self.len_bytes + replayed.valid as u64;
+            if replayed.valid < tail.len() {
+                unfinished(&self.durable_path, new_len)?;
+            }
+            Ok(replayed)
+        });
+        let replayed = match replayed {
+            Ok(replayed) => replayed,
+            Err(damage) => {
+                // the handle stays where it was
+                self.ops.truncate(known);
+                return Err(damage);
+            }
+        };
         if let Some(full) = self.full.get_mut() {
             full.extend_from_slice(&self.ops[known..]);
         }
@@ -313,7 +337,7 @@ impl OpLog {
         }
         let new_len = self.len_bytes + replayed.valid as u64;
         if replayed.valid < tail.len() {
-            self.file.set_len(new_len)?; // drop a crashed writer's torn record
+            self.file.set_len(new_len)?; // drop a crashed writer's unfinished record
             self.file.sync_all()?;
         }
         self.len_bytes = new_len;
@@ -403,8 +427,9 @@ impl OpLog {
         }
         if self.defer {
             // the daemon's group-commit coordinator fsyncs off the write path
-            // (via `sync_handle`); here we only note that a write happened
+            // (via `sync_handle`) and then records how far this append reached
             self.write_count += 1;
+            self.deferred.store(self.len_bytes, Ordering::Release);
             return Ok(());
         }
         self.sync_to(self.len_bytes)
@@ -423,16 +448,22 @@ impl OpLog {
         self.write_count
     }
 
-    /// An independent fd to the (stable, append-only) `log` file, for the
-    /// daemon's off-write-path fsync.
-    pub fn sync_handle(&self) -> Result<File, OpLogError> {
-        Ok(self.file.try_clone()?)
+    /// An independent fsync handle on the (stable, append-only) `log` file,
+    /// for the daemon's off-write-path fsync.
+    pub fn sync_handle(&self) -> Result<OpLogSink, OpLogError> {
+        Ok(OpLogSink {
+            file: self.file.try_clone()?,
+            appended: self.deferred.clone(),
+            durable_path: self.durable_path.clone(),
+        })
     }
 
     /// The fsync-coalescing core: fsync only if no other committer already made
-    /// our target durable (the inline, direct-CLI path).
+    /// our target durable (the inline, direct-CLI path), and record `target`
+    /// (a record boundary) as synced either way.
     fn sync_to(&mut self, target: u64) -> Result<(), OpLogError> {
-        if read_durable(&self.durable_path) >= target {
+        let recorded = |marker: Marker| marker.records(target);
+        if Marker::read(&self.durable_path).is_some_and(recorded) {
             return Ok(());
         }
         let sync_lock = OpenOptions::new()
@@ -442,12 +473,20 @@ impl OpLog {
             .open(&self.sync_lock_path)?;
         lock_exclusive(&sync_lock)?;
         let result = (|| -> Result<(), OpLogError> {
-            if read_durable(&self.durable_path) >= target {
+            let marker = Marker::read(&self.durable_path);
+            if marker.is_some_and(recorded) {
                 return Ok(());
             }
-            let eof = self.file.metadata()?.len();
-            self.file.sync_all()?;
-            write_durable(&self.durable_path, eof)?;
+            let eof = match marker {
+                Some(marker) if marker.eof >= target => marker.eof,
+                _ => {
+                    let eof = self.file.metadata()?.len();
+                    self.file.sync_all()?;
+                    eof
+                }
+            };
+            let whole = marker.and_then(|marker| marker.whole).unwrap_or(0);
+            Marker::write(&self.durable_path, eof, whole.max(target))?;
             Ok(())
         })();
         let _ = unlock(&sync_lock);

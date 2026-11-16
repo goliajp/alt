@@ -63,6 +63,15 @@ pub struct StoreCheckpoint {
     blobmap_len: u64,
 }
 
+impl StoreCheckpoint {
+    /// The active pack's sequence number and length, and the blob map's
+    /// length, at the checkpoint.
+    pub fn lens(&self) -> (u32, u64, u64) {
+        let (seq, pack) = self.chunks.pack();
+        (seq, pack, self.blobmap_len)
+    }
+}
+
 /// Content-addressed byte-stream storage: CDC chunking + manifest trees
 /// over a [`ChunkStore`].
 pub struct BlobStore {
@@ -74,6 +83,8 @@ pub struct BlobStore {
     map: OnceLock<BlobMap>,
     /// the map's index runs, when the opener was told them
     map_runs: Option<Vec<(u64, u64)>>,
+    /// what a blob map that does not read to its end means
+    map_tail: crate::Tail,
     dir: PathBuf,
     opts: BlobOptions,
     /// The lock file of the database this store sits under, if any. Opening
@@ -334,7 +345,8 @@ impl BlobStore {
         }
     }
 
-    /// Whether [`Self::index_tail`] has anything to do.
+    /// Whether [`Self::index_tail`] has anything to do. A blob map this
+    /// handle has not opened is not looked at.
     pub fn index_pending(&self) -> bool {
         self.chunks.index_pending() || self.map.get().is_some_and(BlobMap::index_pending)
     }
@@ -383,6 +395,11 @@ impl BlobStore {
     /// of the flush order. Each layer truncates + fsyncs internally so the
     /// rollback is durable; the caller (the odb rewind) is responsible for
     /// re-writing the odb durable marker afterwards.
+    pub fn check_rewind(&self, ckpt: StoreCheckpoint) -> Result<(), StoreError> {
+        self.chunks.check_rewind(ckpt.chunks)?;
+        self.map()?.check_rewind(ckpt.blobmap_len)
+    }
+
     pub fn rewind(&mut self, ckpt: StoreCheckpoint) -> Result<(), StoreError> {
         self.chunks.rewind(ckpt.chunks)?;
         self.map_mut()?.rewind(ckpt.blobmap_len)?;

@@ -25,6 +25,7 @@ mod map;
 mod odb;
 mod registry;
 mod storage_view;
+mod synced;
 mod tier1;
 
 use std::path::PathBuf;
@@ -75,6 +76,10 @@ pub struct NativeOdb {
     /// whether the store's less used files wait for their own first use
     late: bool,
     defer: bool,
+    read_only: bool,
+    /// outlives the opened store: the sink made from one keeps recording
+    /// for the next
+    deferred: synced::Deferred,
 }
 
 impl NativeOdb {
@@ -85,11 +90,9 @@ impl NativeOdb {
 
     pub fn open_with(alt_dir: impl Into<PathBuf>, opts: BlobOptions) -> Result<Self, OdbError> {
         let this = Self {
-            alt_dir: alt_dir.into(),
-            opts,
-            odb: OnceLock::new(),
             late: false,
-            defer: false,
+            opts,
+            ..Self::deferred(alt_dir)
         };
         this.odb()?;
         Ok(this)
@@ -107,11 +110,28 @@ impl NativeOdb {
             odb: OnceLock::new(),
             late: true,
             defer: false,
+            read_only: false,
+            deferred: synced::Deferred::default(),
+        }
+    }
+
+    /// Names the database to be read and nothing else, for a check that
+    /// must leave it as it finds it: opening creates, repairs and indexes
+    /// nothing, and a write through this handle fails.
+    pub fn read_only(alt_dir: impl Into<PathBuf>) -> Self {
+        Self {
+            read_only: true,
+            ..Self::deferred(alt_dir)
         }
     }
 
     fn start(&self) -> Result<Odb, OdbError> {
-        let mut odb = Odb::open_with(&self.alt_dir, self.opts, self.late)?;
+        let mode = odb::Mode {
+            late: self.late,
+            read_only: self.read_only,
+            deferred: self.deferred.clone(),
+        };
+        let mut odb = Odb::open_with(&self.alt_dir, self.opts, mode)?;
         odb.set_defer_durability(self.defer);
         Ok(odb)
     }
@@ -297,9 +317,15 @@ impl NativeOdb {
 
     /// Rolls every odb write since `ckpt` back: truncates each append file to
     /// its captured length, drops the affected index runs and in-memory
-    /// state, and fsyncs the new lengths. Held under the odb write lock.
+    /// state, and fsyncs the new lengths. A rewind that fails gives up the
+    /// opened store: what it holds in memory may no longer match the files,
+    /// and the next call opens them again.
     pub fn rewind(&mut self, ckpt: OdbCheckpoint) -> Result<(), OdbError> {
-        self.odb_mut()?.rewind(ckpt)
+        let rewound = self.odb_mut()?.rewind(ckpt);
+        if rewound.is_err() {
+            self.odb.take();
+        }
+        rewound
     }
 
     /// Turns deferred durability on or off (the daemon turns it on so its

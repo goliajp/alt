@@ -100,18 +100,56 @@ alt fsck --json
 
 It decodes and hashes every stored chunk, reassembles every large blob, hashes
 every object to its Git id, compares each index with the file it indexes,
-verifies the whole operation log and replays it against the refs. It exits 0
-after printing how many records of each kind it verified, and non-zero at the
-first record that fails, saying what failed. Indexes and the ref snapshot are
-caches that the next writer rebuilds, while a damaged record in a log or pack
-is lost data to restore from another copy.
+verifies the whole operation log and replays it against the refs. It changes
+nothing: no file under `.alt` is written, repaired, rebuilt or created. It
+exits 0 after printing how many records of each kind it verified, and non-zero
+at the first record that fails, saying what failed. Indexes and the ref
+snapshot are caches that the next writer rebuilds, while a damaged record in a
+log or pack is lost data to restore from another copy.
+
+### An interrupted write is not damage
+
+A write that a crash or a power cut interrupted leaves unfinished records at
+the end of a file. Each store records how far its files were last synced
+(`.alt/odb.durable` for the object store, `.alt/oplog/durable` for the
+operation log). Records that do not read past that point never finished: the
+next command cuts them off, and `alt fsck` passes over them without touching
+the file. A record that does not read before that point was once whole. That
+is damage, and no command cuts anything off a damaged file:
+
+| Message | File |
+| --- | --- |
+| `active pack damaged`, `sealed pack truncated` | `.alt/store/pack-*.altpack` |
+| `blobmap record corrupt` | `.alt/store/manifests/blobmap` |
+| `tier1 record corrupt` | `.alt/tier1` |
+| `map.alt record corrupt` | `.alt/map.alt` |
+| `oplog record corrupt`, `oplog chain broken` | `.alt/oplog/log` |
+
+The command that met the record fails with the message, every later command
+that reads it fails the same way, and the file keeps every byte it had, so the
+records after the damaged one are still there for a repair to use. Restore the
+file, or the whole `.alt` directory, from a copy made before the damage; `alt
+export` and `alt push` of history that does not pass through the damaged
+record still work for getting it out.
+
+The same messages appear when the synced length itself is missing: a
+`durable` file that was deleted, or one last written by an alt too old to
+record it, while the end of a file does not read. Nothing is cut then either,
+because nothing says the unreadable records were unfinished. Do not delete
+the `durable` files. If the file was written by an older alt and the machine
+crashed before the upgrade, run any command with that older alt once; it
+removes the unfinished records the way it always did.
+
+### Indexes
 
 An index file that was cut short or whose header is damaged is passed over by
 every command, which reads the indexed file instead. `alt fsck` names each one
 in a line starting `ignored index run` (`ignored_index_runs` in the JSON) and
-still exits 0 when every record verifies. An index that fails its check can be
-removed: delete the `*.idx` directories under `.alt` and the next command
-rebuilds them from the files they index.
+still exits 0 when every record verifies. To repair an index, run `alt fsck`
+first. Only when it exits 0 and all it reports is `ignored index run` lines,
+delete the `*.idx` directories under `.alt`; the next command rebuilds them
+from the files they index. When `alt fsck` reports a damaged record, leave the
+indexes in place: an index can still locate the records behind a damaged one.
 
 ## Preserve data and exit to Git
 

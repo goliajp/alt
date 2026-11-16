@@ -71,11 +71,13 @@ fn torn_tail_is_dropped_on_reopen() {
     let pack = dir
         .path()
         .join(store_files(dir.path(), ".altpack")[0].clone());
+    let whole = fs::metadata(&pack).unwrap().len();
     let mut f = OpenOptions::new().append(true).open(&pack).unwrap();
     f.write_all(&[0xCD; 20]).unwrap();
     drop(f);
 
-    let mut store = ChunkStore::open(dir.path()).unwrap();
+    let synced = super::synced(whole);
+    let mut store = ChunkStore::open_known(dir.path(), Options::default(), None, synced).unwrap();
     assert_eq!(store.len(), 2, "torn tail must not hide complete records");
     assert_eq!(store.get(a).unwrap(), a_data);
     assert_eq!(store.get(b).unwrap(), b_data);
@@ -110,7 +112,9 @@ fn truncation_mid_record_drops_only_the_tail_record() {
         .set_len(size - 10)
         .unwrap();
 
-    let store = ChunkStore::open(dir.path()).unwrap();
+    // neither record was synced: the one cut short is an unfinished append
+    let synced = super::synced(5);
+    let store = ChunkStore::open_known(dir.path(), Options::default(), None, synced).unwrap();
     assert_eq!(store.len(), 1);
     assert_eq!(store.get(a).unwrap(), a_data);
     assert!(matches!(store.get(b), Err(StoreError::NotFound(_))));

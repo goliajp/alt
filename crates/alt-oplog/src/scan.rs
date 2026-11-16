@@ -92,8 +92,9 @@ pub(crate) struct Replayed {
 
 /// Walks length-prefixed records in `data[from..]`, verifying that the hash
 /// chain continues from `prev_head`, pushing each op into `ops`. A record
-/// that runs past the end, or a bad final record, ends the walk (the caller
-/// truncates a torn tail); a bad record before the end is real corruption.
+/// that runs past the end or fails its checksum ends the walk: whether it
+/// is an append that never finished or damage is for the caller to tell
+/// from how far the log was synced, not from where in the file it sits.
 pub(crate) fn replay_records(
     data: &[u8],
     from: usize,
@@ -105,15 +106,12 @@ pub(crate) fn replay_records(
     while let Some(len_bytes) = data.get(at..at + 4) {
         let body_len = u32::from_le_bytes(len_bytes.try_into().unwrap()) as usize;
         let Some(rec) = data.get(at + 4..at + 4 + body_len + CHECKSUM_LEN) else {
-            break; // torn record at EOF
+            break;
         };
         let (body, check) = rec.split_at(body_len);
         let hash = alt_hash::blake3::hash(body);
         if hash.as_bytes()[..CHECKSUM_LEN] != *check {
-            if at + 4 + body_len + CHECKSUM_LEN == data.len() {
-                break; // torn final record: caller truncates
-            }
-            return Err(OpLogError::Format("oplog record corrupt"));
+            break;
         }
         let op = parse_body(body, OpId(*hash.as_bytes()))?;
         if op.parent != prev_head {

@@ -30,6 +30,16 @@ impl Location {
         (self.seq as u64) << OFFSET_BITS | self.offset
     }
 
+    /// Where the records after this location begin in pack `seq`: here in
+    /// its own pack, at the first record of any other.
+    pub fn offset_in(self, seq: u32) -> u64 {
+        if seq == self.seq {
+            self.offset
+        } else {
+            crate::pack::HEADER_LEN as u64
+        }
+    }
+
     pub fn at(position: u64) -> Self {
         Self {
             seq: (position >> OFFSET_BITS) as u32,
@@ -259,6 +269,11 @@ impl ChunkIndex {
             self.latest.clear();
         }
         Ok(true)
+    }
+
+    /// Where the runs [`Self::truncate`] would keep for `target` stop.
+    pub fn covered_up_to(&self, target: Location) -> Location {
+        Location::at(self.runs.covered_up_to(target.position()))
     }
 
     /// Drops the runs reaching past `target`, before a pack is cut back.

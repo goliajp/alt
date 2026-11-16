@@ -301,7 +301,9 @@ fn record_log_torn_tail_after_the_index_is_cut_off() {
         .unwrap()
         .set_len(size - 7)
         .unwrap();
-    let (log, _) = RecLog::open(&path, LAYOUT).unwrap();
+    // synced when it was indexed, and no further
+    let synced = super::synced(5 + (INDEX_AT * REC_LEN) as u64);
+    let (log, _) = RecLog::open_with_runs(&path, LAYOUT, None, synced).unwrap();
     assert_eq!(log.count(), INDEX_AT + 2);
     assert_eq!(value(&log, 1_001), Some(2_002));
     assert_eq!(value(&log, 1_002), None);
