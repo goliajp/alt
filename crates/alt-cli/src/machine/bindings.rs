@@ -25,7 +25,7 @@ pub(super) fn canonical_matches(matches: &Matches) -> Value {
         }
         // a flag that came after bindings were first recorded binds only
         // when it is set: the commands recorded before it keep theirs
-        let later = matches!(entry.id, "renormalize" | "forced");
+        let later = matches!(entry.id, "renormalize" | "forced" | "update" | "all");
         if later && entry.values.iter().all(|v| v.as_bytes() == b"false") {
             continue;
         }

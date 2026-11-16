@@ -452,3 +452,7 @@ alt switch -
 {"subcommand":{"arguments":{"subcommand":null,"values":{"Switch":["6e616d65"],"create":["66616c7365"],"json":["66616c7365"],"name":["2d"]}},"name":"switch"},"values":{}}
 alt log -
 {"subcommand":{"arguments":{"subcommand":null,"values":{"LogArgs":["726576"],"combined":["66616c7365"],"json":["66616c7365"],"patch":["66616c7365"],"pretty":["6f6e656c696e65"],"rev":["2d"]}},"name":"log"},"values":{}}
+alt add -u
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Add":["757064617465"],"json":["66616c7365"],"update":["74727565"]}},"name":"add"},"values":{}}
+alt add -A .
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Add":["616c6c","7061746873"],"all":["74727565"],"json":["66616c7365"],"paths":["2e"]}},"name":"add"},"values":{}}
