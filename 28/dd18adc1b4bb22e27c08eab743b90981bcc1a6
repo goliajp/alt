@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: hold a glob of the policy to the slash beside its double star
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/policy.rs
+touched: crates/alt-cli/tests/it/capability_gate.rs
