@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: count prl_fs and snfs among the filesystems written from elsewhere
+author-type: human
+author: doracawl
+touched: crates/alt-worktree/src/watch/mounts.rs
