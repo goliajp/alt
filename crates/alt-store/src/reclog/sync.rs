@@ -1,8 +1,7 @@
 //! Keeping a held log handle and the index runs in step with the file.
 
-use super::{HEADER_LEN, INDEX_AT, RecLog, SECONDARY, guard_at};
+use super::{End, HEADER_LEN, INDEX_AT, RecLog, SECONDARY, guard_at};
 use crate::StoreError;
-use crate::pack::read_exact_at;
 use crate::runs::Runs;
 
 impl RecLog {
@@ -14,52 +13,37 @@ impl RecLog {
         if size < self.len {
             // another handle cut the log back: what this one holds past the
             // runs still on disk describes records that are gone
-            return self.reload(size);
+            return self.reload(size, End::MaybeTorn);
         }
         if size == self.len {
             return Ok(());
         }
-        let rec_len = self.layout.rec_len;
-        let mut data = vec![0u8; (size - self.len) as usize];
-        read_exact_at(&self.file, &mut data, self.len)?;
-        let mut at = 0usize;
-        while let Some(rec) = data.get(at..at + rec_len) {
-            if !self.layout.intact(rec) {
-                break;
-            }
-            at += rec_len;
-        }
-        let new_len = self.len + at as u64;
-        if at < data.len() {
-            self.file.set_len(new_len)?;
-            self.file.sync_all()?;
-        }
-        self.push_tail(&data[..at]);
-        self.len = new_len;
+        let data = self.read_records(self.len, size, End::MaybeTorn)?;
+        self.push_tail(&data);
+        self.len += data.len() as u64;
         Ok(())
     }
 
     /// Takes the runs as they are on disk now and makes the tail the log
-    /// after them, up to `size`.
-    fn reload(&mut self, size: u64) -> Result<(), StoreError> {
+    /// after them, up to `size`. On an error the handle keeps the runs and
+    /// the tail it had.
+    fn reload(&mut self, size: u64, end: End) -> Result<(), StoreError> {
         let (file, layout) = (&self.file, &self.layout);
-        self.runs = Runs::open(&self.idx_dir, HEADER_LEN as u64, |end| {
+        let runs = Runs::open(&self.idx_dir, HEADER_LEN as u64, |end| {
             guard_at(file, layout, size, end)
         })?;
-        let covered = self.runs.covered();
+        let covered = runs.covered();
         let held_from = self.len - self.tail.len() as u64;
-        if size != self.len || covered < held_from {
+        let tail = if size != self.len || covered < held_from {
             // the tail held here does not reach back to the runs (their
             // directory was removed, or the log was cut back): read it again
-            return self.load_tail(size, false);
-        }
-        // another process indexed the first part of the tail held here
-        let kept = self.tail.split_off((covered - held_from) as usize);
-        self.cache.clear();
-        self.tail.clear();
-        self.tail_keys.clear();
-        self.tail_second.clear();
-        self.push_tail(&kept);
+            self.read_records(covered, size, end)?
+        } else {
+            // another process indexed the first part of the tail held here
+            self.tail.split_off((covered - held_from) as usize)
+        };
+        self.runs = runs;
+        self.set_tail(&tail);
         Ok(())
     }
 
@@ -92,7 +76,7 @@ impl RecLog {
         // the runs on disk may have moved since this handle read them; the
         // tail is made to start exactly where they stop now, so a new run
         // never claims a record it has no entry for
-        self.reload(self.len)?;
+        self.reload(self.len, End::Whole)?;
         if !self.index_pending() {
             return Ok(());
         }

@@ -10,6 +10,7 @@
 mod cache;
 mod check;
 mod sync;
+mod tail;
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -20,6 +21,7 @@ use crate::StoreError;
 use crate::pack::read_exact_at;
 use crate::runs::{GUARD_SPAN, Guard, Key, Runs};
 use alt_hash::IdMap;
+use tail::End;
 
 const HEADER_LEN: usize = 5;
 const MAX_REC: usize = 96;
@@ -179,40 +181,8 @@ impl RecLog {
             len: size,
             unsynced: false,
         };
-        this.load_tail(size, true)?;
+        this.load_tail(size, End::MaybeTorn)?;
         Ok((this, created))
-    }
-
-    /// Reads and verifies `[covered, size)` as the tail. A torn end is cut
-    /// off; with `strict`, a bad record before the end is corruption.
-    fn load_tail(&mut self, size: u64, strict: bool) -> Result<(), StoreError> {
-        let covered = self.runs.covered();
-        let rec_len = self.layout.rec_len;
-        let mut data = vec![0u8; (size - covered) as usize];
-        read_exact_at(&self.file, &mut data, covered)?;
-        let mut at = 0usize;
-        while let Some(rec) = data.get(at..at + rec_len) {
-            if !self.layout.intact(rec) {
-                if strict && at + rec_len != data.len() {
-                    return Err(StoreError::Format(self.layout.corrupt));
-                }
-                break;
-            }
-            at += rec_len;
-        }
-        let valid = covered + at as u64;
-        if valid < size {
-            self.file.set_len(valid)?;
-            self.file.sync_all()?;
-        }
-        data.truncate(at);
-        self.cache.clear();
-        self.tail.clear();
-        self.tail_keys.clear();
-        self.tail_second.clear();
-        self.len = valid;
-        self.push_tail(&data);
-        Ok(())
     }
 
     fn push_tail(&mut self, records: &[u8]) {
@@ -414,7 +384,8 @@ impl RecLog {
         self.runs.truncate(target_len)?;
         self.file.set_len(target_len)?;
         self.file.sync_all()?;
-        self.load_tail(target_len, false)
+        // these records were all written whole: none of them is cut
+        self.load_tail(target_len, End::Whole)
     }
 }
 

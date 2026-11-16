@@ -34,7 +34,19 @@ impl ChunkStore {
 
     /// Reads the packs and the index again, as a fresh open would.
     pub(crate) fn reload(&mut self) -> Result<(), StoreError> {
-        let (sealed, active, index) = load(&self.dir, None)?;
+        self.reload_from(load(&self.dir, None)?)
+    }
+
+    /// The same, for the holder of the write lock that has already folded
+    /// in what other writers appended: no record at the end of the active
+    /// pack can be a torn one, so a pack that does not read to its end is
+    /// reported as damaged and nothing is cut off it.
+    pub(crate) fn reload_whole(&mut self) -> Result<(), StoreError> {
+        self.reload_from(packs::load_from(&self.dir, None, true)?)
+    }
+
+    fn reload_from(&mut self, state: packs::PackState) -> Result<(), StoreError> {
+        let (sealed, active, index) = state;
         self.sealed = sealed;
         self.active = active;
         self.index = index;
@@ -75,7 +87,7 @@ impl ChunkStore {
         // the runs on disk stop short of where this handle's tail begins
         // (their directory was removed while it was open): read the packs
         // again from where they stop now, then index
-        self.reload()?;
+        self.reload_whole()?;
         self.index_from_tail().map(drop)
     }
 
@@ -114,7 +126,7 @@ impl ChunkStore {
             Ok(loc) => Ok(loc.is_some()),
             Err(StoreError::Corrupt { .. } | StoreError::Io(_)) => {
                 self.index.clear()?;
-                self.reload()?;
+                self.reload_whole()?;
                 Ok(self.index.get(id)?.is_some())
             }
             Err(e) => Err(e),

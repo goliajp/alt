@@ -69,10 +69,15 @@ const DELTA_CACHE_BUDGET: usize = 64 << 20;
 #[derive(Debug)]
 pub enum StoreError {
     Io(std::io::Error),
+    /// an index run could not be written; the logs it would index are whole
+    IndexWrite(std::io::Error),
     Format(&'static str),
     NotFound(ChunkId),
     BlobNotFound(BlobId),
-    Corrupt { id: ChunkId, reason: &'static str },
+    Corrupt {
+        id: ChunkId,
+        reason: &'static str,
+    },
     TooLarge(usize),
 }
 
@@ -80,6 +85,7 @@ impl std::fmt::Display for StoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Io(_) => f.write_str("io"),
+            Self::IndexWrite(_) => f.write_str("index run not written"),
             Self::Format(v) => write!(f, "store format: {v}"),
             Self::NotFound(v) => write!(f, "chunk {v} not found"),
             Self::BlobNotFound(v) => write!(f, "blob {v} not found"),
@@ -92,7 +98,7 @@ impl std::fmt::Display for StoreError {
 impl std::error::Error for StoreError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Io(e) => Some(e),
+            Self::Io(e) | Self::IndexWrite(e) => Some(e),
             _ => None,
         }
     }
@@ -993,7 +999,7 @@ impl ChunkStore {
         })?;
         self.active.write.set_len(ckpt.pack_len)?;
         self.active.write.sync_all()?;
-        self.reload()?;
+        self.reload_whole()?;
         self.cache.lock().unwrap().clear();
         Ok(())
     }

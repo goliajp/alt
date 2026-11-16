@@ -85,22 +85,23 @@ pub(crate) fn create_active(path: &Path) -> Result<Active, StoreError> {
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
             let read = File::open(path)?;
             let size = read.metadata()?.len();
-            Ok(open_active(path, read, size, pack::HEADER_LEN as u64)?.0)
+            Ok(open_active(path, read, size, pack::HEADER_LEN as u64, false)?.0)
         }
         Err(e) => Err(e.into()),
     }
 }
 
 /// Opens the active pack through its read handle `read` (`size` bytes
-/// long): validates the header, walks the records from offset `from`
-/// (where the index runs stop, or the first record), and truncates any torn
-/// tail so the writer starts at a clean offset. Returns the pack and the
-/// records walked.
+/// long): validates the header, walks the records from offset `from` (where
+/// the index runs stop, or the first record), and cuts off a torn tail.
+/// With `whole`, every record is known to have been written whole: a walk
+/// that stops short is damage and nothing is cut. Returns the records walked.
 pub(crate) fn open_active(
     path: &Path,
     read: File,
     size: u64,
     from: u64,
+    whole: bool,
 ) -> Result<(Active, Vec<(pack::RecordHeader, u64)>), StoreError> {
     let mut head = [0u8; pack::HEADER_LEN];
     let have = (size as usize).min(pack::HEADER_LEN);
@@ -122,6 +123,9 @@ pub(crate) fn open_active(
         }
     };
 
+    if whole && valid_len != size {
+        return Err(StoreError::Format("active pack damaged"));
+    }
     // append mode: writes land at the end wherever a truncation moved it
     let mut write = OpenOptions::new().append(true).open(path)?;
     if valid_len == 0 {
@@ -178,16 +182,21 @@ pub struct Known {
 /// Loads the on-disk pack set: the index runs, then every record they do
 /// not cover — the rest of the pack they stop in and all later packs.
 pub(crate) fn load(dir: &Path, known: Option<&Known>) -> Result<PackState, StoreError> {
-    match load_from(dir, known) {
+    match load_from(dir, known, false) {
         // a named pack that is not there: the names are out of date
         Err(StoreError::Io(e)) if known.is_some() && e.kind() == std::io::ErrorKind::NotFound => {
-            load_from(dir, None)
+            load_from(dir, None, false)
         }
         loaded => loaded,
     }
 }
 
-fn load_from(dir: &Path, known: Option<&Known>) -> Result<PackState, StoreError> {
+/// `whole`: see [`open_active`].
+pub(crate) fn load_from(
+    dir: &Path,
+    known: Option<&Known>,
+    whole: bool,
+) -> Result<PackState, StoreError> {
     let named = known
         .and_then(|known| known.packs.as_deref())
         // a pack after the last one named was added since they were recorded
@@ -277,8 +286,8 @@ fn load_from(dir: &Path, known: Option<&Known>) -> Result<PackState, StoreError>
         let _ = sealed.get(&seq).unwrap().set(map);
     }
 
-    let (mut active, recs) =
-        open_active(&pack_path(dir, active_seq), read, size, from(active_seq))?;
+    let path = pack_path(dir, active_seq);
+    let (mut active, recs) = open_active(&path, read, size, from(active_seq), whole)?;
     active.seq = active_seq;
     for (hdr, offset) in recs {
         let loc = Location {
