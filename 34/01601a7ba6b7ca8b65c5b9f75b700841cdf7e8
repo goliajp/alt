@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: read a double star that is no whole segment as one star
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/policy.rs
