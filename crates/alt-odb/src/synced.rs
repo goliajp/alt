@@ -40,6 +40,8 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+use alt_store::Basis;
+
 use crate::lock::lock_exclusive;
 
 const MAGIC: [u8; 4] = *b"ALT2";
@@ -49,6 +51,8 @@ const SLOT_LEN: usize = 96;
 const LEN: usize = SLOTS_AT + 2 * SLOT_LEN;
 /// Every append file starts with a five-byte header.
 pub(crate) const HEADER: u64 = 5;
+/// The flag of a marker past whose boundaries appends were left unsynced.
+pub(crate) const UNTRUSTED: u32 = 1;
 
 /// One of the four append files.
 #[derive(Debug, Clone, Copy)]
@@ -270,6 +274,45 @@ impl Marker {
     pub fn generation(&self) -> u64 {
         self.recorded().map_or(0, |state| state.generation)
     }
+
+    /// Whether the marker records boundaries that every append since was
+    /// synced before it moved them.
+    pub fn trusted(&self) -> bool {
+        self.recorded()
+            .is_some_and(|state| state.flags & UNTRUSTED == 0)
+    }
+
+    /// What the marker tells about `log` (pack `seq` for the pack, `len`
+    /// bytes long) not reading to its end. `bounded`: whether the store
+    /// has had a marker in this format, asked when there is none.
+    pub fn basis(&self, log: Log, seq: u32, len: u64, bounded: impl Fn() -> bool) -> Basis {
+        match self {
+            Marker::Recorded(state) if state.flags & UNTRUSTED != 0 => Basis::LastOnly,
+            Marker::Recorded(state) => state
+                .whole
+                .of(log, seq)
+                .map_or(Basis::Unknown, Basis::Boundary),
+            Marker::Legacy([pack, blobmap, map]) => {
+                let eof = match log {
+                    // a length past the end of the pack is of one sealed since
+                    Log::Pack if *pack <= len => *pack,
+                    Log::Blobmap => *blobmap,
+                    Log::Map => *map,
+                    // an older alt records nothing of the tier1 map
+                    Log::Pack | Log::Tier1 => 0,
+                };
+                // a length short of the file header is not one an older alt
+                // recorded: the marker is being replaced as it is read
+                match eof >= HEADER {
+                    true => Basis::Boundary(eof),
+                    false => Basis::LastOnly,
+                }
+            }
+            Marker::Unreadable => Basis::LastOnly,
+            Marker::Absent if bounded() => Basis::Unknown,
+            Marker::Absent => Basis::LastOnly,
+        }
+    }
 }
 
 /// What `data` says and, for a marker in this format, the slot the next
@@ -396,6 +439,20 @@ pub(crate) fn lower_eof(path: &Path, log: Log, seq: u32, at: u64) -> std::io::Re
     update(path, |marker| {
         let mut state = *marker.recorded()?;
         state.eof.lower(log, seq, at).then_some(state)
+    })
+}
+
+/// Makes `lens` the boundaries of a store whose marker recorded none that
+/// hold: the caller holds the write lock, has read every file to its end
+/// and has fsynced them.
+pub(crate) fn establish(path: &Path, lens: Lens) -> std::io::Result<()> {
+    update(path, |marker| {
+        Some(State {
+            generation: marker.generation(),
+            flags: 0,
+            eof: lens,
+            whole: lens,
+        })
     })
 }
 

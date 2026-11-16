@@ -8,7 +8,7 @@ use std::os::unix::fs::FileExt;
 use std::path::Path;
 
 use alt_store::reclog::RecLog;
-use alt_store::{ChunkId, ChunkStore, Options, StoreError, Tail};
+use alt_store::{Basis, ChunkId, ChunkStore, Options, StoreError, Tail};
 
 use super::damaged_log::{len, pack_record};
 use super::index_runs::{LAYOUT, REC_LEN, chunk, record, value};
@@ -88,7 +88,10 @@ fn nothing_is_cut_from_a_pack_whose_synced_length_is_not_known() {
     chunks(dir.path(), 0, 20);
     let whole = len(&pack);
     write_at(&pack, whole, &[0xcd; 20]);
-    for tail in [Tail::default(), Tail::synced_to(|_| None)] {
+    for tail in [
+        Tail::default(),
+        Tail::judged_by(|_, _| Basis::Unknown).locked(),
+    ] {
         let opened = open_chunks(dir.path(), tail);
         assert!(matches!(
             opened,

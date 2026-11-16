@@ -1,6 +1,7 @@
-//! The synced lengths in `odb.durable` decide what an open does with a
-//! record it cannot read: damage in what was synced is reported and no
-//! file is touched; what a dead writer left past it is cut off.
+//! The synced lengths in `odb.durable` decide what is made of a record
+//! that cannot be read: damage in what was synced is reported and no file
+//! is touched; what a dead writer left past it is passed over by an open
+//! and cut off by the next writer.
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -96,7 +97,7 @@ fn damage_in_a_synced_pack_whose_index_was_removed_is_reported_and_nothing_is_cu
 }
 
 #[test]
-fn what_a_dead_writer_left_past_the_synced_lengths_is_cut_off() {
+fn what_a_dead_writer_left_past_the_synced_lengths_is_cut_off_by_the_next_writer() {
     let dir = alt_os::temp::tempdir().unwrap();
     let mut odb = NativeOdb::open(dir.path()).unwrap();
     put(&mut odb, 0..40);
@@ -107,34 +108,22 @@ fn what_a_dead_writer_left_past_the_synced_lengths_is_cut_off() {
         // more than one record's worth, none of it readable
         append(&dir.path().join(name), &[0xcd; 300]);
     }
-    let odb = NativeOdb::open(dir.path()).unwrap();
-    assert_eq!(lens(dir.path()), flushed);
+    let with_tails = lens(dir.path());
+    let mut odb = NativeOdb::open(dir.path()).unwrap();
     let (oid, data) = object(39);
     assert_eq!(odb.get(&oid).unwrap().unwrap().data, data);
-}
-
-#[test]
-fn nothing_is_cut_when_the_marker_is_missing_or_an_older_one() {
-    let dir = alt_os::temp::tempdir().unwrap();
-    let mut odb = NativeOdb::open(dir.path()).unwrap();
-    put(&mut odb, 0..40);
+    assert_eq!(lens(dir.path()), with_tails, "an open cuts nothing");
+    put(&mut odb, 40..41);
     odb.flush().unwrap();
+    let after = lens(dir.path());
+    assert!(after[0] > flushed[0] && after[0] < with_tails[0]);
+    assert_eq!(after[1..], [flushed[1], flushed[2], flushed[3] + MAP_REC]);
     drop(odb);
-    let marker = dir.path().join("odb.durable");
-    append(&dir.path().join("map.alt"), &[0xcd; 30]);
-    let with_tail = lens(dir.path());
-
-    // the three file lengths an older alt records, and nothing else
-    let older = [with_tail[0], with_tail[1], with_tail[3] - 30].map(u64::to_le_bytes);
-    fs::write(&marker, older.concat()).unwrap();
-    assert!(NativeOdb::open(dir.path()).is_err());
-    // a marker cut short
-    fs::write(&marker, b"").unwrap();
-    assert!(NativeOdb::open(dir.path()).is_err());
-    fs::remove_file(&marker).unwrap();
-    assert!(NativeOdb::open(dir.path()).is_err());
-    assert_eq!(lens(dir.path()), with_tail);
-    assert!(!marker.exists(), "an open does not make one up");
+    let odb = NativeOdb::open(dir.path()).unwrap();
+    for n in 0..41 {
+        let (oid, data) = object(n);
+        assert_eq!(odb.get(&oid).unwrap().unwrap().data, data);
+    }
 }
 
 #[test]
@@ -204,8 +193,10 @@ fn a_rewind_brings_the_marker_down_with_the_files() {
     assert_eq!(lens(dir.path()), kept);
     // an unfinished append past the cut is still told from damage
     append(&dir.path().join("map.alt"), &[0xcd; 30]);
-    let odb = NativeOdb::open(dir.path()).unwrap();
-    assert_eq!(lens(dir.path()), kept);
+    let mut odb = NativeOdb::open(dir.path()).unwrap();
     let (gone, _) = object(79);
     assert!(odb.get(&gone).unwrap().is_none());
+    put(&mut odb, 100..101);
+    odb.flush().unwrap();
+    assert_eq!(lens(dir.path())[3], kept[3] + MAP_REC);
 }

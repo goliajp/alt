@@ -42,7 +42,7 @@ pub use blob::{BlobOptions, BlobSink, BlobStore, StoreCheckpoint};
 pub use check::StoreChecked;
 pub use pack::with_shared_lock;
 pub use packs::Known;
-pub use tail::Tail;
+pub use tail::{Basis, Tail};
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt;

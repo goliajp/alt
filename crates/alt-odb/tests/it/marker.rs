@@ -10,6 +10,7 @@ use std::path::Path;
 pub struct Recorded {
     pub serial: u64,
     pub generation: u64,
+    pub flags: u32,
     pub eof: [u64; 4],
     pub whole: [u64; 4],
 }
@@ -23,6 +24,7 @@ fn slot(slot: &[u8]) -> Option<Recorded> {
     Some(Recorded {
         serial: word(0),
         generation: word(8),
+        flags: u32::from_le_bytes(body[16..20].try_into().unwrap()),
         eof: [24, 32, 40, 48].map(word),
         whole: [56, 64, 72, 80].map(word),
     })
@@ -38,4 +40,20 @@ pub fn recorded(alt_dir: &Path) -> Recorded {
         .filter_map(|at| slot(data.get(at..at + 96)?))
         .max_by_key(|slot| slot.serial)
         .expect("no slot of the marker holds")
+}
+
+/// Sets the flag that says unsynced appends may follow the boundaries, as
+/// a writer that skips its fsyncs does.
+pub fn distrust(alt_dir: &Path) {
+    let path = alt_dir.join("odb.durable");
+    let mut data = fs::read(&path).unwrap();
+    let serial = recorded(alt_dir).serial;
+    let at = [32, 128]
+        .into_iter()
+        .find(|at| slot(&data[*at..*at + 96]).is_some_and(|slot| slot.serial == serial))
+        .unwrap();
+    data[at + 16] |= 1;
+    let sum = alt_hash::blake3::hash(&data[at..at + 88]);
+    data[at + 88..at + 96].copy_from_slice(&sum.as_bytes()[..8]);
+    fs::write(&path, data).unwrap();
 }

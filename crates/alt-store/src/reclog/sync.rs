@@ -6,19 +6,26 @@ use crate::runs::Runs;
 
 impl RecLog {
     /// Folds in records another writer appended since our last read. Run
-    /// under the write lock: a torn tail there is a crashed writer's.
+    /// under the write lock: an unfinished record there is a crashed
+    /// writer's and is cut off, as is one this handle passed over when it
+    /// was opened.
     pub fn sync_from_disk(&mut self) -> Result<(), StoreError> {
         self.runs.remove_stale()?;
-        let size = self.file.metadata()?.len();
+        let end = End::MaybeTorn { cut: true };
+        let mut size = self.file.metadata()?.len();
+        if size < HEADER_LEN as u64 {
+            let policy = self.policy.clone().locked();
+            size = self.layout.checked_len(&mut self.file, &policy)?;
+        }
         if size < self.len {
             // another handle cut the log back: what this one holds past the
             // runs still on disk describes records that are gone
-            return self.reload(size, End::MaybeTorn);
+            return self.reload(size, end);
         }
         if size == self.len {
             return Ok(());
         }
-        let data = self.read_records(self.len, size, End::MaybeTorn)?;
+        let data = self.read_records(self.len, size, end)?;
         self.push_tail(&data);
         self.len += data.len() as u64;
         Ok(())

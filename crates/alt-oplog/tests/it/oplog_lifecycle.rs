@@ -208,7 +208,7 @@ fn corruption_before_an_anchor_surfaces_when_the_history_is_read() {
 }
 
 #[test]
-fn a_torn_tail_after_an_anchor_is_truncated() {
+fn a_torn_tail_after_an_anchor_is_passed_over_and_cut_off_by_the_next_append() {
     let dir = alt_os::temp::tempdir().unwrap();
     grow(dir.path(), 0..4);
     let anchor = OpLog::open(dir.path()).unwrap().anchor().unwrap();
@@ -229,7 +229,10 @@ fn a_torn_tail_after_an_anchor_is_truncated() {
     let mut log = OpLog::open_at(dir.path(), Some(anchor)).unwrap();
     assert!(log.anchored());
     assert_eq!(log.len(), 5);
-    assert!(fs::metadata(&path).unwrap().len() < size - 3);
+    assert_eq!(fs::metadata(&path).unwrap().len(), size - 3);
+    assert!(log.anchor().unwrap().end < size - 3);
     log.append("writer", 9, b"after the cut").unwrap();
+    let end = log.anchor().unwrap().end;
+    assert_eq!(fs::metadata(&path).unwrap().len(), end);
     assert_eq!(OpLog::open(dir.path()).unwrap().len(), 6);
 }

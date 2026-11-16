@@ -37,9 +37,11 @@ impl ChunkStore {
         })
     }
 
-    /// Reads the packs and the index again, as a fresh open would.
+    /// Reads the packs and the index again, for the holder of the write
+    /// lock: an unfinished record at the end of the active pack is cut off.
     pub(crate) fn reload(&mut self) -> Result<(), StoreError> {
-        self.reload_from(load(&self.dir, None, &self.tail)?)
+        let tail = self.tail.clone().locked();
+        self.reload_from(load(&self.dir, None, &tail)?)
     }
 
     /// The same, for the holder of the write lock that has already folded
@@ -47,7 +49,8 @@ impl ChunkStore {
     /// pack can be a torn one, so a pack that does not read to its end is
     /// reported as damaged and nothing is cut off it.
     pub(crate) fn reload_whole(&mut self) -> Result<(), StoreError> {
-        self.reload_from(packs::load_from(&self.dir, None, true, &self.tail)?)
+        let tail = self.tail.clone().locked();
+        self.reload_from(packs::load_from(&self.dir, None, true, &tail)?)
     }
 
     fn reload_from(&mut self, state: packs::PackState) -> Result<(), StoreError> {

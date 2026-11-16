@@ -9,14 +9,17 @@
 //! of it is checked for where it is used.
 //!
 //! ```text
-//! [magic "ALTH"][version u8][reserved 3]
+//! [magic "ALTH"][version u8][flags u8][reserved 2]
 //! [pack count u16][run counts: chunks, blob map, tier1, map.alt u8 each][reserved 2]
 //! packs x [seq u32]
 //! runs  x [start u64][end u64]      for each of the four, in that order
 //! [checksum 8]
 //! ```
 //!
-//! A count of all ones says that part is not recorded.
+//! A count of all ones says that part is not recorded. Bit 0 of the flags
+//! says the store has had a synced marker with record boundaries: when
+//! the marker is then missing it was removed, not never written. An older
+//! alt keeps no head record, and one that does writes the flags as zero.
 
 use std::fs::File;
 use std::os::unix::fs::FileExt;
@@ -40,6 +43,8 @@ pub(crate) struct Head {
     pub store: Known,
     pub tier1: Chain,
     pub map: Chain,
+    /// the store has had a synced marker with record boundaries
+    pub bounded: bool,
 }
 
 fn check(body: &[u8]) -> [u8; 8] {
@@ -91,6 +96,7 @@ impl Head {
             },
             tier1,
             map,
+            bounded: fixed[5] & 1 != 0,
         })
     }
 
@@ -105,7 +111,7 @@ impl Head {
         .map(|chain| chain.as_ref().filter(|runs| runs.len() <= MAX_RUNS));
         let mut out = Vec::with_capacity(MAX_LEN);
         out.extend_from_slice(&MAGIC);
-        out.extend_from_slice(&[VERSION, 0, 0, 0]);
+        out.extend_from_slice(&[VERSION, self.bounded as u8, 0, 0]);
         out.extend_from_slice(&packs.map_or(u16::MAX, |p| p.len() as u16).to_le_bytes());
         out.extend(
             chains
@@ -144,6 +150,7 @@ impl Odb {
                 None => self.head.tier1.take(),
             },
             map: Some(self.map.run_chain()),
+            bounded: self.head.bounded,
         };
         if head != self.head_on_disk() {
             let _ = self.lock.write_all_at(&head.encode(), 0);
@@ -172,6 +179,7 @@ mod tests {
             },
             tier1: Some(Vec::new()),
             map: Some(vec![(5, 87)]),
+            bounded: true,
         };
         let bytes = head.encode();
         assert_eq!(Head::parse(&bytes), Some(head.clone()));
@@ -197,6 +205,7 @@ mod tests {
             },
             tier1: None,
             map: None,
+            bounded: false,
         };
         let read = Head::parse(&head.encode()).unwrap();
         assert_eq!(read.store.packs, None);

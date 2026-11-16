@@ -5,7 +5,9 @@ use std::fs::File;
 use std::io::{Seek, SeekFrom, Write};
 use std::path::Path;
 
-use crate::scan::{CHECKSUM_LEN, HEADER_LEN, check_header, file_header, replay_records};
+use crate::scan::{
+    CHECKSUM_LEN, HEADER_LEN, check_header, ends_the_log, file_header, replay_records,
+};
 use crate::synced::{self, Marker, State};
 use crate::{Anchor, Op, OpLogError, ROOT};
 
@@ -26,12 +28,14 @@ pub(crate) struct Scan {
     pub valid_len: u64,
     pub last_start: u64,
     pub file_len: u64,
+    /// no whole record can follow the one the scan stopped at
+    pub last: bool,
 }
 
 impl Scan {
-    /// A new log without its header yet, or a torn tail to cut.
-    pub fn needs_repair(&self) -> bool {
-        self.valid_len < HEADER_LEN as u64 || self.valid_len < self.file_len
+    /// A new log without its header yet.
+    pub fn headless(&self) -> bool {
+        self.valid_len < HEADER_LEN as u64
     }
 }
 
@@ -100,41 +104,42 @@ pub(crate) fn scan(raw: Raw) -> Result<Scan, OpLogError> {
             .last_start
             .map_or(last_start, |start| raw.at + start as u64),
         file_len: raw.at + raw.data.len() as u64,
+        last: ends_the_log(&raw.data, replayed.valid),
     })
 }
 
 impl Scan {
-    /// The scan of a log that is only read: an unfinished append at its
-    /// end is passed over, damage is reported, the file stays as it is.
+    /// The scan as an open takes it: an unfinished append at the end of
+    /// the log is passed over, damage is reported, the file stays as it is.
     pub fn unrepaired(mut self, durable: &Path) -> Result<Self, OpLogError> {
         if self.valid_len >= HEADER_LEN as u64 && self.valid_len < self.file_len {
-            unfinished(durable, self.valid_len)?;
+            unfinished(durable, self.valid_len, self.last)?;
         }
         self.file_len = self.valid_len;
         Ok(self)
     }
 }
 
-/// A record that does not read at `at`: an append that never finished when
-/// the log was not synced that far, damage otherwise.
-pub(crate) fn unfinished(durable: &Path, at: u64) -> Result<(), OpLogError> {
-    if Marker::unfinished(durable, at) {
+/// A record that does not read at `at`: an append that never finished or
+/// damage, as the marker tells (see [`Marker::unfinished`]).
+pub(crate) fn unfinished(durable: &Path, at: u64, last: bool) -> Result<(), OpLogError> {
+    if Marker::unfinished(durable, at, last) {
         Ok(())
     } else {
         Err(OpLogError::Format("oplog record corrupt"))
     }
 }
 
-/// Rescans and repairs; the caller holds the exclusive lock. A new log
-/// gets its header and its marker; an unfinished append is cut off; damage
-/// is reported and nothing is cut.
-pub(crate) fn scan_and_repair(
+/// Rescans a log that had no header and gives it one, with its marker;
+/// the caller holds the exclusive lock. Another opener may have done so in
+/// between: the log is then taken as it is.
+pub(crate) fn scan_and_create(
     file: &mut File,
     anchor: Option<Anchor>,
     durable: &Path,
 ) -> Result<Scan, OpLogError> {
     let mut scan = scan(read_log(file, anchor)?)?;
-    if scan.valid_len < HEADER_LEN as u64 {
+    if scan.headless() {
         if scan.file_len > 0 {
             synced::cut(durable, file, 0)?;
         }
@@ -142,6 +147,7 @@ pub(crate) fn scan_and_repair(
         file.write_all(&file_header())?;
         file.sync_all()?;
         scan.valid_len = HEADER_LEN as u64;
+        scan.file_len = scan.valid_len;
         synced::update(durable, |marker| {
             (*marker == Marker::Absent).then_some(State {
                 flags: 0,
@@ -149,10 +155,7 @@ pub(crate) fn scan_and_repair(
                 whole: scan.valid_len,
             })
         })?;
-    } else if scan.valid_len < scan.file_len {
-        unfinished(durable, scan.valid_len)?;
-        synced::cut(durable, file, scan.valid_len)?;
+        synced::note_bounded(durable)?;
     }
-    scan.file_len = scan.valid_len;
     Ok(scan)
 }

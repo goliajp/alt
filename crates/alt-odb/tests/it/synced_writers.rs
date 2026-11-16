@@ -108,11 +108,10 @@ fn a_cut_takes_back_the_file_lengths_so_that_the_next_flush_syncs() {
         (with_tail[0], with_tail[3])
     );
 
-    // the open cuts the half records off
+    // the next writer cuts the half records off, and what it writes where
+    // they were is not on disk until it is fsynced
     let mut odb = NativeOdb::open(dir.path()).unwrap();
-    assert_eq!(lens(dir.path()), whole);
-    assert_eq!(recorded(dir.path()).eof, whole, "lengths past the cut");
-    // what is written where they were is not on disk until it is fsynced
+    assert_eq!(lens(dir.path()), with_tail, "an open cuts nothing");
     put(&mut odb, 100..101);
     odb.flush().unwrap();
     let after = recorded(dir.path());

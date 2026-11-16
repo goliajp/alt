@@ -92,6 +92,19 @@ pub fn scan_from(data: &[u8], from: usize) -> (Vec<(RecordHeader, u64)>, u64) {
     (entries, at as u64)
 }
 
+/// Whether no whole record can follow the one at `at`, where
+/// [`scan_from`] stopped short of the end of `data`: its header is cut
+/// short, or by its own length it reaches the end or past it.
+pub fn ends_the_pack(data: &[u8], at: usize) -> bool {
+    match data.get(at..at + REC_HEADER_LEN) {
+        Some(hdr_bytes) => {
+            let hdr = RecordHeader::parse(hdr_bytes.try_into().unwrap());
+            (at + REC_HEADER_LEN).saturating_add(hdr.stored_len as usize) >= data.len()
+        }
+        None => true,
+    }
+}
+
 /// Positioned read that leaves the file cursor alone (the writer owns it).
 #[cfg(unix)]
 pub fn read_exact_at(file: &File, buf: &mut [u8], offset: u64) -> io::Result<()> {

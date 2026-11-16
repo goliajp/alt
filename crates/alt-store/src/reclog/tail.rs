@@ -8,9 +8,9 @@ use crate::pack::read_exact_at;
 /// What the end of a stretch of log being read can be.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum End {
-    /// a writer may have died mid-append: what does not read past the
-    /// synced length is cut off
-    MaybeTorn,
+    /// the file's end, where a writer may have died mid-append: such a
+    /// record is passed over, and cut off the file when `cut`
+    MaybeTorn { cut: bool },
     /// every record was written whole: a bad one anywhere is corruption
     Whole,
 }
@@ -18,8 +18,7 @@ pub(super) enum End {
 impl RecLog {
     /// How many leading bytes of `data`, read at `from`, are intact
     /// records. The first record that does not read ends them when it is an
-    /// unfinished append (see [`crate::Tail`]), for the caller to cut off;
-    /// otherwise it is corruption.
+    /// unfinished append (see [`crate::Tail`]); otherwise it is corruption.
     fn intact_prefix(&self, data: &[u8], from: u64, end: End) -> Result<usize, StoreError> {
         let rec_len = self.layout.rec_len;
         let mut at = 0usize;
@@ -29,15 +28,21 @@ impl RecLog {
             }
             at += rec_len;
         }
-        if at != data.len() && (end == End::Whole || !self.policy.unfinished(0, from + at as u64)) {
+        if at == data.len() {
+            return Ok(at);
+        }
+        // no whole record fits in what follows the one that does not read
+        let last = data.len() - at <= rec_len;
+        let (len, bad) = (from + data.len() as u64, from + at as u64);
+        if end == End::Whole || !self.policy.unfinished(0, len, bad, last) {
             return Err(StoreError::Format(self.layout.corrupt));
         }
         Ok(at)
     }
 
-    /// Reads and verifies the records in `[from, size)`, cutting an
-    /// unfinished end off the file. Nothing is cut when a record is
-    /// corrupt, or on a read-only open.
+    /// Reads and verifies the records in `[from, size)` up to an unfinished
+    /// end, which is cut off the file when `end` says so. Nothing is cut
+    /// when a record is corrupt.
     pub(super) fn read_records(
         &self,
         from: u64,
@@ -48,7 +53,7 @@ impl RecLog {
         read_exact_at(&self.file, &mut data, from)?;
         let intact = self.intact_prefix(&data, from, end)?;
         if intact < data.len() {
-            if !self.policy.is_read_only() {
+            if end == (End::MaybeTorn { cut: true }) {
                 self.policy.cut(0, from + intact as u64)?;
                 self.file.set_len(from + intact as u64)?;
                 self.file.sync_all()?;

@@ -109,14 +109,14 @@ pub(crate) struct Walk<'a> {
     pub tail: &'a Tail,
 }
 
+/// The records a walk found, where it stopped, and whether no whole record
+/// can follow the one it stopped at.
+type Walked = (Vec<(pack::RecordHeader, u64)>, u64, bool);
+
 /// Checks the header of a pack of `size` bytes and walks its records from
-/// offset `from`: the records, and where the walk stopped (zero in a pack
-/// cut short inside its header).
-fn walked(
-    read: &File,
-    size: u64,
-    from: u64,
-) -> Result<(Vec<(pack::RecordHeader, u64)>, u64), StoreError> {
+/// offset `from`. The walk stops at zero in a pack cut short inside its
+/// header.
+fn walked(read: &File, size: u64, from: u64) -> Result<Walked, StoreError> {
     let mut head = [0u8; pack::HEADER_LEN];
     let have = (size as usize).min(pack::HEADER_LEN);
     pack::read_exact_at(read, &mut head[..have], 0)?;
@@ -126,30 +126,33 @@ fn walked(
         if !pack::file_header().starts_with(&head[..have]) {
             return Err(StoreError::Format("bad altpack header"));
         }
-        return Ok((Vec::new(), 0));
+        return Ok((Vec::new(), 0, true));
     }
     pack::check_file_header(&head)?;
     if size == from {
-        return Ok((Vec::new(), size));
+        return Ok((Vec::new(), size, true));
     }
     let map = unsafe { Mmap::map(read)? };
-    Ok(pack::scan_from(&map, from as usize))
+    let (recs, valid_len) = pack::scan_from(&map, from as usize);
+    let last = pack::ends_the_pack(&map, valid_len as usize);
+    Ok((recs, valid_len, last))
 }
 
 /// Opens the active pack through its read handle `read` (`size` bytes
 /// long): validates the header and walks the records. A walk that stops
-/// short of the end stopped at an unfinished append, which is cut off, or
-/// at damage, which is reported with the pack left as it is (see [`Tail`]).
-/// Returns the records walked.
+/// short of the end stopped at an unfinished append — passed over, and cut
+/// off the pack by an opener that holds the writers' lock — or at damage,
+/// which is reported with the pack left as it is (see [`Tail`]). Returns
+/// the records walked.
 pub(crate) fn open_active(
     path: &Path,
     read: File,
     size: u64,
     walk: Walk,
 ) -> Result<(Active, Vec<(pack::RecordHeader, u64)>), StoreError> {
-    let (recs, valid_len) = walked(&read, size, walk.from)?;
-    // the synced length is looked up only for a pack that stops short
-    let unfinished = || valid_len == 0 || walk.tail.unfinished(walk.seq, valid_len);
+    let (recs, valid_len, last) = walked(&read, size, walk.from)?;
+    // what is known of the pack is looked up only when it stops short
+    let unfinished = || valid_len == 0 || walk.tail.unfinished(walk.seq, size, valid_len, last);
     if valid_len != size && (walk.whole || !unfinished()) {
         return Err(StoreError::Format("active pack damaged"));
     }
@@ -159,15 +162,14 @@ pub(crate) fn open_active(
     } else {
         // append mode: writes land at the end wherever a truncation moved it
         let mut write = OpenOptions::new().append(true).open(path)?;
-        if valid_len < size {
+        if valid_len < size && walk.tail.cuts() {
             walk.tail.cut(walk.seq, len)?;
-        }
-        if valid_len == 0 {
-            write.set_len(0)?;
-            write.write_all(&pack::file_header())?;
-            write.sync_all()?;
-        } else if valid_len < size {
-            write.set_len(valid_len)?;
+            if valid_len == 0 {
+                write.set_len(0)?;
+                write.write_all(&pack::file_header())?;
+            } else {
+                write.set_len(valid_len)?;
+            }
             write.sync_all()?;
         }
         write

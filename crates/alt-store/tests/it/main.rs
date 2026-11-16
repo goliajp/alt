@@ -9,9 +9,11 @@ mod index_gap;
 mod index_runs;
 mod stale_index;
 mod synced_tail;
+mod tail_basis;
 
-/// A log known to be synced as far as `len`: what does not read past it is
-/// an append that never finished.
+/// A log known to be synced as far as `len`, opened by the holder of the
+/// lock its writers append under: what does not read past that length is
+/// an append that never finished, and is cut off.
 fn synced(len: u64) -> alt_store::Tail {
-    alt_store::Tail::synced_to(move |_| Some(len))
+    alt_store::Tail::judged_by(move |_, _| alt_store::Basis::Boundary(len)).locked()
 }

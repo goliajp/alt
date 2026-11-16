@@ -1,9 +1,9 @@
 //! The synced length in `durable` decides what an open does with a record
 //! it cannot read: damage in what was synced is reported and the log left
-//! as it is; appends that never finished, past it, are cut off.
+//! as it is; appends that never finished, past it, are passed over, and
+//! cut off by the next append.
 
 use std::fs::{self, OpenOptions};
-use std::io::Write;
 use std::os::unix::fs::FileExt;
 use std::path::Path;
 
@@ -73,8 +73,13 @@ fn appends_that_never_finished_are_cut_off_however_many() {
     drop(read);
     let mut log = OpLog::open(dir.path()).unwrap();
     assert_eq!(log.len(), 10);
-    assert_eq!(fs::metadata(&path).unwrap().len(), whole);
+    assert_eq!(
+        fs::metadata(&path).unwrap().len(),
+        unsynced,
+        "nor does any other open"
+    );
     log.append("someone", 10, b"after the cut").unwrap();
+    assert!(fs::metadata(&path).unwrap().len() < unsynced);
     assert_eq!(OpLog::open(dir.path()).unwrap().len(), 11);
 }
 
@@ -88,25 +93,6 @@ fn a_writer_catching_up_reports_damage_in_what_another_synced() {
     assert!(held.append("someone", 99, b"mine").is_err());
     assert_eq!(fs::metadata(&path).unwrap().len(), whole);
     assert_eq!(held.len(), 0, "the handle is where it was");
-}
-
-#[test]
-fn nothing_is_cut_when_the_marker_is_missing_or_an_older_one() {
-    let dir = alt_os::temp::tempdir().unwrap();
-    let path = dir.path().join("log");
-    let (_, whole) = ten(dir.path());
-    let mut file = OpenOptions::new().append(true).open(&path).unwrap();
-    file.write_all(&[0xcd; 30]).unwrap();
-    let marker = dir.path().join("durable");
-    // the file length an older alt records, and nothing else
-    fs::write(&marker, whole.to_le_bytes()).unwrap();
-    assert!(corrupt(OpLog::open(dir.path())));
-    // a marker cut short
-    fs::write(&marker, b"").unwrap();
-    assert!(corrupt(OpLog::open(dir.path())));
-    fs::remove_file(&marker).unwrap();
-    assert!(corrupt(OpLog::open(dir.path())));
-    assert_eq!(fs::metadata(&path).unwrap().len(), whole + 30);
 }
 
 #[test]

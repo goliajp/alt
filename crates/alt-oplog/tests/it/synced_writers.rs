@@ -76,11 +76,10 @@ fn a_cut_takes_back_the_file_length_so_that_the_next_sync_syncs() {
     let before = recorded(dir.path());
     assert_eq!((before.whole, before.eof), (whole, whole + 300));
 
-    // the open cuts the half record off
+    // the next append cuts the half record off, and what it writes where
+    // it was is not on disk until it is fsynced
     let mut log = OpLog::open(dir.path()).unwrap();
-    assert_eq!(len(dir.path()), whole);
-    assert_eq!(recorded(dir.path()).eof, whole, "a length past the cut");
-    // what is written where it was is not on disk until it is fsynced
+    assert_eq!(len(dir.path()), whole + 300, "an open cuts nothing");
     log.append("someone", 9, b"after the cut").unwrap();
     log.sync().unwrap();
     let after = recorded(dir.path());

@@ -15,10 +15,10 @@
 //! ```
 //!
 //! The checksum is the op id's own prefix, so verifying a record and
-//! computing its id are one hash. A record that does not read is cut off
-//! on open when it lies past where the log was last synced (an append
-//! that never finished); anywhere else it is corruption and is reported,
-//! never silently skipped or cut.
+//! computing its id are one hash. A record that does not read past where
+//! the log was last synced is an append that never finished: an open
+//! passes over it and the next append cuts it off. Anywhere else it is
+//! corruption and is reported, never silently skipped or cut.
 //!
 //! Pure-logic crate, business-agnostic: payloads are opaque bytes; what an
 //! op *means* (ref updates, imports, …) is the caller's encoding.
@@ -39,8 +39,8 @@ pub use op::{Op, OpId, OpLogError, ROOT};
 pub use synced::OpLogSink;
 
 use lock::{lock_exclusive, lock_shared, unlock};
-use read::{read_at, read_log, scan, scan_and_repair, unfinished};
-use scan::{CHECKSUM_LEN, HEADER_LEN, check_header, encode_body, replay_records};
+use read::{read_at, read_log, scan, scan_and_create, unfinished};
+use scan::{CHECKSUM_LEN, HEADER_LEN, check_header, encode_body, ends_the_log, replay_records};
 use synced::{Marker, open_sync_lock};
 
 /// A place in the log to start reading from instead of its first record:
@@ -94,8 +94,8 @@ pub struct OpLog {
 
 impl OpLog {
     /// Opens (or creates) the log in `dir`, replaying and verifying the
-    /// whole chain. A torn tail is truncated; a broken chain or corrupt
-    /// record refuses to open.
+    /// whole chain. An unfinished append at its end is passed over; a
+    /// broken chain or corrupt record refuses to open.
     pub fn open(dir: &Path) -> Result<Self, OpLogError> {
         Self::open_at(dir, None)
     }
@@ -107,9 +107,10 @@ impl OpLog {
     ///
     /// The file is read under a shared lock: writers append under the
     /// exclusive one, so a short tail seen here is a crashed writer's, never
-    /// a live append in flight. Repairing it (or writing the header of a new log)
+    /// a live append in flight. It stays in the file until an append, under
+    /// the exclusive lock, cuts it off. Writing the header of a new log
     /// retakes the lock exclusively and rescans, since another opener may
-    /// have repaired it or a writer appended in between.
+    /// have written it in between.
     pub fn open_at(dir: &Path, anchor: Option<Anchor>) -> Result<Self, OpLogError> {
         let path = dir.join("log");
         let mut file = match OpenOptions::new().read(true).write(true).open(&path) {
@@ -131,12 +132,13 @@ impl OpLog {
         let raw = read_log(&file, anchor);
         let _ = unlock(&file);
         let mut scan = scan(raw?)?;
-        if scan.needs_repair() {
+        if scan.headless() {
             lock_exclusive(&file)?;
-            let repaired = scan_and_repair(&mut file, anchor, &dir.join("durable"));
+            let created = scan_and_create(&mut file, anchor, &dir.join("durable"));
             let _ = unlock(&file);
-            scan = repaired?;
+            scan = created?;
         }
+        let scan = scan.unrepaired(&dir.join("durable"))?;
         Ok(Self::opened(dir, file, scan))
     }
 
@@ -240,6 +242,7 @@ impl OpLog {
         payload: &[u8],
     ) -> Result<OpId, OpLogError> {
         self.catch_up()?;
+        self.bound()?;
         self.write_record(actor, timestamp_ms, payload)
     }
 
@@ -255,12 +258,26 @@ impl OpLog {
         E: From<OpLogError>,
     {
         self.catch_up().map_err(E::from)?;
+        self.bound().map_err(E::from)?;
         let payload = build(&self.ops)?;
         if u32::try_from(payload.len()).is_err() {
             return Err(OpLogError::TooLarge(payload.len()).into());
         }
         self.write_record(actor, timestamp_ms, &payload)
             .map_err(E::from)
+    }
+
+    /// With the lock held and the log read to its end: a log whose marker
+    /// does not record a boundary that holds — an older alt wrote it, the
+    /// marker was removed, or appends were left unsynced — gets one before
+    /// anything is appended.
+    fn bound(&mut self) -> Result<(), OpLogError> {
+        let marker = Marker::read(&self.durable_path);
+        if !relaxed_durability() && !marker.trusted() {
+            self.file.sync_all()?;
+            synced::establish(&self.durable_path, self.len_bytes)?;
+        }
+        Ok(())
     }
 
     /// Encodes and appends one record onto the current head and folds it into
@@ -317,7 +334,8 @@ impl OpLog {
         let replayed = replayed.and_then(|replayed| {
             let new_len = self.len_bytes + replayed.valid as u64;
             if replayed.valid < tail.len() {
-                unfinished(&self.durable_path, new_len)?;
+                let last = ends_the_log(&tail, replayed.valid);
+                unfinished(&self.durable_path, new_len, last)?;
             }
             Ok(replayed)
         });

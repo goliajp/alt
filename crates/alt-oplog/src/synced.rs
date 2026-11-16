@@ -4,7 +4,8 @@
 //! already covered its appends. An open that finds a record it cannot read
 //! asks it whether that record lies in the synced part of the log — damage,
 //! reported with the file left as it is — or past it — an append that never
-//! finished, cut off. Without the marker nothing is cut.
+//! finished. What it says when it records no such boundary is in
+//! [`Marker::unfinished`].
 //!
 //! ```text
 //! [0..8)   zero
@@ -29,6 +30,10 @@
 //!
 //! An older alt keeps the file length in the first 8 bytes and replaces the
 //! whole file; reading zero there, it fsyncs every time.
+//!
+//! The first byte of `sync.lock`, which an older alt only locks, says in
+//! bit 0 that the log has had a marker in this format: when the marker is
+//! then missing it was removed, not never written.
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -44,6 +49,10 @@ const LEGACY_LEN: usize = 8;
 const SLOTS_AT: usize = 16;
 const SLOT_LEN: usize = 36;
 const LEN: usize = SLOTS_AT + 2 * SLOT_LEN;
+/// Every log starts with a five-byte header.
+const HEADER: u64 = 5;
+/// The flag of a marker past whose boundary appends were left unsynced.
+const UNTRUSTED: u32 = 1;
 
 /// What a marker in this format records.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -123,13 +132,62 @@ impl Marker {
         self.recorded().is_some_and(|state| state.whole >= target)
     }
 
-    /// Whether a record that does not read at `at` is an append that never
-    /// finished rather than damage.
-    pub fn unfinished(path: &Path, at: u64) -> bool {
-        Self::read(path)
-            .recorded()
-            .is_some_and(|state| at >= state.whole)
+    /// Whether the marker records a boundary that every append since was
+    /// synced before it moved it.
+    pub fn trusted(&self) -> bool {
+        self.recorded()
+            .is_some_and(|state| state.flags & UNTRUSTED == 0)
     }
+
+    /// Whether a record that does not read at `at` is an append that never
+    /// finished rather than damage; `last`: no whole record can follow it.
+    /// Past a boundary that holds it never finished, and before it is
+    /// damage. The file length an older alt recorded is such a boundary.
+    /// Where nothing is recorded, or unsynced appends followed, only the
+    /// last record is taken for unfinished. A marker that was removed
+    /// tells nothing: every such record is damage.
+    pub fn unfinished(path: &Path, at: u64, last: bool) -> bool {
+        match Self::read(path) {
+            Marker::Recorded(state) if state.flags & UNTRUSTED == 0 => at >= state.whole,
+            // a length short of the header is not one an older alt
+            // recorded: the marker is being replaced as it is read
+            Marker::Legacy(eof) if eof >= HEADER => at >= eof,
+            Marker::Recorded(_) | Marker::Legacy(_) | Marker::Unreadable => last,
+            Marker::Absent => last && !bounded(path),
+        }
+    }
+}
+
+/// Whether the log beside the marker at `path` has had a marker in this
+/// format.
+fn bounded(path: &Path) -> bool {
+    std::fs::read(path.with_file_name("sync.lock"))
+        .is_ok_and(|data| data.first().is_some_and(|flags| flags & 1 != 0))
+}
+
+/// Notes that the log beside the marker at `path` has a marker in this
+/// format from now on.
+pub(crate) fn note_bounded(path: &Path) -> std::io::Result<()> {
+    if bounded(path) {
+        return Ok(());
+    }
+    let mut file = open_sync_lock(&path.with_file_name("sync.lock"))?;
+    file.write_all(&[1])?;
+    file.sync_all()
+}
+
+/// Makes `len` the boundary of a log whose marker recorded none that
+/// holds: the caller holds the log's lock, has read it to its end and has
+/// fsynced it.
+pub(crate) fn establish(path: &Path, len: u64) -> std::io::Result<()> {
+    update(path, |_| {
+        Some(State {
+            flags: 0,
+            eof: len,
+            whole: len,
+        })
+    })?;
+    note_bounded(path)
 }
 
 /// What `data` says and, for a marker in this format, the slot the next

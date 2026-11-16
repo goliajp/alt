@@ -46,12 +46,17 @@ fn open_lock(alt_dir: &Path, read_only: bool) -> std::io::Result<File> {
     }
 }
 
-/// What `log` not reading to its end means, from the marker's record of
+/// What `log` not reading to its end means, from what the marker says of
 /// how far it was synced; a cut of it brings the marker down first.
 fn tail(durable: &Path, read_only: bool, log: Log) -> Tail {
     let (read, lowered) = (durable.to_owned(), durable.to_owned());
-    let tail = Tail::synced_to(move |seq| Marker::read(&read).recorded()?.whole.of(log, seq))
-        .before_cut(move |seq, at| synced::lower_eof(&lowered, log, seq, at));
+    let tail = Tail::judged_by(move |seq, len| {
+        let bounded = || {
+            File::open(read.with_file_name("odb.lock")).is_ok_and(|lock| Head::read(&lock).bounded)
+        };
+        Marker::read(&read).basis(log, seq, len, bounded)
+    })
+    .before_cut(move |seq, at| synced::lower_eof(&lowered, log, seq, at));
     if read_only { tail.read_only() } else { tail }
 }
 
@@ -92,10 +97,10 @@ impl Odb {
         let lock = open_lock(&alt_dir, mode.read_only)?;
         let durable_path = alt_dir.join("odb.durable");
         let tail = |log: Log| tail(&durable_path, mode.read_only, log);
-        // Open the append files (active pack, blobmap, map.alt — read and
-        // crash-recovered here) under a shared lock, so the open never overlaps
-        // another process's exclusive append. Without this, an open scanning a
-        // writer's half-written record truncates it and corrupts the store.
+        // Open the append files (active pack, blobmap, map.alt) under a
+        // shared lock, so the open never overlaps another process's
+        // exclusive append: a record that does not read is then one no
+        // writer is still writing.
         lock_shared(&lock)?;
         let head = Head::read(&lock);
         let opened = open_files(&alt_dir, opts, &head, mode.late, tail);
@@ -133,7 +138,9 @@ impl Odb {
     /// A store whose logs have outgrown their index runs, or that has no
     /// head record — written by a program that keeps neither, or by a
     /// writer that died before its flush — gets both from whoever opens it
-    /// next, unless a writer is at work.
+    /// next, unless a writer is at work. That opener holds the write lock
+    /// meanwhile: what a dead writer left unfinished is cut off, and a
+    /// store without record boundaries gets them.
     fn index_stale_tails(&mut self) -> Result<(), OdbError> {
         let pending =
             self.blobs.index_pending() || self.map.index_pending() || self.head == Head::default();
@@ -147,22 +154,28 @@ impl Odb {
             // every log of such a store, opened so far or not
             self.blobs.open_map()?;
             self.tier1_mut()?;
+            self.bound()?;
             self.index_tails()
         })();
         self.release();
         indexed
     }
 
-    /// The Tier 1 map, opened on first use. Opening repairs a torn tail,
-    /// which must not overlap a writer's append: without the write lock in
-    /// hand the open runs under the shared one, like the open of the store.
+    /// The Tier 1 map, opened on first use. Opening must not overlap a
+    /// writer's append: without the write lock in hand the open runs under
+    /// the shared one, like the open of the store. With it, the open cuts
+    /// off what a dead writer left unfinished.
     pub(crate) fn tier1(&self) -> Result<&Tier1Map, OdbError> {
         if let Some(tier1) = self.tier1.get() {
             return Ok(tier1);
         }
         let open = || {
             let runs = self.head.tier1.as_deref();
-            Tier1Map::open(&self.alt_dir, runs, self.tier1_tail.clone())
+            let tail = match self.held {
+                true => self.tier1_tail.clone().locked(),
+                false => self.tier1_tail.clone(),
+            };
+            Tier1Map::open(&self.alt_dir, runs, tail)
         };
         let tier1 = if self.held {
             open()?

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use alt_store::reclog::RecLog;
-use alt_store::{ChunkStore, Options, StoreError, Tail};
+use alt_store::{Basis, ChunkStore, Options, StoreError, Tail};
 
 use super::index_runs::{LAYOUT, REC_LEN, chunk, record, value};
 
@@ -105,7 +105,7 @@ fn catching_up_cuts_what_does_not_read_past_the_synced_length_and_nothing_before
     let synced = Arc::new(AtomicU64::new(5));
     let tail = {
         let synced = synced.clone();
-        Tail::synced_to(move |_| Some(synced.load(Ordering::Relaxed)))
+        Tail::judged_by(move |_, _| Basis::Boundary(synced.load(Ordering::Relaxed)))
     };
     let (mut held, _) = RecLog::open_with_runs(&path, LAYOUT, None, tail).unwrap();
     held.append(&record(0, 0)).unwrap();

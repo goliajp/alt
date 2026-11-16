@@ -98,7 +98,7 @@ impl Odb {
             tier1.sync_from_disk()?;
         }
         self.map.sync_from_disk()?;
-        Ok(())
+        self.bound()
     }
 
     /// Releases the write lock (best-effort; the fd closing also releases it).

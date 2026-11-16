@@ -112,10 +112,11 @@ log or pack is lost data to restore from another copy.
 A write that a crash or a power cut interrupted leaves unfinished records at
 the end of a file. Each store records how far its files were last synced
 (`.alt/odb.durable` for the object store, `.alt/oplog/durable` for the
-operation log). Records that do not read past that point never finished: the
-next command cuts them off, and `alt fsck` passes over them without touching
-the file. A record that does not read before that point was once whole. That
-is damage, and no command cuts anything off a damaged file:
+operation log). Records that do not read past that point never finished:
+commands that only read pass over them without touching the file, `alt fsck`
+included, and the next command that writes cuts them off. A record that does
+not read before that point was once whole. That is damage, and no command
+cuts anything off a damaged file:
 
 | Message | File |
 | --- | --- |
@@ -132,13 +133,17 @@ file, or the whole `.alt` directory, from a copy made before the damage; `alt
 export` and `alt push` of history that does not pass through the damaged
 record still work for getting it out.
 
-The same messages appear when the synced length itself is missing: a
-`durable` file that was deleted, or one last written by an alt too old to
-record it, while the end of a file does not read. Nothing is cut then either,
+A repository that an older alt wrote records only how long its files were
+when they were last synced, or nothing. That length is used the same way.
+Where nothing is recorded, a record that does not read is unfinished only when
+it is the last one in its file, as that alt took it. The first command of
+this alt that writes syncs the files and records how far they are whole; no
+step by hand is needed after an upgrade.
+
+The same messages appear when a `durable` file was deleted from a repository
+that had one, while the end of a file does not read. Nothing is cut then,
 because nothing says the unreadable records were unfinished. Do not delete
-the `durable` files. If the file was written by an older alt and the machine
-crashed before the upgrade, run any command with that older alt once; it
-removes the unfinished records the way it always did.
+the `durable` files.
 
 ### Indexes
 

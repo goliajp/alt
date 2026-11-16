@@ -4,8 +4,8 @@
 //!
 //! Each record ends in an 8-byte checksum over the rest of it. Records
 //! behind the runs are verified when a lookup reads them; the tail past the
-//! runs is verified on open, where a record that does not read is cut off
-//! as an unfinished append or reported as corruption (see [`Tail`]).
+//! runs is verified on open, where a record that does not read is an
+//! unfinished append or is reported as corruption (see [`Tail`]).
 
 mod cache;
 mod check;
@@ -52,8 +52,8 @@ impl Layout {
     }
 
     /// Checks the header of a log file and returns its length. A file a
-    /// crash left shorter than its header gets the header written, unless
-    /// `policy` is read-only, and counts as holding just that.
+    /// crash left shorter than its header counts as holding just that, and
+    /// gets the header written when `policy` cuts.
     fn checked_len(&self, file: &mut File, policy: &Tail) -> Result<u64, StoreError> {
         let header = self.header();
         let size = file.metadata()?.len();
@@ -73,7 +73,7 @@ impl Layout {
         if !header.starts_with(&start[..have]) {
             return Err(StoreError::Format(self.bad_header));
         }
-        if !policy.is_read_only() {
+        if policy.cuts() {
             policy.cut(0, HEADER_LEN as u64)?;
             file.set_len(0)?;
             file.write_all(&header)?;
@@ -208,7 +208,8 @@ impl RecLog {
             unsynced: false,
             policy,
         };
-        this.load_tail(size, End::MaybeTorn)?;
+        let cut = this.policy.cuts();
+        this.load_tail(size, End::MaybeTorn { cut })?;
         Ok((this, created))
     }
 

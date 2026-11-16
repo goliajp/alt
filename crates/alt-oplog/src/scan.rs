@@ -90,6 +90,19 @@ pub(crate) struct Replayed {
     pub last_start: Option<usize>,
 }
 
+/// Whether no whole record can follow the one at `at`, where a walk
+/// stopped short of the end of `data`: its length is cut short, or by its
+/// own length it reaches the end or past it.
+pub(crate) fn ends_the_log(data: &[u8], at: usize) -> bool {
+    match data.get(at..at + 4) {
+        Some(len) => {
+            let body_len = u32::from_le_bytes(len.try_into().unwrap()) as usize;
+            at.saturating_add(4 + body_len + CHECKSUM_LEN) >= data.len()
+        }
+        None => true,
+    }
+}
+
 /// Walks length-prefixed records in `data[from..]`, verifying that the hash
 /// chain continues from `prev_head`, pushing each op into `ops`. A record
 /// that runs past the end or fails its checksum ends the walk: whether it

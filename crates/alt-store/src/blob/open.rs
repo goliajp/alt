@@ -65,7 +65,11 @@ impl BlobStore {
         }
         let open = || {
             let runs = self.map_runs.as_deref();
-            BlobMap::open_with_runs(&self.dir.join("manifests"), runs, self.map_tail.clone())
+            let tail = match self.exclusive {
+                true => self.map_tail.clone().locked(),
+                false => self.map_tail.clone(),
+            };
+            BlobMap::open_with_runs(&self.dir.join("manifests"), runs, tail)
         };
         let map = match &self.open_lock {
             Some(lock) if !self.exclusive => crate::pack::with_shared_lock(lock, open)?,

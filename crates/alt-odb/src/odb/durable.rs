@@ -54,6 +54,26 @@ impl Odb {
         self.sync_to(target, generation)
     }
 
+    /// With the write lock held and every file this handle has open read
+    /// to its end: a store whose marker does not record boundaries that
+    /// hold — an older alt wrote it, the marker was removed, or appends
+    /// were left unsynced — gets them before anything is appended.
+    pub(super) fn bound(&mut self) -> Result<(), OdbError> {
+        let marker = Marker::read(&self.durable_path);
+        if !alt_store::relaxed_durability() && !marker.trusted() {
+            // the other two files are read to their ends as they open
+            self.blobs.open_map()?;
+            self.tier1()?;
+            self.blobs.fsync()?;
+            self.tier1_mut()?.sync()?;
+            self.map.fsync()?;
+            let whole = self.appended_whole()?;
+            synced::establish(&self.durable_path, whole)?;
+        }
+        self.head.bounded = true;
+        Ok(())
+    }
+
     /// The record boundaries this handle's appends reached. A file it has
     /// not opened it has not appended to: zero, short of any length.
     fn appended(&self) -> Result<Lens, OdbError> {
