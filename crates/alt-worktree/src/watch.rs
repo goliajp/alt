@@ -11,6 +11,7 @@ use crate::snapshot::{FileStat, Snapshot};
 use crate::untracked::Untracked;
 
 mod dirs;
+mod mounts;
 #[path = "watch/linux.rs"]
 mod os;
 

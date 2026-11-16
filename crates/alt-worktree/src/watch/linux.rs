@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 
 use alt_os::sys;
 
+use super::mounts::{self, Mounts};
 use super::{Changes, beneath};
 use crate::ignore::{self, IgnoreStack};
 use crate::snapshot::FileStat;
@@ -64,6 +65,7 @@ pub(crate) struct Watcher {
     pub(super) ignore: IgnoreStack,
     /// the directories left unwatched
     pub(super) skipped: BTreeSet<Vec<u8>>,
+    mounts: Mounts,
 }
 
 /// Whether the index has an entry at or beneath a directory.
@@ -114,16 +116,21 @@ impl Watcher {
             excludes: None,
             ignore: IgnoreStack::new(),
             skipped: BTreeSet::new(),
+            mounts: Mounts::open()?,
         };
         watcher.establish(tracked)?;
         Ok(watcher)
     }
 
     /// Watches the tree from its root, on a queue with no watches yet.
+    /// Fails for a tree that events do not tell everything about.
     fn establish(&mut self, tracked: Tracked) -> io::Result<()> {
         self.dirs.clear();
         self.skipped.clear();
         self.ident = ident(&self.root)?;
+        if mounts::elsewhere(&self.root)? || self.mounts.beneath(&self.root)? {
+            return Err(io::ErrorKind::Unsupported.into());
+        }
         // the stat first: a file replaced while it is read differs next time
         self.excludes = ignore::global_excludes_stat();
         self.ignore = IgnoreStack::with_global_excludes()?;
@@ -138,6 +145,9 @@ impl Watcher {
         let mut ruled = Vec::new();
         let mut lost =
             ident(&self.root)? != self.ident || ignore::global_excludes_stat() != self.excludes;
+        if self.mounts.changed()? && self.mounts.beneath(&self.root)? {
+            return Err(io::ErrorKind::Unsupported.into());
+        }
         let mut buf = [0u8; 1 << 16];
         loop {
             let n = match self.queue.read(&mut buf) {
