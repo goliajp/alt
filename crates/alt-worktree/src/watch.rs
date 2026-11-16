@@ -65,6 +65,8 @@ pub struct Watched {
     absorbed: Option<Changes>,
     /// the queue could not be read: the tree is no longer watched
     failed: bool,
+    /// watching ended for want of watches
+    full: bool,
 }
 
 impl Watched {
@@ -96,7 +98,23 @@ impl Watched {
             rules: sure(rules, &opts.clock),
             absorbed: None,
             failed: false,
+            full: false,
         })
+    }
+
+    /// Whether watching this tree ended because no watches were left for
+    /// it, which no later attempt changes.
+    pub fn out_of_watches(&self) -> bool {
+        self.full
+    }
+
+    /// `result`, with a note of it when it is the failure for want of
+    /// watches.
+    fn noting<T>(&mut self, result: io::Result<T>) -> Option<T> {
+        if let Err(e) = &result {
+            self.full |= e.raw_os_error() == Some(os::ENOSPC);
+        }
+        result.ok()
     }
 
     /// How often the watches were set up from the root: once at the start,
@@ -113,7 +131,10 @@ impl Watched {
         // the index is being replaced: every new directory is watched
         match self.watcher.changes(&|_| true) {
             Ok(more) => self.absorbed = Some(merged(self.absorbed.take(), more)),
-            Err(_) => self.failed = true,
+            Err(e) => {
+                self.full |= e.raw_os_error() == Some(os::ENOSPC);
+                self.failed = true;
+            }
         }
     }
 
@@ -130,7 +151,8 @@ impl Watched {
             .eq(opts.excludes.iter().copied());
         if !same_files || self.rules.as_ref() != Some(&rules) {
             // other rules hide other directories
-            self.watcher.start_over(&tracked, opts.excludes).ok()?;
+            let anew = self.watcher.start_over(&tracked, opts.excludes);
+            self.noting(anew)?;
             self.rule_files = opts
                 .excludes
                 .iter()
@@ -142,10 +164,12 @@ impl Watched {
             return Some(Changes::All);
         }
         if self.index_id != snapshot.index_id {
-            self.watcher.revisit(&tracked).ok()?;
+            let more = self.watcher.revisit(&tracked);
+            self.noting(more)?;
             self.index_id.clone_from(&snapshot.index_id);
         }
-        let fresh = self.watcher.changes(&tracked).ok()?;
+        let fresh = self.watcher.changes(&tracked);
+        let fresh = self.noting(fresh)?;
         Some(merged(self.absorbed.take(), fresh))
     }
 
@@ -244,10 +268,8 @@ impl Watched {
         context: &[u8],
     ) -> Option<Delta> {
         let (delta, seen) = crate::delta::scan_seeing(root, snapshot, whole).ok()?;
-        let fresh = self
-            .watcher
-            .fill(seen, &|dir| tracked(snapshot, dir))
-            .ok()?;
+        let fresh = self.watcher.fill(seen, &|dir| tracked(snapshot, dir));
+        let fresh = self.noting(fresh)?;
         if !fresh.is_empty() {
             self.absorbed = Some(merged(self.absorbed.take(), Changes::Paths(fresh)));
         }
