@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: take a search for a hunk header given up at its bounds as no match
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/funcname.rs
+touched: crates/alt-cli/tests/it/funcname_drivers.rs
+touched: crates/alt-cli/tests/it/funcname_long.rs
+touched: crates/alt-cli/tests/it/main.rs
