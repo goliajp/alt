@@ -70,3 +70,21 @@ impl NativeOdb {
         self.odb()?.check()
     }
 }
+
+impl NativeOdb {
+    /// The index run files of this database that are not complete runs
+    /// (see [`alt_store::runs::unusable`]), found without opening it: an
+    /// open may already replace them.
+    pub fn unusable_index_runs(&self) -> Result<Vec<std::path::PathBuf>, OdbError> {
+        let mut out = Vec::new();
+        for dir in [
+            "store/chunks.idx",
+            "store/manifests/blobmap.idx",
+            "tier1.idx",
+            "map.alt.idx",
+        ] {
+            out.extend(alt_store::runs::unusable(&self.alt_dir.join(dir))?);
+        }
+        Ok(out)
+    }
+}

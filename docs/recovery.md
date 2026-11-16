@@ -102,9 +102,16 @@ It decodes and hashes every stored chunk, reassembles every large blob, hashes
 every object to its Git id, compares each index with the file it indexes,
 verifies the whole operation log and replays it against the refs. It exits 0
 after printing how many records of each kind it verified, and non-zero at the
-first record that fails, saying what failed. It changes nothing; indexes and the ref
-snapshot are caches that the next writer rebuilds, while a damaged record in a
-log or pack is lost data to restore from another copy.
+first record that fails, saying what failed. Indexes and the ref snapshot are
+caches that the next writer rebuilds, while a damaged record in a log or pack
+is lost data to restore from another copy.
+
+An index file that was cut short or whose header is damaged is passed over by
+every command, which reads the indexed file instead. `alt fsck` names each one
+in a line starting `ignored index run` (`ignored_index_runs` in the JSON) and
+still exits 0 when every record verifies. An index that fails its check can be
+removed: delete the `*.idx` directories under `.alt` and the next command
+rebuilds them from the files they index.
 
 ## Preserve data and exit to Git
 

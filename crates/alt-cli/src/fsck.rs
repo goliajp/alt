@@ -13,6 +13,8 @@ use crate::native::Store;
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
 pub fn run<W: Write>(store: &mut Store, json: bool, out: &mut W) -> Res<u8> {
+    // looked for before the store is opened, which may replace them
+    let ignored = store.odb().unusable_index_runs().map_err(with_cause)?;
     let odb = store.odb().check().map_err(with_cause)?;
     let refs = store.refs_mut().check().map_err(with_cause)?;
     let counts = [
@@ -24,12 +26,24 @@ pub fn run<W: Write>(store: &mut Store, json: bool, out: &mut W) -> Res<u8> {
         ("refs", "refs", refs.refs),
     ];
     if json {
-        let fields = counts
+        let mut fields: Vec<_> = counts
             .iter()
             .map(|(key, _, count)| (*key, Json::Num(*count as i64)))
             .collect();
+        let paths = ignored
+            .iter()
+            .map(|path| Json::str(path.to_string_lossy().as_bytes()));
+        fields.push(("ignored_index_runs", Json::Array(paths.collect())));
         json::emit(out, fields)?;
     } else {
+        // an index is a cache: without the run its log is read instead
+        for path in &ignored {
+            writeln!(
+                out,
+                "ignored index run {}: not a complete run",
+                path.display()
+            )?;
+        }
         for (_, label, count) in counts {
             writeln!(out, "{count:>12} {label}")?;
         }

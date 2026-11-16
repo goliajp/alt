@@ -98,3 +98,90 @@ fn damage_in_a_record_no_command_reads_fails_fsck_only() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("map.alt record corrupt"), "got: {stderr}");
 }
+
+const INDEX_DIRS: [&str; 4] = [
+    ".alt/map.alt.idx",
+    ".alt/tier1.idx",
+    ".alt/store/chunks.idx",
+    ".alt/store/manifests/blobmap.idx",
+];
+
+fn runs_in(dir: &Path) -> Vec<std::path::PathBuf> {
+    let files = fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().path());
+    files
+        .filter(|path| path.extension().is_some_and(|e| e == "run"))
+        .collect()
+}
+
+#[test]
+fn an_index_run_no_open_can_use_is_named() {
+    // cut short, emptied, and with a damaged header
+    let damages: [fn(&Path); 3] = [
+        |run| {
+            fs::OpenOptions::new()
+                .write(true)
+                .open(run)
+                .unwrap()
+                .set_len(40)
+                .unwrap()
+        },
+        |run| fs::write(run, b"").unwrap(),
+        |run| {
+            let file = fs::OpenOptions::new().write(true).open(run).unwrap();
+            file.write_all_at(&[0xff], 10).unwrap()
+        },
+    ];
+    for damage in damages {
+        let tmp = alt_os::temp::tempdir().unwrap();
+        setup(tmp.path());
+        let run = runs_in(&tmp.path().join(".alt/map.alt.idx")).pop().unwrap();
+        damage(&run);
+        let out = ok(alt(tmp.path(), &["fsck"]));
+        let named = format!("ignored index run {}: not a complete run\n", run.display());
+        assert!(out.contains(&named), "got: {out}");
+        assert!(out.ends_with("every record verified\n"), "got: {out}");
+        // that open put a whole run in its place
+        assert!(!ok(alt(tmp.path(), &["fsck"])).contains("ignored"));
+        let run = runs_in(&tmp.path().join(".alt/map.alt.idx")).pop().unwrap();
+        damage(&run);
+        let json = ok(alt(tmp.path(), &["fsck", "--json"]));
+        let listed = format!("\"ignored_index_runs\":[\"{}\"]", run.display());
+        assert!(json.contains(&listed), "got: {json}");
+    }
+}
+
+#[test]
+fn removing_the_index_directories_repairs_them_and_loses_nothing() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    setup(tmp.path());
+    let remove_indexes = || {
+        for dir in INDEX_DIRS {
+            match fs::remove_dir_all(tmp.path().join(dir)) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => panic!("{dir}: {e}"),
+                _ => {}
+            }
+        }
+    };
+    remove_indexes();
+    let log = ok(alt(tmp.path(), &["log"]));
+    assert_eq!(log.lines().count(), 2, "got: {log}");
+    let out = ok(alt(tmp.path(), &["fsck"]));
+    assert!(!out.contains("ignored"), "got: {out}");
+    assert!(out.ends_with("every record verified\n"), "got: {out}");
+    assert_eq!(runs_in(&tmp.path().join(".alt/map.alt.idx")).len(), 1);
+
+    // over a damaged record the rebuild reports it and cuts nothing off
+    let map = tmp.path().join(".alt/map.alt");
+    flip(&map, 5 + 100 * 82 + 40);
+    remove_indexes();
+    let before = fs::metadata(&map).unwrap().len();
+    for command in [&["cat-file", "-p", "HEAD"][..], &["fsck"]] {
+        let out = alt(tmp.path(), command);
+        assert!(!out.status.success(), "alt {command:?}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("map.alt record corrupt"), "got: {stderr}");
+    }
+    assert_eq!(fs::metadata(&map).unwrap().len(), before);
+}

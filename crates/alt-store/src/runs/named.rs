@@ -2,7 +2,7 @@
 //! listing, and keeping the directory free of files outside the chain.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::{Guard, Run, Runs, parse_name, remove_if_present, run_name};
 use crate::StoreError;
@@ -76,4 +76,26 @@ impl Runs {
         }
         Ok(())
     }
+}
+
+/// The run files in `dir` that are not complete runs: a damaged header, a
+/// file cut short or left empty. Every open passes them over and the next
+/// writer replaces them.
+pub fn unusable(dir: &Path) -> Result<Vec<PathBuf>, StoreError> {
+    let listing = match fs::read_dir(dir) {
+        Ok(listing) => listing,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e.into()),
+    };
+    let mut out = Vec::new();
+    for entry in listing {
+        let entry = entry?;
+        if let Some((start, end)) = entry.file_name().to_str().and_then(parse_name)
+            && Run::load(entry.path(), start, end)?.is_none()
+        {
+            out.push(entry.path());
+        }
+    }
+    out.sort();
+    Ok(out)
 }

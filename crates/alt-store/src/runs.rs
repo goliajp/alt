@@ -35,6 +35,7 @@ use crate::StoreError;
 use crate::run_write::write_run;
 
 mod named;
+pub use named::unusable;
 
 pub const KEY_LEN: usize = 32;
 /// How many log bytes before a run's end its guard holds, at most.
