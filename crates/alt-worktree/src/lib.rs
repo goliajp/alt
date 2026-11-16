@@ -18,6 +18,7 @@ mod fsdir;
 mod glob;
 pub mod ident;
 mod ignore;
+mod kind;
 mod scan;
 mod snapshot;
 #[cfg(unix)]
@@ -32,6 +33,7 @@ pub use cachetree::Staged;
 pub use clock::{Clock, Stamp};
 #[cfg(unix)]
 pub use delta::{CleanTracked, Delta, ScanOptions, scan};
+pub use kind::ChangeKind;
 pub use snapshot::{Dir, Entry, FileStat, Snapshot};
 #[cfg(unix)]
 pub use untracked::Untracked;
@@ -101,13 +103,6 @@ pub struct WorkEntry {
     pub path: BString,
     pub oid: ObjectId,
     pub mode: u32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ChangeKind {
-    Added,
-    Modified,
-    Deleted,
 }
 
 /// What `alt status` reports: index vs HEAD (staged), worktree vs index
@@ -396,7 +391,10 @@ fn diff(old: &[WorkEntry], new: &[WorkEntry], mut emit: impl FnMut(BString, Chan
             }
             std::cmp::Ordering::Equal => {
                 if old[i].oid != new[j].oid || old[i].mode != new[j].mode {
-                    emit(new[j].path.clone(), ChangeKind::Modified);
+                    emit(
+                        new[j].path.clone(),
+                        ChangeKind::between(old[i].mode, new[j].mode),
+                    );
                 }
                 i += 1;
                 j += 1;

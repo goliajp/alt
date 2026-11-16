@@ -11,19 +11,23 @@ impl TreeState {
         let kind = |s: &Staged| match (&s.old, &s.new) {
             (None, _) => ChangeKind::Added,
             (_, None) => ChangeKind::Deleted,
-            _ => ChangeKind::Modified,
+            (Some(old), Some(new)) => ChangeKind::between(old.mode, new.mode),
         };
+        let snapshot = &self.snapshot;
+        let changed = |w: &WorkEntry| {
+            let staged = snapshot.find(&w.path).map(|at| snapshot.entries[at].mode);
+            let kind = staged.map_or(ChangeKind::Modified, |mode| {
+                ChangeKind::between(mode, w.mode)
+            });
+            (w.path.clone(), kind)
+        };
+        let gone = |path: &BString| (path.clone(), ChangeKind::Deleted);
         let mut unstaged: Vec<(BString, ChangeKind)> = self
             .delta
             .changed
             .iter()
-            .map(|w| (w.path.clone(), ChangeKind::Modified))
-            .chain(
-                self.delta
-                    .deleted
-                    .iter()
-                    .map(|p| (p.clone(), ChangeKind::Deleted)),
-            )
+            .map(changed)
+            .chain(self.delta.deleted.iter().map(gone))
             .collect();
         unstaged.sort_by(|a, b| a.0.cmp(&b.0));
         alt_worktree::Status {

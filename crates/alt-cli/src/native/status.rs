@@ -49,9 +49,10 @@ impl NativeRepo<'_> {
         }
         writeln!(out, "On branch {short}")?;
         let mark = |k: ChangeKind| match k {
-            ChangeKind::Added => "new file",
-            ChangeKind::Modified => "modified",
-            ChangeKind::Deleted => "deleted",
+            ChangeKind::Added => "new file:   ",
+            ChangeKind::Modified => "modified:   ",
+            ChangeKind::Deleted => "deleted:   ",
+            ChangeKind::TypeChanged => "typechange: ",
         };
         if !unmerged.is_empty() {
             writeln!(out, "Unmerged paths:")?;
@@ -62,13 +63,13 @@ impl NativeRepo<'_> {
         if !st.staged.is_empty() {
             writeln!(out, "Changes to be committed:")?;
             for (p, k) in &st.staged {
-                writeln!(out, "\t{}:   {p}", mark(*k))?;
+                writeln!(out, "\t{}{p}", mark(*k))?;
             }
         }
         if !st.unstaged.is_empty() {
             writeln!(out, "Changes not staged for commit:")?;
             for (p, k) in &st.unstaged {
-                writeln!(out, "\t{}:   {p}", mark(*k))?;
+                writeln!(out, "\t{}{p}", mark(*k))?;
             }
         }
         if !st.untracked.is_empty() {
@@ -104,7 +105,8 @@ fn render_status_json(
     use crate::json::Json;
     let change = |k: ChangeKind| match k {
         ChangeKind::Added => "added",
-        ChangeKind::Modified => "modified",
+        // the schema has no word of its own for another type of entry
+        ChangeKind::Modified | ChangeKind::TypeChanged => "modified",
         ChangeKind::Deleted => "deleted",
     };
     let entries = |v: &[(BString, ChangeKind)]| {
@@ -140,10 +142,11 @@ fn render_status_json(
 }
 
 /// The mode `text` names, by its name or as a boolean in one of the
-/// spellings git takes: true is `normal`, false is `no`.
+/// spellings git takes: true is `normal`, false is `no`, and so is the
+/// empty text.
 fn mode_named(text: &[u8]) -> Option<Untracked> {
     match text.to_ascii_lowercase().as_slice() {
-        b"no" | b"false" | b"off" | b"0" => Some(Untracked::No),
+        b"" | b"no" | b"false" | b"off" | b"0" => Some(Untracked::No),
         b"normal" | b"true" | b"yes" | b"on" | b"1" => Some(Untracked::Normal),
         b"all" => Some(Untracked::All),
         _ => None,

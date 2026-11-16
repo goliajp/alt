@@ -148,6 +148,18 @@ fn nothing_but_untracked_files_left_out_reads_as_clean() {
 }
 
 #[test]
+fn an_empty_untracked_files_mode_shows_none_as_for_git() {
+    let (a, g) = pair();
+    let (a, g) = (a.path(), g.path());
+    assert!(!git_untracked(g, &["-uno"]).is_empty() || git_untracked(g, &[]).len() > 1);
+    assert!(git_untracked(g, &["--untracked-files="]).is_empty());
+    let none = ok(alt(a, &["status", "--untracked-files="]));
+    assert_eq!(none, ok(alt(a, &["status", "-uno"])));
+    assert!(ok(alt(a, &["status"])).contains("Untracked files:"));
+    assert!(!none.contains("Untracked files:"));
+}
+
+#[test]
 fn add_stages_the_files_of_a_directory_shown_as_one_line() {
     let (a, g) = pair();
     let (a, g) = (a.path(), g.path());
@@ -206,11 +218,15 @@ fn a_repository_in_an_untracked_directory_shows_as_git_shows_it() {
     // a repository with no commit cannot be staged, nor anything with it
     let before = ok(alt(a, &["status"]));
     for named in [".", "outer", "t/emb"] {
-        assert!(!git(g, &["add", named]).status.success(), "{named}");
+        // with git's two lines and its status
+        let theirs = git(g, &["add", named]);
         let refused = alt(a, &["add", named]);
-        assert!(!refused.status.success(), "{named}");
+        assert_eq!(theirs.status.code(), Some(128), "{named}");
+        assert_eq!(refused.status.code(), Some(128), "{named}");
+        let said = String::from_utf8_lossy(&theirs.stderr).into_owned();
+        assert!(said.ends_with("fatal: adding files failed\n"), "{said}");
         let why = String::from_utf8_lossy(&refused.stderr).into_owned();
-        assert!(why.contains("does not have a commit checked out"), "{why}");
+        assert!(why.starts_with(&said), "{why}");
         assert_eq!(ok(alt(a, &["status"])), before, "{named}");
     }
     assert!(git_untracked(g, &[]).contains(&"emb/".to_owned()));

@@ -32,7 +32,11 @@ impl NativeRepo<'_> {
             let path = BString::from(path);
             let head = attrs.submodule_head(&self.abs(&path)?);
             attrs.check()?;
-            let oid = head.ok_or_else(|| format!("'{dir}' does not have a commit checked out"))?;
+            let Some(oid) = head else {
+                let why = format!("error: '{dir}' does not have a commit checked out\n");
+                crate::diagnostics::emit(why.as_bytes())?;
+                return Err(settings::fatal("adding files failed".into()));
+            };
             delta.changed.push(WorkEntry {
                 path: path.clone(),
                 oid,

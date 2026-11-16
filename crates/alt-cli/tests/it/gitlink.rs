@@ -59,6 +59,7 @@ pub(super) fn agree(g: &Path, a: &Path, at: &str) -> String {
                 " D" | "D " => "deleted:   ",
                 " M" | "M " => "modified:   ",
                 "A " => "new file:   ",
+                " T" | "T " => "typechange: ",
                 other => panic!("{other}"),
             };
             format!("\t{what}{}", &line[3..])
@@ -158,4 +159,21 @@ fn add_stages_a_repository_of_its_own_as_a_submodule_as_git_does() {
     ok(git(g, &["add", "."]));
     ok(alt(a, &["add", "."]));
     assert_eq!(agree(g, a, "moved on and staged"), "M  emb\n");
+}
+
+#[test]
+fn another_type_of_entry_at_a_path_is_a_change_of_type_as_for_git() {
+    let (g, a) = pair();
+    let (g, a) = (g.path(), a.path());
+    std::fs::remove_dir(a.join("sub")).unwrap();
+    for root in [g, a] {
+        // a file where the submodule was, a symlink where a file was
+        std::fs::write(root.join("sub"), "a file now\n").unwrap();
+        std::fs::remove_file(root.join("a.txt")).unwrap();
+        std::os::unix::fs::symlink("sub", root.join("a.txt")).unwrap();
+    }
+    assert_eq!(agree(g, a, "in the tree"), " T a.txt\n T sub\n");
+    ok(git(g, &["add", "."]));
+    ok(alt(a, &["add", "."]));
+    assert_eq!(agree(g, a, "staged"), "T  a.txt\nT  sub\n");
 }
