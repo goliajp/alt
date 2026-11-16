@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: refuse a pattern for hunk headers in the words of git
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/funcname.rs
