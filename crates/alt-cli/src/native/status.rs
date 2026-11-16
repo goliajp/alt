@@ -62,6 +62,14 @@ impl NativeRepo<'_> {
     }
 }
 
+/// One path of `status` after its `mark`: the bytes of its name as they
+/// are, or quoted as git quotes them.
+fn path_line(out: &mut impl Write, mark: &str, shown: &[u8], quote: bool) -> Res<()> {
+    write!(out, "\t{mark}")?;
+    crate::quote::write_path(out, shown, quote)?;
+    Ok(out.write_all(b"\n")?)
+}
+
 /// The long form of `status`: its paths as they are named from `prefix`,
 /// the conflicted ones after the staged ones, as for git.
 fn render_status(
@@ -71,11 +79,7 @@ fn render_status(
     st: &alt_worktree::Status,
     conflicts: &std::collections::BTreeMap<BString, u8>,
 ) -> Res<()> {
-    let shown = |p: &BString| {
-        let mut quoted = Vec::new();
-        let _ = crate::quote::write_path(&mut quoted, &pathspec::shown_from(prefix, p), quote);
-        BString::from(quoted)
-    };
+    let shown = |p: &BString| pathspec::shown_from(prefix, p);
     let mark = |k: ChangeKind| match k {
         ChangeKind::Added => "new file:   ",
         ChangeKind::Modified => "modified:   ",
@@ -85,32 +89,29 @@ fn render_status(
     if !st.staged.is_empty() {
         writeln!(out, "Changes to be committed:")?;
         for (p, k) in &st.staged {
-            writeln!(out, "\t{}{}", mark(*k), shown(p))?;
+            path_line(out, mark(*k), &shown(p), quote)?;
         }
     }
     if !conflicts.is_empty() {
         writeln!(out, "Unmerged paths:")?;
         for (p, stages) in conflicts {
-            writeln!(out, "\t{}{}", conflict_mark(*stages), shown(p))?;
+            path_line(out, conflict_mark(*stages), &shown(p), quote)?;
         }
     }
     if !st.unstaged.is_empty() {
         writeln!(out, "Changes not staged for commit:")?;
         for (p, k) in &st.unstaged {
-            writeln!(out, "\t{}{}", mark(*k), shown(p))?;
+            path_line(out, mark(*k), &shown(p), quote)?;
         }
     }
     if !st.untracked.is_empty() {
         writeln!(out, "Untracked files:")?;
         for p in &st.untracked {
-            writeln!(out, "\t{}", shown(p))?;
+            path_line(out, "", &shown(p), quote)?;
         }
     }
-    if conflicts.is_empty()
-        && st.staged.is_empty()
-        && st.unstaged.is_empty()
-        && st.untracked.is_empty()
-    {
+    let changed = st.staged.len() + st.unstaged.len() + st.untracked.len();
+    if conflicts.is_empty() && changed == 0 {
         writeln!(out, "nothing to commit, working tree clean")?;
     }
     Ok(())
@@ -135,7 +136,9 @@ fn conflict_mark(stages: u8) -> &'static str {
 /// `{schema_version, branch, principal:{kind,id,session?}, staged:[…],
 /// unstaged:[…], untracked:[…], unmerged:[…], clean}`. `change` ∈
 /// `added`/`modified`/`deleted`/`typechange`; version 1 had no
-/// `typechange` and reported such a path as `modified`. `principal` is
+/// `typechange` and reported such a path as `modified`. A path that is
+/// not UTF-8 has its bytes in hex beside it: as `path_bytes` in an entry,
+/// in `untracked_bytes` and `unmerged_bytes` by its place in the list. `principal` is
 /// the structured actor, so an agent can self-check "who am I to this
 /// repo" via the same machine-first surface it uses for everything else.
 fn render_status_json(
@@ -156,30 +159,34 @@ fn render_status_json(
         Json::Array(
             v.iter()
                 .map(|(p, k)| {
-                    Json::Object(vec![
-                        ("path", Json::str(p)),
-                        ("change", Json::str(change(*k))),
-                    ])
+                    let mut entry = crate::json::path(p);
+                    entry.push(("change", Json::str(change(*k))));
+                    Json::Object(entry)
                 })
                 .collect(),
         )
     };
-    let paths = |it: &mut dyn Iterator<Item = &BString>| Json::Array(it.map(Json::str).collect());
     let clean = unmerged.is_empty()
         && st.staged.is_empty()
         && st.unstaged.is_empty()
         && st.untracked.is_empty();
-    let doc = Json::Object(vec![
+    let mut doc = vec![
         ("schema_version", Json::Num(2)),
         ("branch", Json::str(branch)),
         ("principal", principal_json(principal)),
         ("staged", entries(&st.staged)),
         ("unstaged", entries(&st.unstaged)),
-        ("untracked", paths(&mut st.untracked.iter())),
-        ("unmerged", paths(&mut unmerged.iter())),
-        ("clean", Json::Bool(clean)),
-    ]);
-    doc.write(out)?;
+    ];
+    let untracked = st.untracked.iter().map(|path| path.as_slice());
+    doc.extend(crate::json::paths(
+        "untracked",
+        "untracked_bytes",
+        untracked,
+    ));
+    let unmerged = unmerged.iter().map(|path| path.as_slice());
+    doc.extend(crate::json::paths("unmerged", "unmerged_bytes", unmerged));
+    doc.push(("clean", Json::Bool(clean)));
+    Json::Object(doc).write(out)?;
     out.write_all(b"\n")?;
     Ok(())
 }

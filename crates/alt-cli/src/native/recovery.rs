@@ -467,7 +467,7 @@ impl NativeRepo<'_> {
                 }
                 let bytes = self.read_snapshot(&intent.before)?;
                 self.read_snapshot(&intent.after)?;
-                fields.push(("paths", Json::Array(intent.worktree.iter().map(|g| Json::str(&g.path)).collect())));
+                fields.extend(crate::json::paths("paths", "paths_bytes", intent.worktree.iter().map(|g| g.path.as_slice())));
                 let inverse = IndexIntent {
                     before: intent.after, after: intent.before,
                     inverse_of: Some(prepared.id.to_string()), request_id: self.request_id.map(|id| crate::machine::hex(&id)), ..intent

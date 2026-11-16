@@ -114,7 +114,7 @@ impl NativeRepo<'_> {
         if json {
             crate::json::emit(out, vec![("staged", crate::json::Json::Num(staged as i64))])?;
         } else {
-            crate::diagnostics::emit(advice.as_bytes())?;
+            crate::diagnostics::emit(&advice)?;
             writeln!(out, "staged {staged} path(s)")?;
         }
         if hidden.is_empty() {

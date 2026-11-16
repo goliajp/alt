@@ -207,16 +207,13 @@ impl NativeRepo<'_> {
             } else {
                 Json::Null
             };
-            let oid = |w: Option<&WorkEntry>| match w {
-                Some(w) => Json::str(w.oid.to_string()),
-                None => Json::Null,
-            };
+            let id = |w: &WorkEntry| Json::str(w.oid.to_string());
+            let oid = |w: Option<&WorkEntry>| w.map_or(Json::Null, id);
             let mode = |w: Option<&WorkEntry>| match w {
                 Some(w) => Json::str(format!("{:06o}", w.mode)),
                 None => Json::Null,
             };
-            files.push(Json::Object(vec![
-                ("path", Json::str(ch.path)),
+            let rest = [
                 ("status", Json::str(status)),
                 ("old_oid", oid(ch.old)),
                 ("new_oid", oid(ch.new)),
@@ -228,7 +225,9 @@ impl NativeRepo<'_> {
                 ("perceptual_diff", perceptual_diff_field),
                 ("part_diff", part_diff_field),
                 ("ast_diff", ast_diff_field),
-            ]));
+            ];
+            let file = crate::json::path(ch.path).into_iter().chain(rest);
+            files.push(Json::Object(file.collect()));
         }
         let doc = Json::Object(vec![
             ("schema_version", Json::Num(1)),

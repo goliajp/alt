@@ -33,8 +33,12 @@ impl NativeRepo<'_> {
             let head = attrs.submodule_head(&self.abs(&path)?);
             attrs.check()?;
             let Some(oid) = head else {
-                let why = format!("error: '{dir}' does not have a commit checked out\n");
-                crate::diagnostics::emit(why.as_bytes())?;
+                let why = [
+                    b"error: '",
+                    &dir[..],
+                    b"' does not have a commit checked out\n",
+                ];
+                crate::diagnostics::emit(&why.concat())?;
                 return Err(settings::fatal("adding files failed".into()));
             };
             delta.changed.push(WorkEntry {
@@ -51,20 +55,20 @@ impl NativeRepo<'_> {
 
 /// What `add` says of the repositories at `paths` that it staged as
 /// submodules: git's warning for each, and once what it means, unless
-/// `advice.addEmbeddedRepo` is off. Git names a command that takes the
+/// `advice.addEmbeddedRepo` is off; a path is said as its bytes are. Git names a command that takes the
 /// one path out of the index, which this program has none for.
-pub(super) fn warning(paths: &[BString], settings: &alt_git_config::Config) -> Res<String> {
-    let mut said = String::new();
+pub(super) fn warning(paths: &[BString], settings: &alt_git_config::Config) -> Res<Vec<u8>> {
+    let mut said = Vec::new();
     let advise = match settings.get_bool("advice", None, "addembeddedrepo") {
         Some(set) => set?,
         None => true,
     };
     for (nth, path) in paths.iter().enumerate() {
-        said.push_str(&format!(
-            "warning: adding embedded git repository: {path}\n"
-        ));
+        said.extend_from_slice(b"warning: adding embedded git repository: ");
+        said.extend_from_slice(path);
+        said.push(b'\n');
         if nth == 0 && advise {
-            said.push_str(ADVICE);
+            said.extend_from_slice(ADVICE.as_bytes());
         }
     }
     Ok(said)

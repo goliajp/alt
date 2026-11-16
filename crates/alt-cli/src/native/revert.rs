@@ -138,9 +138,7 @@ impl NativeRepo<'_> {
                     if json {
                         self.report_merge(true, out, "conflicted", None, &conflicts, "")?;
                     } else {
-                        for p in &conflicts {
-                            writeln!(out, "CONFLICT (content): Merge conflict in {p}")?;
-                        }
+                        cherry_pick::say_conflicts(out, "Merge", &conflicts)?;
                         let short = &target.to_string()[..7];
                         writeln!(
                             out,

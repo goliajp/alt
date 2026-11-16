@@ -412,9 +412,7 @@ impl NativeRepo<'_> {
         if json {
             return self.report_merge(true, out, "conflicted", None, conflicts, "");
         }
-        for p in conflicts {
-            writeln!(out, "CONFLICT (content): Merge conflict in {p}")?;
-        }
+        cherry_pick::say_conflicts(out, "Merge", conflicts)?;
         let subject = self.read_commit_parts(commit)?.subject();
         writeln!(
             out,

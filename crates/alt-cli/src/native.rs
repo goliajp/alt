@@ -1827,9 +1827,7 @@ impl<'a> NativeRepo<'a> {
                 if json {
                     self.report_merge(true, out, "conflicted", None, &conflicts, "")?;
                 } else {
-                    for p in &conflicts {
-                        writeln!(out, "CONFLICT (content): Merge conflict in {p}")?;
-                    }
+                    cherry_pick::say_conflicts(out, "Merge", &conflicts)?;
                     writeln!(
                         out,
                         "Automatic merge failed; fix conflicts and then commit the result."
@@ -1841,7 +1839,8 @@ impl<'a> NativeRepo<'a> {
     }
 
     /// Emits one merge outcome: the human line, or `{schema_version, result,
-    /// commit?, conflicts}` for `--json`.
+    /// commit?, conflicts}` for `--json`, with `conflicts_bytes` where a
+    /// conflicted path is not UTF-8.
     fn report_merge(
         &self,
         json: bool,
@@ -1853,23 +1852,15 @@ impl<'a> NativeRepo<'a> {
     ) -> Res<()> {
         if json {
             use crate::json::Json;
-            crate::json::emit(
-                out,
-                vec![
-                    ("result", Json::str(result)),
-                    (
-                        "commit",
-                        match commit {
-                            Some(c) => Json::str(c.to_string()),
-                            None => Json::Null,
-                        },
-                    ),
-                    (
-                        "conflicts",
-                        Json::Array(conflicts.iter().map(Json::str).collect()),
-                    ),
-                ],
-            )?;
+            let commit = commit.map_or(Json::Null, |c| Json::str(c.to_string()));
+            let mut fields = vec![("result", Json::str(result)), ("commit", commit)];
+            let conflicts = conflicts.iter().map(|path| path.as_slice());
+            fields.extend(crate::json::paths(
+                "conflicts",
+                "conflicts_bytes",
+                conflicts,
+            ));
+            crate::json::emit(out, fields)?;
         } else {
             writeln!(out, "{human}")?;
         }
