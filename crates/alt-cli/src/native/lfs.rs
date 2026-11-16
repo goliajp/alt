@@ -43,12 +43,15 @@ impl NativeRepo<'_> {
             pointer.or_else(|| self.stored_form(&attrs, index, path, content))
         };
         let head = |dir: &Path| attrs.submodule_head(dir);
+        let excludes = self.exclude_files(&self.settings()?)?;
+        let excludes: Vec<&Path> = excludes.iter().map(PathBuf::as_path).collect();
         let scan = scan_worktree_with_index(
             &self.root,
             index,
             self.store.algo,
             Some(&clean),
             Some(&head),
+            &excludes,
         )?;
         attrs.check()?;
         Ok(scan)

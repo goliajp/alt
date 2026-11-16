@@ -112,19 +112,23 @@ impl NativeRepo<'_> {
         let head = |dir: &Path| get().and_then(|(_, attrs)| attrs.submodule_head(dir));
         let control = self.index_path.parent().ok_or("index has no directory")?;
         let clock = alt_worktree::Clock::read(control).unwrap_or(alt_worktree::Clock::UNREADABLE);
+        let inputs = self.scan_inputs()?;
+        let excludes: Vec<&Path> = inputs.excludes.iter().map(PathBuf::as_path).collect();
         let options = ScanOptions {
             untracked,
             within,
             clean: Some(&clean),
             head: Some(&head),
+            excludes: &excludes,
             clock,
         };
         // a watched tree holds its answer with directories as one path
         let watched = match within.is_empty() && untracked != Untracked::All {
             true => {
-                let (files, context) = self.scan_inputs()?;
-                let files: Vec<&Path> = files.iter().map(PathBuf::as_path).collect();
-                watching::watched_scan(&self.root, snapshot, &options, (&files, &context))?
+                let files: Vec<&Path> = inputs.files.iter().map(PathBuf::as_path).collect();
+                let branch = self.head_branch()?.into_bytes();
+                let settings = (files.as_slice(), branch.as_slice());
+                watching::watched_scan(&self.root, snapshot, &options, settings)?
             }
             false => None,
         };

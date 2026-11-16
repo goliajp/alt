@@ -10,7 +10,7 @@ use std::process::{Command, Output};
 /// Runs `alt` in `repo`, through its daemon or not. The user's settings
 /// are looked for inside the control directory, where a test can put them
 /// and no test finds those of whoever runs it.
-fn output(repo: &Path, args: &[&str], daemon: bool) -> Output {
+pub(crate) fn output(repo: &Path, args: &[&str], daemon: bool) -> Output {
     // the tree of a workspace has a file by that name: nothing is found there
     let config = match repo.join(".alt").is_dir() {
         true => repo.join(".alt/test-config"),
@@ -32,7 +32,7 @@ fn output(repo: &Path, args: &[&str], daemon: bool) -> Output {
     command.output().unwrap()
 }
 
-fn run(repo: &Path, args: &[&str], daemon: bool) -> String {
+pub(crate) fn run(repo: &Path, args: &[&str], daemon: bool) -> String {
     let o = output(repo, args, daemon);
     assert!(
         o.status.success(),
@@ -43,14 +43,14 @@ fn run(repo: &Path, args: &[&str], daemon: bool) -> String {
     String::from_utf8(o.stdout).unwrap()
 }
 
-fn write(root: &Path, rel: &str, body: &str) {
+pub(crate) fn write(root: &Path, rel: &str, body: &str) {
     let p = root.join(rel);
     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
     std::fs::write(p, body).unwrap();
 }
 
 /// The daemon and a direct run give the same status and the same diffs.
-fn agree(root: &Path, at: &str) -> String {
+pub(crate) fn agree(root: &Path, at: &str) -> String {
     let status = run(root, &["status"], true);
     assert_eq!(status, run(root, &["status"], false), "status {at}");
     let others: [&[&str]; 5] = [
@@ -70,13 +70,13 @@ fn agree(root: &Path, at: &str) -> String {
     status
 }
 
-fn daemon_pid(root: &Path) -> i32 {
+pub(crate) fn daemon_pid(root: &Path) -> i32 {
     let meta = std::fs::read_to_string(root.join(".alt/daemon.meta")).unwrap();
     meta.lines().next().unwrap().parse().unwrap()
 }
 
 /// Ends the daemon of a test repository and waits until it is gone.
-struct Stop(i32);
+pub(crate) struct Stop(pub(crate) i32);
 
 impl Drop for Stop {
     fn drop(&mut self) {
@@ -92,7 +92,7 @@ impl Drop for Stop {
 }
 
 /// A repository with one commit, and its daemon started.
-fn served() -> (alt_os::temp::TempDir, Stop) {
+pub(crate) fn served() -> (alt_os::temp::TempDir, Stop) {
     let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     run(root, &["init"], false);
@@ -191,7 +191,7 @@ fn the_daemon_answers_from_the_snapshot_it_holds_as_a_direct_run_does() {
 
 /// Whether the daemon holds an inotify instance.
 #[cfg(target_os = "linux")]
-fn watching(pid: i32) -> bool {
+pub(crate) fn watching(pid: i32) -> bool {
     std::fs::read_dir(format!("/proc/{pid}/fd"))
         .unwrap()
         .filter_map(|fd| std::fs::read_link(fd.unwrap().path()).ok())
@@ -272,7 +272,7 @@ fn the_daemon_follows_the_tree_and_the_index_by_events() {
 
 /// The inotify instances the daemon holds and the watches on them.
 #[cfg(target_os = "linux")]
-fn watches(pid: i32) -> (usize, usize) {
+pub(crate) fn watches(pid: i32) -> (usize, usize) {
     let (mut instances, mut watches) = (0, 0);
     for fd in std::fs::read_dir(format!("/proc/{pid}/fd")).unwrap() {
         let fd = fd.unwrap();
@@ -408,7 +408,7 @@ fn attributes_and_settings_that_change_how_a_file_compares_reach_the_daemon() {
 
 /// The descriptors of the inotify instances the daemon holds.
 #[cfg(target_os = "linux")]
-fn instances(pid: i32) -> Vec<String> {
+pub(crate) fn instances(pid: i32) -> Vec<String> {
     let mut held: Vec<String> = std::fs::read_dir(format!("/proc/{pid}/fd"))
         .unwrap()
         .map(|fd| fd.unwrap())

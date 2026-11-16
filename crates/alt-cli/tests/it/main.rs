@@ -29,6 +29,7 @@ mod flow_enforce;
 mod flow_kill;
 mod flow_release_hotfix;
 mod identity;
+mod ignore_sources;
 mod import_materialize;
 mod json_outputs;
 mod lfs;
@@ -50,6 +51,8 @@ mod remote;
 mod revert;
 mod scan_cache;
 mod scan_daemon;
+#[cfg(target_os = "linux")]
+mod scan_daemon_inputs;
 mod show;
 mod status_json;
 mod status_untracked;

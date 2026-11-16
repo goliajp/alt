@@ -60,6 +60,7 @@ fn options(untracked: bool, now: Stamp) -> ScanOptions<'static> {
         within: &[],
         clean: None,
         head: None,
+        excludes: &[],
         clock: Clock { now, dev },
     }
 }
@@ -67,7 +68,7 @@ fn options(untracked: bool, now: Stamp) -> ScanOptions<'static> {
 type View = (Vec<(BString, ChangeKind)>, Vec<BString>);
 
 fn full_scan_view(root: &Path, index: &Index) -> View {
-    let worktree = scan_worktree_with_index(root, index, ALGO, None, None).unwrap();
+    let worktree = scan_worktree_with_index(root, index, ALGO, None, None, &[]).unwrap();
     let st = status(&[], &index_entries(index), &worktree);
     (st.unstaged, st.untracked)
 }

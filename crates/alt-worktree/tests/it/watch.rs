@@ -22,6 +22,7 @@ pub(crate) fn options(untracked: Untracked, root: &Path) -> ScanOptions<'static>
         within: &[],
         clean: None,
         head: None,
+        excludes: &[],
         // the moment a command would take: a file written within the same
         // tick of the clock is read again next time
         clock: Clock::read(&root.join(".alt")).unwrap(),
@@ -35,6 +36,7 @@ pub(crate) fn start(root: &Path, most: usize, snapshot: &Snapshot) -> std::io::R
         within: &[],
         clean: None,
         head: None,
+        excludes: &[],
         // read off the tree itself, before anything in it is watched
         clock: Clock::read(root).unwrap(),
     };

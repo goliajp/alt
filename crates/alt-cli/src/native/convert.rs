@@ -192,8 +192,8 @@ impl NativeRepo<'_> {
 }
 
 /// A path from the configuration, `~/` standing for the home directory.
-fn expand_home(path: &[u8], home: Option<&Path>) -> Res<PathBuf> {
-    let path = std::str::from_utf8(path).map_err(|_| "core.attributesFile is not UTF-8")?;
+pub(super) fn expand_home(path: &[u8], home: Option<&Path>) -> Res<PathBuf> {
+    let path = std::str::from_utf8(path).map_err(|_| "a configured path is not UTF-8")?;
     Ok(match (path.strip_prefix("~/"), home) {
         (Some(rest), Some(home)) => home.join(rest),
         _ => PathBuf::from(path),

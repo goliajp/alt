@@ -33,6 +33,9 @@ pub struct ScanOptions<'a> {
     pub within: &'a [&'a [u8]],
     pub clean: Option<CleanTracked<'a>>,
     pub head: Option<SubmoduleHead<'a>>,
+    /// the ignore files outside the working tree, a later one above an
+    /// earlier and every `.gitignore` above them all
+    pub excludes: &'a [&'a Path],
     /// when the scan began: a file changed at or after it is compared but
     /// not recorded as unchanged, because a later change within the same
     /// tick of the clock would leave its stat as it is
@@ -116,7 +119,7 @@ pub fn scan(
 ) -> Result<Delta, WorktreeError> {
     let ignore = match opts.untracked {
         Untracked::No => IgnoreStack::new(),
-        _ => IgnoreStack::with_global_excludes()?,
+        _ => IgnoreStack::of_files(opts.excludes)?,
     };
     let mut found = walk::walk(root, snapshot, opts.untracked, opts.within, &ignore)?;
     let mut delta = Delta::default();

@@ -4,7 +4,7 @@
 //! complete, the tree is scanned in full.
 
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::clock::Clock;
 use crate::delta::{Delta, ScanOptions};
@@ -50,8 +50,11 @@ pub struct Watched {
     /// the index the watcher last chose its directories by
     index_id: Vec<u8>,
     cached: Option<Cached>,
-    /// the user's ignore file as it was when the watcher read its rules;
-    /// `None` when it can change and look the same
+    /// the ignore files outside the tree that the watcher read its rules
+    /// from
+    rule_files: Vec<PathBuf>,
+    /// those files as they were then; `None` when one of them can change
+    /// and look the same
     rules: Option<Vec<Option<FileStat>>>,
     /// what was taken off the queue between two scans
     absorbed: Option<Changes>,
@@ -74,11 +77,17 @@ impl Watched {
         opts: &ScanOptions<'_>,
     ) -> io::Result<Watched> {
         // the stat first: a file replaced while it is read differs next time
-        let rules = rule_stats();
+        let rules = stats(opts.excludes);
+        let tracked = |dir: &[u8]| tracked(snapshot, dir);
         Ok(Watched {
-            watcher: os::Watcher::start(root, most, &|dir| tracked(snapshot, dir))?,
+            watcher: os::Watcher::start(root, most, &tracked, opts.excludes)?,
             index_id: snapshot.index_id.clone(),
             cached: None,
+            rule_files: opts
+                .excludes
+                .iter()
+                .map(|file| file.to_path_buf())
+                .collect(),
             rules: sure(rules, &opts.clock),
             absorbed: None,
             failed: false,
@@ -106,13 +115,23 @@ impl Watched {
     /// What happened in the tree since this was last asked, the watches
     /// brought in line with the ignore rules and the index of `snapshot`
     /// first.
-    fn changes(&mut self, snapshot: &Snapshot, clock: &Clock) -> Option<Changes> {
+    fn changes(&mut self, snapshot: &Snapshot, opts: &ScanOptions<'_>) -> Option<Changes> {
         let tracked = |dir: &[u8]| tracked(snapshot, dir);
-        let rules = rule_stats();
-        if self.rules.as_ref() != Some(&rules) {
+        let rules = stats(opts.excludes);
+        let same_files = self
+            .rule_files
+            .iter()
+            .map(PathBuf::as_path)
+            .eq(opts.excludes.iter().copied());
+        if !same_files || self.rules.as_ref() != Some(&rules) {
             // other rules hide other directories
-            self.watcher.start_over(&tracked).ok()?;
-            self.rules = sure(rules, clock);
+            self.watcher.start_over(&tracked, opts.excludes).ok()?;
+            self.rule_files = opts
+                .excludes
+                .iter()
+                .map(|file| file.to_path_buf())
+                .collect();
+            self.rules = sure(rules, &opts.clock);
             self.index_id.clone_from(&snapshot.index_id);
             self.absorbed = None;
             return Some(Changes::All);
@@ -145,7 +164,7 @@ impl Watched {
             return None;
         }
         // before anything is looked at: an event that comes later is seen next time
-        let changes = self.changes(snapshot, &opts.clock)?;
+        let changes = self.changes(snapshot, opts)?;
         let outside = stats(settings);
         // taken out: a scan that fails leaves nothing to build on
         let cached = self.cached.take();
@@ -154,6 +173,7 @@ impl Watched {
             within,
             clean: opts.clean,
             head: opts.head,
+            excludes: opts.excludes,
             clock: opts.clock,
         };
         let dirty = match changes {
@@ -226,12 +246,6 @@ fn merged(earlier: Option<Changes>, later: Changes) -> Changes {
 fn stats(files: &[&Path]) -> Vec<Option<FileStat>> {
     let stat = |path: &&Path| std::fs::metadata(path).ok().map(|m| FileStat::of(&m));
     files.iter().map(stat).collect()
-}
-
-/// [`stats`] of the files the watcher reads ignore rules from.
-fn rule_stats() -> Vec<Option<FileStat>> {
-    let file = crate::ignore::global_excludes_path();
-    stats(&file.iter().map(|f| f.as_path()).collect::<Vec<_>>())
 }
 
 /// `stats` as something to tell a later change by: `None` when one of the

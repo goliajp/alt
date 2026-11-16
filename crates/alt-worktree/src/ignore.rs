@@ -5,8 +5,10 @@
 //! `.gitignore` files at the repository root. Patterns are loaded from one
 //! file at a time into an [`IgnoreLayer`]; `scan_dir` stacks layers as it
 //! descends, and the deepest layer's last matching rule wins. Below every
-//! `.gitignore` sits the user's global excludes file, at git's default
-//! location: `$XDG_CONFIG_HOME/git/ignore`, else `$HOME/.config/git/ignore`.
+//! `.gitignore` sit the ignore files outside the working tree that the
+//! caller names, in git the repository's `info/exclude` and beneath it the
+//! user's file: the one `core.excludesFile` names, else the one at
+//! [`default_excludes_file`].
 //!
 //! ## Supported syntax
 //!
@@ -27,12 +29,6 @@
 //!
 //! - `[abc]`, `[a-z]`, `[!a-z]` and `[[:alpha:]]` match one character of
 //!   the class; `\x` matches `x` itself.
-//!
-//! ## Not supported (yet)
-//!
-//! - A `core.excludesFile` setting that moves the global excludes file
-//!   (the default location above is read).
-//! - Per-repository `info/exclude`.
 
 use crate::glob::glob_match;
 
@@ -78,11 +74,12 @@ impl IgnoreStack {
         Self::default()
     }
 
-    /// A stack whose bottom layer is the user's global excludes file, rooted
-    /// at the working tree, so every `.gitignore` takes precedence over it.
-    pub(crate) fn with_global_excludes() -> std::io::Result<Self> {
+    /// A stack of the rules in `files`, those that exist, each rooted at
+    /// the working tree and a later one above an earlier; every
+    /// `.gitignore` takes precedence over them all.
+    pub(crate) fn of_files(files: &[&std::path::Path]) -> std::io::Result<Self> {
         let mut stack = Self::new();
-        if let Some(path) = global_excludes_path() {
+        for path in files {
             match std::fs::read(path) {
                 Ok(bytes) => stack.push(parse_layer(&bytes, b"")),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -129,7 +126,7 @@ impl IgnoreStack {
 
 /// git's global excludes file when `core.excludesFile` is unset. An empty
 /// variable counts as unset, as it does for git.
-pub(crate) fn global_excludes_path() -> Option<std::path::PathBuf> {
+pub fn default_excludes_file() -> Option<std::path::PathBuf> {
     let set = |k| std::env::var_os(k).filter(|v| !v.is_empty());
     let config = set("XDG_CONFIG_HOME")
         .map(std::path::PathBuf::from)

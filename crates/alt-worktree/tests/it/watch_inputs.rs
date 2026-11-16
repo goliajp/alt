@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use alt_git_codec::ObjectId;
-use alt_worktree::{Clock, FileStat, Snapshot, Untracked};
+use alt_worktree::{Clock, FileStat, ScanOptions, Snapshot, Untracked, Watched, scan};
 
 use crate::delta::{ALGO, fixture, index_of, write};
 use crate::watch::{options, start};
@@ -69,4 +69,62 @@ fn a_settings_file_written_in_the_tick_of_a_scan_is_not_gone_by_in_the_next() {
     assert_eq!(scan(None), 0);
     std::fs::write(&settings, "two\n").unwrap();
     assert!(scan(None) > 0);
+}
+
+#[test]
+fn ignore_files_outside_the_tree_are_followed_from_the_tick_they_are_written_in() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let root = dir.path().join("tree");
+    fixture(&root);
+    let mut snapshot = Snapshot::of_index(&index_of(&root), b"one", ALGO, None);
+    std::fs::create_dir(root.join(".alt")).unwrap();
+    write(&root, "out/deep/x.o", "o\n");
+    write(&root, "notes.tmp", "n\n");
+    let (user, own) = (dir.path().join("user"), dir.path().join("own"));
+    std::fs::write(&user, "*.tmp\n!/out/\n").unwrap();
+    std::fs::write(&own, "/out/\n").unwrap();
+    let files = [user.as_path(), own.as_path()];
+    let with = |clock: Clock| ScanOptions {
+        excludes: &files,
+        clock,
+        ..options(Untracked::Normal, &root)
+    };
+
+    // either file could be written once more and look as it does now
+    let began = in_the_tick_of(&own);
+    let mut watched = Watched::start(&root, usize::MAX, &snapshot, &with(began)).unwrap();
+    let mut check = |watched: &mut Watched| {
+        let opts = with(Clock::read(&root.join(".alt")).unwrap());
+        let got = watched.scan(&root, &mut snapshot, &opts, &[], b"");
+        let want = scan(&root, &mut snapshot.clone(), &opts).unwrap();
+        assert_eq!(got.as_ref(), Some(&want));
+        let untracked: Vec<String> = want.untracked.iter().map(|p| p.to_string()).collect();
+        (untracked, watched.set_up())
+    };
+    until_settled(&root.join(".alt"), &own);
+    // the later file is above the earlier
+    let nothing: [&str; 0] = [];
+    assert_eq!(
+        check(&mut watched),
+        (nothing.map(str::to_owned).to_vec(), 2)
+    );
+    assert_eq!(check(&mut watched).1, 2);
+    // what the rules hid is watched once they show it
+    std::fs::write(&own, "*.md\n").unwrap();
+    assert_eq!(check(&mut watched), (vec!["out/".to_owned()], 3));
+    until_settled(&root.join(".alt"), &own);
+    // read once more unless the clock had moved on by the scan before
+    let times = check(&mut watched).1;
+    assert!(times == 3 || times == 4, "{times}");
+    write(&root, "out/deep/y.o", "o\n");
+    std::fs::remove_file(root.join("out/deep/x.o")).unwrap();
+    assert_eq!(check(&mut watched).1, times);
+    std::fs::remove_file(root.join("out/deep/y.o")).unwrap();
+    assert_eq!(check(&mut watched), (Vec::new(), times));
+    // a file that goes, and another list of files
+    std::fs::remove_file(&user).unwrap();
+    assert_eq!(
+        check(&mut watched),
+        (vec!["notes.tmp".to_owned()], times + 1)
+    );
 }

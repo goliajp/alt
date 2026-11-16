@@ -20,7 +20,8 @@ use crate::{WorkEntry, WorktreeError, ignore};
 /// nothing changed.
 pub fn scan_worktree(root: &Path, algo: HashAlgo) -> Result<Vec<WorkEntry>, WorktreeError> {
     let mut out = Vec::new();
-    let mut stack = ignore::IgnoreStack::with_global_excludes()?;
+    let user = ignore::default_excludes_file();
+    let mut stack = ignore::IgnoreStack::of_files(user.as_deref().as_slice())?;
     let tracked = Tracked::default();
     let ctx = ScanCtx {
         root,
@@ -39,20 +40,17 @@ pub fn scan_worktree(root: &Path, algo: HashAlgo) -> Result<Vec<WorkEntry>, Work
 /// read+hash on files whose `(mtime, ctime, size, dev, ino, mode)`
 /// reproduce the recorded stat — the matching index entry's oid + mode
 /// are reused verbatim. A status sweep over an unchanged monorepo then
-/// touches each file's inode once (the `symlink_metadata` syscall) and
-/// reads nothing.
-///
-/// The fast path is byte-identical to the slow path when the stat
-/// matches: the index stores the oid the working tree produced last time,
-/// so reusing it preserves the structural-fidelity invariant. A mismatch
-/// (the file was edited) falls through to the read+hash, so a stale stat
-/// can never report wrong content.
+/// touches each file's inode once and reads nothing. A mismatch (the file
+/// was edited) falls through to the read+hash, so a stale stat can never
+/// report wrong content. `excludes` are the ignore files outside the
+/// working tree, a later one above an earlier.
 pub fn scan_worktree_with_index(
     root: &Path,
     index: &Index,
     algo: HashAlgo,
     clean: Option<Clean<'_>>,
     head: Option<SubmoduleHead<'_>>,
+    excludes: &[&Path],
 ) -> Result<Vec<WorkEntry>, WorktreeError> {
     let mut by_path: std::collections::HashMap<&BString, &alt_git_index::IndexEntry> =
         std::collections::HashMap::with_capacity(index.entries.len());
@@ -62,7 +60,7 @@ pub fn scan_worktree_with_index(
         }
     }
     let mut out = Vec::new();
-    let mut stack = ignore::IgnoreStack::with_global_excludes()?;
+    let mut stack = ignore::IgnoreStack::of_files(excludes)?;
     let tracked = Tracked::of(index);
     let ctx = ScanCtx {
         root,

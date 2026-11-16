@@ -97,6 +97,7 @@ fn scanned(root: &Path, untracked: Untracked) -> Vec<String> {
         within: &[],
         clean: None,
         head: None,
+        excludes: &[],
         clock: Clock::UNREADABLE,
     };
     let delta = scan(root, &mut snapshot, &options).unwrap();

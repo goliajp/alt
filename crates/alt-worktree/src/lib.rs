@@ -38,6 +38,7 @@ pub use untracked::Untracked;
 #[cfg(target_os = "linux")]
 pub use watch::{Watched, watch_allowance};
 
+pub use ignore::default_excludes_file;
 pub use scan::{Clean, PathMatcher, SubmoduleHead, scan_worktree, scan_worktree_with_index};
 
 use alt_bytes::{BString, ByteSlice};

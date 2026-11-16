@@ -58,7 +58,7 @@ pub(crate) struct Watcher {
     /// the device and inode of the root: a root named through a symbolic
     /// link comes to name another directory without an event
     ident: (u64, u64),
-    /// the rules of the user's ignore file
+    /// the rules of the ignore files outside the tree
     pub(super) ignore: IgnoreStack,
     /// the directories left unwatched
     pub(super) skipped: BTreeSet<Vec<u8>>,
@@ -118,14 +118,19 @@ pub(super) fn join(dir: &[u8], name: &[u8]) -> Vec<u8> {
 }
 
 impl Watcher {
-    pub(crate) fn start(root: &Path, most: usize, tracked: Tracked) -> io::Result<Watcher> {
+    pub(crate) fn start(
+        root: &Path,
+        most: usize,
+        tracked: Tracked,
+        excludes: &[&Path],
+    ) -> io::Result<Watcher> {
         let mut watcher = Watcher {
             root: root.to_path_buf(),
             queue: instance()?,
             dirs: HashMap::new(),
             most,
             ident: ident(root)?,
-            ignore: IgnoreStack::with_global_excludes()?,
+            ignore: IgnoreStack::of_files(excludes)?,
             skipped: BTreeSet::new(),
             mounts: Mounts::open()?,
             set_up: 0,
@@ -147,9 +152,9 @@ impl Watcher {
         self.add_tree(Vec::new(), tracked)
     }
 
-    /// Watches the tree anew, by the user's ignore file as it is now.
-    pub(crate) fn start_over(&mut self, tracked: Tracked) -> io::Result<()> {
-        self.ignore = IgnoreStack::with_global_excludes()?;
+    /// Watches the tree anew, by the rules of `excludes` as they are now.
+    pub(crate) fn start_over(&mut self, tracked: Tracked, excludes: &[&Path]) -> io::Result<()> {
+        self.ignore = IgnoreStack::of_files(excludes)?;
         self.queue = instance()?;
         self.establish(tracked)
     }
