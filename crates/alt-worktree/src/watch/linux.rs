@@ -8,6 +8,7 @@ use std::fs::File;
 use std::io::{self, Read};
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use alt_os::sys;
@@ -49,6 +50,9 @@ pub(crate) struct Watcher {
     dirs: HashMap<i32, Vec<u8>>,
     /// the most directories to watch
     most: usize,
+    /// the device and inode of the root: a root named through a symbolic
+    /// link comes to name another directory without an event
+    ident: (u64, u64),
 }
 
 /// What the kernel answers when the user has no watches left.
@@ -62,6 +66,11 @@ fn instance() -> io::Result<File> {
         // SAFETY: just opened, owned by nobody else
         false => Ok(unsafe { File::from_raw_fd(fd) }),
     }
+}
+
+fn ident(root: &Path) -> io::Result<(u64, u64)> {
+    let meta = std::fs::metadata(root)?;
+    Ok((meta.dev(), meta.ino()))
 }
 
 fn gone(e: &io::Error) -> bool {
@@ -87,6 +96,7 @@ impl Watcher {
             queue: instance()?,
             dirs: HashMap::new(),
             most,
+            ident: ident(root)?,
         };
         watcher.add_tree(Vec::new())?;
         Ok(watcher)
@@ -94,8 +104,9 @@ impl Watcher {
 
     /// Watches the directory `rel` and every directory beneath it. Each is
     /// watched before it is listed, so a directory made in it afterwards
-    /// has an event. A directory that is gone by now is passed over; any
-    /// other failure, running out of watches among them, is an error.
+    /// has an event. A directory beneath the root that is gone by now is
+    /// passed over; any other failure, running out of watches among them,
+    /// is an error, and so is a root that cannot be watched.
     fn add_tree(&mut self, rel: Vec<u8>) -> io::Result<()> {
         let mut pending = vec![rel];
         while let Some(rel) = pending.pop() {
@@ -109,7 +120,7 @@ impl Watcher {
                 unsafe { sys::inotify_add_watch(self.queue.as_raw_fd(), path.as_ptr(), WATCHED) };
             if wd < 0 {
                 let e = io::Error::last_os_error();
-                match gone(&e) {
+                match gone(&e) && !rel.is_empty() {
                     true => continue,
                     false => return Err(e),
                 }
@@ -142,7 +153,8 @@ impl Watcher {
     pub(crate) fn changes(&mut self) -> io::Result<Changes> {
         let mut dirty = Vec::new();
         let mut made = Vec::new();
-        let mut lost = false;
+        let root = ident(&self.root)?;
+        let mut lost = root != self.ident;
         let mut buf = [0u8; 1 << 16];
         loop {
             let n = match self.queue.read(&mut buf) {
@@ -164,7 +176,8 @@ impl Watcher {
                     lost = true;
                 }
                 if mask & IN_IGNORED != 0 {
-                    self.dirs.remove(&wd);
+                    // without the watch on the root nothing made in it is seen
+                    lost |= self.dirs.remove(&wd).is_some_and(|dir| dir.is_empty());
                     continue;
                 }
                 let Some(dir) = self.dirs.get(&wd) else {
@@ -174,6 +187,7 @@ impl Watcher {
                 if dir.is_empty() && (name == b".alt" || name == b".git") {
                     continue;
                 }
+                lost |= dir.is_empty() && mask & IN_DELETE_SELF != 0;
                 let path = join(dir, name);
                 if mask & IN_ISDIR != 0 && !name.is_empty() {
                     // the watches beneath a directory that moved away still
@@ -190,6 +204,7 @@ impl Watcher {
             // start over: which watch is on which path is no longer known
             self.queue = instance()?;
             self.dirs.clear();
+            self.ident = root;
             self.add_tree(Vec::new())?;
             return Ok(Changes::All);
         }
