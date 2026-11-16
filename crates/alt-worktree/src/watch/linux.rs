@@ -1,19 +1,24 @@
-//! inotify: one watch on every directory of the tree. Events are queued by
-//! the kernel before the call that caused them returns, so reading the
-//! queue yields every change that has completed.
+//! inotify: one watch on every directory of the tree that a scan looks
+//! into. Events are queued by the kernel before the call that caused them
+//! returns, so reading the queue yields every change that has completed.
+//!
+//! A directory an ignore rule hides, with nothing tracked in it, is left
+//! unwatched: no scan that is answered from events reads it. Its parent is
+//! watched, which tells when it is removed or renamed, and it is looked at
+//! again when the ignore rules or the index change.
 
-use std::collections::HashMap;
-use std::ffi::{CString, OsStr};
+use std::collections::{BTreeSet, HashMap};
 use std::fs::File;
 use std::io::{self, Read};
-use std::os::fd::{AsRawFd, FromRawFd};
-use std::os::unix::ffi::OsStrExt;
+use std::os::fd::FromRawFd;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use alt_os::sys;
 
-use super::Changes;
+use super::{Changes, beneath};
+use crate::ignore::{self, IgnoreStack};
+use crate::snapshot::FileStat;
 
 const IN_MODIFY: u32 = 0x2;
 const IN_ATTRIB: u32 = 0x4;
@@ -31,7 +36,7 @@ const IN_ONLYDIR: u32 = 0x0100_0000;
 const IN_DONT_FOLLOW: u32 = 0x0200_0000;
 const IN_ISDIR: u32 = 0x4000_0000;
 
-const WATCHED: u32 = IN_MODIFY
+pub(super) const WATCHED: u32 = IN_MODIFY
     | IN_ATTRIB
     | IN_CLOSE_WRITE
     | IN_MOVED_FROM
@@ -44,19 +49,28 @@ const WATCHED: u32 = IN_MODIFY
     | IN_DONT_FOLLOW;
 
 pub(crate) struct Watcher {
-    root: PathBuf,
-    queue: File,
+    pub(super) root: PathBuf,
+    pub(super) queue: File,
     /// the directory each watch is on, relative to the root
-    dirs: HashMap<i32, Vec<u8>>,
+    pub(super) dirs: HashMap<i32, Vec<u8>>,
     /// the most directories to watch
-    most: usize,
+    pub(super) most: usize,
     /// the device and inode of the root: a root named through a symbolic
     /// link comes to name another directory without an event
     ident: (u64, u64),
+    /// the user's ignore file as it was when its rules were read
+    excludes: Option<FileStat>,
+    /// the rules of that file
+    pub(super) ignore: IgnoreStack,
+    /// the directories left unwatched
+    pub(super) skipped: BTreeSet<Vec<u8>>,
 }
 
+/// Whether the index has an entry at or beneath a directory.
+pub(crate) type Tracked<'a> = &'a dyn Fn(&[u8]) -> bool;
+
 /// What the kernel answers when the user has no watches left.
-const ENOSPC: i32 = 28;
+pub(super) const ENOSPC: i32 = 28;
 
 fn instance() -> io::Result<File> {
     // SAFETY: no pointers are passed
@@ -73,14 +87,14 @@ fn ident(root: &Path) -> io::Result<(u64, u64)> {
     Ok((meta.dev(), meta.ino()))
 }
 
-fn gone(e: &io::Error) -> bool {
+pub(super) fn gone(e: &io::Error) -> bool {
     matches!(
         e.kind(),
         io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
     )
 }
 
-fn join(dir: &[u8], name: &[u8]) -> Vec<u8> {
+pub(super) fn join(dir: &[u8], name: &[u8]) -> Vec<u8> {
     let mut path = dir.to_vec();
     if !path.is_empty() {
         path.push(b'/');
@@ -90,71 +104,40 @@ fn join(dir: &[u8], name: &[u8]) -> Vec<u8> {
 }
 
 impl Watcher {
-    pub(crate) fn start(root: &Path, most: usize) -> io::Result<Watcher> {
+    pub(crate) fn start(root: &Path, most: usize, tracked: Tracked) -> io::Result<Watcher> {
         let mut watcher = Watcher {
             root: root.to_path_buf(),
             queue: instance()?,
             dirs: HashMap::new(),
             most,
             ident: ident(root)?,
+            excludes: None,
+            ignore: IgnoreStack::new(),
+            skipped: BTreeSet::new(),
         };
-        watcher.add_tree(Vec::new())?;
+        watcher.establish(tracked)?;
         Ok(watcher)
     }
 
-    /// Watches the directory `rel` and every directory beneath it. Each is
-    /// watched before it is listed, so a directory made in it afterwards
-    /// has an event. A directory beneath the root that is gone by now is
-    /// passed over; any other failure, running out of watches among them,
-    /// is an error, and so is a root that cannot be watched.
-    fn add_tree(&mut self, rel: Vec<u8>) -> io::Result<()> {
-        let mut pending = vec![rel];
-        while let Some(rel) = pending.pop() {
-            if self.dirs.len() >= self.most {
-                return Err(io::Error::from_raw_os_error(ENOSPC));
-            }
-            let abs = self.root.join(OsStr::from_bytes(&rel));
-            let path = CString::new(abs.as_os_str().as_bytes()).map_err(io::Error::other)?;
-            // SAFETY: `path` is NUL-terminated and outlives the call
-            let wd =
-                unsafe { sys::inotify_add_watch(self.queue.as_raw_fd(), path.as_ptr(), WATCHED) };
-            if wd < 0 {
-                let e = io::Error::last_os_error();
-                match gone(&e) && !rel.is_empty() {
-                    true => continue,
-                    false => return Err(e),
-                }
-            }
-            self.dirs.insert(wd, rel.clone());
-            let entries = match std::fs::read_dir(&abs) {
-                Ok(entries) => entries,
-                Err(e) if gone(&e) => continue,
-                Err(e) => return Err(e),
-            };
-            for entry in entries {
-                let entry = entry?;
-                let name = entry.file_name();
-                if name == ".alt" || name == ".git" {
-                    continue;
-                }
-                match entry.file_type() {
-                    Ok(kind) if kind.is_dir() => pending.push(join(&rel, name.as_bytes())),
-                    Ok(_) => {}
-                    Err(e) if gone(&e) => {}
-                    Err(e) => return Err(e),
-                }
-            }
-        }
-        Ok(())
+    /// Watches the tree from its root, on a queue with no watches yet.
+    fn establish(&mut self, tracked: Tracked) -> io::Result<()> {
+        self.dirs.clear();
+        self.skipped.clear();
+        self.ident = ident(&self.root)?;
+        // the stat first: a file replaced while it is read differs next time
+        self.excludes = ignore::global_excludes_stat();
+        self.ignore = IgnoreStack::with_global_excludes()?;
+        self.add_tree(Vec::new(), tracked)
     }
 
     /// Everything queued so far. An error means the tree cannot be watched
     /// any longer.
-    pub(crate) fn changes(&mut self) -> io::Result<Changes> {
+    pub(crate) fn changes(&mut self, tracked: Tracked) -> io::Result<Changes> {
         let mut dirty = Vec::new();
         let mut made = Vec::new();
-        let root = ident(&self.root)?;
-        let mut lost = root != self.ident;
+        let mut ruled = Vec::new();
+        let mut lost =
+            ident(&self.root)? != self.ident || ignore::global_excludes_stat() != self.excludes;
         let mut buf = [0u8; 1 << 16];
         loop {
             let n = match self.queue.read(&mut buf) {
@@ -188,6 +171,9 @@ impl Watcher {
                     continue;
                 }
                 lost |= dir.is_empty() && mask & IN_DELETE_SELF != 0;
+                if name == b".gitignore" {
+                    ruled.push(dir.clone());
+                }
                 let path = join(dir, name);
                 if mask & IN_ISDIR != 0 && !name.is_empty() {
                     // the watches beneath a directory that moved away still
@@ -203,13 +189,17 @@ impl Watcher {
         if lost {
             // start over: which watch is on which path is no longer known
             self.queue = instance()?;
-            self.dirs.clear();
-            self.ident = root;
-            self.add_tree(Vec::new())?;
+            self.establish(tracked)?;
             return Ok(Changes::All);
         }
+        // other rules: what they hide beneath their directory is decided anew
+        for dir in ruled {
+            self.skipped
+                .retain(|s| !dir.is_empty() && !beneath(s, &dir));
+            self.add_tree(dir, tracked)?;
+        }
         for dir in made {
-            self.add_tree(dir)?;
+            self.add_tree(dir, tracked)?;
         }
         Ok(Changes::Paths(dirty))
     }

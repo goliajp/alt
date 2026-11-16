@@ -7,19 +7,21 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
-/// The most directories the daemon of a test repository may watch,
-/// read from the file the test left there.
-fn watch_limit(repo: &Path) -> Option<String> {
-    std::fs::read_to_string(repo.join(".alt/test-watch-limit")).ok()
-}
-
-fn run(repo: &Path, args: &[&str], daemon: bool) -> String {
+/// Runs `alt` in `repo`, through its daemon or not. The user's settings
+/// are looked for inside the control directory, where a test can put them
+/// and no test finds those of whoever runs it.
+fn output(repo: &Path, args: &[&str], daemon: bool) -> Output {
+    // the tree of a workspace has a file by that name: nothing is found there
+    let config = match repo.join(".alt").is_dir() {
+        true => repo.join(".alt/test-config"),
+        false => repo.join("test-config"),
+    };
     let mut command = Command::new(env!("CARGO_BIN_EXE_alt"));
     command
         .current_dir(repo)
         .env("GIT_AUTHOR_NAME", "tester")
         .env("GIT_AUTHOR_EMAIL", "t@e")
-        .env_remove("ALT_WATCH_MAX_DIRS")
+        .env("XDG_CONFIG_HOME", config)
         .args(args);
     match daemon {
         true => command
@@ -27,10 +29,11 @@ fn run(repo: &Path, args: &[&str], daemon: bool) -> String {
             .env("ALT_DAEMON_IDLE_MS", "60000"),
         false => command.env("ALT_NO_DAEMON", "1"),
     };
-    if let Some(most) = watch_limit(repo) {
-        command.env("ALT_WATCH_MAX_DIRS", most);
-    }
-    let o: Output = command.output().unwrap();
+    command.output().unwrap()
+}
+
+fn run(repo: &Path, args: &[&str], daemon: bool) -> String {
+    let o = output(repo, args, daemon);
     assert!(
         o.status.success(),
         "{args:?}: stdout: {}\nstderr: {}",
@@ -90,17 +93,9 @@ impl Drop for Stop {
 
 /// A repository with one commit, and its daemon started.
 fn served() -> (alt_os::temp::TempDir, Stop) {
-    served_watching(None)
-}
-
-/// [`served`], the daemon watching at most `most` directories.
-fn served_watching(most: Option<usize>) -> (alt_os::temp::TempDir, Stop) {
     let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     run(root, &["init"], false);
-    if let Some(most) = most {
-        std::fs::write(root.join(".alt/test-watch-limit"), most.to_string()).unwrap();
-    }
     write(root, "a.txt", "aaaa\n");
     write(root, "src/lib.rs", "lib\n");
     write(root, "src/deep/mod.rs", "mod\n");
@@ -275,37 +270,74 @@ fn the_daemon_follows_the_tree_and_the_index_by_events() {
     assert_eq!(daemon_pid(dir.path()), stop.0);
 }
 
+/// The inotify instances the daemon holds and the watches on them.
 #[cfg(target_os = "linux")]
-#[test]
-fn a_tree_too_large_to_watch_is_scanned_in_full_and_no_command_fails() {
-    // the tree has four directories
-    let (dir, stop) = served_watching(Some(3));
-    assert!(!watching(stop.0), "no watch is left behind");
-    through_changes(dir.path());
-    assert!(!watching(stop.0));
-    assert_eq!(daemon_pid(dir.path()), stop.0);
+fn watches(pid: i32) -> (usize, usize) {
+    let (mut instances, mut watches) = (0, 0);
+    for fd in std::fs::read_dir(format!("/proc/{pid}/fd")).unwrap() {
+        let fd = fd.unwrap();
+        let inotify = std::fs::read_link(fd.path())
+            .is_ok_and(|target| target.to_string_lossy().contains("inotify"));
+        if !inotify {
+            continue;
+        }
+        instances += 1;
+        let name = fd.file_name();
+        let info = format!("/proc/{pid}/fdinfo/{}", name.to_string_lossy());
+        let info = std::fs::read_to_string(info).unwrap();
+        watches += info
+            .lines()
+            .filter(|l| l.starts_with("inotify wd:"))
+            .count();
+    }
+    (instances, watches)
 }
 
 #[cfg(target_os = "linux")]
 #[test]
-fn a_tree_that_outgrows_its_watches_is_scanned_in_full_from_then_on() {
-    let (dir, stop) = served_watching(Some(5));
+fn the_daemon_takes_no_watches_for_what_ignore_rules_hide() {
+    let (dir, stop) = served();
     let root = dir.path();
-    assert!(watching(stop.0));
-    write(root, "one/file.txt", "a fifth directory\n");
-    assert!(agree(root, "within the limit").contains("\tone/\n"));
-    assert!(watching(stop.0));
-    write(root, "one/more/file.txt", "a sixth\n");
-    write(root, "a.txt", "changed as the watches ran out\n");
-    let status = agree(root, "beyond the limit");
-    assert!(
-        status.contains("modified:   a.txt") && status.contains("\tone/\n"),
-        "{status}"
-    );
-    assert!(!watching(stop.0), "the watches were given back");
-    std::fs::remove_dir_all(root.join("one")).unwrap();
-    through_changes(root);
-    assert_eq!(daemon_pid(root), stop.0);
+    // the root, docs, src, src/deep
+    assert_eq!(watches(stop.0), (1, 4));
+    write(root, ".gitignore", "/target/\n");
+    for unit in 0..40 {
+        write(root, &format!("target/debug/unit{unit}/out.o"), "o\n");
+    }
+    let status = agree(root, "build output");
+    assert!(!status.contains("target"), "{status}");
+    assert_eq!(watches(stop.0), (1, 4));
+    // shown once the rule is gone, and followed from then on
+    write(root, ".gitignore", "/elsewhere/\n");
+    assert!(agree(root, "rule gone").contains("\ttarget/\n"));
+    assert_eq!(watches(stop.0), (1, 46));
+    std::fs::remove_dir_all(root.join("target")).unwrap();
+    let status = agree(root, "output removed");
+    assert!(!status.contains("target"), "{status}");
+    assert_eq!(watches(stop.0), (1, 4));
+}
+
+#[test]
+fn what_only_a_look_for_untracked_files_fails_on_fails_no_other_command() {
+    let (dir, _stop) = served();
+    let root = dir.path();
+    write(root, "a.txt", "changed\n");
+    agree(root, "changed");
+    // the user's ignore file cannot be read: a directory is in its place
+    std::fs::create_dir_all(root.join(".alt/test-config/git/ignore")).unwrap();
+    for daemon in [true, false] {
+        let status = output(root, &["status"], daemon);
+        assert!(!status.status.success(), "daemon: {daemon}");
+    }
+    let others: [&[&str]; 3] = [&["status", "-uno"], &["diff"], &["diff", "--cached"]];
+    for args in others {
+        assert_eq!(run(root, args, true), run(root, args, false), "{args:?}");
+    }
+    assert!(run(root, &["status", "-uno"], true).contains("modified:   a.txt"));
+    write(root, "src/lib.rs", "changed as well\n");
+    assert!(run(root, &["diff"], true).contains("src/lib.rs"));
+    std::fs::remove_dir(root.join(".alt/test-config/git/ignore")).unwrap();
+    assert!(agree(root, "readable again").contains("modified:   src/lib.rs"));
 }
 
 #[test]

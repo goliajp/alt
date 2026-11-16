@@ -9,8 +9,8 @@ use std::path::Path;
 use crate::delta::{Delta, ScanOptions};
 use crate::snapshot::{FileStat, Snapshot};
 use crate::untracked::Untracked;
-use crate::{WorktreeError, ignore};
 
+mod dirs;
 #[path = "watch/linux.rs"]
 mod os;
 
@@ -25,6 +25,14 @@ pub(crate) enum Changes {
     All,
 }
 
+/// The most watches one tree may take: half of what the system allows the
+/// user, which every tree and every other program of theirs draws on.
+pub fn watch_allowance() -> io::Result<usize> {
+    let all = std::fs::read_to_string("/proc/sys/fs/inotify/max_user_watches")?;
+    let all: usize = all.trim().parse().map_err(io::Error::other)?;
+    Ok(all / 2)
+}
+
 struct Cached {
     index_id: Vec<u8>,
     /// the files outside the tree that decide what a scan answers, as
@@ -35,18 +43,22 @@ struct Cached {
 
 pub struct Watched {
     watcher: os::Watcher,
+    /// the index the watcher last chose its directories by
+    index_id: Vec<u8>,
     cached: Option<Cached>,
 }
 
 impl Watched {
     /// Starts watching the tree at `root`, which takes one watch for every
-    /// directory in it; a tree with more than `most` directories is not
-    /// watched, and fails the way a tree does that the system has no
-    /// watches left for. The first scan sees the whole tree, and it runs
-    /// after every directory is being watched.
-    pub fn start(root: &Path, most: usize) -> io::Result<Watched> {
+    /// directory a scan of it for `snapshot` looks into; a tree with more
+    /// than `most` of them is not watched, and fails the way a tree does
+    /// that the system has no watches left for. Fails as well for a tree
+    /// that events do not tell everything about. The first scan sees the
+    /// whole tree, and it runs after every directory is being watched.
+    pub fn start(root: &Path, most: usize, snapshot: &Snapshot) -> io::Result<Watched> {
         Ok(Watched {
-            watcher: os::Watcher::start(root, most)?,
+            watcher: os::Watcher::start(root, most, &|dir| tracked(snapshot, dir))?,
+            index_id: snapshot.index_id.clone(),
             cached: None,
         })
     }
@@ -55,23 +67,28 @@ impl Watched {
     /// which ask for no untracked files or for directories as one path.
     /// `settings` are the files outside the tree that `opts` read what
     /// they do with a file from: a change in one of them is answered by a
-    /// scan of everything. `None` when the tree can no longer be watched:
-    /// the caller scans it itself and drops this value.
+    /// scan of everything. `None` when the tree can no longer be watched
+    /// or a scan of it failed: the caller scans it itself, which answers
+    /// or fails as it does for a tree that is not watched, and drops this
+    /// value.
     pub fn scan(
         &mut self,
         root: &Path,
         snapshot: &mut Snapshot,
         opts: &ScanOptions<'_>,
         settings: &[&Path],
-    ) -> Result<Option<Delta>, WorktreeError> {
+    ) -> Option<Delta> {
         // before anything is looked at: an event that comes later is seen next time
-        let Ok(changes) = self.watcher.changes() else {
-            return Ok(None);
+        let changes = {
+            let tracked = |dir: &[u8]| tracked(snapshot, dir);
+            if self.index_id != snapshot.index_id {
+                self.watcher.revisit(&tracked).ok()?;
+                self.index_id.clone_from(&snapshot.index_id);
+            }
+            self.watcher.changes(&tracked).ok()?
         };
         let stat = |path: &&Path| std::fs::metadata(path).ok().map(|m| FileStat::of(&m));
-        let outside: Vec<Option<FileStat>> = std::iter::once(ignore::global_excludes_stat())
-            .chain(settings.iter().map(stat))
-            .collect();
+        let outside: Vec<Option<FileStat>> = settings.iter().map(stat).collect();
         // taken out: a scan that fails leaves nothing to build on
         let cached = self.cached.take();
         let whole = |within| ScanOptions {
@@ -95,12 +112,12 @@ impl Watched {
                 let mut delta = cached.delta;
                 if !dirty.is_empty() {
                     let within: Vec<&[u8]> = dirty.iter().map(Vec::as_slice).collect();
-                    let fresh = crate::scan(root, snapshot, &whole(&within))?;
+                    let fresh = crate::scan(root, snapshot, &whole(&within)).ok()?;
                     delta.replace_within(&within, fresh);
                 }
                 delta
             }
-            _ => crate::scan(root, snapshot, &whole(&[]))?,
+            _ => crate::scan(root, snapshot, &whole(&[])).ok()?,
         };
         self.cached = Some(Cached {
             index_id: snapshot.index_id.clone(),
@@ -111,8 +128,22 @@ impl Watched {
         if opts.untracked == Untracked::No {
             delta.untracked.clear();
         }
-        Ok(Some(delta))
+        Some(delta)
     }
+}
+
+/// Whether the index has an entry beneath `dir`.
+fn tracked_in(snapshot: &Snapshot, dir: &[u8]) -> bool {
+    // the index is ordered by path: the entries beneath `dir` begin where
+    // `dir/` would stand
+    let key = [dir, b"/"].concat();
+    let first = partition(snapshot, |entry| entry < key.as_slice());
+    first < snapshot.entries.len() && beneath(snapshot.path(first), dir)
+}
+
+/// Whether the index has an entry beneath `dir` or at it, as a submodule is.
+fn tracked(snapshot: &Snapshot, dir: &[u8]) -> bool {
+    tracked_in(snapshot, dir) || snapshot.find(dir).is_some()
 }
 
 fn beneath(path: &[u8], dir: &[u8]) -> bool {
@@ -172,16 +203,9 @@ fn dirty_paths(paths: Vec<Vec<u8>>, snapshot: &Snapshot) -> Vec<Vec<u8>> {
 /// stands or falls with any file beneath it: a change in there is looked
 /// at from the outermost such directory.
 fn outermost_untracked(path: Vec<u8>, snapshot: &Snapshot) -> Vec<u8> {
-    let tracked = |dir: &[u8]| {
-        // the index is ordered by path: the entries beneath `dir` begin
-        // where `dir/` would stand
-        let key = [dir, b"/"].concat();
-        let first = partition(snapshot, |entry| entry < key.as_slice());
-        first < snapshot.entries.len() && beneath(snapshot.path(first), dir)
-    };
     let slashes = path.iter().enumerate().filter(|(_, b)| **b == b'/');
     for (at, _) in slashes {
-        if !tracked(&path[..at]) {
+        if !tracked_in(snapshot, &path[..at]) {
             return path[..at].to_vec();
         }
     }

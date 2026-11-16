@@ -7,17 +7,6 @@ use alt_worktree::{Delta, ScanOptions, Snapshot};
 
 use super::Res;
 
-/// The most directories watched in one tree, when the environment sets
-/// one: every directory takes a watch out of what the system allows the
-/// user. A tree with more is scanned in full each time.
-#[cfg(target_os = "linux")]
-fn most_directories() -> usize {
-    std::env::var("ALT_WATCH_MAX_DIRS")
-        .ok()
-        .and_then(|most| most.parse().ok())
-        .unwrap_or(usize::MAX)
-}
-
 /// By root; `None` for a tree that cannot be watched.
 #[cfg(target_os = "linux")]
 static WATCHED: std::sync::Mutex<
@@ -26,9 +15,10 @@ static WATCHED: std::sync::Mutex<
 
 /// The scan of the whole tree at `root`, from the events since the last
 /// one where the tree is watched; `settings` are the files outside the
-/// tree that decide how its files compare. `None` where it is not: in a process
-/// that serves one command, and for a tree that could not be watched or
-/// can no longer be; the caller then scans the tree itself.
+/// tree that decide how its files compare. `None` where it is not: in a
+/// process that serves one command, for a tree that could not be watched
+/// or can no longer be, and when the scan failed; the caller then scans
+/// the tree itself.
 #[cfg(target_os = "linux")]
 pub(super) fn watched_scan(
     root: &Path,
@@ -41,13 +31,14 @@ pub(super) fn watched_scan(
     }
     let mut guard = WATCHED.lock().unwrap();
     let trees = guard.get_or_insert_default();
-    let tree = trees
-        .entry(root.to_path_buf())
-        .or_insert_with(|| alt_worktree::Watched::start(root, most_directories()).ok());
+    let tree = trees.entry(root.to_path_buf()).or_insert_with(|| {
+        let most = alt_worktree::watch_allowance().ok()?;
+        alt_worktree::Watched::start(root, most, snapshot).ok()
+    });
     let Some(watched) = tree else {
         return Ok(None);
     };
-    let delta = watched.scan(root, snapshot, options, settings)?;
+    let delta = watched.scan(root, snapshot, options, settings);
     if delta.is_none() {
         *tree = None;
     }
