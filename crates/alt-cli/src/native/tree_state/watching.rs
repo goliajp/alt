@@ -25,7 +25,8 @@ static WATCHED: std::sync::Mutex<
 > = std::sync::Mutex::new(None);
 
 /// The scan of the whole tree at `root`, from the events since the last
-/// one where the tree is watched. `None` where it is not: in a process
+/// one where the tree is watched; `settings` are the files outside the
+/// tree that decide how its files compare. `None` where it is not: in a process
 /// that serves one command, and for a tree that could not be watched or
 /// can no longer be; the caller then scans the tree itself.
 #[cfg(target_os = "linux")]
@@ -33,6 +34,7 @@ pub(super) fn watched_scan(
     root: &Path,
     snapshot: &mut Snapshot,
     options: &ScanOptions<'_>,
+    settings: &[&Path],
 ) -> Res<Option<Delta>> {
     if !super::HELD.started() {
         return Ok(None);
@@ -45,7 +47,7 @@ pub(super) fn watched_scan(
     let Some(watched) = tree else {
         return Ok(None);
     };
-    let delta = watched.scan(root, snapshot, options)?;
+    let delta = watched.scan(root, snapshot, options, settings)?;
     if delta.is_none() {
         *tree = None;
     }
@@ -53,6 +55,11 @@ pub(super) fn watched_scan(
 }
 
 #[cfg(not(target_os = "linux"))]
-pub(super) fn watched_scan(_: &Path, _: &mut Snapshot, _: &ScanOptions<'_>) -> Res<Option<Delta>> {
+pub(super) fn watched_scan(
+    _: &Path,
+    _: &mut Snapshot,
+    _: &ScanOptions<'_>,
+    _: &[&Path],
+) -> Res<Option<Delta>> {
     Ok(None)
 }

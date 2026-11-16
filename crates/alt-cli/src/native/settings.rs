@@ -3,6 +3,12 @@
 use super::*;
 
 impl NativeRepo<'_> {
+    /// The files outside the working tree that [`settings`](Self::settings)
+    /// begin from, there or not.
+    pub(super) fn settings_files(&self) -> Vec<PathBuf> {
+        vec![self.store.alt_dir.join("git-import").join("config")]
+    }
+
     /// The configuration file of this repository with its includes
     /// resolved; empty when the repository has none.
     pub(super) fn settings(&self) -> Res<alt_git_config::Config> {

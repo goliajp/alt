@@ -27,8 +27,9 @@ pub(crate) enum Changes {
 
 struct Cached {
     index_id: Vec<u8>,
-    /// the user's ignore file as it was
-    excludes: Option<FileStat>,
+    /// the files outside the tree that decide what a scan answers, as
+    /// they were
+    outside: Vec<Option<FileStat>>,
     delta: Delta,
 }
 
@@ -52,19 +53,25 @@ impl Watched {
 
     /// What [`scan`](crate::scan) of the whole tree returns for `opts`,
     /// which ask for no untracked files or for directories as one path.
-    /// `None` when the tree can no longer be watched: the caller scans it
-    /// itself and drops this value.
+    /// `settings` are the files outside the tree that `opts` read what
+    /// they do with a file from: a change in one of them is answered by a
+    /// scan of everything. `None` when the tree can no longer be watched:
+    /// the caller scans it itself and drops this value.
     pub fn scan(
         &mut self,
         root: &Path,
         snapshot: &mut Snapshot,
         opts: &ScanOptions<'_>,
+        settings: &[&Path],
     ) -> Result<Option<Delta>, WorktreeError> {
         // before anything is looked at: an event that comes later is seen next time
         let Ok(changes) = self.watcher.changes() else {
             return Ok(None);
         };
-        let excludes = ignore::global_excludes_stat();
+        let stat = |path: &&Path| std::fs::metadata(path).ok().map(|m| FileStat::of(&m));
+        let outside: Vec<Option<FileStat>> = std::iter::once(ignore::global_excludes_stat())
+            .chain(settings.iter().map(stat))
+            .collect();
         // taken out: a scan that fails leaves nothing to build on
         let cached = self.cached.take();
         let whole = |within| ScanOptions {
@@ -81,7 +88,7 @@ impl Watched {
         let delta = match (dirty, cached) {
             (Some(dirty), Some(cached))
                 if cached.index_id == snapshot.index_id
-                    && cached.excludes == excludes
+                    && cached.outside == outside
                     && dirty.len() <= MANY_PATHS
                     && dirty.iter().all(|p| !p.is_empty()) =>
             {
@@ -97,7 +104,7 @@ impl Watched {
         };
         self.cached = Some(Cached {
             index_id: snapshot.index_id.clone(),
-            excludes,
+            outside,
             delta: delta.clone(),
         });
         let mut delta = delta;
@@ -131,9 +138,10 @@ fn dirty_paths(paths: Vec<Vec<u8>>, snapshot: &Snapshot) -> Vec<Vec<u8>> {
         .map(|path| {
             let name = &path[parent(&path).len()..];
             let name = name.strip_prefix(b"/").unwrap_or(name);
-            // ignore rules reach everything beneath their directory, and a
-            // repository in a directory changes what counts as its files
-            if matches!(name, b".gitignore" | b".git" | b".alt") {
+            // ignore rules and attributes reach everything beneath their
+            // directory, and a repository in a directory changes what
+            // counts as its files
+            if matches!(name, b".gitignore" | b".gitattributes" | b".git" | b".alt") {
                 return parent(&path).to_vec();
             }
             // what a submodule has checked out is asked of the submodule itself
@@ -243,6 +251,7 @@ mod tests {
             ["a/b", "a/bc", "z"]
         );
         assert_eq!(paths(&["a/.gitignore", "a/x/y", "b/.git"]), ["a", "b"]);
+        assert_eq!(paths(&["a/b/.gitattributes", "a/b/c"]), ["a/b"]);
         assert_eq!(paths(&["x", ".gitignore", "a/b"]), [""]);
         // in directories with nothing tracked: the outermost of them
         assert_eq!(

@@ -305,3 +305,48 @@ fn a_tree_that_outgrows_its_watches_is_scanned_in_full_from_then_on() {
     through_changes(root);
     assert_eq!(daemon_pid(root), stop.0);
 }
+
+#[test]
+fn attributes_and_settings_that_change_how_a_file_compares_reach_the_daemon() {
+    let (dir, _stop) = served();
+    let root = dir.path();
+    write(root, "a.txt", "aaaa\r\n");
+    write(root, "src/lib.rs", "lib\r\n");
+    let status = agree(root, "other line endings");
+    assert!(
+        status.contains("modified:   a.txt") && status.contains("modified:   src/lib.rs"),
+        "{status}"
+    );
+    write(root, "src/.gitattributes", "*.rs text\n");
+    let status = agree(root, "attributes in a directory");
+    assert!(
+        status.contains("modified:   a.txt") && !status.contains("src/lib.rs"),
+        "{status}"
+    );
+    write(root, ".gitattributes", "* text=auto\n");
+    let status = agree(root, "attributes at the root");
+    assert!(!status.contains("modified:"), "{status}");
+    // a file found unchanged stays so until it is written again
+    std::fs::remove_file(root.join(".gitattributes")).unwrap();
+    std::fs::remove_file(root.join("src/.gitattributes")).unwrap();
+    assert!(agree(root, "attributes removed").contains("nothing to commit"));
+    write(root, "a.txt", "AAAA\r\n");
+    assert!(agree(root, "written again").contains("modified:   a.txt"));
+    write(root, ".gitattributes", "* text=auto\n");
+    assert!(agree(root, "attributes again").contains("modified:   a.txt"));
+    write(root, "a.txt", "aaaa\r\n");
+    assert!(!agree(root, "as stored but for line endings").contains("modified:"));
+    std::fs::remove_file(root.join(".gitattributes")).unwrap();
+
+    // the repository's settings are no part of the tree
+    let config = root.join(".alt/git-import/config");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    for setting in ["true", "input"] {
+        write(root, "a.txt", "aaaa\r\n");
+        assert!(agree(root, "no settings").contains("modified:   a.txt"));
+        std::fs::write(&config, format!("[core]\n\tautocrlf = {setting}\n")).unwrap();
+        let status = agree(root, setting);
+        assert!(status.contains("nothing to commit"), "{setting}: {status}");
+        std::fs::remove_file(&config).unwrap();
+    }
+}
