@@ -15,6 +15,11 @@ impl BlobStore {
         Ok((self.chunks.unfinished(), self.map()?.unfinished()))
     }
 
+    /// See [`crate::ChunkStore::distrust_synced`].
+    pub fn distrust_synced(&mut self) -> Result<bool, StoreError> {
+        self.chunks.distrust_synced()
+    }
+
     /// Visits the blob map's records from byte `from` on: where each
     /// begins, the blob and its manifest root.
     pub fn map_records_from(

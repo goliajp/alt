@@ -32,6 +32,17 @@ impl ChunkStore {
         self.rewind(self.checkpoint())
     }
 
+    /// Stops taking the active pack for synced as far as the opener said
+    /// (see [`Tail::synced_to`]) and reads its end again; says whether
+    /// there was anything to forget.
+    pub fn distrust_synced(&mut self) -> Result<bool, StoreError> {
+        if !self.tail.forget_synced() {
+            return Ok(false);
+        }
+        self.reload()?;
+        Ok(true)
+    }
+
     /// Checks the records a load just walked in the active pack and loads
     /// the pack again up to the first that never finished.
     pub(crate) fn settle(&mut self, fresh: Fresh, tail: &Tail) -> Result<(), StoreError> {

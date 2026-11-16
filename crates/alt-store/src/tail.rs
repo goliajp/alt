@@ -117,6 +117,12 @@ impl Tail {
         self
     }
 
+    /// No longer takes the pack [`Self::synced_to`] named for synced; says
+    /// whether one was named.
+    pub(crate) fn forget_synced(&mut self) -> bool {
+        self.synced.take().is_some()
+    }
+
     pub(crate) fn is_read_only(&self) -> bool {
         self.read_only
     }

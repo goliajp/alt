@@ -13,7 +13,9 @@ use alt_git_codec::ObjectKind;
 use alt_odb::{NativeOdb, OdbError};
 
 use super::marker::rewrite;
-use super::rewind_interrupted::{ALL, FILES, KEPT, cut, lens, object, open, put, reads};
+use super::rewind_interrupted::{
+    ALL, FILES, KEPT, cut, lens, object, older_marker, open, put, reads,
+};
 
 /// The file whose end is lost, and which kind of object the lost content
 /// belongs to (see `object`): the pack holds content of all three, the
@@ -239,4 +241,33 @@ fn a_writer_refuses_a_file_that_ends_short_of_its_synced_records() {
         }
         assert_eq!(snapshot(tmp.path()), before, "{}", FILES[file]);
     }
+}
+
+/// An older alt cuts the pack back without taking the note back, and
+/// replaces the marker with its own. What it then appends inside the
+/// noted length and loses to a power cut is not taken for synced.
+#[test]
+fn a_pack_noted_as_synced_is_checked_again_once_an_older_alt_wrote_the_marker() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let (victim, kept, _) = store(tmp.path(), 0);
+    older_marker(tmp.path(), kept);
+    damage(tmp.path(), 0, Fault::Zeroed, kept);
+    reader_is_sound(tmp.path(), victim, "older marker");
+    recovered(tmp.path(), victim, "older marker");
+}
+
+/// The note counts only next to a head record that says the store keeps
+/// record boundaries: a program that writes head records and no
+/// boundaries does not keep the note either.
+#[test]
+fn a_note_without_a_head_record_that_says_boundaries_are_kept_is_not_believed() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let (victim, kept, _) = store(tmp.path(), 0);
+    rewrite(tmp.path(), |marker| {
+        marker.eof = kept;
+        marker.whole = kept;
+    });
+    overwrite_lock(tmp.path(), 0, 1176);
+    damage(tmp.path(), 0, Fault::Zeroed, kept);
+    recovered(tmp.path(), victim, "no head record");
 }

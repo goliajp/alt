@@ -62,6 +62,10 @@ impl Odb {
     /// fsyncs are skipped the marker is made to say so instead.
     pub(super) fn bound(&mut self) -> Result<(), OdbError> {
         let marker = Marker::read(&self.durable_path);
+        // a pack noted as synced is not, once the marker stops saying so
+        if !marker.trusted() && self.blobs.distrust_synced()? {
+            head::forget_synced(&self.lock)?;
+        }
         self.settle(&marker)?;
         if alt_store::relaxed_durability() {
             let said = |state: &State| state.flags & synced::UNTRUSTED != 0;

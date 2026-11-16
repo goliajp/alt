@@ -109,6 +109,9 @@ impl Odb {
         // writer is still writing.
         lock_shared(&lock)?;
         let (head, synced) = Head::read_with_synced(&lock);
+        // an alt that keeps no record boundaries may have cut the pack
+        // back since, and does not take the note back
+        let synced = synced.filter(|_| head.bounded);
         let tail = |log: Log| tail(&durable_path, mode.read_only, log, synced);
         let opened = open_files(&alt_dir, opts, &head, mode.late, tail);
         let _ = unlock(&lock);
