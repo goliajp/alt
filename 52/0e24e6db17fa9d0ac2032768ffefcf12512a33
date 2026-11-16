@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: test
+summary: hold a daemon to watching its tree until its test ends
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/blame.rs
+touched: crates/alt-cli/tests/it/config_paths.rs
+touched: crates/alt-cli/tests/it/daemon_stop.rs
+touched: crates/alt-cli/tests/it/exclude_dirs.rs
+touched: crates/alt-cli/tests/it/exclude_order.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/scan_daemon.rs
+touched: crates/alt-cli/tests/it/scan_daemon_watches.rs
