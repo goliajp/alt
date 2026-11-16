@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: take an absolute path through a link or with .. in it as a path of the tree where git does
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/pathspec.rs
+touched: crates/alt-cli/tests/it/cwd_paths.rs
