@@ -106,10 +106,11 @@ fn a_pattern_that_does_not_compile_is_refused_in_the_words_of_git() {
 
 #[test]
 fn a_search_given_up_names_nothing_and_stops_nothing() {
-    // every way of splitting the run is tried before the end fails
+    // every group the run could hold, each with every split of what
+    // is behind it, is tried before the end fails
     let lines = [("given_up", "*.txt diff=x")];
     let write = |root: &Path, mark: &str| {
-        let head = "a".repeat(200);
+        let head = "a".repeat(400);
         std::fs::write(root.join("given_up.txt"), body(&head, mark, "\n")).unwrap();
     };
     let prepare = |root: &Path| {
@@ -119,7 +120,7 @@ fn a_search_given_up_names_nothing_and_stops_nothing() {
             "git",
             root,
             "C",
-            &["config", "diff.x.xfuncname", "^(a|aa)+\\1b$"],
+            &["config", "diff.x.xfuncname", "^a*(a*)a*a*\\1[bc]$"],
         ));
     };
     let dirs = pair(prepare, |root: &Path| write(root, " changed"));
