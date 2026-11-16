@@ -1,0 +1,24 @@
+schema: alt-meta/1
+type: fix
+summary: bound what a search holds and place the groups of repeated empty matches where the c library does
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/analysis.rs
+touched: crates/alt-regex/src/backref.rs
+touched: crates/alt-regex/src/backtrack.rs
+touched: crates/alt-regex/src/captures.rs
+touched: crates/alt-regex/src/error.rs
+touched: crates/alt-regex/src/lib.rs
+touched: crates/alt-regex/src/pike.rs
+touched: crates/alt-regex/src/pike/follow.rs
+touched: crates/alt-regex/src/program.rs
+touched: crates/alt-regex/src/program/repeat.rs
+touched: crates/alt-regex/src/registers.rs
+touched: crates/alt-regex/src/search.rs
+touched: crates/alt-regex/tests/it/differences.rs
+touched: crates/alt-regex/tests/it/held.rs
+touched: crates/alt-regex/tests/it/ideal/judged.rs
+touched: crates/alt-regex/tests/it/main.rs
+touched: crates/alt-regex/tests/it/regcomp/groups.rs
+touched: crates/alt-regex/tests/it/regcomp/judged.rs
+touched: crates/alt-regex/tests/it/regcomp/random.rs
