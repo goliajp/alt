@@ -42,9 +42,14 @@ fn diff_skips_an_untouched_submodule_entry() {
     assert!(out.contains("+three"), "{out}");
     assert!(!out.contains("sub"), "{out}");
 
-    // without the placeholder the entry is still not a change, as in status
+    // without the placeholder the entry is deleted, as for git
     std::fs::remove_dir(root.join("sub")).unwrap();
-    assert!(!ok(alt(root, &["diff"])).contains("sub"));
+    std::fs::write(root.join("a.txt"), "one\ntwo\n").unwrap();
+    let ours = ok(alt(root, &["diff"]));
+    let theirs = ok(git(src.path(), &["-c", "core.pager=cat", "diff"]));
+    assert!(theirs.contains("deleted file mode 160000"), "{theirs}");
+    assert_eq!(ours, theirs);
+    assert!(ok(alt(root, &["status"])).contains("deleted:   sub"));
 }
 
 #[test]

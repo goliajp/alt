@@ -1742,7 +1742,14 @@ impl<'a> NativeRepo<'a> {
         // a submodule that checked out another commit is not overwritten:
         // a checkout never touches what is inside it
         let changed = state.delta.changed.iter().any(|w| w.mode != 0o160000);
-        if !state.staged.is_empty() || changed || !state.delta.deleted.is_empty() {
+        // nor is the missing directory of one anything it would write over
+        let snapshot = &state.snapshot;
+        let submodule = |path: &BString| {
+            let entry = snapshot.find(path).map(|at| &snapshot.entries[at]);
+            entry.is_some_and(|e| e.mode == 0o160000)
+        };
+        let deleted = state.delta.deleted.iter().any(|path| !submodule(path));
+        if !state.staged.is_empty() || changed || deleted {
             return Err(crate::machine::Failure::refusal(
                 "precondition_failed",
                 format!("your local changes would be overwritten by {action}; commit them first"),

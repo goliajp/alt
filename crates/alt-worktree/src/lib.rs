@@ -373,19 +373,8 @@ pub fn changes<'a>(old: &'a [WorkEntry], new: &'a [WorkEntry]) -> Vec<Change<'a>
 pub fn status(head: &[WorkEntry], index: &[WorkEntry], worktree: &[WorkEntry]) -> Status {
     let mut s = Status::default();
     diff(head, index, |path, kind| s.staged.push((path, kind)));
-    // Gitlink paths in the index point at submodules: the worktree side
-    // (scan_worktree) deliberately emits no entry for them, so a naive diff
-    // would report them as Deleted on every status. Git treats an
-    // uninitialised submodule directory as clean; mirror that by filtering
-    // gitlink-tagged Deleted reports.
-    let gitlinks: std::collections::HashSet<&BString> = index
-        .iter()
-        .filter(|e| e.mode == 0o160000)
-        .map(|e| &e.path)
-        .collect();
     diff(index, worktree, |path, kind| match kind {
         ChangeKind::Added => s.untracked.push(path),
-        ChangeKind::Deleted if gitlinks.contains(&path) => {}
         other => s.unstaged.push((path, other)),
     });
     s
@@ -530,10 +519,9 @@ mod tests {
     }
 
     #[test]
-    fn status_treats_index_gitlink_as_clean_when_worktree_lacks_path() {
-        // A submodule that's recorded in the index but not initialised on
-        // disk should not be reported as "deleted" by status — git's
-        // baseline behaviour for an uninitialised submodule is clean.
+    fn status_reports_an_index_gitlink_without_its_directory_as_deleted() {
+        // a submodule that is not initialised still has its directory;
+        // without one git reports the entry as deleted
         let gitlink = WorkEntry {
             path: "shFlags".into(),
             oid: oid(0xAA),
@@ -544,10 +532,7 @@ mod tests {
         let wt: Vec<WorkEntry> = vec![];
         let s = status(&head, &index, &wt);
         assert!(s.staged.is_empty(), "no staged changes expected");
-        assert!(
-            s.unstaged.is_empty(),
-            "uninit submodule must not show as deleted"
-        );
+        assert_eq!(s.unstaged, [("shFlags".into(), ChangeKind::Deleted)]);
         assert!(s.untracked.is_empty());
     }
 

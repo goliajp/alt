@@ -203,18 +203,22 @@ fn a_repository_in_an_untracked_directory_shows_as_git_shows_it() {
     for shown in ["alone/deep/emb/", "emb/", "outer/file.txt", "outer/inner/"] {
         assert!(all.contains(&shown.to_owned()), "{shown}: {all:?}");
     }
-    // staging everything leaves a repository of its own where it is
-    ok(alt(a, &["add", "."]));
-    let status = ok(alt(a, &["status"]));
-    assert!(status.contains("new file:   outer/file.txt"), "{status}");
-    assert!(!status.contains("new file:   emb"), "{status}");
-    let listed = "Untracked files:\n\talone/\n\temb/\n\touter/inner/\n\tt/emb/\n";
-    assert!(status.ends_with(listed), "{status}");
-    // naming it, or a path inside it, stages nothing and fails nothing
-    ok(git(g, &["add", "emb/file.txt"]));
-    for named in ["emb/file.txt", "emb", "outer/inner/file.txt"] {
+    // a repository with no commit cannot be staged, nor anything with it
+    let before = ok(alt(a, &["status"]));
+    for named in [".", "outer", "t/emb"] {
+        assert!(!git(g, &["add", named]).status.success(), "{named}");
+        let refused = alt(a, &["add", named]);
+        assert!(!refused.status.success(), "{named}");
+        let why = String::from_utf8_lossy(&refused.stderr).into_owned();
+        assert!(why.contains("does not have a commit checked out"), "{why}");
+        assert_eq!(ok(alt(a, &["status"])), before, "{named}");
+    }
+    assert!(git_untracked(g, &[]).contains(&"emb/".to_owned()));
+    // a path inside a repository stages nothing and fails nothing
+    for named in ["emb/file.txt", "outer/inner/file.txt"] {
+        ok(git(g, &["add", named]));
         ok(alt(a, &["add", named]));
-        assert_eq!(ok(alt(a, &["status"])), status, "{named}");
+        assert_eq!(ok(alt(a, &["status"])), before, "{named}");
     }
     assert!(!alt(a, &["add", "emb-not-there/file.txt"]).status.success());
 }

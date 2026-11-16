@@ -176,10 +176,9 @@ impl Walk<'_> {
     /// The entries `first..end` have nothing in place.
     fn gone(&self, first: usize, end: usize, reach: Reach, found: &mut Found) {
         let s = self.snapshot;
-        // a submodule that is not checked out is no change
+        // a submodule too: one that is not checked out still has its directory
         found.deleted.extend(
             (first..end)
-                .filter(|&i| s.entries[i].mode != 0o160000)
                 .filter(|&i| self.reach(reach, s.path(i)) == Some(Reach::Inside))
                 .map(|i| i as u32),
         );

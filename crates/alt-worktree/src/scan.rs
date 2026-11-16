@@ -197,13 +197,14 @@ fn scan_dir(
             // separate repo, not working-tree content of this one — don't
             // recurse, and don't synthesize a worktree entry for it: the
             // submodule's HEAD oid is owned by the submodule, not us.
-            // status() filters spurious Deleted reports against the index.
             // The same holds for a directory the index records as a
             // submodule, with or without a repository in it: whatever lies
             // there is not this repository's to add. What it reports is
-            // the commit the submodule has checked out.
+            // the commit the submodule has checked out, the recorded one
+            // when it has none.
             if tracked.gitlinks.contains(&rel_b) {
-                if let Some(oid) = ctx.head.and_then(|head| head(&path)) {
+                let recorded = cache.and_then(|c| c.get(&rel_b)).map(|e| e.oid);
+                if let Some(oid) = ctx.head.and_then(|head| head(&path)).or(recorded) {
                     out.push(WorkEntry {
                         path: rel_b,
                         oid,

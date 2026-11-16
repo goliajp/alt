@@ -327,12 +327,21 @@ fn a_submodule_entry_follows_the_commit_checked_out_in_its_directory() {
     );
     let mut snapshot = Snapshot::of_index(&index, b"id", ALGO, None);
 
-    // not checked out: no change, with or without the listing
-    for untracked in [true, false] {
-        assert_eq!(
-            scan(root, &mut snapshot, &options(untracked, LATER)).unwrap(),
-            Delta::default()
-        );
+    // without its directory the entry is deleted, as for git; not
+    // checked out, with the directory there, it is no change
+    for (made, deleted) in [(false, vec![BString::from("sub")]), (true, Vec::new())] {
+        if made {
+            std::fs::create_dir(root.join("sub")).unwrap();
+        }
+        for untracked in [true, false] {
+            let delta = scan(root, &mut snapshot, &options(untracked, LATER)).unwrap();
+            assert_eq!(view(&delta), full_scan_view(root, &index));
+            let want = Delta {
+                deleted: deleted.clone(),
+                ..Delta::default()
+            };
+            assert_eq!(delta, want);
+        }
     }
     write(root, "sub/inner.txt", "the submodule's own file\n");
     for (head, changed) in [(None, 0), (Some(recorded), 0), (Some(moved), 1)] {
