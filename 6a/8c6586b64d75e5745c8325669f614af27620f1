@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: refactor
+summary: move the check for uncommitted changes out of native.rs
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/tree_state/lists.rs
