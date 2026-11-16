@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: say in the advice on an embedded repository that undo takes back the whole add
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/add/embedded.rs
+touched: crates/alt-cli/tests/it/gitlink_said.rs
