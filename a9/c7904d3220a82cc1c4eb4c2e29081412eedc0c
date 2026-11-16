@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: refactor
+summary: keep status, run_native and run_git no longer than they were
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli.rs
+touched: crates/alt-cli/src/native/pathspec.rs
+touched: crates/alt-cli/src/native/status.rs
