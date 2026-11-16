@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: compare the scheme driver with any git, and hold the three an older git lacks to fixed sections
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/funcname_drivers.rs
