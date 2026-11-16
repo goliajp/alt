@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: refactor
+summary: name what add returns of the files it was to store
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/add.rs
+touched: crates/alt-cli/src/native/add/store.rs
