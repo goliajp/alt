@@ -226,14 +226,19 @@ fn text(rng: &mut Rng, options: Options) -> Vec<u8> {
     ];
     let len = rng.below(10);
     let mut out = Vec::new();
+    // without regard to case the C library misses a match behind a
+    // character whose upper-case form is shorter, as of the dotless i,
+    // once a byte that is no character follows: a text has the one kind
+    // or the other
+    let kinds = match (options.ignore_case, rng.below(2)) {
+        (false, _) => 0..wide.len(),
+        (true, 0) => 0..8,
+        (true, _) => 2..wide.len(),
+    };
     for _ in 0..len {
         let kind = rng.below(20);
-        // the C library reports a match in the wrong place behind a
-        // character whose upper-case form is shorter, as of the
-        // dotless i
-        let cased = if options.ignore_case { 2 } else { 0 };
         out.extend(match kind {
-            0..=5 if options.utf8 => wide[cased + rng.below(wide.len() - cased)],
+            0..=5 if options.utf8 => wide[kinds.start + rng.below(kinds.len())],
             6 if options.newline => b"\n",
             _ => plain[rng.below(plain.len())],
         });
@@ -344,6 +349,7 @@ pub fn compare(seed: u64, count: usize, options: Options) -> Tally {
             continue;
         };
         let ours = Regex::with_options(&pat, options);
+        let stray = std::str::from_utf8(&pat).is_err();
         let pat = shown(&pat);
         if ours.is_ok() != theirs.is_some() {
             tally.differs(format!("pattern {pat}: ours {:?}", ours.as_ref().err()));
@@ -376,12 +382,10 @@ pub fn compare(seed: u64, count: usize, options: Options) -> Tally {
             if located != got {
                 tally.differs(format!("find of {pat} on {shown}: {located:?} not {got:?}"));
             }
-            // where a period could take a byte that is no character,
-            // the C library lets it when it places the groups of a
-            // match found without: for `.|(\xe9)` on that byte it gives
-            // the group nothing
-            let stray = |(from, to): (usize, usize)| std::str::from_utf8(&text[from..to]).is_err();
-            let loose = options.utf8 && pat.contains('.') && got.is_some_and(stray);
+            // for a pattern that holds a byte that is no character the C
+            // library reports groups no match has, one with an end
+            // before its start: `(.*).\xc3+` on `a\xc3\x9fbb`
+            let loose = options.utf8 && stray;
             if let Some(expected) = expected.filter(|_| !loose) {
                 let last = ours.groups().min(GROUPS - 1);
                 let ours: Vec<_> = (0..=last).map(span).collect();
