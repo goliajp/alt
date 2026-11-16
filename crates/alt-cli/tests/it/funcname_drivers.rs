@@ -168,7 +168,13 @@ fn every_built_in_driver_names_the_sections_git_names() {
 /// sections git 2.56.1 names, whichever git is at hand.
 #[test]
 fn the_drivers_an_older_git_lacks_name_the_sections_of_the_git_they_are_from() {
-    let cases: [(&str, &[&[u8]], &[&str]); 3] = [
+    // a driver, lines of a file, and the section of the hunk behind each
+    type Case = (
+        &'static str,
+        &'static [&'static [u8]],
+        &'static [&'static str],
+    );
+    let cases: [Case; 3] = [
         (
             "bash",
             &[
