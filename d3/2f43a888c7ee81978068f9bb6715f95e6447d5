@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: fix
+summary: bound the bytes the tree and the program of a pattern hold while it is compiled
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/block.rs
+touched: crates/alt-regex/src/budget.rs
+touched: crates/alt-regex/src/lib.rs
+touched: crates/alt-regex/src/program.rs
+touched: crates/alt-regex/src/program/repeat.rs
+touched: crates/alt-regex/src/syntax.rs
+touched: crates/alt-regex/src/syntax/atoms.rs
+touched: crates/alt-regex/src/syntax/tree.rs
+touched: crates/alt-regex/tests/it/limits.rs
