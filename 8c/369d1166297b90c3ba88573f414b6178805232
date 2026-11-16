@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: fix
+summary: say what the storage layer met when a revision or the durability barrier fails
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd.rs
+touched: crates/alt-cli/src/cli.rs
+touched: crates/alt-cli/src/fsck.rs
+touched: crates/alt-cli/src/group_commit.rs
+touched: crates/alt-cli/src/machine.rs
+touched: crates/alt-cli/src/main.rs
+touched: crates/alt-cli/tests/it/damage_messages.rs
+touched: crates/alt-cli/tests/it/main.rs
