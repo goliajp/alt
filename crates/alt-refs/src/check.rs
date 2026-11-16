@@ -14,6 +14,19 @@ pub struct RefsChecked {
 }
 
 impl RefStore {
+    /// The refs as they were before the last `dropped` ops of the log,
+    /// replayed from the first op.
+    pub fn refs_before(
+        &self,
+        dropped: usize,
+    ) -> Result<BTreeMap<String, crate::RefTarget>, RefError> {
+        let ops = self.oplog.ops()?;
+        let mut replayed = Refs::default();
+        let ops = &ops[..ops.len().saturating_sub(dropped)];
+        fold_new(&mut replayed, &mut 0, &mut BTreeMap::new(), ops)?;
+        Ok(replayed.to_map())
+    }
+
     /// Reads and verifies every record of the operation log, then replays
     /// every ref transaction from the first one and compares the outcome
     /// with the refs this store serves. An ordinary open starts from the

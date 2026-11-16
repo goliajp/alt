@@ -29,6 +29,7 @@ mod flow_enforce;
 mod flow_kill;
 mod flow_release_hotfix;
 mod fsck;
+mod fsck_tails;
 mod identity;
 mod import_materialize;
 mod json_outputs;

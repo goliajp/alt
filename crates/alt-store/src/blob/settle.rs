@@ -15,6 +15,10 @@ impl BlobStore {
         Ok((self.chunks.unfinished(), self.map()?.unfinished()))
     }
 
+    pub(crate) fn map_path(&self) -> std::path::PathBuf {
+        self.dir.join("manifests").join("blobmap")
+    }
+
     /// See [`crate::ChunkStore::distrust_synced`].
     pub fn distrust_synced(&mut self) -> Result<bool, StoreError> {
         self.chunks.distrust_synced()

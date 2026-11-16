@@ -17,6 +17,10 @@ pub struct OdbChecked {
     pub objects: u64,
     /// blobs stored as parts
     pub decomposed: u64,
+    /// bytes of records at the ends of the blob map, the Tier 1 map and
+    /// `map.alt` that were never synced and name content which is not
+    /// stored: a writer cuts them off, and what they name is not checked
+    pub unconfirmed: [u64; 3],
 }
 
 impl Odb {
@@ -25,7 +29,9 @@ impl Odb {
     /// every chunk is decoded and hashed, every blob assembled and hashed,
     /// every object hashed to its git id, every blob stored as parts put
     /// back together, and every index compared with the file it indexes.
-    /// Writers wait while it runs.
+    /// Records the next writer cuts off (see [`Self::unconfirmed`]) are
+    /// read and counted, and what they name is left alone. Writers wait
+    /// while it runs.
     fn check(&self) -> Result<OdbChecked, OdbError> {
         if self.held {
             return self.check_locked();
@@ -37,8 +43,11 @@ impl Odb {
     }
 
     fn check_locked(&self) -> Result<OdbChecked, OdbError> {
-        let store = self.blobs.check()?;
-        let objects = self.map.check(|entry| {
+        let upto = self.unconfirmed()?;
+        let holds = self.holds()?;
+        let ends = [holds.blobmap, holds.tier1, holds.map];
+        let store = self.blobs.check_upto(upto[0])?;
+        let objects = self.map.check(upto[2], |entry| {
             let data = self.fetch_blob(entry.alt)?;
             if data.len() as u64 != entry.size {
                 return Err(OdbError::SizeMismatch(entry.git, entry.size));
@@ -54,12 +63,13 @@ impl Odb {
         })?;
         let decomposed = self
             .tier1()?
-            .check(|blob| self.fetch_blob(blob).map(drop))?;
+            .check(upto[1], |blob| self.fetch_blob(blob).map(drop))?;
         Ok(OdbChecked {
             chunk_records: store.chunk_records,
             blob_records: store.blob_records,
             objects,
             decomposed,
+            unconfirmed: [0, 1, 2].map(|log| ends[log] - upto[log]),
         })
     }
 }
@@ -94,6 +104,19 @@ impl NativeOdb {
     ) -> Result<T, OdbError> {
         self.odb_mut()?
             .settled(|odb| check(&|oid| odb.contains(oid)))
+    }
+}
+
+impl NativeOdb {
+    /// How each of the four append files goes on past the records this
+    /// handle holds of it (see [`alt_store::Passed`]): the active pack,
+    /// the blob map, the Tier 1 map and `map.alt`.
+    pub fn passed(&self) -> Result<Vec<(std::path::PathBuf, alt_store::Passed)>, OdbError> {
+        let odb = self.odb()?;
+        let mut files = odb.blobs.passed()?.to_vec();
+        files.push((odb.alt_dir.join("tier1"), odb.tier1()?.passed()?));
+        files.push((odb.alt_dir.join("map.alt"), odb.map.passed()?));
+        Ok(files)
     }
 }
 

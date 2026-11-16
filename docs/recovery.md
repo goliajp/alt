@@ -166,6 +166,24 @@ warning: the last 1 operation(s) in the operation log were never synced to disk 
 A command that reads no object, such as `alt rev-parse HEAD`, answers from the
 log as it is and can still print the id of a commit that was not kept.
 
+`alt fsck` changes nothing either, and tells what the other commands pass
+over without a word. These lines are not damage, and it still exits 0:
+
+```
+passed over 300 byte(s) at the end of map.alt: an append that never finished
+574 byte(s) of records at the end of map.alt were never synced and name content that is not stored: the next command that writes cuts them off
+1 operation(s) at the end of the operation log were never synced and name objects that are not stored: the next command that writes discards them
+```
+
+It fails when what was passed over holds a whole record after all, when a
+file ends short of what was synced, and when a ref points at an object that is
+not stored:
+
+```
+fatal: fsck: map.alt reads up to byte 1235, and a whole record begins past that, at byte 1317
+fatal: fsck: ref refs/heads/main points at 5c5af38d9217c41249e254adb6430d14d9f8e07b, which is not stored
+```
+
 A record from before the synced point that names missing content is damage,
 and so is a file that ends short of what was synced. The command that writes
 fails, no file changes, and reading what is left still works:

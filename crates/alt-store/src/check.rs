@@ -116,8 +116,14 @@ impl BlobStore {
     /// [`ChunkStore::check`], every blob the map records is assembled from
     /// its manifest and hashed against its id.
     pub fn check(&self) -> Result<StoreChecked, StoreError> {
+        self.check_upto(u64::MAX)
+    }
+
+    /// [`Self::check`] without assembling the blobs whose records begin
+    /// at or past byte `upto` of the blob map.
+    pub fn check_upto(&self, upto: u64) -> Result<StoreChecked, StoreError> {
         let chunk_records = self.chunk_store().check()?;
-        let blob_records = self.map()?.check(|blob, total_len| {
+        let blob_records = self.map()?.check(upto, |blob, total_len| {
             if self.get(blob)?.len() as u64 != total_len {
                 return Err(StoreError::Format("blobmap record corrupt"));
             }

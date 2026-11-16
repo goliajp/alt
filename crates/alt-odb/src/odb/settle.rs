@@ -232,6 +232,24 @@ impl Odb {
         Ok(true)
     }
 
+    /// For a reader, which changes nothing: from which byte on the blob
+    /// map, the Tier 1 map and `map.alt` hold records that were never
+    /// synced and name content which is not stored, the records a writer
+    /// cuts off; where each ends when it holds none.
+    pub(crate) fn unconfirmed(&self) -> Result<[u64; 3], OdbError> {
+        let holds = self.holds()?;
+        let ends = [holds.blobmap, holds.tier1, holds.map];
+        let Some(bounds) = unsynced_from(&Marker::read(&self.durable_path)) else {
+            return Ok(ends);
+        };
+        // a log the marker has no word of is not looked at
+        let from = [0, 1, 2].map(|log| bounds[log].min(ends[log]));
+        if from == ends {
+            return Ok(ends);
+        }
+        self.dangling(from, ends)
+    }
+
     /// Runs `check` with the write lock held, the files read to their ends
     /// and settled: nothing is appended to the store meanwhile, and a
     /// record that is there names content that is stored. A batch this

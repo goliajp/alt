@@ -35,7 +35,7 @@ use alt_git_codec::{ObjectId, ObjectKind, RawObject};
 use alt_store::{BlobOptions, BlobStore, CompactReport, StoreCheckpoint};
 
 pub use abbrev::Abbrev;
-pub use alt_store::{BlobId, held};
+pub use alt_store::{BlobId, Passed, held};
 pub use check::OdbChecked;
 pub use error::OdbError;
 pub use map::{MapEntry, ObjectMap};

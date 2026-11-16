@@ -216,12 +216,13 @@ impl ObjectMap {
     }
 
     /// Full check of the log (see [`RecLog::check`]); `each` sees every
-    /// entry.
+    /// entry recorded before byte `upto`.
     pub fn check(
         &self,
+        upto: u64,
         mut each: impl FnMut(MapEntry) -> Result<(), OdbError>,
     ) -> Result<u64, OdbError> {
-        self.log.check(|rec| each(MapEntry::parse(rec)?))
+        self.log.check_upto(upto, |rec| each(MapEntry::parse(rec)?))
     }
 
     /// Visits the entries from byte `from` of the log on, each with where
@@ -238,6 +239,11 @@ impl ObjectMap {
     /// See [`RecLog::unfinished`].
     pub fn unfinished(&self) -> bool {
         self.log.unfinished()
+    }
+
+    /// See [`RecLog::passed`].
+    pub fn passed(&self) -> Result<alt_store::Passed, StoreError> {
+        self.log.passed()
     }
 
     /// All entries in append order.

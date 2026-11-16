@@ -27,6 +27,14 @@ impl ChunkStore {
         self.active.torn
     }
 
+    pub(crate) fn active_file(&self) -> &std::fs::File {
+        &self.active.read
+    }
+
+    pub(crate) fn active_path(&self) -> std::path::PathBuf {
+        packs::pack_path(&self.dir, self.active.seq)
+    }
+
     /// Cuts that append off the active pack and fsyncs the cut.
     pub fn cut_unfinished(&mut self) -> Result<(), StoreError> {
         self.rewind(self.checkpoint())

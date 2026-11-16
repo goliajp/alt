@@ -91,13 +91,14 @@ impl Tier1Map {
     }
 
     /// Full check of the log (see [`RecLog::check`]); `each` sees every
-    /// decomposed blob.
+    /// decomposed blob recorded before byte `upto`.
     pub fn check<E: From<StoreError>>(
         &self,
+        upto: u64,
         mut each: impl FnMut(BlobId) -> Result<(), E>,
     ) -> Result<u64, E> {
         self.log
-            .check(|rec| each(BlobId(rec[..32].try_into().unwrap())))
+            .check_upto(upto, |rec| each(BlobId(rec[..32].try_into().unwrap())))
     }
 
     /// Visits the records from byte `from` of the log on: where each
@@ -116,6 +117,11 @@ impl Tier1Map {
     /// See [`RecLog::unfinished`].
     pub fn unfinished(&self) -> bool {
         self.log.unfinished()
+    }
+
+    /// See [`RecLog::passed`].
+    pub fn passed(&self) -> Result<alt_store::Passed, StoreError> {
+        self.log.passed()
     }
 
     pub fn run_chain(&self) -> Vec<(u64, u64)> {

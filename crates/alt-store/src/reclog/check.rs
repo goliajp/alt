@@ -12,6 +12,16 @@ impl RecLog {
     /// record in append order; the result is how many there are.
     pub fn check<E: From<StoreError>>(
         &self,
+        each: impl FnMut(&[u8]) -> Result<(), E>,
+    ) -> Result<u64, E> {
+        self.check_upto(u64::MAX, each)
+    }
+
+    /// [`Self::check`] with `each` seeing only the records that begin
+    /// before byte `upto`.
+    pub fn check_upto<E: From<StoreError>>(
+        &self,
+        upto: u64,
         mut each: impl FnMut(&[u8]) -> Result<(), E>,
     ) -> Result<u64, E> {
         self.runs.verify()?;
@@ -29,9 +39,10 @@ impl RecLog {
                     indexed += 1;
                 }
             }
+            let seen = at < upto;
             at += self.layout.rec_len as u64;
             records += 1;
-            each(rec)
+            if seen { each(rec) } else { Ok(()) }
         })?;
         // every covered record is in the runs; equal counts leave no room
         // for an entry that names anything else
@@ -39,6 +50,20 @@ impl RecLog {
             return Err(StoreError::Format(self.layout.corrupt).into());
         }
         Ok(records)
+    }
+
+    pub(crate) fn file(&self) -> &std::fs::File {
+        &self.file
+    }
+
+    pub(crate) fn rec_len(&self) -> usize {
+        self.layout.rec_len
+    }
+
+    /// Whether `rec`, of a record's length, is a record whose checksum
+    /// holds.
+    pub(crate) fn intact(&self, rec: &[u8]) -> bool {
+        self.layout.intact(rec)
     }
 
     fn indexed_at(&self, key: &Key, position: u64) -> Result<(), StoreError> {

@@ -66,7 +66,7 @@ impl Store {
     /// For a command that only reads: how many operations at the end of
     /// the log a command that writes would cut, and where the first of
     /// them starts.
-    fn unconfirmed(&self) -> Res<Option<alt_refs::Unconfirmed>> {
+    pub(crate) fn unconfirmed(&self) -> Res<Option<alt_refs::Unconfirmed>> {
         if self.refs.confirmed() {
             return Ok(None);
         }
@@ -74,6 +74,22 @@ impl Store {
         // it reads
         self.refs
             .unconfirmed(|op| held(op, &|oid| Ok(matches!(self.odb.get(oid), Ok(Some(_))))))
+    }
+}
+
+impl Store {
+    /// The refs that point at an object which does not read, as the refs
+    /// were before the last `dropped` operations of the log.
+    pub(crate) fn dangling_refs(&self, dropped: usize) -> Res<Vec<(String, ObjectId)>> {
+        let mut dangling = Vec::new();
+        for (name, target) in self.refs.refs_before(dropped)? {
+            if let RefTarget::Oid(oid) = target
+                && !matches!(self.odb.get(&oid), Ok(Some(_)))
+            {
+                dangling.push((name, oid));
+            }
+        }
+        Ok(dangling)
     }
 }
 

@@ -90,12 +90,13 @@ impl BlobMap {
     }
 
     /// Full check of the log (see [`RecLog::check`]); `each` sees every
-    /// blob recorded and its total length.
+    /// blob recorded before byte `upto` and its total length.
     pub fn check(
         &self,
+        upto: u64,
         mut each: impl FnMut(BlobId, u64) -> Result<(), StoreError>,
     ) -> Result<u64, StoreError> {
-        self.log.check(|rec| {
+        self.log.check_upto(upto, |rec| {
             let blob = BlobId(rec[..32].try_into().unwrap());
             each(blob, u64::from_le_bytes(rec[64..72].try_into().unwrap()))
         })
@@ -117,6 +118,11 @@ impl BlobMap {
     /// See [`RecLog::unfinished`].
     pub fn unfinished(&self) -> bool {
         self.log.unfinished()
+    }
+
+    /// See [`RecLog::passed`].
+    pub fn passed(&self) -> Result<crate::Passed, StoreError> {
+        self.log.passed()
     }
 
     pub fn contains(&self, blob: BlobId) -> Result<bool, StoreError> {

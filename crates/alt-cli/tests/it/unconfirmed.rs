@@ -12,7 +12,7 @@ use std::process::{Command, Output};
 const PACK: &str = ".alt/store/pack-00000001.altpack";
 const MARKERS: [&str; 2] = [".alt/odb.durable", ".alt/oplog/durable"];
 
-fn alt(repo: &Path, args: &[&str]) -> Output {
+pub(super) fn alt(repo: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_alt"))
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
@@ -24,7 +24,7 @@ fn alt(repo: &Path, args: &[&str]) -> Output {
         .unwrap()
 }
 
-fn ok(o: Output) -> String {
+pub(super) fn ok(o: Output) -> String {
     assert!(
         o.status.success(),
         "stdout: {}\nstderr: {}",
@@ -34,7 +34,7 @@ fn ok(o: Output) -> String {
     String::from_utf8(o.stdout).unwrap()
 }
 
-fn stderr(o: &Output) -> String {
+pub(super) fn stderr(o: &Output) -> String {
     String::from_utf8_lossy(&o.stderr).into_owned()
 }
 
@@ -62,7 +62,7 @@ fn records(pack: &[u8], from: usize) -> Vec<usize> {
 }
 
 /// Every file under `dir` with its bytes.
-fn files(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+pub(super) fn files(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
     let mut out = Vec::new();
     let mut entries: Vec<_> = fs::read_dir(dir).unwrap().map(|e| e.unwrap()).collect();
     entries.sort_by_key(|entry| entry.file_name());
@@ -77,7 +77,7 @@ fn files(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
 }
 
 #[derive(Clone, Copy, Debug)]
-enum Lost {
+pub(super) enum Lost {
     /// the pack ends where it did before the add
     Everything,
     /// the records are there, their payloads are zeros
@@ -91,7 +91,7 @@ enum Lost {
 /// the markers as they were before the add, the operation log and
 /// `map.alt` with everything, the pack having lost `lost`. Returns the id
 /// of the first commit and of the one that was lost.
-fn power_cut(dir: &Path, lost: Lost) -> (String, String) {
+pub(super) fn power_cut(dir: &Path, lost: Lost) -> (String, String) {
     ok(alt(dir, &["init"]));
     fs::write(dir.join("a.txt"), "one\n").unwrap();
     ok(alt(dir, &["add", "a.txt"]));

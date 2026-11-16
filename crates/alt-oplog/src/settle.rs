@@ -75,6 +75,30 @@ fn record_len(op: &Op) -> u64 {
 }
 
 impl OpLog {
+    /// For the full check: where the ops held end, how long the file is,
+    /// and where in between a whole record begins whose checksum holds.
+    /// A reader passes over an append that never finished at the end of
+    /// the log; a whole record there is one it must not pass over. A
+    /// record may begin at any byte, so every byte is tried: one hash of
+    /// what would be the record for each byte whose length field fits.
+    pub fn passed(&self) -> Result<(u64, u64, Option<u64>), OpLogError> {
+        let (holds, len) = (self.len_bytes, self.file.metadata()?.len());
+        let rest = read_at(&self.file, holds, len.saturating_sub(holds) as usize)?;
+        let whole = (0..rest.len()).find(|&at| {
+            let Some(body_len) = rest.get(at..at + 4) else {
+                return false;
+            };
+            let body_len = u32::from_le_bytes(body_len.try_into().unwrap()) as usize;
+            let record = rest.get(at + 4..(at + 4 + body_len).saturating_add(CHECKSUM_LEN));
+            record.is_some_and(|record| {
+                let (body, check) = record.split_at(body_len);
+                // the fixed part of a body
+                body_len >= 78 && alt_hash::blake3::hash(body).as_bytes()[..CHECKSUM_LEN] == *check
+            })
+        });
+        Ok((holds, len, whole.map(|at| holds + at as u64)))
+    }
+
     /// Whether the open stopped short of the file's end ([`end_reads_at`]).
     pub fn clamped(&self) -> bool {
         self.clamped
