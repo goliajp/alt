@@ -61,9 +61,9 @@ impl Finder {
                 let shown = String::from_utf8_lossy(line);
                 return Err(format!("Last expression must not be negated: {shown}").into());
             }
-            let compiled = Regex::with_options(expression, options).map_err(|e| {
+            let compiled = Regex::with_options(expression, options).map_err(|_| {
                 let shown = String::from_utf8_lossy(expression);
-                format!("Invalid regexp to look for hunk header: {shown}: {e}")
+                format!("Invalid regexp to look for hunk header: {shown}")
             })?;
             lines.push(Line {
                 negated,
