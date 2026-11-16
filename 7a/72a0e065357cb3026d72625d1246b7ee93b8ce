@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: search a back-reference from no place twice, so that turns inside turns are not given up
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/backref.rs
+touched: crates/alt-regex/src/lib.rs
