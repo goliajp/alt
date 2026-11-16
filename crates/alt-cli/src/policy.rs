@@ -16,8 +16,11 @@
 //!
 //! The principal-glob matches the same canonical form the op log carries —
 //! `<kind>:<id>` (`agent:bot-1`, `human:alice`) — so what you read
-//! in the audit log is what you write in the policy. Globs use two tokens:
-//! `*` matches one segment (no `/`), `**` matches anything including `/`.
+//! in the audit log is what you write in the policy. Globs use two tokens.
+//! `*` matches one or more characters of one segment: never a `/`, never
+//! nothing. `**` that is a whole segment matches segments: `**/` none or
+//! more of them, a closing `/**` all that lies beneath. Any other run of
+//! `*` (`src**`, `a/**b`, three or more) is one `*`, as git reads `**`.
 //!
 //! cap-spec is whitespace-separated tokens:
 //!
@@ -268,11 +271,9 @@ impl std::error::Error for PolicyError {
     }
 }
 
-/// A two-token glob, matched against the whole of a name: `*` stands for
-/// one or more characters of one segment (no `/`), `**/` where a segment
-/// begins for no segment or several, any other `**` for anything. Plain
-/// text otherwise, no escapes: a `/` in the pattern is a `/` in the name,
-/// so `src/**` holds what lies beneath `src` and nothing beside it.
+/// A two-token glob as the module docs read it, matched against the whole
+/// of a name. Plain text otherwise, no escapes: a `/` in the pattern is a
+/// `/` in the name, so `src/**` holds what lies beneath `src` only.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Glob {
     pattern: String,
@@ -292,8 +293,7 @@ impl Glob {
 }
 
 /// Whether all of `input` is what `pattern` describes; `at_start` where
-/// the pattern begins a segment. Patterns here are tiny: trying every
-/// length a wildcard may stand for is simple and cheap enough.
+/// the pattern begins a segment. Patterns are tiny: every length is tried.
 fn glob(pattern: &[u8], input: &[u8], at_start: bool) -> bool {
     let Some((&first, rest)) = pattern.split_first() else {
         return input.is_empty();
@@ -301,16 +301,15 @@ fn glob(pattern: &[u8], input: &[u8], at_start: bool) -> bool {
     if first != b'*' {
         return input.first() == Some(&first) && glob(rest, &input[1..], first == b'/');
     }
-    if let Some(after) = rest.strip_prefix(b"*") {
-        if let Some(names) = after.strip_prefix(b"/").filter(|_| at_start) {
-            let slashes = input.iter().enumerate().filter(|(_, b)| **b == b'/');
-            let mut starts = std::iter::once(0).chain(slashes.map(|(at, _)| at + 1));
-            return starts.any(|at| glob(names, &input[at..], true));
-        }
-        return (0..=input.len()).any(|at| glob(after, &input[at..], false));
+    let stars = pattern.iter().take_while(|b| **b == b'*').count();
+    let after = &pattern[stars..];
+    if stars == 2 && at_start && matches!(after.first(), None | Some(b'/')) {
+        let slashes = input.iter().enumerate().filter(|(_, b)| **b == b'/');
+        let mut starts = std::iter::once(0).chain(slashes.map(|(at, _)| at + 1));
+        return after.is_empty() || starts.any(|at| glob(&after[1..], &input[at..], true));
     }
     let segment = input.iter().take_while(|b| **b != b'/').count();
-    (1..=segment).any(|at| glob(rest, &input[at..], false))
+    (1..=segment).any(|at| glob(after, &input[at..], false))
 }
 
 #[cfg(test)]
@@ -414,6 +413,70 @@ mod tests {
         assert!(
             Glob::new("agent:*").matches("agent:bot") && !Glob::new("agent:*").matches("agent:")
         );
+    }
+
+    /// Every pattern of up to six of `a`, `*` and `/` against every name of
+    /// up to five of `a`, `b` and `/`, held to a matcher that reads the
+    /// pattern segment by segment.
+    #[test]
+    fn every_short_pattern_matches_what_its_segments_say() {
+        fn words(letters: &str, longest: usize) -> Vec<String> {
+            let mut all = vec![String::new()];
+            let mut from = 0;
+            for _ in 0..longest {
+                let until = all.len();
+                for at in from..until {
+                    let longer = letters.chars().map(|c| format!("{}{c}", all[at]));
+                    all.extend(longer.collect::<Vec<_>>());
+                }
+                from = until;
+            }
+            all
+        }
+        // within a segment a run of stars is one or more characters
+        fn segment(pattern: &[u8], name: &[u8]) -> bool {
+            match pattern.split_first() {
+                None => name.is_empty(),
+                Some((b'*', _)) => {
+                    let stars = pattern.iter().take_while(|b| **b == b'*').count();
+                    (1..=name.len()).any(|at| segment(&pattern[stars..], &name[at..]))
+                }
+                Some((c, rest)) => name.first() == Some(c) && segment(rest, &name[1..]),
+            }
+        }
+        fn segments(pattern: &[&str], name: &[&str]) -> bool {
+            match (pattern.split_first(), name.split_first()) {
+                (None, _) => name.is_empty(),
+                (Some((&"**", [])), _) => !name.is_empty(),
+                (Some((&"**", rest)), _) => (0..=name.len()).any(|at| segments(rest, &name[at..])),
+                (Some((first, rest)), Some((n, names))) => {
+                    segment(first.as_bytes(), n.as_bytes()) && segments(rest, names)
+                }
+                (Some(_), None) => false,
+            }
+        }
+        let names = words("ab/", 5);
+        let mut matched = 0;
+        for pattern in words("a*/", 6) {
+            let glob = Glob::new(&pattern);
+            let parts: Vec<&str> = pattern.split('/').collect();
+            for name in &names {
+                let said = segments(&parts, &name.split('/').collect::<Vec<_>>());
+                assert_eq!(glob.matches(name), said, "{pattern:?} against {name:?}");
+                matched += usize::from(said);
+            }
+        }
+        assert!(matched > 1000, "{matched} matches");
+        for (pattern, across) in [
+            ("src**", "src/a"),
+            ("a**b", "a/b"),
+            ("a/**b", "a/x/b"),
+            ("a/***/b", "a/x/y/b"),
+        ] {
+            assert!(!Glob::new(pattern).matches(across), "{pattern}");
+        }
+        assert!(Glob::new("src**").matches("srcx") && !Glob::new("src**").matches("src"));
+        assert!(Glob::new("a/***/b").matches("a/x/b") && !Glob::new("a/***/b").matches("a/b"));
     }
 
     #[test]
