@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: perf
+summary: take no lock to settle a log whose marker records no boundary
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/unconfirmed.rs
+touched: crates/alt-cli/tests/it/unconfirmed.rs
+touched: crates/alt-oplog/src/settle.rs
+touched: crates/alt-refs/src/settle.rs
