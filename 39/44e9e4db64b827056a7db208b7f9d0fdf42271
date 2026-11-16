@@ -1,0 +1,15 @@
+schema: alt-meta/1
+type: perf
+summary: keep the watches when the event queue runs over, and add only those the scan that follows finds missing
+author-type: human
+author: doracawl
+touched: crates/alt-os/src/sys/linux.rs
+touched: crates/alt-worktree/src/delta.rs
+touched: crates/alt-worktree/src/walk.rs
+touched: crates/alt-worktree/src/walk/found.rs
+touched: crates/alt-worktree/src/watch.rs
+touched: crates/alt-worktree/src/watch/dirs.rs
+touched: crates/alt-worktree/src/watch/linux.rs
+touched: crates/alt-worktree/tests/it/main.rs
+touched: crates/alt-worktree/tests/it/watch.rs
+touched: crates/alt-worktree/tests/it/watch_loss.rs
