@@ -92,7 +92,9 @@ fn ignore_files_outside_the_tree_are_followed_from_the_tick_they_are_written_in(
 
     // either file could be written once more and look as it does now
     let began = in_the_tick_of(&own);
-    let mut watched = Watched::start(&root, usize::MAX, &snapshot, &with(began)).unwrap();
+    let mut watched = Watched::start(&root, usize::MAX, &snapshot, &with(began))
+        .unwrap()
+        .unwrap();
     let mut check = |watched: &mut Watched| {
         let opts = with(Clock::read(&root.join(".alt")).unwrap());
         let got = watched.scan(&root, &mut snapshot, &opts, &[], b"");

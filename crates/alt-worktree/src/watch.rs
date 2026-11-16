@@ -77,18 +77,24 @@ impl Watched {
     /// that the system has no watches left for. Fails as well for a tree
     /// that events do not tell everything about. The first scan sees the
     /// whole tree, and it runs after every directory is being watched.
-    /// `opts` are those of the scan that follows.
+    /// `opts` are those of the scan that follows. `None`, and nothing
+    /// taken from the system, when one of the ignore files outside the
+    /// tree cannot be read: a scan fails on that as well, and the tree
+    /// can be watched once the file can be read.
     pub fn start(
         root: &Path,
         most: usize,
         snapshot: &Snapshot,
         opts: &ScanOptions<'_>,
-    ) -> io::Result<Watched> {
+    ) -> io::Result<Option<Watched>> {
         // the stat first: a file replaced while it is read differs next time
         let rules = stats(opts.excludes);
+        let Ok(ignore) = crate::ignore::IgnoreStack::of_files(opts.excludes) else {
+            return Ok(None);
+        };
         let tracked = |dir: &[u8]| tracked(snapshot, dir);
-        let (watcher, whole) = os::Watcher::start(root, most, &tracked, opts.excludes)?;
-        Ok(Watched {
+        let (watcher, whole) = os::Watcher::start(root, most, &tracked, ignore)?;
+        Ok(Some(Watched {
             watcher,
             index_id: snapshot.index_id.clone(),
             cached: None,
@@ -102,7 +108,7 @@ impl Watched {
             failed: false,
             full: false,
             whole: 0,
-        })
+        }))
     }
 
     /// Whether watching this tree ended because no watches were left for

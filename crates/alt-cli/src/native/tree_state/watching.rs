@@ -148,7 +148,9 @@ mod linux {
         let started = alt_worktree::watch_allowance()
             .and_then(|most| Watched::start(root, most, snapshot, options));
         match started {
-            Ok(watched) => State::Watched(Box::new(watched)),
+            Ok(Some(watched)) => State::Watched(Box::new(watched)),
+            // an ignore file could not be read: the next command tries
+            Ok(None) => State::New,
             Err(e) => off(&e, basis),
         }
     }

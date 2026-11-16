@@ -139,7 +139,7 @@ impl Watcher {
         root: &Path,
         most: usize,
         tracked: Tracked,
-        excludes: &[&Path],
+        ignore: IgnoreStack,
     ) -> io::Result<(Watcher, bool)> {
         let mut watcher = Watcher {
             root: root.to_path_buf(),
@@ -147,7 +147,7 @@ impl Watcher {
             dirs: HashMap::new(),
             most,
             ident: ident(root)?,
-            ignore: IgnoreStack::of_files(excludes)?,
+            ignore,
             skipped: BTreeSet::new(),
             mounts: Mounts::open()?,
             set_up: 0,

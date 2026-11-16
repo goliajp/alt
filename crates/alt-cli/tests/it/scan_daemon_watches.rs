@@ -130,3 +130,42 @@ fn a_hidden_directory_is_watched_once_a_forced_add_tracks_a_file_in_it() {
     );
     assert_eq!(watches(stop.0), (1, 7));
 }
+
+/// The first command a daemon serves finds a directory where the user's
+/// ignore file belongs, and ends as it does without a daemon. Once the
+/// file can be read the daemon watches the tree, as one does that found
+/// it readable from the start.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_tree_whose_ignore_file_no_first_command_could_read_is_watched_once_it_can_be() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let root = dir.path();
+    run(root, &["init"], false);
+    write(root, "a.txt", "aaaa\n");
+    write(root, "docs/guide.md", "guide\n");
+    run(root, &["add", "."], false);
+    run(root, &["commit", "-m", "base"], false);
+    let ignore = root.join(".alt/test-config/git/ignore");
+    std::fs::create_dir_all(&ignore).unwrap();
+    for daemon in [true, false] {
+        let said = output(root, &["status"], daemon);
+        let stderr = String::from_utf8_lossy(&said.stderr);
+        assert_eq!(said.status.code(), Some(128), "daemon: {daemon}");
+        assert!(stderr.contains("git/ignore as an exclude file"), "{stderr}");
+    }
+    let stop = crate::scan_daemon::Stop(daemon_pid(root), true);
+    // a command that reads no ignore rule scans the tree all the same
+    write(root, "a.txt", "changed once\n");
+    assert_eq!(run(root, &["diff"], true), run(root, &["diff"], false));
+    std::fs::remove_dir(&ignore).unwrap();
+    std::fs::write(&ignore, "*.usr\n").unwrap();
+    write(root, "x.usr", "hidden\n");
+    write(root, "a.txt", "changed\n");
+    let status = agree(root, "readable");
+    assert!(status.contains("modified:   a.txt") && !status.contains("x.usr"));
+    assert_eq!(daemon_pid(root), stop.0);
+    // the root and docs, on one queue
+    assert_eq!(watches(stop.0), (1, 2));
+    write(root, "docs/guide.md", "changed last\n");
+    assert!(agree(root, "watched").contains("modified:   docs/guide.md"));
+}

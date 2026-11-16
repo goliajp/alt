@@ -40,7 +40,7 @@ pub(crate) fn start(root: &Path, most: usize, snapshot: &Snapshot) -> std::io::R
         // read off the tree itself, before anything in it is watched
         clock: Clock::read(root).unwrap(),
     };
-    Watched::start(root, most, snapshot, &opts)
+    Watched::start(root, most, snapshot, &opts).map(Option::unwrap)
 }
 
 impl Tree {

@@ -186,6 +186,7 @@ fn a_tree_first_watched_with_a_directory_that_cannot_be_read_is_watched() {
     let opts = options(Untracked::Normal, &root);
     let watched =
         bound_by_modes(|| alt_worktree::Watched::start(&root, usize::MAX, &snapshot, &opts))
+            .unwrap()
             .unwrap();
     let mut tree = Tree {
         dir,
