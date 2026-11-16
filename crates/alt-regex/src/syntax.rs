@@ -14,8 +14,9 @@ mod tree;
 pub use tree::{Look, Node, Shape};
 
 /// The deepest nesting of groups and of repetitions, counted together:
-/// no walk of the tree goes deeper.
-const MAX_DEPTH: u32 = 200;
+/// no walk of the tree goes deeper, and the stack of a thread that
+/// asked for none holds a walk nearly twice as deep.
+const MAX_DEPTH: u32 = 400;
 /// The most groups a pattern may have.
 pub const MAX_GROUPS: u32 = 0x7fff;
 /// The longest pattern read, in bytes.

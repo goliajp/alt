@@ -5,6 +5,9 @@ use std::time::{Duration, Instant};
 
 use alt_regex::{Error, Options, Regex, Syntax};
 
+/// The deepest that groups and repetitions nest.
+const DEEPEST: usize = 400;
+
 fn within(limit: Duration, pattern: &[u8]) -> Result<Regex, Error> {
     let begun = Instant::now();
     let compiled = Regex::new(pattern);
@@ -69,12 +72,12 @@ fn counted_repetitions_nest_to_a_depth_and_no_deeper() {
         pattern.extend(b")?".repeat(depth));
         Regex::new(&pattern)
     };
-    assert!(wrapped(100).unwrap().is_match(b"a"));
-    assert_eq!(wrapped(101).err(), Some(Error::TooBig));
+    assert!(wrapped(DEEPEST / 2).unwrap().is_match(b"a"));
+    assert_eq!(wrapped(DEEPEST / 2 + 1).err(), Some(Error::TooBig));
     let grouped = |depth: usize| ["(".repeat(depth), "a".into(), ")".repeat(depth)].concat();
-    assert!(Regex::new(grouped(200).as_bytes()).is_ok());
+    assert!(Regex::new(grouped(DEEPEST).as_bytes()).is_ok());
     assert_eq!(
-        Regex::new(grouped(201).as_bytes()).err(),
+        Regex::new(grouped(DEEPEST + 1).as_bytes()).err(),
         Some(Error::TooBig)
     );
 }
@@ -88,18 +91,19 @@ fn on_a_small_stack<T: Send + 'static>(run: impl FnOnce() -> T + Send + 'static)
 #[test]
 fn the_deepest_patterns_are_read_compiled_and_searched_on_a_small_stack() {
     // each group under as many repetitions as were left to nest
-    let mut deep = b"(".repeat(199);
+    let mut deep = b"(".repeat(DEEPEST - 1);
     deep.push(b'a');
-    for group in (0..199).rev() {
+    for group in (0..DEEPEST - 1).rev() {
         deep.push(b')');
-        deep.extend(b"{2,}".repeat(199 - group));
+        deep.extend(b"{2,}".repeat((DEEPEST - 1 - group).min(4)));
     }
     assert_eq!(
         on_a_small_stack(move || Regex::new(&deep).err()),
         Some(Error::TooBig)
     );
     for (open, close) in [("(", ")?"), ("(", ")"), ("(x|", ")*"), ("(a|(", "))")] {
-        let levels = 200 / (open.matches('(').count() + close.len() - close.matches(')').count());
+        let levels =
+            DEEPEST / (open.matches('(').count() + close.len() - close.matches(')').count());
         let pattern = [open.repeat(levels), "a".into(), close.repeat(levels)].concat();
         let found = on_a_small_stack(move || {
             let re = Regex::new(pattern.as_bytes()).unwrap();

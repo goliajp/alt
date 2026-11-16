@@ -94,10 +94,13 @@
 //!
 //! What is bounded here and not there, so that a pattern git takes may
 //! be refused here: a pattern of more than 262144 bytes, of more than
-//! 32767 groups, with groups and repetitions nested more than 200 deep, that comes to more than 400000 instructions, or
-//! whose tree and program together would hold more than 24 MiB is
-//! refused with [`Error::TooBig`]; no pattern holds more than some
-//! 32 MiB while it is compiled.
+//! 32767 groups, with groups and repetitions nested more than 400
+//! deep, that comes to more than 400000 instructions, or whose tree
+//! and program together would hold more than 24 MiB is refused with
+//! [`Error::TooBig`]; no pattern holds more than some 32 MiB while it
+//! is compiled. The depth is what the stack of a thread holds, and the
+//! length is near what the instructions allow a pattern of plain
+//! characters.
 //!
 //! A search holds no more than some 48 MiB however long the text, and
 //! most hold a few kilobytes: the tables of states are begun again past
