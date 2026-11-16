@@ -38,20 +38,9 @@ impl NativeRepo<'_> {
     /// yield to the other's first: the user's, which `core.excludesFile`
     /// names, and the repository's own.
     pub(super) fn exclude_files(&self, settings: &alt_git_config::Config) -> Res<Vec<PathBuf>> {
-        let user = self
-            .user_excludes(settings)?
-            .map(|named| self.root.join(named));
+        let user = user_excludes(settings)?.map(|named| self.root.join(named));
         let info = self.store.alt_dir.join("git-import/info/exclude");
         Ok(user.into_iter().chain([info]).collect())
-    }
-
-    /// The user's ignore file as it is named: a relative path is one in
-    /// the working tree.
-    fn user_excludes(&self, settings: &alt_git_config::Config) -> Res<Option<PathBuf>> {
-        match self.named_file(settings, "excludesfile")? {
-            Some(named) => Ok(named),
-            None => Ok(alt_worktree::default_excludes_file()),
-        }
     }
 
     /// Ends the command where a directory stands in place of an ignore
@@ -59,16 +48,14 @@ impl NativeRepo<'_> {
     /// ends there every command that sets up its ignore rules, whether or
     /// not it then looks for untracked files.
     pub fn ensure_exclude_files(&self) -> Res<()> {
-        let user = self.user_excludes(&self.settings()?)?;
+        self.ensure_exclude_files_of(&self.root)
+    }
+
+    /// [`ensure_exclude_files`](Self::ensure_exclude_files) for a tree of
+    /// this repository at `root`, there or not.
+    pub fn ensure_exclude_files_of(&self, root: &Path) -> Res<()> {
         let info = self.store.alt_dir.join("git-import/info/exclude");
-        let info = info.strip_prefix(&self.root).unwrap_or(&info).to_owned();
-        for named in user.into_iter().chain([info]) {
-            if self.root.join(&named).is_dir() {
-                let named = named.display();
-                return Err(fatal(format!("cannot use {named} as an exclude file")));
-            }
-        }
-        Ok(())
+        ensure_exclude_files(&self.settings()?, root, &info)
     }
 
     /// The attribute files outside the working tree: the user's, which
@@ -77,7 +64,7 @@ impl NativeRepo<'_> {
         &self,
         settings: &alt_git_config::Config,
     ) -> Res<(Option<PathBuf>, PathBuf)> {
-        let user = match self.named_file(settings, "attributesfile")? {
+        let user = match named_file(settings, "attributesfile")? {
             Some(named) => named.map(|named| self.root.join(named)),
             None => std::env::var_os("XDG_CONFIG_HOME")
                 .filter(|v| !v.is_empty())
@@ -87,27 +74,6 @@ impl NativeRepo<'_> {
         };
         let info = self.store.alt_dir.join("git-import/info/attributes");
         Ok((user, info))
-    }
-
-    /// The file the setting `key` of the `core` section names, as git
-    /// reads it: `None` when it is not set, no file when it is set to
-    /// nothing. A relative path is one in the working tree. A key without
-    /// a value is an error, and so is a home directory that is not known.
-    fn named_file(
-        &self,
-        settings: &alt_git_config::Config,
-        key: &str,
-    ) -> Res<Option<Option<PathBuf>>> {
-        match settings.get("core", None, key) {
-            None => Ok(None),
-            Some(None) => {
-                let missing = format!("error: missing value for 'core.{key}'\n");
-                crate::diagnostics::emit(missing.as_bytes())?;
-                Err(fatal(format!("bad config variable 'core.{key}'")))
-            }
-            Some(Some(path)) if path.is_empty() => Ok(Some(None)),
-            Some(Some(path)) => Ok(Some(Some(expand_user(path)?))),
-        }
     }
 
     /// The configuration file of this repository with its includes
@@ -134,6 +100,50 @@ impl NativeRepo<'_> {
             home: std::env::var_os("HOME").map(PathBuf::from),
         };
         Ok(alt_git_config::Config::load_listing(&file, &ctx)?)
+    }
+}
+
+/// The user's ignore file as it is named: a relative path is one in the
+/// working tree.
+fn user_excludes(settings: &alt_git_config::Config) -> Res<Option<PathBuf>> {
+    match named_file(settings, "excludesfile")? {
+        Some(named) => Ok(named),
+        None => Ok(alt_worktree::default_excludes_file()),
+    }
+}
+
+/// Ends the command where a directory stands in place of an ignore file
+/// outside the working tree at `root`: the user's, or `info`, which is the
+/// repository's own.
+pub(super) fn ensure_exclude_files(
+    settings: &alt_git_config::Config,
+    root: &Path,
+    info: &Path,
+) -> Res<()> {
+    let info = info.strip_prefix(root).unwrap_or(info).to_owned();
+    for named in user_excludes(settings)?.into_iter().chain([info]) {
+        if root.join(&named).is_dir() {
+            let named = named.display();
+            return Err(fatal(format!("cannot use {named} as an exclude file")));
+        }
+    }
+    Ok(())
+}
+
+/// The file the setting `key` of the `core` section names, as git
+/// reads it: `None` when it is not set, no file when it is set to
+/// nothing. A relative path is one in the working tree. A key without
+/// a value is an error, and so is a home directory that is not known.
+fn named_file(settings: &alt_git_config::Config, key: &str) -> Res<Option<Option<PathBuf>>> {
+    match settings.get("core", None, key) {
+        None => Ok(None),
+        Some(None) => {
+            let missing = format!("error: missing value for 'core.{key}'\n");
+            crate::diagnostics::emit(missing.as_bytes())?;
+            Err(fatal(format!("bad config variable 'core.{key}'")))
+        }
+        Some(Some(path)) if path.is_empty() => Ok(Some(None)),
+        Some(Some(path)) => Ok(Some(Some(expand_user(path)?))),
     }
 }
 

@@ -70,9 +70,12 @@ impl NativeRepo<'_> {
             false => &reach[..],
         };
         let named = |path: &[u8]| pathspec::named(&specs, path);
-        let untracked = match mode.force {
-            true => Untracked::Hidden,
-            false => Untracked::All,
+        // what is not tracked is not looked for where it is not staged,
+        // and no ignore rule is read
+        let untracked = match (mode.renormalize, mode.force) {
+            (true, _) => Untracked::No,
+            (false, true) => Untracked::Hidden,
+            (false, false) => Untracked::All,
         };
 
         // only what differs from the index is read: a file with the stat

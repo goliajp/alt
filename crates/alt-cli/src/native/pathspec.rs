@@ -133,6 +133,13 @@ impl Place {
         rev: Option<&str>,
         options: crate::blame::Options,
     ) -> Res<()> {
+        // git sets up its ignore rules for a blame, whatever it is of
+        let control = match repo.is_native() {
+            true => repo.git_dir().join("git-import"),
+            false => repo.git_dir().to_owned(),
+        };
+        let info = control.join("info/exclude");
+        super::settings::ensure_exclude_files(repo.config(), &self.root, &info)?;
         let rev = rev.unwrap_or("HEAD");
         let path = self.written(given)?;
         crate::blame::run(out, repo, &path, &self.at_head(rev), rev, options)

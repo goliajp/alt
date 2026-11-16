@@ -4,6 +4,30 @@
 use super::*;
 
 impl NativeRepo<'_> {
+    /// Ends a merge of `branch` where an ignore file outside the tree is
+    /// a directory, as git ends one that has something to do: a
+    /// fast-forward as it ends any checkout, a merge of two lines as it
+    /// fails to put the state of the tree by. What else is wrong with the
+    /// merge is the merge's to say.
+    pub fn ensure_exclude_files_to_merge(&self, branch: &str) -> Res<()> {
+        let Err(ended) = self.ensure_exclude_files() else {
+            return Ok(());
+        };
+        let theirs = self.store.refs.resolve(&format!("refs/heads/{branch}"));
+        let ours = self
+            .head_branch()
+            .and_then(|cur| Ok(self.store.refs.resolve(&cur)?));
+        let (Ok(Some(ours)), Ok(Some(theirs))) = (ours, theirs) else {
+            return Ok(());
+        };
+        let bases = self.merge_bases(&[ours], &[theirs])?;
+        match (bases == [theirs], bases == [ours]) {
+            (true, _) => Ok(()),
+            (false, true) => Err(ended),
+            (false, false) => Err(settings::fatal(format!("{ended}\nfatal: stash failed"))),
+        }
+    }
+
     /// The best common ancestors of two commit sets: common ancestors that no
     /// other common ancestor descends from, in oid order so every run agrees.
     /// Several of them mean a criss-cross history; none, unrelated ones.
