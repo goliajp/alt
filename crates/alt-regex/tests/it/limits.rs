@@ -204,6 +204,31 @@ fn filled(head: &str, unit: impl Fn(u32) -> String) -> Vec<u8> {
     pattern.into_bytes()
 }
 
+/// Compiles `pattern`, or sees it refused, within the bounds on memory
+/// and time.
+fn bounded(compiled: bool, options: Options, pattern: &[u8]) {
+    let shown = &pattern[..pattern.len().min(24)].escape_ascii();
+    // on a machine with much else to do one reading of the clock says
+    // little: a pattern that costs too much does so each time
+    let mut cost = Duration::MAX;
+    for _ in 0..3 {
+        let begun = Instant::now();
+        let most = crate::most_held(|| {
+            let made = Regex::with_options(pattern, options);
+            match compiled {
+                true => assert!(made.is_ok(), "{shown}"),
+                false => assert_eq!(made.err(), Some(Error::TooBig), "{shown}"),
+            }
+        });
+        cost = cost.min(begun.elapsed());
+        assert!(most < 32 << 20, "{most} bytes for {shown}");
+        if cost < Duration::from_secs(5) {
+            break;
+        }
+    }
+    assert!(cost < Duration::from_secs(5), "{cost:?} for {shown}");
+}
+
 #[test]
 fn no_pattern_holds_more_than_its_bound_while_it_is_compiled() {
     let bytes = Options::default();
@@ -244,18 +269,6 @@ fn no_pattern_holds_more_than_its_bound_while_it_is_compiled() {
         (false, bytes, b"((a|b){1,300}){1,300}".to_vec()),
     ];
     for (compiled, options, pattern) in patterns {
-        let begun = Instant::now();
-        let most = crate::most_held(|| {
-            let made = Regex::with_options(&pattern, options);
-            let shown = &pattern[..pattern.len().min(24)].escape_ascii();
-            match compiled {
-                true => assert!(made.is_ok(), "{shown}"),
-                false => assert_eq!(made.err(), Some(Error::TooBig), "{shown}"),
-            }
-        });
-        let cost = begun.elapsed();
-        let shown = &pattern[..pattern.len().min(24)].escape_ascii();
-        assert!(most < 32 << 20, "{most} bytes for {shown}");
-        assert!(cost < Duration::from_secs(5), "{cost:?} for {shown}");
+        bounded(compiled, options, &pattern);
     }
 }
