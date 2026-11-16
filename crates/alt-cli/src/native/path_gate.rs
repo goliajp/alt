@@ -20,20 +20,22 @@ impl NativeRepo<'_> {
         Ok(())
     }
 
-    /// Refuses a commit of the index on top of `parent` when a path it
+    /// Refuses a commit of `tree` in the place of `old` when a path it
     /// adds, changes or removes is one the policy leaves out, whoever
     /// staged it: what another principal staged is not committed in this
-    /// one's name. What the index has as the parent has it is not looked
-    /// at.
-    pub(super) fn ensure_changes_allowed(&self, parent: Option<ObjectId>) -> Res<()> {
+    /// one's name, by `commit`, by an amend or by the step a stopped rebase
+    /// or revert goes on with. What `tree` has as `old` has it is not
+    /// looked at.
+    pub(super) fn ensure_commit_allowed(&self, old: Option<ObjectId>, tree: ObjectId) -> Res<()> {
         if self.caps.path_allow.is_empty() {
             return Ok(());
         }
-        let was = match parent {
-            Some(parent) => self.commit_entries(parent)?,
+        let was = match old {
+            Some(old) => self.commit_entries(old)?,
             None => Vec::new(),
         };
-        self.ensure_difference_allowed(&was, &index_entries(&self.index()?))
+        let now = flatten_tree(&self.store.odb, tree, self.store.algo)?;
+        self.ensure_difference_allowed(&was, &now)
     }
 
     /// The trees of `orig` and `onto`, for a replay of `commits` that
@@ -77,14 +79,5 @@ impl NativeRepo<'_> {
             self.ensure_path_allowed(gone)?;
         }
         Ok(())
-    }
-
-    /// The staged tree for an amend of the commit `old`, which the path
-    /// gate lets through: what `old` holds already is not this
-    /// principal's to answer for.
-    pub(super) fn gated_tree(&mut self, old: ObjectId) -> Res<ObjectId> {
-        let tree = self.staged_tree()?;
-        self.ensure_changes_allowed(Some(old))?;
-        Ok(tree)
     }
 }

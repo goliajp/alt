@@ -46,8 +46,6 @@ impl NativeRepo<'_> {
 
         let branch = self.head_branch()?;
         let parent = self.store.refs.resolve(&branch)?;
-        // the path gate holds for what is committed as for what is staged
-        self.ensure_changes_allowed(parent)?;
         let merging = self.merge_head()?;
         // a commit that changes nothing is almost always a mistake (a
         // forgotten `add`); git refuses it too, merges aside
@@ -142,7 +140,7 @@ impl NativeRepo<'_> {
                 .to_owned(),
         };
 
-        let tree = self.gated_tree(old)?;
+        let tree = self.staged_tree()?;
         if !opts.no_verify {
             self.run_precommit()?;
         }
@@ -264,6 +262,7 @@ impl NativeRepo<'_> {
         verb: &str,
         meta: &MetaInput,
     ) -> Res<ObjectId> {
+        self.ensure_commit_allowed(old, c.tree)?;
         let mut bytes = build_commit_bytes(c.tree, c.parents, c.author, c.committer, c.message);
         // when sign-policy is on and a sec key is on disk for
         // the principal, splice an `alt-sig` header into the commit and

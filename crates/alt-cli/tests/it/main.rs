@@ -64,6 +64,7 @@ mod push_wire_ext;
 mod read_json;
 mod rebase;
 mod remote;
+mod replay_refused;
 mod revert;
 mod scan_cache;
 mod scan_daemon;
