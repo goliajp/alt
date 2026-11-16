@@ -259,9 +259,7 @@ fn an_attributes_file_named_by_the_settings_is_found_where_git_finds_it() {
                 let file = pair.at(tree).join(sub).join(&named);
                 std::fs::write(file, "one\r\ntwo\r\n").unwrap();
             }
-            // alt takes the path as one from the root wherever it is run
-            let from_root = Path::new(sub).join(&named);
-            let added = pair.alt(sub, daemon, &["add", from_root.to_str().unwrap()]);
+            let added = pair.alt(sub, daemon, &["add", &named]);
             assert!(
                 added.status.success(),
                 "{at} {sub} {daemon}: {}",
