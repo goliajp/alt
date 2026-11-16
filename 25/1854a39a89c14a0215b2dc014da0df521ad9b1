@@ -1,0 +1,15 @@
+schema: alt-meta/1
+type: fix
+summary: sync the objects another writer's ops name before the log is recorded as synced past them
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/unconfirmed.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/sync_order.rs
+touched: crates/alt-odb/src/odb/durable.rs
+touched: crates/alt-odb/src/odb/sink.rs
+touched: crates/alt-oplog/src/lib.rs
+touched: crates/alt-oplog/src/settle.rs
+touched: crates/alt-oplog/src/synced.rs
+touched: crates/alt-refs/src/settle.rs
