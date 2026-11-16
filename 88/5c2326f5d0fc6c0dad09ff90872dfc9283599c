@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: chore
+summary: keep the program that writes the character tables beside them
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/tables.rs
+touched: crates/alt-regex/tables/gen.c
+touched: crates/alt-regex/tables/gen.sh
