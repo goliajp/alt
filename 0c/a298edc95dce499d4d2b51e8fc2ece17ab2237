@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: test
+summary: take the last log record off as a crash before its sync leaves the marker
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/crash_fixture.rs
+touched: crates/alt-cli/tests/it/machine_results.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/undo_add.rs
