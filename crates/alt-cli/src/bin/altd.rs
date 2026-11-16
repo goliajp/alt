@@ -123,6 +123,7 @@ mod unix {
                     let sink = Arc::clone(&sink);
                     let active = Arc::clone(&active);
                     workers.push(std::thread::spawn(move || {
+                        alt_os::stack::cover_thread();
                         if let Err(e) = serve(&shared, &group, &sink, stream) {
                             eprintln!("altd: request error: {e}");
                         }

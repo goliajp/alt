@@ -728,6 +728,9 @@ dependencies = [
 [[package]]
 name = "alt-threads"
 version = "0.1.0"
+dependencies = [
+ "alt-os",
+]
 
 [[package]]
 name = "alt-treediff"

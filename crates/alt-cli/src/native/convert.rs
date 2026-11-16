@@ -366,7 +366,7 @@ impl Converter {
         // written from another thread: a filter may print before it has
         // read everything
         let (written, read) = std::thread::scope(|scope| {
-            let writer = scope.spawn(move || stdin.write_all(input));
+            let writer = scope.spawn(alt_os::stack::covered(move || stdin.write_all(input)));
             let mut out = Vec::new();
             let read = stdout.read_to_end(&mut out).map(|_| out);
             (writer.join().expect("writer thread"), read)

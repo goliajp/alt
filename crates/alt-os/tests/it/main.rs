@@ -56,6 +56,24 @@ fn child(mode: &str) -> ! {
         "overflow" => {
             std::hint::black_box(recurse(0));
         }
+        "worker" | "uncovered" => {
+            let covered = mode == "worker";
+            let worker = std::thread::Builder::new().name("worker".into());
+            let run = move || {
+                if covered {
+                    alt_os::stack::cover_thread();
+                }
+                std::hint::black_box(recurse(0))
+            };
+            let _ = worker.spawn(run).unwrap().join();
+        }
+        "ended" => {
+            // a covered thread that ends leaves the process as it was
+            for _ in 0..8 {
+                let thread = std::thread::spawn(alt_os::stack::cover_thread);
+                thread.join().unwrap();
+            }
+        }
         "wild" => {
             // a fault far from the stack keeps its ordinary meaning
             let nowhere = std::hint::black_box(8usize) as *mut u8;
@@ -67,12 +85,35 @@ fn child(mode: &str) -> ! {
 }
 
 fn run(mode: &str) -> (Option<i32>, String) {
+    finish(Command::new(std::env::current_exe().unwrap()).env(CHILD, mode))
+}
+
+/// The main thread overflowing a stack with no size limit, in an address
+/// space small enough for the stack to run into its end.
+#[cfg(target_os = "linux")]
+fn run_unlimited() -> (Option<i32>, String) {
+    use std::os::unix::process::CommandExt;
+    unsafe extern "C" {
+        fn setrlimit(resource: std::ffi::c_int, limit: *const [u64; 2]) -> std::ffi::c_int;
+    }
+    const RLIMIT_STACK: std::ffi::c_int = 3;
+    const RLIMIT_AS: std::ffi::c_int = 9;
+    let mut command = Command::new(std::env::current_exe().unwrap());
+    command.env(CHILD, "overflow");
+    // SAFETY: setrlimit is async-signal-safe and the arrays are constants
+    unsafe {
+        command.pre_exec(|| {
+            setrlimit(RLIMIT_STACK, &[u64::MAX; 2]);
+            setrlimit(RLIMIT_AS, &[512 << 20; 2]);
+            Ok(())
+        });
+    }
+    finish(&mut command)
+}
+
+fn finish(command: &mut Command) -> (Option<i32>, String) {
     use std::os::unix::process::ExitStatusExt;
-    let out = Command::new(std::env::current_exe().unwrap())
-        .env(CHILD, mode)
-        .stdin(Stdio::null())
-        .output()
-        .unwrap();
+    let out = command.stdin(Stdio::null()).output().unwrap();
     (
         out.status.signal(),
         String::from_utf8_lossy(&out.stderr).into_owned(),
@@ -93,6 +134,32 @@ pub extern "C" fn main(
         "no overflow report: {stderr:?}"
     );
     assert_eq!(signal, Some(6), "an overflow ends in an abort");
+
+    let (signal, stderr) = run("worker");
+    assert!(
+        stderr.contains("thread 'worker' has overflowed its stack"),
+        "no overflow report for a worker thread: {stderr:?}"
+    );
+    assert_eq!(signal, Some(6), "an overflow ends in an abort");
+    // the control: a thread that was not given a signal stack just dies
+    let (signal, stderr) = run("uncovered");
+    assert!(!stderr.contains("overflowed"), "{stderr:?}");
+    assert!(
+        matches!(signal, Some(11) | Some(10) | Some(7)),
+        "got {signal:?}"
+    );
+    let (signal, _) = run("ended");
+    assert_eq!(signal, None, "covered threads come and go");
+
+    #[cfg(target_os = "linux")]
+    {
+        let (signal, stderr) = run_unlimited();
+        assert!(
+            stderr.contains("thread 'main' has overflowed its stack"),
+            "no overflow report with an unlimited stack: {stderr:?}"
+        );
+        assert_eq!(signal, Some(6));
+    }
 
     let (signal, stderr) = run("wild");
     assert!(!stderr.contains("overflowed"), "{stderr:?}");

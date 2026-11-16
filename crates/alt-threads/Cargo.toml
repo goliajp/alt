@@ -1,8 +1,9 @@
 [package]
 name = "alt-threads"
-description = "A pool of worker threads for splitting work in two, with no dependencies"
+description = "A pool of worker threads for splitting work in two, with no third-party dependencies"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
+alt-os.workspace = true
