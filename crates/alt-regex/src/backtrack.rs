@@ -6,16 +6,19 @@
 //! times text.
 
 use crate::pike::holds;
-use crate::program::{Inst, NO_JOIN, Program, close};
+use crate::program::{Inst, NO_JOIN, Program};
+use crate::registers::close;
 
 /// The most bits of visited marks a search may need.
 const MAX_MARKS: usize = 1 << 21;
 
+/// The most choices and slots written a path may leave behind it: a
+/// longer one is left to the search that steps every path at once.
+const MAX_FRAMES: usize = 1 << 18;
+
 enum Frame {
     Step(u32, usize),
-    Restore(usize, usize),
-    /// put every slot back from the top of the copies kept
-    Whole,
+    Restore(u32, usize),
 }
 
 /// Storage a search reuses.
@@ -26,17 +29,18 @@ pub struct Cache {
     /// the slots with their snapshot behind them, for a program that
     /// keeps one
     both: Vec<usize>,
-    /// whole sets of slots, to put back
-    kept: Vec<usize>,
 }
 
-/// Whether a match of `len` bytes is small enough to search this way.
+/// Whether a match of `len` bytes is one to search this way: small
+/// enough, and of a pattern whose paths never come back to where they
+/// were.
 pub fn fits(prog: &Program, len: usize) -> bool {
-    prog.join_count as usize * (len + 1) <= MAX_MARKS
+    !prog.cyclic && prog.join_count as usize * (len + 1) <= MAX_MARKS
 }
 
 /// Fills `slots` with the capture slots of the match from `from` to `to`,
-/// which the pattern is known to have.
+/// which the pattern is known to have; `None` when a path grew longer
+/// than this search keeps.
 pub fn captures(
     prog: &Program,
     cache: &mut Cache,
@@ -44,7 +48,7 @@ pub fn captures(
     from: usize,
     to: usize,
     slots: &mut [usize],
-) -> bool {
+) -> Option<bool> {
     let captures = slots.len();
     if !prog.snapshots {
         return preferred(prog, cache, text, from, to, slots, captures);
@@ -69,9 +73,11 @@ fn preferred(
     to: usize,
     slots: &mut [usize],
     captures: usize,
-) -> bool {
-    (prog.mixed_ends && paths(prog, cache, text, from, to, slots, captures, true))
-        || paths(prog, cache, text, from, to, slots, captures, false)
+) -> Option<bool> {
+    if prog.mixed_ends && paths(prog, cache, text, from, to, slots, captures, true)? {
+        return Some(true);
+    }
+    paths(prog, cache, text, from, to, slots, captures, false)
 }
 
 /// With `plain`, a path that meets a condition at the end of the match
@@ -86,15 +92,9 @@ fn paths(
     slots: &mut [usize],
     captures: usize,
     plain: bool,
-) -> bool {
+) -> Option<bool> {
     let span = to - from + 1;
-    let Cache {
-        visited,
-        stack,
-        kept,
-        ..
-    } = cache;
-    kept.clear();
+    let Cache { visited, stack, .. } = cache;
     visited.clear();
     visited.resize((prog.join_count as usize * span).div_ceil(64), 0);
     stack.clear();
@@ -102,17 +102,15 @@ fn paths(
     while let Some(frame) = stack.pop() {
         let (mut pc, mut at) = match frame {
             Frame::Restore(slot, old) => {
-                slots[slot] = old;
-                continue;
-            }
-            Frame::Whole => {
-                slots.copy_from_slice(&kept[kept.len() - slots.len()..]);
-                kept.truncate(kept.len() - slots.len());
+                slots[slot as usize] = old;
                 continue;
             }
             Frame::Step(pc, at) => (pc, at),
         };
         loop {
+            if stack.len() + slots.len() + 1 > MAX_FRAMES {
+                return None;
+            }
             let join = prog.joins[pc as usize];
             if join != NO_JOIN {
                 let mark = join as usize * span + (at - from);
@@ -139,14 +137,11 @@ fn paths(
                 }
                 Inst::Save(slot, next) | Inst::SaveOpt(slot, next) => {
                     let slot = slot as usize;
-                    if slot < captures && prog.snapshots {
-                        kept.extend_from_slice(slots);
-                        stack.push(Frame::Whole);
+                    if slot < captures {
                         let opt = matches!(prog.insts[pc as usize], Inst::SaveOpt(..));
-                        close(prog, slots, captures, slot, at, opt);
-                    } else if slot < captures {
-                        stack.push(Frame::Restore(slot, slots[slot]));
-                        slots[slot] = at;
+                        close(slots, captures, slot, at, opt, |slot, old| {
+                            stack.push(Frame::Restore(slot as u32, old))
+                        });
                     }
                     pc = next;
                 }
@@ -155,10 +150,10 @@ fn paths(
                 {
                     pc = next
                 }
-                Inst::Match if at == to => return true,
+                Inst::Match if at == to => return Some(true),
                 _ => break,
             }
         }
     }
-    false
+    Some(false)
 }

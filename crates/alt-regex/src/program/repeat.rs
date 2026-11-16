@@ -7,7 +7,8 @@ use crate::syntax::Node;
 impl Compiler {
     /// One of the copies a repetition is made of. The C library marks
     /// a group that a repetition may leave out, the first such copy
-    /// only, and a copy made of another loses the marks inside it.
+    /// only and with it the copy before, unless that is the only one;
+    /// a copy made of another loses the marks inside it.
     fn copy(&mut self, inner: &Node, next: u32, marked: bool, made: bool) -> Result<u32, Error> {
         let outside = self.copied;
         self.copied = outside || made;
@@ -31,22 +32,14 @@ impl Compiler {
         next: u32,
     ) -> Result<u32, Error> {
         let mut entry = match max {
-            // the loop: once more, or on
-            None if !nullable(inner) => {
+            // the loop: once more, or on. A turn that takes nothing
+            // comes back to the choice with no byte consumed
+            None => {
+                self.cyclic |= nullable(inner);
                 let split = self.push(Inst::Split(next, next))?;
-                let body = self.copy(inner, split, false, min > 0)?;
+                let body = self.copy(inner, split, true, min > 0)?;
                 self.insts[split as usize] = Inst::Split(body, next);
                 split
-            }
-            // a turn that takes nothing comes back to where it began, and
-            // no path goes through an instruction twice at one place:
-            // behind a turn the choice is made at an instruction of its
-            // own, so that one such turn is taken and then left
-            None => {
-                let again = self.push(Inst::Split(next, next))?;
-                let body = self.copy(inner, again, true, min > 0)?;
-                self.insts[again as usize] = Inst::Split(body, next);
-                self.push(Inst::Split(body, next))?
             }
             // the optional copies, wired as the C library wires them:
             // of fewer copies than there may be, the last ones are the
@@ -69,8 +62,12 @@ impl Compiler {
                 entry
             }
         };
+        // of two copies or more that must be there the last is marked
+        // too, when others may follow it
+        let more = max != Some(min);
         for copy in (0..min).rev() {
-            entry = self.copy(inner, entry, false, copy > 0)?;
+            let marked = more && min >= 2 && copy == min - 1;
+            entry = self.copy(inner, entry, marked, copy > 0)?;
         }
         Ok(entry)
     }

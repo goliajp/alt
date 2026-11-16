@@ -1,7 +1,9 @@
-//! Which of the matchers answers a search.
+//! Which of the matchers answers a search. An answer of `None` is a
+//! search given up at its bounds.
 
 use alt_bytes::ByteSlice;
 
+use crate::program::Program;
 use crate::{Cache, FEW, Regex, backref, backtrack, dfa, pike};
 
 impl Regex {
@@ -13,23 +15,17 @@ impl Regex {
     }
 
     #[inline]
-    pub(crate) fn decide(&self, cache: &mut Cache, text: &[u8]) -> bool {
+    pub(crate) fn decide(&self, cache: &mut Cache, text: &[u8]) -> Option<bool> {
         if text.is_empty() {
-            return self.on_empty.is_some();
+            return Some(self.on_empty.is_some());
         }
         if self.prog.backrefs {
             return backref::search(&self.prog, text, None, &mut [pike::UNSET; 2]);
         }
         if self.prog.plain_looks {
-            return dfa::earliest_end(&self.prog, &mut cache.scan, text).is_some();
+            return Some(dfa::earliest_end(&self.prog, &mut cache.scan, text).is_some());
         }
-        pike::search(
-            &self.prog,
-            &mut cache.pike,
-            text,
-            None,
-            &mut [pike::UNSET; 2],
-        )
+        stepped(&self.prog, cache, text, None, &mut [pike::UNSET; 2])
     }
 
     /// Where the earliest match begins and where the longest one from
@@ -60,49 +56,102 @@ impl Regex {
     /// Fills `slots` with the capture slots of the earliest, longest
     /// match; false when there is none.
     #[inline]
-    pub(crate) fn search(&self, cache: &mut Cache, text: &[u8], slots: &mut [usize]) -> bool {
+    pub(crate) fn search(
+        &self,
+        cache: &mut Cache,
+        text: &[u8],
+        slots: &mut [usize],
+    ) -> Option<bool> {
         if self.prog.backrefs {
-            return !self.excluded(text) && backref::search(&self.prog, text, None, slots);
+            if self.excluded(text) {
+                return Some(false);
+            }
+            return backref::search(&self.prog, text, None, slots);
         }
         if text.is_empty() {
             let Some(known) = &self.on_empty else {
-                return false;
+                return Some(false);
             };
             if slots.len() <= FEW {
                 slots.copy_from_slice(&known[..slots.len()]);
-                return true;
+                return Some(true);
             }
-            return backtrack::captures(&self.prog, &mut cache.backtrack, text, 0, 0, slots);
+            return grouped(&self.prog, cache, text, 0, 0, slots);
         }
         if self.excluded(text) {
-            return false;
+            return Some(false);
         }
         let mut from = None;
         if self.prog.plain_looks {
             // most texts match nothing, which the tables tell fastest;
             // and where a match lies, which leaves only its groups
             let Some((begins, ends)) = self.locate(cache, text) else {
-                return false;
+                return Some(false);
             };
             if let (Some(begins), Some(ends)) = (begins, ends) {
                 if slots.len() == 2 {
                     slots.copy_from_slice(&[begins, ends]);
-                    return true;
+                    return Some(true);
                 }
-                if backtrack::fits(&self.prog, ends - begins) {
-                    let prog = &self.prog;
-                    return backtrack::captures(
-                        prog,
-                        &mut cache.backtrack,
-                        text,
-                        begins,
-                        ends,
-                        slots,
-                    );
-                }
+                return grouped(&self.prog, cache, text, begins, ends, slots);
             }
             from = begins;
         }
-        pike::search(&self.prog, &mut cache.pike, text, from, slots)
+        stepped(&self.prog, cache, text, from, slots)
     }
+}
+
+/// Steps every path at once, from `from` or from wherever a match
+/// begins.
+fn stepped(
+    prog: &Program,
+    cache: &mut Cache,
+    text: &[u8],
+    mut from: Option<usize>,
+    slots: &mut [usize],
+) -> Option<bool> {
+    let carried = slots.len() * (1 + usize::from(prog.snapshots));
+    // the paths of every start together would carry too much: where the
+    // match begins is found first, with no groups, and then the groups
+    // of the paths from there
+    if from.is_none() && slots.len() > 2 && prog.row_count as usize * carried > pike::MAX_LIST {
+        let mut whole = [pike::UNSET; 2];
+        if !stepped(prog, cache, text, None, &mut whole)? {
+            return Some(false);
+        }
+        from = Some(whole[0]);
+    }
+    let found = pike::search(prog, &mut cache.pike, text, from, slots);
+    (!cache.pike.exhausted).then_some(found)
+}
+
+/// Fills `slots` with the groups of the match from `from` to `to`.
+fn grouped(
+    prog: &Program,
+    cache: &mut Cache,
+    text: &[u8],
+    from: usize,
+    to: usize,
+    slots: &mut [usize],
+) -> Option<bool> {
+    if backtrack::fits(prog, to - from) {
+        let tried = backtrack::captures(prog, &mut cache.backtrack, text, from, to, slots);
+        if tried.is_some() {
+            return tried;
+        }
+        slots.fill(pike::UNSET);
+    }
+    stepped(prog, cache, text, Some(from), slots)
+}
+
+/// The first capture slots of the match in the empty text, if it has
+/// one: a text with nothing in it is common, and always answered alike.
+pub(crate) fn on_empty(prog: &Program) -> Option<[usize; FEW]> {
+    let mut slots = [pike::UNSET; FEW];
+    let width = FEW.min(2 * (prog.groups as usize + 1));
+    let matched = match prog.backrefs {
+        true => backref::search(prog, b"", None, &mut slots[..width]),
+        false => grouped(prog, &mut Cache::default(), b"", 0, 0, &mut slots[..width]),
+    };
+    (matched == Some(true)).then_some(slots)
 }

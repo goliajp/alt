@@ -1,6 +1,6 @@
-//! Why a pattern is refused.
+//! Why a pattern is refused, or a search given up.
 
-/// Why a pattern was refused.
+/// Why a pattern was refused or a search given up.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Error {
     /// A parenthesis without its partner.
@@ -23,6 +23,9 @@ pub enum Error {
     BackReference,
     /// A pattern too large to compile.
     TooBig,
+    /// A search that came to the bound on what a search may hold or on
+    /// the steps it may take.
+    Exhausted,
 }
 
 impl std::fmt::Display for Error {
@@ -38,6 +41,7 @@ impl std::fmt::Display for Error {
             Error::Collate => "invalid collating element",
             Error::BackReference => "invalid back reference",
             Error::TooBig => "regular expression too big",
+            Error::Exhausted => "search out of space",
         })
     }
 }

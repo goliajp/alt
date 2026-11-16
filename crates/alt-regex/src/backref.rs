@@ -1,20 +1,26 @@
 //! Matching a pattern with back-references, which no automaton can: the
 //! paths from each start are tried one after another, in order of
 //! preference, and the longest match of the earliest start that has one
-//! is kept. The work is bounded by a count of steps; a search that would
-//! take more reports no match.
+//! is kept. The work is bounded by a count of steps, and a path by a
+//! count of the choices it leaves open; a search that would take more
+//! reports no match.
 
 use crate::pike::{UNSET, holds};
 use crate::program::{Inst, Program};
 
 /// The most steps one search takes.
 pub const MAX_STEPS: usize = 1 << 22;
+/// The most choices and slots written a path may leave behind it:
+/// 16 MiB of them.
+const MAX_FRAMES: usize = 1 << 20;
+/// Set on the instruction of a step taken behind a condition, with no
+/// byte consumed since.
+const BEHIND: u32 = 1 << 31;
 
 enum Frame {
-    /// an instruction, a position, and whether a condition was met
-    /// since the last byte
-    Step(u32, usize, bool),
-    Slot(usize, usize),
+    /// an instruction, with [`BEHIND`] or without, and a position
+    Step(u32, usize),
+    Slot(u32, usize),
     /// where a loop was last entered on this path
     Loop(u32, usize),
 }
@@ -26,9 +32,36 @@ fn same(a: &[u8], b: &[u8], fold: bool) -> bool {
     }
 }
 
+/// How many bytes at `at` are what `group` last matched, if it took part
+/// and they are; with `fold`, letters in either case.
+fn again(
+    prog: &Program,
+    text: &[u8],
+    slots: &[usize],
+    group: u32,
+    fold: bool,
+    at: usize,
+) -> Option<usize> {
+    let (from, to) = (slots[2 * group as usize], slots[2 * group as usize + 1]);
+    if from == UNSET || to == UNSET {
+        return None;
+    }
+    if fold && prog.utf8 {
+        return crate::chars::again(&text[at..], &text[from..to]);
+    }
+    let taken = text.get(at..at + (to - from))?;
+    same(taken, &text[from..to], fold).then_some(to - from)
+}
+
 /// Fills `found` with the first capture slots of the earliest match and,
 /// of those, the longest. With `only`, a match begins there or nowhere.
-pub fn search(prog: &Program, text: &[u8], only: Option<usize>, found: &mut [usize]) -> bool {
+/// `None` for a search given up at its bounds.
+pub fn search(
+    prog: &Program,
+    text: &[u8],
+    only: Option<usize>,
+    found: &mut [usize],
+) -> Option<bool> {
     let mut slots = vec![UNSET; 2 * (prog.groups as usize + 1)];
     let mut best = slots.clone();
     let mut entered = vec![UNSET; prog.insts.len()];
@@ -47,22 +80,22 @@ pub fn search(prog: &Program, text: &[u8], only: Option<usize>, found: &mut [usi
         let mut matched = None;
         slots.fill(UNSET);
         entered.fill(UNSET);
-        stack.push(Frame::Step(prog.start, from, false));
+        stack.push(Frame::Step(prog.start, from));
         'paths: while let Some(frame) = stack.pop() {
             let (mut pc, mut at, mut behind) = match frame {
                 Frame::Slot(slot, old) => {
-                    slots[slot] = old;
+                    slots[slot as usize] = old;
                     continue;
                 }
                 Frame::Loop(pc, old) => {
                     entered[pc as usize] = old;
                     continue;
                 }
-                Frame::Step(pc, at, behind) => (pc, at, behind),
+                Frame::Step(pc, at) => (pc & !BEHIND, at, pc & BEHIND != 0),
             };
             loop {
-                if steps == 0 {
-                    return false;
+                if steps == 0 || stack.len() + 2 > MAX_FRAMES {
+                    return None;
                 }
                 steps -= 1;
                 match prog.insts[pc as usize] {
@@ -92,14 +125,14 @@ pub fn search(prog: &Program, text: &[u8], only: Option<usize>, found: &mut [usi
                             continue;
                         }
                         stack.push(Frame::Loop(pc, before));
-                        stack.push(Frame::Step(second, at, behind));
+                        stack.push(Frame::Step(second | if behind { BEHIND } else { 0 }, at));
                         pc = first;
                     }
                     // what a group last matched is what its reference
                     // matches again, also where the group took nothing
                     Inst::Save(slot, next) | Inst::SaveOpt(slot, next) => {
                         let slot = slot as usize;
-                        stack.push(Frame::Slot(slot, slots[slot]));
+                        stack.push(Frame::Slot(slot as u32, slots[slot]));
                         slots[slot] = at;
                         pc = next;
                     }
@@ -107,18 +140,7 @@ pub fn search(prog: &Program, text: &[u8], only: Option<usize>, found: &mut [usi
                         (pc, behind) = (next, true)
                     }
                     Inst::BackRef(group, fold, next) => {
-                        let (from, to) = (slots[2 * group as usize], slots[2 * group as usize + 1]);
-                        if from == UNSET || to == UNSET {
-                            break;
-                        }
-                        let taken = match fold && prog.utf8 {
-                            true => crate::chars::again(&text[at..], &text[from..to]),
-                            false => text
-                                .get(at..at + (to - from))
-                                .is_some_and(|again| same(again, &text[from..to], fold))
-                                .then_some(to - from),
-                        };
-                        let Some(taken) = taken else {
+                        let Some(taken) = again(prog, text, &slots, group, fold, at) else {
                             break;
                         };
                         behind &= taken == 0;
@@ -148,8 +170,8 @@ pub fn search(prog: &Program, text: &[u8], only: Option<usize>, found: &mut [usi
         stack.clear();
         if matched.is_some() {
             found.copy_from_slice(&best[..found.len()]);
-            return true;
+            return Some(true);
         }
     }
-    false
+    Some(false)
 }

@@ -26,7 +26,7 @@ pub enum Inst {
     /// Record the position in a capture slot.
     Save(u32, u32),
     /// Record the end of a group that a repetition may leave out and
-    /// that may match nothing: see [`close`].
+    /// that may match nothing: see [`crate::registers::close`].
     SaveOpt(u32, u32),
     Look(Look, u32),
     /// Consume what this group matched, letters in either case if asked.
@@ -84,6 +84,9 @@ pub struct Program {
     /// capture slots, what they were when a group last closed around
     /// something.
     pub snapshots: bool,
+    /// Something that may match nothing is repeated without bound: a
+    /// path can come back to an instruction with no byte consumed.
+    pub cyclic: bool,
     /// A match can end behind a condition and without one: see
     /// [`mixed_ends`].
     pub mixed_ends: bool,
@@ -91,9 +94,7 @@ pub struct Program {
     /// number among those; the others have none.
     pub joins: Vec<u32>,
     pub join_count: u32,
-    /// For each instruction a path waits at, for a byte or as the match,
-    /// its number among those.
-    pub rows: Vec<u32>,
+    /// How many instructions a path waits at, for a byte or as the match.
     pub row_count: u32,
     /// Bytes no instruction tells apart share a class.
     pub classes: [u8; 256],
@@ -105,11 +106,11 @@ pub struct Program {
 pub const MAX_INSTS: usize = 400_000;
 /// More steps through the tree of the pattern than this is refused.
 const MAX_WORK: usize = 4 * MAX_INSTS;
-/// The most capture slots the matcher that carries them may hold: one
-/// row of all the slots for each instruction a path can wait at.
+/// The most capture slots a pattern may come to: one row of all the
+/// slots for each instruction a path can wait at.
 const MAX_SLOTS: usize = 1 << 22;
-/// The bytes the tables made of the instructions hold for each: its row,
-/// its join and how the match is reached from it.
+/// The bytes held beside each instruction: its join, how the match is
+/// reached from it, and the mark a search keeps of it.
 const BESIDE: usize = 9;
 
 struct Compiler {
@@ -121,6 +122,7 @@ struct Compiler {
     ignore_case: bool,
     /// inside a copy of a repeated expression other than its first
     copied: bool,
+    cyclic: bool,
     blocks: Vec<Copied>,
     /// each block whose sets are among the program's
     met: Vec<*const Block>,
@@ -134,6 +136,7 @@ pub fn compile(node: &Node, groups: u32, options: Options, shape: Shape) -> Resu
         budget: shape.budget,
         ignore_case: options.ignore_case,
         copied: false,
+        cyclic: false,
         blocks: Vec::new(),
         met: Vec::new(),
     };
@@ -149,7 +152,7 @@ pub fn compile(node: &Node, groups: u32, options: Options, shape: Shape) -> Resu
     let plain_looks = plain_looks && !(shape.apart && shape.strays);
     let backrefs = c.insts.iter().any(|i| matches!(i, Inst::BackRef(..)));
     let snapshots = c.insts.iter().any(|i| matches!(i, Inst::SaveOpt(..)));
-    let (rows, row_count) = rows(&c.insts);
+    let row_count = rows(&c.insts);
     if row_count as usize * 2 * (groups as usize + 1) > MAX_SLOTS {
         return Err(Error::TooBig);
     }
@@ -169,37 +172,14 @@ pub fn compile(node: &Node, groups: u32, options: Options, shape: Shape) -> Resu
         plain_looks,
         backrefs,
         snapshots,
+        cyclic: c.cyclic,
         mixed_ends,
         joins,
         join_count,
-        rows,
         row_count,
         classes,
         members,
     })
-}
-
-/// Records position `at` in capture slot `slot` of a path, as the C
-/// library keeps its registers. `slots` holds the `width` capture slots
-/// in use and, for a program with snapshots, as many again: what the
-/// first were when a group last closed around something. A group that
-/// closes around nothing, in a turn of a repetition that could have been
-/// left out and behind an earlier match of the group, puts every slot
-/// back to that.
-pub fn close(prog: &Program, slots: &mut [usize], width: usize, slot: usize, at: usize, opt: bool) {
-    if !prog.snapshots || slot.is_multiple_of(2) {
-        slots[slot] = at;
-        return;
-    }
-    let (now, kept) = slots.split_at_mut(width);
-    if now[slot - 1] < at {
-        now[slot] = at;
-        kept.copy_from_slice(now);
-    } else if opt && kept[slot - 1] != usize::MAX {
-        now.copy_from_slice(kept);
-    } else {
-        now[slot] = at;
-    }
 }
 
 /// Whether `node` can match without consuming a byte.
@@ -307,16 +287,14 @@ impl Compiler {
                 .iter()
                 .rev()
                 .try_fold(next, |next, item| self.node(item, next)),
+            // nested to the left, as the tree of the C library is
             Node::Alt(branches) => {
-                let mut entries = Vec::with_capacity(branches.len());
-                for branch in branches {
-                    entries.push(self.node(branch, next)?);
+                let mut entry = self.node(&branches[0], next)?;
+                for branch in &branches[1..] {
+                    let other = self.node(branch, next)?;
+                    entry = self.push(Inst::Split(entry, other))?;
                 }
-                let last = entries.pop().expect("an alternation has branches");
-                entries
-                    .into_iter()
-                    .rev()
-                    .try_fold(last, |rest, entry| self.push(Inst::Split(entry, rest)))
+                Ok(entry)
             }
             Node::Repeat(inner, min, max) => self.repeat(inner, *min, *max, next),
         }

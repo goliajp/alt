@@ -90,16 +90,15 @@ pub fn joins(insts: &[Inst], start: u32, exits: &[u32]) -> (Vec<u32>, u32) {
     (ways.into_iter().map(numbered).collect(), count)
 }
 
-pub fn rows(insts: &[Inst]) -> (Vec<u32>, u32) {
-    let mut count = 0;
-    let numbered = |inst: &Inst| match inst {
-        Inst::Set(..) | Inst::Byte(..) | Inst::Switch(..) | Inst::Match => {
-            count += 1;
-            count - 1
-        }
-        _ => NO_JOIN,
+/// How many instructions a path waits at.
+pub fn rows(insts: &[Inst]) -> u32 {
+    let waits = |inst: &&Inst| {
+        matches!(
+            inst,
+            Inst::Set(..) | Inst::Byte(..) | Inst::Switch(..) | Inst::Match
+        )
     };
-    (insts.iter().map(numbered).collect(), count)
+    insts.iter().filter(waits).count() as u32
 }
 
 pub fn classes(insts: &[Inst], sets: &[ByteSet]) -> ([u8; 256], Vec<u8>) {

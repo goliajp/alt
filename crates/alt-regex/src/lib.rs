@@ -11,9 +11,19 @@
 //! at hand gives something else. The tests that compare the two are
 //! therefore built only where the GNU C library is the C library.
 //!
+//! Where the groups lie is the C library's answer also where that is not
+//! what POSIX says of subexpressions. Once the two ends of a match are
+//! known the C library walks one path between them: at each choice it
+//! takes the first way, in the order written, that still leads to the
+//! end, and behind a turn of a repetition that took nothing it leaves
+//! the repetition. So `(b?|a)*a?` on `ba` gives the group the `b`,
+//! though the repetition could have taken the `a` too, and `((b*)|a)*`
+//! on `a` reports the second group, of a branch the last turn did not
+//! take, as empty at 0.
+//!
 //! A pattern with a back-reference is no longer regular. It is matched
 //! by trying its paths one after another, up to a fixed number of steps;
-//! a text that would take more is reported as not matching.
+//! a search that would take more is given up.
 //!
 //! Texts are bytes, as in the locale `C`: a multi-byte character is the
 //! bytes it is made of, and letters outside ASCII have no case. With
@@ -50,16 +60,6 @@
 //!   match at 2, where a word ends; here it is at 1. `(\ba){2,}` matches
 //!   `aaa` there and nothing here; `(^a?){1,2}` matches `a` here and
 //!   nothing there.
-//! - The groups inside a repetition without bound of what may match
-//!   nothing; the whole match is the same. `(b{0,1}|[ab]{0,1})*a?` on
-//!   `bbaxaa`: the repetition there stops short of the third byte, which
-//!   it could take, and the group is the second; here it is the third.
-//!   `((b*)|a)*` on `a`: the C library reports the second group, of the
-//!   branch not taken, as empty at 0; here it took no part. Where POSIX
-//!   leaves open whether a last turn of nothing is taken, the C library
-//!   now and then takes it and this crate never: `((x|)*b){,2}` on `xb`
-//!   gives the second group that turn at 1 there, the `x` here. For
-//!   some such patterns the C library never answers.
 //! - A group that is repeated, may match nothing and is referred back
 //!   to. `(a*)*\1` on `aaa`: the C library reports a group that ends
 //!   before it begins; here it is the empty one at 3.
@@ -84,8 +84,31 @@
 //! more than 200 deep, that comes to more than 400000 instructions, or
 //! whose tree and program together would hold more than 24 MiB is
 //! refused with [`Error::TooBig`]; no pattern holds more than some
-//! 32 MiB while it is compiled. A search with back-references that
-//! takes more than some four million steps reports no match.
+//! 32 MiB while it is compiled.
+//!
+//! A search holds no more than some 48 MiB however long the text, and
+//! most hold a few kilobytes: the tables of states are begun again past
+//! 2 MiB each, the paths stepped together carry at most 8 MiB of capture
+//! slots at one position of the text and as much at the next, and what
+//! a path leaves behind it to come back to is bounded by the size of
+//! the program. For each byte of the text a search takes no more steps
+//! than the program has instructions, which is at most 400000, and
+//! copies no more than a million capture slots; for a pattern that
+//! repeats without bound what may match nothing it takes up to 65536
+//! steps more, and past those the groups inside such a repetition are
+//! those of fewer turns than the C library takes.
+//!
+//! A search that comes to one of these bounds is given up, and reported
+//! as no match by all but [`Regex::try_captures_upto_with`], which says
+//! [`Error::Exhausted`]: the C library's `regexec` says `REG_ESPACE`
+//! when it has no memory left. That is a search for more groups than
+//! the paths from one start of a match carry between them, a thousand
+//! groups in a thousand paths; whether and where such a pattern matches
+//! and its first groups are found all the same. And it is a search with
+//! back-references that takes more than some four million steps or
+//! leaves more than a million choices open at once. For a few
+//! patterns that repeat without bound what may match nothing the C
+//! library never answers; this crate always does.
 //!
 //! The classes, the upper-case forms and the order of characters are
 //! those of the one locale named above, whatever locale the process is
@@ -98,6 +121,7 @@ mod backtrack;
 mod block;
 mod bracket;
 mod budget;
+mod captures;
 mod chars;
 mod class;
 mod dfa;
@@ -105,6 +129,7 @@ mod error;
 mod literal;
 mod pike;
 mod program;
+mod registers;
 mod search;
 mod syntax;
 mod tables;
@@ -113,6 +138,9 @@ mod utf8;
 use std::ops::Range;
 use std::sync::Mutex;
 
+use captures::{FEW, Slots};
+
+pub use captures::Captures;
 pub use class::ByteSet;
 pub use error::Error;
 
@@ -172,35 +200,6 @@ pub struct Regex {
     cache: Mutex<Cache>,
 }
 
-/// Where a match and its groups lie in the text.
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct Captures {
-    slots: Slots,
-}
-
-/// The slots of a few groups lie in the value itself.
-#[derive(Clone, PartialEq, Eq, Debug)]
-enum Slots {
-    Few([usize; FEW]),
-    Many(Vec<usize>),
-}
-
-const FEW: usize = 8;
-
-impl Captures {
-    /// The span of group `index`; group 0 is the whole match. `None` for
-    /// a group that took no part in the match.
-    pub fn get(&self, index: usize) -> Option<Range<usize>> {
-        let slots = match &self.slots {
-            Slots::Few(slots) => slots.as_slice(),
-            Slots::Many(slots) => slots.as_slice(),
-        };
-        let from = *slots.get(2 * index)?;
-        let to = *slots.get(2 * index + 1)?;
-        (from != pike::UNSET && to != pike::UNSET).then_some(from..to)
-    }
-}
-
 impl Regex {
     /// Compiles an extended regular expression.
     pub fn new(pattern: &[u8]) -> Result<Self, Error> {
@@ -214,17 +213,9 @@ impl Regex {
         // few bytes anyway; looking through the text first costs more
         let literal = literal::required(&node).filter(|_| !prog.anchored);
         drop(node);
-        // a text with nothing in it is common, and always answered alike
-        let mut slots = [pike::UNSET; FEW];
-        let width = FEW.min(2 * (groups as usize + 1));
-        let cache = &mut backtrack::Cache::default();
-        let matched = match prog.backrefs {
-            true => backref::search(&prog, b"", None, &mut slots[..width]),
-            false => backtrack::captures(&prog, cache, b"", 0, 0, &mut slots[..width]),
-        };
         Ok(Regex {
+            on_empty: search::on_empty(&prog),
             prog,
-            on_empty: matched.then_some(slots),
             literal,
             cache: Mutex::default(),
         })
@@ -241,12 +232,12 @@ impl Regex {
 
     /// Whether the pattern matches anywhere in `text`.
     pub fn is_match(&self, text: &[u8]) -> bool {
-        !self.excluded(text) && self.decide(&mut self.shared(), text)
+        !self.excluded(text) && self.decide(&mut self.shared(), text) == Some(true)
     }
 
     /// As [`Regex::is_match`], with the caller's storage.
     pub fn is_match_with(&self, cache: &mut Cache, text: &[u8]) -> bool {
-        !self.excluded(text) && self.decide(cache, text)
+        !self.excluded(text) && self.decide(cache, text) == Some(true)
     }
 
     /// The earliest match in `text`, and of those the longest.
@@ -257,8 +248,8 @@ impl Regex {
     /// As [`Regex::find`], with the caller's storage.
     pub fn find_with(&self, cache: &mut Cache, text: &[u8]) -> Option<Range<usize>> {
         let mut slots = [pike::UNSET; 2];
-        self.search(cache, text, &mut slots)
-            .then(|| slots[0]..slots[1])
+        let found = self.search(cache, text, &mut slots) == Some(true);
+        found.then(|| slots[0]..slots[1])
     }
 
     /// The earliest, longest match with the spans of all its groups.
@@ -279,19 +270,35 @@ impl Regex {
         text: &[u8],
         last: usize,
     ) -> Option<Captures> {
+        self.try_captures_upto_with(cache, text, last)
+            .unwrap_or(None)
+    }
+
+    /// As [`Regex::captures_upto_with`], and a search given up at its
+    /// bounds is told apart from a text without a match: the other
+    /// searches report the two alike.
+    pub fn try_captures_upto_with(
+        &self,
+        cache: &mut Cache,
+        text: &[u8],
+        last: usize,
+    ) -> Result<Option<Captures>, Error> {
         let width = 2 * (last.min(self.groups()) + 1);
-        if width <= FEW {
-            let mut few = [pike::UNSET; FEW];
-            let found = self.search(cache, text, &mut few[..width]);
-            return found.then_some(Captures {
-                slots: Slots::Few(few),
-            });
-        }
-        let mut slots = vec![pike::UNSET; width];
-        let found = self.search(cache, text, &mut slots);
-        found.then_some(Captures {
-            slots: Slots::Many(slots),
-        })
+        let mut few = [pike::UNSET; FEW];
+        let mut many = Vec::new();
+        let slots = match width <= FEW {
+            true => &mut few[..width],
+            false => {
+                many.resize(width, pike::UNSET);
+                &mut many[..]
+            }
+        };
+        let found = self.search(cache, text, slots).ok_or(Error::Exhausted)?;
+        let slots = match width <= FEW {
+            true => Slots::Few(few),
+            false => Slots::Many(many),
+        };
+        Ok(found.then_some(Captures { slots }))
     }
 }
 
@@ -331,6 +338,15 @@ mod tests {
         assert_eq!(found, vec![Some(0..4), Some(2..3), Some(3..4)]);
         let found = spans("(()|a)+(a*b)", "aaab").unwrap();
         assert_eq!(found, vec![Some(0..4), Some(0..0), Some(0..0), Some(0..4)]);
+        // a repetition of what may match nothing is left behind a turn
+        // of nothing, though it could take more
+        assert_eq!(spans("(b?|a)*a?", "ba"), Some(vec![Some(0..2), Some(0..1)]));
+        let found = spans("((b*)|a)*", "a").unwrap();
+        assert_eq!(found, vec![Some(0..1), Some(0..1), Some(0..0)]);
+        // the second of the copies that must be there gives way to what
+        // the first found, as one that may be left out
+        let found = spans("(()*(|a){2,})*", "a").unwrap();
+        assert_eq!(found, vec![Some(0..1), Some(0..1), Some(0..0), Some(0..1)]);
     }
 
     #[test]
@@ -434,14 +450,8 @@ mod tests {
             let mut by_paths = vec![pike::UNSET; by_steps.len()];
             let (from, to) = (by_steps[0], by_steps[1]);
             let cache = &mut backtrack::Cache::default();
-            assert!(backtrack::captures(
-                &re.prog,
-                cache,
-                text,
-                from,
-                to,
-                &mut by_paths
-            ));
+            let found = backtrack::captures(&re.prog, cache, text, from, to, &mut by_paths);
+            assert_eq!(found, Some(true), "{pattern}");
             assert_eq!(by_paths, by_steps, "{pattern}");
         }
     }

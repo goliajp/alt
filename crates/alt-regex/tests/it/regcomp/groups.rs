@@ -6,7 +6,7 @@ use alt_regex::{Options, Regex};
 use super::Theirs;
 
 /// Patterns whose groups could lie in more than one place.
-const AMBIGUOUS: [(&str, &str); 55] = [
+const AMBIGUOUS: [(&str, &str); 66] = [
     // a first branch of nothing is tried behind the second
     ("|(b?)", ""),
     ("a(|(b?))", "a"),
@@ -53,6 +53,21 @@ const AMBIGUOUS: [(&str, &str); 55] = [
     ("\\.?( ab{2,}[[:alpha:]]|b?c{0,1})*", "a"),
     ("^.{2}(([^a]{1,2})+[a-c]{1,2}c*|c{,2})*[a-c]?", "bab"),
     ("(a?)*(b?)+", "x"),
+    // what may match nothing, repeated without bound: the first way
+    // that leads to the end is walked, and a turn of nothing is left
+    ("(b?|a)*a?", "ba"),
+    ("(b{0,1}|[ab]{0,1})*a?", "bbaxaa"),
+    ("((b*)|a)*", "a"),
+    ("((x|)*b){,2}", "xb"),
+    ("(b+|(|a)*){2}", "ba"),
+    ("(a*)*(b|ab)", "aaab"),
+    // of two copies or more that must be there the last is marked as
+    // one that may be left out
+    ("(()*(|a){2,})*", "a"),
+    ("(()*(|a){3,})*", "a"),
+    ("(()+(|ab){2,4})*", "ab"),
+    ("(()+(b{0,1}|ab*x?b?){2,})*", "aaab"),
+    ("(()+(b?|ab){2,})*", "b"),
     // a branch that ends behind a condition, with nothing taken since,
     // gives way to one that does not
     ("(a)$|a", "a"),

@@ -1,4 +1,5 @@
-//! The groups this crate finds, judged by the rules of [`super::groups`].
+//! The groups this crate finds, which are the C library's, judged by
+//! the rules of [`super::groups`]: how far the two lie apart.
 
 use super::groups::{Kept, Report, admitted};
 use super::{Node, Rng, Writer, read, text};
@@ -39,116 +40,71 @@ pub fn report(written: &str) -> Report {
     written.split(' ').map(span).collect()
 }
 
-/// Matches whose groups the C library reports otherwise, all in a
-/// repetition without bound of what may match nothing: the pattern, the
-/// text, the groups here with how they stand by the rules, and the
-/// same for the C library's. The whole match is the same in each.
-pub const JUDGED: [(&str, &str, &str, Verdict, &str, Verdict); 14] = {
-    use Verdict::{Neither, Rule, Stale};
+/// Matches whose groups the rules of POSIX would put elsewhere, or
+/// leave open, all in a repetition without bound of what may match
+/// nothing: the pattern, the text, the groups the C library reports,
+/// which are the groups this crate reports, and how they stand by the
+/// rules.
+pub const JUDGED: [(&str, &str, &str, Verdict); 14] = {
+    use Verdict::{Neither, Rule};
     [
-        // the C library leaves the repetition short of what it could take
-        ("(b?|a)*a?", "ba", "0-2 1-2", Rule, "0-2 0-1", Neither),
-        (
-            "(b{0,1}|[ab]{0,1})*a?",
-            "abbaba",
-            "0-6 5-6",
-            Rule,
-            "0-6 4-5",
-            Neither,
-        ),
-        // or reports a group of a branch that was not taken
-        ("((b*)|a)*", "a", "0-1 0-1 -", Rule, "0-1 0-1 0-0", Neither),
-        (
-            "b{,2}((b*)*|a)*b{,2}",
-            "ba baa",
-            "0-2 1-2 -",
-            Rule,
-            "0-2 1-2 1-1",
-            Neither,
-        ),
+        // the repetition is left short of what it could take
+        ("(b?|a)*a?", "ba", "0-2 0-1", Neither),
+        ("(b{0,1}|[ab]{0,1})*a?", "abbaba", "0-6 4-5", Neither),
+        // a group of a branch that was not taken is reported
+        ("((b*)|a)*", "a", "0-1 0-1 0-0", Neither),
+        ("b{,2}((b*)*|a)*b{,2}", "ba baa", "0-2 1-2 1-1", Neither),
         (
             "()|((){1,2}([ab]{0,1}b?b|)|)*b{,2}",
             "b",
-            "0-1 - 0-1 0-0 0-1",
-            Rule,
             "0-1 - 0-1 0-0 1-1",
             Neither,
         ),
         (
             "(){1,2}|b?((|b{2}a+){2,}(b*))*[^a]{,2}",
             "bb",
-            "0-2 - 1-2 1-1 1-2",
-            Rule,
             "0-2 - 1-2 1-1 2-2",
             Neither,
         ),
         // one more turn of nothing behind the last, which the rules
-        // leave open: the C library takes it, in copies of a group that
-        // an interval makes
-        (
-            "((x|)*b){,2}",
-            "xb",
-            "0-2 0-2 0-1",
-            Rule,
-            "0-2 0-2 1-1",
-            Rule,
-        ),
-        (
-            "(b+|(|a)*){2}",
-            "ba",
-            "0-2 1-2 1-2",
-            Rule,
-            "0-2 1-2 2-2",
-            Rule,
-        ),
+        // leave open, is taken
+        ("((x|)*b){,2}", "xb", "0-2 0-2 1-1", Rule),
+        ("(b+|(|a)*){2}", "ba", "0-2 1-2 2-2", Rule),
         (
             "a{,2}(ab*(b+)|(b{0,1}b?)*\\W?x{0,1}){2,}b?",
             " b",
-            "0-2 1-2 - 1-2",
-            Rule,
             "0-2 1-2 - 2-2",
             Rule,
         ),
-        // neither side by the rules: both keep a group as a turn of
-        // nothing found it, each in its own way
+        // a group is kept as a turn of nothing found it
         (
             "(|(x{,2}|b{1,2}){2,}){2}|b{2,}b",
             "bb",
-            "0-2 0-2 0-2",
-            Neither,
             "0-2 0-2 2-2",
             Neither,
         ),
         (
             "((b?|bb{,2}[a-c]{0,1})+( {1,2}b+){0,1}){2,}b?",
             "ba_ ba",
-            "0-2 0-2 0-2 -",
-            Neither,
             "0-2 0-2 2-2 -",
             Neither,
         ),
         (
             "(b*(b?x{0,1}|b{2}a* +)*|[[:alpha:]]{2}(){1,2}()?)*",
             "abbbb",
-            "0-5 2-5 5-5 2-2 2-2",
-            Stale,
             "0-5 0-5 0-0 2-2 2-2",
             Neither,
         ),
-        // the C library by the rules and this crate not
+        // and here the rules are kept
         (
             "()|[^a]{,2}((b{,2}|ab*){2}){2,}b{0,1}",
             "baaba",
-            "0-5 - 4-5 4-5",
-            Neither,
             "0-5 - 4-5 5-5",
             Rule,
         ),
         (
             "((b{0,1}|b\\w?b{1,2}){,2})*(){0,1}|b{,2}ab{2}(ab*b*){1,2}",
             "bb_",
-            "0-2 0-2 1-2 2-2 -",
-            Neither,
             "0-2 0-2 2-2 2-2 -",
             Rule,
         ),
@@ -156,21 +112,15 @@ pub const JUDGED: [(&str, &str, &str, Verdict, &str, Verdict); 14] = {
 };
 
 #[test]
-fn the_groups_the_c_library_reports_otherwise_stand_by_the_rules_as_judged() {
-    for (pattern, text, here, stands, there, theirs) in JUDGED {
+fn groups_lie_where_the_c_library_puts_them_whatever_the_rules_say() {
+    for (pattern, text, groups, stands) in JUDGED {
         let node = read(pattern.as_bytes(), false);
         let re = alt_regex::Regex::new(pattern.as_bytes()).unwrap();
         let found = ours(&re, text.as_bytes()).unwrap();
-        assert_eq!(found, report(here), "{pattern} on {text}");
+        assert_eq!(found, report(groups), "{pattern} on {text}");
         assert_eq!(
             verdict(&node, text.as_bytes(), &found),
             stands,
-            "{pattern} on {text}"
-        );
-        let there = report(there);
-        assert_eq!(
-            verdict(&node, text.as_bytes(), &there),
-            theirs,
             "{pattern} on {text}"
         );
     }
@@ -206,7 +156,8 @@ fn compare(seed: u64, count: usize) -> (usize, usize) {
 // the groups are the C library's, which tries the branches of an
 // alternation and the turns of a repetition in the order written and
 // keeps the first way that gives the longest match: in some matches of
-// two hundred that is not the way the rules name
+// two hundred that is not the way the rules name. The count says how
+// far the two lie apart; it is no aim
 #[test]
 fn nearly_all_groups_lie_where_posix_puts_them() {
     let (matched, by_rule) = compare(0x9e3779b97f4a7c15, 6_000);

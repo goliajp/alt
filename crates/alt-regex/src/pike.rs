@@ -2,72 +2,39 @@
 //! carrying the positions of its groups. One pass over the text, with
 //! work per byte bounded by the size of the pattern.
 
+mod follow;
+
 use crate::class::ByteSet;
-use crate::program::{Inst, NO_JOIN, Program, close};
+use crate::program::{Inst, Program};
 use crate::syntax::Look;
+use follow::{Frame, Walk};
 
 /// A position no group has.
 pub const UNSET: usize = usize::MAX;
 
-/// The paths alive at one position, in order of preference.
+/// The most capture slots the paths that wait at one position of the
+/// text carry between them: 8 MiB, and as much again for the paths at
+/// the next position.
+pub const MAX_LIST: usize = 1 << 20;
+
+/// The paths that wait at one position, in order of preference.
 #[derive(Default)]
 struct Threads {
-    /// Where each instruction sits in `order`, when it is in the set.
-    place: Vec<u32>,
+    /// the instruction each waits at
     order: Vec<u32>,
-    /// The capture slots of each path that waits at an instruction, by
-    /// the row of the instruction.
+    /// the capture slots of each, one after another
     slots: Vec<usize>,
-    /// The instructions reached behind a condition, with nothing
-    /// consumed since, that do not wait for a byte: a path without the
-    /// condition may still pass them.
-    behind: Vec<u32>,
-    reached: Vec<u32>,
-    /// A path came to the match that way; its slots are the last row.
+    /// A path came to the match behind a condition; its slots are `last`.
     late: bool,
+    last: Vec<usize>,
 }
 
 impl Threads {
-    fn reset(&mut self, insts: usize, rows: usize, width: usize) {
-        self.place.resize(insts, 0);
-        self.behind.resize(insts, 0);
-        self.slots.resize((rows + 1) * width, UNSET);
-        self.clear();
-    }
-
     fn clear(&mut self) {
         self.order.clear();
-        self.reached.clear();
+        self.slots.clear();
         self.late = false;
     }
-
-    fn passed(&self, pc: u32) -> bool {
-        let at = self.behind[pc as usize] as usize;
-        self.reached.get(at) == Some(&pc)
-    }
-
-    fn pass(&mut self, pc: u32) {
-        self.behind[pc as usize] = self.reached.len() as u32;
-        self.reached.push(pc);
-    }
-
-    fn contains(&self, pc: u32) -> bool {
-        let at = self.place[pc as usize] as usize;
-        self.order.get(at) == Some(&pc)
-    }
-
-    fn insert(&mut self, pc: u32) {
-        self.place[pc as usize] = self.order.len() as u32;
-        self.order.push(pc);
-    }
-}
-
-enum Frame {
-    /// an instruction, and whether a condition was met on the way
-    Explore(u32, bool),
-    Restore(usize, usize),
-    /// put every slot back from the top of the copies kept
-    Whole,
 }
 
 /// Storage a search reuses.
@@ -75,10 +42,53 @@ enum Frame {
 pub struct Cache {
     now: Threads,
     next: Threads,
+    /// For each instruction the turn, one to a position of the text, in
+    /// which a path last came to it; behind a condition, in `passed`.
+    seen: Vec<u32>,
+    passed: Vec<u32>,
+    /// For an instruction on the path being followed, how many were on
+    /// it when the path last came there.
+    depth: Vec<u32>,
+    turn: u32,
+    /// how often in this turn a path may still come back to an
+    /// instruction it is on
+    rounds: u32,
     stack: Vec<Frame>,
     scratch: Vec<usize>,
-    /// whole sets of slots, to put back
-    kept: Vec<usize>,
+    /// The last search was given up: its paths came to carry more than
+    /// [`MAX_LIST`] slots.
+    pub exhausted: bool,
+}
+
+impl Cache {
+    /// Begins the next turn, with the marks of the paths in `now` kept.
+    fn turn(&mut self) {
+        if self.turn == u32::MAX {
+            self.seen.fill(0);
+            self.passed.fill(0);
+            self.turn = 0;
+            for &pc in &self.now.order {
+                self.seen[pc as usize] = 1;
+            }
+        }
+        self.turn += 1;
+        self.rounds = follow::ROUNDS;
+    }
+
+    fn reset(&mut self, prog: &Program, width: usize) {
+        let insts = prog.insts.len();
+        self.seen.resize(insts, 0);
+        self.depth.resize(if prog.cyclic { insts } else { 0 }, 0);
+        self.passed
+            .resize(if prog.mixed_ends { insts } else { 0 }, 0);
+        self.now.clear();
+        self.next.clear();
+        self.scratch.clear();
+        self.scratch.resize(width, UNSET);
+        self.stack.clear();
+        self.exhausted = false;
+        self.turn();
+    }
 }
 
 /// Whether the condition holds at `at`; `utf8` for a text matched
@@ -106,84 +116,6 @@ pub fn holds(look: Look, text: &[u8], at: usize, utf8: bool) -> bool {
     }
 }
 
-/// Adds the path at `pc`, and every path reachable from it without
-/// consuming a byte, to `list`.
-#[allow(clippy::too_many_arguments)]
-fn follow(
-    prog: &Program,
-    list: &mut Threads,
-    stack: &mut Vec<Frame>,
-    kept: &mut Vec<usize>,
-    slots: &mut [usize],
-    captures: usize,
-    pc: u32,
-    text: &[u8],
-    at: usize,
-) {
-    let width = slots.len();
-    stack.push(Frame::Explore(pc, false));
-    while let Some(frame) = stack.pop() {
-        let (pc, behind) = match frame {
-            Frame::Restore(slot, old) => {
-                slots[slot] = old;
-                continue;
-            }
-            Frame::Whole => {
-                slots.copy_from_slice(&kept[kept.len() - width..]);
-                kept.truncate(kept.len() - width);
-                continue;
-            }
-            Frame::Explore(pc, _) if list.contains(pc) => continue,
-            Frame::Explore(pc, true) if list.passed(pc) => continue,
-            Frame::Explore(pc, behind) => (pc, behind),
-        };
-        let inst = prog.insts[pc as usize];
-        match (behind, inst) {
-            (true, Inst::Match) => {
-                list.pass(pc);
-                list.late = true;
-                let row = prog.row_count as usize;
-                list.slots[row * width..][..width].copy_from_slice(slots);
-                continue;
-            }
-            (false, _) | (true, Inst::Set(..) | Inst::Byte(..) | Inst::Switch(..)) => {
-                list.insert(pc)
-            }
-            (true, _) => list.pass(pc),
-        }
-        match inst {
-            Inst::Split(first, second) => {
-                stack.push(Frame::Explore(second, behind));
-                stack.push(Frame::Explore(first, behind));
-            }
-            Inst::Save(slot, next) | Inst::SaveOpt(slot, next) => {
-                let slot = slot as usize;
-                if slot < captures && prog.snapshots {
-                    kept.extend_from_slice(slots);
-                    stack.push(Frame::Whole);
-                    let opt = matches!(prog.insts[pc as usize], Inst::SaveOpt(..));
-                    close(prog, slots, captures, slot, at, opt);
-                } else if slot < captures {
-                    stack.push(Frame::Restore(slot, slots[slot]));
-                    slots[slot] = at;
-                }
-                stack.push(Frame::Explore(next, behind));
-            }
-            Inst::Look(look, next) => {
-                if holds(look, text, at, prog.utf8) {
-                    stack.push(Frame::Explore(next, prog.mixed_ends));
-                }
-            }
-            // a pattern with one is not searched this way
-            Inst::BackRef(..) => {}
-            Inst::Set(..) | Inst::Byte(..) | Inst::Switch(..) | Inst::Match => {
-                let row = prog.rows[pc as usize] as usize;
-                list.slots[row * width..][..width].copy_from_slice(slots);
-            }
-        }
-    }
-}
-
 /// Finds the match that starts earliest and, of those, ends latest;
 /// fills `found` with its capture slots. `found` holds at least the two
 /// slots of the whole match. With `only`, a match begins at that
@@ -196,55 +128,37 @@ pub fn search(
     found: &mut [usize],
 ) -> bool {
     let captures = found.len();
-    let width = if prog.snapshots {
-        2 * captures
-    } else {
-        captures
-    };
-    let Cache {
-        now,
-        next,
-        stack,
-        scratch,
-        kept,
-    } = cache;
-    kept.clear();
-    now.reset(prog.insts.len(), prog.row_count as usize, width);
-    next.reset(prog.insts.len(), prog.row_count as usize, width);
-    scratch.clear();
-    scratch.resize(width, UNSET);
+    // the whole match alone is found without the snapshot
+    let width = captures * (1 + usize::from(prog.snapshots && captures > 2));
+    cache.reset(prog, width);
     let mut matched = false;
     let from = only.unwrap_or(0);
     for at in from..=text.len() {
         let begins = at == from || (only.is_none() && !prog.anchored);
         if !matched && begins && !(prog.apart && crate::chars::inside(text, at)) {
-            scratch.fill(UNSET);
-            follow(
-                prog, now, stack, kept, scratch, captures, prog.start, text, at,
-            );
+            cache.scratch.fill(UNSET);
+            let (mut walk, slots) = Walk::over(prog, cache, text, captures, false);
+            walk.follow(slots, prog.start, at);
         }
-        if now.order.is_empty() {
+        if cache.now.order.is_empty() && !cache.now.late {
             // nothing lives, and nothing begins later
             if matched || only.is_some() || prog.anchored {
                 break;
             }
+            cache.turn();
             continue;
         }
-        for index in 0..now.order.len() {
-            let pc = now.order[index] as usize;
-            let row = prog.rows[pc] as usize;
-            if row == NO_JOIN as usize {
-                continue;
-            }
-            let slots = &now.slots[row * width..][..width];
+        cache.turn();
+        for index in 0..cache.now.order.len() {
+            let pc = cache.now.order[index] as usize;
+            let slots = &cache.now.slots[index * width..][..width];
             // a path that began behind the match found cannot replace it
             if matched && slots[0] > found[0] {
                 continue;
             }
             let target = match prog.insts[pc] {
                 Inst::Match => {
-                    let better = !matched || slots[0] < found[0] || at > found[1];
-                    if better {
+                    if !matched || slots[0] < found[0] || at > found[1] {
                         found.copy_from_slice(&slots[..captures]);
                         found[1] = at;
                         matched = true;
@@ -268,35 +182,25 @@ pub fn search(
                 }
                 _ => continue,
             };
-            scratch.copy_from_slice(slots);
-            follow(
-                prog,
-                next,
-                stack,
-                kept,
-                scratch,
-                captures,
-                target,
-                text,
-                at + 1,
-            );
+            cache.scratch.copy_from_slice(slots);
+            let (mut walk, slots) = Walk::over(prog, cache, text, captures, true);
+            walk.follow(slots, target, at + 1);
+        }
+        if cache.exhausted {
+            return false;
         }
         // a path that came to the match behind a condition is kept when
         // none that began as early came without one
-        if now.late {
-            let slots = &now.slots[prog.row_count as usize * width..][..width];
-            let better = match matched {
-                false => true,
-                true => slots[0] < found[0] || (slots[0] == found[0] && at > found[1]),
-            };
-            if better {
-                found.copy_from_slice(&slots[..captures]);
-                found[1] = at;
-                matched = true;
-            }
+        let slots = &cache.now.last;
+        if cache.now.late
+            && (!matched || slots[0] < found[0] || (slots[0] == found[0] && at > found[1]))
+        {
+            found.copy_from_slice(&slots[..captures]);
+            found[1] = at;
+            matched = true;
         }
-        std::mem::swap(now, next);
-        next.clear();
+        std::mem::swap(&mut cache.now, &mut cache.next);
+        cache.next.clear();
     }
     matched
 }

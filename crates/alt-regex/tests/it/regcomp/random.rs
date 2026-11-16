@@ -83,10 +83,9 @@ impl Writer<'_> {
         }
     }
 
-    /// A random expression; says whether it may match nothing. Nothing
-    /// that can match the empty string is repeated without bound: the C
-    /// library may then never answer, and where it does it can give a
-    /// group a turn that the turns before it leave no room for.
+    /// A random expression; says whether it may match nothing. What can
+    /// match the empty string is repeated without bound too: for a few
+    /// such patterns the C library never answers.
     fn expression(&mut self, depth: u32) -> bool {
         let pieces = 1 + self.rng.below(3);
         // whether the branch being written can be empty so far, and
@@ -141,21 +140,21 @@ impl Writer<'_> {
                     continue;
                 }
             };
-            all_empty &= self.repeat(empty == Some(false)) || empty == Some(true);
+            all_empty &= self.repeat() || empty == Some(true);
         }
         before || all_empty
     }
 
-    /// A repetition of what was just written, without bound only when
-    /// that takes something; says whether it may be left out.
-    fn repeat(&mut self, takes: bool) -> bool {
+    /// A repetition of what was just written; says whether it may be
+    /// left out.
+    fn repeat(&mut self) -> bool {
         let bounded: [&[u8]; 10] = [
             b"", b"", b"", b"?", b"{2}", b"{1,2}", b"{0,1}", b"{,2}", b"{3}", b"{2,4}",
         ];
         let unbounded: [&[u8]; 4] = [b"*", b"+", b"{2,}", b"{3,}"];
-        let repeat = match (takes, self.rng.below(14)) {
-            (true, at @ 10..) => unbounded[at - 10],
-            (_, at) => bounded[at % 10],
+        let repeat = match self.rng.below(14) {
+            at @ 10.. => unbounded[at - 10],
+            at => bounded[at],
         };
         self.op(repeat);
         matches!(repeat, b"*" | b"?" | b"{0,1}" | b"{,2}")
