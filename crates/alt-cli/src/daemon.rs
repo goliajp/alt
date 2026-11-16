@@ -43,6 +43,16 @@ pub const FORWARDED_ENV: &[&str] = &[
     "LANG",
 ];
 
+/// Where the C library of this process looks for locales, as the daemon
+/// writes it beside its socket: `LOCPATH` in hexadecimal, nothing when
+/// it is not set. A locale is found by the path of the process that asks
+/// for it, so a daemon answers only callers whose path is its own.
+pub fn locale_path() -> String {
+    let path = std::env::var_os("LOCPATH").unwrap_or_default();
+    let bytes = path.as_encoded_bytes().iter();
+    bytes.map(|byte| format!("{byte:02x}")).collect()
+}
+
 /// A client-chosen idempotency token: 16 bytes, unique per command invocation
 /// and stable across that invocation's retries. The daemon stamps it on the
 /// command's ref transaction and, on a same-id retry, detects the write as

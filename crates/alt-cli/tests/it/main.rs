@@ -17,6 +17,8 @@ mod commit_meta;
 mod config;
 mod credential_helper;
 mod daemon_client;
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+mod daemon_locale;
 mod daemon_server;
 mod diff;
 mod diff_git;

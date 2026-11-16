@@ -142,7 +142,8 @@ mod unix {
     }
 
     /// Records the running daemon's identity next to its socket: pid +
-    /// `altd` path + the binary's mtime-nanos + size. Clients compare
+    /// `altd` path + the binary's mtime-nanos + size + where it looks
+    /// for locales. Clients compare
     /// these against their own `altd` and kill+respawn on mismatch
     /// (the fix for "cargo install upgraded the binary but
     /// the old daemon still answers"). Best-effort: any io failure
@@ -159,7 +160,8 @@ mod unix {
         let size = meta.len();
         let pid = std::process::id();
         let altd_str = altd.display().to_string();
-        let content = format!("{pid}\n{altd_str}\n{mtime_nanos}\n{size}\n");
+        let locales = alt_cli::daemon::locale_path();
+        let content = format!("{pid}\n{altd_str}\n{mtime_nanos}\n{size}\n{locales}\n");
         let path = alt_dir.join("daemon.meta");
         // Write atomically via tmp + rename so a client can never read
         // a torn meta during the swap.

@@ -201,7 +201,7 @@ mod imp {
         }
 
         if let Ok(s) = UnixStream::connect(sock) {
-            return Some(s);
+            return same_locales(alt_dir).then_some(s);
         }
         spawn_daemon(alt_dir)?;
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -213,6 +213,18 @@ mod imp {
                 }
                 Err(_) => return None,
             }
+        }
+    }
+
+    /// Whether the daemon that listens looks for locales where the caller
+    /// does; one that does not would match the caller's texts in another
+    /// locale than the caller named.
+    fn same_locales(alt_dir: &Path) -> bool {
+        let ours = daemon::locale_path();
+        let meta = std::fs::read_to_string(alt_dir.join("daemon.meta")).unwrap_or_default();
+        match meta.lines().nth(4) {
+            Some(theirs) => theirs == ours,
+            None => ours.is_empty(),
         }
     }
 
