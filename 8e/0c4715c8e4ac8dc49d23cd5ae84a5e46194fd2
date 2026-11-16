@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: wait out the clock's granularity and end the daemon on any failure
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/scan_daemon.rs
+touched: crates/alt-worktree/src/clock.rs
