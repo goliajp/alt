@@ -66,11 +66,11 @@ fn a_flush_that_cannot_index_still_makes_the_batch_durable() {
     put(&mut odb, 10..700);
     odb.flush().unwrap();
     // the batch reached its fsync: the durable marker covers map.alt
-    let durable = std::fs::read(tmp.path().join("odb.durable")).unwrap();
+    let marked = super::marker::recorded(tmp.path());
     let map_len = std::fs::metadata(tmp.path().join("map.alt")).unwrap().len();
-    let marked = u64::from_le_bytes(durable[16..24].try_into().unwrap());
     assert_eq!(
-        marked, map_len,
+        (marked.eof[3], marked.whole[3]),
+        (map_len, map_len),
         "the flush fsynced up to the end of map.alt"
     );
     // and the lock is free again

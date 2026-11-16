@@ -116,6 +116,11 @@ impl Tier1Map {
         self.log.fsync()
     }
 
+    /// The file's true on-disk size.
+    pub fn file_len(&self) -> Result<u64, StoreError> {
+        self.log.file_len()
+    }
+
     /// Truncates the tier1 record back to `target_len`, removing every blob
     /// → record mapping appended past that point. Used by [`super::NativeOdb::rewind`]
     /// to roll back a failed write batch.

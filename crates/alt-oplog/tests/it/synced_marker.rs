@@ -101,6 +101,9 @@ fn nothing_is_cut_when_the_marker_is_missing_or_an_older_one() {
     // the file length an older alt records, and nothing else
     fs::write(&marker, whole.to_le_bytes()).unwrap();
     assert!(corrupt(OpLog::open(dir.path())));
+    // a marker cut short
+    fs::write(&marker, b"").unwrap();
+    assert!(corrupt(OpLog::open(dir.path())));
     fs::remove_file(&marker).unwrap();
     assert!(corrupt(OpLog::open(dir.path())));
     assert_eq!(fs::metadata(&path).unwrap().len(), whole + 30);

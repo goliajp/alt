@@ -6,7 +6,7 @@ use std::io::{Seek, SeekFrom, Write};
 use std::path::Path;
 
 use crate::scan::{CHECKSUM_LEN, HEADER_LEN, check_header, file_header, replay_records};
-use crate::synced::Marker;
+use crate::synced::{self, Marker, State};
 use crate::{Anchor, Op, OpLogError, ROOT};
 
 /// Bytes read from the log file under its lock, not yet verified.
@@ -140,9 +140,13 @@ pub(crate) fn scan_and_repair(
         file.write_all(&file_header())?;
         file.sync_all()?;
         scan.valid_len = HEADER_LEN as u64;
-        if Marker::read(durable).is_none() {
-            Marker::write(durable, scan.valid_len, scan.valid_len)?;
-        }
+        synced::update(durable, |marker| {
+            (*marker == Marker::Absent).then_some(State {
+                flags: 0,
+                eof: scan.valid_len,
+                whole: scan.valid_len,
+            })
+        })?;
     } else if scan.valid_len < scan.file_len {
         unfinished(durable, scan.valid_len)?;
         file.set_len(scan.valid_len)?;

@@ -41,7 +41,7 @@ pub use synced::OpLogSink;
 use lock::{lock_exclusive, lock_shared, unlock};
 use read::{read_at, read_log, scan, scan_and_repair, unfinished};
 use scan::{CHECKSUM_LEN, HEADER_LEN, check_header, encode_body, replay_records};
-use synced::Marker;
+use synced::{Marker, open_sync_lock};
 
 /// A place in the log to start reading from instead of its first record:
 /// the op whose record occupies bytes `start..end`, being op number `count`
@@ -462,31 +462,25 @@ impl OpLog {
     /// our target durable (the inline, direct-CLI path), and record `target`
     /// (a record boundary) as synced either way.
     fn sync_to(&mut self, target: u64) -> Result<(), OpLogError> {
-        let recorded = |marker: Marker| marker.records(target);
-        if Marker::read(&self.durable_path).is_some_and(recorded) {
+        if Marker::read(&self.durable_path).records(target) {
             return Ok(());
         }
-        let sync_lock = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(&self.sync_lock_path)?;
+        let sync_lock = open_sync_lock(&self.sync_lock_path)?;
         lock_exclusive(&sync_lock)?;
         let result = (|| -> Result<(), OpLogError> {
             let marker = Marker::read(&self.durable_path);
-            if marker.is_some_and(recorded) {
+            if marker.records(target) {
                 return Ok(());
             }
-            let eof = match marker {
-                Some(marker) if marker.eof >= target => marker.eof,
+            let eof = match marker.recorded() {
+                Some(state) if state.eof >= target => None,
                 _ => {
                     let eof = self.file.metadata()?.len();
                     self.file.sync_all()?;
-                    eof
+                    Some(eof)
                 }
             };
-            let whole = marker.and_then(|marker| marker.whole).unwrap_or(0);
-            Marker::write(&self.durable_path, eof, whole.max(target))?;
+            synced::record(&self.durable_path, target, eof)?;
             Ok(())
         })();
         let _ = unlock(&sync_lock);

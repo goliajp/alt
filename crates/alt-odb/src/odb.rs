@@ -3,6 +3,7 @@
 
 mod durable;
 mod open;
+mod sink;
 
 pub(crate) use open::Mode;
 
@@ -21,7 +22,7 @@ use crate::synced::Deferred;
 use crate::tier1::{self, Tier1Map};
 use crate::{BlobId, OdbError};
 
-pub use durable::OdbSink;
+pub use sink::OdbSink;
 
 /// The native object database: blob store + git-identity map.
 ///

@@ -125,8 +125,11 @@ fn nothing_is_cut_when_the_marker_is_missing_or_an_older_one() {
     let with_tail = lens(dir.path());
 
     // the three file lengths an older alt records, and nothing else
-    let older = fs::read(&marker).unwrap()[..24].to_vec();
-    fs::write(&marker, older).unwrap();
+    let older = [with_tail[0], with_tail[1], with_tail[3] - 30].map(u64::to_le_bytes);
+    fs::write(&marker, older.concat()).unwrap();
+    assert!(NativeOdb::open(dir.path()).is_err());
+    // a marker cut short
+    fs::write(&marker, b"").unwrap();
     assert!(NativeOdb::open(dir.path()).is_err());
     fs::remove_file(&marker).unwrap();
     assert!(NativeOdb::open(dir.path()).is_err());

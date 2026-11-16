@@ -10,7 +10,7 @@ use super::Odb;
 use crate::head::Head;
 use crate::lock::{lock_shared, try_hold_exclusive, unlock};
 use crate::map::ObjectMap;
-use crate::synced::{Deferred, Lens, Marker};
+use crate::synced::{self, Deferred, Log, Marker, State};
 use crate::tier1::Tier1Map;
 use crate::{OdbError, default_registry};
 
@@ -46,13 +46,11 @@ fn open_lock(alt_dir: &Path, read_only: bool) -> std::io::Result<File> {
     }
 }
 
-type Pick = fn(&Lens, u32) -> Option<u64>;
-
-/// What a file that does not read to its end means, from the marker's
-/// record of how far `pick` says that file was synced.
-fn tail(durable: &Path, read_only: bool, pick: Pick) -> Tail {
+/// What `log` not reading to its end means, from the marker's record of
+/// how far it was synced.
+fn tail(durable: &Path, read_only: bool, log: Log) -> Tail {
     let durable = durable.to_owned();
-    let tail = Tail::synced_to(move |seq| pick(&Marker::read(&durable)?.whole?, seq));
+    let tail = Tail::synced_to(move |seq| Marker::read(&durable).recorded()?.whole.of(log, seq));
     if read_only { tail.read_only() } else { tail }
 }
 
@@ -65,21 +63,18 @@ fn open_files(
     opts: BlobOptions,
     head: &Head,
     late: bool,
-    tail: impl Fn(Pick) -> Tail,
+    tail: impl Fn(Log) -> Tail,
 ) -> Result<Files, OdbError> {
-    let tails = [
-        tail(Lens::pack_synced),
-        tail(|whole, _| Some(whole.blobmap)),
-    ];
+    let tails = [tail(Log::Pack), tail(Log::Blobmap)];
     let blobs = BlobStore::open_deferred(alt_dir.join("store"), opts, Some(&head.store), tails)?;
     let tier1 = if late {
         OnceLock::new()
     } else {
         blobs.open_map()?;
-        let tail = tail(|whole, _| Some(whole.tier1));
+        let tail = tail(Log::Tier1);
         OnceLock::from(Tier1Map::open(alt_dir, head.tier1.as_deref(), tail)?)
     };
-    let tail = tail(|whole, _| Some(whole.map));
+    let tail = tail(Log::Map);
     let (map, created) =
         ObjectMap::open_with_runs(&alt_dir.join("map.alt"), head.map.as_deref(), tail)?;
     Ok((blobs, tier1, map, created))
@@ -95,7 +90,7 @@ impl Odb {
         let alt_dir = alt_dir.into();
         let lock = open_lock(&alt_dir, mode.read_only)?;
         let durable_path = alt_dir.join("odb.durable");
-        let tail = |pick: Pick| tail(&durable_path, mode.read_only, pick);
+        let tail = |log: Log| tail(&durable_path, mode.read_only, log);
         // Open the append files (active pack, blobmap, map.alt — read and
         // crash-recovered here) under a shared lock, so the open never overlaps
         // another process's exclusive append. Without this, an open scanning a
@@ -106,9 +101,11 @@ impl Odb {
         let _ = unlock(&lock);
         let (mut blobs, tier1, map, created) = opened?;
         blobs.guard_opens(alt_dir.join("odb.lock"));
-        if created && Marker::read(&durable_path).is_none() {
+        if created {
             // a new store: each file is synced as far as its header
-            Marker::write_whole(&durable_path, Lens::NEW)?;
+            synced::update(&durable_path, |marker| {
+                (*marker == Marker::Absent).then_some(State::NEW)
+            })?;
         }
         let mut odb = Self {
             blobs,
@@ -119,7 +116,7 @@ impl Odb {
             held: false,
             head,
             sync_lock_path: alt_dir.join("odb.sync.lock"),
-            tier1_tail: tail(|whole, _| Some(whole.tier1)),
+            tier1_tail: tail(Log::Tier1),
             durable_path,
             defer: false,
             write_count: 0,
