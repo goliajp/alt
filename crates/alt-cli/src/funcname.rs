@@ -90,7 +90,10 @@ impl Finder {
         } in &self.lines
         {
             let mut cache = cache.borrow_mut();
-            let Some(found) = expression.captures_upto_with(&mut cache, line, 1) else {
+            // a search given up is no match, as one the C library gives
+            // up for want of memory is to git
+            let found = expression.try_captures_upto_with(&mut cache, line, 1);
+            let Ok(Some(found)) = found else {
                 continue;
             };
             if *negated {

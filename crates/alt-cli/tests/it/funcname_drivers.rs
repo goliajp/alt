@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 /// Runs git or alt in `repo` with the locale `locale`.
-fn run(tool: &str, repo: &Path, locale: &str, args: &[&str]) -> Output {
+pub fn run(tool: &str, repo: &Path, locale: &str, args: &[&str]) -> Output {
     run_in(tool, repo, &[("LC_ALL", locale)], args)
 }
 
@@ -38,7 +38,7 @@ fn run_in(tool: &str, repo: &Path, locale: &[(&str, &str)], args: &[&str]) -> Ou
         .unwrap()
 }
 
-fn ok(o: Output) -> Vec<u8> {
+pub fn ok(o: Output) -> Vec<u8> {
     assert!(
         o.status.success(),
         "stderr: {}",
@@ -55,7 +55,7 @@ fn hunk_headers(patch: &[u8]) -> Vec<String> {
 
 /// The locales git matches in: one of bytes everywhere, and a UTF-8 one
 /// where the C library is the one this crate follows.
-fn locales() -> &'static [&'static str] {
+pub fn locales() -> &'static [&'static str] {
     if cfg!(all(target_os = "linux", target_env = "gnu")) {
         &["C", "C.UTF-8"]
     } else {
@@ -65,7 +65,7 @@ fn locales() -> &'static [&'static str] {
 
 /// A git repository and its import into alt. `prepare` fills and
 /// commits the first; `change` then runs on the working tree of each.
-fn pair(prepare: impl Fn(&Path), change: impl Fn(&Path)) -> [alt_os::temp::TempDir; 2] {
+pub fn pair(prepare: impl Fn(&Path), change: impl Fn(&Path)) -> [alt_os::temp::TempDir; 2] {
     let dirs = [0; 2].map(|_| alt_os::temp::tempdir().unwrap());
     let (src, dst) = (dirs[0].path(), dirs[1].path());
     ok(run("git", src, "C", &["init", "-q", "-b", "main", "."]));
@@ -80,7 +80,7 @@ fn pair(prepare: impl Fn(&Path), change: impl Fn(&Path)) -> [alt_os::temp::TempD
 
 /// Both tools' hunk headers for `args`, which must be the same and
 /// `least` or more, in each locale.
-fn same_headers(dirs: &[alt_os::temp::TempDir; 2], args: &[&str], least: usize) -> Vec<String> {
+pub fn same_headers(dirs: &[alt_os::temp::TempDir; 2], args: &[&str], least: usize) -> Vec<String> {
     let mut all = Vec::new();
     for locale in locales() {
         let theirs = hunk_headers(&ok(run("git", dirs[0].path(), locale, args)));

@@ -72,6 +72,7 @@ mod corpus_history;
 mod filter_process;
 mod funcname;
 mod funcname_drivers;
+mod funcname_long;
 mod git_settings;
 mod recovery_kinds;
 
