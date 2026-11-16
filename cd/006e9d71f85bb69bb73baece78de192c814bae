@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: cover a missing submodule directory at switch and merge, and a limited scan inside an embedded repository
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/gitlink.rs
+touched: crates/alt-worktree/tests/it/untracked.rs
