@@ -1,0 +1,25 @@
+schema: alt-meta/1
+type: fix
+summary: check what pack records past the synced boundary hold and end the pack at the first that does not
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/torn_pack.rs
+touched: crates/alt-odb/src/head.rs
+touched: crates/alt-odb/src/odb/durable.rs
+touched: crates/alt-odb/src/odb/open.rs
+touched: crates/alt-odb/src/odb/sink.rs
+touched: crates/alt-odb/src/synced.rs
+touched: crates/alt-odb/tests/it/head_record.rs
+touched: crates/alt-odb/tests/it/main.rs
+touched: crates/alt-odb/tests/it/rewind_interrupted.rs
+touched: crates/alt-odb/tests/it/synced_note.rs
+touched: crates/alt-oplog/tests/it/synced_marker.rs
+touched: crates/alt-store/src/check.rs
+touched: crates/alt-store/src/indexing.rs
+touched: crates/alt-store/src/lib.rs
+touched: crates/alt-store/src/packs.rs
+touched: crates/alt-store/src/settle.rs
+touched: crates/alt-store/src/tail.rs
+touched: crates/alt-store/tests/it/main.rs
+touched: crates/alt-store/tests/it/torn_payload.rs
