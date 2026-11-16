@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: open the refs before the object store when reading
+author-type: human
+author: doracawl
+touched: crates/alt-repo/src/alt_backend.rs
+touched: crates/alt-repo/src/lib.rs
+touched: crates/alt-repo/src/odb.rs
+touched: crates/alt-repo/tests/it/main.rs
+touched: crates/alt-repo/tests/it/open_order.rs
