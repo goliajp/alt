@@ -473,6 +473,9 @@ mod tests {
             spans("(a)(b)\\2\\1", "abba"),
             Some(vec![Some(0..4), Some(0..1), Some(1..2)])
         );
+        // a turn of an outer repetition begins the inner one anew
+        assert_eq!(spans("(a*)*-\\1$", "aa-a").unwrap()[0], Some(0..4));
+        assert_eq!(spans("(a*)*-\\1", "aa-a").unwrap()[0], Some(0..4));
         // a group that took no part matches nothing again
         assert_eq!(spans("((a)|b)\\2", "b"), None);
         assert_eq!(spans("(a*)*\\1", "b"), Some(vec![Some(0..0), Some(0..0)]));

@@ -124,8 +124,11 @@ pub fn search(
                             pc = second;
                             continue;
                         }
-                        stack.push(Frame::Loop(pc, before));
+                        // the way out is taken with the loop as it was
+                        // found: a turn of a loop around this one may
+                        // enter it here again
                         stack.push(Frame::Step(second | if behind { BEHIND } else { 0 }, at));
+                        stack.push(Frame::Loop(pc, before));
                         pc = first;
                     }
                     // what a group last matched is what its reference
