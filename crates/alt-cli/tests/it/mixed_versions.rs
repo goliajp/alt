@@ -170,3 +170,50 @@ fn old_and_new_write_at_the_same_time() {
     }
     same_reads(&old, &repo);
 }
+
+#[test]
+#[ignore = "run with ALT_OLD_BIN set to an alt built from the base branch"]
+fn what_the_old_program_left_unfinished_does_not_keep_the_new_one_out() {
+    // (file with part of a record at its end, markers removed)
+    let cases = [
+        (None, false),
+        (Some("map.alt"), false),
+        (Some("oplog/log"), false),
+        (Some("store/pack-00000001.altpack"), false),
+        (None, true),
+        (Some("map.alt"), true),
+        (Some("oplog/log"), true),
+    ];
+    for (torn, unmarked) in cases {
+        let case = format!("{torn:?}, markers removed: {unmarked}");
+        let tmp = alt_os::temp::tempdir().unwrap();
+        let repo = tmp.path();
+        let (old, new) = (old_bin(), new_bin());
+        ok(run(&old, repo, &["init"]));
+        for round in 0..3 {
+            commit_files(&old, repo, &format!("old-{round}"), 3);
+        }
+        let alt_dir = repo.join(".alt");
+        if unmarked {
+            fs::remove_file(alt_dir.join("odb.durable")).unwrap();
+            fs::remove_file(alt_dir.join("oplog/durable")).unwrap();
+        }
+        if let Some(file) = torn {
+            let mut data = fs::read(alt_dir.join(file)).unwrap();
+            data.extend_from_slice(b"half a record");
+            fs::write(alt_dir.join(file), data).unwrap();
+        }
+        for args in [&["status"][..], &["log", "-n", "1"], &["fsck"]] {
+            let out = run(&new, repo, args);
+            assert!(out.status.success(), "{case}: alt {args:?}");
+        }
+        commit_files(&new, repo, "new", 3);
+        assert_eq!(ok(run(&new, repo, &["log"])).lines().count(), 4, "{case}");
+        // and the old one goes on with what the new one left
+        same_reads(&old, repo);
+        commit_files(&old, repo, "old-again", 3);
+        commit_files(&new, repo, "new-again", 3);
+        same_reads(&old, repo);
+        assert_eq!(head_tree(&new, repo).lines().count(), 18, "{case}");
+    }
+}

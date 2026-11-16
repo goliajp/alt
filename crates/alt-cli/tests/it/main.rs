@@ -33,6 +33,7 @@ mod import_materialize;
 mod json_outputs;
 mod lfs;
 mod log_patch;
+mod log_tails;
 mod machine_results;
 mod merge;
 mod merge_criss_cross;
