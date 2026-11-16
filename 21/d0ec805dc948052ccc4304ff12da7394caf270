@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: watch before listing in a directory that had no watch when a scan after lost events listed it
+author-type: human
+author: doracawl
+touched: crates/alt-worktree/src/watch/dirs.rs
+touched: crates/alt-worktree/src/watch/linux.rs
+touched: crates/alt-worktree/tests/it/main.rs
+touched: crates/alt-worktree/tests/it/watch_gap.rs
+touched: crates/alt-worktree/tests/it/watch_loss.rs
