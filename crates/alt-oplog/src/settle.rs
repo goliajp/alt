@@ -235,6 +235,7 @@ impl OpLog {
         self.full = OnceLock::new();
         self.len_bytes = scan.valid_len.max(HEADER_LEN as u64);
         self.last_start = scan.last_start;
+        self.others_to = self.len_bytes;
         self.reads += 1;
         Ok(())
     }

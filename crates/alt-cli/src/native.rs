@@ -83,7 +83,7 @@ impl Store {
     pub fn open(alt_dir: PathBuf) -> Res<Self> {
         Ok(Self {
             odb: NativeOdb::deferred(&alt_dir),
-            refs: RefStore::open(&alt_dir)?,
+            refs: unconfirmed::open_refs(&alt_dir)?,
             policy: Policy::load(&alt_dir)?,
             algo: std::sync::OnceLock::new(),
             alt_dir,

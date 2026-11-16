@@ -2,13 +2,13 @@
 //! write path.
 
 use std::fs::{File, OpenOptions};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::Odb;
-use crate::OdbError;
 use crate::head;
 use crate::lock::lock_shared;
-use crate::synced::{self, Deferred};
+use crate::synced::{self, Deferred, Marker};
+use crate::{NativeOdb, OdbError};
 
 /// Off-write-path fsync handle for a [`crate::NativeOdb`]: the blob store (chunks then
 /// blobmap) then `map.alt`, the durability order so a crash never leaves a
@@ -55,6 +55,35 @@ impl OdbSink {
         lock_shared(&lock)?;
         if let Some(whole) = synced::record(&self.durable_path, generation, lens, Some(lens))? {
             head::note_synced(&lock, whole.seq, whole.pack);
+        }
+        Ok(())
+    }
+}
+
+impl NativeOdb {
+    /// Syncs what the database under `alt_dir` holds, whoever wrote it,
+    /// and records that: for a caller about to record as synced something
+    /// of another writer that names objects, which that writer stored
+    /// first but may not have synced.
+    ///
+    /// It waits for no lock of the database, so it can be called with any
+    /// of them held. The files are read the way a reader reads them. A
+    /// rewind or a cut meanwhile moves the marker's generation, and under
+    /// another generation than the one read first nothing is recorded.
+    pub fn sync_stored(alt_dir: &Path) -> Result<(), OdbError> {
+        let durable_path = alt_dir.join("odb.durable");
+        let generation = Marker::read(&durable_path)
+            .recorded()
+            .map(|state| state.generation);
+        let mut this = NativeOdb::open(alt_dir)?;
+        let odb = this.odb_mut()?;
+        let holds = odb.holds()?;
+        odb.blobs.fsync()?;
+        odb.tier1_mut()?.sync()?;
+        odb.map.fsync()?;
+        // a marker without boundaries gets them from a writer
+        if let Some(generation) = generation {
+            synced::record(&durable_path, generation, holds, Some(holds))?;
         }
         Ok(())
     }

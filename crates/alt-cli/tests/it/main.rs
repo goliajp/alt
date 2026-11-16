@@ -56,6 +56,7 @@ mod show;
 mod status_json;
 mod store_refresh;
 mod switch_kinds;
+mod sync_order;
 mod tag;
 mod task_delivery;
 mod task_evidence;

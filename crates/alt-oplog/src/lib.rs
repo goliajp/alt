@@ -37,7 +37,7 @@ use std::sync::OnceLock;
 
 pub use op::{Op, OpId, OpLogError, ROOT};
 pub use settle::{Unconfirmed, end_reads_at};
-pub use synced::OpLogSink;
+pub use synced::{OpLogSink, SyncNamed};
 
 use lock::{lock_exclusive, lock_shared, unlock};
 use read::{read_at, read_log, scan, scan_and_create, unfinished};
@@ -97,6 +97,10 @@ pub struct OpLog {
     clamped: bool,
     /// How many times this handle read the log anew ([`Self::reopen`]).
     reads: u64,
+    /// Where the last record ends that this handle read and did not write.
+    others_to: u64,
+    /// Syncs what the ops of other writers name ([`Self::sync_named_with`]).
+    named: Option<SyncNamed>,
 }
 
 impl OpLog {
@@ -178,6 +182,8 @@ impl OpLog {
             generation: 0,
             clamped: scan.clamped,
             reads: 0,
+            others_to: scan.valid_len,
+            named: None,
         }
     }
 
@@ -291,6 +297,10 @@ impl OpLog {
                 synced::distrust(&self.durable_path)?;
             }
         } else if !marker.trusted() {
+            // the boundary is about to take in every op there is
+            if let Some(sync) = self.named.as_ref().filter(|_| !self.is_empty()) {
+                sync()?;
+            }
             self.file.sync_all()?;
             synced::establish(&self.durable_path, self.len_bytes)?;
         }
@@ -370,10 +380,11 @@ impl OpLog {
         if let Some(full) = self.full.get_mut() {
             full.extend_from_slice(&self.ops[known..]);
         }
+        let new_len = self.len_bytes + replayed.valid as u64;
         if let Some(start) = replayed.last_start {
             self.last_start = self.len_bytes + start as u64;
+            self.others_to = new_len;
         }
-        let new_len = self.len_bytes + replayed.valid as u64;
         if replayed.valid < tail.len() {
             // drop a crashed writer's unfinished record
             synced::cut(&self.durable_path, &self.file, new_len)?;
@@ -467,7 +478,7 @@ impl OpLog {
             // the daemon's group-commit coordinator fsyncs off the write path
             // (via `sync_handle`) and then records how far this append reached
             self.write_count += 1;
-            *self.deferred.lock().unwrap() = (self.generation, self.len_bytes);
+            *self.deferred.lock().unwrap() = (self.generation, self.others_to, self.len_bytes);
             return Ok(());
         }
         self.sync_to(self.len_bytes)
@@ -493,7 +504,18 @@ impl OpLog {
             file: self.file.try_clone()?,
             appended: self.deferred.clone(),
             durable_path: self.durable_path.clone(),
+            named: self.named.clone(),
         })
+    }
+
+    /// Has `sync` called before this log, or a sink made from it
+    /// afterwards, records as synced ops that other writers appended and
+    /// nobody has recorded yet. What such an op names its writer stored
+    /// before appending it but may not have synced: `sync` syncs it, so
+    /// that no op is recorded as synced ahead of what it names. It is
+    /// called with no lock of the log held, or with the append lock.
+    pub fn sync_named_with(&mut self, sync: SyncNamed) {
+        self.named = Some(sync);
     }
 
     /// The fsync-coalescing core: fsync only if no other committer already made
@@ -504,6 +526,7 @@ impl OpLog {
         if marker.generation() == self.generation && marker.records(target) {
             return Ok(());
         }
+        synced::sync_named(&self.named, &marker, self.others_to)?;
         let sync_lock = open_sync_lock(&self.sync_lock_path)?;
         lock_exclusive(&sync_lock)?;
         let result = (|| -> Result<(), OpLogError> {

@@ -25,6 +25,13 @@ pub fn named_objects(op: &Op) -> Result<Vec<ObjectId>, RefError> {
 }
 
 impl RefStore {
+    /// Has `sync` sync the objects that ops of other writers name before
+    /// this store records those ops as synced (see
+    /// [`alt_oplog::OpLog::sync_named_with`]).
+    pub fn sync_objects_with(&mut self, sync: alt_oplog::SyncNamed) {
+        self.oplog.sync_named_with(sync);
+    }
+
     /// Whether every op of the log is recorded as synced. Reads the
     /// marker and takes no lock.
     pub fn confirmed(&self) -> bool {

@@ -31,6 +31,18 @@ fn discarded(ops: usize) -> String {
     )
 }
 
+/// The ref store of a repository whose objects are in the object store
+/// beside it: before it records as synced an op another writer appended,
+/// the objects stored by then are synced, that writer's among them.
+pub(super) fn open_refs(alt_dir: &Path) -> Res<RefStore> {
+    let mut refs = RefStore::open(alt_dir)?;
+    let alt_dir = alt_dir.to_owned();
+    refs.sync_objects_with(std::sync::Arc::new(move || {
+        NativeOdb::sync_stored(&alt_dir).map_err(std::io::Error::other)
+    }));
+    Ok(refs)
+}
+
 impl Store {
     /// Opens the store for a command; one that writes starts from a log
     /// without unsynced operations that name objects which are not

@@ -63,8 +63,27 @@ const UNTRUSTED: u32 = 1;
 const GENERATION: u32 = 8;
 
 /// The generation and the boundary a handle's deferred appends reached,
-/// for its sink to record.
-pub(crate) type Deferred = Arc<Mutex<(u32, u64)>>;
+/// for its sink to record, and between them where the last record ends
+/// that the handle read and did not write.
+pub(crate) type Deferred = Arc<Mutex<(u32, u64, u64)>>;
+
+/// Syncs what the ops in the log name (see
+/// [`crate::OpLog::sync_named_with`]).
+pub type SyncNamed = Arc<dyn Fn() -> std::io::Result<()> + Send + Sync>;
+
+/// Before the marker is moved past `others_to`, where the ops of other
+/// writers end: when it does not record them as synced yet, what they name
+/// is synced first.
+pub(crate) fn sync_named(
+    named: &Option<SyncNamed>,
+    marker: &Marker,
+    others_to: u64,
+) -> std::io::Result<()> {
+    match named {
+        Some(sync) if !marker.records(others_to) => sync(),
+        _ => Ok(()),
+    }
+}
 
 /// What a marker in this format records.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -430,11 +449,15 @@ pub struct OpLogSink {
     pub(crate) file: File,
     pub(crate) appended: Deferred,
     pub(crate) durable_path: PathBuf,
+    pub(crate) named: Option<SyncNamed>,
 }
 
 impl OpLogSink {
     pub fn fsync(&self) -> Result<(), OpLogError> {
-        let (generation, target) = *self.appended.lock().unwrap();
+        let (generation, others_to, target) = *self.appended.lock().unwrap();
+        if target != 0 {
+            sync_named(&self.named, &Marker::read(&self.durable_path), others_to)?;
+        }
         self.file.sync_all()?;
         if target != 0 {
             // a boundary this log wrote, not a file length: only a cut of

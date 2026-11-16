@@ -36,20 +36,29 @@ impl Odb {
         // before it) appended into the index runs, so the next open does not
         // have to scan it
         let indexed = self.index_tails();
+        let relaxed = alt_store::relaxed_durability();
+        // the daemon's group-commit coordinator fsyncs off the write path
+        // (via `sink`) and then records how far this batch reached. It is
+        // told before the lock is given up: a sink syncs under the shared
+        // lock and so never records less than the batches that ended
+        let deferred = match self.defer && !relaxed {
+            true => Some(self.appended_whole()),
+            false => None,
+        };
+        if let Some(Ok(whole)) = deferred {
+            *self.deferred.lock().unwrap() = Some((whole, generation));
+        }
         // release the exclusive append lock first, so other writers append (and
         // pile onto the same fsync) instead of waiting behind my durability
         self.release();
         indexed?;
 
-        if alt_store::relaxed_durability() {
+        if relaxed {
             return Ok(());
         }
-        if self.defer {
-            // the daemon's group-commit coordinator fsyncs off the write path
-            // (via `sink`) and then records how far this batch reached
+        if let Some(whole) = deferred {
+            whole?;
             self.write_count += 1;
-            let whole = self.appended_whole()?;
-            *self.deferred.lock().unwrap() = Some((whole, generation));
             return Ok(());
         }
         self.sync_to(target, generation)
