@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: feat
+summary: name the index runs no open can use in fsck
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/fsck.rs
+touched: crates/alt-cli/tests/it/fsck.rs
+touched: crates/alt-odb/src/check.rs
+touched: crates/alt-store/src/runs.rs
+touched: crates/alt-store/src/runs/named.rs
+touched: docs/recovery.md
