@@ -144,13 +144,15 @@ what they named was never committed and can be added again. Until then,
 commands that only read find such an object listed and fail when they read
 it; they change nothing.
 
-A record from before the synced point that names missing content is damage.
-The command that writes fails, no file changes, and reading what is left
-still works:
+A record from before the synced point that names missing content is damage,
+and so is a file that ends short of what was synced. The command that writes
+fails, no file changes, and reading what is left still works:
 
 | Message | Meaning |
 | --- | --- |
 | `the record at byte N of FILE names content the store does not hold` | a record that was synced, or that nothing tells from a synced one, names content that is gone |
+| `FILE ends at byte N, but records up to byte M of it were committed and synced` | the end of a file that was synced is gone |
+| `the operation log ends at byte N, but records up to byte M of it were committed and synced` | the same for `.alt/oplog/log` |
 
 A repository that an older alt wrote records only how long its files were
 when they were last synced, or nothing. That length is used the same way.

@@ -46,6 +46,33 @@ fn unsynced_from(marker: &Marker) -> Option<[u64; 3]> {
     }
 }
 
+/// What records synced whole are missing from a store that holds `holds`.
+pub(crate) fn lost(marker: &Marker, holds: &Lens) -> Result<(), OdbError> {
+    let Some(State { whole, .. }) = marker.recorded() else {
+        return Ok(());
+    };
+    // of a pack older than the one recorded nothing is known whole
+    let pack = match holds.seq.cmp(&whole.seq) {
+        std::cmp::Ordering::Less => 0,
+        std::cmp::Ordering::Equal => holds.pack,
+        std::cmp::Ordering::Greater => u64::MAX,
+    };
+    let files = [
+        ("the active pack", whole.pack, pack),
+        (NAMING[0], whole.blobmap, holds.blobmap),
+        (NAMING[1], whole.tier1, holds.tier1),
+        (NAMING[2], whole.map, holds.map),
+    ];
+    match files.into_iter().find(|(_, synced, holds)| holds < synced) {
+        Some((file, synced, holds)) => Err(OdbError::Lost {
+            file,
+            synced,
+            holds,
+        }),
+        None => Ok(()),
+    }
+}
+
 impl Odb {
     /// Under the write lock: reads all four files to their ends. What a
     /// dead writer left unfinished is passed over, for [`Self::settle`].
@@ -84,7 +111,7 @@ impl Odb {
     /// off what never finished, and with it the records past the synced
     /// boundaries that name content the store does not hold. Fails, with
     /// every file as it was, when a record that was synced names such
-    /// content.
+    /// content, or when records that were synced are gone.
     pub(super) fn settle(&mut self, marker: &Marker) -> Result<(), OdbError> {
         let (pack_torn, blobmap_torn) = self.blobs.unfinished()?;
         let torn = [
@@ -131,6 +158,7 @@ impl Odb {
             map: cuts[2],
             ..holds
         };
+        lost(marker, &after)?;
         let moved = cuts != ends;
         if moved || pack_torn || torn.contains(&true) {
             self.cut_back(after, pack_torn, moved)?;

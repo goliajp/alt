@@ -7,6 +7,7 @@ mod settle;
 mod sink;
 
 pub(crate) use open::Mode;
+pub(crate) use settle::lost;
 
 use std::fs::File;
 use std::path::PathBuf;

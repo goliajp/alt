@@ -3,6 +3,7 @@
 use alt_git_codec::ObjectId;
 
 use crate::odb::Odb;
+use crate::synced::Marker;
 use crate::{NativeOdb, OdbError, lock};
 
 /// How many records a full check read and verified.
@@ -68,6 +69,17 @@ impl NativeOdb {
     /// check behind `alt fsck`.
     pub fn check(&self) -> Result<OdbChecked, OdbError> {
         self.odb()?.check()
+    }
+}
+
+impl NativeOdb {
+    /// Whether every append file still holds the records the synced
+    /// marker says were synced; [`OdbError::Lost`] names one that does
+    /// not. Reads the marker and takes no lock: a writer checks the same
+    /// under the write lock before it appends.
+    pub fn check_synced(&self) -> Result<(), OdbError> {
+        let odb = self.odb()?;
+        crate::odb::lost(&Marker::read(&odb.durable_path), &odb.holds()?)
     }
 }
 

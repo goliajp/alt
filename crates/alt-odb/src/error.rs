@@ -16,6 +16,13 @@ pub enum OdbError {
     Tier1Record(BlobId, crate::tier1::RecordError),
     Tier1Recompose(BlobId),
     Tier1HashMismatch(BlobId),
+    /// `file` holds whole records only up to byte `holds`, short of the
+    /// byte it was synced to
+    Lost {
+        file: &'static str,
+        synced: u64,
+        holds: u64,
+    },
     /// the record at byte `at` of `file` names content that is not stored
     Dangling {
         file: &'static str,
@@ -41,6 +48,15 @@ impl std::fmt::Display for OdbError {
             Self::Tier1HashMismatch(id) => {
                 write!(f, "tier1 recomposed bytes do not hash to {id}")
             }
+            Self::Lost {
+                file,
+                synced,
+                holds,
+            } => write!(
+                f,
+                "{file} ends at byte {holds}, but records up to byte {synced} of it were \
+                 committed and synced: committed data is gone from the store"
+            ),
             Self::Dangling { file, at } => write!(
                 f,
                 "the record at byte {at} of {file} names content the store does not hold"
@@ -60,6 +76,7 @@ impl std::error::Error for OdbError {
             | Self::Tier1Record(..)
             | Self::Tier1Recompose(_)
             | Self::Tier1HashMismatch(_)
+            | Self::Lost { .. }
             | Self::Dangling { .. } => None,
         }
     }

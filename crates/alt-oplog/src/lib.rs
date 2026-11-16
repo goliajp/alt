@@ -274,6 +274,7 @@ impl OpLog {
     /// to say so instead.
     fn bound(&mut self) -> Result<(), OpLogError> {
         let marker = Marker::read(&self.durable_path);
+        synced::lost(&marker, self.len_bytes)?;
         if relaxed_durability() {
             if marker.recorded().is_none() || marker.trusted() {
                 synced::distrust(&self.durable_path)?;

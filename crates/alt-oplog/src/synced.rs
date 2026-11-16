@@ -176,6 +176,27 @@ pub(crate) fn note_bounded(path: &Path) -> std::io::Result<()> {
     file.sync_all()
 }
 
+/// Fails when a log that holds whole records up to `holds` is short of
+/// the records the marker says were synced.
+pub(crate) fn lost(marker: &Marker, holds: u64) -> Result<(), OpLogError> {
+    match marker.recorded() {
+        Some(state) if holds < state.whole => Err(OpLogError::Lost {
+            synced: state.whole,
+            holds,
+        }),
+        _ => Ok(()),
+    }
+}
+
+impl crate::OpLog {
+    /// Whether the log still holds the records its marker says were
+    /// synced; [`OpLogError::Lost`] when it does not. Reads the marker and
+    /// takes no lock: an append checks the same under the lock.
+    pub fn check_synced(&self) -> Result<(), OpLogError> {
+        lost(&Marker::read(&self.durable_path), self.len_bytes)
+    }
+}
+
 /// Makes `len` the boundary of a log whose marker recorded none that
 /// holds: the caller holds the log's lock, has read it to its end and has
 /// fsynced it.

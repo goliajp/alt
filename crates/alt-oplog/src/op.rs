@@ -7,6 +7,12 @@ pub enum OpLogError {
     Io(std::io::Error),
     Format(&'static str),
     TooLarge(usize),
+    /// the log holds whole records only up to byte `holds`, short of the
+    /// byte it was synced to
+    Lost {
+        synced: u64,
+        holds: u64,
+    },
 }
 
 impl std::fmt::Display for OpLogError {
@@ -15,6 +21,11 @@ impl std::fmt::Display for OpLogError {
             Self::Io(_) => f.write_str("io"),
             Self::Format(v) => write!(f, "oplog format: {v}"),
             Self::TooLarge(v) => write!(f, "op too large: {v} bytes"),
+            Self::Lost { synced, holds } => write!(
+                f,
+                "the operation log ends at byte {holds}, but records up to byte {synced} of \
+                 it were committed and synced: committed operations are gone"
+            ),
         }
     }
 }

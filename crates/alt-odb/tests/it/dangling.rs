@@ -213,3 +213,30 @@ fn with_no_boundaries_an_unfinished_end_nothing_names_is_cut_as_before() {
         }
     }
 }
+
+#[test]
+fn a_writer_refuses_a_file_that_ends_short_of_its_synced_records() {
+    // a file and a kind of object that grows it
+    for (file, class) in [(0, 0), (1, 1), (2, 2), (3, 0)] {
+        let tmp = alt_os::temp::tempdir().unwrap();
+        let (victim, kept, full) = store(tmp.path(), class);
+        cut(tmp.path(), file, kept[file]);
+        let before = snapshot(tmp.path());
+        let odb = open(tmp.path());
+        for n in 0..KEPT {
+            reads(&odb, n);
+        }
+        let lost = odb.check_synced().unwrap_err();
+        drop(odb);
+        let refused = try_put(tmp.path(), victim + 3).err();
+        for error in [Some(lost), refused] {
+            match error {
+                Some(OdbError::Lost { synced, holds, .. }) => {
+                    assert_eq!((synced, holds), (full[file], kept[file]), "{}", FILES[file]);
+                }
+                other => panic!("{}: {other:?}", FILES[file]),
+            }
+        }
+        assert_eq!(snapshot(tmp.path()), before, "{}", FILES[file]);
+    }
+}

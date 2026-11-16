@@ -164,7 +164,7 @@ impl Odb {
         self.release();
         match indexed {
             // for the write that runs into it to report: reads go on
-            Err(OdbError::Dangling { .. }) => Ok(()),
+            Err(OdbError::Lost { .. } | OdbError::Dangling { .. }) => Ok(()),
             indexed => indexed,
         }
     }
