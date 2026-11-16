@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: take out the test of concurrent requests until the daemon serves them
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/scan_daemon_trees.rs
