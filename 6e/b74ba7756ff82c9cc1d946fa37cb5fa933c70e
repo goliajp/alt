@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: feat
+summary: take the default untracked files mode from status.showUntrackedFiles
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/status.rs
+touched: crates/alt-cli/tests/it/status_untracked.rs
