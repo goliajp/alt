@@ -1,0 +1,17 @@
+schema: alt-meta/1
+type: fix
+summary: say a path that is not utf-8 by its bytes, and give them beside it in json
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/json.rs
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/add.rs
+touched: crates/alt-cli/src/native/add/embedded.rs
+touched: crates/alt-cli/src/native/cherry_pick.rs
+touched: crates/alt-cli/src/native/diff.rs
+touched: crates/alt-cli/src/native/rebase.rs
+touched: crates/alt-cli/src/native/recovery.rs
+touched: crates/alt-cli/src/native/revert.rs
+touched: crates/alt-cli/src/native/status.rs
+touched: crates/alt-cli/tests/fixtures/cli/uncommitted-changes.txt
+touched: crates/alt-cli/tests/it/byte_names.rs
