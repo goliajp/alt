@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: perf
+summary: find the groups of a match as fast as before a search was bounded
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/backtrack.rs
+touched: crates/alt-regex/src/captures.rs
+touched: crates/alt-regex/src/lib.rs
+touched: crates/alt-regex/src/program.rs
+touched: crates/alt-regex/src/program/repeat.rs
+touched: crates/alt-regex/tests/it/held.rs
