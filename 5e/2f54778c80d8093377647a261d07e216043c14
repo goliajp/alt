@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: refactor
+summary: split undo out of recovery and bring three files back to their size
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/machine.rs
+touched: crates/alt-cli/src/machine/kinds.rs
+touched: crates/alt-cli/src/native/checkout_plan.rs
+touched: crates/alt-cli/src/native/recovery.rs
+touched: crates/alt-cli/src/native/recovery/undo.rs
+touched: crates/alt-worktree/src/error.rs
+touched: crates/alt-worktree/src/lib.rs
