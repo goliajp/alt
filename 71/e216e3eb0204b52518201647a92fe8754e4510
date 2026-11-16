@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: stop taking the pack for synced as far as noted once the marker or the head record no longer says so
+author-type: human
+author: doracawl
+touched: crates/alt-odb/src/odb/durable.rs
+touched: crates/alt-odb/src/odb/open.rs
+touched: crates/alt-odb/tests/it/dangling.rs
+touched: crates/alt-store/src/blob/settle.rs
+touched: crates/alt-store/src/settle.rs
+touched: crates/alt-store/src/tail.rs
