@@ -102,6 +102,36 @@ fn path_allow_denies_staging_a_removal_out_of_tree() {
     ok(alt_as(repo, &["commit", "-m", "src only"], "bot"));
 }
 
+/// An `add` of a path within the allowed ones that puts an entry out of
+/// them out of the index is refused: a directory where a file was tracked,
+/// a file where a directory was. The index stays as it was.
+#[test]
+fn path_allow_denies_an_add_that_displaces_an_entry_out_of_tree() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let repo = fixture(&tmp);
+    for file in ["src/k", "docs/x.rs/notes.txt"] {
+        std::fs::create_dir_all(repo.join(file).parent().unwrap()).unwrap();
+        std::fs::write(repo.join(file), "tracked\n").unwrap();
+    }
+    ok(alt(repo, &["add", "."]));
+    ok(alt(repo, &["commit", "-m", "tracked"]));
+    std::fs::remove_file(repo.join("src/k")).unwrap();
+    std::fs::create_dir(repo.join("src/k")).unwrap();
+    std::fs::write(repo.join("src/k/gen.txt"), "g\n").unwrap();
+    std::fs::remove_dir_all(repo.join("docs/x.rs")).unwrap();
+    std::fs::write(repo.join("docs/x.rs"), "f\n").unwrap();
+    let index = std::fs::read(repo.join(".alt/index")).unwrap();
+    for (policy, added, displaced) in [
+        ("path=src/*/gen.txt", "src/k/gen.txt", "src/k"),
+        ("path=**/*.rs", "docs/x.rs", "docs/x.rs/notes.txt"),
+    ] {
+        write_policy(repo, &format!("agent:* -> {policy}\n"));
+        let denied = format!("capability denied: path '{displaced}'");
+        fails_with(alt_as(repo, &["add", added], "bot"), &denied);
+        assert_eq!(std::fs::read(repo.join(".alt/index")).unwrap(), index);
+    }
+}
+
 /// A rebase the restricted principal may not carry out is refused before
 /// it begins: over a path the new base changes, and over one a replayed
 /// commit changes that the last of them leaves as the base has it. The

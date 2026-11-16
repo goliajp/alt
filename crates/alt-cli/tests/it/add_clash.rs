@@ -102,3 +102,23 @@ fn add_leaves_no_path_a_file_and_a_directory_at_once() {
         checked_by_git(&exported);
     }
 }
+
+/// Names that sort between a path and what lies beneath it (`a-b` and
+/// `a.txt` between `a` and `a/x`) do not hide the entries beneath from the
+/// file that takes the directory's place.
+#[test]
+fn a_file_displaces_what_lay_beneath_it_past_the_names_sorted_between() {
+    let trees = Trees::new();
+    for file in ["n/a/x", "n/a/deep/y", "n/a-b", "n/a.txt", "n/a0"] {
+        trees.write(file, "tracked\n");
+    }
+    each(&trees, &["add", "."]);
+    each(&trees, &["commit", "-m", "names"]);
+    for tree in ["direct", "served", "git"] {
+        std::fs::remove_dir_all(trees.at(tree).join("n/a")).unwrap();
+        std::fs::write(trees.at(tree).join("n/a"), "file\n").unwrap();
+    }
+    // a pattern names the file alone: what lay beneath is not named gone
+    adds_alike(&trees, "n", "[a]");
+    each(&trees, &["commit", "-m", "a file"]);
+}

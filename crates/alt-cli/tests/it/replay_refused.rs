@@ -159,3 +159,22 @@ fn reverts_are_refused_before_the_first_when_a_later_one_would_be() {
         b"new\n"
     );
 }
+
+/// A rebase onto a base that has a file where an untracked one lies is
+/// refused before HEAD leaves the branch, whoever asks for it.
+#[test]
+fn a_rebase_over_an_untracked_file_is_refused_with_the_branch_as_it_was() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let repo = fixture(&tmp);
+    ok(alt(repo, &["switch", "-c", "side"]));
+    write(repo, "scripts/run.sh", "side\n");
+    commit(repo, "side: a script");
+    ok(alt(repo, &["switch", "main"]));
+    ok(alt(repo, &["switch", "-c", "topic"]));
+    write(repo, "src/b.rs", "topic\n");
+    commit(repo, "topic: src");
+    write(repo, "scripts/run.sh", "untracked\n");
+    let before = state(repo, &["topic", "side"]);
+    fails_with(alt(repo, &["rebase", "side"]), "would be overwritten");
+    assert_eq!(state(repo, &["topic", "side"]), before);
+}
