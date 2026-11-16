@@ -225,7 +225,7 @@ pub fn node(set: &CharSet) -> Node {
 
 impl Block {
     /// What the block holds in memory, about.
-    fn bytes(&self) -> usize {
+    pub fn bytes(&self) -> usize {
         let place = |place: &Place| {
             let edges = place.edges.len() * size_of::<(ByteSet, u32)>();
             size_of::<Place>() + edges + place.table.as_ref().map_or(0, |_| 256)

@@ -2,10 +2,12 @@
 //! operators (`\w`, `\s`, `\b`, `\<` and their kin) that the C library
 //! accepts in both.
 
+use crate::budget::Budget;
 use crate::class::ByteSet;
 use crate::program::MAX_INSTS;
-use crate::{Error, Options, Syntax, bracket, utf8};
+use crate::{Error, Options, Syntax, utf8};
 
+mod atoms;
 mod interval;
 mod tree;
 
@@ -30,6 +32,8 @@ struct Parser<'a> {
     tall: u32,
     /// the places of the sets of characters read so far
     places: usize,
+    /// the bytes the tree read so far holds
+    budget: Budget,
     /// the groups whose closing parenthesis has been read
     complete: Vec<u32>,
     /// whether a period was read, and whether something the C library
@@ -61,6 +65,7 @@ pub fn parse_shaped(pat: &[u8], opts: Options) -> Result<(Node, u32, Shape), Err
             depth: 0,
             tall: 0,
             places: 0,
+            budget: Budget::default(),
             complete: Vec::new(),
             period: false,
             complex: opts.ignore_case,
@@ -72,6 +77,7 @@ pub fn parse_shaped(pat: &[u8], opts: Options) -> Result<(Node, u32, Shape), Err
             return Err(Error::Paren);
         }
         let shape = Shape {
+            budget: p.budget,
             apart: opts.utf8 && p.complex,
             strays: p.strays,
         };
@@ -79,6 +85,8 @@ pub fn parse_shaped(pat: &[u8], opts: Options) -> Result<(Node, u32, Shape), Err
     };
     let (node, groups, shape, period) = read(false)?;
     if opts.utf8 && period && !shape.apart {
+        // the two readings are not held at once
+        drop(node);
         return read(true).map(|(node, groups, shape, _)| (node, groups, shape));
     }
     Ok((node, groups, shape))
@@ -114,14 +122,17 @@ impl<'a> Parser<'a> {
 
     fn alternation(&mut self) -> Result<Node, Error> {
         let before = self.complete.len();
-        let mut branches = vec![self.concat()?];
+        let mut branches = Vec::new();
+        let first = self.concat()?;
+        self.budget.push(&mut branches, first)?;
         let mut tall = self.tall;
         while self.at_alt() {
             self.at += if self.ere() { 1 } else { 2 };
             // as in the C library, a branch cannot refer to a group of
             // a branch beside it
             let beside = self.complete.split_off(before);
-            branches.push(self.concat()?);
+            let branch = self.concat()?;
+            self.budget.push(&mut branches, branch)?;
             self.complete.extend(beside);
             tall = tall.max(self.tall);
         }
@@ -131,7 +142,10 @@ impl<'a> Parser<'a> {
             branches.swap(0, 1);
         }
         Ok(match branches.len() {
-            1 => branches.pop().expect("one branch"),
+            1 => {
+                self.budget.give(branches.capacity() * size_of::<Node>());
+                branches.pop().expect("one branch")
+            }
             _ => Node::Alt(branches),
         })
     }
@@ -151,16 +165,24 @@ impl<'a> Parser<'a> {
                     return Err(Error::TooBig);
                 }
             }
-            items.push(match atom {
+            // what a group holds was counted as it was read
+            if !matches!(atom, Node::Group(..)) {
+                self.budget.take(atom.held())?;
+            }
+            let item = match atom {
                 Node::Look(_) => atom,
                 _ => self.repeats(atom)?,
-            });
+            };
+            self.budget.push(&mut items, item)?;
             tall = tall.max(self.tall);
         }
         self.tall = tall;
         Ok(match items.len() {
             0 => Node::Empty,
-            1 => items.pop().expect("one item"),
+            1 => {
+                self.budget.give(items.capacity() * size_of::<Node>());
+                items.pop().expect("one item")
+            }
             _ => Node::Concat(items),
         })
     }
@@ -200,6 +222,7 @@ impl<'a> Parser<'a> {
                     if self.depth + self.tall > MAX_DEPTH {
                         return Err(Error::TooBig);
                     }
+                    self.budget.take(size_of::<Node>())?;
                     Node::Repeat(Box::new(atom), min, max)
                 }
             };
@@ -274,77 +297,6 @@ impl<'a> Parser<'a> {
             b'[' => self.bracket(),
             _ => Ok(self.literal(b)),
         }
-    }
-
-    fn escape(&mut self) -> Result<Node, Error> {
-        let Some(&c) = self.pat.get(self.at + 1) else {
-            return Err(Error::Escape);
-        };
-        self.at += 2;
-        self.complex |= matches!(c, b'w' | b'W' | b's' | b'S' | b'b' | b'B' | b'<' | b'>');
-        let utf8 = self.opts.utf8;
-        let named = |name: &[u8], negated: bool| {
-            if utf8 {
-                return utf8::named(name, negated);
-            }
-            let mut set = match name {
-                b"alnum" => ByteSet::word(),
-                _ => ByteSet::class(name).expect("a known class"),
-            };
-            if negated {
-                set.negate();
-            }
-            Node::Set(set)
-        };
-        Ok(match c {
-            b'1'..=b'9' => {
-                let number = u32::from(c - b'0');
-                if !self.complete.contains(&number) {
-                    return Err(Error::BackReference);
-                }
-                Node::BackRef(number)
-            }
-            b'w' | b'W' => named(b"alnum", c == b'W'),
-            b's' | b'S' => named(b"space", c == b'S'),
-            b'b' => Node::Look(Look::WordBoundary),
-            b'B' => Node::Look(Look::NotWordBoundary),
-            b'<' => Node::Look(Look::WordStart),
-            b'>' => Node::Look(Look::WordEnd),
-            b'`' => Node::Look(Look::TextStart),
-            b'\'' => Node::Look(Look::TextEnd),
-            b'(' if !self.ere() => return self.group(),
-            b')' if !self.ere() => return Err(Error::Paren),
-            b'{' if !self.ere() => return Err(Error::Repeat),
-            _ => self.literal(c),
-        })
-    }
-
-    fn bracket(&mut self) -> Result<Node, Error> {
-        let (node, complex) = bracket::parse(self.pat, &mut self.at, self.opts)?;
-        self.complex |= complex;
-        Ok(node)
-    }
-
-    /// A group, behind its opening parenthesis.
-    fn group(&mut self) -> Result<Node, Error> {
-        self.groups += 1;
-        if self.groups > MAX_GROUPS {
-            return Err(Error::TooBig);
-        }
-        let number = self.groups;
-        self.depth += 1;
-        if self.depth > MAX_DEPTH {
-            return Err(Error::TooBig);
-        }
-        let inner = self.alternation()?;
-        if !self.at_close() {
-            return Err(Error::Paren);
-        }
-        self.at += if self.ere() { 1 } else { 2 };
-        self.depth -= 1;
-        self.tall += 1;
-        self.complete.push(number);
-        Ok(Node::Group(Box::new(inner), number))
     }
 }
 

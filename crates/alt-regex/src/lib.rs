@@ -76,9 +76,11 @@
 //!
 //! What is bounded here and not there: a pattern of more than 262144
 //! bytes, of more than 32767 groups, with groups and repetitions nested
-//! more than 200 deep, or that comes to more than 400000 instructions
-//! is refused with [`Error::TooBig`], and a search with back-references
-//! that takes more than some four million steps reports no match.
+//! more than 200 deep, that comes to more than 400000 instructions, or
+//! whose tree and program together would hold more than 24 MiB is
+//! refused with [`Error::TooBig`]; no pattern holds more than some
+//! 32 MiB while it is compiled. A search with back-references that
+//! takes more than some four million steps reports no match.
 //!
 //! The classes, the upper-case forms and the order of characters are
 //! those of the one locale named above, whatever locale the process is
@@ -90,6 +92,7 @@ mod backref;
 mod backtrack;
 mod block;
 mod bracket;
+mod budget;
 mod chars;
 mod class;
 mod dfa;
@@ -202,21 +205,22 @@ impl Regex {
     pub fn with_options(pattern: &[u8], options: Options) -> Result<Self, Error> {
         let (node, groups, shape) = syntax::parse_shaped(pattern, options)?;
         let prog = program::compile(&node, groups, options, shape)?;
-        let anchored = prog.anchored;
+        // a pattern tied to the start of the text is refused within a
+        // few bytes anyway; looking through the text first costs more
+        let literal = literal::required(&node).filter(|_| !prog.anchored);
+        drop(node);
         // a text with nothing in it is common, and always answered alike
         let mut slots = [pike::UNSET; FEW];
         let width = FEW.min(2 * (groups as usize + 1));
-        let cache = &mut pike::Cache::default();
+        let cache = &mut backtrack::Cache::default();
         let matched = match prog.backrefs {
             true => backref::search(&prog, b"", None, &mut slots[..width]),
-            false => pike::search(&prog, cache, b"", None, &mut slots[..width]),
+            false => backtrack::captures(&prog, cache, b"", 0, 0, &mut slots[..width]),
         };
         Ok(Regex {
             prog,
             on_empty: matched.then_some(slots),
-            // a pattern tied to the start of the text is refused within a
-            // few bytes anyway; looking through the text first costs more
-            literal: literal::required(&node).filter(|_| !anchored),
+            literal,
             cache: Mutex::default(),
         })
     }

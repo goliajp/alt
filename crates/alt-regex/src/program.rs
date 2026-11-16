@@ -5,9 +5,12 @@ use crate::analysis::{classes, joins, mixed_ends, rows};
 use std::sync::Arc;
 
 use crate::block::{Block, EXIT};
+use crate::budget::Budget;
 use crate::class::ByteSet;
 use crate::syntax::{Look, Node, Shape};
 use crate::{Error, Options};
+
+mod repeat;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Inst {
@@ -105,11 +108,16 @@ const MAX_WORK: usize = 4 * MAX_INSTS;
 /// The most capture slots the matcher that carries them may hold: one
 /// row of all the slots for each instruction a path can wait at.
 const MAX_SLOTS: usize = 1 << 22;
+/// The bytes the tables made of the instructions hold for each: its row,
+/// its join and how the match is reached from it.
+const BESIDE: usize = 9;
 
 struct Compiler {
     insts: Vec<Inst>,
     sets: Vec<ByteSet>,
     work: usize,
+    /// the bytes the tree and the program so far hold
+    budget: Budget,
     ignore_case: bool,
     /// inside a copy of a repeated expression other than its first
     copied: bool,
@@ -123,6 +131,7 @@ pub fn compile(node: &Node, groups: u32, options: Options, shape: Shape) -> Resu
         insts: Vec::new(),
         sets: Vec::new(),
         work: 0,
+        budget: shape.budget,
         ignore_case: options.ignore_case,
         copied: false,
         blocks: Vec::new(),
@@ -225,7 +234,8 @@ impl Compiler {
         if self.insts.len() >= MAX_INSTS {
             return Err(Error::TooBig);
         }
-        self.insts.push(inst);
+        self.budget.push(&mut self.insts, inst)?;
+        self.budget.take(BESIDE)?;
         Ok(u32::try_from(self.insts.len() - 1).expect("below the limit"))
     }
 
@@ -233,11 +243,13 @@ impl Compiler {
         if let Some(b) = set.single() {
             return self.push(Inst::Byte(b, next));
         }
-        let known = self.sets.iter().position(|s| s == set);
-        let index = known.unwrap_or_else(|| {
-            self.sets.push(*set);
-            self.sets.len() - 1
-        });
+        let index = match self.sets.iter().position(|s| s == set) {
+            Some(known) => known,
+            None => {
+                self.budget.push(&mut self.sets, *set)?;
+                self.sets.len() - 1
+            }
+        };
         self.push(Inst::Set(u32::try_from(index).expect("few sets"), next))
     }
 
@@ -248,22 +260,29 @@ impl Compiler {
             return Err(Error::TooBig);
         }
         let pointer = Arc::as_ptr(block);
+        let room = self.sets.capacity() * size_of::<ByteSet>();
         if !self.met.contains(&pointer) {
             self.sets.extend(&block.sets);
-            self.met.push(pointer);
+            self.budget.push(&mut self.met, pointer)?;
         }
         let base = u32::try_from(self.insts.len()).expect("below the limit");
         let number = u32::try_from(self.blocks.len()).expect("below the limit");
         let places = 0..block.places.len() as u32;
+        let room = room + self.insts.capacity() * size_of::<Inst>();
         self.insts
             .extend(places.map(|place| Inst::Switch(number, place)));
-        self.blocks.push(Copied {
+        let grown =
+            self.sets.capacity() * size_of::<ByteSet>() + self.insts.capacity() * size_of::<Inst>();
+        self.budget
+            .take(grown - room + block.places.len() * BESIDE)?;
+        let copied = Copied {
             block: block.clone(),
             base,
             next,
             start: block.start,
             ascii: block.ascii,
-        });
+        };
+        self.budget.push(&mut self.blocks, copied)?;
         Ok(base + block.start)
     }
 
@@ -301,76 +320,6 @@ impl Compiler {
             }
             Node::Repeat(inner, min, max) => self.repeat(inner, *min, *max, next),
         }
-    }
-
-    /// One of the copies a repetition is made of. The C library marks
-    /// a group that a repetition may leave out, the first such copy
-    /// only, and a copy made of another loses the marks inside it.
-    fn copy(&mut self, inner: &Node, next: u32, marked: bool, made: bool) -> Result<u32, Error> {
-        let outside = self.copied;
-        self.copied = outside || made;
-        let entry = match inner {
-            Node::Group(body, number) if marked && !outside && nullable(body) => {
-                let close = self.push(Inst::SaveOpt(2 * number + 1, next))?;
-                let body = self.node(body, close)?;
-                self.push(Inst::Save(2 * number, body))
-            }
-            _ => self.node(inner, next),
-        };
-        self.copied = outside;
-        entry
-    }
-
-    fn repeat(
-        &mut self,
-        inner: &Node,
-        min: u32,
-        max: Option<u32>,
-        next: u32,
-    ) -> Result<u32, Error> {
-        let mut entry = match max {
-            // the loop: once more, or on
-            None if !nullable(inner) => {
-                let split = self.push(Inst::Split(next, next))?;
-                let body = self.copy(inner, split, false, min > 0)?;
-                self.insts[split as usize] = Inst::Split(body, next);
-                split
-            }
-            // a turn that takes nothing comes back to where it began, and
-            // no path goes through an instruction twice at one place:
-            // behind a turn the choice is made at an instruction of its
-            // own, so that one such turn is taken and then left
-            None => {
-                let again = self.push(Inst::Split(next, next))?;
-                let body = self.copy(inner, again, true, min > 0)?;
-                self.insts[again as usize] = Inst::Split(body, next);
-                self.push(Inst::Split(body, next))?
-            }
-            // the optional copies, wired as the C library wires them:
-            // of fewer copies than there may be, the last ones are the
-            // ones taken, each entered only behind the one before it
-            Some(max) => {
-                let mut bodies = Vec::new();
-                let mut behind = next;
-                for copy in (min..max).rev() {
-                    let first = copy == min;
-                    behind = self.copy(inner, behind, first, !first || min > 0)?;
-                    bodies.push(behind);
-                }
-                bodies.reverse();
-                let mut entry = next;
-                for (at, body) in bodies.iter().enumerate() {
-                    let without = bodies.get(at + 1).copied().unwrap_or(next);
-                    let with = if at == 0 { *body } else { entry };
-                    entry = self.push(Inst::Split(with, without))?;
-                }
-                entry
-            }
-        };
-        for copy in (0..min).rev() {
-            entry = self.copy(inner, entry, false, copy > 0)?;
-        }
-        Ok(entry)
     }
 }
 

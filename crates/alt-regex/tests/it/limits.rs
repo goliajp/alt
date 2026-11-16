@@ -187,6 +187,75 @@ fn sets_of_characters_past_what_a_program_holds_are_refused_as_they_are_read() {
     });
     let cost = begun.elapsed();
     assert!(cost < Duration::from_secs(5), "{cost:?}");
-    assert!(most < 96 << 20, "{most} bytes");
-    println!("refused after {cost:?}, holding {most} bytes");
+    assert!(most < 32 << 20, "{most} bytes");
+}
+
+/// As much of `unit` written again and again, numbered, as the longest
+/// pattern has room for behind `head`.
+fn filled(head: &str, unit: impl Fn(u32) -> String) -> Vec<u8> {
+    let mut pattern = String::from(head);
+    for number in 0.. {
+        let next = unit(number);
+        if pattern.len() + next.len() > 1 << 18 {
+            break;
+        }
+        pattern.push_str(&next);
+    }
+    pattern.into_bytes()
+}
+
+#[test]
+fn no_pattern_holds_more_than_its_bound_while_it_is_compiled() {
+    let bytes = Options::default();
+    let utf8 = Options {
+        utf8: true,
+        ..bytes
+    };
+    let any_case = Options {
+        ignore_case: true,
+        ..utf8
+    };
+    let han = |number: u32| char::from_u32(0x4e00 + number % 20_000).unwrap();
+    let same = |unit: &'static str| move |_| unit.to_string();
+    // whether it is compiled, and what a pattern is made of
+    let patterns = [
+        (true, bytes, filled("", same("a"))),
+        (true, utf8, filled("", same("\u{e9}"))),
+        (true, bytes, filled("", same("a|"))),
+        (true, bytes, filled("(a)(a)(a)", same("a"))),
+        (true, bytes, filled("(a?)*(b?)*(c?)*", same("a"))),
+        (true, bytes, b"(()*){30000}".to_vec()),
+        (true, utf8, b".{1,8000}".to_vec()),
+        (true, utf8, b"\\w{1,500}".to_vec()),
+        (false, any_case, filled("", same("\u{e9}"))),
+        (false, any_case, filled("", same("i"))),
+        (false, any_case, filled("", |n| han(n).to_string())),
+        (false, utf8, filled("", same("."))),
+        (false, utf8, ".".repeat(8_000).into_bytes()),
+        (false, utf8, filled("", same("\\W|"))),
+        (
+            false,
+            utf8,
+            filled("", |n| format!("[[:alpha:]{}]", han(n))),
+        ),
+        (false, any_case, filled("", |n| format!("[^{}]|", han(n)))),
+        (false, utf8, filled("", |n| format!("[{}]", han(n)))),
+        (false, bytes, filled("", same("(a|b)"))),
+        (false, bytes, b"((a|b){1,300}){1,300}".to_vec()),
+    ];
+    for (compiled, options, pattern) in patterns {
+        let begun = Instant::now();
+        let most = crate::most_held(|| {
+            let made = Regex::with_options(&pattern, options);
+            let shown = &pattern[..pattern.len().min(24)].escape_ascii();
+            match compiled {
+                true => assert!(made.is_ok(), "{shown}"),
+                false => assert_eq!(made.err(), Some(Error::TooBig), "{shown}"),
+            }
+        });
+        let cost = begun.elapsed();
+        let shown = &pattern[..pattern.len().min(24)].escape_ascii();
+        assert!(most < 32 << 20, "{most} bytes for {shown}");
+        assert!(cost < Duration::from_secs(5), "{cost:?} for {shown}");
+    }
 }
