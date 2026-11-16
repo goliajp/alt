@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: fix
+summary: sync a deferred batch before a file outside the log names its objects
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/lfs.rs
+touched: crates/alt-cli/src/native/merge.rs
+touched: crates/alt-cli/src/native/task/candidate.rs
+touched: crates/alt-cli/src/native/task/delivery.rs
+touched: crates/alt-cli/src/native/task/transfer.rs
+touched: crates/alt-cli/tests/it/sync_order.rs
+touched: crates/alt-cli/tests/it/task_delivery.rs
+touched: crates/alt-odb/src/odb/sink.rs
