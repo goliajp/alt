@@ -459,7 +459,7 @@ impl NativeRepo<'_> {
 
     /// Makes the index and working tree match `commit`, clearing whatever a
     /// stopped step left behind, conflicted paths included.
-    fn reset_worktree_to(&mut self, commit: ObjectId) -> Res<()> {
+    pub(super) fn reset_worktree_to(&mut self, commit: ObjectId) -> Res<()> {
         let mut known: Vec<WorkEntry> = Vec::new();
         for e in &self.index()?.entries {
             if known.last().is_none_or(|k: &WorkEntry| k.path != e.path) {

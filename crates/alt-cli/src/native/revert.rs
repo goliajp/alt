@@ -52,6 +52,7 @@ impl NativeRepo<'_> {
                     .ok_or_else(|| format!("bad revision '{r}'").into())
             })
             .collect::<Res<Vec<ObjectId>>>()?;
+        self.ensure_reverts_allowed(&todo, mainline)?;
         let orig = self.branch_tip("revert")?;
         self.run_reverts(todo, mainline, orig, json, out)
     }
@@ -85,20 +86,7 @@ impl NativeRepo<'_> {
             .ok_or("revert --abort: no revert in progress")?;
         let branch = self.head_branch()?;
         let head = self.branch_tip("revert --abort")?;
-        // every path the index knows, conflicted ones included, so checkout
-        // clears whatever the stopped revert left in the working tree
-        let mut known: Vec<WorkEntry> = Vec::new();
-        for e in &self.index()?.entries {
-            if known.last().is_none_or(|k: &WorkEntry| k.path != e.path) {
-                known.push(WorkEntry {
-                    path: e.path.clone(),
-                    oid: e.oid,
-                    mode: e.mode,
-                });
-            }
-        }
-        let target = self.commit_entries(state.orig)?;
-        self.checkout(&known, &target)?;
+        self.reset_worktree_to(state.orig)?;
         if head != state.orig {
             self.commit_refs(
                 "revert",
@@ -224,7 +212,11 @@ impl NativeRepo<'_> {
     /// The parent a revert of `target` goes back to: its only parent, or for
     /// a merge the one `-m` names. Git's rules for when `-m` is required or
     /// refused apply.
-    fn revert_parent(&self, target: ObjectId, mainline: Option<usize>) -> Res<Option<ObjectId>> {
+    pub(super) fn revert_parent(
+        &self,
+        target: ObjectId,
+        mainline: Option<usize>,
+    ) -> Res<Option<ObjectId>> {
         let short = &target.to_string()[..7];
         let parents = self.commit_parents(target)?;
         match (parents.len(), mainline) {

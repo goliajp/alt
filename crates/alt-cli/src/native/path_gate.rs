@@ -64,6 +64,28 @@ impl NativeRepo<'_> {
         Ok((old, target))
     }
 
+    /// Refuses the reverts of `todo` before the first of them when a path
+    /// one of them puts back is one the policy leaves out: a sequence
+    /// refused at a later commit would leave the branch with the earlier
+    /// reverts on it.
+    pub(super) fn ensure_reverts_allowed(
+        &self,
+        todo: &[ObjectId],
+        mainline: Option<usize>,
+    ) -> Res<()> {
+        if self.caps.path_allow.is_empty() {
+            return Ok(());
+        }
+        for &target in todo {
+            let back = match self.revert_parent(target, mainline)? {
+                Some(parent) => self.commit_entries(parent)?,
+                None => Vec::new(),
+            };
+            self.ensure_difference_allowed(&self.commit_entries(target)?, &back)?;
+        }
+        Ok(())
+    }
+
     /// Leaves a merge that stopped in conflict in the index and the working
     /// tree, unless a path it changes there is one the policy leaves out:
     /// refused before either is touched, as a merge without a conflict is.

@@ -129,3 +129,33 @@ fn what_would_stop_in_conflict_with_a_change_out_of_tree_is_refused_whole() {
     stops(alt_as(repo, &["merge", "main"], "bot"));
     assert!(repo.join(".alt/MERGE_HEAD").exists());
 }
+
+/// Reverts of which a later one changes a path out of tree are refused
+/// before the first is made: the branch stays where it was. Those that all
+/// lie in the allowed paths are made.
+#[test]
+fn reverts_are_refused_before_the_first_when_a_later_one_would_be() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let repo = fixture(&tmp);
+    for (file, message) in [
+        ("src/first.rs", "first: src"),
+        ("scripts/run.sh", "second: a script"),
+        ("src/third.rs", "third: src"),
+    ] {
+        write(repo, file, "new\n");
+        commit(repo, message);
+    }
+    write_policy(repo, POLICY);
+    let before = state(repo, &["main"]);
+    fails_with(
+        alt_as(repo, &["revert", "HEAD", "HEAD~1"], "bot"),
+        "capability denied: path 'scripts/run.sh'",
+    );
+    assert_eq!(state(repo, &["main"]), before);
+    ok(alt_as(repo, &["revert", "HEAD", "HEAD~2"], "bot"));
+    assert!(!repo.join("src/first.rs").exists() && !repo.join("src/third.rs").exists());
+    assert_eq!(
+        std::fs::read(repo.join("scripts/run.sh")).unwrap(),
+        b"new\n"
+    );
+}
