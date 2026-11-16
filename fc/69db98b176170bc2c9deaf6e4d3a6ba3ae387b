@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: keep the recorded names of the add and status arguments
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli.rs
+touched: crates/alt-cli/src/worktree_args.rs
