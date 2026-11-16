@@ -63,29 +63,34 @@ fn given_back(blocks: usize, size: usize) -> u64 {
     held.saturating_sub(resident())
 }
 
+/// For a mode that measures the heap: sets the heap up as the mode says,
+/// prints what it measures and ends the process.
+#[cfg(target_os = "linux")]
+fn measure_heap(mode: &str) {
+    match mode {
+        "retain" | "kept-heap" => alt_os::heap::keep_freed_memory(),
+        // the limits altd sets
+        m if m.starts_with("daemon") && m != "daemon-control" => {
+            alt_os::heap::keep_freed_up_to(4 << 20, 32 << 20)
+        }
+        _ => {}
+    }
+    let measured = match mode {
+        "retain" | "release" => Some(churn(30, 256, 64 << 10)),
+        "daemon" | "daemon-control" => Some(churn(30, 8, 2 << 20)),
+        "daemon-heap" | "kept-heap" => Some(given_back(24, 2 << 20)),
+        "daemon-block" => Some(given_back(1, 48 << 20)),
+        _ => None,
+    };
+    if let Some(measured) = measured {
+        println!("{measured}");
+        std::process::exit(0);
+    }
+}
+
 fn child(mode: &str) -> ! {
     #[cfg(target_os = "linux")]
-    {
-        match mode {
-            "retain" | "kept-heap" => alt_os::heap::keep_freed_memory(),
-            // the limits altd sets
-            m if m.starts_with("daemon") && m != "daemon-control" => {
-                alt_os::heap::keep_freed_up_to(4 << 20, 32 << 20)
-            }
-            _ => {}
-        }
-        let measured = match mode {
-            "retain" | "release" => Some(churn(30, 256, 64 << 10)),
-            "daemon" | "daemon-control" => Some(churn(30, 8, 2 << 20)),
-            "daemon-heap" | "kept-heap" => Some(given_back(24, 2 << 20)),
-            "daemon-block" => Some(given_back(1, 48 << 20)),
-            _ => None,
-        };
-        if let Some(measured) = measured {
-            println!("{measured}");
-            std::process::exit(0);
-        }
-    }
+    measure_heap(mode);
     if mode == "bare" {
         std::hint::black_box(recurse(0));
     }
