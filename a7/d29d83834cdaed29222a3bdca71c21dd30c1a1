@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: say what a command reports when the log was cut back under it
+author-type: human
+author: doracawl
+touched: docs/recovery.md
