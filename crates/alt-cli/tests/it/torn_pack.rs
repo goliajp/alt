@@ -1,7 +1,8 @@
 //! A power cut during `alt add`: the headers of the new pack records
 //! reached the disk and their payloads did not, or zeros did where records
-//! were to follow. The repository reads as it did before the add, the file
-//! is added again, and the full check passes before and after.
+//! were to follow — or the record of `map.alt` that names the new blob
+//! reached the disk and the blob did not. The repository reads as it did
+//! before the add, the file is added again, and the full check passes.
 
 use std::fs;
 use std::path::Path;
@@ -126,6 +127,55 @@ fn a_file_whose_add_lost_its_payloads_to_a_power_cut_is_added_again_and_restored
         precious()
     );
     ok(alt(&dir, &["fsck"]));
+}
+
+/// The kernel wrote `map.alt` out before the pack: the record that names
+/// the new blob is whole on disk, and the blob never arrived or arrived as
+/// zeros. The next add cuts the record off and stores the file again.
+#[test]
+fn a_file_whose_add_reached_the_map_and_not_the_pack_is_added_again_and_restored() {
+    for zeroed in [false, true] {
+        let tmp = alt_os::temp::tempdir().unwrap();
+        let dir = tmp.path().join("repo");
+        fs::create_dir(&dir).unwrap();
+        repo(&dir);
+        ok(alt(&dir, &["branch", "without"]));
+        let (pack, map) = (dir.join(PACK), dir.join(".alt/map.alt"));
+        let synced = len(&pack) as usize;
+        let saved = tmp.path().join("saved");
+        copy(&dir.join(".alt"), &saved);
+        fs::write(dir.join("precious.txt"), precious()).unwrap();
+        ok(alt(&dir, &["add", "precious.txt"]));
+        let named = fs::read(&map).unwrap();
+        let mut torn = fs::read(&pack).unwrap();
+        match zeroed {
+            true => assert!(zero_payloads(&mut torn, synced) > 0),
+            false => torn.truncate(synced),
+        }
+        // everything but the map is as it was before the add
+        fs::remove_dir_all(dir.join(".alt")).unwrap();
+        copy(&saved, &dir.join(".alt"));
+        fs::write(&pack, &torn).unwrap();
+        assert!(named.len() as u64 > len(&map));
+        fs::write(&map, &named).unwrap();
+
+        assert!(ok(alt(&dir, &["status"])).contains("precious.txt"));
+        let _ = alt(&dir, &["fsck"]);
+        assert_eq!(fs::read(&pack).unwrap(), torn, "a read cut the pack");
+        assert_eq!(fs::read(&map).unwrap(), named, "a read cut the map");
+        ok(alt(&dir, &["add", "precious.txt"]));
+        ok(alt(&dir, &["commit", "-m", "precious"]));
+        assert!(ok(alt(&dir, &["log", "-n", "1"])).contains("precious"));
+        ok(alt(&dir, &["branch", "with"]));
+        ok(alt(&dir, &["switch", "without"]));
+        assert!(!dir.join("precious.txt").exists());
+        ok(alt(&dir, &["switch", "with"]));
+        assert_eq!(
+            fs::read_to_string(dir.join("precious.txt")).unwrap(),
+            precious()
+        );
+        ok(alt(&dir, &["fsck"]));
+    }
 }
 
 #[test]

@@ -101,6 +101,24 @@ impl BlobMap {
         })
     }
 
+    /// Visits the records from byte `from` of the log on: where each
+    /// begins, the blob and its manifest root.
+    pub fn each_from(
+        &self,
+        from: u64,
+        mut each: impl FnMut(u64, BlobId, ChunkId) -> Result<(), StoreError>,
+    ) -> Result<(), StoreError> {
+        self.log.each_from(from, |at, rec| {
+            let blob = BlobId(rec[..32].try_into().unwrap());
+            each(at, blob, ChunkId(rec[32..64].try_into().unwrap()))
+        })
+    }
+
+    /// See [`RecLog::unfinished`].
+    pub fn unfinished(&self) -> bool {
+        self.log.unfinished()
+    }
+
     pub fn contains(&self, blob: BlobId) -> Result<bool, StoreError> {
         self.log.contains(&blob.0)
     }

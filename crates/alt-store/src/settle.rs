@@ -21,6 +21,17 @@ use crate::packs::{self, Fresh};
 use crate::{Basis, ChunkStore, StoreError, Tail};
 
 impl ChunkStore {
+    /// Whether an append that never finished follows the records held here
+    /// in the active pack (see [`Tail::deferring`]).
+    pub fn unfinished(&self) -> bool {
+        self.active.torn
+    }
+
+    /// Cuts that append off the active pack and fsyncs the cut.
+    pub fn cut_unfinished(&mut self) -> Result<(), StoreError> {
+        self.rewind(self.checkpoint())
+    }
+
     /// Checks the records a load just walked in the active pack and loads
     /// the pack again up to the first that never finished.
     pub(crate) fn settle(&mut self, fresh: Fresh, tail: &Tail) -> Result<(), StoreError> {

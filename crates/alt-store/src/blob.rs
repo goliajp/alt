@@ -13,6 +13,7 @@
 //! per-chunk re-hash the chunk store already does.
 
 mod open;
+mod settle;
 
 use std::path::PathBuf;
 use std::sync::OnceLock;

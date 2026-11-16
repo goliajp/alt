@@ -40,6 +40,7 @@ pub struct Tail {
     synced: Option<(u32, u64)>,
     read_only: bool,
     locked: bool,
+    deferred: bool,
 }
 
 /// A store nothing is known about and that no one else writes: its opener
@@ -52,6 +53,7 @@ impl Default for Tail {
             synced: None,
             read_only: false,
             locked: true,
+            deferred: false,
         }
     }
 }
@@ -68,6 +70,7 @@ impl Tail {
             synced: None,
             read_only: false,
             locked: false,
+            deferred: false,
         }
     }
 
@@ -104,6 +107,16 @@ impl Tail {
         self
     }
 
+    /// The same policy for a store whose opener cuts unfinished records off
+    /// itself, once it has seen what names them: they are passed over
+    /// under the writers' lock too, and the handle says so
+    /// ([`crate::reclog::RecLog::unfinished`]). Nothing may be appended
+    /// before they are cut.
+    pub fn deferring(mut self) -> Self {
+        self.deferred = true;
+        self
+    }
+
     pub(crate) fn is_read_only(&self) -> bool {
         self.read_only
     }
@@ -111,7 +124,17 @@ impl Tail {
     /// Whether an unfinished record is cut off the file rather than passed
     /// over.
     pub(crate) fn cuts(&self) -> bool {
+        self.repairs() && !self.deferred
+    }
+
+    /// Whether a file cut short inside its header gets the header written.
+    pub(crate) fn repairs(&self) -> bool {
         self.locked && !self.read_only
+    }
+
+    /// Whether unfinished records are left for the opener to cut.
+    pub(crate) fn defers(&self) -> bool {
+        self.deferred
     }
 
     /// Announces that the log (pack `seq` of a chunk store) is about to be

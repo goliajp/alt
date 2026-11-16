@@ -224,6 +224,22 @@ impl ObjectMap {
         self.log.check(|rec| each(MapEntry::parse(rec)?))
     }
 
+    /// Visits the entries from byte `from` of the log on, each with where
+    /// its record begins.
+    pub fn each_from(
+        &self,
+        from: u64,
+        mut each: impl FnMut(u64, MapEntry) -> Result<(), OdbError>,
+    ) -> Result<(), OdbError> {
+        self.log
+            .each_from(from, |at, rec| each(at, MapEntry::parse(rec)?))
+    }
+
+    /// See [`RecLog::unfinished`].
+    pub fn unfinished(&self) -> bool {
+        self.log.unfinished()
+    }
+
     /// All entries in append order.
     pub fn entries(&self) -> Result<Vec<MapEntry>, OdbError> {
         let mut out = Vec::with_capacity(self.log.count());

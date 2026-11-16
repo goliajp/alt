@@ -22,6 +22,8 @@ pub(crate) struct Active {
     /// Separate handle for positioned reads so the cursor stays the writer's.
     pub read: File,
     pub len: u64,
+    /// an append that never finished follows `len` in the file
+    pub torn: bool,
 }
 
 pub(crate) fn pack_path(dir: &Path, seq: u32) -> PathBuf {
@@ -81,6 +83,7 @@ pub(crate) fn create_active(dir: &Path, seq: u32, tail: &Tail) -> Result<Active,
                 write,
                 read: File::open(&path)?,
                 len: pack::HEADER_LEN as u64,
+                torn: false,
             })
         }
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -173,12 +176,18 @@ pub(crate) fn open_active(
         return Err(StoreError::Format("active pack damaged"));
     }
     let len = valid_len.max(pack::HEADER_LEN as u64);
+    // a pack cut short inside its header holds no record to look into
+    let cut = valid_len < size
+        && match valid_len {
+            0 => walk.tail.repairs(),
+            _ => walk.tail.cuts(),
+        };
     let write = if walk.tail.is_read_only() {
         read.try_clone()?
     } else {
         // append mode: writes land at the end wherever a truncation moved it
         let mut write = OpenOptions::new().append(true).open(path)?;
-        if valid_len < size && walk.tail.cuts() {
+        if cut {
             walk.tail.cut(walk.seq, len)?;
             if valid_len == 0 {
                 write.set_len(0)?;
@@ -195,6 +204,7 @@ pub(crate) fn open_active(
         write,
         read,
         len,
+        torn: valid_len < size && !cut,
     };
     Ok((active, recs))
 }

@@ -100,6 +100,24 @@ impl Tier1Map {
             .check(|rec| each(BlobId(rec[..32].try_into().unwrap())))
     }
 
+    /// Visits the records from byte `from` of the log on: where each
+    /// begins, the decomposed blob and the blob its recipe record is.
+    pub fn each_from<E: From<StoreError>>(
+        &self,
+        from: u64,
+        mut each: impl FnMut(u64, BlobId, BlobId) -> Result<(), E>,
+    ) -> Result<(), E> {
+        self.log.each_from(from, |at, rec| {
+            let blob = BlobId(rec[..32].try_into().unwrap());
+            each(at, blob, BlobId(rec[32..64].try_into().unwrap()))
+        })
+    }
+
+    /// See [`RecLog::unfinished`].
+    pub fn unfinished(&self) -> bool {
+        self.log.unfinished()
+    }
+
     pub fn run_chain(&self) -> Vec<(u64, u64)> {
         self.log.run_chain()
     }

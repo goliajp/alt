@@ -14,18 +14,18 @@ use alt_prism::{Decomposition, Prism, PrismId};
 
 use super::marker::rewrite;
 
-const FILES: [&str; 4] = [
+pub(super) const FILES: [&str; 4] = [
     "store/pack-00000001.altpack",
     "store/manifests/blobmap",
     "tier1",
     "map.alt",
 ];
-const KEPT: u32 = 30;
-const ALL: u32 = 60;
+pub(super) const KEPT: u32 = 30;
+pub(super) const ALL: u32 = 60;
 
 /// Splits what starts with `split:` in two, so that it is stored through
 /// the Tier 1 map.
-struct Split;
+pub(super) struct Split;
 
 impl Prism for Split {
     fn id(&self) -> PrismId {
@@ -49,7 +49,7 @@ impl Prism for Split {
 
 /// Every third object is one chunk, every third several chunks under a
 /// blob map record, every third goes through the Tier 1 map.
-fn object(n: u32) -> (ObjectId, Vec<u8>) {
+pub(super) fn object(n: u32) -> (ObjectId, Vec<u8>) {
     let data = match n % 3 {
         0 => format!("object number {n} {}", "x".repeat(60)).into_bytes(),
         1 => {
@@ -72,17 +72,17 @@ fn object(n: u32) -> (ObjectId, Vec<u8>) {
     )
 }
 
-fn open(dir: &Path) -> NativeOdb {
+pub(super) fn open(dir: &Path) -> NativeOdb {
     let mut odb = NativeOdb::open(dir).unwrap();
     odb.register_prism(Box::new(Split)).unwrap();
     odb
 }
 
-fn lens(dir: &Path) -> [u64; 4] {
+pub(super) fn lens(dir: &Path) -> [u64; 4] {
     FILES.map(|name| fs::metadata(dir.join(name)).unwrap().len())
 }
 
-fn put(odb: &mut NativeOdb, objects: std::ops::Range<u32>) {
+pub(super) fn put(odb: &mut NativeOdb, objects: std::ops::Range<u32>) {
     for n in objects {
         let (oid, data) = object(n);
         odb.put(oid, ObjectKind::Blob, &data).unwrap();
@@ -90,7 +90,7 @@ fn put(odb: &mut NativeOdb, objects: std::ops::Range<u32>) {
     odb.flush().unwrap();
 }
 
-fn cut(dir: &Path, file: usize, len: u64) {
+pub(super) fn cut(dir: &Path, file: usize, len: u64) {
     let file = OpenOptions::new()
         .write(true)
         .open(dir.join(FILES[file]))
@@ -117,7 +117,7 @@ fn rewind_begun(dir: &Path) -> [u64; 4] {
     kept
 }
 
-fn reads(odb: &NativeOdb, n: u32) {
+pub(super) fn reads(odb: &NativeOdb, n: u32) {
     let (oid, data) = object(n);
     let read = odb.get(&oid).unwrap().expect("object missing");
     assert_eq!(read.data, data, "object {n}");
@@ -125,7 +125,7 @@ fn reads(odb: &NativeOdb, n: u32) {
 
 /// The store opens, holds what the rewind keeps, and takes what it rolled
 /// back again.
-fn recovers(dir: &Path, step: &str) {
+pub(super) fn recovers(dir: &Path, step: &str) {
     let mut odb = open(dir);
     for n in 0..KEPT {
         reads(&odb, n);
@@ -216,14 +216,30 @@ fn the_rewind_cuts_what_names_content_before_the_content() {
     recovers(tmp.path(), "after a whole rewind");
 }
 
+/// Writes the marker an older alt keeps: the lengths of the pack, the blob
+/// map and `map.alt` at its last fsync.
+pub(super) fn older_marker(dir: &Path, synced: [u64; 4]) {
+    let bytes: Vec<u8> = [synced[0], synced[1], synced[3]]
+        .iter()
+        .flat_map(|len| len.to_le_bytes())
+        .collect();
+    fs::write(dir.join("odb.durable"), bytes).unwrap();
+}
+
 /// What an older alt leaves when its rewind, which cut the pack first, is
-/// interrupted: records that name content the pack no longer holds. Such
-/// an object is reported as not readable, never read as other bytes.
+/// interrupted after a batch it had synced: records that name content the
+/// pack no longer holds, and nothing that tells them from records whose
+/// content was lost. Such an object is reported as not readable, never
+/// read as other bytes, and a writer reports the store instead of taking
+/// the records at their word.
 #[test]
 fn records_an_older_rewind_left_naming_cut_content_never_read_as_other_bytes() {
     let tmp = alt_os::temp::tempdir().unwrap();
     let kept = rewind_begun(tmp.path());
+    let full = lens(tmp.path());
+    older_marker(tmp.path(), full);
     cut(tmp.path(), 0, kept[0]);
+    let before = lens(tmp.path());
     let mut odb = open(tmp.path());
     for n in 0..KEPT {
         reads(&odb, n);
@@ -238,20 +254,39 @@ fn records_an_older_rewind_left_naming_cut_content_never_read_as_other_bytes() {
         }
     }
     assert!(odb.check().is_err());
-    // writing such an object again does not bring it back: the records
-    // that name it are taken at their word
-    for n in KEPT..ALL {
-        let (oid, data) = object(n);
-        odb.put(oid, ObjectKind::Blob, &data).unwrap();
+    let (oid, data) = object(KEPT);
+    let refused = odb.put(oid, ObjectKind::Blob, &data).unwrap_err();
+    assert!(
+        matches!(refused, alt_odb::OdbError::Dangling { .. }),
+        "{refused:?}"
+    );
+    let (oid, data) = object(ALL + 1);
+    assert!(odb.put(oid, ObjectKind::Blob, &data).is_err());
+    drop(odb);
+    assert_eq!(lens(tmp.path()), before);
+    // no boundaries were made up for a store in this state
+    assert_eq!(fs::read(tmp.path().join("odb.durable")).unwrap().len(), 24);
+}
+
+/// The same rewind interrupted before the batch was synced: the older
+/// marker's lengths stop short of the records that name the cut content,
+/// so the next writer cuts those too and the store goes on.
+#[test]
+fn records_an_older_rewind_left_past_the_synced_lengths_are_cut_with_the_content() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let kept = rewind_begun(tmp.path());
+    older_marker(tmp.path(), kept);
+    cut(tmp.path(), 0, kept[0]);
+    // an older alt keeps no length of the tier1 map to judge its records by
+    cut(tmp.path(), 2, kept[2]);
+    let mut odb = open(tmp.path());
+    put(&mut odb, KEPT..ALL);
+    drop(odb);
+    let odb = open(tmp.path());
+    for n in 0..ALL {
+        reads(&odb, n);
     }
-    odb.flush().unwrap();
-    for n in KEPT..ALL {
-        let (oid, data) = object(n);
-        if let Ok(Some(read)) = odb.get(&oid) {
-            assert_eq!(read.data, data, "object {n}");
-        }
-    }
-    assert!(odb.check().is_err());
+    odb.check().unwrap();
 }
 
 /// Zeros a power cut left where records were to follow, in each of the

@@ -86,6 +86,37 @@ impl RecLog {
         self.file.set_len(target_len)?;
         self.file.sync_all()?;
         self.set_tail(&kept);
+        self.unfinished = false;
+        Ok(())
+    }
+
+    /// Visits the records from `from` (a record boundary) on, each with
+    /// where it begins, in append order, verifying each.
+    pub fn each_from<E: From<StoreError>>(
+        &self,
+        from: u64,
+        mut each: impl FnMut(u64, &[u8]) -> Result<(), E>,
+    ) -> Result<(), E> {
+        let rec_len = self.layout.rec_len;
+        let tail_from = self.len - self.tail.len() as u64;
+        let mut buf = Vec::new();
+        let mut at = from;
+        while at < tail_from {
+            buf.resize(super::SCAN_BYTES / rec_len * rec_len, 0);
+            let take = ((tail_from - at) as usize).min(buf.len());
+            read_exact_at(&self.file, &mut buf[..take], at).map_err(StoreError::from)?;
+            for rec in buf[..take].chunks_exact(rec_len) {
+                if !self.layout.intact(rec) {
+                    return Err(StoreError::Format(self.layout.corrupt).into());
+                }
+                each(at, rec)?;
+                at += rec_len as u64;
+            }
+        }
+        for rec in self.tail[(at - tail_from) as usize..].chunks_exact(rec_len) {
+            each(at, rec)?;
+            at += rec_len as u64;
+        }
         Ok(())
     }
 

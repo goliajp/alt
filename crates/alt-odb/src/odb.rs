@@ -3,6 +3,7 @@
 
 mod durable;
 mod open;
+mod settle;
 mod sink;
 
 pub(crate) use open::Mode;
@@ -74,6 +75,10 @@ pub(crate) struct Odb {
     /// What a Tier 1 map that does not read to its end means, for the open
     /// on first use.
     pub(crate) tier1_tail: Tail,
+    /// How far this handle has seen the records of the blob map, the Tier 1
+    /// map and `map.alt` name content that is stored, and the marker's
+    /// generation then (see [`Self::settle`]).
+    pub(crate) checked: Option<(u64, [u64; 3])>,
 }
 
 impl Odb {
@@ -93,17 +98,20 @@ impl Odb {
         }
         hold_exclusive(&self.lock)?;
         self.held = true;
-        self.blobs.sync_from_disk()?;
-        if let Some(tier1) = self.tier1.get_mut() {
-            tier1.sync_from_disk()?;
+        let ready = self.catch_up().and_then(|()| self.bound());
+        if ready.is_err() {
+            // nothing was appended; the next call looks at the store again
+            release_exclusive(&self.lock);
+            self.held = false;
+            self.blobs.end_batch();
         }
-        self.map.sync_from_disk()?;
-        self.bound()
+        ready
     }
 
     /// Releases the write lock (best-effort; the fd closing also releases it).
     fn release(&mut self) {
         if self.held {
+            self.note_checked();
             self.save_head();
             release_exclusive(&self.lock);
             self.held = false;

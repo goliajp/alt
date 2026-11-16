@@ -73,7 +73,7 @@ impl Layout {
         if !header.starts_with(&start[..have]) {
             return Err(StoreError::Format(self.bad_header));
         }
-        if policy.cuts() {
+        if policy.repairs() {
             policy.cut(0, HEADER_LEN as u64)?;
             file.set_len(0)?;
             file.write_all(&header)?;
@@ -121,6 +121,8 @@ pub struct RecLog {
     tail_second: IdMap<Key, Vec<u32>>,
     cache: cache::ReadCache,
     len: u64,
+    /// an append that never finished follows `len` in the file
+    unfinished: bool,
     unsynced: bool,
     policy: Tail,
 }
@@ -205,11 +207,13 @@ impl RecLog {
             tail_second: IdMap::default(),
             cache: cache::ReadCache::default(),
             len: size,
+            unfinished: false,
             unsynced: false,
             policy,
         };
         let cut = this.policy.cuts();
         this.load_tail(size, End::MaybeTorn { cut })?;
+        this.unfinished = !cut && this.len < size;
         Ok((this, created))
     }
 
@@ -333,25 +337,13 @@ impl RecLog {
         &self,
         mut each: impl FnMut(&[u8]) -> Result<(), E>,
     ) -> Result<(), E> {
-        let rec_len = self.layout.rec_len;
-        let covered = self.runs.covered();
-        let mut buf = vec![0u8; SCAN_BYTES / rec_len * rec_len];
-        let mut at = HEADER_LEN as u64;
-        while at < covered {
-            let take = ((covered - at) as usize).min(buf.len());
-            read_exact_at(&self.file, &mut buf[..take], at).map_err(StoreError::from)?;
-            for rec in buf[..take].chunks_exact(rec_len) {
-                if !self.layout.intact(rec) {
-                    return Err(StoreError::Format(self.layout.corrupt).into());
-                }
-                each(rec)?;
-            }
-            at += take as u64;
-        }
-        for rec in self.tail.chunks_exact(rec_len) {
-            each(rec)?;
-        }
-        Ok(())
+        self.each_from(HEADER_LEN as u64, |_, rec| each(rec))
+    }
+
+    /// Whether an append that never finished follows the records held
+    /// here: the file is longer than [`Self::appended_len`].
+    pub fn unfinished(&self) -> bool {
+        self.unfinished
     }
 
     /// Records in the log.

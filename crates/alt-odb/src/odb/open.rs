@@ -57,7 +57,9 @@ fn tail(durable: &Path, read_only: bool, log: Log, synced: Option<(u32, u64)>) -
         };
         Marker::read(&read).basis(log, seq, len, bounded)
     })
-    .before_cut(move |seq, at| synced::lower_eof(&lowered, log, seq, at));
+    .before_cut(move |seq, at| synced::lower_eof(&lowered, log, seq, at))
+    // what a dead writer left unfinished is cut by `Odb::settle`
+    .deferring();
     let tail = match (log, synced) {
         (Log::Pack, Some((seq, len))) => tail.synced_to(seq, len),
         _ => tail,
@@ -131,6 +133,7 @@ impl Odb {
             durable_path,
             defer: false,
             write_count: 0,
+            checked: None,
             deferred: mode.deferred,
             alt_dir,
         };
@@ -154,16 +157,16 @@ impl Odb {
         }
         self.held = true;
         let indexed = (|| {
-            self.blobs.sync_from_disk()?;
-            self.map.sync_from_disk()?;
-            // every log of such a store, opened so far or not
-            self.blobs.open_map()?;
-            self.tier1_mut()?;
+            self.catch_up()?;
             self.bound()?;
             self.index_tails()
         })();
         self.release();
-        indexed
+        match indexed {
+            // for the write that runs into it to report: reads go on
+            Err(OdbError::Dangling { .. }) => Ok(()),
+            indexed => indexed,
+        }
     }
 
     /// The Tier 1 map, opened on first use. Opening must not overlap a

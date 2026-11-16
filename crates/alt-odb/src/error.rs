@@ -8,11 +8,19 @@ pub enum OdbError {
     Io(std::io::Error),
     Store(StoreError),
     Format(&'static str),
-    HashMismatch { claimed: ObjectId, actual: ObjectId },
+    HashMismatch {
+        claimed: ObjectId,
+        actual: ObjectId,
+    },
     SizeMismatch(ObjectId, u64),
     Tier1Record(BlobId, crate::tier1::RecordError),
     Tier1Recompose(BlobId),
     Tier1HashMismatch(BlobId),
+    /// the record at byte `at` of `file` names content that is not stored
+    Dangling {
+        file: &'static str,
+        at: u64,
+    },
 }
 
 impl std::fmt::Display for OdbError {
@@ -33,6 +41,10 @@ impl std::fmt::Display for OdbError {
             Self::Tier1HashMismatch(id) => {
                 write!(f, "tier1 recomposed bytes do not hash to {id}")
             }
+            Self::Dangling { file, at } => write!(
+                f,
+                "the record at byte {at} of {file} names content the store does not hold"
+            ),
         }
     }
 }
@@ -47,7 +59,8 @@ impl std::error::Error for OdbError {
             | Self::SizeMismatch(..)
             | Self::Tier1Record(..)
             | Self::Tier1Recompose(_)
-            | Self::Tier1HashMismatch(_) => None,
+            | Self::Tier1HashMismatch(_)
+            | Self::Dangling { .. } => None,
         }
     }
 }

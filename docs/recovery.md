@@ -133,6 +133,25 @@ file, or the whole `.alt` directory, from a copy made before the damage; `alt
 export` and `alt push` of history that does not pass through the damaged
 record still work for getting it out.
 
+### Records whose content never arrived
+
+Content is written before the records that name it and synced in that order,
+but before the sync the system may write the files out in any order. A power
+cut can therefore leave a record whole while the content it names is not
+there. The next command that writes looks at the records past the synced
+point, cuts off those that name content the store does not hold, and goes on:
+what they named was never committed and can be added again. Until then,
+commands that only read find such an object listed and fail when they read
+it; they change nothing.
+
+A record from before the synced point that names missing content is damage.
+The command that writes fails, no file changes, and reading what is left
+still works:
+
+| Message | Meaning |
+| --- | --- |
+| `the record at byte N of FILE names content the store does not hold` | a record that was synced, or that nothing tells from a synced one, names content that is gone |
+
 A repository that an older alt wrote records only how long its files were
 when they were last synced, or nothing. That length is used the same way.
 Where nothing is recorded, a record that does not read is unfinished only when
