@@ -39,6 +39,10 @@ pub const PATHS_IGNORED: &str = "paths_ignored";
 /// the index has not, which it has said as git says it.
 pub const PATHS_UNKNOWN: &str = "paths_unknown";
 
+/// The kind of failure `add` ends with when it could not store a path
+/// and has said which, as git says it.
+pub const PATHS_FAILED: &str = "paths_failed";
+
 impl Failure {
     pub fn refusal(kind: &'static str, message: impl Into<String>) -> Self {
         Self {
@@ -102,7 +106,7 @@ impl Failure {
                 .unwrap_or_default();
             match self.kind {
                 // the command has said which paths, as git says it
-                PATHS_IGNORED | PATHS_UNKNOWN => request,
+                PATHS_IGNORED | PATHS_UNKNOWN | PATHS_FAILED => request,
                 _ => format!("fatal: {}\n{request}", self.message),
             }
             .into_bytes()

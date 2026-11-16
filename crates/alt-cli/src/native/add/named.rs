@@ -236,6 +236,22 @@ pub(super) fn left_alone(paths: &[BString]) -> crate::machine::Failure {
     failure
 }
 
+/// How an `add` ends that left the paths `hidden` alone or `failed` to
+/// store a path: with the status git has for it, 255 for the failure
+/// whatever else there is.
+pub(super) fn ended(hidden: &[BString], failed: bool) -> Res<()> {
+    let said = "a path could not be added";
+    let failure = crate::machine::Failure::refusal(crate::machine::PATHS_FAILED, said);
+    match (failed, hidden.is_empty()) {
+        (true, _) => Err(Box::new(crate::machine::Failure {
+            exit_code: 255,
+            ..failure
+        })),
+        (false, false) => Err(left_alone(hidden).into()),
+        (false, true) => Ok(()),
+    }
+}
+
 const ADVICE: &str = "\
 hint: Use -f if you really want to add them.
 hint: Disable this message with \"alt config advice.addIgnoredFile false\"

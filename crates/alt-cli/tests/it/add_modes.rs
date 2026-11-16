@@ -44,6 +44,9 @@ const CASES: &[&[&str]] = &[
     &["--renormalize", "g.txt"],
     &["--renormalize", "f.txt", "g.txt"],
     &["--renormalize", "f.txt"],
+    &["--renormalize", "d.txt"],
+    &["--renormalize", "f.txt", "d.txt"],
+    &["--renormalize", "*.txt", ":!g.txt"],
 ];
 
 /// The status a command ended with and what it wrote to stderr, without
@@ -58,7 +61,13 @@ pub(crate) fn said(output: &Output) -> (Option<i32>, Vec<&BStr>) {
 /// The files of case `n`, made and committed just before it runs: a case
 /// that stages in the whole tree leaves those of the cases to come alone.
 fn files(trees: &Trees, n: usize) {
-    for file in ["top.txt", "sub/f.txt", "sub/g.txt", "sub/deep/g.txt"] {
+    for file in [
+        "top.txt",
+        "sub/f.txt",
+        "sub/g.txt",
+        "sub/d.txt",
+        "sub/deep/g.txt",
+    ] {
         trees.write(&format!("c{n}/{file}"), "base\n");
     }
     each(trees, &["add", &format!("c{n}")]);
@@ -66,8 +75,13 @@ fn files(trees: &Trees, n: usize) {
     for file in ["top.txt", "sub/f.txt", "sub/n.txt", "new.txt", "sub/x.log"] {
         trees.write(&format!("c{n}/{file}"), "now\n");
     }
+    // a file gone, and a directory where another was
     for tree in ["direct", "served", "git"] {
-        std::fs::remove_file(trees.at(tree).join(format!("c{n}/sub/g.txt"))).unwrap();
+        let sub = trees.at(tree).join(format!("c{n}/sub"));
+        std::fs::remove_file(sub.join("g.txt")).unwrap();
+        std::fs::remove_file(sub.join("d.txt")).unwrap();
+        std::fs::create_dir(sub.join("d.txt")).unwrap();
+        std::fs::write(sub.join("d.txt/in.txt"), "in\n").unwrap();
     }
 }
 
