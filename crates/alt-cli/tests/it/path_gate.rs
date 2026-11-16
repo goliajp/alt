@@ -98,3 +98,49 @@ fn path_allow_denies_staging_a_removal_out_of_tree() {
     ok(alt_as(repo, &["add", "src/gone.rs"], "bot"));
     ok(alt_as(repo, &["commit", "-m", "src only"], "bot"));
 }
+
+/// A rebase the restricted principal may not carry out is refused before
+/// it begins: over a path the new base changes, and over one a replayed
+/// commit changes that the last of them leaves as the base has it. The
+/// branch, the index and the working tree stay as they were.
+#[test]
+fn path_allow_denies_a_rebase_and_leaves_no_part_of_it() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let repo = fixture(&tmp);
+    let write = |file: &str, body: &str| {
+        std::fs::create_dir_all(repo.join(file).parent().unwrap()).unwrap();
+        std::fs::write(repo.join(file), body).unwrap();
+    };
+    let commit = |message: &str| {
+        ok(alt(repo, &["add", "."]));
+        ok(alt(repo, &["commit", "-m", message]));
+    };
+    write("scripts/run.sh", "run\n");
+    commit("scripts");
+    ok(alt(repo, &["switch", "-c", "beside"]));
+    write("src/o.rs", "// o\n");
+    commit("beside: src only");
+    ok(alt(repo, &["switch", "-c", "across"]));
+    write("scripts/x.sh", "x\n");
+    commit("across: scripts");
+    ok(alt(repo, &["switch", "main"]));
+    write("scripts/t.sh", "t\n");
+    write("src/lib.rs", "// lib\n");
+    commit("main: a script comes");
+    std::fs::remove_file(repo.join("scripts/t.sh")).unwrap();
+    commit("main: and goes");
+    write_policy(repo, "agent:* -> path=src/**\n");
+
+    let state = || {
+        let said = ["status", "branch"].map(|c| ok(alt(repo, &[c])));
+        let refs = ["main", "beside", "across"].map(|r| ok(alt(repo, &["rev-parse", r])));
+        (said, refs, std::fs::read(repo.join(".alt/index")).unwrap())
+    };
+    let before = state();
+    for upstream in ["across", "beside"] {
+        fails_with(alt_as(repo, &["rebase", upstream], "bot"), "capability denied");
+        assert_eq!(state(), before, "after rebase {upstream}");
+        assert!(!repo.join("src/o.rs").exists());
+    }
+    ok(alt(repo, &["rebase", "beside"]));
+}

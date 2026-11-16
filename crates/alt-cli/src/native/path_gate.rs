@@ -33,16 +33,37 @@ impl NativeRepo<'_> {
             Some(parent) => self.commit_entries(parent)?,
             None => Vec::new(),
         };
+        self.ensure_difference_allowed(&was, &index_entries(&self.index()?))
+    }
+
+    /// Refuses a replay of `commits` before any of it is done, when a path
+    /// one of them changes is one the policy leaves out: a replay refused
+    /// midway would leave the branch between where it was and where it goes.
+    pub(super) fn ensure_replay_allowed(&self, commits: &[ObjectId]) -> Res<()> {
+        if self.caps.path_allow.is_empty() {
+            return Ok(());
+        }
+        for &commit in commits {
+            let was = match self.commit_parents(commit)?.first() {
+                Some(&parent) => self.commit_entries(parent)?,
+                None => Vec::new(),
+            };
+            self.ensure_difference_allowed(&was, &self.commit_entries(commit)?)?;
+        }
+        Ok(())
+    }
+
+    /// Every path `now` adds to `was`, changes or leaves out is allowed.
+    fn ensure_difference_allowed(&self, was: &[WorkEntry], now: &[WorkEntry]) -> Res<()> {
         let was: HashMap<&BString, &WorkEntry> = was.iter().map(|e| (&e.path, e)).collect();
-        let staged = index_entries(&self.index()?);
         let same = |e: &WorkEntry, old: &&WorkEntry| old.oid == e.oid && old.mode == e.mode;
-        for e in staged
+        for e in now
             .iter()
             .filter(|e| !was.get(&e.path).is_some_and(|old| same(e, old)))
         {
             self.ensure_path_allowed(&e.path)?;
         }
-        let kept: HashSet<&BString> = staged.iter().map(|e| &e.path).collect();
+        let kept: HashSet<&BString> = now.iter().map(|e| &e.path).collect();
         for gone in was.keys().filter(|path| !kept.contains(*path)) {
             self.ensure_path_allowed(gone)?;
         }

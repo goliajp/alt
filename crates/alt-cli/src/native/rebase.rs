@@ -74,6 +74,12 @@ impl NativeRepo<'_> {
             }
         }
 
+        // refused before the branch is left, a rebase leaves nothing behind
+        let old = self.commit_entries(orig)?;
+        let target = self.commit_entries(onto)?;
+        self.preflight_checkout(&old, &target)?;
+        let picked = todo.iter().filter(|(action, _)| *action != Action::Drop);
+        self.ensure_replay_allowed(&picked.map(|(_, c)| *c).collect::<Vec<_>>())?;
         let recovery = Some(self.snapshot_workspace()?);
 
         // hand HEAD to the scratch ref, sitting on the new base
@@ -94,8 +100,6 @@ impl NativeRepo<'_> {
                 },
             ],
         )?;
-        let old = self.commit_entries(orig)?;
-        let target = self.commit_entries(onto)?;
         self.checkout(&old, &target)?;
         let state = RebaseState {
             recovery,
@@ -214,10 +218,8 @@ impl NativeRepo<'_> {
         self.clear_rebase_state()?;
         if json {
             use crate::json::Json;
-            let short = state
-                .branch
-                .strip_prefix("refs/heads/")
-                .unwrap_or(&state.branch);
+            let branch = &state.branch;
+            let short = branch.strip_prefix("refs/heads/").unwrap_or(branch);
             crate::json::emit(
                 out,
                 vec![
