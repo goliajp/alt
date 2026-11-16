@@ -77,6 +77,7 @@ mod scan_daemon_watches;
 mod show;
 mod status_json;
 mod status_labels;
+mod status_replaced;
 mod status_untracked;
 mod switch_kinds;
 mod tag;

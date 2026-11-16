@@ -6,6 +6,7 @@ use std::io;
 use super::{Below, Child, Found, Reach, Walk, with_name};
 use crate::fsdir::{DirFd, Kind, Listing, kind_of};
 use crate::ignore::IgnoreStack;
+use crate::untracked::Untracked;
 
 /// What a listed directory holds, as the walk of it sorts it out.
 struct Here {
@@ -91,6 +92,14 @@ impl Walk<'_> {
                         continue;
                     }
                     let Some(item) = names.find(name, false) else {
+                        // a directory by the name of a tracked file is no
+                        // untracked path, as for git; its files are, where
+                        // each is asked for
+                        if self.untracked == Untracked::Normal
+                            && let Some(dir) = names.find(name, true)
+                        {
+                            here.taken[dir] = true;
+                        }
                         self.gone(first, end, reach, found);
                         continue;
                     };
