@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: refactor
+summary: move the choice of paths to look at again out of the watched tree's module
+author-type: human
+author: doracawl
+touched: crates/alt-worktree/src/watch.rs
+touched: crates/alt-worktree/src/watch/paths.rs
