@@ -64,6 +64,26 @@ impl NativeRepo<'_> {
         Ok((old, target))
     }
 
+    /// Leaves a merge that stopped in conflict in the index and the working
+    /// tree, unless a path it changes there is one the policy leaves out:
+    /// refused before either is touched, as a merge without a conflict is.
+    pub(super) fn write_conflicted(&mut self, resolved: &[Resolved]) -> Res<()> {
+        if !self.caps.path_allow.is_empty() {
+            let index = self.index()?;
+            let whole = index.entries.iter().filter(|e| e.stage() == 0);
+            let was: HashMap<&BString, &IndexEntry> = whole.map(|e| (&e.path, e)).collect();
+            let changes = |r: &&Resolved| match (&r.entry, was.get(&r.path)) {
+                _ if r.conflicted => true,
+                (Some(e), Some(was)) => e.oid != was.oid || e.mode != was.mode,
+                (now, was) => now.is_some() || was.is_some(),
+            };
+            for r in resolved.iter().filter(changes) {
+                self.ensure_path_allowed(&r.path)?;
+            }
+        }
+        self.write_merge_state(resolved)
+    }
+
     /// Every path `now` adds to `was`, changes or leaves out is allowed.
     fn ensure_difference_allowed(&self, was: &[WorkEntry], now: &[WorkEntry]) -> Res<()> {
         let was: HashMap<&BString, &WorkEntry> = was.iter().map(|e| (&e.path, e)).collect();

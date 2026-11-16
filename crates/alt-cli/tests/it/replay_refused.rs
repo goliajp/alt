@@ -36,14 +36,22 @@ fn state(repo: &Path, refs: &[&str]) -> (Vec<String>, Vec<Vec<u8>>, Vec<bool>) {
     (said, files.into(), under_way.into())
 }
 
-/// `main` and `topic` change the same line of `src/b.rs`; `topic` goes on
-/// with a second change of it. Left on `topic`.
+/// `main`, `topic` and `across` change the same line of `src/b.rs`, the
+/// last two twice; `across` changes a script with the first. Left on
+/// `topic`.
 fn diverged(tmp: &alt_os::temp::TempDir) -> &Path {
     let repo = fixture(tmp);
     write(repo, "src/b.rs", "l1\nl2\nl3\n");
     write(repo, "scripts/old.sh", "old\n");
     write(repo, "scripts/run.sh", "run\n");
     commit(repo, "files");
+    ok(alt(repo, &["switch", "-c", "across"]));
+    write(repo, "src/b.rs", "l1\nacross\nl3\n");
+    write(repo, "scripts/run.sh", "across\n");
+    commit(repo, "across: a line and a script");
+    write(repo, "src/b.rs", "l1\nacross again\nl3\n");
+    commit(repo, "across: the line again");
+    ok(alt(repo, &["switch", "main"]));
     ok(alt(repo, &["switch", "-c", "topic"]));
     write(repo, "src/b.rs", "l1\ntopic\nl3\n");
     commit(repo, "topic: a line");
@@ -92,4 +100,32 @@ fn a_stopped_sequence_goes_on_with_no_change_another_staged_out_of_tree() {
             assert_eq!(state(repo, &["topic", "main"]), before, "{verb}");
         }
     }
+}
+
+/// A merge, a cherry-pick, a revert and a rebase that would stop in
+/// conflict and bring a change out of tree with it are refused as they are
+/// without the conflict: nothing is written. One whose changes all lie in
+/// the allowed paths stops at its conflict.
+#[test]
+fn what_would_stop_in_conflict_with_a_change_out_of_tree_is_refused_whole() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let repo = diverged(&tmp);
+    let refs = ["topic", "main", "across"];
+    for (branch, args) in [
+        ("topic", &["merge", "across"][..]),
+        ("topic", &["cherry-pick", "across~1"]),
+        ("across", &["revert", "HEAD~1"]),
+        ("across", &["rebase", "main"]),
+    ] {
+        ok(alt(repo, &["switch", branch]));
+        let before = state(repo, &refs);
+        fails_with(
+            alt_as(repo, args, "bot"),
+            "capability denied: path 'scripts/run.sh'",
+        );
+        assert_eq!(state(repo, &refs), before, "{args:?}");
+    }
+    ok(alt(repo, &["switch", "topic"]));
+    stops(alt_as(repo, &["merge", "main"], "bot"));
+    assert!(repo.join(".alt/MERGE_HEAD").exists());
 }
