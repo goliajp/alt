@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: end a command on a directory in place of an ignore file where git does
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli.rs
+touched: crates/alt-cli/src/native/settings.rs
+touched: crates/alt-cli/tests/it/exclude_dirs.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/scan_daemon_watches.rs
