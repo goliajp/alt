@@ -95,9 +95,14 @@ impl Watched {
             return Err(Unanswered::ScanFailed);
         };
         let fresh = self.watcher.fill(seen, &|dir| tracked(snapshot, dir));
-        let fresh = self.noting(fresh).ok_or(Unanswered::Unwatched)?;
-        if !fresh.is_empty() {
-            self.absorbed = Some(merged(self.absorbed.take(), Changes::Paths(fresh)));
+        match self.noting(fresh).ok_or(Unanswered::Unwatched)? {
+            Some(fresh) if fresh.is_empty() => {}
+            Some(fresh) => {
+                self.absorbed = Some(merged(self.absorbed.take(), Changes::Paths(fresh)));
+            }
+            // a directory the scan did not read cannot be: the watches
+            // are gone over again after the next scan, of everything
+            None => self.absorbed = Some(Changes::Unknown),
         }
         Ok(delta)
     }

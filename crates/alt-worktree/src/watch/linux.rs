@@ -17,7 +17,8 @@ use std::path::{Path, PathBuf};
 use alt_os::sys;
 
 use super::mounts::{self, Mounts};
-use super::{Changes, beneath};
+use super::Changes;
+use super::dirs::unread;
 use crate::ignore::IgnoreStack;
 
 const IN_MODIFY: u32 = 0x2;
@@ -139,7 +140,7 @@ impl Watcher {
         most: usize,
         tracked: Tracked,
         excludes: &[&Path],
-    ) -> io::Result<Watcher> {
+    ) -> io::Result<(Watcher, bool)> {
         let mut watcher = Watcher {
             root: root.to_path_buf(),
             queue: instance()?,
@@ -153,13 +154,15 @@ impl Watcher {
             check: Check::default(),
             pending: Seen::default(),
         };
-        watcher.establish(tracked)?;
-        Ok(watcher)
+        let whole = watcher.establish(tracked)?;
+        Ok((watcher, whole))
     }
 
     /// Watches the tree from its root, on a queue with no watches yet.
-    /// Fails for a tree that events do not tell everything about.
-    fn establish(&mut self, tracked: Tracked) -> io::Result<()> {
+    /// Fails for a tree that events do not tell everything about. `false`
+    /// when something beneath the root could not be read: the watches set
+    /// so far stand, and the rest are to be filled in after a scan.
+    fn establish(&mut self, tracked: Tracked) -> io::Result<bool> {
         self.set_up += 1;
         self.dirs.clear();
         self.skipped.clear();
@@ -168,11 +171,16 @@ impl Watcher {
         if mounts::elsewhere(&self.root)? || self.mounts.beneath(&self.root)? {
             return Err(io::ErrorKind::Unsupported.into());
         }
-        self.add_tree(Vec::new(), tracked)
+        let whole = self.add_tree(Vec::new(), tracked);
+        match self.dirs.is_empty() {
+            true => whole.map(|()| true),
+            false => unread(whole),
+        }
     }
 
-    /// Watches the tree anew, by the rules of `excludes` as they are now.
-    pub(crate) fn start_over(&mut self, tracked: Tracked, excludes: &[&Path]) -> io::Result<()> {
+    /// Watches the tree anew, by the rules of `excludes` as they are now;
+    /// `false` as [`establish`](Self::establish) has it.
+    pub(crate) fn start_over(&mut self, tracked: Tracked, excludes: &[&Path]) -> io::Result<bool> {
         self.ignore = IgnoreStack::of_files(excludes)?;
         self.queue = instance()?;
         self.establish(tracked)
@@ -264,22 +272,18 @@ impl Watcher {
         if replaced || seen.lost {
             // start over: which watch is on which path is no longer known
             self.queue = instance()?;
-            self.establish(tracked)?;
-            return Ok(Changes::All);
+            return Ok(match self.establish(tracked)? {
+                true => Changes::All,
+                false => Changes::Unknown,
+            });
         }
         if seen.dropped {
             // the watches stay; what they missed, the caller looks for
             return Ok(Changes::Unknown);
         }
-        // other rules: what they hide beneath their directory is decided anew
-        for dir in seen.ruled {
-            self.skipped
-                .retain(|s| !dir.is_empty() && !beneath(s, &dir));
-            self.add_tree(dir, tracked)?;
-        }
-        for dir in seen.made {
-            self.add_tree(dir, tracked)?;
-        }
-        Ok(Changes::Paths(seen.dirty))
+        Ok(match unread(self.follow(seen.ruled, seen.made, tracked))? {
+            true => Changes::Paths(seen.dirty),
+            false => Changes::Unknown,
+        })
     }
 }

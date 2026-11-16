@@ -87,8 +87,9 @@ impl Watched {
         // the stat first: a file replaced while it is read differs next time
         let rules = stats(opts.excludes);
         let tracked = |dir: &[u8]| tracked(snapshot, dir);
+        let (watcher, whole) = os::Watcher::start(root, most, &tracked, opts.excludes)?;
         Ok(Watched {
-            watcher: os::Watcher::start(root, most, &tracked, opts.excludes)?,
+            watcher,
             index_id: snapshot.index_id.clone(),
             cached: None,
             rule_files: opts
@@ -97,7 +98,7 @@ impl Watched {
                 .map(|file| file.to_path_buf())
                 .collect(),
             rules: sure(rules, &opts.clock),
-            absorbed: None,
+            absorbed: (!whole).then_some(Changes::Unknown),
             failed: false,
             full: false,
             whole: 0,
@@ -176,7 +177,7 @@ impl Watched {
         if !same_files || self.rules.as_ref() != Some(&rules) {
             // other rules hide other directories
             let anew = self.watcher.start_over(&tracked, opts.excludes);
-            self.noting(anew)?;
+            let whole = self.noting(anew)?;
             self.rule_files = opts
                 .excludes
                 .iter()
@@ -185,11 +186,16 @@ impl Watched {
             self.rules = sure(rules, &opts.clock);
             self.index_id.clone_from(&snapshot.index_id);
             self.absorbed = None;
-            return Some(Changes::All);
+            return Some(match whole {
+                true => Changes::All,
+                false => Changes::Unknown,
+            });
         }
         if self.index_id != snapshot.index_id {
             let more = self.watcher.revisit(&tracked);
-            self.noting(more)?;
+            if !self.noting(more)? {
+                self.absorbed = Some(Changes::Unknown);
+            }
             self.index_id.clone_from(&snapshot.index_id);
         }
         let fresh = self.watcher.changes(&tracked);

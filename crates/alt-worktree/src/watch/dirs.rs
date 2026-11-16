@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use alt_os::sys;
 
+use super::beneath;
 use super::os::{Check, ENOSPC, Tracked, WATCHED, Watcher, gone, join};
 use crate::delta::Seen;
 use crate::ignore::{self, IgnoreLayer, IgnoreStack};
@@ -30,7 +31,35 @@ fn rules(abs: &Path, rel: &[u8]) -> io::Result<Option<Arc<IgnoreLayer>>> {
     }
 }
 
+/// Whether the watches were put where `set` meant to put them: `false`
+/// when a directory or an ignore file could not be read, which a scan
+/// fails on as well. The watches are then gone over after a scan of
+/// everything that does not fail. Running out of watches stays an error.
+pub(super) fn unread(set: io::Result<()>) -> io::Result<bool> {
+    match set {
+        Ok(()) => Ok(true),
+        Err(e) if e.raw_os_error() == Some(ENOSPC) => Err(e),
+        Err(_) => Ok(false),
+    }
+}
+
 impl Watcher {
+    /// Watches what the events tell of: the directories that came to be
+    /// `made`, and beneath those in `ruled` whatever their rules hide no
+    /// longer.
+    pub(super) fn follow(&mut self, ruled: Vec<Vec<u8>>, made: Vec<Vec<u8>>, tracked: Tracked) -> io::Result<()> {
+        // other rules: what they hide beneath their directory is decided anew
+        for dir in ruled {
+            self.skipped
+                .retain(|s| !dir.is_empty() && !beneath(s, &dir));
+            self.add_tree(dir, tracked)?;
+        }
+        for dir in made {
+            self.add_tree(dir, tracked)?;
+        }
+        Ok(())
+    }
+
     /// Whether `dir` is left unwatched under the rules `ignore`.
     fn passed_over(&mut self, dir: &[u8], ignore: &IgnoreStack, tracked: Tracked) -> bool {
         let hidden = ignore.is_ignored(dir, true) && !tracked(dir);
@@ -143,11 +172,30 @@ impl Watcher {
     /// and in no listing; watches on anything else are taken off. Returns
     /// the directories given a watch they did not have: the files made in
     /// them since the scan are in no event either.
-    pub(crate) fn fill(&mut self, mut seen: Seen, tracked: Tracked) -> io::Result<Vec<Vec<u8>>> {
+    /// `None` when something in the tree could not be read: the watches
+    /// are to be gone over once more.
+    pub(crate) fn fill(&mut self, seen: Seen, tracked: Tracked) -> io::Result<Option<Vec<Vec<u8>>>> {
         self.check = Check {
             on: true,
             ..Check::default()
         };
+        let filled = unread(self.fill_in(seen, tracked))?;
+        let check = std::mem::take(&mut self.check);
+        if !filled {
+            return Ok(None);
+        }
+        self.dirs.retain(|wd, _| {
+            let kept = check.found.contains(wd);
+            if !kept {
+                // SAFETY: no pointers are passed
+                unsafe { sys::inotify_rm_watch(self.queue.as_raw_fd(), *wd) };
+            }
+            kept
+        });
+        Ok(Some(check.fresh))
+    }
+
+    fn fill_in(&mut self, mut seen: Seen, tracked: Tracked) -> io::Result<()> {
         self.skipped = seen.passed.into_iter().collect();
         // a directory before those in it, which a walk of it covers
         seen.listed.sort_unstable();
@@ -162,21 +210,17 @@ impl Watcher {
         for rel in seen.unwalked {
             self.add_tree(rel, tracked)?;
         }
-        let check = std::mem::take(&mut self.check);
-        self.dirs.retain(|wd, _| {
-            let kept = check.found.contains(wd);
-            if !kept {
-                // SAFETY: no pointers are passed
-                unsafe { sys::inotify_rm_watch(self.queue.as_raw_fd(), *wd) };
-            }
-            kept
-        });
-        Ok(check.fresh)
+        Ok(())
     }
 
     /// After the index changed: watches the directories left unwatched
-    /// that have something tracked in them now.
-    pub(crate) fn revisit(&mut self, tracked: Tracked) -> io::Result<()> {
+    /// that have something tracked in them now; `false` when one of them
+    /// could not be read.
+    pub(crate) fn revisit(&mut self, tracked: Tracked) -> io::Result<bool> {
+        unread(self.revisit_all(tracked))
+    }
+
+    fn revisit_all(&mut self, tracked: Tracked) -> io::Result<()> {
         let now: Vec<Vec<u8>> = self
             .skipped
             .iter()

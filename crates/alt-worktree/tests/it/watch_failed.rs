@@ -116,3 +116,86 @@ fn events_taken_off_the_queue_while_a_directory_is_renamed_leave_hidden_ones_unw
     assert_eq!(tree.check().deleted.len(), 2);
     assert!(!tree.watched.out_of_watches());
 }
+
+/// What a watched tree answers as a user the modes hold for.
+fn bound_scan(tree: &mut Tree) -> Result<alt_worktree::Delta, Unanswered> {
+    let root = tree.dir.path().to_path_buf();
+    let opts = options(Untracked::Normal, &root);
+    bound_by_modes(|| {
+        tree.watched
+            .scan(&root, &mut tree.snapshot, &opts, &[], b"")
+    })
+}
+
+#[test]
+fn a_directory_made_that_cannot_be_read_leaves_the_tree_watched() {
+    let mut tree = Tree::new(fixture);
+    let root = tree.dir.path().to_path_buf();
+    mode(&root, 0o755);
+    std::fs::create_dir(root.join("locked")).unwrap();
+    mode(&root.join("locked"), 0o000);
+    for round in 0..2 {
+        assert_ne!(
+            bound_scan(&mut tree),
+            Err(Unanswered::Unwatched),
+            "round {round}"
+        );
+    }
+    mode(&root.join("locked"), 0o755);
+    tree.check();
+    // the directory has its watch, and one made in it has
+    write(&root, "locked/in/file.txt", "new\n");
+    assert_eq!(tree.untracked(), ["locked/"]);
+    std::fs::remove_file(root.join("locked/in/file.txt")).unwrap();
+    assert!(tree.untracked().is_empty());
+    assert_eq!(tree.watched.set_up(), 1);
+}
+
+#[test]
+fn an_ignore_file_that_cannot_be_read_leaves_the_tree_watched() {
+    let mut tree = Tree::new(fixture);
+    let root = tree.dir.path().to_path_buf();
+    mode(&root, 0o755);
+    write(&root, "docs/.gitignore", "*.tmp\n");
+    mode(&root.join("docs/.gitignore"), 0o000);
+    for round in 0..2 {
+        assert_ne!(
+            bound_scan(&mut tree),
+            Err(Unanswered::Unwatched),
+            "round {round}"
+        );
+    }
+    mode(&root.join("docs/.gitignore"), 0o644);
+    assert_eq!(tree.untracked(), ["docs/.gitignore"]);
+    write(&root, "docs/x.tmp", "hidden\n");
+    write(&root, "docs/more/file.txt", "new\n");
+    assert_eq!(tree.untracked(), ["docs/.gitignore", "docs/more/"]);
+    assert_eq!(tree.watched.set_up(), 1);
+}
+
+#[test]
+fn a_tree_first_watched_with_a_directory_that_cannot_be_read_is_watched() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let root = dir.path().to_path_buf();
+    fixture(&root);
+    mode(&root, 0o755);
+    let snapshot = Snapshot::of_index(&index_of(&root), b"one", ALGO, None);
+    std::fs::create_dir(root.join(".alt")).unwrap();
+    std::fs::create_dir(root.join("locked")).unwrap();
+    mode(&root.join("locked"), 0o000);
+    let opts = options(Untracked::Normal, &root);
+    let watched =
+        bound_by_modes(|| alt_worktree::Watched::start(&root, usize::MAX, &snapshot, &opts))
+            .unwrap();
+    let mut tree = Tree {
+        dir,
+        snapshot,
+        watched,
+    };
+    assert_ne!(bound_scan(&mut tree), Err(Unanswered::Unwatched));
+    mode(&root.join("locked"), 0o755);
+    tree.check();
+    write(&root, "locked/file.txt", "new\n");
+    assert_eq!(tree.untracked(), ["locked/"]);
+    assert_eq!(tree.watched.set_up(), 1);
+}
