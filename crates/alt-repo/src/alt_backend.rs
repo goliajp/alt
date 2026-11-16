@@ -13,13 +13,23 @@ use crate::RepoError;
 pub(crate) struct AltBackend {
     pub alt_dir: PathBuf,
     /// opens its files as reads first need them: a command that only
-    /// looks at refs never touches the object store
+    /// looks at refs never touches the object store. Read through
+    /// [`Self::odb`]
     pub odb: NativeOdb,
     /// opened by the first read of a ref
     pub refs: OnceLock<alt_refs::RefStore>,
 }
 
 impl AltBackend {
+    /// The object store, for reading. The refs are opened before it is:
+    /// a writer stores its objects before the ref that names them, so
+    /// refs read no later than the objects never name one that this view
+    /// of the store lacks.
+    pub fn odb(&self) -> Result<&NativeOdb, RepoError> {
+        self.refs()?;
+        Ok(&self.odb)
+    }
+
     pub fn refs(&self) -> Result<&alt_refs::RefStore, RepoError> {
         if let Some(refs) = self.refs.get() {
             return Ok(refs);

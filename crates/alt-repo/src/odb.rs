@@ -28,7 +28,7 @@ impl Repository {
     pub fn abbrev(&self) -> Result<Option<alt_odb::Abbrev<'_>>, RepoError> {
         Ok(match &self.backend {
             Backend::Git { .. } => None,
-            Backend::Alt(alt) => Some(alt.odb.abbrev()?),
+            Backend::Alt(alt) => Some(alt.odb()?.abbrev()?),
         })
     }
 }

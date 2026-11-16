@@ -342,7 +342,7 @@ impl Repository {
                     Err(e) => Err(e.into()),
                 }
             }
-            Backend::Alt(alt) => Ok(alt.odb.get(oid)?),
+            Backend::Alt(alt) => Ok(alt.odb()?.get(oid)?),
         }
     }
 
@@ -353,7 +353,7 @@ impl Repository {
     pub fn storage_view(&self, oid: &ObjectId) -> Result<Option<alt_odb::StorageView>, RepoError> {
         match &self.backend {
             Backend::Git { .. } => Ok(None),
-            Backend::Alt(alt) => Ok(alt.odb.storage_view(oid)?),
+            Backend::Alt(alt) => Ok(alt.odb()?.storage_view(oid)?),
         }
     }
 
@@ -362,7 +362,7 @@ impl Repository {
     pub fn storage_stats(&self) -> Result<Option<alt_odb::StorageStats>, RepoError> {
         match &self.backend {
             Backend::Git { .. } => Ok(None),
-            Backend::Alt(alt) => Ok(Some(alt.odb.storage_stats()?)),
+            Backend::Alt(alt) => Ok(Some(alt.odb()?.storage_stats()?)),
         }
     }
 
@@ -511,7 +511,7 @@ impl Repository {
     fn resolve_short_oid(&self, prefix: &str) -> Result<Option<ObjectId>, RepoError> {
         match &self.backend {
             Backend::Alt(alt) => {
-                let matches = alt.odb.lookup_by_prefix(prefix, 4)?;
+                let matches = alt.odb()?.lookup_by_prefix(prefix, 4)?;
                 if matches.is_empty() {
                     Ok(None)
                 } else if matches.len() == 1 {
