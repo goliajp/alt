@@ -186,6 +186,7 @@ impl Cache {
 
     /// Whether a state is one a search goes on from without a second
     /// look: built, alive and not a match.
+    #[inline(always)]
     fn plain(&self, state: u32) -> bool {
         state.wrapping_sub(self.width + 1) < MATCH - self.width - 1
     }
@@ -194,6 +195,7 @@ impl Cache {
     /// as the states are plain. Returns the position reached, the state
     /// there, and the entry that stopped the run: of the byte at that
     /// position, or nothing at the end of the text.
+    #[inline(always)]
     fn run(
         &self,
         prog: &Program,
@@ -220,6 +222,7 @@ impl Cache {
 /// matches anywhere in it. The text is not empty, the program's only
 /// conditions are on the ends of the text, and the cache is one for
 /// matches that begin anywhere.
+#[inline]
 pub fn earliest_end(prog: &Program, cache: &mut Cache, text: &[u8]) -> Option<usize> {
     let mut state = cache.start(prog, 0);
     if !cache.plain(state) {
