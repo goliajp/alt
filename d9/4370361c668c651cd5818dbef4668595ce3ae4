@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: perf
+summary: find a pattern of nothing but fixed bytes by looking for the bytes
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/lib.rs
+touched: crates/alt-regex/src/literal.rs
+touched: crates/alt-regex/src/search.rs
