@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: test
+summary: split the comparisons with the c library that had grown
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/funcname_drivers.rs
+touched: crates/alt-regex/tests/it/regcomp.rs
+touched: crates/alt-regex/tests/it/regcomp/groups.rs
+touched: crates/alt-regex/tests/it/regcomp/oracle.rs
+touched: crates/alt-regex/tests/it/regcomp/random.rs
+touched: crates/alt-regex/tests/it/regcomp/utf8.rs
