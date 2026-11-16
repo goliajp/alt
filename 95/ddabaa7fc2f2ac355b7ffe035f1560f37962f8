@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: read repetitions behind one another and a circumflex behind an anchor in a basic expression as the c library does
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/funcname_git.rs
+touched: crates/alt-regex/src/syntax.rs
+touched: crates/alt-regex/tests/it/limits.rs
+touched: crates/alt-regex/tests/it/regcomp.rs
