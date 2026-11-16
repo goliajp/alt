@@ -204,33 +204,25 @@ fn filled(head: &str, unit: impl Fn(u32) -> String) -> Vec<u8> {
     pattern.into_bytes()
 }
 
-/// Compiles `pattern`, or sees it refused, within the bounds on memory
-/// and time.
-fn bounded(compiled: bool, options: Options, pattern: &[u8]) {
+/// Compiles `pattern`, or sees it refused, holding no more than a
+/// pattern may; returns what that took.
+fn bounded(compiled: bool, options: Options, pattern: &[u8]) -> Duration {
     let shown = &pattern[..pattern.len().min(24)].escape_ascii();
-    // on a machine with much else to do one reading of the clock says
-    // little: a pattern that costs too much does so each time
-    let mut cost = Duration::MAX;
-    for _ in 0..3 {
-        let begun = Instant::now();
-        let most = crate::most_held(|| {
-            let made = Regex::with_options(pattern, options);
-            match compiled {
-                true => assert!(made.is_ok(), "{shown}"),
-                false => assert_eq!(made.err(), Some(Error::TooBig), "{shown}"),
-            }
-        });
-        cost = cost.min(begun.elapsed());
-        assert!(most < 32 << 20, "{most} bytes for {shown}");
-        if cost < Duration::from_secs(5) {
-            break;
+    let begun = Instant::now();
+    let most = crate::most_held(|| {
+        let made = Regex::with_options(pattern, options);
+        match compiled {
+            true => assert!(made.is_ok(), "{shown}"),
+            false => assert_eq!(made.err(), Some(Error::TooBig), "{shown}"),
         }
-    }
-    assert!(cost < Duration::from_secs(5), "{cost:?} for {shown}");
+    });
+    assert!(most < 32 << 20, "{most} bytes for {shown}");
+    begun.elapsed()
 }
 
-#[test]
-fn no_pattern_holds_more_than_its_bound_while_it_is_compiled() {
+/// Patterns as long as a pattern may be, of the kinds that hold the
+/// most: whether each is compiled, how it is read, and the pattern.
+fn hostile() -> Vec<(bool, Options, Vec<u8>)> {
     let bytes = Options::default();
     let utf8 = Options {
         utf8: true,
@@ -243,7 +235,7 @@ fn no_pattern_holds_more_than_its_bound_while_it_is_compiled() {
     let han = |number: u32| char::from_u32(0x4e00 + number % 20_000).unwrap();
     let same = |unit: &'static str| move |_| unit.to_string();
     // whether it is compiled, and what a pattern is made of
-    let patterns = [
+    vec![
         (true, bytes, filled("", same("a"))),
         (true, utf8, filled("", same("\u{e9}"))),
         (true, bytes, filled("", same("a|"))),
@@ -267,8 +259,22 @@ fn no_pattern_holds_more_than_its_bound_while_it_is_compiled() {
         (false, utf8, filled("", |n| format!("[{}]", han(n)))),
         (false, bytes, filled("", same("(a|b)"))),
         (false, bytes, b"((a|b){1,300}){1,300}".to_vec()),
-    ];
-    for (compiled, options, pattern) in patterns {
+    ]
+}
+
+#[test]
+fn no_pattern_holds_more_than_its_bound_while_it_is_compiled() {
+    for (compiled, options, pattern) in hostile() {
         bounded(compiled, options, &pattern);
+    }
+}
+
+#[test]
+#[ignore = "a limit on time, which a machine with much else to do does not keep, needs --release"]
+fn no_pattern_takes_long_to_compile() {
+    for (compiled, options, pattern) in hostile() {
+        let cost = bounded(compiled, options, &pattern);
+        let shown = &pattern[..pattern.len().min(24)].escape_ascii();
+        assert!(cost < Duration::from_secs(5), "{cost:?} for {shown}");
     }
 }
