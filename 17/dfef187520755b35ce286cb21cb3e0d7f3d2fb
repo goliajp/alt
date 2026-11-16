@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: decide by the index which new directories take a watch while a checkout runs
+author-type: human
+author: doracawl
+touched: crates/alt-worktree/src/watch.rs
+touched: crates/alt-worktree/src/watch/linux.rs
+touched: crates/alt-worktree/tests/it/watch_failed.rs
