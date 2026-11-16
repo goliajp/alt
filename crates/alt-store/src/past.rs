@@ -16,7 +16,7 @@
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 
 use alt_os::map::Mmap;
 
@@ -33,10 +33,11 @@ pub struct PassedDamage {
 
 static PASSED: Mutex<Vec<PassedDamage>> = Mutex::new(Vec::new());
 
-/// Whether this process reads past damage.
+/// Whether this process reads past damage. The environment is asked each
+/// time, which is once or twice a process: an answer kept in a static
+/// would be a page more for every process to write.
 pub fn reading_past_damage() -> bool {
-    static ASKED: OnceLock<bool> = OnceLock::new();
-    *ASKED.get_or_init(|| std::env::var_os("ALT_READ_PAST_DAMAGE").is_some())
+    std::env::var_os("ALT_READ_PAST_DAMAGE").is_some()
 }
 
 /// What the opens of this process passed over as damaged so far, each

@@ -75,10 +75,10 @@ static PASSED_DAMAGE: OnceLock<(PathBuf, u64, u64)> = OnceLock::new();
 /// Whether this process reads the log past damage: by
 /// `ALT_READ_PAST_DAMAGE` in its environment, for a process that only
 /// reads. An open then takes the log to end where a record is damaged,
-/// and notes it ([`passed_damage`]), instead of failing.
+/// and notes it ([`passed_damage`]), instead of failing. The environment
+/// is asked each time, which is once an open.
 pub fn reading_past_damage() -> bool {
-    static ASKED: OnceLock<bool> = OnceLock::new();
-    *ASKED.get_or_init(|| std::env::var_os("ALT_READ_PAST_DAMAGE").is_some())
+    std::env::var_os("ALT_READ_PAST_DAMAGE").is_some()
 }
 
 /// Notes that the log beside the marker `durable` was not read from byte

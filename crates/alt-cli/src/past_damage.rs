@@ -30,6 +30,9 @@ pub fn admit(command: &Command) -> Result<(), Failure> {
 /// Puts before what `response` says on stderr which bytes the command
 /// passed over as damaged.
 pub fn report(mut response: Response) -> Response {
+    if !alt_odb::reading_past_damage() {
+        return response;
+    }
     let mut passed = alt_odb::passed_damage();
     if let Some((file, from, to)) = alt_oplog::passed_damage() {
         passed.push(alt_odb::PassedDamage { file, from, to });
