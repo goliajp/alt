@@ -76,14 +76,10 @@ mod unix {
         let sock_path = alt_dir.join("daemon.sock");
 
         let listener = bind(&sock_path)?;
-        // Drop a small metadata file alongside the socket so clients can
-        // tell whether the daemon is still the same `altd` binary they
-        // have on disk. The next `alt` invocation reads this, compares
-        // against its own `altd`'s mtime + size, and kills+respawns us
-        // when the binary moved on (cargo install path). Best-effort —
-        // a write failure just disables the auto-reload, never the
-        // daemon itself.
-        let _ = write_meta(&alt_dir);
+        // tells clients which `altd` this is and what it declares: one
+        // whose own `altd` is another build stops this daemon and starts
+        // its own
+        let _ = alt_cli::daemon_meta::write(&alt_dir);
         // the held store serves native commands; the held repository serves
         // git-layer reads (`log`) — both opened once and refreshed per request,
         // and shared across request threads behind one Mutex
@@ -148,33 +144,6 @@ mod unix {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(DEFAULT_IDLE_MS)
-    }
-
-    /// Records the running daemon's identity next to its socket: pid +
-    /// `altd` path + the binary's mtime-nanos + size. Clients compare
-    /// these against their own `altd` and kill+respawn on mismatch
-    /// (the fix for "cargo install upgraded the binary but
-    /// the old daemon still answers"). Best-effort: any io failure
-    /// disables auto-reload without affecting the daemon's lifecycle.
-    fn write_meta(alt_dir: &Path) -> Option<()> {
-        let altd = std::env::current_exe().ok()?;
-        let meta = std::fs::metadata(&altd).ok()?;
-        let mtime_nanos = meta
-            .modified()
-            .ok()?
-            .duration_since(std::time::UNIX_EPOCH)
-            .ok()?
-            .as_nanos();
-        let size = meta.len();
-        let pid = std::process::id();
-        let altd_str = altd.display().to_string();
-        let content = format!("{pid}\n{altd_str}\n{mtime_nanos}\n{size}\n");
-        let path = alt_dir.join("daemon.meta");
-        // Write atomically via tmp + rename so a client can never read
-        // a torn meta during the swap.
-        let tmp = path.with_extension("meta.tmp");
-        std::fs::write(&tmp, content).ok()?;
-        std::fs::rename(&tmp, &path).ok()
     }
 
     /// Binds the listening socket, self-healing a stale socket file and bowing

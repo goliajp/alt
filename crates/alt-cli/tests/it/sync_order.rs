@@ -53,21 +53,21 @@ fn word(slot: &[u8], at: usize) -> u64 {
 }
 
 /// How far the object store's marker says each of its files is synced.
-fn objects_synced(alt_dir: &Path) -> [u64; 4] {
+pub(super) fn objects_synced(alt_dir: &Path) -> [u64; 4] {
     let slot = slot(&alt_dir.join("odb.durable"), 32, 96);
     [56, 64, 72, 80].map(|at| word(&slot, at))
 }
 
 /// How far the operation log's marker says the log is synced.
-fn log_synced(alt_dir: &Path) -> u64 {
+pub(super) fn log_synced(alt_dir: &Path) -> u64 {
     word(&slot(&alt_dir.join("oplog/durable"), 16, 36), 20)
 }
 
-fn lens(alt_dir: &Path) -> [u64; 4] {
+pub(super) fn lens(alt_dir: &Path) -> [u64; 4] {
     FILES.map(|name| std::fs::metadata(alt_dir.join(name)).unwrap().len())
 }
 
-fn log_len(alt_dir: &Path) -> u64 {
+pub(super) fn log_len(alt_dir: &Path) -> u64 {
     std::fs::metadata(alt_dir.join("oplog/log")).unwrap().len()
 }
 

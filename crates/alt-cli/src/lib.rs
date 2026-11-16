@@ -14,6 +14,7 @@ mod combined;
 pub mod commit_sign;
 pub mod config_cmd;
 pub mod daemon;
+pub mod daemon_meta;
 pub mod diagnostics;
 pub mod fsck;
 pub mod group_commit;

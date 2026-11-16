@@ -38,6 +38,7 @@ mod imp {
 
     use crate::cli::Command as Cmd;
     use crate::daemon::{self, Request, RequestId, Response};
+    use crate::daemon_meta::{self, Daemon};
 
     /// What came of trying to serve a request through the daemon. The three-way
     /// split exists for the at-most-once write contract: `NotSent` is always
@@ -188,69 +189,48 @@ mod imp {
         }
     }
 
-    /// Connects to `sock`; if nothing is listening, spawns `altd` and polls for
-    /// it to come up (the daemon binds before it accepts). `None` if the daemon
-    /// can't be reached — the caller then runs directly.
+    /// Connects to this program's own daemon on `sock`, starting it when
+    /// it does not run. `None` when it cannot be reached, and when another
+    /// daemon keeps answering there: the caller then runs the command
+    /// itself.
     ///
-    /// Before connecting, we check whether the running daemon is the
-    /// same `altd` binary we're about to invoke (via the metadata file
-    /// the daemon drops next to its socket). On mismatch — the
-    /// case where `cargo install` replaced the binary while
-    /// the old daemon was idle-running — SIGTERM the stale daemon,
-    /// wait for its socket to disappear, then proceed to spawn fresh.
+    /// Which daemon answers is told by `daemon.meta` ([`daemon_meta`]). A
+    /// daemon of another build, or one that does not declare what this
+    /// program needs of it, is sent SIGTERM and given two seconds to stop
+    /// answering. One that left no meta is not known and is left alone.
     fn connect_or_spawn(alt_dir: &Path, sock: &Path) -> Option<UnixStream> {
-        if let Some(stale_pid) = stale_daemon_pid(alt_dir) {
-            let _ = alt_os::sys::kill(stale_pid as i32, alt_os::sys::SIGTERM);
+        let running = daemon_meta::read(alt_dir);
+        if running == Daemon::Ours
+            && let Ok(stream) = UnixStream::connect(sock)
+        {
+            return Some(stream);
+        }
+        if UnixStream::connect(sock).is_ok() {
+            let Daemon::Other(pid) = running else {
+                return None;
+            };
+            let _ = alt_os::sys::kill(pid as i32, alt_os::sys::SIGTERM);
             let deadline = Instant::now() + Duration::from_secs(2);
-            while Instant::now() < deadline {
-                if !sock.exists() {
-                    break;
+            while UnixStream::connect(sock).is_ok() {
+                if Instant::now() >= deadline {
+                    return None;
                 }
                 std::thread::sleep(Duration::from_millis(20));
             }
         }
-
-        if let Ok(s) = UnixStream::connect(sock) {
-            return Some(s);
-        }
         spawn_daemon(alt_dir)?;
+        // it listens before it writes its meta: the request waits for both
         let deadline = Instant::now() + Duration::from_secs(5);
+        let mut stream = None;
         loop {
-            match UnixStream::connect(sock) {
-                Ok(s) => return Some(s),
-                Err(_) if Instant::now() < deadline => {
-                    std::thread::sleep(Duration::from_millis(2));
-                }
-                Err(_) => return None,
+            stream = stream.or_else(|| UnixStream::connect(sock).ok());
+            if stream.is_some() && daemon_meta::read(alt_dir) == Daemon::Ours {
+                return stream;
             }
-        }
-    }
-
-    /// Returns `Some(pid)` when `daemon.meta` records an `altd` whose
-    /// identity (path + mtime + size) differs from the one we'd
-    /// spawn — i.e. the daemon is running an outdated build. `None`
-    /// when meta is missing, unreadable, or matches the current binary.
-    fn stale_daemon_pid(alt_dir: &Path) -> Option<u32> {
-        let altd = std::env::current_exe().ok()?.with_file_name("altd");
-        let meta = std::fs::metadata(&altd).ok()?;
-        let mtime = meta
-            .modified()
-            .ok()?
-            .duration_since(std::time::UNIX_EPOCH)
-            .ok()?
-            .as_nanos();
-        let size = meta.len();
-        let content = std::fs::read_to_string(alt_dir.join("daemon.meta")).ok()?;
-        let mut lines = content.lines();
-        let pid: u32 = lines.next()?.parse().ok()?;
-        let daemon_path = lines.next()?;
-        let daemon_mtime: u128 = lines.next()?.parse().ok()?;
-        let daemon_size: u64 = lines.next()?.parse().ok()?;
-        let current_path = altd.display().to_string();
-        if daemon_path == current_path && daemon_mtime == mtime && daemon_size == size {
-            None
-        } else {
-            Some(pid)
+            if Instant::now() >= deadline {
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(2));
         }
     }
 

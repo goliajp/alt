@@ -1,0 +1,86 @@
+//! `daemon.meta`: which `altd` serves a repository, and what it declares.
+//!
+//! The daemon writes the file next to its socket once it listens; a client
+//! reads it to tell whether the daemon that answers there is one to give a
+//! request to. Its lines: the daemon's pid, the path of its binary, that
+//! file's mtime in nanoseconds and its size, and the capabilities the
+//! daemon declares, separated by spaces. A daemon from before capabilities
+//! were declared writes the first four.
+
+use std::path::Path;
+
+/// Declared by a daemon that records in the synced markers what it syncs.
+/// One that does not leaves the markers behind what is on disk, and what
+/// lies past them is taken for never written if it is later found damaged:
+/// no write is given to such a daemon.
+pub const SYNCED_MARKERS: &str = "synced-markers";
+
+/// The mtime in nanoseconds and the size of the file at `path`.
+fn identity(path: &Path) -> Option<(u128, u64)> {
+    let meta = std::fs::metadata(path).ok()?;
+    let mtime = meta.modified().ok()?;
+    let since = mtime.duration_since(std::time::UNIX_EPOCH).ok()?;
+    Some((since.as_nanos(), meta.len()))
+}
+
+/// Records the running daemon next to its socket. Best-effort: without
+/// the file no client gives this daemon a request.
+pub fn write(alt_dir: &Path) -> Option<()> {
+    let altd = std::env::current_exe().ok()?;
+    let (mtime, size) = identity(&altd)?;
+    let pid = std::process::id();
+    let content = format!(
+        "{pid}\n{}\n{mtime}\n{size}\n{SYNCED_MARKERS}\n",
+        altd.display()
+    );
+    let path = alt_dir.join("daemon.meta");
+    // renamed into place, so that a client never reads half of it
+    let tmp = path.with_extension("meta.tmp");
+    std::fs::write(&tmp, content).ok()?;
+    std::fs::rename(&tmp, &path).ok()
+}
+
+/// What `daemon.meta` says of the daemon of a repository.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Daemon {
+    /// a live process running the `altd` beside this program, declaring
+    /// what this program needs of it
+    Ours,
+    /// a live process that is not that: another build, or one that
+    /// declares less
+    Other(u32),
+    /// nothing that tells: no file, one that does not parse, or the
+    /// process it names is gone
+    Unknown,
+}
+
+/// Reads `daemon.meta` under `alt_dir`.
+#[cfg(unix)]
+pub fn read(alt_dir: &Path) -> Daemon {
+    let parsed = (|| {
+        let content = std::fs::read_to_string(alt_dir.join("daemon.meta")).ok()?;
+        let mut lines = content.lines();
+        let pid: u32 = lines.next()?.parse().ok()?;
+        let path = lines.next()?.to_owned();
+        let mtime: u128 = lines.next()?.parse().ok()?;
+        let size: u64 = lines.next()?.parse().ok()?;
+        let declared = lines.next().unwrap_or("");
+        let markers = declared.split(' ').any(|word| word == SYNCED_MARKERS);
+        Some((pid, path, (mtime, size), markers))
+    })();
+    let Some((pid, path, identity_then, markers)) = parsed else {
+        return Daemon::Unknown;
+    };
+    if alt_os::sys::kill(pid as i32, 0).is_err() {
+        return Daemon::Unknown;
+    }
+    let ours = std::env::current_exe()
+        .ok()
+        .map(|alt| alt.with_file_name("altd"))
+        .filter(|altd| altd.display().to_string() == path)
+        .and_then(|altd| identity(&altd));
+    match markers && ours == Some(identity_then) {
+        true => Daemon::Ours,
+        false => Daemon::Other(pid),
+    }
+}
