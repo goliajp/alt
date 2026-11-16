@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: report a stack overflow on worker threads and under an unlimited stack
+author-type: human
+author: doracawl
+touched: Cargo.lock
+touched: crates/alt-cli/src/bin/altd.rs
+touched: crates/alt-cli/src/native/convert.rs
+touched: crates/alt-os/src/stack.rs
+touched: crates/alt-os/tests/it/main.rs
+touched: crates/alt-threads/Cargo.toml
+touched: crates/alt-threads/src/lib.rs
