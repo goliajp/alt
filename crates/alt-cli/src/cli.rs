@@ -13,7 +13,7 @@ use alt_git_codec::{ObjectId, ObjectKind, RawObject, Tree};
 use alt_repo::Repository;
 
 use crate::native::{self, Identity, NativeRepo, Store};
-use crate::{log_cmd, quote};
+use crate::{log_cmd, quote, worktree_args};
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -118,15 +118,8 @@ pub enum Command {
     },
     /// Stage file contents into the index
     Add {
-        /// Paths to stage; `.` stages the whole working tree
-        paths: Vec<String>,
-        /// Store every tracked file among the paths again, as the
-        /// attributes and line-ending settings now in force clean it
-        #[arg(long)]
-        renormalize: bool,
-        /// Emit a structured JSON result instead of the human line
-        #[arg(long)]
-        json: bool,
+        #[command(flatten)]
+        args: worktree_args::AddArgs,
     },
     /// Record staged changes as a new commit
     Commit {
@@ -163,20 +156,8 @@ pub enum Command {
     },
     /// Show the working tree status
     Status {
-        /// Which untracked files to show: `no`, `normal` (a directory with
-        /// nothing tracked in it as one path) or `all`; `all` when the
-        /// option is given without a mode, `normal` without the option
-        #[arg(
-            short = 'u',
-            long = "untracked-files",
-            value_name = "MODE",
-            default_missing_value = "all",
-            value_parser = ["no", "normal", "all"]
-        )]
-        untracked_files: Option<String>,
-        /// Emit a stable JSON object instead of the human-readable view
-        #[arg(long)]
-        json: bool,
+        #[command(flatten)]
+        args: worktree_args::StatusArgs,
     },
     /// List, create, or delete branches
     Branch {
@@ -1283,13 +1264,9 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
         Command::Candidate { op, json } => repo.candidate_command(op, *json, out)?,
         Command::Evidence { op, json } => repo.evidence_command(op, *json, out)?,
         Command::Request { op, json } => repo.request_query(op, *json, out)?,
-        Command::Add {
-            paths,
-            renormalize,
-            json,
-        } => match renormalize {
-            true => repo.renormalize(paths, *json, out)?,
-            false => repo.add(paths, *json, out)?,
+        Command::Add { args } => match args.renormalize {
+            true => repo.renormalize(&args.paths, args.json, out)?,
+            false => repo.add(&args.paths, args.json, out)?,
         },
         Command::Commit {
             validate: true,
@@ -1321,10 +1298,7 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
                 repo.commit(message.as_deref().unwrap_or_default(), opts, *json, out)?
             }
         }
-        Command::Status {
-            untracked_files,
-            json,
-        } => repo.status(untracked_files.as_deref(), *json, out)?,
+        Command::Status { args } => repo.status(args.untracked.as_deref(), args.json, out)?,
         Command::Branch {
             name,
             delete,
