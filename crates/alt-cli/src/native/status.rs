@@ -5,6 +5,36 @@ use alt_worktree::Untracked;
 use super::*;
 
 impl NativeRepo<'_> {
+    /// The mode named `given`, or without one what `status.showUntrackedFiles`
+    /// sets, which may be a boolean as for git; `normal` when nothing does.
+    fn untracked_mode(&self, given: Option<&str>) -> Res<Untracked> {
+        let named = |mode: &[u8]| match mode {
+            b"no" => Some(Untracked::No),
+            b"normal" => Some(Untracked::Normal),
+            b"all" => Some(Untracked::All),
+            _ => None,
+        };
+        let invalid = |mode: &[u8]| {
+            let mode = String::from_utf8_lossy(mode);
+            format!("invalid untracked files mode '{mode}'")
+        };
+        if let Some(given) = given {
+            return named(given.as_bytes()).ok_or_else(|| invalid(given.as_bytes()).into());
+        }
+        let settings = self.settings()?;
+        let (section, key) = ("status", "showuntrackedfiles");
+        let Some(set) = settings.get(section, None, key) else {
+            return Ok(Untracked::Normal);
+        };
+        let text: &[u8] = set.map(|v| v.as_ref()).unwrap_or(b"true");
+        match (named(text), settings.get_bool(section, None, key)) {
+            (Some(mode), _) => Ok(mode),
+            (None, Some(Ok(true))) => Ok(Untracked::Normal),
+            (None, Some(Ok(false))) => Ok(Untracked::No),
+            (None, _) => Err(invalid(text).into()),
+        }
+    }
+
     /// `alt status`: staged / unstaged / untracked against HEAD and the index,
     /// plus any unmerged (conflicted) paths left by a merge. With `json`, emits
     /// the stable structured schema instead of the human view.
@@ -13,12 +43,7 @@ impl NativeRepo<'_> {
     /// files out, `normal` (the default) shows a directory with nothing
     /// tracked in it as one path ending in `/`, `all` shows every file.
     pub fn status(&self, untracked: Option<&str>, json: bool, out: &mut impl Write) -> Res<()> {
-        let untracked = match untracked {
-            Some("no") => Untracked::No,
-            None | Some("normal") => Untracked::Normal,
-            Some("all") => Untracked::All,
-            Some(other) => return Err(format!("invalid untracked files mode '{other}'").into()),
-        };
+        let untracked = self.untracked_mode(untracked)?;
         let branch = self.head_branch()?;
         let state = self.tree_state(untracked)?;
         let unmerged = state.unmerged();

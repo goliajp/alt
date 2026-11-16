@@ -207,3 +207,39 @@ fn a_repository_in_an_untracked_directory_shows_as_git_shows_it() {
     assert!(status.ends_with(listed), "{status}");
     assert!(!alt(a, &["add", "emb"]).status.success());
 }
+
+#[test]
+fn the_configured_untracked_files_mode_is_the_default_as_it_is_for_git() {
+    let (a, g) = pair();
+    let (a, g) = (a.path(), g.path());
+    let set = |value: &str| {
+        ok(git(g, &["config", "status.showUntrackedFiles", value]));
+        let config = format!("[status]\n\tshowUntrackedFiles = {value}\n");
+        write(a, ".alt/git-import/config", &config);
+    };
+    let modes: [&[&str]; 4] = [&[], &["-uall"], &["-uno"], &["-unormal"]];
+    for value in ["no", "normal", "all", "true", "false"] {
+        set(value);
+        for options in modes {
+            let want = git_untracked(g, options);
+            let json = ok(alt(a, &[&["status", "--json"][..], options].concat()));
+            assert!(
+                json.contains(&json_member(&want)),
+                "{value} {options:?}: {json}"
+            );
+        }
+    }
+    set("all");
+    assert_eq!(git_untracked(g, &[]).len(), 6);
+    set("no");
+    assert!(git_untracked(g, &[]).is_empty());
+    set("some");
+    assert!(!git(g, &["status"]).status.success());
+    let refused = alt(a, &["status"]);
+    assert!(!refused.status.success());
+    let said = String::from_utf8_lossy(&refused.stderr).to_lowercase();
+    assert!(
+        said.contains("invalid untracked files mode 'some'"),
+        "{said}"
+    );
+}
