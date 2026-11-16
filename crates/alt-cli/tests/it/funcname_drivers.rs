@@ -121,12 +121,13 @@ fn every_built_in_driver_names_the_sections_git_names() {
         .map(|(name, ..)| name)
         .collect();
     assert_eq!(all.len(), 27);
-    // the drivers are those of git 2.56; an older git has these four
+    // the drivers are those of git 2.56; an older git has these three
     // otherwise or not at all, from the version named on
-    let later = [("bash", 50), ("ini", 50), ("r", 51), ("scheme", 55)];
+    let later = [("bash", 50), ("ini", 50), ("r", 51)];
     let version = ok(run("git", Path::new("."), "C", &["--version"]));
     let version = String::from_utf8(version).unwrap();
-    let mut numbers = version.trim().rsplit(' ').next().unwrap().split('.');
+    // `git version 2.39.3 (Apple Git-146)`
+    let mut numbers = version.split(' ').nth(2).unwrap().split('.');
     let major: u32 = numbers.next().unwrap().parse().unwrap();
     let minor: u32 = numbers.next().unwrap().parse().unwrap();
     let known = |name: &&str| {
@@ -134,7 +135,7 @@ fn every_built_in_driver_names_the_sections_git_names() {
         since.is_none_or(|&(_, since)| major > 2 || minor >= since)
     };
     let drivers: Vec<&str> = all.into_iter().filter(known).collect();
-    assert!(drivers.len() >= 23, "{version}");
+    assert!(drivers.len() >= 24, "{version}");
     let prepare = |root: &Path| {
         let mut attributes = String::new();
         for driver in &drivers {
@@ -153,11 +154,100 @@ fn every_built_in_driver_names_the_sections_git_names() {
     // the drivers do name sections, and not all the same ones
     let named = headers.iter().filter(|h| !h.ends_with("@@")).count();
     assert!(named > headers.len() / 2, "{named} of {}", headers.len());
+    // the two lines with a byte that is no character are heads only
+    // where lines are bytes; git ends a header before such a byte
+    let (bytes, characters) = headers.split_at(headers.len() / locales().len());
+    let cut = |headers: &[String]| headers.iter().filter(|h| h.ends_with(" int caf")).count();
+    assert!(cut(bytes) > 0);
     if locales().len() == 2 {
-        let (bytes, characters) = headers.split_at(headers.len() / 2);
-        // the two lines with a byte that is no character are heads
-        // only where lines are bytes
-        assert_ne!(bytes, characters);
+        assert!(cut(characters) < cut(bytes));
+    }
+}
+
+/// The three drivers an older git has otherwise or not at all name the
+/// sections git 2.56.1 names, whichever git is at hand.
+#[test]
+fn the_drivers_an_older_git_lacks_name_the_sections_of_the_git_they_are_from() {
+    let cases: [(&str, &[&[u8]], &[&str]); 3] = [
+        (
+            "bash",
+            &[
+                b"run() {",
+                b"  my_func ( ) # note",
+                b"function build {",
+                b"function deploy() {",
+                b"function x",
+                b"echo not_a_function",
+                b"x=1 # ()",
+                b"local()name",
+            ],
+            &[
+                "run() {",
+                "my_func ( ) # note",
+                "function build {",
+                "function deploy() {",
+                "function deploy() {",
+                "function deploy() {",
+                "function deploy() {",
+                "local()name",
+            ],
+        ),
+        (
+            "ini",
+            &[
+                b"[core]",
+                b"  [remote \"origin\"] ; note",
+                b"[]",
+                b"key = value",
+                b"[section.sub]\ttrailing",
+                b"; [comment]",
+            ],
+            &[
+                "[core]",
+                "  [remote \\\"origin\\\"]",
+                "  [remote \\\"origin\\\"]",
+                "  [remote \\\"origin\\\"]",
+                "[section.sub]",
+                "[section.sub]",
+            ],
+        ),
+        (
+            "r",
+            &[
+                b"fit <- function(x) {",
+                b"  plot.all = function(...)",
+                b"_bad <- function()",
+                b"x <- 1",
+                b"Name2 <-function(a)",
+                b"^odd = function()",
+            ],
+            &[
+                "fit <- function(x) {",
+                "plot.all = function(...)",
+                "_bad <- function()",
+                "_bad <- function()",
+                "Name2 <-function(a)",
+                "^odd = function()",
+            ],
+        ),
+    ];
+    let files = |root: &Path, mark: &str| {
+        for (driver, heads, _) in cases {
+            std::fs::write(root.join(format!("f.{driver}")), blocks(heads, mark)).unwrap();
+        }
+    };
+    let prepare = |root: &Path| {
+        let attributes = cases.map(|(driver, ..)| format!("*.{driver} diff={driver}\n"));
+        std::fs::write(root.join(".gitattributes"), attributes.concat()).unwrap();
+        files(root, "");
+    };
+    let dirs = pair(prepare, |root| files(root, " changed"));
+    let expected = cases.iter().flat_map(|(_, _, sections)| sections.iter());
+    let expected: Vec<&str> = expected.copied().collect();
+    for locale in locales() {
+        let ours = hunk_headers(&ok(run("alt", dirs[1].path(), locale, &["diff"])));
+        let sections = ours.iter().map(|h| h.splitn(5, ' ').nth(4).unwrap());
+        assert_eq!(sections.collect::<Vec<_>>(), expected, "{locale}");
     }
 }
 
