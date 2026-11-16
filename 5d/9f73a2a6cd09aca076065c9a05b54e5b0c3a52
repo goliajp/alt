@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: count groups and repetitions together in the depth a pattern may nest to
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/syntax.rs
+touched: crates/alt-regex/src/syntax/interval.rs
+touched: crates/alt-regex/tests/it/limits.rs
