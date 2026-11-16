@@ -10,8 +10,6 @@ use super::*;
 pub(super) struct Plan<'a> {
     /// the paths stored from the working tree
     pub(super) taken: Vec<&'a BString>,
-    /// the tracked paths whose file is gone and whose removal is staged
-    pub(super) deleted: &'a [BString],
     /// the entries that stay as they are
     pub(super) entries: Vec<IndexEntry>,
     /// every path whose entries change
@@ -110,7 +108,6 @@ pub(super) fn plan<'a>(
     let staged = kept.filter(unchanged).count() + taken.len();
     Plan {
         taken,
-        deleted,
         entries,
         touched,
         staged,

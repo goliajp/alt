@@ -63,3 +63,38 @@ fn path_allow_denies_a_commit_of_what_another_staged_out_of_tree() {
     ok(alt_as(repo, &["add", "src/lib.rs"], "bot"));
     ok(alt_as(repo, &["commit", "-m", "src only"], "bot"));
 }
+
+/// A removal outside the allowed paths is not staged by the restricted
+/// principal, however the `add` comes by it, and the index stays as it was.
+#[test]
+fn path_allow_denies_staging_a_removal_out_of_tree() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let repo = fixture(&tmp);
+    let lone = repo.join("scripts/lone");
+    std::fs::create_dir_all(&lone).unwrap();
+    std::fs::create_dir_all(repo.join("src")).unwrap();
+    std::fs::write(lone.join("gone.sh"), "gone\n").unwrap();
+    std::fs::write(repo.join("src/gone.rs"), "gone\n").unwrap();
+    ok(alt(repo, &["add", "."]));
+    ok(alt(repo, &["commit", "-m", "scripts"]));
+    write_policy(repo, "agent:* -> path=src/**\n");
+    std::fs::remove_file(lone.join("gone.sh")).unwrap();
+    std::fs::remove_file(repo.join("src/gone.rs")).unwrap();
+    let index = std::fs::read(repo.join(".alt/index")).unwrap();
+
+    for args in [
+        &["add", "scripts/lone/gone.sh"][..],
+        &["add", "-u", "scripts/lone/gone.sh"],
+        &["add", "-A", "scripts/lone"],
+        &["add", "scripts"],
+    ] {
+        fails_with(alt_as(repo, args, "bot"), "capability denied");
+    }
+    // the removal is the one tracked path the directory has
+    for args in [&["add", "."][..], &["add", "-u"], &["add", "-A"]] {
+        fails_with(alt_as(&lone, args, "bot"), "capability denied");
+    }
+    assert_eq!(std::fs::read(repo.join(".alt/index")).unwrap(), index);
+    ok(alt_as(repo, &["add", "src/gone.rs"], "bot"));
+    ok(alt_as(repo, &["commit", "-m", "src only"], "bot"));
+}

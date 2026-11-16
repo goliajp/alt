@@ -1,7 +1,5 @@
 //! `alt add`: stage working-tree files into the index.
 
-use std::collections::HashSet;
-
 use alt_worktree::{Delta, FileStat, Snapshot, Untracked};
 
 use super::*;
@@ -181,8 +179,9 @@ impl NativeRepo<'_> {
         })
     }
 
-    /// The path gate: denies staging any path the policy excludes, before
-    /// a blob is written to the object store, so a denial has no side effect.
+    /// The path gate: denies staging any path the policy excludes, a removal
+    /// as well, before a blob is written to the object store, so a denial
+    /// has no side effect.
     fn ensure_paths_allowed(
         &self,
         before: &Index,
@@ -193,11 +192,12 @@ impl NativeRepo<'_> {
         if self.caps.path_allow.is_empty() {
             return Ok(());
         }
-        let gone: HashSet<&[u8]> = plan.deleted.iter().map(|p| p.as_slice()).collect();
-        let stays = |e: &&IndexEntry| !gone.contains(e.path.as_slice());
+        // a removal is staged as much as a file is: every path whose
+        // entries change is asked for, beside the files that stay
         let present = |e: &&IndexEntry| present(e, delta, named);
-        for e in before.entries.iter().filter(present).filter(stays) {
-            self.ensure_path_allowed(&e.path)?;
+        let kept = before.entries.iter().filter(present).map(|e| &e.path);
+        for path in kept.chain(&plan.touched) {
+            self.ensure_path_allowed(path)?;
         }
         Ok(())
     }
