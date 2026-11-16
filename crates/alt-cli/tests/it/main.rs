@@ -61,8 +61,6 @@ mod scan_daemon_inputs;
 mod scan_daemon_mounts;
 mod scan_daemon_switch;
 #[cfg(target_os = "linux")]
-mod scan_daemon_trees;
-#[cfg(target_os = "linux")]
 mod scan_daemon_watches;
 mod show;
 mod status_json;
