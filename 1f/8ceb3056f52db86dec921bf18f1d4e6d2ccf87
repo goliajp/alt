@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: perf
+summary: bound what a search for groups leaves behind before it begins
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/analysis.rs
+touched: crates/alt-regex/src/backtrack.rs
+touched: crates/alt-regex/src/program.rs
