@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: end a back-reference where the text ends inside a byte that is no character
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/chars.rs
+touched: crates/alt-regex/src/lib.rs
+touched: crates/alt-regex/tests/it/hostile.rs
+touched: crates/alt-regex/tests/it/main.rs
