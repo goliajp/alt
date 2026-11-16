@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: write repetitions behind one another seldom, since the c library often never answers for them
+author-type: human
+author: doracawl
+touched: crates/alt-regex/tests/it/regcomp/random.rs
