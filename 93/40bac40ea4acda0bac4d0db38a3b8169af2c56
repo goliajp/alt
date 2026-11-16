@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: say that a pattern with a back-reference matches the empty text when a search finds it does
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/lib.rs
+touched: crates/alt-regex/src/search.rs
