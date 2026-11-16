@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: leave ignored directories unwatched, cap watches by the user's allowance, and scan as a direct run does when a watched scan fails
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/tree_state/watching.rs
+touched: crates/alt-cli/tests/it/scan_daemon.rs
+touched: crates/alt-worktree/src/lib.rs
+touched: crates/alt-worktree/src/watch.rs
+touched: crates/alt-worktree/src/watch/dirs.rs
+touched: crates/alt-worktree/src/watch/linux.rs
+touched: crates/alt-worktree/tests/it/watch.rs
