@@ -89,7 +89,7 @@ fn trees(dir: &Path) -> ([PathBuf; 3], Stop) {
             .status
             .success()
     );
-    let stop = watching_daemon(&trees[1]);
+    let stop = watching_daemon(&trees[1]).unheld();
     (trees, stop)
 }
 
@@ -237,7 +237,7 @@ fn a_directory_in_place_of_the_ignore_file_of_the_user_ends_what_git_ends() {
 /// Three trees as [`trees`] makes them, but with nothing changed in them
 /// and two branches beside `main`: `old`, which `main` is ahead of, and
 /// `side`, which has a commit of its own.
-fn clean_trees(dir: &Path) -> ([PathBuf; 3], Stop) {
+pub(crate) fn clean_trees(dir: &Path) -> ([PathBuf; 3], Stop) {
     let trees = ["direct", "served", "git"].map(|tree| dir.join(tree));
     for (root, tool) in trees.iter().zip(["alt", "alt", "git"]) {
         let step = |args: &[&str]| {
@@ -266,18 +266,18 @@ fn clean_trees(dir: &Path) -> ([PathBuf; 3], Stop) {
     }
     let served = alt(&trees[1], &trees[1], &["status"], true);
     assert!(served.status.success());
-    let stop = watching_daemon(&trees[1]);
+    let stop = watching_daemon(&trees[1]).unheld();
     (trees, stop)
 }
 
 /// Whether a command succeeded, its exit status and every line it ended
 /// with.
-type Ended = (bool, Option<i32>, Vec<String>);
+pub(crate) type Ended = (bool, Option<i32>, Vec<String>);
 
 /// Runs a command in each tree, as `alt` has it and as git has it, and
 /// returns what it came to, the same in all three. `{tree}` in an
 /// argument stands for a path beside the tree.
-fn each(trees: &[PathBuf; 3], ours: &[&str], theirs: &[&str]) -> Ended {
+pub(crate) fn each(trees: &[PathBuf; 3], ours: &[&str], theirs: &[&str]) -> Ended {
     let ended = |output: &Output, root: &Path, control: &str| -> Ended {
         let root = root.canonicalize().unwrap();
         let stderr = String::from_utf8_lossy(&output.stderr)
@@ -306,9 +306,9 @@ fn each(trees: &[PathBuf; 3], ours: &[&str], theirs: &[&str]) -> Ended {
 }
 
 /// Puts a directory where an ignore file is looked for, or takes it away.
-type Break = fn(&Path, &str, bool);
+pub(crate) type Break = fn(&Path, &str, bool);
 
-fn breaks() -> [(&'static str, Break); 3] {
+pub(crate) fn breaks() -> [(&'static str, Break); 3] {
     let info: Break = |root, control, on| {
         let exclude = root.join(control).join("info/exclude");
         let _ = std::fs::remove_file(&exclude);
@@ -365,12 +365,6 @@ fn a_directory_in_place_of_an_ignore_file_ends_what_merges_replays_and_checks_ou
         ended(&["revert", "HEAD"], &["revert", "--no-edit", "HEAD"], 1);
         ended(&["rebase", "side"], &["rebase", "side"], 1);
         ended(&["blame", "a.txt"], &["blame", "a.txt"], 1);
-        // what is wrong with the command itself is what git says first
-        for wrong in [&["cherry-pick", "nosuch"][..], &["blame", "nosuch"]] {
-            let (_, code, fatal) = each(&trees, wrong, wrong);
-            assert_eq!((code, fatal.len()), (Some(128), 1), "{name}: {wrong:?}");
-            assert!(!fatal[0].contains("exclude file"), "{name}: {fatal:?}");
-        }
         let ours = ["workspace", "add", "beside", "{tree}", "side"];
         let theirs = ["worktree", "add", "{tree}", "side"];
         match name {

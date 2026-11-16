@@ -4,6 +4,7 @@
 //! index or the snapshot file in the meantime, it answers what a command
 //! run without it answers.
 
+pub(crate) use crate::daemon_stop::Stop;
 use std::path::Path;
 use std::process::{Command, Output};
 
@@ -75,29 +76,13 @@ pub(crate) fn daemon_pid(root: &Path) -> i32 {
     meta.lines().next().unwrap().parse().unwrap()
 }
 
-/// Ends the daemon of a test repository and waits until it is gone.
-pub(crate) struct Stop(pub(crate) i32);
-
-impl Drop for Stop {
-    fn drop(&mut self) {
-        let _ = alt_os::sys::kill(self.0, alt_os::sys::SIGTERM);
-        for _ in 0..500 {
-            if alt_os::sys::kill(self.0, 0).is_err() {
-                return;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        let _ = alt_os::sys::kill(self.0, alt_os::sys::SIGKILL);
-    }
-}
-
 /// The daemon of the tree at `root`, which has just answered a `status`
 /// and is expected to watch the tree from then on. Where it does not,
 /// every comparison with a direct run still holds, by a daemon that scans
 /// the tree itself: the test fails here instead of passing without
 /// looking at what it is about.
 pub(crate) fn watching_daemon(root: &Path) -> Stop {
-    let stop = Stop(daemon_pid(root));
+    let stop = Stop(daemon_pid(root), true);
     #[cfg(target_os = "linux")]
     {
         let (instances, on_them) = watches(stop.0);

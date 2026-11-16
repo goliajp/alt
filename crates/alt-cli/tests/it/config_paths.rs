@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use crate::scan_daemon::{Stop, daemon_pid};
+use crate::scan_daemon::{Stop, daemon_pid, watching_daemon};
 
 /// An alt repository and a git one with the same files, and the home of
 /// their user, unless that user has none.
@@ -87,7 +87,17 @@ impl Pair {
         };
         let output = command.args(args).output().unwrap();
         if daemon && self.daemon.is_none() && self.at("a/.alt/daemon.meta").exists() {
-            self.daemon = Some(Stop(daemon_pid(&self.at("a"))));
+            // its first command may not have scanned the tree: this one does
+            let mut status = self.command(env!("CARGO_BIN_EXE_alt"), self.at("a"));
+            status.env_remove("ALT_NO_DAEMON");
+            status.env("ALT_DAEMON_IDLE_MS", "60000");
+            // where the settings end it, the daemon is not held to watching
+            self.daemon = Some(
+                match status.arg("status").output().unwrap().status.success() {
+                    true => watching_daemon(&self.at("a")),
+                    false => Stop(daemon_pid(&self.at("a")), false),
+                },
+            );
         }
         output
     }

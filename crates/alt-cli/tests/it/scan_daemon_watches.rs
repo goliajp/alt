@@ -50,7 +50,8 @@ fn a_removed_workspace_gives_its_watches_back() {
 
 #[test]
 fn a_tree_is_watched_as_before_once_its_ignore_file_can_be_read_again() {
-    let (dir, _stop) = served();
+    let (dir, stop) = served();
+    let _stop = stop.unheld();
     let root = dir.path();
     write(root, "a.txt", "changed\n");
     agree(root, "changed");
