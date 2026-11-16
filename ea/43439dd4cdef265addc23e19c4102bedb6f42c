@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: fail instead of waiting forever when the clock does not move
+author-type: human
+author: doracawl
+touched: crates/alt-worktree/src/clock.rs
