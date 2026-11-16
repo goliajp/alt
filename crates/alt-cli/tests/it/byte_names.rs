@@ -11,11 +11,11 @@ use crate::scan_daemon::{output, run};
 
 const TREES: [&str; 3] = ["direct", "served", "git"];
 
-fn write(trees: &Trees, name: &[u8], body: &str) {
+fn write(trees: &Trees, name: &[u8], body: impl AsRef<[u8]>) {
     for tree in TREES {
         let file = trees.at(tree).join(OsStr::from_bytes(name));
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-        std::fs::write(file, body).unwrap();
+        std::fs::write(file, body.as_ref()).unwrap();
     }
 }
 
@@ -122,4 +122,28 @@ fn a_name_that_is_not_utf8_is_staged_shown_committed_and_checked_out() {
     let set = ["config", "core.quotePath", "false"];
     assert!(git(&trees.at("git"), &set).status.success());
     alike(&trees, "unquoted");
+}
+
+#[test]
+fn a_rule_that_is_not_utf8_hides_and_converts_what_it_names() {
+    let trees = Trees::new();
+    write(&trees, b".gitignore", b"b\xff.txt\n*\xfe.log\n/d\xff/\n");
+    write(
+        &trees,
+        b".gitattributes",
+        b"a\xff.txt text\n*\xfd.md text\n",
+    );
+    for hidden in [&b"b\xff.txt"[..], b"x\xfe.log", b"d\xff/in.txt"] {
+        write(&trees, hidden, "hidden\n");
+    }
+    write(&trees, b"k\xff.txt", "kept\n");
+    write(&trees, b"a\xff.txt", "one\r\ntwo\r\n");
+    write(&trees, b"w\xfd.md", "one\r\ntwo\r\n");
+    write(&trees, b"raw.md", "one\r\ntwo\r\n");
+    alike(&trees, "new");
+    each(&trees, &["add", "."]);
+    alike(&trees, "staged");
+    let staged = entries(&trees, &trees.at("direct").join(".alt/index"));
+    let has = |name: &[u8]| staged.windows(name.len()).any(|w| w == name);
+    assert!(has(b"k\xff.txt") && !has(b"b\xff.txt") && !has(b"\xfe.log") && !has(b"in.txt"));
 }

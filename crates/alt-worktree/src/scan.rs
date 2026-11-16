@@ -137,10 +137,10 @@ pub struct PathMatcher(ignore::IgnoreStack);
 
 impl PathMatcher {
     /// One pattern per entry, gitignore syntax.
-    pub fn new<'a>(patterns: impl IntoIterator<Item = &'a str>) -> PathMatcher {
-        let text: String = patterns.into_iter().map(|p| format!("{p}\n")).collect();
+    pub fn new<'a>(patterns: impl IntoIterator<Item = &'a [u8]>) -> PathMatcher {
+        let lines: Vec<&[u8]> = patterns.into_iter().collect();
         let mut stack = ignore::IgnoreStack::new();
-        stack.push(ignore::parse_layer(text.as_bytes(), b""));
+        stack.push(ignore::parse_layer(&lines.join(&b'\n'), b""));
         PathMatcher(stack)
     }
 

@@ -15,18 +15,18 @@ use super::*;
 impl NativeRepo<'_> {
     /// The paths the root `.gitattributes` sends through LFS, if any.
     pub(super) fn lfs_rules(&self) -> Res<Option<PathMatcher>> {
-        let text = match std::fs::read_to_string(self.root.join(".gitattributes")) {
+        let text = match std::fs::read(self.root.join(".gitattributes")) {
             Ok(t) => t,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(e.into()),
         };
-        let patterns: Vec<&str> = text
-            .lines()
-            .filter(|l| !l.trim_start().starts_with('#'))
+        let patterns: Vec<&[u8]> = text
+            .split(|b| *b == b'\n')
+            .filter(|l| !l.trim_ascii_start().starts_with(b"#"))
             .filter_map(|l| {
-                let mut words = l.split_whitespace();
+                let mut words = l.split(u8::is_ascii_whitespace).filter(|w| !w.is_empty());
                 let pattern = words.next()?;
-                words.any(|w| w == "filter=lfs").then_some(pattern)
+                words.any(|w| w == b"filter=lfs").then_some(pattern)
             })
             .collect();
         Ok((!patterns.is_empty()).then(|| PathMatcher::new(patterns)))

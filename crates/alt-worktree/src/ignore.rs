@@ -36,7 +36,7 @@ use crate::glob::glob_match;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Rule {
     /// The pattern in its post-strip form (no leading `!`, no trailing `/`).
-    pattern: String,
+    pattern: Vec<u8>,
     negate: bool,
     dir_only: bool,
     /// True if the pattern contains a `/` other than a trailing one — i.e.
@@ -148,11 +148,11 @@ pub(crate) fn parse_layer(content: &[u8], base: &[u8]) -> IgnoreLayer {
     for (at, rule) in rules.iter().enumerate() {
         let literal = !rule
             .pattern
-            .bytes()
+            .iter()
             .any(|b| matches!(b, b'*' | b'?' | b'[' | b'\\'));
         match rule.anchored && literal {
             true => exact
-                .entry(rule.pattern.clone().into_bytes())
+                .entry(rule.pattern.clone())
                 .or_default()
                 .push(at as u32),
             false => general.push(at as u32),
@@ -188,9 +188,8 @@ fn parse_rule(line: &[u8]) -> Option<Rule> {
         Some(body) => (true, body),
         None => (body.contains(&b'/'), body),
     };
-    let pattern = std::str::from_utf8(body).ok()?;
     Some(Rule {
-        pattern: pattern.to_string(),
+        pattern: body.to_vec(),
         negate,
         dir_only,
         anchored,
@@ -257,7 +256,7 @@ fn strip_base<'p>(path: &'p [u8], base: &[u8]) -> Option<&'p [u8]> {
 
 /// `rel` is the candidate path relative to the rule's layer base.
 fn matches_rule(rule: &Rule, rel: &[u8]) -> bool {
-    let pattern = rule.pattern.as_bytes();
+    let pattern = rule.pattern.as_slice();
     if rule.anchored {
         glob_match(pattern, rel)
     } else {
