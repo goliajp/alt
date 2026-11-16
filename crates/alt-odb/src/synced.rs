@@ -456,6 +456,18 @@ pub(crate) fn establish(path: &Path, lens: Lens) -> std::io::Result<()> {
     })
 }
 
+/// Marks the boundaries as no longer telling an unfinished append from
+/// damage: appends that are not synced are about to follow them.
+pub(crate) fn distrust(path: &Path) -> std::io::Result<()> {
+    update(path, |marker| {
+        let state = marker.recorded().copied().unwrap_or(State::NONE);
+        Some(State {
+            flags: state.flags | UNTRUSTED,
+            ..state
+        })
+    })
+}
+
 /// What a handle whose fsyncs are left to a sink (the daemon) last finished
 /// writing, for that sink to record once it has synced: the boundaries and
 /// the marker's generation when they were written.

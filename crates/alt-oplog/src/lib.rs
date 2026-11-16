@@ -270,10 +270,15 @@ impl OpLog {
     /// With the lock held and the log read to its end: a log whose marker
     /// does not record a boundary that holds — an older alt wrote it, the
     /// marker was removed, or appends were left unsynced — gets one before
-    /// anything is appended.
+    /// anything is appended. Where fsyncs are skipped the marker is made
+    /// to say so instead.
     fn bound(&mut self) -> Result<(), OpLogError> {
         let marker = Marker::read(&self.durable_path);
-        if !relaxed_durability() && !marker.trusted() {
+        if relaxed_durability() {
+            if marker.recorded().is_none() || marker.trusted() {
+                synced::distrust(&self.durable_path)?;
+            }
+        } else if !marker.trusted() {
             self.file.sync_all()?;
             synced::establish(&self.durable_path, self.len_bytes)?;
         }

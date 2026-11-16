@@ -138,7 +138,10 @@ when they were last synced, or nothing. That length is used the same way.
 Where nothing is recorded, a record that does not read is unfinished only when
 it is the last one in its file, as that alt took it. The first command of
 this alt that writes syncs the files and records how far they are whole; no
-step by hand is needed after an upgrade.
+step by hand is needed after an upgrade. Commits made with
+`ALT_RELAXED_DURABILITY` set are not synced, and what was recorded is marked
+as no longer holding until a command without it writes: in between, too,
+only the last record of a file can be an unfinished one.
 
 The same messages appear when a `durable` file was deleted from a repository
 that had one, while the end of a file does not read. Nothing is cut then,

@@ -5,6 +5,7 @@
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;
+use std::os::unix::fs::FileExt;
 use std::path::Path;
 use std::process::{Command, Output};
 
@@ -155,4 +156,43 @@ fn an_unfinished_record_in_a_repository_without_markers_is_cut_like_an_older_alt
         append(&alt_dir.join(file), b"half a record");
         usable(tmp.path(), 3);
     }
+}
+
+#[test]
+fn damage_in_what_unsynced_commits_wrote_is_reported_and_nothing_is_cut() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    repo(tmp.path());
+    let alt_dir = tmp.path().join(".alt");
+    for tag in ["relaxed-1", "relaxed-2", "relaxed-3"] {
+        commit(tmp.path(), true, tag, 10);
+    }
+    assert_eq!((odb_flags(&alt_dir), oplog_flags(&alt_dir)), (1, 1));
+    ok(alt(tmp.path(), false, &["fsck"]));
+
+    // one byte of a record twenty before the end of map.alt
+    let map = alt_dir.join("map.alt");
+    let at = len(&map) - 20 * 82 + 10;
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&map)
+        .unwrap();
+    let mut byte = [0u8];
+    file.read_exact_at(&mut byte, at).unwrap();
+    file.write_all_at(&[byte[0] ^ 0xff], at).unwrap();
+    let damaged = fs::read(&map).unwrap();
+    for args in [&["fsck"][..], &["status"], &["log", "-n", "4"]] {
+        let out = alt(tmp.path(), false, args);
+        assert!(!out.status.success(), "alt {args:?}");
+        let said = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert!(
+            said.contains("map.alt record corrupt"),
+            "alt {args:?}: {said}"
+        );
+    }
+    assert!(fs::read(&map).unwrap() == damaged, "the file is as it was");
+
+    // with the record restored, a commit that syncs bounds the store again
+    file.write_all_at(&byte, at).unwrap();
+    usable(tmp.path(), 6);
 }

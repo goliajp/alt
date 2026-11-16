@@ -190,6 +190,18 @@ pub(crate) fn establish(path: &Path, len: u64) -> std::io::Result<()> {
     note_bounded(path)
 }
 
+/// Marks the boundary as no longer telling an unfinished append from
+/// damage: appends that are not synced are about to follow it.
+pub(crate) fn distrust(path: &Path) -> std::io::Result<()> {
+    update(path, |marker| {
+        let state = marker.recorded().copied().unwrap_or_default();
+        Some(State {
+            flags: state.flags | UNTRUSTED,
+            ..state
+        })
+    })
+}
+
 /// What `data` says and, for a marker in this format, the slot the next
 /// write goes to with its serial.
 fn parse(data: &[u8]) -> (Marker, Option<(usize, u64)>) {

@@ -57,10 +57,16 @@ impl Odb {
     /// With the write lock held and every file this handle has open read
     /// to its end: a store whose marker does not record boundaries that
     /// hold — an older alt wrote it, the marker was removed, or appends
-    /// were left unsynced — gets them before anything is appended.
+    /// were left unsynced — gets them before anything is appended. Where
+    /// fsyncs are skipped the marker is made to say so instead.
     pub(super) fn bound(&mut self) -> Result<(), OdbError> {
         let marker = Marker::read(&self.durable_path);
-        if !alt_store::relaxed_durability() && !marker.trusted() {
+        if alt_store::relaxed_durability() {
+            let said = |state: &State| state.flags & synced::UNTRUSTED != 0;
+            if !marker.recorded().is_some_and(said) {
+                synced::distrust(&self.durable_path)?;
+            }
+        } else if !marker.trusted() {
             // the other two files are read to their ends as they open
             self.blobs.open_map()?;
             self.tier1()?;
