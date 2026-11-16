@@ -4,6 +4,16 @@ use super::{Compiler, Inst, nullable};
 use crate::Error;
 use crate::syntax::Node;
 
+/// Whether something that may match nothing is repeated without bound.
+pub(super) fn cyclic(node: &Node) -> bool {
+    match node {
+        Node::Repeat(inner, _, None) => nullable(inner) || cyclic(inner),
+        Node::Repeat(inner, ..) | Node::Group(inner, _) => cyclic(inner),
+        Node::Concat(items) | Node::Alt(items) => items.iter().any(cyclic),
+        _ => false,
+    }
+}
+
 impl Compiler {
     /// One of the copies a repetition is made of. The C library marks
     /// a group that a repetition may leave out, the first such copy
@@ -35,7 +45,6 @@ impl Compiler {
             // the loop: once more, or on. A turn that takes nothing
             // comes back to the choice with no byte consumed
             None => {
-                self.cyclic |= nullable(inner);
                 let split = self.push(Inst::Split(next, next))?;
                 let body = self.copy(inner, split, true, min > 0)?;
                 self.insts[split as usize] = Inst::Split(body, next);

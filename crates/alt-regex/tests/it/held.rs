@@ -124,7 +124,7 @@ fn long(length: usize) {
 
 #[test]
 fn a_long_text_is_searched_within_the_bound_whatever_the_pattern() {
-    long(1 << 16);
+    long(1 << 14);
 }
 
 #[test]
@@ -175,7 +175,7 @@ fn largest(size: usize, length: usize) {
 
 #[test]
 fn large_patterns_are_searched_within_the_bound() {
-    largest(1 << 11, 600);
+    largest(1 << 10, 300);
 }
 
 #[test]

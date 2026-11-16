@@ -108,9 +108,6 @@ fn paths(
             Frame::Step(pc, at) => (pc, at),
         };
         loop {
-            if stack.len() + slots.len() + 1 > MAX_FRAMES {
-                return None;
-            }
             let join = prog.joins[pc as usize];
             if join != NO_JOIN {
                 let mark = join as usize * span + (at - from);
@@ -132,12 +129,22 @@ fn paths(
                     }
                 }
                 Inst::Split(first, second) => {
+                    if stack.len() >= MAX_FRAMES {
+                        return None;
+                    }
                     stack.push(Frame::Step(second, at));
                     pc = first;
                 }
                 Inst::Save(slot, next) | Inst::SaveOpt(slot, next) => {
                     let slot = slot as usize;
-                    if slot < captures {
+                    if stack.len() + slots.len() > MAX_FRAMES {
+                        return None;
+                    }
+                    // most programs keep no snapshot: one slot is written
+                    if slot < captures && slots.len() == captures {
+                        stack.push(Frame::Restore(slot as u32, slots[slot]));
+                        slots[slot] = at;
+                    } else if slot < captures {
                         let opt = matches!(prog.insts[pc as usize], Inst::SaveOpt(..));
                         close(slots, captures, slot, at, opt, |slot, old| {
                             stack.push(Frame::Restore(slot as u32, old))

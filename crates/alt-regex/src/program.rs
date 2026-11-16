@@ -136,7 +136,7 @@ pub fn compile(node: &Node, groups: u32, options: Options, shape: Shape) -> Resu
         budget: shape.budget,
         ignore_case: options.ignore_case,
         copied: false,
-        cyclic: false,
+        cyclic: repeat::cyclic(node),
         blocks: Vec::new(),
         met: Vec::new(),
     };
@@ -287,14 +287,28 @@ impl Compiler {
                 .iter()
                 .rev()
                 .try_fold(next, |next, item| self.node(item, next)),
-            // nested to the left, as the tree of the C library is
-            Node::Alt(branches) => {
+            // nested to the left, as the tree of the C library is: where
+            // a path comes back to a choice, which way it then takes
+            // depends on it
+            Node::Alt(branches) if self.cyclic => {
                 let mut entry = self.node(&branches[0], next)?;
                 for branch in &branches[1..] {
                     let other = self.node(branch, next)?;
                     entry = self.push(Inst::Split(entry, other))?;
                 }
                 Ok(entry)
+            }
+            // elsewhere one choice is met before each branch
+            Node::Alt(branches) => {
+                let mut entries = Vec::with_capacity(branches.len());
+                for branch in branches {
+                    entries.push(self.node(branch, next)?);
+                }
+                let last = entries.pop().expect("an alternation has branches");
+                entries
+                    .into_iter()
+                    .rev()
+                    .try_fold(last, |rest, entry| self.push(Inst::Split(entry, rest)))
             }
             Node::Repeat(inner, min, max) => self.repeat(inner, *min, *max, next),
         }

@@ -138,7 +138,7 @@ mod utf8;
 use std::ops::Range;
 use std::sync::Mutex;
 
-use captures::{FEW, Slots};
+use captures::FEW;
 
 pub use captures::Captures;
 pub use class::ByteSet;
@@ -261,44 +261,6 @@ impl Regex {
     /// `last`: fewer groups to carry make a faster search.
     pub fn captures_upto(&self, text: &[u8], last: usize) -> Option<Captures> {
         self.captures_upto_with(&mut self.shared(), text, last)
-    }
-
-    /// As [`Regex::captures_upto`], with the caller's storage.
-    pub fn captures_upto_with(
-        &self,
-        cache: &mut Cache,
-        text: &[u8],
-        last: usize,
-    ) -> Option<Captures> {
-        self.try_captures_upto_with(cache, text, last)
-            .unwrap_or(None)
-    }
-
-    /// As [`Regex::captures_upto_with`], and a search given up at its
-    /// bounds is told apart from a text without a match: the other
-    /// searches report the two alike.
-    pub fn try_captures_upto_with(
-        &self,
-        cache: &mut Cache,
-        text: &[u8],
-        last: usize,
-    ) -> Result<Option<Captures>, Error> {
-        let width = 2 * (last.min(self.groups()) + 1);
-        let mut few = [pike::UNSET; FEW];
-        let mut many = Vec::new();
-        let slots = match width <= FEW {
-            true => &mut few[..width],
-            false => {
-                many.resize(width, pike::UNSET);
-                &mut many[..]
-            }
-        };
-        let found = self.search(cache, text, slots).ok_or(Error::Exhausted)?;
-        let slots = match width <= FEW {
-            true => Slots::Few(few),
-            false => Slots::Many(many),
-        };
-        Ok(found.then_some(Captures { slots }))
     }
 }
 
