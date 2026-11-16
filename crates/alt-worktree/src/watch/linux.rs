@@ -68,6 +68,19 @@ pub(crate) struct Watcher {
     mounts: Mounts,
 }
 
+/// What the events read off the queue tell.
+#[derive(Default)]
+struct Seen {
+    /// the paths something happened to
+    dirty: Vec<Vec<u8>>,
+    /// the directories that came to be
+    made: Vec<Vec<u8>>,
+    /// the directories whose ignore file something happened to
+    ruled: Vec<Vec<u8>>,
+    /// which watch is on which path is no longer known
+    lost: bool,
+}
+
 /// Whether the index has an entry at or beneath a directory.
 pub(crate) type Tracked<'a> = &'a dyn Fn(&[u8]) -> bool;
 
@@ -137,23 +150,47 @@ impl Watcher {
         self.add_tree(Vec::new(), tracked)
     }
 
-    /// Everything queued so far. An error means the tree cannot be watched
-    /// any longer.
-    pub(crate) fn changes(&mut self, tracked: Tracked) -> io::Result<Changes> {
-        let mut dirty = Vec::new();
-        let mut made = Vec::new();
-        let mut ruled = Vec::new();
-        let mut lost =
-            ident(&self.root)? != self.ident || ignore::global_excludes_stat() != self.excludes;
-        if self.mounts.changed()? && self.mounts.beneath(&self.root)? {
-            return Err(io::ErrorKind::Unsupported.into());
+    /// Takes in one event: `mask` on the watch `wd`, about `name` in its
+    /// directory.
+    fn event(&mut self, wd: i32, mask: u32, name: &[u8], seen: &mut Seen) {
+        seen.lost |= mask & (IN_Q_OVERFLOW | IN_UNMOUNT | IN_MOVE_SELF) != 0;
+        if mask & IN_IGNORED != 0 {
+            // without the watch on the root nothing made in it is seen
+            seen.lost |= self.dirs.remove(&wd).is_some_and(|dir| dir.is_empty());
+            return;
         }
+        let Some(dir) = self.dirs.get(&wd) else {
+            return;
+        };
+        // the control directories of the root are not part of the tree
+        if dir.is_empty() && (name == b".alt" || name == b".git") {
+            return;
+        }
+        seen.lost |= dir.is_empty() && mask & IN_DELETE_SELF != 0;
+        if name == b".gitignore" {
+            seen.ruled.push(dir.clone());
+        }
+        let path = join(dir, name);
+        if mask & IN_ISDIR != 0 && !name.is_empty() {
+            // the watches beneath a directory that moved away still
+            // report under the path it had
+            seen.lost |= mask & IN_MOVED_FROM != 0;
+            if mask & (IN_CREATE | IN_MOVED_TO) != 0 && name != b".alt" && name != b".git" {
+                seen.made.push(path.clone());
+            }
+        }
+        seen.dirty.push(path);
+    }
+
+    /// Reads the queue until it is empty.
+    fn drain(&mut self) -> io::Result<Seen> {
+        let mut seen = Seen::default();
         let mut buf = [0u8; 1 << 16];
         loop {
             let n = match self.queue.read(&mut buf) {
-                Ok(0) => break,
+                Ok(0) => return Ok(seen),
                 Ok(n) => n,
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => return Ok(seen),
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
                 Err(e) => return Err(e),
             };
@@ -165,52 +202,35 @@ impl Watcher {
                 let name = &buf[at + 16..at + 16 + len];
                 let name = &name[..name.iter().position(|b| *b == 0).unwrap_or(len)];
                 at += 16 + len;
-                if mask & (IN_Q_OVERFLOW | IN_UNMOUNT | IN_MOVE_SELF) != 0 {
-                    lost = true;
-                }
-                if mask & IN_IGNORED != 0 {
-                    // without the watch on the root nothing made in it is seen
-                    lost |= self.dirs.remove(&wd).is_some_and(|dir| dir.is_empty());
-                    continue;
-                }
-                let Some(dir) = self.dirs.get(&wd) else {
-                    continue;
-                };
-                // the control directories of the root are not part of the tree
-                if dir.is_empty() && (name == b".alt" || name == b".git") {
-                    continue;
-                }
-                lost |= dir.is_empty() && mask & IN_DELETE_SELF != 0;
-                if name == b".gitignore" {
-                    ruled.push(dir.clone());
-                }
-                let path = join(dir, name);
-                if mask & IN_ISDIR != 0 && !name.is_empty() {
-                    // the watches beneath a directory that moved away still
-                    // report under the path it had
-                    lost |= mask & IN_MOVED_FROM != 0;
-                    if mask & (IN_CREATE | IN_MOVED_TO) != 0 && name != b".alt" && name != b".git" {
-                        made.push(path.clone());
-                    }
-                }
-                dirty.push(path);
+                self.event(wd, mask, name, &mut seen);
             }
         }
-        if lost {
+    }
+
+    /// Everything queued so far. An error means the tree cannot be watched
+    /// any longer.
+    pub(crate) fn changes(&mut self, tracked: Tracked) -> io::Result<Changes> {
+        let replaced =
+            ident(&self.root)? != self.ident || ignore::global_excludes_stat() != self.excludes;
+        if self.mounts.changed()? && self.mounts.beneath(&self.root)? {
+            return Err(io::ErrorKind::Unsupported.into());
+        }
+        let seen = self.drain()?;
+        if replaced || seen.lost {
             // start over: which watch is on which path is no longer known
             self.queue = instance()?;
             self.establish(tracked)?;
             return Ok(Changes::All);
         }
         // other rules: what they hide beneath their directory is decided anew
-        for dir in ruled {
+        for dir in seen.ruled {
             self.skipped
                 .retain(|s| !dir.is_empty() && !beneath(s, &dir));
             self.add_tree(dir, tracked)?;
         }
-        for dir in made {
+        for dir in seen.made {
             self.add_tree(dir, tracked)?;
         }
-        Ok(Changes::Paths(dirty))
+        Ok(Changes::Paths(seen.dirty))
     }
 }

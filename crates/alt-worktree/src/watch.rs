@@ -64,6 +64,17 @@ impl Watched {
         })
     }
 
+    /// What happened in the tree since this was last asked, the watches
+    /// brought in line with the index of `snapshot` first.
+    fn changes(&mut self, snapshot: &Snapshot) -> Option<Changes> {
+        let tracked = |dir: &[u8]| tracked(snapshot, dir);
+        if self.index_id != snapshot.index_id {
+            self.watcher.revisit(&tracked).ok()?;
+            self.index_id.clone_from(&snapshot.index_id);
+        }
+        self.watcher.changes(&tracked).ok()
+    }
+
     /// What [`scan`](crate::scan) of the whole tree returns for `opts`,
     /// which ask for no untracked files or for directories as one path.
     /// `settings` are the files outside the tree that `opts` read what
@@ -80,16 +91,8 @@ impl Watched {
         settings: &[&Path],
     ) -> Option<Delta> {
         // before anything is looked at: an event that comes later is seen next time
-        let changes = {
-            let tracked = |dir: &[u8]| tracked(snapshot, dir);
-            if self.index_id != snapshot.index_id {
-                self.watcher.revisit(&tracked).ok()?;
-                self.index_id.clone_from(&snapshot.index_id);
-            }
-            self.watcher.changes(&tracked).ok()?
-        };
-        let stat = |path: &&Path| std::fs::metadata(path).ok().map(|m| FileStat::of(&m));
-        let outside: Vec<Option<FileStat>> = settings.iter().map(stat).collect();
+        let changes = self.changes(snapshot)?;
+        let outside = stats(settings);
         // taken out: a scan that fails leaves nothing to build on
         let cached = self.cached.take();
         let whole = |within| ScanOptions {
@@ -145,6 +148,12 @@ fn tracked_in(snapshot: &Snapshot, dir: &[u8]) -> bool {
 /// Whether the index has an entry beneath `dir` or at it, as a submodule is.
 fn tracked(snapshot: &Snapshot, dir: &[u8]) -> bool {
     tracked_in(snapshot, dir) || snapshot.find(dir).is_some()
+}
+
+/// What each of the files looks like now; `None` for one that is not there.
+fn stats(files: &[&Path]) -> Vec<Option<FileStat>> {
+    let stat = |path: &&Path| std::fs::metadata(path).ok().map(|m| FileStat::of(&m));
+    files.iter().map(stat).collect()
 }
 
 fn beneath(path: &[u8], dir: &[u8]) -> bool {

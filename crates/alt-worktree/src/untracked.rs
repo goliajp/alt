@@ -65,13 +65,7 @@ impl Walk<'_> {
         let mut names = fd.names()?;
         names.sort();
         if holds_repository(&names) {
-            if reach != Reach::Inside {
-                return Ok(ControlFlow::Continue(()));
-            }
-            path.push(b'/');
-            let flow = each(path);
-            path.pop();
-            return Ok(flow);
+            return Ok(as_one_path(path, reach, each));
         }
         let own = ignore_file(&fd, &names, path, ignore)?;
         let ignore = own.as_ref().unwrap_or(ignore);
@@ -112,4 +106,20 @@ impl Walk<'_> {
         }
         Ok(ControlFlow::Continue(()))
     }
+}
+
+/// Calls `each` with the directory `path` itself, ending in `/`, when
+/// `reach` has all of it.
+fn as_one_path(
+    path: &mut Vec<u8>,
+    reach: Reach,
+    each: &mut dyn FnMut(&[u8]) -> ControlFlow<()>,
+) -> ControlFlow<()> {
+    if reach != Reach::Inside {
+        return ControlFlow::Continue(());
+    }
+    path.push(b'/');
+    let flow = each(path);
+    path.pop();
+    flow
 }

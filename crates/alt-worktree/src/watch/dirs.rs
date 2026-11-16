@@ -58,6 +58,26 @@ impl Watcher {
         Ok(stack)
     }
 
+    /// Puts a watch on the directory `rel`, which is at `abs`; `false` for
+    /// one beneath the root that is gone by now.
+    fn watch(&mut self, abs: &Path, rel: &[u8]) -> io::Result<bool> {
+        let path = CString::new(abs.as_os_str().as_bytes()).map_err(io::Error::other)?;
+        // SAFETY: `path` is NUL-terminated and outlives the call
+        let wd = unsafe { sys::inotify_add_watch(self.queue.as_raw_fd(), path.as_ptr(), WATCHED) };
+        if wd < 0 {
+            let e = io::Error::last_os_error();
+            return match gone(&e) && !rel.is_empty() {
+                true => Ok(false),
+                false => Err(e),
+            };
+        }
+        self.dirs.insert(wd, rel.to_vec());
+        match self.dirs.len() > self.most {
+            true => Err(io::Error::from_raw_os_error(ENOSPC)),
+            false => Ok(true),
+        }
+    }
+
     /// Watches the directory `rel` and every directory beneath it that is
     /// not left unwatched. Each is watched before it is listed, so a
     /// directory made in it afterwards has an event. A directory beneath
@@ -72,20 +92,8 @@ impl Watcher {
         let mut pending = vec![(rel, above)];
         while let Some((rel, above)) = pending.pop() {
             let abs = self.root.join(OsStr::from_bytes(&rel));
-            let path = CString::new(abs.as_os_str().as_bytes()).map_err(io::Error::other)?;
-            // SAFETY: `path` is NUL-terminated and outlives the call
-            let wd =
-                unsafe { sys::inotify_add_watch(self.queue.as_raw_fd(), path.as_ptr(), WATCHED) };
-            if wd < 0 {
-                let e = io::Error::last_os_error();
-                match gone(&e) && !rel.is_empty() {
-                    true => continue,
-                    false => return Err(e),
-                }
-            }
-            self.dirs.insert(wd, rel.clone());
-            if self.dirs.len() > self.most {
-                return Err(io::Error::from_raw_os_error(ENOSPC));
+            if !self.watch(&abs, &rel)? {
+                continue;
             }
             let ignore = match rules(&abs, &rel)? {
                 Some(layer) => above.with(layer),
