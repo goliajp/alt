@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: leave what a read-only command opened to the exit of the process
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/main.rs
