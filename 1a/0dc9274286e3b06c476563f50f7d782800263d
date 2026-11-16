@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: refactor
+summary: put the entries of a prefix in order and drop repeats from their neighbours
+author-type: human
+author: doracawl
+touched: crates/alt-odb/src/map.rs
