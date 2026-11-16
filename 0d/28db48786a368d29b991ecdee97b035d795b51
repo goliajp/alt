@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: test
+summary: fail a daemon test where the daemon does not watch its tree
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/cwd_paths.rs
+touched: crates/alt-cli/tests/it/exclude_dirs.rs
+touched: crates/alt-cli/tests/it/scan_daemon.rs
+touched: crates/alt-cli/tests/it/status_labels.rs
