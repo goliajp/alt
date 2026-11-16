@@ -5,7 +5,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::scan_daemon::{agree, output, run, served, write};
+use crate::scan_daemon::{agree, daemon_pid, instances, output, run, served, write};
 
 #[test]
 fn a_switch_leaves_directories_shown_as_one_path_as_the_new_index_has_them() {
@@ -205,4 +205,39 @@ fn a_switch_is_followed_by_no_look_at_the_files_it_left_alone() {
         assert_eq!(reads(), before + 1);
         assert_eq!(diff, run(root, &["diff"], false), "on {branch}");
     }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_switch_of_more_files_than_the_queue_holds_events_for_loses_none() {
+    let (dir, stop) = served();
+    let root = dir.path();
+    // the directories are there, and watched, on either branch
+    for d in 0..30 {
+        write(root, &format!("many/d{d}/kept.txt"), "kept\n");
+    }
+    run(root, &["add", "."], false);
+    run(root, &["commit", "-m", "directories"], false);
+    run(root, &["switch", "-c", "many"], true);
+    for f in 0..6000 {
+        write(root, &format!("many/d{}/f{f}.txt", f % 30), "x\n");
+    }
+    run(root, &["add", "."], false);
+    run(root, &["commit", "-m", "many"], false);
+    assert!(agree(root, "committed").contains("nothing to commit"));
+    let held = instances(stop.0);
+    assert_eq!(held.len(), 1);
+    for round in 0..2 {
+        run(root, &["switch", "main"], true);
+        assert!(!root.join("many/d7/f7.txt").exists());
+        assert!(agree(root, "without them").contains("nothing to commit"));
+        run(root, &["switch", "many"], true);
+        write(root, "many/d7/f7.txt", &format!("changed {round}\n"));
+        assert!(agree(root, "with them").contains("modified:   many/d7/f7.txt"));
+        write(root, "many/d7/f7.txt", "x\n");
+        assert!(agree(root, "restored").contains("nothing to commit"));
+    }
+    // a queue that ran over would have been replaced by another
+    assert_eq!(instances(stop.0), held);
+    assert_eq!(daemon_pid(root), stop.0);
 }
