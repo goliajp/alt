@@ -37,17 +37,17 @@ $ [repo] alt ci validate --json
 exit 1
 err| {"error":{"details":{"command_output":{"encoding":"utf-8","text":"{\"file\":\"<root>/repo/.alt/ci/broken/workflow.toml\",\"line\":1,\"col\":1,\"severity\":\"error\",\"message\":\"step \\\"test\\\" needs undefined step \\\"does-not-exist\\\"\"}\n","truncated":false},"operation_ids":[]},"kind":"validation_failed","message":"command reported a conflict or failed validation","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
 $ [repo] alt add . --json
-exit 75
-err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"unsupported non-UTF-8 recovery path","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:10>","retryable":false},"schema_version":1}
+exit 0
+out| {"operation_ids":["<id64:10>","<id64:11>"],"request_id":"<id32:12>","schema_version":1,"staged":9}
 $ [repo] alt add . --json
 exit 0
-out| {"operation_ids":["<id64:11>","<id64:12>"],"request_id":"<id32:13>","schema_version":1,"staged":8}
+out| {"operation_ids":["<id64:13>","<id64:14>"],"request_id":"<id32:15>","schema_version":1,"staged":8}
 $ [repo] alt status --json
 exit 0
 out| {"schema_version":2,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[{"path":"added.txt","change":"added"},{"path":"binary.bin","change":"modified"},{"path":"code.rs","change":"modified"},{"path":"edited.txt","change":"modified"},{"path":"gone.txt","change":"deleted"},{"path":"staged-gone.txt","change":"deleted"},{"path":"staged.txt","change":"modified"},{"path":"untracked \"q\".txt","change":"added"}],"unstaged":[],"untracked":[],"unmerged":[],"clean":false}
 $ [repo] alt undo --json
 exit 0
-out| {"operation_ids":["<id64:14>","<id64:15>"],"paths":["binary.bin","code.rs","edited.txt","gone.txt","untracked \"q\".txt"],"request_id":"<id32:16>","schema_version":1,"undone":true}
+out| {"operation_ids":["<id64:16>","<id64:17>"],"paths":["bad-�-name.txt"],"request_id":"<id32:18>","schema_version":1,"undone":true}
 $ [repo] alt status --json
 exit 0
-out| {"schema_version":2,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[{"path":"added.txt","change":"added"},{"path":"staged-gone.txt","change":"deleted"},{"path":"staged.txt","change":"modified"}],"unstaged":[{"path":"binary.bin","change":"modified"},{"path":"code.rs","change":"modified"},{"path":"edited.txt","change":"modified"},{"path":"gone.txt","change":"deleted"}],"untracked":["untracked \"q\".txt"],"unmerged":[],"clean":false}
+out| {"schema_version":2,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[{"path":"added.txt","change":"added"},{"path":"bad-�-name.txt","change":"added"},{"path":"binary.bin","change":"modified"},{"path":"code.rs","change":"modified"},{"path":"edited.txt","change":"modified"},{"path":"gone.txt","change":"deleted"},{"path":"staged-gone.txt","change":"deleted"},{"path":"staged.txt","change":"modified"},{"path":"untracked \"q\".txt","change":"added"}],"unstaged":[{"path":"bad-�-name.txt","change":"deleted"}],"untracked":[],"unmerged":[],"clean":false}
