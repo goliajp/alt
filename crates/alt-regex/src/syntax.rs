@@ -3,6 +3,7 @@
 //! accepts in both.
 
 use crate::class::ByteSet;
+use crate::program::MAX_INSTS;
 use crate::{Error, Options, Syntax, bracket, utf8};
 
 mod interval;
@@ -55,6 +56,8 @@ struct Parser<'a> {
     depth: u32,
     /// how deep the groups and repetitions nest in what was last read
     tall: u32,
+    /// the places of the sets of characters read so far
+    places: usize,
     /// the groups whose closing parenthesis has been read
     complete: Vec<u32>,
     /// whether a period was read, and whether something the C library
@@ -97,6 +100,7 @@ pub fn parse_shaped(pat: &[u8], opts: Options) -> Result<(Node, u32, Shape), Err
             groups: 0,
             depth: 0,
             tall: 0,
+            places: 0,
             complete: Vec::new(),
             period: false,
             complex: opts.ignore_case,
@@ -176,6 +180,13 @@ impl<'a> Parser<'a> {
             let fresh = matches!(items.last(), None | Some(Node::Look(_)));
             self.tall = 0;
             let atom = self.atom(fresh)?;
+            if let Node::Class(block) = &atom {
+                // a program holds every place of every set
+                self.places += block.places.len();
+                if self.places > MAX_INSTS {
+                    return Err(Error::TooBig);
+                }
+            }
             items.push(match atom {
                 Node::Look(_) => atom,
                 _ => self.repeats(atom)?,

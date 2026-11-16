@@ -223,11 +223,45 @@ pub fn node(set: &CharSet) -> Node {
     Node::Class(Arc::new(builder.block(start, ascii)))
 }
 
-/// The sets made so far, by what was written and how it was read.
-type Known = HashMap<(Vec<u8>, u8), Node>;
+impl Block {
+    /// What the block holds in memory, about.
+    fn bytes(&self) -> usize {
+        let place = |place: &Place| {
+            let edges = place.edges.len() * size_of::<(ByteSet, u32)>();
+            size_of::<Place>() + edges + place.table.as_ref().map_or(0, |_| 256)
+        };
+        let places: usize = self.places.iter().map(place).sum();
+        size_of::<Block>() + places + self.sets.len() * size_of::<ByteSet>()
+    }
+}
 
-/// The most sets remembered.
+/// The sets made so far, by what was written and how it was read, and
+/// the bytes they hold.
+#[derive(Default)]
+struct Known {
+    sets: HashMap<(Vec<u8>, u8), Node>,
+    bytes: usize,
+}
+
+/// The most sets remembered, and the most bytes they may hold together:
+/// room for some eighty sets as large as the letters of Unicode.
 const REMEMBERED: usize = 512;
+const REMEMBERED_BYTES: usize = 4 << 20;
+
+impl Known {
+    /// Keeps `made` under `key` while there is room for it.
+    fn keep(&mut self, key: (Vec<u8>, u8), made: &Node) {
+        let block = match made {
+            Node::Class(block) => block.bytes(),
+            _ => 0,
+        };
+        let bytes = size_of::<Node>() + key.0.len() + block;
+        if self.sets.len() < REMEMBERED && self.bytes + bytes <= REMEMBERED_BYTES {
+            self.bytes += bytes;
+            self.sets.insert(key, made.clone());
+        }
+    }
+}
 
 /// What matches one character of the set that `written` and `flags`
 /// name; `set` makes it the first time. The same few sets are written
@@ -235,16 +269,13 @@ const REMEMBERED: usize = 512;
 pub fn remembered(written: &[u8], flags: u8, set: impl FnOnce() -> CharSet) -> Node {
     static KNOWN: Mutex<Option<Known>> = Mutex::new(None);
     let key = (written.to_vec(), flags);
-    let known = |map: &mut Option<Known>| map.get_or_insert_default().get(&key).cloned();
+    let known = |known: &mut Option<Known>| known.get_or_insert_default().sets.get(&key).cloned();
     if let Some(node) = known(&mut KNOWN.lock().expect("no panic under the lock")) {
         return node;
     }
     let made = node(&set());
-    let mut map = KNOWN.lock().expect("no panic under the lock");
-    let map = map.get_or_insert_default();
-    if map.len() < REMEMBERED {
-        map.insert(key, made.clone());
-    }
+    let mut known = KNOWN.lock().expect("no panic under the lock");
+    known.get_or_insert_default().keep(key, &made);
     made
 }
 
@@ -322,5 +353,31 @@ pub(crate) mod tests {
         let twice = remembered(b"[x]", 0, || CharSet::new(vec![(0x100, 0x200)]));
         let again = remembered(b"[x]", 0, || unreachable!("made once"));
         assert_eq!(twice, again);
+    }
+
+    #[test]
+    fn the_sets_remembered_are_bounded_in_bytes() {
+        let letters = CharSet::new(crate::tables::ALPHA.to_vec());
+        let Node::Class(block) = node(&letters) else {
+            panic!("a set beyond ASCII is a block");
+        };
+        let large = block.bytes();
+        assert!(large > 32 << 10 && large < 256 << 10, "{large}");
+        let mut known = Known::default();
+        for number in 0..200u8 {
+            known.keep((vec![number], 0), &Node::Class(block.clone()));
+        }
+        assert!(known.bytes <= REMEMBERED_BYTES && known.bytes + large > REMEMBERED_BYTES);
+        assert_eq!(
+            known.sets.len(),
+            REMEMBERED_BYTES / (large + size_of::<Node>() + 1)
+        );
+        assert!(known.sets.contains_key(&(vec![0], 0)));
+        // small ones are bounded in number
+        let mut known = Known::default();
+        for number in 0..2 * REMEMBERED {
+            known.keep((number.to_le_bytes().to_vec(), 0), &Node::Empty);
+        }
+        assert_eq!(known.sets.len(), REMEMBERED);
     }
 }

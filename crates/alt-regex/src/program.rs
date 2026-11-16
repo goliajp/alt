@@ -99,7 +99,7 @@ pub struct Program {
 }
 
 /// More instructions than this is refused.
-const MAX_INSTS: usize = 400_000;
+pub const MAX_INSTS: usize = 400_000;
 /// More steps through the tree of the pattern than this is refused.
 const MAX_WORK: usize = 4 * MAX_INSTS;
 /// The most capture slots the matcher that carries them may hold: one

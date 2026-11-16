@@ -167,3 +167,26 @@ fn the_tables_of_a_search_are_bounded_in_bytes_whatever_the_states_hold() {
     text.push(b'c');
     assert_eq!(re.find(&text), Some(0..9_001));
 }
+
+#[test]
+fn sets_of_characters_past_what_a_program_holds_are_refused_as_they_are_read() {
+    let utf8 = Options {
+        utf8: true,
+        ..Options::default()
+    };
+    // some twenty thousand sets, no two alike
+    let mut pattern = String::new();
+    let mut other = ('\u{4e00}'..).filter(|c| !c.is_alphabetic());
+    while pattern.len() + 24 < 1 << 18 {
+        pattern.push_str(&format!("[[:alpha:]{}]", other.next().unwrap()));
+    }
+    let begun = Instant::now();
+    let most = crate::most_held(|| {
+        let refused = Regex::with_options(pattern.as_bytes(), utf8);
+        assert_eq!(refused.err(), Some(Error::TooBig));
+    });
+    let cost = begun.elapsed();
+    assert!(cost < Duration::from_secs(5), "{cost:?}");
+    assert!(most < 96 << 20, "{most} bytes");
+    println!("refused after {cost:?}, holding {most} bytes");
+}
