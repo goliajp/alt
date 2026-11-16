@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: name nothing by a pattern whose search is in fact given up
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/funcname_git.rs
