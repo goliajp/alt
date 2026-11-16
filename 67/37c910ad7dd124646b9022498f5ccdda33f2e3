@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: slow the writer beside a switch down as it goes on
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/scan_daemon_switch.rs
