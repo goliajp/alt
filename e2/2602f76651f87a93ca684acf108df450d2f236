@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: name the type of the cases of the fixed sections
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/funcname_drivers.rs
