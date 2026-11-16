@@ -150,7 +150,8 @@ pub(crate) fn on_empty(prog: &Program) -> Option<[usize; FEW]> {
     let mut slots = [pike::UNSET; FEW];
     let width = FEW.min(2 * (prog.groups as usize + 1));
     let matched = match prog.backrefs {
-        true => backref::search(prog, b"", None, &mut slots[..width]),
+        // whether it matches is all that is asked of such a pattern here
+        true => backref::search(prog, b"", None, &mut slots[..2]),
         false => grouped(prog, &mut Cache::default(), b"", 0, 0, &mut slots[..width]),
     };
     (matched == Some(true)).then_some(slots)

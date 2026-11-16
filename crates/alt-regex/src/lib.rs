@@ -486,6 +486,9 @@ mod tests {
         assert_eq!(re.captures(b"aa").and_then(|c| c.get(2)), Some(0..1));
         assert!(re.captures_upto(b"aa", 1).is_none() && re.is_match(b"aa"));
         assert_eq!(re.find(b"aa"), Some(0..2));
+        // also in a text of nothing, whichever group is referred to
+        let re = Regex::new(b"(a?)(b?)(c?)((d)?)*\\4").unwrap();
+        assert!(re.is_match(b"") && re.find(b"") == Some(0..0));
         assert!(
             Regex::new(b"(a)\\1")
                 .unwrap()
