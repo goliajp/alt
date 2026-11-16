@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: test
+summary: use repositories an older alt left with unfinished appends
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/log_tails.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/mixed_versions.rs
