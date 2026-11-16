@@ -148,7 +148,13 @@ pub fn parse(pat: &[u8], at: &mut usize, opts: Options) -> Result<(Node, bool), 
         plain = false;
     }
     *at += 1;
-    let node = match members {
+    Ok((made(members, &pat[written..*at], negate, opts), !plain))
+}
+
+/// What matches one of `members`, or with `negate` anything else; the
+/// bracket expression was `written` so.
+fn made(members: Members, written: &[u8], negate: bool, opts: Options) -> Node {
+    match members {
         Members::Bytes(mut set) => {
             if opts.ignore_case {
                 set.read_in_upper_case();
@@ -163,7 +169,7 @@ pub fn parse(pat: &[u8], at: &mut usize, opts: Options) -> Result<(Node, bool), 
         }
         Members::Chars(mut ranges, classes) => {
             let flags = 4 + u8::from(opts.ignore_case) + 2 * u8::from(opts.newline);
-            block::remembered(&pat[written..*at], flags, || {
+            block::remembered(written, flags, || {
                 for name in classes {
                     let class = chars::class(name, opts.ignore_case);
                     ranges.extend(class.expect("a known class"));
@@ -179,6 +185,5 @@ pub fn parse(pat: &[u8], at: &mut usize, opts: Options) -> Result<(Node, bool), 
                 set
             })
         }
-    };
-    Ok((node, !plain))
+    }
 }
