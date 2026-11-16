@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: use no pattern for hunk headers where the diff attribute is set without a driver
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/funcname.rs
