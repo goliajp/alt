@@ -146,7 +146,9 @@ fn follow(
                 list.slots[row * width..][..width].copy_from_slice(slots);
                 continue;
             }
-            (false, _) | (true, Inst::Set(..) | Inst::Byte(..)) => list.insert(pc),
+            (false, _) | (true, Inst::Set(..) | Inst::Byte(..) | Inst::Switch(..)) => {
+                list.insert(pc)
+            }
             (true, _) => list.pass(pc),
         }
         match inst {
@@ -174,7 +176,7 @@ fn follow(
             }
             // a pattern with one is not searched this way
             Inst::BackRef(..) => {}
-            Inst::Set(..) | Inst::Byte(..) | Inst::Match => {
+            Inst::Set(..) | Inst::Byte(..) | Inst::Switch(..) | Inst::Match => {
                 let row = prog.rows[pc as usize] as usize;
                 list.slots[row * width..][..width].copy_from_slice(slots);
             }
@@ -256,6 +258,13 @@ pub fn search(
                         .is_some_and(|&b| prog.sets[set as usize].contains(b)) =>
                 {
                     target
+                }
+                Inst::Switch(copied, place) => {
+                    let taken = text.get(at).and_then(|&b| prog.taken(copied, place, b));
+                    match taken {
+                        Some(target) => target,
+                        None => continue,
+                    }
                 }
                 _ => continue,
             };

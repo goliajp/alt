@@ -6,7 +6,7 @@ use crate::program::{Inst, NO_JOIN};
 /// Whether a match can end both ways: behind a condition with nothing
 /// consumed after it, and without one. The C library keeps the second
 /// kind of path when it has both, whichever the pattern prefers.
-pub fn mixed_ends(insts: &[Inst], start: u32) -> bool {
+pub fn mixed_ends(insts: &[Inst], start: u32, exits: &[u32]) -> bool {
     const PLAIN: u8 = 1;
     const BEHIND: u8 = 2;
     // how the match is reached from an instruction with nothing
@@ -20,6 +20,8 @@ pub fn mixed_ends(insts: &[Inst], start: u32) -> bool {
         Inst::Set(_, next) | Inst::Byte(_, next) | Inst::BackRef(_, _, next) => {
             (reach[next as usize] & 3) << 2
         }
+        // some place of the set is its last
+        Inst::Switch(copied, _) => (reach[exits[copied as usize] as usize] & 3) << 2,
     };
     let mut reach = vec![0u8; insts.len()];
     // an instruction is made after the ones it leads to, but for the
@@ -34,7 +36,7 @@ pub fn mixed_ends(insts: &[Inst], start: u32) -> bool {
             | Inst::Set(_, next)
             | Inst::Byte(_, next)
             | Inst::BackRef(_, _, next) => next as usize > pc,
-            Inst::Match => false,
+            Inst::Match | Inst::Switch(..) => false,
         };
         if ahead {
             late.push(pc);
@@ -53,11 +55,10 @@ pub fn mixed_ends(insts: &[Inst], start: u32) -> bool {
     ends & PLAIN != 0 && ends & BEHIND != 0
 }
 
-/// Numbers the instructions that more than one path leads into. Inside
-/// a block of `blocks`, each from its start to its end and entered at
-/// one place, the byte read decides the path: a path that comes to an
-/// instruction there twice at one position has entered the block twice.
-pub fn joins(insts: &[Inst], start: u32, blocks: &[(u32, u32, u32)]) -> (Vec<u32>, u32) {
+/// Numbers the instructions that more than one path leads into. Behind
+/// each set of characters copied in comes one of `exits`. Inside a set
+/// the byte read decides the path, so its places are no joins.
+pub fn joins(insts: &[Inst], start: u32, exits: &[u32]) -> (Vec<u32>, u32) {
     let mut ways = vec![0u32; insts.len()];
     ways[start as usize] = 1;
     for inst in insts {
@@ -72,13 +73,11 @@ pub fn joins(insts: &[Inst], start: u32, blocks: &[(u32, u32, u32)]) -> (Vec<u32
                 ways[first as usize] += 1;
                 ways[second as usize] += 1;
             }
-            Inst::Match => {}
+            Inst::Match | Inst::Switch(..) => {}
         }
     }
-    for &(from, to, entry) in blocks {
-        let entered = ways[entry as usize];
-        ways[from as usize..to as usize].fill(1);
-        ways[entry as usize] = entered;
+    for &exit in exits {
+        ways[exit as usize] += 1;
     }
     let mut count = 0;
     let numbered = |ways: u32| match ways > 1 {
@@ -94,7 +93,7 @@ pub fn joins(insts: &[Inst], start: u32, blocks: &[(u32, u32, u32)]) -> (Vec<u32
 pub fn rows(insts: &[Inst]) -> (Vec<u32>, u32) {
     let mut count = 0;
     let numbered = |inst: &Inst| match inst {
-        Inst::Set(..) | Inst::Byte(..) | Inst::Match => {
+        Inst::Set(..) | Inst::Byte(..) | Inst::Switch(..) | Inst::Match => {
             count += 1;
             count - 1
         }
@@ -195,7 +194,7 @@ mod tests {
     fn the_instructions_inside_a_set_of_characters_are_no_joins() {
         let bytes = program("^([a-z]|x)+$", true);
         let characters = program("^([[:alpha:]]|x)+$", true);
-        assert!(characters.insts.len() > 20 * bytes.insts.len());
+        assert!(characters.insts.len() > 5 * bytes.insts.len());
         assert_eq!(characters.join_count, bytes.join_count);
     }
 }

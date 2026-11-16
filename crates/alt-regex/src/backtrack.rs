@@ -127,6 +127,12 @@ fn paths(
                 Inst::Set(set, next) if at < to && prog.sets[set as usize].contains(text[at]) => {
                     (pc, at) = (next, at + 1)
                 }
+                Inst::Switch(copied, place) if at < to => {
+                    match prog.taken(copied, place, text[at]) {
+                        Some(target) => (pc, at) = (target, at + 1),
+                        None => break,
+                    }
+                }
                 Inst::Split(first, second) => {
                     stack.push(Frame::Step(second, at));
                     pc = first;

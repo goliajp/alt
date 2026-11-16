@@ -2,6 +2,8 @@
 //! steps through, several at once.
 
 use crate::analysis::{classes, joins, mixed_ends, rows};
+use std::sync::Arc;
+
 use crate::block::{Block, EXIT};
 use crate::class::ByteSet;
 use crate::syntax::{Look, Node, Shape};
@@ -11,6 +13,9 @@ use crate::{Error, Options};
 pub enum Inst {
     /// Consume one byte of the set with this index.
     Set(u32, u32),
+    /// Consume one byte of a character, at this place of the block
+    /// copied in with this number: see [`Program::taken`].
+    Switch(u32, u32),
     /// Consume this byte.
     Byte(u8, u32),
     /// Go on at either target; the first is preferred.
@@ -26,6 +31,27 @@ pub enum Inst {
     Match,
 }
 
+/// A set of characters copied into a program: its places are the
+/// instructions from `base` on, and behind a character comes `next`.
+pub struct Copied {
+    block: Arc<Block>,
+    base: u32,
+    pub next: u32,
+}
+
+impl Program {
+    /// Where the instruction at place `place` of the copy `copied` goes
+    /// on byte `b`.
+    #[inline]
+    pub fn taken(&self, copied: u32, place: u32, b: u8) -> Option<u32> {
+        let copied = &self.blocks[copied as usize];
+        match copied.block.places[place as usize].on(b)? {
+            EXIT => Some(copied.next),
+            place => Some(copied.base + place),
+        }
+    }
+}
+
 pub struct Program {
     pub insts: Vec<Inst>,
     pub sets: Vec<ByteSet>,
@@ -35,6 +61,8 @@ pub struct Program {
     pub utf8: bool,
     /// No match begins inside a character.
     pub apart: bool,
+    /// The sets of characters copied in.
+    pub blocks: Vec<Copied>,
     /// Every match begins at the start of the text.
     pub anchored: bool,
     /// The only conditions are on the two ends of the text.
@@ -77,10 +105,9 @@ struct Compiler {
     ignore_case: bool,
     /// inside a copy of a repeated expression other than its first
     copied: bool,
-    /// the blocks copied in: where each begins, ends and is entered
-    blocks: Vec<(u32, u32, u32)>,
-    /// each block met, with the number of its first set
-    met: Vec<(*const Block, u32)>,
+    blocks: Vec<Copied>,
+    /// each block whose sets are among the program's
+    met: Vec<*const Block>,
 }
 
 pub fn compile(node: &Node, groups: u32, options: Options, shape: Shape) -> Result<Program, Error> {
@@ -110,14 +137,16 @@ pub fn compile(node: &Node, groups: u32, options: Options, shape: Shape) -> Resu
         return Err(Error::TooBig);
     }
     let (classes, members) = classes(&c.insts, &c.sets);
-    let (joins, join_count) = joins(&c.insts, start, &c.blocks);
-    let mixed_ends = mixed_ends(&c.insts, start);
+    let exits: Vec<u32> = c.blocks.iter().map(|copied| copied.next).collect();
+    let (joins, join_count) = joins(&c.insts, start, &exits);
+    let mixed_ends = mixed_ends(&c.insts, start, &exits);
     Ok(Program {
         insts: c.insts,
         sets: c.sets,
         start,
         groups,
         utf8: options.utf8,
+        blocks: c.blocks,
         apart: shape.apart,
         anchored: anchored(node),
         plain_looks,
@@ -204,36 +233,27 @@ impl Compiler {
         self.push(Inst::Set(u32::try_from(index).expect("few sets"), next))
     }
 
-    /// Copies the instructions of `block` in, to go on at `next`.
-    fn block(&mut self, block: &std::sync::Arc<Block>, next: u32) -> Result<u32, Error> {
-        self.work += block.insts.len();
-        if self.insts.len() + block.insts.len() > MAX_INSTS || self.work > MAX_WORK {
+    /// Copies the places of `block` in, to go on at `next`.
+    fn block(&mut self, block: &Arc<Block>, next: u32) -> Result<u32, Error> {
+        self.work += block.places.len();
+        if self.insts.len() + block.places.len() > MAX_INSTS || self.work > MAX_WORK {
             return Err(Error::TooBig);
         }
-        let pointer = std::sync::Arc::as_ptr(block);
-        let sets = match self.met.iter().find(|(met, _)| *met == pointer) {
-            Some((_, sets)) => *sets,
-            None => {
-                let sets = u32::try_from(self.sets.len()).expect("few sets");
-                self.sets.extend(&block.sets);
-                self.met.push((pointer, sets));
-                sets
-            }
-        };
+        let pointer = Arc::as_ptr(block);
+        if !self.met.contains(&pointer) {
+            self.sets.extend(&block.sets);
+            self.met.push(pointer);
+        }
         let base = u32::try_from(self.insts.len()).expect("below the limit");
-        let placed = |target: u32| match target {
-            EXIT => next,
-            target => base + target,
-        };
+        let number = u32::try_from(self.blocks.len()).expect("below the limit");
+        let places = 0..block.places.len() as u32;
         self.insts
-            .extend(block.insts.iter().map(|inst| match *inst {
-                Inst::Set(set, target) => Inst::Set(sets + set, placed(target)),
-                Inst::Byte(b, target) => Inst::Byte(b, placed(target)),
-                Inst::Split(first, second) => Inst::Split(placed(first), placed(second)),
-                other => other,
-            }));
-        let end = u32::try_from(self.insts.len()).expect("below the limit");
-        self.blocks.push((base, end, base + block.start));
+            .extend(places.map(|place| Inst::Switch(number, place)));
+        self.blocks.push(Copied {
+            block: block.clone(),
+            base,
+            next,
+        });
         Ok(base + block.start)
     }
 

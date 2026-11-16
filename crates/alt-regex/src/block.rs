@@ -1,24 +1,52 @@
-//! A set of characters as instructions over the bytes of their UTF-8
-//! forms, so that the matchers go on stepping bytes. The instructions of
-//! a set are made once and copied into each program that uses it; forms
-//! that end alike share their ends.
+//! A set of characters as the places a matcher passes through while it
+//! steps over the bytes of one of them: at each place the byte read
+//! decides the next. The places of a set are made once and shared by
+//! every program that uses it; forms that end alike share their ends.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::chars::CharSet;
 use crate::class::ByteSet;
-use crate::program::Inst;
 use crate::syntax::Node;
 
-/// The target of an instruction that leaves the block.
+/// The place behind the last byte of a character.
 pub const EXIT: u32 = u32::MAX;
 
-/// The instructions that take one character of a set. Targets count
-/// from the start of the block, and sets from its own.
+/// More edges than this are found by a table.
+const LISTED: usize = 4;
+
+/// One place in a character: the bytes that lead on from it, each set
+/// with the place it leads to.
+#[derive(Debug, PartialEq)]
+pub struct Place {
+    edges: Edges,
+    /// for each byte the number of its edge and one, or zero
+    table: Option<Box<[u8; 256]>>,
+}
+
+impl Place {
+    /// Where byte `b` leads.
+    #[inline]
+    pub fn on(&self, b: u8) -> Option<u32> {
+        match &self.table {
+            Some(table) => {
+                let edge = usize::from(table[usize::from(b)]).checked_sub(1)?;
+                Some(self.edges[edge].1)
+            }
+            None => {
+                let edge = self.edges.iter().find(|(bytes, _)| bytes.contains(b))?;
+                Some(edge.1)
+            }
+        }
+    }
+}
+
+/// The places of the characters of a set, and where they begin.
 #[derive(Debug, PartialEq)]
 pub struct Block {
-    pub insts: Vec<Inst>,
+    pub places: Vec<Place>,
+    /// every set of bytes that some place tells from the others
     pub sets: Vec<ByteSet>,
     pub start: u32,
 }
@@ -137,42 +165,25 @@ impl Builder {
         edges
     }
 
-    /// The places as instructions, each after the ones it leads to.
     fn block(self, start: u32) -> Block {
-        let mut insts = Vec::new();
         let mut sets: Vec<ByteSet> = Vec::new();
-        let mut numbers: HashMap<ByteSet, u32, Mixed> = HashMap::default();
-        let mut entries = Vec::with_capacity(self.places.len());
-        for edges in &self.places {
-            let first = insts.len() as u32;
-            for (bytes, behind) in edges {
-                let target = match *behind {
-                    EXIT => EXIT,
-                    place => entries[place as usize],
-                };
-                insts.push(match bytes.single() {
-                    Some(b) => Inst::Byte(b, target),
-                    None => {
-                        let number = *numbers.entry(*bytes).or_insert_with(|| {
-                            sets.push(*bytes);
-                            sets.len() as u32 - 1
-                        });
-                        Inst::Set(number, target)
-                    }
-                });
+        let mut seen: std::collections::HashSet<ByteSet, Mixed> = Default::default();
+        let places = self.places.into_iter().map(|edges| {
+            let mut table = (edges.len() > LISTED).then(|| Box::new([0u8; 256]));
+            for (number, (bytes, _)) in edges.iter().enumerate() {
+                if seen.insert(*bytes) {
+                    sets.push(*bytes);
+                }
+                if let Some(table) = &mut table {
+                    bytes.each(|b| table[usize::from(b)] = number as u8 + 1);
+                }
             }
-            // the choice between them, the last two first
-            let mut entry = insts.len() as u32 - 1;
-            for edge in (first..entry).rev() {
-                insts.push(Inst::Split(edge, entry));
-                entry = insts.len() as u32 - 1;
-            }
-            entries.push(entry);
-        }
+            Place { edges, table }
+        });
         Block {
-            insts,
+            places: places.collect(),
             sets,
-            start: entries[start as usize],
+            start,
         }
     }
 }
@@ -302,9 +313,9 @@ pub(crate) mod tests {
         let Node::Class(block) = node(&CharSet::new(vec![(0, u32::MAX)])) else {
             panic!("a set beyond ASCII is a block");
         };
-        // one instruction for each of the five bytes that may follow,
-        // and the leading bytes that differ in what follows them
-        assert!(block.insts.len() < 40, "{}", block.insts.len());
+        // one place for each of the five bytes that may follow, and
+        // the leading bytes that differ in what follows them
+        assert!(block.places.len() < 20, "{}", block.places.len());
         let twice = remembered(b"[x]", 0, || CharSet::new(vec![(0x100, 0x200)]));
         let again = remembered(b"[x]", 0, || unreachable!("made once"));
         assert_eq!(twice, again);

@@ -76,6 +76,13 @@ pub fn search(prog: &Program, text: &[u8], only: Option<usize>, found: &mut [usi
                     {
                         (pc, at, behind) = (next, at + 1, false)
                     }
+                    Inst::Switch(copied, place) => {
+                        let taken = text.get(at).and_then(|&b| prog.taken(copied, place, b));
+                        match taken {
+                            Some(target) => (pc, at, behind) = (target, at + 1, false),
+                            None => break,
+                        }
+                    }
                     Inst::Split(first, second) => {
                         // behind a turn of a loop that took nothing, the
                         // only way on is out of the loop

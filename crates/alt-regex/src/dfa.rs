@@ -92,7 +92,11 @@ impl Cache {
                 Inst::Look(Look::TextEnd, next) if at_end => self.stack.push(next),
                 Inst::Look(Look::TextStart, _) | Inst::BackRef(..) => {}
                 // waits in the state for the end of the text
-                Inst::Look(..) | Inst::Set(..) | Inst::Byte(..) | Inst::Match => out.push(pc),
+                Inst::Look(..)
+                | Inst::Set(..)
+                | Inst::Byte(..)
+                | Inst::Switch(..)
+                | Inst::Match => out.push(pc),
             }
         }
         out.sort_unstable();
@@ -139,6 +143,7 @@ impl Cache {
             .filter_map(|&pc| match prog.insts[pc as usize] {
                 Inst::Byte(b, next) if b == byte => Some(next),
                 Inst::Set(set, next) if prog.sets[set as usize].contains(byte) => Some(next),
+                Inst::Switch(copied, place) => prog.taken(copied, place, byte),
                 _ => None,
             })
             .collect();
