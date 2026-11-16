@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: name a file to add from the directory the command runs in
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/config_paths.rs
