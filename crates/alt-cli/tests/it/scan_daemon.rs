@@ -107,8 +107,10 @@ fn served_watching(most: Option<usize>) -> (alt_os::temp::TempDir, Stop) {
     write(root, "docs/guide.md", "guide\n");
     run(root, &["add", "."], false);
     run(root, &["commit", "-m", "base"], false);
-    assert!(agree(root, "clean").contains("nothing to commit"));
+    // whatever fails from here on, the daemon is ended
+    run(root, &["status"], true);
     let stop = Stop(daemon_pid(root));
+    assert!(agree(root, "clean").contains("nothing to commit"));
     (dir, stop)
 }
 

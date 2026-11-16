@@ -179,7 +179,10 @@ mod tests {
         let dir = tmp.path();
         let of = |name: &str| FileStat::of(&std::fs::metadata(dir.join(name)).unwrap());
         std::fs::write(dir.join("before"), b"x").unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(30));
+        // however coarse the clock: until it has moved past that file
+        while !Clock::read(dir).unwrap().settled(&of("before")) {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
         for round in 0..200 {
             let clock = Clock::read(dir).unwrap();
             std::fs::write(dir.join("after"), b"x").unwrap();
