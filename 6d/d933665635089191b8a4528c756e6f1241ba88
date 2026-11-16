@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: find the files core.excludesFile and core.attributesFile name where git finds them
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/convert.rs
+touched: crates/alt-cli/src/native/settings.rs
+touched: crates/alt-cli/tests/it/config_paths.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-worktree/src/ignore.rs
