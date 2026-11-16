@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: build a state and settle the end of a text in functions the searches never inline
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/dfa.rs
