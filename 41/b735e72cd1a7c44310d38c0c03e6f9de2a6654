@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: refuse a merge that stops in conflict over a path out of tree before it is written
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/merge.rs
+touched: crates/alt-cli/src/native/path_gate.rs
+touched: crates/alt-cli/tests/it/replay_refused.rs
