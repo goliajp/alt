@@ -76,7 +76,7 @@ mod linux {
     }
 
     pub(super) enum State {
-        /// watching has not been tried
+        /// watching was not tried, or only while an ignore file could not be read
         New,
         Watched(Box<Watched>),
         /// not watched: tried again once the tree is on another basis than
@@ -148,9 +148,7 @@ mod linux {
         let started = alt_worktree::watch_allowance()
             .and_then(|most| Watched::start(root, most, snapshot, options));
         match started {
-            Ok(Some(watched)) => State::Watched(Box::new(watched)),
-            // an ignore file could not be read: the next command tries
-            Ok(None) => State::New,
+            Ok(watched) => watched.map_or(State::New, |w| State::Watched(Box::new(w))),
             Err(e) => off(&e, basis),
         }
     }

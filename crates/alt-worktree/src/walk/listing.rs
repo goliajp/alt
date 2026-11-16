@@ -92,15 +92,7 @@ impl Walk<'_> {
                         continue;
                     }
                     let Some(item) = names.find(name, false) else {
-                        // a directory by the name of a tracked file is no
-                        // untracked path, as for git; its files are, where
-                        // each is asked for
-                        if self.untracked == Untracked::Normal
-                            && let Some(dir) = names.find(name, true)
-                        {
-                            here.taken[dir] = true;
-                        }
-                        self.gone(first, end, reach, found);
+                        self.no_file(names, name, (first, end), reach, here, found);
                         continue;
                     };
                     here.taken[item] = true;
@@ -124,6 +116,26 @@ impl Walk<'_> {
                 },
             }
         }
+    }
+
+    /// The entries `at` have no file by their `name`. A directory by that
+    /// name is no untracked path, as for git; its files are, where each is
+    /// asked for.
+    fn no_file(
+        &self,
+        names: &Listing,
+        name: &[u8],
+        at: (usize, usize),
+        reach: Reach,
+        here: &mut Here,
+        found: &mut Found,
+    ) {
+        if self.untracked == Untracked::Normal
+            && let Some(dir) = names.find(name, true)
+        {
+            here.taken[dir] = true;
+        }
+        self.gone(at.0, at.1, reach, found);
     }
 
     /// Goes over what the listing `names` of the directory `base` has that

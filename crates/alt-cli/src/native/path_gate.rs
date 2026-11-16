@@ -36,21 +36,30 @@ impl NativeRepo<'_> {
         self.ensure_difference_allowed(&was, &index_entries(&self.index()?))
     }
 
-    /// Refuses a replay of `commits` before any of it is done, when a path
-    /// one of them changes is one the policy leaves out: a replay refused
+    /// The trees of `orig` and `onto`, for a replay of `commits` that
+    /// begins with a checkout from the one to the other. Refused before any
+    /// of it is done when that checkout would be, or when a path one of the
+    /// commits changes is one the policy leaves out: a replay refused
     /// midway would leave the branch between where it was and where it goes.
-    pub(super) fn ensure_replay_allowed(&self, commits: &[ObjectId]) -> Res<()> {
+    pub(super) fn replay_trees(
+        &self,
+        orig: ObjectId,
+        onto: ObjectId,
+        commits: impl Iterator<Item = ObjectId>,
+    ) -> Res<(Vec<WorkEntry>, Vec<WorkEntry>)> {
+        let (old, target) = (self.commit_entries(orig)?, self.commit_entries(onto)?);
+        self.preflight_checkout(&old, &target)?;
         if self.caps.path_allow.is_empty() {
-            return Ok(());
+            return Ok((old, target));
         }
-        for &commit in commits {
+        for commit in commits {
             let was = match self.commit_parents(commit)?.first() {
                 Some(&parent) => self.commit_entries(parent)?,
                 None => Vec::new(),
             };
             self.ensure_difference_allowed(&was, &self.commit_entries(commit)?)?;
         }
-        Ok(())
+        Ok((old, target))
     }
 
     /// Every path `now` adds to `was`, changes or leaves out is allowed.

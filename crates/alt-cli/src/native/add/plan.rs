@@ -36,7 +36,9 @@ fn displaced<'a>(before: &'a Index, taken: &[&BString]) -> Vec<&'a [u8]> {
         let path = path.as_slice();
         for dir in above(path) {
             let from = entries.partition_point(|e| e.path.as_slice() < dir);
-            let named = entries[from..].iter().take_while(|e| e.path.as_slice() == dir);
+            let named = entries[from..]
+                .iter()
+                .take_while(|e| e.path.as_slice() == dir);
             gone.extend(named.filter(whole).map(|e| e.path.as_slice()));
         }
         // what sorts before `path/`: the path, and a name that goes on
@@ -44,7 +46,9 @@ fn displaced<'a>(before: &'a Index, taken: &[&BString]) -> Vec<&'a [u8]> {
         let goes_on = |name: &[u8]| name.starts_with(path) && name.get(path.len()) < Some(&b'/');
         let from = entries.partition_point(|e| e.path.as_slice() <= path || goes_on(&e.path));
         let beneath = |e: &&IndexEntry| e.path.get(path.len()) == Some(&b'/');
-        let inside = entries[from..].iter().take_while(|e| e.path.starts_with(path));
+        let inside = entries[from..]
+            .iter()
+            .take_while(|e| e.path.starts_with(path));
         let inside = inside.take_while(beneath);
         gone.extend(inside.filter(whole).map(|e| e.path.as_slice()));
     }

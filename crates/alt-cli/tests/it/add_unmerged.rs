@@ -133,8 +133,16 @@ fn add_beside_the_stages_of_a_conflict_keeps_and_drops_what_git_does() {
     let theirs = entries(&trees, &trees.at("git").join(".git/index"));
     let ours = entries(&trees, &trees.at("direct").join(".alt/index"));
     assert_eq!(ours, theirs, "the stages of the merge");
-    let stages = |index: &[u8]| index.split(|b| *b == 0).filter(|e| e.contains(&b'\t')).count();
-    assert_eq!(stages(&theirs) - 4, CASES.len() * (CONFLICTED.len() * 3 + 5));
+    let stages = |index: &[u8]| {
+        index
+            .split(|b| *b == 0)
+            .filter(|e| e.contains(&b'\t'))
+            .count()
+    };
+    assert_eq!(
+        stages(&theirs) - 4,
+        CASES.len() * (CONFLICTED.len() * 3 + 5)
+    );
     for (n, (then, at, args)) in CASES.iter().enumerate() {
         for tree in ["direct", "served", "git"] {
             change(&trees.at(tree).join(format!("c{n}")), *then);

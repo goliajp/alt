@@ -31,11 +31,18 @@ fn a_directory_in_place_of_a_tracked_file_is_no_untracked_path() {
     }
     let short = git(&trees.at("git"), &["status", "--porcelain"]);
     let short = String::from_utf8(short.stdout).unwrap();
-    let theirs: Vec<&str> = short.lines().filter_map(|l| l.strip_prefix("?? ")).collect();
+    let theirs: Vec<&str> = short
+        .lines()
+        .filter_map(|l| l.strip_prefix("?? "))
+        .collect();
     assert_eq!(theirs, [".gitignore", "new/"]);
     for (tree, daemon) in [("direct", false), ("served", true)] {
         let ours = run(&trees.at(tree), &["status", "--json"], daemon);
         let ours: alt_json::Value = alt_json::from_slice(ours.as_bytes()).unwrap();
-        assert_eq!(ours["untracked"], alt_json::json!([".gitignore", "new/"]), "{tree}");
+        assert_eq!(
+            ours["untracked"],
+            alt_json::json!([".gitignore", "new/"]),
+            "{tree}"
+        );
     }
 }

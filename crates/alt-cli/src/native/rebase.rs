@@ -74,12 +74,8 @@ impl NativeRepo<'_> {
             }
         }
 
-        // refused before the branch is left, a rebase leaves nothing behind
-        let old = self.commit_entries(orig)?;
-        let target = self.commit_entries(onto)?;
-        self.preflight_checkout(&old, &target)?;
-        let picked = todo.iter().filter(|(action, _)| *action != Action::Drop);
-        self.ensure_replay_allowed(&picked.map(|(_, c)| *c).collect::<Vec<_>>())?;
+        let picked = todo.iter().filter(|step| step.0 != Action::Drop);
+        let (old, target) = self.replay_trees(orig, onto, picked.map(|step| step.1))?;
         let recovery = Some(self.snapshot_workspace()?);
 
         // hand HEAD to the scratch ref, sitting on the new base

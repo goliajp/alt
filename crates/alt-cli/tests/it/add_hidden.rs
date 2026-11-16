@@ -54,7 +54,13 @@ fn said(output: &Output) -> (Option<i32>, Vec<&BStr>) {
 fn files(trees: &Trees) {
     for (n, _) in CASES.iter().enumerate() {
         // `kept.log` is tracked before a rule comes to hide its name
-        for file in ["top.txt", "sub/f.txt", "sub/deep/g.txt", "other/o.txt", "kept.log"] {
+        for file in [
+            "top.txt",
+            "sub/f.txt",
+            "sub/deep/g.txt",
+            "other/o.txt",
+            "kept.log",
+        ] {
             trees.write(&format!("c{n}/{file}"), "base\n");
         }
     }
@@ -62,7 +68,14 @@ fn files(trees: &Trees) {
     each(trees, &["commit", "-m", "cases"]);
     for (n, _) in CASES.iter().enumerate() {
         trees.write(&format!("c{n}/.gitignore"), "/sub/\n*.log\n");
-        for file in ["top.txt", "sub/f.txt", "sub/n.txt", "x.log", "other/o.txt", "kept.log"] {
+        for file in [
+            "top.txt",
+            "sub/f.txt",
+            "sub/n.txt",
+            "x.log",
+            "other/o.txt",
+            "kept.log",
+        ] {
             trees.write(&format!("c{n}/{file}"), "now\n");
         }
     }

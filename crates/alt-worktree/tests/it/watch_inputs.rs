@@ -105,11 +105,7 @@ fn ignore_files_outside_the_tree_are_followed_from_the_tick_they_are_written_in(
     };
     until_settled(&root.join(".alt"), &own);
     // the later file is above the earlier
-    let nothing: [&str; 0] = [];
-    assert_eq!(
-        check(&mut watched),
-        (nothing.map(str::to_owned).to_vec(), 2)
-    );
+    assert_eq!(check(&mut watched), (Vec::new(), 2));
     assert_eq!(check(&mut watched).1, 2);
     // what the rules hid is watched once they show it
     std::fs::write(&own, "*.md\n").unwrap();

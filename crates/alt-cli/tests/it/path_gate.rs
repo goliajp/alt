@@ -141,7 +141,10 @@ fn path_allow_denies_a_rebase_and_leaves_no_part_of_it() {
     };
     let before = state();
     for upstream in ["across", "beside"] {
-        fails_with(alt_as(repo, &["rebase", upstream], "bot"), "capability denied");
+        fails_with(
+            alt_as(repo, &["rebase", upstream], "bot"),
+            "capability denied",
+        );
         assert_eq!(state(), before, "after rebase {upstream}");
         assert!(!repo.join("src/o.rs").exists());
     }
