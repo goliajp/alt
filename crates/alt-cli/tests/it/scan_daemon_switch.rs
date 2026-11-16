@@ -95,7 +95,9 @@ fn what_others_do_to_the_tree_while_a_switch_runs_is_in_the_next_status() {
                             .unwrap();
                     }
                     n += 1;
-                    std::thread::sleep(std::time::Duration::from_millis(3));
+                    // slower as it goes on: a switch that takes minutes on
+                    // a busy disk is not buried in files
+                    std::thread::sleep(std::time::Duration::from_millis(3 + n / 8));
                 }
                 n
             });
