@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: fsync the logs before indexing them and drop only a failed index write
+author-type: human
+author: doracawl
+touched: crates/alt-odb/src/odb.rs
+touched: crates/alt-odb/src/odb/durable.rs
+touched: crates/alt-odb/src/tier1.rs
+touched: crates/alt-odb/tests/it/cache_failure.rs
+touched: crates/alt-store/src/runs.rs
