@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: perf
+summary: look up what an add displaces in the ordered index and check an index in one pass
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/add/plan.rs
+touched: crates/alt-git-index/src/clash.rs
