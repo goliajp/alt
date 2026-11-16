@@ -84,10 +84,8 @@ impl Writer<'_> {
 
     /// A random expression; says whether it may match nothing. Nothing
     /// that can match the empty string is repeated without bound: the C
-    /// library may then never answer, and where it does it leaves a
-    /// loop behind a turn that took nothing before it tries the other
-    /// branches of that turn, so that for `(|a)+(a*b)` on `aaab` it
-    /// gives the first group to the third `a`.
+    /// library may then never answer, and where it does it can give a
+    /// group a turn that the turns before it leave no room for.
     fn expression(&mut self, depth: u32) -> bool {
         let pieces = 1 + self.rng.below(3);
         // whether the branch being written can be empty so far, and
@@ -123,15 +121,18 @@ impl Writer<'_> {
                     Some(false)
                 }
                 7 | 8 => {
+                    // now and then a group of nothing
                     self.op(b"(");
-                    let empty = self.expression(depth - 1);
+                    let empty = self.rng.below(8) == 0 || self.expression(depth - 1);
                     self.op(b")");
                     Some(empty)
                 }
                 _ => {
-                    let left = self.expression(depth - 1);
+                    // now and then a branch of nothing
+                    let bare = self.rng.below(8);
+                    let left = bare == 0 || self.expression(depth - 1);
                     self.op(b"|");
-                    let right = self.expression(depth - 1);
+                    let right = bare == 1 || self.expression(depth - 1);
                     // the branch ends in the left side, and the right
                     // side begins the next
                     before |= left || right;

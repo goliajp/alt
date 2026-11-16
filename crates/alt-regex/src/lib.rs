@@ -356,6 +356,13 @@ mod tests {
         assert_eq!(found, vec![Some(0..1), None, Some(0..1)]);
         let found = spans("(a|b)+", "abab").unwrap();
         assert_eq!(found, vec![Some(0..4), Some(3..4)]);
+        // a first branch of nothing is tried behind the second
+        assert_eq!(spans("|(b?)", ""), Some(vec![Some(0..0), Some(0..0)]));
+        assert_eq!(spans("(b?)|", ""), Some(vec![Some(0..0), Some(0..0)]));
+        let found = spans("(|a)+(a*b)", "aaab").unwrap();
+        assert_eq!(found, vec![Some(0..4), Some(2..3), Some(3..4)]);
+        let found = spans("(()|a)+(a*b)", "aaab").unwrap();
+        assert_eq!(found, vec![Some(0..4), Some(0..0), Some(0..0), Some(0..4)]);
     }
 
     #[test]

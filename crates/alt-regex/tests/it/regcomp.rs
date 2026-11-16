@@ -251,7 +251,19 @@ fn back_references_match_as_the_c_library_matches_them() {
 }
 
 /// Patterns whose groups could lie in more than one place.
-const AMBIGUOUS: [(&str, &str); 44] = [
+const AMBIGUOUS: [(&str, &str); 55] = [
+    // a first branch of nothing is tried behind the second
+    ("|(b?)", ""),
+    ("a(|(b?))", "a"),
+    ("(|a)+(a*b)", "aaab"),
+    ("(a|)+(a*b)", "aaab"),
+    ("(()|a)+(a*b)", "aaab"),
+    ("(a{0}b{0}|(b?))", ""),
+    ("(|(a)|(b?))", ""),
+    ("((a?)||(b?))", ""),
+    ("(|a|ab)(b?)", "ab"),
+    ("(|(a))(|(a))", "a"),
+    ("(|(a)|b)*", "ab"),
     ("(a|ab)(c|bcd)(d*)", "abcd"),
     ("^([a-z]+|[a-z]+ [a-z]+)( .*)?$", "foo bar baz"),
     ("(a|ab)(bc|c)?", "abc"),

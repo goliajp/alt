@@ -124,6 +124,15 @@ pub fn parse_shaped(pat: &[u8], opts: Options) -> Result<(Node, u32, Shape), Err
     Ok((node, groups, shape))
 }
 
+/// Whether nothing was written, or only repetitions of none.
+fn nothing(node: &Node) -> bool {
+    match node {
+        Node::Empty => true,
+        Node::Concat(items) => items.iter().all(nothing),
+        _ => false,
+    }
+}
+
 impl<'a> Parser<'a> {
     fn ere(&self) -> bool {
         self.opts.syntax == Syntax::Extended
@@ -166,6 +175,10 @@ impl<'a> Parser<'a> {
             tall = tall.max(self.tall);
         }
         self.tall = tall;
+        // the C library tries a first branch of nothing behind the second
+        if branches.len() > 1 && nothing(&branches[0]) {
+            branches.swap(0, 1);
+        }
         Ok(match branches.len() {
             1 => branches.pop().expect("one branch"),
             _ => Node::Alt(branches),
