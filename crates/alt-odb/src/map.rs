@@ -203,15 +203,16 @@ impl ObjectMap {
         // the padded key range also holds shorter oids ending in zeros
         for rec in self.log.range(&lo, &hi, usize::MAX).map_err(lift)? {
             let entry = MapEntry::parse(&rec)?;
-            // an object two writers stored at once has a record from each
-            let listed = out.iter().any(|seen| seen.git == entry.git);
-            if !listed && entry.git.to_string().starts_with(hex) {
+            if entry.git.to_string().starts_with(hex) {
                 out.push(entry);
-                if out.len() >= cap {
-                    break;
-                }
             }
         }
+        // the range comes run by run and then the tail, not in order of
+        // id, and an object two writers stored at once has a record from
+        // each: in order, those lie next to each other
+        out.sort_by_key(|entry| entry.git);
+        out.dedup_by_key(|entry| entry.git);
+        out.truncate(cap);
         Ok(out)
     }
 
