@@ -473,6 +473,13 @@ mod tests {
             spans("(a)(b)\\2\\1", "abba"),
             Some(vec![Some(0..4), Some(0..1), Some(1..2)])
         );
+        // turns inside turns before a reference: the ways to split the
+        // words between them are many, the places to stand few
+        let re = Regex::new(b"(\\w+) (\\w+ *)*\\1").unwrap();
+        let line = b"the quick brown fox jumps over the lazy dog and the cat";
+        assert_eq!(re.find(line), Some(0..51));
+        let found = re.captures(line).unwrap();
+        assert_eq!((found.get(1), found.get(2)), (Some(0..3), Some(44..48)));
         // asked for fewer groups than a reference names, the C library
         // finds no match; asked for none, it finds one
         let re = Regex::new(b"((a)\\2)").unwrap();

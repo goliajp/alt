@@ -6,7 +6,7 @@
 //! reports no match.
 
 use crate::pike::{UNSET, holds};
-use crate::program::{Inst, Program};
+use crate::program::{Inst, NO_JOIN, Program};
 
 /// The most steps one search takes.
 pub const MAX_STEPS: usize = 1 << 22;
@@ -23,6 +23,53 @@ enum Frame {
     Slot(u32, usize),
     /// where a loop was last entered on this path
     Loop(u32, usize),
+}
+
+/// The places a search has stood at: an instruction where paths meet, a
+/// position, and what the groups referred to held. From a place it
+/// stood at before, nothing new is found. It is a table of what was
+/// seen last, 2 MiB of it, made once a search has taken some steps.
+struct Stood {
+    table: Vec<[u64; 2]>,
+    /// the capture slots of the groups referred to
+    referred: Vec<usize>,
+}
+
+impl Stood {
+    const PLACES: usize = 1 << 17;
+    /// A search of fewer steps keeps no table.
+    const AFTER: usize = 1 << 10;
+
+    fn new(prog: &Program) -> Self {
+        let mut referred = Vec::new();
+        for inst in &prog.insts {
+            if let Inst::BackRef(group, ..) = *inst {
+                referred.extend([2 * group as usize, 2 * group as usize + 1]);
+            }
+        }
+        referred.sort_unstable();
+        referred.dedup();
+        let table = Vec::new();
+        Stood { table, referred }
+    }
+
+    /// Whether the search stood here before; it has now. A loop come
+    /// back to with nothing taken is no place to ask of: it is left.
+    fn before(&mut self, place: [usize; 3], slots: &[usize]) -> bool {
+        let mut key = [0x9e37_79b9_7f4a_7c15u64, 0xc2b2_ae3d_27d4_eb4f];
+        let held = self.referred.iter().map(|&slot| slots[slot]);
+        for value in place.into_iter().chain(held) {
+            key[0] = (key[0] ^ value as u64).wrapping_mul(0xff51_afd7_ed55_8ccd);
+            key[0] ^= key[0] >> 32;
+            key[1] = (key[1].rotate_left(23) ^ value as u64).wrapping_mul(0xc4ce_b9fe_1a85_ec53);
+        }
+        key[1] |= 1;
+        if self.table.is_empty() {
+            self.table = vec![[0; 2]; Self::PLACES];
+        }
+        let at = key[0] as usize % Self::PLACES;
+        std::mem::replace(&mut self.table[at], key) == key
+    }
 }
 
 fn same(a: &[u8], b: &[u8], fold: bool) -> bool {
@@ -67,20 +114,16 @@ pub fn search(
     let mut entered = vec![UNSET; prog.insts.len()];
     let mut stack = Vec::new();
     let mut steps = MAX_STEPS;
-    let asked = found.len();
+    let (mut stood, asked) = (Stood::new(prog), found.len());
     let first = only.unwrap_or(0);
-    let last = match only.is_some() || prog.anchored {
-        true => first,
-        false => text.len(),
-    };
-    for from in first..=last {
+    let fixed = only.is_some() || prog.anchored;
+    for from in first..=if fixed { first } else { text.len() } {
         if prog.apart && crate::chars::inside(text, from) {
             continue;
         }
         // whether a match was found, and whether behind a condition
         let mut matched = None;
         slots.fill(UNSET);
-        entered.fill(UNSET);
         stack.push(Frame::Step(prog.start, from));
         'paths: while let Some(frame) = stack.pop() {
             let (mut pc, mut at, mut behind) = match frame {
@@ -99,6 +142,11 @@ pub fn search(
                     return None;
                 }
                 steps -= 1;
+                let place = [pc as usize | usize::from(behind) << 32, at, from];
+                let met = prog.joins[pc as usize] != NO_JOIN && entered[pc as usize] != at;
+                if met && steps < MAX_STEPS - Stood::AFTER && stood.before(place, &slots) {
+                    break;
+                }
                 match prog.insts[pc as usize] {
                     Inst::Byte(b, next) if text.get(at) == Some(&b) => {
                         (pc, at, behind) = (next, at + 1, false)
