@@ -49,6 +49,8 @@ pub struct Block {
     /// every set of bytes that some place tells from the others
     pub sets: Vec<ByteSet>,
     pub start: u32,
+    /// the characters of one byte
+    pub ascii: ByteSet,
 }
 
 /// The bytes that lead on from one place in a form, each set with the
@@ -165,7 +167,7 @@ impl Builder {
         edges
     }
 
-    fn block(self, start: u32) -> Block {
+    fn block(self, start: u32, ascii: ByteSet) -> Block {
         let mut sets: Vec<ByteSet> = Vec::new();
         let mut seen: std::collections::HashSet<ByteSet, Mixed> = Default::default();
         let places = self.places.into_iter().map(|edges| {
@@ -184,6 +186,7 @@ impl Builder {
             places: places.collect(),
             sets,
             start,
+            ascii,
         }
     }
 }
@@ -217,7 +220,7 @@ pub fn node(set: &CharSet) -> Node {
         }
     }
     let start = builder.place(edges);
-    Node::Class(Arc::new(builder.block(start)))
+    Node::Class(Arc::new(builder.block(start, ascii)))
 }
 
 /// The sets made so far, by what was written and how it was read.

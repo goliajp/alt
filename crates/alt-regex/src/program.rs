@@ -37,6 +37,9 @@ pub struct Copied {
     block: Arc<Block>,
     base: u32,
     pub next: u32,
+    /// the first place, and the characters of one byte
+    start: u32,
+    ascii: ByteSet,
 }
 
 impl Program {
@@ -45,6 +48,11 @@ impl Program {
     #[inline]
     pub fn taken(&self, copied: u32, place: u32, b: u8) -> Option<u32> {
         let copied = &self.blocks[copied as usize];
+        // most text is ASCII, which only the first place takes
+        if b < 0x80 {
+            let taken = place == copied.start && copied.ascii.contains(b);
+            return taken.then_some(copied.next);
+        }
         match copied.block.places[place as usize].on(b)? {
             EXIT => Some(copied.next),
             place => Some(copied.base + place),
@@ -253,6 +261,8 @@ impl Compiler {
             block: block.clone(),
             base,
             next,
+            start: block.start,
+            ascii: block.ascii,
         });
         Ok(base + block.start)
     }
