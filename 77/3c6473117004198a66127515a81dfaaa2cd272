@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: ask the c library in a process that is stopped when it does not answer, and write repetitions behind one another as often as before
+author-type: human
+author: doracawl
+touched: crates/alt-regex/tests/it/regcomp/oracle.rs
+touched: crates/alt-regex/tests/it/regcomp/random.rs
