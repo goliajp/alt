@@ -15,4 +15,5 @@ mod odb_lifecycle;
 mod rewind_interrupted;
 mod second_handle;
 mod synced_marker;
+mod synced_note;
 mod synced_writers;

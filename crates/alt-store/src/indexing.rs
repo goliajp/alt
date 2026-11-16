@@ -20,8 +20,8 @@ impl ChunkStore {
         tail: Tail,
     ) -> Result<Self, StoreError> {
         let dir = dir.into();
-        let (sealed, active, index) = load(&dir, known, &tail)?;
-        Ok(Self {
+        let ((sealed, active, index), fresh) = load(&dir, known, &tail)?;
+        let mut store = Self {
             dir,
             opts,
             sealed,
@@ -34,14 +34,18 @@ impl ChunkStore {
             newer: OnceLock::new(),
             keep: false,
             tail,
-        })
+        };
+        store.settle(fresh, &store.tail.clone())?;
+        Ok(store)
     }
 
     /// Reads the packs and the index again, for the holder of the write
     /// lock: an unfinished record at the end of the active pack is cut off.
     pub(crate) fn reload(&mut self) -> Result<(), StoreError> {
         let tail = self.tail.clone().locked();
-        self.reload_from(load(&self.dir, None, &tail)?)
+        let (state, fresh) = load(&self.dir, None, &tail)?;
+        self.reload_from(state)?;
+        self.settle(fresh, &tail)
     }
 
     /// The same, for the holder of the write lock that has already folded
@@ -50,10 +54,10 @@ impl ChunkStore {
     /// reported as damaged and nothing is cut off it.
     pub(crate) fn reload_whole(&mut self) -> Result<(), StoreError> {
         let tail = self.tail.clone().locked();
-        self.reload_from(packs::load_from(&self.dir, None, true, &tail)?)
+        self.reload_from(packs::load_from(&self.dir, None, true, None, &tail)?.0)
     }
 
-    fn reload_from(&mut self, state: packs::PackState) -> Result<(), StoreError> {
+    pub(crate) fn reload_from(&mut self, state: packs::PackState) -> Result<(), StoreError> {
         let (sealed, active, index) = state;
         self.sealed = sealed;
         self.active = active;

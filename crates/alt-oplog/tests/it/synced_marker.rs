@@ -84,6 +84,25 @@ fn appends_that_never_finished_are_cut_off_however_many() {
 }
 
 #[test]
+fn zeros_after_the_synced_log_are_no_record_and_are_cut_by_the_next_append() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let path = dir.path().join("log");
+    let (_, whole) = ten(dir.path());
+    // a record of no bytes with a zero checksum, a hundred times over
+    write_at(&path, whole, &[0u8; 1200]);
+    assert_eq!(OpLog::open_read_only(dir.path(), None).unwrap().len(), 10);
+    let mut log = OpLog::open(dir.path()).unwrap();
+    assert_eq!(log.len(), 10);
+    assert_eq!(fs::metadata(&path).unwrap().len(), whole + 1200);
+    let before = fs::read(&path).unwrap();
+    log.append("someone", 10, b"after the zeros").unwrap();
+    let after = fs::read(&path).unwrap();
+    assert_eq!(after[..whole as usize], before[..whole as usize]);
+    assert!(after.len() < before.len() && after[whole as usize..].iter().any(|b| *b != 0));
+    assert_eq!(OpLog::open(dir.path()).unwrap().len(), 11);
+}
+
+#[test]
 fn a_writer_catching_up_reports_damage_in_what_another_synced() {
     let dir = alt_os::temp::tempdir().unwrap();
     let path = dir.path().join("log");

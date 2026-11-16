@@ -1,11 +1,12 @@
 //! The fsync handle a daemon syncs the object database through, off the
 //! write path.
 
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::path::PathBuf;
 
 use super::Odb;
 use crate::OdbError;
+use crate::head;
 use crate::lock::lock_shared;
 use crate::synced::{self, Deferred};
 
@@ -50,9 +51,11 @@ impl OdbSink {
         };
         // a rewind holds the append lock exclusively: it is over or has not
         // begun, and the marker's generation tells which
-        let lock = File::open(&self.lock_path)?;
+        let lock = OpenOptions::new().write(true).open(&self.lock_path)?;
         lock_shared(&lock)?;
-        synced::record(&self.durable_path, generation, lens, Some(lens))?;
+        if let Some(whole) = synced::record(&self.durable_path, generation, lens, Some(lens))? {
+            head::note_synced(&lock, whole.seq, whole.pack);
+        }
         Ok(())
     }
 }

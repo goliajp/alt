@@ -90,6 +90,7 @@ pub(crate) fn create_active(dir: &Path, seq: u32, tail: &Tail) -> Result<Active,
                 seq,
                 from: pack::HEADER_LEN as u64,
                 whole: false,
+                stop: None,
                 tail,
             };
             Ok(open_active(&path, read, size, walk)?.0)
@@ -106,7 +107,17 @@ pub(crate) struct Walk<'a> {
     /// every record is known to have been written whole: a walk that stops
     /// short is damage whatever `tail` says
     pub whole: bool,
+    /// the records from this offset on were found not to hold what they
+    /// name: the walk ends there, at an append that never finished
+    pub stop: Option<u64>,
     pub tail: &'a Tail,
+}
+
+/// What a load walked in the active pack: the pack's length and the records
+/// past the index runs.
+pub(crate) struct Fresh {
+    pub size: u64,
+    pub recs: Vec<(pack::RecordHeader, u64)>,
 }
 
 /// The records a walk found, where it stopped, and whether no whole record
@@ -114,9 +125,9 @@ pub(crate) struct Walk<'a> {
 type Walked = (Vec<(pack::RecordHeader, u64)>, u64, bool);
 
 /// Checks the header of a pack of `size` bytes and walks its records from
-/// offset `from`. The walk stops at zero in a pack cut short inside its
-/// header.
-fn walked(read: &File, size: u64, from: u64) -> Result<Walked, StoreError> {
+/// offset `from`, no further than `stop`. The walk stops at zero in a pack
+/// cut short inside its header.
+fn walked(read: &File, size: u64, from: u64, stop: Option<u64>) -> Result<Walked, StoreError> {
     let mut head = [0u8; pack::HEADER_LEN];
     let have = (size as usize).min(pack::HEADER_LEN);
     pack::read_exact_at(read, &mut head[..have], 0)?;
@@ -133,7 +144,8 @@ fn walked(read: &File, size: u64, from: u64) -> Result<Walked, StoreError> {
         return Ok((Vec::new(), size, true));
     }
     let map = unsafe { Mmap::map(read)? };
-    let (recs, valid_len) = pack::scan_from(&map, from as usize);
+    let upto = stop.map_or(map.len(), |stop| stop as usize);
+    let (recs, valid_len) = pack::scan_from(&map[..upto], from as usize);
     let last = pack::ends_the_pack(&map, valid_len as usize);
     Ok((recs, valid_len, last))
 }
@@ -150,9 +162,13 @@ pub(crate) fn open_active(
     size: u64,
     walk: Walk,
 ) -> Result<(Active, Vec<(pack::RecordHeader, u64)>), StoreError> {
-    let (recs, valid_len, last) = walked(&read, size, walk.from)?;
+    let (recs, valid_len, last) = walked(&read, size, walk.from, walk.stop)?;
     // what is known of the pack is looked up only when it stops short
-    let unfinished = || valid_len == 0 || walk.tail.unfinished(walk.seq, size, valid_len, last);
+    let unfinished = || {
+        walk.stop.is_some()
+            || valid_len == 0
+            || walk.tail.unfinished(walk.seq, size, valid_len, last)
+    };
     if valid_len != size && (walk.whole || !unfinished()) {
         return Err(StoreError::Format("active pack damaged"));
     }
@@ -215,11 +231,11 @@ pub(crate) fn load(
     dir: &Path,
     known: Option<&Known>,
     tail: &Tail,
-) -> Result<PackState, StoreError> {
-    match load_from(dir, known, false, tail) {
+) -> Result<(PackState, Fresh), StoreError> {
+    match load_from(dir, known, false, None, tail) {
         // a named pack that is not there: the names are out of date
         Err(StoreError::Io(e)) if known.is_some() && e.kind() == std::io::ErrorKind::NotFound => {
-            load_from(dir, None, false, tail)
+            load_from(dir, None, false, None, tail)
         }
         loaded => loaded,
     }
@@ -255,23 +271,28 @@ fn first_pack(
     first: Location,
     runs: Option<&[(u64, u64)]>,
     tail: &Tail,
-) -> Result<PackState, StoreError> {
+) -> Result<(PackState, Fresh), StoreError> {
     if tail.is_read_only() {
         return Err(std::io::Error::from(std::io::ErrorKind::NotFound).into());
     }
     let index = ChunkIndex::open(dir, first, runs, |loc| guard_at(dir, loc))?;
     let active = create_active(dir, 1, tail)?;
     pack::fsync_dir(dir)?;
-    Ok((BTreeMap::new(), active, index))
+    let fresh = Fresh {
+        size: active.len,
+        recs: Vec::new(),
+    };
+    Ok(((BTreeMap::new(), active, index), fresh))
 }
 
-/// `whole`: see [`Walk`].
+/// `whole`, `stop`: see [`Walk`].
 pub(crate) fn load_from(
     dir: &Path,
     known: Option<&Known>,
     whole: bool,
+    stop: Option<u64>,
     tail: &Tail,
-) -> Result<PackState, StoreError> {
+) -> Result<(PackState, Fresh), StoreError> {
     let seqs = pack_seqs(dir, known, tail.is_read_only())?;
     let runs = known.and_then(|known| known.chunk_runs.as_deref());
     let first = Location {
@@ -307,14 +328,15 @@ pub(crate) fn load_from(
         seq,
         from,
         whole,
+        stop,
         tail,
     };
     let (active, recs) = open_active(&pack_path(dir, seq), read, size, walk)?;
-    for (hdr, offset) in recs {
+    for &(hdr, offset) in &recs {
         let end = offset + (REC_HEADER_LEN + hdr.stored_len as usize) as u64;
         index.insert(hdr.id, Location { seq, offset }, end);
     }
-    Ok((sealed, active, index))
+    Ok(((sealed, active, index), Fresh { size, recs }))
 }
 
 /// Feeds the records of sealed pack `seq` from offset `from` on into the

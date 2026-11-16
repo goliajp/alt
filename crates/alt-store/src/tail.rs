@@ -36,6 +36,8 @@ type BeforeCut = Arc<dyn Fn(u32, u64) -> std::io::Result<()> + Send + Sync>;
 pub struct Tail {
     basis: Option<Judge>,
     before_cut: Option<BeforeCut>,
+    /// a pack and a length it is known to have been synced whole up to
+    synced: Option<(u32, u64)>,
     read_only: bool,
     locked: bool,
 }
@@ -47,6 +49,7 @@ impl Default for Tail {
         Self {
             basis: None,
             before_cut: None,
+            synced: None,
             read_only: false,
             locked: true,
         }
@@ -62,6 +65,7 @@ impl Tail {
         Self {
             basis: Some(Arc::new(basis)),
             before_cut: None,
+            synced: None,
             read_only: false,
             locked: false,
         }
@@ -76,6 +80,13 @@ impl Tail {
         before_cut: impl Fn(u32, u64) -> std::io::Result<()> + Send + Sync + 'static,
     ) -> Self {
         self.before_cut = Some(Arc::new(before_cut));
+        self
+    }
+
+    /// Pack `seq` is known synced whole up to `len`: while it is no longer
+    /// than that, what is known of it is not asked for.
+    pub fn synced_to(mut self, seq: u32, len: u64) -> Self {
+        self.synced = Some((seq, len));
         self
     }
 
@@ -112,15 +123,26 @@ impl Tail {
         }
     }
 
+    /// Whether pack `seq`, `len` bytes long, is known without asking
+    /// [`Self::basis`] to have been synced to its end.
+    pub(crate) fn synced_past(&self, seq: u32, len: u64) -> bool {
+        self.synced
+            .is_some_and(|(pack, upto)| pack == seq && len <= upto)
+    }
+
+    /// What is known of the log (pack `seq` of a chunk store), `len` bytes
+    /// long.
+    pub(crate) fn basis(&self, seq: u32, len: u64) -> Basis {
+        self.basis
+            .as_ref()
+            .map_or(Basis::Unknown, |basis| basis(seq, len))
+    }
+
     /// Whether a record that does not read at `at`, in a log `len` bytes
     /// long, is an unfinished write. `last`: by the format alone no whole
     /// record can follow it.
     pub(crate) fn unfinished(&self, seq: u32, len: u64, at: u64, last: bool) -> bool {
-        let basis = self
-            .basis
-            .as_ref()
-            .map_or(Basis::Unknown, |basis| basis(seq, len));
-        match basis {
+        match self.basis(seq, len) {
             Basis::Boundary(synced) => at >= synced,
             Basis::LastOnly => last,
             Basis::Unknown => false,

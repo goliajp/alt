@@ -253,3 +253,46 @@ fn records_an_older_rewind_left_naming_cut_content_never_read_as_other_bytes() {
     }
     assert!(odb.check().is_err());
 }
+
+/// Zeros a power cut left where records were to follow, in each of the
+/// three logs of fixed records: a record of zeros does not pass its
+/// checksum, so they are passed over and the next writer cuts them off.
+#[test]
+fn zeros_after_the_synced_records_of_a_log_are_no_records() {
+    for file in 1..4 {
+        let tmp = alt_os::temp::tempdir().unwrap();
+        let mut odb = open(tmp.path());
+        put(&mut odb, 0..KEPT);
+        drop(odb);
+        let synced = lens(tmp.path());
+        let path = tmp.path().join(FILES[file]);
+        let mut zeros = fs::read(&path).unwrap();
+        // several records of any of the three sizes
+        zeros.extend_from_slice(&[0; 82 * 80 * 72]);
+        fs::write(&path, &zeros).unwrap();
+        let odb = open(tmp.path());
+        for n in 0..KEPT {
+            reads(&odb, n);
+        }
+        odb.check().unwrap();
+        drop(odb);
+        assert_eq!(fs::read(&path).unwrap(), zeros, "{}", FILES[file]);
+        let mut odb = open(tmp.path());
+        put(&mut odb, KEPT..ALL);
+        let after = fs::read(&path).unwrap();
+        assert_eq!(
+            after[..synced[file] as usize],
+            zeros[..synced[file] as usize]
+        );
+        assert!(
+            after[synced[file] as usize..]
+                .iter()
+                .take(64)
+                .any(|b| *b != 0)
+        );
+        for n in 0..ALL {
+            reads(&odb, n);
+        }
+        odb.check().unwrap();
+    }
+}

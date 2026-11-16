@@ -10,6 +10,7 @@ mod index_runs;
 mod stale_index;
 mod synced_tail;
 mod tail_basis;
+mod torn_payload;
 
 /// A log known to be synced as far as `len`, opened by the holder of the
 /// lock its writers append under: what does not read past that length is

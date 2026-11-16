@@ -20,6 +20,19 @@
 //! says the store has had a synced marker with record boundaries: when
 //! the marker is then missing it was removed, not never written. An older
 //! alt keeps no head record, and one that does writes the flags as zero.
+//!
+//! Past the longest head record the file holds one more thing an opener
+//! wants without opening another file: how far the active pack is known
+//! synced, as the synced marker had it when it was last raised.
+//!
+//! ```text
+//! [pack seq u32][reserved 4][length u64][checksum 8]      at byte 1176
+//! ```
+//!
+//! It is written after the marker and never fsynced, so it can fall behind
+//! the marker; an opener whose pack reaches past it reads the marker. It
+//! must never be ahead: a rewind, which cuts the pack back, clears it and
+//! fsyncs that first.
 
 use std::fs::File;
 use std::os::unix::fs::FileExt;
@@ -34,6 +47,8 @@ const FIXED: usize = 16;
 const MAX_PACKS: usize = 96;
 const MAX_RUNS: usize = 12;
 const MAX_LEN: usize = FIXED + 4 * MAX_PACKS + 4 * 16 * MAX_RUNS + 8;
+const SYNCED_AT: usize = MAX_LEN;
+const SYNCED_LEN: usize = 24;
 
 type Chain = Option<Vec<(u64, u64)>>;
 
@@ -56,9 +71,17 @@ fn check(body: &[u8]) -> [u8; 8] {
 impl Head {
     /// What the lock file records; nothing when it records nothing usable.
     pub fn read(lock: &File) -> Self {
-        let mut buf = [0u8; MAX_LEN];
+        Self::read_with_synced(lock).0
+    }
+
+    /// The same, and the active pack with the length it is known synced
+    /// to, when the file says.
+    pub fn read_with_synced(lock: &File) -> (Self, Option<(u32, u64)>) {
+        let mut buf = [0u8; SYNCED_AT + SYNCED_LEN];
         let have = lock.read_at(&mut buf, 0).unwrap_or(0);
-        Self::parse(&buf[..have]).unwrap_or_default()
+        let head = Self::parse(&buf[..have.min(MAX_LEN)]).unwrap_or_default();
+        let synced = buf[..have].get(SYNCED_AT..).and_then(parse_synced);
+        (head, synced)
     }
 
     fn parse(data: &[u8]) -> Option<Self> {
@@ -130,6 +153,35 @@ impl Head {
         out.extend_from_slice(&sum);
         out
     }
+}
+
+fn parse_synced(data: &[u8]) -> Option<(u32, u64)> {
+    let (body, sum) = data.get(..SYNCED_LEN)?.split_at(16);
+    if check(body) != *sum {
+        return None;
+    }
+    let seq = u32::from_le_bytes(body[..4].try_into().unwrap());
+    Some((seq, u64::from_le_bytes(body[8..].try_into().unwrap())))
+}
+
+/// Notes in the lock file that pack `seq` is synced whole up to `len`, for
+/// a caller that holds the lock (shared will do: no rewind is under way)
+/// and has seen the synced marker say so. Not fsynced, failures ignored:
+/// without it an opener reads the marker.
+pub(crate) fn note_synced(lock: &File, seq: u32, len: u64) {
+    let mut bytes = [0u8; SYNCED_LEN];
+    bytes[..4].copy_from_slice(&seq.to_le_bytes());
+    bytes[8..16].copy_from_slice(&len.to_le_bytes());
+    let sum = check(&bytes[..16]);
+    bytes[16..].copy_from_slice(&sum);
+    let _ = lock.write_all_at(&bytes, SYNCED_AT as u64);
+}
+
+/// Takes the note back before the pack is cut, and fsyncs that: what
+/// grows back in the pack was not synced.
+pub(crate) fn forget_synced(lock: &File) -> std::io::Result<()> {
+    lock.write_all_at(&[0u8; SYNCED_LEN], SYNCED_AT as u64)?;
+    lock.sync_data()
 }
 
 impl Odb {

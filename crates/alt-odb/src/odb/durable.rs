@@ -4,6 +4,7 @@
 use std::fs::OpenOptions;
 
 use super::Odb;
+use crate::head;
 use crate::lock::{lock_exclusive, lock_shared, unlock};
 use crate::synced::{self, Lens, Marker, State};
 use crate::tier1::Tier1Map;
@@ -75,6 +76,7 @@ impl Odb {
             self.map.fsync()?;
             let whole = self.appended_whole()?;
             synced::establish(&self.durable_path, whole)?;
+            head::note_synced(&self.lock, whole.seq, whole.pack);
         }
         self.head.bounded = true;
         Ok(())
@@ -201,6 +203,7 @@ impl Odb {
             tier1: ckpt.tier1_len,
             map: ckpt.map_len,
         };
+        head::forget_synced(&self.lock)?;
         // the marker comes down before the files do: it never claims more
         // than they hold, whichever step a crash interrupts. Its generation
         // moves, so a writer or a sink that wrote before the cut does not
@@ -235,6 +238,7 @@ impl Odb {
                 },
             })
         })?;
+        head::note_synced(&self.lock, after.seq, after.pack);
         Ok(())
     }
 
@@ -324,7 +328,9 @@ impl Odb {
             self.map.fsync()?; // then map.alt (may reference tier1 ids)
             Some(eof)
         };
-        synced::record(&self.durable_path, generation, target, eof)?;
+        if let Some(whole) = synced::record(&self.durable_path, generation, target, eof)? {
+            head::note_synced(&self.lock, whole.seq, whole.pack);
+        }
         Ok(())
     }
 }

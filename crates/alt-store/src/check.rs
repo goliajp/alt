@@ -86,7 +86,11 @@ impl ChunkStore {
     }
 
     /// Decodes one record as it sits in its pack and hashes the result.
-    fn check_record(&self, header: &RecordHeader, payload: &[u8]) -> Result<(), StoreError> {
+    pub(crate) fn check_record(
+        &self,
+        header: &RecordHeader,
+        payload: &[u8],
+    ) -> Result<(), StoreError> {
         let id = header.id;
         let corrupt = |reason| StoreError::Corrupt { id, reason };
         let data = match header.encoding {

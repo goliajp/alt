@@ -36,6 +36,7 @@ mod packs;
 pub mod reclog;
 mod run_write;
 pub mod runs;
+mod settle;
 mod tail;
 
 pub use blob::{BlobOptions, BlobSink, BlobStore, StoreCheckpoint};

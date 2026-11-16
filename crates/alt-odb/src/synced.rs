@@ -35,6 +35,7 @@
 //! An older alt keeps three file lengths in the first 24 bytes and replaces
 //! the whole file; reading zeros there, it fsyncs every time.
 
+use std::cell::Cell;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
@@ -405,12 +406,14 @@ pub(crate) fn update(path: &Path, next: impl Fn(&Marker) -> Option<State>) -> st
 /// read `generation` while it held the write lock, and with them the file
 /// lengths `eof` of an fsync it made itself. Nothing is recorded when a
 /// rewind has moved the generation since: it cut those records off.
+/// Returns the boundaries the marker then holds, when it holds these.
 pub(crate) fn record(
     path: &Path,
     generation: u64,
     whole: Lens,
     eof: Option<Lens>,
-) -> std::io::Result<()> {
+) -> std::io::Result<Option<Lens>> {
+    let held = Cell::new(None);
     update(path, |marker| {
         let mut state = marker.recorded().copied().unwrap_or(State::NONE);
         if state.generation != generation {
@@ -428,8 +431,10 @@ pub(crate) fn record(
                 ..state.eof
             };
         }
+        held.set(Some(state.whole));
         Some(state)
-    })
+    })?;
+    Ok(held.get())
 }
 
 /// Called before `log` (pack `seq` for the pack) is cut back to `at`: a

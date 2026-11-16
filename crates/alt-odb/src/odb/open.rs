@@ -47,8 +47,9 @@ fn open_lock(alt_dir: &Path, read_only: bool) -> std::io::Result<File> {
 }
 
 /// What `log` not reading to its end means, from what the marker says of
-/// how far it was synced; a cut of it brings the marker down first.
-fn tail(durable: &Path, read_only: bool, log: Log) -> Tail {
+/// how far it was synced; a cut of it brings the marker down first. A pack
+/// no longer than `synced` says is not looked up in the marker.
+fn tail(durable: &Path, read_only: bool, log: Log, synced: Option<(u32, u64)>) -> Tail {
     let (read, lowered) = (durable.to_owned(), durable.to_owned());
     let tail = Tail::judged_by(move |seq, len| {
         let bounded = || {
@@ -57,6 +58,10 @@ fn tail(durable: &Path, read_only: bool, log: Log) -> Tail {
         Marker::read(&read).basis(log, seq, len, bounded)
     })
     .before_cut(move |seq, at| synced::lower_eof(&lowered, log, seq, at));
+    let tail = match (log, synced) {
+        (Log::Pack, Some((seq, len))) => tail.synced_to(seq, len),
+        _ => tail,
+    };
     if read_only { tail.read_only() } else { tail }
 }
 
@@ -96,13 +101,13 @@ impl Odb {
         let alt_dir = alt_dir.into();
         let lock = open_lock(&alt_dir, mode.read_only)?;
         let durable_path = alt_dir.join("odb.durable");
-        let tail = |log: Log| tail(&durable_path, mode.read_only, log);
         // Open the append files (active pack, blobmap, map.alt) under a
         // shared lock, so the open never overlaps another process's
         // exclusive append: a record that does not read is then one no
         // writer is still writing.
         lock_shared(&lock)?;
-        let head = Head::read(&lock);
+        let (head, synced) = Head::read_with_synced(&lock);
+        let tail = |log: Log| tail(&durable_path, mode.read_only, log, synced);
         let opened = open_files(&alt_dir, opts, &head, mode.late, tail);
         let _ = unlock(&lock);
         let (mut blobs, tier1, map, created) = opened?;
