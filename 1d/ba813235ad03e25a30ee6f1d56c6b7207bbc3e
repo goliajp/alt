@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: build
+summary: link alt as a position-independent executable with full relro again
+author-type: human
+author: doracawl
+touched: crates/alt-cli/build.rs
