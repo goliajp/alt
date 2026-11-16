@@ -25,8 +25,11 @@ const MANY_PATHS: usize = 256;
 pub(crate) enum Changes {
     /// these paths, relative to the root, each with everything beneath it
     Paths(Vec<Vec<u8>>),
-    /// events were lost or the tree was rearranged: anything may differ
+    /// the tree was rearranged and is watched anew: anything may differ
     All,
+    /// events were lost: anything may differ, and directories may have
+    /// come to be that are not watched
+    Unknown,
 }
 
 /// The most watches one tree may take: half of what the system allows the
@@ -181,6 +184,9 @@ impl Watched {
         let dirty = match changes {
             Changes::Paths(paths) => Some(dirty_paths(paths, snapshot)),
             Changes::All => None,
+            Changes::Unknown => {
+                return self.scan_after_loss(root, snapshot, opts, &whole(&[]), outside, context);
+            }
         };
         let delta = match (dirty, cached) {
             (Some(dirty), Some(cached))
@@ -200,17 +206,52 @@ impl Watched {
             }
             _ => crate::scan(root, snapshot, &whole(&[])).ok()?,
         };
+        Some(self.keep(snapshot, opts, outside, context, delta))
+    }
+
+    /// Holds `delta` as the answer for the tree as it is, and returns what
+    /// of it `opts` ask for.
+    fn keep(
+        &mut self,
+        snapshot: &Snapshot,
+        opts: &ScanOptions<'_>,
+        outside: Vec<Option<FileStat>>,
+        context: &[u8],
+        mut delta: Delta,
+    ) -> Delta {
         self.cached = Some(Cached {
             index_id: snapshot.index_id.clone(),
             outside: sure(outside, &opts.clock),
             context: context.to_vec(),
             delta: delta.clone(),
         });
-        let mut delta = delta;
         if opts.untracked == Untracked::No {
             delta.untracked.clear();
         }
-        Some(delta)
+        delta
+    }
+
+    /// The scan after events were lost: of everything, and the watches
+    /// are brought in line with the directories it came by. A directory
+    /// that had no watch while it was listed is looked at again next time.
+    fn scan_after_loss(
+        &mut self,
+        root: &Path,
+        snapshot: &mut Snapshot,
+        opts: &ScanOptions<'_>,
+        whole: &ScanOptions<'_>,
+        outside: Vec<Option<FileStat>>,
+        context: &[u8],
+    ) -> Option<Delta> {
+        let (delta, seen) = crate::delta::scan_seeing(root, snapshot, whole).ok()?;
+        let fresh = self
+            .watcher
+            .fill(seen, &|dir| tracked(snapshot, dir))
+            .ok()?;
+        if !fresh.is_empty() {
+            self.absorbed = Some(merged(self.absorbed.take(), Changes::Paths(fresh)));
+        }
+        Some(self.keep(snapshot, opts, outside, context, delta))
     }
 }
 
@@ -219,6 +260,9 @@ impl Watched {
 fn merged(earlier: Option<Changes>, later: Changes) -> Changes {
     match (earlier, later) {
         (None, later) => later,
+        // watched anew since: nothing is left to make up for
+        (_, Changes::All) => Changes::All,
+        (Some(Changes::Unknown), _) | (_, Changes::Unknown) => Changes::Unknown,
         (Some(Changes::Paths(mut paths)), Changes::Paths(more)) => {
             paths.extend(more);
             match paths.len() > 4 * MANY_PATHS {

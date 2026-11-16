@@ -10,3 +10,5 @@ mod untracked;
 mod watch;
 #[cfg(target_os = "linux")]
 mod watch_inputs;
+#[cfg(target_os = "linux")]
+mod watch_loss;

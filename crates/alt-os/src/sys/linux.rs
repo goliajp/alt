@@ -155,6 +155,7 @@ unsafe extern "C" {
     pub fn umount2(target: *const c_char, flags: c_int) -> c_int;
     pub fn inotify_init1(flags: c_int) -> c_int;
     pub fn inotify_add_watch(fd: c_int, pathname: *const c_char, mask: u32) -> c_int;
+    pub fn inotify_rm_watch(fd: c_int, wd: c_int) -> c_int;
     fn syscall(number: c_long, ...) -> c_long;
 }
 

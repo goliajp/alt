@@ -18,31 +18,8 @@ const SPLIT: u32 = 512;
 /// A directory with fewer files of its own has them looked at by one thread.
 const MANY_FILES: usize = 256;
 
-/// What a walk found to differ from the snapshot. Entries are named by
-/// their position in it.
-#[derive(Default)]
-pub(crate) struct Found {
-    /// a file is there, with another stat than the one recorded
-    pub suspects: Vec<(u32, FileStat)>,
-    /// nothing is there, or a directory
-    pub deleted: Vec<u32>,
-    /// files the index does not have and no ignore rule hides
-    pub untracked: Vec<Vec<u8>>,
-    /// submodule entries with a directory in place
-    pub gitlinks: Vec<u32>,
-    /// conflicted paths with a file in place
-    pub unmerged: Vec<u32>,
-}
-
-impl Found {
-    fn absorb(&mut self, other: Found) {
-        self.suspects.extend(other.suspects);
-        self.deleted.extend(other.deleted);
-        self.untracked.extend(other.untracked);
-        self.gitlinks.extend(other.gitlinks);
-        self.unmerged.extend(other.unmerged);
-    }
-}
+mod found;
+pub(crate) use found::Found;
 
 pub(crate) struct Walk<'a> {
     snapshot: &'a Snapshot,
@@ -288,6 +265,9 @@ impl Walk<'_> {
         let mut names = fd.names()?;
         names.sort();
         let base = self.snapshot.dir_path(dir);
+        if !hidden {
+            found.listed.push(dir as u32);
+        }
         let own = match hidden {
             true => None,
             false => ignore_file(&fd, &names, base, ignore)?,
@@ -320,7 +300,11 @@ impl Walk<'_> {
                 Child::Dir(c) => match names.find(name, true) {
                     Some(item) => {
                         taken[item] = true;
+                        let inside = hidden;
                         let hidden = hidden || ignore.is_ignored(self.snapshot.dir_path(c), true);
+                        if hidden && !inside {
+                            found.unwalked.push(self.snapshot.dir_path(c).to_vec());
+                        }
                         below.push(Below {
                             item,
                             tracked: Some((c, hidden)),
@@ -348,14 +332,18 @@ impl Walk<'_> {
                 }
                 let is_dir = names.kind(item) == Kind::Dir;
                 with_name(&mut path, name, |path| match self.reach(reach, path) {
-                    Some(reach) if is_dir && !ignore.is_ignored(path, true) => below.push(Below {
-                        item,
-                        tracked: None,
-                        reach,
-                    }),
+                    Some(reach) if is_dir && !ignore.is_ignored(path, true) => {
+                        found.unwalked.push(path.to_vec());
+                        below.push(Below {
+                            item,
+                            tracked: None,
+                            reach,
+                        })
+                    }
                     Some(Reach::Inside) if !is_dir && !ignore.is_ignored(path, false) => {
                         found.untracked.push(path.to_vec())
                     }
+                    Some(_) if is_dir => found.passed.push(path.to_vec()),
                     _ => {}
                 });
             }

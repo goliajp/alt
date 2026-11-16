@@ -7,7 +7,7 @@
 //! watched, which tells when it is removed or renamed, and it is looked at
 //! again when the ignore rules or the index change.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs::File;
 use std::io::{self, Read};
 use std::os::fd::FromRawFd;
@@ -65,6 +65,10 @@ pub(crate) struct Watcher {
     mounts: Mounts,
     /// how often the watches were set up from the root
     pub(super) set_up: usize,
+    /// while the watches are gone over after events were lost: the
+    /// watches found in place, and the directories that had none or
+    /// another
+    pub(super) check: Option<(HashSet<i32>, Vec<Vec<u8>>)>,
 }
 
 /// What the events read off the queue tell.
@@ -78,6 +82,8 @@ struct Seen {
     ruled: Vec<Vec<u8>>,
     /// which watch is on which path is no longer known
     lost: bool,
+    /// the queue ran over: some events are missing
+    dropped: bool,
 }
 
 /// Whether the index has an entry at or beneath a directory.
@@ -134,6 +140,7 @@ impl Watcher {
             skipped: BTreeSet::new(),
             mounts: Mounts::open()?,
             set_up: 0,
+            check: None,
         };
         watcher.establish(tracked)?;
         Ok(watcher)
@@ -162,7 +169,8 @@ impl Watcher {
     /// Takes in one event: `mask` on the watch `wd`, about `name` in its
     /// directory.
     fn event(&mut self, wd: i32, mask: u32, name: &[u8], seen: &mut Seen) {
-        seen.lost |= mask & (IN_Q_OVERFLOW | IN_UNMOUNT | IN_MOVE_SELF) != 0;
+        seen.lost |= mask & (IN_UNMOUNT | IN_MOVE_SELF) != 0;
+        seen.dropped |= mask & IN_Q_OVERFLOW != 0;
         if mask & IN_IGNORED != 0 {
             // without the watch on the root nothing made in it is seen
             seen.lost |= self.dirs.remove(&wd).is_some_and(|dir| dir.is_empty());
@@ -229,6 +237,10 @@ impl Watcher {
             self.queue = instance()?;
             self.establish(tracked)?;
             return Ok(Changes::All);
+        }
+        if seen.dropped {
+            // the watches stay; what they missed, the caller looks for
+            return Ok(Changes::Unknown);
         }
         // other rules: what they hide beneath their directory is decided anew
         for dir in seen.ruled {

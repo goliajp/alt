@@ -10,6 +10,7 @@ use std::sync::Arc;
 use alt_os::sys;
 
 use super::os::{ENOSPC, Tracked, WATCHED, Watcher, gone, join};
+use crate::delta::Seen;
 use crate::ignore::{self, IgnoreLayer, IgnoreStack};
 
 /// The rules of the `.gitignore` in the directory `abs`, when it has one.
@@ -71,7 +72,13 @@ impl Watcher {
                 false => Err(e),
             };
         }
-        self.dirs.insert(wd, rel.to_vec());
+        let was = self.dirs.insert(wd, rel.to_vec());
+        if let Some((found, fresh)) = &mut self.check {
+            found.insert(wd);
+            if was.as_deref() != Some(rel) {
+                fresh.push(rel.to_vec());
+            }
+        }
         match self.dirs.len() > self.most {
             true => Err(io::Error::from_raw_os_error(ENOSPC)),
             false => Ok(true),
@@ -124,6 +131,36 @@ impl Watcher {
             }
         }
         Ok(())
+    }
+
+    /// After events were lost, with what a scan of the whole tree came by
+    /// since: goes over the watches without walking the tree again where
+    /// the scan has. Every directory the scan listed is given its watch
+    /// anew, since one that was moved away took its watch along; the
+    /// directories the scan did not look through are walked here; watches
+    /// on anything else are taken off. Returns the directories that were
+    /// not watched, or not under their name, while the scan listed them:
+    /// what happened in them since then is in no event.
+    pub(crate) fn fill(&mut self, seen: Seen, tracked: Tracked) -> io::Result<Vec<Vec<u8>>> {
+        self.check = Some(Default::default());
+        self.skipped = seen.passed.into_iter().collect();
+        for rel in seen.listed {
+            let abs = self.root.join(OsStr::from_bytes(&rel));
+            self.watch(&abs, &rel)?;
+        }
+        for rel in seen.unwalked {
+            self.add_tree(rel, tracked)?;
+        }
+        let (found, fresh) = self.check.take().unwrap_or_default();
+        self.dirs.retain(|wd, _| {
+            let kept = found.contains(wd);
+            if !kept {
+                // SAFETY: no pointers are passed
+                unsafe { sys::inotify_rm_watch(self.queue.as_raw_fd(), *wd) };
+            }
+            kept
+        });
+        Ok(fresh)
     }
 
     /// After the index changed: watches the directories left unwatched

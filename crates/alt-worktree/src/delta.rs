@@ -110,6 +110,18 @@ impl FileStat {
     }
 }
 
+/// The directories a scan that looked for untracked files came by.
+#[derive(Default)]
+pub(crate) struct Seen {
+    /// those of the index that were listed, with every directory in them
+    /// either among these as well or in one of the other two lists
+    pub listed: Vec<Vec<u8>>,
+    /// those not looked through to the end
+    pub unwalked: Vec<Vec<u8>>,
+    /// those an ignore rule hides, with nothing tracked in them
+    pub passed: Vec<Vec<u8>>,
+}
+
 /// Compares the working tree at `root` with `snapshot`, recording in the
 /// snapshot the stat of every file found to hold its entry's content.
 pub fn scan(
@@ -117,11 +129,35 @@ pub fn scan(
     snapshot: &mut Snapshot,
     opts: &ScanOptions<'_>,
 ) -> Result<Delta, WorktreeError> {
+    Ok(scan_seeing(root, snapshot, opts)?.0)
+}
+
+/// [`scan`], with the directories it came by.
+pub(crate) fn scan_seeing(
+    root: &Path,
+    snapshot: &mut Snapshot,
+    opts: &ScanOptions<'_>,
+) -> Result<(Delta, Seen), WorktreeError> {
     let ignore = match opts.untracked {
         Untracked::No => IgnoreStack::new(),
         _ => IgnoreStack::of_files(opts.excludes)?,
     };
     let mut found = walk::walk(root, snapshot, opts.untracked, opts.within, &ignore)?;
+    let view = &*snapshot;
+    let listed = found
+        .listed
+        .iter()
+        .map(|&d| view.dir_path(d as usize).to_vec());
+    let links = found
+        .gitlinks
+        .iter()
+        .map(|&i| view.path(i as usize).to_vec());
+    let unwalked = std::mem::take(&mut found.unwalked);
+    let seen = Seen {
+        listed: listed.collect(),
+        unwalked: unwalked.into_iter().chain(links).collect(),
+        passed: std::mem::take(&mut found.passed),
+    };
     let mut delta = Delta::default();
     found.suspects.sort_unstable_by_key(|s| s.0);
     compare(
@@ -163,7 +199,7 @@ pub fn scan(
     found.untracked.sort_unstable();
     delta.untracked = found.untracked.into_iter().map(BString::from).collect();
     delta.changed.sort_by(|a, b| a.path.cmp(&b.path));
-    Ok(delta)
+    Ok((delta, seen))
 }
 
 /// A suspect's content as the working tree has it, with its blob id.

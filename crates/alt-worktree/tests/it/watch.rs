@@ -10,10 +10,10 @@ use alt_worktree::{Clock, Delta, ScanOptions, Snapshot, Untracked, Watched, scan
 
 use crate::delta::{ALGO, change, fixture, index_of, write};
 
-struct Tree {
-    dir: alt_os::temp::TempDir,
-    snapshot: Snapshot,
-    watched: Watched,
+pub(crate) struct Tree {
+    pub(crate) dir: alt_os::temp::TempDir,
+    pub(crate) snapshot: Snapshot,
+    pub(crate) watched: Watched,
 }
 
 pub(crate) fn options(untracked: Untracked, root: &Path) -> ScanOptions<'static> {
@@ -44,7 +44,7 @@ pub(crate) fn start(root: &Path, most: usize, snapshot: &Snapshot) -> std::io::R
 }
 
 impl Tree {
-    fn new(fill: impl Fn(&Path)) -> Tree {
+    pub(crate) fn new(fill: impl Fn(&Path)) -> Tree {
         let dir = alt_os::temp::tempdir().unwrap();
         fill(dir.path());
         let index = index_of(dir.path());
@@ -60,12 +60,12 @@ impl Tree {
         tree
     }
 
-    fn root(&self) -> &Path {
+    pub(crate) fn root(&self) -> &Path {
         self.dir.path()
     }
 
     /// What the watched tree answers is what a scan of everything finds.
-    fn check(&mut self) -> Delta {
+    pub(crate) fn check(&mut self) -> Delta {
         let root = self.dir.path();
         let mut last = Delta::default();
         for untracked in [Untracked::No, Untracked::Normal] {
@@ -78,7 +78,7 @@ impl Tree {
         last
     }
 
-    fn untracked(&mut self) -> Vec<String> {
+    pub(crate) fn untracked(&mut self) -> Vec<String> {
         let delta = self.check();
         delta.untracked.iter().map(|p| p.to_string()).collect()
     }
@@ -211,26 +211,6 @@ fn another_index_is_answered_from_a_new_scan() {
     assert_eq!(tree.check(), Delta::default());
     write(tree.root(), "new.txt", "changed after staging\n");
     assert_eq!(tree.check().changed.len(), 1);
-}
-
-#[test]
-fn more_events_than_the_queue_holds_lead_to_a_full_scan() {
-    let mut tree = Tree::new(fixture);
-    // the queue of a watcher holds 16384 events unless raised
-    for f in 0..9000 {
-        write(tree.root(), &format!("many/f{f}.txt"), "x\n");
-    }
-    for f in 0..9000 {
-        std::fs::remove_file(tree.root().join(format!("many/f{f}.txt"))).unwrap();
-    }
-    write(tree.root(), "many/kept.txt", "kept\n");
-    write(tree.root(), "a.txt", "changed while events were lost\n");
-    let delta = tree.check();
-    assert_eq!(delta.changed.len(), 1);
-    assert_eq!(delta.untracked, [BString::from("many/")]);
-    // watching goes on afterwards
-    write(tree.root(), "src/lib.rs", "after the overflow\n");
-    assert_eq!(tree.check().changed.len(), 2);
 }
 
 /// What the kernel answers when the user has no watches left.
