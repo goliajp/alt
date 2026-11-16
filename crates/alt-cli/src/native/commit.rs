@@ -42,15 +42,12 @@ impl NativeRepo<'_> {
         if self.bisect_in_progress() {
             return Err("commit: a bisect is in progress; end it with `alt bisect reset`".into());
         }
-        // Path gate is `add`-only on purpose: the restricted principal's
-        // *choice* of what to stage is what the policy constrains. Pre-existing
-        // index entries inherited from another principal (e.g. operator's
-        // baseline) ride through to the commit unchallenged — penalising the
-        // agent for paths it never touched is unhelpful.
         let tree = self.staged_tree()?;
 
         let branch = self.head_branch()?;
         let parent = self.store.refs.resolve(&branch)?;
+        // the path gate holds for what is committed as for what is staged
+        self.ensure_changes_allowed(parent)?;
         let merging = self.merge_head()?;
         // a commit that changes nothing is almost always a mistake (a
         // forgotten `add`); git refuses it too, merges aside
@@ -145,7 +142,7 @@ impl NativeRepo<'_> {
                 .to_owned(),
         };
 
-        let tree = self.staged_tree()?;
+        let tree = self.gated_tree(old)?;
         if !opts.no_verify {
             self.run_precommit()?;
         }

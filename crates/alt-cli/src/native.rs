@@ -40,6 +40,7 @@ pub use identity::{Identity, Principal, PrincipalKind};
 mod merge;
 mod op_log;
 mod operation;
+mod path_gate;
 pub mod pathspec;
 use op_log::render_op_log_json;
 pub mod notes;
@@ -831,20 +832,6 @@ impl<'a> NativeRepo<'a> {
             ),
         )
         .into())
-    }
-
-    /// Reject staging/committing a path that the policy's `path_allow` does
-    /// not match. Empty allow-list = no constraint.
-    fn ensure_path_allowed(&self, path: &[u8]) -> Res<()> {
-        // a pattern is text: where there are patterns, so is every path allowed
-        let text = std::str::from_utf8(path).ok();
-        if !self.caps.path_allow.is_empty() && !text.is_some_and(|p| self.caps.allows_path_name(p))
-        {
-            let path = String::from_utf8_lossy(path);
-            let why = format!("capability denied: path '{path}' is not in path_allow");
-            return Err(crate::machine::Failure::refusal("capability_denied", why).into());
-        }
-        Ok(())
     }
 
     /// Reject a ref change that would be a non-fast-forward (or branch
