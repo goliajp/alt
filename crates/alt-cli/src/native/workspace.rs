@@ -90,13 +90,14 @@ impl NativeRepo<'_> {
         }
         // Check the destination before publishing either its marker or HEAD.
         let target = self.commit_entries(commit)?;
-        let preview = Coord {
+        let child = Coord {
             root: abs.clone(),
             workspace: name.to_owned(),
-            head_ref: head_ref.clone(),
+            head_ref,
             index_path: ws_dir.join("index"),
             prefix: String::new(),
         };
+        let preview = child.clone();
         NativeRepo::attach(&mut *self.store, preview, self.id.clone(), self.request_id)
             .preflight_checkout(&[], &target)?;
         std::fs::create_dir_all(&ws_dir)?;
@@ -132,13 +133,6 @@ impl NativeRepo<'_> {
         // materialize the branch tree into the new working tree + index by
         // attaching a child view (sharing this store) and checking out from an
         // empty base
-        let child = Coord {
-            root: abs,
-            workspace: name.to_owned(),
-            head_ref,
-            index_path: ws_dir.join("index"),
-            prefix: String::new(),
-        };
         let mut ws = NativeRepo::attach(&mut *self.store, child, self.id.clone(), self.request_id);
         let target = ws.commit_entries(commit)?;
         ws.checkout(&[], &target)?;

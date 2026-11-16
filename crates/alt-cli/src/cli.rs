@@ -15,6 +15,9 @@ use alt_repo::Repository;
 use crate::native::pathspec::Place;
 use crate::native::{self, Identity, NativeRepo, Store};
 use crate::{log_cmd, quote, worktree_args};
+use prepare::prepare;
+
+mod prepare;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -1240,41 +1243,6 @@ pub fn mutates_command(cmd: &Command) -> bool {
             }
             | Command::Lfs { op: LfsOp::Ls }
     )
-}
-
-/// What comes before any command: git sets up its ignore rules for some
-/// and ends there where one of the files they are in cannot be one.
-fn prepare(repo: &mut NativeRepo, cmd: &Command) -> Res<()> {
-    use Command::{
-        Add, CherryPick, Commit, Diff, Merge, Rebase, Revert, Status, Switch, Workspace,
-    };
-    let excludes = match cmd {
-        Add { args } => !args.renormalize,
-        Commit { validate, .. } => !validate,
-        Diff { cached, .. } => *cached,
-        Switch { create, .. } => !create,
-        // a sequence under way is ended or gone on with all the same
-        Rebase { upstream, .. } => upstream.is_some(),
-        Revert { revs, .. } => !revs.is_empty(),
-        _ => matches!(cmd, Status { .. } | CherryPick { .. }),
-    };
-    if excludes {
-        repo.ensure_exclude_files()?;
-    }
-    match cmd {
-        Merge { branch, .. } => repo.ensure_exclude_files_to_merge(branch)?,
-        // the tree to come is checked out by the rules that hold in it
-        Workspace { op, .. } => {
-            if let WorkspaceOp::Add { path, .. } = op {
-                repo.ensure_exclude_files_of(path)?;
-            }
-        }
-        _ => {}
-    }
-    if mutates_command(cmd) && !matches!(cmd, Command::Operation { .. }) {
-        repo.begin_workspace_write()?;
-    }
-    Ok(())
 }
 
 pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> Res<u8> {

@@ -6,6 +6,8 @@ use super::checkout_recovery::{CheckoutIntent, FileChange, FileState};
 use super::*;
 use recovery::hash;
 
+mod paths;
+
 impl NativeRepo<'_> {
     pub(super) fn file_state(&self, path: &BString, persist: bool) -> Res<Option<FileState>> {
         use std::os::unix::{ffi::OsStrExt, fs::PermissionsExt};
@@ -240,21 +242,7 @@ impl NativeRepo<'_> {
                 }
             }
         }
-        // Newly created or removed directory entries must reach disk too,
-        // all the way back to the existing workspace root.
-        let mut parent = abs.parent();
-        while let Some(path) = parent {
-            match std::fs::File::open(path) {
-                Ok(dir) => dir.sync_all()?,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => return Err(e.into()),
-            }
-            if path == self.root {
-                break;
-            }
-            parent = path.parent();
-        }
-        Ok(())
+        self.sync_parents(&abs)
     }
 
     /// Remembers what a file looks like right after the checkout wrote it,
@@ -270,53 +258,6 @@ impl NativeRepo<'_> {
             self.written.borrow_mut().push((path.clone(), stat));
         }
         Ok(())
-    }
-
-    /// Checks that `bytes` names a path inside the working tree whose
-    /// parents are real directories. A parent that is a file or a symlink
-    /// is accepted only when the operation owns it, since it is then
-    /// removed before anything is written beneath; the result says whether
-    /// there is such a parent.
-    pub(super) fn validate_path_among(
-        &self,
-        bytes: &BString,
-        owned: &dyn Fn(&[u8]) -> bool,
-    ) -> Res<bool> {
-        let path = bytes.as_slice();
-        let no_name = |c: &[u8]| c.is_empty() || matches!(c, b"." | b".." | b".alt" | b".git");
-        // an absolute path begins with a name that is empty
-        if path.is_empty() || path.split(|b| *b == b'/').any(no_name) {
-            return Err(crate::machine::Failure::refusal(
-                "precondition_failed",
-                "unsafe recovery path",
-            )
-            .into());
-        }
-        let mut beneath_owned = false;
-        // outermost parent first: nothing past a symlink is looked at
-        let mut end = 0;
-        while let Some(at) = path[end..].iter().position(|b| *b == b'/') {
-            end += at;
-            let parent = &path[..end];
-            end += 1;
-            match self.abs(&BString::from(parent))?.symlink_metadata() {
-                Ok(m) if m.is_dir() => {}
-                Ok(_) if owned(parent) => {
-                    beneath_owned = true;
-                    break;
-                }
-                Ok(_) => {
-                    return Err(crate::machine::Failure::refusal(
-                        "precondition_failed",
-                        "recovery path traverses an unsafe parent",
-                    )
-                    .into());
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => break,
-                Err(e) => return Err(e.into()),
-            }
-        }
-        Ok(beneath_owned)
     }
 }
 

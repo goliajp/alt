@@ -121,7 +121,7 @@ impl NativeRepo<'_> {
             return Ok(());
         }
         let report = named::ignored(&hidden, &self.settings()?)?;
-        Err(crate::machine::Failure::told(crate::machine::PATHS_IGNORED, report).into())
+        Err(crate::machine::Failure::refusal(crate::machine::PATHS_IGNORED, report).into())
     }
 
     /// The path gate: denies staging any path the policy excludes, before

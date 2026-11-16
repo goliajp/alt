@@ -200,8 +200,7 @@ fn scan_dir(
             // The same holds for a directory the index records as a
             // submodule, with or without a repository in it: whatever lies
             // there is not this repository's to add. What it reports is
-            // the commit the submodule has checked out, the recorded one
-            // when it has none
+            // the commit the submodule has checked out, or the recorded one
             if tracked.gitlinks.contains(&rel_b) {
                 let recorded = cache.and_then(|c| c.get(&rel_b)).map(|e| e.oid);
                 if let Some(oid) = ctx.head.and_then(|head| head(&path)).or(recorded) {

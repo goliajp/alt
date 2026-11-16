@@ -141,43 +141,8 @@ pub fn default_excludes_file() -> Option<std::path::PathBuf> {
 /// base is consumed verbatim; callers compute it as the directory holding
 /// the `.gitignore` (relative to the working-tree root, slash-joined).
 pub(crate) fn parse_layer(content: &[u8], base: &[u8]) -> IgnoreLayer {
-    let mut rules = Vec::new();
-    for line in content.split(|&b| b == b'\n') {
-        let line = strip_cr(line);
-        let line = strip_trailing_ws(line);
-        if line.is_empty() || line[0] == b'#' {
-            continue;
-        }
-        let (negate, body) = if line[0] == b'!' {
-            (true, &line[1..])
-        } else {
-            (false, line)
-        };
-        let (body, dir_only) = if body.last() == Some(&b'/') {
-            (&body[..body.len() - 1], true)
-        } else {
-            (body, false)
-        };
-        if body.is_empty() {
-            continue;
-        }
-        let (anchored, body) = if body[0] == b'/' {
-            (true, &body[1..])
-        } else {
-            // Patterns containing an internal `/` are also anchored.
-            let inner_slash = body.contains(&b'/');
-            (inner_slash, body)
-        };
-        let Ok(pattern) = std::str::from_utf8(body) else {
-            continue;
-        };
-        rules.push(Rule {
-            pattern: pattern.to_string(),
-            negate,
-            dir_only,
-            anchored,
-        });
-    }
+    let lines = content.split(|&b| b == b'\n');
+    let rules: Vec<Rule> = lines.filter_map(parse_rule).collect();
     let mut exact: std::collections::HashMap<Vec<u8>, Vec<u32>> = Default::default();
     let mut general = Vec::new();
     for (at, rule) in rules.iter().enumerate() {
@@ -199,6 +164,37 @@ pub(crate) fn parse_layer(content: &[u8], base: &[u8]) -> IgnoreLayer {
         exact,
         general,
     }
+}
+
+/// The rule one line of an ignore file states, when it states one.
+fn parse_rule(line: &[u8]) -> Option<Rule> {
+    let line = strip_trailing_ws(strip_cr(line));
+    if line.is_empty() || line[0] == b'#' {
+        return None;
+    }
+    let (negate, body) = match line.strip_prefix(b"!") {
+        Some(body) => (true, body),
+        None => (false, line),
+    };
+    let (body, dir_only) = match body.strip_suffix(b"/") {
+        Some(body) => (body, true),
+        None => (body, false),
+    };
+    if body.is_empty() {
+        return None;
+    }
+    // a pattern with a `/` inside it is anchored as well
+    let (anchored, body) = match body.strip_prefix(b"/") {
+        Some(body) => (true, body),
+        None => (body.contains(&b'/'), body),
+    };
+    let pattern = std::str::from_utf8(body).ok()?;
+    Some(Rule {
+        pattern: pattern.to_string(),
+        negate,
+        dir_only,
+        anchored,
+    })
 }
 
 fn strip_cr(line: &[u8]) -> &[u8] {

@@ -7,6 +7,9 @@ use alt_json::{Value, json};
 
 use crate::cli::Cli;
 use crate::daemon::Response;
+use bindings::canonical_matches;
+
+mod bindings;
 
 #[derive(Debug, Clone)]
 pub struct Failure {
@@ -42,15 +45,6 @@ impl Failure {
             operation_id: None,
             details: Box::new(json!({})),
             next_action: "Inspect the reported condition before submitting a new request",
-        }
-    }
-
-    /// What a command that did its work still has to say, where git ends
-    /// with status 1 and calls nothing fatal: `said` goes out as it is.
-    pub fn told(kind: &'static str, said: impl Into<String>) -> Self {
-        Self {
-            next_action: "Read what the command reported",
-            ..Self::refusal(kind, said)
         }
     }
 
@@ -161,47 +155,6 @@ pub fn parse(args: Vec<OsString>) -> Result<Parsed, Response> {
 
 fn matches_json(matches: &Matches) -> bool {
     matches.flag("json") || matches.subcommand().is_some_and(matches_json)
-}
-
-/// The argument values a durable request is bound to. Stored bindings are
-/// compared with this on a retry, so its shape must never change.
-fn canonical_matches(matches: &Matches) -> Value {
-    let mut args = std::collections::BTreeMap::new();
-    for entry in matches.entries() {
-        if matches!(entry.id, "request_id" | "workspace") {
-            continue;
-        }
-        // a global flag reads the same on every level, wherever it was given
-        if entry.id == "json" {
-            let raw = if matches_json(matches) {
-                "true"
-            } else {
-                "false"
-            };
-            args.insert(entry.id, vec![hex(raw.as_bytes())]);
-            continue;
-        }
-        // a flag that came after bindings were first recorded binds only
-        // when it is set: the commands recorded before it keep theirs
-        let later = matches!(entry.id, "renormalize" | "forced");
-        if later && entry.values.iter().all(|v| v.as_bytes() == b"false") {
-            continue;
-        }
-        args.insert(
-            entry.id,
-            entry
-                .values
-                .iter()
-                .map(|value| hex(value.as_bytes()))
-                .collect::<Vec<_>>(),
-        );
-    }
-    let subcommand = matches.subcommand().map(|sub| {
-        json!({
-            "name": sub.name(), "arguments": canonical_matches(sub)
-        })
-    });
-    json!({"values": args, "subcommand": subcommand})
 }
 
 pub fn hex(bytes: &[u8]) -> String {
