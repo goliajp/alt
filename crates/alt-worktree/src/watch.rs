@@ -156,13 +156,9 @@ impl Watched {
     /// itself, more than the queue holds: called every so often while it
     /// does, it keeps the queue from running over.
     pub fn absorb(&mut self) {
-        // the index is being replaced: every new directory is watched
-        match self.watcher.changes(&|_| true) {
-            Ok(more) => self.absorbed = Some(merged(self.absorbed.take(), more)),
-            Err(e) => {
-                self.full |= e.raw_os_error() == Some(os::ENOSPC);
-                self.failed = true;
-            }
+        match self.watcher.absorb() {
+            Ok(paths) => self.absorbed = Some(merged(self.absorbed.take(), Changes::Paths(paths))),
+            Err(_) => self.failed = true,
         }
     }
 

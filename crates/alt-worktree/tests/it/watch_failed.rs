@@ -5,10 +5,10 @@
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
-use alt_worktree::{Unanswered, Untracked, scan};
+use alt_worktree::{Snapshot, Unanswered, Untracked, scan};
 
-use crate::delta::{fixture, write};
-use crate::watch::{Tree, options};
+use crate::delta::{ALGO, fixture, index_of, write};
+use crate::watch::{Tree, options, start};
 
 unsafe extern "C" {
     /// Sets the user that access to files is checked for, on the calling
@@ -85,4 +85,34 @@ fn a_scan_that_fails_after_events_were_lost_makes_up_for_them_next_time() {
     std::fs::remove_file(root.join("made/in/between.txt")).unwrap();
     assert!(tree.untracked().is_empty());
     assert_eq!(tree.watched.set_up(), 1);
+}
+
+#[test]
+fn events_taken_off_the_queue_while_a_directory_is_renamed_leave_hidden_ones_unwatched() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let root = dir.path();
+    // the root, a, docs, src, src/deep, src/deep/er: six watches
+    fixture(root);
+    let snapshot = Snapshot::of_index(&index_of(root), b"one", ALGO, None);
+    write(
+        root,
+        "build/out/a/b/c/d/o.o",
+        "hidden by the rule on build\n",
+    );
+    std::fs::create_dir(root.join(".alt")).unwrap();
+    let watched = start(root, 8, &snapshot).unwrap();
+    let mut tree = Tree {
+        dir,
+        snapshot,
+        watched,
+    };
+    tree.check();
+    // which watch is on which path is no longer known: all are set anew
+    std::fs::rename(tree.root().join("docs"), tree.root().join("papers")).unwrap();
+    write(tree.root(), "build/more/of/it/o.o", "hidden as well\n");
+    tree.watched.absorb();
+    assert!(!tree.watched.out_of_watches());
+    assert_eq!(tree.untracked(), ["papers/"]);
+    assert_eq!(tree.check().deleted.len(), 2);
+    assert!(!tree.watched.out_of_watches());
 }

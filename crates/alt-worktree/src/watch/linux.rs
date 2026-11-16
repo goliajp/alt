@@ -66,6 +66,8 @@ pub(crate) struct Watcher {
     /// how often the watches were set up from the root
     pub(super) set_up: usize,
     pub(super) check: Check,
+    /// what the events read so far tell that is not acted on yet
+    pending: Seen,
 }
 
 /// What is noted of each watch put on a directory while the watches are
@@ -149,6 +151,7 @@ impl Watcher {
             mounts: Mounts::open()?,
             set_up: 0,
             check: Check::default(),
+            pending: Seen::default(),
         };
         watcher.establish(tracked)?;
         Ok(watcher)
@@ -160,6 +163,7 @@ impl Watcher {
         self.set_up += 1;
         self.dirs.clear();
         self.skipped.clear();
+        self.pending = Seen::default();
         self.ident = ident(&self.root)?;
         if mounts::elsewhere(&self.root)? || self.mounts.beneath(&self.root)? {
             return Err(io::ErrorKind::Unsupported.into());
@@ -208,14 +212,20 @@ impl Watcher {
     }
 
     /// Reads the queue until it is empty.
-    fn drain(&mut self) -> io::Result<Seen> {
-        let mut seen = Seen::default();
+    fn drain(&mut self) -> io::Result<()> {
+        let mut seen = std::mem::take(&mut self.pending);
+        let read = self.read(&mut seen);
+        self.pending = seen;
+        read
+    }
+
+    fn read(&mut self, seen: &mut Seen) -> io::Result<()> {
         let mut buf = [0u8; 1 << 16];
         loop {
             let n = match self.queue.read(&mut buf) {
-                Ok(0) => return Ok(seen),
+                Ok(0) => return Ok(()),
                 Ok(n) => n,
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => return Ok(seen),
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => return Ok(()),
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
                 Err(e) => return Err(e),
             };
@@ -227,9 +237,19 @@ impl Watcher {
                 let name = &buf[at + 16..at + 16 + len];
                 let name = &name[..name.iter().position(|b| *b == 0).unwrap_or(len)];
                 at += 16 + len;
-                self.event(wd, mask, name, &mut seen);
+                self.event(wd, mask, name, seen);
             }
         }
+    }
+
+    /// Takes everything queued so far off the queue and returns the paths
+    /// named. What else the events tell is acted on by the next
+    /// [`changes`](Self::changes), which is told what the index tracks:
+    /// a directory that came to be has its watch from then, and is among
+    /// the paths returned here.
+    pub(crate) fn absorb(&mut self) -> io::Result<Vec<Vec<u8>>> {
+        self.drain()?;
+        Ok(std::mem::take(&mut self.pending.dirty))
     }
 
     /// Everything queued so far. An error means the tree cannot be watched
@@ -239,7 +259,8 @@ impl Watcher {
         if self.mounts.changed()? && self.mounts.beneath(&self.root)? {
             return Err(io::ErrorKind::Unsupported.into());
         }
-        let seen = self.drain()?;
+        self.drain()?;
+        let seen = std::mem::take(&mut self.pending);
         if replaced || seen.lost {
             // start over: which watch is on which path is no longer known
             self.queue = instance()?;
