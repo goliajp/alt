@@ -1,4 +1,7 @@
-// CODEGEN: gen.c, run with the GNU C library 2.41 in the locale C.UTF-8 (Unicode 16.0.0)
+// CODEGEN: tables/gen.c
+// source: the GNU C library 2.41, its locale C.UTF-8 (Unicode 16.0.0)
+// regenerate where that library is the C library:
+//   sh crates/alt-regex/tables/gen.sh 16.0.0 > crates/alt-regex/src/tables.rs
 
 //! The character classes and the upper-case letters of a UTF-8 locale.
 
