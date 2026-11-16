@@ -102,7 +102,28 @@ fn hand_picked_patterns_are_accepted_or_refused_as_the_c_library_does() {
         syntax: Syntax::Basic,
         ..Options::default()
     };
-    let cases: [(&str, Options); 35] = [
+    let any_case = Options {
+        ignore_case: true,
+        ..Options::default()
+    };
+    let cases: [(&str, Options); 50] = [
+        // a hyphen stands for itself only first or last in its brackets
+        ("[[:alpha:]-z]", Options::default()),
+        ("[[=a=]-z]", Options::default()),
+        ("[a-b-c]", Options::default()),
+        ("[a-a-z]", Options::default()),
+        ("[--z]", Options::default()),
+        ("[^-z]", Options::default()),
+        ("[a-z-]", Options::default()),
+        ("[[:alpha:]-]", Options::default()),
+        ("[]-a]", Options::default()),
+        // without regard to case a range is read in upper case
+        ("[A-z]", any_case),
+        ("[_-z]", any_case),
+        ("[a-Z]", any_case),
+        ("[Z-a]", any_case),
+        ("[a-_]", any_case),
+        ("[^[:lower:]_-a]", any_case),
         ("*a", Options::default()),
         ("a**", Options::default()),
         ("a|*b", Options::default()),
@@ -151,7 +172,7 @@ fn hand_picked_patterns_are_accepted_or_refused_as_the_c_library_does() {
         let Ok(ours) = ours else { continue };
         let texts = [
             "", "a", "*a", "aa", "ab", "b", "a+b?", "a|b", "aab", "a)", "]", "x ab.", "cab a b",
-            "ab ",
+            "ab ", "_", "B", "-", "z", "Z", "^", "`",
         ];
         for text in texts {
             let expected = theirs.spans(text.as_bytes()).map(|spans| spans[0]);

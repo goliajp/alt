@@ -74,10 +74,12 @@ pub fn parse(pat: &[u8], at: &mut usize, opts: Options) -> Result<(Node, bool), 
         true => Members::Chars(Vec::new(), Vec::new()),
         false => Members::Bytes(ByteSet::empty()),
     };
-    // the pattern of a UTF-8 text is read in upper case
-    let cased = |c: u32| match opts.utf8 && opts.ignore_case {
-        true => chars::upper(c),
-        false => c,
+    // without regard to case the pattern is read in upper case, and so
+    // are the ends of its ranges
+    let cased = |c: u32| match (opts.ignore_case, opts.utf8) {
+        (false, _) => c,
+        (true, true) => chars::upper(c),
+        (true, false) => u32::from((c as u8).to_ascii_uppercase()),
     };
     let mut plain = !negate;
     let mut first = true;
@@ -85,6 +87,9 @@ pub fn parse(pat: &[u8], at: &mut usize, opts: Options) -> Result<(Node, bool), 
         match pat.get(*at) {
             None => return Err(Error::Bracket),
             Some(b']') if !first => break,
+            // a hyphen that neither begins nor ends the brackets and
+            // ends no range
+            Some(b'-') if !first && pat.get(*at + 1) != Some(&b']') => return Err(Error::Range),
             Some(_) => {}
         }
         first = false;
@@ -92,7 +97,14 @@ pub fn parse(pat: &[u8], at: &mut usize, opts: Options) -> Result<(Node, bool), 
             Element::Class(name) => {
                 plain = false;
                 match &mut members {
-                    Members::Bytes(set) => set.union(&ByteSet::class(name).ok_or(Error::Class)?),
+                    Members::Bytes(set) => {
+                        // in upper case no text has a letter of the other
+                        let name = match name {
+                            b"upper" | b"lower" if opts.ignore_case => b"alpha",
+                            _ => name,
+                        };
+                        set.union(&ByteSet::class(name).ok_or(Error::Class)?)
+                    }
                     Members::Chars(_, classes) => {
                         ByteSet::class(name).ok_or(Error::Class)?;
                         classes.push(name);
@@ -139,7 +151,7 @@ pub fn parse(pat: &[u8], at: &mut usize, opts: Options) -> Result<(Node, bool), 
     let node = match members {
         Members::Bytes(mut set) => {
             if opts.ignore_case {
-                set.fold_case();
+                set.read_in_upper_case();
             }
             if negate {
                 set.negate();

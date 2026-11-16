@@ -108,6 +108,16 @@ impl ByteSet {
         }
     }
 
+    /// Makes the set the bytes whose upper-case form it held: what a
+    /// text read in upper case matches.
+    pub fn read_in_upper_case(&mut self) {
+        let held = *self;
+        *self = Self::empty();
+        for b in (0..=255u8).filter(|b| held.contains(b.to_ascii_uppercase())) {
+            self.insert(b);
+        }
+    }
+
     /// The bytes that make up a word: letters, digits and `_`.
     pub fn word() -> Self {
         let mut set = Self::class(b"alnum").expect("a known class");

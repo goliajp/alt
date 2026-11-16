@@ -505,5 +505,23 @@ mod tests {
         let (node, _) = parse(b"a[x-z]1", opts).unwrap();
         let sets = [&b"aA"[..], b"xyzXYZ", b"1"].map(|s| Node::Set(ByteSet::of(s)));
         assert_eq!(node, Node::Concat(sets.to_vec()));
+        // a range is read in upper case, as the text is
+        let set = |pat: &str| parse(pat.as_bytes(), opts).map(|(node, _)| node);
+        let letters = Node::Set(ByteSet::class(b"alpha").unwrap());
+        assert_eq!(set("[A-z]"), Ok(letters.clone()));
+        assert_eq!(set("[a-Z]"), Ok(letters.clone()));
+        assert_eq!(set("[[:lower:]]"), Ok(letters));
+        assert_eq!(set("[_-z]"), Err(Error::Range));
+        assert_eq!(set("[y-_]"), Ok(Node::Set(ByteSet::of(b"yzYZ[\\]^_"))));
+    }
+
+    #[test]
+    fn a_hyphen_inside_brackets_ends_a_range_or_is_refused() {
+        for pat in ["[a-b-c]", "[[:alpha:]-z]", "[[=a=]-z]", "[a-a-z]"] {
+            assert_eq!(ere(pat), Err(Error::Range), "{pat}");
+        }
+        for pat in ["[--z]", "[^-z]", "[a-z-]", "[[:alpha:]-]", "[]-a]", "[%--]"] {
+            assert!(ere(pat).is_ok(), "{pat}");
+        }
     }
 }
