@@ -319,6 +319,7 @@ impl NativeRepo<'_> {
     ) -> Res<OpId> {
         self.lock_workspace()?;
         self.ensure_no_pending_recovery()?;
+        index_file::ensure_sound(&after)?;
         let before = canonical_index(before, self.store.algo);
         let after = canonical_index(after, self.store.algo);
         if canonical_index(self.index()?, self.store.algo) != before {

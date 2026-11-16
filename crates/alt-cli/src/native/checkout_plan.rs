@@ -179,6 +179,7 @@ impl NativeRepo<'_> {
             });
         }
         let index_after = target_index(target);
+        index_file::ensure_sound(&index_after)?;
         let index_after = self.snapshot(&canonical_index(index_after, self.store.algo))?;
         *self.planned.borrow_mut() = Some(super::tree_state::Planned {
             index: index_after.clone(),

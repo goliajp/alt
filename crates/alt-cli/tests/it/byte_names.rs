@@ -38,7 +38,7 @@ fn by_git(trees: &Trees, args: &[&str]) -> String {
 }
 
 /// Every entry of the index at `index`, as git lists it byte for byte.
-fn entries(trees: &Trees, index: &Path) -> Vec<u8> {
+pub(crate) fn entries(trees: &Trees, index: &Path) -> Vec<u8> {
     let listed = std::process::Command::new("git")
         .current_dir(trees.at("git"))
         .env("GIT_INDEX_FILE", index)
@@ -64,7 +64,7 @@ fn alike(trees: &Trees, at: &str) {
     }
 }
 
-fn each(trees: &Trees, args: &[&str]) {
+pub(crate) fn each(trees: &Trees, args: &[&str]) {
     run(&trees.at("direct"), args, false);
     run(&trees.at("served"), args, true);
     assert!(git(&trees.at("git"), args).status.success(), "git {args:?}");

@@ -33,6 +33,8 @@ pub use coord::{Coord, resolve_workspace};
 mod diff;
 mod http_auth;
 mod identity;
+mod index_file;
+use index_file::{empty_index, save_index};
 mod lfs;
 pub use identity::{Identity, Principal, PrincipalKind};
 mod merge;
@@ -4194,51 +4196,6 @@ fn check_remote_name(name: &str) -> Res<()> {
 /// git's default behavior).
 fn default_fetch_refspec(name: &str) -> String {
     format!("+refs/heads/*:refs/remotes/{name}/*")
-}
-
-/// A 7-hex-char object id abbreviation, or all-zero for an absent side.
-fn empty_index() -> Index {
-    Index {
-        version: 2,
-        entries: Vec::new(),
-        extensions: Vec::new(),
-    }
-}
-
-/// Atomic index write to `path`: temp file + rename (sibling temp).
-///
-/// Racily clean entries are handled as git does: an entry whose mtime is not
-/// older than the index file itself may be rewritten within the same clock
-/// tick (coarse on Linux) with the same size, which a stat compare cannot
-/// see. Those entries get a zero mtime, so the next scan re-hashes them.
-fn save_index(path: &Path, index: &Index, algo: HashAlgo) -> Res<()> {
-    let tmp = path.with_extension("tmp");
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    crate::durable::write(&tmp, index.serialize(algo))?;
-    let stamp = file_mtime(&std::fs::metadata(&tmp)?);
-    if index.entries.iter().any(|e| e.mtime >= stamp) {
-        let mut smudged = index.clone();
-        for e in smudged.entries.iter_mut().filter(|e| e.mtime >= stamp) {
-            e.mtime = (0, 0);
-        }
-        crate::durable::write(&tmp, smudged.serialize(algo))?;
-    }
-    crate::durable::rename(&tmp, path)?;
-    Ok(())
-}
-
-#[cfg(unix)]
-fn file_mtime(meta: &std::fs::Metadata) -> (u32, u32) {
-    use std::os::unix::fs::MetadataExt;
-    (meta.mtime() as u32, meta.mtime_nsec() as u32)
-}
-
-// stat is never trusted off unix, so no entry is ever racily clean
-#[cfg(not(unix))]
-fn file_mtime(_meta: &std::fs::Metadata) -> (u32, u32) {
-    (u32::MAX, u32::MAX)
 }
 
 /// Builds an index entry for a working-tree file, filling stat from its

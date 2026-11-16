@@ -26,6 +26,26 @@ pub(super) fn present(e: &IndexEntry, delta: &Delta, named: &dyn Fn(&[u8]) -> bo
     e.stage() == 0 && named(&e.path) && (e.mode != 0o160000 || delta.submodules.contains(&e.path))
 }
 
+/// The files of `before` that cannot stay beside the files `taken`, as git
+/// has it: one whose name a taken path has for a directory, and one that
+/// lies beneath a taken path. A conflicted path stays with its stages.
+fn displaced<'a>(before: &'a Index, taken: &[&BString]) -> Vec<&'a [u8]> {
+    let files: HashSet<&[u8]> = taken.iter().map(|path| path.as_slice()).collect();
+    let dirs: HashSet<&[u8]> = taken.iter().flat_map(|path| above(path)).collect();
+    let clashes = |path: &[u8]| dirs.contains(path) || above(path).any(|d| files.contains(d));
+    let whole = before.entries.iter().filter(|e| e.stage() == 0);
+    whole
+        .map(|e| e.path.as_slice())
+        .filter(|path| !files.contains(path) && clashes(path))
+        .collect()
+}
+
+/// The directories `path` lies in, from the outermost.
+fn above(path: &[u8]) -> impl Iterator<Item = &[u8]> {
+    let slashes = path.iter().enumerate().filter(|(_, b)| **b == b'/');
+    slashes.map(move |(at, _)| &path[..at])
+}
+
 /// Works out from the scan `delta` which paths are taken from the working
 /// tree and which entries of `before` go. With `renormalize` every tracked
 /// file among the named paths is taken, and nothing else is touched.
@@ -55,11 +75,13 @@ pub(super) fn plan<'a>(
         true => &[],
         false => &delta.deleted,
     };
+    let displaced = displaced(before, &taken);
     let acted: HashSet<&[u8]> = taken
         .iter()
         .copied()
         .chain(deleted)
         .map(|p| p.as_slice())
+        .chain(displaced)
         .collect();
     // a conflicted path among those named is resolved by what the working
     // tree has there: the file when there is one (`unmerged`), a removal

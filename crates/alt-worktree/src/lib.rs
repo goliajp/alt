@@ -56,6 +56,8 @@ pub enum WorktreeError {
     Odb(OdbError),
     Object(alt_git_codec::ObjectParseError),
     NotATree(ObjectId),
+    /// a tree was to be written with two entries of this name
+    Duplicate(BString),
 }
 
 impl std::fmt::Display for WorktreeError {
@@ -65,6 +67,7 @@ impl std::fmt::Display for WorktreeError {
             Self::Odb(e) => std::fmt::Display::fmt(e, f),
             Self::Object(e) => std::fmt::Display::fmt(e, f),
             Self::NotATree(v) => write!(f, "object {v} is not a tree"),
+            Self::Duplicate(name) => write!(f, "tree would hold '{name}' twice"),
         }
     }
 }
@@ -175,6 +178,10 @@ pub fn write_tree(
         .map(|e| (e.path.as_bytes(), e.oid, e.mode))
         .collect();
     flat.sort_by(|a, b| a.0.cmp(b.0));
+    let paths: Vec<&[u8]> = flat.iter().map(|e| e.0).collect();
+    if let Some(at) = alt_git_index::clash_among(&paths) {
+        return Err(WorktreeError::Duplicate(BString::from(paths[at])));
+    }
     write_subtree(odb, &flat, algo)
 }
 
