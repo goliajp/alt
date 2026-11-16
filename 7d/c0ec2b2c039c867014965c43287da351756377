@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: hold the predefined zstd sequence tables at their own length
+author-type: human
+author: doracawl
+touched: crates/alt-zstd/src/sequences.rs
