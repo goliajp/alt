@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: feat
+summary: let groups and repetitions nest 400 deep
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/lib.rs
+touched: crates/alt-regex/src/syntax.rs
+touched: crates/alt-regex/tests/it/limits.rs
