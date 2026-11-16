@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: look up the synced length only for a pack that stops short
+author-type: human
+author: doracawl
+touched: crates/alt-store/src/packs.rs
