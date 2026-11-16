@@ -114,24 +114,73 @@ the end of a file. Each store records how far its files were last synced
 (`.alt/odb.durable` for the object store, `.alt/oplog/durable` for the
 operation log). Records that do not read past that point never finished:
 commands that only read pass over them without touching the file, `alt fsck`
-included, and the next command that writes cuts them off. A record that does
-not read before that point was once whole. That is damage, and no command
-cuts anything off a damaged file:
+included, and the next command that writes cuts them off. `alt fsck` says so
+and still exits 0:
 
-| Message | File |
+```
+passed over 13 byte(s) at the end of map.alt: an append that never finished
+```
+
+### Damage
+
+A record that does not read before the synced point was once whole. That is
+damage. No command cuts anything off a damaged file or writes into it: the
+file keeps every byte it had, so the records after the damaged one are still
+there. The message names the file:
+
+| Message ends in | File |
 | --- | --- |
-| `active pack damaged`, `sealed pack truncated` | `.alt/store/pack-*.altpack` |
+| `active pack damaged`, `sealed pack truncated`, `chunk ID corrupt: REASON` | `.alt/store/pack-*.altpack` |
 | `blobmap record corrupt` | `.alt/store/manifests/blobmap` |
 | `tier1 record corrupt` | `.alt/tier1` |
 | `map.alt record corrupt` | `.alt/map.alt` |
-| `oplog record corrupt`, `oplog chain broken` | `.alt/oplog/log` |
+| `oplog record corrupt`, `oplog chain broken`, `oplog does not lead to its anchor` | `.alt/oplog/log` |
 
-The command that met the record fails with the message, every later command
-that reads it fails the same way, and the file keeps every byte it had, so the
-records after the damaged one are still there for a repair to use. Restore the
-file, or the whole `.alt` directory, from a copy made before the damage; `alt
-export` and `alt push` of history that does not pass through the damaged
-record still work for getting it out.
+A command fails with the message when it reads the damaged record, and so
+does every later command that reads it. Which commands read it depends on
+where it lies:
+
+| Damaged record | Commands that fail | Commands that still work |
+| --- | --- | --- |
+| among the last written to `map.alt` (not indexed yet) | every command that reads or writes an object | `alt rev-parse` of a ref |
+| an older record of `map.alt` | those that read that object, `alt fsck` | the rest, writes included |
+| among the last written to the operation log | every command | none |
+| an older operation, before the ref snapshot | commands that write, `alt op-log`, `alt fsck` (`oplog does not lead to its anchor`) | the other commands that read |
+| a chunk in a pack | those that read an object stored in it, `alt fsck` | the rest, writes included |
+| a pack record whose header no longer reads, among the last written | every command that reads or writes an object (`active pack damaged`) | `alt rev-parse` of a ref |
+| `.alt/tier1` or the blob map | those that read an object stored through it, commands that write, `alt export`, `alt fsck` | the rest |
+
+Restore the file, or the whole `.alt` directory, from a copy made before the
+damage. A command that writes and fails this way exits 75 and prints the id
+of its request: the store's files are as they were before it.
+
+### Reading past damage
+
+When there is no copy to restore, what is left can still be read out. With
+`ALT_READ_PAST_DAMAGE` set in its environment, a command that only reads
+goes on where it would have failed: it passes over the damaged bytes, holds
+the records that read on either side of them, and says on stderr what it
+passed over:
+
+```
+warning: passed over bytes 1153 to 1235 of /path/to/repository/.alt/map.alt: they do not read, and what they held is left out
+```
+
+```sh
+ALT_READ_PAST_DAMAGE=1 alt cat-file -p COMMIT
+ALT_READ_PAST_DAMAGE=1 alt log
+ALT_READ_PAST_DAMAGE=1 alt export /path/outside/the/repository
+```
+
+What the damaged bytes held is left out: an object stored in them reads as
+missing, and a command that needs it fails saying so (`blob ID not found`,
+`notes tree missing from store`). `alt export` writes everything out when no
+ref reaches such an object. The operation log is read up to the first
+damaged operation: the refs are shown as they were before it, and the
+operations after it are not read. No file under `.alt` changes. The variable
+is refused by commands that write to the repository and by `alt fsck`, which
+reports the repository as it is; the daemon is not used and does not start
+with it set.
 
 ### Records whose content never arrived
 
@@ -170,42 +219,52 @@ log as it is and can still print the id of a commit that was not kept.
 over without a word. These lines are not damage, and it still exits 0:
 
 ```
-passed over 300 byte(s) at the end of map.alt: an append that never finished
 574 byte(s) of records at the end of map.alt were never synced and name content that is not stored: the next command that writes cuts them off
 1 operation(s) at the end of the operation log were never synced and name objects that are not stored: the next command that writes discards them
 ```
 
-It fails when what was passed over holds a whole record after all, when a
-file ends short of what was synced, and when a ref points at an object that is
-not stored:
+### What only the check or a command that writes reports
 
-```
-fatal: fsck: map.alt reads up to byte 1235, and a whole record begins past that, at byte 1317
-fatal: fsck: ref refs/heads/main points at 5c5af38d9217c41249e254adb6430d14d9f8e07b, which is not stored
-```
+`alt fsck` fails, with a line starting `fatal: fsck:`, on every message in
+the tables above and on these. None of them changes a file.
 
-A record from before the synced point that names missing content is damage,
-and so is a file that ends short of what was synced. The command that writes
-fails, no file changes, and reading what is left still works:
+| Message | Meaning | What to do |
+| --- | --- | --- |
+| `FILE reads up to byte N, and a whole record begins past that, at byte M` | the bytes commands pass over at the end of `FILE` hold a record that reads: the record at byte N is damaged, not unfinished | restore `FILE`, or read past the damage |
+| `ref NAME points at ID, which is not stored` | the object a ref names is gone | restore, or point the ref at a commit that is stored |
+| `FILE ends at byte N, but records up to byte M of it were committed and synced` | the end of a file that was synced is gone | restore `FILE` |
+| `the operation log ends at byte N, but records up to byte M of it were committed and synced` | the same for `.alt/oplog/log` | restore it |
+| `the record at byte N of FILE names content the store does not hold` | a record that was synced, or that nothing tells from a synced one, names content that is gone | restore the file that held the content |
+| `pack holds bytes that are not records` | a pack does not read as records to its end | restore the pack |
+| `refs disagree with the operation log`, `ref state diverged during replay` | replaying the log does not give the refs the repository shows | move `.alt/refs/snapshot`, a cache, aside and check again; when it still fails, restore `.alt/oplog/log` |
+| `index run corrupt`, `chunk index misses a record`, `chunk index names a superseded record`, `chunk index names a record no pack holds`, `pack shorter than its index` | an index does not match the file it indexes | see Indexes below |
 
-| Message | Meaning |
-| --- | --- |
-| `the record at byte N of FILE names content the store does not hold` | a record that was synced, or that nothing tells from a synced one, names content that is gone |
-| `FILE ends at byte N, but records up to byte M of it were committed and synced` | the end of a file that was synced is gone |
-| `the operation log ends at byte N, but records up to byte M of it were committed and synced` | the same for `.alt/oplog/log` |
+The third, fourth and fifth of these are also what a command that writes
+fails with before it changes anything: it holds every file against what was
+synced before it appends. Commands that only read do not look, and go on
+reading what is left.
+
+### Older repositories, upgrades and unsynced commits
 
 A repository that an older alt wrote records only how long its files were
 when they were last synced, or nothing. That length is used the same way.
 Where nothing is recorded, a record that does not read is unfinished only when
 it is the last one in its file, as that alt took it. The first command of
 this alt that writes syncs the files and records how far they are whole; no
-step by hand is needed after an upgrade. Commits made with
-`ALT_RELAXED_DURABILITY` set are not synced, and what was recorded is marked
-as no longer holding until a command without it writes: in between, too,
-only the last record of a file can be an unfinished one.
+step by hand is needed after an upgrade. A daemon of the older alt that is
+still running for the repository is stopped by the first command of this
+alt that would use it, which starts its own; an older alt does the same to
+this one's daemon, so the two can be used in turn.
 
-The same messages appear when a `durable` file was deleted from a repository
-that had one, while the end of a file does not read. Nothing is cut then,
+Commits made with `ALT_RELAXED_DURABILITY` set are not synced, and what was
+recorded is marked as no longer holding until a command without it writes:
+in between, too, only the last record of a file can be an unfinished one, and
+a power cut can lose such commits whole or in part.
+
+When a `durable` file was deleted from a repository that had one, nothing
+says how far the files were synced. A file that reads to its end is taken
+as it is, and the next command that writes records it anew. A file whose end
+does not read is reported with the messages for damage, and nothing is cut,
 because nothing says the unreadable records were unfinished. Do not delete
 the `durable` files.
 
@@ -214,11 +273,17 @@ the `durable` files.
 An index file that was cut short or whose header is damaged is passed over by
 every command, which reads the indexed file instead. `alt fsck` names each one
 in a line starting `ignored index run` (`ignored_index_runs` in the JSON) and
-still exits 0 when every record verifies. To repair an index, run `alt fsck`
-first. Only when it exits 0 and all it reports is `ignored index run` lines,
-delete the `*.idx` directories under `.alt`; the next command rebuilds them
-from the files they index. When `alt fsck` reports a damaged record, leave the
-indexes in place: an index can still locate the records behind a damaged one.
+still exits 0 when every record verifies. An index damaged elsewhere is not
+trusted either: a lookup through it fails rather than return another record
+(`chunk ID corrupt: record id mismatch`), and `alt fsck` fails with `index
+run corrupt` or one of the other index messages above.
+
+To repair an index, make a copy of `.alt`, then delete the `*.idx`
+directories under `.alt` and run `alt fsck`: it now reads the indexed files
+themselves. When it exits 0 the index was all that was damaged, and the next
+command that writes rebuilds it. When it reports a damaged record, put the
+indexes back from the copy: an index can still locate the records behind a
+damaged one.
 
 ## Preserve data and exit to Git
 
