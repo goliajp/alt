@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: run a command outside the daemon when the daemon looks for locales elsewhere than its caller
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd.rs
+touched: crates/alt-cli/src/client.rs
+touched: crates/alt-cli/src/daemon.rs
+touched: crates/alt-cli/tests/it/daemon_locale.rs
+touched: crates/alt-cli/tests/it/main.rs
