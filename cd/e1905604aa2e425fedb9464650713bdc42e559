@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: add beside the stages of a conflict as git does
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/add_unmerged.rs
+touched: crates/alt-cli/tests/it/main.rs
