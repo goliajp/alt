@@ -8,30 +8,19 @@ impl NativeRepo<'_> {
     /// The mode named `given`, or without one what `status.showUntrackedFiles`
     /// sets, which may be a boolean as for git; `normal` when nothing does.
     fn untracked_mode(&self, given: Option<&str>) -> Res<Untracked> {
-        let named = |mode: &[u8]| match mode {
-            b"no" => Some(Untracked::No),
-            b"normal" => Some(Untracked::Normal),
-            b"all" => Some(Untracked::All),
-            _ => None,
-        };
         let invalid = |mode: &[u8]| {
             let mode = String::from_utf8_lossy(mode);
             format!("invalid untracked files mode '{mode}'")
         };
         if let Some(given) = given {
-            return named(given.as_bytes()).ok_or_else(|| invalid(given.as_bytes()).into());
+            return mode_named(given.as_bytes()).ok_or_else(|| invalid(given.as_bytes()).into());
         }
         let settings = self.settings()?;
-        let (section, key) = ("status", "showuntrackedfiles");
-        let Some(set) = settings.get(section, None, key) else {
-            return Ok(Untracked::Normal);
-        };
-        let text: &[u8] = set.map(|v| v.as_ref()).unwrap_or(b"true");
-        match (named(text), settings.get_bool(section, None, key)) {
-            (Some(mode), _) => Ok(mode),
-            (None, Some(Ok(true))) => Ok(Untracked::Normal),
-            (None, Some(Ok(false))) => Ok(Untracked::No),
-            (None, _) => Err(invalid(text).into()),
+        match settings.get("status", None, "showuntrackedfiles") {
+            None => Ok(Untracked::Normal),
+            // a key without a value is true
+            Some(None) => Ok(Untracked::Normal),
+            Some(Some(text)) => mode_named(text).ok_or_else(|| invalid(text).into()),
         }
     }
 
@@ -148,4 +137,15 @@ fn render_status_json(
     doc.write(out)?;
     out.write_all(b"\n")?;
     Ok(())
+}
+
+/// The mode `text` names, by its name or as a boolean in one of the
+/// spellings git takes: true is `normal`, false is `no`.
+fn mode_named(text: &[u8]) -> Option<Untracked> {
+    match text.to_ascii_lowercase().as_slice() {
+        b"no" | b"false" | b"off" | b"0" => Some(Untracked::No),
+        b"normal" | b"true" | b"yes" | b"on" | b"1" => Some(Untracked::Normal),
+        b"all" => Some(Untracked::All),
+        _ => None,
+    }
 }

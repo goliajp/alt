@@ -18,14 +18,14 @@ pub struct Add {
 #[derive(alt_args::Args)]
 pub struct Status {
     /// Which untracked files to show: `no`, `normal` (a directory with
-    /// nothing tracked in it as one path) or `all`; `all` when the
-    /// option is given without a mode, `normal` without the option
+    /// nothing tracked in it as one path) or `all`, or a boolean for
+    /// `normal` or `no`; `all` when the option is given without a mode,
+    /// and without the option what `status.showUntrackedFiles` sets
     #[arg(
         short = 'u',
         long = "untracked-files",
         value_name = "MODE",
-        default_missing_value = "all",
-        value_parser = ["no", "normal", "all"]
+        default_missing_value = "all"
     )]
     pub untracked_files: Option<String>,
     /// Emit a stable JSON object instead of the human-readable view

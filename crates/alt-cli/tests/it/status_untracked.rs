@@ -103,7 +103,12 @@ fn json_member(paths: &[String]) -> String {
 fn every_untracked_files_mode_lists_what_git_lists() {
     let (a, g) = pair();
     let (a, g) = (a.path(), g.path());
-    let spellings: [&[&str]; 8] = [
+    let spellings: [&[&str]; 13] = [
+        &["-utrue"],
+        &["-ufalse"],
+        &["--untracked-files=yes"],
+        &["--untracked-files=off"],
+        &["-u1"],
         &[],
         &["-unormal"],
         &["--untracked-files=normal"],
@@ -205,7 +210,32 @@ fn a_repository_in_an_untracked_directory_shows_as_git_shows_it() {
     assert!(!status.contains("new file:   emb"), "{status}");
     let listed = "Untracked files:\n\talone/\n\temb/\n\touter/inner/\n\tt/emb/\n";
     assert!(status.ends_with(listed), "{status}");
-    assert!(!alt(a, &["add", "emb"]).status.success());
+    // naming it, or a path inside it, stages nothing and fails nothing
+    ok(git(g, &["add", "emb/file.txt"]));
+    for named in ["emb/file.txt", "emb", "outer/inner/file.txt"] {
+        ok(alt(a, &["add", named]));
+        assert_eq!(ok(alt(a, &["status"])), status, "{named}");
+    }
+    assert!(!alt(a, &["add", "emb-not-there/file.txt"]).status.success());
+}
+
+#[test]
+fn untracked_files_beside_a_repository_in_a_tracked_directory_are_listed() {
+    let (a, g) = pair();
+    for root in [a.path(), g.path()] {
+        // `t` has a tracked file
+        ok(git(&root.join("t"), &["init", "-q", "-b", "main"]));
+        write(root, "t/beside.txt", "beside\n");
+        write(root, "t/keep.txt", "changed\n");
+    }
+    let (a, g) = (a.path(), g.path());
+    for options in [&[][..], &["-uall"]] {
+        let want = git_untracked(g, options);
+        assert!(want.contains(&"t/beside.txt".to_owned()), "{want:?}");
+        let json = ok(alt(a, &[&["status", "--json"][..], options].concat()));
+        assert!(json.contains(&json_member(&want)), "{options:?}: {json}");
+    }
+    assert!(ok(alt(a, &["status"])).contains("modified:   t/keep.txt"));
 }
 
 #[test]

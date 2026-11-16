@@ -232,16 +232,17 @@ fn tracked_files_beside_a_nested_repository_are_not_reported_deleted() {
     let dir = repo();
     let root = dir.path();
     write(root, "src/.git/HEAD", "ref: refs/heads/main\n");
-    write(
-        root,
-        "src/untracked.rs",
-        "belongs to the nested repository\n",
-    );
-    assert_eq!(status(root), CLEAN);
+    // the directory has files in the index: it is walked as any other, as
+    // git walks it
+    write(root, "src/untracked.rs", "beside the nested repository\n");
+    let untracked = "Untracked files:\n\tsrc/untracked.rs\n";
+    assert_eq!(status(root), format!("On branch main\n{untracked}"));
     write(root, "src/lib.rs", "changed\n");
     assert_eq!(
         status(root),
-        "On branch main\nChanges not staged for commit:\n\tmodified:   src/lib.rs\n"
+        format!(
+            "On branch main\nChanges not staged for commit:\n\tmodified:   src/lib.rs\n{untracked}"
+        )
     );
 }
 
@@ -408,23 +409,25 @@ fn recorded(root: &Path, path: &str) -> bool {
 fn a_switch_records_the_stat_of_the_files_it_writes() {
     let dir = repo();
     let root = dir.path();
+    let files: Vec<String> = (0..400).map(|f| format!("many/f{f}.txt")).collect();
+    for file in &files {
+        write(root, file, "main\n");
+    }
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "many"]));
     ok(alt(root, &["switch", "-c", "other"]));
-    write(root, "a.txt", "other\n");
+    for file in &files {
+        write(root, file, "other\n");
+    }
     ok(alt(root, &["add", "."]));
     ok(alt(root, &["commit", "-m", "other"]));
     // a file written within the tick of the clock the switch ends in is
-    // left for the next scan to record, and a switch of one small file
-    // seldom takes longer than a tick: it is repeated until one does
-    let mut seen = false;
-    let began = std::time::Instant::now();
-    for round in 0.. {
-        if began.elapsed() > std::time::Duration::from_secs(60) {
-            break;
-        }
-        let to = if round % 2 == 0 { "main" } else { "other" };
+    // left for the next scan to record; writing these takes many ticks
+    for to in ["main", "other"] {
         ok(alt(root, &["switch", to]));
-        if recorded(root, "a.txt") {
-            seen = true;
+        let recorded = files.iter().filter(|file| recorded(root, file)).count();
+        assert!(recorded > 0, "switch to {to} recorded no stat");
+        if recorded == files.len() {
             // the status that follows has nothing to learn
             let scan = std::fs::read(root.join(".alt/index.scan")).unwrap();
             assert_eq!(
@@ -432,8 +435,6 @@ fn a_switch_records_the_stat_of_the_files_it_writes() {
                 format!("On branch {to}\nnothing to commit, working tree clean\n")
             );
             assert_eq!(std::fs::read(root.join(".alt/index.scan")).unwrap(), scan);
-            break;
         }
     }
-    assert!(seen, "no switch recorded the stat of the file it wrote");
 }

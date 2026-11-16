@@ -289,8 +289,6 @@ impl Walk<'_> {
         let mut names = fd.names()?;
         names.sort();
         let base = self.snapshot.dir_path(dir);
-        // a repository of its own among tracked files: its other files are its own
-        let hidden = hidden || (dir != 0 && holds_repository(&names));
         let own = match hidden {
             true => None,
             false => ignore_file(&fd, &names, base, ignore)?,

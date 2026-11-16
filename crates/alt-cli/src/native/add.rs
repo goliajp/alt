@@ -18,6 +18,13 @@ fn under(path: &[u8], spec: &str) -> bool {
         || (path.starts_with(spec.as_bytes()) && path.get(spec.len()) == Some(&b'/'))
 }
 
+/// Whether `spec` names something inside the repository of its own that
+/// the scan reported as the directory `path`, which ends in `/`. Such a
+/// path matches and stages nothing, as for git.
+fn inside_repository(path: &[u8], spec: &str) -> bool {
+    path.ends_with(b"/") && spec.as_bytes().starts_with(path)
+}
+
 /// A path stands for itself and every file under it, deleted ones included
 /// (their removal is staged), as in git; a conflicted path is one the index
 /// knows, with or without its file. A path that names nothing is an error.
@@ -28,7 +35,7 @@ fn all_match(specs: &[&str], given: &[String], before: &Index, delta: &Delta) ->
             .untracked
             .iter()
             .chain(&delta.unmerged)
-            .any(|p| under(p, spec));
+            .any(|p| under(p, spec) || inside_repository(p, spec));
         if !tracked && !seen {
             return Err(format!("pathspec '{given}' did not match any files").into());
         }
@@ -81,10 +88,10 @@ impl NativeRepo<'_> {
         // it had when it was staged holds what the index holds
         let mut snapshot = self.worktree_snapshot()?;
         let (mut delta, clock) = self.scan_delta_within(&mut snapshot, Untracked::All, &within)?;
+        all_match(&specs, paths, &before, &delta)?;
         // a repository of its own in the tree is shown as a directory and
         // left where it is
         delta.untracked.retain(|path| !path.ends_with(b"/"));
-        all_match(&specs, paths, &before, &delta)?;
 
         let plan = plan(&before, &delta, renormalize, &named);
         // path gate: deny staging any path the policy excludes, *before*
