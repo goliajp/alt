@@ -46,11 +46,16 @@ fn the_diff_attribute_decides_whether_the_default_pattern_is_used() {
     ];
     let found = headers(&lines, "default", "^[a-z]+", "pub fn main(x)");
     let named = found.iter().filter(|h| h.ends_with("@@ pub")).count();
-    let bare = found.iter().filter(|h| h.ends_with("@@")).count();
+    let plain = found
+        .iter()
+        .filter(|h| h.ends_with("@@ pub fn main(x)"))
+        .count();
     // by the pattern where no driver or the one of that name is given;
-    // by none where the attribute is set without a name
+    // by git's plain rule where the attribute is set without a name;
+    // and a file that is binary has no hunks
     let each = crate::funcname_drivers::locales().len();
-    assert_eq!((named, bare), (3 * each, each), "{found:?}");
+    assert_eq!((named, plain), (3 * each, each), "{found:?}");
+    assert_eq!(found.len(), 4 * each);
 }
 
 #[test]
