@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: keep repetitions written behind one another around a group apart, as the c library reads them
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/lib.rs
+touched: crates/alt-regex/src/syntax.rs
+touched: crates/alt-regex/src/syntax/tree.rs
+touched: crates/alt-regex/tests/it/regcomp/groups.rs
+touched: crates/alt-regex/tests/it/regcomp/random.rs
