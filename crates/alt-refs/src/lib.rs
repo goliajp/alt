@@ -13,6 +13,7 @@
 
 mod check;
 mod policy;
+mod settle;
 mod snapshot;
 mod state;
 mod tx;
@@ -24,9 +25,10 @@ use alt_git_codec::ObjectId;
 use alt_oplog::OpLog;
 use state::Refs;
 
-pub use alt_oplog::OpId;
+pub use alt_oplog::{OpId, Unconfirmed};
 pub use check::RefsChecked;
 pub use policy::{RefError, RefPolicy, StateCheck};
+pub use settle::named_objects;
 pub use tx::{IdemKey, PAYLOAD_REF_TX, ParsedTx, RefChange, parse_tx};
 
 /// What a ref points at.
@@ -67,6 +69,8 @@ pub struct RefStore {
     /// recent (post-snapshot) keys are kept — long enough for any in-flight
     /// retry, which happens within one client invocation.
     by_key: BTreeMap<IdemKey, OpId>,
+    /// The oplog's count of reading the log anew that `refs` follows.
+    reads_seen: u64,
 }
 
 impl RefStore {
@@ -119,10 +123,11 @@ impl RefStore {
             snapshot_end,
             snapshot_len,
             by_key,
+            reads_seen: 0,
         };
         // a reader refreshes a snapshot that has fallen behind (or predates
         // anchors), so the next open is short whoever runs it
-        if !read_only && store.snapshot_is_due() {
+        if !read_only && !store.oplog.clamped() && store.snapshot_is_due() {
             // a cache: where it cannot be written, the open still stands
             let _ = store.snapshot();
         }
@@ -257,7 +262,14 @@ impl RefStore {
     /// served read reflects the true on-disk state — not the snapshot this
     /// process held at open.
     pub fn refresh(&mut self) -> Result<(), RefError> {
-        self.oplog.refresh()?;
+        match self.oplog.refresh() {
+            // another writer cut ops this handle held
+            Err(alt_oplog::OpLogError::CutBack) => self.oplog.reopen()?,
+            refreshed => refreshed?,
+        }
+        if self.oplog.reads() != self.reads_seen {
+            return self.rebuild();
+        }
         fold_new(
             &mut self.refs,
             &mut self.applied,

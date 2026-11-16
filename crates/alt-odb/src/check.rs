@@ -84,6 +84,20 @@ impl NativeOdb {
 }
 
 impl NativeOdb {
+    /// Runs `check` while this handle holds the write lock, with the
+    /// store read to its end and settled; `check` is given what says
+    /// whether an object is stored. For a caller that is about to judge
+    /// records elsewhere by whether the objects they name are here.
+    pub fn settled<T>(
+        &mut self,
+        check: impl FnOnce(&dyn Fn(&alt_git_codec::ObjectId) -> Result<bool, OdbError>) -> T,
+    ) -> Result<T, OdbError> {
+        self.odb_mut()?
+            .settled(|odb| check(&|oid| odb.contains(oid)))
+    }
+}
+
+impl NativeOdb {
     /// The index run files of this database that are not complete runs
     /// (see [`alt_store::runs::unusable`]), found without opening it: an
     /// open may already replace them.

@@ -18,6 +18,7 @@ pub(crate) struct Raw {
     /// file offset of `data[0]`
     at: u64,
     data: Vec<u8>,
+    clamped: bool,
 }
 
 /// The verified ops of a [`Raw`] read, and where the last whole record ends
@@ -30,6 +31,8 @@ pub(crate) struct Scan {
     pub file_len: u64,
     /// no whole record can follow the one the scan stopped at
     pub last: bool,
+    /// the read stopped short of the file's end on request
+    pub clamped: bool,
 }
 
 impl Scan {
@@ -63,7 +66,9 @@ pub(crate) fn read_at(file: &File, at: u64, len: usize) -> std::io::Result<Vec<u
 /// record it names still ends where it says (the checksum closing a record
 /// is the op id's first bytes), the whole file otherwise.
 pub(crate) fn read_log(file: &File, anchor: Option<Anchor>) -> std::io::Result<Raw> {
-    let size = file.metadata()?.len();
+    let meta = file.metadata()?;
+    let size = crate::settle::read_end(&meta);
+    let clamped = size < meta.len();
     if let Some(anchor) = anchor
         && anchor.end <= size
         && anchor.start + 4 + (CHECKSUM_LEN as u64) <= anchor.end
@@ -74,12 +79,14 @@ pub(crate) fn read_log(file: &File, anchor: Option<Anchor>) -> std::io::Result<R
             base: Some(anchor),
             at: anchor.end,
             data: read_at(file, anchor.end, (size - anchor.end) as usize)?,
+            clamped,
         });
     }
     Ok(Raw {
         base: None,
         at: 0,
         data: read_at(file, 0, size as usize)?,
+        clamped,
     })
 }
 
@@ -105,6 +112,7 @@ pub(crate) fn scan(raw: Raw) -> Result<Scan, OpLogError> {
             .map_or(last_start, |start| raw.at + start as u64),
         file_len: raw.at + raw.data.len() as u64,
         last: ends_the_log(&raw.data, replayed.valid),
+        clamped: raw.clamped,
     })
 }
 

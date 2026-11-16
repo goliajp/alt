@@ -4,3 +4,4 @@ mod cache_failure;
 mod crash_injection;
 mod full_check;
 mod refs_lifecycle;
+mod unconfirmed;

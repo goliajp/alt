@@ -15,7 +15,14 @@
 //! [52..88) slot 1
 //! slot: [serial u64][flags u32][eof u64][whole u64]
 //!       [checksum 8 = blake3(the 28 bytes before it)[..8]]
+//! flags: bit 0, unsynced appends may follow `whole`; bits 8 and up, the
+//!        generation
 //! ```
+//!
+//! The generation goes up whenever whole records are cut from the log
+//! (see [`crate::OpLog::settle`]). A committer notes it when it appends
+//! and records nothing as synced under another one: what it appended may
+//! be gone, and other records in its place.
 //!
 //! `whole` is a record boundary known synced. `eof` is the file length at
 //! the last fsync, which can include a dead writer's unfinished record: it
@@ -38,8 +45,7 @@
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use crate::OpLogError;
 use crate::lock::{lock_exclusive, unlock};
@@ -53,6 +59,12 @@ const LEN: usize = SLOTS_AT + 2 * SLOT_LEN;
 const HEADER: u64 = 5;
 /// The flag of a marker past whose boundary appends were left unsynced.
 const UNTRUSTED: u32 = 1;
+/// Where the generation starts in the flags.
+const GENERATION: u32 = 8;
+
+/// The generation and the boundary a handle's deferred appends reached,
+/// for its sink to record.
+pub(crate) type Deferred = Arc<Mutex<(u32, u64)>>;
 
 /// What a marker in this format records.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -66,6 +78,10 @@ pub(crate) struct State {
 }
 
 impl State {
+    pub fn generation(&self) -> u32 {
+        self.flags >> GENERATION
+    }
+
     fn encode(&self, serial: u64) -> [u8; SLOT_LEN] {
         let mut slot = Vec::with_capacity(SLOT_LEN);
         slot.extend_from_slice(&serial.to_le_bytes());
@@ -130,6 +146,21 @@ impl Marker {
     /// Whether the marker says the records up to `target` are synced.
     pub fn records(&self, target: u64) -> bool {
         self.recorded().is_some_and(|state| state.whole >= target)
+    }
+
+    /// Zero for a marker that records none.
+    pub fn generation(&self) -> u32 {
+        self.recorded().map_or(0, State::generation)
+    }
+
+    /// From which byte on the records of the log are not known to have
+    /// been synced; `None` where the marker has no word that holds.
+    pub fn unsynced_from(&self) -> Option<u64> {
+        match self {
+            Marker::Recorded(state) if self.trusted() => Some(state.whole),
+            Marker::Legacy(eof) if *eof >= HEADER => Some(*eof),
+            _ => None,
+        }
     }
 
     /// Whether the marker records a boundary that every append since was
@@ -201,9 +232,9 @@ impl crate::OpLog {
 /// holds: the caller holds the log's lock, has read it to its end and has
 /// fsynced it.
 pub(crate) fn establish(path: &Path, len: u64) -> std::io::Result<()> {
-    update(path, |_| {
+    update(path, |marker| {
         Some(State {
-            flags: 0,
+            flags: marker.generation() << GENERATION,
             eof: len,
             whole: len,
         })
@@ -310,10 +341,20 @@ pub(crate) fn update(path: &Path, next: impl Fn(&Marker) -> Option<State>) -> st
 }
 
 /// Records that the records up to `whole` are synced and, for a committer
-/// that fsynced itself, the file length `eof` it did so at.
-pub(crate) fn record(path: &Path, whole: u64, eof: Option<u64>) -> std::io::Result<()> {
+/// that fsynced itself, the file length `eof` it did so at. Nothing is
+/// recorded under a generation other than the one the committer appended
+/// under.
+pub(crate) fn record(
+    path: &Path,
+    generation: u32,
+    whole: u64,
+    eof: Option<u64>,
+) -> std::io::Result<()> {
     update(path, |marker| {
         let state = marker.recorded().copied().unwrap_or_default();
+        if state.generation() != generation {
+            return None;
+        }
         Some(State {
             eof: state.eof.max(eof.unwrap_or(0)),
             whole: state.whole.max(whole),
@@ -342,6 +383,38 @@ pub(crate) fn cut(durable: &Path, file: &File, at: u64) -> std::io::Result<()> {
     cut
 }
 
+/// Cuts the whole records from `at` on off the log `file`, under its
+/// exclusive lock, and moves the marker to the next generation. An older
+/// alt's marker, whose length `at` does not come before, gives way to one
+/// that records that length as the boundary.
+pub(crate) fn cut_records(durable: &Path, file: &File, at: u64) -> std::io::Result<()> {
+    let sync_lock = open_sync_lock(&durable.with_file_name("sync.lock"))?;
+    lock_exclusive(&sync_lock)?;
+    let cut = (|| {
+        update(durable, |marker| {
+            let state = match marker {
+                Marker::Recorded(state) => *state,
+                Marker::Legacy(eof) => State {
+                    flags: 0,
+                    eof: *eof,
+                    whole: *eof,
+                },
+                _ => return None,
+            };
+            Some(State {
+                flags: (state.flags & UNTRUSTED) | (state.generation() + 1) << GENERATION,
+                eof: state.eof.min(at),
+                whole: state.whole,
+            })
+        })?;
+        note_bounded(durable)?;
+        file.set_len(at)?;
+        file.sync_all()
+    })();
+    let _ = unlock(&sync_lock);
+    cut
+}
+
 pub(crate) fn open_sync_lock(path: &Path) -> std::io::Result<File> {
     OpenOptions::new()
         .create(true)
@@ -355,17 +428,18 @@ pub(crate) fn open_sync_lock(path: &Path) -> std::io::Result<File> {
 /// records how far that log's deferred appends had reached before it.
 pub struct OpLogSink {
     pub(crate) file: File,
-    pub(crate) appended: Arc<AtomicU64>,
+    pub(crate) appended: Deferred,
     pub(crate) durable_path: PathBuf,
 }
 
 impl OpLogSink {
     pub fn fsync(&self) -> Result<(), OpLogError> {
-        let target = self.appended.load(Ordering::Acquire);
+        let (generation, target) = *self.appended.lock().unwrap();
         self.file.sync_all()?;
         if target != 0 {
-            // a boundary this log wrote, not a file length: nothing cuts it
-            record(&self.durable_path, target, Some(target))?;
+            // a boundary this log wrote, not a file length: only a cut of
+            // whole records brings it down, and that changes the generation
+            record(&self.durable_path, generation, target, Some(target))?;
         }
         Ok(())
     }
@@ -544,9 +618,11 @@ mod tests {
     fn a_boundary_is_recorded_without_a_file_length_it_was_not_synced_at() {
         let dir = alt_os::temp::tempdir().unwrap();
         let path = dir.path().join("durable");
-        record(&path, 10, Some(40)).unwrap();
-        record(&path, 30, None).unwrap();
-        record(&path, 20, Some(35)).unwrap();
+        record(&path, 0, 10, Some(40)).unwrap();
+        record(&path, 0, 30, None).unwrap();
+        record(&path, 0, 20, Some(35)).unwrap();
+        // another generation's committer records nothing
+        record(&path, 1, 90, Some(90)).unwrap();
         let expected = State {
             flags: 0,
             eof: 40,

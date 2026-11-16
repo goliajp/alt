@@ -48,6 +48,8 @@ mod revert;
 mod sequence_editor;
 mod settings;
 mod task;
+mod unconfirmed;
+pub use unconfirmed::answer_before_unconfirmed;
 mod workspace;
 pub use workspace::resolve_workspace;
 

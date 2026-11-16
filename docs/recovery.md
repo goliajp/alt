@@ -144,6 +144,28 @@ what they named was never committed and can be added again. Until then,
 commands that only read find such an object listed and fail when they read
 it; they change nothing.
 
+The operation log is held to the same rule one layer up. A commit's ref
+update is written to the log after its objects, but a power cut can leave the
+update in the log and the objects nowhere. Such an update starts past the
+log's synced point: the command that made it never finished. The next command
+that writes cuts the log from the first such update on and says how many
+operations it discarded:
+
+```
+warning: discarded 1 operation(s) at the end of the operation log: they were never synced to disk and name objects that are not stored
+```
+
+The commit can then be made again; no step by hand is needed. Until a command
+writes, a command that only reads and fails on a missing object answers from
+the log as it stood before those operations, changes no file, and says so:
+
+```
+warning: the last 1 operation(s) in the operation log were never synced to disk and name objects that are not stored; this shows the repository as it was before them. The next command that writes discards them.
+```
+
+A command that reads no object, such as `alt rev-parse HEAD`, answers from the
+log as it is and can still print the id of a commit that was not kept.
+
 A record from before the synced point that names missing content is damage,
 and so is a file that ends short of what was synced. The command that writes
 fails, no file changes, and reading what is left still works:

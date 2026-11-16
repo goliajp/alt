@@ -66,6 +66,10 @@ fn deliver(response: &Response) -> u8 {
 }
 
 fn run() -> Response {
+    native::answer_before_unconfirmed(attempt(), attempt)
+}
+
+fn attempt() -> Response {
     let mut args = std::env::args_os().collect::<Vec<_>>();
     let mut parsed = match machine::parse(args.clone()) {
         Ok(parsed) => parsed,
@@ -209,7 +213,7 @@ fn run() -> Response {
                 native::resolve_workspace(&cwd, execution.parsed.cli.workspace.as_deref())?;
             let store = match execution.parsed.cli.command {
                 Command::Fsck { .. } => Store::open_read_only(dir.clone())?,
-                _ => Store::open(dir.clone())?,
+                _ => Store::open_for(dir.clone(), execution.writing)?,
             };
             let repo = Repository::open_alt(dir, Some(coord.root().to_owned()))?;
             Ok((store, repo))

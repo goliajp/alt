@@ -1,0 +1,217 @@
+//! Operations that were never synced and name content that is not stored.
+//!
+//! What an op names (objects, for a ref transaction) is written and synced
+//! before the op is, but the op is in the page cache before that sync is
+//! over, and the kernel writes pages out in whatever order it likes. A
+//! power cut can leave the op whole in the log while what it names never
+//! arrived. Such an op starts past the boundary the synced marker records:
+//! nobody was told it happened. The log does not know what an op names;
+//! whoever does passes `held`, which says whether everything an op names
+//! is there.
+//!
+//! A writer cuts the log from the first such op on ([`OpLog::settle`]). A
+//! reader changes nothing and can be told where that op starts
+//! ([`OpLog::unconfirmed`]), to open the log again as it stood before it
+//! ([`end_reads_at`]). An op before the boundary that names content which
+//! is not stored is damage and is neither looked for nor cut here, and
+//! where the marker records no boundary that holds, no op is looked at.
+
+use std::path::Path;
+use std::sync::OnceLock;
+
+use crate::lock::{lock_exclusive, unlock};
+use crate::read::{read_at, read_log, scan};
+use crate::scan::{CHECKSUM_LEN, HEADER_LEN};
+use crate::synced::{self, Marker};
+use crate::{Op, OpLog, OpLogError};
+
+/// The ops at the end of the log from the first one on that was never
+/// synced and names content that is not stored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Unconfirmed {
+    /// where the record of the first of them starts
+    pub at: u64,
+    /// how many there are
+    pub ops: usize,
+}
+
+/// The log file opens of this process stop reading at, and where.
+static READ_END: OnceLock<(u64, u64, u64)> = OnceLock::new();
+
+/// Makes every later open of the log in `dir` by this process read it only
+/// up to byte `at`, as if it ended there. For a command that reads: the
+/// first call stands, the file is not touched.
+#[cfg(unix)]
+pub fn end_reads_at(dir: &Path, at: u64) -> std::io::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = std::fs::metadata(dir.join("log"))?;
+    let _ = READ_END.set((meta.dev(), meta.ino(), at));
+    Ok(())
+}
+
+/// How far an open reads the log file `meta` is of.
+#[cfg(unix)]
+pub(crate) fn read_end(meta: &std::fs::Metadata) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+    match READ_END.get() {
+        Some(&(dev, ino, at)) if dev == meta.dev() && ino == meta.ino() => at.min(meta.len()),
+        _ => meta.len(),
+    }
+}
+
+#[cfg(not(unix))]
+pub fn end_reads_at(_dir: &Path, _at: u64) -> std::io::Result<()> {
+    Ok(())
+}
+
+#[cfg(not(unix))]
+pub(crate) fn read_end(meta: &std::fs::Metadata) -> u64 {
+    meta.len()
+}
+
+fn record_len(op: &Op) -> u64 {
+    // length, the fixed part of a body, the checksum
+    (4 + 78 + op.actor.len() + op.payload.len() + CHECKSUM_LEN) as u64
+}
+
+impl OpLog {
+    /// Whether the open stopped short of the file's end ([`end_reads_at`]).
+    pub fn clamped(&self) -> bool {
+        self.clamped
+    }
+
+    /// How many times this handle has read the log anew since it was
+    /// opened: its ops are then other ones, from the first record on.
+    pub fn reads(&self) -> u64 {
+        self.reads
+    }
+
+    /// Whether the marker says every op this handle holds is synced.
+    /// Reads the marker and takes no lock.
+    pub fn confirmed(&self) -> bool {
+        let marker = Marker::read(&self.durable_path);
+        marker.trusted() && marker.records(self.len_bytes)
+    }
+
+    /// Whether the record of the last op this handle holds is still where
+    /// the handle has it, in a file of `size` bytes: a cut of whole
+    /// records takes it away, and what is appended after reads otherwise.
+    pub(crate) fn holds_head(&self, size: u64) -> Result<bool, OpLogError> {
+        let Some(head) = self.head() else {
+            return Ok(true);
+        };
+        if size < self.len_bytes {
+            return Ok(false);
+        }
+        let check = read_at(
+            &self.file,
+            self.len_bytes - CHECKSUM_LEN as u64,
+            CHECKSUM_LEN,
+        )?;
+        Ok(check == head.0[..CHECKSUM_LEN])
+    }
+
+    /// Reads the log again from its first record, for a handle whose
+    /// records were cut ([`OpLogError::CutBack`]). Whoever derived state
+    /// from the ops of this handle derives it again.
+    pub fn reopen(&mut self) -> Result<(), OpLogError> {
+        crate::lock::lock_shared(&self.file)?;
+        let reopened = self.reopen_locked();
+        let _ = unlock(&self.file);
+        reopened
+    }
+
+    /// The first op at or past byte `from` that `held` does not vouch for,
+    /// with the ops after it.
+    fn first_unheld<E: From<OpLogError>>(
+        &self,
+        from: u64,
+        mut held: impl FnMut(&Op) -> Result<bool, E>,
+    ) -> Result<Option<Unconfirmed>, E> {
+        let recent_from = self.base.map_or(HEADER_LEN as u64, |anchor| anchor.end);
+        let (ops, mut at) = if from < recent_from {
+            (self.ops()?, HEADER_LEN as u64)
+        } else {
+            (&self.ops[..], recent_from)
+        };
+        for (index, op) in ops.iter().enumerate() {
+            if at >= from && !held(op)? {
+                return Ok(Some(Unconfirmed {
+                    at,
+                    ops: ops.len() - index,
+                }));
+            }
+            at += record_len(op);
+        }
+        Ok(None)
+    }
+
+    /// For a reader: the ops at the end of the log, as this handle holds
+    /// it, that a writer would cut ([`Self::settle`]). Reads the marker
+    /// and takes no lock; nothing changes.
+    pub fn unconfirmed<E: From<OpLogError>>(
+        &self,
+        held: impl FnMut(&Op) -> Result<bool, E>,
+    ) -> Result<Option<Unconfirmed>, E> {
+        match Marker::read(&self.durable_path).unsynced_from() {
+            Some(from) if from < self.len_bytes => self.first_unheld(from, held),
+            _ => Ok(None),
+        }
+    }
+
+    /// For a writer, before it appends: reads the log to its end and cuts
+    /// it from the first op on that starts past the synced boundary and
+    /// that `held` does not vouch for; the marker moves to the next
+    /// generation first. Returns what was cut. The handle then holds the
+    /// log as it is now, read from its first record: state derived from
+    /// its ops is to be derived again.
+    ///
+    /// `held` must see everything a live writer stored before it appended
+    /// its op: the caller keeps the content store from being appended to,
+    /// and has read it to its end, for as long as this runs.
+    pub fn settle<E: From<OpLogError>>(
+        &mut self,
+        held: impl FnMut(&Op) -> Result<bool, E>,
+    ) -> Result<Option<Unconfirmed>, E> {
+        lock_exclusive(&self.file).map_err(OpLogError::from)?;
+        let settled = self.settle_locked(held);
+        let _ = unlock(&self.file);
+        settled
+    }
+
+    fn settle_locked<E: From<OpLogError>>(
+        &mut self,
+        held: impl FnMut(&Op) -> Result<bool, E>,
+    ) -> Result<Option<Unconfirmed>, E> {
+        match self.catch_up() {
+            Err(OpLogError::CutBack) => {
+                self.reopen_locked()?;
+                self.catch_up()?;
+            }
+            caught_up => caught_up?,
+        }
+        let marker = Marker::read(&self.durable_path);
+        synced::lost(&marker, self.len_bytes)?;
+        let Some(from) = marker.unsynced_from().filter(|from| *from < self.len_bytes) else {
+            return Ok(None);
+        };
+        let Some(cut) = self.first_unheld(from, held)? else {
+            return Ok(None);
+        };
+        synced::cut_records(&self.durable_path, &self.file, cut.at).map_err(OpLogError::from)?;
+        self.reopen_locked()?;
+        Ok(Some(cut))
+    }
+
+    /// [`Self::reopen`] for a caller that holds the log's lock.
+    fn reopen_locked(&mut self) -> Result<(), OpLogError> {
+        let scan = scan(read_log(&self.file, None)?)?.unrepaired(&self.durable_path)?;
+        self.base = None;
+        self.ops = scan.ops;
+        self.full = OnceLock::new();
+        self.len_bytes = scan.valid_len.max(HEADER_LEN as u64);
+        self.last_start = scan.last_start;
+        self.reads += 1;
+        Ok(())
+    }
+}

@@ -13,6 +13,8 @@ pub enum OpLogError {
         synced: u64,
         holds: u64,
     },
+    /// the log was cut back past records this handle read or wrote
+    CutBack,
 }
 
 impl std::fmt::Display for OpLogError {
@@ -25,6 +27,10 @@ impl std::fmt::Display for OpLogError {
                 f,
                 "the operation log ends at byte {holds}, but records up to byte {synced} of \
                  it were committed and synced: committed operations are gone"
+            ),
+            Self::CutBack => f.write_str(
+                "the operation log was cut back: operations that were never synced and \
+                 name objects that are not stored were discarded",
             ),
         }
     }

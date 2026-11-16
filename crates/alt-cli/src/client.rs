@@ -24,13 +24,16 @@
 //! deadline, surfaces the at-most-once error.
 
 #[cfg(unix)]
-pub use imp::{Outcome, disabled, is_idempotent, routes_through_daemon, serve_write, try_serve};
+pub use imp::{
+    Outcome, disabled, is_idempotent, routes_through_daemon, serve_write, stay_direct, try_serve,
+};
 
 #[cfg(unix)]
 mod imp {
     use std::os::unix::net::UnixStream;
     use std::path::Path;
     use std::process::{Command, Stdio};
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::{Duration, Instant};
 
     use crate::cli::Command as Cmd;
@@ -99,7 +102,14 @@ mod imp {
     /// `ALT_NO_DAEMON` (any value) forces the direct path — the escape hatch the
     /// local-first contract promises.
     pub fn disabled() -> bool {
-        std::env::var_os("ALT_NO_DAEMON").is_some()
+        DIRECT.load(Ordering::Relaxed) || std::env::var_os("ALT_NO_DAEMON").is_some()
+    }
+
+    static DIRECT: AtomicBool = AtomicBool::new(false);
+
+    /// Makes the rest of this process run its commands itself.
+    pub fn stay_direct() {
+        DIRECT.store(true, Ordering::Relaxed);
     }
 
     /// How long [`serve_write`] keeps retrying a same-id write whose response

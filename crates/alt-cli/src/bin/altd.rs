@@ -261,9 +261,12 @@ mod unix {
         let (response, operations, ticket, barrier_ok) = {
             let mut guard = shared.lock().expect("daemon store mutex poisoned");
             let (store, repo) = &mut *guard;
-            let refreshed = store
-                .refresh()
-                .and_then(|()| repo.refresh().map_err(Into::into));
+            let refreshed = (if execution.writing {
+                store.settle()
+            } else {
+                store.refresh()
+            })
+            .and_then(|()| repo.refresh().map_err(Into::into));
             let (mut response, operations) = match refreshed {
                 Ok(()) => execution.on_store(store, repo),
                 Err(error) => (execution.failure(error.as_ref()), Vec::new()),

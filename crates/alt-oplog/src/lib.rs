@@ -27,15 +27,16 @@ mod lock;
 mod op;
 mod read;
 mod scan;
+mod settle;
 mod synced;
 
 use std::fs::{File, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
 
 pub use op::{Op, OpId, OpLogError, ROOT};
+pub use settle::{Unconfirmed, end_reads_at};
 pub use synced::OpLogSink;
 
 use lock::{lock_exclusive, lock_shared, unlock};
@@ -89,7 +90,13 @@ pub struct OpLog {
     unsynced: bool,
     /// How far this handle's deferred appends reach, for its sink to record
     /// once it has fsynced.
-    deferred: Arc<AtomicU64>,
+    deferred: synced::Deferred,
+    /// The marker's generation when this handle last appended.
+    generation: u32,
+    /// Set when the open stopped short of the file's end on request.
+    clamped: bool,
+    /// How many times this handle read the log anew ([`Self::reopen`]).
+    reads: u64,
 }
 
 impl OpLog {
@@ -167,7 +174,10 @@ impl OpLog {
             defer: false,
             write_count: 0,
             unsynced: false,
-            deferred: Arc::default(),
+            deferred: synced::Deferred::default(),
+            generation: 0,
+            clamped: scan.clamped,
+            reads: 0,
         }
     }
 
@@ -275,6 +285,7 @@ impl OpLog {
     fn bound(&mut self) -> Result<(), OpLogError> {
         let marker = Marker::read(&self.durable_path);
         synced::lost(&marker, self.len_bytes)?;
+        self.generation = marker.generation();
         if relaxed_durability() {
             if marker.recorded().is_none() || marker.trusted() {
                 synced::distrust(&self.durable_path)?;
@@ -329,6 +340,9 @@ impl OpLog {
     /// lock, so no live writer is mid-append).
     fn catch_up(&mut self) -> Result<(), OpLogError> {
         let size = self.file.metadata()?.len();
+        if !self.holds_head(size)? {
+            return Err(OpLogError::CutBack);
+        }
         if size <= self.len_bytes {
             return Ok(());
         }
@@ -453,7 +467,7 @@ impl OpLog {
             // the daemon's group-commit coordinator fsyncs off the write path
             // (via `sync_handle`) and then records how far this append reached
             self.write_count += 1;
-            self.deferred.store(self.len_bytes, Ordering::Release);
+            *self.deferred.lock().unwrap() = (self.generation, self.len_bytes);
             return Ok(());
         }
         self.sync_to(self.len_bytes)
@@ -486,13 +500,23 @@ impl OpLog {
     /// our target durable (the inline, direct-CLI path), and record `target`
     /// (a record boundary) as synced either way.
     fn sync_to(&mut self, target: u64) -> Result<(), OpLogError> {
-        if Marker::read(&self.durable_path).records(target) {
+        let marker = Marker::read(&self.durable_path);
+        if marker.generation() == self.generation && marker.records(target) {
             return Ok(());
         }
         let sync_lock = open_sync_lock(&self.sync_lock_path)?;
         lock_exclusive(&sync_lock)?;
         let result = (|| -> Result<(), OpLogError> {
             let marker = Marker::read(&self.durable_path);
+            if marker.generation() != self.generation {
+                // records were cut since the append: not this one's, or
+                // there is nothing of it to sync
+                let size = self.file.metadata()?.len();
+                if !self.holds_head(size)? {
+                    return Err(OpLogError::CutBack);
+                }
+                self.generation = marker.generation();
+            }
             if marker.records(target) {
                 return Ok(());
             }
@@ -506,7 +530,7 @@ impl OpLog {
                     Some(eof)
                 }
             };
-            synced::record(&self.durable_path, target, eof)?;
+            synced::record(&self.durable_path, self.generation, target, eof)?;
             Ok(())
         })();
         let _ = unlock(&sync_lock);

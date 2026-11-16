@@ -232,6 +232,20 @@ impl Odb {
         Ok(true)
     }
 
+    /// Runs `check` with the write lock held, the files read to their ends
+    /// and settled: nothing is appended to the store meanwhile, and a
+    /// record that is there names content that is stored. A batch this
+    /// handle has open stays open.
+    pub fn settled<T>(&mut self, check: impl FnOnce(&Self) -> T) -> Result<T, OdbError> {
+        let held = self.held;
+        self.acquire()?;
+        let out = check(self);
+        if !held {
+            self.release();
+        }
+        Ok(out)
+    }
+
     /// Cuts the files back to `after`: `map.alt`, the Tier 1 map, the blob
     /// map, then what never finished in the pack. What the marker and the
     /// lock file say of how far the files were synced comes down first.

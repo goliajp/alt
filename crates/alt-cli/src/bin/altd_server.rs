@@ -1171,7 +1171,7 @@ fn handle_receive_pack(
     // entry the daemon uses to catch up its read view. Must
     // happen *before* the sig_block decision below so the next
     // signing policy is seen on this request, not a request later.
-    if let Err(e) = store.lock().unwrap().refresh() {
+    if let Err(e) = store.lock().unwrap().settle() {
         eprintln!("altd-server: store refresh failed (continuing with stale policy): {e}");
     }
 

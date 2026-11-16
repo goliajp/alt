@@ -60,6 +60,7 @@ mod task_evidence;
 mod task_remote;
 mod task_runner;
 mod torn_pack;
+mod unconfirmed;
 mod undo_add;
 mod url_rewrite;
 mod verify_commit;
