@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: refactor
+summary: move the add and status arguments out of cli.rs
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli.rs
+touched: crates/alt-cli/src/lib.rs
+touched: crates/alt-cli/src/worktree_args.rs
