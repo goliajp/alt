@@ -413,9 +413,14 @@ fn a_switch_records_the_stat_of_the_files_it_writes() {
     ok(alt(root, &["add", "."]));
     ok(alt(root, &["commit", "-m", "other"]));
     // a file written within the tick of the clock the switch ends in is
-    // left for the next scan to record, so one switch may record nothing
+    // left for the next scan to record, and a switch of one small file
+    // seldom takes longer than a tick: it is repeated until one does
     let mut seen = false;
-    for round in 0..20 {
+    let began = std::time::Instant::now();
+    for round in 0.. {
+        if began.elapsed() > std::time::Duration::from_secs(60) {
+            break;
+        }
         let to = if round % 2 == 0 { "main" } else { "other" };
         ok(alt(root, &["switch", to]));
         if recorded(root, "a.txt") {
