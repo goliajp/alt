@@ -158,9 +158,8 @@ impl Writer<'_> {
         };
         self.op(repeat);
         let mut left_out = matches!(repeat, b"*" | b"?" | b"{0,1}" | b"{,2}");
-        // seldom another behind it, where the syntax has that: around
-        // what may match nothing the C library often never answers
-        if !self.basic && !repeat.is_empty() && self.rng.below(40) == 0 {
+        // at times another behind it, where the syntax has that
+        if !self.basic && !repeat.is_empty() && self.rng.below(8) == 0 {
             let more = [&b"*"[..], b"+", b"?"][self.rng.below(3)];
             self.op(more);
             left_out |= more != b"+";
