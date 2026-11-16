@@ -1,0 +1,16 @@
+schema: alt-meta/1
+type: fix
+summary: follow git for submodule entries: one without its directory is deleted, and add stages a repository of its own as one
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/add.rs
+touched: crates/alt-cli/src/native/add/embedded.rs
+touched: crates/alt-cli/tests/it/diff_git.rs
+touched: crates/alt-cli/tests/it/gitlink.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/status_untracked.rs
+touched: crates/alt-worktree/src/lib.rs
+touched: crates/alt-worktree/src/scan.rs
+touched: crates/alt-worktree/src/walk.rs
+touched: crates/alt-worktree/tests/it/delta.rs
