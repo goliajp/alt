@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: match no back-reference to a group that was not asked for, as the c library does
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/backref.rs
+touched: crates/alt-regex/src/lib.rs
