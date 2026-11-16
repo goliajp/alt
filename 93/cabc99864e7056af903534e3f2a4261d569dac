@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: find the character around a byte also in the forms of five and six bytes
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/chars.rs
+touched: crates/alt-regex/tests/it/regcomp/utf8.rs
