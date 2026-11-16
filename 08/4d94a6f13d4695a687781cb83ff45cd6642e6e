@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: keep a tree watched when a directory or an ignore file in it cannot be read
+author-type: human
+author: doracawl
+touched: crates/alt-worktree/src/watch.rs
+touched: crates/alt-worktree/src/watch/dirs.rs
+touched: crates/alt-worktree/src/watch/linux.rs
+touched: crates/alt-worktree/src/watch/scans.rs
+touched: crates/alt-worktree/tests/it/watch_failed.rs
