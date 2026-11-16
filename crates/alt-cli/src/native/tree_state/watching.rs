@@ -31,6 +31,8 @@ pub(super) fn watched_scan(
     }
     let mut guard = WATCHED.lock().unwrap();
     let trees = guard.get_or_insert_default();
+    // a directory that is no working tree any more gives its watches back
+    trees.retain(|at, _| at == root || at.join(".alt").exists());
     let tree = trees.entry(root.to_path_buf()).or_insert_with(|| {
         let most = alt_worktree::watch_allowance().ok()?;
         alt_worktree::Watched::start(root, most, snapshot).ok()

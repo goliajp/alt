@@ -317,6 +317,27 @@ fn the_daemon_takes_no_watches_for_what_ignore_rules_hide() {
     assert_eq!(watches(stop.0), (1, 4));
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn a_removed_workspace_gives_its_watches_back() {
+    let (dir, stop) = served();
+    let root = dir.path();
+    let side = alt_os::temp::tempdir().unwrap();
+    let tree = side.path().join("tree");
+    run(root, &["branch", "feat"], false);
+    let at = tree.to_str().unwrap();
+    run(root, &["workspace", "add", "side", at, "feat"], false);
+    assert_eq!(
+        run(&tree, &["status"], true),
+        run(&tree, &["status"], false)
+    );
+    assert_eq!(watches(stop.0), (2, 8));
+    run(root, &["workspace", "remove", "side"], false);
+    agree(root, "after the removal");
+    assert_eq!(watches(stop.0), (1, 4));
+    assert_eq!(daemon_pid(root), stop.0);
+}
+
 #[test]
 fn what_only_a_look_for_untracked_files_fails_on_fails_no_other_command() {
     let (dir, _stop) = served();
