@@ -28,6 +28,8 @@ mod checkout_recovery;
 mod cherry_pick;
 pub mod commit;
 mod convert;
+mod coord;
+pub use coord::{Coord, resolve_workspace};
 mod diff;
 mod http_auth;
 mod identity;
@@ -36,6 +38,7 @@ pub use identity::{Identity, Principal, PrincipalKind};
 mod merge;
 mod op_log;
 mod operation;
+pub mod pathspec;
 use op_log::render_op_log_json;
 pub mod notes;
 use merge::Resolved;
@@ -50,7 +53,6 @@ mod task;
 mod tree_state;
 pub use tree_state::hold_snapshots;
 mod workspace;
-pub use workspace::resolve_workspace;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -224,62 +226,6 @@ impl StoreSink {
         self.odb.fsync()?;
         self.oplog.sync_all()?;
         Ok(())
-    }
-}
-
-/// The per-workspace coordinates within a repo: the working-tree root, the
-/// workspace name, the ref naming its HEAD, and its index file. Resolved per
-/// request and cheap to carry by value.
-#[derive(Clone)]
-pub struct Coord {
-    root: PathBuf,
-    workspace: String,
-    head_ref: String,
-    index_path: PathBuf,
-}
-
-impl Coord {
-    /// The ref this workspace's HEAD lives in: `HEAD` for the default
-    /// workspace, `workspaces/<name>/HEAD` for a named one.
-    pub fn head_ref(&self) -> &str {
-        &self.head_ref
-    }
-
-    /// The workspace's working-tree root.
-    pub fn root(&self) -> &Path {
-        &self.root
-    }
-
-    /// The default workspace's coordinates for the repo rooted at `repo_root`
-    /// (its HEAD stays the bare `HEAD` ref and its index `.alt/index`, so
-    /// existing repos are unchanged).
-    fn default_at(repo_root: &Path) -> Coord {
-        let alt_dir = repo_root.join(".alt");
-        Coord {
-            index_path: alt_dir.join("index"),
-            root: repo_root.to_path_buf(),
-            workspace: DEFAULT_WORKSPACE.to_owned(),
-            head_ref: "HEAD".to_owned(),
-        }
-    }
-
-    /// The coordinates of workspace `name` in the repo whose control dir is
-    /// `alt_dir`. The default workspace's working tree is the repo root; a
-    /// named one's comes from its registry `meta`.
-    fn for_name(alt_dir: &Path, name: &str) -> Res<Coord> {
-        let repo_root = alt_dir.parent().unwrap_or(alt_dir);
-        if name == DEFAULT_WORKSPACE {
-            return Ok(Coord::default_at(repo_root));
-        }
-        let ws_dir = alt_dir.join("workspaces").join(name);
-        let worktree = std::fs::read_to_string(ws_dir.join("meta"))
-            .map_err(|_| format!("no such workspace '{name}'"))?;
-        Ok(Coord {
-            root: PathBuf::from(worktree.trim()),
-            workspace: name.to_owned(),
-            head_ref: format!("workspaces/{name}/HEAD"),
-            index_path: ws_dir.join("index"),
-        })
     }
 }
 
@@ -639,6 +585,8 @@ pub struct NativeRepo<'a> {
     head_ref: String,
     /// This workspace's index file.
     index_path: PathBuf,
+    /// where beneath `root` the command was run: `sub/dir`, empty at the root
+    prefix: String,
     /// The caller acting through this view.
     id: Identity,
     /// The capability gate for this caller's [`Principal`], derived from
@@ -675,6 +623,7 @@ impl<'a> NativeRepo<'a> {
             workspace: coord.workspace,
             head_ref: coord.head_ref,
             index_path: coord.index_path,
+            prefix: coord.prefix,
             id,
             caps,
             request_id,

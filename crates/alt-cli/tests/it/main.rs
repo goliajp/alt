@@ -20,6 +20,7 @@ mod config;
 #[cfg(target_os = "linux")]
 mod config_paths;
 mod credential_helper;
+mod cwd_paths;
 mod daemon_client;
 mod daemon_server;
 mod diff;

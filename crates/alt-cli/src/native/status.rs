@@ -48,6 +48,14 @@ impl NativeRepo<'_> {
             return render_status_json(out, short, &self.id.principal, &st, &unmerged);
         }
         writeln!(out, "On branch {short}")?;
+        // as git shows them: from where the command was run, unless
+        // `status.relativePaths` is off
+        let relative = self.settings()?.get_bool("status", None, "relativepaths");
+        let prefix = match relative {
+            Some(Ok(false)) => "",
+            _ => self.prefix.as_str(),
+        };
+        let shown = |p: &BString| BString::from(pathspec::shown_from(prefix, p));
         let mark = |k: ChangeKind| match k {
             ChangeKind::Added => "new file:   ",
             ChangeKind::Modified => "modified:   ",
@@ -57,25 +65,25 @@ impl NativeRepo<'_> {
         if !unmerged.is_empty() {
             writeln!(out, "Unmerged paths:")?;
             for p in &unmerged {
-                writeln!(out, "\tboth modified:   {p}")?;
+                writeln!(out, "\tboth modified:   {}", shown(p))?;
             }
         }
         if !st.staged.is_empty() {
             writeln!(out, "Changes to be committed:")?;
             for (p, k) in &st.staged {
-                writeln!(out, "\t{}{p}", mark(*k))?;
+                writeln!(out, "\t{}{}", mark(*k), shown(p))?;
             }
         }
         if !st.unstaged.is_empty() {
             writeln!(out, "Changes not staged for commit:")?;
             for (p, k) in &st.unstaged {
-                writeln!(out, "\t{}{p}", mark(*k))?;
+                writeln!(out, "\t{}{}", mark(*k), shown(p))?;
             }
         }
         if !st.untracked.is_empty() {
             writeln!(out, "Untracked files:")?;
             for p in &st.untracked {
-                writeln!(out, "\t{p}")?;
+                writeln!(out, "\t{}", shown(p))?;
             }
         }
         if unmerged.is_empty()

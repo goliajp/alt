@@ -77,7 +77,8 @@ impl NativeRepo<'_> {
         self.lock_workspace()?;
         self.ensure_no_pending_recovery()?;
         let before = self.index()?;
-        let specs: Vec<&str> = paths.iter().map(|p| pathspec(p)).collect();
+        let specs: Vec<String> = paths.iter().map(|p| self.named(p)).collect::<Res<_>>()?;
+        let specs: Vec<&str> = specs.iter().map(String::as_str).collect();
         self.ensure_reachable(&specs, paths, &before)?;
         let within: Vec<&[u8]> = match specs.iter().any(|p| p.is_empty()) {
             true => Vec::new(),
@@ -113,6 +114,23 @@ impl NativeRepo<'_> {
             writeln!(out, "staged {staged} path(s)")?;
         }
         Ok(())
+    }
+
+    /// The path from the root of the tree that the argument `given` names
+    /// from where the command was run, empty for the whole tree.
+    fn named(&self, given: &str) -> Res<String> {
+        if given.is_empty() {
+            let hint = "please use . instead if you meant to match all paths";
+            return Err(settings::fatal(format!(
+                "empty string is not a valid pathspec. {hint}"
+            )));
+        }
+        pathspec::from_root(&self.root, &self.prefix, given).ok_or_else(|| {
+            let root = self.root.display();
+            settings::fatal(format!(
+                "{given}: '{given}' is outside repository at '{root}'"
+            ))
+        })
     }
 
     /// The path gate: denies staging any path the policy excludes, before
@@ -260,11 +278,4 @@ fn staged_entry(path: &BString, oid: ObjectId, mode: u32) -> IndexEntry {
         extended_flags: None,
         path: path.clone(),
     }
-}
-
-/// A path argument relative to the working-tree root, without `./` in front
-/// or `/` behind; the empty string means the whole tree.
-fn pathspec(given: &str) -> &str {
-    let spec = given.trim_start_matches("./").trim_end_matches('/');
-    if spec == "." { "" } else { spec }
 }
