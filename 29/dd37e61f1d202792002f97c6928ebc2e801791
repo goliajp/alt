@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: fix
+summary: report a damaged log record or pack instead of cutting the file back to it
+author-type: human
+author: doracawl
+touched: crates/alt-store/src/indexing.rs
+touched: crates/alt-store/src/lib.rs
+touched: crates/alt-store/src/packs.rs
+touched: crates/alt-store/src/reclog.rs
+touched: crates/alt-store/src/reclog/sync.rs
+touched: crates/alt-store/src/reclog/tail.rs
+touched: crates/alt-store/tests/it/damaged_log.rs
+touched: crates/alt-store/tests/it/main.rs
