@@ -148,8 +148,9 @@ pub(crate) fn open_active(
     walk: Walk,
 ) -> Result<(Active, Vec<(pack::RecordHeader, u64)>), StoreError> {
     let (recs, valid_len) = walked(&read, size, walk.from)?;
-    let unfinished = valid_len == 0 || walk.tail.unfinished(walk.seq, valid_len);
-    if valid_len != size && (walk.whole || !unfinished) {
+    // the synced length is looked up only for a pack that stops short
+    let unfinished = || valid_len == 0 || walk.tail.unfinished(walk.seq, valid_len);
+    if valid_len != size && (walk.whole || !unfinished()) {
         return Err(StoreError::Format("active pack damaged"));
     }
     let len = valid_len.max(pack::HEADER_LEN as u64);
