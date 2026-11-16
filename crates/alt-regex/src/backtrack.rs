@@ -12,8 +12,9 @@ use crate::registers::close;
 /// The most bits of visited marks a search may need.
 const MAX_MARKS: usize = 1 << 21;
 
-/// The most choices and slots written a path may leave behind it: a
-/// longer one is left to the search that steps every path at once.
+/// The most choices and slots written a search may leave behind it,
+/// 4 MiB of them: one that could leave more is left to the search that
+/// steps every path at once.
 const MAX_FRAMES: usize = 1 << 18;
 
 enum Frame {
@@ -33,9 +34,14 @@ pub struct Cache {
 
 /// Whether a match of `len` bytes is one to search this way: small
 /// enough, and of a pattern whose paths never come back to where they
-/// were.
+/// were. An instruction is come to once at each position, through the
+/// one way into it or as a join not yet marked, so what is left behind
+/// is no more than the instructions that leave something times the
+/// positions.
 pub fn fits(prog: &Program, len: usize) -> bool {
-    !prog.cyclic && prog.join_count as usize * (len + 1) <= MAX_MARKS
+    !prog.cyclic
+        && prog.join_count as usize * (len + 1) <= MAX_MARKS
+        && prog.left_behind as usize * (len + 1) <= MAX_FRAMES
 }
 
 /// Fills `slots` with the capture slots of the match from `from` to `to`,
@@ -129,22 +135,20 @@ fn paths(
                     }
                 }
                 Inst::Split(first, second) => {
-                    if stack.len() >= MAX_FRAMES {
-                        return None;
-                    }
                     stack.push(Frame::Step(second, at));
                     pc = first;
                 }
                 Inst::Save(slot, next) | Inst::SaveOpt(slot, next) => {
                     let slot = slot as usize;
-                    if stack.len() + slots.len() > MAX_FRAMES {
-                        return None;
-                    }
                     // most programs keep no snapshot: one slot is written
                     if slot < captures && slots.len() == captures {
                         stack.push(Frame::Restore(slot as u32, slots[slot]));
                         slots[slot] = at;
                     } else if slot < captures {
+                        // a snapshot taken or put back writes every slot
+                        if stack.len() + slots.len() > MAX_FRAMES {
+                            return None;
+                        }
                         let opt = matches!(prog.insts[pc as usize], Inst::SaveOpt(..));
                         close(slots, captures, slot, at, opt, |slot, old| {
                             stack.push(Frame::Restore(slot as u32, old))

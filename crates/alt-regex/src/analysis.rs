@@ -2,6 +2,7 @@
 
 use crate::class::ByteSet;
 use crate::program::{Inst, NO_JOIN};
+use crate::syntax::{Look, Node};
 
 /// Whether a match can end both ways: behind a condition with nothing
 /// consumed after it, and without one. The C library keeps the second
@@ -90,15 +91,30 @@ pub fn joins(insts: &[Inst], start: u32, exits: &[u32]) -> (Vec<u32>, u32) {
     (ways.into_iter().map(numbered).collect(), count)
 }
 
-/// How many instructions a path waits at.
-pub fn rows(insts: &[Inst]) -> u32 {
-    let waits = |inst: &&Inst| {
-        matches!(
-            inst,
-            Inst::Set(..) | Inst::Byte(..) | Inst::Switch(..) | Inst::Match
-        )
-    };
-    insts.iter().filter(waits).count() as u32
+/// How many instructions a path waits at, and how many leave a choice
+/// or a slot to come back to.
+pub fn counts(insts: &[Inst]) -> (u32, u32) {
+    let (mut wait, mut leave) = (0, 0);
+    for inst in insts {
+        match inst {
+            Inst::Set(..) | Inst::Byte(..) | Inst::Switch(..) | Inst::Match => wait += 1,
+            Inst::Split(..) | Inst::Save(..) | Inst::SaveOpt(..) => leave += 1,
+            Inst::Look(..) | Inst::BackRef(..) => {}
+        }
+    }
+    (wait, leave)
+}
+
+/// Whether nothing can match before `node` except at the start of the text.
+pub fn anchored(node: &Node) -> bool {
+    match node {
+        Node::Look(Look::TextStart) => true,
+        Node::Group(inner, _) => anchored(inner),
+        Node::Concat(items) => items.first().is_some_and(anchored),
+        Node::Alt(branches) => branches.iter().all(anchored),
+        Node::Repeat(inner, min, _) => *min > 0 && anchored(inner),
+        _ => false,
+    }
 }
 
 pub fn classes(insts: &[Inst], sets: &[ByteSet]) -> ([u8; 256], Vec<u8>) {

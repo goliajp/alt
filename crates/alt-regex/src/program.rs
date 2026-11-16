@@ -1,7 +1,7 @@
 //! The pattern as a nondeterministic automaton: instructions a matcher
 //! steps through, several at once.
 
-use crate::analysis::{classes, joins, mixed_ends, rows};
+use crate::analysis::{anchored, classes, counts, joins, mixed_ends};
 use std::sync::Arc;
 
 use crate::block::{Block, EXIT};
@@ -96,6 +96,8 @@ pub struct Program {
     pub join_count: u32,
     /// How many instructions a path waits at, for a byte or as the match.
     pub row_count: u32,
+    /// How many leave something behind to come back to.
+    pub left_behind: u32,
     /// Bytes no instruction tells apart share a class.
     pub classes: [u8; 256],
     /// One byte of each class.
@@ -150,9 +152,7 @@ pub fn compile(node: &Node, groups: u32, options: Options, shape: Shape) -> Resu
     });
     // the tables begin a match at any byte
     let plain_looks = plain_looks && !(shape.apart && shape.strays);
-    let backrefs = c.insts.iter().any(|i| matches!(i, Inst::BackRef(..)));
-    let snapshots = c.insts.iter().any(|i| matches!(i, Inst::SaveOpt(..)));
-    let row_count = rows(&c.insts);
+    let (row_count, left_behind) = counts(&c.insts);
     if row_count as usize * 2 * (groups as usize + 1) > MAX_SLOTS {
         return Err(Error::TooBig);
     }
@@ -161,6 +161,8 @@ pub fn compile(node: &Node, groups: u32, options: Options, shape: Shape) -> Resu
     let (joins, join_count) = joins(&c.insts, start, &exits);
     let mixed_ends = mixed_ends(&c.insts, start, &exits);
     Ok(Program {
+        backrefs: c.insts.iter().any(|i| matches!(i, Inst::BackRef(..))),
+        snapshots: c.insts.iter().any(|i| matches!(i, Inst::SaveOpt(..))),
         insts: c.insts,
         sets: c.sets,
         start,
@@ -170,13 +172,12 @@ pub fn compile(node: &Node, groups: u32, options: Options, shape: Shape) -> Resu
         apart: shape.apart,
         anchored: anchored(node),
         plain_looks,
-        backrefs,
-        snapshots,
         cyclic: c.cyclic,
         mixed_ends,
         joins,
         join_count,
         row_count,
+        left_behind,
         classes,
         members,
     })
@@ -191,18 +192,6 @@ fn nullable(node: &Node) -> bool {
         Node::Concat(items) => items.iter().all(nullable),
         Node::Alt(branches) => branches.iter().any(nullable),
         Node::Repeat(inner, min, _) => *min == 0 || nullable(inner),
-    }
-}
-
-/// Whether nothing can match before `node` except at the start of the text.
-fn anchored(node: &Node) -> bool {
-    match node {
-        Node::Look(Look::TextStart) => true,
-        Node::Group(inner, _) => anchored(inner),
-        Node::Concat(items) => items.first().is_some_and(anchored),
-        Node::Alt(branches) => branches.iter().all(anchored),
-        Node::Repeat(inner, min, _) => *min > 0 && anchored(inner),
-        _ => false,
     }
 }
 
