@@ -157,7 +157,14 @@ impl Writer<'_> {
             at => bounded[at],
         };
         self.op(repeat);
-        matches!(repeat, b"*" | b"?" | b"{0,1}" | b"{,2}")
+        let mut left_out = matches!(repeat, b"*" | b"?" | b"{0,1}" | b"{,2}");
+        // now and then another behind it, where the syntax has that
+        if !self.basic && !repeat.is_empty() && self.rng.below(8) == 0 {
+            let more = [&b"*"[..], b"+", b"?"][self.rng.below(3)];
+            self.op(more);
+            left_out |= more != b"+";
+        }
+        left_out
     }
 
     /// Atoms that each take something, with the edges of words and

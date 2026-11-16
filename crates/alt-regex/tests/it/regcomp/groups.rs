@@ -6,7 +6,7 @@ use alt_regex::{Options, Regex};
 use super::Theirs;
 
 /// Patterns whose groups could lie in more than one place.
-const AMBIGUOUS: [(&str, &str); 66] = [
+const AMBIGUOUS: [(&str, &str); 72] = [
     // a first branch of nothing is tried behind the second
     ("|(b?)", ""),
     ("a(|(b?))", "a"),
@@ -68,6 +68,13 @@ const AMBIGUOUS: [(&str, &str); 66] = [
     ("(()+(|ab){2,4})*", "ab"),
     ("(()+(b{0,1}|ab*x?b?){2,})*", "aaab"),
     ("(()+(b?|ab){2,})*", "b"),
+    // repetitions behind one another, each around the one before it
+    ("(a*)++", "aa"),
+    ("(a*)*+", "aa"),
+    ("(a*)+*", "aa"),
+    ("(a*)?+", "aa"),
+    ("(a*){1,}+", "aa"),
+    ("(([a-z]+ ?)*)*+\\(", "pub fn main(x)"),
     // a branch that ends behind a condition, with nothing taken since,
     // gives way to one that does not
     ("(a)$|a", "a"),

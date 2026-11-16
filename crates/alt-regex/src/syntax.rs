@@ -210,9 +210,10 @@ impl<'a> Parser<'a> {
                 Node::Empty => Node::Empty,
                 _ if max == Some(0) => Node::Empty,
                 _ if (min, max) == (1, Some(1)) => atom,
-                // `*`, `+` and `?` behind one another are one of them
+                // `*`, `+` and `?` behind one another are one of them,
+                // but for where the groups inside come to lie
                 Node::Repeat(inner, low @ 0..=1, high @ (None | Some(1)))
-                    if min <= 1 && matches!(max, None | Some(1)) =>
+                    if min <= 1 && matches!(max, None | Some(1)) && !inner.grouped() =>
                 {
                     let once = high.is_some() && max.is_some();
                     Node::Repeat(inner, low * min, once.then_some(1))

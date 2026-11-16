@@ -46,6 +46,16 @@ impl Node {
         }
     }
 
+    /// Whether a group is written in it.
+    pub fn grouped(&self) -> bool {
+        match self {
+            Node::Group(..) => true,
+            Node::Repeat(inner, ..) => inner.grouped(),
+            Node::Concat(items) | Node::Alt(items) => items.iter().any(Node::grouped),
+            _ => false,
+        }
+    }
+
     /// The bytes held behind the node. A set of characters that other
     /// patterns share is not counted: it is held whether or not this
     /// one is.

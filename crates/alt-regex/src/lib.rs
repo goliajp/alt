@@ -307,6 +307,8 @@ mod tests {
         assert_eq!(found, vec![Some(0..1), Some(0..1), Some(0..0)]);
         // the second of the copies that must be there gives way to what
         // the first found, as one that may be left out
+        // repetitions written behind one another are one inside the other
+        assert_eq!(spans("(a*)++", "aa"), Some(vec![Some(0..2), Some(2..2)]));
         let found = spans("(()*(|a){2,})*", "a").unwrap();
         assert_eq!(found, vec![Some(0..1), Some(0..1), Some(0..0), Some(0..1)]);
     }
