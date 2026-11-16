@@ -7,6 +7,7 @@ mod add_modes;
 mod add_paths;
 mod add_renormalize;
 mod add_star;
+mod add_unmerged;
 mod altd_server;
 mod amend;
 mod argument_bindings;
