@@ -212,3 +212,32 @@ fn a_submodule_entry_without_its_directory_stops_no_switch_and_no_merge() {
         assert!(root.join("b.txt").is_file() && !root.join("sub").exists());
     }
 }
+
+/// A file put where a committed submodule was is staged and committed,
+/// and the tree is the one git commits.
+#[test]
+fn a_file_where_a_committed_submodule_was_is_committed_as_git_commits_it() {
+    let (g, a) = pair();
+    let (g, a) = (g.path(), a.path());
+    std::fs::create_dir(g.join("sub")).unwrap();
+    for root in [g, a] {
+        embed(&root.join("inner"));
+    }
+    ok(git(g, &["add", "inner"]));
+    ok(alt(a, &["add", "inner"]));
+    ok(git(g, &["commit", "-qm", "embedded"]));
+    ok(alt(a, &["commit", "-m", "embedded"]));
+    for root in [g, a] {
+        std::fs::remove_dir_all(root.join("inner")).unwrap();
+        std::fs::write(root.join("inner"), "f\n").unwrap();
+    }
+    ok(git(g, &["add", "inner"]));
+    ok(alt(a, &["add", "inner"]));
+    assert_eq!(agree(g, a, "staged"), "T  inner\n");
+    ok(git(g, &["commit", "-qm", "a file"]));
+    ok(alt(a, &["commit", "-m", "a file"]));
+    let tree = ok(git(g, &["rev-parse", "HEAD^{tree}"]));
+    let log = ok(alt(a, &["log", "-n", "1", "--json"]));
+    let committed = format!("\"tree\":\"{}\"", tree.trim());
+    assert!(log.contains(&committed), "{log}");
+}

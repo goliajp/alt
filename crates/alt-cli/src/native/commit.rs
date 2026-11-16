@@ -224,6 +224,8 @@ impl NativeRepo<'_> {
             if old.is_some_and(|o| o.oid == e.oid) {
                 continue;
             }
+            // what a submodule entry names is a commit of another store
+            let old = old.filter(|o| o.mode != 0o160000);
             let old = old.map(|o| self.blob_bytes(o.oid)).transpose()?;
             files.push((e.path.to_string(), old, self.blob_bytes(e.oid)?));
         }
