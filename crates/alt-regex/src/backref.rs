@@ -67,6 +67,7 @@ pub fn search(
     let mut entered = vec![UNSET; prog.insts.len()];
     let mut stack = Vec::new();
     let mut steps = MAX_STEPS;
+    let asked = found.len();
     let first = only.unwrap_or(0);
     let last = match only.is_some() || prog.anchored {
         true => first,
@@ -125,8 +126,7 @@ pub fn search(
                             continue;
                         }
                         // the way out is taken with the loop as it was
-                        // found: a turn of a loop around this one may
-                        // enter it here again
+                        // found: a loop around it may enter it again
                         stack.push(Frame::Step(second | if behind { BEHIND } else { 0 }, at));
                         stack.push(Frame::Loop(pc, before));
                         pc = first;
@@ -142,6 +142,8 @@ pub fn search(
                     Inst::Look(look, next) if holds(look, text, at, prog.utf8) => {
                         (pc, behind) = (next, true)
                     }
+                    // the C library keeps no group that is not asked for
+                    Inst::BackRef(group, ..) if asked > 2 && 2 * group as usize >= asked => break,
                     Inst::BackRef(group, fold, next) => {
                         let Some(taken) = again(prog, text, &slots, group, fold, at) else {
                             break;

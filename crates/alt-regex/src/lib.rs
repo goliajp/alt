@@ -473,6 +473,18 @@ mod tests {
             spans("(a)(b)\\2\\1", "abba"),
             Some(vec![Some(0..4), Some(0..1), Some(1..2)])
         );
+        // asked for fewer groups than a reference names, the C library
+        // finds no match; asked for none, it finds one
+        let re = Regex::new(b"((a)\\2)").unwrap();
+        assert_eq!(re.captures(b"aa").and_then(|c| c.get(2)), Some(0..1));
+        assert!(re.captures_upto(b"aa", 1).is_none() && re.is_match(b"aa"));
+        assert_eq!(re.find(b"aa"), Some(0..2));
+        assert!(
+            Regex::new(b"(a)\\1")
+                .unwrap()
+                .captures_upto(b"aa", 1)
+                .is_some()
+        );
         // a turn of an outer repetition begins the inner one anew
         assert_eq!(spans("(a*)*-\\1$", "aa-a").unwrap()[0], Some(0..4));
         assert_eq!(spans("(a*)*-\\1", "aa-a").unwrap()[0], Some(0..4));
