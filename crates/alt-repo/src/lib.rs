@@ -257,10 +257,13 @@ impl Repository {
         let repo_dir = &self.repo_dir;
         match &mut self.backend {
             Backend::Alt(alt) => {
-                alt.odb.refresh()?;
+                // refs before objects: a writer stores its objects before
+                // the ref that names them, so refs read first never name
+                // an object the refreshed store lacks
                 if let Some(refs) = alt.refs.get_mut() {
                     refs.refresh()?;
                 }
+                alt.odb.refresh()?;
             }
             Backend::Git { refs, packs, .. } => {
                 let algo = object_format(&repo_dir.join("config"))?;

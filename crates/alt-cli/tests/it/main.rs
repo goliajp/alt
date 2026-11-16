@@ -51,6 +51,7 @@ mod remote;
 mod revert;
 mod show;
 mod status_json;
+mod store_refresh;
 mod switch_kinds;
 mod tag;
 mod task_delivery;

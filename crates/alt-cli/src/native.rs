@@ -131,8 +131,11 @@ impl Store {
     /// Also re-loads the capability policy so a `.alt/policy` edit takes effect on
     /// the next request without restarting the daemon.
     pub fn refresh(&mut self) -> Res<()> {
-        self.odb.refresh()?;
+        // refs before objects: a writer stores its objects before the ref
+        // that names them, so refs read first never name an object the
+        // refreshed store lacks
         self.refs.refresh()?;
+        self.odb.refresh()?;
         self.policy = Policy::load(&self.alt_dir)?;
         Ok(())
     }
