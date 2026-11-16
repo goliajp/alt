@@ -119,7 +119,7 @@ pub enum Command {
     /// Stage file contents into the index
     Add {
         #[command(flatten)]
-        args: worktree_args::AddArgs,
+        args: worktree_args::Add,
     },
     /// Record staged changes as a new commit
     Commit {
@@ -157,7 +157,7 @@ pub enum Command {
     /// Show the working tree status
     Status {
         #[command(flatten)]
-        args: worktree_args::StatusArgs,
+        args: worktree_args::Status,
     },
     /// List, create, or delete branches
     Branch {
@@ -1298,7 +1298,7 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
                 repo.commit(message.as_deref().unwrap_or_default(), opts, *json, out)?
             }
         }
-        Command::Status { args } => repo.status(args.untracked.as_deref(), args.json, out)?,
+        Command::Status { args } => repo.status(args.untracked(), args.json, out)?,
         Command::Branch {
             name,
             delete,
