@@ -100,10 +100,7 @@ mod unix {
         let shared: Shared = Arc::new(Mutex::new((store, repo)));
         let group = Arc::new(GroupCommit::new());
 
-        let idle_ms = std::env::var("ALT_DAEMON_IDLE_MS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(DEFAULT_IDLE_MS);
+        let idle_ms = idle_ms();
 
         // count of requests accepted but not yet fully served. Incremented in
         // this thread before the worker spawns (so an immediate idle poll can't
@@ -143,6 +140,14 @@ mod unix {
         }
         let _ = std::fs::remove_file(&sock_path);
         Ok(())
+    }
+
+    /// How long to wait for a request before exiting.
+    fn idle_ms() -> i32 {
+        std::env::var("ALT_DAEMON_IDLE_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_IDLE_MS)
     }
 
     /// Records the running daemon's identity next to its socket: pid +

@@ -97,15 +97,7 @@ impl NativeRepo<'_> {
             when,
             tz: "+0000",
         };
-        let original_msg = String::from_utf8_lossy(target_commit.message().as_slice()).into_owned();
-        let mut msg = original_msg;
-        if !msg.ends_with('\n') {
-            msg.push('\n');
-        }
-        if !msg.ends_with("\n\n") {
-            msg.push('\n');
-        }
-        msg.push_str(&format!("(cherry picked from commit {target_oid})\n"));
+        let msg = picked_message(target_commit.message().as_slice(), target_oid);
 
         let commit = write_commit(
             &mut self.store.odb,
@@ -142,6 +134,19 @@ impl NativeRepo<'_> {
         }
         Ok(false)
     }
+}
+
+/// The picked commit's message, ending in the trailer that names it.
+fn picked_message(original: &[u8], picked: ObjectId) -> String {
+    let mut msg = String::from_utf8_lossy(original).into_owned();
+    if !msg.ends_with('\n') {
+        msg.push('\n');
+    }
+    if !msg.ends_with("\n\n") {
+        msg.push('\n');
+    }
+    msg.push_str(&format!("(cherry picked from commit {picked})\n"));
+    msg
 }
 
 /// Parse a git ident line ("Name <email> <epoch> <tz>") into a

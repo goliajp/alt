@@ -142,21 +142,33 @@ pub fn run(
             }
         }
         if args.patch {
-            // as in git, a blank line sets a patch apart from every header
-            // but the one-line one, and a combined diff from any header
-            use crate::patch::Section;
-            let mut patch = Vec::new();
-            let style = match &style {
-                Some(style) => style,
-                None => style.insert(crate::patch::style(repo)?),
-            };
-            let shown = crate::patch::write_commit(&mut patch, repo, &oid, args.combined, style)?;
-            if shown == Section::Combined || (shown == Section::Patch && args.pretty != "oneline") {
-                out.write_all(b"\n")?;
-            }
-            out.write_all(&patch)?;
+            write_patch(out, repo, &args, &oid, &mut style)?;
         }
     }
+    Ok(())
+}
+
+/// One commit's patch, after its header; makes `style` if no patch has yet.
+fn write_patch<'r>(
+    out: &mut impl Write,
+    repo: &'r Repository,
+    args: &LogArgs,
+    oid: &ObjectId,
+    style: &mut Option<crate::file_header::Style<'r>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // as in git, a blank line sets a patch apart from every header
+    // but the one-line one, and a combined diff from any header
+    use crate::patch::Section;
+    let mut patch = Vec::new();
+    let style = match &*style {
+        Some(style) => style,
+        None => style.insert(crate::patch::style(repo)?),
+    };
+    let shown = crate::patch::write_commit(&mut patch, repo, oid, args.combined, style)?;
+    if shown == Section::Combined || (shown == Section::Patch && args.pretty != "oneline") {
+        out.write_all(b"\n")?;
+    }
+    out.write_all(&patch)?;
     Ok(())
 }
 

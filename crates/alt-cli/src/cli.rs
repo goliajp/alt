@@ -1125,6 +1125,11 @@ pub fn mutates_command(cmd: &Command) -> bool {
                 | Command::Export { .. }
         );
     }
+    native_mutates(cmd)
+}
+
+/// Whether a native command writes: all of them do but the pure reads.
+fn native_mutates(cmd: &Command) -> bool {
     !matches!(
         cmd,
         Command::Request { .. }

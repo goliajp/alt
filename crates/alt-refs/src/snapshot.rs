@@ -69,15 +69,12 @@ fn encode_target(buf: &mut Vec<u8>, target: &RefTarget) {
     }
 }
 
-/// Writes the snapshot of `count` refs (in name order) and returns its
-/// size. No fsync: a snapshot lost or torn in a crash fails its checksum
-/// and is rebuilt from the log.
-pub fn write<'a>(
-    path: &Path,
+/// The bytes of a version 2 snapshot of `count` refs (in name order).
+fn encode<'a>(
     at: &Anchor,
     count: usize,
     refs: impl Iterator<Item = (&'a str, &'a RefTarget)>,
-) -> Result<u64, RefError> {
+) -> Vec<u8> {
     let blocks = count.div_ceil(BLOCK);
     let mut buf = Vec::new();
     buf.extend_from_slice(&MAGIC);
@@ -104,6 +101,19 @@ pub fn write<'a>(
         .try_into()
         .unwrap();
     buf.extend_from_slice(&check);
+    buf
+}
+
+/// Writes the snapshot of `count` refs (in name order) and returns its
+/// size. No fsync: a snapshot lost or torn in a crash fails its checksum
+/// and is rebuilt from the log.
+pub fn write<'a>(
+    path: &Path,
+    at: &Anchor,
+    count: usize,
+    refs: impl Iterator<Item = (&'a str, &'a RefTarget)>,
+) -> Result<u64, RefError> {
+    let buf = encode(at, count, refs);
 
     // readers refresh the snapshot too, any number at once, in one process
     // or in several that may share process ids: each writes a file no one
@@ -185,6 +195,21 @@ fn field(body: &[u8], at: usize) -> Option<u64> {
     Some(u64::from_le_bytes(body.get(at..at + 8)?.try_into().ok()?))
 }
 
+/// The refs of a version 1 file: a count, then every ref up to the end.
+fn refs_op_only(body: &[u8]) -> Option<Refs> {
+    let count = u32::from_le_bytes(body[37..41].try_into().unwrap()) as usize;
+    let mut refs = BTreeMap::new();
+    let mut at = 41;
+    for _ in 0..count {
+        let (name, target) = parse_entry(body, &mut at)?;
+        refs.insert(name.to_owned(), Some(target));
+    }
+    if at != body.len() {
+        return None;
+    }
+    Some(Refs::from_changes(refs))
+}
+
 /// Reads a snapshot; any structural problem yields None (rebuild), never an
 /// error — the snapshot is a cache.
 pub fn read(path: &Path) -> Option<Snapshot> {
@@ -202,20 +227,10 @@ pub fn read(path: &Path) -> Option<Snapshot> {
     let at_op = OpId(body[5..37].try_into().unwrap());
 
     if version == VERSION_OP_ONLY {
-        let count = u32::from_le_bytes(body[37..41].try_into().unwrap()) as usize;
-        let mut refs = BTreeMap::new();
-        let mut at = 41;
-        for _ in 0..count {
-            let (name, target) = parse_entry(body, &mut at)?;
-            refs.insert(name.to_owned(), Some(target));
-        }
-        if at != body.len() {
-            return None;
-        }
         return Some(Snapshot {
             at_op,
             anchor: None,
-            refs: Refs::from_changes(refs),
+            refs: refs_op_only(body)?,
             len,
         });
     }

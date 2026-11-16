@@ -32,6 +32,14 @@ fn artifact(bytes: &[u8]) -> Artifact {
         bytes: bytes.len() as u64,
     }
 }
+/// Every operation in the local log.
+fn local_ops<'a>(repo: &'a NativeRepo<'_>) -> Result<&'a [alt_oplog::Op]> {
+    repo.store
+        .refs
+        .oplog()
+        .ops()
+        .map_err(|_| Error::Invalid("local operation log"))
+}
 pub(super) struct ProofBytes(pub Vec<Vec<u8>>);
 impl ArtifactSource for ProofBytes {
     fn open(&self, artifact: &Artifact) -> alt_task_service::Result<Box<dyn Read + '_>> {
@@ -82,13 +90,7 @@ pub(super) fn completed(
     let checked = alt_task_service::check_source(record, &proof, &raw, maximum)?;
     if let TaskRecord::Integration(integration) = record {
         let mut matched = None;
-        let ops = repo
-            .store
-            .refs
-            .oplog()
-            .ops()
-            .map_err(|_| Error::Invalid("local operation log"))?;
-        for op in ops {
+        for op in local_ops(repo)? {
             if !completion.operations.contains(&op.id.to_string()) {
                 continue;
             }
@@ -246,13 +248,7 @@ impl Source for LocalSource<'_, '_> {
         };
         let mut raw = vec![raw_intent];
         if let Some(id) = operation {
-            let op = self
-                .repo
-                .store
-                .refs
-                .oplog()
-                .ops()
-                .map_err(|_| Error::Invalid("local operation log"))?
+            let op = local_ops(self.repo)?
                 .iter()
                 .find(|op| op.id.to_string() == id)
                 .ok_or(Error::Invalid("recovered operation missing"))?;
