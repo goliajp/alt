@@ -268,145 +268,49 @@ impl std::error::Error for PolicyError {
     }
 }
 
-/// A two-token glob: `*` matches one segment (no `/`), `**` matches anything
-/// (including `/`). Plain text otherwise — no escapes. Stored compiled into a
-/// list of literal/anysegment/anychars parts so matching is a flat walk and
-/// not a regex engine.
+/// A two-token glob, matched against the whole of a name: `*` stands for
+/// one or more characters of one segment (no `/`), `**/` where a segment
+/// begins for no segment or several, any other `**` for anything. Plain
+/// text otherwise, no escapes: a `/` in the pattern is a `/` in the name,
+/// so `src/**` holds what lies beneath `src` and nothing beside it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Glob {
-    parts: Vec<Part>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Part {
-    Lit(String),
-    AnySegment, // `*`
-    AnyChars,   // `**`
+    pattern: String,
 }
 
 impl Glob {
-    /// Compile a glob string. `**` absorbs adjacent `/` on both sides so that
-    /// `a/**/b` matches `a/b` (gitignore semantics) — the "0 or more path
-    /// segments" reading where the separators around the wildcard are part of
-    /// the wildcard, not a hard literal you must reproduce.
     pub fn new(pat: &str) -> Self {
-        let bytes = pat.as_bytes();
-        let mut parts = Vec::new();
-        let mut buf = String::new();
-        let mut i = 0;
-        while i < bytes.len() {
-            if bytes[i] == b'*' {
-                let double = i + 1 < bytes.len() && bytes[i + 1] == b'*';
-                // `**` adjacent to `/` on the left: drop the trailing slash
-                // from the literal so it counts as part of the wildcard span.
-                if double && buf.ends_with('/') {
-                    buf.pop();
-                }
-                if !buf.is_empty() {
-                    parts.push(Part::Lit(std::mem::take(&mut buf)));
-                }
-                if double {
-                    parts.push(Part::AnyChars);
-                    i += 2;
-                    // …and on the right: skip a trailing `/` after `**`.
-                    if i < bytes.len() && bytes[i] == b'/' {
-                        i += 1;
-                    }
-                } else {
-                    parts.push(Part::AnySegment);
-                    i += 1;
-                }
-            } else {
-                buf.push(bytes[i] as char);
-                i += 1;
-            }
+        Self {
+            pattern: pat.to_owned(),
         }
-        if !buf.is_empty() {
-            parts.push(Part::Lit(buf));
-        }
-        Self { parts }
     }
 
     /// Match the whole `input` against this glob.
     pub fn matches(&self, input: &str) -> bool {
-        match_parts(&self.parts, input.as_bytes())
+        glob(self.pattern.as_bytes(), input.as_bytes(), true)
     }
 }
 
-fn match_parts(parts: &[Part], input: &[u8]) -> bool {
-    let mut i = 0; // input cursor
-    let mut p = 0; // parts cursor
-    // The classic backtracking matcher: `**` ("any chars") may need to try
-    // multiple split points before what follows succeeds; `*` (one segment)
-    // is greedy up to the next `/`. Patterns here are tiny — backtracking is
-    // simpler than a NFA and there is no perf pressure on this path.
-    let mut bt: Option<(usize, usize)> = None; // (parts_idx of `**`, next input_pos to try)
-    loop {
-        if p == parts.len() {
-            if i == input.len() {
-                return true;
-            }
-            // unmatched tail — fall through to backtrack
-        } else {
-            match &parts[p] {
-                Part::Lit(s) => {
-                    let s = s.as_bytes();
-                    if i + s.len() <= input.len() && &input[i..i + s.len()] == s {
-                        i += s.len();
-                        p += 1;
-                        continue;
-                    }
-                }
-                Part::AnySegment => {
-                    // greedy up to next `/`; record the next part for the
-                    // matcher to verify after each candidate length
-                    let end = input[i..]
-                        .iter()
-                        .position(|&b| b == b'/')
-                        .map(|k| i + k)
-                        .unwrap_or(input.len());
-                    // try the longest match first; backtrack one byte at a
-                    // time on failure (segment lengths are short).
-                    return match_anysegment(parts, p, input, i, end);
-                }
-                Part::AnyChars => {
-                    bt = Some((p, i));
-                    p += 1;
-                    continue;
-                }
-            }
-        }
-        // mismatch / overflow — try to backtrack into a prior `**`
-        if let Some((bp, bi)) = bt
-            && bi < input.len()
-        {
-            i = bi + 1;
-            bt = Some((bp, i));
-            p = bp + 1;
-            continue;
-        }
-        return false;
+/// Whether all of `input` is what `pattern` describes; `at_start` where
+/// the pattern begins a segment. Patterns here are tiny: trying every
+/// length a wildcard may stand for is simple and cheap enough.
+fn glob(pattern: &[u8], input: &[u8], at_start: bool) -> bool {
+    let Some((&first, rest)) = pattern.split_first() else {
+        return input.is_empty();
+    };
+    if first != b'*' {
+        return input.first() == Some(&first) && glob(rest, &input[1..], first == b'/');
     }
-}
-
-fn match_anysegment(parts: &[Part], p: usize, input: &[u8], lo: usize, hi: usize) -> bool {
-    // `*` requires at least one byte (it stands for a non-empty path segment),
-    // so refuse the empty-segment case up front.
-    if hi == lo {
-        return false;
-    }
-    // try every split from longest to single-byte (greedy, then backtrack)
-    let rest = &parts[p + 1..];
-    let mut end = hi;
-    loop {
-        if match_parts(rest, &input[end..]) {
-            return true;
+    if let Some(after) = rest.strip_prefix(b"*") {
+        if let Some(names) = after.strip_prefix(b"/").filter(|_| at_start) {
+            let slashes = input.iter().enumerate().filter(|(_, b)| **b == b'/');
+            let mut starts = std::iter::once(0).chain(slashes.map(|(at, _)| at + 1));
+            return starts.any(|at| glob(names, &input[at..], true));
         }
-        if end == lo + 1 {
-            return false;
-        }
-        end -= 1;
+        return (0..=input.len()).any(|at| glob(after, &input[at..], false));
     }
+    let segment = input.iter().take_while(|b| **b != b'/').count();
+    (1..=segment).any(|at| glob(rest, &input[at..], false))
 }
 
 #[cfg(test)]
@@ -485,6 +389,31 @@ mod tests {
         assert!(g.matches("src/a/lib.rs"));
         assert!(g.matches("src/a/b/c/lib.rs"));
         assert!(!g.matches("src/a/lib.rsx"));
+    }
+
+    #[test]
+    fn a_slash_beside_a_double_star_is_a_slash_of_the_name() {
+        let beneath = Glob::new("src/**");
+        assert!(beneath.matches("src/lib.rs") && beneath.matches("src/a/b.rs"));
+        for beside in ["srcx/y", "srcfile2", "src", "xsrc/y", "a/src/y"] {
+            assert!(!beneath.matches(beside), "{beside}");
+        }
+        let branch = Glob::new("refs/heads/feature/agent-bot/**");
+        assert!(!branch.matches("refs/heads/feature/agent-botX/y"));
+        assert!(!branch.matches("refs/heads/feature/agent-bot"));
+        let anywhere = Glob::new("**/lib.rs");
+        assert!(anywhere.matches("lib.rs") && anywhere.matches("a/b/lib.rs"));
+        assert!(!anywhere.matches("xlib.rs") && !anywhere.matches("a/xlib.rs"));
+        let between = Glob::new("a/**/b");
+        assert!(between.matches("a/b") && between.matches("a/x/y/b"));
+        assert!(!between.matches("ab") && !between.matches("a/xb") && !between.matches("ax/b"));
+        let one = Glob::new("src/*.rs");
+        assert!(one.matches("src/a.rs"));
+        assert!(!one.matches("src/a/b.rs") && !one.matches("src/.rs") && !one.matches("srcx/a.rs"));
+        assert!(Glob::new("**").matches("") && Glob::new("**").matches("a/b"));
+        assert!(
+            Glob::new("agent:*").matches("agent:bot") && !Glob::new("agent:*").matches("agent:")
+        );
     }
 
     #[test]

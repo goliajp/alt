@@ -123,6 +123,13 @@ fn branch_allow_denies_out_of_namespace() {
         "capability denied",
     );
     ok(alt_as(repo, &["branch", "feature/agent-bot/wip"], "bot"));
+    // a name that only begins as the namespace does is outside it
+    for beside in ["feature/agent-botX/wip", "feature/agent-bot"] {
+        fails_with(
+            alt_as(repo, &["branch", beside], "bot"),
+            "capability denied",
+        );
+    }
 
     // …and the unrestricted operator (no rule matches `human:operator`)
     // still moves freely
@@ -179,6 +186,24 @@ fn path_allow_denies_out_of_tree_paths() {
     );
     // commit of the already-staged src/ is fine
     ok(alt_as(repo, &["commit", "-m", "add src"], "bot"));
+}
+
+/// `src/**` allows what lies beneath `src` and nothing whose name only
+/// begins with it.
+#[test]
+fn path_allow_holds_a_path_to_the_directory_it_names() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let repo = fixture(&tmp);
+    for file in ["src/deep/lib.rs", "srcx/y", "srcfile2"] {
+        std::fs::create_dir_all(repo.join(file).parent().unwrap()).unwrap();
+        std::fs::write(repo.join(file), "x\n").unwrap();
+    }
+    write_policy(repo, "agent:* -> path=src/**\n");
+    for beside in ["srcx/y", "srcfile2", "srcx", "."] {
+        fails_with(alt_as(repo, &["add", beside], "bot"), "capability denied");
+    }
+    ok(alt_as(repo, &["add", "src"], "bot"));
+    ok(alt_as(repo, &["commit", "-m", "src"], "bot"));
 }
 
 /// What another principal staged outside the allowed paths is not
