@@ -50,7 +50,10 @@ impl Drop for Caller {
 /// Whether git would match the caller's texts as UTF-8: the first of
 /// `LC_ALL`, `LC_CTYPE` and `LANG` that is set names the locale, and the
 /// C library must have that locale, with UTF-8 as its character set. A
-/// locale that is not installed leaves git in the locale `C`.
+/// locale that is not installed leaves git in the locale `C`. Which
+/// UTF-8 locale it is changes nothing further: the classes and the case
+/// of characters are those of `C.UTF-8`, where git would take them from
+/// the locale named, the Turkish pairing of the letters i among them.
 pub(crate) fn utf8_locale() -> bool {
     let set = |name| var(name).filter(|value| !value.is_empty());
     let Some(locale) = ["LC_ALL", "LC_CTYPE", "LANG"].into_iter().find_map(set) else {
