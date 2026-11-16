@@ -131,7 +131,7 @@ pub fn again(text: &[u8], group: &[u8]) -> Option<usize> {
         let (theirs, step) = decode(&group[done..]).unwrap_or((u32::MAX, 1));
         let (ours, len) = decode(text.get(taken..)?).unwrap_or((u32::MAX, 1));
         let same = match theirs {
-            u32::MAX => ours == u32::MAX && text[taken] == group[done],
+            u32::MAX => ours == u32::MAX && text.get(taken) == Some(&group[done]),
             _ => upper(ours) == upper(theirs),
         };
         if !same {
@@ -339,5 +339,8 @@ mod tests {
         assert_eq!(again(b"\xe9", b"\xe9"), Some(1));
         assert_eq!(again(b"\xc9", b"\xe9"), None);
         assert_eq!(again(b"a", b"ab"), None);
+        // the text ends where a byte that is no character is due
+        assert_eq!(again(b"", b"\xe9"), None);
+        assert_eq!(again(b"a", b"a\xe9"), None);
     }
 }

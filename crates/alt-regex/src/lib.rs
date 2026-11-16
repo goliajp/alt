@@ -539,6 +539,15 @@ mod tests {
         };
         let re = Regex::with_options(b"^\\(a*\\)b\\1$", basic).unwrap();
         assert!(re.is_match(b"aabaa") && !re.is_match(b"aaba"));
+        // a group of a byte that is no character, and no text left for
+        // its reference
+        let stray = Options {
+            utf8: true,
+            ..any_case
+        };
+        let re = Regex::with_options(b"(\xe9)\\1", stray).unwrap();
+        assert!(!re.is_match(b"\xe9") && re.captures(b"\xe9").is_none());
+        assert_eq!(re.find(b"x\xe9\xe9"), Some(1..3));
     }
 
     #[test]
