@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: test
+summary: hold the rebase preflight, the gate on displaced entries and the names sorted between
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/add_clash.rs
+touched: crates/alt-cli/tests/it/path_gate.rs
+touched: crates/alt-cli/tests/it/replay_refused.rs
