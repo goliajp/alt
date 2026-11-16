@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: bound the time a pattern takes to compile only where time is measured
+author-type: human
+author: doracawl
+touched: crates/alt-regex/tests/it/limits.rs
