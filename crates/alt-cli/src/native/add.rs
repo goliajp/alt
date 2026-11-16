@@ -82,7 +82,11 @@ impl NativeRepo<'_> {
         // it had when it was staged holds what the index holds
         let mut snapshot = self.worktree_snapshot()?;
         let (mut delta, clock) = self.scan_delta_within(&mut snapshot, untracked, within)?;
-        let hidden = self.unmatched(&specs, &before, &delta, mode.renormalize)?;
+        self.ensure_matched(&specs, &before, &delta, mode.renormalize)?;
+        let hidden = match mode.renormalize || mode.force {
+            true => Vec::new(),
+            false => self.hidden(&specs, &before)?,
+        };
         // the scan looked at more than is named where a path has wildcards
         delta.changed.retain(|w| named(&w.path));
         for list in [
@@ -114,14 +118,16 @@ impl NativeRepo<'_> {
         if json {
             crate::json::emit(out, vec![("staged", crate::json::Json::Num(staged as i64))])?;
         } else {
+            if !hidden.is_empty() {
+                crate::diagnostics::emit(&named::ignored(&hidden, &self.settings()?)?)?;
+            }
             crate::diagnostics::emit(&advice)?;
             writeln!(out, "staged {staged} path(s)")?;
         }
-        if hidden.is_empty() {
-            return Ok(());
+        match hidden.is_empty() {
+            true => Ok(()),
+            false => Err(named::left_alone(&hidden).into()),
         }
-        let report = named::ignored(&hidden, &self.settings()?)?;
-        Err(crate::machine::Failure::refusal(crate::machine::PATHS_IGNORED, report).into())
     }
 
     /// The path gate: denies staging any path the policy excludes, before

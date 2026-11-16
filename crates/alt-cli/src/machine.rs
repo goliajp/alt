@@ -31,7 +31,8 @@ impl std::fmt::Display for Failure {
 
 impl std::error::Error for Failure {}
 
-/// The kind of failure `add` reports the paths with that it left alone.
+/// The kind of failure `add` ends with when it left paths alone that an
+/// ignore rule hides: its details name them under `ignored_paths`.
 pub const PATHS_IGNORED: &str = "paths_ignored";
 
 impl Failure {
@@ -93,11 +94,12 @@ impl Failure {
             bytes
         } else {
             let request = request_id
-                .map(|id| format!("\nrequest: {id}"))
+                .map(|id| format!("request: {id}\n"))
                 .unwrap_or_default();
             match self.kind {
-                PATHS_IGNORED => format!("{}{}", self.message, request.trim_start()),
-                _ => format!("fatal: {}{}\n", self.message, request),
+                // the command has said which paths, as git says it
+                PATHS_IGNORED => request,
+                _ => format!("fatal: {}\n{request}", self.message),
             }
             .into_bytes()
         };

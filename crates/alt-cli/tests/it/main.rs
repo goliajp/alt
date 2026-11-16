@@ -1,6 +1,7 @@
 //! Single integration-test binary for alt-cli.
 mod add_clash;
 mod add_conflict;
+mod add_hidden;
 mod add_ignore;
 mod add_paths;
 mod add_renormalize;

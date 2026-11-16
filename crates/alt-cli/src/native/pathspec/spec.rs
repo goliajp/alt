@@ -14,7 +14,7 @@ pub struct Spec {
     pub given: String,
     /// the path from the root, empty for the whole tree; no `/` at the end
     pub path: String,
-    /// given with a `/` at the end: what it names is a directory
+    /// given with `/`, `.` or `..` at the end: what it names is a directory
     pub dir: bool,
     /// takes away from what the other paths name
     pub exclude: bool,
@@ -115,9 +115,12 @@ impl Spec {
             Some(more) if from_here && more.starts_with('/') => prefix.len() + 1,
             _ => 0,
         };
+        // a path that ends in `/`, `.` or `..` is a directory to git
+        let last = rest.rsplit('/').next();
+        let ends_dir = matches!(last, Some("" | "." | ".."));
         Ok(Spec {
             given: given.to_owned(),
-            dir: rest.ends_with('/') && !path.is_empty(),
+            dir: ends_dir && !path.is_empty(),
             exclude: magic.exclude,
             literal: magic.literal,
             glob: magic.glob,
@@ -182,6 +185,26 @@ impl Spec {
     pub fn reach(&self) -> &str {
         let plain = self.plain_len();
         match (self.fold_case, plain == self.path.len()) {
+            (true, _) => self.path[..self.fixed].trim_end_matches('/'),
+            (false, true) => &self.path,
+            (false, false) => match self.path[..plain].rfind('/') {
+                Some(slash) => &self.path[..slash],
+                None => "",
+            },
+        }
+    }
+
+    /// The path as far as it is written out, which is what git goes by
+    /// where it tells of a path an ignore rule hides.
+    pub fn literal(&self) -> &str {
+        self.path[..self.plain_len()].trim_end_matches('/')
+    }
+
+    /// The directory git walks for what this names: the one the path as
+    /// far as it is written out lies in, or is when it names a directory.
+    pub fn walked(&self) -> &str {
+        let plain = self.plain_len();
+        match (self.fold_case, self.dir && plain == self.path.len()) {
             (true, _) => self.path[..self.fixed].trim_end_matches('/'),
             (false, true) => &self.path,
             (false, false) => match self.path[..plain].rfind('/') {

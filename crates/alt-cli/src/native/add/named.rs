@@ -1,5 +1,6 @@
 //! What the paths given to `add` name: which of them name nothing, which
-//! only something an ignore rule hides, and which cannot be named at all.
+//! lead to something an ignore rule hides, and which cannot be named at
+//! all.
 
 use alt_worktree::Delta;
 
@@ -13,22 +14,42 @@ fn inside_repository(path: &[u8], spec: &str) -> bool {
     path.ends_with(b"/") && spec.as_bytes().starts_with(path)
 }
 
+/// Whether `path` is `dir` or lies beneath it; the empty `dir` is the tree.
+fn within(path: &[u8], dir: &[u8]) -> bool {
+    let beneath = |rest: &[u8]| rest.is_empty() || rest[0] == b'/';
+    dir.is_empty() || path.strip_prefix(dir).is_some_and(beneath)
+}
+
+/// The directory git walks to find what `specs` name for a command run in
+/// `prefix`: the innermost that holds every path given as far as it is
+/// written out, those that take away left aside.
+fn walked<'a>(specs: &'a [Spec], prefix: &'a str) -> &'a str {
+    let mut dirs = specs.iter().filter(|s| !s.exclude).map(Spec::walked);
+    let Some(mut walked) = dirs.next() else {
+        return prefix;
+    };
+    for dir in dirs {
+        while !within(dir.as_bytes(), walked.as_bytes()) {
+            walked = walked.rfind('/').map_or("", |slash| &walked[..slash]);
+        }
+    }
+    walked
+}
+
 impl NativeRepo<'_> {
     /// A path stands for itself and every file under it, deleted ones
     /// included (their removal is staged), as in git; a conflicted path
     /// is one the index knows, with or without its file. A path that
     /// names nothing is an error, unless it is written out and there is
-    /// something at it: returns those of them an ignore rule hides, each
-    /// as the outermost directory hidden. With `tracked_only`, what is
-    /// not in the index is not named and nothing is returned.
-    pub(super) fn unmatched(
+    /// something at it. With `tracked_only`, what is not in the index is
+    /// not named.
+    pub(super) fn ensure_matched(
         &self,
         specs: &[Spec],
         before: &Index,
         delta: &Delta,
         tracked_only: bool,
-    ) -> Res<Vec<BString>> {
-        let mut hidden = Vec::new();
+    ) -> Res<()> {
         let named = specs.iter().filter(|s| !s.exclude && !s.path.is_empty());
         for spec in named {
             let tracked = before.entries.iter().any(|e| spec.matches(&e.path));
@@ -48,13 +69,30 @@ impl NativeRepo<'_> {
                     "pathspec '{given}' did not match any files"
                 )));
             }
-            if tracked_only {
+        }
+        Ok(())
+    }
+
+    /// The paths git tells of because an ignore rule hides them: each the
+    /// outermost path hidden that a path given leads to or into as far as
+    /// it is written out, one that takes away as well, and that git meets
+    /// on its walk. A file of the index is hidden by no rule.
+    pub(super) fn hidden(&self, specs: &[Spec], before: &Index) -> Res<Vec<BString>> {
+        let walked = walked(specs, &self.prefix).as_bytes();
+        let inputs = self.scan_inputs()?;
+        let excludes: Vec<&Path> = inputs.excludes.iter().map(PathBuf::as_path).collect();
+        let mut hidden = Vec::new();
+        for spec in specs.iter().filter(|spec| !spec.literal().is_empty()) {
+            let literal = spec.literal().as_bytes();
+            let Some(by) = alt_worktree::hidden_by(&self.root, literal, &excludes)? else {
                 continue;
+            };
+            let met = within(&by, walked) || within(walked, &by);
+            let by = BString::from(by);
+            let tracked = before.entries.binary_search_by(|e| e.path.cmp(&by)).is_ok();
+            if met && !tracked && std::fs::symlink_metadata(self.abs(&by)?).is_ok() {
+                hidden.push(by);
             }
-            let inputs = self.scan_inputs()?;
-            let excludes: Vec<&Path> = inputs.excludes.iter().map(PathBuf::as_path).collect();
-            let by = alt_worktree::hidden_by(&self.root, spec.path.as_bytes(), &excludes)?;
-            hidden.extend(by.map(BString::from));
         }
         hidden.sort();
         hidden.dedup();
@@ -97,25 +135,58 @@ impl NativeRepo<'_> {
 }
 
 /// What `add` says of the `paths` it left alone because an ignore rule
-/// hides them: git's list, and how to add them all the same unless
-/// `advice.addIgnoredFile` is off.
-pub(super) fn ignored(paths: &[BString], settings: &alt_git_config::Config) -> Res<String> {
+/// hides them: git's list, each path as its bytes are, and how to add
+/// them all the same unless `advice.addIgnoredFile` is off.
+pub(super) fn ignored(paths: &[BString], settings: &alt_git_config::Config) -> Res<Vec<u8>> {
     let advise = match settings.get_bool("advice", None, "addignoredfile") {
         Some(set) => set?,
         None => true,
     };
-    let mut said =
-        String::from("The following paths are ignored by one of your .gitignore files:\n");
+    let mut said = b"The following paths are ignored by one of your .gitignore files:\n".to_vec();
     for path in paths {
-        said.push_str(&format!("{path}\n"));
+        said.extend_from_slice(path);
+        said.push(b'\n');
     }
     if advise {
-        said.push_str(ADVICE);
+        said.extend_from_slice(ADVICE.as_bytes());
     }
     Ok(said)
+}
+
+/// The failure an `add` ends with that left `paths` alone: they are named
+/// in its details, each with its bytes beside it where it is not UTF-8.
+pub(super) fn left_alone(paths: &[BString]) -> crate::machine::Failure {
+    let named = |path: &BString| match std::str::from_utf8(path) {
+        Ok(text) => alt_json::json!({"path": text}),
+        Err(_) => alt_json::json!({
+            "path": String::from_utf8_lossy(path),
+            "path_bytes": crate::machine::hex(path),
+        }),
+    };
+    let paths: Vec<alt_json::Value> = paths.iter().map(named).collect();
+    let said = "paths that an ignore rule hides were not added";
+    let mut failure = crate::machine::Failure::refusal(crate::machine::PATHS_IGNORED, said);
+    *failure.details = alt_json::json!({"ignored_paths": paths});
+    failure
 }
 
 const ADVICE: &str = "\
 hint: Use -f if you really want to add them.
 hint: Disable this message with \"alt config advice.addIgnoredFile false\"
 ";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_path_left_alone_that_is_not_utf8_has_its_bytes_in_the_details() {
+        let failure = left_alone(&[BString::from("x.log"), BString::from(&b"h\xff"[..])]);
+        let paths = alt_json::json!([
+            {"path": "x.log"},
+            {"path": "h\u{fffd}", "path_bytes": "68ff"},
+        ]);
+        assert_eq!(failure.details["ignored_paths"], paths);
+        assert_eq!((failure.kind, failure.exit_code), ("paths_ignored", 1));
+    }
+}
