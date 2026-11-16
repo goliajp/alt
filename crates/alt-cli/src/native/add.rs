@@ -7,98 +7,99 @@ use alt_worktree::{Delta, FileStat, Snapshot, Untracked};
 use super::*;
 
 mod embedded;
+mod named;
 mod plan;
 
+use pathspec::Spec;
 use plan::{Plan, plan, present};
 
-/// Whether `path` is what `spec` names or lies beneath it; the empty spec
-/// is the whole tree.
-fn under(path: &[u8], spec: &str) -> bool {
-    spec.is_empty()
-        || path == spec.as_bytes()
-        || (path.starts_with(spec.as_bytes()) && path.get(spec.len()) == Some(&b'/'))
-}
-
-/// Whether `spec` names something inside the repository of its own that
-/// the scan reported as the directory `path`, which ends in `/`. Such a
-/// path matches and stages nothing, as for git.
-fn inside_repository(path: &[u8], spec: &str) -> bool {
-    path.ends_with(b"/") && spec.as_bytes().starts_with(path)
-}
-
-/// A path stands for itself and every file under it, deleted ones included
-/// (their removal is staged), as in git; a conflicted path is one the index
-/// knows, with or without its file. A path that names nothing is an error.
-fn all_match(specs: &[&str], given: &[String], before: &Index, delta: &Delta) -> Res<()> {
-    for (spec, given) in specs.iter().zip(given).filter(|(spec, _)| !spec.is_empty()) {
-        let tracked = before.entries.iter().any(|e| under(&e.path, spec));
-        let seen = delta
-            .untracked
-            .iter()
-            .chain(&delta.unmerged)
-            .any(|p| under(p, spec) || inside_repository(p, spec));
-        if !tracked && !seen {
-            return Err(format!("pathspec '{given}' did not match any files").into());
-        }
-    }
-    Ok(())
+/// How an `add` goes about it.
+#[derive(Clone, Copy, Default)]
+struct Mode {
+    /// every tracked file among the paths is stored again, nothing else
+    renormalize: bool,
+    /// what an ignore rule hides is staged as well
+    force: bool,
 }
 
 impl NativeRepo<'_> {
     /// `alt add <paths>`: stage the given paths (or everything for `.`),
     /// updating the index to match the working tree.
     pub fn add(&mut self, paths: &[String], json: bool, out: &mut impl Write) -> Res<()> {
-        self.stage(paths, false, json, out)
+        self.stage(paths, Mode::default(), json, out)
     }
 
-    /// `alt add --renormalize <paths>`, as in git: every tracked file
-    /// among the paths is stored again the way the attributes and settings
-    /// now in force clean it, whatever the index holds for it. A file that
-    /// kept its stat is not looked at otherwise, so a change of the rules
+    /// `alt add` as the command line has it. Where a path named is one an
+    /// ignore rule hides, the others are staged all the same and the
+    /// command ends as git does, with status 1 and the paths left alone.
+    ///
+    /// With `--renormalize`, as in git: every tracked file among the
+    /// paths is stored again the way the attributes and settings now in
+    /// force clean it, whatever the index holds for it. A file that kept
+    /// its stat is not looked at otherwise, so a change of the rules
     /// alone reaches the index only this way. Untracked files, conflicted
     /// paths and submodules are left as they are, and a tracked file that
     /// is gone is an error.
-    pub fn renormalize(&mut self, paths: &[String], json: bool, out: &mut impl Write) -> Res<()> {
-        if paths.is_empty() {
+    pub fn add_paths(&mut self, args: &crate::worktree_args::Add, out: &mut impl Write) -> Res<()> {
+        if args.renormalize && args.paths.is_empty() {
             writeln!(out, "Nothing specified, nothing added.")?;
             return Ok(());
         }
-        self.stage(paths, true, json, out)
+        let mode = Mode {
+            renormalize: args.renormalize,
+            force: args.forced,
+        };
+        self.stage(&args.paths, mode, args.json, out)
     }
 
-    fn stage(
-        &mut self,
-        paths: &[String],
-        renormalize: bool,
-        json: bool,
-        out: &mut impl Write,
-    ) -> Res<()> {
+    fn stage(&mut self, paths: &[String], mode: Mode, json: bool, out: &mut impl Write) -> Res<()> {
         self.ensure_writable("add")?;
         self.lock_workspace()?;
         self.ensure_no_pending_recovery()?;
         let before = self.index()?;
-        let specs: Vec<String> = paths.iter().map(|p| self.named(p)).collect::<Res<_>>()?;
-        let specs: Vec<&str> = specs.iter().map(String::as_str).collect();
-        self.ensure_reachable(&specs, paths, &before)?;
-        let within: Vec<&[u8]> = match specs.iter().any(|p| p.is_empty()) {
-            true => Vec::new(),
-            false => specs.iter().map(|s| s.as_bytes()).collect(),
+        let parse = |given: &String| Spec::parse(&self.root, &self.prefix, given);
+        let specs: Vec<Spec> = paths.iter().map(parse).collect::<Res<_>>()?;
+        self.ensure_reachable(&specs, &before)?;
+        let reach: Vec<&[u8]> = specs
+            .iter()
+            .filter(|spec| !spec.exclude)
+            .map(|spec| spec.reach().as_bytes())
+            .collect();
+        let within = match reach.iter().any(|dir| dir.is_empty()) {
+            true => &[][..],
+            false => &reach[..],
         };
-        let named = |path: &[u8]| specs.iter().any(|spec| under(path, spec));
+        let named = |path: &[u8]| pathspec::named(&specs, path);
+        let untracked = match mode.force {
+            true => Untracked::Hidden,
+            false => Untracked::All,
+        };
 
         // only what differs from the index is read: a file with the stat
         // it had when it was staged holds what the index holds
         let mut snapshot = self.worktree_snapshot()?;
-        let (mut delta, clock) = self.scan_delta_within(&mut snapshot, Untracked::All, &within)?;
-        all_match(&specs, paths, &before, &delta)?;
-        let embedded = self.take_embedded(&mut delta, &named)?;
+        let (mut delta, clock) = self.scan_delta_within(&mut snapshot, untracked, within)?;
+        let hidden = self.unmatched(&specs, &before, &delta, mode.renormalize)?;
+        // the scan looked at more than is named where a path has wildcards
+        delta.changed.retain(|w| named(&w.path));
+        for list in [
+            &mut delta.deleted,
+            &mut delta.untracked,
+            &mut delta.unmerged,
+        ] {
+            list.retain(|path| named(path));
+        }
+        let embedded = match mode.renormalize {
+            true => Vec::new(),
+            false => self.take_embedded(&mut delta, &named)?,
+        };
         let advice = embedded::warning(&embedded, &self.settings()?)?;
 
-        let plan = plan(&before, &delta, renormalize, &named);
+        let plan = plan(&before, &delta, mode.renormalize, &named);
         self.ensure_paths_allowed(&before, &plan, &delta, &named)?;
         // stored anew, a file is cleaned without regard to what is staged
         let none = index_of(Vec::new());
-        let staged_now = if renormalize { &none } else { &before };
+        let staged_now = if mode.renormalize { &none } else { &before };
         let mut entries = plan.entries;
         let stats = self.stage_files(&plan.taken, &delta, staged_now, &mut entries)?;
         self.store.odb.flush()?;
@@ -113,24 +114,11 @@ impl NativeRepo<'_> {
             crate::diagnostics::emit(advice.as_bytes())?;
             writeln!(out, "staged {staged} path(s)")?;
         }
-        Ok(())
-    }
-
-    /// The path from the root of the tree that the argument `given` names
-    /// from where the command was run, empty for the whole tree.
-    fn named(&self, given: &str) -> Res<String> {
-        if given.is_empty() {
-            let hint = "please use . instead if you meant to match all paths";
-            return Err(settings::fatal(format!(
-                "empty string is not a valid pathspec. {hint}"
-            )));
+        if hidden.is_empty() {
+            return Ok(());
         }
-        pathspec::from_root(&self.root, &self.prefix, given).ok_or_else(|| {
-            let root = self.root.display();
-            settings::fatal(format!(
-                "{given}: '{given}' is outside repository at '{root}'"
-            ))
-        })
+        let report = named::ignored(&hidden, &self.settings()?)?;
+        Err(crate::machine::Failure::told(crate::machine::PATHS_IGNORED, report).into())
     }
 
     /// The path gate: denies staging any path the policy excludes, before
@@ -179,31 +167,6 @@ impl NativeRepo<'_> {
         }
         next.fill_trees();
         self.keep_snapshot(&next);
-        Ok(())
-    }
-
-    /// Refuses a path named through a symlink, which is not a path of this
-    /// tree, and one inside a submodule, which is the submodule's to add.
-    fn ensure_reachable(&self, specs: &[&str], given: &[String], before: &Index) -> Res<()> {
-        let refuse = |why: String| -> Res<()> {
-            Err(crate::machine::Failure::refusal("precondition_failed", why).into())
-        };
-        for (spec, given) in specs.iter().zip(given) {
-            let mut parents = spec.match_indices('/').map(|(at, _)| &spec[..at]);
-            if parents.any(|p| self.root.join(p).is_symlink()) {
-                return refuse(format!("pathspec '{given}' is beyond a symbolic link"));
-            }
-            let inside = before.entries.iter().find(|e| {
-                e.mode == 0o160000
-                    && spec
-                        .as_bytes()
-                        .strip_prefix(e.path.as_slice())
-                        .is_some_and(|rest| rest.starts_with(b"/"))
-            });
-            if let Some(sub) = inside {
-                return refuse(format!("pathspec '{given}' is in submodule '{}'", sub.path));
-            }
-        }
         Ok(())
     }
 

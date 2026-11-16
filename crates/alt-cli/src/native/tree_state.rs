@@ -97,7 +97,8 @@ impl NativeRepo<'_> {
     ) -> Res<(Delta, alt_worktree::Clock)> {
         self.scanning(untracked, within, |options, settings| {
             // a watched tree holds its answer with directories as one path
-            let watched = match within.is_empty() && untracked != Untracked::All {
+            let held = matches!(untracked, Untracked::No | Untracked::Normal);
+            let watched = match within.is_empty() && held {
                 true => watching::watched_scan(&self.root, snapshot, options, settings)?,
                 false => None,
             };

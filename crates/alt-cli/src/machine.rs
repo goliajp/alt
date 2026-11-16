@@ -28,6 +28,9 @@ impl std::fmt::Display for Failure {
 
 impl std::error::Error for Failure {}
 
+/// The kind of failure `add` reports the paths with that it left alone.
+pub const PATHS_IGNORED: &str = "paths_ignored";
+
 impl Failure {
     pub fn refusal(kind: &'static str, message: impl Into<String>) -> Self {
         Self {
@@ -39,6 +42,15 @@ impl Failure {
             operation_id: None,
             details: Box::new(json!({})),
             next_action: "Inspect the reported condition before submitting a new request",
+        }
+    }
+
+    /// What a command that did its work still has to say, where git ends
+    /// with status 1 and calls nothing fatal: `said` goes out as it is.
+    pub fn told(kind: &'static str, said: impl Into<String>) -> Self {
+        Self {
+            next_action: "Read what the command reported",
+            ..Self::refusal(kind, said)
         }
     }
 
@@ -89,7 +101,11 @@ impl Failure {
             let request = request_id
                 .map(|id| format!("\nrequest: {id}"))
                 .unwrap_or_default();
-            format!("fatal: {}{}\n", self.message, request).into_bytes()
+            match self.kind {
+                PATHS_IGNORED => format!("{}{}", self.message, request.trim_start()),
+                _ => format!("fatal: {}{}\n", self.message, request),
+            }
+            .into_bytes()
         };
         Response {
             exit_code: self.exit_code,
@@ -167,7 +183,8 @@ fn canonical_matches(matches: &Matches) -> Value {
         }
         // a flag that came after bindings were first recorded binds only
         // when it is set: the commands recorded before it keep theirs
-        if entry.id == "renormalize" && entry.values.iter().all(|v| v.as_bytes() == b"false") {
+        let later = matches!(entry.id, "renormalize" | "forced");
+        if later && entry.values.iter().all(|v| v.as_bytes() == b"false") {
             continue;
         }
         args.insert(

@@ -90,12 +90,14 @@ impl<'r> Board<'r> {
         mut self,
         start: ObjectId,
         path: &str,
+        named: &str,
     ) -> Res<(Rc<Vec<u8>>, Vec<ObjectId>)> {
-        let path = path.trim_matches('/');
         let tree = self.commit(start)?.tree;
-        let file = tree_changes::file_at(self.repo, tree, path.as_bytes())?
-            .filter(|f| f.mode & 0o170000 != 0o160000)
-            .ok_or_else(|| format!("path '{path}' not found in {start}"))?;
+        // a path with `/` at the end names no file, as for git
+        let file = tree_changes::file_at(self.repo, tree, path.trim_end_matches('/').as_bytes())?
+            .filter(|f| !matches!(f.mode & 0o170000, 0o160000 | 0o040000))
+            .filter(|_| !path.ends_with('/'))
+            .ok_or_else(|| format!("no such path '{path}' in {named}"))?;
         self.content = self.blob(file.oid)?;
         self.starts = line_starts(&self.content);
         let lines = self.starts.len() - 1;

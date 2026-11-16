@@ -72,3 +72,55 @@ fn a_tree_is_watched_as_before_once_its_ignore_file_can_be_read_again() {
     std::fs::remove_dir(root.join(".alt/test-config/git/ignore")).unwrap();
     assert!(agree(root, "readable again").contains("modified:   src/lib.rs"));
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_hidden_directory_is_watched_once_a_forced_add_tracks_a_file_in_it() {
+    let (dir, stop) = served();
+    let root = dir.path();
+    write(root, ".gitignore", "/target/\n*.log\n");
+    write(root, "target/debug/out.o", "o\n");
+    write(root, "target/debug/deep/more.o", "o\n");
+    write(root, "docs/run.log", "log\n");
+    agree(root, "hidden");
+    // the root, docs, src, src/deep
+    assert_eq!(watches(stop.0), (1, 4));
+    // left alone and said so, as git has it
+    let refused = output(root, &["add", "target/debug/out.o"], true);
+    assert_eq!(refused.status.code(), Some(1));
+    let said = String::from_utf8_lossy(&refused.stderr);
+    assert!(
+        said.starts_with("The following paths are ignored"),
+        "{said}"
+    );
+    assert!(said.contains("\ntarget\n"), "{said}");
+    run(
+        root,
+        &["add", "-f", "target/debug/out.o", "docs/run.log"],
+        true,
+    );
+    let status = agree(root, "forced");
+    assert!(
+        status.contains("\tnew file:   target/debug/out.o\n"),
+        "{status}"
+    );
+    assert!(status.contains("\tnew file:   docs/run.log\n"), "{status}");
+    assert!(!status.contains("more.o"), "{status}");
+    // target and the directories in it
+    assert_eq!(watches(stop.0), (1, 7));
+    write(root, "target/debug/out.o", "built again\n");
+    write(root, "docs/run.log", "more\n");
+    let status = agree(root, "written again");
+    assert!(
+        status.contains("\tmodified:   target/debug/out.o\n"),
+        "{status}"
+    );
+    assert!(status.contains("\tmodified:   docs/run.log\n"), "{status}");
+    std::fs::remove_file(root.join("target/debug/out.o")).unwrap();
+    let status = agree(root, "removed");
+    assert!(
+        status.contains("\tdeleted:    target/debug/out.o\n"),
+        "{status}"
+    );
+    assert_eq!(watches(stop.0), (1, 7));
+}

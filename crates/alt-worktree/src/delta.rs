@@ -112,7 +112,7 @@ pub(crate) fn scan_seeing(
     opts: &ScanOptions<'_>,
 ) -> Result<(Delta, Seen), WorktreeError> {
     let ignore = match opts.untracked {
-        Untracked::No => IgnoreStack::new(),
+        Untracked::No | Untracked::Hidden => IgnoreStack::new(),
         _ => IgnoreStack::of_files(opts.excludes)?,
     };
     let mut found = walk::walk(root, snapshot, opts.untracked, opts.within, &ignore)?;

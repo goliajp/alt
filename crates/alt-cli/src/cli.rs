@@ -1283,10 +1283,7 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
         Command::Candidate { op, json } => repo.candidate_command(op, *json, out)?,
         Command::Evidence { op, json } => repo.evidence_command(op, *json, out)?,
         Command::Request { op, json } => repo.request_query(op, *json, out)?,
-        Command::Add { args } => match args.renormalize {
-            true => repo.renormalize(&args.paths, args.json, out)?,
-            false => repo.add(&args.paths, args.json, out)?,
-        },
+        Command::Add { args } => repo.add_paths(args, out)?,
         Command::Commit {
             validate: true,
             json,
@@ -1553,12 +1550,11 @@ pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, at: &Place, out: &mut
             copies,
             follow: _,
         } => {
-            let spec = at_head(rev.as_deref().unwrap_or("HEAD"));
             let options = crate::blame::Options {
                 moves: *moves || *copies > 0,
                 copies: *copies,
             };
-            crate::blame::run(out, repo, &at.path(path)?, &spec, options)?;
+            at.blame(out, repo, path, rev.as_deref(), options)?;
         }
         Command::Config {
             key,

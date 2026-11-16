@@ -7,6 +7,11 @@ use alt_repo::Repository;
 
 use super::Res;
 
+mod spec;
+mod wild;
+
+pub use spec::{Spec, named};
+
 /// Where `cwd` lies beneath the working tree at `root`: `sub/dir`, empty
 /// for the root itself and for a directory outside the tree.
 pub fn prefix_of(root: &Path, cwd: &Path) -> String {
@@ -117,6 +122,34 @@ impl Place {
             }
             _ => spec.to_owned(),
         }
+    }
+
+    /// `blame` of the file `given` names as it is written, from `rev`.
+    pub fn blame(
+        &self,
+        out: &mut impl std::io::Write,
+        repo: &Repository,
+        given: &str,
+        rev: Option<&str>,
+        options: crate::blame::Options,
+    ) -> Res<()> {
+        let rev = rev.unwrap_or("HEAD");
+        let path = self.written(given)?;
+        crate::blame::run(out, repo, &path, &self.at_head(rev), rev, options)
+    }
+
+    /// The path from the root that `given` names, read without magic; a
+    /// `/` at its end stays.
+    fn written(&self, given: &str) -> Res<String> {
+        let path = match given.starts_with('/') {
+            true => plain("", given).and_then(|path| absolute(&self.root, &path)),
+            false => plain(&self.prefix, given),
+        };
+        let path = path.ok_or_else(|| self.outside(given))?;
+        Ok(match given.ends_with('/') && !path.is_empty() {
+            true => path + "/",
+            false => path,
+        })
     }
 
     /// The path from the root that a command run here names by `given`.

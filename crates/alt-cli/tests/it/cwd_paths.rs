@@ -12,7 +12,7 @@ const FILES: [&str; 4] = ["top.txt", "sub/f.txt", "sub/deep/g.txt", "other/o.txt
 
 /// Three trees with the same files and one commit: one for `alt` run
 /// directly, one for `alt` through its daemon, one for git.
-struct Trees {
+pub(crate) struct Trees {
     dir: alt_os::temp::TempDir,
     _stop: Stop,
 }
@@ -36,7 +36,7 @@ pub(crate) fn git(at: &Path, args: &[&str]) -> Output {
 }
 
 impl Trees {
-    fn new() -> Trees {
+    pub(crate) fn new() -> Trees {
         let dir = alt_os::temp::tempdir().unwrap();
         let at = |tree: &str| dir.path().join(tree);
         for tree in ["direct", "served", "git"] {
@@ -64,11 +64,11 @@ impl Trees {
         Trees { dir, _stop: stop }
     }
 
-    fn at(&self, tree: &str) -> PathBuf {
+    pub(crate) fn at(&self, tree: &str) -> PathBuf {
         self.dir.path().join(tree)
     }
 
-    fn write(&self, file: &str, body: &str) {
+    pub(crate) fn write(&self, file: &str, body: &str) {
         for tree in ["direct", "served", "git"] {
             write(&self.at(tree), file, body);
         }
@@ -154,7 +154,7 @@ impl Said {
 }
 
 /// The paths `status`, run at the root, lists as new in the index.
-fn staged(status: &str) -> Vec<String> {
+pub(crate) fn staged(status: &str) -> Vec<String> {
     let new = status
         .lines()
         .filter_map(|l| l.strip_prefix("\tnew file:   "));
@@ -243,7 +243,13 @@ fn add_in_a_workspace_reads_its_paths_from_the_directory_it_runs_in() {
         symlink(&beside, trees.at(&format!("by-{tree}"))).unwrap();
         let linked = trees.at(&format!("by-{tree}")).join("linked");
         run(&root, &["branch", "more"], false);
-        let made = ["workspace", "add", "linked", linked.to_str().unwrap(), "more"];
+        let made = [
+            "workspace",
+            "add",
+            "linked",
+            linked.to_str().unwrap(),
+            "more",
+        ];
         run(&root, &made, false);
         let real = beside.canonicalize().unwrap().join("linked");
         for (n, named) in [&linked, &real].into_iter().enumerate() {
@@ -372,16 +378,26 @@ fn blame_and_show_read_a_path_from_the_directory_they_run_in() {
     assert!(blame("sub", "f.txt").ends_with(" sub/f.txt\n"));
     assert_eq!(blame("sub", "../top.txt"), blame("", "top.txt"));
     assert_eq!(blame("sub/deep", "../f.txt"), blame("", "sub/f.txt"));
-    assert_eq!(blame("sub", ":/top.txt"), blame("", "top.txt"));
-    for (sub, path) in [("sub", "sub/f.txt"), ("sub", "../../x"), ("", "../x")] {
+    // no magic, and a `/` at the end names no file
+    let none = [
+        ("sub", "sub/f.txt"),
+        ("sub", "../../x"),
+        ("", "../x"),
+        ("sub", ":/top.txt"),
+        ("sub", ":(top)top.txt"),
+        ("sub", "f.txt/"),
+        ("sub", "../top.txt/"),
+        ("sub", "deep"),
+        ("sub", "*.txt"),
+        ("", "sub/nosuch"),
+    ];
+    for (sub, path) in none {
         let (alt, git) = (
             trees.alt(sub, &["blame", path]),
             trees.git(sub, &["blame", path]),
         );
         assert_eq!((alt.ok, git.ok), (false, false), "{path}");
-        if path.contains("..") {
-            assert_eq!((alt.code, alt.fatal), (git.code, git.fatal), "{path}");
-        }
+        assert_eq!((alt.code, alt.fatal), (git.code, git.fatal), "{path}");
     }
     let shown = [
         "HEAD:sub/f.txt",

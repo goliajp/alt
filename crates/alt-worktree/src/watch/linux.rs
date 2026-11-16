@@ -16,9 +16,9 @@ use std::path::{Path, PathBuf};
 
 use alt_os::sys;
 
-use super::mounts::{self, Mounts};
 use super::Changes;
 use super::dirs::unread;
+use super::mounts::{self, Mounts};
 use crate::ignore::IgnoreStack;
 
 const IN_MODIFY: u32 = 0x2;

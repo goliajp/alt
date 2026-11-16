@@ -3,7 +3,7 @@
 
 use std::io;
 
-use super::{Below, Child, Found, Reach, Walk, ignore_file, with_name};
+use super::{Below, Child, Found, Reach, Walk, with_name};
 use crate::fsdir::{DirFd, Kind, Listing, kind_of};
 use crate::ignore::IgnoreStack;
 
@@ -38,7 +38,7 @@ impl Walk<'_> {
         }
         let own = match hidden {
             true => None,
-            false => ignore_file(&fd, &names, base, ignore)?,
+            false => self.rules_in(&fd, &names, base, ignore)?,
         };
         let ignore = own.as_ref().unwrap_or(ignore);
         let mut here = Here {

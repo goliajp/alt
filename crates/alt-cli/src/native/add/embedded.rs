@@ -26,7 +26,7 @@ impl NativeRepo<'_> {
                 delta.untracked.push(dir);
                 continue;
             };
-            if !named(path) {
+            if !named(&dir) {
                 continue;
             }
             let path = BString::from(path);

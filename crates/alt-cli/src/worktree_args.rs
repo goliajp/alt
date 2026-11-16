@@ -10,6 +10,9 @@ pub struct Add {
     /// attributes and line-ending settings now in force clean it
     #[arg(long)]
     pub renormalize: bool,
+    /// Stage files that an ignore rule hides as well
+    #[arg(short = 'f', long = "force")]
+    pub forced: bool,
     /// Emit a structured JSON result instead of the human line
     #[arg(long)]
     pub json: bool,

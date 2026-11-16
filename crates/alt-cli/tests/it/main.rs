@@ -46,6 +46,7 @@ mod merge_criss_cross;
 mod monorepo_bench;
 mod nested_repo;
 mod op_log;
+mod pathspec_git;
 mod patterns;
 mod precommit;
 mod push;

@@ -28,19 +28,21 @@ pub use walk::Options;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
-/// `alt blame <path> [<rev>]`. Writes one row per line to `out`:
+/// `alt blame <path> [<rev>]`, the revision `rev` given as `named`. Writes
+/// one row per line to `out`:
 /// `<short-oid> (<author-name> <YYYY-MM-DD> <line-no>) <line content>`
 pub fn run(
     out: &mut impl Write,
     repo: &Repository,
     path: &str,
     rev: &str,
+    named: &str,
     options: Options,
 ) -> Res<()> {
     let start = repo
         .rev_parse(rev)?
         .ok_or_else(|| format!("bad revision '{rev}'"))?;
-    let (content, origins) = Board::new(repo, options).blame(start, path)?;
+    let (content, origins) = Board::new(repo, options).blame(start, path, named)?;
     let mut author_cache: HashMap<ObjectId, (String, String)> = HashMap::new();
 
     let pad_oid = 8;

@@ -47,7 +47,12 @@ impl Watcher {
     /// Watches what the events tell of: the directories that came to be
     /// `made`, and beneath those in `ruled` whatever their rules hide no
     /// longer.
-    pub(super) fn follow(&mut self, ruled: Vec<Vec<u8>>, made: Vec<Vec<u8>>, tracked: Tracked) -> io::Result<()> {
+    pub(super) fn follow(
+        &mut self,
+        ruled: Vec<Vec<u8>>,
+        made: Vec<Vec<u8>>,
+        tracked: Tracked,
+    ) -> io::Result<()> {
         // other rules: what they hide beneath their directory is decided anew
         for dir in ruled {
             self.skipped
@@ -174,7 +179,11 @@ impl Watcher {
     /// them since the scan are in no event either.
     /// `None` when something in the tree could not be read: the watches
     /// are to be gone over once more.
-    pub(crate) fn fill(&mut self, seen: Seen, tracked: Tracked) -> io::Result<Option<Vec<Vec<u8>>>> {
+    pub(crate) fn fill(
+        &mut self,
+        seen: Seen,
+        tracked: Tracked,
+    ) -> io::Result<Option<Vec<Vec<u8>>>> {
         self.check = Check {
             on: true,
             ..Check::default()

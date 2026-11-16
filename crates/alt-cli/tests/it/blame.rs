@@ -88,7 +88,8 @@ fn blame_missing_file_fails_clearly() {
     let out = alt(tmp.path(), &["blame", "no/such/file.txt"]);
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("not found"), "stderr: {err}");
+    let said = "fatal: no such path 'no/such/file.txt' in HEAD";
+    assert!(err.contains(said), "stderr: {err}");
 }
 
 fn git(repo: &Path, date: u32, args: &[&str]) -> String {

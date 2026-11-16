@@ -36,7 +36,7 @@ pub use delta::{CleanTracked, Delta, ScanOptions, scan};
 pub use kind::ChangeKind;
 pub use snapshot::{Dir, Entry, FileStat, Snapshot};
 #[cfg(unix)]
-pub use untracked::Untracked;
+pub use untracked::{Untracked, hidden_by};
 #[cfg(target_os = "linux")]
 pub use watch::{Unanswered, Watched, watch_allowance};
 
