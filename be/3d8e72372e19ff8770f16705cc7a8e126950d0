@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: bring the recovery guide in line with what damaged and unfinished records do
+author-type: human
+author: doracawl
+touched: docs/recovery.md
