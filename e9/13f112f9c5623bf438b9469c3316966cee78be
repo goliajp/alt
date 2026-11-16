@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: stage a repository where a tracked file was as git does with -u, and tell of a path that takes away as it does
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/add.rs
+touched: crates/alt-cli/src/native/add/embedded.rs
+touched: crates/alt-cli/src/native/add/named.rs
+touched: crates/alt-cli/src/native/add/store.rs
+touched: crates/alt-cli/tests/it/add_modes.rs
