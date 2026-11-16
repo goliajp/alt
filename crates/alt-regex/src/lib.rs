@@ -210,6 +210,9 @@ pub struct Regex {
     prog: program::Program,
     /// Bytes every match contains.
     literal: Option<Vec<u8>>,
+    /// The pattern is those bytes and nothing else, and where they lie
+    /// in a text is where it matches.
+    alone: bool,
     /// The first capture slots of the match in the empty text, if it has
     /// one.
     on_empty: Option<[usize; FEW]>,
@@ -228,11 +231,14 @@ impl Regex {
         // a pattern tied to the start of the text is refused within a
         // few bytes anyway; looking through the text first costs more
         let literal = literal::required(&node).filter(|_| !prog.anchored);
+        // a byte that goes on a character is not found inside one
+        let alone = literal::alone(&node) && !prog.apart && !shape.strays;
         drop(node);
         Ok(Regex {
             on_empty: search::on_empty(&prog),
             prog,
             literal,
+            alone,
             cache: Mutex::default(),
         })
     }
@@ -289,6 +295,29 @@ mod tests {
         let found = re.captures(text.as_bytes())?;
         assert!(re.is_match(text.as_bytes()), "{pattern} on {text}");
         Some((0..=re.groups()).map(|i| found.get(i)).collect())
+    }
+
+    #[test]
+    fn a_pattern_of_fixed_bytes_matches_where_they_first_lie() {
+        let long = "ab".repeat(3_000);
+        for pattern in ["b", "ab", "é", "a\\.b", &long] {
+            let re = Regex::new(pattern.as_bytes()).unwrap();
+            assert!(re.alone, "{pattern}");
+        }
+        assert_eq!(spans("ab", "aabab"), Some(vec![Some(1..3)]));
+        assert_eq!(spans("ab", "ba"), None);
+        assert_eq!(spans("ab", ""), None);
+        let text = format!("b{long}{long}");
+        assert_eq!(spans(&long, &text), Some(vec![Some(1..6_001)]));
+        // what is more than fixed bytes is searched as ever
+        for pattern in ["(ab)", "^ab", "ab$", "a|b", "ab?", "a.b"] {
+            assert!(!Regex::new(pattern.as_bytes()).unwrap().alone, "{pattern}");
+        }
+        let any_case = Options {
+            ignore_case: true,
+            ..Options::default()
+        };
+        assert!(!Regex::with_options(b"ab", any_case).unwrap().alone);
     }
 
     #[test]

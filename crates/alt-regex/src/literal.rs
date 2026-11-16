@@ -11,6 +11,16 @@ pub fn required(node: &Node) -> Option<Vec<u8>> {
     (!best.is_empty()).then_some(best)
 }
 
+/// Whether `node` is fixed bytes and nothing else: where they lie in a
+/// text is then where it matches.
+pub fn alone(node: &Node) -> bool {
+    let fixed = |node: &Node| matches!(node, Node::Set(set) if set.single().is_some());
+    match node {
+        Node::Concat(items) => items.iter().all(fixed),
+        _ => fixed(node),
+    }
+}
+
 fn close(run: &mut Vec<u8>, best: &mut Vec<u8>) {
     if run.len() > best.len() {
         std::mem::swap(run, best);
@@ -57,6 +67,11 @@ mod tests {
             let (node, _) = parse(pat.as_bytes(), Options::default()).unwrap();
             let found = required(&node);
             assert_eq!(found.as_deref(), literal.map(str::as_bytes), "{pat}");
+            assert!(!alone(&node), "{pat}");
+        }
+        for pat in ["a", "static int", "a\\.b"] {
+            let (node, _) = parse(pat.as_bytes(), Options::default()).unwrap();
+            assert!(alone(&node), "{pat}");
         }
     }
 }

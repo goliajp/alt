@@ -19,6 +19,10 @@ impl Regex {
         if text.is_empty() {
             return Some(self.on_empty.is_some());
         }
+        // its bytes were looked for before this was asked
+        if self.alone {
+            return Some(true);
+        }
         if self.prog.backrefs {
             return backref::search(&self.prog, text, None, &mut [pike::UNSET; 2]);
         }
@@ -77,6 +81,15 @@ impl Regex {
                 return Some(true);
             }
             return grouped(&self.prog, cache, text, 0, 0, slots);
+        }
+        if self.alone {
+            let fixed = self.literal.as_ref().expect("the bytes it is");
+            let Some(at) = text.find(fixed) else {
+                return Some(false);
+            };
+            slots.fill(pike::UNSET);
+            slots[..2].copy_from_slice(&[at, at + fixed.len()]);
+            return Some(true);
         }
         if self.excluded(text) {
             return Some(false);
