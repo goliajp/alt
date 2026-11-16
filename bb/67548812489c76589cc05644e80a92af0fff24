@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: refactor
+summary: make the node of a bracket expression in a function of its own
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/bracket.rs
