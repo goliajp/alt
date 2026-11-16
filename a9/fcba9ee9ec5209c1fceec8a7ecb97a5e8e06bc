@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: refactor
+summary: keep the tree of a pattern in a file of its own
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/syntax.rs
+touched: crates/alt-regex/src/syntax/tree.rs
