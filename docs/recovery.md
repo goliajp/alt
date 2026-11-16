@@ -215,6 +215,12 @@ warning: the last 1 operation(s) in the operation log were never synced to disk 
 A command that reads no object, such as `alt rev-parse HEAD`, answers from the
 log as it is and can still print the id of a commit that was not kept.
 
+A command that was already running when another one discarded such
+operations, and had read them, fails with `the operation log was cut back:
+operations that were never synced and name objects that are not stored were
+discarded`. What that command was recording is not in the log either; run
+it again.
+
 `alt fsck` changes nothing either, and tells what the other commands pass
 over without a word. These lines are not damage, and it still exits 0:
 
