@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: gate a commit on each kind of change staged out of tree by itself
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/path_gate.rs
