@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: refuse a rebase the path gate denies before the branch is left
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/path_gate.rs
+touched: crates/alt-cli/src/native/rebase.rs
+touched: crates/alt-cli/tests/it/path_gate.rs
