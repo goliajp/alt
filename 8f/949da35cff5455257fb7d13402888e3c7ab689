@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: perf
+summary: step through a set of characters by one instruction a place, the byte deciding the next
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/analysis.rs
+touched: crates/alt-regex/src/backref.rs
+touched: crates/alt-regex/src/backtrack.rs
+touched: crates/alt-regex/src/block.rs
+touched: crates/alt-regex/src/dfa.rs
+touched: crates/alt-regex/src/pike.rs
+touched: crates/alt-regex/src/program.rs
