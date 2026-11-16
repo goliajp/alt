@@ -5,6 +5,8 @@
 use crate::class::ByteSet;
 use crate::{Error, Options, Syntax, bracket, utf8};
 
+mod interval;
+
 /// A condition on a position that consumes nothing.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Look {
@@ -36,9 +38,8 @@ pub enum Node {
     Repeat(Box<Node>, u32, Option<u32>),
 }
 
-/// The largest repetition count, as in the C library.
-const DUP_MAX: u32 = 0x7fff;
-/// The deepest nesting of groups and of repetitions around one atom.
+/// The deepest nesting of groups and of repetitions, counted together:
+/// no walk of the tree goes deeper.
 const MAX_DEPTH: u32 = 200;
 /// The most groups a pattern may have.
 pub const MAX_GROUPS: u32 = 0x7fff;
@@ -50,7 +51,10 @@ struct Parser<'a> {
     at: usize,
     opts: Options,
     groups: u32,
+    /// the groups open around what is being read
     depth: u32,
+    /// how deep the groups and repetitions nest in what was last read
+    tall: u32,
     /// the groups whose closing parenthesis has been read
     complete: Vec<u32>,
     /// whether a period was read, and whether something the C library
@@ -92,6 +96,7 @@ pub fn parse_shaped(pat: &[u8], opts: Options) -> Result<(Node, u32, Shape), Err
             opts,
             groups: 0,
             depth: 0,
+            tall: 0,
             complete: Vec::new(),
             period: false,
             complex: opts.ignore_case,
@@ -146,6 +151,7 @@ impl<'a> Parser<'a> {
     fn alternation(&mut self) -> Result<Node, Error> {
         let before = self.complete.len();
         let mut branches = vec![self.concat()?];
+        let mut tall = self.tall;
         while self.at_alt() {
             self.at += if self.ere() { 1 } else { 2 };
             // as in the C library, a branch cannot refer to a group of
@@ -153,7 +159,9 @@ impl<'a> Parser<'a> {
             let beside = self.complete.split_off(before);
             branches.push(self.concat()?);
             self.complete.extend(beside);
+            tall = tall.max(self.tall);
         }
+        self.tall = tall;
         Ok(match branches.len() {
             1 => branches.pop().expect("one branch"),
             _ => Node::Alt(branches),
@@ -162,15 +170,19 @@ impl<'a> Parser<'a> {
 
     fn concat(&mut self) -> Result<Node, Error> {
         let mut items = Vec::new();
+        let mut tall = 0;
         while self.at < self.pat.len() && !self.at_alt() && !self.at_close() {
             // nothing to repeat yet: at the start, or behind an anchor
             let fresh = matches!(items.last(), None | Some(Node::Look(_)));
+            self.tall = 0;
             let atom = self.atom(fresh)?;
             items.push(match atom {
                 Node::Look(_) => atom,
                 _ => self.repeats(atom)?,
             });
+            tall = tall.max(self.tall);
         }
+        self.tall = tall;
         Ok(match items.len() {
             0 => Node::Empty,
             1 => items.pop().expect("one item"),
@@ -179,7 +191,6 @@ impl<'a> Parser<'a> {
     }
 
     fn repeats(&mut self, mut atom: Node) -> Result<Node, Error> {
-        let mut nested = 0;
         loop {
             let rest = self.rest();
             let (skip, bounds) = match (self.ere(), rest) {
@@ -210,49 +221,14 @@ impl<'a> Parser<'a> {
                     Node::Repeat(inner, low * min, once.then_some(1))
                 }
                 _ => {
-                    nested += 1;
-                    if self.depth + nested > MAX_DEPTH {
+                    self.tall += 1;
+                    if self.depth + self.tall > MAX_DEPTH {
                         return Err(Error::TooBig);
                     }
                     Node::Repeat(Box::new(atom), min, max)
                 }
             };
         }
-    }
-
-    fn number(&mut self) -> Result<Option<u32>, Error> {
-        let mut value = None;
-        while let Some(digit @ b'0'..=b'9') = self.peek() {
-            let next = value.unwrap_or(0) * 10 + u32::from(digit - b'0');
-            if next > DUP_MAX {
-                return Err(Error::TooBig);
-            }
-            value = Some(next);
-            self.at += 1;
-        }
-        Ok(value)
-    }
-
-    /// The bounds of `{m}`, `{m,}`, `{m,n}` or `{,n}`, behind the brace.
-    fn interval(&mut self) -> Result<(u32, Option<u32>), Error> {
-        let min = self.number()?;
-        let (min, max) = match (min, self.peek()) {
-            (_, Some(b',')) => {
-                self.at += 1;
-                (min.unwrap_or(0), self.number()?)
-            }
-            (Some(min), _) => (min, Some(min)),
-            (None, _) => return Err(Error::Brace),
-        };
-        let close: &[u8] = if self.ere() { b"}" } else { b"\\}" };
-        if !self.rest().starts_with(close) {
-            return Err(Error::Brace);
-        }
-        self.at += close.len();
-        if max.is_some_and(|max| max < min) {
-            return Err(Error::Brace);
-        }
-        Ok((min, max))
     }
 
     /// What the literal that the byte just read begins matches.
@@ -368,13 +344,13 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// A group, behind its opening parenthesis.
     fn bracket(&mut self) -> Result<Node, Error> {
         let (node, complex) = bracket::parse(self.pat, &mut self.at, self.opts)?;
         self.complex |= complex;
         Ok(node)
     }
 
+    /// A group, behind its opening parenthesis.
     fn group(&mut self) -> Result<Node, Error> {
         self.groups += 1;
         if self.groups > MAX_GROUPS {
@@ -391,6 +367,7 @@ impl<'a> Parser<'a> {
         }
         self.at += if self.ere() { 1 } else { 2 };
         self.depth -= 1;
+        self.tall += 1;
         self.complete.push(number);
         Ok(Node::Group(Box::new(inner), number))
     }

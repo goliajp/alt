@@ -56,11 +56,52 @@ fn counted_repetitions_nest_to_a_depth_and_no_deeper() {
         within(Duration::from_secs(5), &nested(100_000)).err(),
         Some(Error::TooBig)
     );
-    // groups and the repetitions around them count apart
-    let mut pattern = b"(".repeat(150);
-    pattern.push(b'a');
-    pattern.extend(b")?".repeat(150));
-    assert!(Regex::new(&pattern).unwrap().is_match(b"a"));
+    // groups and the repetitions around them count together
+    let wrapped = |depth: usize| {
+        let mut pattern = b"(".repeat(depth);
+        pattern.push(b'a');
+        pattern.extend(b")?".repeat(depth));
+        Regex::new(&pattern)
+    };
+    assert!(wrapped(100).unwrap().is_match(b"a"));
+    assert_eq!(wrapped(101).err(), Some(Error::TooBig));
+    let grouped = |depth: usize| ["(".repeat(depth), "a".into(), ")".repeat(depth)].concat();
+    assert!(Regex::new(grouped(200).as_bytes()).is_ok());
+    assert_eq!(
+        Regex::new(grouped(201).as_bytes()).err(),
+        Some(Error::TooBig)
+    );
+}
+
+/// Runs on a thread with the stack a thread has when none is asked for.
+fn on_a_small_stack<T: Send + 'static>(run: impl FnOnce() -> T + Send + 'static) -> T {
+    let thread = std::thread::Builder::new().stack_size(2 << 20);
+    thread.spawn(run).unwrap().join().unwrap()
+}
+
+#[test]
+fn the_deepest_patterns_are_read_compiled_and_searched_on_a_small_stack() {
+    // each group under as many repetitions as were left to nest
+    let mut deep = b"(".repeat(199);
+    deep.push(b'a');
+    for group in (0..199).rev() {
+        deep.push(b')');
+        deep.extend(b"{2,}".repeat(199 - group));
+    }
+    assert_eq!(
+        on_a_small_stack(move || Regex::new(&deep).err()),
+        Some(Error::TooBig)
+    );
+    for (open, close) in [("(", ")?"), ("(", ")"), ("(x|", ")*"), ("(a|(", "))")] {
+        let levels = 200 / (open.matches('(').count() + close.len() - close.matches(')').count());
+        let pattern = [open.repeat(levels), "a".into(), close.repeat(levels)].concat();
+        let found = on_a_small_stack(move || {
+            let re = Regex::new(pattern.as_bytes()).unwrap();
+            let whole = re.captures(b"a").and_then(|found| found.get(0));
+            (re.is_match(b"a"), whole)
+        });
+        assert_eq!(found, (true, Some(0..1)), "{open}");
+    }
 }
 
 #[test]
