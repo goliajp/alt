@@ -42,13 +42,16 @@ impl TreeState {
         }
     }
 
-    /// The paths with a conflict in the index.
-    pub(in crate::native) fn unmerged(&self) -> std::collections::BTreeSet<BString> {
+    /// The paths with a conflict in the index, each with the stages the
+    /// index has for it: 1 for the base, 2 for ours, 4 for theirs.
+    pub(in crate::native) fn conflicts(&self) -> std::collections::BTreeMap<BString, u8> {
         let s = &self.snapshot;
-        (0..s.entries.len())
-            .filter(|&i| s.entries[i].stage() > 0)
-            .map(|i| BString::from(s.path(i)))
-            .collect()
+        let mut found = std::collections::BTreeMap::new();
+        for entry in s.entries.iter().enumerate().filter(|(_, e)| e.stage() > 0) {
+            let stages: &mut u8 = found.entry(BString::from(s.path(entry.0))).or_default();
+            *stages |= 1 << (entry.1.stage() - 1);
+        }
+        found
     }
 }
 

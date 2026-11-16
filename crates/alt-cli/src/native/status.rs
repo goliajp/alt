@@ -35,7 +35,8 @@ impl NativeRepo<'_> {
         let untracked = self.untracked_mode(untracked)?;
         let branch = self.head_branch()?;
         let state = self.tree_state(untracked)?;
-        let unmerged = state.unmerged();
+        let conflicts = state.conflicts();
+        let unmerged: std::collections::BTreeSet<BString> = conflicts.keys().cloned().collect();
         let mut st = state.status();
         // unmerged paths are reported in their own section, not as
         // staged/unstaged/untracked noise driven by the missing stage-0 entry
@@ -59,19 +60,19 @@ impl NativeRepo<'_> {
         let mark = |k: ChangeKind| match k {
             ChangeKind::Added => "new file:   ",
             ChangeKind::Modified => "modified:   ",
-            ChangeKind::Deleted => "deleted:   ",
+            ChangeKind::Deleted => "deleted:    ",
             ChangeKind::TypeChanged => "typechange: ",
         };
-        if !unmerged.is_empty() {
-            writeln!(out, "Unmerged paths:")?;
-            for p in &unmerged {
-                writeln!(out, "\tboth modified:   {}", shown(p))?;
-            }
-        }
         if !st.staged.is_empty() {
             writeln!(out, "Changes to be committed:")?;
             for (p, k) in &st.staged {
                 writeln!(out, "\t{}{}", mark(*k), shown(p))?;
+            }
+        }
+        if !conflicts.is_empty() {
+            writeln!(out, "Unmerged paths:")?;
+            for (p, stages) in &conflicts {
+                writeln!(out, "\t{}{}", conflict_mark(*stages), shown(p))?;
             }
         }
         if !st.unstaged.is_empty() {
@@ -94,6 +95,21 @@ impl NativeRepo<'_> {
             writeln!(out, "nothing to commit, working tree clean")?;
         }
         Ok(())
+    }
+}
+
+/// What git calls a conflicted path by the stages the index has for it:
+/// 1 for the base, 2 for ours, 4 for theirs. Padded to one width, as the
+/// marks of the other sections are to theirs.
+fn conflict_mark(stages: u8) -> &'static str {
+    match stages {
+        1 => "both deleted:    ",
+        2 => "added by us:     ",
+        3 => "deleted by them: ",
+        4 => "added by them:   ",
+        5 => "deleted by us:   ",
+        6 => "both added:      ",
+        _ => "both modified:   ",
     }
 }
 

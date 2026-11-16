@@ -37,7 +37,7 @@ fn a_tree_is_watched_again_once_what_was_mounted_in_it_is_gone() {
     assert_eq!(mounted, 0, "{}", std::io::Error::last_os_error());
     write(root, "docs/inside.txt", "beneath the mount point\n");
     let status = agree(root, "mounted");
-    assert!(status.contains("deleted:   docs/guide.md"), "{status}");
+    assert!(status.contains("deleted:    docs/guide.md"), "{status}");
     assert!(status.contains("\tdocs/inside.txt\n"), "{status}");
     assert!(!watching(stop.0));
     write(root, "docs/more.txt", "no event tells of this\n");

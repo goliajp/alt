@@ -223,13 +223,13 @@ pub(crate) fn through_changes(root: &Path) {
     write(root, "source/lib.rs", "moved and edited\n");
     let status = agree(root, "renamed directory");
     assert!(
-        status.contains("deleted:   src/lib.rs") && status.contains("\tsource/\n"),
+        status.contains("deleted:    src/lib.rs") && status.contains("\tsource/\n"),
         "{status}"
     );
     std::fs::rename(root.join("source"), root.join("src")).unwrap();
     write(root, "src/lib.rs", "lib\n");
     std::fs::remove_dir_all(root.join("docs")).unwrap();
-    assert!(agree(root, "removed directory").contains("deleted:   docs/guide.md"));
+    assert!(agree(root, "removed directory").contains("deleted:    docs/guide.md"));
     write(root, "docs/guide.md", "guide\n");
     write(root, ".gitignore", "/new/\n");
     let status = agree(root, "ignore file");

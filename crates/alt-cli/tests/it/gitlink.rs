@@ -56,7 +56,7 @@ pub(super) fn agree(g: &Path, a: &Path, at: &str) -> String {
         .lines()
         .map(|line| {
             let what = match &line[..2] {
-                " D" | "D " => "deleted:   ",
+                " D" | "D " => "deleted:    ",
                 " M" | "M " => "modified:   ",
                 "A " => "new file:   ",
                 " T" | "T " => "typechange: ",

@@ -49,7 +49,7 @@ fn diff_skips_an_untouched_submodule_entry() {
     let theirs = ok(git(src.path(), &["-c", "core.pager=cat", "diff"]));
     assert!(theirs.contains("deleted file mode 160000"), "{theirs}");
     assert_eq!(ours, theirs);
-    assert!(ok(alt(root, &["status"])).contains("deleted:   sub"));
+    assert!(ok(alt(root, &["status"])).contains("deleted:    sub"));
 }
 
 #[test]

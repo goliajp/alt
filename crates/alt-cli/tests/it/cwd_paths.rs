@@ -20,7 +20,7 @@ fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
-fn git(at: &Path, args: &[&str]) -> Output {
+pub(crate) fn git(at: &Path, args: &[&str]) -> Output {
     Command::new("git")
         .current_dir(at)
         .env("GIT_CONFIG_NOSYSTEM", "1")
@@ -119,7 +119,16 @@ impl Said {
             .lines()
             .find(|line| line.starts_with("fatal:"))
             .unwrap_or_default()
-            .to_owned();
+            .split(' ')
+            .map(
+                |word| match word.len() == 40 && word.bytes().all(|b| b.is_ascii_hexdigit()) {
+                    // a commit, which has another id in each tree
+                    true => "<id>",
+                    false => word,
+                },
+            )
+            .collect::<Vec<_>>()
+            .join(" ");
         Said {
             ok: output.status.success(),
             code: output.status.code(),
@@ -222,9 +231,14 @@ fn add_in_a_workspace_reads_its_paths_from_the_directory_it_runs_in() {
 
 /// The lines of git's long status that `alt` has as well: none of the
 /// advice, no blank line.
-fn listed(status: &str) -> String {
+pub(crate) fn listed(status: &str) -> String {
     let kept = |line: &&str| {
-        let advice = ["  (", "no changes added", "Untracked files not listed"];
+        let advice = [
+            "  (",
+            "no changes added",
+            "Untracked files not listed",
+            "You have unmerged",
+        ];
         !line.is_empty() && !advice.iter().any(|said| line.starts_with(said))
     };
     let lines: Vec<&str> = status.lines().filter(kept).collect();

@@ -96,7 +96,7 @@ fn a_conflicted_path_without_its_file_is_resolved_as_removed_like_git() {
         );
         assert_eq!(
             ok(alt(a, &["status"])),
-            "On branch main\nChanges to be committed:\n\tdeleted:   d/c.txt\n",
+            "On branch main\nChanges to be committed:\n\tdeleted:    d/c.txt\n",
             "{spec}"
         );
         ok(alt(a, &["commit", "-m", "merged"]));

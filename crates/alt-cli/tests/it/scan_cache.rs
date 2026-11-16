@@ -174,7 +174,7 @@ fn an_index_written_by_a_program_that_knows_no_snapshot_is_followed() {
     std::fs::write(&scan, &new_scan).unwrap();
     let st = status(root);
     assert!(
-        st.contains("Changes to be committed:\n\tmodified:   a.txt\n\tdeleted:   added.txt"),
+        st.contains("Changes to be committed:\n\tmodified:   a.txt\n\tdeleted:    added.txt"),
         "{st}"
     );
     assert!(
@@ -283,7 +283,7 @@ fn adding_everything_counts_every_file_and_touches_only_what_changed() {
     assert_eq!(ok(alt(root, &["add", "."])), "staged 4 path(s)\n");
     assert_eq!(
         status(root),
-        "On branch main\nChanges to be committed:\n\tmodified:   a.txt\n\tdeleted:   docs/guide.md\n\tnew file:   new/file.txt\n"
+        "On branch main\nChanges to be committed:\n\tmodified:   a.txt\n\tdeleted:    docs/guide.md\n\tnew file:   new/file.txt\n"
     );
     // an unchanged file edited afterwards does not stand in the way of undo
     write(root, "src/lib.rs", "edited after the add\n");
