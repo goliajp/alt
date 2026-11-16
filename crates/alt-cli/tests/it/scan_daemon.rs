@@ -455,3 +455,51 @@ fn a_switch_of_more_files_than_the_queue_holds_events_for_loses_none() {
     assert_eq!(instances(stop.0), held);
     assert_eq!(daemon_pid(root), stop.0);
 }
+
+#[test]
+fn every_file_the_settings_and_attributes_come_from_reaches_the_daemon() {
+    let (dir, _stop) = served();
+    let root = dir.path();
+    let import = root.join(".alt/git-import");
+    std::fs::create_dir_all(import.join("info")).unwrap();
+    // stored with LF: modified until something says the file is text
+    let crlf = |at: &str| {
+        write(root, "a.txt", "aaaa\r\n");
+        assert!(agree(root, at).contains("modified:   a.txt"), "{at}");
+    };
+    let clean = |at: &str| {
+        let status = agree(root, at);
+        assert!(status.contains("nothing to commit"), "{at}: {status}");
+    };
+
+    crlf("no attributes");
+    let info = import.join("info/attributes");
+    std::fs::write(&info, "* text\n").unwrap();
+    clean("the repository's attributes");
+    std::fs::remove_file(&info).unwrap();
+
+    crlf("no attributes of the user");
+    let user = root.join(".alt/test-config/git/attributes");
+    std::fs::create_dir_all(user.parent().unwrap()).unwrap();
+    std::fs::write(&user, "* text\n").unwrap();
+    clean("the user's attributes");
+    std::fs::remove_file(&user).unwrap();
+
+    // an included file that is not there yet, then is
+    let config = import.join("config");
+    std::fs::write(&config, "[include]\n\tpath = extra.cfg\n").unwrap();
+    crlf("nothing included");
+    std::fs::write(import.join("extra.cfg"), "[core]\n\tautocrlf = true\n").unwrap();
+    clean("an included file");
+    std::fs::remove_file(import.join("extra.cfg")).unwrap();
+
+    // a file included on one branch only: neither it nor the index changes
+    let on_side = "[includeIf \"onbranch:side\"]\n\tpath = side.cfg\n";
+    std::fs::write(&config, on_side).unwrap();
+    std::fs::write(import.join("side.cfg"), "[core]\n\tautocrlf = true\n").unwrap();
+    crlf("on a branch that includes nothing");
+    run(root, &["switch", "-c", "side"], true);
+    clean("on the branch that includes it");
+    run(root, &["switch", "main"], true);
+    crlf("back on a branch that includes nothing");
+}

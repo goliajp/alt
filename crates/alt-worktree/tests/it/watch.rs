@@ -55,7 +55,7 @@ impl Tree {
         let mut last = Delta::default();
         for untracked in [Untracked::No, Untracked::Normal] {
             let opts = options(untracked, root);
-            let got = self.watched.scan(root, &mut self.snapshot, &opts, &[]);
+            let got = self.watched.scan(root, &mut self.snapshot, &opts, &[], b"");
             let want = scan(root, &mut self.snapshot.clone(), &opts).unwrap();
             assert_eq!(got.as_ref(), Some(&want), "{untracked:?}");
             last = want;
@@ -243,14 +243,14 @@ fn a_watched_tree_that_outgrows_its_watches_says_so_and_loses_nothing() {
     std::fs::create_dir(root.join(".alt")).unwrap();
     let mut watched = Watched::start(root, 6, &snapshot).unwrap();
     let opts = options(Untracked::Normal, root);
-    let first = watched.scan(root, &mut snapshot, &opts, &[]);
+    let first = watched.scan(root, &mut snapshot, &opts, &[], b"");
     assert_eq!(first, Some(Delta::default()));
 
     // a seventh directory: no watch is left for it
     write(root, "a.txt", "changed\n");
     write(root, "one/more/file.txt", "new\n");
     let opts = options(Untracked::Normal, root);
-    assert_eq!(watched.scan(root, &mut snapshot, &opts, &[]), None);
+    assert_eq!(watched.scan(root, &mut snapshot, &opts, &[], b""), None);
     // the caller scans by itself from here on
     let delta = scan(root, &mut snapshot, &opts).unwrap();
     assert_eq!(delta.changed.len(), 1);
@@ -266,7 +266,7 @@ fn a_root_moved_away_is_no_longer_watched() {
     let opts = options(Untracked::Normal, &away);
     let gone = tree
         .watched
-        .scan(tree.dir.path(), &mut tree.snapshot, &opts, &[]);
+        .scan(tree.dir.path(), &mut tree.snapshot, &opts, &[], b"");
     std::fs::rename(&away, tree.root()).unwrap();
     assert_eq!(gone, None);
 }
@@ -303,7 +303,7 @@ fn a_root_named_through_a_link_follows_the_link_to_another_directory() {
         std::os::unix::fs::symlink(real, &link).unwrap();
         write(real, "src/lib.rs", &format!("round {round}\n"));
         let opts = options(Untracked::Normal, &link);
-        let got = watched.scan(&link, &mut snapshot, &opts, &[]);
+        let got = watched.scan(&link, &mut snapshot, &opts, &[], b"");
         let want = scan(&link, &mut snapshot.clone(), &opts).unwrap();
         assert_eq!(got.as_ref(), Some(&want), "round {round}");
         assert_eq!(

@@ -122,9 +122,9 @@ impl NativeRepo<'_> {
         // a watched tree holds its answer with directories as one path
         let watched = match within.is_empty() && untracked != Untracked::All {
             true => {
-                let settings = self.settings_files();
-                let settings: Vec<&Path> = settings.iter().map(PathBuf::as_path).collect();
-                watching::watched_scan(&self.root, snapshot, &options, &settings)?
+                let (files, context) = self.scan_inputs()?;
+                let files: Vec<&Path> = files.iter().map(PathBuf::as_path).collect();
+                watching::watched_scan(&self.root, snapshot, &options, (&files, &context))?
             }
             false => None,
         };

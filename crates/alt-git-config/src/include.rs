@@ -19,14 +19,16 @@ pub struct IncludeContext {
     pub home: Option<PathBuf>,
 }
 
-/// Loads `path`, splicing included files in place, recursively.
+/// Loads `path`, splicing included files in place, recursively. Also
+/// returns every file that was read or looked for and not found.
 pub(crate) fn load_with_includes(
     path: &Path,
     ctx: &IncludeContext,
-) -> Result<Vec<Entry>, ConfigError> {
+) -> Result<(Vec<Entry>, Vec<PathBuf>), ConfigError> {
     let mut out = Vec::new();
-    load_into(path, ctx, 0, &mut out)?;
-    Ok(out)
+    let mut files = Vec::new();
+    load_into(path, ctx, 0, &mut out, &mut files)?;
+    Ok((out, files))
 }
 
 fn load_into(
@@ -34,10 +36,12 @@ fn load_into(
     ctx: &IncludeContext,
     depth: usize,
     out: &mut Vec<Entry>,
+    files: &mut Vec<PathBuf>,
 ) -> Result<(), ConfigError> {
     if depth > MAX_INCLUDE_DEPTH {
         return Err(ConfigError::IncludeDepth);
     }
+    files.push(path.to_path_buf());
     let base = path.parent().unwrap_or(Path::new("."));
     for entry in parse::parse_file(&std::fs::read(path)?)? {
         let include = match (
@@ -63,8 +67,9 @@ fn load_into(
         out.push(entry);
         if let Some(target) = target {
             // like git: a missing include target is silently skipped
-            if target.is_file() {
-                load_into(&target, ctx, depth + 1, out)?;
+            match target.is_file() {
+                true => load_into(&target, ctx, depth + 1, out, files)?,
+                false => files.push(target),
             }
         }
     }

@@ -39,6 +39,8 @@ struct Cached {
     /// the files outside the tree that decide what a scan answers, as
     /// they were
     outside: Vec<Option<FileStat>>,
+    /// what else decides it, as the caller put it
+    context: Vec<u8>,
     delta: Delta,
 }
 
@@ -103,8 +105,8 @@ impl Watched {
     /// What [`scan`](crate::scan) of the whole tree returns for `opts`,
     /// which ask for no untracked files or for directories as one path.
     /// `settings` are the files outside the tree that `opts` read what
-    /// they do with a file from: a change in one of them is answered by a
-    /// scan of everything. `None` when the tree can no longer be watched
+    /// they do with a file from, and `context` whatever else they go by:
+    /// a change in either is answered by a scan of everything. `None` when the tree can no longer be watched
     /// or a scan of it failed: the caller scans it itself, which answers
     /// or fails as it does for a tree that is not watched, and drops this
     /// value.
@@ -114,6 +116,7 @@ impl Watched {
         snapshot: &mut Snapshot,
         opts: &ScanOptions<'_>,
         settings: &[&Path],
+        context: &[u8],
     ) -> Option<Delta> {
         if self.failed {
             return None;
@@ -138,6 +141,7 @@ impl Watched {
             (Some(dirty), Some(cached))
                 if cached.index_id == snapshot.index_id
                     && cached.outside == outside
+                    && cached.context == context
                     && dirty.len() <= MANY_PATHS
                     && dirty.iter().all(|p| !p.is_empty()) =>
             {
@@ -154,6 +158,7 @@ impl Watched {
         self.cached = Some(Cached {
             index_id: snapshot.index_id.clone(),
             outside,
+            context: context.to_vec(),
             delta: delta.clone(),
         });
         let mut delta = delta;
