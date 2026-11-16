@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: fail the mixed-version tests when no older alt is named
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/mixed_versions.rs
+touched: scripts/gate.sh
