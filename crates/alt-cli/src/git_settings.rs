@@ -47,19 +47,19 @@ impl Drop for Caller {
     }
 }
 
-/// Whether the caller's locale has its texts in UTF-8: the first of
-/// `LC_ALL`, `LC_CTYPE` and `LANG` that is set says so, in the character
-/// set its value names.
+/// Whether git would match the caller's texts as UTF-8: the first of
+/// `LC_ALL`, `LC_CTYPE` and `LANG` that is set names the locale, and the
+/// C library must have that locale, with UTF-8 as its character set. A
+/// locale that is not installed leaves git in the locale `C`.
 pub(crate) fn utf8_locale() -> bool {
     let set = |name| var(name).filter(|value| !value.is_empty());
     let Some(locale) = ["LC_ALL", "LC_CTYPE", "LANG"].into_iter().find_map(set) else {
         return false;
     };
-    let locale = locale.to_string_lossy();
-    let charset = locale.split_once('.').map_or("", |(_, rest)| rest);
-    let charset = charset.split('@').next().unwrap_or("");
-    let letters = charset.bytes().filter(u8::is_ascii_alphanumeric);
-    letters.map(|b| b.to_ascii_lowercase()).eq(*b"utf8")
+    let Ok(locale) = std::ffi::CString::new(locale.into_encoded_bytes()) else {
+        return false;
+    };
+    alt_os::locale::charset(&locale).is_some_and(|charset| charset == b"UTF-8")
 }
 
 /// A variable of [`CALLER_ENV`] as the caller has it.
@@ -224,19 +224,22 @@ mod tests {
             let _caller = Caller::new(env.collect());
             utf8_locale()
         };
-        assert!(says(&[("LANG", "en_US.UTF-8")]));
-        assert!(says(&[("LC_ALL", "C.utf8")]));
-        assert!(says(&[("LC_CTYPE", "de_DE.UTF-8@euro")]));
+        // the one UTF-8 locale every system of its kind has
+        let utf8 = match cfg!(target_os = "linux") {
+            true => "C.UTF-8",
+            false => "en_US.UTF-8",
+        };
+        assert!(says(&[("LANG", utf8)]));
+        assert!(says(&[("LC_ALL", utf8)]));
         assert!(!says(&[("LANG", "C")]));
-        assert!(!says(&[("LANG", "en_US.ISO-8859-1")]));
+        assert!(!says(&[("LANG", "POSIX")]));
         assert!(!says(&[]));
+        // a locale the system does not have leaves the texts bytes
+        assert!(!says(&[("LC_ALL", "xx_XX.UTF-8")]));
+        assert!(!says(&[("LC_CTYPE", "xx_XX.UTF-8"), ("LANG", utf8)]));
         // the first that is set stands, also against the others
-        assert!(!says(&[("LC_ALL", "C"), ("LANG", "en_US.UTF-8")]));
-        assert!(says(&[
-            ("LC_ALL", ""),
-            ("LC_CTYPE", "C.UTF-8"),
-            ("LANG", "C")
-        ]));
-        assert!(!says(&[("LC_CTYPE", "POSIX"), ("LANG", "en_US.UTF-8")]));
+        assert!(!says(&[("LC_ALL", "C"), ("LANG", utf8)]));
+        assert!(says(&[("LC_ALL", ""), ("LC_CTYPE", utf8), ("LANG", "C")]));
+        assert!(!says(&[("LC_CTYPE", "POSIX"), ("LANG", utf8)]));
     }
 }

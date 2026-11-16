@@ -7,6 +7,12 @@ use std::process::{Command, Output};
 
 /// Runs git or alt in `repo` with the locale `locale`.
 fn run(tool: &str, repo: &Path, locale: &str, args: &[&str]) -> Output {
+    run_in(tool, repo, &[("LC_ALL", locale)], args)
+}
+
+/// Runs git or alt in `repo` with only `locale` of the variables that
+/// name a locale.
+fn run_in(tool: &str, repo: &Path, locale: &[(&str, &str)], args: &[&str]) -> Output {
     let mut command = match tool {
         "alt" => {
             let mut alt = crate::alt_command();
@@ -23,9 +29,10 @@ fn run(tool: &str, repo: &Path, locale: &str, args: &[&str]) -> Output {
         .env("GIT_AUTHOR_EMAIL", "t@e")
         .env("GIT_COMMITTER_NAME", "tester")
         .env("GIT_COMMITTER_EMAIL", "t@e")
-        .env("LC_ALL", locale)
+        .env_remove("LC_ALL")
         .env_remove("LC_CTYPE")
         .env_remove("LANG")
+        .envs(locale.iter().copied())
         .args(args)
         .output()
         .unwrap()
@@ -230,4 +237,50 @@ fn a_renamed_file_is_named_by_the_driver_git_takes() {
     let theirs = ok(run("git", dirs[0].path(), "C", &args));
     assert!(theirs.windows(11).any(|w| w == b"rename from"));
     assert!(headers.iter().any(|h| h.contains("def one")), "{headers:?}");
+}
+
+/// Which locale a text is matched in is what git makes of the
+/// variables: the first that is set, when the system has that locale.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+#[test]
+fn a_text_is_utf8_in_the_locales_git_finds_installed() {
+    // the second head is one only where lines are bytes
+    let heads: [&[u8]; 2] = [b"def first(self):", b"def caf\xe9(self):"];
+    let prepare = |root: &Path| {
+        std::fs::write(root.join(".gitattributes"), "*.py diff=python\n").unwrap();
+        std::fs::write(root.join("f.py"), blocks(&heads, "")).unwrap();
+    };
+    let change =
+        |root: &Path| std::fs::write(root.join("f.py"), blocks(&heads, " changed")).unwrap();
+    let dirs = pair(prepare, change);
+    let cases: [&[(&str, &str)]; 16] = [
+        &[],
+        &[("LC_ALL", "C")],
+        &[("LC_ALL", "POSIX")],
+        &[("LC_ALL", "C.UTF-8")],
+        &[("LC_ALL", "C.utf8")],
+        &[("LANG", "C.UTF-8")],
+        &[("LC_CTYPE", "C.UTF-8")],
+        // not installed
+        &[("LC_ALL", "xx_XX.UTF-8")],
+        &[("LC_ALL", "xx_XX.UTF-8"), ("LANG", "C.UTF-8")],
+        &[("LC_CTYPE", "xx_XX.UTF-8"), ("LANG", "C.UTF-8")],
+        &[("LC_ALL", "UTF-8")],
+        // one that is set to nothing is not set
+        &[("LC_ALL", ""), ("LC_CTYPE", ""), ("LANG", "C.UTF-8")],
+        &[("LC_ALL", "C"), ("LANG", "C.UTF-8")],
+        &[("LC_ALL", "C.UTF-8"), ("LANG", "C")],
+        &[("LC_CTYPE", "C"), ("LANG", "C.UTF-8")],
+        &[("LC_CTYPE", "C.UTF-8"), ("LANG", "C")],
+    ];
+    let mut characters = Vec::new();
+    for case in cases {
+        let theirs = hunk_headers(&ok(run_in("git", dirs[0].path(), case, &["diff"])));
+        let ours = hunk_headers(&ok(run_in("alt", dirs[1].path(), case, &["diff"])));
+        assert_eq!(ours, theirs, "{case:?}");
+        assert_eq!(theirs.len(), 2, "{case:?}");
+        characters.push(theirs[1].ends_with("def first(self):"));
+    }
+    let expected = [0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1].map(|utf8| utf8 == 1);
+    assert_eq!(characters, expected);
 }
