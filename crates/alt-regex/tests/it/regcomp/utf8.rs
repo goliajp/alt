@@ -125,7 +125,10 @@ fn case_is_ignored_for_the_characters_the_c_library_ignores_it_for() {
 #[test]
 fn bytes_that_are_no_character_match_as_in_the_c_library() {
     in_utf8_locale();
-    let patterns: [&[u8]; 16] = [
+    let patterns: [&[u8]; 19] = [
+        b"\xbf",
+        b"\\>",
+        b"\\bx",
         b".",
         b"^.$",
         b"^..$",
@@ -143,7 +146,10 @@ fn bytes_that_are_no_character_match_as_in_the_c_library() {
         b"(.)\\1",
         "^é".as_bytes(),
     ];
-    let texts: [&[u8]; 12] = [
+    let texts: [&[u8]; 15] = [
+        b"\xfd\xbf\xbf\xbf\xbf\xbf",
+        b"\xf8\x88\x80\x80\xaa ",
+        b"\xfc\x84\x80\x80\x80\xb5x",
         b"caf\xe9(void)",
         "café(void)".as_bytes(),
         b"\xe9",

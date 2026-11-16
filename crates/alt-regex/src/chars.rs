@@ -82,10 +82,10 @@ fn at(text: &[u8], at: usize) -> u32 {
 }
 
 /// Where the character that holds the byte at `at` begins and ends, for
-/// a byte that could go on one.
+/// a byte that could go on one: the longest form has five such bytes.
 fn around(text: &[u8], at: usize) -> Option<(usize, usize)> {
     let mut from = at;
-    while from > 0 && at - from < 3 && text[from] & 0xc0 == 0x80 {
+    while from > 0 && at - from < 5 && text[from] & 0xc0 == 0x80 {
         from -= 1;
     }
     let (_, len) = decode(&text[from..])?;
@@ -330,6 +330,12 @@ mod tests {
         // a byte that is no character counts as the one of its value
         assert!(!holds(Look::WordEnd, b"n\xe9", 1));
         assert!(holds(Look::WordEnd, b"n\xa9", 1));
+        // the forms of five and six bytes are characters too
+        let (five, six) = (b"\xf8\x88\x80\x80\xaa ", b"\xfc\x84\x80\x80\x80\xb5x");
+        assert!((1..5).all(|pos| inside(five, pos)) && !inside(five, 5));
+        assert!((1..6).all(|pos| inside(six, pos)) && !inside(six, 6));
+        assert!(!holds(Look::WordEnd, five, 5));
+        assert!(holds(Look::WordBoundary, six, 6));
     }
 
     #[test]
