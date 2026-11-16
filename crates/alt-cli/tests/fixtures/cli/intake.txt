@@ -6,7 +6,7 @@ exit 1
 err| {"error":{"details":{"operation_ids":[]},"kind":"precondition_failed","message":"destination must not exist; choose a new independent directory","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
 $ [native] alt status --json
 exit 0
-out| {"schema_version":1,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[],"unstaged":[],"untracked":[],"unmerged":[],"clean":true}
+out| {"schema_version":2,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[],"unstaged":[],"untracked":[],"unmerged":[],"clean":true}
 $ [native] alt log --json
 exit 0
 out| {"schema_version":1,"commits":[{"oid":"<id40:1>","tree":"<id40:3>","parents":[],"author":"fixture <fixture@test> <digits> +0000","committer":"fixture <fixture@test> <digits> +0000","message":"baseline\n","note_message":null}]}

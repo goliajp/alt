@@ -113,12 +113,13 @@ fn conflict_mark(stages: u8) -> &'static str {
     }
 }
 
-/// Renders `status` as the stable JSON schema (version 1):
+/// Renders `status` as the stable JSON schema (version 2):
 /// `{schema_version, branch, principal:{kind,id,session?}, staged:[…],
 /// unstaged:[…], untracked:[…], unmerged:[…], clean}`. `change` ∈
-/// `added`/`modified`/`deleted`; `principal` is the structured actor, so
-/// an agent can self-check "who am I to this repo" via the same
-/// machine-first surface it uses for everything else.
+/// `added`/`modified`/`deleted`/`typechange`; version 1 had no
+/// `typechange` and reported such a path as `modified`. `principal` is
+/// the structured actor, so an agent can self-check "who am I to this
+/// repo" via the same machine-first surface it uses for everything else.
 fn render_status_json(
     out: &mut impl Write,
     branch: &str,
@@ -129,8 +130,8 @@ fn render_status_json(
     use crate::json::Json;
     let change = |k: ChangeKind| match k {
         ChangeKind::Added => "added",
-        // the schema has no word of its own for another type of entry
-        ChangeKind::Modified | ChangeKind::TypeChanged => "modified",
+        ChangeKind::Modified => "modified",
+        ChangeKind::TypeChanged => "typechange",
         ChangeKind::Deleted => "deleted",
     };
     let entries = |v: &[(BString, ChangeKind)]| {
@@ -151,7 +152,7 @@ fn render_status_json(
         && st.unstaged.is_empty()
         && st.untracked.is_empty();
     let doc = Json::Object(vec![
-        ("schema_version", Json::Num(1)),
+        ("schema_version", Json::Num(2)),
         ("branch", Json::str(branch)),
         ("principal", principal_json(principal)),
         ("staged", entries(&st.staged)),
