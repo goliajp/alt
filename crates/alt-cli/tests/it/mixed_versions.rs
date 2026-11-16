@@ -9,13 +9,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-/// The older binary, when the environment names one.
-fn old_bin() -> Option<PathBuf> {
-    let named = std::env::var_os("ALT_OLD_BIN").map(PathBuf::from);
-    if named.is_none() {
-        eprintln!("not run: ALT_OLD_BIN is not set");
-    }
-    named
+/// The older binary. These tests have nothing to say without one, so a
+/// run that names none fails.
+fn old_bin() -> PathBuf {
+    let named = std::env::var_os("ALT_OLD_BIN")
+        .expect("ALT_OLD_BIN names an alt built from the base branch");
+    PathBuf::from(named)
 }
 
 fn run(bin: &Path, repo: &Path, args: &[&str]) -> Output {
@@ -91,9 +90,7 @@ fn head_tree(bin: &Path, repo: &Path) -> String {
 fn old_and_new_take_turns_writing() {
     let tmp = alt_os::temp::tempdir().unwrap();
     let repo = tmp.path();
-    let (Some(old), new) = (old_bin(), new_bin()) else {
-        return;
-    };
+    let (old, new) = (old_bin(), new_bin());
     ok(run(&new, repo, &["init"]));
     // enough for the new program to index and record
     commit_files(&new, repo, "new-a", 300);
@@ -126,9 +123,7 @@ fn old_and_new_write_at_the_same_time() {
     let tmp = alt_os::temp::tempdir().unwrap();
     let repo = tmp.path().join("repo");
     fs::create_dir(&repo).unwrap();
-    let (Some(old), new) = (old_bin(), new_bin()) else {
-        return;
-    };
+    let (old, new) = (old_bin(), new_bin());
     ok(run(&new, &repo, &["init"]));
     commit_files(&new, &repo, "base", 300);
     // each program commits on a branch of its own, in a workspace of its own

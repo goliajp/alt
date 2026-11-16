@@ -37,6 +37,8 @@ are errors. The package class takes no scope/profile options and does not build
 Rust code. Workspace/release checks belong on a remote runner.
 Corpus runs ignored library and integration tests; --test restricts it to that
 integration target. Filters apply to both kinds when no target is selected.
+A corpus run that reaches alt-cli needs ALT_OLD_BIN: an alt built from the
+previous release, which its mixed-version tests run against this build.
 EOF
 }
 
@@ -195,6 +197,13 @@ run_tests() {
     scoped_cargo test "$@"
 }
 
+# whether this corpus run reaches alt-cli's tests against an older alt
+needs_old_bin() {
+    case "$package" in ''|alt-cli) ;; *) return 1 ;; esac
+    case "$target" in ''|it) ;; *) return 1 ;; esac
+    case "$filter" in ''|*mixed_versions*) ;; *) return 1 ;; esac
+}
+
 run_corpus() {
     # absolute path: cargo test sets the package dir, not the workspace
     # root, as the tests' working directory
@@ -203,6 +212,12 @@ run_corpus() {
         # Resolve overrides too, before Cargo changes the working directory.
         ALT_CORPUS=$(cd "$ALT_CORPUS" && pwd -P) || exit 2
         export ALT_CORPUS
+        if needs_old_bin; then
+            [ -n "${ALT_OLD_BIN:-}" ] && [ -x "$ALT_OLD_BIN" ] ||
+                die "corpus: set ALT_OLD_BIN to an alt built from the previous release (the mixed_versions tests run it)"
+            ALT_OLD_BIN=$(cd "$(dirname "$ALT_OLD_BIN")" && pwd -P)/$(basename "$ALT_OLD_BIN")
+            export ALT_OLD_BIN
+        fi
         run_tests corpus
     )
 }
