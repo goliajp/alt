@@ -6,7 +6,7 @@ use std::path::Path;
 
 use alt_bytes::BString;
 use alt_git_index::Index;
-use alt_worktree::{Clock, Delta, ScanOptions, Snapshot, Untracked, Watched, scan};
+use alt_worktree::{Clock, Delta, ScanOptions, Snapshot, Unanswered, Untracked, Watched, scan};
 
 use crate::delta::{ALGO, change, fixture, index_of, write};
 
@@ -72,7 +72,7 @@ impl Tree {
             let opts = options(untracked, root);
             let got = self.watched.scan(root, &mut self.snapshot, &opts, &[], b"");
             let want = scan(root, &mut self.snapshot.clone(), &opts).unwrap();
-            assert_eq!(got.as_ref(), Some(&want), "{untracked:?}");
+            assert_eq!(got.as_ref(), Ok(&want), "{untracked:?}");
             last = want;
         }
         last
@@ -239,13 +239,14 @@ fn a_watched_tree_that_outgrows_its_watches_says_so_and_loses_nothing() {
     let mut watched = start(root, 6, &snapshot).unwrap();
     let opts = options(Untracked::Normal, root);
     let first = watched.scan(root, &mut snapshot, &opts, &[], b"");
-    assert_eq!(first, Some(Delta::default()));
+    assert_eq!(first, Ok(Delta::default()));
 
     // a seventh directory: no watch is left for it
     write(root, "a.txt", "changed\n");
     write(root, "one/more/file.txt", "new\n");
     let opts = options(Untracked::Normal, root);
-    assert_eq!(watched.scan(root, &mut snapshot, &opts, &[], b""), None);
+    let ended = watched.scan(root, &mut snapshot, &opts, &[], b"");
+    assert_eq!(ended, Err(Unanswered::Unwatched));
     // the caller scans by itself from here on
     let delta = scan(root, &mut snapshot, &opts).unwrap();
     assert_eq!(delta.changed.len(), 1);
@@ -263,7 +264,7 @@ fn a_root_moved_away_is_no_longer_watched() {
         .watched
         .scan(tree.dir.path(), &mut tree.snapshot, &opts, &[], b"");
     std::fs::rename(&away, tree.root()).unwrap();
-    assert_eq!(gone, None);
+    assert_eq!(gone, Err(Unanswered::Unwatched));
 }
 
 #[test]
@@ -300,7 +301,7 @@ fn a_root_named_through_a_link_follows_the_link_to_another_directory() {
         let opts = options(Untracked::Normal, &link);
         let got = watched.scan(&link, &mut snapshot, &opts, &[], b"");
         let want = scan(&link, &mut snapshot.clone(), &opts).unwrap();
-        assert_eq!(got.as_ref(), Some(&want), "round {round}");
+        assert_eq!(got.as_ref(), Ok(&want), "round {round}");
         assert_eq!(
             want.changed.len(),
             1 + usize::from(round > 0),

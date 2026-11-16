@@ -9,7 +9,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use alt_os::sys;
-use alt_worktree::{Snapshot, Untracked, scan};
+use alt_worktree::{Snapshot, Unanswered, Untracked, scan};
 
 use crate::delta::{ALGO, fixture, index_of, write};
 use crate::watch::{Tree, options, start};
@@ -72,7 +72,7 @@ fn a_mount_inside_a_watched_tree_ends_the_watching_until_it_is_gone() {
         write(root, "docs/inside.txt", "beneath the mount point\n");
         let opts = options(Untracked::Normal, root);
         let answer = tree.watched.scan(root, &mut tree.snapshot, &opts, &[], b"");
-        assert_eq!(answer, None, "bind: {bind}");
+        assert_eq!(answer, Err(Unanswered::Unwatched), "bind: {bind}");
         let direct = scan(root, &mut tree.snapshot, &opts).unwrap();
         assert!(
             direct
@@ -106,9 +106,7 @@ fn a_mount_beside_the_tree_or_above_it_does_not_end_the_watching() {
     let mut watched = start(&root, usize::MAX, &snapshot).unwrap();
     let mut answers = |watched: &mut alt_worktree::Watched| {
         let opts = options(Untracked::Normal, &root);
-        watched
-            .scan(&root, &mut snapshot, &opts, &[], b"")
-            .is_some()
+        watched.scan(&root, &mut snapshot, &opts, &[], b"").is_ok()
     };
     assert!(answers(&mut watched));
     mount(None, &beside);

@@ -53,7 +53,7 @@ mod linux {
     use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-    use alt_worktree::{Delta, ScanOptions, Snapshot, Watched};
+    use alt_worktree::{Delta, ScanOptions, Snapshot, Unanswered, Watched};
 
     use super::super::Res;
 
@@ -187,8 +187,9 @@ mod linux {
         answer(&mut state, root, snapshot, options, settings)
     }
 
-    /// What a tree in `state` answers when it is watched. One that gives
-    /// no answer is not watched from then on.
+    /// What a tree in `state` answers when it is watched. One that can
+    /// no longer be watched is not from then on; one whose scan failed
+    /// stays watched.
     fn answer(
         state: &mut State,
         root: &Path,
@@ -199,12 +200,15 @@ mod linux {
         let State::Watched(watched) = state else {
             return None;
         };
-        let delta = watched.scan(root, snapshot, options, settings.0, settings.1);
-        if delta.is_none() {
-            let basis = (!watched.out_of_watches()).then(|| Basis::of(root));
-            *state = State::Off(basis);
+        match watched.scan(root, snapshot, options, settings.0, settings.1) {
+            Ok(delta) => Some(delta),
+            Err(Unanswered::ScanFailed) => None,
+            Err(Unanswered::Unwatched) => {
+                let basis = (!watched.out_of_watches()).then(|| Basis::of(root));
+                *state = State::Off(basis);
+                None
+            }
         }
-        delta
     }
 
     /// The tree at `root`, when this process has scanned it before.
@@ -334,25 +338,62 @@ mod linux {
             (dir, snapshot)
         }
 
+        fn options<'a>(
+            root: &Path,
+            clean: Option<alt_worktree::CleanTracked<'a>>,
+        ) -> ScanOptions<'a> {
+            ScanOptions {
+                untracked: alt_worktree::Untracked::Normal,
+                within: &[],
+                clean,
+                head: None,
+                excludes: &[],
+                clock: alt_worktree::Clock::read(&root.join(".alt")).unwrap(),
+            }
+        }
+
+        #[test]
+        fn a_tree_whose_scan_failed_is_watched_as_before() {
+            use std::os::unix::fs::PermissionsExt;
+            unsafe extern "C" {
+                /// Sets the user that access to files is checked for, on
+                /// the calling thread alone; returns the one it was.
+                fn setfsuid(uid: u32) -> i32;
+            }
+            let mode = |path: &Path, mode: u32| {
+                std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap()
+            };
+            let (dir, mut snapshot) = changed_tree();
+            let root = dir.path();
+            let mut scan = |as_user: Option<u32>| {
+                let options = options(root, None);
+                // SAFETY: no pointers are passed
+                let was = as_user.map(|user| unsafe { setfsuid(user) });
+                let delta = scan_tree(root, &mut snapshot, &options, (&[], b""));
+                // SAFETY: no pointers are passed
+                was.map(|was| unsafe { setfsuid(was as u32) });
+                delta
+            };
+            assert!(scan(None).is_some());
+            mode(root, 0o755);
+            let closed = root.join("closed");
+            std::fs::create_dir(&closed).unwrap();
+            std::fs::write(closed.join("file"), "new\n").unwrap();
+            assert_eq!(scan(None).unwrap().untracked.len(), 1);
+            // as a user whom the mode keeps out, which it does not keep root
+            mode(&closed, 0o000);
+            assert!(scan(Some(65534)).is_none());
+            assert!(watches(root), "a scan that failed ends no watching");
+            mode(&closed, 0o755);
+            assert_eq!(scan(None).unwrap().untracked.len(), 1);
+        }
+
         #[test]
         fn a_scan_of_one_tree_keeps_no_scan_of_another_waiting() {
             use std::sync::mpsc::channel;
             use std::time::Duration;
             let (one, mut first) = changed_tree();
             let (other, mut second) = changed_tree();
-            fn options<'a>(
-                root: &Path,
-                clean: Option<alt_worktree::CleanTracked<'a>>,
-            ) -> ScanOptions<'a> {
-                ScanOptions {
-                    untracked: alt_worktree::Untracked::Normal,
-                    within: &[],
-                    clean,
-                    head: None,
-                    excludes: &[],
-                    clock: alt_worktree::Clock::read(&root.join(".alt")).unwrap(),
-                }
-            }
             let (began, has_begun) = channel();
             let (go, may_go) = channel::<()>();
             let (answered, has_answered) = channel();

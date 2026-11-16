@@ -9,6 +9,8 @@ mod untracked;
 #[cfg(target_os = "linux")]
 mod watch;
 #[cfg(target_os = "linux")]
+mod watch_failed;
+#[cfg(target_os = "linux")]
 mod watch_gap;
 #[cfg(target_os = "linux")]
 mod watch_index;

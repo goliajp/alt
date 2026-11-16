@@ -8,9 +8,8 @@ use std::path::{Path, PathBuf};
 
 use crate::delta::{Delta, ScanOptions};
 use crate::snapshot::{FileStat, Snapshot};
-use crate::untracked::Untracked;
-use held::{Cached, merged, replace_within, stats, sure};
-use paths::{beneath, dirty_paths, tracked};
+use held::{Cached, merged, stats, sure};
+use paths::{beneath, tracked};
 
 mod dirs;
 mod held;
@@ -19,6 +18,7 @@ mod moved;
 #[path = "watch/linux.rs"]
 mod os;
 mod paths;
+mod scans;
 
 /// What happened in the tree since the watcher was last asked.
 pub(crate) enum Changes {
@@ -37,6 +37,16 @@ pub fn watch_allowance() -> io::Result<usize> {
     let all = std::fs::read_to_string("/proc/sys/fs/inotify/max_user_watches")?;
     let all: usize = all.trim().parse().map_err(io::Error::other)?;
     Ok(all / 2)
+}
+
+/// Why a watched tree has no answer.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Unanswered {
+    /// this scan failed: the tree is watched as before, and the next
+    /// scan looks at all of it
+    ScanFailed,
+    /// the tree can no longer be watched, and the value is to be dropped
+    Unwatched,
 }
 
 pub struct Watched {
@@ -195,10 +205,9 @@ impl Watched {
     /// which ask for no untracked files or for directories as one path.
     /// `settings` are the files outside the tree that `opts` read what
     /// they do with a file from, and `context` whatever else they go by:
-    /// a change in either is answered by a scan of everything. `None` when the tree can no longer be watched
-    /// or a scan of it failed: the caller scans it itself, which answers
-    /// or fails as it does for a tree that is not watched, and drops this
-    /// value.
+    /// a change in either is answered by a scan of everything. Where
+    /// there is no answer, the caller scans the tree itself, which
+    /// answers or fails as it does for a tree that is not watched.
     pub fn scan(
         &mut self,
         root: &Path,
@@ -206,94 +215,26 @@ impl Watched {
         opts: &ScanOptions<'_>,
         settings: &[&Path],
         context: &[u8],
-    ) -> Option<Delta> {
+    ) -> Result<Delta, Unanswered> {
         if self.failed {
-            return None;
+            return Err(Unanswered::Unwatched);
         }
         // before anything is looked at: an event that comes later is seen next time
-        let changes = self.changes(snapshot, opts)?;
+        let changes = self.changes(snapshot, opts).ok_or(Unanswered::Unwatched)?;
         let outside = stats(settings);
         // taken out: a scan that fails leaves nothing to build on
-        let cached = self.cached.take();
-        let whole = |within| ScanOptions {
-            untracked: Untracked::Normal,
-            within,
-            clean: opts.clean,
-            head: opts.head,
-            excludes: opts.excludes,
-            clock: opts.clock,
-        };
-        let dirty = match changes {
-            Changes::Paths(paths) => Some(dirty_paths(paths, snapshot)),
-            Changes::All => None,
-            Changes::Unknown => {
-                return self.scan_after_loss(root, snapshot, opts, &whole(&[]), outside, context);
-            }
-        };
-        let delta = match (dirty, cached) {
-            (Some(dirty), Some(cached))
-                if cached.index_id == snapshot.index_id
-                    && cached.outside.as_ref() == Some(&outside)
-                    && cached.context == context
-                    && dirty.iter().all(|p| !p.is_empty()) =>
-            {
-                let mut delta = cached.delta;
-                if !dirty.is_empty() {
-                    let within: Vec<&[u8]> = dirty.iter().map(Vec::as_slice).collect();
-                    let fresh = crate::scan(root, snapshot, &whole(&within)).ok()?;
-                    replace_within(&mut delta, &within, fresh);
-                }
-                delta
-            }
-            _ => {
-                self.whole += 1;
-                crate::scan(root, snapshot, &whole(&[])).ok()?
-            }
-        };
-        Some(self.keep(snapshot, opts, outside, context, delta))
-    }
-
-    /// Holds `delta` as the answer for the tree as it is, and returns what
-    /// of it `opts` ask for.
-    fn keep(
-        &mut self,
-        snapshot: &Snapshot,
-        opts: &ScanOptions<'_>,
-        outside: Vec<Option<FileStat>>,
-        context: &[u8],
-        mut delta: Delta,
-    ) -> Delta {
-        self.cached = Some(Cached {
-            index_id: snapshot.index_id.clone(),
-            outside: sure(outside, &opts.clock),
-            context: context.to_vec(),
-            delta: delta.clone(),
+        let held = self.cached.take().filter(|cached| {
+            cached.index_id == snapshot.index_id
+                && cached.outside.as_ref() == Some(&outside)
+                && cached.context == context
         });
-        if opts.untracked == Untracked::No {
-            delta.untracked.clear();
-        }
-        delta
-    }
-
-    /// The scan after events were lost: of everything, and the watches
-    /// are brought in line with the directories it came by. A directory
-    /// that had no watch while it was listed is looked at again next time.
-    fn scan_after_loss(
-        &mut self,
-        root: &Path,
-        snapshot: &mut Snapshot,
-        opts: &ScanOptions<'_>,
-        whole: &ScanOptions<'_>,
-        outside: Vec<Option<FileStat>>,
-        context: &[u8],
-    ) -> Option<Delta> {
-        self.whole += 1;
-        let (delta, seen) = crate::delta::scan_seeing(root, snapshot, whole).ok()?;
-        let fresh = self.watcher.fill(seen, &|dir| tracked(snapshot, dir));
-        let fresh = self.noting(fresh)?;
-        if !fresh.is_empty() {
-            self.absorbed = Some(merged(self.absorbed.take(), Changes::Paths(fresh)));
-        }
-        Some(self.keep(snapshot, opts, outside, context, delta))
+        let delta = match (changes, held) {
+            (Changes::Unknown, _) => self.scan_after_loss(root, snapshot, opts)?,
+            (Changes::Paths(paths), Some(held)) => {
+                self.scan_paths(root, snapshot, opts, paths, held.delta)?
+            }
+            _ => self.scan_whole(root, snapshot, opts)?,
+        };
+        Ok(self.keep(snapshot, opts, outside, context, delta))
     }
 }

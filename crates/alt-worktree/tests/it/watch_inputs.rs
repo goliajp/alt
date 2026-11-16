@@ -97,7 +97,7 @@ fn ignore_files_outside_the_tree_are_followed_from_the_tick_they_are_written_in(
         let opts = with(Clock::read(&root.join(".alt")).unwrap());
         let got = watched.scan(&root, &mut snapshot, &opts, &[], b"");
         let want = scan(&root, &mut snapshot.clone(), &opts).unwrap();
-        assert_eq!(got.as_ref(), Some(&want));
+        assert_eq!(got.as_ref(), Ok(&want));
         let untracked: Vec<String> = want.untracked.iter().map(|p| p.to_string()).collect();
         (untracked, watched.set_up())
     };

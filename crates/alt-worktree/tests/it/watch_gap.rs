@@ -30,7 +30,7 @@ fn scan_with(tree: &mut Tree, meanwhile: impl Fn(&Path)) {
     let scanned = tree
         .watched
         .scan(&root, &mut tree.snapshot, &opts, &[], b"");
-    assert!(scanned.is_some());
+    assert!(scanned.is_ok());
     assert!(ran.get(), "the scan read the changed file");
 }
 
