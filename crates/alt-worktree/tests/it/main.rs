@@ -12,3 +12,5 @@ mod watch;
 mod watch_inputs;
 #[cfg(target_os = "linux")]
 mod watch_loss;
+#[cfg(target_os = "linux")]
+mod watch_mounts;
