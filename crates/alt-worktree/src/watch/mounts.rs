@@ -13,7 +13,7 @@ use alt_os::sys;
 /// The filesystems whose files change without an event on this machine:
 /// served over a network, shared between the nodes of a cluster, passed
 /// in from a host, or kept by a process of its own.
-const ELSEWHERE: [i64; 21] = [
+const ELSEWHERE: [i64; 23] = [
     0x6969,      // nfs
     0x517b,      // smb
     0xff53_4d42, // cifs
@@ -35,6 +35,8 @@ const ELSEWHERE: [i64; 21] = [
     0xa501_fcf5, // vxfs
     0x786f_4256, // vboxsf
     0xbacb_acbc, // vmhgfs
+    0x7c7c_6673, // prl_fs
+    0xbeef_dead, // snfs
 ];
 
 pub(crate) fn written_elsewhere(kind: i64) -> bool {
@@ -139,6 +141,8 @@ mod tests {
         assert!(written_elsewhere(0x6969));
         assert!(written_elsewhere(0x6573_5546));
         assert!(written_elsewhere(0x0102_1997));
+        assert!(written_elsewhere(0x7c7c_6673));
+        assert!(written_elsewhere(0xbeef_dead_u32 as i32 as i64));
         // cifs with the sign carried into the upper half
         assert!(written_elsewhere(0xff53_4d42_u32 as i32 as i64));
         assert!(written_elsewhere(0xff53_4d42));
