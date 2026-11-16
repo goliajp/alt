@@ -6,19 +6,25 @@ use alt_worktree::{Delta, FileStat, PathMatcher};
 
 use super::*;
 
+/// What became of the files an `add` was to store.
+pub(super) struct Stored {
+    /// the stat each file stored had before it was read
+    pub(super) stats: Vec<(BString, FileStat)>,
+    /// the paths that could not be stored
+    pub(super) blocked: Vec<BString>,
+}
+
 impl NativeRepo<'_> {
     /// Stores what the working tree has at each of `taken` and pushes its
-    /// entry; returns the stat each file had before it was read, and the
-    /// paths that could not be stored: a directory where a tracked file
-    /// is to be stored again is to git a repository with no commit, which
-    /// it says and goes on.
+    /// entry. A directory where a tracked file is to be stored again is
+    /// to git a repository with no commit, which it says and goes on.
     pub(super) fn stage_files(
         &mut self,
         taken: &[&BString],
         delta: &Delta,
         before: &Index,
         entries: &mut Vec<IndexEntry>,
-    ) -> Res<(Vec<(BString, FileStat)>, Vec<BString>)> {
+    ) -> Res<Stored> {
         let lfs = self.lfs_rules()?;
         let attrs = self.converter()?;
         let moved: HashMap<&[u8], &WorkEntry> = delta
@@ -53,7 +59,7 @@ impl NativeRepo<'_> {
             entries.push(self.stored(path, stat.git_mode(), lfs.as_ref(), &attrs, before)?);
             stats.push((path.clone(), stat));
         }
-        Ok((stats, blocked))
+        Ok(Stored { stats, blocked })
     }
 
     /// Stores the file at `path` as it is cleaned, and returns the entry

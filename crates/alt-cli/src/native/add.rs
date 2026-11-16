@@ -112,7 +112,8 @@ impl NativeRepo<'_> {
         let none = index_of(Vec::new());
         let staged_now = if mode.renormalize { &none } else { &before };
         let mut entries = plan.entries;
-        let (stats, blocked) = self.stage_files(&plan.taken, &delta, staged_now, &mut entries)?;
+        let store::Stored { stats, blocked } =
+            self.stage_files(&plan.taken, &delta, staged_now, &mut entries)?;
         // what could not be stored stays as it was staged
         let kept = before.entries.iter().filter(|e| blocked.contains(&e.path));
         entries.extend(kept.cloned());
