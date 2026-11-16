@@ -165,7 +165,7 @@ pub(crate) fn open_active(
     size: u64,
     walk: Walk,
 ) -> Result<(Active, Vec<(pack::RecordHeader, u64)>), StoreError> {
-    let (recs, valid_len, last) = walked(&read, size, walk.from, walk.stop)?;
+    let (mut recs, mut valid_len, last) = walked(&read, size, walk.from, walk.stop)?;
     // what is known of the pack is looked up only when it stops short
     let unfinished = || {
         walk.stop.is_some()
@@ -173,7 +173,10 @@ pub(crate) fn open_active(
             || walk.tail.unfinished(walk.seq, size, valid_len, last)
     };
     if valid_len != size && (walk.whole || !unfinished()) {
-        return Err(StoreError::Format("active pack damaged"));
+        if walk.whole || walk.tail.repairs() || !crate::reading_past_damage() {
+            return Err(StoreError::Format("active pack damaged"));
+        }
+        valid_len = crate::past::walk_on(path, &read, valid_len, &mut recs)?;
     }
     let len = valid_len.max(pack::HEADER_LEN as u64);
     // a pack cut short inside its header holds no record to look into

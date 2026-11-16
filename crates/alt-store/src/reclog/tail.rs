@@ -40,6 +40,31 @@ impl RecLog {
         Ok(at)
     }
 
+    /// Whether this handle goes on past a damaged record (see
+    /// [`crate::reading_past_damage`]): not one that holds the writers'
+    /// lock.
+    fn reads_past_damage(&self) -> bool {
+        !self.policy.repairs() && crate::reading_past_damage()
+    }
+
+    /// Takes out of `data`, read at `from`, every record that does not
+    /// read, and notes each. What the handle then holds is no stretch of
+    /// the file any more.
+    fn keep_intact(&self, data: &mut Vec<u8>, from: u64) {
+        let rec_len = self.layout.rec_len;
+        let file = self.idx_dir.with_extension("");
+        let mut kept = Vec::with_capacity(data.len());
+        for (n, rec) in data.chunks(rec_len).enumerate() {
+            if rec.len() == rec_len && self.layout.intact(rec) {
+                kept.extend_from_slice(rec);
+            } else {
+                let at = from + (n * rec_len) as u64;
+                crate::past::note(&file, at, at + rec.len() as u64);
+            }
+        }
+        *data = kept;
+    }
+
     /// Reads and verifies the records in `[from, size)` up to an unfinished
     /// end, which is cut off the file when `end` says so. Nothing is cut
     /// when a record is corrupt.
@@ -51,7 +76,13 @@ impl RecLog {
     ) -> Result<Vec<u8>, StoreError> {
         let mut data = vec![0u8; (size - from) as usize];
         read_exact_at(&self.file, &mut data, from)?;
-        let intact = self.intact_prefix(&data, from, end)?;
+        let intact = match self.intact_prefix(&data, from, end) {
+            Err(StoreError::Format(_)) if end != End::Whole && self.reads_past_damage() => {
+                self.keep_intact(&mut data, from);
+                data.len()
+            }
+            intact => intact?,
+        };
         if intact < data.len() {
             if end == (End::MaybeTorn { cut: true }) {
                 self.policy.cut(0, from + intact as u64)?;

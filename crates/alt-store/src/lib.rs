@@ -34,6 +34,7 @@ mod node;
 mod pack;
 mod packs;
 mod passed;
+mod past;
 pub mod reclog;
 mod run_write;
 pub mod runs;
@@ -45,6 +46,7 @@ pub use check::StoreChecked;
 pub use pack::with_shared_lock;
 pub use packs::Known;
 pub use passed::Passed;
+pub use past::{PassedDamage, passed_damage, reading_past_damage};
 pub use tail::{Basis, Tail};
 
 use std::collections::{BTreeMap, HashMap, VecDeque};

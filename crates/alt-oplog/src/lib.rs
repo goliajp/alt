@@ -36,7 +36,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 pub use op::{Op, OpId, OpLogError, ROOT};
-pub use settle::{Unconfirmed, end_reads_at};
+pub use settle::{Unconfirmed, end_reads_at, passed_damage, reading_past_damage};
 pub use synced::{OpLogSink, SyncNamed};
 
 use lock::{lock_exclusive, lock_shared, unlock};

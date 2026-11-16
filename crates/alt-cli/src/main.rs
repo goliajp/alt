@@ -66,7 +66,8 @@ fn deliver(response: &Response) -> u8 {
 }
 
 fn run() -> Response {
-    native::answer_before_unconfirmed(attempt(), attempt)
+    let response = native::answer_before_unconfirmed(attempt(), attempt);
+    alt_cli::past_damage::report(response)
 }
 
 fn attempt() -> Response {
@@ -75,6 +76,9 @@ fn attempt() -> Response {
         Ok(parsed) => parsed,
         Err(response) => return response,
     };
+    if let Err(refused) = alt_cli::past_damage::admit(&parsed.cli.command) {
+        return refused.response(parsed.json, None);
+    }
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(error) => return machine::from_error(&error, false).response(parsed.json, None),
@@ -208,40 +212,7 @@ fn attempt() -> Response {
         Err(response) => return response,
     };
     if cli::is_native(&execution.parsed.cli.command) {
-        let opened = (|| -> Result<_, Box<dyn std::error::Error>> {
-            let (dir, coord) =
-                native::resolve_workspace(&cwd, execution.parsed.cli.workspace.as_deref())?;
-            let store = match execution.parsed.cli.command {
-                Command::Fsck { .. } => Store::open_read_only(dir.clone())?,
-                _ => Store::open_for(dir.clone(), execution.writing)?,
-            };
-            let repo = Repository::open_alt(dir, Some(coord.root().to_owned()))?;
-            Ok((store, repo))
-        })();
-        let (mut store, repo) = match opened {
-            Ok(pair) => pair,
-            Err(error) => return execution.failure(error.as_ref()),
-        };
-        let (response, operations) = execution.on_store(&mut store, &repo);
-        let barrier = store
-            .odb_mut()
-            .flush_pending()
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
-            .and_then(|()| {
-                if execution.writing {
-                    store.sink()?.fsync_all()
-                } else {
-                    Ok(())
-                }
-            });
-        if let Err(error) = barrier {
-            let causes = machine::causes(error.as_ref());
-            return Failure::unknown(format!("durability: {causes}")).response(
-                execution.parsed.json,
-                execution.parsed.cli.request_id.as_deref(),
-            );
-        }
-        return execution.publish(response, operations);
+        return on_native_store(execution, &cwd);
     }
     let capture = alt_cli::diagnostics::Capture::start(execution.parsed.json);
     let mut out = Vec::new();
@@ -291,4 +262,43 @@ fn attempt() -> Response {
         Ok(0)
     })();
     execution.finish(result, out, capture.finish(), &[])
+}
+
+/// Runs a command of the native store in this process: opens the store,
+/// runs the command, and publishes its result once what it wrote is synced.
+fn on_native_store(execution: Execution, cwd: &std::path::Path) -> Response {
+    let opened = (|| -> Result<_, Box<dyn std::error::Error>> {
+        let (dir, coord) =
+            native::resolve_workspace(cwd, execution.parsed.cli.workspace.as_deref())?;
+        let store = match execution.parsed.cli.command {
+            Command::Fsck { .. } => Store::open_read_only(dir.clone())?,
+            _ => Store::open_for(dir.clone(), execution.writing)?,
+        };
+        let repo = Repository::open_alt(dir, Some(coord.root().to_owned()))?;
+        Ok((store, repo))
+    })();
+    let (mut store, repo) = match opened {
+        Ok(pair) => pair,
+        Err(error) => return execution.failure(error.as_ref()),
+    };
+    let (response, operations) = execution.on_store(&mut store, &repo);
+    let barrier = store
+        .odb_mut()
+        .flush_pending()
+        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+        .and_then(|()| {
+            if execution.writing {
+                store.sink()?.fsync_all()
+            } else {
+                Ok(())
+            }
+        });
+    if let Err(error) = barrier {
+        let causes = machine::causes(error.as_ref());
+        return Failure::unknown(format!("durability: {causes}")).response(
+            execution.parsed.json,
+            execution.parsed.cli.request_id.as_deref(),
+        );
+    }
+    execution.publish(response, operations)
 }

@@ -78,7 +78,8 @@ impl RefStore {
     /// `<alt_dir>/refs/snapshot`. Replays (and re-verifies) all ref
     /// transactions past the snapshot point.
     pub fn open(alt_dir: impl Into<PathBuf>) -> Result<Self, RefError> {
-        Self::open_as(alt_dir.into(), false)
+        // a process that reads past damage changes no file
+        Self::open_as(alt_dir.into(), alt_oplog::reading_past_damage())
     }
 
     /// Opens the store to be read and nothing else, for a check that must

@@ -45,6 +45,7 @@ mod monorepo_bench;
 mod nested_repo;
 mod old_daemon;
 mod op_log;
+mod past_damage;
 mod patterns;
 mod precommit;
 mod push;

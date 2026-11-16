@@ -121,7 +121,15 @@ impl Scan {
     /// the log is passed over, damage is reported, the file stays as it is.
     pub fn unrepaired(mut self, durable: &Path) -> Result<Self, OpLogError> {
         if self.valid_len >= HEADER_LEN as u64 && self.valid_len < self.file_len {
-            unfinished(durable, self.valid_len, self.last)?;
+            match unfinished(durable, self.valid_len, self.last) {
+                // the ops from the damaged one on are not read: nothing
+                // tells whether what follows it continues the chain
+                Err(_) if crate::settle::reading_past_damage() => {
+                    crate::settle::note_damage(durable, self.valid_len, self.file_len);
+                    self.clamped = true;
+                }
+                judged => judged?,
+            }
         }
         self.file_len = self.valid_len;
         Ok(self)

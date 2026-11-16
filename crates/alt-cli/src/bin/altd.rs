@@ -73,6 +73,9 @@ mod unix {
             .nth(1)
             .map(PathBuf::from)
             .ok_or("usage: altd <alt-dir>")?;
+        if alt_odb::reading_past_damage() {
+            return Err("altd holds its store open for writers: unset ALT_READ_PAST_DAMAGE".into());
+        }
         let sock_path = alt_dir.join("daemon.sock");
 
         let listener = bind(&sock_path)?;
@@ -193,6 +196,14 @@ mod unix {
         }
     }
 
+    /// What a request is answered when what it wrote could not be synced.
+    fn not_durable(execution: &Execution, causes: String) -> daemon::Response {
+        Failure::unknown(format!("durability: {causes}")).response(
+            execution.parsed.json,
+            execution.id.as_ref().map(|id| machine::hex(id)).as_deref(),
+        )
+    }
+
     /// Reads one request, runs it against the held store/repo, writes back.
     /// Framing I/O happens outside the lock; only `handle` (refresh + dispatch)
     /// holds it, so the serialized section is the store work, not the wire I/O.
@@ -242,11 +253,7 @@ mod unix {
             };
             let mut barrier_ok = true;
             if let Err(error) = store.odb_mut().flush_pending() {
-                let causes = machine::causes(&error);
-                response = Failure::unknown(format!("durability: {causes}")).response(
-                    execution.parsed.json,
-                    execution.id.as_ref().map(|id| machine::hex(id)).as_deref(),
-                );
+                response = not_durable(&execution, machine::causes(&error));
                 barrier_ok = false;
             }
             let ticket = execution.writing.then(|| group.assign());
@@ -258,10 +265,7 @@ mod unix {
                 .transpose()
             {
                 Ok(_) => execution.publish(response, operations),
-                Err(error) => Failure::unknown(format!("durability: {error}")).response(
-                    execution.parsed.json,
-                    execution.id.as_ref().map(|id| machine::hex(id)).as_deref(),
-                ),
+                Err(error) => not_durable(&execution, error),
             }
         } else {
             response

@@ -35,7 +35,7 @@ use alt_git_codec::{ObjectId, ObjectKind, RawObject};
 use alt_store::{BlobOptions, BlobStore, CompactReport, StoreCheckpoint};
 
 pub use abbrev::Abbrev;
-pub use alt_store::{BlobId, Passed, held};
+pub use alt_store::{BlobId, Passed, PassedDamage, held, passed_damage, reading_past_damage};
 pub use check::OdbChecked;
 pub use error::OdbError;
 pub use map::{MapEntry, ObjectMap};
@@ -128,7 +128,8 @@ impl NativeOdb {
     fn start(&self) -> Result<Odb, OdbError> {
         let mode = odb::Mode {
             late: self.late,
-            read_only: self.read_only,
+            // a process that reads past damage changes no file
+            read_only: self.read_only || alt_store::reading_past_damage(),
             deferred: self.deferred.clone(),
         };
         let mut odb = Odb::open_with(&self.alt_dir, self.opts, mode)?;

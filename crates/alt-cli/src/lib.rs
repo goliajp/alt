@@ -26,6 +26,7 @@ pub mod log_count;
 pub mod machine;
 pub mod meta;
 pub mod native;
+pub mod past_damage;
 mod patch;
 pub mod patterns;
 pub mod policy;

@@ -16,7 +16,7 @@
 //! is not stored is damage and is neither looked for nor cut here, and
 //! where the marker records no boundary that holds, no op is looked at.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use crate::lock::{lock_exclusive, unlock};
@@ -67,6 +67,30 @@ pub fn end_reads_at(_dir: &Path, _at: u64) -> std::io::Result<()> {
 #[cfg(not(unix))]
 pub(crate) fn read_end(meta: &std::fs::Metadata) -> u64 {
     meta.len()
+}
+
+/// The log and the bytes of it an open of this process did not read.
+static PASSED_DAMAGE: OnceLock<(PathBuf, u64, u64)> = OnceLock::new();
+
+/// Whether this process reads the log past damage: by
+/// `ALT_READ_PAST_DAMAGE` in its environment, for a process that only
+/// reads. An open then takes the log to end where a record is damaged,
+/// and notes it ([`passed_damage`]), instead of failing.
+pub fn reading_past_damage() -> bool {
+    static ASKED: OnceLock<bool> = OnceLock::new();
+    *ASKED.get_or_init(|| std::env::var_os("ALT_READ_PAST_DAMAGE").is_some())
+}
+
+/// Notes that the log beside the marker `durable` was not read from byte
+/// `from` to its end at `to`.
+pub(crate) fn note_damage(durable: &Path, from: u64, to: u64) {
+    let _ = PASSED_DAMAGE.set((durable.with_file_name("log"), from, to));
+}
+
+/// The log file and the bytes of it, from a damaged record to the end of
+/// the file, that an open of this process did not read.
+pub fn passed_damage() -> Option<(PathBuf, u64, u64)> {
+    PASSED_DAMAGE.get().cloned()
 }
 
 fn record_len(op: &Op) -> u64 {
