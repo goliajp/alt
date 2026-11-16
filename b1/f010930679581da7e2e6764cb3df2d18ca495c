@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: take a submodule's empty directory with its entry and warn of embedded repositories on stderr
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/add.rs
+touched: crates/alt-cli/src/native/add/embedded.rs
+touched: crates/alt-cli/src/native/checkout_files.rs
+touched: crates/alt-cli/src/native/checkout_plan.rs
+touched: crates/alt-cli/tests/it/gitlink.rs
+touched: crates/alt-cli/tests/it/gitlink_said.rs
+touched: crates/alt-cli/tests/it/main.rs
