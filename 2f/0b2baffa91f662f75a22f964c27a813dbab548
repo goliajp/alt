@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: keep the inode of a log that is read short from going to another test's log
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/tests/it/unconfirmed.rs
