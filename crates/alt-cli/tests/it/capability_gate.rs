@@ -6,7 +6,7 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
-fn alt_as(repo: &Path, args: &[&str], principal_id: &str) -> Output {
+pub(crate) fn alt_as(repo: &Path, args: &[&str], principal_id: &str) -> Output {
     Command::new(env!("CARGO_BIN_EXE_alt"))
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
@@ -23,7 +23,7 @@ fn alt_as(repo: &Path, args: &[&str], principal_id: &str) -> Output {
 /// As the unrestricted human operator (no ALT_PRINCIPAL_* set; defaults to
 /// Human/USER, which is "operator" — the policies tested below target
 /// `agent:*`, so this principal is unconstrained).
-fn alt(repo: &Path, args: &[&str]) -> Output {
+pub(crate) fn alt(repo: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_alt"))
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
@@ -35,7 +35,7 @@ fn alt(repo: &Path, args: &[&str]) -> Output {
         .unwrap()
 }
 
-fn ok(o: Output) -> String {
+pub(crate) fn ok(o: Output) -> String {
     assert!(
         o.status.success(),
         "stderr: {}",
@@ -44,7 +44,7 @@ fn ok(o: Output) -> String {
     String::from_utf8(o.stdout).unwrap()
 }
 
-fn fails_with(o: Output, needle: &str) -> String {
+pub(crate) fn fails_with(o: Output, needle: &str) -> String {
     let err = String::from_utf8_lossy(&o.stderr).to_string();
     assert!(
         !o.status.success(),
@@ -60,7 +60,7 @@ fn fails_with(o: Output, needle: &str) -> String {
 
 /// One-shot fixture: init repo, write base file, stage + commit once as the
 /// unrestricted operator. Returns the repo path (kept alive by the tempdir).
-fn fixture(tmp: &alt_os::temp::TempDir) -> &Path {
+pub(crate) fn fixture(tmp: &alt_os::temp::TempDir) -> &Path {
     let repo = tmp.path();
     ok(alt(repo, &["init", "."]));
     std::fs::write(repo.join("a.txt"), "base\n").unwrap();
@@ -69,7 +69,7 @@ fn fixture(tmp: &alt_os::temp::TempDir) -> &Path {
     repo
 }
 
-fn write_policy(repo: &Path, body: &str) {
+pub(crate) fn write_policy(repo: &Path, body: &str) {
     std::fs::write(repo.join(".alt/policy"), body).unwrap();
 }
 
@@ -186,65 +186,6 @@ fn path_allow_denies_out_of_tree_paths() {
     );
     // commit of the already-staged src/ is fine
     ok(alt_as(repo, &["commit", "-m", "add src"], "bot"));
-}
-
-/// `src/**` allows what lies beneath `src` and nothing whose name only
-/// begins with it.
-#[test]
-fn path_allow_holds_a_path_to_the_directory_it_names() {
-    let tmp = alt_os::temp::tempdir().unwrap();
-    let repo = fixture(&tmp);
-    for file in ["src/deep/lib.rs", "srcx/y", "srcfile2"] {
-        std::fs::create_dir_all(repo.join(file).parent().unwrap()).unwrap();
-        std::fs::write(repo.join(file), "x\n").unwrap();
-    }
-    write_policy(repo, "agent:* -> path=src/**\n");
-    for beside in ["srcx/y", "srcfile2", "srcx", "."] {
-        fails_with(alt_as(repo, &["add", beside], "bot"), "capability denied");
-    }
-    ok(alt_as(repo, &["add", "src"], "bot"));
-    ok(alt_as(repo, &["commit", "-m", "src"], "bot"));
-}
-
-/// What another principal staged outside the allowed paths is not
-/// committed by the restricted one: a new file, a change, a removal. The
-/// index stays as it was, and the operator commits it.
-#[test]
-fn path_allow_denies_a_commit_of_what_another_staged_out_of_tree() {
-    let tmp = alt_os::temp::tempdir().unwrap();
-    let repo = fixture(&tmp);
-    std::fs::create_dir_all(repo.join("src")).unwrap();
-    std::fs::create_dir_all(repo.join("scripts")).unwrap();
-    std::fs::write(repo.join("scripts/old.sh"), "old\n").unwrap();
-    std::fs::write(repo.join("scripts/gone.sh"), "gone\n").unwrap();
-    ok(alt(repo, &["add", "."]));
-    ok(alt(repo, &["commit", "-m", "scripts"]));
-    write_policy(repo, "agent:* -> path=src/**\n");
-    let head = ok(alt(repo, &["rev-parse", "main"]));
-
-    type Staged = fn(&Path);
-    let staged: [Staged; 3] = [
-        |repo| std::fs::write(repo.join("scripts/run.sh"), "#!/bin/sh\n").unwrap(),
-        |repo| std::fs::write(repo.join("scripts/old.sh"), "changed\n").unwrap(),
-        |repo| std::fs::remove_file(repo.join("scripts/gone.sh")).unwrap(),
-    ];
-    for stage in staged {
-        stage(repo);
-        std::fs::write(repo.join("src/lib.rs"), "// src\n").unwrap();
-        ok(alt(repo, &["add", "."]));
-        for args in [
-            &["commit", "-m", "by bot"][..],
-            &["commit", "--amend", "-m", "by bot"],
-        ] {
-            fails_with(alt_as(repo, args, "bot"), "capability denied");
-        }
-        assert_eq!(ok(alt(repo, &["rev-parse", "main"])), head);
-    }
-    // the baseline another principal committed is no obstacle
-    ok(alt(repo, &["commit", "-m", "by the operator"]));
-    std::fs::write(repo.join("src/lib.rs"), "// more\n").unwrap();
-    ok(alt_as(repo, &["add", "src/lib.rs"], "bot"));
-    ok(alt_as(repo, &["commit", "-m", "src only"], "bot"));
 }
 
 /// The zero-regression red line: a repo with no `.alt/policy` file behaves
