@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: roll a batch back from the records that name content down to the content
+author-type: human
+author: doracawl
+touched: crates/alt-odb/src/odb/durable.rs
+touched: crates/alt-odb/tests/it/main.rs
+touched: crates/alt-odb/tests/it/marker.rs
+touched: crates/alt-odb/tests/it/rewind_interrupted.rs
+touched: crates/alt-store/src/blob.rs
