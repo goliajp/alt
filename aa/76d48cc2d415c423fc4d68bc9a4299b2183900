@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: test
+summary: split the index run tests and the heap modes of the alt-os child
+author-type: human
+author: doracawl
+touched: crates/alt-os/tests/it/main.rs
+touched: crates/alt-store/tests/it/chunk_store.rs
+touched: crates/alt-store/tests/it/index_runs.rs
+touched: crates/alt-store/tests/it/index_stores.rs
+touched: crates/alt-store/tests/it/main.rs
