@@ -212,6 +212,19 @@ pub fn from_error(error: &(dyn std::error::Error + 'static), writing: bool) -> F
     if error.is::<alt_flow::FlowError>() {
         return Failure::usage(error.to_string());
     }
+    if writing {
+        Failure::unknown(causes(error))
+    } else {
+        Failure {
+            exit_code: 128,
+            ..Failure::refusal("execution_error", causes(error))
+        }
+    }
+}
+
+/// What `error` says, then what each of its causes says: the outer errors
+/// of the storage layers only name the layer.
+pub fn causes(error: &(dyn std::error::Error + 'static)) -> String {
     let mut messages = vec![error.to_string()];
     let mut source = error.source();
     while let Some(error) = source {
@@ -221,14 +234,7 @@ pub fn from_error(error: &(dyn std::error::Error + 'static), writing: bool) -> F
         }
         source = error.source();
     }
-    if writing {
-        Failure::unknown(messages.join(": "))
-    } else {
-        Failure {
-            exit_code: 128,
-            ..Failure::refusal("execution_error", messages.join(": "))
-        }
-    }
+    messages.join(": ")
 }
 
 pub fn bytes_value(bytes: &[u8]) -> Value {

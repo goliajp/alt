@@ -242,7 +242,8 @@ mod unix {
             };
             let mut barrier_ok = true;
             if let Err(error) = store.odb_mut().flush_pending() {
-                response = Failure::unknown(format!("durability: {error}")).response(
+                let causes = machine::causes(&error);
+                response = Failure::unknown(format!("durability: {causes}")).response(
                     execution.parsed.json,
                     execution.id.as_ref().map(|id| machine::hex(id)).as_deref(),
                 );

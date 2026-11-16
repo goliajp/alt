@@ -85,7 +85,8 @@ impl GroupCommit {
     /// later callers wait on the condvar. A leader whose own flush
     /// fails surfaces the error rather than retry a dead disk.
     pub fn await_durable(&self, sink: &StoreSink, ticket: u64) -> Result<(), String> {
-        self.await_durable_with(ticket, || sink.fsync_all())
+        let causes = |e: Box<dyn std::error::Error>| crate::machine::causes(e.as_ref());
+        self.await_durable_with(ticket, || sink.fsync_all().map_err(causes))
     }
 
     /// [`Self::await_durable`] with the flush supplied by the caller, so the

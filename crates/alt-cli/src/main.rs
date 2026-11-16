@@ -235,7 +235,8 @@ fn attempt() -> Response {
                 }
             });
         if let Err(error) = barrier {
-            return Failure::unknown(format!("durability: {error}")).response(
+            let causes = machine::causes(error.as_ref());
+            return Failure::unknown(format!("durability: {causes}")).response(
                 execution.parsed.json,
                 execution.parsed.cli.request_id.as_deref(),
             );

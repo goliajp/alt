@@ -1559,14 +1559,11 @@ pub fn workspace_head(cwd: &Path, workspace: Option<&str>) -> Res<String> {
     }
 }
 
-fn resolve(repo: &Repository, spec: &str) -> Result<ObjectId, String> {
-    repo.rev_parse(spec)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| {
-            format!(
-                "ambiguous argument '{spec}': unknown revision or path not in the working tree."
-            )
-        })
+fn resolve(repo: &Repository, spec: &str) -> Res<ObjectId> {
+    repo.rev_parse(spec)?.ok_or_else(|| {
+        format!("ambiguous argument '{spec}': unknown revision or path not in the working tree.")
+            .into()
+    })
 }
 
 /// `cat-file -p`: blobs/commits/tags verbatim, trees in ls-tree-like shape.

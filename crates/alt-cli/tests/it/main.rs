@@ -20,6 +20,7 @@ mod crash_fixture;
 mod credential_helper;
 mod daemon_client;
 mod daemon_server;
+mod damage_messages;
 mod diff;
 mod diff_git;
 mod eol;

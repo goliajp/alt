@@ -139,15 +139,6 @@ fn findings(
     (notes, damage)
 }
 
-/// Spells out the whole cause chain: the outer errors of the storage layers
-/// only name the layer.
-fn with_cause(error: impl std::error::Error) -> Box<dyn std::error::Error> {
-    let mut text = error.to_string();
-    let mut source = error.source();
-    while let Some(cause) = source {
-        text.push_str(": ");
-        text.push_str(&cause.to_string());
-        source = cause.source();
-    }
-    format!("fsck: {text}").into()
+fn with_cause(error: impl std::error::Error + 'static) -> Box<dyn std::error::Error> {
+    format!("fsck: {}", crate::machine::causes(&error)).into()
 }
