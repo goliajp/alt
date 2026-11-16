@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: refuse no pattern for the capture slots its paths could carry
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/lib.rs
+touched: crates/alt-regex/src/program.rs
+touched: crates/alt-regex/tests/it/limits.rs
