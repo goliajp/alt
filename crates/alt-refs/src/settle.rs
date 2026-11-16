@@ -38,6 +38,13 @@ impl RefStore {
         self.oplog.confirmed()
     }
 
+    /// Whether ops of the log lie past a boundary its marker records, for
+    /// a writer to look at ([`Self::settle`]). Reads the marker and takes
+    /// no lock.
+    pub fn unsettled(&self) -> bool {
+        self.oplog.unsettled()
+    }
+
     /// For a reader: the ops at the end of the log that a writer would
     /// cut, `held` saying of an op whether everything it names is stored.
     /// Nothing changes.

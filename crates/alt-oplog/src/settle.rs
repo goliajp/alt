@@ -117,6 +117,15 @@ impl OpLog {
         marker.trusted() && marker.records(self.len_bytes)
     }
 
+    /// Whether ops this handle holds lie past a boundary the marker
+    /// records: those a writer looks at before it appends
+    /// ([`Self::settle`]). Without such a boundary there are none to look
+    /// at. Reads the marker and takes no lock.
+    pub fn unsettled(&self) -> bool {
+        let from = Marker::read(&self.durable_path).unsynced_from();
+        from.is_some_and(|from| from < self.len_bytes)
+    }
+
     /// Whether the record of the last op this handle holds is still where
     /// the handle has it, in a file of `size` bytes: a cut of whole
     /// records takes it away, and what is appended after reads otherwise.

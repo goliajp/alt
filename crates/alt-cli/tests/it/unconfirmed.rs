@@ -236,3 +236,36 @@ fn a_synced_transaction_whose_commit_is_gone_is_damage_and_stays() {
         .collect();
     assert!(changed.is_empty(), "changed: {changed:?}");
 }
+
+/// A log whose marker records no boundary that holds has no operations to
+/// look at: a command that writes does not wait for the locks it would
+/// look at them under.
+#[test]
+fn a_writer_takes_no_lock_to_settle_a_log_without_a_boundary() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let dir = tmp.path();
+    ok(alt(dir, &["init"]));
+    fs::write(dir.join("a.txt"), "one\n").unwrap();
+    ok(alt(dir, &["add", "a.txt"]));
+    ok(alt(dir, &["commit", "-m", "first"]));
+    // no slot of it holds
+    let marker = dir.join(MARKERS[1]);
+    fs::write(&marker, &fs::read(&marker).unwrap()[..16]).unwrap();
+
+    let held = fs::File::open(dir.join(".alt/odb.lock")).unwrap();
+    alt_os::sys::flock(&held, alt_os::sys::LOCK_EX).unwrap();
+    let alt_dir = dir.join(".alt");
+    let (done, settled) = mpsc::channel();
+    let writer = std::thread::spawn(move || {
+        let mut store = alt_cli::native::Store::open(alt_dir).unwrap();
+        let settled = store.settle().map_err(|e| e.to_string());
+        done.send(settled).unwrap();
+    });
+    let settled = settled.recv_timeout(Duration::from_secs(5));
+    alt_os::sys::flock(&held, alt_os::sys::LOCK_UN).unwrap();
+    writer.join().unwrap();
+    assert_eq!(settled, Ok(Ok(())), "it waited for the object store's lock");
+}

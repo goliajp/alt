@@ -49,7 +49,7 @@ impl Store {
     /// stored ([`Self::settle`]).
     pub fn open_for(alt_dir: PathBuf, writing: bool) -> Res<Self> {
         let mut store = Self::open(alt_dir)?;
-        if writing && !store.refs.confirmed() {
+        if writing && store.refs.unsettled() {
             store.settle()?;
         }
         Ok(store)
@@ -59,10 +59,12 @@ impl Store {
     /// also cut from the first operation on that was never synced and
     /// makes a ref point at an object which is not stored. The object
     /// store is kept from being appended to meanwhile, so that a live
-    /// writer's objects are all seen.
+    /// writer's objects are all seen. Where the log's marker records no
+    /// boundary, or every operation lies before it, there is nothing to
+    /// look at and no lock is taken.
     pub fn settle(&mut self) -> Res<()> {
         self.refresh()?;
-        if self.refs.confirmed() {
+        if !self.refs.unsettled() {
             return Ok(());
         }
         let refs = &mut self.refs;
