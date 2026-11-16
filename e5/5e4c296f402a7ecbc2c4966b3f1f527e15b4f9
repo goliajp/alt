@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: record that add takes a name that is not utf-8
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/fixtures/cli/uncommitted-changes.txt
