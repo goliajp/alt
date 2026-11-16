@@ -6,6 +6,8 @@
 use std::fs::{self, OpenOptions};
 use std::os::unix::fs::FileExt;
 use std::path::Path;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
 use alt_odb::NativeOdb;
@@ -62,6 +64,44 @@ fn the_note_follows_the_marker_and_a_rewind_brings_it_back() {
     odb.rewind(ckpt).unwrap();
     assert_eq!(len(tmp.path()), kept);
     assert_eq!(note(tmp.path()), Some((1, kept)));
+}
+
+#[test]
+fn a_rewind_takes_the_note_back_before_it_cuts_the_pack() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let dir = tmp.path().to_owned();
+    let (ready, is_ready) = mpsc::channel();
+    let (go, may_go) = mpsc::channel();
+    let rewind = std::thread::spawn(move || {
+        let mut odb = NativeOdb::open(&dir).unwrap();
+        put(&mut odb, 0..10);
+        let ckpt = odb.checkpoint().unwrap();
+        put(&mut odb, 10..20);
+        ready.send(()).unwrap();
+        may_go.recv().unwrap();
+        odb.rewind(ckpt)
+    });
+    is_ready.recv().unwrap();
+    let full = len(tmp.path());
+    assert_eq!(note(tmp.path()), Some((1, full)));
+    // the rewind's first write to the marker waits for this lock: the
+    // rewind then stands between taking the note back and cutting
+    let marker = fs::File::open(tmp.path().join("odb.durable")).unwrap();
+    alt_os::sys::flock(&marker, alt_os::sys::LOCK_EX).unwrap();
+    go.send(()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while note(tmp.path()).is_some() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let (noted, cut) = (note(tmp.path()), len(tmp.path()) < full);
+    alt_os::sys::flock(&marker, alt_os::sys::LOCK_UN).unwrap();
+    rewind.join().unwrap().unwrap();
+    assert_eq!(
+        noted, None,
+        "the note stood while the pack was about to be cut"
+    );
+    assert!(!cut, "the pack was cut before the marker came down");
+    assert_eq!(note(tmp.path()), Some((1, len(tmp.path()))));
 }
 
 #[test]
