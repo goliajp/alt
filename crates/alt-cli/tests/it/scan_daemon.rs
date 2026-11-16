@@ -91,6 +91,27 @@ impl Drop for Stop {
     }
 }
 
+/// The daemon of the tree at `root`, which has just answered a `status`
+/// and is expected to watch the tree from then on. Where it does not,
+/// every comparison with a direct run still holds, by a daemon that scans
+/// the tree itself: the test fails here instead of passing without
+/// looking at what it is about.
+pub(crate) fn watching_daemon(root: &Path) -> Stop {
+    let stop = Stop(daemon_pid(root));
+    #[cfg(target_os = "linux")]
+    {
+        let (instances, on_them) = watches(stop.0);
+        let limit = "/proc/sys/fs/inotify/max_user_instances";
+        assert!(
+            instances >= 1 && on_them >= 1,
+            "the daemon does not watch {root:?}: it holds {instances} inotify instances with \
+             {on_them} watches. The user may have no instance left: {limit} is {}",
+            std::fs::read_to_string(limit).unwrap_or_default().trim()
+        );
+    }
+    stop
+}
+
 /// A repository with one commit, and its daemon started.
 pub(crate) fn served() -> (alt_os::temp::TempDir, Stop) {
     let dir = alt_os::temp::tempdir().unwrap();
@@ -104,7 +125,7 @@ pub(crate) fn served() -> (alt_os::temp::TempDir, Stop) {
     run(root, &["commit", "-m", "base"], false);
     // whatever fails from here on, the daemon is ended
     run(root, &["status"], true);
-    let stop = Stop(daemon_pid(root));
+    let stop = watching_daemon(root);
     assert!(agree(root, "clean").contains("nothing to commit"));
     (dir, stop)
 }

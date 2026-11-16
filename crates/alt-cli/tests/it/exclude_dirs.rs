@@ -9,7 +9,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use crate::scan_daemon::{Stop, daemon_pid, write};
+use crate::scan_daemon::{Stop, watching_daemon, write};
 
 /// `program` in `at`, a directory of the tree `root`, with the settings
 /// of its user in a directory beside the trees, the same for them all.
@@ -89,7 +89,7 @@ fn trees(dir: &Path) -> ([PathBuf; 3], Stop) {
             .status
             .success()
     );
-    let stop = Stop(daemon_pid(&trees[1]));
+    let stop = watching_daemon(&trees[1]);
     (trees, stop)
 }
 
@@ -266,7 +266,7 @@ fn clean_trees(dir: &Path) -> ([PathBuf; 3], Stop) {
     }
     let served = alt(&trees[1], &trees[1], &["status"], true);
     assert!(served.status.success());
-    let stop = Stop(daemon_pid(&trees[1]));
+    let stop = watching_daemon(&trees[1]);
     (trees, stop)
 }
 

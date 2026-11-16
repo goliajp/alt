@@ -6,7 +6,7 @@
 use std::path::Path;
 
 use crate::cwd_paths::{git, listed};
-use crate::scan_daemon::{Stop, daemon_pid, run, write};
+use crate::scan_daemon::{Stop, run, watching_daemon, write};
 
 /// An alt tree and a git tree in `dir` with the same commit.
 fn pair(dir: &Path, files: &[&str]) -> Stop {
@@ -26,7 +26,7 @@ fn pair(dir: &Path, files: &[&str]) -> Stop {
         assert!(git(&with_git, args).status.success(), "{args:?}");
     }
     run(&alt, &["status"], true);
-    Stop(daemon_pid(&alt))
+    watching_daemon(&alt)
 }
 
 /// What `alt status` lists, the same by its daemon and without it,

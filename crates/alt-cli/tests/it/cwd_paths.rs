@@ -6,7 +6,7 @@ use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use crate::scan_daemon::{Stop, daemon_pid, output, run, write};
+use crate::scan_daemon::{Stop, output, run, watching_daemon, write};
 
 const FILES: [&str; 4] = ["top.txt", "sub/f.txt", "sub/deep/g.txt", "other/o.txt"];
 
@@ -57,7 +57,7 @@ impl Trees {
         assert!(git(&at("git"), &["add", "."]).status.success());
         assert!(git(&at("git"), &["commit", "-qm", "base"]).status.success());
         run(&at("served"), &["status"], true);
-        let stop = Stop(daemon_pid(&at("served")));
+        let stop = watching_daemon(&at("served"));
         for tree in ["direct", "served", "git"] {
             symlink(at(tree), at(&format!("link-{tree}"))).unwrap();
         }
