@@ -1,0 +1,20 @@
+schema: alt-meta/1
+type: feat
+summary: let commands that only read go on past damaged records when asked to
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd.rs
+touched: crates/alt-cli/src/lib.rs
+touched: crates/alt-cli/src/main.rs
+touched: crates/alt-cli/src/past_damage.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/past_damage.rs
+touched: crates/alt-odb/src/lib.rs
+touched: crates/alt-oplog/src/lib.rs
+touched: crates/alt-oplog/src/read.rs
+touched: crates/alt-oplog/src/settle.rs
+touched: crates/alt-refs/src/lib.rs
+touched: crates/alt-store/src/lib.rs
+touched: crates/alt-store/src/packs.rs
+touched: crates/alt-store/src/past.rs
+touched: crates/alt-store/src/reclog/tail.rs
