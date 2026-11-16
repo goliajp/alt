@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: keep a tree watched while an ignore file outside it cannot be read
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/daemon_stop.rs
+touched: crates/alt-cli/tests/it/exclude_dirs.rs
+touched: crates/alt-cli/tests/it/scan_daemon_watches.rs
+touched: crates/alt-worktree/src/watch.rs
+touched: crates/alt-worktree/src/watch/linux.rs
