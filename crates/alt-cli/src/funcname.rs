@@ -209,6 +209,9 @@ impl Sections {
     pub(crate) fn of(&self, path: &[u8]) -> Res<Option<Rc<Finder>>> {
         let name = match self.attribute(path)? {
             DiffAttribute::Named(name) => name,
+            // set without a name, a path has a driver of its own that
+            // no pattern is configured for
+            DiffAttribute::Set => return Ok(None),
             _ => b"default".to_vec(),
         };
         if let Some(known) = self.finders.borrow().get(&name) {
