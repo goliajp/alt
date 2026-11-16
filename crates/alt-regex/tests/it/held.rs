@@ -93,6 +93,18 @@ fn groups_past_what_the_paths_of_one_start_carry_are_an_error() {
     held(&pattern, Options::default(), b"xac");
 }
 
+#[test]
+fn a_path_that_leaves_much_behind_it_is_not_kept() {
+    let run = vec![b'a'; 1 << 19];
+    // the groups of a long match, with a choice and eight slots to put
+    // back for each byte of it
+    let most = held(b"((((a))))*", Options::default(), &run);
+    assert!(most.is_some_and(|most| most < 24 << 20), "{most:?}");
+    // and the same on the way to a reference that then matches nothing
+    let most = held(b"((((a))))*\\1[bc]", Options::default(), &run);
+    assert!(most.is_some_and(|most| most < 40 << 20), "{most:?}");
+}
+
 /// Patterns that make the most of each byte, searched in `length` bytes.
 fn long(length: usize) {
     let long: Vec<u8> = b"ab".iter().copied().cycle().take(length).collect();
