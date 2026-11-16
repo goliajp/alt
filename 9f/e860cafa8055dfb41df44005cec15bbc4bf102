@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: say which drivers are not compared with a git that has them otherwise
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/funcname_drivers.rs
