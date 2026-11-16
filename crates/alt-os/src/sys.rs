@@ -110,6 +110,13 @@ pub fn clear_errno() {
 
 unsafe extern "C" {
     pub safe fn geteuid() -> uid_t;
+    pub fn getpwnam_r(
+        name: *const c_char,
+        pwd: *mut passwd,
+        buf: *mut c_char,
+        buflen: usize,
+        result: *mut *mut passwd,
+    ) -> c_int;
 
     #[cfg_attr(
         all(target_os = "macos", target_arch = "x86_64"),

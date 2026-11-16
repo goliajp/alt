@@ -133,6 +133,17 @@ pub struct dirent {
     pub d_name: [c_char; 256],
 }
 
+#[repr(C)]
+pub struct passwd {
+    pub pw_name: *mut c_char,
+    pub pw_passwd: *mut c_char,
+    pub pw_uid: u32,
+    pub pw_gid: u32,
+    pub pw_gecos: *mut c_char,
+    pub pw_dir: *mut c_char,
+    pub pw_shell: *mut c_char,
+}
+
 unsafe extern "C" {
     /// The address of the calling thread's `errno`.
     #[link_name = "__errno_location"]
