@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: refuse sets of characters past what a program holds as they are read, and bound the sets remembered in bytes
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/block.rs
+touched: crates/alt-regex/src/program.rs
+touched: crates/alt-regex/src/syntax.rs
+touched: crates/alt-regex/tests/it/limits.rs
