@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: leave out the random texts in which a character begins with the byte the pattern holds as none
+author-type: human
+author: doracawl
+touched: crates/alt-regex/tests/it/regcomp/random.rs
