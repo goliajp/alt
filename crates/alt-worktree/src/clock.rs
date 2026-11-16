@@ -180,7 +180,9 @@ mod tests {
         let of = |name: &str| FileStat::of(&std::fs::metadata(dir.join(name)).unwrap());
         std::fs::write(dir.join("before"), b"x").unwrap();
         // however coarse the clock: until it has moved past that file
+        let began = std::time::Instant::now();
         while !Clock::read(dir).unwrap().settled(&of("before")) {
+            assert!(began.elapsed().as_secs() < 10, "the clock does not move");
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
         for round in 0..200 {
