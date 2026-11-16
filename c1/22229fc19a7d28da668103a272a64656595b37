@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: list an object recorded twice in map.alt once when looking up by prefix
+author-type: human
+author: doracawl
+touched: crates/alt-odb/src/map.rs
+touched: crates/alt-odb/tests/it/duplicate_records.rs
+touched: crates/alt-odb/tests/it/main.rs
+touched: crates/alt-repo/tests/it/duplicate_records.rs
+touched: crates/alt-repo/tests/it/main.rs
