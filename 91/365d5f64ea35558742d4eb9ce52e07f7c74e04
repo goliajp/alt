@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: perf
+summary: let altd give back what one large request needed
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd.rs
+touched: crates/alt-os/src/heap.rs
