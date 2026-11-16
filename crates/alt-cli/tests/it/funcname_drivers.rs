@@ -134,6 +134,11 @@ fn every_built_in_driver_names_the_sections_git_names() {
         let since = later.iter().find(|(driver, _)| driver == name);
         since.is_none_or(|&(_, since)| major > 2 || minor >= since)
     };
+    for (driver, since) in later.iter().filter(|(driver, _)| !known(driver)) {
+        println!(
+            "not compared: git {major}.{minor} has the driver {driver} as it is here from 2.{since} on"
+        );
+    }
     let drivers: Vec<&str> = all.into_iter().filter(known).collect();
     assert!(drivers.len() >= 24, "{version}");
     let prepare = |root: &Path| {
