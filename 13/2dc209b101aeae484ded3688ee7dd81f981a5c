@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: hold the choice of a pattern for hunk headers and what is done with it to git
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/funcname_git.rs
+touched: crates/alt-cli/tests/it/main.rs
