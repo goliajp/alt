@@ -51,7 +51,6 @@ fn a_removed_workspace_gives_its_watches_back() {
 #[test]
 fn a_tree_is_watched_as_before_once_its_ignore_file_can_be_read_again() {
     let (dir, stop) = served();
-    let _stop = stop.unheld();
     let root = dir.path();
     write(root, "a.txt", "changed\n");
     agree(root, "changed");
@@ -72,6 +71,12 @@ fn a_tree_is_watched_as_before_once_its_ignore_file_can_be_read_again() {
     assert!(run(root, &["diff"], true).contains("src/lib.rs"));
     std::fs::remove_dir(root.join(".alt/test-config/git/ignore")).unwrap();
     assert!(agree(root, "readable again").contains("modified:   src/lib.rs"));
+    // by the daemon that was there, from the events of its watches again
+    assert_eq!(daemon_pid(root), stop.0);
+    write(root, "docs/guide.md", "changed last\n");
+    assert!(agree(root, "watched again").contains("modified:   docs/guide.md"));
+    #[cfg(target_os = "linux")]
+    assert!(crate::scan_daemon::watching(stop.0));
 }
 
 #[cfg(target_os = "linux")]

@@ -89,7 +89,7 @@ fn trees(dir: &Path) -> ([PathBuf; 3], Stop) {
             .status
             .success()
     );
-    let stop = watching_daemon(&trees[1]).unheld();
+    let stop = watching_daemon(&trees[1]);
     (trees, stop)
 }
 
@@ -266,7 +266,7 @@ pub(crate) fn clean_trees(dir: &Path) -> ([PathBuf; 3], Stop) {
     }
     let served = alt(&trees[1], &trees[1], &["status"], true);
     assert!(served.status.success());
-    let stop = watching_daemon(&trees[1]).unheld();
+    let stop = watching_daemon(&trees[1]);
     (trees, stop)
 }
 

@@ -177,7 +177,11 @@ impl Watched {
         if !same_files || self.rules.as_ref() != Some(&rules) {
             // other rules hide other directories
             let anew = self.watcher.start_over(&tracked, opts.excludes);
-            let whole = self.noting(anew)?;
+            let Some(whole) = self.noting(anew)? else {
+                // the rules are read again the next time
+                self.rules = None;
+                return Some(Changes::Unknown);
+            };
             self.rule_files = opts
                 .excludes
                 .iter()

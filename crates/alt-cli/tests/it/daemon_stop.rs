@@ -6,15 +6,6 @@
 /// scanning on the way fails the test.
 pub(crate) struct Stop(pub(crate) i32, pub(crate) bool);
 
-impl Stop {
-    /// For a test that puts a directory where an ignore file is looked
-    /// for: its daemon gives up watching and is not held to it.
-    pub(crate) fn unheld(mut self) -> Stop {
-        self.1 = false;
-        self
-    }
-}
-
 impl Drop for Stop {
     fn drop(&mut self) {
         let fds = std::fs::read_dir(format!("/proc/{}/fd", self.0));

@@ -179,11 +179,20 @@ impl Watcher {
     }
 
     /// Watches the tree anew, by the rules of `excludes` as they are now;
-    /// `false` as [`establish`](Self::establish) has it.
-    pub(crate) fn start_over(&mut self, tracked: Tracked, excludes: &[&Path]) -> io::Result<bool> {
-        self.ignore = IgnoreStack::of_files(excludes)?;
+    /// `false` as [`establish`](Self::establish) has it. `None`, and the
+    /// watches as they were, when one of those files cannot be read: a
+    /// scan fails on that as well, and the tree stays watched.
+    pub(crate) fn start_over(
+        &mut self,
+        tracked: Tracked,
+        excludes: &[&Path],
+    ) -> io::Result<Option<bool>> {
+        let Ok(ignore) = IgnoreStack::of_files(excludes) else {
+            return Ok(None);
+        };
+        self.ignore = ignore;
         self.queue = instance()?;
-        self.establish(tracked)
+        self.establish(tracked).map(Some)
     }
 
     /// Takes in one event: `mask` on the watch `wd`, about `name` in its
