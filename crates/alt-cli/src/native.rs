@@ -1735,30 +1735,6 @@ impl<'a> NativeRepo<'a> {
         report(out, "switched", &format!("Switched to branch '{name}'"))
     }
 
-    /// Refuses `action` if any tracked file has staged or unstaged changes, so
-    /// a tree-rewriting operation never clobbers uncommitted work.
-    fn ensure_clean(&self, action: &str) -> Res<()> {
-        let state = self.tree_state(alt_worktree::Untracked::No)?;
-        // a submodule that checked out another commit is not overwritten:
-        // a checkout never touches what is inside it
-        let changed = state.delta.changed.iter().any(|w| w.mode != 0o160000);
-        // nor is the missing directory of one anything it would write over
-        let snapshot = &state.snapshot;
-        let submodule = |path: &BString| {
-            let entry = snapshot.find(path).map(|at| &snapshot.entries[at]);
-            entry.is_some_and(|e| e.mode == 0o160000)
-        };
-        let deleted = state.delta.deleted.iter().any(|path| !submodule(path));
-        if !state.staged.is_empty() || changed || deleted {
-            return Err(crate::machine::Failure::refusal(
-                "precondition_failed",
-                format!("your local changes would be overwritten by {action}; commit them first"),
-            )
-            .into());
-        }
-        Ok(())
-    }
-
     /// Materializes `target` into the working tree, removing tracked files in
     /// `old` that are absent from `target`, and rewrites the index to match.
     fn checkout(&mut self, old: &[WorkEntry], target: &[WorkEntry]) -> Res<()> {

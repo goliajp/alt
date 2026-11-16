@@ -1,4 +1,5 @@
-//! What a command prints of the three trees compared.
+//! What a command prints of the three trees compared, and whether they
+//! leave a checkout free to write.
 
 use alt_worktree::Staged;
 
@@ -48,5 +49,31 @@ impl TreeState {
             .filter(|&i| s.entries[i].stage() > 0)
             .map(|i| BString::from(s.path(i)))
             .collect()
+    }
+}
+
+impl NativeRepo<'_> {
+    /// Refuses `action` if any tracked file has staged or unstaged changes, so
+    /// a tree-rewriting operation never clobbers uncommitted work.
+    pub(in crate::native) fn ensure_clean(&self, action: &str) -> Res<()> {
+        let state = self.tree_state(alt_worktree::Untracked::No)?;
+        // a submodule that checked out another commit is not overwritten:
+        // a checkout never touches what is inside it
+        let changed = state.delta.changed.iter().any(|w| w.mode != 0o160000);
+        // nor is the missing directory of one anything it would write over
+        let snapshot = &state.snapshot;
+        let submodule = |path: &BString| {
+            let entry = snapshot.find(path).map(|at| &snapshot.entries[at]);
+            entry.is_some_and(|e| e.mode == 0o160000)
+        };
+        let deleted = state.delta.deleted.iter().any(|path| !submodule(path));
+        if !state.staged.is_empty() || changed || deleted {
+            return Err(crate::machine::Failure::refusal(
+                "precondition_failed",
+                format!("your local changes would be overwritten by {action}; commit them first"),
+            )
+            .into());
+        }
+        Ok(())
     }
 }
