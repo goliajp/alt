@@ -280,6 +280,7 @@ pub(crate) fn listed(status: &str) -> String {
         let advice = [
             "  (",
             "no changes added",
+            "nothing added to commit",
             "Untracked files not listed",
             "You have unmerged",
         ];

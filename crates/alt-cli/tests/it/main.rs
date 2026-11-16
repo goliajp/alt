@@ -9,6 +9,7 @@ mod argument_bindings;
 mod bisect;
 mod blame;
 mod branch_switch;
+mod byte_names;
 mod capability_gate;
 mod charset;
 mod cherry_pick;

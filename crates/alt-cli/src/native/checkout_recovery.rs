@@ -215,9 +215,7 @@ impl NativeRepo<'_> {
             intent.files.iter().map(|c| c.path.as_slice()).collect();
         for change in &intent.files {
             let path = BString::from(change.path.clone());
-            self.ensure_path_allowed(
-                std::str::from_utf8(&path).map_err(|_| "unsupported non-UTF-8 recovery path")?,
-            )?;
+            self.ensure_path_allowed(&path)?;
             for state in [&change.before, &change.after].into_iter().flatten() {
                 if state.mode != 0o160000 {
                     self.read_snapshot(&state.contents)?;
@@ -267,9 +265,7 @@ impl NativeRepo<'_> {
             intent.files.iter().map(|c| c.path.as_slice()).collect();
         for change in &intent.files {
             let path = BString::from(change.path.clone());
-            self.ensure_path_allowed(
-                std::str::from_utf8(&path).map_err(|_| "unsupported non-UTF-8 recovery path")?,
-            )?;
+            self.ensure_path_allowed(&path)?;
             for state in [&change.before, &change.after].into_iter().flatten() {
                 if state.mode != 0o160000 {
                     self.read_snapshot(&state.contents)?;

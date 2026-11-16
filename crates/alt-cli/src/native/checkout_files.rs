@@ -282,13 +282,10 @@ impl NativeRepo<'_> {
         bytes: &BString,
         owned: &dyn Fn(&[u8]) -> bool,
     ) -> Res<bool> {
-        let path = std::str::from_utf8(bytes).map_err(|_| "unsupported non-UTF-8 recovery path")?;
-        if path.is_empty()
-            || path
-                .split('/')
-                .any(|c| c.is_empty() || matches!(c, "." | ".." | ".alt" | ".git"))
-            || Path::new(path).is_absolute()
-        {
+        let path = bytes.as_slice();
+        let no_name = |c: &[u8]| c.is_empty() || matches!(c, b"." | b".." | b".alt" | b".git");
+        // an absolute path begins with a name that is empty
+        if path.is_empty() || path.split(|b| *b == b'/').any(no_name) {
             return Err(crate::machine::Failure::refusal(
                 "precondition_failed",
                 "unsafe recovery path",
@@ -298,13 +295,13 @@ impl NativeRepo<'_> {
         let mut beneath_owned = false;
         // outermost parent first: nothing past a symlink is looked at
         let mut end = 0;
-        while let Some(at) = path[end..].find('/') {
+        while let Some(at) = path[end..].iter().position(|b| *b == b'/') {
             end += at;
             let parent = &path[..end];
             end += 1;
-            match self.root.join(parent).symlink_metadata() {
+            match self.abs(&BString::from(parent))?.symlink_metadata() {
                 Ok(m) if m.is_dir() => {}
-                Ok(_) if owned(parent.as_bytes()) => {
+                Ok(_) if owned(parent) => {
                     beneath_owned = true;
                     break;
                 }

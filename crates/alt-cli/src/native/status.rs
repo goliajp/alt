@@ -50,13 +50,15 @@ impl NativeRepo<'_> {
         }
         // as git shows them: from where the command was run, unless
         // `status.relativePaths` is off
-        let relative = self.settings()?.get_bool("status", None, "relativepaths");
+        let settings = self.settings()?;
+        let relative = settings.get_bool("status", None, "relativepaths");
         let prefix = match relative {
             Some(Ok(false)) => "",
             _ => self.prefix.as_str(),
         };
         writeln!(out, "On branch {short}")?;
-        render_status(out, prefix, &st, &conflicts)
+        let quote = settings.get_bool("core", None, "quotepath").transpose()?;
+        render_status(out, prefix, quote.unwrap_or(true), &st, &conflicts)
     }
 }
 
@@ -65,10 +67,15 @@ impl NativeRepo<'_> {
 fn render_status(
     out: &mut impl Write,
     prefix: &str,
+    quote: bool,
     st: &alt_worktree::Status,
     conflicts: &std::collections::BTreeMap<BString, u8>,
 ) -> Res<()> {
-    let shown = |p: &BString| BString::from(pathspec::shown_from(prefix, p));
+    let shown = |p: &BString| {
+        let mut quoted = Vec::new();
+        let _ = crate::quote::write_path(&mut quoted, &pathspec::shown_from(prefix, p), quote);
+        BString::from(quoted)
+    };
     let mark = |k: ChangeKind| match k {
         ChangeKind::Added => "new file:   ",
         ChangeKind::Modified => "modified:   ",

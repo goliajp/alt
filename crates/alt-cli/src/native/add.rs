@@ -137,7 +137,7 @@ impl NativeRepo<'_> {
         let stays = |e: &&IndexEntry| !gone.contains(e.path.as_slice());
         let present = |e: &&IndexEntry| present(e, delta, named);
         for e in before.entries.iter().filter(present).filter(stays) {
-            self.ensure_path_allowed(e.path.to_str().unwrap_or(""))?;
+            self.ensure_path_allowed(&e.path)?;
         }
         Ok(())
     }
@@ -190,7 +190,7 @@ impl NativeRepo<'_> {
         let unread = ObjectId::hash_object(self.store.algo, ObjectKind::Blob, b"");
         let mut stats = Vec::new();
         for &path in taken {
-            self.ensure_path_allowed(path.to_str().unwrap_or(""))?;
+            self.ensure_path_allowed(path)?;
             // a submodule is recorded by the commit it has checked out,
             // which lives in its own store
             if let Some(w) = moved.get(path.as_slice()) {

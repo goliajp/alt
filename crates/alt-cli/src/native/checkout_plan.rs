@@ -69,10 +69,7 @@ impl NativeRepo<'_> {
         }
         for entry in target.iter().filter(|e| !same.contains(e.path.as_slice())) {
             let beneath_tracked = self.validate_path_among(&entry.path, &tracked)?;
-            self.ensure_path_allowed(
-                std::str::from_utf8(&entry.path)
-                    .map_err(|_| "unsupported non-UTF-8 checkout path")?,
-            )?;
+            self.ensure_path_allowed(&entry.path)?;
             let on_disk = match beneath_tracked {
                 true => None,
                 false => self.abs(&entry.path)?.symlink_metadata().ok(),
@@ -95,10 +92,7 @@ impl NativeRepo<'_> {
             }
         }
         for entry in old.iter().filter(|e| !same.contains(e.path.as_slice())) {
-            self.ensure_path_allowed(
-                std::str::from_utf8(&entry.path)
-                    .map_err(|_| "unsupported non-UTF-8 checkout path")?,
-            )?;
+            self.ensure_path_allowed(&entry.path)?;
         }
         Ok(())
     }

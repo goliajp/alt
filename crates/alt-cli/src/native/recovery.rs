@@ -380,10 +380,7 @@ impl NativeRepo<'_> {
         }
         self.check_guards(&intent.worktree)?;
         for guard in &intent.worktree {
-            self.ensure_path_allowed(
-                std::str::from_utf8(&guard.path)
-                    .map_err(|_| "unsupported non-UTF-8 recovery path")?,
-            )?;
+            self.ensure_path_allowed(&guard.path)?;
         }
         let before = self.read_snapshot(&intent.before)?;
         let after = self.read_snapshot(&intent.after)?;
@@ -465,8 +462,7 @@ impl NativeRepo<'_> {
                 }
                 self.check_guards(&intent.worktree)?;
                 for guard in &intent.worktree {
-                    let path = std::str::from_utf8(&guard.path).map_err(|_| "unsupported non-UTF-8 recovery path")?;
-                    self.ensure_path_allowed(path)?;
+                    self.ensure_path_allowed(&guard.path)?;
                 }
                 let bytes = self.read_snapshot(&intent.before)?;
                 self.read_snapshot(&intent.after)?;
