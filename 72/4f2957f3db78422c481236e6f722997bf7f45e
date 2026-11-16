@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: assert the whole line blame says of a missing path
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/blame.rs
