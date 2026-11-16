@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: refuse to write an index with a path that is a file and a directory
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/index_file.rs
