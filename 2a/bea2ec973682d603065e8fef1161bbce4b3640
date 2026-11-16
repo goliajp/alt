@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: test
+summary: put the tests of the path gate in a module of their own
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/capability_gate.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/path_gate.rs
