@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: hold a path that leaves much behind it to the bound of a search
+author-type: human
+author: doracawl
+touched: crates/alt-regex/tests/it/held.rs
