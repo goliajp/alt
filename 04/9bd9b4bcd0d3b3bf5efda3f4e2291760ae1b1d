@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: refactor
+summary: split the watcher's event handling and directory watching into shorter functions
+author-type: human
+author: doracawl
+touched: crates/alt-worktree/src/untracked.rs
+touched: crates/alt-worktree/src/watch.rs
+touched: crates/alt-worktree/src/watch/dirs.rs
+touched: crates/alt-worktree/src/watch/linux.rs
