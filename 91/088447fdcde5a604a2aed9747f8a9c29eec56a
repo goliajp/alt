@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: match git on a change of type, an empty untracked files mode and add of a repository without a commit
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/add/embedded.rs
+touched: crates/alt-cli/src/native/status.rs
+touched: crates/alt-cli/src/native/tree_state/lists.rs
+touched: crates/alt-cli/tests/it/gitlink.rs
+touched: crates/alt-cli/tests/it/status_untracked.rs
+touched: crates/alt-worktree/src/kind.rs
+touched: crates/alt-worktree/src/lib.rs
