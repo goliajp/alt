@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: say in one place why the blob store rolls its map back first
+author-type: human
+author: doracawl
+touched: crates/alt-store/src/blob.rs
