@@ -139,7 +139,12 @@ fn the_snapshot_scan_reports_what_the_full_scan_does() {
 
     change(root);
     let delta = scan(root, &mut snapshot, &options(true, LATER)).unwrap();
-    assert_eq!(view(&delta), full_scan_view(root, &index));
+    // the scan of every file leaves out a repository of its own, which is
+    // one path here as it is for git
+    let (unstaged, mut untracked) = full_scan_view(root, &index);
+    untracked.push("nested/".into());
+    untracked.sort();
+    assert_eq!(view(&delta), (unstaged, untracked));
     let names = |paths: &[BString]| paths.iter().map(|p| p.to_string()).collect::<Vec<_>>();
     assert_eq!(
         names(&delta.untracked),
@@ -148,6 +153,7 @@ fn the_snapshot_scan_reports_what_the_full_scan_does() {
             "docs/scratch.tmp",
             "fresh/.gitignore",
             "fresh/dir/one.txt",
+            "nested/",
             "new.txt",
             "src/deep"
         ]

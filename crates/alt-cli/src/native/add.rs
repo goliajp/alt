@@ -80,7 +80,10 @@ impl NativeRepo<'_> {
         // only what differs from the index is read: a file with the stat
         // it had when it was staged holds what the index holds
         let mut snapshot = self.worktree_snapshot()?;
-        let (delta, clock) = self.scan_delta_within(&mut snapshot, Untracked::All, &within)?;
+        let (mut delta, clock) = self.scan_delta_within(&mut snapshot, Untracked::All, &within)?;
+        // a repository of its own in the tree is shown as a directory and
+        // left where it is
+        delta.untracked.retain(|path| !path.ends_with(b"/"));
         all_match(&specs, paths, &before, &delta)?;
 
         let plan = plan(&before, &delta, renormalize, &named);

@@ -51,8 +51,9 @@ impl Walk<'_> {
 
     /// Calls `each` with every file beneath a directory the index knows
     /// nothing in, less what the ignore rules hide, until it breaks. A
-    /// directory holding a repository is skipped. The files of a directory
-    /// come before what lies in its subdirectories.
+    /// directory holding a repository is one path ending in `/`, as it is
+    /// for git, and is not looked into. The files of a directory come
+    /// before what lies in its subdirectories.
     fn each_file(
         &self,
         mut fd: DirFd,
@@ -64,7 +65,13 @@ impl Walk<'_> {
         let mut names = fd.names()?;
         names.sort();
         if holds_repository(&names) {
-            return Ok(ControlFlow::Continue(()));
+            if reach != Reach::Inside {
+                return Ok(ControlFlow::Continue(()));
+            }
+            path.push(b'/');
+            let flow = each(path);
+            path.pop();
+            return Ok(flow);
         }
         let own = ignore_file(&fd, &names, path, ignore)?;
         let ignore = own.as_ref().unwrap_or(ignore);

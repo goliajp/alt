@@ -165,3 +165,45 @@ fn add_stages_the_files_of_a_directory_shown_as_one_line() {
     assert!(want.contains(&"u1/later.txt".to_owned()));
     assert!(ok(alt(a, &["status", "--json"])).contains(&json_member(&want)));
 }
+
+/// Repositories of their own in directories the index knows nothing in.
+fn embed(root: &Path) {
+    for repo in ["emb", "outer/inner", "t/emb", "build/emb", "alone/deep/emb"] {
+        std::fs::create_dir_all(root.join(repo)).unwrap();
+        ok(git(&root.join(repo), &["init", "-q", "-b", "main"]));
+        write(root, &format!("{repo}/file.txt"), "its own\n");
+    }
+    ok(git(&root.join("emb"), &["add", "."]));
+    ok(git(&root.join("emb"), &["commit", "-q", "-m", "its own"]));
+    write(root, "outer/file.txt", "beside a repository\n");
+}
+
+#[test]
+fn a_repository_in_an_untracked_directory_shows_as_git_shows_it() {
+    let (a, g) = pair();
+    let (a, g) = (a.path(), g.path());
+    embed(a);
+    embed(g);
+    let modes: [&[&str]; 3] = [&[], &["-uall"], &["-uno"]];
+    for options in modes {
+        let want = git_untracked(g, options);
+        let json = ok(alt(a, &[&["status", "--json"][..], options].concat()));
+        assert!(json.contains(&json_member(&want)), "{options:?}: {json}");
+    }
+    let normal = git_untracked(g, &[]);
+    for shown in ["alone/", "emb/", "outer/", "t/emb/"] {
+        assert!(normal.contains(&shown.to_owned()), "{shown}: {normal:?}");
+    }
+    let all = git_untracked(g, &["-uall"]);
+    for shown in ["alone/deep/emb/", "emb/", "outer/file.txt", "outer/inner/"] {
+        assert!(all.contains(&shown.to_owned()), "{shown}: {all:?}");
+    }
+    // staging everything leaves a repository of its own where it is
+    ok(alt(a, &["add", "."]));
+    let status = ok(alt(a, &["status"]));
+    assert!(status.contains("new file:   outer/file.txt"), "{status}");
+    assert!(!status.contains("new file:   emb"), "{status}");
+    let listed = "Untracked files:\n\talone/\n\temb/\n\touter/inner/\n\tt/emb/\n";
+    assert!(status.ends_with(listed), "{status}");
+    assert!(!alt(a, &["add", "emb"]).status.success());
+}
