@@ -91,10 +91,14 @@ fn index(root: &Path) -> Index {
 }
 
 fn scanned(root: &Path, untracked: Untracked) -> Vec<String> {
+    scanned_within(root, untracked, &[])
+}
+
+fn scanned_within(root: &Path, untracked: Untracked, within: &[&[u8]]) -> Vec<String> {
     let mut snapshot = Snapshot::of_index(&index(root), b"id", ALGO, None);
     let options = ScanOptions {
         untracked,
-        within: &[],
+        within,
         clean: None,
         head: None,
         excludes: &[],
@@ -156,4 +160,27 @@ fn untracked_files_and_directories_are_reported_as_git_reports_them() {
 
     assert_eq!(scanned(root, Untracked::No), Vec::<String>::new());
     assert_eq!(git_untracked(root, "no"), Vec::<String>::new());
+}
+
+#[test]
+fn a_scan_limited_to_a_path_inside_a_repository_of_its_own_finds_the_repository() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let root = dir.path();
+    tree(root);
+    write(root, "emb/.git/HEAD", "ref: refs/heads/main\n");
+    write(root, "emb/deep/file.txt", "the other repository's\n");
+    write(root, "u1/emb/.git", "gitdir: elsewhere\n");
+    write(root, "u1/emb/file.txt", "the other repository's\n");
+    for untracked in [Untracked::Normal, Untracked::All] {
+        let within = |paths: &[&[u8]]| scanned_within(root, untracked, paths);
+        assert_eq!(within(&[b"emb/deep/file.txt"]), ["emb/"]);
+        assert_eq!(within(&[b"emb/deep"]), ["emb/"]);
+        assert_eq!(within(&[b"emb"]), ["emb/"]);
+    }
+    let all = |paths: &[&[u8]]| scanned_within(root, Untracked::All, paths);
+    assert_eq!(all(&[b"u1/emb/file.txt"]), ["u1/emb/"]);
+    assert_eq!(
+        all(&[b"u1/emb/file.txt", b"u1/a.txt"]),
+        ["u1/a.txt", "u1/emb/"]
+    );
 }

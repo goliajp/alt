@@ -177,3 +177,38 @@ fn another_type_of_entry_at_a_path_is_a_change_of_type_as_for_git() {
     ok(alt(a, &["add", "."]));
     assert_eq!(agree(g, a, "staged"), "T  a.txt\nT  sub\n");
 }
+
+#[test]
+fn a_submodule_entry_without_its_directory_stops_no_switch_and_no_merge() {
+    let (g, a) = pair();
+    let (g, a) = (g.path(), a.path());
+    std::fs::create_dir(g.join("sub")).unwrap();
+    // a branch at the same commit, and one a commit further
+    ok(git(g, &["branch", "other"]));
+    ok(alt(a, &["branch", "other"]));
+    ok(git(g, &["switch", "-q", "-c", "third"]));
+    ok(alt(a, &["switch", "-c", "third"]));
+    for root in [g, a] {
+        std::fs::write(root.join("b.txt"), "two\n").unwrap();
+    }
+    ok(git(g, &["add", "b.txt"]));
+    ok(alt(a, &["add", "b.txt"]));
+    ok(git(g, &["commit", "-qm", "third"]));
+    ok(alt(a, &["commit", "-m", "third"]));
+    ok(git(g, &["switch", "-q", "main"]));
+    ok(alt(a, &["switch", "main"]));
+    for root in [g, a] {
+        std::fs::remove_dir(root.join("sub")).unwrap();
+    }
+    // the missing directory is nothing a checkout would write over, and
+    // nothing it makes again where both sides have the entry
+    ok(git(g, &["switch", "-q", "other"]));
+    ok(alt(a, &["switch", "other"]));
+    assert_eq!(agree(g, a, "on a branch that was there"), " D sub\n");
+    ok(git(g, &["merge", "-q", "third"]));
+    ok(alt(a, &["merge", "third"]));
+    assert_eq!(agree(g, a, "merged"), " D sub\n");
+    for root in [g, a] {
+        assert!(root.join("b.txt").is_file() && !root.join("sub").exists());
+    }
+}
