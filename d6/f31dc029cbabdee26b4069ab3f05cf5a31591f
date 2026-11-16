@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: test
+summary: run the alt-os module tests from the harness-free test binary
+author-type: human
+author: doracawl
+touched: crates/alt-os/tests/it/layout.rs
+touched: crates/alt-os/tests/it/main.rs
+touched: crates/alt-os/tests/it/map.rs
+touched: crates/alt-os/tests/it/random.rs
+touched: crates/alt-os/tests/it/sys.rs
+touched: crates/alt-os/tests/it/temp.rs
