@@ -22,7 +22,6 @@ fn entries(directory: &Path) -> Vec<String> {
     names
 }
 
-#[test]
 fn directory_is_removed_with_its_contents_on_drop() {
     let directory = temp::tempdir().unwrap();
     let path = directory.path().to_owned();
@@ -34,7 +33,6 @@ fn directory_is_removed_with_its_contents_on_drop() {
     assert!(!path.exists());
 }
 
-#[test]
 fn directory_names_are_random_and_carry_the_prefix() {
     let parent = temp::tempdir().unwrap();
     let first = temp::tempdir_in(parent.path()).unwrap();
@@ -56,7 +54,6 @@ fn directory_names_are_random_and_carry_the_prefix() {
     assert_eq!(entries(parent.path()).len(), 3);
 }
 
-#[test]
 fn directory_has_the_permissions_of_a_plain_mkdir() {
     let parent = temp::tempdir().unwrap();
     std::fs::create_dir(parent.path().join("plain")).unwrap();
@@ -64,7 +61,6 @@ fn directory_has_the_permissions_of_a_plain_mkdir() {
     assert_eq!(mode(directory.path()), mode(&parent.path().join("plain")));
 }
 
-#[test]
 fn kept_directory_stays_and_closed_directory_goes() {
     let parent = temp::tempdir().unwrap();
     let kept = temp::tempdir_in(parent.path()).unwrap().keep();
@@ -76,7 +72,6 @@ fn kept_directory_stays_and_closed_directory_goes() {
     assert!(kept.is_dir());
 }
 
-#[test]
 fn relative_parent_gives_an_absolute_path() {
     let directory = temp::tempdir_in(".").unwrap();
     assert!(directory.path().is_absolute());
@@ -88,7 +83,6 @@ fn relative_parent_gives_an_absolute_path() {
     assert!(file.path().is_absolute());
 }
 
-#[test]
 fn missing_parent_is_reported_as_not_found() {
     let parent = temp::tempdir().unwrap();
     let missing = parent.path().join("missing");
@@ -106,7 +100,6 @@ fn missing_parent_is_reported_as_not_found() {
     );
 }
 
-#[test]
 fn named_file_is_private_and_removed_on_drop() {
     let parent = temp::tempdir().unwrap();
     let mut file = NamedTempFile::new_in(parent.path()).unwrap();
@@ -126,7 +119,6 @@ fn named_file_is_private_and_removed_on_drop() {
     assert!(default.path().starts_with(std::env::temp_dir()));
 }
 
-#[test]
 fn reopen_sees_writes_and_detects_a_replaced_file() {
     let mut file = NamedTempFile::new().unwrap();
     file.as_file_mut().write_all(b"written first").unwrap();
@@ -145,7 +137,6 @@ fn reopen_sees_writes_and_detects_a_replaced_file() {
     assert_eq!(file.reopen().unwrap_err().kind(), io::ErrorKind::NotFound);
 }
 
-#[test]
 fn persist_renames_and_replaces() {
     let parent = temp::tempdir().unwrap();
     let target = parent.path().join("target");
@@ -162,7 +153,6 @@ fn persist_renames_and_replaces() {
     assert_eq!(std::fs::read(&target).unwrap(), b"newer");
 }
 
-#[test]
 fn persist_noclobber_refuses_an_existing_name_and_returns_the_file() {
     let parent = temp::tempdir().unwrap();
     let target = parent.path().join("target");
@@ -185,7 +175,6 @@ fn persist_noclobber_refuses_an_existing_name_and_returns_the_file() {
     assert_eq!(entries(parent.path()), ["target"]);
 }
 
-#[test]
 fn failed_persist_keeps_the_temporary_file() {
     let parent = temp::tempdir().unwrap();
     let file = NamedTempFile::new_in(parent.path()).unwrap();
@@ -196,7 +185,6 @@ fn failed_persist_keeps_the_temporary_file() {
     assert!(failure.file.path().exists());
 }
 
-#[test]
 fn keep_leaves_the_file_under_its_temporary_name() {
     let parent = temp::tempdir().unwrap();
     let mut file = NamedTempFile::new_in(parent.path()).unwrap();
@@ -206,7 +194,6 @@ fn keep_leaves_the_file_under_its_temporary_name() {
     assert_eq!(path.parent().unwrap(), parent.path());
 }
 
-#[test]
 fn parts_of_a_named_file_have_separate_lifetimes() {
     let parent = temp::tempdir().unwrap();
 
@@ -245,7 +232,6 @@ fn parts_of_a_named_file_have_separate_lifetimes() {
     assert_eq!(entries(parent.path()), ["target"]);
 }
 
-#[test]
 fn unnamed_file_has_no_directory_entry() {
     let parent = temp::tempdir().unwrap();
     let mut file = temp::tempfile_in(parent.path()).unwrap();
@@ -262,3 +248,20 @@ fn unnamed_file_has_no_directory_entry() {
     default.write_all(b"x").unwrap();
     assert_eq!(default.metadata().unwrap().nlink(), 0);
 }
+
+tests![
+    directory_is_removed_with_its_contents_on_drop,
+    directory_names_are_random_and_carry_the_prefix,
+    directory_has_the_permissions_of_a_plain_mkdir,
+    kept_directory_stays_and_closed_directory_goes,
+    relative_parent_gives_an_absolute_path,
+    missing_parent_is_reported_as_not_found,
+    named_file_is_private_and_removed_on_drop,
+    reopen_sees_writes_and_detects_a_replaced_file,
+    persist_renames_and_replaces,
+    persist_noclobber_refuses_an_existing_name_and_returns_the_file,
+    failed_persist_keeps_the_temporary_file,
+    keep_leaves_the_file_under_its_temporary_name,
+    parts_of_a_named_file_have_separate_lifetimes,
+    unnamed_file_has_no_directory_entry,
+];

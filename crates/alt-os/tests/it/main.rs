@@ -4,6 +4,21 @@
 //! print the same message, is never installed here.
 #![no_main]
 
+/// Lists the tests of a module: there is no harness to collect `#[test]`
+/// functions, so `main` calls the ones listed. A test left out of its
+/// module's list is dead code, which the lints refuse.
+macro_rules! tests {
+    ($($(#[$cfg:meta])* $name:ident),* $(,)?) => {
+        pub const TESTS: &[(&str, fn())] = &[$($(#[$cfg])* (stringify!($name), $name)),*];
+    };
+}
+
+mod layout;
+mod map;
+mod random;
+mod sys;
+mod temp;
+
 use std::process::{Command, Stdio};
 
 const CHILD: &str = "ALT_OS_TEST_CHILD";
@@ -89,6 +104,10 @@ fn measure_heap(mode: &str) {
 }
 
 fn child(mode: &str) -> ! {
+    if mode == "setrlimit" {
+        sys::setrlimit_child();
+        std::process::exit(0);
+    }
     #[cfg(target_os = "linux")]
     measure_heap(mode);
     if mode == "bare" {
@@ -170,6 +189,20 @@ pub extern "C" fn main(
 ) -> std::ffi::c_int {
     if let Ok(mode) = std::env::var(CHILD) {
         child(&mode);
+    }
+    let suites = [
+        ("layout", layout::TESTS),
+        ("map", map::TESTS),
+        ("random", random::TESTS),
+        ("sys", sys::TESTS),
+        ("temp", temp::TESTS),
+    ];
+    for (module, tests) in suites {
+        for (name, test) in tests {
+            // a test that fails panics, which ends the process here
+            test();
+            println!("test {module}::{name} ... ok");
+        }
     }
     let (signal, stderr) = run("overflow");
     assert!(

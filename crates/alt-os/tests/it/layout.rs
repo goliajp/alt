@@ -4,7 +4,6 @@
 use alt_os::sys;
 use std::mem::{offset_of, size_of};
 
-#[test]
 fn shared_structures() {
     assert_eq!(size_of::<sys::rlimit>(), 16);
     assert_eq!(offset_of!(sys::rlimit, rlim_max), 8);
@@ -14,7 +13,6 @@ fn shared_structures() {
 }
 
 #[cfg(target_os = "macos")]
-#[test]
 fn macos_structures() {
     assert_eq!(size_of::<sys::stat>(), 144);
     assert_eq!(offset_of!(sys::stat, st_mode), 4);
@@ -30,7 +28,6 @@ fn macos_structures() {
 }
 
 #[cfg(target_os = "linux")]
-#[test]
 fn linux_structures() {
     #[cfg(target_arch = "x86_64")]
     {
@@ -52,3 +49,11 @@ fn linux_structures() {
     assert_eq!(size_of::<sys::dirent>(), 280);
     assert_eq!(offset_of!(sys::dirent, d_name), 19);
 }
+
+tests![
+    shared_structures,
+    #[cfg(target_os = "macos")]
+    macos_structures,
+    #[cfg(target_os = "linux")]
+    linux_structures,
+];

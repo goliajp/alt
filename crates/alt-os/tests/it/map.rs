@@ -1,7 +1,6 @@
 use alt_os::{map::Mmap, temp};
 use std::io::Write;
 
-#[test]
 fn mapping_equals_reading() {
     let mut file = temp::NamedTempFile::new().unwrap();
     let content: Vec<u8> = (0..200_003u32).map(|i| (i * 31 % 251) as u8).collect();
@@ -13,7 +12,6 @@ fn mapping_equals_reading() {
     assert_eq!(&map[..], &std::fs::read(file.path()).unwrap()[..]);
 }
 
-#[test]
 fn empty_file_maps_to_an_empty_slice() {
     let file = temp::tempfile().unwrap();
     // SAFETY: nothing else writes the file
@@ -22,7 +20,6 @@ fn empty_file_maps_to_an_empty_slice() {
     assert_eq!(&map[..], b"");
 }
 
-#[test]
 fn mapping_outlives_the_file_and_crosses_threads() {
     let mut file = temp::tempfile().unwrap();
     file.write_all(b"still here").unwrap();
@@ -37,10 +34,16 @@ fn mapping_outlives_the_file_and_crosses_threads() {
     assert_eq!(&map[..], b"still here");
 }
 
-#[test]
 fn directory_cannot_be_mapped() {
     let directory = temp::tempdir().unwrap();
     let file = std::fs::File::open(directory.path()).unwrap();
     // SAFETY: the call is expected to fail without creating a mapping
     assert!(unsafe { Mmap::map(&file) }.is_err());
 }
+
+tests![
+    mapping_equals_reading,
+    empty_file_maps_to_an_empty_slice,
+    mapping_outlives_the_file_and_crosses_threads,
+    directory_cannot_be_mapped,
+];
