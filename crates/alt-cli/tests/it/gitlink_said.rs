@@ -137,6 +137,8 @@ fn add_warns_of_an_embedded_repository_where_git_does() {
     let head = |said: &str| said.lines().take(4).map(str::to_owned).collect::<Vec<_>>();
     assert_eq!(head(&ours), head(&theirs));
     assert!(ours.contains("hint: \talt undo\n"), "{ours}");
+    // which takes back more than the one path
+    assert!(ours.contains("takes back every path it staged"), "{ours}");
     assert!(
         !ours.contains("git submodule") && !ours.contains("git rm"),
         "{ours}"
