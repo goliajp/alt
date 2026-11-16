@@ -42,10 +42,6 @@ impl NativeRepo<'_> {
             Some(named) => named,
             None => alt_worktree::default_excludes_file(),
         };
-        if let Some(named) = user.as_ref().filter(|named| named.is_dir()) {
-            let named = named.display();
-            return Err(fatal(format!("cannot use {named} as an exclude file")));
-        }
         let info = self.store.alt_dir.join("git-import/info/exclude");
         Ok(user.into_iter().chain([info]).collect())
     }

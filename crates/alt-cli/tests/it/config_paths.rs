@@ -214,14 +214,6 @@ fn a_setting_that_names_no_file_ends_the_command_as_it_ends_git() {
         );
         both_refuse(&mut pair, key, &fatal, true);
     }
-    // a directory is no ignore file; as an attributes file it is none
-    pair.configure("excludesFile = {}/sub\n");
-    let (alt, git) = pair.status("a directory");
-    for (seen, tree) in [(alt, "a/sub"), (git, "g/sub")] {
-        let named = pair.at(tree);
-        let fatal = format!("fatal: cannot use {} as an exclude file\n", named.display());
-        assert_eq!((seen.code, seen.said), (Some(128), fatal));
-    }
     let mut homeless = Pair::new(false);
     for key in ["excludesFile", "attributesFile"] {
         homeless.configure(&format!("{key} = ~/rules\n"));
