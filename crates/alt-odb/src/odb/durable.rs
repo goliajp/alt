@@ -214,9 +214,11 @@ impl Odb {
                 ..*state
             })
         })?;
-        self.blobs.rewind(ckpt.blobs)?;
-        self.tier1_mut()?.rewind(ckpt.tier1_len)?;
+        // what names content is cut before the content it names: whichever
+        // step a crash interrupts, no record is left naming what was cut
         self.map.rewind(ckpt.map_len)?;
+        self.tier1_mut()?.rewind(ckpt.tier1_len)?;
+        self.blobs.rewind(ckpt.blobs)?;
         // each cut was fsynced: the files are synced to exactly these lengths
         synced::update(&self.durable_path, |marker| {
             Some(match marker.recorded() {

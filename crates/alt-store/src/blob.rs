@@ -390,19 +390,22 @@ impl BlobStore {
         })
     }
 
-    /// Drops every chunk + blobmap record appended after `ckpt` was taken.
-    /// Chunks first (they're referenced by the blobmap records) — the inverse
-    /// of the flush order. Each layer truncates + fsyncs internally so the
-    /// rollback is durable; the caller (the odb rewind) is responsible for
-    /// re-writing the odb durable marker afterwards.
+    /// Whether [`Self::rewind`] to `ckpt` can go ahead, changing nothing.
     pub fn check_rewind(&self, ckpt: StoreCheckpoint) -> Result<(), StoreError> {
         self.chunks.check_rewind(ckpt.chunks)?;
         self.map()?.check_rewind(ckpt.blobmap_len)
     }
 
+    /// Drops every chunk + blobmap record appended after `ckpt` was taken.
+    /// Each layer truncates + fsyncs internally so the rollback is durable;
+    /// the caller (the odb rewind) is responsible for re-writing the odb
+    /// durable marker afterwards.
     pub fn rewind(&mut self, ckpt: StoreCheckpoint) -> Result<(), StoreError> {
-        self.chunks.rewind(ckpt.chunks)?;
+        // the inverse of the flush order, the map first: a crash between
+        // the two leaves chunks no record names, never a record naming
+        // chunks that are gone
         self.map_mut()?.rewind(ckpt.blobmap_len)?;
+        self.chunks.rewind(ckpt.chunks)?;
         Ok(())
     }
 

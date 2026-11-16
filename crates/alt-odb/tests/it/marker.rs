@@ -57,3 +57,26 @@ pub fn distrust(alt_dir: &Path) {
     data[at + 88..at + 96].copy_from_slice(&sum.as_bytes()[..8]);
     fs::write(&path, data).unwrap();
 }
+
+/// Replaces what the marker says with `change` applied to it, as the next
+/// write of the store would: with the next serial.
+pub fn rewrite(alt_dir: &Path, change: impl FnOnce(&mut Recorded)) {
+    let path = alt_dir.join("odb.durable");
+    let mut data = fs::read(&path).unwrap();
+    let mut state = recorded(alt_dir);
+    let at = [32, 128]
+        .into_iter()
+        .find(|at| slot(&data[*at..*at + 96]).is_some_and(|slot| slot.serial == state.serial))
+        .unwrap();
+    change(&mut state);
+    let body = &mut data[at..at + 96];
+    body[..8].copy_from_slice(&(state.serial + 1).to_le_bytes());
+    body[8..16].copy_from_slice(&state.generation.to_le_bytes());
+    body[16..20].copy_from_slice(&state.flags.to_le_bytes());
+    for (n, len) in state.eof.iter().chain(&state.whole).enumerate() {
+        body[24 + 8 * n..32 + 8 * n].copy_from_slice(&len.to_le_bytes());
+    }
+    let sum = alt_hash::blake3::hash(&body[..88]);
+    body[88..].copy_from_slice(&sum.as_bytes()[..8]);
+    fs::write(&path, data).unwrap();
+}
