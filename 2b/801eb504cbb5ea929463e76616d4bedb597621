@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: stop watching a tree whose root cannot be watched or was replaced
+author-type: human
+author: doracawl
+touched: crates/alt-worktree/src/watch/linux.rs
+touched: crates/alt-worktree/tests/it/watch.rs
