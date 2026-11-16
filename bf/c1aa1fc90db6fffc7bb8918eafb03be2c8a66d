@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: try a first branch of nothing behind the second, as the c library does
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/lib.rs
+touched: crates/alt-regex/src/syntax.rs
+touched: crates/alt-regex/tests/it/regcomp.rs
+touched: crates/alt-regex/tests/it/regcomp/random.rs
