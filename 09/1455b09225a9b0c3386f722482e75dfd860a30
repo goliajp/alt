@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: refresh the refs before the object store in a held handle
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/store_refresh.rs
+touched: crates/alt-repo/src/lib.rs
+touched: crates/alt-repo/tests/it/main.rs
+touched: crates/alt-repo/tests/it/refresh_order.rs
