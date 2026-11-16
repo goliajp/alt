@@ -77,25 +77,6 @@ impl NativeRepo<'_> {
         self.converter_over(Tree::Stored(layers.collect()))
     }
 
-    /// The attribute files outside the working tree: the user's, which
-    /// `core.attributesFile` names, and the repository's own.
-    pub(super) fn attribute_files(
-        &self,
-        settings: &alt_git_config::Config,
-    ) -> Res<(Option<PathBuf>, PathBuf)> {
-        let home = std::env::var_os("HOME").map(PathBuf::from);
-        let global = match settings.get_str("core", None, "attributesfile") {
-            Some(path) => Some(expand_home(path, home.as_deref())?),
-            None => std::env::var_os("XDG_CONFIG_HOME")
-                .filter(|v| !v.is_empty())
-                .map(PathBuf::from)
-                .or_else(|| home.as_ref().map(|h| h.join(".config")))
-                .map(|config| config.join("git").join("attributes")),
-        };
-        let info = self.store.alt_dir.join("git-import/info/attributes");
-        Ok((global, info))
-    }
-
     fn converter_over(&self, tree: Tree) -> Res<Converter> {
         let settings = self.settings()?;
         let text = |key: &str| settings.get_str("core", None, key).map(|v| v.to_vec());
@@ -189,15 +170,6 @@ impl NativeRepo<'_> {
             },
         )
     }
-}
-
-/// A path from the configuration, `~/` standing for the home directory.
-pub(super) fn expand_home(path: &[u8], home: Option<&Path>) -> Res<PathBuf> {
-    let path = std::str::from_utf8(path).map_err(|_| "a configured path is not UTF-8")?;
-    Ok(match (path.strip_prefix("~/"), home) {
-        (Some(rest), Some(home)) => home.join(rest),
-        _ => PathBuf::from(path),
-    })
 }
 
 /// The content of a regular file; `None` when there is no such file. A

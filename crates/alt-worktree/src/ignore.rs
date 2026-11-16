@@ -78,11 +78,14 @@ impl IgnoreStack {
     /// the working tree and a later one above an earlier; every
     /// `.gitignore` takes precedence over them all.
     pub(crate) fn of_files(files: &[&std::path::Path]) -> std::io::Result<Self> {
+        use std::io::ErrorKind::{NotADirectory, NotFound};
+        let absent = |e: &std::io::Error| matches!(e.kind(), NotFound | NotADirectory);
         let mut stack = Self::new();
         for path in files {
             match std::fs::read(path) {
                 Ok(bytes) => stack.push(parse_layer(&bytes, b"")),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                // beneath a file that is no directory there is none either
+                Err(e) if absent(&e) => {}
                 Err(e) => return Err(e),
             }
         }

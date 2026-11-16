@@ -17,6 +17,8 @@ mod clone;
 mod commit_loop;
 mod commit_meta;
 mod config;
+#[cfg(target_os = "linux")]
+mod config_paths;
 mod credential_helper;
 mod daemon_client;
 mod daemon_server;
