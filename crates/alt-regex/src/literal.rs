@@ -21,6 +21,27 @@ pub fn alone(node: &Node) -> bool {
     }
 }
 
+/// Whether every match of `node` begins with the bytes `fixed`, as
+/// far as the pattern says so in as many words: `fixed` is the run of
+/// fixed bytes it begins with.
+pub fn leads(node: &Node, fixed: &[u8]) -> bool {
+    let mut run = Vec::new();
+    lead(node, &mut run);
+    run == fixed
+}
+
+/// Adds the fixed bytes `node` begins with to `run`; false when
+/// something else may come behind them.
+fn lead(node: &Node, run: &mut Vec<u8>) -> bool {
+    match node {
+        Node::Set(set) => set.single().map(|b| run.push(b)).is_some(),
+        Node::Empty => true,
+        Node::Group(inner, _) => lead(inner, run),
+        Node::Concat(items) => items.iter().all(|item| lead(item, run)),
+        _ => false,
+    }
+}
+
 fn close(run: &mut Vec<u8>, best: &mut Vec<u8>) {
     if run.len() > best.len() {
         std::mem::swap(run, best);
@@ -68,6 +89,16 @@ mod tests {
             let found = required(&node);
             assert_eq!(found.as_deref(), literal.map(str::as_bytes), "{pat}");
             assert!(!alone(&node), "{pat}");
+        }
+        for (pat, fixed, led) in [
+            ("foo(bar)baz+", "foobarba", true),
+            ("abc(d|e)", "abc", true),
+            ("ab(cd|ef)ghi", "ghi", false),
+            ("x*abc", "abc", false),
+            ("(ab)+c", "ab", false),
+        ] {
+            let (node, _) = parse(pat.as_bytes(), Options::default()).unwrap();
+            assert_eq!(leads(&node, fixed.as_bytes()), led, "{pat}");
         }
         for pat in ["a", "static int", "a\\.b"] {
             let (node, _) = parse(pat.as_bytes(), Options::default()).unwrap();

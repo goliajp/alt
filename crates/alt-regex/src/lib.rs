@@ -174,6 +174,10 @@ use std::sync::Mutex;
 
 use captures::FEW;
 
+/// A program that waits at more instructions than this is a long one:
+/// its paths are not stepped from every start of a text at once.
+const LONG: u32 = 4096;
+
 pub use captures::Captures;
 pub use class::ByteSet;
 pub use error::Error;
@@ -231,6 +235,17 @@ pub struct Regex {
     /// The pattern is those bytes and nothing else, and where they lie
     /// in a text is where it matches.
     alone: bool,
+    /// The pattern begins with those bytes and is one for the tables:
+    /// a match begins where they lie.
+    led: bool,
+    /// The tables that step from every start at once tell where a
+    /// match lies,
+    scanned: bool,
+    /// and by themselves whether a text has one.
+    tables: bool,
+    /// The program is one for the tables but too long to step from
+    /// every start at once: the starts are tried in turn.
+    long: bool,
     /// The first capture slots of the match in the empty text, if it has
     /// one.
     on_empty: Option<[usize; FEW]>,
@@ -251,12 +266,20 @@ impl Regex {
         let literal = literal::required(&node).filter(|_| !prog.anchored);
         // a byte that goes on a character is not found inside one
         let alone = literal::alone(&node) && !prog.apart && !shape.strays;
+        let tabled = prog.plain_looks && !prog.backrefs && !alone;
+        let fixed = literal.as_deref().filter(|_| tabled);
+        let led = fixed.is_some_and(|fixed| literal::leads(&node, fixed));
+        let long = tabled && !prog.anchored && prog.row_count > LONG;
         drop(node);
         Ok(Regex {
             on_empty: search::on_empty(&prog),
+            scanned: prog.plain_looks && !long,
+            tables: prog.plain_looks && !long && !led,
+            long,
             prog,
             literal,
             alone,
+            led,
             cache: Mutex::default(),
         })
     }
@@ -340,6 +363,61 @@ mod tests {
             ..Options::default()
         };
         assert!(!Regex::with_options(b"ab", any_case).unwrap().alone);
+    }
+
+    #[test]
+    fn a_pattern_that_begins_with_fixed_bytes_matches_where_they_lie() {
+        for (pattern, led) in [
+            ("abc(d|e)", true),
+            ("aab?c", true),
+            ("(ab)c*", true),
+            ("ab", false),
+            ("x*abc", false),
+            ("^abc?", false),
+            ("ab(cd|ef)ghi", false),
+            ("abc\\b.", false),
+            ("(abc)x*\\1", false),
+        ] {
+            assert_eq!(
+                Regex::new(pattern.as_bytes()).unwrap().led,
+                led,
+                "{pattern}"
+            );
+        }
+        let both = Some(vec![Some(4..8), Some(7..8)]);
+        assert_eq!(spans("abc(d|e)", "xabcabce"), both);
+        assert_eq!(spans("abc(d|e)", "xabcabc"), None);
+        assert_eq!(spans("abc(d|e)", ""), None);
+        // the bytes lie across one another
+        assert_eq!(spans("aab?c", "aaac"), Some(vec![Some(1..4)]));
+        assert_eq!(spans("aa(a*)", "baaaa"), Some(vec![Some(1..5), Some(3..5)]));
+        let long = "a".repeat(3_000);
+        let pattern = format!("{long}b?");
+        let text = format!("{}{long}b", "ab".repeat(1_500));
+        assert_eq!(spans(&pattern, &text), Some(vec![Some(3_000..6_001)]));
+        let utf8 = Options {
+            utf8: true,
+            ..Options::default()
+        };
+        let re = Regex::with_options("é.".as_bytes(), utf8).unwrap();
+        assert_eq!(re.find("éé".as_bytes()), Some(0..4));
+        // a long pattern that begins with no fixed bytes is tried from
+        // each start in turn
+        let any_case = Options {
+            ignore_case: true,
+            ..utf8
+        };
+        let re = Regex::with_options("é".repeat(3_000).as_bytes(), any_case).unwrap();
+        assert!(re.long && !re.scanned && !re.tables && !re.led);
+        let text = format!("xé{}", "É".repeat(3_000));
+        assert_eq!(re.find(text.as_bytes()), Some(1..6_001));
+        assert!(re.is_match(text.as_bytes()) && !re.is_match(&text.as_bytes()[..6_000]));
+        assert_eq!(re.find(&text.as_bytes()[5..]), None);
+        let short = Regex::new(b"[ab]*c").unwrap();
+        assert!(short.tables && short.scanned && !short.long);
+        // one that begins at the start of the text is tried there anyway
+        let tied = Regex::with_options(format!("^{}", "é".repeat(3_000)).as_bytes(), any_case);
+        assert!(tied.is_ok_and(|tied| tied.scanned && !tied.long));
     }
 
     #[test]

@@ -32,10 +32,43 @@ impl Regex {
         if self.prog.backrefs {
             return backref::search(&self.prog, text, None, &mut [pike::UNSET; 2]);
         }
-        if self.prog.plain_looks {
+        if self.tables {
             return Some(dfa::earliest_end(&self.prog, &mut cache.scan, text).is_some());
         }
+        if self.prog.plain_looks {
+            return self.search(cache, text, &mut [pike::UNSET; 2]);
+        }
         stepped(&self.prog, cache, text, None, &mut [pike::UNSET; 2])
+    }
+
+    /// The match of a pattern that begins with its fixed bytes, the
+    /// first of which lie at `first`: it begins where such bytes lie,
+    /// and the tables tell from there where it ends. `None` where
+    /// trying those places costs more than a search of the whole text.
+    fn begun(
+        &self,
+        cache: &mut Cache,
+        text: &[u8],
+        first: usize,
+    ) -> Option<Option<(usize, usize)>> {
+        let fixed = self.literal.as_ref().expect("the bytes it begins with");
+        let mut work = 8 * text.len() + 64;
+        let mut from = first;
+        loop {
+            if !(self.prog.apart && crate::chars::inside(text, from)) {
+                let end = dfa::longest(&self.prog, &mut cache.fixed, text, from, &mut work);
+                if let Some(end) = end {
+                    return Some(Some((from, end)));
+                }
+                if work == 0 {
+                    return None;
+                }
+            }
+            match text[from + 1..].find(fixed) {
+                Some(next) => from += 1 + next,
+                None => return Some(None),
+            }
+        }
     }
 
     /// Where the earliest match begins and where the longest one from
@@ -97,11 +130,20 @@ impl Regex {
             slots[..2].copy_from_slice(&[at, at + fixed.len()]);
             return Some(true);
         }
-        if self.excluded(text) {
-            return Some(false);
+        if let Some(fixed) = &self.literal {
+            let Some(first) = text.find(fixed) else {
+                return Some(false);
+            };
+            if self.led {
+                match self.begun(cache, text, first) {
+                    Some(None) => return Some(false),
+                    Some(Some(span)) => return self.between(cache, text, span, slots),
+                    None => {}
+                }
+            }
         }
         let mut from = None;
-        if self.prog.plain_looks {
+        if self.scanned {
             // most texts match nothing, which the tables tell fastest;
             // and where a match lies, which leaves only its groups
             let Some((begins, ends)) = self.locate(cache, text) else {
@@ -115,8 +157,50 @@ impl Regex {
                 return grouped(&self.prog, cache, text, begins, ends, slots);
             }
             from = begins;
+        } else if self.long {
+            return self.in_turn(cache, text, slots);
         }
         stepped(&self.prog, cache, text, from, slots)
+    }
+
+    /// Fills `slots` with the groups of the match that lies at `span`.
+    fn between(
+        &self,
+        cache: &mut Cache,
+        text: &[u8],
+        (begins, ends): (usize, usize),
+        slots: &mut [usize],
+    ) -> Option<bool> {
+        if slots.len() == 2 {
+            slots.copy_from_slice(&[begins, ends]);
+            return Some(true);
+        }
+        grouped(&self.prog, cache, text, begins, ends, slots)
+    }
+
+    /// The search of a program so long that stepping its paths from
+    /// every start at once costs more than trying the starts in turn,
+    /// as long as that costs no more than the text is long.
+    #[cold]
+    fn in_turn(&self, cache: &mut Cache, text: &[u8], slots: &mut [usize]) -> Option<bool> {
+        let mut work = 8 * text.len() + 64;
+        for from in 0..=text.len() {
+            let end = dfa::longest(&self.prog, &mut cache.fixed, text, from, &mut work);
+            if let Some(end) = end {
+                return self.between(cache, text, (from, end), slots);
+            }
+            if work == 0 {
+                break;
+            }
+        }
+        if work > 0 {
+            return Some(false);
+        }
+        match self.locate(cache, text) {
+            None => Some(false),
+            Some((Some(begins), Some(ends))) => self.between(cache, text, (begins, ends), slots),
+            Some((from, _)) => stepped(&self.prog, cache, text, from, slots),
+        }
     }
 }
 
