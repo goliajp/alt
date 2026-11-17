@@ -35,6 +35,15 @@ impl Regex {
         if self.tables {
             return Some(dfa::earliest_end(&self.prog, &mut cache.scan, text).is_some());
         }
+        self.sought(cache, text)
+    }
+
+    /// Whether there is a match, of a pattern the tables that step from
+    /// every start at once do not answer for: few are such, and what
+    /// they need is kept out of the steps of the others.
+    #[cold]
+    #[inline(never)]
+    fn sought(&self, cache: &mut Cache, text: &[u8]) -> Option<bool> {
         if self.prog.plain_looks {
             return self.search(cache, text, &mut [pike::UNSET; 2]);
         }
