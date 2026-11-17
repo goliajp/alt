@@ -42,7 +42,7 @@ pub mod notes;
 mod object_format;
 use merge::Resolved;
 mod reading;
-pub use reading::{only_reads, open_for_command, view_for};
+pub use reading::{leave_to_exit, only_reads, open_for_command, view_for};
 mod rebase;
 mod recovery;
 mod requests;

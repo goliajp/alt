@@ -236,3 +236,23 @@ fn a_torn_tail_after_an_anchor_is_passed_over_and_cut_off_by_the_next_append() {
     assert_eq!(fs::metadata(&path).unwrap().len(), end);
     assert_eq!(OpLog::open(dir.path()).unwrap().len(), 6);
 }
+
+#[test]
+fn a_handle_says_whether_it_appended_and_one_opened_to_read_cannot() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let mut log = OpLog::open(dir.path()).unwrap();
+    assert!(!log.appended());
+    log.append("alice", 1, b"first").unwrap();
+    assert!(log.appended());
+    // a drop syncs the log once more whatever was synced before it
+    log.sync().unwrap();
+    assert!(log.appended());
+    drop(log);
+
+    let bytes = fs::read(log_path(dir.path())).unwrap();
+    assert!(!OpLog::open(dir.path()).unwrap().appended());
+    let mut read = OpLog::open_read_only(dir.path(), None).unwrap();
+    assert!(read.append("bob", 2, b"second").is_err());
+    assert!(!read.appended());
+    assert_eq!(fs::read(log_path(dir.path())).unwrap(), bytes);
+}

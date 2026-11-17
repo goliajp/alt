@@ -222,3 +222,29 @@ fn a_store_whose_fsyncs_are_deferred_is_told_of_the_cut_and_follows_it_on_refres
         .unwrap();
     assert_eq!(RefStore::open(dir.path()).unwrap().check().unwrap().ops, 3);
 }
+
+#[test]
+fn a_store_says_whether_it_appended_and_one_opened_to_read_cannot() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let mut store = RefStore::open(dir.path()).unwrap();
+    assert!(!store.appended());
+    point(&mut store, "refs/heads/main", 1);
+    assert!(store.appended());
+    drop(store);
+
+    let before = tree(dir.path());
+    let change = || RefChange {
+        old: None,
+        new: Some(RefTarget::Oid(oid(2))),
+        name: "refs/heads/dev".to_owned(),
+    };
+    for mut read in [
+        RefStore::open_read_only(dir.path()).unwrap(),
+        RefStore::open_reading(dir.path()).unwrap(),
+    ] {
+        assert!(read.commit("a", 2, &[change()]).is_err());
+        assert!(!read.appended());
+        assert_eq!(read.get("refs/heads/dev"), None);
+    }
+    assert_eq!(tree(dir.path()), before);
+}

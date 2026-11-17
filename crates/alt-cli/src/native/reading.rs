@@ -43,7 +43,27 @@ pub fn open_for_command(
     Ok((store, view_for(repo, command)))
 }
 
+/// Leaves what a command that only read holds for the exit of the process
+/// to take down, which follows as soon as the answer is written: closing
+/// the files, unmapping and freeing one by one is work the exit does at
+/// once. Not for a handle that appended to a log, which syncs it when
+/// dropped, or that holds a lock a drop releases: a [`Repository`] has no
+/// way to append, an [`Execution`](crate::execution::Execution) of a
+/// command that does not write holds no file, and a [`Store`] is asked
+/// ([`Store::only_read`]).
+pub fn leave_to_exit<T>(held: T) {
+    std::mem::forget(held);
+}
+
 impl Store {
+    /// Whether a drop of this store does no more than the exit of the
+    /// process: its object store was opened to be read, so that nothing
+    /// was appended to it and no lock of it is held, and its ref store
+    /// appended no operation.
+    pub fn only_read(&self) -> bool {
+        self.odb.is_read_only() && !self.refs.appended()
+    }
+
     fn opened(alt_dir: PathBuf, odb: NativeOdb, refs: RefStore) -> Res<Self> {
         Ok(Self {
             odb,

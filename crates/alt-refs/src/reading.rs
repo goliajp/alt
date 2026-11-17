@@ -24,6 +24,12 @@ impl RefStore {
         Self::open_as(alt_dir.into(), true, !alt_oplog::reading_past_damage())
     }
 
+    /// Whether this store appended to its log: a drop of it then syncs
+    /// the log once more.
+    pub fn appended(&self) -> bool {
+        self.oplog.appended()
+    }
+
     /// [`Self::refresh`] for a store held across commands, before one that
     /// only reads: the ops other writers committed are folded in under the
     /// log's shared lock and nothing is written. An append that never
