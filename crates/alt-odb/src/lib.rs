@@ -76,7 +76,7 @@ pub struct NativeOdb {
     /// whether the store's less used files wait for their own first use
     late: bool,
     defer: bool,
-    read_only: bool,
+    access: odb::Access,
     /// outlives the opened store: the sink made from one keeps recording
     /// for the next
     deferred: synced::Deferred,
@@ -110,28 +110,13 @@ impl NativeOdb {
             odb: OnceLock::new(),
             late: true,
             defer: false,
-            read_only: false,
+            access: odb::Access::Write,
             deferred: synced::Deferred::default(),
         }
     }
 
-    /// Names the database to be read and nothing else, for a check that
-    /// must leave it as it finds it: opening creates, repairs and indexes
-    /// nothing, and a write through this handle fails.
-    pub fn read_only(alt_dir: impl Into<PathBuf>) -> Self {
-        Self {
-            read_only: true,
-            ..Self::deferred(alt_dir)
-        }
-    }
-
     fn start(&self) -> Result<Odb, OdbError> {
-        let mode = odb::Mode {
-            late: self.late,
-            // a process that reads past damage changes no file
-            read_only: self.read_only || alt_store::reading_past_damage(),
-            deferred: self.deferred.clone(),
-        };
+        let mode = self.access.mode(self.late, self.deferred.clone());
         let mut odb = Odb::open_with(&self.alt_dir, self.opts, mode)?;
         odb.set_defer_durability(self.defer);
         Ok(odb)

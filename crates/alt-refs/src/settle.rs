@@ -116,6 +116,12 @@ impl RefStore {
     pub(crate) fn rebuild(&mut self) -> Result<(), RefError> {
         // it may tell of ops that are gone; it is a cache
         let _ = std::fs::remove_file(&self.snapshot_path);
+        self.rederive()
+    }
+
+    /// The same with the snapshot left where it is: an open finds out by
+    /// itself that it tells of ops which are gone.
+    pub(crate) fn rederive(&mut self) -> Result<(), RefError> {
         self.refs = Refs::default();
         self.applied = 0;
         self.by_key.clear();

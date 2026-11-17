@@ -13,18 +13,18 @@ use std::process::Output;
 
 use super::unconfirmed::{alt, alt_command, files, ok, stderr};
 
-const LOGS: [&str; 5] = [
+pub(super) const LOGS: [&str; 5] = [
     "store/pack-00000001.altpack",
     "store/manifests/blobmap",
     "tier1",
     "map.alt",
     "oplog/log",
 ];
-const MARKERS: [&str; 2] = ["odb.durable", "oplog/durable"];
+pub(super) const MARKERS: [&str; 2] = ["odb.durable", "oplog/durable"];
 
 /// Bytes that neither compress nor repeat, `seed` telling one run from
 /// another.
-fn noise(seed: u64, len: usize) -> Vec<u8> {
+pub(super) fn noise(seed: u64, len: usize) -> Vec<u8> {
     let mut word = 0x9e37_79b9_7f4a_7c15u64 ^ seed;
     (0..len)
         .map(|_| {
@@ -37,7 +37,7 @@ fn noise(seed: u64, len: usize) -> Vec<u8> {
 }
 
 /// An archive of one stored entry, which the store keeps as parts.
-fn archive(body: &[u8]) -> Vec<u8> {
+pub(super) fn archive(body: &[u8]) -> Vec<u8> {
     let (name, size) = (b"part.bin", body.len() as u32);
     let mut out = b"PK\x03\x04".to_vec();
     out.extend_from_slice(&[20, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
@@ -66,7 +66,7 @@ fn archive(body: &[u8]) -> Vec<u8> {
     out
 }
 
-fn lens(dir: &Path) -> [u64; 5] {
+pub(super) fn lens(dir: &Path) -> [u64; 5] {
     LOGS.map(|log| fs::metadata(dir.join(".alt").join(log)).unwrap().len())
 }
 
@@ -102,7 +102,7 @@ fn repo(dir: &Path) -> ([u64; 5], [Vec<u8>; 2]) {
 }
 
 /// Puts the markers back to what they recorded after the first commit.
-fn lag(dir: &Path, markers: &[Vec<u8>; 2]) {
+pub(super) fn lag(dir: &Path, markers: &[Vec<u8>; 2]) {
     for (marker, saved) in MARKERS.iter().zip(markers) {
         fs::write(dir.join(".alt").join(marker), saved).unwrap();
     }
@@ -115,7 +115,7 @@ fn lag(dir: &Path, markers: &[Vec<u8>; 2]) {
 }
 
 /// Changes a byte of the record that begins at `at` of log `n`.
-fn damage(dir: &Path, n: usize, at: u64) {
+pub(super) fn damage(dir: &Path, n: usize, at: u64) {
     // past a pack record's header, into what it holds
     let within = [41, 10, 10, 10, 14][n];
     let file = fs::OpenOptions::new()

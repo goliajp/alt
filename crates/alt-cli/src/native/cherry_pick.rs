@@ -11,7 +11,7 @@ impl NativeRepo<'_> {
     /// 3-way merge stops in conflict (caller maps to exit code 1).
     pub fn cherry_pick(&mut self, rev: &str, json: bool, out: &mut impl Write) -> Res<bool> {
         self.ensure_topic_branch_or_unborn("cherry-pick")?;
-        let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
+        let repo = self.store.git_view()?;
         let target_oid = repo
             .rev_parse(rev)?
             .ok_or_else(|| format!("bad revision '{rev}'"))?;

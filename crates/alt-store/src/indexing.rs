@@ -93,24 +93,38 @@ impl ChunkStore {
     /// once there are enough of them. Run under the odb write lock, after
     /// `sync_from_disk`, so every record on disk is known here.
     pub fn index_tail(&mut self) -> Result<(), StoreError> {
-        if self.index_from_tail()? {
+        if self.index_from_tail(u64::MAX)? {
             return Ok(());
         }
         // the runs on disk stop short of where this handle's tail begins
         // (their directory was removed while it was open): read the packs
         // again from where they stop now, then index
         self.reload_whole()?;
-        self.index_from_tail().map(drop)
+        self.index_from_tail(u64::MAX).map(drop)
     }
 
-    fn index_from_tail(&mut self) -> Result<bool, StoreError> {
-        let Some(end) = self.index.pending() else {
+    /// The same for the records before byte `upto` of the active pack and
+    /// no others, for a store read under the write lock by an opener that
+    /// is not to sync it: the records a run names were synced.
+    pub fn index_synced(&mut self, upto: u64) -> Result<(), StoreError> {
+        let (seq, _) = self.checkpoint().pack();
+        let upto = Location { seq, offset: upto };
+        self.index_from_tail(upto.position()).map(drop)
+    }
+
+    fn index_from_tail(&mut self, upto: u64) -> Result<bool, StoreError> {
+        let Some(end) = self.index.pending(upto) else {
             return Ok(true);
         };
         let dir = &self.dir;
-        let guard =
-            packs::guard_at(dir, end).ok_or(StoreError::Format("pack shorter than its index"))?;
+        let guard = match packs::guard_at(dir, end) {
+            Some(guard) => guard,
+            // no run ends where a pack begins: the synced records stop there
+            None if upto != u64::MAX => return Ok(true),
+            None => return Err(StoreError::Format("pack shorter than its index")),
+        };
         self.index.index_tail(
+            end,
             guard,
             |loc| packs::guard_at(dir, loc),
             !relaxed_durability(),
@@ -148,6 +162,6 @@ impl ChunkStore {
     /// Whether enough records sit past the index runs for
     /// [`Self::index_tail`] to act.
     pub fn index_pending(&self) -> bool {
-        self.index.pending().is_some()
+        self.index.pending(u64::MAX).is_some()
     }
 }

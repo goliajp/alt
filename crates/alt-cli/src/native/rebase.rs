@@ -48,7 +48,7 @@ impl NativeRepo<'_> {
         if !branch.starts_with("refs/heads/") {
             return Err("rebase: HEAD is not on a branch".into());
         }
-        let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
+        let repo = self.store.git_view()?;
         let onto = repo
             .rev_parse(upstream)?
             .ok_or_else(|| format!("rebase: bad revision '{upstream}'"))?;
@@ -373,7 +373,7 @@ impl NativeRepo<'_> {
         ed::edit(&path, true)?;
         let edited = std::fs::read_to_string(&path)?;
         crate::durable::remove_file(&path)?;
-        let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
+        let repo = self.store.git_view()?;
         ed::parse_todo(&edited, |rev| {
             repo.rev_parse(rev)?
                 .ok_or_else(|| format!("rebase: unknown commit '{rev}' in the todo list").into())

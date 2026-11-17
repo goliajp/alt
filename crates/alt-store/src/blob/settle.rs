@@ -25,6 +25,40 @@ impl BlobStore {
         self.chunks.active_path()
     }
 
+    /// Whether the files are no longer as this handle read them: a pack
+    /// came or went, or the active pack or the blob map (once opened) is
+    /// not as long as the records held here. Takes no lock and reads no
+    /// record.
+    pub fn changed_on_disk(&self) -> Result<bool, StoreError> {
+        if self.chunks.disk_changed()? {
+            return Ok(true);
+        }
+        match self.map.get() {
+            Some(map) => Ok(map.file_len()? != map.appended_len()),
+            None => Ok(false),
+        }
+    }
+
+    /// Builds index runs over the records that have none, where there are
+    /// enough of them, and only over records that were synced: `pack` says
+    /// how far pack `seq`, the active one, `len` bytes long, was, and the
+    /// blob map (once opened) was up to byte `map`. For an opener that
+    /// read the store under the write lock and is not to sync it.
+    pub fn index_synced(
+        &mut self,
+        pack: impl FnOnce(u32, u64) -> Option<u64>,
+        map: u64,
+    ) -> Result<(), StoreError> {
+        let (seq, len) = self.chunks.checkpoint().pack();
+        if let Some(upto) = pack(seq, len) {
+            self.chunks.index_synced(upto)?;
+        }
+        match self.map.get_mut() {
+            Some(blobmap) => blobmap.index_tail(map),
+            None => Ok(()),
+        }
+    }
+
     /// See [`crate::ChunkStore::distrust_synced`].
     pub fn distrust_synced(&mut self) -> Result<bool, StoreError> {
         self.chunks.distrust_synced()

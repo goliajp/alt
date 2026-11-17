@@ -67,10 +67,14 @@ pub(super) fn open_refs(alt_dir: &Path) -> Res<RefStore> {
 impl Store {
     /// Opens the store for a command; one that writes starts from a log
     /// without unsynced operations that name objects which are not
-    /// stored ([`Self::settle`]).
+    /// stored ([`Self::settle`]), one that only reads changes nothing
+    /// ([`Self::open_reading`]).
     pub fn open_for(alt_dir: PathBuf, writing: bool) -> Res<Self> {
+        if !writing {
+            return Self::open_reading(alt_dir);
+        }
         let mut store = Self::open(alt_dir)?;
-        if writing && store.refs.unsettled() {
+        if store.refs.unsettled() {
             store.settle()?;
         }
         Ok(store)

@@ -154,7 +154,7 @@ pub fn export_git(alt_dir: &Path, target: &Path) -> Result<ExportReport, ExportE
     // decode-once read materializes each object once (a base shared by many
     // lineage deltas is decoded just once) without per-object re-hashing —
     // git fsck on the output is the integrity boundary. ---
-    let odb = NativeOdb::open(alt_dir)?;
+    let odb = NativeOdb::reading(alt_dir);
     let count = u32::try_from(odb.len()?).map_err(|_| ExportError::Format("store too large"))?;
     let mut writer = PackWriter::create(&git_dir.join("objects/pack"), algo, count)?;
     let mut fail: Option<ExportError> = None;
@@ -174,7 +174,7 @@ pub fn export_git(alt_dir: &Path, target: &Path) -> Result<ExportReport, ExportE
     let written = writer.finish()?;
 
     // --- refs + HEAD from native state ---
-    let refs = RefStore::open(alt_dir)?;
+    let refs = RefStore::open_reading(alt_dir)?;
     let mut head = None;
     let mut loose: Vec<(BString, alt_git_refs::RefTarget)> = Vec::new();
     for (name, target) in refs.iter() {

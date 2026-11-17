@@ -4,11 +4,11 @@ use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use alt_store::{BlobOptions, BlobStore, Tail};
+use alt_store::{Basis, BlobOptions, BlobStore, StoreError, Tail};
 
 use super::Odb;
 use crate::head::Head;
-use crate::lock::{lock_shared, try_hold_exclusive, unlock};
+use crate::lock::{lock_shared, release_exclusive, try_hold_exclusive, unlock};
 use crate::map::ObjectMap;
 use crate::synced::{self, Deferred, Log, Marker, State};
 use crate::tier1::Tier1Map;
@@ -19,9 +19,37 @@ pub(crate) struct Mode {
     /// leave the blob map and the Tier 1 map for the first call that needs
     /// them (where damage to them is then reported)
     pub late: bool,
-    /// read and nothing else: no file is created, repaired or indexed
+    /// read and nothing else: no file is created or repaired
     pub read_only: bool,
+    /// where enough synced records have no index run, the open builds one
+    pub index: bool,
     pub deferred: Deferred,
+}
+
+/// What a handle on the database is for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Access {
+    /// reads and writes
+    Write,
+    /// a command that only reads: no file is created or repaired, and of
+    /// what is there only index runs are written
+    Read,
+    /// a check that leaves every file as it finds it
+    Check,
+}
+
+impl Access {
+    /// How a handle for this opens the database.
+    pub fn mode(self, late: bool, deferred: Deferred) -> Mode {
+        // a process that reads past damage changes no file
+        let check = self == Access::Check || alt_store::reading_past_damage();
+        Mode {
+            late,
+            read_only: check || self == Access::Read,
+            index: !check,
+            deferred,
+        }
+    }
 }
 
 fn open_lock(alt_dir: &Path, read_only: bool) -> std::io::Result<File> {
@@ -93,8 +121,55 @@ fn open_files(
     Ok((blobs, tier1, map, created))
 }
 
+/// A store whose logs have outgrown their index runs — an older alt wrote
+/// it, the runs were removed, or a writer could not write them — gets runs
+/// from whoever opens it next, unless a writer is at work: over the records
+/// the marker says were synced and no others, so that no run is ever over
+/// records a writer may cut. The opener takes the write lock for it, reads
+/// the files again under it (`read`) and gives those back; `None` when a
+/// writer has the lock. That is all the lock is taken for: nothing is cut,
+/// and neither the marker nor the lock file is written.
+fn index_synced(
+    lock: &File,
+    durable: &Path,
+    read: impl FnOnce() -> Result<Files, OdbError>,
+) -> Result<Option<Files>, OdbError> {
+    if !try_hold_exclusive(lock)? {
+        return Ok(None);
+    }
+    let indexed = read().and_then(|mut files| {
+        let marker = Marker::read(durable);
+        // a marker that is gone or does not read bounds nothing
+        let synced = |log, seq, len| match marker.basis(log, seq, len, || true) {
+            Basis::Boundary(upto) => Some(upto),
+            _ => None,
+        };
+        let upto = |log| synced(log, 0, 0).unwrap_or(0);
+        let (blobs, tier1, map, _) = &mut files;
+        let stores = blobs.index_synced(|seq, len| synced(Log::Pack, seq, len), upto(Log::Blobmap));
+        let stores = stores.and_then(|()| match tier1.get_mut() {
+            Some(tier1) => tier1.index_tail(upto(Log::Tier1)),
+            None => Ok(()),
+        });
+        let indexed = stores
+            .map_err(OdbError::from)
+            .and_then(|()| map.index_tail(upto(Log::Map)));
+        match indexed {
+            // the runs are a cache: where they cannot be written, reads go on
+            Ok(()) | Err(OdbError::Store(StoreError::IndexWrite(_))) => Ok(files),
+            Err(damage) => Err(damage),
+        }
+    });
+    release_exclusive(lock);
+    indexed.map(Some)
+}
+
 impl Odb {
     /// Opens (or creates) the database under the `.alt` root directory.
+    /// No log, marker or lock file that is there is changed: what a dead
+    /// writer left unfinished is passed over, and a store without record
+    /// boundaries or a head record stays without. The first write gives
+    /// it those, under the write lock.
     pub fn open_with(
         alt_dir: impl Into<PathBuf>,
         opts: BlobOptions,
@@ -115,7 +190,14 @@ impl Odb {
         let tail = |log: Log| tail(&durable_path, mode.read_only, log, synced);
         let opened = open_files(&alt_dir, opts, &head, mode.late, tail);
         let _ = unlock(&lock);
-        let (mut blobs, tier1, map, created) = opened?;
+        let mut files = opened?;
+        if mode.index && (files.0.index_pending() || files.2.index_pending()) {
+            let read = || open_files(&alt_dir, opts, &head, mode.late, tail);
+            if let Some(indexed) = index_synced(&lock, &durable_path, read)? {
+                files = indexed;
+            }
+        }
+        let (mut blobs, tier1, map, created) = files;
         blobs.guard_opens(alt_dir.join("odb.lock"));
         if created {
             // a new store: each file is synced as far as its header
@@ -123,7 +205,7 @@ impl Odb {
                 (*marker == Marker::Absent).then_some(State::NEW)
             })?;
         }
-        let mut odb = Self {
+        Ok(Self {
             blobs,
             map,
             tier1,
@@ -140,37 +222,7 @@ impl Odb {
             discarded: Vec::new(),
             deferred: mode.deferred,
             alt_dir,
-        };
-        if !mode.read_only {
-            odb.index_stale_tails()?;
-        }
-        Ok(odb)
-    }
-
-    /// A store whose logs have outgrown their index runs, or that has no
-    /// head record — written by a program that keeps neither, or by a
-    /// writer that died before its flush — gets both from whoever opens it
-    /// next, unless a writer is at work. That opener holds the write lock
-    /// meanwhile: what a dead writer left unfinished is cut off, and a
-    /// store without record boundaries gets them.
-    fn index_stale_tails(&mut self) -> Result<(), OdbError> {
-        let pending =
-            self.blobs.index_pending() || self.map.index_pending() || self.head == Head::default();
-        if !pending || !try_hold_exclusive(&self.lock)? {
-            return Ok(());
-        }
-        self.held = true;
-        let indexed = (|| {
-            self.catch_up()?;
-            self.bound()?;
-            self.index_tails()
-        })();
-        self.release();
-        match indexed {
-            // for the write that runs into it to report: reads go on
-            Err(OdbError::Lost { .. } | OdbError::Dangling { .. }) => Ok(()),
-            indexed => indexed,
-        }
+        })
     }
 
     /// The Tier 1 map, opened on first use. Opening must not overlap a

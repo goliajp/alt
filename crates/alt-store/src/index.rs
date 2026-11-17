@@ -226,21 +226,25 @@ impl ChunkIndex {
         }
     }
 
-    /// The position a run written now would end at, when the tail is long
-    /// enough to be worth one.
-    pub fn pending(&self) -> Option<Location> {
-        (self.tail.len() >= INDEX_AT).then(|| Location::at(self.end))
+    /// The position a run written now over the tail's records before
+    /// `upto` would end at, when they are enough to be worth one.
+    pub fn pending(&self, upto: u64) -> Option<Location> {
+        let take = self.tail.partition_point(|(_, loc)| loc.position() < upto);
+        let next = self.tail.get(take).map(|(_, loc)| loc.position());
+        (take >= INDEX_AT).then(|| Location::at(next.unwrap_or(self.end)))
     }
 
-    /// Moves the tail into the runs. Run under the write lock with every
-    /// record on disk already in the tail; `guard` is the pack bytes before
-    /// [`Self::pending`], `guard_at` reads the same for any position.
+    /// Moves the tail's records before `end`, a [`Self::pending`], into
+    /// the runs. Run under the write lock with every record on disk
+    /// already in the tail; `guard` is the pack bytes before `end`,
+    /// `guard_at` reads the same for any position.
     ///
     /// Returns false, having changed nothing, when the runs on disk stop
     /// short of where this handle's tail begins: a run written now would
     /// claim records it has no entries for. The caller reloads and retries.
     pub fn index_tail(
         &mut self,
+        end: Location,
         guard: Guard,
         guard_at: impl Fn(Location) -> Option<Guard>,
         durable: bool,
@@ -257,16 +261,14 @@ impl ChunkIndex {
         self.runs = runs;
         self.tail.retain(|(_, loc)| loc.position() >= covered);
         self.latest = self.tail.iter().copied().collect();
-        if self.tail.len() >= INDEX_AT {
-            let entries: Vec<(Key, u64)> = self
-                .tail
-                .iter()
-                .map(|(id, loc)| (id.0, loc.position()))
-                .collect();
-            self.runs
-                .extend(&entries, covered, self.end, guard, durable)?;
-            self.tail.clear();
-            self.latest.clear();
+        let end = end.position();
+        let take = self.tail.partition_point(|(_, loc)| loc.position() < end);
+        if take >= INDEX_AT {
+            let tail = self.tail[..take].iter();
+            let entries: Vec<(Key, u64)> = tail.map(|(id, loc)| (id.0, loc.position())).collect();
+            self.runs.extend(&entries, covered, end, guard, durable)?;
+            self.tail.drain(..take);
+            self.latest = self.tail.iter().copied().collect();
         }
         Ok(true)
     }

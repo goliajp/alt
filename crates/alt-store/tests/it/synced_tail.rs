@@ -176,7 +176,7 @@ fn damage_in_a_synced_log_whose_index_was_removed_is_reported() {
     for n in 0..600 {
         log.append(&record(n, n)).unwrap();
     }
-    log.index_tail(true).unwrap();
+    log.index_tail(u64::MAX, true).unwrap();
     drop(log);
     write_at(&path, 5 + 100 * REC_LEN as u64 + 33, &[0xff]);
     fs::remove_dir_all(dir.path().join("log.idx")).unwrap();

@@ -241,12 +241,11 @@ mod unix {
         let (response, operations, ticket, barrier_ok) = {
             let mut guard = shared.lock().expect("daemon store mutex poisoned");
             let (store, repo) = &mut *guard;
-            let refreshed = (if execution.writing {
-                store.settle()
-            } else {
-                store.refresh()
-            })
-            .and_then(|()| repo.refresh().map_err(Into::into));
+            // a command that only reads leaves the files as they are
+            let refreshed = match execution.writing {
+                true => store.settle().and_then(|()| Ok(repo.refresh()?)),
+                false => store.follow().and_then(|()| Ok(repo.follow()?)),
+            };
             let (mut response, operations) = match refreshed {
                 Ok(()) => execution.on_store(store, repo),
                 Err(error) => (execution.failure(error.as_ref()), Vec::new()),

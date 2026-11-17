@@ -53,6 +53,7 @@ mod push;
 mod push_policy;
 mod push_wire_ext;
 mod read_json;
+mod readers;
 mod rebase;
 mod remote;
 mod revert;

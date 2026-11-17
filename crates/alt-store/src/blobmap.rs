@@ -68,10 +68,10 @@ impl BlobMap {
         self.log.sync_from_disk()
     }
 
-    /// Indexes the records appended since the last index run, once there
-    /// are enough of them. Run under the odb write lock.
-    pub fn index_tail(&mut self) -> Result<(), StoreError> {
-        self.log.index_tail(!crate::relaxed_durability())
+    /// Indexes the records before byte `upto` that have no index run yet,
+    /// once there are enough of them. Run under the odb write lock.
+    pub fn index_tail(&mut self, upto: u64) -> Result<(), StoreError> {
+        self.log.index_tail(upto, !crate::relaxed_durability())
     }
 
     pub fn index_pending(&self) -> bool {

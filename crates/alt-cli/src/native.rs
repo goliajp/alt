@@ -41,6 +41,8 @@ use op_log::render_op_log_json;
 pub mod notes;
 mod object_format;
 use merge::Resolved;
+mod reading;
+pub use reading::{only_reads, open_for_command, view_for};
 mod rebase;
 mod recovery;
 mod requests;
@@ -84,18 +86,6 @@ impl Store {
         Ok(Self {
             odb: NativeOdb::deferred(&alt_dir),
             refs: unconfirmed::open_refs(&alt_dir)?,
-            policy: Policy::load(&alt_dir)?,
-            algo: std::sync::OnceLock::new(),
-            alt_dir,
-        })
-    }
-
-    /// Opens the store to be read and nothing else (`alt fsck`): no file
-    /// under `alt_dir` is created, repaired or rebuilt.
-    pub fn open_read_only(alt_dir: PathBuf) -> Res<Self> {
-        Ok(Self {
-            odb: NativeOdb::read_only(&alt_dir),
-            refs: RefStore::open_read_only(&alt_dir)?,
             policy: Policy::load(&alt_dir)?,
             algo: std::sync::OnceLock::new(),
             alt_dir,
@@ -778,7 +768,7 @@ impl<'a> NativeRepo<'a> {
         if old == new {
             return Ok(Some(true));
         }
-        let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
+        let repo = self.store.git_view()?;
         if repo.read_object(&old)?.is_none() || repo.read_object(&new)?.is_none() {
             return Ok(None);
         }
@@ -1157,7 +1147,7 @@ impl<'a> NativeRepo<'a> {
         if old == new {
             return Ok(true);
         }
-        let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
+        let repo = self.store.git_view()?;
         let mut seen = std::collections::HashSet::new();
         let mut stack = vec![new];
         while let Some(c) = stack.pop() {
@@ -1596,7 +1586,7 @@ impl<'a> NativeRepo<'a> {
         }
         let target = match rev {
             Some(spec) => {
-                let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
+                let repo = self.store.git_view()?;
                 repo.rev_parse(spec)?
                     .ok_or_else(|| format!("bad revision '{spec}'"))?
             }
@@ -1658,7 +1648,7 @@ impl<'a> NativeRepo<'a> {
         }
         let target = match rev {
             Some(spec) => {
-                let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
+                let repo = self.store.git_view()?;
                 repo.rev_parse(spec)?
                     .ok_or_else(|| format!("bad revision '{spec}'"))?
             }
@@ -2792,7 +2782,7 @@ impl<'a> NativeRepo<'a> {
         // common payoff is rewriting SSH-style URLs to HTTPS so alt's
         // git-smart-http transport can take them.
         let rewritten_url = {
-            let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
+            let repo = self.store.git_view()?;
             repo.rewrite_url(&remote.url)?
         };
         let transport = build_transport(&remote.name, &rewritten_url);
@@ -3055,7 +3045,7 @@ impl<'a> NativeRepo<'a> {
         // common payoff is rewriting SSH-style URLs to HTTPS so alt's
         // git-smart-http transport can take them.
         let rewritten_url = {
-            let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
+            let repo = self.store.git_view()?;
             repo.rewrite_url(&remote.url)?
         };
         let transport = build_transport(&remote.name, &rewritten_url);
@@ -3152,7 +3142,7 @@ impl<'a> NativeRepo<'a> {
         }
 
         // compute outgoing object set: reachable(local tips) \ reachable(server tips)
-        let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
+        let repo = self.store.git_view()?;
         let excludes: Vec<ObjectId> = ad.refs.values().copied().collect();
         let outgoing = repo.reachable_objects(&local_tips, &excludes)?;
 
@@ -3294,7 +3284,7 @@ impl<'a> NativeRepo<'a> {
         verify: bool,
         out: &mut impl Write,
     ) -> Res<()> {
-        let oplog = alt_oplog::OpLog::open(&self.store.alt_dir.join("oplog"))?;
+        let oplog = alt_oplog::OpLog::open_read_only(&self.store.alt_dir.join("oplog"), None)?;
         let limit = max_count.unwrap_or(usize::MAX);
         // newest first matches `alt log` and what an auditor naturally wants
         let entries: Vec<&alt_oplog::Op> = oplog.ops()?.iter().rev().take(limit).collect();

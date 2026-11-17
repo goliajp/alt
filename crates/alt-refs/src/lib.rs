@@ -13,6 +13,7 @@
 
 mod check;
 mod policy;
+mod reading;
 mod settle;
 mod snapshot;
 mod state;
@@ -79,17 +80,13 @@ impl RefStore {
     /// transactions past the snapshot point.
     pub fn open(alt_dir: impl Into<PathBuf>) -> Result<Self, RefError> {
         // a process that reads past damage changes no file
-        Self::open_as(alt_dir.into(), alt_oplog::reading_past_damage())
+        let past = alt_oplog::reading_past_damage();
+        Self::open_as(alt_dir.into(), past, !past)
     }
 
-    /// Opens the store to be read and nothing else, for a check that must
-    /// leave it as it finds it: the log is not repaired and the snapshot is
-    /// not refreshed.
-    pub fn open_read_only(alt_dir: impl Into<PathBuf>) -> Result<Self, RefError> {
-        Self::open_as(alt_dir.into(), true)
-    }
-
-    fn open_as(alt_dir: PathBuf, read_only: bool) -> Result<Self, RefError> {
+    /// `read_only`: the log is neither created nor repaired. `snapshots`:
+    /// a snapshot that has fallen behind is written anew.
+    fn open_as(alt_dir: PathBuf, read_only: bool, snapshots: bool) -> Result<Self, RefError> {
         let snapshot_path = alt_dir.join("refs").join("snapshot");
         let snapshot = snapshot::read(&snapshot_path);
         let anchor = snapshot.as_ref().and_then(|snap| snap.anchor);
@@ -128,7 +125,7 @@ impl RefStore {
         };
         // a reader refreshes a snapshot that has fallen behind (or predates
         // anchors), so the next open is short whoever runs it
-        if !read_only && !store.oplog.clamped() && store.snapshot_is_due() {
+        if snapshots && !store.oplog.clamped() && store.snapshot_is_due() {
             // a cache: where it cannot be written, the open still stands
             let _ = store.snapshot();
         }

@@ -193,12 +193,20 @@ fn an_older_marker_whose_pack_length_is_of_a_pack_sealed_since_bounds_nothing_in
 }
 
 #[test]
-fn a_store_without_a_head_record_is_bounded_by_the_open_that_indexes_it() {
+fn a_store_without_a_head_record_is_left_by_an_open_and_bounded_by_the_first_write() {
     let dir = alt_os::temp::tempdir().unwrap();
     store(dir.path(), State::Never, Fault::Unfinished);
+    let before = snapshot(dir.path());
     drop(NativeOdb::open(dir.path()).unwrap());
+    assert!(snapshot(dir.path()) == before, "the open changed a file");
+    let mut odb = NativeOdb::open(dir.path()).unwrap();
+    let (oid, data) = object(OBJECTS);
+    odb.put(oid, ObjectKind::Blob, &data).unwrap();
+    odb.flush().unwrap();
+    drop(odb);
     let after = lens(dir.path());
-    assert_eq!(after[3], 5 + OBJECTS as u64 * MAP_REC, "the open cut it");
+    let records = OBJECTS as u64 + 1;
+    assert_eq!(after[3], 5 + records * MAP_REC, "the write cut it");
     let marker = recorded(dir.path());
     assert_eq!((marker.flags, marker.whole.to_vec()), (0, after));
 

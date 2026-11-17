@@ -160,9 +160,10 @@ fn a_command_that_writes_and_the_full_check_do_not_read_past_damage() {
     assert!(files(&dir.join(".alt")) == before);
 }
 
-/// An open otherwise brings the record of the store's files in `odb.lock`
-/// up to date. A process that reads past damage opens the store to be
-/// read and nothing else.
+/// A process that reads past damage opens the store to be read and
+/// nothing else: like any command that only reads it leaves the record of
+/// the store's files in `odb.lock` to the next write, and unlike them it
+/// leaves the snapshot of the refs too.
 #[test]
 fn reading_past_damage_leaves_what_an_open_would_bring_up_to_date() {
     let tmp = alt_os::temp::tempdir().unwrap();
@@ -173,10 +174,10 @@ fn reading_past_damage_leaves_what_an_open_would_bring_up_to_date() {
     ok(past(dir, &["cat-file", "-p", &last]));
     assert!(files(&dir.join(".alt")) == before);
     ok(alt(dir, &["cat-file", "-p", &last]));
-    assert!(
-        files(&dir.join(".alt")) != before,
-        "nothing to bring up to date"
-    );
+    assert!(files(&dir.join(".alt")) == before);
+    ok(alt(dir, &["tag", "-a", "written", "-m", "written"]));
+    let record = fs::read(dir.join(".alt/odb.lock")).unwrap();
+    assert!(record.starts_with(b"ALTH"), "nothing to bring up to date");
 
     // the same for the snapshot of the refs, which an open writes once
     // the log has grown enough past it

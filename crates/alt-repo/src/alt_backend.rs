@@ -1,14 +1,14 @@
 //! The native `.alt` store behind a [`crate::Repository`], opened piece by
 //! piece as a command first needs each one.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use alt_bytes::BString;
 use alt_git_config::{Config, IncludeContext};
 use alt_odb::NativeOdb;
 
-use crate::RepoError;
+use crate::{Backend, RepoError, Repository};
 
 pub(crate) struct AltBackend {
     pub alt_dir: PathBuf,
@@ -18,9 +18,22 @@ pub(crate) struct AltBackend {
     pub odb: NativeOdb,
     /// opened by the first read of a ref
     pub refs: OnceLock<alt_refs::RefStore>,
+    /// the command this serves only reads: no file of the store is
+    /// created, repaired or cut when one is opened
+    pub reading: bool,
 }
 
 impl AltBackend {
+    /// The store under `alt_dir`, nothing of it opened yet.
+    pub fn at(alt_dir: &Path) -> Self {
+        Self {
+            alt_dir: alt_dir.to_owned(),
+            odb: NativeOdb::deferred(alt_dir),
+            refs: OnceLock::new(),
+            reading: false,
+        }
+    }
+
     /// The object store, for reading. The refs are opened before it is:
     /// a writer stores its objects before the ref that names them, so
     /// refs read no later than the objects never name one that this view
@@ -34,7 +47,10 @@ impl AltBackend {
         if let Some(refs) = self.refs.get() {
             return Ok(refs);
         }
-        let refs = alt_refs::RefStore::open(&self.alt_dir)?;
+        let refs = match self.reading {
+            true => alt_refs::RefStore::open_reading(&self.alt_dir)?,
+            false => alt_refs::RefStore::open(&self.alt_dir)?,
+        };
         Ok(self.refs.get_or_init(|| refs))
     }
 
@@ -58,5 +74,34 @@ impl AltBackend {
             home: std::env::var_os("HOME").map(PathBuf::from),
         };
         Ok(Config::load(&config_path, &ctx)?)
+    }
+}
+
+impl Repository {
+    /// The same repository for a command that only reads. Of a native
+    /// store nothing is opened yet: what is opened from here on is opened
+    /// to be read, and no file of it changes but its caches, a ref
+    /// snapshot that fell behind and index runs that are missing.
+    pub fn reading(mut self) -> Self {
+        if let Backend::Alt(alt) = &mut self.backend {
+            alt.odb = NativeOdb::reading(&alt.alt_dir);
+            alt.refs = OnceLock::new();
+            alt.reading = true;
+        }
+        self
+    }
+
+    /// [`Self::refresh`] for a repository held across commands, before
+    /// one that only reads: a native store takes in what other writers
+    /// appended and writes nothing.
+    pub fn follow(&mut self) -> Result<(), RepoError> {
+        let Backend::Alt(alt) = &mut self.backend else {
+            return self.refresh();
+        };
+        // refs before objects, as in a refresh
+        if let Some(refs) = alt.refs.get_mut() {
+            refs.follow()?;
+        }
+        Ok(alt.odb.follow()?)
     }
 }

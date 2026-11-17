@@ -18,7 +18,7 @@ use alt_cli::cli::{self, Command};
 use alt_cli::daemon::Response;
 use alt_cli::execution::Execution;
 use alt_cli::machine::{self, Failure};
-use alt_cli::native::{self, Identity, Store};
+use alt_cli::native::{self, Identity};
 use alt_repo::Repository;
 use std::io::Write;
 
@@ -256,6 +256,7 @@ fn attempt() -> Response {
                     Err(error) if execution.parsed.cli.workspace.is_some() => return Err(error),
                     Err(_) => (Repository::discover(&cwd)?, "HEAD".to_owned()),
                 };
+                let repo = native::view_for(repo, command);
                 cli::run_git(&repo, command, &head, &mut out)?;
                 if !execution.writing {
                     leave_to_exit(repo);
@@ -287,12 +288,7 @@ fn on_native_store(execution: Execution, cwd: &std::path::Path) -> Response {
     let opened = (|| -> Result<_, Box<dyn std::error::Error>> {
         let (dir, coord) =
             native::resolve_workspace(cwd, execution.parsed.cli.workspace.as_deref())?;
-        let store = match execution.parsed.cli.command {
-            Command::Fsck { .. } => Store::open_read_only(dir.clone())?,
-            _ => Store::open_for(dir.clone(), execution.writing)?,
-        };
-        let repo = Repository::open_alt(dir, Some(coord.root().to_owned()))?;
-        Ok((store, repo))
+        native::open_for_command(&execution.parsed.cli.command, dir, coord.root())
     })();
     let (mut store, repo) = match opened {
         Ok(pair) => pair,

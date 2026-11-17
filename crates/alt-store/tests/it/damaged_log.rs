@@ -35,7 +35,7 @@ fn a_rewind_over_a_damaged_record_changes_nothing() {
     for n in 0..600 {
         log.append(&record(n, n)).unwrap();
     }
-    log.index_tail(true).unwrap();
+    log.index_tail(u64::MAX, true).unwrap();
     drop(log);
     damage(&path, 100);
 
@@ -46,7 +46,7 @@ fn a_rewind_over_a_damaged_record_changes_nothing() {
     for n in 1000..1300 {
         log.append(&record(n, n)).unwrap();
     }
-    log.index_tail(true).unwrap();
+    log.index_tail(u64::MAX, true).unwrap();
     let grown = len(&path);
     let runs = || {
         let listing = fs::read_dir(dir.path().join("log.idx")).unwrap();
@@ -77,7 +77,7 @@ fn indexing_over_a_damaged_record_leaves_the_log_and_the_handle_alone() {
     for n in 0..600 {
         log.append(&record(n, n)).unwrap();
     }
-    log.index_tail(true).unwrap();
+    log.index_tail(u64::MAX, true).unwrap();
     damage(&path, 100);
     fs::remove_dir_all(dir.path().join("log.idx")).unwrap();
 
@@ -86,7 +86,10 @@ fn indexing_over_a_damaged_record_leaves_the_log_and_the_handle_alone() {
     }
     log.sync_from_disk().unwrap();
     let before = len(&path);
-    assert!(corrupt(log.index_tail(true)), "the damage is reported");
+    assert!(
+        corrupt(log.index_tail(u64::MAX, true)),
+        "the damage is reported"
+    );
     assert_eq!(
         len(&path),
         before,

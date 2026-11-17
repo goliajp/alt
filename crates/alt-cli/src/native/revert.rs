@@ -44,7 +44,7 @@ impl NativeRepo<'_> {
         self.ensure_topic_branch_or_unborn("revert")?;
         self.ensure_no_merge_in_progress("revert")?;
         self.ensure_clean("revert")?;
-        let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
+        let repo = self.store.git_view()?;
         let todo = revs
             .iter()
             .map(|r| {

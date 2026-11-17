@@ -357,7 +357,7 @@ impl BlobStore {
     /// at the end of a batch.
     pub fn index_tail(&mut self) -> Result<(), StoreError> {
         self.chunks.index_tail()?;
-        self.map_mut()?.index_tail()
+        self.map_mut()?.index_tail(u64::MAX)
     }
 
     /// Raw fsync of chunks then the blob map, in that order — so a crash never

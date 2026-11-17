@@ -73,10 +73,12 @@ impl RecLog {
         self.tail.len() / self.layout.rec_len >= INDEX_AT
     }
 
-    /// Moves a long enough tail into the index runs. Run under the write
-    /// lock, after `sync_from_disk`, so the log holds nothing we have not
-    /// seen. `durable` fsyncs the new run before it replaces the old ones.
-    pub fn index_tail(&mut self, durable: bool) -> Result<(), StoreError> {
+    /// Moves a long enough tail into the index runs: the records before
+    /// byte `upto` of it, all of them for the writer that has just synced
+    /// them. Run under the write lock, after `sync_from_disk` or an open
+    /// under that lock, so the log holds nothing we have not seen.
+    /// `durable` fsyncs the new run before it replaces the old ones.
+    pub fn index_tail(&mut self, upto: u64, durable: bool) -> Result<(), StoreError> {
         let rec_len = self.layout.rec_len;
         if !self.index_pending() {
             return Ok(());
@@ -85,13 +87,15 @@ impl RecLog {
         // tail is made to start exactly where they stop now, so a new run
         // never claims a record it has no entry for
         self.reload(self.len, End::Whole)?;
-        if !self.index_pending() {
+        let from = self.len - self.tail.len() as u64;
+        let take = (upto.min(self.len).saturating_sub(from) / rec_len as u64) as usize;
+        if take < INDEX_AT {
             return Ok(());
         }
-        let mut entries = Vec::with_capacity(self.tail.len() / rec_len);
-        let from = self.len - self.tail.len() as u64;
+        let end = from + (take * rec_len) as u64;
+        let mut entries = Vec::with_capacity(take);
         let mut position = from;
-        for rec in self.tail.chunks_exact(rec_len) {
+        for rec in self.tail[..take * rec_len].chunks_exact(rec_len) {
             let (key, second) = (self.layout.keys)(rec);
             entries.push((key, position));
             if let Some(second) = second {
@@ -99,13 +103,11 @@ impl RecLog {
             }
             position += rec_len as u64;
         }
-        let guard = guard_at(&self.file, &self.layout, self.len, self.len)
+        let guard = guard_at(&self.file, &self.layout, self.len, end)
             .ok_or(StoreError::Format(self.layout.corrupt))?;
-        self.runs.extend(&entries, from, self.len, guard, durable)?;
-        self.cache.clear();
-        self.tail.clear();
-        self.tail_keys.clear();
-        self.tail_second.clear();
+        self.runs.extend(&entries, from, end, guard, durable)?;
+        let rest = self.tail.split_off(take * rec_len);
+        self.set_tail(&rest);
         Ok(())
     }
 }

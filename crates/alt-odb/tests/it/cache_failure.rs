@@ -42,7 +42,7 @@ fn holds(dir: &Path, count: usize) {
 }
 
 #[test]
-fn an_open_that_cannot_index_a_long_tail_still_opens() {
+fn a_store_with_a_long_tail_and_nowhere_to_index_it_still_opens() {
     let tmp = alt_os::temp::tempdir().unwrap();
     {
         let mut odb = NativeOdb::open(tmp.path()).unwrap();
@@ -50,7 +50,7 @@ fn an_open_that_cannot_index_a_long_tail_still_opens() {
         odb.flush().unwrap();
     }
     block_indexes(tmp.path());
-    // 700 records past the (absent) runs: every open tries to index them
+    // 700 records past the (absent) runs
     holds(tmp.path(), 700);
     let odb = NativeOdb::open(tmp.path()).unwrap();
     assert_eq!(odb.len().unwrap(), 700);
@@ -105,7 +105,7 @@ fn a_flush_reports_damage_it_finds_while_indexing() {
 }
 
 #[test]
-fn an_open_reports_a_damaged_file_it_was_about_to_index() {
+fn an_open_indexes_what_was_synced_and_a_write_reports_a_damaged_file() {
     let tmp = alt_os::temp::tempdir().unwrap();
     {
         let mut odb = NativeOdb::open(tmp.path()).unwrap();
@@ -115,12 +115,18 @@ fn an_open_reports_a_damaged_file_it_was_about_to_index() {
     // a long tail to index, and a tier1 file that is not one
     std::fs::remove_dir_all(tmp.path().join("map.alt.idx")).unwrap();
     std::fs::write(tmp.path().join("tier1"), b"not a tier1 file").unwrap();
-    let opened = NativeOdb::deferred(tmp.path()).len();
+    // a read that does not need the file goes through, and the open
+    // before it indexes map.alt, every record of which was synced
+    assert_eq!(NativeOdb::deferred(tmp.path()).len().unwrap(), 700);
+    assert!(tmp.path().join("map.alt.idx").is_dir());
+    let mut odb = NativeOdb::deferred(tmp.path());
+    let (oid, data) = object(700);
+    let written = odb.put(oid, ObjectKind::Blob, &data);
     assert!(
         matches!(
-            opened,
+            written,
             Err(OdbError::Store(alt_store::StoreError::Format(_)))
         ),
-        "{opened:?}"
+        "{written:?}"
     );
 }

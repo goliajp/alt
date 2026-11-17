@@ -131,7 +131,7 @@ fn a_record_that_is_garbage_or_absent_is_ignored() {
 }
 
 #[test]
-fn a_reader_gives_a_store_without_a_record_one() {
+fn a_reader_leaves_a_store_without_a_record_without() {
     let tmp = alt_os::temp::tempdir().unwrap();
     let lock = tmp.path().join("odb.lock");
     put(tmp.path(), 0..400);
@@ -140,7 +140,7 @@ fn a_reader_gives_a_store_without_a_record_one() {
     let odb = NativeOdb::deferred(tmp.path());
     assert!(odb.get(&object(7).0).unwrap().is_some());
     drop(odb);
-    assert!(fs::read(&lock).unwrap().starts_with(b"ALTH"));
+    assert!(fs::read(&lock).unwrap().is_empty());
     holds(tmp.path(), 400);
 }
 

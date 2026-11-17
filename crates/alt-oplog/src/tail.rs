@@ -7,6 +7,7 @@
 //! record before them was not: they were never synced either, and go with
 //! it. Each cut is kept ([`Discarded`]) for whoever tells the user.
 
+use crate::lock::{lock_shared, unlock};
 use crate::read::{read_at, unfinished};
 use crate::scan::{BODY_FIXED_LEN, CHECKSUM_LEN, ends_the_log, parse_body, replay_records};
 use crate::synced::{self, Marker};
@@ -84,6 +85,24 @@ impl OpLog {
     /// head. A torn tail left by a crashed writer is truncated (we hold the
     /// lock, so no live writer is mid-append).
     pub(crate) fn catch_up(&mut self) -> Result<(), OpLogError> {
+        self.read_on(true)
+    }
+
+    /// [`Self::refresh`] for a handle that serves a read: the records other
+    /// writers appended are replayed under the shared lock, and nothing is
+    /// written. What a crashed writer left unfinished is passed over, as an
+    /// open passes over it; the next append cuts it off.
+    pub fn follow(&mut self) -> Result<(), OpLogError> {
+        lock_shared(&self.file)?;
+        let read = self.read_on(false);
+        let _ = unlock(&self.file);
+        read
+    }
+
+    /// Replays the records past the ones held, under the log's lock. An
+    /// unfinished end is cut off the file when `cut`, which takes the
+    /// exclusive lock, and stays in it otherwise.
+    fn read_on(&mut self, cut: bool) -> Result<(), OpLogError> {
         let size = self.file.metadata()?.len();
         if !self.holds_head(size)? {
             return Err(OpLogError::CutBack);
@@ -120,7 +139,7 @@ impl OpLog {
             self.last_start = self.len_bytes + start as u64;
             self.others_to = new_len;
         }
-        if replayed.valid < tail.len() {
+        if cut && replayed.valid < tail.len() {
             // drop a crashed writer's unfinished record, and what follows it
             synced::cut(&self.durable_path, &self.file, new_len)?;
             self.note_discarded(Discarded::unread(new_len, size, &tail[replayed.valid..]));

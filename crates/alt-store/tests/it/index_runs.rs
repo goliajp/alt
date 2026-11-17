@@ -185,7 +185,7 @@ fn fill(path: &Path, range: std::ops::Range<u64>, index: bool) {
         log.append(&record(n, n * 2)).unwrap();
     }
     if index {
-        log.index_tail(true).unwrap();
+        log.index_tail(u64::MAX, true).unwrap();
     }
 }
 
@@ -279,7 +279,7 @@ fn record_log_rewind_behind_the_index_keeps_the_rest_readable() {
         for n in 0..INDEX_AT as u64 {
             log.append(&record(1_000_000 + n, n)).unwrap();
         }
-        log.index_tail(true).unwrap();
+        log.index_tail(u64::MAX, true).unwrap();
     }
     let (log, _) = RecLog::open(&path, LAYOUT).unwrap();
     assert_eq!(log.count() as u64, keep + INDEX_AT as u64);
@@ -348,7 +348,7 @@ fn record_log_at_ten_million_records() {
         }
         next += batch;
         let started = Instant::now();
-        log.index_tail(true).unwrap();
+        log.index_tail(u64::MAX, true).unwrap();
         println!("indexed a batch of {batch} in {:?}", started.elapsed());
     }
 

@@ -139,13 +139,13 @@ impl Odb {
         let indexed = (|| -> Result<(), StoreError> {
             self.blobs.index_tail()?;
             if let Some(tier1) = self.tier1.get_mut() {
-                tier1.index_tail()?;
+                tier1.index_tail(u64::MAX)?;
             }
             Ok(())
         })();
         match indexed
             .map_err(OdbError::from)
-            .and_then(|()| self.map.index_tail())
+            .and_then(|()| self.map.index_tail(u64::MAX))
         {
             Err(OdbError::Store(StoreError::IndexWrite(_))) => Ok(()),
             other => other,

@@ -147,11 +147,7 @@ impl Repository {
     }
 
     fn open_alt_dir(alt_dir: PathBuf, work_tree: Option<PathBuf>) -> Result<Self, RepoError> {
-        let backend = AltBackend {
-            alt_dir: alt_dir.clone(),
-            odb: alt_odb::NativeOdb::deferred(&alt_dir),
-            refs: OnceLock::new(),
-        };
+        let backend = AltBackend::at(&alt_dir);
         Ok(Self {
             repo_dir: alt_dir,
             work_tree,

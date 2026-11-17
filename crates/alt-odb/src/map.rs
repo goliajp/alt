@@ -157,11 +157,11 @@ impl ObjectMap {
         self.log.sync_from_disk().map_err(lift)
     }
 
-    /// Indexes the records appended since the last index run, once there
-    /// are enough of them. Run under the odb write lock.
-    pub fn index_tail(&mut self) -> Result<(), OdbError> {
+    /// Indexes the records before byte `upto` that have no index run yet,
+    /// once there are enough of them. Run under the odb write lock.
+    pub fn index_tail(&mut self, upto: u64) -> Result<(), OdbError> {
         self.log
-            .index_tail(!alt_store::relaxed_durability())
+            .index_tail(upto, !alt_store::relaxed_durability())
             .map_err(lift)
     }
 

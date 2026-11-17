@@ -4,13 +4,15 @@
 mod bulk;
 mod cut;
 mod durable;
+mod follow;
 mod open;
 mod settle;
 mod sink;
 
 pub use cut::Discarded;
-pub(crate) use open::Mode;
+pub(crate) use open::Access;
 pub(crate) use settle::lost;
+pub use sink::OdbSink;
 
 use std::fs::File;
 use std::path::PathBuf;
@@ -26,8 +28,6 @@ use crate::map::{MapEntry, ObjectMap};
 use crate::synced::Deferred;
 use crate::tier1::{self, Tier1Map};
 use crate::{BlobId, OdbError};
-
-pub use sink::OdbSink;
 
 /// The native object database: blob store + git-identity map.
 ///

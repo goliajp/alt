@@ -17,7 +17,7 @@ fn record_log_indexes_everything_after_its_index_dir_is_removed() {
     for n in 0..300 {
         log.append(&record(n, n)).unwrap();
     }
-    log.index_tail(true).unwrap();
+    log.index_tail(u64::MAX, true).unwrap();
     assert!(!log.index_pending(), "the first 300 are in a run");
 
     fs::remove_dir_all(dir.path().join("log.idx")).unwrap();
@@ -25,7 +25,7 @@ fn record_log_indexes_everything_after_its_index_dir_is_removed() {
         log.append(&record(n, n)).unwrap();
     }
     log.sync_from_disk().unwrap();
-    log.index_tail(true).unwrap();
+    log.index_tail(u64::MAX, true).unwrap();
     for n in [0, 150, 299, 300, 599] {
         assert_eq!(
             value(&log, n),
@@ -53,7 +53,7 @@ fn record_log_follows_another_handle_cutting_the_log_back() {
     for n in 0..600 {
         held.append(&record(n, n)).unwrap();
     }
-    held.index_tail(true).unwrap();
+    held.index_tail(u64::MAX, true).unwrap();
 
     // another handle drops records 100.. and writes different ones
     let (mut other, _) = RecLog::open(&path, LAYOUT).unwrap();
@@ -68,7 +68,7 @@ fn record_log_follows_another_handle_cutting_the_log_back() {
     for n in 2000..2300 {
         held.append(&record(n, n)).unwrap();
     }
-    held.index_tail(true).unwrap();
+    held.index_tail(u64::MAX, true).unwrap();
     for n in [50, 1100, 2100] {
         assert_eq!(
             value(&held, n),
@@ -127,7 +127,7 @@ fn a_run_temporary_file_left_by_a_crash_is_removed_by_the_next_writer() {
     for n in 0..300 {
         log.append(&record(n, n)).unwrap();
     }
-    log.index_tail(true).unwrap();
+    log.index_tail(u64::MAX, true).unwrap();
     drop(log);
 
     let leftover = dir.path().join("log.idx/000000000005-00000000ffff.run.tmp");
@@ -153,7 +153,7 @@ fn a_lookup_repeated_after_the_log_changed_sees_the_change() {
     for n in 0..300 {
         log.append(&record(n, n)).unwrap();
     }
-    log.index_tail(true).unwrap();
+    log.index_tail(u64::MAX, true).unwrap();
     // records read from behind the runs are kept from now on: the second
     // pass is answered from memory
     log.keep_reads();
@@ -170,7 +170,7 @@ fn a_lookup_repeated_after_the_log_changed_sees_the_change() {
             .unwrap();
     }
     assert_eq!(value(&log, 7), Some(300));
-    log.index_tail(true).unwrap();
+    log.index_tail(u64::MAX, true).unwrap();
     assert_eq!(value(&log, 7), Some(300));
     assert_eq!(value(&log, 250), Some(250));
 

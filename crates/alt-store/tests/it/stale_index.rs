@@ -30,7 +30,7 @@ fn a_log_regrown_to_the_same_length_and_last_record_is_not_taken_for_the_old_one
     for n in 0..600 {
         log.append(&record(n, n)).unwrap();
     }
-    log.index_tail(true).unwrap();
+    log.index_tail(u64::MAX, true).unwrap();
     assert!(!log.index_pending());
     drop(log);
 
