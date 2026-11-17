@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: perf
+summary: leave a store that only read to the exit of the process
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/main.rs
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/reading.rs
+touched: crates/alt-cli/tests/it/readers.rs
+touched: crates/alt-cli/tests/it/readers/exit.rs
+touched: crates/alt-oplog/src/settle.rs
+touched: crates/alt-oplog/tests/it/oplog_lifecycle.rs
+touched: crates/alt-refs/src/reading.rs
+touched: crates/alt-refs/tests/it/unconfirmed.rs
