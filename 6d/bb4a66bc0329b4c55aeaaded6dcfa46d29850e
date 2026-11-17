@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: shorten the comments of the log's marker module
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/synced.rs
