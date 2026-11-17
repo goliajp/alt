@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: perf
+summary: ask whether a pattern is its fixed bytes only where those bytes were found
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/lib.rs
+touched: crates/alt-regex/src/search.rs
