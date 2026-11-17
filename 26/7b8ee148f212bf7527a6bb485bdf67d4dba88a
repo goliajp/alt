@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: perf
+summary: begin a match where the fixed bytes a pattern begins with lie, and try the starts of a long program in turn
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/lib.rs
+touched: crates/alt-regex/src/literal.rs
+touched: crates/alt-regex/src/search.rs
