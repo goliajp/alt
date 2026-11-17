@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: answer a search for fewer groups than a pattern refers to as the c library does
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/backref.rs
+touched: crates/alt-regex/src/lib.rs
+touched: crates/alt-regex/src/program.rs
+touched: crates/alt-regex/src/syntax.rs
+touched: crates/alt-regex/tests/it/regcomp.rs
