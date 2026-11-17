@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: say which command cuts an unconfirmed end and that the check exits 3 for whole records about to go
+author-type: human
+author: doracawl
+touched: docs/recovery.md
