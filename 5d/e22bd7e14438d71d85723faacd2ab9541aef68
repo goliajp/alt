@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: fail the check on records and operations a writer is about to cut and say which command cuts
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/fsck.rs
+touched: crates/alt-cli/src/fsck/tails.rs
+touched: crates/alt-cli/tests/it/fsck_tails.rs
+touched: crates/alt-cli/tests/it/unconfirmed.rs
+touched: crates/alt-cli/tests/it/unconfirmed_tails.rs
