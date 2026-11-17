@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: keep the searches few patterns need out of the steps that tell whether a text has a match
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/search.rs
