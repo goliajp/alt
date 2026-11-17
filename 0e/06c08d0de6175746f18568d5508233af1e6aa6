@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: record the end of a group that keeps a snapshot outside the steps of every path
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/backtrack.rs
