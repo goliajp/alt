@@ -77,16 +77,21 @@ impl Theirs {
     }
 
     fn spans(&self, text: &[u8]) -> Option<Vec<Option<(usize, usize)>>> {
+        self.registers(text, GROUPS)
+    }
+
+    /// What `regexec` puts into `count` registers.
+    fn registers(&self, text: &[u8], count: usize) -> Option<Vec<Option<(usize, usize)>>> {
         let text = CString::new(text).unwrap();
         let mut spans = [Span { from: -1, to: -1 }; GROUPS];
         let compiled = self.0.as_ref().unwrap();
         // SAFETY: compiled by regcomp, and the array holds GROUPS spans
-        let missed = unsafe { regexec(compiled, text.as_ptr(), GROUPS, spans.as_mut_ptr(), 0) };
+        let missed = unsafe { regexec(compiled, text.as_ptr(), count, spans.as_mut_ptr(), 0) };
         if missed != 0 {
             return None;
         }
         let span = |s: &Span| (s.from >= 0).then_some((s.from as usize, s.to as usize));
-        Some(spans.iter().map(span).collect())
+        Some(spans[..count].iter().map(span).collect())
     }
 }
 
@@ -281,6 +286,91 @@ fn back_references_match_as_the_c_library_matches_them() {
     }
     assert_eq!(compared, 17 * texts.len());
     assert!(differ.is_empty(), "{}", differ.join("\n"));
+}
+
+/// Git asks for the first group only. The C library then keeps no
+/// other, and a reference to another is what its walk through the
+/// match cannot follow.
+#[test]
+fn a_reference_to_a_group_not_asked_for_is_answered_as_the_c_library_answers() {
+    let patterns = [
+        // no choice in the pattern: the reference is taken to be empty
+        "((a)\\2)",
+        "(a)()\\2",
+        "(a)(b)\\2",
+        "(a)(b{0})\\2b",
+        // a choice: the reference fails, and so does the search
+        "(a)(b?)\\2",
+        "(a)(b)\\2c*",
+        "(a)(b)\\2|(a)b",
+        "(a+)(b)\\2|ab",
+        "(a)(b)\\2|(c)",
+        "^([a-z]+) ([a-z]+) \\2",
+        // unless the walk ends before it comes to the reference
+        "(x*)*(a)\\2",
+        "(a)(B?)*_(.+\\2)+",
+        // a turn that takes nothing while the group is open
+        "(a|x*)*(b)\\2",
+        "(a(x+)*)(b)\\3",
+        // the group asked for is referred to as well
+        "(a*)(b)\\2\\1",
+        "(a)\\1(b)\\2",
+    ];
+    let texts = [
+        "",
+        "a",
+        "aa",
+        "ab",
+        "abb",
+        "abbb",
+        "abbc",
+        "aabb",
+        "abba",
+        "abbaa",
+        "xabb",
+        "b",
+        "bb",
+        "a_b1aa1A",
+        " _a_b1aa1A",
+        "a00b0AB_",
+        "ab ab ab",
+        "ab cd cd",
+        "axbb",
+        "abc",
+        "axb",
+    ];
+    let mut differ = Vec::new();
+    for pattern in patterns {
+        let theirs = Theirs::new(pattern.as_bytes(), Options::default());
+        let ours = Regex::new(pattern.as_bytes()).unwrap();
+        for text in texts {
+            let expected = theirs.registers(text.as_bytes(), 2);
+            // a group the C library gives a start and no end is none
+            let whole = |span: &Option<(usize, usize)>| span.filter(|span| span.0 <= span.1);
+            let expected = expected.map(|spans| spans.iter().map(whole).collect::<Vec<_>>());
+            let found = ours.captures_upto(text.as_bytes(), 1).map(|found| {
+                let span = |i| found.get(i).map(|r| (r.start, r.end));
+                vec![span(0), span(1)]
+            });
+            if found != expected {
+                differ.push(format!(
+                    "{pattern:?} on {text:?}: {found:?} not {expected:?}"
+                ));
+            }
+        }
+    }
+    assert!(differ.is_empty(), "{}", differ.join("\n"));
+    // where the walk of the C library ends with the group begun and
+    // not ended, there is no match here
+    let pattern = b"(a(x*)*)(b)\\2";
+    let theirs = Theirs::new(pattern, Options::default()).registers(b"axb", 2);
+    assert_eq!(theirs, Some(vec![Some((0, 3)), Some((0, usize::MAX))]));
+    assert!(
+        Regex::new(pattern)
+            .unwrap()
+            .captures_upto(b"axb", 1)
+            .is_none()
+    );
 }
 
 /// The list of differences in the documentation stays true of the C

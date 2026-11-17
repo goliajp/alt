@@ -80,6 +80,16 @@ pub struct Program {
     pub plain_looks: bool,
     /// Some instruction is a back-reference.
     pub backrefs: bool,
+    /// The highest group a back-reference names, as the C library
+    /// numbers them.
+    pub referred: u32,
+    /// For a pattern with back-references, the group the C library
+    /// keeps in place of each: of two groups written with nothing
+    /// between them, as in `((a))`, it keeps the outer one only.
+    pub merged: Vec<u32>,
+    /// The pattern leaves a choice: an alternation, or a repetition of
+    /// more turns or fewer.
+    pub plural: bool,
     /// Some group ends in [`Inst::SaveOpt`]: a path carries, behind its
     /// capture slots, what they were when a group last closed around
     /// something.
@@ -154,8 +164,21 @@ pub fn compile(node: &Node, groups: u32, options: Options, shape: Shape) -> Resu
     let exits: Vec<u32> = c.blocks.iter().map(|copied| copied.next).collect();
     let (joins, join_count) = joins(&c.insts, start, &exits);
     let mixed_ends = mixed_ends(&c.insts, start, &exits);
+    let backrefs = c.insts.iter().any(|i| matches!(i, Inst::BackRef(..)));
+    let mut merged = Vec::new();
+    if backrefs {
+        c.budget.take(size_of::<u32>() * (groups as usize + 1))?;
+        merged = (0..=groups).collect();
+        merge(node, &mut merged);
+    }
     Ok(Program {
-        backrefs: c.insts.iter().any(|i| matches!(i, Inst::BackRef(..))),
+        backrefs,
+        referred: c.insts.iter().fold(0, |highest, inst| match *inst {
+            Inst::BackRef(group, ..) => highest.max(merged[group as usize]),
+            _ => highest,
+        }),
+        merged,
+        plural: plural(node),
         snapshots: c.insts.iter().any(|i| matches!(i, Inst::SaveOpt(..))),
         insts: c.insts,
         sets: c.sets,
@@ -186,6 +209,39 @@ fn nullable(node: &Node) -> bool {
         Node::Concat(items) => items.iter().all(nullable),
         Node::Alt(branches) => branches.iter().any(nullable),
         Node::Repeat(inner, min, _) => *min == 0 || nullable(inner),
+    }
+}
+
+/// Whether `node` leaves a choice between paths, as far as the C
+/// library builds it: what is repeated no times is not built.
+fn plural(node: &Node) -> bool {
+    match node {
+        Node::Alt(_) => true,
+        Node::Repeat(_, _, Some(0)) => false,
+        Node::Repeat(inner, min, max) => *max != Some(*min) || plural(inner),
+        Node::Group(inner, _) => plural(inner),
+        Node::Concat(items) => items.iter().any(plural),
+        _ => false,
+    }
+}
+
+/// Gives each group written right inside another the number of that
+/// one. The C library looks at a group once: the one inside a group so
+/// merged is merged with none.
+fn merge(node: &Node, merged: &mut [u32]) {
+    match node {
+        Node::Group(inner, outer) => match &**inner {
+            Node::Group(within, number) => {
+                merged[*number as usize] = merged[*outer as usize];
+                merge(within, merged);
+            }
+            inner => merge(inner, merged),
+        },
+        Node::Repeat(inner, ..) => merge(inner, merged),
+        Node::Concat(items) | Node::Alt(items) => {
+            items.iter().for_each(|item| merge(item, merged));
+        }
+        _ => {}
     }
 }
 

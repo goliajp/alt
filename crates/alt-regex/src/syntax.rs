@@ -44,6 +44,8 @@ struct Parser<'a> {
     strays: bool,
     /// see [`utf8::period`]
     loose: bool,
+    /// a back-reference may be written somewhere in the pattern
+    refers: bool,
 }
 
 /// Parses `pat` into its tree and the number of groups in it.
@@ -72,6 +74,9 @@ pub fn parse_shaped(pat: &[u8], opts: Options) -> Result<(Node, u32, Shape), Err
             complex: opts.ignore_case,
             strays: false,
             loose,
+            refers: pat
+                .windows(2)
+                .any(|pair| pair[0] == b'\\' && (b'1'..=b'9').contains(&pair[1])),
         };
         let node = p.alternation()?;
         if p.at < pat.len() {
@@ -216,9 +221,14 @@ impl<'a> Parser<'a> {
                 _ if max == Some(0) => Node::Empty,
                 _ if (min, max) == (1, Some(1)) => atom,
                 // `*`, `+` and `?` behind one another are one of them,
-                // but for where the groups inside come to lie
+                // but for where the groups inside come to lie, and for
+                // where the C library ends its walk through a match
+                // with back-references
                 Node::Repeat(inner, low @ 0..=1, high @ (None | Some(1)))
-                    if min <= 1 && matches!(max, None | Some(1)) && !inner.grouped() =>
+                    if min <= 1
+                        && matches!(max, None | Some(1))
+                        && !inner.grouped()
+                        && !self.refers =>
                 {
                     let once = high.is_some() && max.is_some();
                     Node::Repeat(inner, low * min, once.then_some(1))

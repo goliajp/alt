@@ -25,6 +25,19 @@
 //! by trying its paths one after another, up to a fixed number of steps;
 //! a search that would take more is given up.
 //!
+//! [`Regex::captures_upto`] asks for the first groups only, as a caller
+//! of `regexec` does that hands it few registers, and a pattern that
+//! refers back to a group beyond them is answered as there. The C
+//! library finds the match with every group, then walks a path through
+//! it knowing only the groups it was asked for. In a pattern with an
+//! alternation or a repetition of more turns or fewer, the walk cannot
+//! pass a reference to a group it does not know, and a walk that finds
+//! no way reports no match at all, whatever lies later in the text; in
+//! a pattern without either it takes such a group to be empty. So
+//! `(a)(b?)\2` asked for one group matches nothing, `(a)()\2` matches
+//! `a`, and `(x*)*(a)\2` matches `aa`, the walk having ended before
+//! the reference as told below.
+//!
 //! Texts are bytes, as in the locale `C`: a multi-byte character is the
 //! bytes it is made of, and letters outside ASCII have no case. With
 //! [`Options::utf8`] a text is UTF-8 and is matched as in the locale
@@ -69,7 +82,12 @@
 //!   walk there: the groups behind that place are reported as taking
 //!   no part. `x?*(a)\1` on `aa`: the match and no first group there;
 //!   here the group is the first `a`. Of two paths that a match has,
-//!   the two may also keep different ones.
+//!   the two may also keep different ones. Asked for fewer groups than
+//!   such a pattern refers to, the walk decides whether there is a
+//!   match, and the two may end it at different places; the C
+//!   library also ends it with a group begun and not ended, and
+//!   reports that. `(a(x*)*)(b)\2` on `axb`, asked for one group: the
+//!   match and a first group from 0 with no end there, no match here.
 //! - Without [`Options::newline`], an anchor beside a newline in the
 //!   text. Where the C library steps from byte to byte it takes a
 //!   newline for the end of a line whether or not it was asked to, and
@@ -531,6 +549,27 @@ mod tests {
         assert_eq!(re.captures(b"aa").and_then(|c| c.get(2)), Some(0..1));
         assert!(re.captures_upto(b"aa", 1).is_none() && re.is_match(b"aa"));
         assert_eq!(re.find(b"aa"), Some(0..2));
+        let first = |pattern: &str, text: &str| {
+            let re = Regex::new(pattern.as_bytes()).unwrap();
+            let found = re.captures_upto(text.as_bytes(), 1)?;
+            Some((found.get(0).unwrap(), found.get(1)))
+        };
+        // with no choice in the pattern the group is taken to be empty
+        assert_eq!(first("(a)()\\2", "a"), Some((0..1, Some(0..1))));
+        assert_eq!(first("(a)(b)\\2", "abb"), None);
+        // with one the reference fails, and no later match is looked for
+        assert_eq!(first("(a)(b?)\\2", "a"), None);
+        assert_eq!(first("(a)(b)\\2|(c)", "abbc"), None);
+        assert_eq!(first("(a)(b)\\2|(c)", "abc"), Some((2..3, None)));
+        // a walk come back to where it stood ends before the reference
+        assert_eq!(first("(x*)*(a)\\2", "aa"), Some((0..2, Some(0..0))));
+        // with the group open it takes another way, where it has one
+        assert_eq!(first("(a|x*)*(b)\\2", "axbb"), Some((0..4, Some(0..1))));
+        assert_eq!(first("(a(x*)*)(b)\\2", "ab"), None);
+        // two groups with nothing between them are one to it
+        assert_eq!(first("((b?a))1*\\2", "baa"), Some((1..3, Some(1..2))));
+        // repetitions behind one another are turns inside turns
+        assert_eq!(first("(b)|(()b+**\\3+)", ""), Some((0..0, None)));
         // also in a text of nothing, whichever group is referred to
         let re = Regex::new(b"(a?)(b?)(c?)((d)?)*\\4").unwrap();
         assert!(re.is_match(b"") && re.find(b"") == Some(0..0));
