@@ -18,6 +18,7 @@ alt request pending --json
 In JSON mode, success goes to stdout; one failure object goes to stderr.
 Exit codes are 0 for success, 1 for a known refusal/conflict or ineligible
 validation, 2 for usage, 128 for execution errors, and 75 for unknown effects.
+`alt fsck` alone exits 3, for an unconfirmed tail (see below).
 Inspect `error.outcome` (`not_applied`, `applied`, `partial`, `unknown`) and
 `next_action`, not just the exit code. Validation can fail after its evidence
 has been durably recorded: that is an applied receipt, not a lost write.
@@ -121,6 +122,15 @@ and still exits 0:
 passed over 13 byte(s) at the end of map.alt: an append that never finished
 ```
 
+The command that cuts them off says so on stderr:
+
+```
+warning: discarded 13 byte(s) at the end of map.alt: they were never confirmed as synced to disk
+```
+
+When whole records follow the one that does not read, more than an
+unfinished record goes: see An unconfirmed tail below.
+
 ### Damage
 
 A record that does not read before the synced point was once whole. That is
@@ -197,12 +207,20 @@ The operation log is held to the same rule one layer up. A commit's ref
 update is written to the log after its objects, but a power cut can leave the
 update in the log and the objects nowhere. Such an update starts past the
 log's synced point: the command that made it never finished. The next command
-that writes cuts the log from the first such update on and says how many
-operations it discarded:
+that writes cuts the log from the first such update on and says on stderr
+what it discarded: the operations, each ref they moved, and the bytes that
+went off each file under `.alt`:
 
 ```
 warning: discarded 1 operation(s) at the end of the operation log: they were never synced to disk and name objects that are not stored
+warning:   refs/heads/main: 1 update(s), from e1e23a7a529a878cc9ade4271da4c46aa665440f to 12ff6301950af9a5602bd55ada1fd9ce83bb054f
+warning:   refs/notes/alt/meta: 1 update(s), from 8cfce41f6494e3565e2445f090daaeda696b4810 to 601f1142baf9f3ea93b36d62cc8481013c234a11
+warning: discarded 574 byte(s) at the end of map.alt: they were never confirmed as synced to disk
+warning: discarded 485 byte(s) at the end of oplog/log: they were never confirmed as synced to disk
 ```
+
+A ref line gives the id the ref is back at, then the id the discarded
+operations had moved it to.
 
 The commit can then be made again; no step by hand is needed. Until a command
 writes, a command that only reads and fails on a missing object answers from
@@ -229,6 +247,83 @@ over without a word. These lines are not damage, and it still exits 0:
 1 operation(s) at the end of the operation log were never synced and name objects that are not stored: the next command that writes discards them
 ```
 
+### An unconfirmed tail
+
+Nothing past the synced point of a file was ever confirmed to the command
+that wrote it. A power cut can leave a record there that does not read with
+whole records after it, because the system may have written out the later
+part of what was appended and not the earlier part. The file then ends at
+the record that does not read: commands that only read pass over everything
+from it on, and the next command that writes cuts the file there. It also
+cuts the records of the other files that name what went, and the operations
+in the log that name objects which are then not stored. This happens only
+past a synced point that holds; the same record before it is damage (above),
+and so is one in a repository where nothing records how far the file was
+synced (Older repositories, below).
+
+It is not damage, since none of it was ever confirmed, and `alt fsck` does
+not report it as damage. But whole records and operations are about to go,
+so `alt fsck` does not pass either. It names each such file, says what the
+next command that writes discards from each file and from the operation
+log, and exits 3:
+
+```
+unconfirmed tail: store/pack-00000001.altpack reads up to byte 717; the 8949 byte(s) after it were never confirmed as synced, the record at byte 717 does not read, and a whole record begins at byte 4371
+1148 byte(s) of records at the end of map.alt were never synced and name content that is not stored: the next command that writes cuts them off
+4 operation(s) at the end of the operation log were never synced and name objects that are not stored: the next command that writes discards them
+the next command that writes discards:
+        8949 byte(s) at the end of store/pack-00000001.altpack
+        1148 byte(s) at the end of map.alt
+        1815 byte(s) at the end of oplog/log
+           4 operation(s) at the end of the operation log
+             refs/heads/main: 2 update(s), from e702fa974d36440dc03e15f0ea75cb8eec79edb3 to 9e4a69dc1b5899c2a63e602ce0e56caf4209fa23
+             refs/notes/alt/meta: 2 update(s), from da556a6dba0fdd29f6d8cb1164937fbc21e37f67 to 415f465d512a9e510c83a47d4a8de3cd4fca0148
+             2 operation(s) that move no ref
+to keep them, copy the .alt directory before you run a command that writes
+```
+
+The counts of what it verified follow, then `every record before the
+unconfirmed tail verified`, and on stderr:
+
+```
+fatal: fsck: unconfirmed tail: the next command that writes discards 11912 byte(s) and 4 operation(s) that were never confirmed as synced; to keep them, copy the .alt directory first
+```
+
+`alt fsck --json` exits 3 as well, with one failure object on stderr whose
+`error.kind` is `unconfirmed_tail`; `error.details.files` lists the bytes
+for each file and `error.details.operations` the number of operations.
+`alt fsck` changes no file, however often it runs.
+
+To keep what the tail holds, copy the whole `.alt` directory somewhere else
+before you run another command: `alt fsck` has cut nothing, and the copy
+holds every byte. A ref line shows what goes from the history:
+`refs/heads/main` above goes back to `e702fa97…`, and the two commits up to
+`9e4a69dc…` have to be made again from the files in the working tree.
+
+The next command that writes then discards exactly what `alt fsck` listed,
+says so on stderr, and goes on:
+
+```
+warning: discarded 4 operation(s) at the end of the operation log: they were never synced to disk and name objects that are not stored
+warning:   refs/heads/main: 2 update(s), from e702fa974d36440dc03e15f0ea75cb8eec79edb3 to 9e4a69dc1b5899c2a63e602ce0e56caf4209fa23
+warning:   refs/notes/alt/meta: 2 update(s), from da556a6dba0fdd29f6d8cb1164937fbc21e37f67 to 415f465d512a9e510c83a47d4a8de3cd4fca0148
+warning:   2 operation(s) that move no ref
+warning: discarded 8949 byte(s) at the end of store/pack-00000001.altpack: they were never confirmed as synced to disk
+warning: discarded 1148 byte(s) at the end of map.alt: they were never confirmed as synced to disk
+warning: discarded 1815 byte(s) at the end of oplog/log: they were never confirmed as synced to disk
+```
+
+After it `alt fsck` exits 0. A command that the daemon runs prints the same
+warning. When the operations that go follow a record of the operation log
+that does not read, the first line ends in `and follow a record that does
+not read` instead.
+
+A command that writes only a ref, such as `alt tag`, has no reason to open
+the object store for writing when the log holds no operation to discard.
+With the tail in the object store's files alone, such a command cuts nothing
+and prints no warning, and `alt fsck` goes on exiting 3 until a command
+stores an object, `alt add` for one.
+
 ### What only the check or a command that writes reports
 
 `alt fsck` fails, with a line starting `fatal: fsck:`, on every message in
@@ -236,7 +331,7 @@ the tables above and on these. None of them changes a file.
 
 | Message | Meaning | What to do |
 | --- | --- | --- |
-| `FILE reads up to byte N, and a whole record begins past that, at byte M` | the bytes commands pass over at the end of `FILE` hold a record that reads: the record at byte N is damaged, not unfinished | restore `FILE`, or read past the damage |
+| `FILE reads up to byte N, and a whole record begins past that, at byte M` | nothing records how far `FILE` was synced, and the bytes commands pass over at its end hold a record that reads: the record at byte N is damaged, not unfinished. Past a synced point that holds, this is an unconfirmed tail instead (above) | restore `FILE`, or read past the damage |
 | `ref NAME points at ID, which is not stored` | the object a ref names is gone | restore, or point the ref at a commit that is stored |
 | `FILE ends at byte N, but records up to byte M of it were committed and synced` | the end of a file that was synced is gone | restore `FILE` |
 | `the operation log ends at byte N, but records up to byte M of it were committed and synced` | the same for `.alt/oplog/log` | restore it |
