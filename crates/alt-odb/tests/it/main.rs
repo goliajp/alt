@@ -10,6 +10,7 @@ mod full_check;
 mod head_record;
 mod marker;
 mod marker_states;
+mod marker_unreadable;
 mod merge_readers;
 mod odb_index;
 mod odb_lifecycle;

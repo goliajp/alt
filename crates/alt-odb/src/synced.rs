@@ -285,7 +285,8 @@ impl Marker {
 
     /// What the marker tells about `log` (pack `seq` for the pack, `len`
     /// bytes long) not reading to its end. `bounded`: whether the store
-    /// has had a marker in this format, asked when there is none.
+    /// has had a marker in this format, asked when there is none or it
+    /// does not read: boundaries were then lost, not never written.
     pub fn basis(&self, log: Log, seq: u32, len: u64, bounded: impl Fn() -> bool) -> Basis {
         match self {
             Marker::Recorded(state) if state.flags & UNTRUSTED != 0 => Basis::LastOnly,
@@ -309,9 +310,8 @@ impl Marker {
                     false => Basis::LastOnly,
                 }
             }
-            Marker::Unreadable => Basis::LastOnly,
-            Marker::Absent if bounded() => Basis::Unknown,
-            Marker::Absent => Basis::LastOnly,
+            Marker::Unreadable | Marker::Absent if bounded() => Basis::Unknown,
+            Marker::Unreadable | Marker::Absent => Basis::LastOnly,
         }
     }
 }

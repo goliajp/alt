@@ -1,9 +1,12 @@
 //! What the store does about a record that does not read under each state
 //! its marker can be in: recording boundaries, recording them with
 //! unsynced appends after, written by an older alt, unreadable, removed,
-//! and never written. An unfinished append never keeps the store from
-//! opening and is cut off by the next writer, which also gives the store a
-//! marker with boundaries; damage is reported and nothing changes.
+//! and never written. Where the marker tells of the ends of the logs, an
+//! unfinished append does not keep the store from opening and is cut off
+//! by the next writer, which also gives the store a marker with
+//! boundaries; damage is reported and nothing changes. A store that has
+//! had boundaries and whose marker is gone or does not read is told
+//! nothing: every record that does not read is reported.
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -102,8 +105,8 @@ fn store(dir: &Path, state: State, fault: Fault) {
 fn opens(state: State, fault: Fault) -> bool {
     match fault {
         Fault::None => true,
-        // a marker that was removed tells nothing about the end of a log
-        Fault::Unfinished => state != State::Removed,
+        // a marker that is gone tells nothing about the end of a log
+        Fault::Unfinished => !matches!(state, State::Removed | State::Unreadable),
         Fault::Damage => false,
     }
 }
@@ -211,7 +214,7 @@ fn a_store_without_a_head_record_is_bounded_by_the_open_that_indexes_it() {
 
 #[test]
 fn a_writer_bounds_the_store_before_it_appends() {
-    for state in [State::Older, State::Unreadable, State::Untrusted] {
+    for state in [State::Older, State::Untrusted] {
         let dir = alt_os::temp::tempdir().unwrap();
         store(dir.path(), state, Fault::Unfinished);
         let mut odb = NativeOdb::open(dir.path()).unwrap();

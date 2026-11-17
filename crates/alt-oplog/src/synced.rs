@@ -40,7 +40,7 @@
 //!
 //! The first byte of `sync.lock`, which an older alt only locks, says in
 //! bit 0 that the log has had a marker in this format: when the marker is
-//! then missing it was removed, not never written.
+//! then missing or does not read, a boundary was lost, not never written.
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -194,16 +194,17 @@ impl Marker {
     /// Past a boundary that holds it never finished, and before it is
     /// damage. The file length an older alt recorded is such a boundary.
     /// Where nothing is recorded, or unsynced appends followed, only the
-    /// last record is taken for unfinished. A marker that was removed
-    /// tells nothing: every such record is damage.
+    /// last record is taken for unfinished. In a log that has had a marker
+    /// in this format, one that was removed or does not read tells
+    /// nothing: every such record is damage.
     pub fn unfinished(path: &Path, at: u64, last: bool) -> bool {
         match Self::read(path) {
             Marker::Recorded(state) if state.flags & UNTRUSTED == 0 => at >= state.whole,
             // a length short of the header is not one an older alt
             // recorded: the marker is being replaced as it is read
             Marker::Legacy(eof) if eof >= HEADER => at >= eof,
-            Marker::Recorded(_) | Marker::Legacy(_) | Marker::Unreadable => last,
-            Marker::Absent => last && !bounded(path),
+            Marker::Recorded(_) | Marker::Legacy(_) => last,
+            Marker::Unreadable | Marker::Absent => last && !bounded(path),
         }
     }
 }
