@@ -259,7 +259,7 @@ fn attempt() -> Response {
                 let repo = native::view_for(repo, command);
                 cli::run_git(&repo, command, &head, &mut out)?;
                 if !execution.writing {
-                    native::leave_to_exit(repo);
+                    leave_to_exit(repo);
                 }
             }
         }
@@ -267,14 +267,23 @@ fn attempt() -> Response {
     })();
     let response = execution.finish(result, out, capture.finish(), &[]);
     if !execution.writing && response.exit_code == 0 {
-        native::leave_to_exit(execution);
+        leave_to_exit(execution);
     }
     response
 }
 
+/// Leaves what a command that only read holds for the exit of the process
+/// to take down, which follows as soon as the answer is written: closing
+/// the files, unmapping and freeing one by one is work the exit does at
+/// once. Not for a handle that may have appended to a log, which syncs it
+/// when dropped: a [`Repository`] has no way to append, and an
+/// [`Execution`] of a command that does not write holds no file.
+fn leave_to_exit<T>(held: T) {
+    std::mem::forget(held);
+}
+
 /// Runs a command of the native store in this process: opens the store,
 /// runs the command, and publishes its result once what it wrote is synced.
-/// A store that only read is left for the exit to take down.
 fn on_native_store(execution: Execution, cwd: &std::path::Path) -> Response {
     let opened = (|| -> Result<_, Box<dyn std::error::Error>> {
         let (dir, coord) =
@@ -304,9 +313,5 @@ fn on_native_store(execution: Execution, cwd: &std::path::Path) -> Response {
             execution.parsed.cli.request_id.as_deref(),
         );
     }
-    let response = execution.publish(response, operations);
-    if store.only_read() && response.exit_code == 0 {
-        native::leave_to_exit((store, repo));
-    }
-    response
+    execution.publish(response, operations)
 }

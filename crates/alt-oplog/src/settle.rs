@@ -175,12 +175,6 @@ impl OpLog {
         !self.defer && !crate::relaxed_durability()
     }
 
-    /// Whether this handle appended to the log: a drop of it then syncs
-    /// the log once more.
-    pub fn appended(&self) -> bool {
-        self.unsynced
-    }
-
     /// Reads the log again from its first record, for a handle whose
     /// records were cut ([`OpLogError::CutBack`]). Whoever derived state
     /// from the ops of this handle derives it again.

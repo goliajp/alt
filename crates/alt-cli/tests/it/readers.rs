@@ -8,7 +8,6 @@
 
 mod commands;
 mod daemon;
-mod exit;
 mod runs;
 mod states;
 
