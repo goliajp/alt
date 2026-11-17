@@ -14,14 +14,20 @@ impl Regex {
             .is_some_and(|literal| text.find(literal).is_none())
     }
 
+    /// What the bytes every match contains tell of `text` by
+    /// themselves: no match where they are missing, and one where they
+    /// are all the pattern is.
+    #[inline]
+    pub(crate) fn settled(&self, text: &[u8]) -> Option<bool> {
+        let found = text.find(self.literal.as_ref()?).is_some();
+        (!found || self.alone).then_some(found)
+    }
+
+    /// Whether there is a match, of a text [`Regex::settled`] left open.
     #[inline]
     pub(crate) fn decide(&self, cache: &mut Cache, text: &[u8]) -> Option<bool> {
         if text.is_empty() {
             return Some(self.on_empty.is_some());
-        }
-        // its bytes were looked for before this was asked
-        if self.alone {
-            return Some(true);
         }
         if self.prog.backrefs {
             return backref::search(&self.prog, text, None, &mut [pike::UNSET; 2]);

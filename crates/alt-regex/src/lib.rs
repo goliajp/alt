@@ -272,12 +272,14 @@ impl Regex {
 
     /// Whether the pattern matches anywhere in `text`.
     pub fn is_match(&self, text: &[u8]) -> bool {
-        !self.excluded(text) && self.decide(&mut self.shared(), text) == Some(true)
+        self.settled(text)
+            .unwrap_or_else(|| self.decide(&mut self.shared(), text) == Some(true))
     }
 
     /// As [`Regex::is_match`], with the caller's storage.
     pub fn is_match_with(&self, cache: &mut Cache, text: &[u8]) -> bool {
-        !self.excluded(text) && self.decide(cache, text) == Some(true)
+        self.settled(text)
+            .unwrap_or_else(|| self.decide(cache, text) == Some(true))
     }
 
     /// The earliest match in `text`, and of those the longest.
@@ -325,6 +327,8 @@ mod tests {
         assert_eq!(spans("ab", "aabab"), Some(vec![Some(1..3)]));
         assert_eq!(spans("ab", "ba"), None);
         assert_eq!(spans("ab", ""), None);
+        let fixed = Regex::new(b"ab").unwrap();
+        assert!(fixed.is_match(b"aabab") && !fixed.is_match(b"ba") && !fixed.is_match(b""));
         let text = format!("b{long}{long}");
         assert_eq!(spans(&long, &text), Some(vec![Some(1..6_001)]));
         // what is more than fixed bytes is searched as ever
