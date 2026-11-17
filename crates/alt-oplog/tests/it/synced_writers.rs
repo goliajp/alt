@@ -143,3 +143,51 @@ fn what_the_ops_name_is_synced_with_the_log_unlocked() {
     assert_eq!(*free.lock().unwrap(), [true]);
     assert_eq!(OpLog::open(dir.path()).unwrap().len(), 2);
 }
+
+/// While the log is unlocked another writer appends and records its op as
+/// synced, and one that skips its fsyncs follows: the boundary set where
+/// the log ended before does not take the other writer's back.
+#[test]
+fn a_boundary_recorded_while_the_log_was_unlocked_is_not_lowered() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    let dir = alt_os::temp::tempdir().unwrap();
+    let mut log = OpLog::open(dir.path()).unwrap();
+    log.append("someone", 1, b"one").unwrap();
+    log.sync().unwrap();
+    drop(log);
+    let end = len(dir.path());
+    fs::write(dir.path().join("durable"), end.to_le_bytes()).unwrap();
+
+    let mut log = OpLog::open(dir.path()).unwrap();
+    let synced = Arc::new(AtomicU64::new(0));
+    let (recorded_to, path) = (synced.clone(), dir.path().to_owned());
+    log.sync_named_with(Arc::new(move || {
+        if recorded_to.load(Ordering::Relaxed) == 0 {
+            let mut other = OpLog::open(&path).unwrap();
+            other.append("other", 2, b"two").unwrap();
+            other.sync().unwrap();
+            recorded_to.store(len(&path), Ordering::Relaxed);
+            super::marker::distrust(&path);
+        }
+        Ok(())
+    }));
+    log.append("someone", 3, b"three").unwrap();
+    // the writer dies here
+    std::mem::forget(log);
+    let synced = synced.load(Ordering::Relaxed);
+    assert!(end < synced && synced < len(dir.path()));
+    let marker = recorded(dir.path());
+    assert_eq!((marker.flags, marker.whole), (0, synced));
+
+    // damage to the other writer's op is not taken for an unfinished append
+    let file = OpenOptions::new()
+        .write(true)
+        .open(dir.path().join("log"))
+        .unwrap();
+    std::os::unix::fs::FileExt::write_all_at(&file, &[0xff], end + 20).unwrap();
+    let before = fs::read(dir.path().join("log")).unwrap();
+    assert!(OpLog::open(dir.path()).is_err());
+    assert!(fs::read(dir.path().join("log")).unwrap() == before);
+}

@@ -249,13 +249,15 @@ impl crate::OpLog {
 
 /// Makes `len` the boundary of a log whose marker recorded none that
 /// holds: the caller holds the log's lock, has read it to its end and has
-/// fsynced it.
+/// fsynced it. A boundary recorded past `len` stays: the records before
+/// it were synced, whatever was appended after them.
 pub(crate) fn establish(path: &Path, len: u64) -> std::io::Result<()> {
     update(path, |marker| {
+        let state = marker.recorded().copied().unwrap_or_default();
         Some(State {
-            flags: marker.generation() << GENERATION,
-            eof: len,
-            whole: len,
+            flags: state.generation() << GENERATION,
+            eof: state.eof.max(len),
+            whole: state.whole.max(len),
         })
     })?;
     note_bounded(path)

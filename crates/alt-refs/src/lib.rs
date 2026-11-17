@@ -193,25 +193,19 @@ impl RefStore {
         // the append lock, fold in any ops they committed since (so `refs` is
         // the true current state), then CAS-validate this transaction against
         // it. A rejected transaction aborts with nothing written.
-        let refs = &mut self.refs;
-        let applied = &mut self.applied;
-        let by_key = &mut self.by_key;
-        let op_id =
-            self.oplog
-                .append_checked(actor, timestamp_ms, |ops| -> Result<Vec<u8>, RefError> {
-                    fold_new(refs, applied, by_key, ops)?;
-                    // Policy gate first: a CapabilityDenied here aborts the
-                    // append (no oplog row, no idempotency update) — denial
-                    // costs nothing observable.
-                    if let Some(p) = policy {
-                        p.check(refs, changes)?;
-                    }
-                    refs.check(changes, false)?;
-                    Ok(match context {
-                        Some(context) => tx::encode_scoped_tx(changes, key, context),
-                        None => tx::encode_tx(changes, key),
-                    })
-                })?;
+        let op_id = self.append_op(actor, timestamp_ms, |refs| {
+            // Policy gate first: a CapabilityDenied here aborts the
+            // append (no oplog row, no idempotency update) — denial
+            // costs nothing observable.
+            if let Some(p) = policy {
+                p.check(refs, changes)?;
+            }
+            refs.check(changes, false)?;
+            Ok(match context {
+                Some(context) => tx::encode_scoped_tx(changes, key, context),
+                None => tx::encode_tx(changes, key),
+            })
+        })?;
         self.oplog.sync()?;
         // our own op is durable now; fold it into the map, the cursor, and the
         // idempotency index (so a retry with the same key is detected)
@@ -242,16 +236,7 @@ impl RefStore {
         if payload.first() == Some(&PAYLOAD_REF_TX) {
             return Err(RefError::ReservedPayload(PAYLOAD_REF_TX));
         }
-        let refs = &mut self.refs;
-        let applied = &mut self.applied;
-        let by_key = &mut self.by_key;
-        let owned = payload.to_vec();
-        let op_id =
-            self.oplog
-                .append_checked(actor, timestamp_ms, |ops| -> Result<Vec<u8>, RefError> {
-                    fold_new(refs, applied, by_key, ops)?;
-                    Ok(owned)
-                })?;
+        let op_id = self.append_op(actor, timestamp_ms, |_| Ok(payload.to_vec()))?;
         self.oplog.sync()?;
         self.applied = self.oplog.recent().len();
         self.note_op()?;

@@ -168,6 +168,13 @@ impl OpLog {
         Ok(check == head.0[..CHECKSUM_LEN])
     }
 
+    /// Whether this handle fsyncs each op it appends before it appends
+    /// the next: a cut of the log, which takes no synced op, then takes
+    /// none of this handle's.
+    pub fn syncs_inline(&self) -> bool {
+        !self.defer && !crate::relaxed_durability()
+    }
+
     /// Reads the log again from its first record, for a handle whose
     /// records were cut ([`OpLogError::CutBack`]). Whoever derived state
     /// from the ops of this handle derives it again.

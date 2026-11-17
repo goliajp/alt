@@ -192,3 +192,48 @@ fn a_handle_whose_op_stayed_syncs_it_after_a_cut_behind_it() {
     kept.sync().unwrap();
     assert!(OpLog::open(dir.path()).unwrap().confirmed());
 }
+
+/// A writer gives up the lock to have what the ops of a log without a
+/// boundary name synced. Ops it held that another writer cuts meanwhile
+/// are told of like any cut: nothing is appended at an offset that is no
+/// longer the end of what the handle read.
+#[test]
+fn a_cut_made_while_what_the_ops_name_is_synced_refuses_the_append() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let dir = alt_os::temp::tempdir().unwrap();
+    let ends = log_with(dir.path(), &[b"gone"]);
+    // as an older alt leaves it: the file length at its last fsync
+    fs::write(dir.path().join("durable"), ends[2].to_le_bytes()).unwrap();
+
+    let mut victim = OpLog::open(dir.path()).unwrap();
+    assert_eq!(victim.len(), 4);
+    let (cut, path) = (Arc::new(AtomicBool::new(false)), dir.path().to_owned());
+    let done = cut.clone();
+    victim.sync_named_with(Arc::new(move || {
+        if !done.swap(true, Ordering::Relaxed) {
+            let mut other = OpLog::open(&path).unwrap();
+            assert!(other.settle(held).unwrap().is_some());
+            other.append("actor", 5, b"here").unwrap();
+            other.sync().unwrap();
+        }
+        Ok(())
+    }));
+    let after_cut = |dir: &Path| fs::read(dir.join("log")).unwrap();
+    assert!(matches!(
+        victim.append("actor", 6, b"more"),
+        Err(OpLogError::CutBack)
+    ));
+    assert!(cut.load(Ordering::Relaxed));
+    let log = after_cut(dir.path());
+    assert_eq!(victim.len(), 4, "the handle stays where it was");
+    victim.reopen().unwrap();
+    assert_eq!(victim.recent().last().unwrap().payload, b"here");
+    victim.append("actor", 6, b"more").unwrap();
+    victim.sync().unwrap();
+    assert!(after_cut(dir.path()).starts_with(&log));
+    let log = OpLog::open(dir.path()).unwrap();
+    assert_eq!(log.len(), 5);
+    assert!(log.confirmed());
+}

@@ -3,7 +3,7 @@
 //! [`alt_oplog::OpLog::settle`]); here the refs follow the log.
 
 use alt_git_codec::ObjectId;
-use alt_oplog::{Op, OpLogError, Unconfirmed};
+use alt_oplog::{Op, OpId, OpLogError, Unconfirmed};
 
 use crate::state::Refs;
 use crate::{RefError, RefStore, RefTarget, fold_new, tx};
@@ -76,6 +76,34 @@ impl RefStore {
             )?;
         }
         Ok(cut)
+    }
+
+    /// Appends the op `build` makes of the refs as they are under the
+    /// log's lock, the ops of other writers folded in. When ops this store
+    /// held were cut meanwhile by another writer, the log is read again and
+    /// the op built on the refs it then tells of. A store that leaves its
+    /// fsyncs to a sink does not go on: ops it appended itself may be among
+    /// those cut.
+    pub(crate) fn append_op(
+        &mut self,
+        actor: &str,
+        timestamp_ms: u64,
+        build: impl Fn(&Refs) -> Result<Vec<u8>, RefError>,
+    ) -> Result<OpId, RefError> {
+        loop {
+            let (refs, applied, by_key) = (&mut self.refs, &mut self.applied, &mut self.by_key);
+            let appended = self.oplog.append_checked(actor, timestamp_ms, |ops| {
+                fold_new(refs, applied, by_key, ops)?;
+                build(refs)
+            });
+            match appended {
+                Err(RefError::OpLog(OpLogError::CutBack)) if self.oplog.syncs_inline() => {
+                    self.oplog.reopen()?;
+                    self.rebuild()?;
+                }
+                appended => return appended,
+            }
+        }
     }
 
     /// Derives the refs again from a log that was read anew.
