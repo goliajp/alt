@@ -88,10 +88,11 @@ impl NativeOdb {
     /// of another writer that names objects, which that writer stored
     /// first but may not have synced.
     ///
-    /// It waits for no lock of the database, so it can be called with any
-    /// of them held. The files are read the way a reader reads them. A
-    /// rewind or a cut meanwhile moves the marker's generation, and under
-    /// another generation than the one read first nothing is recorded.
+    /// The database is opened the way a reader opens it, which waits for
+    /// the shared lock on `odb.lock`: the caller holds no lock that is
+    /// taken after that one, the operation log's among them. A rewind or
+    /// a cut meanwhile moves the marker's generation, and under another
+    /// generation than the one read first nothing is recorded.
     pub fn sync_stored(alt_dir: &Path) -> Result<(), OdbError> {
         let durable_path = alt_dir.join("odb.durable");
         let generation = Marker::read(&durable_path)

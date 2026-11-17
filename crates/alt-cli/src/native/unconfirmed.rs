@@ -8,6 +8,31 @@
 //! before it does anything else. A command that only reads and fails on
 //! such a repository runs again on the log as it stood before them, and
 //! says so; it changes no file.
+//!
+//! # The order locks are taken in
+//!
+//! Settling is where the locks of the object store and of the operation
+//! log are held together. A thread that waits for a lock holds none that
+//! comes after it here:
+//!
+//! 1. `requests/<id>/lock`, for as long as a command that writes runs
+//! 2. the mutex a daemon keeps its store behind
+//! 3. `write.lock` of the workspace a command runs in, then that of one
+//!    it adds
+//! 4. `task-data/lock`
+//! 5. `odb.sync.lock`, around the fsync of the object store
+//! 6. `odb.lock`: exclusive for a batch of appends, shared for an open,
+//!    for that fsync and for a sink's
+//! 7. `oplog/log`, for an append, a cut or a read of the log
+//! 8. `oplog/sync.lock`, around the fsync of the log and a cut of it
+//! 9. a marker, `odb.durable` or `oplog/durable`, locked on itself for
+//!    one update with nothing else taken meanwhile
+//!
+//! So nothing that runs with `oplog/log` locked touches the object store
+//! unless it took `odb.lock` first, as settling does, and a batch of
+//! appends may be open when an op is appended. A lock that is only ever
+//! asked for without waiting (another request's, a migration journal's)
+//! has no place in the order.
 
 use alt_oplog::Op;
 

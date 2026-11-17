@@ -35,6 +35,7 @@ mod identity;
 mod import_materialize;
 mod json_outputs;
 mod lfs;
+mod lock_order;
 mod log_patch;
 mod log_tails;
 mod machine_results;

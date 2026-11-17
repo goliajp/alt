@@ -23,6 +23,7 @@
 //! Pure-logic crate, business-agnostic: payloads are opaque bytes; what an
 //! op *means* (ref updates, imports, …) is the caller's encoding.
 
+mod bound;
 mod lock;
 mod op;
 mod read;
@@ -257,8 +258,7 @@ impl OpLog {
         timestamp_ms: u64,
         payload: &[u8],
     ) -> Result<OpId, OpLogError> {
-        self.catch_up()?;
-        self.bound()?;
+        self.catch_up_bounded()?;
         self.write_record(actor, timestamp_ms, payload)
     }
 
@@ -273,38 +273,13 @@ impl OpLog {
         F: FnOnce(&[Op]) -> Result<Vec<u8>, E>,
         E: From<OpLogError>,
     {
-        self.catch_up().map_err(E::from)?;
-        self.bound().map_err(E::from)?;
+        self.catch_up_bounded().map_err(E::from)?;
         let payload = build(&self.ops)?;
         if u32::try_from(payload.len()).is_err() {
             return Err(OpLogError::TooLarge(payload.len()).into());
         }
         self.write_record(actor, timestamp_ms, &payload)
             .map_err(E::from)
-    }
-
-    /// With the lock held and the log read to its end: a log whose marker
-    /// does not record a boundary that holds — an older alt wrote it, the
-    /// marker was removed, or appends were left unsynced — gets one before
-    /// anything is appended. Where fsyncs are skipped the marker is made
-    /// to say so instead.
-    fn bound(&mut self) -> Result<(), OpLogError> {
-        let marker = Marker::read(&self.durable_path);
-        synced::lost(&marker, self.len_bytes)?;
-        self.generation = marker.generation();
-        if relaxed_durability() {
-            if marker.recorded().is_none() || marker.trusted() {
-                synced::distrust(&self.durable_path)?;
-            }
-        } else if !marker.trusted() {
-            // the boundary is about to take in every op there is
-            if let Some(sync) = self.named.as_ref().filter(|_| !self.is_empty()) {
-                sync()?;
-            }
-            self.file.sync_all()?;
-            synced::establish(&self.durable_path, self.len_bytes)?;
-        }
-        Ok(())
     }
 
     /// Encodes and appends one record onto the current head and folds it into
@@ -513,7 +488,7 @@ impl OpLog {
     /// nobody has recorded yet. What such an op names its writer stored
     /// before appending it but may not have synced: `sync` syncs it, so
     /// that no op is recorded as synced ahead of what it names. It is
-    /// called with no lock of the log held, or with the append lock.
+    /// called with no lock of the log held.
     pub fn sync_named_with(&mut self, sync: SyncNamed) {
         self.named = Some(sync);
     }

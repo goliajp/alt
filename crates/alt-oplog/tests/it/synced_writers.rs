@@ -109,3 +109,37 @@ fn a_writer_catching_up_cuts_the_same_way() {
     assert_eq!((after.eof, after.whole), (len(dir.path()), len(dir.path())));
     assert_eq!(OpLog::open(dir.path()).unwrap().len(), 2);
 }
+
+/// What the ops of a log without a boundary name is synced before the
+/// boundary takes them in, by a caller that takes locks of its own which
+/// come before the log's: the log is not locked meanwhile.
+#[test]
+fn what_the_ops_name_is_synced_with_the_log_unlocked() {
+    use std::sync::{Arc, Mutex};
+
+    let dir = alt_os::temp::tempdir().unwrap();
+    let mut log = OpLog::open(dir.path()).unwrap();
+    log.append("someone", 1, b"one").unwrap();
+    log.sync().unwrap();
+    drop(log);
+    let end = len(dir.path());
+    // as an older alt leaves it
+    fs::write(dir.path().join("durable"), end.to_le_bytes()).unwrap();
+
+    let mut log = OpLog::open(dir.path()).unwrap();
+    let free = Arc::new(Mutex::new(Vec::new()));
+    let (seen, path) = (free.clone(), dir.path().join("log"));
+    log.sync_named_with(Arc::new(move || {
+        let other = fs::File::open(&path)?;
+        let taken = alt_os::sys::flock(&other, alt_os::sys::LOCK_EX | alt_os::sys::LOCK_NB);
+        seen.lock().unwrap().push(taken.is_ok());
+        Ok(())
+    }));
+    log.append("someone", 2, b"two").unwrap();
+    assert_eq!(*free.lock().unwrap(), [true], "synced with the log locked");
+    assert_eq!(recorded(dir.path()).whole, end);
+    log.sync().unwrap();
+    assert_eq!(recorded(dir.path()).whole, len(dir.path()));
+    assert_eq!(*free.lock().unwrap(), [true]);
+    assert_eq!(OpLog::open(dir.path()).unwrap().len(), 2);
+}
