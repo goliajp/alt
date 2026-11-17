@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: describe an unconfirmed tail and what the command that cuts it says
+author-type: human
+author: doracawl
+touched: docs/recovery.md
