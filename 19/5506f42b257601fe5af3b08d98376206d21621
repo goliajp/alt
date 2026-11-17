@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: keep a boundary recorded meanwhile and read the log again after a cut when a writer bounds it
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/settle.rs
+touched: crates/alt-oplog/src/synced.rs
+touched: crates/alt-oplog/tests/it/synced_writers.rs
+touched: crates/alt-oplog/tests/it/unconfirmed.rs
+touched: crates/alt-refs/src/lib.rs
+touched: crates/alt-refs/src/settle.rs
+touched: crates/alt-refs/tests/it/unconfirmed.rs
