@@ -194,9 +194,8 @@ impl Marker {
     /// Past a boundary that holds it never finished, and before it is
     /// damage. The file length an older alt recorded is such a boundary.
     /// Where nothing is recorded, or unsynced appends followed, only the
-    /// last record is taken for unfinished. In a log that has had a marker
-    /// in this format, one that was removed or does not read tells
-    /// nothing: every such record is damage.
+    /// last record is taken for unfinished. A marker that is gone or does
+    /// not read, in a log that has had one, makes every such record damage.
     pub fn unfinished(path: &Path, at: u64, last: bool) -> bool {
         match Self::read(path) {
             Marker::Recorded(state) if state.flags & UNTRUSTED == 0 => at >= state.whole,
@@ -209,8 +208,7 @@ impl Marker {
     }
 }
 
-/// Whether the log beside the marker at `path` has had a marker in this
-/// format.
+/// Whether the log beside the marker at `path` has had one in this format.
 fn bounded(path: &Path) -> bool {
     std::fs::read(path.with_file_name("sync.lock"))
         .is_ok_and(|data| data.first().is_some_and(|flags| flags & 1 != 0))
@@ -249,9 +247,8 @@ impl crate::OpLog {
 }
 
 /// Makes `len` the boundary of a log whose marker recorded none that
-/// holds: the caller holds the log's lock, has read it to its end and has
-/// fsynced it. A boundary recorded past `len` stays: the records before
-/// it were synced, whatever was appended after them.
+/// holds, unless one past `len` was recorded meanwhile: the caller holds
+/// the log's lock, has read it to its end and has fsynced it.
 pub(crate) fn establish(path: &Path, len: u64) -> std::io::Result<()> {
     update(path, |marker| {
         let state = marker.recorded().copied().unwrap_or_default();
