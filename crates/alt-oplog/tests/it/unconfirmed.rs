@@ -237,3 +237,76 @@ fn a_cut_made_while_what_the_ops_name_is_synced_refuses_the_append() {
     assert_eq!(log.len(), 5);
     assert!(log.confirmed());
 }
+
+fn flip(dir: &Path, at: u64) {
+    let path = dir.join("log");
+    let mut bytes = fs::read(&path).unwrap();
+    bytes[at as usize] ^= 0xff;
+    fs::write(path, bytes).unwrap();
+}
+
+fn payloads(ops: &[Op]) -> Vec<&[u8]> {
+    ops.iter().map(|op| &op.payload[..]).collect()
+}
+
+#[test]
+fn what_a_writer_cuts_is_kept_with_the_ops_among_it_that_read() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let unsynced: [&[u8]; 6] = [
+        b"kept",
+        b"gone",
+        b"after it",
+        b"unread",
+        b"past it",
+        b"last",
+    ];
+    let ends = log_with(dir.path(), &unsynced);
+    // the record of `unread`: the log ends before it for every reader
+    flip(dir.path(), ends[5] + 20);
+    let mut log = OpLog::open(dir.path()).unwrap();
+    assert_eq!(log.len(), 6);
+    assert_eq!(log.unsynced_from(), Some(ends[2]));
+    let passed = log.passed_ops().unwrap();
+    assert_eq!(payloads(&passed), [&b"past it"[..], b"last"]);
+    assert!(log.take_discarded().is_empty());
+
+    let cut = log.settle(held).unwrap().unwrap();
+    assert_eq!((cut.at, cut.ops), (ends[3], 2));
+    let discarded = log.take_discarded();
+    assert_eq!(discarded.len(), 2);
+    // what follows the record that does not read goes first
+    let (tail, named) = (&discarded[0], &discarded[1]);
+    assert_eq!((tail.from, tail.to), (ends[5], ends[8]));
+    assert_eq!(tail.unread, ends[6] - ends[5]);
+    assert_eq!(payloads(&tail.ops), [&b"past it"[..], b"last"]);
+    assert_eq!((named.from, named.to, named.unread), (ends[3], ends[5], 0));
+    assert_eq!(payloads(&named.ops), [&b"gone"[..], b"after it"]);
+    assert!(log.take_discarded().is_empty());
+    assert_eq!(fs::metadata(dir.path().join("log")).unwrap().len(), ends[3]);
+}
+
+#[test]
+fn an_append_keeps_word_of_the_end_it_cut_off_first() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let ends = log_with(dir.path(), &[b"unread", b"past it"]);
+    flip(dir.path(), ends[2] + 20);
+    let mut log = OpLog::open(dir.path()).unwrap();
+    assert_eq!(log.len(), 3);
+    log.append("actor", 10, b"next").unwrap();
+    let discarded = log.take_discarded();
+    assert_eq!(discarded.len(), 1);
+    assert_eq!((discarded[0].from, discarded[0].to), (ends[2], ends[4]));
+    assert_eq!(payloads(&discarded[0].ops), [&b"past it"[..]]);
+    assert_eq!(discarded[0].unread, ends[3] - ends[2]);
+    // an append that never finished holds no op
+    drop(log);
+    let mut all = fs::read(dir.path().join("log")).unwrap();
+    all.extend_from_slice(&[0xcd; 9]);
+    fs::write(dir.path().join("log"), all).unwrap();
+    let mut log = OpLog::open(dir.path()).unwrap();
+    log.append("actor", 11, b"one more").unwrap();
+    let discarded = log.take_discarded();
+    assert_eq!(discarded.len(), 1);
+    assert!(discarded[0].ops.is_empty());
+    assert_eq!(discarded[0].unread, 9);
+}

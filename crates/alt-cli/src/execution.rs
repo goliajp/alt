@@ -100,10 +100,25 @@ impl Execution {
     }
 
     pub fn failure(&self, error: &(dyn std::error::Error + 'static)) -> Response {
-        machine::from_error(error, self.writing).response(
-            self.parsed.json,
-            self.id.as_ref().map(|id| machine::hex(id)).as_deref(),
-        )
+        let id = self.id.as_ref().map(|id| machine::hex(id));
+        // a store that had cut something before it failed tells of it here
+        let Some(after) = error.downcast_ref::<native::AfterDiscards>() else {
+            return machine::from_error(error, self.writing)
+                .response(self.parsed.json, id.as_deref());
+        };
+        let mut failure = machine::from_error(after.cause.as_ref(), self.writing);
+        if self.parsed.json {
+            let details = failure.details.as_object_mut().expect("details object");
+            details.insert(
+                "diagnostics".into(),
+                machine::bytes_value(after.said.as_bytes()),
+            );
+        }
+        let mut response = failure.response(self.parsed.json, id.as_deref());
+        if !self.parsed.json {
+            response.stderr.splice(0..0, after.said.bytes());
+        }
+        response
     }
 
     pub fn on_store(
@@ -128,7 +143,7 @@ impl Execution {
             {
                 return Err(Failure::unknown("legacy request has recorded effects but no complete response; inspect operations before recovery").into());
             }
-            cli::run_on_store(
+            let ran = cli::run_on_store(
                 &self.parsed.cli,
                 store,
                 repo,
@@ -136,7 +151,10 @@ impl Execution {
                 self.identity.clone(),
                 self.id,
                 &mut stdout,
-            )
+            );
+            // what the store cut off its files for this command, or before it
+            store.warn_discarded()?;
+            ran
         })();
         let operations = self
             .id

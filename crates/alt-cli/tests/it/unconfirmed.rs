@@ -12,16 +12,20 @@ use std::process::{Command, Output};
 const PACK: &str = ".alt/store/pack-00000001.altpack";
 const MARKERS: [&str; 2] = [".alt/odb.durable", ".alt/oplog/durable"];
 
-pub(super) fn alt(repo: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alt"))
+pub(super) fn alt_command(repo: &Path, args: &[&str]) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_alt"));
+    command
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", "tester")
         .env("GIT_AUTHOR_EMAIL", "t@e")
         .env_remove("ALT_RELAXED_DURABILITY")
-        .args(args)
-        .output()
-        .unwrap()
+        .args(args);
+    command
+}
+
+pub(super) fn alt(repo: &Path, args: &[&str]) -> Output {
+    alt_command(repo, args).output().unwrap()
 }
 
 pub(super) fn ok(o: Output) -> String {

@@ -1,9 +1,12 @@
 //! The full check of an object database.
 
+use std::collections::HashSet;
+
 use alt_git_codec::ObjectId;
+use alt_store::Basis;
 
 use crate::odb::Odb;
-use crate::synced::Marker;
+use crate::synced::{HEADER, Log, Marker};
 use crate::{NativeOdb, OdbError, lock};
 
 /// How many records a full check read and verified.
@@ -117,6 +120,52 @@ impl NativeOdb {
         files.push((odb.alt_dir.join("tier1"), odb.tier1()?.passed()?));
         files.push((odb.alt_dir.join("map.alt"), odb.map.passed()?));
         Ok(files)
+    }
+}
+
+impl NativeOdb {
+    /// For a reader, which changes nothing: the objects that go when a
+    /// writer cuts off `map.alt` the records that were never synced and
+    /// name content which is not stored, and those after them: the ones
+    /// no record before the cut names.
+    pub fn unconfirmed_objects(&self) -> Result<HashSet<ObjectId>, OdbError> {
+        let odb = self.odb()?;
+        let upto = odb.unconfirmed()?[2];
+        let mut gone = HashSet::new();
+        odb.map.each_from(upto, |_, entry| {
+            gone.insert(entry.git);
+            Ok(())
+        })?;
+        if !gone.is_empty() {
+            odb.map.each_from(HEADER, |at, entry| {
+                if at < upto {
+                    gone.remove(&entry.git);
+                }
+                Ok(())
+            })?;
+        }
+        Ok(gone)
+    }
+}
+
+impl NativeOdb {
+    /// For each of the four append files, in the order of
+    /// [`Self::passed`]: the byte from which on its records are not known
+    /// to have been synced, where the marker records a boundary that
+    /// holds. A record that does not read at or past it was never
+    /// confirmed; without a boundary nothing tells it from damage.
+    pub fn unsynced_from(&self) -> Result<[Option<u64>; 4], OdbError> {
+        let odb = self.odb()?;
+        let marker = Marker::read(&odb.durable_path);
+        let (seq, _, _) = odb.blobs.checkpoint()?.lens();
+        let (pack_len, _) = odb.blobs.file_lens()?;
+        let logs = [Log::Pack, Log::Blobmap, Log::Tier1, Log::Map];
+        Ok(
+            logs.map(|log| match marker.basis(log, seq, pack_len, || true) {
+                Basis::Boundary(at) => Some(at),
+                Basis::LastOnly | Basis::Unknown => None,
+            }),
+        )
     }
 }
 

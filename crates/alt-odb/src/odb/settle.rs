@@ -23,8 +23,8 @@ use std::collections::HashSet;
 use alt_store::StoreError;
 
 use super::Odb;
-use crate::synced::{self, HEADER, Lens, Marker, State};
-use crate::{BlobId, OdbError, head, tier1};
+use crate::synced::{HEADER, Lens, Marker, State};
+use crate::{BlobId, OdbError, tier1};
 
 /// The logs whose records name content, in the order they are written.
 const NAMING: [&str; 3] = ["the blob map", "the tier1 map", "map.alt"];
@@ -262,33 +262,5 @@ impl Odb {
             self.release();
         }
         Ok(out)
-    }
-
-    /// Cuts the files back to `after`: `map.alt`, the Tier 1 map, the blob
-    /// map, then what never finished in the pack. What the marker and the
-    /// lock file say of how far the files were synced comes down first.
-    /// `moved`: whole records are cut, which a writer that wrote them must
-    /// not record as synced afterwards.
-    fn cut_back(&mut self, after: Lens, pack_torn: bool, moved: bool) -> Result<(), OdbError> {
-        if pack_torn {
-            head::forget_synced(&self.lock)?;
-        }
-        synced::update(&self.durable_path, |marker| {
-            let state = marker.recorded()?;
-            Some(State {
-                generation: state.generation + u64::from(moved),
-                eof: state.eof.min(after),
-                ..*state
-            })
-        })?;
-        if self.map.unfinished() || after.map < self.map.appended_len() {
-            self.map.rewind(after.map)?;
-        }
-        let tier1 = self.tier1_mut()?;
-        if tier1.unfinished() || after.tier1 < tier1.appended_len() {
-            tier1.rewind(after.tier1)?;
-        }
-        self.blobs.cut_back(after.blobmap)?;
-        Ok(())
     }
 }

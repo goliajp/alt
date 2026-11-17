@@ -39,6 +39,9 @@ use alt_oplog::Op;
 use super::*;
 use crate::daemon::Response;
 
+mod discarded;
+pub use discarded::{AfterDiscards, Discards};
+
 /// Whether every object `op` makes a ref point at is stored.
 fn held(op: &Op, stored: &dyn Fn(&ObjectId) -> Res<bool>) -> Res<bool> {
     for oid in alt_refs::named_objects(op)? {
@@ -47,13 +50,6 @@ fn held(op: &Op, stored: &dyn Fn(&ObjectId) -> Res<bool>) -> Res<bool> {
         }
     }
     Ok(true)
-}
-
-fn discarded(ops: usize) -> String {
-    format!(
-        "warning: discarded {ops} operation(s) at the end of the operation log: they were never \
-         synced to disk and name objects that are not stored\n"
-    )
 }
 
 /// The ref store of a repository whose objects are in the object store
@@ -87,19 +83,22 @@ impl Store {
     /// writer's objects are all seen. Where the log's marker records no
     /// boundary, or every operation lies before it, there is nothing to
     /// look at and no lock is taken.
+    ///
+    /// What is cut is told by whoever runs the command
+    /// ([`Self::warn_discarded`]), or with the failure when this fails.
     pub fn settle(&mut self) -> Res<()> {
-        self.refresh()?;
-        if !self.refs.unsettled() {
-            return Ok(());
-        }
-        let refs = &mut self.refs;
-        let cut = self
-            .odb
-            .settled(|stored| refs.settle(|op| held(op, &|oid| Ok(stored(oid)?))))?;
-        if let Some(cut) = cut? {
-            crate::diagnostics::emit(discarded(cut.ops).as_bytes())?;
-        }
-        Ok(())
+        let settled = (|| -> Res<()> {
+            self.refresh()?;
+            if !self.refs.unsettled() {
+                return Ok(());
+            }
+            let refs = &mut self.refs;
+            let cut = self
+                .odb
+                .settled(|stored| refs.settle(|op| held(op, &|oid| Ok(stored(oid)?))))?;
+            cut.map(drop)
+        })();
+        settled.map_err(|error| self.after_discards(error))
     }
 
     /// For a command that only reads: how many operations at the end of
@@ -110,9 +109,11 @@ impl Store {
             return Ok(None);
         }
         // nothing has settled the object store: an object is stored when
-        // it reads
-        self.refs
-            .unconfirmed(|op| held(op, &|oid| Ok(matches!(self.odb.get(oid), Ok(Some(_))))))
+        // it reads and its record is not one a writer cuts off
+        let gone = self.odb.unconfirmed_objects()?;
+        let stored =
+            |oid: &ObjectId| !gone.contains(oid) && matches!(self.odb.get(oid), Ok(Some(_)));
+        self.refs.unconfirmed(|op| held(op, &|oid| Ok(stored(oid))))
     }
 }
 

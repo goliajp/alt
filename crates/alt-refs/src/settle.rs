@@ -78,6 +78,12 @@ impl RefStore {
         Ok(cut)
     }
 
+    /// What this store cut off the end of the log since the last call (see
+    /// [`alt_oplog::OpLog::take_discarded`]).
+    pub fn take_discarded(&mut self) -> Vec<alt_oplog::Discarded> {
+        self.oplog.take_discarded()
+    }
+
     /// Appends the op `build` makes of the refs as they are under the
     /// log's lock, the ops of other writers folded in. When ops this store
     /// held were cut meanwhile by another writer, the log is read again and

@@ -137,6 +137,7 @@ impl Odb {
             defer: false,
             write_count: 0,
             checked: None,
+            discarded: Vec::new(),
             deferred: mode.deferred,
             alt_dir,
         };

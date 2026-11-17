@@ -40,7 +40,7 @@ pub use check::OdbChecked;
 pub use error::OdbError;
 pub use map::{MapEntry, ObjectMap};
 use odb::Odb;
-pub use odb::OdbSink;
+pub use odb::{Discarded, OdbSink};
 pub use registry::default_registry;
 pub use storage_view::{
     ChunkInfo, ChunkLayout, PrismStats, StorageStats, StorageView, Tier1Layout,

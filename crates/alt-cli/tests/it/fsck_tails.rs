@@ -7,7 +7,7 @@
 use std::fs;
 use std::path::Path;
 
-use super::unconfirmed::{Lost, alt, files, ok, power_cut, stderr};
+use super::unconfirmed::{Lost, alt, alt_command, files, ok, power_cut, stderr};
 
 const LOGS: [&str; 5] = [
     "store/pack-00000001.altpack",
@@ -71,11 +71,30 @@ fn first_record(bytes: &[u8], fixed: usize, after: usize) -> &[u8] {
     &bytes[5..5 + fixed + 4 + len + after]
 }
 
+/// Runs `alt fsck`, which is to change no file; gives its exit code and
+/// everything it said.
+fn fsck_code(dir: &Path) -> (Option<i32>, String) {
+    let before = files(&dir.join(".alt"));
+    let out = alt(dir, &["fsck"]);
+    assert!(files(&dir.join(".alt")) == before, "fsck changed a file");
+    let said = String::from_utf8_lossy(&out.stdout).into_owned() + &stderr(&out);
+    (out.status.code(), said)
+}
+
+/// A commit more, made without syncing: the markers then hold no boundary.
+fn unsynced_commit(dir: &Path) {
+    fs::write(dir.join("c.txt"), "three\n").unwrap();
+    for args in [&["add", "c.txt"][..], &["commit", "-m", "c.txt"]] {
+        let mut relaxed = alt_command(dir, args);
+        ok(relaxed.env("ALT_RELAXED_DURABILITY", "1").output().unwrap());
+    }
+}
+
 /// Makes what to append to a file out of what the file holds.
 type Tail = fn(&[u8]) -> Vec<u8>;
 
 #[test]
-fn a_whole_record_in_what_was_passed_over_fails_the_check() {
+fn a_whole_record_in_what_was_passed_over_is_not_an_append_that_never_finished() {
     // bytes that read as no record, then a record that does
     let cases: [(&str, Tail); 3] = [
         ("map.alt", |all| [&[0xcd; 82][..], &all[5..87]].concat()),
@@ -87,23 +106,43 @@ fn a_whole_record_in_what_was_passed_over_fails_the_check() {
         }),
     ];
     for (log, tail) in cases {
-        let tmp = alt_os::temp::tempdir().unwrap();
-        repo(tmp.path());
-        let path = tmp.path().join(".alt").join(log);
-        let all = fs::read(&path).unwrap();
-        let tail = tail(&all);
-        append(&path, &tail);
-        let skipped = if log == "map.alt" { 82 } else { 7 };
-        let (passes, _, errors) = fsck(tmp.path());
-        assert!(!passes, "{log}");
-        let expected = format!(
-            "{log} reads up to byte {}, and a whole record begins past that, at byte {}",
-            all.len(),
-            all.len() + skipped
-        );
-        assert!(errors.contains(&expected), "{log}: {errors}");
-        // the commands before it pass over all of it
-        ok(alt(tmp.path(), &["log", "-n", "1"]));
+        // past a boundary that holds, and with unsynced writes after it
+        for bounded in [true, false] {
+            let tmp = alt_os::temp::tempdir().unwrap();
+            repo(tmp.path());
+            if !bounded {
+                unsynced_commit(tmp.path());
+            }
+            let path = tmp.path().join(".alt").join(log);
+            let all = fs::read(&path).unwrap();
+            let tail = tail(&all);
+            append(&path, &tail);
+            let len = all.len();
+            let whole = len + if log == "map.alt" { 82 } else { 7 };
+            let (code, said) = fsck_code(tmp.path());
+            let expected = match (bounded, log) {
+                (true, _) => format!(
+                    "unconfirmed tail: {log} reads up to byte {len}; the {} byte(s) after it \
+                     were never confirmed as synced, the record at byte {len} does not read, \
+                     and a whole record begins at byte {whole}",
+                    tail.len()
+                ),
+                // records of one length: the one that does not read is
+                // not the last, and so is damage for every command
+                (false, "map.alt") => "map.alt record corrupt".to_owned(),
+                (false, _) => format!(
+                    "{log} reads up to byte {len}, and a whole record begins past that, at \
+                     byte {whole}"
+                ),
+            };
+            let fails = Some(if bounded { 3 } else { 128 });
+            assert_eq!(code, fails, "{bounded} {log}: {said}");
+            assert!(said.contains(&expected), "{bounded} {log}: {said}");
+            if bounded || log != "map.alt" {
+                // the commands before it pass over all of it
+                ok(alt(tmp.path(), &["log", "-n", "1"]));
+            }
+        }
     }
 }
 

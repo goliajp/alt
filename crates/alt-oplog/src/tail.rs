@@ -1,0 +1,156 @@
+//! The end of the log as a writer finds it under the log's lock: the
+//! records other writers appended, and what it cuts off after them.
+//!
+//! A record that does not read past the synced boundary ends the log for
+//! every reader, and a writer cuts the log there. What it cuts may hold
+//! whole records after that one, written out by the kernel while the
+//! record before them was not: they were never synced either, and go with
+//! it. Each cut is kept ([`Discarded`]) for whoever tells the user.
+
+use crate::read::{read_at, unfinished};
+use crate::scan::{BODY_FIXED_LEN, CHECKSUM_LEN, ends_the_log, parse_body, replay_records};
+use crate::synced::{self, Marker};
+use crate::{Op, OpId, OpLog, OpLogError, ROOT};
+
+/// Bytes a writer cut off the end of the log.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Discarded {
+    /// where the log ends now
+    pub from: u64,
+    /// where it ended
+    pub to: u64,
+    /// the ops among those bytes whose records read, in the order they
+    /// were in
+    pub ops: Vec<Op>,
+    /// how many of those bytes no record that reads covers: none when
+    /// whole ops were cut for what they name
+    pub unread: u64,
+}
+
+impl Discarded {
+    /// The bytes `rest`, which ended a log `to` bytes long and begin with a
+    /// record that does not read, cut off it at `from`.
+    fn unread(from: u64, to: u64, rest: &[u8]) -> Self {
+        let (ops, unread) = whole_ops(rest);
+        Self {
+            from,
+            to,
+            ops,
+            unread,
+        }
+    }
+}
+
+/// The op whose record begins at `at` of `rest` and reads, with the length
+/// of the record.
+fn whole_at(rest: &[u8], at: usize) -> Option<(Op, usize)> {
+    let body_len = u32::from_le_bytes(rest.get(at..at + 4)?.try_into().unwrap()) as usize;
+    if body_len < BODY_FIXED_LEN {
+        return None;
+    }
+    let record = rest.get(at + 4..(at + 4 + body_len).checked_add(CHECKSUM_LEN)?)?;
+    let (body, check) = record.split_at(body_len);
+    let hash = alt_hash::blake3::hash(body);
+    if hash.as_bytes()[..CHECKSUM_LEN] != *check {
+        return None;
+    }
+    let op = parse_body(body, OpId(*hash.as_bytes())).ok()?;
+    Some((op, 4 + body_len + CHECKSUM_LEN))
+}
+
+/// The ops whose records read in `rest`, wherever they begin, and how many
+/// bytes of it none of them covers: every such byte is tried as the start
+/// of a record.
+pub(crate) fn whole_ops(rest: &[u8]) -> (Vec<Op>, u64) {
+    let (mut at, mut ops, mut unread) = (0, Vec::new(), 0);
+    while at < rest.len() {
+        match whole_at(rest, at) {
+            Some((op, len)) => {
+                ops.push(op);
+                at += len;
+            }
+            None => {
+                unread += 1;
+                at += 1;
+            }
+        }
+    }
+    (ops, unread)
+}
+
+impl OpLog {
+    /// Replays any records appended past our known tail (by another writer),
+    /// extending the in-memory chain so the next append parents on the real
+    /// head. A torn tail left by a crashed writer is truncated (we hold the
+    /// lock, so no live writer is mid-append).
+    pub(crate) fn catch_up(&mut self) -> Result<(), OpLogError> {
+        let size = self.file.metadata()?.len();
+        if !self.holds_head(size)? {
+            return Err(OpLogError::CutBack);
+        }
+        if size <= self.len_bytes {
+            return Ok(());
+        }
+        let tail = read_at(&self.file, self.len_bytes, (size - self.len_bytes) as usize)?;
+
+        let head = self.head().unwrap_or(ROOT);
+        let known = self.ops.len();
+        let replayed = replay_records(&tail, 0, head, &mut self.ops);
+        let replayed = replayed.and_then(|replayed| {
+            let new_len = self.len_bytes + replayed.valid as u64;
+            if replayed.valid < tail.len() {
+                let last = ends_the_log(&tail, replayed.valid);
+                unfinished(&self.durable_path, new_len, last)?;
+            }
+            Ok(replayed)
+        });
+        let replayed = match replayed {
+            Ok(replayed) => replayed,
+            Err(damage) => {
+                // the handle stays where it was
+                self.ops.truncate(known);
+                return Err(damage);
+            }
+        };
+        if let Some(full) = self.full.get_mut() {
+            full.extend_from_slice(&self.ops[known..]);
+        }
+        let new_len = self.len_bytes + replayed.valid as u64;
+        if let Some(start) = replayed.last_start {
+            self.last_start = self.len_bytes + start as u64;
+            self.others_to = new_len;
+        }
+        if replayed.valid < tail.len() {
+            // drop a crashed writer's unfinished record, and what follows it
+            synced::cut(&self.durable_path, &self.file, new_len)?;
+            self.note_discarded(Discarded::unread(new_len, size, &tail[replayed.valid..]));
+        }
+        self.len_bytes = new_len;
+        Ok(())
+    }
+
+    /// For the full check: the ops past the ones this handle holds whose
+    /// records read, wherever they begin (see [`Self::passed`]).
+    pub fn passed_ops(&self) -> Result<Vec<Op>, OpLogError> {
+        let len = self.file.metadata()?.len();
+        let rest = len.saturating_sub(self.len_bytes) as usize;
+        Ok(whole_ops(&read_at(&self.file, self.len_bytes, rest)?).0)
+    }
+
+    /// From which byte on the records of the log are not known to have
+    /// been synced, where the marker records a boundary that holds. Reads
+    /// the marker and takes no lock.
+    pub fn unsynced_from(&self) -> Option<u64> {
+        Marker::read(&self.durable_path).unsynced_from()
+    }
+
+    /// What this handle cut off the end of the log since the last call,
+    /// in the order it was cut.
+    pub fn take_discarded(&mut self) -> Vec<Discarded> {
+        std::mem::take(&mut self.discarded)
+    }
+
+    pub(crate) fn note_discarded(&mut self, discarded: Discarded) {
+        self.discarded.push(discarded);
+    }
+}

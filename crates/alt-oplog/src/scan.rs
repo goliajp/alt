@@ -7,7 +7,7 @@ pub(crate) const MAGIC: [u8; 4] = *b"ALTL";
 pub(crate) const VERSION: u8 = 1;
 pub(crate) const HEADER_LEN: usize = 5;
 /// parent 32 + change_id 32 + timestamp 8 + actor_len 2 + payload_len 4.
-const BODY_FIXED_LEN: usize = 78;
+pub(crate) const BODY_FIXED_LEN: usize = 78;
 pub(crate) const CHECKSUM_LEN: usize = 8;
 
 pub(crate) fn file_header() -> [u8; HEADER_LEN] {

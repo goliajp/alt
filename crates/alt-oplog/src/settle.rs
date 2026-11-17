@@ -262,7 +262,15 @@ impl OpLog {
         let Some(cut) = self.first_unheld(from, held)? else {
             return Ok(None);
         };
+        let ops = self.ops()?;
+        let discarded = crate::Discarded {
+            from: cut.at,
+            to: self.len_bytes,
+            ops: ops[ops.len() - cut.ops..].to_vec(),
+            unread: 0,
+        };
         synced::cut_records(&self.durable_path, &self.file, cut.at).map_err(OpLogError::from)?;
+        self.note_discarded(discarded);
         self.reopen_locked()?;
         Ok(Some(cut))
     }

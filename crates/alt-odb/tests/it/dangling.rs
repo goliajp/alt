@@ -50,7 +50,7 @@ fn store(dir: &Path, class: u32) -> (u32, [u64; 4], [u64; 4]) {
 /// Makes the marker say what it would had the last batch not been synced
 /// as far as `whole`, and takes back the note of how far the pack was:
 /// it is written after the marker and never says more.
-fn synced_to(dir: &Path, whole: [u64; 4], flags: u32) {
+pub(super) fn synced_to(dir: &Path, whole: [u64; 4], flags: u32) {
     rewrite(dir, |marker| {
         marker.flags = flags;
         marker.eof = whole;

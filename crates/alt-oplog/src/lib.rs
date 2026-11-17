@@ -30,6 +30,7 @@ mod read;
 mod scan;
 mod settle;
 mod synced;
+mod tail;
 
 use std::fs::{File, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
@@ -39,10 +40,11 @@ use std::sync::OnceLock;
 pub use op::{Op, OpId, OpLogError, ROOT};
 pub use settle::{Unconfirmed, end_reads_at, passed_damage, reading_past_damage};
 pub use synced::{OpLogSink, SyncNamed};
+pub use tail::Discarded;
 
 use lock::{lock_exclusive, lock_shared, unlock};
-use read::{read_at, read_log, scan, scan_and_create, unfinished};
-use scan::{CHECKSUM_LEN, HEADER_LEN, check_header, encode_body, ends_the_log, replay_records};
+use read::{read_at, read_log, scan, scan_and_create};
+use scan::{CHECKSUM_LEN, HEADER_LEN, check_header, encode_body, replay_records};
 use synced::{Marker, open_sync_lock};
 
 /// A place in the log to start reading from instead of its first record:
@@ -102,6 +104,8 @@ pub struct OpLog {
     others_to: u64,
     /// Syncs what the ops of other writers name ([`Self::sync_named_with`]).
     named: Option<SyncNamed>,
+    /// What this handle cut off the end of the log and nobody was told.
+    discarded: Vec<Discarded>,
 }
 
 impl OpLog {
@@ -185,6 +189,7 @@ impl OpLog {
             reads: 0,
             others_to: scan.valid_len,
             named: None,
+            discarded: Vec::new(),
         }
     }
 
@@ -317,55 +322,6 @@ impl OpLog {
         }
         self.ops.push(op);
         Ok(OpId(*hash.as_bytes()))
-    }
-
-    /// Replays any records appended past our known tail (by another writer),
-    /// extending the in-memory chain so the next append parents on the real
-    /// head. A torn tail left by a crashed writer is truncated (we hold the
-    /// lock, so no live writer is mid-append).
-    fn catch_up(&mut self) -> Result<(), OpLogError> {
-        let size = self.file.metadata()?.len();
-        if !self.holds_head(size)? {
-            return Err(OpLogError::CutBack);
-        }
-        if size <= self.len_bytes {
-            return Ok(());
-        }
-        let tail = read_at(&self.file, self.len_bytes, (size - self.len_bytes) as usize)?;
-
-        let head = self.head().unwrap_or(ROOT);
-        let known = self.ops.len();
-        let replayed = replay_records(&tail, 0, head, &mut self.ops);
-        let replayed = replayed.and_then(|replayed| {
-            let new_len = self.len_bytes + replayed.valid as u64;
-            if replayed.valid < tail.len() {
-                let last = ends_the_log(&tail, replayed.valid);
-                unfinished(&self.durable_path, new_len, last)?;
-            }
-            Ok(replayed)
-        });
-        let replayed = match replayed {
-            Ok(replayed) => replayed,
-            Err(damage) => {
-                // the handle stays where it was
-                self.ops.truncate(known);
-                return Err(damage);
-            }
-        };
-        if let Some(full) = self.full.get_mut() {
-            full.extend_from_slice(&self.ops[known..]);
-        }
-        let new_len = self.len_bytes + replayed.valid as u64;
-        if let Some(start) = replayed.last_start {
-            self.last_start = self.len_bytes + start as u64;
-            self.others_to = new_len;
-        }
-        if replayed.valid < tail.len() {
-            // drop a crashed writer's unfinished record
-            synced::cut(&self.durable_path, &self.file, new_len)?;
-        }
-        self.len_bytes = new_len;
-        Ok(())
     }
 
     /// The latest op — the state the log currently describes.
