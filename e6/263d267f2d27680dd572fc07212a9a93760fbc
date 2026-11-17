@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: report a record that does not read under a marker that was lost instead of cutting it
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/damage_messages.rs
+touched: crates/alt-odb/src/synced.rs
+touched: crates/alt-odb/tests/it/main.rs
+touched: crates/alt-odb/tests/it/marker_states.rs
+touched: crates/alt-odb/tests/it/marker_unreadable.rs
+touched: crates/alt-oplog/src/synced.rs
+touched: crates/alt-oplog/tests/it/marker_states.rs
