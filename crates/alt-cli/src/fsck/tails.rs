@@ -1,17 +1,19 @@
-//! An unconfirmed tail: bytes past the boundary a file was last recorded
-//! as synced to, where a record does not read and whole records follow
-//! it.
+//! An unconfirmed tail: what lies past the boundary a file was last
+//! recorded as synced to and holds whole records that a command which
+//! writes takes away. Either a record there does not read and whole
+//! records follow it, or records and operations there name content that
+//! is not stored.
 //!
 //! Nothing past that boundary was ever confirmed to the command that
-//! wrote it, so the next command that writes cuts the file where it stops
+//! wrote it, so a command that writes cuts the file where it stops
 //! reading, and with it the records and operations that name what went.
 //! That is not damage, and it is not nothing either: the check says what
-//! goes, file by file, and exits with [`EXIT`] so that whoever wants the
-//! bytes can copy `.alt` first.
+//! goes, file by file, which command takes it, and exits with [`EXIT`] so
+//! that whoever wants the bytes can copy `.alt` first.
 
 use alt_json::json;
 
-use super::{End, Res};
+use super::{Found, Res};
 use crate::json::Json;
 use crate::machine::Failure;
 use crate::native::{Discards, Store};
@@ -28,27 +30,72 @@ pub(super) fn found(file: &str, holds: u64, bytes: u64, whole_at: u64) -> String
     )
 }
 
-/// What the next command that writes cuts off the five files, from what
+const ANY: &str = "the next command that writes";
+const OBJECTS: &str = "the next command that writes objects";
+const LOG: &str = "oplog/log";
+
+/// Which command cuts the end off `file`. The operation log's goes with
+/// the next command that writes. So does the object store's when
+/// operations lie past the log's boundary (`settles`): a command then
+/// settles the object store to judge them before it writes anything. With
+/// none there, the object store is cut by the next command that stores an
+/// object; one that writes only a ref leaves it.
+pub(super) fn cutter(file: &str, settles: bool) -> &'static str {
+    match settles || file == LOG {
+        true => ANY,
+        false => OBJECTS,
+    }
+}
+
+/// What goes off the five files, and which command takes it.
+pub(super) struct Tail {
+    discards: Discards,
+    settles: bool,
+}
+
+impl Tail {
+    /// The bytes that go off each file with the command `by`.
+    fn files(&self, by: &'static str) -> impl Iterator<Item = &(String, u64)> {
+        let cut = move |(file, _): &&(String, u64)| cutter(file, self.settles) == by;
+        self.discards.files.iter().filter(cut)
+    }
+
+    fn bytes(&self, by: &'static str) -> u64 {
+        self.files(by).map(|(_, bytes)| bytes).sum()
+    }
+
+    /// Each file with its bytes and the command that cuts it.
+    fn each<T>(&self, entry: impl Fn(&str, u64, &'static str) -> T) -> Vec<T> {
+        let files = self.discards.files.iter();
+        files
+            .map(|(file, bytes)| entry(file, *bytes, cut_by(cutter(file, self.settles))))
+            .collect()
+    }
+}
+
+/// How a command that cuts is named to a program.
+fn cut_by(by: &str) -> &'static str {
+    match by == ANY {
+        true => "next_write",
+        false => "next_object_write",
+    }
+}
+
+/// What the commands that write next cut off the five files, from what
 /// the check read of them.
 pub(super) fn discards(
     store: &mut Store,
-    ends: &[End],
-    odb: &alt_odb::OdbChecked,
+    found: &Found,
     unconfirmed: Option<alt_refs::Unconfirmed>,
-) -> Res<Discards> {
+) -> Res<Tail> {
     let mut discards = Discards::default();
     let alt_dir = store.alt_dir().to_owned();
     // records that name content which is not stored go with the pack's end
-    let named = [
-        0,
-        odb.unconfirmed[0],
-        odb.unconfirmed[1],
-        odb.unconfirmed[2],
-    ];
-    for ((path, passed, _), named) in ends.iter().zip(named) {
+    let named = [0].into_iter().chain(found.odb.unconfirmed);
+    for ((path, passed, _), named) in found.ends.iter().zip(named) {
         discards.file(&alt_dir, path, passed.len - passed.holds + named);
     }
-    let (path, passed, _) = &ends[4];
+    let (path, passed, _) = &found.ends[4];
     let from = unconfirmed.map_or(passed.holds, |found| found.at);
     discards.file(&alt_dir, path, passed.len - from);
     let log = store.refs_mut().oplog();
@@ -56,21 +103,30 @@ pub(super) fn discards(
     let cut = unconfirmed.map_or(0, |found| found.ops);
     discards.named = ops[ops.len() - cut..].to_vec();
     discards.after = log.passed_ops()?;
-    Ok(discards)
+    Ok(Tail {
+        discards,
+        settles: found.settles,
+    })
 }
 
-/// The lines that say what goes and how to keep it.
-pub(super) fn told(discards: &Discards) -> Vec<String> {
-    let mut lines = vec!["the next command that writes discards:".to_owned()];
-    for (file, bytes) in &discards.files {
-        lines.push(format!("{bytes:>12} byte(s) at the end of {file}"));
+/// The lines that say what goes, with which command, and how to keep it.
+pub(super) fn told(tail: &Tail) -> Vec<String> {
+    let mut lines = Vec::new();
+    let file = |(file, bytes): &(String, u64)| format!("{bytes:>12} byte(s) at the end of {file}");
+    let ops = tail.discards.ops();
+    if ops > 0 || tail.bytes(ANY) > 0 {
+        lines.push(format!("{ANY} discards:"));
+        lines.extend(tail.files(ANY).map(file));
+        lines.push(format!(
+            "{ops:>12} operation(s) at the end of the operation log"
+        ));
+        for line in tail.discards.moves() {
+            lines.push(format!("{:>12} {line}", ""));
+        }
     }
-    let ops = discards.ops();
-    lines.push(format!(
-        "{ops:>12} operation(s) at the end of the operation log"
-    ));
-    for line in discards.moves() {
-        lines.push(format!("{:>12} {line}", ""));
+    if tail.bytes(OBJECTS) > 0 {
+        lines.push(format!("{OBJECTS} discards:"));
+        lines.extend(tail.files(OBJECTS).map(file));
     }
     lines.push(
         "to keep them, copy the .alt directory before you run a command that writes".to_owned(),
@@ -78,41 +134,45 @@ pub(super) fn told(discards: &Discards) -> Vec<String> {
     lines
 }
 
-pub(super) fn json(discards: &Discards) -> Json {
-    let files = discards.files.iter().map(|(file, bytes)| {
+pub(super) fn json(tail: &Tail) -> Json {
+    let files = tail.each(|file, bytes, by| {
         Json::Object(vec![
             ("file", Json::str(file)),
-            ("bytes", Json::Num(*bytes as i64)),
+            ("bytes", Json::Num(bytes as i64)),
+            ("cut_by", Json::str(by)),
         ])
     });
-    let moves = discards.moves().into_iter().map(Json::str);
+    let moves = tail.discards.moves().into_iter().map(Json::str);
     Json::Object(vec![
-        ("files", Json::Array(files.collect())),
-        ("operations", Json::Num(discards.ops() as i64)),
+        ("files", Json::Array(files)),
+        ("operations", Json::Num(tail.discards.ops() as i64)),
         ("refs", Json::Array(moves.collect())),
     ])
 }
 
 /// How the check ends when all it found is an unconfirmed tail.
-pub(super) fn failure(discards: &Discards) -> Failure {
-    let bytes: u64 = discards.files.iter().map(|(_, bytes)| bytes).sum();
-    let ops = discards.ops();
-    let files: Vec<_> = discards
-        .files
-        .iter()
-        .map(|(file, bytes)| json!({"file": file, "bytes": bytes}))
-        .collect();
+pub(super) fn failure(tail: &Tail) -> Failure {
+    let ops = tail.discards.ops();
+    let (any, objects) = (tail.bytes(ANY), tail.bytes(OBJECTS));
+    let goes = match (ops > 0 || any > 0, objects > 0) {
+        (true, false) => format!("{ANY} discards {any} byte(s) and {ops} operation(s)"),
+        (false, _) => format!("{OBJECTS} discards {objects} byte(s)"),
+        (true, true) => format!(
+            "{ANY} discards {any} byte(s) and {ops} operation(s), and {OBJECTS} discards \
+             {objects} byte(s),"
+        ),
+    };
+    let files = tail.each(|file, bytes, by| json!({"file": file, "bytes": bytes, "cut_by": by}));
     Failure {
         exit_code: EXIT,
         details: Box::new(json!({"files": files, "operations": ops})),
-        next_action: "Copy the .alt directory to keep the unconfirmed tail; the next command \
-                      that writes discards it",
+        next_action: "Copy the .alt directory before running a command that writes, to keep \
+                      what was never confirmed as synced",
         ..Failure::refusal(
             "unconfirmed_tail",
             format!(
-                "fsck: unconfirmed tail: the next command that writes discards {bytes} byte(s) \
-                 and {ops} operation(s) that were never confirmed as synced; to keep them, \
-                 copy the .alt directory first"
+                "fsck: unconfirmed tail: {goes} that were never confirmed as synced; to keep \
+                 them, copy the .alt directory first"
             ),
         )
     }

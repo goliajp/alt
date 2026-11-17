@@ -7,10 +7,10 @@
 //!
 //! It also says what a command passes over without a word: bytes at the
 //! end of a file that an interrupted append left, and operations and
-//! records that were never synced and name what is not stored. Those the
-//! next command that writes cuts off; they are not damage. Where what is
-//! cut holds whole records, the check says how much goes and does not
-//! pass ([`tails`]). It changes no file.
+//! records that were never synced and name what is not stored. Those a
+//! command that writes cuts off; they are not damage. Where what is cut
+//! holds whole records, the check says how much goes, which command takes
+//! it, and does not pass ([`tails`]). It changes no file.
 
 mod tails;
 
@@ -18,7 +18,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::json::{self, Json};
-use crate::native::{Discards, Store};
+use crate::native::Store;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -69,17 +69,23 @@ pub fn run<W: Write>(store: &mut Store, json: bool, out: &mut W) -> Res<u8> {
     let unconfirmed = store.unconfirmed()?;
     let named = unconfirmed.map_or(0, |found| found.ops);
     let dangling = store.dangling_refs(named)?;
-
-    let (mut notes, damage, tails) = findings(store.alt_dir(), &ends, &odb, named, &dangling);
+    let found = Found {
+        ends: &ends,
+        odb: &odb,
+        unconfirmed: named,
+        dangling: &dangling,
+        settles: store.refs_mut().unsettled(),
+    };
+    let (mut notes, damage, tails) = findings(store.alt_dir(), &found);
     if !damage.is_empty() {
         return Err(format!("fsck: {}", damage.join("\nfsck: ")).into());
     }
     let discards = match tails {
-        true => Some(tails::discards(store, &ends, &odb, unconfirmed)?),
+        true => Some(tails::discards(store, &found, unconfirmed)?),
         false => None,
     };
-    if let Some(discards) = &discards {
-        notes.extend(tails::told(discards));
+    if let Some(tail) = &discards {
+        notes.extend(tails::told(tail));
     }
     let counts = [
         ("chunk_records", "chunk records", odb.chunk_records),
@@ -91,7 +97,7 @@ pub fn run<W: Write>(store: &mut Store, json: bool, out: &mut W) -> Res<u8> {
     ];
     report(out, json, &ignored, &notes, &counts, discards.as_ref())?;
     match discards {
-        Some(discards) => Err(tails::failure(&discards).into()),
+        Some(tail) => Err(tails::failure(&tail).into()),
         None => Ok(0),
     }
 }
@@ -103,7 +109,7 @@ fn report<W: Write>(
     ignored: &[PathBuf],
     notes: &[String],
     counts: &[(&'static str, &str, u64)],
-    discards: Option<&Discards>,
+    discards: Option<&tails::Tail>,
 ) -> Res<()> {
     if json {
         let mut fields: Vec<_> = counts
@@ -143,27 +149,37 @@ fn report<W: Write>(
     Ok(())
 }
 
-/// What the check has to tell that is not damage, what is, and whether a
-/// file ends in an unconfirmed tail: nothing past a boundary that holds
-/// was ever confirmed, so a writer cuts all of it off, whole records too.
-fn findings(
-    alt_dir: &Path,
-    ends: &[End],
-    odb: &alt_odb::OdbChecked,
+/// What the check read that `findings` tells of.
+struct Found<'a> {
+    ends: &'a [End],
+    odb: &'a alt_odb::OdbChecked,
+    /// operations that were never synced and name objects not stored
     unconfirmed: usize,
-    dangling: &[(String, alt_git_codec::ObjectId)],
-) -> (Vec<String>, Vec<String>, bool) {
+    dangling: &'a [(String, alt_git_codec::ObjectId)],
+    /// whether a command that writes settles the object store whatever
+    /// it writes ([`tails::cutter`])
+    settles: bool,
+}
+
+/// What the check has to tell that is not damage, what is, and whether a
+/// command that writes takes whole records away: nothing past a boundary
+/// that holds was ever confirmed, so a writer cuts off a record there
+/// that does not read with the whole ones after it, and the records and
+/// operations that name what is not stored.
+fn findings(alt_dir: &Path, found: &Found) -> (Vec<String>, Vec<String>, bool) {
     let name = |path: &Path| {
         let inside = path.strip_prefix(alt_dir).unwrap_or(path);
         inside.display().to_string()
     };
     let (mut notes, mut damage, mut tails) = (Vec::new(), Vec::new(), false);
-    for (path, passed, bound) in ends {
+    for (path, passed, bound) in found.ends {
         let (file, holds) = (name(path), passed.holds);
         let bytes = passed.len.saturating_sub(holds);
         match passed.whole_at {
             None if bytes > 0 => notes.push(format!(
-                "passed over {bytes} byte(s) at the end of {file}: an append that never finished"
+                "passed over {bytes} byte(s) at the end of {file}: an append that never \
+                 finished; {} cuts them off",
+                tails::cutter(&file, found.settles)
             )),
             None => {}
             Some(at) if bound.is_some_and(|bound| holds >= bound) => {
@@ -175,21 +191,25 @@ fn findings(
             )),
         }
     }
-    for (file, bytes) in MAPS.iter().zip(odb.unconfirmed) {
+    for (file, bytes) in MAPS.iter().zip(found.odb.unconfirmed) {
         if bytes > 0 {
+            tails = true;
             notes.push(format!(
                 "{bytes} byte(s) of records at the end of {file} were never synced and name \
-                 content that is not stored: the next command that writes cuts them off"
+                 content that is not stored: {} cuts them off",
+                tails::cutter(file, found.settles)
             ));
         }
     }
-    if unconfirmed > 0 {
+    if found.unconfirmed > 0 {
+        tails = true;
         notes.push(format!(
-            "{unconfirmed} operation(s) at the end of the operation log were never synced and \
-             name objects that are not stored: the next command that writes discards them"
+            "{} operation(s) at the end of the operation log were never synced and name \
+             objects that are not stored: the next command that writes discards them",
+            found.unconfirmed
         ));
     }
-    for (name, oid) in dangling {
+    for (name, oid) in found.dangling {
         damage.push(format!("ref {name} points at {oid}, which is not stored"));
     }
     (notes, damage, tails)

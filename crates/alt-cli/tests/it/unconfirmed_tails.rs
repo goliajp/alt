@@ -1,9 +1,11 @@
 //! A record that does not read past the boundary a file was last recorded
-//! as synced to, with whole records after it: nothing there was ever
-//! confirmed. `alt fsck` says what the next command that writes discards
-//! and exits 3, that command says what it discarded, and the two agree
-//! with what left the files. The same record before the boundary, or
-//! without a boundary that holds, is damage: reported, and nothing is cut.
+//! as synced to, with whole records after it, and whole records and
+//! operations there that name content which is not stored: nothing there
+//! was ever confirmed. `alt fsck` says what goes with the next command
+//! that writes, or with the next that writes objects, and exits 3; that
+//! command says what it discarded, and the two agree with what left the
+//! files. The same record before the boundary, or without a boundary that
+//! holds, is damage: reported, and nothing is cut.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -11,7 +13,7 @@ use std::os::unix::fs::FileExt;
 use std::path::Path;
 use std::process::Output;
 
-use super::unconfirmed::{alt, alt_command, files, ok, stderr};
+use super::unconfirmed::{Lost, alt, alt_command, files, ok, power_cut, stderr};
 
 pub(super) const LOGS: [&str; 5] = [
     "store/pack-00000001.altpack",
@@ -132,17 +134,15 @@ pub(super) fn damage(dir: &Path, n: usize, at: u64) {
 /// to the refs.
 type Told = (BTreeMap<String, u64>, usize, Vec<String>);
 
-/// Runs `alt fsck`, which is to change no file; gives its exit code, what
-/// it printed, and what it said the next command that writes discards.
-fn fsck(dir: &Path) -> (Option<i32>, String, Told) {
-    let before = files(&dir.join(".alt"));
-    let out = alt(dir, &["fsck"]);
-    assert!(files(&dir.join(".alt")) == before, "fsck changed a file");
-    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+/// What goes with any command that writes, and with one that writes
+/// objects, as the check heads them.
+const ANY: &str = "the next command that writes discards:\n";
+const OBJECTS: &str = "the next command that writes objects discards:\n";
+
+/// What the check `said` goes with the command of `header`.
+fn told_by(said: &str, header: &str) -> Told {
     let mut told: Told = Default::default();
-    let block = said
-        .split("the next command that writes discards:\n")
-        .nth(1);
+    let block = said.split(header).nth(1);
     for line in block.unwrap_or("").lines() {
         let line = line.trim_start();
         if let Some((bytes, file)) = line.split_once(" byte(s) at the end of ") {
@@ -150,12 +150,23 @@ fn fsck(dir: &Path) -> (Option<i32>, String, Told) {
         } else if let Some(ops) = line.strip_suffix(" operation(s) at the end of the operation log")
         {
             told.1 = ops.parse().unwrap();
-        } else if line.starts_with("to keep them") {
+        } else if line.starts_with("to keep them") || line.starts_with("the next command") {
             break;
         } else {
             told.2.push(line.to_owned());
         }
     }
+    told
+}
+
+/// Runs `alt fsck`, which is to change no file; gives its exit code, what
+/// it printed, and what it said the next command that writes discards.
+fn fsck(dir: &Path) -> (Option<i32>, String, Told) {
+    let before = files(&dir.join(".alt"));
+    let out = alt(dir, &["fsck"]);
+    assert!(files(&dir.join(".alt")) == before, "fsck changed a file");
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    let told = told_by(&said, ANY);
     (out.status.code(), said + &stderr(&out), told)
 }
 
@@ -196,6 +207,16 @@ fn last_op(bytes: &[u8]) -> u64 {
     }
 }
 
+/// The bytes that left the end of each log since they were `before` long,
+/// a command having appended one operation since and nothing else.
+fn went(dir: &Path, before: [u64; 5]) -> BTreeMap<String, u64> {
+    let after = lens(dir);
+    let ops = fs::read(dir.join(".alt/oplog/log")).unwrap();
+    let ends = [after[0], after[1], after[2], after[3], last_op(&ops)];
+    let cut = |m: usize| (LOGS[m].to_owned(), before[m] - ends[m]);
+    (0..5).map(cut).filter(|(_, cut)| *cut > 0).collect()
+}
+
 #[test]
 fn what_the_check_says_goes_is_what_the_next_writer_says_it_cut_and_what_it_cut() {
     for (n, log) in LOGS.iter().enumerate() {
@@ -229,17 +250,7 @@ fn what_the_check_says_goes_is_what_the_next_writer_says_it_cut_and_what_it_cut(
         let wrote = alt(dir, &["tag", "after"]);
         assert!(wrote.status.success(), "{log}: {}", stderr(&wrote));
         assert_eq!(warned(&wrote), told, "{log}: {}", stderr(&wrote));
-        let after = lens(dir);
-        let ops = fs::read(dir.join(".alt/oplog/log")).unwrap();
-        let ends = [after[0], after[1], after[2], after[3], last_op(&ops)];
-        for (m, file) in LOGS.iter().enumerate() {
-            let cut = before[m] - ends[m];
-            assert_eq!(
-                told.0.get(*file).copied().unwrap_or(0),
-                cut,
-                "{log}: {file}"
-            );
-        }
+        assert_eq!(went(dir, before), told.0, "{log}");
 
         let (code, said, told) = fsck(dir);
         assert_eq!((code, told), (Some(0), Told::default()), "{log}: {said}");
@@ -338,4 +349,152 @@ fn a_command_the_daemon_runs_says_what_it_cut() {
     );
     assert_eq!(warned(&wrote), told, "{}", stderr(&wrote));
     assert_eq!(alt(dir, &["fsck"]).status.code(), Some(0));
+}
+
+/// Whole records and operations past the boundary that name content
+/// which is not stored: a command that writes takes them, so the check
+/// does not pass, and says what goes as that command then does.
+#[test]
+fn records_and_operations_whose_content_never_arrived_fail_the_check_as_the_writer_cuts_them() {
+    for lost in [Lost::Everything, Lost::Payloads, Lost::NotesCommit] {
+        let tmp = alt_os::temp::tempdir().unwrap();
+        let dir = tmp.path();
+        let (first, second) = power_cut(dir, lost);
+        let before = lens(dir);
+
+        let (code, said, told) = fsck(dir);
+        assert_eq!(code, Some(3), "{lost:?}: {said}");
+        for note in [
+            "1 operation(s) at the end of the operation log were never synced and name objects \
+             that are not stored: the next command that writes discards them\n",
+            "of records at the end of map.alt were never synced and name content that is not \
+             stored: the next command that writes cuts them off\n",
+            "every record before the unconfirmed tail verified\n",
+            "fatal: fsck: unconfirmed tail: the next command that writes discards ",
+            "copy the .alt directory first",
+        ] {
+            assert!(said.contains(note), "{lost:?}: {note}: {said}");
+        }
+        assert_eq!(told_by(&said, OBJECTS), Told::default(), "{lost:?}");
+        assert!(told.0["map.alt"] > 0 && told.0["oplog/log"] > 0, "{said}");
+        assert_eq!(told.1, 1, "{lost:?}: {said}");
+        let main = format!("refs/heads/main: 1 update(s), from {first} to {second}");
+        assert!(told.2.contains(&main), "{lost:?}: {said}");
+        let json = alt(dir, &["fsck", "--json"]);
+        assert_eq!(json.status.code(), Some(3), "{lost:?}");
+        assert!(stderr(&json).contains("\"kind\":\"unconfirmed_tail\""));
+
+        let wrote = alt(dir, &["tag", "after"]);
+        assert!(wrote.status.success(), "{lost:?}: {}", stderr(&wrote));
+        assert_eq!(warned(&wrote), told, "{lost:?}: {}", stderr(&wrote));
+        assert_eq!(went(dir, before), told.0, "{lost:?}");
+
+        let (code, said, told) = fsck(dir);
+        assert_eq!((code, told), (Some(0), Told::default()), "{lost:?}: {said}");
+        assert!(
+            said.ends_with("every record verified\n"),
+            "{lost:?}: {said}"
+        );
+        assert!(!said.contains("never"), "{lost:?}: {said}");
+    }
+}
+
+/// The object store ends in a tail and the operation log holds nothing
+/// past its boundary: a command that writes only a ref has no reason to
+/// settle the object store, and leaves it. The check says the tail goes
+/// with the next command that writes objects, and what the log ends in,
+/// if anything, with the next that writes.
+#[test]
+fn a_tail_in_the_object_store_alone_waits_for_a_command_that_writes_objects() {
+    for torn_log in [false, true] {
+        let tmp = alt_os::temp::tempdir().unwrap();
+        let dir = tmp.path();
+        ok(alt(dir, &["init"]));
+        fs::write(dir.join("a.txt"), "one\n").unwrap();
+        ok(alt(dir, &["add", "a.txt"]));
+        ok(alt(dir, &["commit", "-m", "first"]));
+        let first = lens(dir);
+        let saved = ["odb.durable", "oplog/durable", "oplog/log"]
+            .map(|file| fs::read(dir.join(".alt").join(file)).unwrap());
+        for (name, seed) in [("b.bin", 1), ("c.bin", 2)] {
+            fs::write(dir.join(name), noise(seed, 4000)).unwrap();
+            ok(alt(dir, &["add", name]));
+        }
+        // the log as it was before the two adds, all of it synced
+        fs::write(dir.join(".alt/oplog/log"), &saved[2]).unwrap();
+        lag(dir, &[saved[0].clone(), saved[1].clone()]);
+        damage(dir, 0, first[0]);
+        if torn_log {
+            let mut log = saved[2].clone();
+            log.extend_from_slice(&[0xcd; 9]);
+            fs::write(dir.join(".alt/oplog/log"), log).unwrap();
+        }
+        let before = lens(dir);
+        let held = LOGS.map(|log| fs::read(dir.join(".alt").join(log)).unwrap());
+
+        let (code, said, any) = fsck(dir);
+        let objects = told_by(&said, OBJECTS);
+        assert_eq!(code, Some(3), "{torn_log}: {said}");
+        assert!(objects.0[LOGS[0]] > 0 && objects.0["map.alt"] > 0, "{said}");
+        assert_eq!((objects.1, objects.2.len()), (0, 0), "{said}");
+        let bytes: u64 = objects.0.values().sum();
+        let fatal = match torn_log {
+            true => format!(
+                "fatal: fsck: unconfirmed tail: the next command that writes discards 9 byte(s) \
+                 and 0 operation(s), and the next command that writes objects discards {bytes} \
+                 byte(s), that were never confirmed as synced; to keep them, copy the .alt \
+                 directory first\n"
+            ),
+            false => format!(
+                "fatal: fsck: unconfirmed tail: the next command that writes objects discards \
+                 {bytes} byte(s) that were never confirmed as synced; to keep them, copy the \
+                 .alt directory first\n"
+            ),
+        };
+        assert!(said.contains(&fatal), "{torn_log}: {said}");
+        assert!(
+            said.contains(
+                "of records at the end of map.alt were never synced and name content that is \
+                 not stored: the next command that writes objects cuts them off\n"
+            ),
+            "{torn_log}: {said}"
+        );
+        let log_end = "passed over 9 byte(s) at the end of oplog/log: an append that never \
+                       finished; the next command that writes cuts them off\n";
+        assert_eq!(said.contains(log_end), torn_log, "{said}");
+        assert_eq!(said.contains(ANY), torn_log, "{said}");
+        let torn: BTreeMap<_, _> = [("oplog/log".to_owned(), 9)].into();
+        let expected = if torn_log { torn } else { BTreeMap::new() };
+        assert_eq!(any, (expected, 0, Vec::new()), "{torn_log}: {said}");
+
+        // a ref and nothing else: the object store's files stay
+        let wrote = alt(dir, &["tag", "v1"]);
+        assert!(wrote.status.success(), "{torn_log}: {}", stderr(&wrote));
+        assert_eq!(warned(&wrote), any, "{torn_log}: {}", stderr(&wrote));
+        assert_eq!(went(dir, before), any.0, "{torn_log}");
+        let (code, said, any) = fsck(dir);
+        assert_eq!(code, Some(3), "{torn_log}: {said}");
+        assert_eq!(any, Told::default(), "{torn_log}: {said}");
+        assert_eq!(told_by(&said, OBJECTS), objects, "{torn_log}: {said}");
+        assert!(!said.contains(ANY), "{torn_log}: {said}");
+
+        // an object: its files are cut where the check said
+        let wrote = alt(dir, &["add", "b.bin"]);
+        assert!(wrote.status.success(), "{torn_log}: {}", stderr(&wrote));
+        assert_eq!(warned(&wrote), objects, "{torn_log}: {}", stderr(&wrote));
+        for (file, held) in LOGS.iter().zip(&held).take(4) {
+            let cut = objects.0.get(*file).copied().unwrap_or(0) as usize;
+            let now = fs::read(dir.join(".alt").join(file)).unwrap();
+            assert!(now.starts_with(&held[..held.len() - cut]), "{file}");
+            assert_eq!(now.starts_with(held), cut == 0, "{torn_log}: {file}");
+        }
+        let (code, said, any) = fsck(dir);
+        assert_eq!(
+            (code, any),
+            (Some(0), Told::default()),
+            "{torn_log}: {said}"
+        );
+        assert!(said.ends_with("every record verified\n"), "{said}");
+        assert!(!said.contains("never"), "{torn_log}: {said}");
+    }
 }

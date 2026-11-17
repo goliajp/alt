@@ -157,6 +157,8 @@ fn a_commit_the_log_kept_and_the_store_lost_is_passed_over_cut_and_made_again() 
         assert_eq!(ok(status).contains("b.txt"), whole, "{lost:?}");
         // a ref alone is read from the log as it is: no object is missed
         assert_eq!(ok(alt(dir, &["rev-parse", "HEAD"])).trim(), second);
+        // the check does not pass: a whole operation is about to go
+        assert_eq!(alt(dir, &["fsck"]).status.code(), Some(3), "{lost:?}");
         assert!(
             files(&dir.join(".alt")) == before,
             "{lost:?}: a command that reads changed a file"

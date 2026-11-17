@@ -1,8 +1,8 @@
 //! What `alt fsck` says of the ends of the append files and of the refs:
-//! bytes an interrupted append left, a whole record in what was passed
-//! over, a file shorter than it was synced, operations that were never
-//! synced, and a ref that points at an object which is not stored. It
-//! changes no file whatever it finds.
+//! bytes an interrupted append left and which command cuts them, a whole
+//! record in what was passed over, a file shorter than it was synced,
+//! operations that were never synced, and a ref that points at an object
+//! which is not stored. It changes no file whatever it finds.
 
 use std::fs;
 use std::path::Path;
@@ -43,7 +43,7 @@ fn fsck(dir: &Path) -> (bool, String, String) {
 }
 
 #[test]
-fn the_bytes_passed_over_at_the_end_of_each_file_are_counted() {
+fn the_bytes_passed_over_at_the_end_of_each_file_are_what_the_writer_then_cuts() {
     let tmp = alt_os::temp::tempdir().unwrap();
     repo(tmp.path());
     let (passes, said, _) = fsck(tmp.path());
@@ -51,16 +51,52 @@ fn the_bytes_passed_over_at_the_end_of_each_file_are_counted() {
     for (n, log) in LOGS.iter().enumerate() {
         append(&tmp.path().join(".alt").join(log), &vec![0xcd; 100 + n]);
     }
+    let held = LOGS.map(|log| fs::read(tmp.path().join(".alt").join(log)).unwrap());
     let (passes, said, errors) = fsck(tmp.path());
     assert!(passes, "{errors}");
     for (n, log) in LOGS.iter().enumerate() {
+        // nothing past the log's boundary: the object store waits for a
+        // command that stores an object
+        let by = if n == 4 { "writes" } else { "writes objects" };
         let line = format!(
-            "passed over {} byte(s) at the end of {log}: an append that never finished\n",
+            "passed over {} byte(s) at the end of {log}: an append that never finished; the \
+             next command that {by} cuts them off\n",
             100 + n
         );
         assert!(said.contains(&line), "{log}: {said}");
     }
     assert!(said.ends_with("every record verified\n"));
+
+    // a ref and nothing else: the log's end goes, the others stay
+    let tagged = alt(tmp.path(), &["tag", "v1"]);
+    assert!(tagged.status.success(), "{}", stderr(&tagged));
+    let cut = |n: usize| {
+        format!(
+            "warning: discarded {} byte(s) at the end of {}: they were never confirmed as \
+             synced to disk\n",
+            100 + n,
+            LOGS[n]
+        )
+    };
+    assert!(stderr(&tagged).contains(&cut(4)), "{}", stderr(&tagged));
+    assert_eq!(stderr(&tagged).matches("discarded").count(), 1);
+    let (passes, said, errors) = fsck(tmp.path());
+    assert!(passes && !said.contains("oplog/log"), "{said}{errors}");
+    assert_eq!(said.matches("passed over").count(), 4, "{said}");
+
+    fs::write(tmp.path().join("c.txt"), "three\n").unwrap();
+    let added = alt(tmp.path(), &["add", "c.txt"]);
+    assert!(added.status.success(), "{}", stderr(&added));
+    for (n, held) in held.iter().enumerate().take(4) {
+        assert!(stderr(&added).contains(&cut(n)), "{}", stderr(&added));
+        let now = fs::read(tmp.path().join(".alt").join(LOGS[n])).unwrap();
+        let whole = held.len() - (100 + n);
+        assert!(now.starts_with(&held[..whole]), "{}", LOGS[n]);
+        assert!(!now[whole..].starts_with(&[0xcd; 8]), "{}", LOGS[n]);
+    }
+    assert_eq!(stderr(&added).matches("discarded").count(), 4);
+    let (passes, said, errors) = fsck(tmp.path());
+    assert!(passes && !said.contains("passed over"), "{said}{errors}");
 }
 
 /// The first record of a file of records that vary in length, the file
@@ -178,12 +214,13 @@ fn a_file_shorter_than_its_marker_says_was_synced_fails_the_check() {
 }
 
 #[test]
-fn operations_that_were_never_synced_are_told_and_are_not_damage() {
+fn operations_that_were_never_synced_are_told_and_fail_the_check_until_a_command_writes() {
     for lost in [Lost::Everything, Lost::Payloads, Lost::NotesCommit] {
         let tmp = alt_os::temp::tempdir().unwrap();
         power_cut(tmp.path(), lost);
-        let (passes, said, errors) = fsck(tmp.path());
-        assert!(passes, "{lost:?}: {errors}");
+        let (code, said) = fsck_code(tmp.path());
+        // whole operations and records go: neither damage nor a pass
+        assert_eq!(code, Some(3), "{lost:?}: {said}");
         assert!(
             said.contains(
                 "1 operation(s) at the end of the operation log were never synced and name \
@@ -198,8 +235,10 @@ fn operations_that_were_never_synced_are_told_and_are_not_damage() {
             ),
             "{lost:?}: {said}"
         );
-        let json = ok(alt(tmp.path(), &["fsck", "--json"]));
-        assert!(json.contains("\"notes\":[\""), "{json}");
+        let json = alt(tmp.path(), &["fsck", "--json"]);
+        assert_eq!(json.status.code(), Some(3), "{lost:?}");
+        assert!(stderr(&json).contains("\"kind\":\"unconfirmed_tail\""));
+        assert!(stderr(&json).contains("\"cut_by\":\"next_write\""));
         // once a command has written there is nothing left to tell
         ok(alt(tmp.path(), &["add", "b.txt"]));
         let (passes, said, _) = fsck(tmp.path());
