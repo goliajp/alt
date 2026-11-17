@@ -150,9 +150,7 @@ fn paths(
                             return None;
                         }
                         let opt = matches!(prog.insts[pc as usize], Inst::SaveOpt(..));
-                        close(slots, captures, slot, at, opt, |slot, old| {
-                            stack.push(Frame::Restore(slot as u32, old))
-                        });
+                        snapshot(stack, slots, captures, (slot, at, opt));
                     }
                     pc = next;
                 }
@@ -167,4 +165,18 @@ fn paths(
         }
     }
     Some(false)
+}
+
+/// Records `at` in `slot` of a path that keeps a snapshot; each slot
+/// that changes is left on `stack` to be put back.
+#[inline(never)]
+fn snapshot(
+    stack: &mut Vec<Frame>,
+    slots: &mut [usize],
+    captures: usize,
+    (slot, at, opt): (usize, usize, bool),
+) {
+    close(slots, captures, slot, at, opt, |slot, old| {
+        stack.push(Frame::Restore(slot as u32, old))
+    });
 }
