@@ -83,11 +83,12 @@
 //!   no part. `x?*(a)\1` on `aa`: the match and no first group there;
 //!   here the group is the first `a`. Of two paths that a match has,
 //!   the two may also keep different ones. Asked for fewer groups than
-//!   such a pattern refers to, the walk decides whether there is a
-//!   match, and the two may end it at different places; the C
-//!   library also ends it with a group begun and not ended, and
-//!   reports that. `(a(x*)*)(b)\2` on `axb`, asked for one group: the
-//!   match and a first group from 0 with no end there, no match here.
+//!   a pattern refers to, the walk decides whether there is a match,
+//!   and is taken here as there, but that a group it leaves begun and
+//!   not ended took no part here (`(a(x*)*)(b)\2` on `axb`), and that
+//!   of the copies a second repetition makes of a group the C library
+//!   follows the references of the first only: `(a(b)\2)?+c` on `abbc`,
+//!   asked for one group, is no match there and the match here.
 //! - Without [`Options::newline`], an anchor beside a newline in the
 //!   text. Where the C library steps from byte to byte it takes a
 //!   newline for the end of a line whether or not it was asked to, and
@@ -168,6 +169,7 @@ mod search;
 mod syntax;
 mod tables;
 mod utf8;
+mod walk;
 
 use std::ops::Range;
 use std::sync::Mutex;
@@ -648,6 +650,10 @@ mod tests {
         // with the group open it takes another way, where it has one
         assert_eq!(first("(a|x*)*(b)\\2", "axbb"), Some((0..4, Some(0..1))));
         assert_eq!(first("(a(x*)*)(b)\\2", "ab"), None);
+        // and where it has none, the group is left begun and not ended
+        assert_eq!(first("(a(x*)*)(b)\\2", "axb"), Some((0..3, None)));
+        // a way taken up is not recorded: the end of the group is lost
+        assert_eq!(first("((a)\\2|y*)*", "y"), Some((0..1, Some(0..0))));
         // two groups with nothing between them are one to it
         assert_eq!(first("((b?a))1*\\2", "baa"), Some((1..3, Some(1..2))));
         // repetitions behind one another are turns inside turns

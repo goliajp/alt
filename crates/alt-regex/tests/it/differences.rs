@@ -71,6 +71,32 @@ pub const CASES: [Case; 14] = [
     (false, true, b".*\xa9", b"\xc3\xa9", Some(&[Some((1, 2))])),
 ];
 
+/// A pattern, a text, and the match with its first group when no other
+/// group is asked for.
+type Asked = (&'static [u8], &'static [u8], Option<First>);
+
+/// Where a match lies, and its first group.
+type First = ((usize, usize), Option<(usize, usize)>);
+
+pub const ASKED: [Asked; 4] = [
+    // the walk of the C library ends with the group begun and not ended
+    (b"(a(x*)*)(b)\\2", b"axb", Some(((0, 3), None))),
+    // a second repetition makes copies of a group that is referred to:
+    // the C library follows the reference of the first copy only, and
+    // its walk ends elsewhere
+    (b"(a(b)\\2)?+c", b"abbc", Some(((0, 4), None))),
+    (b"(a(b)\\2){0,1}{1,}c", b"abbc", Some(((0, 4), None))),
+    (b"(a(b?))*+c\\2", b"abcb", Some(((0, 4), Some((0, 2))))),
+];
+
+/// The match of `pattern` in `text` and its first group, no other
+/// being asked for.
+pub fn first(pattern: &[u8], text: &[u8]) -> Option<First> {
+    let found = Regex::new(pattern).unwrap().captures_upto(text, 1)?;
+    let span = |group| found.get(group).map(|r| (r.start, r.end));
+    Some((span(0).unwrap(), span(1)))
+}
+
 /// The match of `pattern` in `text` with all its groups.
 pub fn ours(
     ignore_case: bool,
@@ -97,5 +123,13 @@ fn the_cases_the_c_library_answers_otherwise_are_answered_as_documented() {
         let found = ours(ignore_case, utf8, pattern, text);
         let shown = format!("{} on {}", pattern.escape_ascii(), text.escape_ascii());
         assert_eq!(found.as_deref(), expected, "{shown}");
+    }
+}
+
+#[test]
+fn asked_for_one_group_the_cases_are_answered_as_documented() {
+    for (pattern, text, expected) in ASKED {
+        let shown = format!("{} on {}", pattern.escape_ascii(), text.escape_ascii());
+        assert_eq!(first(pattern, text), expected, "{shown}");
     }
 }
