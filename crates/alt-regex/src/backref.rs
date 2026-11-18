@@ -106,7 +106,9 @@ pub fn again(
 
 /// Fills `found` with the first capture slots of the earliest match and,
 /// of those, the longest. With `only`, a match begins there or nowhere.
-/// `None` for a search given up at its bounds.
+/// `None` for a search given up at its bounds. Few patterns refer
+/// back: the search is kept out of the steps of the others.
+#[inline(never)]
 pub fn search(
     prog: &Program,
     text: &[u8],
