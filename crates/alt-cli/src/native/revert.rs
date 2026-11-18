@@ -69,7 +69,8 @@ impl NativeRepo<'_> {
                 );
             }
             let head = self.branch_tip("revert --continue")?;
-            let tree = self.staged_tree()?;
+            let head_tree = self.commit_tree(head)?;
+            let tree = self.staged_tree(Some(head_tree))?;
             let msg = self.revert_message(current, state.mainline)?;
             let commit = self.commit_revert(head, tree, &msg)?;
             self.report_revert(commit, &msg, json, out)?;

@@ -10,6 +10,9 @@ pub mod attributes;
 pub mod ident;
 mod ignore;
 mod scan;
+mod stored;
+
+pub use stored::unstored_blob;
 
 pub use scan::{
     Clean, PathMatcher, SubmoduleHead, scan_indexed_paths, scan_worktree, scan_worktree_with_index,

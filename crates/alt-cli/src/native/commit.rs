@@ -47,18 +47,14 @@ impl NativeRepo<'_> {
         // index entries inherited from another principal (e.g. operator's
         // baseline) ride through to the commit unchallenged — penalising the
         // agent for paths it never touched is unhelpful.
-        let tree = self.staged_tree()?;
-
         let branch = self.head_branch()?;
         let parent = self.store.refs.resolve(&branch)?;
+        let head_tree = parent.map(|p| self.commit_tree(p)).transpose()?;
+        let tree = self.staged_tree(head_tree)?;
         let merging = self.merge_head()?;
         // a commit that changes nothing is almost always a mistake (a
         // forgotten `add`); git refuses it too, merges aside
-        if let Some(p) = parent
-            && merging.is_none()
-            && !opts.allow_empty
-            && self.commit_tree(p)? == tree
-        {
+        if head_tree == Some(tree) && merging.is_none() && !opts.allow_empty {
             return Err(crate::machine::Failure::refusal(
                 "precondition_failed",
                 "nothing to commit: the index matches HEAD (use --allow-empty to \
@@ -145,7 +141,7 @@ impl NativeRepo<'_> {
                 .to_owned(),
         };
 
-        let tree = self.staged_tree()?;
+        let tree = self.staged_tree(prev.tree())?;
         if !opts.no_verify {
             self.run_precommit()?;
         }
@@ -241,8 +237,10 @@ impl NativeRepo<'_> {
         Ok(precommit::check(&changes))
     }
 
-    /// The index's stage-0 entries written out as a tree.
-    pub(super) fn staged_tree(&mut self) -> Res<ObjectId> {
+    /// The index's stage-0 entries written out as a tree. The blob of
+    /// every entry that `base`, the tree of a commit, does not have is
+    /// looked up first: the index can name one that was never stored.
+    pub(super) fn staged_tree(&mut self, base: Option<ObjectId>) -> Res<ObjectId> {
         let staged = index_entries(&self.index()?);
         if staged.is_empty() {
             return Err(crate::machine::Failure::refusal(
@@ -251,7 +249,16 @@ impl NativeRepo<'_> {
             )
             .into());
         }
-        self.store_tree(&staged)
+        let tree = self.store_tree(&staged)?;
+        let algo = self.store.algo()?;
+        if let Some((path, blob)) = alt_worktree::unstored_blob(&self.store.odb, tree, base, algo)?
+        {
+            return Err(format!(
+                "index entry {path} names blob {blob}, which is not stored: add the file again"
+            )
+            .into());
+        }
+        Ok(tree)
     }
 
     /// Stores a commit (signed when the sign policy asks for it) and moves

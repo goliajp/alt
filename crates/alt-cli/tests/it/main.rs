@@ -33,6 +33,7 @@ mod fsck;
 mod fsck_tails;
 mod identity;
 mod import_materialize;
+mod index_blobs;
 mod json_outputs;
 mod lfs;
 mod lock_order;

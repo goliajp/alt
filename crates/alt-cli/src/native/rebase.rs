@@ -120,9 +120,10 @@ impl NativeRepo<'_> {
                     "rebase --continue: resolve the conflicts and `alt add` them first".into(),
                 );
             }
-            let tree = self.staged_tree()?;
             let head = self.rebase_head()?;
-            if tree == self.commit_tree(head)? && !action.melds() {
+            let head_tree = self.commit_tree(head)?;
+            let tree = self.staged_tree(Some(head_tree))?;
+            if tree == head_tree && !action.melds() {
                 return Err(
                     "rebase --continue: no changes staged; if nothing is left of \
                             this commit, run `alt rebase --skip`"

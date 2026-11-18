@@ -114,6 +114,13 @@ pub(super) fn lag(dir: &Path, markers: &[Vec<u8>; 2]) {
         .open(dir.join(".alt/odb.lock"))
         .unwrap();
     lock.write_all_at(&[0u8; 48], 1176).unwrap();
+    // and the snapshot's of how far the operation log was
+    if let Ok(snapshot) = fs::OpenOptions::new()
+        .write(true)
+        .open(dir.join(".alt/refs/snapshot"))
+    {
+        snapshot.write_all_at(&[0u8; 16], 5).unwrap();
+    }
 }
 
 /// Changes a byte of the record that begins at `at` of log `n`.
@@ -168,6 +175,27 @@ fn fsck(dir: &Path) -> (Option<i32>, String, Told) {
     let said = String::from_utf8_lossy(&out.stdout).into_owned();
     let told = told_by(&said, ANY);
     (out.status.code(), said + &stderr(&out), told)
+}
+
+/// The check after a writer cut what was never confirmed. The index may
+/// still name blobs that went with the cut: the check then says so and
+/// nothing else, and the files are added again before it is run anew.
+fn fsck_once_staged_again(dir: &Path) -> (Option<i32>, String, Told) {
+    let (code, said, told) = fsck(dir);
+    if code == Some(0) {
+        return (code, said, told);
+    }
+    assert_eq!((code, &told), (Some(128), &Told::default()), "{said}");
+    for line in said.lines() {
+        let entry =
+            line.starts_with("fatal: fsck: index entry ") || line.starts_with("fsck: index entry ");
+        assert!(
+            entry && line.ends_with(", which is not stored: add the file again"),
+            "{said}"
+        );
+    }
+    ok(alt(dir, &["add", "."]));
+    fsck(dir)
 }
 
 /// What a command that wrote said on stderr it discarded.
@@ -252,7 +280,7 @@ fn what_the_check_says_goes_is_what_the_next_writer_says_it_cut_and_what_it_cut(
         assert_eq!(warned(&wrote), told, "{log}: {}", stderr(&wrote));
         assert_eq!(went(dir, before), told.0, "{log}");
 
-        let (code, said, told) = fsck(dir);
+        let (code, said, told) = fsck_once_staged_again(dir);
         assert_eq!((code, told), (Some(0), Told::default()), "{log}: {said}");
         assert!(said.ends_with("every record verified\n"), "{log}: {said}");
         assert!(!said.contains("never"), "{log}: {said}");
@@ -348,6 +376,10 @@ fn a_command_the_daemon_runs_says_what_it_cut() {
         "the command did not go through a daemon"
     );
     assert_eq!(warned(&wrote), told, "{}", stderr(&wrote));
+    // the index still names what went with the cut (the daemon's socket
+    // is in the directory: no file is read back here)
+    assert_eq!(alt(dir, &["fsck"]).status.code(), Some(128));
+    ok(alt(dir, &["add", "."]));
     assert_eq!(alt(dir, &["fsck"]).status.code(), Some(0));
 }
 
@@ -389,7 +421,7 @@ fn records_and_operations_whose_content_never_arrived_fail_the_check_as_the_writ
         assert_eq!(warned(&wrote), told, "{lost:?}: {}", stderr(&wrote));
         assert_eq!(went(dir, before), told.0, "{lost:?}");
 
-        let (code, said, told) = fsck(dir);
+        let (code, said, told) = fsck_once_staged_again(dir);
         assert_eq!((code, told), (Some(0), Told::default()), "{lost:?}: {said}");
         assert!(
             said.ends_with("every record verified\n"),
@@ -488,7 +520,7 @@ fn a_tail_in_the_object_store_alone_waits_for_a_command_that_writes_objects() {
             assert!(now.starts_with(&held[..held.len() - cut]), "{file}");
             assert_eq!(now.starts_with(held), cut == 0, "{torn_log}: {file}");
         }
-        let (code, said, any) = fsck(dir);
+        let (code, said, any) = fsck_once_staged_again(dir);
         assert_eq!(
             (code, any),
             (Some(0), Told::default()),
