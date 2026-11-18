@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: perf
+summary: skip the fsync on drop for a log that was fsynced after its last append
+author-type: human
+author: doracawl
+touched: crates/alt-odb/src/map.rs
+touched: crates/alt-oplog/src/lib.rs
+touched: crates/alt-oplog/src/sync.rs
+touched: crates/alt-store/src/blob.rs
+touched: crates/alt-store/src/blobmap.rs
+touched: crates/alt-store/src/durable.rs
+touched: crates/alt-store/src/lib.rs
+touched: crates/alt-store/src/reclog.rs
+touched: crates/alt-store/src/reclog/tests.rs
