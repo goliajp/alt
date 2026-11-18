@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: test
+summary: a rewind drops runs another handle wrote, and the alt binary reports an overflow of its main thread
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/stack_overflow.rs
+touched: crates/alt-store/tests/it/index_gap.rs
