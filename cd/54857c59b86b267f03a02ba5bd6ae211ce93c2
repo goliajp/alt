@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: refactor
+summary: split the merge state write, the run write, the run and store opens and the settle into shorter functions
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/merge.rs
+touched: crates/alt-cli/src/native/merge/write.rs
+touched: crates/alt-odb/src/odb/open.rs
+touched: crates/alt-odb/src/odb/settle.rs
+touched: crates/alt-refs/src/lib.rs
+touched: crates/alt-refs/src/reading.rs
+touched: crates/alt-store/src/run_write.rs
+touched: crates/alt-store/src/runs.rs
+touched: crates/alt-store/src/runs/named.rs
