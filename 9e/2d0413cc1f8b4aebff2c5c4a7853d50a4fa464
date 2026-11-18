@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: refactor
+summary: keep the two-slot marker file both synced markers are written as in a crate of its own
+author-type: human
+author: doracawl
+touched: Cargo.lock
+touched: Cargo.toml
+touched: crates/alt-marker/Cargo.toml
+touched: crates/alt-marker/src/lib.rs
+touched: crates/alt-marker/src/tests.rs
+touched: crates/alt-odb/Cargo.toml
+touched: crates/alt-odb/src/synced.rs
+touched: crates/alt-oplog/Cargo.toml
+touched: crates/alt-oplog/src/synced.rs
