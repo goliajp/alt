@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: test
+summary: the order of a cut, the generation after one, a past-damage reader's index runs and the ref snapshot between versions
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/mixed_versions.rs
+touched: crates/alt-cli/tests/it/readers/runs.rs
+touched: crates/alt-odb/tests/it/cut_order.rs
+touched: crates/alt-odb/tests/it/main.rs
+touched: crates/alt-odb/tests/it/synced_writers.rs
