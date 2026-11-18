@@ -529,6 +529,26 @@ recorded is marked as no longer holding until a command without it writes:
 in between, too, only the last record of a file can be an unfinished one, and
 a power cut can lose such commits whole or in part.
 
+An `alt add` that a power cut interrupts while syncs are skipped can leave its
+intent in the log and its blobs nowhere, like the one described under Records
+whose content never arrived. Here nothing says the intent was never synced, so
+it is not discarded with the end of the log. The next command that writes in
+the workspace abandons it instead: where the add had already replaced the
+index, the index is put back to what it was before; a record in the operation
+log closes the intent; and the command says:
+
+```
+warning: abandoned operation 2e64a2b53522048e297bb790f1c16bf17623d449d4b7415a8fed406ff7aae54b: it was interrupted, and index entry new.txt of the index it prepared names blob 0f755dd8e8201ee00e82eedbbd7eda23921d6c0d, which is not stored: add the file again
+```
+
+The command then goes on; no `alt operation recover` is needed, and one that
+is run for such an operation abandons it the same way. Afterwards
+`alt operation status` shows the operation as `abandoned`, with the outcome
+`not_applied`, and the file is added again. The same is done for an add whose
+intent was synced and whose blob the store has lost since. An index that is
+neither the one from before the add nor the one it prepared is left alone,
+and the operation stays pending.
+
 ### A `durable` file that is gone or does not read
 
 When a `durable` file was deleted from a repository that had one, or is

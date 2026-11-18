@@ -15,7 +15,7 @@ use super::crash_fixture::remove_final_log_frame;
 use super::unconfirmed::{Lost, alt, alt_command, ok, power_cut, stderr};
 use super::unconfirmed_tails::{LOGS, MARKERS, lag, lens};
 
-fn stdout(out: &std::process::Output) -> String {
+pub(super) fn stdout(out: &std::process::Output) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
@@ -117,7 +117,8 @@ fn the_check_reports_the_entries_of_every_workspace() {
 }
 
 /// An add that was interrupted before its completion was recorded, with
-/// the blob it stored lost as well: recovery does not complete it.
+/// the blob it stored lost as well: recovery does not complete it. It
+/// abandons it, and puts back the index from before the add.
 #[test]
 fn recovery_does_not_complete_an_add_whose_blob_is_not_stored() {
     let tmp = alt_os::temp::tempdir().unwrap();
@@ -127,19 +128,24 @@ fn recovery_does_not_complete_an_add_whose_blob_is_not_stored() {
     let pending: alt_json::Value =
         alt_json::from_str(&ok(alt(dir, &["operation", "pending", "--json"]))).unwrap();
     let id = pending["operations"][0]["operation_id"].as_str().unwrap();
-    let log = fs::read(dir.join(".alt/oplog/log")).unwrap();
     let recover = alt(dir, &["operation", "recover", id]);
-    assert!(!recover.status.success());
     let said = stderr(&recover);
+    assert!(recover.status.success(), "{said}");
     assert!(
-        said.contains("recovery refused: index entry new.txt names blob "),
+        said.contains(&format!("warning: abandoned operation {id}: ")),
         "{said}"
     );
-    assert_eq!(fs::read(dir.join(".alt/oplog/log")).unwrap(), log);
+    assert_eq!(stdout(&recover), format!("{id} abandoned\n"));
+    let index = fs::read(dir.join(".alt/index")).unwrap();
+    assert!(!index.windows(7).any(|at| at == b"new.txt"));
+    assert_eq!(ok(alt(dir, &["operation", "pending"])), "");
+    ok(alt(dir, &["add", "new.txt"]));
+    ok(alt(dir, &["commit", "-m", "second"]));
+    ok(alt(dir, &["fsck"]));
 }
 
 /// The operation log without its last record; the marker stays.
-fn drop_last_op(dir: &Path) {
+pub(super) fn drop_last_op(dir: &Path) {
     let path = dir.join(".alt/oplog/log");
     let bytes = fs::read(&path).unwrap();
     let (mut at, mut last) = (5, 5);

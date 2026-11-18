@@ -5,6 +5,7 @@ use super::*;
 
 mod index;
 mod prepared;
+pub(super) use index::ABANDON;
 pub use prepared::{export_git, prepared_blobs};
 
 pub(super) const PREPARE: u8 = 0x30;
@@ -62,6 +63,8 @@ pub(super) struct IndexIntent {
     inverse_of: Option<String>,
 }
 
+/// The record that closes a prepared index change: its completion, or
+/// its abandonment.
 #[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 struct Completion {
@@ -259,54 +262,6 @@ impl NativeRepo<'_> {
         Ok(())
     }
 
-    fn pending_index(&self, identity: &WorkspaceIdentity) -> Res<Option<(OpId, IndexIntent)>> {
-        let mut completed = std::collections::HashSet::new();
-        for op in self.store.refs.oplog().ops()?.iter().rev() {
-            match op.payload.first() {
-                Some(&COMPLETE) => {
-                    let done: Completion = decode(&op.payload, COMPLETE)?;
-                    if done.version != 1 {
-                        return Err(crate::machine::Failure::refusal(
-                            "unsupported_record",
-                            "unsupported recovery completion",
-                        )
-                        .into());
-                    }
-                    completed.insert(done.prepared);
-                }
-                Some(&PREPARE) => {
-                    let intent: IndexIntent = decode(&op.payload, PREPARE)?;
-                    if intent.version != 1 {
-                        return Err(crate::machine::Failure::refusal(
-                            "unsupported_record",
-                            "unsupported index intent",
-                        )
-                        .into());
-                    }
-                    if intent.workspace == *identity && !completed.contains(&op.id.to_string()) {
-                        return Ok(Some((op.id, intent)));
-                    }
-                }
-                _ => {}
-            }
-        }
-        Ok(None)
-    }
-
-    pub(super) fn ensure_no_pending_recovery(&self) -> Res<()> {
-        self.ensure_no_pending_checkout()?;
-        if let Some((id, _)) = self.pending_index(&self.workspace_identity()?)? {
-            return Err(crate::machine::Failure::pending(
-                id,
-                format!(
-                    "operation {id} has no durable completion; recovery required (outcome unknown)"
-                ),
-            )
-            .into());
-        }
-        Ok(())
-    }
-
     pub(super) fn write_index_transaction(
         &mut self,
         before: Index,
@@ -367,11 +322,9 @@ impl NativeRepo<'_> {
         Ok(prepared)
     }
 
-    pub fn undo(&mut self, json: bool, out: &mut impl Write) -> Res<()> {
-        self.ensure_writable("undo")?;
-        self.lock_workspace()?;
-        self.ensure_no_pending_recovery()?;
-        let workspace = self.workspace_identity()?;
+    /// The last operation of the log, or the checkout its completion
+    /// closes.
+    fn last_undoable(&self) -> Res<alt_oplog::Op> {
         let mut last = self
             .store
             .refs
@@ -402,6 +355,15 @@ impl NativeRepo<'_> {
                 .ok_or("missing checkout intent")?
                 .clone();
         }
+        Ok(last)
+    }
+
+    pub fn undo(&mut self, json: bool, out: &mut impl Write) -> Res<()> {
+        self.ensure_writable("undo")?;
+        self.lock_workspace()?;
+        self.ensure_no_pending_recovery()?;
+        let workspace = self.workspace_identity()?;
+        let last = self.last_undoable()?;
         use crate::json::Json;
         let mut fields = vec![("undone", Json::Bool(true))];
         match last.payload.first() {
@@ -443,6 +405,7 @@ impl NativeRepo<'_> {
                 fields.push(("refs", Json::Array(tx.changes.iter().map(|c| Json::str(&c.name)).collect())));
                 self.undo_scoped_refs(&last)?;
             },
+            Some(&ABANDON) => return Err(crate::machine::Failure::refusal("precondition_failed", "nothing to undo: the last operation was abandoned").into()),
             Some(&crate::index_tx::PAYLOAD_INDEX_TX) => return Err(crate::machine::Failure::refusal("unsupported_record", "legacy operation lacks workspace ownership and recovery prestate; automatic undo refused").into()),
             _ => return Err(crate::machine::Failure::refusal("unsupported_record", "unknown or incomplete operation; automatic undo refused").into()),
         }

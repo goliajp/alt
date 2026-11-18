@@ -4,7 +4,7 @@
 use super::*;
 use crate::json::Json;
 use checkout_recovery::{COMPLETE_CHECKOUT, CheckoutIntent, PREPARE_CHECKOUT};
-use recovery::{COMPLETE, IndexIntent, PREPARE, RefContext, WorkspaceIdentity, decode};
+use recovery::{ABANDON, COMPLETE, IndexIntent, PREPARE, RefContext, WorkspaceIdentity, decode};
 
 impl NativeRepo<'_> {
     fn operation_by_id(&self, id: &str) -> Res<alt_oplog::Op> {
@@ -59,11 +59,9 @@ impl NativeRepo<'_> {
             }
             Some(&PREPARE) => {
                 let intent: IndexIntent = decode(&op.payload, PREPARE)?;
-                Ok((
-                    Some(intent.workspace),
-                    self.operation_complete(op.id, COMPLETE)?,
-                    true,
-                ))
+                let closed = self.operation_complete(op.id, COMPLETE)?
+                    || self.operation_complete(op.id, ABANDON)?;
+                Ok((Some(intent.workspace), closed, true))
             }
             Some(&PREPARE_CHECKOUT) => {
                 let intent: CheckoutIntent = decode(&op.payload, PREPARE_CHECKOUT)?;
@@ -100,9 +98,19 @@ impl NativeRepo<'_> {
         }
     }
 
+    /// Whether `op` is a prepared index change that was abandoned.
+    fn abandoned(&self, op: &alt_oplog::Op) -> Res<bool> {
+        Ok(op.payload.first() == Some(&PREPARE) && self.operation_complete(op.id, ABANDON)?)
+    }
+
     fn operation_json(&self, op: &alt_oplog::Op) -> Res<Json> {
         let (workspace, complete, recoverable) = self.operation_info(op)?;
-        let scoped = workspace.is_some();
+        let (state, outcome) = match (workspace.is_some(), self.abandoned(op)?, complete) {
+            (false, ..) => ("legacy_or_unsupported", "unknown"),
+            (true, true, _) => ("abandoned", "not_applied"),
+            (true, false, true) => ("completed", "applied"),
+            (true, false, false) => ("prepared", "unknown"),
+        };
         let task = if op.payload.first() == Some(&task::TASK_OPERATION) {
             Some(decode::<task::TaskOperation>(
                 &op.payload,
@@ -137,24 +145,8 @@ impl NativeRepo<'_> {
                     .map(Json::str)
                     .unwrap_or(Json::Null),
             ),
-            (
-                "state",
-                Json::str(if !scoped {
-                    "legacy_or_unsupported"
-                } else if complete {
-                    "completed"
-                } else {
-                    "prepared"
-                }),
-            ),
-            (
-                "outcome",
-                Json::str(if complete && scoped {
-                    "applied"
-                } else {
-                    "unknown"
-                }),
-            ),
+            ("state", Json::str(state)),
+            ("outcome", Json::str(outcome)),
             ("recoverable", Json::Bool(recoverable)),
             (
                 "workspace",
@@ -206,7 +198,9 @@ impl NativeRepo<'_> {
                 out,
                 "{} {}",
                 op.id,
-                if complete {
+                if self.abandoned(&op)? {
+                    "abandoned"
+                } else if complete {
                     "completed"
                 } else {
                     "prepared (outcome unknown)"
