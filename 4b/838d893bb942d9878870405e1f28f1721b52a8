@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: walk through a match as the c library walks it when asked for fewer groups than a pattern refers to
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/backref.rs
+touched: crates/alt-regex/src/lib.rs
+touched: crates/alt-regex/src/walk.rs
+touched: crates/alt-regex/tests/it/differences.rs
+touched: crates/alt-regex/tests/it/regcomp.rs
+touched: crates/alt-regex/tests/it/regcomp/asked.rs
