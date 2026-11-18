@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: say what is cut and what never is, how to restore one file from a copy, and how far reading past damage reaches
+author-type: human
+author: doracawl
+touched: docs/recovery.md
