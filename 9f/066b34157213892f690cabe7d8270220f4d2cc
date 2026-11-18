@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: refactor
+summary: split the export, the check, the daemon's serve and the snapshot read into shorter functions
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd.rs
+touched: crates/alt-cli/src/cli.rs
+touched: crates/alt-cli/src/fsck.rs
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/recovery.rs
+touched: crates/alt-cli/src/native/recovery/prepared.rs
+touched: crates/alt-export/src/lib.rs
+touched: crates/alt-refs/src/snapshot.rs
