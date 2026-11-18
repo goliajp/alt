@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: refactor
+summary: run the commands that work on no repository through one function
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/main.rs
+touched: crates/alt-cli/tests/it/machine_results.rs
