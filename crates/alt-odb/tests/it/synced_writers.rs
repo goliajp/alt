@@ -155,3 +155,42 @@ fn a_sink_does_not_record_what_a_rewind_cut_off() {
     sink.fsync().unwrap();
     assert_eq!(recorded(dir.path()).whole, lens(dir.path()));
 }
+
+/// A writer cuts whole records another handle appended and never synced,
+/// their content lost: the sink of that handle does not record them as
+/// synced afterwards.
+#[test]
+fn a_sink_does_not_record_what_another_writer_cut_as_never_synced() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let mut odb = NativeOdb::open(dir.path()).unwrap();
+    odb.set_defer_durability(true);
+    let sink = odb.sink().unwrap();
+    put(&mut odb, 0..40);
+    odb.flush().unwrap();
+    sink.fsync().unwrap();
+    let kept = lens(dir.path());
+    let before = recorded(dir.path());
+    assert_eq!(before.whole, kept);
+
+    // the sink now has a batch's boundaries to record, and its content
+    // is lost before it does
+    put(&mut odb, 40..80);
+    odb.flush().unwrap();
+    let full = lens(dir.path());
+    let pack = OpenOptions::new()
+        .write(true)
+        .open(dir.path().join(FILES[0]))
+        .unwrap();
+    pack.set_len(kept[0]).unwrap();
+
+    let mut other = NativeOdb::open(dir.path()).unwrap();
+    put(&mut other, 100..101);
+    other.flush().unwrap();
+    let cut = recorded(dir.path());
+    assert!(lens(dir.path())[3] < full[3], "the records were not cut");
+    assert_eq!(cut.generation, before.generation + 1);
+    assert_eq!(cut.whole, lens(dir.path()));
+
+    let _ = sink.fsync();
+    assert_eq!(recorded(dir.path()), cut);
+}

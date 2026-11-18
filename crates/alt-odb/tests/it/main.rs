@@ -5,6 +5,7 @@ mod cache_failure;
 mod compact_readers;
 mod confirmed;
 mod corpus_objects;
+mod cut_order;
 mod dangling;
 mod discarded;
 mod duplicate_records;

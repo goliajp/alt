@@ -4,7 +4,7 @@
 use std::fs;
 use std::path::Path;
 
-use super::super::unconfirmed::alt;
+use super::super::unconfirmed::{alt, alt_command};
 use super::super::unconfirmed_tails::{LOGS, lens};
 use super::states::{Base, Step, run_dirs};
 use super::{answer, tree};
@@ -64,4 +64,20 @@ fn the_index_runs_a_reader_builds_are_over_synced_records_and_no_others() {
         let again = alt(&dir, &["fsck"]);
         assert_eq!(answer(&again), answer(&checked), "{steps:?}");
     }
+}
+
+/// A process that reads past damage changes no file: it builds no index
+/// run either, where the same command without that would.
+#[test]
+fn a_reader_that_reads_past_damage_builds_no_index_run() {
+    let base = Base::build();
+    let dir = base.state("past", &[Step::NoRuns]);
+    let before = tree(&dir);
+    let mut past = alt_command(&dir, &["cat-file", "-p", "HEAD"]);
+    let read = past.env("ALT_READ_PAST_DAMAGE", "1").output().unwrap();
+    assert!(read.status.success(), "{read:?}");
+    assert!(tree(&dir) == before, "reading past damage changed a file");
+    assert!(run_dirs(&dir.join(".alt")).is_empty());
+    let _ = alt(&dir, &["cat-file", "-p", "HEAD"]);
+    assert!(!run_dirs(&dir.join(".alt")).is_empty(), "nothing to build");
 }

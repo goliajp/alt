@@ -116,6 +116,55 @@ fn old_and_new_take_turns_writing() {
     );
 }
 
+/// The version byte of the ref snapshot, where there is one.
+fn snapshot_version(repo: &Path) -> Option<u8> {
+    let snapshot = fs::read(repo.join(".alt/refs/snapshot")).ok()?;
+    assert_eq!(&snapshot[..4], b"ALTS");
+    Some(snapshot[4])
+}
+
+/// The ref snapshot is a cache each program writes in its own version:
+/// this build's carries a note of how far the log is synced, which the
+/// older one does not know and takes for no snapshot. Whichever read or
+/// wrote last, both answer the same, and once this build has read, the
+/// snapshot is one of its own again.
+#[test]
+#[ignore = "run with ALT_OLD_BIN set to an alt built from the base branch"]
+fn the_ref_snapshot_changes_hands_and_both_programs_read_the_same() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let repo = tmp.path();
+    let (old, new) = (old_bin(), new_bin());
+    ok(run(&new, repo, &["init"]));
+    // enough operations for a snapshot to be due
+    commit_files(&new, repo, "new-a", 300);
+    let head = ok(run(&new, repo, &["rev-parse", "HEAD"]));
+    assert_eq!(snapshot_version(repo), Some(3));
+
+    for round in 0..3 {
+        // the older program reads past a snapshot it does not know
+        assert_eq!(ok(run(&old, repo, &["rev-parse", "HEAD"])), head, "{round}");
+        let by_old = snapshot_version(repo);
+        same_reads(&old, repo);
+        // and this build reads whatever the older one left there
+        assert_eq!(ok(run(&new, repo, &["rev-parse", "HEAD"])), head, "{round}");
+        assert_eq!(snapshot_version(repo), Some(3), "{round}: after {by_old:?}");
+        ok(run(&new, repo, &["fsck"]));
+    }
+
+    // either writes on top of a snapshot the other left
+    commit_files(&old, repo, "old-a", 300);
+    let by_old = snapshot_version(repo);
+    same_reads(&old, repo);
+    assert_eq!(snapshot_version(repo), Some(3), "after {by_old:?}");
+    commit_files(&new, repo, "new-b", 300);
+    assert_eq!(snapshot_version(repo), Some(3));
+    same_reads(&old, repo);
+    commit_files(&old, repo, "old-b", 3);
+    same_reads(&old, repo);
+    assert_eq!(ok(run(&new, repo, &["log"])).lines().count(), 4);
+    assert_eq!(head_tree(&old, repo).lines().count(), 903);
+}
+
 #[test]
 #[ignore = "run with ALT_OLD_BIN set to an alt built from the base branch"]
 fn old_and_new_write_at_the_same_time() {
