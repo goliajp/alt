@@ -181,3 +181,43 @@ fn a_lookup_repeated_after_the_log_changed_sees_the_change() {
     assert_eq!(value(&log, 250), None);
     assert_eq!(value(&log, 199), Some(199));
 }
+
+/// A rewind drops every run that reaches past its target, also one this
+/// handle never loaded: another handle indexed the log after this one
+/// opened it.
+#[test]
+fn a_rewind_drops_the_runs_another_handle_wrote_past_its_target() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let path = dir.path().join("log");
+    let (mut held, _) = RecLog::open(&path, LAYOUT).unwrap();
+    for n in 0..10 {
+        held.append(&record(n, n)).unwrap();
+    }
+    let kept = held.appended_len();
+
+    let (mut other, _) = RecLog::open(&path, LAYOUT).unwrap();
+    for n in 10..400 {
+        other.append(&record(n, n)).unwrap();
+    }
+    other.index_tail(u64::MAX, true).unwrap();
+    drop(other);
+    let runs = || {
+        std::fs::read_dir(dir.path().join("log.idx"))
+            .unwrap()
+            .count()
+    };
+    assert_eq!(runs(), 1);
+
+    // the handle that knows of no run cuts the log back behind that one
+    held.sync_from_disk().unwrap();
+    held.rewind(kept).unwrap();
+    assert_eq!(runs(), 0, "a run is left over records that are gone");
+    for n in 400..700 {
+        held.append(&record(n, n)).unwrap();
+    }
+    drop(held);
+    let (log, _) = RecLog::open(&path, LAYOUT).unwrap();
+    assert_eq!(value(&log, 5), Some(5));
+    assert_eq!(value(&log, 200), None);
+    assert_eq!(value(&log, 650), Some(650));
+}

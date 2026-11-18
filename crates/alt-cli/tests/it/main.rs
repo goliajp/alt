@@ -86,3 +86,4 @@ mod cli_matrix;
 mod corpus_cli;
 mod corpus_history;
 mod recovery_kinds;
+mod stack_overflow;
