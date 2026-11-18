@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: fail an export on a ref whose object is not stored and take back the git directory of one that fails
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli.rs
+touched: crates/alt-cli/tests/it/fsck_tails.rs
+touched: crates/alt-cli/tests/it/past_damage.rs
+touched: crates/alt-export/src/lib.rs
