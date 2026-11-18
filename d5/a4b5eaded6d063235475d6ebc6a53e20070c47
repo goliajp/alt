@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: say that every reading command answers without unsynced operations and what an index ahead of the store shows
+author-type: human
+author: doracawl
+touched: docs/recovery.md
