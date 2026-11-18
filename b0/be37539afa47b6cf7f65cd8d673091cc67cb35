@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: perf
+summary: find a match by the run of bytes every match begins with, each byte of the text read once
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/cache.rs
+touched: crates/alt-regex/src/dfa.rs
+touched: crates/alt-regex/src/dfa/longest.rs
+touched: crates/alt-regex/src/lib.rs
+touched: crates/alt-regex/src/literal.rs
+touched: crates/alt-regex/src/search.rs
