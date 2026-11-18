@@ -401,6 +401,18 @@ mod tests {
         assert_eq!(re.find(&text.as_bytes()[5..]), None);
         let short = Regex::new(b"[ab]*c").unwrap();
         assert!(short.tables && short.scanned && !short.long);
+        // one that begins at the start of the text is tried there anyway
+        let tied = Regex::with_options(format!("^{}", "é".repeat(3_000)).as_bytes(), any_case);
+        assert!(tied.is_ok_and(|tied| tied.scanned && !tied.long));
+    }
+
+    #[test]
+    fn a_text_that_begins_a_pattern_at_every_place_is_searched_from_behind_what_it_begins_with() {
+        let long = "a".repeat(3_000);
+        let any_case = Options {
+            ignore_case: true,
+            ..Options::default()
+        };
         // a text that begins the pattern at every place and matches at
         // none is answered from behind what the pattern begins with:
         // the tables that step from every start are never built
@@ -431,9 +443,6 @@ mod tests {
         );
         assert!(unbuilt(&cache) && !re.is_match_with(&mut cache, &text.as_bytes()[..19_999]));
         assert!(unbuilt(&cache));
-        // one that begins at the start of the text is tried there anyway
-        let tied = Regex::with_options(format!("^{}", "é".repeat(3_000)).as_bytes(), any_case);
-        assert!(tied.is_ok_and(|tied| tied.scanned && !tied.long));
     }
 
     #[test]
@@ -613,34 +622,7 @@ mod tests {
     }
 
     #[test]
-    fn a_back_reference_matches_what_its_group_matched() {
-        assert_eq!(spans("(a)\\1", "xaab"), Some(vec![Some(1..3), Some(1..2)]));
-        assert_eq!(spans("(a)\\1", "aba"), None);
-        assert_eq!(
-            spans("^(.+)\\1$", "abcabc"),
-            Some(vec![Some(0..6), Some(0..3)])
-        );
-        assert_eq!(spans("^(.+)\\1$", "abcabd"), None);
-        // the longest match of the earliest start, not the first path's
-        assert_eq!(
-            spans("(a|ab)\\1", "abab"),
-            Some(vec![Some(0..4), Some(0..2)])
-        );
-        assert_eq!(
-            spans("(a*)\\1", "aaaaa"),
-            Some(vec![Some(0..4), Some(0..2)])
-        );
-        assert_eq!(
-            spans("(a)(b)\\2\\1", "abba"),
-            Some(vec![Some(0..4), Some(0..1), Some(1..2)])
-        );
-        // turns inside turns before a reference: the ways to split the
-        // words between them are many, the places to stand few
-        let re = Regex::new(b"(\\w+) (\\w+ *)*\\1").unwrap();
-        let line = b"the quick brown fox jumps over the lazy dog and the cat";
-        assert_eq!(re.find(line), Some(0..51));
-        let found = re.captures(line).unwrap();
-        assert_eq!((found.get(1), found.get(2)), (Some(0..3), Some(44..48)));
+    fn fewer_groups_than_a_pattern_refers_to_are_found_as_the_c_library_finds_them() {
         // asked for fewer groups than a reference names, the C library
         // finds no match; asked for none, it finds one
         let re = Regex::new(b"((a)\\2)").unwrap();
@@ -681,6 +663,37 @@ mod tests {
                 .captures_upto(b"aa", 1)
                 .is_some()
         );
+    }
+
+    #[test]
+    fn a_back_reference_matches_what_its_group_matched() {
+        assert_eq!(spans("(a)\\1", "xaab"), Some(vec![Some(1..3), Some(1..2)]));
+        assert_eq!(spans("(a)\\1", "aba"), None);
+        assert_eq!(
+            spans("^(.+)\\1$", "abcabc"),
+            Some(vec![Some(0..6), Some(0..3)])
+        );
+        assert_eq!(spans("^(.+)\\1$", "abcabd"), None);
+        // the longest match of the earliest start, not the first path's
+        assert_eq!(
+            spans("(a|ab)\\1", "abab"),
+            Some(vec![Some(0..4), Some(0..2)])
+        );
+        assert_eq!(
+            spans("(a*)\\1", "aaaaa"),
+            Some(vec![Some(0..4), Some(0..2)])
+        );
+        assert_eq!(
+            spans("(a)(b)\\2\\1", "abba"),
+            Some(vec![Some(0..4), Some(0..1), Some(1..2)])
+        );
+        // turns inside turns before a reference: the ways to split the
+        // words between them are many, the places to stand few
+        let re = Regex::new(b"(\\w+) (\\w+ *)*\\1").unwrap();
+        let line = b"the quick brown fox jumps over the lazy dog and the cat";
+        assert_eq!(re.find(line), Some(0..51));
+        let found = re.captures(line).unwrap();
+        assert_eq!((found.get(1), found.get(2)), (Some(0..3), Some(44..48)));
         // a turn of an outer repetition begins the inner one anew
         assert_eq!(spans("(a*)*-\\1$", "aa-a").unwrap()[0], Some(0..4));
         assert_eq!(spans("(a*)*-\\1", "aa-a").unwrap()[0], Some(0..4));
