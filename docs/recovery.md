@@ -283,8 +283,8 @@ cut can therefore leave a record whole while the content it names is not
 there. A command that writes objects looks at the records past the synced
 point, cuts off those that name content the store does not hold, and goes on:
 what they named was never committed and can be added again. Until then,
-commands that only read find such an object listed and fail when they read
-it; they change nothing.
+commands that only read pass over those records, as if the object had never
+been added; they change nothing.
 
 The operation log is held to the same rule one layer up. A commit's ref
 update is written to the log after its objects, but a power cut can leave the
@@ -307,15 +307,15 @@ A ref line gives the id the ref is back at, then the id the discarded
 operations had moved it to.
 
 The commit can then be made again; no step by hand is needed. Until a command
-writes, a command that only reads and fails on a missing object answers from
-the log as it stood before those operations, changes no file, and says so:
+writes, every command that only reads answers from the log as it stood before
+those operations, changes no file, and says so:
 
 ```
 warning: the last 1 operation(s) in the operation log were never synced to disk and name objects that are not stored; this shows the repository as it was before them. The next command that writes discards them.
 ```
 
-A command that reads no object, such as `alt rev-parse HEAD`, answers from the
-log as it is and can still print the id of a commit that was not kept.
+That holds for a command that reads no object too: `alt rev-parse HEAD` prints
+the commit `alt log` shows, not the one that was not kept.
 
 A command that was already running when another one discarded such
 operations, and had read them, fails with `the operation log was cut back:
@@ -354,7 +354,21 @@ warning above), count for count: `refs/heads/main` goes back to
 `654cf34e…`, and the commit `5f7c0ecf…` has to be made
 again. To keep what is about to go, copy the whole `.alt` directory
 somewhere else before you run another command; `alt fsck` has cut nothing,
-however often it runs. After the command that writes, `alt fsck` exits 0.
+however often it runs.
+
+The index is written with a sync of its own and can be ahead of the object
+store: after such a power cut it may still name the blobs of files that were
+added and whose content went. `alt fsck` lists those entries, with the
+unconfirmed tail while there is one, and on their own once a command that
+writes has cut it, when `alt fsck` exits 128:
+
+```
+fatal: fsck: index entry b.txt names blob 8067c2ab85b24c1b9015d7a4b82c0928bcf2b1ef, which is not stored: add the file again
+```
+
+`alt commit` says the same of the entry and records nothing, rather than a
+tree that names a blob which is not there. `alt add b.txt` stores the file
+again; after that `alt fsck` exits 0.
 
 ### An unconfirmed tail
 
