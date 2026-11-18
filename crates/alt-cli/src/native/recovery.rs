@@ -4,6 +4,8 @@
 use super::*;
 
 mod index;
+mod prepared;
+pub use prepared::prepared_blobs;
 
 pub(super) const PREPARE: u8 = 0x30;
 pub(super) const COMPLETE: u8 = 0x31;
@@ -200,14 +202,7 @@ impl NativeRepo<'_> {
     }
 
     pub(super) fn read_snapshot(&self, id: &str) -> Res<Vec<u8>> {
-        if id.len() != 64 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err("invalid recovery snapshot identity".into());
-        }
-        let bytes = std::fs::read(self.store.alt_dir.join("recovery/objects").join(id))?;
-        if hash(&bytes) != id {
-            return Err("corrupt recovery snapshot".into());
-        }
-        Ok(bytes)
+        prepared::read_snapshot_at(&self.store.alt_dir, id)
     }
 
     /// The working-tree state at `path`, as an index change records it. A

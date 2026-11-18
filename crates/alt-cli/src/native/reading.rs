@@ -23,7 +23,10 @@ pub fn only_reads(command: &Command) -> bool {
 /// `repo`, of which nothing is opened yet, as `command` is to hold it.
 pub fn view_for(repo: Repository, command: &Command) -> Repository {
     match only_reads(command) {
-        true => repo.reading(),
+        true => {
+            let also = prepared_blobs(repo.git_dir());
+            repo.reading().naming(also)
+        }
         false => repo,
     }
 }
@@ -72,7 +75,10 @@ impl Store {
     pub fn open_reading(alt_dir: PathBuf) -> Res<Self> {
         let odb = NativeOdb::reading(&alt_dir);
         // an object that does not read is reported by whoever reads it
-        let refs = RefStore::open_confirmed(&alt_dir, |oid| odb.contains(oid).unwrap_or(true))?;
+        let also = prepared_blobs(&alt_dir);
+        let refs = RefStore::open_confirmed(&alt_dir, Some(&also), |oid| {
+            odb.contains(oid).unwrap_or(true)
+        })?;
         Self::opened(alt_dir, odb, refs)
     }
 
@@ -82,7 +88,8 @@ impl Store {
     /// a process that opens the store without them.
     pub fn holds_unconfirmed(&self) -> Res<bool> {
         let stored = |oid: &ObjectId| self.odb.contains(oid).unwrap_or(true);
-        Ok(self.refs.unheld(stored)?.is_some())
+        let also = prepared_blobs(&self.alt_dir);
+        Ok(self.refs.unheld(Some(&also), stored)?.is_some())
     }
 
     /// The git-layer view of this store, held the way the store is: of a
@@ -90,7 +97,7 @@ impl Store {
     pub(super) fn git_view(&self) -> Res<Repository> {
         let repo = Repository::discover(&self.alt_dir)?;
         Ok(match self.odb.is_read_only() {
-            true => repo.reading(),
+            true => repo.reading().naming(prepared_blobs(&self.alt_dir)),
             false => repo,
         })
     }

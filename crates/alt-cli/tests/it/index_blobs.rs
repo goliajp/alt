@@ -2,12 +2,17 @@
 //! written with its own fsync, so after a power cut it can be ahead of
 //! the object store. The check reports the entry, a commit refuses to
 //! build a tree on it, and adding the file again stores the blob.
+//!
+//! The intent of an add is in the operation log before the blobs are
+//! synced. One a power cut left there without its blobs was never
+//! confirmed: readers pass it over and the next writer cuts it, with all
+//! that follows, as they do a ref transaction whose objects are lost.
 
 use std::fs;
 use std::path::Path;
 
 use super::crash_fixture::remove_final_log_frame;
-use super::unconfirmed::{alt, ok, stderr};
+use super::unconfirmed::{Lost, alt, alt_command, ok, power_cut, stderr};
 use super::unconfirmed_tails::{LOGS, MARKERS, lag, lens};
 
 fn stdout(out: &std::process::Output) -> String {
@@ -131,4 +136,204 @@ fn recovery_does_not_complete_an_add_whose_blob_is_not_stored() {
         "{said}"
     );
     assert_eq!(fs::read(dir.join(".alt/oplog/log")).unwrap(), log);
+}
+
+/// The operation log without its last record; the marker stays.
+fn drop_last_op(dir: &Path) {
+    let path = dir.join(".alt/oplog/log");
+    let bytes = fs::read(&path).unwrap();
+    let (mut at, mut last) = (5, 5);
+    while at < bytes.len() {
+        last = at;
+        at += 4 + u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()) as usize + 8;
+    }
+    fs::write(path, &bytes[..last]).unwrap();
+}
+
+/// One commit, then `new.txt` added and whatever `then` does, and the
+/// state a power cut leaves when none of it was synced: the operation
+/// log holds it, the object store and both markers are as before the add.
+/// Returns the index as it was before the add.
+fn add_never_synced(dir: &Path, then: impl FnOnce()) -> Vec<u8> {
+    ok(alt(dir, &["init"]));
+    fs::write(dir.join("a.txt"), "one\n").unwrap();
+    ok(alt(dir, &["add", "a.txt"]));
+    ok(alt(dir, &["commit", "-m", "first"]));
+    let before = lens(dir);
+    let markers = MARKERS.map(|marker| fs::read(dir.join(".alt").join(marker)).unwrap());
+    let index = fs::read(dir.join(".alt/index")).unwrap();
+    fs::write(dir.join("new.txt"), "never arrived\n").unwrap();
+    ok(alt(dir, &["add", "new.txt"]));
+    then();
+    for (file, len) in LOGS.iter().zip(before).take(4) {
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .open(dir.join(".alt").join(file))
+            .unwrap();
+        file.set_len(len).unwrap();
+    }
+    lag(dir, &markers);
+    index
+}
+
+fn left_out(out: &std::process::Output, ops: usize) -> bool {
+    stderr(out).contains(&format!(
+        "warning: the last {ops} operation(s) in the operation log were never synced"
+    ))
+}
+
+/// The cut came between the intent and the sync that goes before the
+/// index is replaced: the intent is in the log, the blob is not stored,
+/// the index is the old one. No recovery is asked for.
+#[test]
+fn an_add_cut_before_its_sync_is_passed_over_and_discarded() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let dir = tmp.path();
+    let index = add_never_synced(dir, || ());
+    // neither the index nor the completion was written
+    drop_last_op(dir);
+    fs::write(dir.join(".alt/index"), &index).unwrap();
+    let check = alt(dir, &["fsck"]);
+    assert_eq!(check.status.code(), Some(3), "{}", stderr(&check));
+    let said = stdout(&check);
+    assert!(
+        said.contains("1 operation(s) at the end of the operation log")
+            && said.contains("1 operation(s) that move no ref"),
+        "{said}"
+    );
+    let pending = alt(dir, &["operation", "pending", "--json"]);
+    assert!(left_out(&pending, 1), "{}", stderr(&pending));
+    let listed: alt_json::Value = alt_json::from_str(&ok(pending)).unwrap();
+    assert_eq!(listed["operations"].as_array().unwrap().len(), 0);
+    let status = alt(dir, &["status"]);
+    assert!(status.status.success() && left_out(&status, 1));
+    assert_eq!(fs::read(dir.join(".alt/index")).unwrap(), index);
+
+    let add = alt(dir, &["add", "new.txt"]);
+    let said = stderr(&add);
+    assert!(add.status.success(), "{said}");
+    assert!(
+        said.contains("warning: discarded 1 operation(s) at the end of the operation log"),
+        "{said}"
+    );
+    ok(alt(dir, &["commit", "-m", "second"]));
+    ok(alt(dir, &["fsck"]));
+}
+
+/// What was appended after such an intent was never confirmed either:
+/// every command that reads answers without it, an export writes the
+/// repository out without it, and the next writer cuts all of it.
+#[test]
+fn what_follows_an_add_that_was_never_synced_goes_with_it() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let dir = &tmp.path().join("repo");
+    fs::create_dir(dir).unwrap();
+    add_never_synced(dir, || drop(ok(alt(dir, &["tag", "v1"]))));
+    let readers: [&[&str]; 6] = [
+        &["log", "-n", "1"],
+        &["rev-parse", "HEAD"],
+        &["status"],
+        &["cat-file", "-p", "HEAD"],
+        &["branch"],
+        &["tag"],
+    ];
+    for reader in readers {
+        let read = alt(dir, reader);
+        assert!(read.status.success(), "{reader:?}: {}", stderr(&read));
+        assert!(left_out(&read, 3), "{reader:?}: {}", stderr(&read));
+        assert!(!stdout(&read).contains("v1"), "{reader:?}");
+    }
+    let out = tmp.path().join("exported");
+    let export = alt(dir, &["export", out.to_str().unwrap()]);
+    assert!(export.status.success() && left_out(&export, 3));
+    assert!(!out.join(".git/refs/tags/v1").exists());
+    let packed = fs::read_to_string(out.join(".git/packed-refs")).unwrap_or_default();
+    assert!(!packed.contains("v1"), "{packed}");
+
+    let branch = alt(dir, &["branch", "side"]);
+    let said = stderr(&branch);
+    assert!(branch.status.success(), "{said}");
+    assert!(
+        said.contains("warning: discarded 3 operation(s) at the end of the operation log"),
+        "{said}"
+    );
+    assert_eq!(ok(alt(dir, &["tag"])), "");
+    ok(alt(dir, &["add", "new.txt"]));
+    ok(alt(dir, &["fsck"]));
+}
+
+/// A daemon that finds such an intent in the store it opens hands a
+/// command that only reads back to the client, which answers without it.
+#[test]
+fn a_daemon_answers_no_reader_from_an_add_that_was_never_synced() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let dir = tmp.path();
+    add_never_synced(dir, || drop(ok(alt(dir, &["tag", "v1"]))));
+    let served = |args: &[&str]| {
+        let mut command = alt_command(dir, args);
+        command.env_remove("ALT_NO_DAEMON");
+        command.env("ALT_DAEMON_IDLE_MS", "6000").output().unwrap()
+    };
+    ok(served(&["branch"]));
+    let daemon = fs::read(dir.join(".alt/daemon.meta")).unwrap();
+    for args in [&["tag"][..], &["rev-parse", "HEAD"], &["status"]] {
+        let (direct, through) = (alt(dir, args), served(args));
+        assert!(left_out(&direct, 3), "{direct:?}");
+        assert_eq!(
+            (through.status.code(), &through.stdout, stderr(&through)),
+            (direct.status.code(), &direct.stdout, stderr(&direct)),
+            "alt {args:?}"
+        );
+    }
+    let still = fs::read(dir.join(".alt/daemon.meta")).unwrap();
+    assert_eq!(still, daemon, "another daemon took over");
+}
+
+/// A writer that cut a commit which was never confirmed leaves the index
+/// as the commit's add wrote it. Where the blobs went with the cut, the
+/// command says which files to add again and the check reports them until
+/// they are; where the blobs are stored, neither says anything.
+#[test]
+fn the_command_that_cuts_names_the_files_whose_blobs_went_and_no_others() {
+    for lost in [Lost::Everything, Lost::Payloads, Lost::NotesCommit] {
+        let tmp = alt_os::temp::tempdir().unwrap();
+        let dir = tmp.path();
+        power_cut(dir, lost);
+        let cut = alt(dir, &["tag", "after"]);
+        let said = stderr(&cut);
+        assert!(cut.status.success(), "{lost:?}: {said}");
+        assert!(said.contains("warning: discarded "), "{lost:?}: {said}");
+        let entry = said
+            .lines()
+            .find_map(|line| line.strip_prefix("warning: index entry b.txt names blob "));
+        if let Lost::NotesCommit = lost {
+            // the blob of b.txt was stored before the commit that was lost
+            assert_eq!(entry, None, "{said}");
+            assert!(!said.contains("index entry"), "{said}");
+            ok(alt(dir, &["fsck"]));
+            ok(alt(dir, &["commit", "-m", "second, again"]));
+            ok(alt(dir, &["fsck"]));
+            continue;
+        }
+        let (blob, rest) = entry
+            .unwrap_or_else(|| panic!("{lost:?}: {said}"))
+            .split_once(", ")
+            .unwrap();
+        assert_eq!(rest, "which is not stored: add the file again");
+        assert!(!said.contains("index entry a.txt"), "{said}");
+        assert!(
+            !alt(dir, &["cat-file", "-t", blob]).status.success(),
+            "{lost:?}"
+        );
+        let check = alt(dir, &["fsck"]);
+        assert_eq!(check.status.code(), Some(128), "{lost:?}");
+        let expected =
+            format!("index entry b.txt names blob {blob}, which is not stored: add the file again");
+        assert!(stderr(&check).contains(&expected), "{}", stderr(&check));
+        // a command that cuts nothing says nothing of the index
+        let quiet = alt(dir, &["tag", "later"]);
+        assert!(quiet.status.success() && !stderr(&quiet).contains("index entry"));
+        ok(alt(dir, &["add", "b.txt"]));
+        ok(alt(dir, &["fsck"]));
+    }
 }

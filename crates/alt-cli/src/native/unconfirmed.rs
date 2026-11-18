@@ -39,11 +39,13 @@ use super::*;
 use crate::daemon::Response;
 
 mod discarded;
+mod staged;
 pub use discarded::{AfterDiscards, Discards};
 
-/// Whether every object `op` makes a ref point at is stored.
-fn held(op: &Op, stored: &dyn Fn(&ObjectId) -> Res<bool>) -> Res<bool> {
-    for oid in alt_refs::named_objects(op)? {
+/// Whether every object `op` names is stored: those a ref transaction
+/// makes refs point at, and the blobs of an index change (`also`).
+fn held(op: &Op, also: &alt_refs::AlsoNamed, stored: &dyn Fn(&ObjectId) -> Res<bool>) -> Res<bool> {
+    for oid in alt_refs::named_objects(op)?.into_iter().chain(also(op)) {
         if !stored(&oid)? {
             return Ok(false);
         }
@@ -96,9 +98,10 @@ impl Store {
                 return Ok(());
             }
             let refs = &mut self.refs;
+            let also = prepared_blobs(&self.alt_dir);
             let cut = self
                 .odb
-                .settled(|stored| refs.settle(|op| held(op, &|oid| Ok(stored(oid)?))))?;
+                .settled(|stored| refs.settle(|op| held(op, &also, &|oid| Ok(stored(oid)?))))?;
             cut.map(drop)
         })();
         settled.map_err(|error| self.after_discards(error))
@@ -116,7 +119,9 @@ impl Store {
         let gone = self.odb.unconfirmed_objects()?;
         let stored =
             |oid: &ObjectId| !gone.contains(oid) && matches!(self.odb.get(oid), Ok(Some(_)));
-        self.refs.unconfirmed(|op| held(op, &|oid| Ok(stored(oid))))
+        let also = prepared_blobs(&self.alt_dir);
+        self.refs
+            .unconfirmed(|op| held(op, &also, &|oid| Ok(stored(oid))))
     }
 }
 

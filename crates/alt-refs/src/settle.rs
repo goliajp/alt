@@ -24,6 +24,23 @@ pub fn named_objects(op: &Op) -> Result<Vec<ObjectId>, RefError> {
     Ok(named.collect())
 }
 
+/// The objects an op that is no ref transaction names, as the writer of
+/// such ops tells them: the log holds ops of kinds the ref store does not
+/// know, and one of those may name content that never arrived as well.
+pub type AlsoNamed = std::sync::Arc<dyn Fn(&Op) -> Vec<ObjectId> + Send + Sync>;
+
+/// Whether `stored` vouches for every object `op` names: those a ref
+/// transaction makes refs point at, and those `also` tells of.
+pub fn all_stored(
+    op: &Op,
+    also: Option<&AlsoNamed>,
+    stored: impl Fn(&ObjectId) -> bool,
+) -> Result<bool, RefError> {
+    let held = named_objects(op)?.iter().all(&stored)
+        && also.is_none_or(|also| also(op).iter().all(&stored));
+    Ok(held)
+}
+
 impl RefStore {
     /// Has `sync` sync the objects that ops of other writers name before
     /// this store records those ops as synced (see
@@ -53,17 +70,18 @@ impl RefStore {
     }
 
     /// For a reader: the ops at the end of the log that were never synced
-    /// and make a ref point at an object `stored` does not vouch for, the
-    /// ops a writer would cut. Nothing changes, and nothing is read where
-    /// the snapshot's note says the log is synced.
+    /// and name an object `stored` does not vouch for ([`all_stored`]),
+    /// the ops a writer would cut. Nothing changes, and nothing is read
+    /// where the snapshot's note says the log is synced.
     pub fn unheld(
         &self,
+        also: Option<&AlsoNamed>,
         stored: impl Fn(&ObjectId) -> bool,
     ) -> Result<Option<Unconfirmed>, RefError> {
         if self.known_synced() {
             return Ok(None);
         }
-        self.unconfirmed(|op| Ok::<_, RefError>(named_objects(op)?.iter().all(&stored)))
+        self.unconfirmed(|op| all_stored(op, also, &stored))
     }
 
     /// For a reader: the ops at the end of the log that a writer would

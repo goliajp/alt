@@ -155,13 +155,17 @@ impl Store {
         discards
     }
 
-    /// Says on stderr what this store cut since it last said.
+    /// Says on stderr what this store cut since it last said, and which
+    /// files are staged with a blob that is no longer stored.
     pub fn warn_discarded(&mut self) -> Res<()> {
-        let said = self.take_discards().warning();
-        if !said.is_empty() {
-            crate::diagnostics::emit(said.as_bytes())?;
+        let mut said = self.take_discards().warning();
+        if said.is_empty() {
+            return Ok(());
         }
-        Ok(())
+        for entry in self.unstored_index_entries(&Default::default())? {
+            said.push_str(&format!("warning: {entry}\n"));
+        }
+        Ok(crate::diagnostics::emit(said.as_bytes())?)
     }
 
     /// [`Self::settle`] for a caller with no command to tell what was cut:

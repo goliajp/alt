@@ -53,47 +53,6 @@ fn ends(store: &mut Store) -> Res<Vec<End>> {
     Ok(ends)
 }
 
-/// The entries of every workspace's index that name a blob which is not
-/// stored, or one that goes with the records a writer cuts off: an index
-/// is written with its own fsync and can be ahead of the object store.
-fn unstored_index_entries(store: &Store) -> Res<Vec<String>> {
-    let alt_dir = store.alt_dir();
-    let mut indexes = vec![(String::new(), alt_dir.join("index"))];
-    if let Ok(listing) = std::fs::read_dir(alt_dir.join("workspaces")) {
-        let mut named: Vec<_> = listing.filter_map(|entry| entry.ok()).collect();
-        named.sort_by_key(|entry| entry.file_name());
-        for entry in named {
-            let of = format!(" of workspace {}", entry.file_name().to_string_lossy());
-            indexes.push((of, entry.path().join("index")));
-        }
-    }
-    let gone = store.odb().unconfirmed_objects().map_err(with_cause)?;
-    let mut unstored = Vec::new();
-    for (of, path) in indexes {
-        let index = match alt_git_index::Index::open(&path, store.algo()?) {
-            Err(alt_git_index::IndexError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
-                continue;
-            }
-            index => index?,
-        };
-        for entry in index.entries {
-            // a gitlink names a commit of another repository
-            if entry.mode & 0o170000 == 0o160000 {
-                continue;
-            }
-            let stored = !gone.contains(&entry.oid)
-                && store.odb().contains(&entry.oid).map_err(with_cause)?;
-            if !stored {
-                unstored.push(format!(
-                    "index entry {}{of} names blob {}, which is not stored: add the file again",
-                    entry.path, entry.oid
-                ));
-            }
-        }
-    }
-    Ok(unstored)
-}
-
 pub fn run<W: Write>(store: &mut Store, json: bool, out: &mut W) -> Res<u8> {
     // looked for before the store is opened, which may replace them
     let ignored = store.odb().unusable_index_runs().map_err(with_cause)?;
@@ -110,7 +69,11 @@ pub fn run<W: Write>(store: &mut Store, json: bool, out: &mut W) -> Res<u8> {
     let unconfirmed = store.unconfirmed()?;
     let named = unconfirmed.map_or(0, |found| found.ops);
     let dangling = store.dangling_refs(named)?;
-    let unstored = unstored_index_entries(store)?;
+    // an index is written with its own fsync and can be ahead of the store
+    let gone = store.odb().unconfirmed_objects().map_err(with_cause)?;
+    let unstored = store
+        .unstored_index_entries(&gone)
+        .map_err(|error| format!("fsck: {error}"))?;
     let found = Found {
         ends: &ends,
         odb: &odb,

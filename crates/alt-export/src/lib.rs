@@ -20,7 +20,7 @@ use alt_git_codec::{HashAlgo, ObjectId};
 use alt_git_config::Config;
 use alt_git_pack::PackWriter;
 use alt_odb::{NativeOdb, OdbError};
-use alt_refs::{RefError, RefStore, RefTarget};
+use alt_refs::{AlsoNamed, RefError, RefStore, RefTarget};
 
 #[derive(Debug)]
 pub enum ExportError {
@@ -125,6 +125,18 @@ pub struct ExportReport {
 /// names an object the store does not hold fails it; a process that reads
 /// past damage leaves such a ref out instead and reports it.
 pub fn export_git(alt_dir: &Path, target: &Path) -> Result<ExportReport, ExportError> {
+    export_git_naming(alt_dir, target, None)
+}
+
+/// [`export_git`] for a store whose log holds ops that are no ref
+/// transactions and name objects, `also` telling which: an op that was
+/// never synced and names what is not stored ends what is exported, as it
+/// ends what every command that reads answers from.
+pub fn export_git_naming(
+    alt_dir: &Path,
+    target: &Path,
+    also: Option<&AlsoNamed>,
+) -> Result<ExportReport, ExportError> {
     match fs::read_dir(target) {
         Ok(mut entries) => {
             if entries.next().is_some() {
@@ -136,14 +148,18 @@ pub fn export_git(alt_dir: &Path, target: &Path) -> Result<ExportReport, ExportE
     }
     let git_dir = target.join(".git");
     fs::create_dir_all(git_dir.join("refs"))?;
-    let report = write_git(alt_dir, &git_dir);
+    let report = write_git(alt_dir, &git_dir, also);
     if report.is_err() {
         fs::remove_dir_all(&git_dir)?;
     }
     report
 }
 
-fn write_git(alt_dir: &Path, git_dir: &Path) -> Result<ExportReport, ExportError> {
+fn write_git(
+    alt_dir: &Path,
+    git_dir: &Path,
+    also: Option<&AlsoNamed>,
+) -> Result<ExportReport, ExportError> {
     // --- config first: it declares the object format ---
     let preserved = alt_dir.join("git-import/config");
     let algo;
@@ -177,7 +193,7 @@ fn write_git(alt_dir: &Path, git_dir: &Path) -> Result<ExportReport, ExportError
     // git fsck on the output is the integrity boundary. ---
     let odb = NativeOdb::reading(alt_dir);
     // an object that does not read fails the export below
-    let refs = RefStore::open_confirmed(alt_dir, |oid| odb.contains(oid).unwrap_or(true))?;
+    let refs = RefStore::open_confirmed(alt_dir, also, |oid| odb.contains(oid).unwrap_or(true))?;
     let mut unstored: HashSet<ObjectId> = refs
         .iter()
         .filter_map(|(_, target)| match target {

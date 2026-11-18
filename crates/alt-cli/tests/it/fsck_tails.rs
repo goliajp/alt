@@ -221,13 +221,12 @@ fn operations_that_were_never_synced_are_told_and_fail_the_check_until_a_command
         let (code, said) = fsck_code(tmp.path());
         // whole operations and records go: neither damage nor a pass
         assert_eq!(code, Some(3), "{lost:?}: {said}");
-        assert!(
-            said.contains(
-                "1 operation(s) at the end of the operation log were never synced and name \
-                 objects that are not stored: the next command that writes discards them\n"
-            ),
-            "{lost:?}: {said}"
+        let operations = format!(
+            "{} operation(s) at the end of the operation log were never synced and name \
+             objects that are not stored: the next command that writes discards them\n",
+            lost.ops()
         );
+        assert!(said.contains(&operations), "{lost:?}: {said}");
         assert!(
             said.contains(
                 "of records at the end of map.alt were never synced and name content that is \

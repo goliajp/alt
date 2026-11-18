@@ -30,7 +30,7 @@ pub use alt_oplog::{OpId, Unconfirmed};
 pub use check::RefsChecked;
 pub use policy::{RefError, RefPolicy, StateCheck};
 pub use reading::left_out;
-pub use settle::named_objects;
+pub use settle::{AlsoNamed, all_stored, named_objects};
 pub use tx::{IdemKey, PAYLOAD_REF_TX, ParsedTx, RefChange, parse_tx};
 
 /// What a ref points at.

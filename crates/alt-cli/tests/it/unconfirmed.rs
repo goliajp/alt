@@ -90,6 +90,18 @@ pub(super) enum Lost {
     NotesCommit,
 }
 
+impl Lost {
+    /// How many operations were never confirmed: the commit, and where
+    /// the blob of its file is lost too, the intent and the completion
+    /// of the add that stored it.
+    pub(super) fn ops(self) -> usize {
+        match self {
+            Lost::NotesCommit => 1,
+            Lost::Everything | Lost::Payloads => 3,
+        }
+    }
+}
+
 /// A repository with one commit and a branch `without` at it, then
 /// `b.txt` added and committed, and then the state a power cut can leave:
 /// the markers as they were before the add, the operation log and
@@ -174,7 +186,8 @@ fn a_commit_the_log_kept_and_the_store_lost_is_passed_over_cut_and_made_again() 
 
         // the first command that writes cuts the transaction off
         let add = alt(dir, &["add", "b.txt"]);
-        assert!(stderr(&add).contains("discarded 1 operation(s)"), "{add:?}");
+        let discarded = format!("discarded {} operation(s)", lost.ops());
+        assert!(stderr(&add).contains(&discarded), "{add:?}");
         ok(add);
         ok(alt(dir, &["commit", "-m", "second again"]));
         let log = alt(dir, &["log", "-n", "4"]);

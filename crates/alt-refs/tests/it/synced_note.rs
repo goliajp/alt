@@ -68,7 +68,7 @@ fn a_log_no_longer_than_the_note_says_is_not_looked_up_in_the_marker() {
     let store = RefStore::open_reading(dir.path()).unwrap();
     assert!(store.confirmed());
     assert!(!store.unsettled());
-    assert_eq!(store.unheld(|_| false).unwrap(), None);
+    assert_eq!(store.unheld(None, |_| false).unwrap(), None);
     drop(store);
     // a note that does not read is no note
     let mut data = snapshot(dir.path());
@@ -148,10 +148,10 @@ fn a_reader_is_told_the_unsynced_operations_that_name_what_is_not_stored() {
     assert_eq!(store.get("refs/heads/main"), Some(&RefTarget::Oid(oid(2))));
     assert!(!store.confirmed());
     assert_eq!(
-        store.unheld(stored).unwrap().map(|found| found.ops),
+        store.unheld(None, stored).unwrap().map(|found| found.ops),
         Some(2)
     );
-    assert_eq!(store.unheld(|_| true).unwrap(), None);
+    assert_eq!(store.unheld(None, |_| true).unwrap(), None);
     // nothing of the log changed
     assert_eq!(fs::read(dir.path().join("oplog/log")).unwrap(), log);
     assert_eq!(fs::read(dir.path().join("oplog/durable")).unwrap(), marker);

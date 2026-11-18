@@ -8,7 +8,7 @@ use std::sync::OnceLock;
 use alt_git_codec::ObjectId;
 use alt_oplog::OpLogError;
 
-use crate::{RefError, RefStore, fold_new};
+use crate::{AlsoNamed, RefError, RefStore, fold_new};
 
 /// How many ops at the end of the log the stores of this process leave
 /// out ([`RefStore::open_confirmed`]).
@@ -24,16 +24,17 @@ pub fn left_out() -> Option<usize> {
 impl RefStore {
     /// [`Self::open_reading`] for a command that answers from the refs:
     /// the log is taken as ending before the first op that was never
-    /// synced and makes a ref point at an object `stored` does not vouch
-    /// for, where the next command that writes cuts it. Every later open
-    /// of the log by this process ends there too.
+    /// synced and names an object `stored` does not vouch for
+    /// ([`crate::all_stored`]), where the next command that writes cuts
+    /// it. Every later open of the log by this process ends there too.
     pub fn open_confirmed(
         alt_dir: impl Into<PathBuf>,
+        also: Option<&AlsoNamed>,
         stored: impl Fn(&ObjectId) -> bool,
     ) -> Result<Self, RefError> {
         let alt_dir = alt_dir.into();
         let store = Self::open_reading(&alt_dir)?;
-        let Some(found) = store.unheld(stored)? else {
+        let Some(found) = store.unheld(also, stored)? else {
             return Ok(store);
         };
         alt_oplog::end_reads_at(&alt_dir.join("oplog"), found.at)?;

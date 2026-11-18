@@ -21,6 +21,9 @@ pub(crate) struct AltBackend {
     /// the command this serves only reads: no file of the store is
     /// created, repaired or cut when one is opened
     pub reading: bool,
+    /// what the ops of the log that are no ref transactions name, for a
+    /// command that only reads to leave out what a writer would cut
+    pub also: Option<alt_refs::AlsoNamed>,
 }
 
 impl AltBackend {
@@ -31,6 +34,7 @@ impl AltBackend {
             odb: NativeOdb::deferred(alt_dir),
             refs: OnceLock::new(),
             reading: false,
+            also: None,
         }
     }
 
@@ -49,7 +53,7 @@ impl AltBackend {
         }
         let refs = match self.reading {
             // an object that does not read is reported by whoever reads it
-            true => alt_refs::RefStore::open_confirmed(&self.alt_dir, |oid| {
+            true => alt_refs::RefStore::open_confirmed(&self.alt_dir, self.also.as_ref(), |oid| {
                 self.odb.contains(oid).unwrap_or(true)
             })?,
             false => alt_refs::RefStore::open(&self.alt_dir)?,
@@ -90,6 +94,16 @@ impl Repository {
             alt.odb = NativeOdb::reading(&alt.alt_dir);
             alt.refs = OnceLock::new();
             alt.reading = true;
+        }
+        self
+    }
+
+    /// Has the refs, when a command that only reads opens them, end
+    /// before an op that was never synced and of which `also` names an
+    /// object that is not stored, as before a ref transaction of that kind.
+    pub fn naming(mut self, also: alt_refs::AlsoNamed) -> Self {
+        if let Backend::Alt(alt) = &mut self.backend {
+            alt.also = Some(also);
         }
         self
     }

@@ -396,9 +396,13 @@ fn records_and_operations_whose_content_never_arrived_fail_the_check_as_the_writ
 
         let (code, said, told) = fsck(dir);
         assert_eq!(code, Some(3), "{lost:?}: {said}");
-        for note in [
-            "1 operation(s) at the end of the operation log were never synced and name objects \
+        let operations = format!(
+            "{} operation(s) at the end of the operation log were never synced and name objects \
              that are not stored: the next command that writes discards them\n",
+            lost.ops()
+        );
+        for note in [
+            operations.as_str(),
             "of records at the end of map.alt were never synced and name content that is not \
              stored: the next command that writes cuts them off\n",
             "every record before the unconfirmed tail verified\n",
@@ -409,7 +413,7 @@ fn records_and_operations_whose_content_never_arrived_fail_the_check_as_the_writ
         }
         assert_eq!(told_by(&said, OBJECTS), Told::default(), "{lost:?}");
         assert!(told.0["map.alt"] > 0 && told.0["oplog/log"] > 0, "{said}");
-        assert_eq!(told.1, 1, "{lost:?}: {said}");
+        assert_eq!(told.1, lost.ops(), "{lost:?}: {said}");
         let main = format!("refs/heads/main: 1 update(s), from {first} to {second}");
         assert!(told.2.contains(&main), "{lost:?}: {said}");
         let json = alt(dir, &["fsck", "--json"]);
