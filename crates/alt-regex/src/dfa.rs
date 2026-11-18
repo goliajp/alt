@@ -8,6 +8,10 @@ use std::collections::HashMap;
 use crate::program::{Inst, Program};
 use crate::syntax::Look;
 
+mod longest;
+
+pub use longest::{longest, longest_behind};
+
 /// A state is named by where its row begins in the table. The first row
 /// stands for a state not built yet, the second for the dead state.
 const UNKNOWN: u32 = 0;
@@ -55,6 +59,12 @@ impl Cache {
             stamp: 0,
             stack: Vec::new(),
         }
+    }
+
+    /// How many states the searches have built.
+    #[cfg(test)]
+    pub fn built(&self) -> usize {
+        self.states.len()
     }
 
     fn clear(&mut self) {
@@ -255,51 +265,6 @@ pub fn earliest_end(prog: &Program, cache: &mut Cache, text: &[u8]) -> Option<us
         }
         if next == cache.width {
             return None;
-        }
-        (at, state) = (reached + 1, next);
-    }
-}
-
-/// Where the longest match that begins exactly at `from` ends, with a
-/// cache for matches that begin only where the search starts. `work` is
-/// counted down by the bytes looked at.
-pub fn longest(
-    prog: &Program,
-    cache: &mut Cache,
-    text: &[u8],
-    from: usize,
-    work: &mut usize,
-) -> Option<usize> {
-    let mut state = cache.start(prog, from);
-    let mut last = None;
-    if !cache.plain(state) {
-        if state & MATCH == 0 {
-            return None;
-        }
-        last = Some(from);
-        state &= !MATCH;
-    }
-    let mut at = from;
-    loop {
-        let (reached, before, stopped) = cache.run(prog, text, at, state);
-        let Some(mut next) = stopped else {
-            *work = work.saturating_sub(reached - from);
-            return match cache.finish(prog, before) {
-                true => Some(text.len()),
-                false => last,
-            };
-        };
-        if next == UNKNOWN {
-            let class = usize::from(prog.classes[usize::from(text[reached])]);
-            next = cache.step(prog, before, class);
-        }
-        if next == cache.width {
-            *work = work.saturating_sub(reached + 1 - from);
-            return last;
-        }
-        if next & MATCH != 0 {
-            last = Some(reached + 1);
-            next &= !MATCH;
         }
         (at, state) = (reached + 1, next);
     }

@@ -1,8 +1,6 @@
 //! Which of the matchers answers a search. An answer of `None` is a
 //! search given up at its bounds.
 
-use alt_bytes::ByteSlice;
-
 use crate::program::Program;
 use crate::{Cache, FEW, Regex, backref, backtrack, dfa, pike};
 
@@ -11,7 +9,7 @@ impl Regex {
     pub(crate) fn excluded(&self, text: &[u8]) -> bool {
         self.literal
             .as_ref()
-            .is_some_and(|literal| text.find(literal).is_none())
+            .is_some_and(|literal| literal.find(text).is_none())
     }
 
     /// What the bytes every match contains tell of `text` by
@@ -19,7 +17,7 @@ impl Regex {
     /// are all the pattern is.
     #[inline]
     pub(crate) fn settled(&self, text: &[u8]) -> Option<bool> {
-        let found = text.find(self.literal.as_ref()?).is_some();
+        let found = self.literal.as_ref()?.find(text).is_some();
         (!found || self.alone).then_some(found)
     }
 
@@ -50,34 +48,33 @@ impl Regex {
         stepped(&self.prog, cache, text, None, &mut [pike::UNSET; 2])
     }
 
-    /// The match of a pattern that begins with its fixed bytes, the
-    /// first of which lie at `first`: it begins where such bytes lie,
-    /// and the tables tell from there where it ends. `None` where
-    /// trying those places costs more than a search of the whole text.
-    fn begun(
+    /// The match of a pattern by what every match of it begins with,
+    /// in a text where that first lies at `first` or later: a match
+    /// begins where it lies, and the tables tell from behind it where
+    /// the match ends. `None` where trying those places costs more
+    /// than a search of the whole text.
+    pub(crate) fn begun(
         &self,
         cache: &mut Cache,
         text: &[u8],
         first: usize,
     ) -> Option<Option<(usize, usize)>> {
-        let fixed = self.literal.as_ref().expect("the bytes it begins with");
+        let (lead, behind) = self.lead.as_ref().expect("what it begins with");
         let mut work = 8 * text.len() + 64;
-        let mut from = first;
-        loop {
-            if !(self.prog.apart && crate::chars::inside(text, from)) {
-                let end = dfa::longest(&self.prog, &mut cache.fixed, text, from, &mut work);
-                if let Some(end) = end {
-                    return Some(Some((from, end)));
-                }
-                if work == 0 {
-                    return None;
-                }
+        for from in lead.lies(text, first) {
+            if self.prog.apart && crate::chars::inside(text, from) {
+                continue;
             }
-            match text[from + 1..].find(fixed) {
-                Some(next) => from += 1 + next,
-                None => return Some(None),
+            let place = (*behind, from + lead.len());
+            let end = dfa::longest_behind(&self.prog, &mut cache.tail, text, place, &mut work);
+            if let Some(end) = end {
+                return Some(Some((from, end)));
+            }
+            if work == 0 {
+                return None;
             }
         }
+        Some(None)
     }
 
     /// Where the earliest match begins and where the longest one from
@@ -132,7 +129,7 @@ impl Regex {
         }
         if self.alone {
             let fixed = self.literal.as_ref().expect("the bytes it is");
-            let Some(at) = text.find(fixed) else {
+            let Some(at) = fixed.find(text) else {
                 return Some(false);
             };
             slots.fill(pike::UNSET);
@@ -140,7 +137,7 @@ impl Regex {
             return Some(true);
         }
         if let Some(fixed) = &self.literal {
-            let Some(first) = text.find(fixed) else {
+            let Some(first) = fixed.find(text) else {
                 return Some(false);
             };
             if self.led {
@@ -192,6 +189,13 @@ impl Regex {
     /// as long as that costs no more than the text is long.
     #[cold]
     fn in_turn(&self, cache: &mut Cache, text: &[u8], slots: &mut [usize]) -> Option<bool> {
+        if self.lead.is_some() {
+            match self.begun(cache, text, 0) {
+                Some(None) => return Some(false),
+                Some(Some(span)) => return self.between(cache, text, span, slots),
+                None => {}
+            }
+        }
         let mut work = 8 * text.len() + 64;
         for from in 0..=text.len() {
             let end = dfa::longest(&self.prog, &mut cache.fixed, text, from, &mut work);

@@ -156,6 +156,7 @@ mod backtrack;
 mod block;
 mod bracket;
 mod budget;
+mod cache;
 mod captures;
 mod chars;
 mod class;
@@ -180,6 +181,7 @@ use captures::FEW;
 /// its paths are not stepped from every start of a text at once.
 const LONG: u32 = 4096;
 
+pub use cache::Cache;
 pub use captures::Captures;
 pub use class::ByteSet;
 pub use error::Error;
@@ -206,40 +208,19 @@ pub struct Options {
     pub utf8: bool,
 }
 
-/// Storage the searches with one pattern reuse. A thread that searches
-/// often keeps its own and passes it to the `_with` methods; the others
-/// share one inside the pattern, behind a lock.
-pub struct Cache {
-    /// for a match that begins anywhere
-    scan: dfa::Cache,
-    /// for a match that begins where the search does
-    fixed: dfa::Cache,
-    pike: pike::Cache,
-    backtrack: backtrack::Cache,
-}
-
-impl Default for Cache {
-    fn default() -> Self {
-        Cache {
-            scan: dfa::Cache::new(true),
-            fixed: dfa::Cache::new(false),
-            pike: pike::Cache::default(),
-            backtrack: backtrack::Cache::default(),
-        }
-    }
-}
-
 /// A compiled pattern.
 pub struct Regex {
     prog: program::Program,
     /// Bytes every match contains.
-    literal: Option<Vec<u8>>,
+    literal: Option<literal::Fixed>,
     /// The pattern is those bytes and nothing else, and where they lie
     /// in a text is where it matches.
     alone: bool,
     /// The pattern begins with those bytes and is one for the tables:
     /// a match begins where they lie.
     led: bool,
+    /// What every match begins with, and the instruction behind it.
+    lead: Option<(literal::Fixed, u32)>,
     /// The tables that step from every start at once tell where a
     /// match lies,
     scanned: bool,
@@ -272,6 +253,8 @@ impl Regex {
         let fixed = literal.as_deref().filter(|_| tabled);
         let led = fixed.is_some_and(|fixed| literal::leads(&node, fixed));
         let long = tabled && !prog.anchored && prog.row_count > LONG;
+        let lead = (led || long).then(|| literal::begins(&prog)).flatten();
+        let led = led && lead.is_some();
         drop(node);
         Ok(Regex {
             on_empty: search::on_empty(&prog),
@@ -279,9 +262,10 @@ impl Regex {
             tables: prog.plain_looks && !long && !led,
             long,
             prog,
-            literal,
+            literal: literal.map(literal::Fixed::new),
             alone,
             led,
+            lead,
             cache: Mutex::default(),
         })
     }
@@ -417,6 +401,36 @@ mod tests {
         assert_eq!(re.find(&text.as_bytes()[5..]), None);
         let short = Regex::new(b"[ab]*c").unwrap();
         assert!(short.tables && short.scanned && !short.long);
+        // a text that begins the pattern at every place and matches at
+        // none is answered from behind what the pattern begins with:
+        // the tables that step from every start are never built
+        let unbuilt = |cache: &Cache| cache.scan.built() + cache.fixed.built() == 0;
+        let re = Regex::new(format!("{long}[bc]").as_bytes()).unwrap();
+        let mut cache = Cache::default();
+        let text = "a".repeat(9_000);
+        assert!(re.led && !re.is_match_with(&mut cache, text.as_bytes()));
+        assert!(unbuilt(&cache));
+        let text = format!("{text}c");
+        assert_eq!(
+            re.find_with(&mut cache, text.as_bytes()),
+            Some(6_000..9_001)
+        );
+        assert!(unbuilt(&cache));
+        // so is one of letters in either case, which begins with no
+        // fixed bytes
+        let re = Regex::with_options("a".repeat(5_000).as_bytes(), any_case).unwrap();
+        let text = format!(
+            "{}{}",
+            format!("{}x", "A".repeat(4_999)).repeat(3),
+            "aA".repeat(2_500)
+        );
+        assert!(re.long && re.lead.is_some() && !re.led);
+        assert_eq!(
+            re.find_with(&mut cache, text.as_bytes()),
+            Some(15_000..20_000)
+        );
+        assert!(unbuilt(&cache) && !re.is_match_with(&mut cache, &text.as_bytes()[..19_999]));
+        assert!(unbuilt(&cache));
         // one that begins at the start of the text is tried there anyway
         let tied = Regex::with_options(format!("^{}", "é".repeat(3_000)).as_bytes(), any_case);
         assert!(tied.is_ok_and(|tied| tied.scanned && !tied.long));
