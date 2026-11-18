@@ -7,3 +7,10 @@ license.workspace = true
 
 [dependencies]
 alt-os.workspace = true
+
+[[test]]
+name = "it"
+path = "tests/it/main.rs"
+# entered through the C main: the pool covers its threads against a stack
+# overflow only in a program that is
+harness = false
