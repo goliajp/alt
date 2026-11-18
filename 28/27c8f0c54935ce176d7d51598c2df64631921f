@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: perf
+summary: read a synced marker with one read of the file
+author-type: human
+author: doracawl
+touched: crates/alt-odb/src/synced.rs
+touched: crates/alt-oplog/src/synced.rs
