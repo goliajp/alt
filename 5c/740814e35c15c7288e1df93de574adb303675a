@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: refactor
+summary: move the syncing of the operation log into its own module
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/lib.rs
+touched: crates/alt-oplog/src/sync.rs
