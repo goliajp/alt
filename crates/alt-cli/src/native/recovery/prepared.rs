@@ -47,3 +47,17 @@ pub fn prepared_blobs(alt_dir: &Path) -> alt_refs::AlsoNamed {
     // recovery of that operation reports it
     Arc::new(move |op| blobs(&alt_dir, op).unwrap_or_default())
 }
+
+/// Writes the store under `alt_dir` out as a git repository in `target`,
+/// without what was never synced and names what is not stored, an add
+/// among it; a ref that reading past damage leaves out is told on stderr.
+pub fn export_git(
+    alt_dir: &Path,
+    target: &Path,
+) -> Result<alt_export::ExportReport, alt_export::ExportError> {
+    let report = alt_export::export_git_naming(alt_dir, target, Some(&prepared_blobs(alt_dir)))?;
+    for (name, oid) in &report.left_out {
+        eprintln!("warning: left out ref {name}: it points at {oid}, which is not stored");
+    }
+    Ok(report)
+}

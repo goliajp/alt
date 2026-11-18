@@ -1500,14 +1500,7 @@ pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, head: &str, out: &mut
             if !repo.is_native() {
                 return Err("export needs a .alt store; run inside one (see 'alt import')".into());
             }
-            let report = alt_export::export_git_naming(
-                repo.git_dir(),
-                target,
-                Some(&crate::native::prepared_blobs(repo.git_dir())),
-            )?;
-            for (name, oid) in &report.left_out {
-                eprintln!("warning: left out ref {name}: it points at {oid}, which is not stored");
-            }
+            let report = crate::native::export_git(repo.git_dir(), target)?;
             writeln!(
                 out,
                 "exported {} objects, {} refs{} into {}",

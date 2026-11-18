@@ -236,6 +236,26 @@ fn refs_op_only(body: &[u8]) -> Option<Refs> {
     Some(Refs::from_changes(refs))
 }
 
+/// The anchor that begins at `at` of an anchored snapshot's `body`, where
+/// the table of its ref blocks begins, and how many refs it holds.
+fn anchored(body: &[u8], at: usize) -> Option<(Anchor, usize, usize)> {
+    let anchor = Anchor {
+        op: OpId(body.get(at..at + 32)?.try_into().ok()?),
+        start: field(body, at + 32)?,
+        end: field(body, at + 40)?,
+        count: field(body, at + 48)?,
+    };
+    let counts = at + ANCHOR_LEN;
+    let count = u32::from_le_bytes(body.get(counts..counts + 4)?.try_into().ok()?);
+    let blocks = u32::from_le_bytes(body.get(counts + 4..counts + 8)?.try_into().ok()?);
+    let table = counts + 8;
+    let entries = table.checked_add((blocks as usize).checked_mul(4)?)?;
+    if blocks as usize != (count as usize).div_ceil(BLOCK) || entries > body.len() {
+        return None;
+    }
+    Some((anchor, table, count as usize))
+}
+
 /// Reads a snapshot; any structural problem yields None (rebuild), never an
 /// error — the snapshot is a cache.
 pub fn read(path: &Path) -> Option<Snapshot> {
@@ -270,21 +290,8 @@ pub fn read(path: &Path) -> Option<Snapshot> {
         return None;
     }
     let at = if version == VERSION { NOTE_END } else { 5 };
-    let anchor = Anchor {
-        op: OpId(body.get(at..at + 32)?.try_into().ok()?),
-        start: field(body, at + 32)?,
-        end: field(body, at + 40)?,
-        count: field(body, at + 48)?,
-    };
-    let counts = at + ANCHOR_LEN;
-    let count = u32::from_le_bytes(body.get(counts..counts + 4)?.try_into().ok()?);
-    let blocks = u32::from_le_bytes(body.get(counts + 4..counts + 8)?.try_into().ok()?);
-    let table = counts + 8;
-    let entries = table.checked_add((blocks as usize).checked_mul(4)?)?;
-    if blocks as usize != (count as usize).div_ceil(BLOCK) || entries > body.len() {
-        return None;
-    }
-    let refs = Base::new(map, table, count as usize, body_len);
+    let (anchor, table, count) = anchored(body, at)?;
+    let refs = Base::new(map, table, count, body_len);
     Some(Snapshot {
         at_op: anchor.op,
         anchor: Some(anchor),

@@ -5,7 +5,7 @@ use super::*;
 
 mod index;
 mod prepared;
-pub use prepared::prepared_blobs;
+pub use prepared::{export_git, prepared_blobs};
 
 pub(super) const PREPARE: u8 = 0x30;
 pub(super) const COMPLETE: u8 = 0x31;

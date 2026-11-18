@@ -53,6 +53,31 @@ fn ends(store: &mut Store) -> Res<Vec<End>> {
     Ok(ends)
 }
 
+/// The entries of every workspace's index that name a blob which is not
+/// stored, or one that goes with the records a writer cuts off: an index
+/// is written with its own fsync and can be ahead of the object store.
+fn unstored_index_entries(store: &Store) -> Res<Vec<String>> {
+    let gone = store.odb().unconfirmed_objects().map_err(with_cause)?;
+    Ok(store
+        .unstored_index_entries(&gone)
+        .map_err(|error| format!("fsck: {error}"))?)
+}
+
+/// What the check counted, as it is named in JSON and in text.
+fn counts(
+    odb: &alt_odb::OdbChecked,
+    refs: &alt_refs::RefsChecked,
+) -> [(&'static str, &'static str, u64); 6] {
+    [
+        ("chunk_records", "chunk records", odb.chunk_records),
+        ("blob_records", "blob records", odb.blob_records),
+        ("objects", "objects", odb.objects),
+        ("decomposed_blobs", "decomposed blobs", odb.decomposed),
+        ("operations", "operations", refs.ops),
+        ("refs", "refs", refs.refs),
+    ]
+}
+
 pub fn run<W: Write>(store: &mut Store, json: bool, out: &mut W) -> Res<u8> {
     // looked for before the store is opened, which may replace them
     let ignored = store.odb().unusable_index_runs().map_err(with_cause)?;
@@ -69,11 +94,7 @@ pub fn run<W: Write>(store: &mut Store, json: bool, out: &mut W) -> Res<u8> {
     let unconfirmed = store.unconfirmed()?;
     let named = unconfirmed.map_or(0, |found| found.ops);
     let dangling = store.dangling_refs(named)?;
-    // an index is written with its own fsync and can be ahead of the store
-    let gone = store.odb().unconfirmed_objects().map_err(with_cause)?;
-    let unstored = store
-        .unstored_index_entries(&gone)
-        .map_err(|error| format!("fsck: {error}"))?;
+    let unstored = unstored_index_entries(store)?;
     let found = Found {
         ends: &ends,
         odb: &odb,
@@ -98,14 +119,7 @@ pub fn run<W: Write>(store: &mut Store, json: bool, out: &mut W) -> Res<u8> {
     if let Some(tail) = &discards {
         notes.extend(tails::told(tail));
     }
-    let counts = [
-        ("chunk_records", "chunk records", odb.chunk_records),
-        ("blob_records", "blob records", odb.blob_records),
-        ("objects", "objects", odb.objects),
-        ("decomposed_blobs", "decomposed blobs", odb.decomposed),
-        ("operations", "operations", refs.ops),
-        ("refs", "refs", refs.refs),
-    ];
+    let counts = counts(&odb, &refs);
     report(out, json, &ignored, &notes, &counts, discards.as_ref())?;
     match discards {
         Some(tail) => Err(tails::failure(&tail).into()),

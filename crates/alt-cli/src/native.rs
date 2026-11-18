@@ -45,7 +45,7 @@ mod reading;
 pub use reading::{only_reads, open_for_command, view_for};
 mod rebase;
 mod recovery;
-pub use recovery::prepared_blobs;
+pub use recovery::{export_git, prepared_blobs};
 mod requests;
 mod revert;
 mod sequence_editor;

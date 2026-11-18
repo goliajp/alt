@@ -155,52 +155,45 @@ pub fn export_git_naming(
     report
 }
 
-fn write_git(
-    alt_dir: &Path,
-    git_dir: &Path,
-    also: Option<&AlsoNamed>,
-) -> Result<ExportReport, ExportError> {
-    // --- config first: it declares the object format ---
+/// Writes the config, which declares the object format: the preserved
+/// one where there is one, the minimum a repository needs otherwise.
+fn write_config(alt_dir: &Path, git_dir: &Path) -> Result<HashAlgo, ExportError> {
     let preserved = alt_dir.join("git-import/config");
-    let algo;
-    if preserved.is_file() {
-        let bytes = fs::read(&preserved)?;
-        let plain = Config {
-            entries: alt_git_config::parse_file(&bytes)?,
-        };
-        algo = match plain.get_str("extensions", None, "objectformat") {
-            None => HashAlgo::Sha1,
-            Some(v) if v.as_ref() as &[u8] == b"sha256" => HashAlgo::Sha256,
-            Some(_) => return Err(ExportError::Format("unknown extensions.objectFormat")),
-        };
-        // the export writes files-backend refs by decision, so a
-        // preserved extensions.refstorage (e.g. reftable) must not
-        // survive; everything else returns byte-identical
-        fs::write(git_dir.join("config"), strip_refstorage(&bytes))?;
-    } else {
-        // native-born store without an import config: synthesize the
-        // minimum a functional repository needs
-        algo = HashAlgo::Sha1;
+    if !preserved.is_file() {
+        // native-born store without an import config
         fs::write(
             git_dir.join("config"),
             b"[core]\n\trepositoryformatversion = 0\n\tbare = false\n",
         )?;
+        return Ok(HashAlgo::Sha1);
     }
+    let bytes = fs::read(&preserved)?;
+    let plain = Config {
+        entries: alt_git_config::parse_file(&bytes)?,
+    };
+    let algo = match plain.get_str("extensions", None, "objectformat") {
+        None => HashAlgo::Sha1,
+        Some(v) if v.as_ref() as &[u8] == b"sha256" => HashAlgo::Sha256,
+        Some(_) => return Err(ExportError::Format("unknown extensions.objectFormat")),
+    };
+    // the export writes files-backend refs by decision, so a preserved
+    // extensions.refstorage (e.g. reftable) must not survive; everything
+    // else returns byte-identical
+    fs::write(git_dir.join("config"), strip_refstorage(&bytes))?;
+    Ok(algo)
+}
 
-    // --- objects: one plain pack with every mapped object. The bulk
-    // decode-once read materializes each object once (a base shared by many
-    // lineage deltas is decoded just once) without per-object re-hashing —
-    // git fsck on the output is the integrity boundary. ---
-    let odb = NativeOdb::reading(alt_dir);
-    // an object that does not read fails the export below
-    let refs = RefStore::open_confirmed(alt_dir, also, |oid| odb.contains(oid).unwrap_or(true))?;
-    let mut unstored: HashSet<ObjectId> = refs
-        .iter()
-        .filter_map(|(_, target)| match target {
-            RefTarget::Oid(oid) => Some(*oid),
-            RefTarget::Symbolic(_) => None,
-        })
-        .collect();
+/// Writes one plain pack with every mapped object and takes each out of
+/// `unstored`. The bulk decode-once read materializes each object once (a
+/// base shared by many lineage deltas is decoded just once) without
+/// per-object re-hashing: git fsck on the output is the integrity
+/// boundary. Returns how many objects were written.
+fn write_objects(
+    odb: &NativeOdb,
+    git_dir: &Path,
+    algo: HashAlgo,
+    unstored: &mut HashSet<ObjectId>,
+) -> Result<u32, ExportError> {
     let count = u32::try_from(odb.len()?).map_err(|_| ExportError::Format("store too large"))?;
     let mut writer = PackWriter::create(&git_dir.join("objects/pack"), algo, count)?;
     let mut fail: Option<ExportError> = None;
@@ -218,9 +211,27 @@ fn write_git(
     if let Some(e) = fail {
         return Err(e);
     }
-    let written = writer.finish()?;
+    Ok(writer.finish()?.objects)
+}
 
-    // --- refs + HEAD from native state ---
+fn write_git(
+    alt_dir: &Path,
+    git_dir: &Path,
+    also: Option<&AlsoNamed>,
+) -> Result<ExportReport, ExportError> {
+    let algo = write_config(alt_dir, git_dir)?;
+    let odb = NativeOdb::reading(alt_dir);
+    // an object that does not read fails the export below
+    let refs = RefStore::open_confirmed(alt_dir, also, |oid| odb.contains(oid).unwrap_or(true))?;
+    let mut unstored: HashSet<ObjectId> = refs
+        .iter()
+        .filter_map(|(_, target)| match target {
+            RefTarget::Oid(oid) => Some(*oid),
+            RefTarget::Symbolic(_) => None,
+        })
+        .collect();
+    let objects = write_objects(&odb, git_dir, algo, &mut unstored)?;
+
     let mut head = None;
     let mut loose: Vec<(BString, alt_git_refs::RefTarget)> = Vec::new();
     let mut left_out = Vec::new();
@@ -240,18 +251,15 @@ fn write_git(
                 alt_git_refs::RefTarget::Symbolic(BString::from(sym.as_str()))
             }
         };
-        if name == "HEAD" {
-            head = Some(converted);
-        } else {
-            loose.push((BString::from(name), converted));
+        match name == "HEAD" {
+            true => head = Some(converted),
+            false => loose.push((BString::from(name), converted)),
         }
     }
-    let refs_written = loose.len();
     alt_git_refs::write_loose(git_dir, head.as_ref(), &loose)?;
-
     Ok(ExportReport {
-        objects: written.objects,
-        refs: refs_written,
+        objects,
+        refs: loose.len(),
         head: head.is_some(),
         left_out,
     })

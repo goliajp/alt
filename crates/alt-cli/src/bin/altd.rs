@@ -204,6 +204,20 @@ mod unix {
         )
     }
 
+    /// Takes in what other processes wrote before a command runs on the
+    /// store this daemon holds; for a command that only reads the files are
+    /// left as they are.
+    fn bring_up(
+        store: &mut Store,
+        repo: &mut Repository,
+        writing: bool,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        match writing {
+            true => store.settle().and_then(|()| Ok(repo.refresh()?)),
+            false => store.follow().and_then(|()| Ok(repo.follow()?)),
+        }
+    }
+
     /// Reads one request, runs it against the held store/repo, writes back.
     /// Framing I/O happens outside the lock; only `handle` (refresh + dispatch)
     /// holds it, so the serialized section is the store work, not the wire I/O.
@@ -241,11 +255,7 @@ mod unix {
         let (response, operations, ticket, barrier_ok) = {
             let mut guard = shared.lock().expect("daemon store mutex poisoned");
             let (store, repo) = &mut *guard;
-            // a command that only reads leaves the files as they are
-            let refreshed = match execution.writing {
-                true => store.settle().and_then(|()| Ok(repo.refresh()?)),
-                false => store.follow().and_then(|()| Ok(repo.follow()?)),
-            };
+            let refreshed = bring_up(store, repo, execution.writing);
             // operations that were never synced and name objects which are
             // not stored are left out by a process that opens the store
             // for this one command: the client, when it gets no answer
