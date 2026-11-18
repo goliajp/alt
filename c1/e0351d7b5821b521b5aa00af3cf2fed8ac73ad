@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: run the older alt on a repository where an add was abandoned
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/abandoned_add.rs
+touched: crates/alt-cli/tests/it/mixed_versions.rs
