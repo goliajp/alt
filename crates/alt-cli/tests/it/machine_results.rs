@@ -389,3 +389,54 @@ fn recovering_a_suboperation_does_not_complete_the_interrupted_request() {
         "result_unknown",
     );
 }
+
+/// Commands that keep a journal of their own work on no repository: each
+/// refuses a workspace and a request id before it does anything.
+#[test]
+fn a_command_with_its_own_journal_refuses_repository_selectors() {
+    let directory = alt_os::temp::tempdir().unwrap();
+    let cases: [(&[&str], &str); 3] = [
+        (
+            &["runner", "probe", "--bindings", "b", "--environment", "e"],
+            "runner uses its snapshot nonce",
+        ),
+        (
+            &[
+                "auth",
+                "delegate",
+                "--credential-file",
+                "c",
+                "--agent-file",
+                "a",
+                "--resume",
+            ],
+            "auth uses a private login journal",
+        ),
+        (
+            &[
+                "portable",
+                "export",
+                "--credential-file",
+                "c",
+                "--journal",
+                "j",
+                "--repository",
+                "r",
+                "--output",
+                "o",
+            ],
+            "portable transfer uses its private journal",
+        ),
+    ];
+    for (args, said) in cases {
+        for selector in [["--workspace", "other"], ["--request-id", ID]] {
+            let refused = run(directory.path(), &[&selector[..], args].concat(), false);
+            let stderr = String::from_utf8_lossy(&refused.stderr);
+            assert!(!refused.status.success(), "{args:?}");
+            assert!(stderr.contains(said), "{args:?} {selector:?}: {stderr}");
+            assert!(refused.stdout.is_empty(), "{args:?}");
+        }
+    }
+    // nothing was created for any of them
+    assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+}

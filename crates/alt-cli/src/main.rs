@@ -89,48 +89,23 @@ fn attempt() -> Response {
         *error.details = alt_json::json!({"path_bytes_hex": machine::hex(cwd.as_os_str().as_encoded_bytes()), "encoding":"os_bytes"});
         return error.response(parsed.json, parsed.cli.request_id.as_deref());
     }
-    if let Command::Runner { op, .. } = &parsed.cli.command {
-        if parsed.cli.request_id.is_some() || parsed.cli.workspace.is_some() {
-            return Failure::usage("runner uses its snapshot nonce; repository request/workspace selectors are not supported")
-                .response(parsed.json, parsed.cli.request_id.as_deref());
-        }
-        let mut stdout = Vec::new();
-        return match alt_cli::runner::run(op, &mut stdout) {
-            Ok(()) => Response {
-                exit_code: 0,
-                stdout,
-                stderr: Vec::new(),
-            },
-            Err(error) => machine::from_error(error.as_ref(), false).response(parsed.json, None),
-        };
-    }
-    if let Command::Auth { op, .. } = &parsed.cli.command {
-        if parsed.cli.request_id.is_some() || parsed.cli.workspace.is_some() {
-            return Failure::usage("auth uses a private login journal; repository request/workspace selectors are not supported").response(parsed.json,None);
-        }
-        let mut stdout = Vec::new();
-        return match alt_cli::auth::run(op, &mut stdout, &mut std::io::stderr().lock()) {
-            Ok(()) => Response {
-                exit_code: 0,
-                stdout,
-                stderr: Vec::new(),
-            },
-            Err(error) => machine::from_error(error.as_ref(), false).response(parsed.json, None),
-        };
-    }
-    if let Command::Portable { op, .. } = &parsed.cli.command {
-        if parsed.cli.request_id.is_some() || parsed.cli.workspace.is_some() {
-            return Failure::usage("portable transfer uses its private journal; repository request/workspace selectors are not supported").response(parsed.json,None);
-        }
-        let mut stdout = Vec::new();
-        return match alt_cli::portable::run(op, &mut stdout) {
-            Ok(()) => Response {
-                exit_code: 0,
-                stdout,
-                stderr: Vec::new(),
-            },
-            Err(error) => machine::from_error(error.as_ref(), false).response(parsed.json, None),
-        };
+    let own: Option<(&str, OwnRun)> = match &parsed.cli.command {
+        Command::Runner { op, .. } => Some((
+            "runner uses its snapshot nonce; repository request/workspace selectors are not supported",
+            &|out| alt_cli::runner::run(op, out),
+        )),
+        Command::Auth { op, .. } => Some((
+            "auth uses a private login journal; repository request/workspace selectors are not supported",
+            &|out| alt_cli::auth::run(op, out, &mut std::io::stderr().lock()),
+        )),
+        Command::Portable { op, .. } => Some((
+            "portable transfer uses its private journal; repository request/workspace selectors are not supported",
+            &|out| alt_cli::portable::run(op, out),
+        )),
+        _ => None,
+    };
+    if let Some((refused, run)) = own {
+        return outside_repository(&parsed, refused, run);
     }
     let identity = Identity::from_env();
     let native_write =
@@ -270,6 +245,31 @@ fn attempt() -> Response {
         leave_to_exit(execution);
     }
     response
+}
+
+/// A command that works on no repository: it writes what it prints.
+type OwnRun<'a> = &'a dyn Fn(&mut Vec<u8>) -> Result<(), Box<dyn std::error::Error>>;
+
+/// Runs a command that keeps a journal of its own and works on no
+/// repository: it takes neither a request id nor a workspace.
+fn outside_repository(parsed: &machine::Parsed, refused: &str, run: OwnRun) -> Response {
+    if parsed.cli.request_id.is_some() || parsed.cli.workspace.is_some() {
+        // a runner's refusal names the request it was given
+        let id = match &parsed.cli.command {
+            Command::Runner { .. } => parsed.cli.request_id.as_deref(),
+            _ => None,
+        };
+        return Failure::usage(refused).response(parsed.json, id);
+    }
+    let mut stdout = Vec::new();
+    match run(&mut stdout) {
+        Ok(()) => Response {
+            exit_code: 0,
+            stdout,
+            stderr: Vec::new(),
+        },
+        Err(error) => machine::from_error(error.as_ref(), false).response(parsed.json, None),
+    }
 }
 
 /// Leaves what a command that only read holds for the exit of the process
