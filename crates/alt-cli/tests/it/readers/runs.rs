@@ -4,10 +4,10 @@
 use std::fs;
 use std::path::Path;
 
-use super::super::unconfirmed::{alt, alt_command};
-use super::super::unconfirmed_tails::{LOGS, lens};
-use super::states::{Base, Step, run_dirs};
-use super::{answer, tree};
+use super::super::unconfirmed::{alt, alt_command, ok};
+use super::super::unconfirmed_tails::{LOGS, MARKERS, archive, lag, lens, noise};
+use super::states::{Base, Step, copy_tree, run_dirs};
+use super::{answer, answers_as_after_the_cut, tree};
 
 /// Where the index runs beside `log` stop: the byte of the log (of the
 /// active pack, for the chunk index) the last of them indexes up to.
@@ -80,4 +80,56 @@ fn a_reader_that_reads_past_damage_builds_no_index_run() {
     assert!(run_dirs(&dir.join(".alt")).is_empty());
     let _ = alt(&dir, &["cat-file", "-p", "HEAD"]);
     assert!(!run_dirs(&dir.join(".alt")).is_empty(), "nothing to build");
+}
+
+/// A run is written once its records are fsynced and before the marker
+/// says so, and can reach past the boundary. With the content of the
+/// records past it gone, a reader answers behind the run, as it does
+/// once a writer cut them.
+#[test]
+fn a_reader_answers_as_after_the_cut_where_an_index_run_reaches_past_the_boundary() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let base = tmp.path().join("base");
+    fs::create_dir(&base).unwrap();
+    ok(alt(&base, &["init"]));
+    fs::write(base.join("a.txt"), "one\n").unwrap();
+    ok(alt(&base, &["add", "."]));
+    ok(alt(&base, &["commit", "-m", "first"]));
+    let first = lens(&base);
+    let first_head = ok(alt(&base, &["rev-parse", "HEAD"]));
+    let markers = MARKERS.map(|marker| fs::read(base.join(".alt").join(marker)).unwrap());
+    for n in 0..300 {
+        fs::write(base.join(format!("f{n}.txt")), format!("file {n}\n")).unwrap();
+    }
+    fs::write(base.join("l.bin"), noise(1, 1 << 20)).unwrap();
+    fs::write(base.join("z.zip"), archive(&noise(9, 4000))).unwrap();
+    ok(alt(&base, &["add", "."]));
+    ok(alt(&base, &["commit", "-m", "second"]));
+    assert!(indexed_to(&base, "map.alt").unwrap() > first[3]);
+    // the pack, then the blob map, end where they did at the boundary
+    for lost in [0, 1] {
+        let (found, written) = (tmp.path().join("found"), tmp.path().join("written"));
+        for dir in [&found, &written] {
+            let _ = fs::remove_dir_all(dir);
+            copy_tree(&base, dir);
+            lag(dir, &markers);
+            let log = fs::OpenOptions::new()
+                .write(true)
+                .open(dir.join(".alt").join(LOGS[lost]))
+                .unwrap();
+            log.set_len(first[lost]).unwrap();
+        }
+        let head = alt(&found, &["rev-parse", "HEAD"]);
+        assert_eq!(ok(head), first_head, "{} lost", LOGS[lost]);
+        let said = answers_as_after_the_cut(&found, &written, LOGS[lost]);
+        let (cut, discarded, left_out) = said.expect("the writer cuts");
+        assert!(
+            cut && discarded > 0,
+            "{}: {discarded} discarded",
+            LOGS[lost]
+        );
+        // a command that reads the blobs the index still names fails,
+        // before the cut and after it alike
+        assert!(left_out >= 4, "{}: {left_out} readers", LOGS[lost]);
+    }
 }

@@ -428,6 +428,12 @@ impl Runs {
         kept.last().map_or(self.base, |run| run.end)
     }
 
+    /// For a handle that holds the log as ending at `target`: no longer
+    /// looks in the runs that reach past it. Their files stay.
+    pub fn pass_over_past(&mut self, target: u64) {
+        self.runs.retain(|run| run.end <= target);
+    }
+
     /// Drops the runs that reach past `target`, before the log is cut back
     /// to it: every such file in the directory, not only the ones this
     /// handle loaded (another process may have merged them since). The

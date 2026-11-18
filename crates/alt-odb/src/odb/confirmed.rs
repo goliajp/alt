@@ -65,7 +65,7 @@ impl Odb {
             Ok::<(), OdbError>(())
         })?;
         if let Some(at) = cut {
-            tier1.pass_over_from(at);
+            tier1.pass_over_from(at)?;
         }
         Ok(())
     }
@@ -99,7 +99,7 @@ impl Odb {
             Ok(())
         })?;
         if let Some(at) = cut {
-            self.map.pass_over_from(at);
+            self.map.pass_over_from(at)?;
         }
         Ok(())
     }

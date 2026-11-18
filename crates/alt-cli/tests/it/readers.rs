@@ -199,8 +199,16 @@ fn answer(ran: &Output) -> (Option<i32>, String) {
     (ran.status.code(), said)
 }
 
-#[test]
-fn a_reader_answers_as_it_does_after_the_next_writer_cut() {
+/// Two copies of one state: a command that writes runs in `written`,
+/// and each of six commands that only read answers in `found` as it does
+/// in `written` after that. `None` where the writer reports damage and
+/// cuts nothing; else whether it cut, how many operations it discarded,
+/// and how many of the readers that succeeded left those out.
+fn answers_as_after_the_cut(
+    found: &Path,
+    written: &Path,
+    name: &str,
+) -> Option<(bool, usize, usize)> {
     const ASKED: [&[&str]; 6] = [
         &["log"],
         &["rev-parse", "HEAD"],
@@ -209,37 +217,47 @@ fn a_reader_answers_as_it_does_after_the_next_writer_cut() {
         &["branch"],
         &["diff", "--cached"],
     ];
+    // stores an object and moves a ref that none of the answers shows:
+    // the logs are read to their ends, cut and bounded
+    let wrote = alt(written, &["tag", "-a", "probe", "-m", "probe"]);
+    if !wrote.status.success() {
+        return None;
+    }
+    let cut = stderr(&wrote).contains("warning: discarded");
+    let ops = " operation(s) at the end of the operation log";
+    let discarded = told(&wrote, "warning: discarded ", ops).unwrap_or(0);
+    let mut left_out = 0;
+    for args in ASKED {
+        let read = alt(found, args);
+        // whole operations go with what the writer cuts: a reader
+        // leaves out the ones the writer discards, and says so
+        let never = " operation(s) in the operation log were never synced";
+        let passed = told(&read, "warning: the last ", never).unwrap_or(0);
+        // a command that fails says why and nothing else
+        if read.status.success() {
+            assert_eq!(passed, discarded, "{name}: alt {args:?}");
+            left_out += usize::from(discarded > 0);
+        }
+        let after = alt(written, args);
+        assert_eq!(answer(&read), answer(&after), "{name}: alt {args:?}");
+    }
+    Some((cut, discarded, left_out))
+}
+
+#[test]
+fn a_reader_answers_as_it_does_after_the_next_writer_cut() {
     let base = Base::build();
     let (mut cut, mut same, mut left_out) = (0, 0, 0);
     let states = ENDS.iter().chain(MARKS).chain(RUNS);
     for (n, (name, steps)) in states.enumerate() {
         let found = base.state(&format!("found{n}"), steps);
         let written = base.state(&format!("written{n}"), steps);
-        // stores an object and moves a ref that none of the answers
-        // shows: the logs are read to their ends, cut and bounded
-        let wrote = alt(&written, &["tag", "-a", "probe", "-m", "probe"]);
-        if !wrote.status.success() {
-            // damage: the writer reports it and cuts nothing
+        let Some((was_cut, _, readers)) = answers_as_after_the_cut(&found, &written, name) else {
             continue;
-        }
-        cut += usize::from(stderr(&wrote).contains("warning: discarded"));
-        let ops = " operation(s) at the end of the operation log";
-        let discarded = told(&wrote, "warning: discarded ", ops).unwrap_or(0);
-        for args in ASKED {
-            let read = alt(&found, args);
-            // whole operations go with what the writer cuts: a reader
-            // leaves out the ones the writer discards, and says so
-            let never = " operation(s) in the operation log were never synced";
-            let passed = told(&read, "warning: the last ", never).unwrap_or(0);
-            // a command that fails says why and nothing else
-            if read.status.success() {
-                assert_eq!(passed, discarded, "{name}: alt {args:?}");
-                left_out += usize::from(discarded > 0);
-            }
-            let after = alt(&written, args);
-            assert_eq!(answer(&read), answer(&after), "{name}: alt {args:?}");
-            same += 1;
-        }
+        };
+        cut += usize::from(was_cut);
+        same += 6;
+        left_out += readers;
     }
     assert!(
         cut >= 20 && same >= 120 && left_out >= 12,

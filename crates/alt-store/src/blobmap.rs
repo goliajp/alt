@@ -116,7 +116,7 @@ impl BlobMap {
     }
 
     /// See [`RecLog::pass_over_from`].
-    pub fn pass_over_from(&mut self, at: u64) {
+    pub fn pass_over_from(&mut self, at: u64) -> Result<(), StoreError> {
         self.log.pass_over_from(at)
     }
 

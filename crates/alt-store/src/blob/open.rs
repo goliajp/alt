@@ -108,7 +108,7 @@ impl BlobStore {
             Ok(())
         })?;
         if let Some(at) = cut {
-            map.pass_over_from(at);
+            map.pass_over_from(at)?;
         }
         Ok(())
     }

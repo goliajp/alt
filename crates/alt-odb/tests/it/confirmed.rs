@@ -8,11 +8,14 @@ use std::fs;
 use std::os::unix::fs::FileExt;
 use std::path::Path;
 
+use alt_git_codec::ObjectKind;
 use alt_odb::{BlobId, NativeOdb};
 
 use super::dangling::{CASES, Fault, damage, snapshot, store, synced_to};
 use super::marker::rewrite;
-use super::rewind_interrupted::{FILES, KEPT, Split, cut, object, older_marker, open, reads};
+use super::rewind_interrupted::{
+    FILES, KEPT, Split, cut, lens, object, older_marker, open, put, reads,
+};
 use super::synced_note::{NOTE_AT, note_of, write_note};
 
 fn reading(dir: &Path) -> NativeOdb {
@@ -159,4 +162,77 @@ fn the_note_records_all_four_files_as_far_as_the_marker_does() {
     let (_, _, full) = store(tmp.path(), 2);
     assert_eq!(note_of(tmp.path()), Some((1, full)));
     assert_eq!(super::marker::recorded(tmp.path()).whole, full);
+}
+
+/// Index runs are written once their records are fsynced and before the
+/// marker says so: a run can reach past the boundary. A reader holds the
+/// log as ending where the writer will cut it all the same, behind the
+/// run, and after the cut the two say the same of every object.
+#[test]
+fn a_reader_passes_over_unsynced_records_an_index_run_covers() {
+    // one of several chunks, then enough of the other two kinds for runs
+    let batch: Vec<u32> = (1000..1040)
+        .chain([1042])
+        .chain(1043..1900)
+        .filter(|n| n % 3 != 1 || *n == 1042)
+        .collect();
+    let first_mapped = batch.iter().position(|n| *n == 1042).unwrap();
+    for lost in [0, 1] {
+        for zeroed in [false, true] {
+            let case = format!("{} lost, zeroed {zeroed}", FILES[lost]);
+            let tmp = alt_os::temp::tempdir().unwrap();
+            let dir = tmp.path();
+            let mut odb = open(dir);
+            put(&mut odb, 0..KEPT);
+            let kept = lens(dir);
+            for n in &batch {
+                let (oid, data) = object(*n);
+                odb.put(oid, ObjectKind::Blob, &data).unwrap();
+            }
+            odb.flush().unwrap();
+            drop(odb);
+            let run_end = |name: std::ffi::OsString| {
+                let name = name.into_string().unwrap();
+                let end = name.strip_suffix(".run")?.split_once('-')?.1.to_owned();
+                u64::from_str_radix(&end, 16).ok()
+            };
+            let runs = fs::read_dir(dir.join("map.alt.idx")).unwrap();
+            let covered = runs.filter_map(|run| run_end(run.unwrap().file_name()));
+            assert!(covered.max().unwrap() > kept[3], "{case}: no run to pass");
+            synced_to(dir, kept, 0);
+            if zeroed {
+                let len = lens(dir)[lost];
+                cut(dir, lost, kept[lost]);
+                cut(dir, lost, len);
+            } else {
+                cut(dir, lost, kept[lost]);
+            }
+            // with the blob map lost, the objects before the first it
+            // names are whole
+            let held = if lost == 0 { 0 } else { first_mapped };
+            let holds = |odb: &NativeOdb| -> Vec<bool> {
+                let asked = (0..KEPT).chain(batch.iter().copied());
+                asked.map(|n| odb.contains(&object(n).0).unwrap()).collect()
+            };
+            let before = snapshot(dir);
+            let found = [holds(&reading(dir)), holds(&open(dir))];
+            assert_eq!(snapshot(dir), before, "{case}");
+            for found in &found {
+                let expect = KEPT as usize + held;
+                assert!(found[..expect].iter().all(|held| *held), "{case}");
+                assert!(found[expect..].iter().all(|held| !*held), "{case}");
+            }
+            let reader = reading(dir);
+            for n in (0..KEPT).chain(batch[..held].iter().copied()) {
+                reads(&reader, n);
+            }
+            let (oid, _) = object(batch[held]);
+            assert!(reader.get(&oid).unwrap().is_none(), "{case}");
+            drop(reader);
+            // the write lock taken and given up: the records are cut
+            open(dir).checkpoint().unwrap();
+            assert!(lens(dir)[3] < before[3].0, "{case}: nothing was cut");
+            assert_eq!(holds(&reading(dir)), found[0], "{case}");
+        }
+    }
 }

@@ -238,8 +238,8 @@ impl ObjectMap {
     }
 
     /// See [`RecLog::pass_over_from`].
-    pub fn pass_over_from(&mut self, at: u64) {
-        self.log.pass_over_from(at)
+    pub fn pass_over_from(&mut self, at: u64) -> Result<(), OdbError> {
+        self.log.pass_over_from(at).map_err(lift)
     }
 
     /// See [`RecLog::unfinished`].
