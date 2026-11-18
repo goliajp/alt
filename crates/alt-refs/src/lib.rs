@@ -110,16 +110,8 @@ impl RefStore {
         };
 
         let recent = oplog.recent();
-        let (mut refs, replay_from, snapshot_end, snapshot_len) = match snapshot {
-            Some(snap) if oplog.anchored() => (snap.refs, 0, anchor.map_or(0, |a| a.end), snap.len),
-            // the whole log was replayed: the snapshot is only usable if its
-            // op is still in the chain
-            Some(snap) => match recent.iter().position(|op| op.id == snap.at_op) {
-                Some(index) => (snap.refs, index + 1, 0, snap.len),
-                None => (Refs::default(), 0, 0, 0),
-            },
-            None => (Refs::default(), 0, 0, 0),
-        };
+        let (mut refs, replay_from, snapshot_end, snapshot_len) =
+            reading::start_from(snapshot, oplog.anchored(), recent);
 
         let mut by_key = BTreeMap::new();
         let mut applied = replay_from;

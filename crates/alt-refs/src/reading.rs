@@ -21,6 +21,26 @@ pub fn left_out() -> Option<usize> {
     LEFT_OUT.get().copied()
 }
 
+/// What an open starts from: the refs of `snapshot`, the op of `recent`
+/// to replay from, and where the snapshot ends in the log and how long it
+/// is. Nothing of a snapshot the log no longer leads to.
+pub(crate) fn start_from(
+    snapshot: Option<crate::snapshot::Snapshot>,
+    anchored: bool,
+    recent: &[alt_oplog::Op],
+) -> (crate::Refs, usize, u64, u64) {
+    match snapshot {
+        Some(snap) if anchored => (snap.refs, 0, snap.anchor.map_or(0, |a| a.end), snap.len),
+        // the whole log was replayed: the snapshot is only usable if its
+        // op is still in the chain
+        Some(snap) => match recent.iter().position(|op| op.id == snap.at_op) {
+            Some(index) => (snap.refs, index + 1, 0, snap.len),
+            None => (crate::Refs::default(), 0, 0, 0),
+        },
+        None => (crate::Refs::default(), 0, 0, 0),
+    }
+}
+
 impl RefStore {
     /// [`Self::open_reading`] for a command that answers from the refs:
     /// the log is taken as ending before the first op that was never

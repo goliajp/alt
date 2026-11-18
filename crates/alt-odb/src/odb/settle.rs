@@ -107,6 +107,18 @@ impl Odb {
         }
     }
 
+    /// From which byte on the records of each naming log are to be looked
+    /// at, `bounds` being where those not known synced begin: not the
+    /// ones this handle has looked at under this `generation` already.
+    fn unchecked_from(&self, bounds: [u64; 3], generation: u64) -> [u64; 3] {
+        let seen = self.checked.filter(|(seen, _)| *seen == generation);
+        [0, 1, 2].map(|log| match bounds[log] {
+            // no word of this log: all of it is looked at
+            u64::MAX => HEADER,
+            synced => synced.max(seen.map_or(0, |(_, upto)| upto[log])),
+        })
+    }
+
     /// With the write lock held and the files read to their ends: cuts
     /// off what never finished, and with it the records past the synced
     /// boundaries that name content the store does not hold. Fails, with
@@ -128,16 +140,7 @@ impl Odb {
         let from = if pack_torn || torn[0] || torn[1] || cut_before {
             Some([HEADER; 3])
         } else {
-            let seen = self
-                .checked
-                .filter(|(generation, _)| *generation == marker.generation());
-            bounds.map(|bounds| {
-                [0, 1, 2].map(|log| match bounds[log] {
-                    // no word of this log: all of it is looked at
-                    u64::MAX => HEADER,
-                    synced => synced.max(seen.map_or(0, |(_, upto)| upto[log])),
-                })
-            })
+            bounds.map(|bounds| self.unchecked_from(bounds, marker.generation()))
         };
         let cuts = match from.map(|from| [0, 1, 2].map(|log| from[log].min(ends[log]))) {
             Some(from) if from != ends => self.dangling(from, ends)?,

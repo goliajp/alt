@@ -33,19 +33,30 @@ impl Runs {
             at = run.end;
             runs.push(run);
         }
-        let mut stale = Vec::new();
+        Ok(Self::guarded(dir, base, runs, Vec::new(), guard_at))
+    }
+
+    /// The chain `runs` without the runs at its end whose guard no longer
+    /// matches the log; those join `stale`.
+    pub(super) fn guarded(
+        dir: &Path,
+        base: u64,
+        mut runs: Vec<Run>,
+        mut stale: Vec<PathBuf>,
+        guard_at: impl Fn(u64) -> Option<Guard>,
+    ) -> Self {
         while let Some(last) = runs.last() {
             if guard_at(last.end).as_deref() == Some(last.guard()) {
                 break;
             }
             stale.push(runs.pop().unwrap().path);
         }
-        Ok(Self {
+        Self {
             dir: dir.to_owned(),
             base,
             runs,
             stale,
-        })
+        }
     }
 
     /// The log range of each run, oldest first: what [`Runs::open_named`]
@@ -76,6 +87,29 @@ impl Runs {
         }
         Ok(())
     }
+}
+
+/// The run files in `dir` by the log range each is named for; one that
+/// was never finished is listed past every range.
+pub(super) fn listed(dir: &Path) -> Result<Vec<(u64, u64, PathBuf)>, StoreError> {
+    let mut found = Vec::new();
+    let listing = match fs::read_dir(dir) {
+        Ok(listing) => listing,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(found),
+        Err(e) => return Err(e.into()),
+    };
+    for entry in listing {
+        let entry = entry?;
+        let name = entry.file_name();
+        if let Some((start, end)) = name.to_str().and_then(parse_name) {
+            found.push((start, end, entry.path()));
+        } else if name.as_encoded_bytes().ends_with(b".run.tmp") {
+            // runs are written under the log's write lock, so one seen
+            // here was left by a writer that died
+            found.push((u64::MAX, 0, entry.path()));
+        }
+    }
+    Ok(found)
 }
 
 /// The run files in `dir` that are not complete runs: a damaged header, a

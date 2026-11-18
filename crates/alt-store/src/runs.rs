@@ -216,25 +216,7 @@ impl Runs {
         base: u64,
         guard_at: impl Fn(u64) -> Option<Guard>,
     ) -> Result<Self, StoreError> {
-        let mut found: Vec<(u64, u64, PathBuf)> = Vec::new();
-        match fs::read_dir(dir) {
-            Ok(listing) => {
-                for entry in listing {
-                    let entry = entry?;
-                    let name = entry.file_name();
-                    if let Some((start, end)) = name.to_str().and_then(parse_name) {
-                        found.push((start, end, entry.path()));
-                    } else if name.as_encoded_bytes().ends_with(b".run.tmp") {
-                        // runs are written under the log's write lock, so
-                        // one seen here was left by a writer that died
-                        found.push((u64::MAX, 0, entry.path()));
-                    }
-                }
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e.into()),
-        }
-
+        let mut found = named::listed(dir)?;
         let mut runs: Vec<Run> = Vec::new();
         let mut at = base;
         // the widest run from each point wins: it is the most merged one
@@ -257,19 +239,8 @@ impl Runs {
                 }
             }
         }
-        let mut stale: Vec<PathBuf> = found.into_iter().map(|(_, _, path)| path).collect();
-        while let Some(last) = runs.last() {
-            if guard_at(last.end).as_deref() == Some(last.guard()) {
-                break;
-            }
-            stale.push(runs.pop().unwrap().path);
-        }
-        Ok(Self {
-            dir: dir.to_owned(),
-            base,
-            runs,
-            stale,
-        })
+        let stale = found.into_iter().map(|(_, _, path)| path).collect();
+        Ok(Self::guarded(dir, base, runs, stale, guard_at))
     }
 
     /// The log position up to which records are indexed.

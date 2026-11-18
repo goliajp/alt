@@ -206,15 +206,33 @@ impl Odb {
                 files = indexed;
             }
         }
+        let tier1_tail = tail(Log::Tier1);
+        let mut this = Self::holding(alt_dir, lock, head, files, tier1_tail, mode.deferred)?;
+        this.confirmed = confirmed;
+        this.confirm()?;
+        Ok(this)
+    }
+
+    /// A handle on the files as opened; a store just created gets its
+    /// marker.
+    fn holding(
+        alt_dir: PathBuf,
+        lock: File,
+        head: Head,
+        files: Files,
+        tier1_tail: Tail,
+        deferred: Deferred,
+    ) -> Result<Self, OdbError> {
         let (mut blobs, tier1, map, created) = files;
         blobs.guard_opens(alt_dir.join("odb.lock"));
+        let durable_path = alt_dir.join("odb.durable");
         if created {
             // a new store: each file is synced as far as its header
             synced::update(&durable_path, |marker| {
                 (*marker == Marker::Absent).then_some(State::NEW)
             })?;
         }
-        let mut this = Self {
+        Ok(Self {
             blobs,
             map,
             tier1,
@@ -223,18 +241,16 @@ impl Odb {
             held: false,
             head,
             sync_lock_path: alt_dir.join("odb.sync.lock"),
-            tier1_tail: tail(Log::Tier1),
+            tier1_tail,
             durable_path,
             defer: false,
             write_count: 0,
             checked: None,
             discarded: Vec::new(),
-            deferred: mode.deferred,
-            confirmed,
+            deferred,
+            confirmed: None,
             alt_dir,
-        };
-        this.confirm()?;
-        Ok(this)
+        })
     }
 
     /// The Tier 1 map, opened on first use. Opening must not overlap a
