@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: leave operations out of what the check says goes when none do
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/fsck/tails.rs
+touched: crates/alt-cli/tests/it/unconfirmed_tails.rs
