@@ -2,6 +2,7 @@
 //! and the prism pipeline. [`crate::NativeOdb`] opens one on first use.
 
 mod bulk;
+mod confirmed;
 mod cut;
 mod durable;
 mod follow;
@@ -25,7 +26,7 @@ use alt_store::{BlobStore, CompactReport, StoreError, Tail};
 use crate::head::Head;
 use crate::lock::{hold_exclusive, release_exclusive};
 use crate::map::{MapEntry, ObjectMap};
-use crate::synced::Deferred;
+use crate::synced::{Deferred, Lens};
 use crate::tier1::{self, Tier1Map};
 use crate::{BlobId, OdbError};
 
@@ -85,6 +86,10 @@ pub(crate) struct Odb {
     pub(crate) checked: Option<(u64, [u64; 3])>,
     /// What this handle cut off the ends of the files and nobody was told.
     pub(crate) discarded: Vec<Discarded>,
+    /// Set for a handle that passes over records that were never synced
+    /// and name content which is not stored: how far the lock file noted
+    /// each file as synced when the handle was opened.
+    pub(crate) confirmed: Option<Lens>,
 }
 
 impl Odb {

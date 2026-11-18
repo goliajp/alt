@@ -40,6 +40,7 @@ impl BlobStore {
             map: OnceLock::new(),
             map_runs: known.and_then(|known| known.map_runs.clone()),
             map_tail,
+            map_synced: None,
             dir,
             opts,
             open_lock: None,
@@ -71,11 +72,45 @@ impl BlobStore {
             };
             BlobMap::open_with_runs(&self.dir.join("manifests"), runs, tail)
         };
-        let map = match &self.open_lock {
+        let mut map = match &self.open_lock {
             Some(lock) if !self.exclusive => crate::pack::with_shared_lock(lock, open)?,
             _ => open()?,
         };
+        if !self.exclusive {
+            self.pass_over_unsynced(&mut map)?;
+        }
         Ok(self.map.get_or_init(|| map))
+    }
+
+    /// The blob map of this handle, when it is opened without the writers'
+    /// lock held, is held as ending before the first record that was never
+    /// synced and names a tree which is not stored: the record a writer
+    /// cuts the map back to. `noted` is how far the map is known synced
+    /// without asking `unsynced`.
+    pub fn pass_over_unsynced_map(&mut self, noted: u64, unsynced: super::Unsynced) {
+        self.map_synced = Some((noted, unsynced));
+    }
+
+    fn pass_over_unsynced(&self, map: &mut BlobMap) -> Result<(), StoreError> {
+        let end = map.appended_len();
+        let from = match &self.map_synced {
+            Some((noted, unsynced)) if end > *noted => unsynced(),
+            _ => None,
+        };
+        let Some(from) = from.filter(|from| *from < end) else {
+            return Ok(());
+        };
+        let mut cut = None;
+        map.each_from(from, |at, _, root| {
+            if cut.is_none() && !self.tree_stored(root)? {
+                cut = Some(at);
+            }
+            Ok(())
+        })?;
+        if let Some(at) = cut {
+            map.pass_over_from(at);
+        }
+        Ok(())
     }
 
     /// For a handle that lives long: chunk locations found through the

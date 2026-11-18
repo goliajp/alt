@@ -54,7 +54,7 @@ impl OdbSink {
         let lock = OpenOptions::new().write(true).open(&self.lock_path)?;
         lock_shared(&lock)?;
         if let Some(whole) = synced::record(&self.durable_path, generation, lens, Some(lens))? {
-            head::note_synced(&lock, whole.seq, whole.pack);
+            head::note_synced(&lock, whole);
         }
         Ok(())
     }

@@ -25,12 +25,7 @@ impl Odb {
     /// lock file say of how far the files were synced comes down first.
     /// `moved`: whole records are cut, which a writer that wrote them must
     /// not record as synced afterwards.
-    pub(super) fn cut_back(
-        &mut self,
-        after: Lens,
-        pack_torn: bool,
-        moved: bool,
-    ) -> Result<(), OdbError> {
+    pub(super) fn cut_back(&mut self, after: Lens, moved: bool) -> Result<(), OdbError> {
         let (pack, blobmap) = self.blobs.file_lens()?;
         let files = [
             (self.blobs.active_pack_path(), after.pack, pack),
@@ -46,9 +41,7 @@ impl Odb {
                 self.map.file_len()?,
             ),
         ];
-        if pack_torn {
-            head::forget_synced(&self.lock)?;
-        }
+        head::forget_synced(&self.lock)?;
         synced::update(&self.durable_path, |marker| {
             let state = marker.recorded()?;
             Some(State {

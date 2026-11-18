@@ -346,6 +346,21 @@ impl RecLog {
         self.unfinished
     }
 
+    /// For a handle that only reads: holds the log as ending at `at`, a
+    /// record boundary. The records from there on stay in the file; a
+    /// later [`Self::sync_from_disk`] reads them again. Index runs are
+    /// built over synced records only, so `at`, where records that were
+    /// not synced begin, is never behind them.
+    pub fn pass_over_from(&mut self, at: u64) {
+        let Some(keep) = at.checked_sub(self.runs.covered()) else {
+            return;
+        };
+        if at < self.len {
+            let kept = self.tail[..keep as usize].to_vec();
+            self.set_tail(&kept);
+        }
+    }
+
     /// Records in the log.
     pub fn count(&self) -> usize {
         (self.len as usize - HEADER_LEN) / self.layout.rec_len

@@ -108,12 +108,12 @@ pub(super) fn lag(dir: &Path, markers: &[Vec<u8>; 2]) {
     for (marker, saved) in MARKERS.iter().zip(markers) {
         fs::write(dir.join(".alt").join(marker), saved).unwrap();
     }
-    // the lock file's note of how far the pack was synced
+    // the lock file's note of how far the files were synced
     let lock = fs::OpenOptions::new()
         .write(true)
         .open(dir.join(".alt/odb.lock"))
         .unwrap();
-    lock.write_all_at(&[0u8; 24], 1176).unwrap();
+    lock.write_all_at(&[0u8; 48], 1176).unwrap();
 }
 
 /// Changes a byte of the record that begins at `at` of log `n`.

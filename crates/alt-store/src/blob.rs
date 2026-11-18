@@ -73,6 +73,10 @@ impl StoreCheckpoint {
     }
 }
 
+/// Says from which byte on the blob map's records are not known to have
+/// been synced; `None` when nothing tells.
+pub type Unsynced = std::sync::Arc<dyn Fn() -> Option<u64> + Send + Sync>;
+
 /// Content-addressed byte-stream storage: CDC chunking + manifest trees
 /// over a [`ChunkStore`].
 pub struct BlobStore {
@@ -86,6 +90,11 @@ pub struct BlobStore {
     map_runs: Option<Vec<(u64, u64)>>,
     /// what a blob map that does not read to its end means
     map_tail: crate::Tail,
+    /// set for a handle that passes over records that were never synced
+    /// and name a tree which is not stored: how far the map is noted as
+    /// synced, and what says where its synced records end when it is
+    /// longer than that
+    map_synced: Option<(u64, Unsynced)>,
     dir: PathBuf,
     opts: BlobOptions,
     /// The lock file of the database this store sits under, if any. Opening

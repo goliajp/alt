@@ -32,7 +32,7 @@ const NAMING: [&str; 3] = ["the blob map", "the tier1 map", "map.alt"];
 /// From which byte on the records of each naming log are not known to have
 /// been synced, by what the marker says; `u64::MAX` for a log it says
 /// nothing of. `None` when it tells of no log.
-fn unsynced_from(marker: &Marker) -> Option<[u64; 3]> {
+pub(super) fn unsynced_from(marker: &Marker) -> Option<[u64; 3]> {
     match marker {
         Marker::Recorded(state) if marker.trusted() => {
             Some([state.whole.blobmap, state.whole.tier1, state.whole.map])
@@ -161,7 +161,7 @@ impl Odb {
         lost(marker, &after)?;
         let moved = cuts != ends;
         if moved || pack_torn || torn.contains(&true) {
-            self.cut_back(after, pack_torn, moved)?;
+            self.cut_back(after, moved)?;
         }
         self.checked = Some((marker.generation() + u64::from(moved), cuts));
         Ok(())
@@ -210,7 +210,7 @@ impl Odb {
 
     /// Whether the recipe record `record` and every part it lists are
     /// stored.
-    fn parts_stored(
+    pub(super) fn parts_stored(
         &self,
         record: BlobId,
         stored: &impl Fn(BlobId) -> Result<bool, StoreError>,

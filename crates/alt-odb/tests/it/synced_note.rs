@@ -1,7 +1,7 @@
-//! The note in the lock file of how far the active pack is known synced:
-//! it follows the synced marker up, a rewind takes it back before it cuts,
-//! and an opener whose pack is no longer than it does not check the pack's
-//! last records against the marker.
+//! The note in the lock file of how far the append files are known synced:
+//! it follows the synced marker up, whoever cuts a file takes it back
+//! first, and an opener whose files are no longer than it does not check
+//! their last records against the marker.
 
 use std::fs::{self, OpenOptions};
 use std::os::unix::fs::FileExt;
@@ -15,7 +15,8 @@ use alt_odb::NativeOdb;
 use super::marker::recorded;
 
 const PACK: &str = "store/pack-00000001.altpack";
-const NOTE_AT: usize = 1176;
+pub(super) const NOTE_AT: usize = 1176;
+pub(super) const NOTE_LEN: usize = 48;
 
 fn object(n: u32) -> (ObjectId, Vec<u8>) {
     let data = format!("object number {n} {}", "x".repeat(60)).into_bytes();
@@ -35,15 +36,41 @@ fn put(odb: &mut NativeOdb, objects: std::ops::Range<u32>) {
 
 /// The pack and the length the lock file notes as synced.
 fn note(dir: &Path) -> Option<(u32, u64)> {
+    let (seq, lens) = note_of(dir)?;
+    Some((seq, lens[0]))
+}
+
+/// The pack and the lengths of the four files the lock file notes as
+/// synced: pack, blob map, Tier 1 map, `map.alt`.
+pub(super) fn note_of(dir: &Path) -> Option<(u32, [u64; 4])> {
     let lock = fs::read(dir.join("odb.lock")).unwrap();
-    let note = lock.get(NOTE_AT..NOTE_AT + 24)?;
-    if alt_hash::blake3::hash(&note[..16]).as_bytes()[..8] != note[16..] {
+    let note = lock.get(NOTE_AT..NOTE_AT + NOTE_LEN)?;
+    if alt_hash::blake3::hash(&note[..40]).as_bytes()[..8] != note[40..] {
         return None;
     }
+    let word = |n: usize| u64::from_le_bytes(note[8 + 8 * n..16 + 8 * n].try_into().unwrap());
     Some((
         u32::from_le_bytes(note[..4].try_into().unwrap()),
-        u64::from_le_bytes(note[8..16].try_into().unwrap()),
+        [0, 1, 2, 3].map(word),
     ))
+}
+
+/// Writes the note a writer leaves after the marker says `lens` of pack 1
+/// are synced.
+pub(super) fn write_note(dir: &Path, lens: [u64; 4]) {
+    let mut note = Vec::new();
+    note.extend_from_slice(&1u32.to_le_bytes());
+    note.extend_from_slice(&[0; 4]);
+    for len in lens {
+        note.extend_from_slice(&len.to_le_bytes());
+    }
+    let sum = alt_hash::blake3::hash(&note);
+    note.extend_from_slice(&sum.as_bytes()[..8]);
+    let lock = OpenOptions::new()
+        .write(true)
+        .open(dir.join("odb.lock"))
+        .unwrap();
+    lock.write_all_at(&note, NOTE_AT as u64).unwrap();
 }
 
 fn len(dir: &Path) -> u64 {
@@ -131,12 +158,13 @@ fn a_pack_past_the_note_is_checked_against_the_marker_and_one_within_it_is_not()
                 .write(true)
                 .open(tmp.path().join("odb.lock"))
                 .unwrap();
-            lock.write_all_at(&[0u8; 24], NOTE_AT as u64).unwrap();
+            lock.write_all_at(&[0u8; NOTE_LEN], NOTE_AT as u64).unwrap();
         }
         let odb = NativeOdb::open(tmp.path()).unwrap();
         let (oid, _) = object(10);
         // within the note the record is taken for synced and reads as
-        // damaged; past the note it never finished and is not there
+        // damaged; past the note it never finished and is not there, while
+        // the record of `map.alt` that names it was synced
         let err = format!("{:?}", odb.get(&oid).unwrap_err());
         assert_eq!(err.contains("NotFound"), !within, "{err}");
     }

@@ -21,13 +21,13 @@ use super::rewind_interrupted::{
 /// belongs to (see `object`): the pack holds content of all three, the
 /// blob map names the chunks of a blob of several, the Tier 1 map the
 /// parts of a decomposed one.
-const CASES: [(usize, u32); 5] = [(0, 0), (0, 1), (0, 2), (1, 1), (2, 2)];
+pub(super) const CASES: [(usize, u32); 5] = [(0, 0), (0, 1), (0, 2), (1, 1), (2, 2)];
 
 /// The marker's flag for appends that were not synced.
 const UNSYNCED_APPENDS: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum Fault {
+pub(super) enum Fault {
     /// the file ends where it did before the batch
     Missing,
     /// the last record is cut short
@@ -38,7 +38,7 @@ enum Fault {
 
 /// A store of `KEPT` synced objects and then one more of `class`; the
 /// file lengths before and after that one.
-fn store(dir: &Path, class: u32) -> (u32, [u64; 4], [u64; 4]) {
+pub(super) fn store(dir: &Path, class: u32) -> (u32, [u64; 4], [u64; 4]) {
     let victim = ALL + class;
     let mut odb = open(dir);
     put(&mut odb, 0..KEPT);
@@ -48,7 +48,7 @@ fn store(dir: &Path, class: u32) -> (u32, [u64; 4], [u64; 4]) {
 }
 
 /// Makes the marker say what it would had the last batch not been synced
-/// as far as `whole`, and takes back the note of how far the pack was:
+/// as far as `whole`, and takes back the note of how far the files were:
 /// it is written after the marker and never says more.
 pub(super) fn synced_to(dir: &Path, whole: [u64; 4], flags: u32) {
     rewrite(dir, |marker| {
@@ -56,11 +56,11 @@ pub(super) fn synced_to(dir: &Path, whole: [u64; 4], flags: u32) {
         marker.eof = whole;
         marker.whole = whole;
     });
-    overwrite_lock(dir, 1176, 24);
+    overwrite_lock(dir, 1176, 48);
 }
 
 /// Zeros `len` bytes of the lock file from `at` on: the head record
-/// starts the file, the note of how far the pack is synced is at 1176.
+/// starts the file, the note of how far the files are synced is at 1176.
 fn overwrite_lock(dir: &Path, at: u64, len: usize) {
     let lock = fs::OpenOptions::new()
         .write(true)
@@ -69,7 +69,7 @@ fn overwrite_lock(dir: &Path, at: u64, len: usize) {
     lock.write_all_at(&vec![0; len], at).unwrap();
 }
 
-fn damage(dir: &Path, file: usize, fault: Fault, kept: [u64; 4]) {
+pub(super) fn damage(dir: &Path, file: usize, fault: Fault, kept: [u64; 4]) {
     let path = dir.join(FILES[file]);
     let mut data = fs::read(&path).unwrap();
     let len = data.len();
@@ -84,7 +84,7 @@ fn damage(dir: &Path, file: usize, fault: Fault, kept: [u64; 4]) {
     }
 }
 
-fn snapshot(dir: &Path) -> Vec<(u64, SystemTime)> {
+pub(super) fn snapshot(dir: &Path) -> Vec<(u64, SystemTime)> {
     FILES
         .iter()
         .map(|name| {

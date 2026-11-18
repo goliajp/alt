@@ -87,7 +87,7 @@ impl Odb {
             self.map.fsync()?;
             let whole = self.appended_whole()?;
             synced::establish(&self.durable_path, whole)?;
-            head::note_synced(&self.lock, whole.seq, whole.pack);
+            head::note_synced(&self.lock, whole);
         }
         self.head.bounded = true;
         Ok(())
@@ -249,7 +249,7 @@ impl Odb {
                 },
             })
         })?;
-        head::note_synced(&self.lock, after.seq, after.pack);
+        head::note_synced(&self.lock, after);
         Ok(())
     }
 
@@ -340,7 +340,7 @@ impl Odb {
             Some(eof)
         };
         if let Some(whole) = synced::record(&self.durable_path, generation, target, eof)? {
-            head::note_synced(&self.lock, whole.seq, whole.pack);
+            head::note_synced(&self.lock, whole);
         }
         Ok(())
     }

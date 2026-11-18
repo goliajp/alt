@@ -84,7 +84,7 @@ impl Lens {
         map: HEADER,
     };
 
-    const NONE: Lens = Lens {
+    pub(crate) const NONE: Lens = Lens {
         seq: 0,
         pack: 0,
         blobmap: 0,
@@ -156,13 +156,13 @@ impl Lens {
         past
     }
 
-    fn encode(&self, out: &mut Vec<u8>) {
+    pub(crate) fn encode(&self, out: &mut Vec<u8>) {
         for len in [self.pack, self.blobmap, self.tier1, self.map] {
             out.extend_from_slice(&len.to_le_bytes());
         }
     }
 
-    fn decode(seq: u32, data: &[u8]) -> Lens {
+    pub(crate) fn decode(seq: u32, data: &[u8]) -> Lens {
         let word = |at: usize| u64::from_le_bytes(data[at..at + 8].try_into().unwrap());
         Lens {
             seq,

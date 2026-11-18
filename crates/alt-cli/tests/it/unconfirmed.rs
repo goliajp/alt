@@ -123,12 +123,12 @@ pub(super) fn power_cut(dir: &Path, lost: Lost) -> (String, String) {
     for (marker, saved) in MARKERS.iter().zip(markers) {
         fs::write(dir.join(marker), saved).unwrap();
     }
-    // the lock file's note of how far the pack was synced
+    // the lock file's note of how far the files were synced
     let lock = fs::OpenOptions::new()
         .write(true)
         .open(dir.join(".alt/odb.lock"))
         .unwrap();
-    lock.write_all_at(&[0u8; 24], 1176).unwrap();
+    lock.write_all_at(&[0u8; 48], 1176).unwrap();
     (first, second)
 }
 

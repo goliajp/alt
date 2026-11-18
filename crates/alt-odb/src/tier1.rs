@@ -114,6 +114,11 @@ impl Tier1Map {
         })
     }
 
+    /// See [`RecLog::pass_over_from`].
+    pub fn pass_over_from(&mut self, at: u64) {
+        self.log.pass_over_from(at)
+    }
+
     /// See [`RecLog::unfinished`].
     pub fn unfinished(&self) -> bool {
         self.log.unfinished()

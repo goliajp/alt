@@ -3,6 +3,7 @@
 mod abbrev;
 mod cache_failure;
 mod compact_readers;
+mod confirmed;
 mod corpus_objects;
 mod dangling;
 mod discarded;
