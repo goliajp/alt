@@ -254,13 +254,25 @@ pub(crate) enum Marker {
 }
 
 impl Marker {
-    /// Reads the marker, taking no lock.
+    /// Reads the marker, taking no lock: one read of as much of the file
+    /// as a marker takes up.
     pub fn read(path: &Path) -> Marker {
-        match std::fs::read(path) {
-            Ok(data) => parse(&data).0,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Marker::Absent,
-            Err(_) => Marker::Unreadable,
+        let mut file = match File::open(path) {
+            Ok(file) => file,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Marker::Absent,
+            Err(_) => return Marker::Unreadable,
+        };
+        let mut data = [0u8; LEN];
+        let mut have = 0;
+        while have < LEN {
+            match file.read(&mut data[have..]) {
+                Ok(0) => break,
+                Ok(n) => have += n,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(_) => return Marker::Unreadable,
+            }
         }
+        parse(&data[..have]).0
     }
 
     pub fn recorded(&self) -> Option<&State> {
@@ -696,5 +708,23 @@ mod tests {
         expected.eof.pack = 40;
         expected.eof.map = 60;
         assert_eq!(Marker::read(&path), Marker::Recorded(expected));
+    }
+
+    #[test]
+    fn a_marker_reads_the_same_whatever_follows_it_in_the_file() {
+        let dir = alt_os::temp::tempdir().unwrap();
+        let path = dir.path().join("durable");
+        assert_eq!(Marker::read(&path), Marker::Absent);
+        update(&path, |_| Some(state(40))).unwrap();
+        assert_eq!(Marker::read(&path), Marker::Recorded(state(40)));
+        let mut longer = std::fs::read(&path).unwrap();
+        longer.extend_from_slice(&[7; 300]);
+        std::fs::write(&path, longer).unwrap();
+        assert_eq!(Marker::read(&path), Marker::Recorded(state(40)));
+        // an older alt's marker is shorter than this one
+        std::fs::write(&path, 9u64.to_le_bytes().repeat(3)).unwrap();
+        assert_eq!(Marker::read(&path), Marker::Legacy([9, 9, 9]));
+        std::fs::write(&path, b"abc").unwrap();
+        assert_eq!(Marker::read(&path), Marker::Unreadable);
     }
 }
