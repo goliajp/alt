@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: say that an add cut before its sync is discarded and which files to add again after a cut
+author-type: human
+author: doracawl
+touched: docs/recovery.md
