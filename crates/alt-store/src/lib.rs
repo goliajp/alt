@@ -25,6 +25,7 @@ mod check;
 /// Lineage delta codec (zstd ref-prefix / patch-from). Public as a
 /// primitive — reused by the store's encode/decode and benched directly.
 pub mod delta;
+mod durable;
 mod fresh;
 pub mod held;
 mod idx;
@@ -43,6 +44,7 @@ mod tail;
 
 pub use blob::{BlobOptions, BlobSink, BlobStore, StoreCheckpoint};
 pub use check::StoreChecked;
+pub use durable::ChunkSink;
 pub use pack::with_shared_lock;
 pub use packs::Known;
 pub use passed::Passed;
@@ -51,7 +53,7 @@ pub use tail::{Basis, Tail};
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt;
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -360,29 +362,6 @@ fn pack_bytes(dir: &Path, seqs: &[u32]) -> Result<u64, StoreError> {
         total += std::fs::metadata(pack_path(dir, seq))?.len();
     }
     Ok(total)
-}
-
-/// An off-write-path fsync handle for the chunk store's active pack (see
-/// [`ChunkStore::sink`]). Holds only the pack directory; it re-opens the
-/// highest-seq (active) pack on each `fsync`, so a roll between calls is handled
-/// by construction.
-pub struct ChunkSink {
-    dir: PathBuf,
-}
-
-impl ChunkSink {
-    /// Fsyncs the active pack. A read+write handle (we only fsync, never write)
-    /// is opened fresh so this needs no shared state with the live `ChunkStore`.
-    pub fn fsync(&self) -> Result<(), StoreError> {
-        if let Some(seq) = list_pack_seqs(&self.dir)?.into_iter().max() {
-            let f = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(pack_path(&self.dir, seq))?;
-            f.sync_all()?;
-        }
-        Ok(())
-    }
 }
 
 impl ChunkStore {
@@ -943,31 +922,6 @@ impl ChunkStore {
         self.counters
     }
 
-    /// Fsyncs the active pack — the durability point between seals.
-    pub fn flush(&mut self) -> Result<(), StoreError> {
-        if !relaxed_durability() {
-            self.active.write.sync_all()?;
-        }
-        Ok(())
-    }
-
-    /// Raw fsync of the active pack (no relaxed-durability gate) — the group
-    /// commit layer decides whether/when to call it.
-    pub fn fsync(&self) -> Result<(), StoreError> {
-        self.active.write.sync_all()?;
-        Ok(())
-    }
-
-    /// An independent fsync handle (the daemon's group commit fsyncs off the
-    /// write path, without `&mut self`, so appends overlap the fsync). It
-    /// re-finds the active pack on each call because the pack rolls; sealed
-    /// packs are fsynced at seal time, so only the active one needs flushing.
-    pub fn sink(&self) -> ChunkSink {
-        ChunkSink {
-            dir: self.dir.clone(),
-        }
-    }
-
     /// Our in-memory write cursor (bytes we have appended to the active pack).
     pub fn appended_len(&self) -> u64 {
         self.active.len
@@ -1087,15 +1041,6 @@ impl ChunkStore {
                     reason: "record out of bounds",
                 })?;
         Ok((header, payload.to_vec()))
-    }
-}
-
-impl Drop for ChunkStore {
-    fn drop(&mut self) {
-        // best-effort durability; explicit flush() is the checked path
-        if self.unsynced {
-            let _ = self.active.write.sync_all();
-        }
     }
 }
 

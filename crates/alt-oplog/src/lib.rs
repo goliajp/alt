@@ -442,6 +442,21 @@ mod tests {
     }
 
     #[test]
+    fn a_drop_owes_an_fsync_only_for_what_was_appended_since_the_last_one() {
+        let dir = alt_os::temp::tempdir().unwrap();
+        let mut log = OpLog::open(dir.path()).unwrap();
+        assert!(!log.unsynced);
+        log.append("a", 1, b"x").unwrap();
+        assert!(log.unsynced);
+        log.sync().unwrap();
+        assert!(!log.unsynced);
+        log.append("a", 2, b"y").unwrap();
+        assert!(log.unsynced);
+        log.sync().unwrap();
+        assert!(!log.unsynced);
+    }
+
+    #[test]
     fn appends_chain_and_replays() {
         let dir = alt_os::temp::tempdir().unwrap();
         let mut log = OpLog::open(dir.path()).unwrap();

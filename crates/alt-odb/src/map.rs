@@ -284,7 +284,7 @@ impl ObjectMap {
     }
 
     /// Raw fsync (no relaxed gate) — called by the group commit layer.
-    pub fn fsync(&self) -> Result<(), OdbError> {
+    pub fn fsync(&mut self) -> Result<(), OdbError> {
         self.log.fsync().map_err(lift)
     }
 

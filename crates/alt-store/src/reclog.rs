@@ -11,6 +11,8 @@ mod cache;
 mod check;
 mod sync;
 mod tail;
+#[cfg(test)]
+mod tests;
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -394,8 +396,9 @@ impl RecLog {
     }
 
     /// Raw fsync (no relaxed gate), for the group commit layer.
-    pub fn fsync(&self) -> Result<(), StoreError> {
+    pub fn fsync(&mut self) -> Result<(), StoreError> {
         self.file.sync_all()?;
+        self.unsynced = false;
         Ok(())
     }
 

@@ -139,7 +139,7 @@ impl BlobMap {
     }
 
     /// Raw fsync (no relaxed gate) — called by the group commit layer.
-    pub fn fsync(&self) -> Result<(), StoreError> {
+    pub fn fsync(&mut self) -> Result<(), StoreError> {
         self.log.fsync()
     }
 

@@ -372,9 +372,9 @@ impl BlobStore {
     /// Raw fsync of chunks then the blob map, in that order — so a crash never
     /// leaves a durable map record pointing at lost chunks. Group commit calls
     /// this once for a batch of coalesced commits.
-    pub fn fsync(&self) -> Result<(), StoreError> {
+    pub fn fsync(&mut self) -> Result<(), StoreError> {
         self.chunks.fsync()?;
-        match self.map.get() {
+        match self.map.get_mut() {
             Some(map) => map.fsync(),
             None => Ok(()),
         }

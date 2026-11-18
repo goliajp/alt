@@ -103,6 +103,7 @@ impl OpLog {
                 _ => {
                     let eof = self.file.metadata()?.len();
                     self.file.sync_all()?;
+                    self.unsynced = false;
                     Some(eof)
                 }
             };
