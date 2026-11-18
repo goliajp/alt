@@ -117,9 +117,11 @@ pub(super) fn told(tail: &Tail) -> Vec<String> {
     if ops > 0 || tail.bytes(ANY) > 0 {
         lines.push(format!("{ANY} discards:"));
         lines.extend(tail.files(ANY).map(file));
-        lines.push(format!(
-            "{ops:>12} operation(s) at the end of the operation log"
-        ));
+        if ops > 0 {
+            lines.push(format!(
+                "{ops:>12} operation(s) at the end of the operation log"
+            ));
+        }
         for line in tail.discards.moves() {
             lines.push(format!("{:>12} {line}", ""));
         }
@@ -154,13 +156,14 @@ pub(super) fn json(tail: &Tail) -> Json {
 pub(super) fn failure(tail: &Tail) -> Failure {
     let ops = tail.discards.ops();
     let (any, objects) = (tail.bytes(ANY), tail.bytes(OBJECTS));
+    let first = match ops {
+        0 => format!("{ANY} discards {any} byte(s)"),
+        _ => format!("{ANY} discards {any} byte(s) and {ops} operation(s)"),
+    };
     let goes = match (ops > 0 || any > 0, objects > 0) {
-        (true, false) => format!("{ANY} discards {any} byte(s) and {ops} operation(s)"),
+        (true, false) => first,
         (false, _) => format!("{OBJECTS} discards {objects} byte(s)"),
-        (true, true) => format!(
-            "{ANY} discards {any} byte(s) and {ops} operation(s), and {OBJECTS} discards \
-             {objects} byte(s),"
-        ),
+        (true, true) => format!("{first}, and {OBJECTS} discards {objects} byte(s),"),
     };
     let files = tail.each(|file, bytes, by| json!({"file": file, "bytes": bytes, "cut_by": by}));
     Failure {

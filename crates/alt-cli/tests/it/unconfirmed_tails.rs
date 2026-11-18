@@ -440,10 +440,9 @@ fn a_tail_in_the_object_store_alone_waits_for_a_command_that_writes_objects() {
         let bytes: u64 = objects.0.values().sum();
         let fatal = match torn_log {
             true => format!(
-                "fatal: fsck: unconfirmed tail: the next command that writes discards 9 byte(s) \
-                 and 0 operation(s), and the next command that writes objects discards {bytes} \
-                 byte(s), that were never confirmed as synced; to keep them, copy the .alt \
-                 directory first\n"
+                "fatal: fsck: unconfirmed tail: the next command that writes discards 9 byte(s), \
+                 and the next command that writes objects discards {bytes} byte(s), that were \
+                 never confirmed as synced; to keep them, copy the .alt directory first\n"
             ),
             false => format!(
                 "fatal: fsck: unconfirmed tail: the next command that writes objects discards \
@@ -452,6 +451,7 @@ fn a_tail_in_the_object_store_alone_waits_for_a_command_that_writes_objects() {
             ),
         };
         assert!(said.contains(&fatal), "{torn_log}: {said}");
+        assert!(!said.contains(" 0 operation(s)"), "{torn_log}: {said}");
         assert!(
             said.contains(
                 "of records at the end of map.alt were never synced and name content that is \
