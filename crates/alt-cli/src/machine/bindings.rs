@@ -1,4 +1,4 @@
-//! The one form every spelling of a command's arguments shares.
+//! What the arguments of a command come to for the request that records it.
 
 use alt_args::Matches;
 use alt_json::{Value, json};
@@ -29,6 +29,12 @@ fn canonical_matches(matches: &Matches) -> Value {
                 "false"
             };
             args.insert(entry.id, vec![hex(raw.as_bytes())]);
+            continue;
+        }
+        // a flag that came after bindings were first recorded binds only
+        // when it is set: the commands recorded before it keep theirs
+        let later = matches!(entry.id, "renormalize" | "forced" | "update" | "all");
+        if later && entry.values.iter().all(|v| v.as_bytes() == b"false") {
             continue;
         }
         args.insert(

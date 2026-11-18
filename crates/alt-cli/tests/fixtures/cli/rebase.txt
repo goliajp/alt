@@ -29,7 +29,7 @@ exit 1
 err| {"error":{"details":{"command_output":{"encoding":"utf-8","text":"{\"schema_version\":1,\"result\":\"conflicted\",\"commit\":null,\"conflicts\":[\"f.txt\"]}\n","truncated":false},"operation_ids":["<id64:0>","<id64:1>","<id64:2>"]},"kind":"conflict","message":"command reported a conflict or failed validation","next_action":"Inspect the reported condition before submitting a new request","operation_id":"<id64:2>","outcome":"partial","request_id":"<id32:3>","retryable":false},"schema_version":1}
 $ [repo] alt status --json
 exit 0
-out| {"schema_version":1,"branch":"rebase/default","principal":{"kind":"human","id":"json-test","session":null},"staged":[{"path":"only-feat.txt","change":"added"}],"unstaged":[],"untracked":[],"unmerged":["f.txt"],"clean":false}
+out| {"schema_version":2,"branch":"rebase/default","principal":{"kind":"human","id":"json-test","session":null},"staged":[{"path":"only-feat.txt","change":"added"}],"unstaged":[],"untracked":[],"unmerged":["f.txt"],"clean":false}
 $ [repo] alt rebase --continue --json
 exit 75
 err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"rebase --continue: resolve the conflicts and `alt add` them first","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:4>","retryable":false},"schema_version":1}
@@ -38,7 +38,7 @@ exit 0
 out| {"command_output":{"encoding":"utf-8","text":"Rebase aborted.\n","truncated":false},"operation_ids":["<id64:5>","<id64:6>","<id64:7>"],"request_id":"<id32:8>","schema_version":1}
 $ [repo] alt status --json
 exit 0
-out| {"schema_version":1,"branch":"feat","principal":{"kind":"human","id":"json-test","session":null},"staged":[],"unstaged":[],"untracked":[],"unmerged":[],"clean":true}
+out| {"schema_version":2,"branch":"feat","principal":{"kind":"human","id":"json-test","session":null},"staged":[],"unstaged":[],"untracked":[],"unmerged":[],"clean":true}
 $ [repo] alt rebase main --json
 exit 1
 err| {"error":{"details":{"command_output":{"encoding":"utf-8","text":"{\"schema_version\":1,\"result\":\"conflicted\",\"commit\":null,\"conflicts\":[\"f.txt\"]}\n","truncated":false},"operation_ids":["<id64:9>","<id64:10>","<id64:11>"]},"kind":"conflict","message":"command reported a conflict or failed validation","next_action":"Inspect the reported condition before submitting a new request","operation_id":"<id64:11>","outcome":"partial","request_id":"<id32:12>","retryable":false},"schema_version":1}

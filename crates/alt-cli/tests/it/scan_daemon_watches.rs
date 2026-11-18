@@ -1,0 +1,171 @@
+//! Which directories the daemon watches, and what becomes of its watches
+//! when a tree is gone or a look at it fails.
+
+use crate::scan_daemon::{agree, daemon_pid, output, run, served, watches, write};
+
+#[cfg(target_os = "linux")]
+#[test]
+fn the_daemon_takes_no_watches_for_what_ignore_rules_hide() {
+    let (dir, stop) = served();
+    let root = dir.path();
+    // the root, docs, src, src/deep
+    assert_eq!(watches(stop.0), (1, 4));
+    write(root, ".gitignore", "/target/\n");
+    for unit in 0..40 {
+        write(root, &format!("target/debug/unit{unit}/out.o"), "o\n");
+    }
+    let status = agree(root, "build output");
+    assert!(!status.contains("target"), "{status}");
+    assert_eq!(watches(stop.0), (1, 4));
+    // shown once the rule is gone, and followed from then on
+    write(root, ".gitignore", "/elsewhere/\n");
+    assert!(agree(root, "rule gone").contains("\ttarget/\n"));
+    assert_eq!(watches(stop.0), (1, 46));
+    std::fs::remove_dir_all(root.join("target")).unwrap();
+    let status = agree(root, "output removed");
+    assert!(!status.contains("target"), "{status}");
+    assert_eq!(watches(stop.0), (1, 4));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_removed_workspace_gives_its_watches_back() {
+    let (dir, stop) = served();
+    let root = dir.path();
+    let side = alt_os::temp::tempdir().unwrap();
+    let tree = side.path().join("tree");
+    run(root, &["branch", "feat"], false);
+    let at = tree.to_str().unwrap();
+    run(root, &["workspace", "add", "side", at, "feat"], false);
+    assert_eq!(
+        run(&tree, &["status"], true),
+        run(&tree, &["status"], false)
+    );
+    assert_eq!(watches(stop.0), (2, 8));
+    run(root, &["workspace", "remove", "side"], false);
+    agree(root, "after the removal");
+    assert_eq!(watches(stop.0), (1, 4));
+    assert_eq!(daemon_pid(root), stop.0);
+}
+
+#[test]
+fn a_tree_is_watched_as_before_once_its_ignore_file_can_be_read_again() {
+    let (dir, stop) = served();
+    let root = dir.path();
+    write(root, "a.txt", "changed\n");
+    agree(root, "changed");
+    // the user's ignore file cannot be read: a directory is in its place,
+    // which ends every command that sets up the ignore rules
+    std::fs::create_dir_all(root.join(".alt/test-config/git/ignore")).unwrap();
+    let ended: [&[&str]; 3] = [&["status"], &["status", "-uno"], &["diff", "--cached"]];
+    for args in ended {
+        for daemon in [true, false] {
+            let said = output(root, args, daemon);
+            let stderr = String::from_utf8_lossy(&said.stderr);
+            assert_eq!(said.status.code(), Some(128), "{args:?} daemon: {daemon}");
+            assert!(stderr.contains("git/ignore as an exclude file"), "{stderr}");
+        }
+    }
+    write(root, "src/lib.rs", "changed as well\n");
+    assert_eq!(run(root, &["diff"], true), run(root, &["diff"], false));
+    assert!(run(root, &["diff"], true).contains("src/lib.rs"));
+    std::fs::remove_dir(root.join(".alt/test-config/git/ignore")).unwrap();
+    assert!(agree(root, "readable again").contains("modified:   src/lib.rs"));
+    // by the daemon that was there, from the events of its watches again
+    assert_eq!(daemon_pid(root), stop.0);
+    write(root, "docs/guide.md", "changed last\n");
+    assert!(agree(root, "watched again").contains("modified:   docs/guide.md"));
+    #[cfg(target_os = "linux")]
+    assert!(crate::scan_daemon::watching(stop.0));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_hidden_directory_is_watched_once_a_forced_add_tracks_a_file_in_it() {
+    let (dir, stop) = served();
+    let root = dir.path();
+    write(root, ".gitignore", "/target/\n*.log\n");
+    write(root, "target/debug/out.o", "o\n");
+    write(root, "target/debug/deep/more.o", "o\n");
+    write(root, "docs/run.log", "log\n");
+    agree(root, "hidden");
+    // the root, docs, src, src/deep
+    assert_eq!(watches(stop.0), (1, 4));
+    // left alone and said so, as git has it
+    let refused = output(root, &["add", "target/debug/out.o"], true);
+    assert_eq!(refused.status.code(), Some(1));
+    let said = String::from_utf8_lossy(&refused.stderr);
+    assert!(
+        said.starts_with("The following paths are ignored"),
+        "{said}"
+    );
+    assert!(said.contains("\ntarget\n"), "{said}");
+    run(
+        root,
+        &["add", "-f", "target/debug/out.o", "docs/run.log"],
+        true,
+    );
+    let status = agree(root, "forced");
+    assert!(
+        status.contains("\tnew file:   target/debug/out.o\n"),
+        "{status}"
+    );
+    assert!(status.contains("\tnew file:   docs/run.log\n"), "{status}");
+    assert!(!status.contains("more.o"), "{status}");
+    // target and the directories in it
+    assert_eq!(watches(stop.0), (1, 7));
+    write(root, "target/debug/out.o", "built again\n");
+    write(root, "docs/run.log", "more\n");
+    let status = agree(root, "written again");
+    assert!(
+        status.contains("\tmodified:   target/debug/out.o\n"),
+        "{status}"
+    );
+    assert!(status.contains("\tmodified:   docs/run.log\n"), "{status}");
+    std::fs::remove_file(root.join("target/debug/out.o")).unwrap();
+    let status = agree(root, "removed");
+    assert!(
+        status.contains("\tdeleted:    target/debug/out.o\n"),
+        "{status}"
+    );
+    assert_eq!(watches(stop.0), (1, 7));
+}
+
+/// The first command a daemon serves finds a directory where the user's
+/// ignore file belongs, and ends as it does without a daemon. Once the
+/// file can be read the daemon watches the tree, as one does that found
+/// it readable from the start.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_tree_whose_ignore_file_no_first_command_could_read_is_watched_once_it_can_be() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let root = dir.path();
+    run(root, &["init"], false);
+    write(root, "a.txt", "aaaa\n");
+    write(root, "docs/guide.md", "guide\n");
+    run(root, &["add", "."], false);
+    run(root, &["commit", "-m", "base"], false);
+    let ignore = root.join(".alt/test-config/git/ignore");
+    std::fs::create_dir_all(&ignore).unwrap();
+    for daemon in [true, false] {
+        let said = output(root, &["status"], daemon);
+        let stderr = String::from_utf8_lossy(&said.stderr);
+        assert_eq!(said.status.code(), Some(128), "daemon: {daemon}");
+        assert!(stderr.contains("git/ignore as an exclude file"), "{stderr}");
+    }
+    let stop = crate::scan_daemon::Stop(daemon_pid(root), true);
+    // a command that reads no ignore rule scans the tree all the same
+    write(root, "a.txt", "changed once\n");
+    assert_eq!(run(root, &["diff"], true), run(root, &["diff"], false));
+    std::fs::remove_dir(&ignore).unwrap();
+    std::fs::write(&ignore, "*.usr\n").unwrap();
+    write(root, "x.usr", "hidden\n");
+    write(root, "a.txt", "changed\n");
+    let status = agree(root, "readable");
+    assert!(status.contains("modified:   a.txt") && !status.contains("x.usr"));
+    assert_eq!(daemon_pid(root), stop.0);
+    // the root and docs, on one queue
+    assert_eq!(watches(stop.0), (1, 2));
+    write(root, "docs/guide.md", "changed last\n");
+    assert!(agree(root, "watched").contains("modified:   docs/guide.md"));
+}

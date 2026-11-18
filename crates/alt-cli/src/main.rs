@@ -18,6 +18,7 @@ use alt_cli::cli::{self, Command};
 use alt_cli::daemon::Response;
 use alt_cli::execution::Execution;
 use alt_cli::machine::{self, Failure};
+use alt_cli::native::pathspec::Place;
 use alt_cli::native::{self, Identity};
 use alt_repo::Repository;
 use std::io::Write;
@@ -220,19 +221,21 @@ fn attempt() -> Response {
                 json,
             } => return alt_cli::ci_cmd::ci_validate(&cwd, paths, *json, &mut out),
             command => {
-                let (repo, head) = match native::resolve_workspace(
-                    &cwd,
-                    execution.parsed.cli.workspace.as_deref(),
-                ) {
+                let named = execution.parsed.cli.workspace.as_deref();
+                let (repo, at) = match native::resolve_workspace(&cwd, named) {
                     Ok((dir, coord)) => (
                         Repository::open_alt(dir, Some(coord.root().to_owned()))?,
-                        coord.head_ref().to_owned(),
+                        Place::at(coord),
                     ),
-                    Err(error) if execution.parsed.cli.workspace.is_some() => return Err(error),
-                    Err(_) => (Repository::discover(&cwd)?, "HEAD".to_owned()),
+                    Err(error) if named.is_some() => return Err(error),
+                    Err(_) => {
+                        let repo = Repository::discover(&cwd)?;
+                        let at = Place::in_git(&repo, &cwd)?;
+                        (repo, at)
+                    }
                 };
                 let repo = native::view_for(repo, command);
-                cli::run_git(&repo, command, &head, &mut out)?;
+                cli::run_git(&repo, command, &at, &mut out)?;
                 if !execution.writing {
                     leave_to_exit(repo);
                 }

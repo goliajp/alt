@@ -7,6 +7,9 @@ use std::path::Path;
 use alt_bytes::{BString, ByteSlice};
 use alt_git_codec::{HashAlgo, ObjectId};
 
+mod clash;
+pub use clash::clash_among;
+
 /// Stage bits and friends live in `flags`; typed accessors below.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IndexEntry {

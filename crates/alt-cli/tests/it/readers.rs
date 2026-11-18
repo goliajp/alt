@@ -4,7 +4,8 @@
 //! or `oplog/sync.lock`, and creates no file that is gone. What is there
 //! to cut or to bound waits for the next command that writes, and the
 //! reader answers as it would after that command. Its caches it does
-//! write: the ref snapshot, and index runs over synced records.
+//! write: the ref snapshot, index runs over synced records, and the
+//! snapshot of the working tree.
 
 mod commands;
 mod daemon;
@@ -29,9 +30,12 @@ const RUN_DIRS: [&str; 4] = [
 ];
 
 /// What a command that only reads may write under `.alt`: the ref
-/// snapshot, a cache of the refs as the log gives them, and index runs.
+/// snapshot, a cache of the refs as the log gives them, index runs, and
+/// the snapshot of the working tree kept beside an index.
 fn cache(path: &Path) -> bool {
-    path == Path::new("refs/snapshot") || RUN_DIRS.iter().any(|dir| path.starts_with(dir))
+    path == Path::new("refs/snapshot")
+        || path.file_name().is_some_and(|name| name == "index.scan")
+        || RUN_DIRS.iter().any(|dir| path.starts_with(dir))
 }
 
 /// Every regular file under `.alt` with its bytes; anything else by name.

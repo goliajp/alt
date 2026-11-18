@@ -111,19 +111,10 @@ impl NativeRepo<'_> {
             }
         }
         let mut fixed = Vec::new();
-        let home = std::env::var_os("HOME").map(PathBuf::from);
-        let global = match text("attributesfile") {
-            Some(path) => Some(expand_home(&path, home.as_deref())?),
-            None => std::env::var_os("XDG_CONFIG_HOME")
-                .filter(|v| !v.is_empty())
-                .map(PathBuf::from)
-                .or_else(|| home.as_ref().map(|h| h.join(".config")))
-                .map(|config| config.join("git").join("attributes")),
-        };
+        let (global, info) = self.attribute_files(&settings)?;
         if let Some(content) = global.map(read_if_file).transpose()?.flatten() {
             fixed.push(Layer::global(&content));
         }
-        let info = self.store.alt_dir.join("git-import/info/attributes");
         if let Some(content) = read_if_file(info)? {
             fixed.push(Layer::info(&content));
         }
@@ -148,32 +139,37 @@ impl NativeRepo<'_> {
         path: &[u8],
         content: &[u8],
     ) -> Option<Vec<u8>> {
-        converter.to_store(path, content, &|| {
-            // the index is ordered by path, then stage
-            let from = index.entries.partition_point(|e| e.path.as_slice() < path);
-            let staged = index.entries[from..]
-                .iter()
-                .take_while(|e| e.path.as_slice() == path)
-                .find(|e| e.stage() == 0);
-            match staged.map(|e| self.blob_bytes(e.oid)) {
+        // the index is ordered by path, then stage
+        let from = index.entries.partition_point(|e| e.path.as_slice() < path);
+        let staged = index.entries[from..]
+            .iter()
+            .take_while(|e| e.path.as_slice() == path)
+            .find(|e| e.stage() == 0);
+        self.stored_form_of(converter, staged.map(|e| e.oid), path, content)
+    }
+
+    /// [`stored_form`](Self::stored_form) for a path whose staged blob,
+    /// if it has one, is `staged`.
+    pub(super) fn stored_form_of(
+        &self,
+        converter: &Converter,
+        staged: Option<ObjectId>,
+        path: &[u8],
+        content: &[u8],
+    ) -> Option<Vec<u8>> {
+        converter.to_store(
+            path,
+            content,
+            &|| match staged.map(|oid| self.blob_bytes(oid)) {
                 Some(Ok(blob)) => attributes::stored_with_crlf(&blob),
                 Some(Err(e)) => {
                     converter.fail(e);
                     false
                 }
                 None => false,
-            }
-        })
+            },
+        )
     }
-}
-
-/// A path from the configuration, `~/` standing for the home directory.
-fn expand_home(path: &[u8], home: Option<&Path>) -> Res<PathBuf> {
-    let path = std::str::from_utf8(path).map_err(|_| "core.attributesFile is not UTF-8")?;
-    Ok(match (path.strip_prefix("~/"), home) {
-        (Some(rest), Some(home)) => home.join(rest),
-        _ => PathBuf::from(path),
-    })
 }
 
 /// The content of a regular file; `None` when there is no such file. A

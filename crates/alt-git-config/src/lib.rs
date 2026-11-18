@@ -47,9 +47,18 @@ pub struct Config {
 impl Config {
     /// Loads `path` and resolves `include` / `includeIf` directives.
     pub fn load(path: &Path, ctx: &IncludeContext) -> Result<Self, ConfigError> {
-        Ok(Self {
-            entries: include::load_with_includes(path, ctx)?,
-        })
+        Ok(Self::load_listing(path, ctx)?.0)
+    }
+
+    /// [`load`](Self::load), with every file the result was read from and
+    /// every included file that was looked for and is not there: a change
+    /// to any of them, or one of them coming to be, may change the result.
+    pub fn load_listing(
+        path: &Path,
+        ctx: &IncludeContext,
+    ) -> Result<(Self, Vec<std::path::PathBuf>), ConfigError> {
+        let (entries, files) = include::load_with_includes(path, ctx)?;
+        Ok((Self { entries }, files))
     }
 
     fn is_match(e: &Entry, section: &str, subsection: Option<&[u8]>, key: &str) -> bool {

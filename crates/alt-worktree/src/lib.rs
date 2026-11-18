@@ -7,69 +7,54 @@
 //! specific command.
 
 pub mod attributes;
+mod cachetree;
+#[cfg(unix)]
+mod clock;
+mod commit;
+mod control;
+#[cfg(unix)]
+mod delta;
+mod error;
+#[cfg(unix)]
+mod fsdir;
+mod glob;
 pub mod ident;
 mod ignore;
+mod kind;
 mod scan;
+mod snapshot;
 mod stored;
+#[cfg(unix)]
+mod untracked;
+#[cfg(unix)]
+mod walk;
+#[cfg(target_os = "linux")]
+mod watch;
 
 pub use stored::unstored_blob;
 
-pub use scan::{
-    Clean, PathMatcher, SubmoduleHead, scan_indexed_paths, scan_worktree, scan_worktree_with_index,
-};
+pub use cachetree::Staged;
+#[cfg(unix)]
+pub use clock::{Clock, Stamp};
+pub use commit::{Sig, build_commit_bytes, write_commit};
+#[cfg(unix)]
+pub use delta::{CleanTracked, Delta, ScanOptions, scan};
+pub use error::WorktreeError;
+pub use kind::ChangeKind;
+pub use snapshot::{Dir, Entry, FileStat, Snapshot};
+#[cfg(unix)]
+pub use untracked::{Untracked, hidden_by};
+#[cfg(target_os = "linux")]
+pub use watch::{Unanswered, Watched, watch_allowance};
+
+pub use glob::class_at;
+pub use ignore::default_excludes_file;
+pub use scan::{Clean, PathMatcher, SubmoduleHead, scan_worktree, scan_worktree_with_index};
 
 use alt_bytes::{BString, ByteSlice};
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind, Tree};
 use alt_git_index::Index;
-use alt_odb::{NativeOdb, OdbError};
-
-#[derive(Debug)]
-pub enum WorktreeError {
-    Io(std::io::Error),
-    Odb(OdbError),
-    Object(alt_git_codec::ObjectParseError),
-    NotATree(ObjectId),
-}
-
-impl std::fmt::Display for WorktreeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Io(_) => f.write_str("io"),
-            Self::Odb(e) => std::fmt::Display::fmt(e, f),
-            Self::Object(e) => std::fmt::Display::fmt(e, f),
-            Self::NotATree(v) => write!(f, "object {v} is not a tree"),
-        }
-    }
-}
-
-impl std::error::Error for WorktreeError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Io(e) => Some(e),
-            Self::Odb(e) => e.source(),
-            Self::Object(e) => e.source(),
-            _ => None,
-        }
-    }
-}
-
-impl From<std::io::Error> for WorktreeError {
-    fn from(e: std::io::Error) -> Self {
-        Self::Io(e)
-    }
-}
-
-impl From<OdbError> for WorktreeError {
-    fn from(e: OdbError) -> Self {
-        Self::Odb(e)
-    }
-}
-
-impl From<alt_git_codec::ObjectParseError> for WorktreeError {
-    fn from(e: alt_git_codec::ObjectParseError) -> Self {
-        Self::Object(e)
-    }
-}
+use alt_odb::NativeOdb;
 
 /// One path's identity: its git blob/link id and mode. The unit the three
 /// views (HEAD, index, worktree) are compared in.
@@ -78,13 +63,6 @@ pub struct WorkEntry {
     pub path: BString,
     pub oid: ObjectId,
     pub mode: u32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ChangeKind {
-    Added,
-    Modified,
-    Deleted,
 }
 
 /// What `alt status` reports: index vs HEAD (staged), worktree vs index
@@ -155,6 +133,10 @@ pub fn write_tree(
         .map(|e| (e.path.as_bytes(), e.oid, e.mode))
         .collect();
     flat.sort_by(|a, b| a.0.cmp(b.0));
+    let paths: Vec<&[u8]> = flat.iter().map(|e| e.0).collect();
+    if let Some(at) = alt_git_index::clash_among(&paths) {
+        return Err(WorktreeError::Duplicate(BString::from(paths[at])));
+    }
     write_subtree(odb, &flat, algo)
 }
 
@@ -213,56 +195,6 @@ fn write_subtree(
     let id = ObjectId::hash_object(algo, ObjectKind::Tree, &bytes);
     odb.put(id, ObjectKind::Tree, &bytes)?;
     Ok(id)
-}
-
-/// A commit author/committer line: `Name <email> <unix-ts> <tz>`.
-pub struct Sig<'a> {
-    pub name: &'a str,
-    pub email: &'a str,
-    /// Seconds since the epoch.
-    pub when: i64,
-    /// Timezone like `+0000`.
-    pub tz: &'a str,
-}
-
-/// Writes a commit object and returns its id. The bytes are git-canonical,
-/// so the id equals `git commit-tree`'s for the same inputs.
-pub fn write_commit(
-    odb: &mut NativeOdb,
-    tree: ObjectId,
-    parents: &[ObjectId],
-    author: &Sig,
-    committer: &Sig,
-    message: &str,
-    algo: HashAlgo,
-) -> Result<ObjectId, WorktreeError> {
-    let bytes = build_commit_bytes(tree, parents, author, committer, message);
-    let id = ObjectId::hash_object(algo, ObjectKind::Commit, &bytes);
-    odb.put(id, ObjectKind::Commit, &bytes)?;
-    Ok(id)
-}
-
-/// Just the byte assembly half of [`write_commit`] — useful for callers
-/// (e.g. commit signing) that want to mutate the bytes before
-/// hashing + storing. The caller is responsible for the put + hash.
-pub fn build_commit_bytes(
-    tree: ObjectId,
-    parents: &[ObjectId],
-    author: &Sig,
-    committer: &Sig,
-    message: &str,
-) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    bytes.extend_from_slice(format!("tree {tree}\n").as_bytes());
-    for p in parents {
-        bytes.extend_from_slice(format!("parent {p}\n").as_bytes());
-    }
-    let line = |s: &Sig| format!("{} <{}> {} {}", s.name, s.email, s.when, s.tz);
-    bytes.extend_from_slice(format!("author {}\n", line(author)).as_bytes());
-    bytes.extend_from_slice(format!("committer {}\n", line(committer)).as_bytes());
-    bytes.push(b'\n');
-    bytes.extend_from_slice(message.as_bytes());
-    bytes
 }
 
 /// The index's tracked entries (stage 0 only) as `WorkEntry`s.
@@ -350,19 +282,8 @@ pub fn changes<'a>(old: &'a [WorkEntry], new: &'a [WorkEntry]) -> Vec<Change<'a>
 pub fn status(head: &[WorkEntry], index: &[WorkEntry], worktree: &[WorkEntry]) -> Status {
     let mut s = Status::default();
     diff(head, index, |path, kind| s.staged.push((path, kind)));
-    // Gitlink paths in the index point at submodules: the worktree side
-    // (scan_worktree) deliberately emits no entry for them, so a naive diff
-    // would report them as Deleted on every status. Git treats an
-    // uninitialised submodule directory as clean; mirror that by filtering
-    // gitlink-tagged Deleted reports.
-    let gitlinks: std::collections::HashSet<&BString> = index
-        .iter()
-        .filter(|e| e.mode == 0o160000)
-        .map(|e| &e.path)
-        .collect();
     diff(index, worktree, |path, kind| match kind {
         ChangeKind::Added => s.untracked.push(path),
-        ChangeKind::Deleted if gitlinks.contains(&path) => {}
         other => s.unstaged.push((path, other)),
     });
     s
@@ -384,7 +305,10 @@ fn diff(old: &[WorkEntry], new: &[WorkEntry], mut emit: impl FnMut(BString, Chan
             }
             std::cmp::Ordering::Equal => {
                 if old[i].oid != new[j].oid || old[i].mode != new[j].mode {
-                    emit(new[j].path.clone(), ChangeKind::Modified);
+                    emit(
+                        new[j].path.clone(),
+                        ChangeKind::between(old[i].mode, new[j].mode),
+                    );
                 }
                 i += 1;
                 j += 1;
@@ -507,10 +431,9 @@ mod tests {
     }
 
     #[test]
-    fn status_treats_index_gitlink_as_clean_when_worktree_lacks_path() {
-        // A submodule that's recorded in the index but not initialised on
-        // disk should not be reported as "deleted" by status — git's
-        // baseline behaviour for an uninitialised submodule is clean.
+    fn status_reports_an_index_gitlink_without_its_directory_as_deleted() {
+        // a submodule that is not initialised still has its directory;
+        // without one git reports the entry as deleted
         let gitlink = WorkEntry {
             path: "shFlags".into(),
             oid: oid(0xAA),
@@ -521,10 +444,7 @@ mod tests {
         let wt: Vec<WorkEntry> = vec![];
         let s = status(&head, &index, &wt);
         assert!(s.staged.is_empty(), "no staged changes expected");
-        assert!(
-            s.unstaged.is_empty(),
-            "uninit submodule must not show as deleted"
-        );
+        assert_eq!(s.unstaged, [("shFlags".into(), ChangeKind::Deleted)]);
         assert!(s.untracked.is_empty());
     }
 

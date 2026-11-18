@@ -215,9 +215,7 @@ impl NativeRepo<'_> {
             intent.files.iter().map(|c| c.path.as_slice()).collect();
         for change in &intent.files {
             let path = BString::from(change.path.clone());
-            self.ensure_path_allowed(
-                std::str::from_utf8(&path).map_err(|_| "unsupported non-UTF-8 recovery path")?,
-            )?;
+            self.ensure_path_allowed(&path)?;
             for state in [&change.before, &change.after].into_iter().flatten() {
                 if state.mode != 0o160000 {
                     self.read_snapshot(&state.contents)?;
@@ -267,9 +265,7 @@ impl NativeRepo<'_> {
             intent.files.iter().map(|c| c.path.as_slice()).collect();
         for change in &intent.files {
             let path = BString::from(change.path.clone());
-            self.ensure_path_allowed(
-                std::str::from_utf8(&path).map_err(|_| "unsupported non-UTF-8 recovery path")?,
-            )?;
+            self.ensure_path_allowed(&path)?;
             for state in [&change.before, &change.after].into_iter().flatten() {
                 if state.mode != 0o160000 {
                     self.read_snapshot(&state.contents)?;
@@ -309,6 +305,7 @@ impl NativeRepo<'_> {
         if current != intent.index_after {
             durable_write(&self.index_path, &after)?;
         }
+        self.snapshot_checked_out(&after)?;
         self.store.refs.record_op(
             &self.id.actor("recover"),
             now_ms(),
@@ -372,7 +369,9 @@ impl NativeRepo<'_> {
         }
         self.ensure_directories_replaceable(intent)?;
         self.apply_changes(intent.files.iter())?;
-        durable_write(&self.index_path, &self.read_snapshot(&intent.index_after)?)?;
+        let index = self.read_snapshot(&intent.index_after)?;
+        durable_write(&self.index_path, &index)?;
+        self.snapshot_checked_out(&index)?;
         self.store.refs.record_op(
             &self.id.actor("checkout"),
             now_ms(),

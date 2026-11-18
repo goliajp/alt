@@ -11,13 +11,15 @@ use alt_oplog::OpLogError;
 use crate::{AlsoNamed, RefError, RefStore, fold_new};
 
 /// How many ops at the end of the log the stores of this process leave
-/// out ([`RefStore::open_confirmed`]).
-static LEFT_OUT: OnceLock<usize> = OnceLock::new();
+/// out ([`RefStore::open_confirmed`]): those that name objects which are
+/// not stored, and those past a record that does not read.
+static LEFT_OUT: OnceLock<(usize, usize)> = OnceLock::new();
 
-/// How many ops at the end of the log this process answers without: those
-/// that were never synced and name objects which are not stored. `None`
+/// How many ops at the end of the log this process answers without, none
+/// of them ever synced: first those that name objects which are not
+/// stored, then those that follow a record which does not read. `None`
 /// when it found none.
-pub fn left_out() -> Option<usize> {
+pub fn left_out() -> Option<(usize, usize)> {
     LEFT_OUT.get().copied()
 }
 
@@ -54,12 +56,26 @@ impl RefStore {
     ) -> Result<Self, RefError> {
         let alt_dir = alt_dir.into();
         let store = Self::open_reading(&alt_dir)?;
+        let unread = store.unread()?;
         let Some(found) = store.unheld(also, stored)? else {
+            if unread > 0 {
+                let _ = LEFT_OUT.set((0, unread));
+            }
             return Ok(store);
         };
         alt_oplog::end_reads_at(&alt_dir.join("oplog"), found.at)?;
-        let _ = LEFT_OUT.set(found.ops);
+        let _ = LEFT_OUT.set((found.ops, unread));
         Self::open_reading(alt_dir)
+    }
+
+    /// For a reader: how many whole ops lie past an unfinished append at
+    /// the end of the log, which this store passed over. A writer cuts
+    /// them with it. Nothing is read where the log read to its end.
+    pub fn unread(&self) -> Result<usize, RefError> {
+        if !self.oplog.passed_over() {
+            return Ok(0);
+        }
+        Ok(self.oplog.passed_ops()?.len())
     }
 
     /// Opens the store to be read and nothing else, for a check that must

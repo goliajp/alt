@@ -467,7 +467,10 @@ Its last lines name the files to add again (see Records whose content never
 arrived, above); once they are added, `alt fsck` exits 0. A command that the
 daemon runs prints the same warning. When the operations that go follow a record of the operation log
 that does not read, the first line ends in `and follow a record that does
-not read` instead.
+not read` instead. Until then a command that only reads leaves those
+operations out and says `warning: the last N operation(s) in the operation
+log were never synced to disk and follow a record that does not read`, as
+it does for operations that name objects which are not stored.
 
 A command that writes only a ref, such as `alt tag`, has no reason to open
 the object store for writing when the log holds no operation past its

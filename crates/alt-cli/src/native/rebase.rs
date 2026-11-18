@@ -74,6 +74,8 @@ impl NativeRepo<'_> {
             }
         }
 
+        let picked = todo.iter().filter(|step| step.0 != Action::Drop);
+        let (old, target) = self.replay_trees(orig, onto, picked.map(|step| step.1))?;
         let recovery = Some(self.snapshot_workspace()?);
 
         // hand HEAD to the scratch ref, sitting on the new base
@@ -94,8 +96,6 @@ impl NativeRepo<'_> {
                 },
             ],
         )?;
-        let old = self.commit_entries(orig)?;
-        let target = self.commit_entries(onto)?;
         self.checkout(&old, &target)?;
         let state = RebaseState {
             recovery,
@@ -120,8 +120,7 @@ impl NativeRepo<'_> {
                     "rebase --continue: resolve the conflicts and `alt add` them first".into(),
                 );
             }
-            let head = self.rebase_head()?;
-            let head_tree = self.commit_tree(head)?;
+            let head_tree = self.commit_tree(self.rebase_head()?)?;
             let tree = self.staged_tree(Some(head_tree))?;
             if tree == head_tree && !action.melds() {
                 return Err(
@@ -215,10 +214,8 @@ impl NativeRepo<'_> {
         self.clear_rebase_state()?;
         if json {
             use crate::json::Json;
-            let short = state
-                .branch
-                .strip_prefix("refs/heads/")
-                .unwrap_or(&state.branch);
+            let branch = &state.branch;
+            let short = branch.strip_prefix("refs/heads/").unwrap_or(branch);
             crate::json::emit(
                 out,
                 vec![
@@ -413,9 +410,7 @@ impl NativeRepo<'_> {
         if json {
             return self.report_merge(true, out, "conflicted", None, conflicts, "");
         }
-        for p in conflicts {
-            writeln!(out, "CONFLICT (content): Merge conflict in {p}")?;
-        }
+        cherry_pick::say_conflicts(out, "Merge", conflicts)?;
         let subject = self.read_commit_parts(commit)?.subject();
         writeln!(
             out,
@@ -464,7 +459,7 @@ impl NativeRepo<'_> {
 
     /// Makes the index and working tree match `commit`, clearing whatever a
     /// stopped step left behind, conflicted paths included.
-    fn reset_worktree_to(&mut self, commit: ObjectId) -> Res<()> {
+    pub(super) fn reset_worktree_to(&mut self, commit: ObjectId) -> Res<()> {
         let mut known: Vec<WorkEntry> = Vec::new();
         for e in &self.index()?.entries {
             if known.last().is_none_or(|k: &WorkEntry| k.path != e.path) {

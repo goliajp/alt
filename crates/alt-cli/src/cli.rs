@@ -12,8 +12,12 @@ use alt_args::{Parser, Subcommand};
 use alt_git_codec::{ObjectId, ObjectKind, RawObject, Tree};
 use alt_repo::Repository;
 
+use crate::native::pathspec::Place;
 use crate::native::{self, Identity, NativeRepo, Store};
-use crate::{log_cmd, quote};
+use crate::{log_cmd, quote, worktree_args};
+use prepare::prepare;
+
+mod prepare;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -118,11 +122,8 @@ pub enum Command {
     },
     /// Stage file contents into the index
     Add {
-        /// Paths to stage; `.` stages the whole working tree
-        paths: Vec<String>,
-        /// Emit a structured JSON result instead of the human line
-        #[arg(long)]
-        json: bool,
+        #[command(flatten)]
+        args: worktree_args::Add,
     },
     /// Record staged changes as a new commit
     Commit {
@@ -159,9 +160,8 @@ pub enum Command {
     },
     /// Show the working tree status
     Status {
-        /// Emit a stable JSON object instead of the human-readable view
-        #[arg(long)]
-        json: bool,
+        #[command(flatten)]
+        args: worktree_args::Status,
     },
     /// List, create, or delete branches
     Branch {
@@ -198,7 +198,7 @@ pub enum Command {
     },
     /// Line-by-line origin attribution for one file (`git blame`-style)
     Blame {
-        /// Path to the file to blame (relative to the work tree root).
+        /// Path to the file to blame (relative to the current directory).
         path: String,
         /// Revision to start the walk from (default `HEAD`).
         rev: Option<String>,
@@ -1184,15 +1184,13 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
         )
         .into());
     }
-    if mutates_command(cmd) && !matches!(cmd, Command::Operation { .. }) {
-        repo.begin_workspace_write()?;
-    }
+    prepare(repo, cmd)?;
     match cmd {
         Command::Task { op, json } => repo.task_command(op, *json, out)?,
         Command::Candidate { op, json } => repo.candidate_command(op, *json, out)?,
         Command::Evidence { op, json } => repo.evidence_command(op, *json, out)?,
         Command::Request { op, json } => repo.request_query(op, *json, out)?,
-        Command::Add { paths, json } => repo.add(paths, *json, out)?,
+        Command::Add { args } => repo.add_paths(args, out)?,
         Command::Commit {
             validate: true,
             json,
@@ -1223,7 +1221,7 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
                 repo.commit(message.as_deref().unwrap_or_default(), opts, *json, out)?
             }
         }
-        Command::Status { json } => repo.status(*json, out)?,
+        Command::Status { args } => repo.status(args.untracked(), args.json, out)?,
         Command::Branch {
             name,
             delete,
@@ -1411,22 +1409,10 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
     Ok(0)
 }
 
-/// `HEAD` in a revision (also `HEAD~n`, `HEAD^`, `HEAD:path`) means the
-/// current workspace's HEAD, which outside the default workspace lives in
-/// `workspaces/<name>/HEAD` rather than the repository's bare `HEAD`.
-fn at_head(spec: &str, head: &str) -> String {
-    match spec.strip_prefix("HEAD") {
-        Some(rest) if rest.is_empty() || rest.starts_with(['~', '^', ':']) => {
-            format!("{head}{rest}")
-        }
-        _ => spec.to_owned(),
-    }
-}
-
-/// Runs a git-layer command against an opened repository. `head` is the
-/// ref that `HEAD` stands for in this invocation's workspace.
-pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, head: &str, out: &mut W) -> Res<()> {
-    let at_head = |spec: &str| at_head(spec, head);
+/// Runs a git-layer command against an opened repository, for the
+/// workspace and the directory of this invocation.
+pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, at: &Place, out: &mut W) -> Res<()> {
+    let at_head = |spec: &str| at.at_head(spec);
     match cmd {
         Command::RevParse { rev } => {
             let oid = resolve(repo, &at_head(rev))?;
@@ -1457,10 +1443,7 @@ pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, head: &str, out: &mut
                 if *json {
                     return Err("--json is not supported with <rev>:<path>".into());
                 }
-                let commit_oid = repo
-                    .rev_parse(rev_part)?
-                    .ok_or_else(|| format!("bad revision '{rev_part}'"))?;
-                let blob = crate::tree_changes::blob_at(repo, commit_oid, path_part)?;
+                let blob = at.blob(repo, rev_part, path_part)?;
                 out.write_all(&blob)?;
                 return Ok(());
             }
@@ -1474,12 +1457,11 @@ pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, head: &str, out: &mut
             copies,
             follow: _,
         } => {
-            let spec = at_head(rev.as_deref().unwrap_or("HEAD"));
             let options = crate::blame::Options {
                 moves: *moves || *copies > 0,
                 copies: *copies,
             };
-            crate::blame::run(out, repo, path, &spec, options)?;
+            at.blame(out, repo, path, rev.as_deref(), options)?;
         }
         Command::Config {
             key,
@@ -1541,21 +1523,10 @@ pub fn run_on_store<W: Write>(
             run_native(&mut repo, c, out)
         }
         c => {
-            let head = workspace_head(cwd, cli.workspace.as_deref())?;
-            run_git(repo, c, &head, out)?;
+            let at = Place::of(repo, cwd, cli.workspace.as_deref())?;
+            run_git(repo, c, &at, out)?;
             Ok(0)
         }
-    }
-}
-
-/// The ref `HEAD` stands for when a git-layer command runs from `cwd`: the
-/// workspace's own HEAD inside an alt repository, the bare `HEAD` in a plain
-/// git one. An explicitly named workspace that does not resolve is an error.
-pub fn workspace_head(cwd: &Path, workspace: Option<&str>) -> Res<String> {
-    match native::resolve_workspace(cwd, workspace) {
-        Ok((_, coord)) => Ok(coord.head_ref().to_owned()),
-        Err(e) if workspace.is_some() => Err(e),
-        Err(_) => Ok("HEAD".to_owned()),
     }
 }
 

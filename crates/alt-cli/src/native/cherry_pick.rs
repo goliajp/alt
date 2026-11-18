@@ -14,7 +14,7 @@ impl NativeRepo<'_> {
         let repo = self.store.git_view()?;
         let target_oid = repo
             .rev_parse(rev)?
-            .ok_or_else(|| format!("bad revision '{rev}'"))?;
+            .ok_or_else(|| settings::fatal(format!("bad revision '{rev}'")))?;
         let target_commit = repo.read_commit(&target_oid)?;
         let target_parent = target_commit
             .parents()
@@ -49,9 +49,7 @@ impl NativeRepo<'_> {
             if json {
                 self.report_merge(true, out, "conflicted", None, &conflicts, "")?;
             } else {
-                for p in &conflicts {
-                    writeln!(out, "CONFLICT (content): cherry-pick conflict in {p}")?;
-                }
+                say_conflicts(out, "cherry-pick", &conflicts)?;
                 writeln!(
                     out,
                     "Automatic cherry-pick failed; fix conflicts and then commit the result."
@@ -205,4 +203,15 @@ fn parse_ident(raw: Vec<u8>) -> Res<Sig<'static>> {
         when,
         tz: Box::leak(tz.into_boxed_str()),
     })
+}
+
+/// git's line for each of the `conflicts` a `kind` of merge left, the path
+/// as its bytes are.
+pub(super) fn say_conflicts(out: &mut impl Write, kind: &str, conflicts: &[BString]) -> Res<()> {
+    for path in conflicts {
+        write!(out, "CONFLICT (content): {kind} conflict in ")?;
+        out.write_all(path)?;
+        out.write_all(b"\n")?;
+    }
+    Ok(())
 }

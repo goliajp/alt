@@ -6,7 +6,10 @@ use super::*;
 impl NativeRepo<'_> {
     /// The attribute files among `resolved`, each with the directory it
     /// is in.
-    fn attribute_files<'a>(&self, resolved: &'a [Resolved]) -> Res<Vec<(&'a [u8], Vec<u8>)>> {
+    fn merged_attribute_files<'a>(
+        &self,
+        resolved: &'a [Resolved],
+    ) -> Res<Vec<(&'a [u8], Vec<u8>)>> {
         let mut files: Vec<(&[u8], Vec<u8>)> = Vec::new();
         for r in resolved {
             let dir = match r.path.as_slice() {
@@ -30,12 +33,12 @@ impl NativeRepo<'_> {
     /// Writes a conflicted merge state to disk: each resolution's working-tree
     /// bytes, then an index carrying stage-0 entries for clean paths and
     /// stage 1/2/3 entries for conflicted ones (so git tools see the merge).
-    pub(in crate::native) fn write_conflicted(&mut self, resolved: &[Resolved]) -> Res<()> {
+    pub(in crate::native) fn write_merge_state(&mut self, resolved: &[Resolved]) -> Res<()> {
         // the index written below names the blobs of the paths that merged
         self.store.odb.flush_synced()?;
         // converted under the attribute files of the merge result, as a
         // checkout of it would be: those on disk are from before the merge
-        let files = self.attribute_files(resolved)?;
+        let files = self.merged_attribute_files(resolved)?;
         let files: Vec<(&[u8], &[u8])> = files.iter().map(|(d, c)| (*d, c.as_slice())).collect();
         let attrs = self.converter_under(&files)?;
         // a path the merge leaves as it was keeps its file and its index

@@ -84,12 +84,13 @@ impl Store {
 
     /// For a store held across commands, before one that only reads:
     /// whether the log ends in operations that were never synced and
-    /// name objects which are not stored. Such a command is answered by
-    /// a process that opens the store without them.
+    /// name objects which are not stored or follow a record that does
+    /// not read. Such a command is answered by a process that opens the
+    /// store without them.
     pub fn holds_unconfirmed(&self) -> Res<bool> {
         let stored = |oid: &ObjectId| self.odb.contains(oid).unwrap_or(true);
         let also = prepared_blobs(&self.alt_dir);
-        Ok(self.refs.unheld(Some(&also), stored)?.is_some())
+        Ok(self.refs.unread()? > 0 || self.refs.unheld(Some(&also), stored)?.is_some())
     }
 
     /// The git-layer view of this store, held the way the store is: of a

@@ -4,7 +4,7 @@
 //! holds the real files, and paths `.gitattributes` marks `filter=lfs` are
 //! turned back into pointers whenever the tree is scanned or staged.
 
-use alt_worktree::{scan_indexed_paths, scan_worktree_with_index};
+use alt_worktree::scan_worktree_with_index;
 
 use alt_lfs::Pointer;
 use alt_odb::BlobId;
@@ -15,18 +15,18 @@ use super::*;
 impl NativeRepo<'_> {
     /// The paths the root `.gitattributes` sends through LFS, if any.
     pub(super) fn lfs_rules(&self) -> Res<Option<PathMatcher>> {
-        let text = match std::fs::read_to_string(self.root.join(".gitattributes")) {
+        let text = match std::fs::read(self.root.join(".gitattributes")) {
             Ok(t) => t,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(e.into()),
         };
-        let patterns: Vec<&str> = text
-            .lines()
-            .filter(|l| !l.trim_start().starts_with('#'))
+        let patterns: Vec<&[u8]> = text
+            .split(|b| *b == b'\n')
+            .filter(|l| !l.trim_ascii_start().starts_with(b"#"))
             .filter_map(|l| {
-                let mut words = l.split_whitespace();
+                let mut words = l.split(u8::is_ascii_whitespace).filter(|w| !w.is_empty());
                 let pattern = words.next()?;
-                words.any(|w| w == "filter=lfs").then_some(pattern)
+                words.any(|w| w == b"filter=lfs").then_some(pattern)
             })
             .collect();
         Ok((!patterns.is_empty()).then(|| PathMatcher::new(patterns)))
@@ -43,32 +43,15 @@ impl NativeRepo<'_> {
             pointer.or_else(|| self.stored_form(&attrs, index, path, content))
         };
         let head = |dir: &Path| attrs.submodule_head(dir);
+        let excludes = self.exclude_files(&self.settings()?)?;
+        let excludes: Vec<&Path> = excludes.iter().map(PathBuf::as_path).collect();
         let scan = scan_worktree_with_index(
             &self.root,
             index,
             self.store.algo()?,
             Some(&clean),
             Some(&head),
-        )?;
-        attrs.check()?;
-        Ok(scan)
-    }
-
-    /// Like [`scan_tree`](Self::scan_tree) but only over the index's paths.
-    pub(super) fn scan_index_paths(&self, index: &Index) -> Res<Vec<WorkEntry>> {
-        let rules = self.lfs_rules()?;
-        let attrs = self.converter()?;
-        let clean = |path: &[u8], content: &[u8]| {
-            let pointer = rules.as_ref().and_then(|r| lfs_clean(r, path, content));
-            pointer.or_else(|| self.stored_form(&attrs, index, path, content))
-        };
-        let head = |dir: &Path| attrs.submodule_head(dir);
-        let scan = scan_indexed_paths(
-            &self.root,
-            index,
-            self.store.algo()?,
-            Some(&clean),
-            Some(&head),
+            &excludes,
         )?;
         attrs.check()?;
         Ok(scan)
@@ -282,7 +265,7 @@ impl NativeRepo<'_> {
 
 /// git-lfs's clean step: an LFS path's content becomes its pointer; content
 /// that already is a pointer stays as it is.
-fn lfs_clean(rules: &PathMatcher, path: &[u8], content: &[u8]) -> Option<Vec<u8>> {
+pub(super) fn lfs_clean(rules: &PathMatcher, path: &[u8], content: &[u8]) -> Option<Vec<u8>> {
     if !rules.matches(path) || Pointer::parse(content).is_some() {
         return None;
     }

@@ -143,13 +143,23 @@ impl Store {
 
 /// The answer to a command, told when it shows the repository without
 /// the last operations of the log: a command that only reads leaves out
-/// those that were never synced and name objects which are not stored.
+/// those that were never synced and name objects which are not stored or
+/// follow a record that does not read.
 pub fn tell_left_out(mut response: Response) -> Response {
-    if let (0, Some(ops)) = (response.exit_code, alt_refs::left_out()) {
+    if let (0, Some((named, after))) = (response.exit_code, alt_refs::left_out()) {
+        let why = match (named, after) {
+            (_, 0) => "and name objects that are not stored".to_owned(),
+            (0, _) => "and follow a record that does not read".to_owned(),
+            _ => format!(
+                "({after} of them follow a record that does not read, the others name objects \
+                 that are not stored)"
+            ),
+        };
+        let ops = named + after;
         let warning = format!(
             "warning: the last {ops} operation(s) in the operation log were never synced to disk \
-             and name objects that are not stored; this shows the repository as it was before \
-             them. The next command that writes discards them.\n"
+             {why}; this shows the repository as it was before them. The next command that \
+             writes discards them.\n"
         );
         response.stderr.splice(0..0, warning.into_bytes());
     }

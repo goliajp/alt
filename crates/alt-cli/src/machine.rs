@@ -6,8 +6,10 @@ use alt_args::{ErrorKind, Matches, Parser};
 use alt_json::{Value, json};
 
 use crate::{cli::Cli, daemon::Response};
+pub use kinds::{PATHS_FAILED, PATHS_IGNORED, PATHS_UNKNOWN};
 
-mod canonical;
+mod bindings;
+mod kinds;
 
 #[derive(Debug, Clone)]
 pub struct Failure {
@@ -88,9 +90,13 @@ impl Failure {
             bytes
         } else {
             let request = request_id
-                .map(|id| format!("\nrequest: {id}"))
+                .map(|id| format!("request: {id}\n"))
                 .unwrap_or_default();
-            format!("fatal: {}{}\n", self.message, request).into_bytes()
+            match self.kind {
+                PATHS_IGNORED | PATHS_UNKNOWN | PATHS_FAILED => request,
+                _ => format!("fatal: {}\n{request}", self.message),
+            }
+            .into_bytes()
         };
         Response {
             exit_code: self.exit_code,

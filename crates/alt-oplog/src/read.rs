@@ -33,6 +33,8 @@ pub(crate) struct Scan {
     pub last: bool,
     /// the read stopped short of the file's end on request
     pub clamped: bool,
+    /// an unfinished append at the end of the file was passed over
+    pub passed: bool,
 }
 
 impl Scan {
@@ -113,6 +115,7 @@ pub(crate) fn scan(raw: Raw) -> Result<Scan, OpLogError> {
         file_len: raw.at + raw.data.len() as u64,
         last: ends_the_log(&raw.data, replayed.valid),
         clamped: raw.clamped,
+        passed: false,
     })
 }
 
@@ -128,7 +131,10 @@ impl Scan {
                     crate::settle::note_damage(durable, self.valid_len, self.file_len);
                     self.clamped = true;
                 }
-                judged => judged?,
+                judged => {
+                    judged?;
+                    self.passed = true;
+                }
             }
         }
         self.file_len = self.valid_len;

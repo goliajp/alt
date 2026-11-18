@@ -144,6 +144,10 @@ impl Level<'_> {
                 self.settle()?;
                 self.record(at, vec![value.to_owned()])?;
             }
+            (true, None) if !arg.missing.is_empty() => {
+                self.settle()?;
+                self.record(at, vec![arg.missing.to_owned()])?;
+            }
             (true, None) => {
                 self.settle()?;
                 self.pending = Some((at, Vec::new()));
@@ -200,7 +204,9 @@ impl Level<'_> {
                 continue;
             }
             let attached = &cluster[offset + letter.len_utf8()..];
-            if attached.is_empty() {
+            if attached.is_empty() && !arg.missing.is_empty() {
+                self.record(at, vec![arg.missing.to_owned()])?;
+            } else if attached.is_empty() {
                 self.pending = Some((at, Vec::new()));
                 self.state = State::Value;
             } else {

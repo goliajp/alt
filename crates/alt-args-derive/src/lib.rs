@@ -15,7 +15,8 @@
 //!   `name = "..."`; on a field: `subcommand`, `flatten`
 //! - `#[arg(...)]` on a field: `long`, `long = "..."`, `short`, `short = 'c'`,
 //!   `id = "..."`, `visible_alias = "..."`, `value_name = "..."`, `global = true`,
-//!   `default_value = "..."`, `default_value_t = expr`, `required = true`,
+//!   `default_value = "..."`, `default_value_t = expr`,
+//!   `default_missing_value = "..."`, `required = true`,
 //!   `action = set`, `action = count`, `value_parser = path`, `value_parser = ["a", "b"]`,
 //!   `conflicts_with = "id"`, `conflicts_with_all = ["id", ...]`,
 //!   `requires = "id"`, `required_unless_present = "id"`,

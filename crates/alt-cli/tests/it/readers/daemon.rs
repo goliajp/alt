@@ -86,31 +86,42 @@ fn a_daemon_serving_commands_that_only_read_sees_what_other_processes_wrote() {
 }
 
 /// Operations that were never synced and name objects which are not
-/// stored are left out by a command that reads, whoever runs it: a
-/// daemon that finds them in the store it opens hands the command back
-/// to the client. (The marker of a store a daemon already holds does not
-/// go back: a power cut that leaves such operations ends the daemon.)
+/// stored, or follow a record that does not read, are left out by a
+/// command that reads, whoever runs it: a daemon that finds them in the
+/// store it opens hands the command back to the client. (The marker of a
+/// store a daemon already holds does not go back: a power cut that leaves
+/// such operations ends the daemon.)
 #[test]
 fn a_command_that_only_reads_is_answered_the_same_through_a_daemon() {
     let base = Base::build();
-    let dir = base.state("left", &[Step::Lag, Step::PackLost]);
-    ok(served(&dir, &["branch"]));
-    let daemon = fs::read(dir.join(".alt/daemon.meta")).unwrap();
-    for args in [
-        &["rev-parse", "HEAD"][..],
-        &["log", "-n", "3"],
-        &["cat-file", "-p", "HEAD"],
-        &["status"],
-    ] {
-        let direct = alt(&dir, args);
-        assert!(stderr(&direct).contains("never synced"), "{direct:?}");
-        let through = served(&dir, args);
-        assert_eq!(
-            (through.status.code(), &through.stdout, stderr(&through)),
-            (direct.status.code(), &direct.stdout, stderr(&direct)),
-            "alt {args:?}"
-        );
+    let left = [
+        (Step::PackLost, "and name objects that are not stored"),
+        (Step::Damage(4), "and follow a record that does not read"),
+    ];
+    for (n, (step, why)) in left.into_iter().enumerate() {
+        let dir = base.state(&format!("left{n}"), &[Step::Lag, step]);
+        ok(served(&dir, &["branch"]));
+        let daemon = fs::read(dir.join(".alt/daemon.meta")).unwrap();
+        for args in [
+            &["rev-parse", "HEAD"][..],
+            &["log", "-n", "3"],
+            &["cat-file", "-p", "HEAD"],
+            &["status"],
+        ] {
+            let direct = alt(&dir, args);
+            let said = stderr(&direct);
+            assert!(
+                said.contains("never synced to disk") && said.contains(why),
+                "{direct:?}"
+            );
+            let through = served(&dir, args);
+            assert_eq!(
+                (through.status.code(), &through.stdout, stderr(&through)),
+                (direct.status.code(), &direct.stdout, said),
+                "{step:?}: alt {args:?}"
+            );
+        }
+        let still = fs::read(dir.join(".alt/daemon.meta")).unwrap();
+        assert_eq!(still, daemon, "{step:?}: another daemon took over");
     }
-    let still = fs::read(dir.join(".alt/daemon.meta")).unwrap();
-    assert_eq!(still, daemon, "another daemon took over");
 }

@@ -100,6 +100,8 @@ pub struct OpLog {
     generation: u32,
     /// Set when the open stopped short of the file's end on request.
     clamped: bool,
+    /// Set when the last read passed over an unfinished append.
+    passed: bool,
     /// How many times this handle read the log anew ([`Self::reopen`]).
     reads: u64,
     /// Where the last record ends that this handle read and did not write.
@@ -190,6 +192,7 @@ impl OpLog {
             deferred: synced::Deferred::default(),
             generation: 0,
             clamped: scan.clamped,
+            passed: scan.passed,
             reads: 0,
             others_to: scan.valid_len,
             named: None,

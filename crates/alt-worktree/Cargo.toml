@@ -10,9 +10,11 @@ alt-git-codec.workspace = true
 alt-git-index.workspace = true
 alt-odb.workspace = true
 alt-bytes.workspace = true
+alt-hash.workspace = true
+alt-os.workspace = true
+alt-threads.workspace = true
 
 [dev-dependencies]
 alt-import.workspace = true
-alt-os.workspace = true
 alt-repo.workspace = true
 alt-testutil.workspace = true

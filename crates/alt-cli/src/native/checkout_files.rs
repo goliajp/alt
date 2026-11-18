@@ -1,9 +1,12 @@
 //! What a checkout reads from and writes to the working tree, one path at a
 //! time, and the checks that run before the first write.
 
+use super::checkout_plan::holds_untracked;
 use super::checkout_recovery::{CheckoutIntent, FileChange, FileState};
 use super::*;
 use recovery::hash;
+
+mod paths;
 
 impl NativeRepo<'_> {
     pub(super) fn file_state(&self, path: &BString, persist: bool) -> Res<Option<FileState>> {
@@ -189,10 +192,14 @@ impl NativeRepo<'_> {
     }
 
     fn apply_file_state(&self, path: &BString, state: &Option<FileState>) -> Res<()> {
+        super::tree_state::wrote_file(&self.root);
         let abs = self.abs(path)?;
         match state {
             None => {
-                crate::durable::remove_file(&abs)?;
+                match abs.symlink_metadata().is_ok_and(|m| m.is_dir()) {
+                    true => super::checkout_plan::remove_left_empty(&abs, path)?,
+                    false => crate::durable::remove_file(&abs)?,
+                }
                 if let Some(parent) = abs.parent() {
                     std::fs::File::open(parent)?.sync_all()?;
                 }
@@ -218,6 +225,7 @@ impl NativeRepo<'_> {
                     let link = temp.path().join("link");
                     symlink_to(&bytes, &link)?;
                     crate::durable::rename(link, &abs)?;
+                    self.note_written(path, &abs, state)?;
                     std::fs::File::open(parent)?.sync_all()?;
                 } else {
                     use std::os::unix::fs::PermissionsExt;
@@ -229,75 +237,27 @@ impl NativeRepo<'_> {
                         ))?;
                     tmp.as_file().sync_all()?;
                     tmp.persist(&abs)?;
+                    self.note_written(path, &abs, state)?;
                     std::fs::File::open(parent)?.sync_all()?;
                 }
             }
         }
-        // Newly created or removed directory entries must reach disk too,
-        // all the way back to the existing workspace root.
-        let mut parent = abs.parent();
-        while let Some(path) = parent {
-            match std::fs::File::open(path) {
-                Ok(dir) => dir.sync_all()?,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => return Err(e.into()),
-            }
-            if path == self.root {
-                break;
-            }
-            parent = path.parent();
-        }
-        Ok(())
+        self.sync_parents(&abs)
     }
 
-    /// Checks that `bytes` names a path inside the working tree whose
-    /// parents are real directories. A parent that is a file or a symlink
-    /// is accepted only when the operation owns it, since it is then
-    /// removed before anything is written beneath; the result says whether
-    /// there is such a parent.
-    pub(super) fn validate_path_among(
-        &self,
-        bytes: &BString,
-        owned: &dyn Fn(&[u8]) -> bool,
-    ) -> Res<bool> {
-        let path = std::str::from_utf8(bytes).map_err(|_| "unsupported non-UTF-8 recovery path")?;
-        if path.is_empty()
-            || path
-                .split('/')
-                .any(|c| c.is_empty() || matches!(c, "." | ".." | ".alt" | ".git"))
-            || Path::new(path).is_absolute()
-        {
-            return Err(crate::machine::Failure::refusal(
-                "precondition_failed",
-                "unsafe recovery path",
-            )
-            .into());
+    /// Remembers what a file looks like right after the checkout wrote it,
+    /// for the snapshot of the index the checkout ends with. Only a file
+    /// written as the checkout planned from a tree's entries counts: an
+    /// undo or a recovery writes back what it once found there, which
+    /// need not be what the index holds.
+    fn note_written(&self, path: &BString, abs: &Path, state: &FileState) -> Res<()> {
+        let planned = self.planned.borrow();
+        let as_planned = planned.as_ref().and_then(|p| p.files.get(path.as_slice()));
+        if as_planned == Some(&(state.mode, state.contents.clone())) {
+            let stat = alt_worktree::FileStat::of(&std::fs::symlink_metadata(abs)?);
+            self.written.borrow_mut().push((path.clone(), stat));
         }
-        let mut beneath_owned = false;
-        // outermost parent first: nothing past a symlink is looked at
-        let mut end = 0;
-        while let Some(at) = path[end..].find('/') {
-            end += at;
-            let parent = &path[..end];
-            end += 1;
-            match self.root.join(parent).symlink_metadata() {
-                Ok(m) if m.is_dir() => {}
-                Ok(_) if owned(parent.as_bytes()) => {
-                    beneath_owned = true;
-                    break;
-                }
-                Ok(_) => {
-                    return Err(crate::machine::Failure::refusal(
-                        "precondition_failed",
-                        "recovery path traverses an unsafe parent",
-                    )
-                    .into());
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => break,
-                Err(e) => return Err(e.into()),
-            }
-        }
-        Ok(beneath_owned)
+        Ok(())
     }
 }
 
@@ -316,12 +276,4 @@ fn remove_empty_directories(path: &Path) -> Res<()> {
     }
     std::fs::remove_dir(path)?;
     Ok(())
-}
-
-pub(super) fn holds_untracked(path: &BString) -> Box<dyn std::error::Error> {
-    crate::machine::Failure::refusal(
-        "precondition_failed",
-        format!("checkout target '{path}' is a directory holding untracked files"),
-    )
-    .into()
 }

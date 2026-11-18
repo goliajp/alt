@@ -1,4 +1,28 @@
 //! Single integration-test binary for alt-worktree.
 
+#[cfg(unix)]
+mod delta;
+#[cfg(unix)]
+mod delta_options;
 mod ignore_scan;
 mod status_interop;
+#[cfg(unix)]
+mod untracked;
+#[cfg(target_os = "linux")]
+mod watch;
+#[cfg(target_os = "linux")]
+mod watch_failed;
+#[cfg(target_os = "linux")]
+mod watch_gap;
+#[cfg(target_os = "linux")]
+mod watch_hidden;
+#[cfg(target_os = "linux")]
+mod watch_index;
+#[cfg(target_os = "linux")]
+mod watch_inputs;
+#[cfg(target_os = "linux")]
+mod watch_loss;
+#[cfg(target_os = "linux")]
+mod watch_mounts;
+#[cfg(target_os = "linux")]
+mod watch_root;

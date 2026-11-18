@@ -6,7 +6,7 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
-fn alt_as(repo: &Path, args: &[&str], principal_id: &str) -> Output {
+pub(crate) fn alt_as(repo: &Path, args: &[&str], principal_id: &str) -> Output {
     Command::new(env!("CARGO_BIN_EXE_alt"))
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
@@ -23,7 +23,7 @@ fn alt_as(repo: &Path, args: &[&str], principal_id: &str) -> Output {
 /// As the unrestricted human operator (no ALT_PRINCIPAL_* set; defaults to
 /// Human/USER, which is "operator" — the policies tested below target
 /// `agent:*`, so this principal is unconstrained).
-fn alt(repo: &Path, args: &[&str]) -> Output {
+pub(crate) fn alt(repo: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_alt"))
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
@@ -35,7 +35,7 @@ fn alt(repo: &Path, args: &[&str]) -> Output {
         .unwrap()
 }
 
-fn ok(o: Output) -> String {
+pub(crate) fn ok(o: Output) -> String {
     assert!(
         o.status.success(),
         "stderr: {}",
@@ -44,7 +44,7 @@ fn ok(o: Output) -> String {
     String::from_utf8(o.stdout).unwrap()
 }
 
-fn fails_with(o: Output, needle: &str) -> String {
+pub(crate) fn fails_with(o: Output, needle: &str) -> String {
     let err = String::from_utf8_lossy(&o.stderr).to_string();
     assert!(
         !o.status.success(),
@@ -60,7 +60,7 @@ fn fails_with(o: Output, needle: &str) -> String {
 
 /// One-shot fixture: init repo, write base file, stage + commit once as the
 /// unrestricted operator. Returns the repo path (kept alive by the tempdir).
-fn fixture(tmp: &alt_os::temp::TempDir) -> &Path {
+pub(crate) fn fixture(tmp: &alt_os::temp::TempDir) -> &Path {
     let repo = tmp.path();
     ok(alt(repo, &["init", "."]));
     std::fs::write(repo.join("a.txt"), "base\n").unwrap();
@@ -69,7 +69,7 @@ fn fixture(tmp: &alt_os::temp::TempDir) -> &Path {
     repo
 }
 
-fn write_policy(repo: &Path, body: &str) {
+pub(crate) fn write_policy(repo: &Path, body: &str) {
     std::fs::write(repo.join(".alt/policy"), body).unwrap();
 }
 
@@ -123,6 +123,13 @@ fn branch_allow_denies_out_of_namespace() {
         "capability denied",
     );
     ok(alt_as(repo, &["branch", "feature/agent-bot/wip"], "bot"));
+    // a name that only begins as the namespace does is outside it
+    for beside in ["feature/agent-botX/wip", "feature/agent-bot"] {
+        fails_with(
+            alt_as(repo, &["branch", beside], "bot"),
+            "capability denied",
+        );
+    }
 
     // …and the unrestricted operator (no rule matches `human:operator`)
     // still moves freely
@@ -159,7 +166,7 @@ fn forbid_force_blocks_delete_and_keeps_creations_free() {
 
 /// `path_allow` blocks staging files outside the allowed path globs. The check
 /// fires inside `add` (before the blob is even written to the odb) and again
-/// inside `commit` (so an index-from-before-policy can't sneak past).
+/// inside `commit`, for every path the commit changes.
 #[test]
 fn path_allow_denies_out_of_tree_paths() {
     let tmp = alt_os::temp::tempdir().unwrap();

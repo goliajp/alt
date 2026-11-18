@@ -1,7 +1,6 @@
 //! What a checkout will do, worked out before anything is written: the
 //! checks that can refuse it, and the list of paths it changes.
 
-use super::checkout_files::holds_untracked;
 use super::checkout_recovery::{CheckoutIntent, FileChange};
 use super::*;
 use recovery::canonical_index;
@@ -70,10 +69,7 @@ impl NativeRepo<'_> {
         }
         for entry in target.iter().filter(|e| !same.contains(e.path.as_slice())) {
             let beneath_tracked = self.validate_path_among(&entry.path, &tracked)?;
-            self.ensure_path_allowed(
-                std::str::from_utf8(&entry.path)
-                    .map_err(|_| "unsupported non-UTF-8 checkout path")?,
-            )?;
+            self.ensure_path_allowed(&entry.path)?;
             let on_disk = match beneath_tracked {
                 true => None,
                 false => self.abs(&entry.path)?.symlink_metadata().ok(),
@@ -96,10 +92,7 @@ impl NativeRepo<'_> {
             }
         }
         for entry in old.iter().filter(|e| !same.contains(e.path.as_slice())) {
-            self.ensure_path_allowed(
-                std::str::from_utf8(&entry.path)
-                    .map_err(|_| "unsupported non-UTF-8 checkout path")?,
-            )?;
+            self.ensure_path_allowed(&entry.path)?;
         }
         Ok(())
     }
@@ -134,6 +127,7 @@ impl NativeRepo<'_> {
         let mut visible = Visible::default();
         let mut ignored = Vec::new();
         let mut files = Vec::new();
+        let mut planned = std::collections::HashMap::new();
         for path in paths {
             let beneath_file = path
                 .iter()
@@ -152,8 +146,16 @@ impl NativeRepo<'_> {
                 .get(path)
                 .map(|t| self.target_state(t, &attrs))
                 .transpose()?;
-            // Submodule directories are not owned by the repository checkout.
-            if before.as_ref().is_some_and(|s| s.mode == 0o160000) && after.is_none() {
+            if let Some(state) = &after {
+                planned.insert(path.to_vec(), (state.mode, state.contents.clone()));
+            }
+            // the directory of a submodule goes with its entry while it is
+            // empty; what it holds is not this checkout's to remove
+            if before.as_ref().is_some_and(|s| s.mode == 0o160000)
+                && after.is_none()
+                && std::fs::read_dir(self.abs(path)?)?.next().is_some()
+            {
+                left_in_place(path)?;
                 continue;
             }
             if directory && after.as_ref().is_some_and(|s| s.mode != 0o160000) {
@@ -176,35 +178,72 @@ impl NativeRepo<'_> {
                 after: None,
             });
         }
-        let entries = target
-            .iter()
-            .map(|entry| IndexEntry {
-                ctime: (0, 0),
-                mtime: (0, 0),
-                dev: 0,
-                ino: 0,
-                mode: entry.mode,
-                uid: 0,
-                gid: 0,
-                size: 0,
-                oid: entry.oid,
-                flags: entry.path.len().min(0x0fff) as u16,
-                extended_flags: None,
-                path: entry.path.clone(),
-            })
-            .collect();
-        let index_after = Index {
-            version: 2,
-            entries,
-            extensions: Vec::new(),
-        };
+        let index_after = target_index(target)?;
+        let index_after = self.snapshot(&canonical_index(index_after, self.store.algo()?))?;
+        *self.planned.borrow_mut() = Some(super::tree_state::Planned {
+            index: index_after.clone(),
+            files: planned,
+        });
         Ok(CheckoutIntent {
             version: 1,
             workspace: self.workspace_identity()?,
             request_id: self.request_id.map(|id| crate::machine::hex(&id)),
             index_before: self.snapshot(&canonical_index(self.index()?, self.store.algo()?))?,
-            index_after: self.snapshot(&canonical_index(index_after, self.store.algo()?))?,
+            index_after,
             files,
         })
     }
+}
+
+/// The index a checkout of `target` leaves in place, refused where a path
+/// of it would be a file and a directory.
+fn target_index(target: &[WorkEntry]) -> Res<Index> {
+    let entry = |entry: &WorkEntry| IndexEntry {
+        ctime: (0, 0),
+        mtime: (0, 0),
+        dev: 0,
+        ino: 0,
+        mode: entry.mode,
+        uid: 0,
+        gid: 0,
+        size: 0,
+        oid: entry.oid,
+        flags: entry.path.len().min(0x0fff) as u16,
+        extended_flags: None,
+        path: entry.path.clone(),
+    };
+    let index = Index {
+        version: 2,
+        entries: target.iter().map(entry).collect(),
+        extensions: Vec::new(),
+    };
+    index_file::ensure_sound(&index)?;
+    Ok(index)
+}
+
+/// Says of a submodule directory left in place what git says. A command
+/// that answers in JSON has no place for it.
+pub(super) fn left_in_place(path: &BString) -> Res<()> {
+    if !crate::diagnostics::json_mode() {
+        let said = format!("warning: unable to rmdir '{path}': Directory not empty\n");
+        crate::diagnostics::emit(said.as_bytes())?;
+    }
+    Ok(())
+}
+
+/// Removes the directory of a submodule at `abs`, which was empty when
+/// the checkout was planned; one that holds something by now stays.
+pub(super) fn remove_left_empty(abs: &Path, path: &BString) -> Res<()> {
+    match std::fs::remove_dir(abs) {
+        Err(e) if e.kind() == std::io::ErrorKind::DirectoryNotEmpty => left_in_place(path),
+        removed => Ok(removed?),
+    }
+}
+
+pub(super) fn holds_untracked(path: &BString) -> Box<dyn std::error::Error> {
+    crate::machine::Failure::refusal(
+        "precondition_failed",
+        format!("checkout target '{path}' is a directory holding untracked files"),
+    )
+    .into()
 }

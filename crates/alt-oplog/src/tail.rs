@@ -144,8 +144,16 @@ impl OpLog {
             synced::cut(&self.durable_path, &self.file, new_len)?;
             self.note_discarded(Discarded::unread(new_len, size, &tail[replayed.valid..]));
         }
+        self.passed = !cut && replayed.valid < tail.len();
         self.len_bytes = new_len;
         Ok(())
+    }
+
+    /// Whether the last read of this handle passed over an unfinished
+    /// append at the end of the log: whole ops may follow it there
+    /// ([`Self::passed_ops`]).
+    pub fn passed_over(&self) -> bool {
+        self.passed
     }
 
     /// For the full check: the ops past the ones this handle holds whose

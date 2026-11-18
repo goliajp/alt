@@ -66,13 +66,13 @@ exit 0
 out| {"schema_version":1,"workspaces":[{"name":"default","path":"<root>/repo","current":true},{"name":"side","path":"<root>/side","current":false}]}
 $ [repo] alt --workspace side status --json
 exit 0
-out| {"schema_version":1,"branch":"side","principal":{"kind":"human","id":"json-test","session":null},"staged":[],"unstaged":[],"untracked":[],"unmerged":[],"clean":true}
+out| {"schema_version":2,"branch":"side","principal":{"kind":"human","id":"json-test","session":null},"staged":[],"unstaged":[],"untracked":[],"unmerged":[],"clean":true}
 $ [repo] alt --workspace side switch develop --json
 exit 1
 err| {"error":{"details":{"operation_ids":[]},"kind":"precondition_failed","message":"branch 'develop' is checked out in workspace 'default'","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:33>","retryable":false},"schema_version":1}
 $ [side] alt status --json
 exit 0
-out| {"schema_version":1,"branch":"side","principal":{"kind":"human","id":"json-test","session":null},"staged":[],"unstaged":[],"untracked":[],"unmerged":[],"clean":true}
+out| {"schema_version":2,"branch":"side","principal":{"kind":"human","id":"json-test","session":null},"staged":[],"unstaged":[],"untracked":[],"unmerged":[],"clean":true}
 $ [side] alt flow feature start inside --json
 exit 0
 out| {"base":"develop","branch":"feature/inside","commit":"<id40:22>","operation_ids":["<id64:34>","<id64:35>"],"request_id":"<id32:36>","schema_version":1}

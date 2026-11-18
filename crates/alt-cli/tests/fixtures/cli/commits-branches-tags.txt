@@ -26,7 +26,7 @@ exit 0
 out| {"branch":"main","commit":"<id40:18>","operation_ids":["<id64:19>"],"request_id":"<id32:20>","schema_version":1,"tree":"<id40:13>"}
 $ [repo] alt status --json
 exit 0
-out| {"schema_version":1,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[],"unstaged":[],"untracked":[],"unmerged":[],"clean":true}
+out| {"schema_version":2,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[],"unstaged":[],"untracked":[],"unmerged":[],"clean":true}
 $ [repo] alt branch --json
 exit 0
 out| {"schema_version":1,"current":"main","branches":[{"name":"main","current":true,"oid":"<id40:18>"}]}
@@ -126,4 +126,4 @@ exit 0
 out| {"schema_version":1,"ops":[{"id":"<id64:69>","request_id":"<id32:70>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"undo","ref_changes":[{"name":"refs/notes/alt/meta","old":"<id40:46>","new":"<id40:47>"}],"workspace":{"name":"default","instance":"<id64:48>"},"inverse_of":"<id64:67>"},{"id":"<id64:67>","request_id":"<id32:68>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"undo","ref_changes":[{"name":"refs/notes/alt/meta","old":"<id40:47>","new":"<id40:46>"}],"workspace":{"name":"default","instance":"<id64:48>"},"inverse_of":"<id64:44>"}]}
 $ [repo] alt status --json
 exit 0
-out| {"schema_version":1,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[],"unstaged":[],"untracked":[],"unmerged":[],"clean":true}
+out| {"schema_version":2,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[],"unstaged":[],"untracked":[],"unmerged":[],"clean":true}

@@ -1,6 +1,6 @@
 //! Linux (glibc) values and layouts for x86_64 and aarch64.
 
-use super::{c_char, c_int, c_uint, c_ulong, c_void};
+use super::{c_char, c_int, c_long, c_uint, c_ulong, c_void};
 
 pub type mode_t = u32;
 pub type nfds_t = c_ulong;
@@ -133,6 +133,17 @@ pub struct dirent {
     pub d_name: [c_char; 256],
 }
 
+#[repr(C)]
+pub struct passwd {
+    pub pw_name: *mut c_char,
+    pub pw_passwd: *mut c_char,
+    pub pw_uid: u32,
+    pub pw_gid: u32,
+    pub pw_gecos: *mut c_char,
+    pub pw_dir: *mut c_char,
+    pub pw_shell: *mut c_char,
+}
+
 unsafe extern "C" {
     /// The address of the calling thread's `errno`.
     #[link_name = "__errno_location"]
@@ -153,4 +164,27 @@ unsafe extern "C" {
         data: *const c_void,
     ) -> c_int;
     pub fn umount2(target: *const c_char, flags: c_int) -> c_int;
+    pub fn inotify_init1(flags: c_int) -> c_int;
+    pub fn inotify_add_watch(fd: c_int, pathname: *const c_char, mask: u32) -> c_int;
+    pub fn inotify_rm_watch(fd: c_int, wd: c_int) -> c_int;
+    fn syscall(number: c_long, ...) -> c_long;
+}
+
+#[cfg(target_arch = "x86_64")]
+const SYS_GETDENTS64: c_long = 217;
+#[cfg(target_arch = "aarch64")]
+const SYS_GETDENTS64: c_long = 61;
+
+/// Fills `buf` with directory entries, each laid out as [`dirent`] with
+/// a name of its own length; returns the bytes written, 0 at the end and
+/// -1 with `errno` set on failure. The kernel is asked by number: the C
+/// library has a function of this name only from glibc 2.30 on.
+///
+/// # Safety
+///
+/// `buf` must be writable for `len` bytes.
+pub unsafe fn getdents64(fd: c_int, buf: *mut c_void, len: usize) -> isize {
+    // SAFETY: the kernel writes at most `len` bytes to `buf`, which the
+    // caller vouches for
+    unsafe { syscall(SYS_GETDENTS64, fd, buf, len) as isize }
 }
