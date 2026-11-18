@@ -26,7 +26,7 @@ fn relaxed(dir: &Path, args: &[&str]) -> Output {
 /// completion, the object store is as before the add. `replaced` leaves
 /// the index the add wrote, which without fsyncs can be there first.
 /// Returns the index from before the add.
-fn add_cut_short(dir: &Path, replaced: bool) -> Vec<u8> {
+pub(super) fn add_cut_short(dir: &Path, replaced: bool) -> Vec<u8> {
     ok(alt(dir, &["init"]));
     fs::write(dir.join("a.txt"), "one\n").unwrap();
     ok(alt(dir, &["add", "a.txt"]));
