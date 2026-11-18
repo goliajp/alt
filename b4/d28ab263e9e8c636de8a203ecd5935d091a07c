@@ -1,0 +1,16 @@
+schema: alt-meta/1
+type: fix
+summary: pass over unsynced records that name lost content where an index run reaches past the synced boundary
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/readers.rs
+touched: crates/alt-cli/tests/it/readers/runs.rs
+touched: crates/alt-cli/tests/it/readers/states.rs
+touched: crates/alt-odb/src/map.rs
+touched: crates/alt-odb/src/odb/confirmed.rs
+touched: crates/alt-odb/src/tier1.rs
+touched: crates/alt-odb/tests/it/confirmed.rs
+touched: crates/alt-store/src/blob/open.rs
+touched: crates/alt-store/src/blobmap.rs
+touched: crates/alt-store/src/reclog.rs
+touched: crates/alt-store/src/runs.rs
