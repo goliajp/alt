@@ -1,0 +1,26 @@
+schema: alt-meta/1
+type: fix
+summary: pass over unsynced records that name lost content when the store is opened without the write lock
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/unconfirmed.rs
+touched: crates/alt-cli/tests/it/unconfirmed_tails.rs
+touched: crates/alt-odb/src/head.rs
+touched: crates/alt-odb/src/map.rs
+touched: crates/alt-odb/src/odb.rs
+touched: crates/alt-odb/src/odb/confirmed.rs
+touched: crates/alt-odb/src/odb/cut.rs
+touched: crates/alt-odb/src/odb/durable.rs
+touched: crates/alt-odb/src/odb/open.rs
+touched: crates/alt-odb/src/odb/settle.rs
+touched: crates/alt-odb/src/odb/sink.rs
+touched: crates/alt-odb/src/synced.rs
+touched: crates/alt-odb/src/tier1.rs
+touched: crates/alt-odb/tests/it/confirmed.rs
+touched: crates/alt-odb/tests/it/dangling.rs
+touched: crates/alt-odb/tests/it/main.rs
+touched: crates/alt-odb/tests/it/synced_note.rs
+touched: crates/alt-store/src/blob.rs
+touched: crates/alt-store/src/blob/open.rs
+touched: crates/alt-store/src/blobmap.rs
+touched: crates/alt-store/src/reclog.rs
