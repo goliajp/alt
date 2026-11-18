@@ -27,9 +27,16 @@ fn len(path: &Path) -> u64 {
     fs::metadata(path).unwrap().len()
 }
 
-fn set_byte(path: &Path, at: u64, byte: u8) {
-    let file = fs::OpenOptions::new().write(true).open(path).unwrap();
-    file.write_all_at(&[byte], at).unwrap();
+/// Changes the byte at `at`, whatever it was.
+fn flip_byte(path: &Path, at: u64) {
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .unwrap();
+    let mut byte = [0];
+    file.read_exact_at(&mut byte, at).unwrap();
+    file.write_all_at(&[!byte[0]], at).unwrap();
 }
 
 fn commit(dir: &Path, text: &str) -> String {
@@ -82,7 +89,7 @@ fn records_after_a_damaged_one_in_map_alt_are_read() {
     let dir = tmp.path();
     let (_, spare, last) = repo(dir);
     // inside the record of the blob no commit names
-    set_byte(&dir.join(".alt/map.alt"), spare + 40, 0xff);
+    flip_byte(&dir.join(".alt/map.alt"), spare + 40);
 
     let passed = ("map.alt", spare, spare + 82);
     let shown = reads_past(
@@ -111,7 +118,7 @@ fn records_after_a_damaged_one_in_the_pack_are_read() {
     let dir = tmp.path();
     let (spare, _, last) = repo(dir);
     // an encoding no record has: the walk of the pack stops at this header
-    set_byte(&dir.join(PACK), spare + 32, 0xff);
+    flip_byte(&dir.join(PACK), spare + 32);
 
     let out = past(dir, &["cat-file", "-p", &last]);
     let said = stderr(&out);
@@ -136,7 +143,7 @@ fn the_log_is_read_up_to_a_damaged_operation() {
     let log = dir.join(".alt/oplog/log");
     let before = len(&log);
     ok(alt(dir, &["branch", "later"]));
-    set_byte(&log, before + 30, 0xff);
+    flip_byte(&log, before + 30);
 
     let passed = ("oplog/log", before, len(&log));
     let head = reads_past(dir, &["rev-parse", "HEAD"], "oplog record corrupt", passed);
@@ -205,4 +212,46 @@ fn the_daemon_does_not_start_reading_past_damage() {
         .unwrap();
     assert!(!out.status.success(), "{out:?}");
     assert!(stderr(&out).contains("ALT_READ_PAST_DAMAGE"), "{out:?}");
+}
+
+#[test]
+fn an_export_fails_on_a_ref_whose_object_is_not_stored_and_past_damage_leaves_the_ref_out() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let dir = &tmp.path().join("repo");
+    fs::create_dir(dir).unwrap();
+    let second = super::fsck_tails::store_behind_its_log(dir);
+    let before = files(&dir.join(".alt"));
+
+    let target = tmp.path().join("exported");
+    let export = alt(dir, &["export", target.to_str().unwrap()]);
+    assert!(!export.status.success(), "{export:?}");
+    let said = stderr(&export);
+    assert!(
+        said.contains("which is not stored; nothing was exported"),
+        "{said}"
+    );
+    assert!(said.contains("ref refs/"), "{said}");
+    assert!(!target.join(".git").exists());
+
+    let export = past(dir, &["export", target.to_str().unwrap()]);
+    let said = stderr(&export);
+    let left = format!(
+        "warning: left out ref refs/heads/main: it points at {second}, which is not stored"
+    );
+    assert!(said.contains(&left), "{said}");
+    assert!(ok(export).contains("exported"));
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .current_dir(&target)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let fsck = git(&["fsck"]);
+    assert!(fsck.status.success(), "{fsck:?}");
+    let refs = String::from_utf8(git(&["for-each-ref"]).stdout).unwrap();
+    assert!(!refs.contains("refs/heads/main"), "{refs}");
+    assert_eq!(files(&dir.join(".alt")), before);
 }

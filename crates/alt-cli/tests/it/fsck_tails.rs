@@ -246,16 +246,13 @@ fn operations_that_were_never_synced_are_told_and_fail_the_check_until_a_command
     }
 }
 
-#[test]
-fn a_ref_that_points_at_an_object_which_is_not_stored_is_named() {
-    let tmp = alt_os::temp::tempdir().unwrap();
-    let dir = tmp.path();
+/// One commit, and then the object store as it was after it under a log
+/// with a second commit, every operation of it synced. Gives the second.
+pub(super) fn store_behind_its_log(dir: &Path) -> String {
     ok(alt(dir, &["init"]));
     fs::write(dir.join("a.txt"), "one\n").unwrap();
     ok(alt(dir, &["add", "a.txt"]));
     ok(alt(dir, &["commit", "-m", "first"]));
-    // the object store as it is now under a log with one commit more,
-    // every operation of it synced
     let inside = |path: &Path| {
         path.starts_with(dir.join(".alt/oplog")) || path.starts_with(dir.join(".alt/refs"))
     };
@@ -275,6 +272,14 @@ fn a_ref_that_points_at_an_object_which_is_not_stored_is_named() {
     for (path, bytes) in kept {
         fs::write(path, bytes).unwrap();
     }
+    second
+}
+
+#[test]
+fn a_ref_that_points_at_an_object_which_is_not_stored_is_named() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let dir = tmp.path();
+    let second = store_behind_its_log(dir);
 
     let (passes, said, errors) = fsck(dir);
     assert!(!passes, "{said}");

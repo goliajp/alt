@@ -1501,6 +1501,9 @@ pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, head: &str, out: &mut
                 return Err("export needs a .alt store; run inside one (see 'alt import')".into());
             }
             let report = alt_export::export_git(repo.git_dir(), target)?;
+            for (name, oid) in &report.left_out {
+                eprintln!("warning: left out ref {name}: it points at {oid}, which is not stored");
+            }
             writeln!(
                 out,
                 "exported {} objects, {} refs{} into {}",
