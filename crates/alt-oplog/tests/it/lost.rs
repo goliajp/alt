@@ -41,3 +41,38 @@ fn an_append_refuses_a_log_that_ends_short_of_its_synced_records() {
     drop(log);
     assert_eq!(state(), before);
 }
+
+/// A writer that settles the log before it appends finds the same and
+/// cuts nothing: the operations past the end are not ones to look at.
+#[test]
+fn a_settle_refuses_a_log_that_ends_short_of_its_synced_records() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let path = dir.path().join("log");
+    let mut log = OpLog::open(dir.path()).unwrap();
+    let mut ends = Vec::new();
+    for n in 0..3u64 {
+        log.append("actor", n, b"payload").unwrap();
+        log.sync().unwrap();
+        ends.push(fs::metadata(&path).unwrap().len());
+    }
+    drop(log);
+    let file = OpenOptions::new().write(true).open(&path).unwrap();
+    file.set_len(ends[1]).unwrap();
+    drop(file);
+    let before = (
+        fs::read(&path).unwrap(),
+        fs::read(dir.path().join("durable")).unwrap(),
+    );
+
+    let mut log = OpLog::open(dir.path()).unwrap();
+    match log.settle(|_| Ok::<_, OpLogError>(true)) {
+        Err(OpLogError::Lost { synced, holds }) => assert_eq!((synced, holds), (ends[2], ends[1])),
+        other => panic!("{other:?}"),
+    }
+    drop(log);
+    let after = (
+        fs::read(&path).unwrap(),
+        fs::read(dir.path().join("durable")).unwrap(),
+    );
+    assert!(after == before);
+}
