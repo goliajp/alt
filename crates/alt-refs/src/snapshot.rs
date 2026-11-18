@@ -4,21 +4,25 @@
 //! log) snapshot is simply ignored and rebuilt — exactly like the pack idx,
 //! the oplog stays the single source of state.
 //!
-//! Version 2 (all integers little-endian):
+//! Version 3 (all integers little-endian):
 //!
 //! ```text
 //! [magic "ALTS"][version u8]
+//! [note 16]                         how far the log is known synced
 //! [op id 32][record start u64][record end u64][op count u64]
 //! [ref count u32][block count u32]
 //! block count x [offset u32]        where each block of 64 refs starts
 //! refs, names ascending: [name len u16][name][target]
-//! [checksum 8]                      over everything before it
+//! [checksum 8]                      over everything between it and the note
 //! ```
 //!
 //! The op's place in the log lets the log be read from there on; the block
-//! offsets let a lookup parse one block instead of every ref. Version 1
-//! files (op id and refs only) are still read; they cost one full replay,
-//! after which a version 2 file replaces them.
+//! offsets let a lookup parse one block instead of every ref. The note
+//! (see [`alt_oplog::NotePlace`]) is the one part a writer of the log
+//! changes in place, after it has synced the log: an open whose log is no
+//! longer than the note says does not read the log's marker. Version 2
+//! files (no note) and version 1 files (op id and refs only) are still
+//! read; a version 1 file costs one full replay.
 
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
@@ -34,9 +38,24 @@ use crate::{RefError, RefTarget};
 
 const MAGIC: [u8; 4] = *b"ALTS";
 const VERSION_OP_ONLY: u8 = 1;
-const VERSION: u8 = 2;
-/// magic, version, op id, record start, record end, op count
-const ANCHOR_END: usize = 5 + 32 + 24;
+const VERSION_NO_NOTE: u8 = 2;
+const VERSION: u8 = 3;
+const NOTE_AT: usize = 5;
+const NOTE_END: usize = NOTE_AT + alt_oplog::NOTE_LEN;
+/// op id, record start, record end, op count
+const ANCHOR_LEN: usize = 32 + 24;
+
+/// Where a writer of the log notes in the snapshot at `path` how far the
+/// log is synced.
+pub fn note_place(path: &Path) -> alt_oplog::NotePlace {
+    let mut tag = MAGIC.to_vec();
+    tag.push(VERSION);
+    alt_oplog::NotePlace {
+        path: path.to_owned(),
+        tag,
+        at: NOTE_AT as u64,
+    }
+}
 
 const TARGET_OID: u8 = 1;
 const TARGET_SYMBOLIC: u8 = 2;
@@ -49,6 +68,8 @@ pub struct Snapshot {
     pub refs: Refs,
     /// size of the file
     pub len: u64,
+    /// how far the file notes the log as synced; absent before version 3
+    pub synced: Option<u64>,
 }
 
 fn encode_target(buf: &mut Vec<u8>, target: &RefTarget) {
@@ -69,9 +90,11 @@ fn encode_target(buf: &mut Vec<u8>, target: &RefTarget) {
     }
 }
 
-/// The bytes of a version 2 snapshot of `count` refs (in name order).
+/// The bytes of a snapshot of `count` refs (in name order) that notes the
+/// log as synced up to `synced`.
 fn encode<'a>(
     at: &Anchor,
+    synced: u64,
     count: usize,
     refs: impl Iterator<Item = (&'a str, &'a RefTarget)>,
 ) -> Vec<u8> {
@@ -79,6 +102,7 @@ fn encode<'a>(
     let mut buf = Vec::new();
     buf.extend_from_slice(&MAGIC);
     buf.push(VERSION);
+    buf.extend_from_slice(&alt_oplog::encode_note(synced));
     buf.extend_from_slice(&at.op.0);
     buf.extend_from_slice(&at.start.to_le_bytes());
     buf.extend_from_slice(&at.end.to_le_bytes());
@@ -97,23 +121,25 @@ fn encode<'a>(
         buf.extend_from_slice(name.as_bytes());
         encode_target(&mut buf, target);
     }
-    let check: [u8; 8] = alt_hash::blake3::hash(&buf).as_bytes()[..8]
+    let check: [u8; 8] = alt_hash::blake3::hash(&buf[NOTE_END..]).as_bytes()[..8]
         .try_into()
         .unwrap();
     buf.extend_from_slice(&check);
     buf
 }
 
-/// Writes the snapshot of `count` refs (in name order) and returns its
-/// size. No fsync: a snapshot lost or torn in a crash fails its checksum
-/// and is rebuilt from the log.
+/// Writes the snapshot of `count` refs (in name order), with the note
+/// that the log is synced up to `synced`, and returns its size. No fsync:
+/// a snapshot lost or torn in a crash fails its checksum and is rebuilt
+/// from the log.
 pub fn write<'a>(
     path: &Path,
     at: &Anchor,
+    synced: u64,
     count: usize,
     refs: impl Iterator<Item = (&'a str, &'a RefTarget)>,
 ) -> Result<u64, RefError> {
-    let buf = encode(at, count, refs);
+    let buf = encode(at, synced, count, refs);
 
     // readers refresh the snapshot too, any number at once, in one process
     // or in several that may share process ids: each writes a file no one
@@ -220,42 +246,51 @@ pub fn read(path: &Path) -> Option<Snapshot> {
     let version = map[4];
     let len = map.len() as u64;
     let body_len = map.len() - 8;
-    if alt_hash::blake3::hash(&map[..body_len]).as_bytes()[..8] != map[body_len..] {
+    // the note is changed in place: it carries its own checksum
+    let (from, synced) = match version {
+        VERSION => (NOTE_END, alt_oplog::parse_note(map.get(NOTE_AT..NOTE_END)?)),
+        _ => (0, None),
+    };
+    let checked = map.get(from..body_len)?;
+    if alt_hash::blake3::hash(checked).as_bytes()[..8] != map[body_len..] {
         return None;
     }
     let body = &map[..body_len];
-    let at_op = OpId(body[5..37].try_into().unwrap());
 
     if version == VERSION_OP_ONLY {
         return Some(Snapshot {
-            at_op,
+            at_op: OpId(body[5..37].try_into().unwrap()),
             anchor: None,
             refs: refs_op_only(body)?,
             len,
+            synced,
         });
     }
-    if version != VERSION {
+    if version != VERSION && version != VERSION_NO_NOTE {
         return None;
     }
+    let at = if version == VERSION { NOTE_END } else { 5 };
     let anchor = Anchor {
-        op: at_op,
-        start: field(body, 37)?,
-        end: field(body, 45)?,
-        count: field(body, 53)?,
+        op: OpId(body.get(at..at + 32)?.try_into().ok()?),
+        start: field(body, at + 32)?,
+        end: field(body, at + 40)?,
+        count: field(body, at + 48)?,
     };
-    let count = u32::from_le_bytes(body.get(ANCHOR_END..ANCHOR_END + 4)?.try_into().ok()?);
-    let blocks = u32::from_le_bytes(body.get(ANCHOR_END + 4..ANCHOR_END + 8)?.try_into().ok()?);
-    let table = ANCHOR_END + 8;
+    let counts = at + ANCHOR_LEN;
+    let count = u32::from_le_bytes(body.get(counts..counts + 4)?.try_into().ok()?);
+    let blocks = u32::from_le_bytes(body.get(counts + 4..counts + 8)?.try_into().ok()?);
+    let table = counts + 8;
     let entries = table.checked_add((blocks as usize).checked_mul(4)?)?;
     if blocks as usize != (count as usize).div_ceil(BLOCK) || entries > body.len() {
         return None;
     }
     let refs = Base::new(map, table, count as usize, body_len);
     Some(Snapshot {
-        at_op,
+        at_op: anchor.op,
         anchor: Some(anchor),
         refs: Refs::from_base(refs),
         len,
+        synced,
     })
 }
 
@@ -266,8 +301,9 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     fn verifies(map: &[u8]) -> bool {
-        map.len() > 8
-            && alt_hash::blake3::hash(&map[..map.len() - 8]).as_bytes()[..8] == map[map.len() - 8..]
+        map.len() > NOTE_END + 8
+            && alt_hash::blake3::hash(&map[NOTE_END..map.len() - 8]).as_bytes()[..8]
+                == map[map.len() - 8..]
     }
 
     /// Two stores in one process (two threads) refresh the same snapshot:
@@ -297,7 +333,7 @@ mod tests {
                             count: round + 1,
                         };
                         let listed = refs.iter().map(|(name, target)| (name.as_str(), target));
-                        write(&path, &anchor, refs.len(), listed)
+                        write(&path, &anchor, round, refs.len(), listed)
                             .unwrap_or_else(|e| panic!("writer {writer} round {round}: {e:?}"));
                     }
                 })

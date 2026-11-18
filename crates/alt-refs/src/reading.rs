@@ -3,12 +3,44 @@
 //! there to cut or to bound is left for the next command that writes.
 
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
+use alt_git_codec::ObjectId;
 use alt_oplog::OpLogError;
 
 use crate::{RefError, RefStore, fold_new};
 
+/// How many ops at the end of the log the stores of this process leave
+/// out ([`RefStore::open_confirmed`]).
+static LEFT_OUT: OnceLock<usize> = OnceLock::new();
+
+/// How many ops at the end of the log this process answers without: those
+/// that were never synced and name objects which are not stored. `None`
+/// when it found none.
+pub fn left_out() -> Option<usize> {
+    LEFT_OUT.get().copied()
+}
+
 impl RefStore {
+    /// [`Self::open_reading`] for a command that answers from the refs:
+    /// the log is taken as ending before the first op that was never
+    /// synced and makes a ref point at an object `stored` does not vouch
+    /// for, where the next command that writes cuts it. Every later open
+    /// of the log by this process ends there too.
+    pub fn open_confirmed(
+        alt_dir: impl Into<PathBuf>,
+        stored: impl Fn(&ObjectId) -> bool,
+    ) -> Result<Self, RefError> {
+        let alt_dir = alt_dir.into();
+        let store = Self::open_reading(&alt_dir)?;
+        let Some(found) = store.unheld(stored)? else {
+            return Ok(store);
+        };
+        alt_oplog::end_reads_at(&alt_dir.join("oplog"), found.at)?;
+        let _ = LEFT_OUT.set(found.ops);
+        Self::open_reading(alt_dir)
+    }
+
     /// Opens the store to be read and nothing else, for a check that must
     /// leave it as it finds it: the log is not repaired and the snapshot is
     /// not refreshed.

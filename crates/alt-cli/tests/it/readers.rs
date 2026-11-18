@@ -227,16 +227,14 @@ fn a_reader_answers_as_it_does_after_the_next_writer_cut() {
         let discarded = told(&wrote, "warning: discarded ", ops).unwrap_or(0);
         for args in ASKED {
             let read = alt(&found, args);
-            if discarded > 0 {
-                // whole operations go with what the writer cuts. A reader
-                // has them in its log until it fails on what they name;
-                // it then leaves out the ones the writer discards
-                let never = " operation(s) in the operation log were never synced";
-                let Some(passed) = told(&read, "warning: the last ", never) else {
-                    continue;
-                };
+            // whole operations go with what the writer cuts: a reader
+            // leaves out the ones the writer discards, and says so
+            let never = " operation(s) in the operation log were never synced";
+            let passed = told(&read, "warning: the last ", never).unwrap_or(0);
+            // a command that fails says why and nothing else
+            if read.status.success() {
                 assert_eq!(passed, discarded, "{name}: alt {args:?}");
-                left_out += 1;
+                left_out += usize::from(discarded > 0);
             }
             let after = alt(&written, args);
             assert_eq!(answer(&read), answer(&after), "{name}: alt {args:?}");
@@ -247,4 +245,27 @@ fn a_reader_answers_as_it_does_after_the_next_writer_cut() {
         cut >= 20 && same >= 120 && left_out >= 12,
         "{cut} states cut, {same} answers the same, {left_out} of them with operations left out"
     );
+}
+
+/// An export is a command that only reads: it writes out the repository
+/// as it was before the operations that were never synced and name
+/// objects which are not stored, and says so.
+#[test]
+fn an_export_leaves_out_what_every_reader_leaves_out() {
+    let base = Base::build();
+    let dir = base.state("exported", &[Step::Lag, Step::PackLost]);
+    let head = alt(&dir, &["rev-parse", "HEAD"]);
+    assert!(stderr(&head).contains("never synced"), "{head:?}");
+    let out = dir.with_extension("git");
+    let export = alt(&dir, &["export", out.to_str().unwrap()]);
+    assert!(stderr(&export).contains("never synced"), "{export:?}");
+    assert!(export.status.success(), "{export:?}");
+    let exported = std::process::Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(&out)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .unwrap();
+    assert_eq!(answer(&exported), answer(&head));
 }

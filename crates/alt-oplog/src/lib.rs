@@ -25,6 +25,7 @@
 
 mod bound;
 mod lock;
+mod note;
 mod op;
 mod read;
 mod scan;
@@ -38,6 +39,7 @@ use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+pub use note::{NOTE_LEN, NotePlace, encode_note, parse_note};
 pub use op::{Op, OpId, OpLogError, ROOT};
 pub use settle::{Unconfirmed, end_reads_at, passed_damage, reading_past_damage};
 pub use synced::{OpLogSink, SyncNamed};
@@ -106,6 +108,8 @@ pub struct OpLog {
     named: Option<SyncNamed>,
     /// What this handle cut off the end of the log and nobody was told.
     discarded: Vec<Discarded>,
+    /// Where this handle notes how far the marker says the log is synced.
+    note: Option<NotePlace>,
 }
 
 impl OpLog {
@@ -190,6 +194,7 @@ impl OpLog {
             others_to: scan.valid_len,
             named: None,
             discarded: Vec::new(),
+            note: None,
         }
     }
 

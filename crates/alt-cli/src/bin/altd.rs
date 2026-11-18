@@ -246,6 +246,12 @@ mod unix {
                 true => store.settle().and_then(|()| Ok(repo.refresh()?)),
                 false => store.follow().and_then(|()| Ok(repo.follow()?)),
             };
+            // operations that were never synced and name objects which are
+            // not stored are left out by a process that opens the store
+            // for this one command: the client, when it gets no answer
+            if !execution.writing && refreshed.is_ok() && store.holds_unconfirmed()? {
+                return Ok(());
+            }
             let (mut response, operations) = match refreshed {
                 Ok(()) => execution.on_store(store, repo),
                 Err(error) => (execution.failure(error.as_ref()), Vec::new()),

@@ -378,8 +378,8 @@ fn a_damaged_snapshot_is_ignored_whatever_part_is_hit() {
     }
     let expect = all_refs(&RefStore::open(dir.path()).unwrap());
     let good = fs::read(&path).unwrap();
-    // header, block table, a ref in the middle, the checksum
-    for at in [6, 70, good.len() / 2, good.len() - 1] {
+    // the op id, block table, a ref in the middle, the checksum
+    for at in [22, 86, good.len() / 2, good.len() - 1] {
         let mut bad = good.clone();
         bad[at] ^= 0x10;
         fs::write(&path, &bad).unwrap();
@@ -387,4 +387,13 @@ fn a_damaged_snapshot_is_ignored_whatever_part_is_hit() {
         assert!(!store.oplog().anchored(), "byte {at}");
         assert!(all_refs(&store) == expect, "byte {at}");
     }
+    // the note of how far the log is synced is not part of the snapshot
+    // proper: a hit there costs the note, and the marker is read instead
+    let mut bad = good.clone();
+    bad[6] ^= 0x10;
+    fs::write(&path, &bad).unwrap();
+    let store = RefStore::open_read_only(dir.path()).unwrap();
+    assert!(store.oplog().anchored());
+    assert!(all_refs(&store) == expect);
+    assert!(store.confirmed());
 }

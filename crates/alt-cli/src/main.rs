@@ -66,7 +66,7 @@ fn deliver(response: &Response) -> u8 {
 }
 
 fn run() -> Response {
-    let response = native::answer_before_unconfirmed(attempt(), attempt);
+    let response = native::tell_left_out(attempt());
     alt_cli::past_damage::report(response)
 }
 

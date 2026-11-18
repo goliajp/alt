@@ -29,6 +29,7 @@ use state::Refs;
 pub use alt_oplog::{OpId, Unconfirmed};
 pub use check::RefsChecked;
 pub use policy::{RefError, RefPolicy, StateCheck};
+pub use reading::left_out;
 pub use settle::named_objects;
 pub use tx::{IdemKey, PAYLOAD_REF_TX, ParsedTx, RefChange, parse_tx};
 
@@ -72,6 +73,10 @@ pub struct RefStore {
     by_key: BTreeMap<IdemKey, OpId>,
     /// The oplog's count of reading the log anew that `refs` follows.
     reads_seen: u64,
+    /// Up to where the log was known synced when this store was opened, by
+    /// the snapshot's note or else by the log's marker; zero when neither
+    /// told.
+    synced: u64,
 }
 
 impl RefStore {
@@ -90,10 +95,18 @@ impl RefStore {
         let snapshot_path = alt_dir.join("refs").join("snapshot");
         let snapshot = snapshot::read(&snapshot_path);
         let anchor = snapshot.as_ref().and_then(|snap| snap.anchor);
-        let oplog = if read_only {
+        let mut oplog = if read_only {
             OpLog::open_read_only(&alt_dir.join("oplog"), anchor)?
         } else {
             OpLog::open_at(&alt_dir.join("oplog"), anchor)?
+        };
+        oplog.note_synced_at(snapshot::note_place(&snapshot_path));
+        // a log no longer than the snapshot notes as synced needs no look
+        // at its marker
+        let noted = snapshot.as_ref().map(|snap| snap.synced);
+        let synced = match noted.flatten() {
+            Some(noted) if oplog.appended_len() <= noted => noted,
+            _ => oplog.synced_to().unwrap_or(0),
         };
 
         let recent = oplog.recent();
@@ -122,10 +135,13 @@ impl RefStore {
             snapshot_len,
             by_key,
             reads_seen: 0,
+            synced,
         };
         // a reader refreshes a snapshot that has fallen behind (or predates
-        // anchors), so the next open is short whoever runs it
-        if snapshots && !store.oplog.clamped() && store.snapshot_is_due() {
+        // anchors, or the note), so the next open is short whoever runs it
+        let unnoted = noted.is_some_and(|noted| noted != Some(synced))
+            && synced >= store.oplog.appended_len();
+        if snapshots && !store.oplog.clamped() && (store.snapshot_is_due() || unnoted) {
             // a cache: where it cannot be written, the open still stands
             let _ = store.snapshot();
         }
@@ -305,9 +321,14 @@ impl RefStore {
         if let Some(dir) = self.snapshot_path.parent() {
             std::fs::create_dir_all(dir)?;
         }
+        // ops this handle appended were synced since it was opened
+        if !self.known_synced() {
+            self.synced = self.oplog.synced_to().unwrap_or(self.synced);
+        }
         self.snapshot_len = snapshot::write(
             &self.snapshot_path,
             &head,
+            self.synced,
             self.refs.len(),
             self.refs.iter(),
         )?;

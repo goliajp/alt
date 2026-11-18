@@ -48,7 +48,10 @@ impl AltBackend {
             return Ok(refs);
         }
         let refs = match self.reading {
-            true => alt_refs::RefStore::open_reading(&self.alt_dir)?,
+            // an object that does not read is reported by whoever reads it
+            true => alt_refs::RefStore::open_confirmed(&self.alt_dir, |oid| {
+                self.odb.contains(oid).unwrap_or(true)
+            })?,
             false => alt_refs::RefStore::open(&self.alt_dir)?,
         };
         Ok(self.refs.get_or_init(|| refs))

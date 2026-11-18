@@ -5,9 +5,8 @@
 //! out and not the objects. After a power cut such a transaction starts
 //! past the boundary the log's marker records: no command was told it
 //! happened. A command that writes cuts the log from the first one on
-//! before it does anything else. A command that only reads and fails on
-//! such a repository runs again on the log as it stood before them, and
-//! says so; it changes no file.
+//! before it does anything else. A command that only reads answers from
+//! the log as it stood before them, and says so; it changes no file.
 //!
 //! # The order locks are taken in
 //!
@@ -137,46 +136,17 @@ impl Store {
     }
 }
 
-/// The answer to a command: `first` unless the command only reads, failed,
-/// and the repository holds operations that were never synced and name
-/// objects which are not stored. `attempt` then runs it again, in this
-/// process, on the log as it stood before those operations.
-pub fn answer_before_unconfirmed(first: Response, attempt: impl Fn() -> Response) -> Response {
-    if first.exit_code == 0 {
-        return first;
-    }
-    let found = (|| -> Res<Option<alt_refs::Unconfirmed>> {
-        let Ok(parsed) = crate::machine::parse(std::env::args_os().collect()) else {
-            return Ok(None);
-        };
-        let command = &parsed.cli.command;
-        // the check reports the repository as it is
-        if crate::cli::mutates_command(command)
-            || matches!(command, crate::cli::Command::Fsck { .. })
-        {
-            return Ok(None);
-        }
-        let cwd = std::env::current_dir()?;
-        let (alt_dir, _) = resolve_workspace(&cwd, parsed.cli.workspace.as_deref())?;
-        let found = Store::open_read_only(alt_dir.clone())?.unconfirmed()?;
-        if let Some(found) = found {
-            alt_oplog::end_reads_at(&alt_dir.join("oplog"), found.at)?;
-        }
-        Ok(found)
-    })();
-    let Ok(Some(found)) = found else {
-        return first;
-    };
-    crate::client::stay_direct();
-    let mut again = attempt();
-    if again.exit_code == 0 {
+/// The answer to a command, told when it shows the repository without
+/// the last operations of the log: a command that only reads leaves out
+/// those that were never synced and name objects which are not stored.
+pub fn tell_left_out(mut response: Response) -> Response {
+    if let (0, Some(ops)) = (response.exit_code, alt_refs::left_out()) {
         let warning = format!(
-            "warning: the last {} operation(s) in the operation log were never synced to disk \
+            "warning: the last {ops} operation(s) in the operation log were never synced to disk \
              and name objects that are not stored; this shows the repository as it was before \
-             them. The next command that writes discards them.\n",
-            found.ops
+             them. The next command that writes discards them.\n"
         );
-        again.stderr.splice(0..0, warning.into_bytes());
+        response.stderr.splice(0..0, warning.into_bytes());
     }
-    again
+    response
 }

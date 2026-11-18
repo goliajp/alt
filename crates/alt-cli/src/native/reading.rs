@@ -67,12 +67,22 @@ impl Store {
     /// Opens the store for a command that only reads: as
     /// [`Self::open_read_only`], but a ref snapshot that fell behind is
     /// written anew, and index runs over synced records that have none.
+    /// The refs are as the log had them before the operations the next
+    /// command that writes cuts (see [`RefStore::open_confirmed`]).
     pub fn open_reading(alt_dir: PathBuf) -> Res<Self> {
-        let (odb, refs) = (
-            NativeOdb::reading(&alt_dir),
-            RefStore::open_reading(&alt_dir)?,
-        );
+        let odb = NativeOdb::reading(&alt_dir);
+        // an object that does not read is reported by whoever reads it
+        let refs = RefStore::open_confirmed(&alt_dir, |oid| odb.contains(oid).unwrap_or(true))?;
         Self::opened(alt_dir, odb, refs)
+    }
+
+    /// For a store held across commands, before one that only reads:
+    /// whether the log ends in operations that were never synced and
+    /// name objects which are not stored. Such a command is answered by
+    /// a process that opens the store without them.
+    pub fn holds_unconfirmed(&self) -> Res<bool> {
+        let stored = |oid: &ObjectId| self.odb.contains(oid).unwrap_or(true);
+        Ok(self.refs.unheld(stored)?.is_some())
     }
 
     /// The git-layer view of this store, held the way the store is: of a

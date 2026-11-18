@@ -5,7 +5,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Output;
 
-use super::super::unconfirmed::{alt, alt_command, ok};
+use super::super::unconfirmed::{alt, alt_command, ok, stderr};
 use super::states::{Base, Step};
 use super::{changed, tree};
 
@@ -81,6 +81,36 @@ fn a_daemon_serving_commands_that_only_read_sees_what_other_processes_wrote() {
     }
     assert!(ok(served(&dir, &["log", "-n", "1"])).contains("by another process"));
     assert!(ok(served(&dir, &["branch"])).contains("other"));
+    let still = fs::read(dir.join(".alt/daemon.meta")).unwrap();
+    assert_eq!(still, daemon, "another daemon took over");
+}
+
+/// Operations that were never synced and name objects which are not
+/// stored are left out by a command that reads, whoever runs it: a
+/// daemon that finds them in the store it opens hands the command back
+/// to the client. (The marker of a store a daemon already holds does not
+/// go back: a power cut that leaves such operations ends the daemon.)
+#[test]
+fn a_command_that_only_reads_is_answered_the_same_through_a_daemon() {
+    let base = Base::build();
+    let dir = base.state("left", &[Step::Lag, Step::PackLost]);
+    ok(served(&dir, &["branch"]));
+    let daemon = fs::read(dir.join(".alt/daemon.meta")).unwrap();
+    for args in [
+        &["rev-parse", "HEAD"][..],
+        &["log", "-n", "3"],
+        &["cat-file", "-p", "HEAD"],
+        &["status"],
+    ] {
+        let direct = alt(&dir, args);
+        assert!(stderr(&direct).contains("never synced"), "{direct:?}");
+        let through = served(&dir, args);
+        assert_eq!(
+            (through.status.code(), &through.stdout, stderr(&through)),
+            (direct.status.code(), &direct.stdout, stderr(&direct)),
+            "alt {args:?}"
+        );
+    }
     let still = fs::read(dir.join(".alt/daemon.meta")).unwrap();
     assert_eq!(still, daemon, "another daemon took over");
 }

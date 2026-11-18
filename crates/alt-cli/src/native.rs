@@ -51,7 +51,7 @@ mod sequence_editor;
 mod settings;
 mod task;
 mod unconfirmed;
-pub use unconfirmed::{AfterDiscards, Discards, answer_before_unconfirmed};
+pub use unconfirmed::{AfterDiscards, Discards, tell_left_out};
 mod workspace;
 pub use workspace::resolve_workspace;
 

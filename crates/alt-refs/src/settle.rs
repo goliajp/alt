@@ -32,17 +32,38 @@ impl RefStore {
         self.oplog.sync_named_with(sync);
     }
 
+    /// Whether the log is no longer than it was known synced when this
+    /// store was opened: nothing is read to tell.
+    pub(crate) fn known_synced(&self) -> bool {
+        self.oplog.appended_len() <= self.synced
+    }
+
     /// Whether every op of the log is recorded as synced. Reads the
-    /// marker and takes no lock.
+    /// marker, unless the snapshot's note already said so, and takes no
+    /// lock.
     pub fn confirmed(&self) -> bool {
-        self.oplog.confirmed()
+        self.known_synced() || self.oplog.confirmed()
     }
 
     /// Whether ops of the log lie past a boundary its marker records, for
-    /// a writer to look at ([`Self::settle`]). Reads the marker and takes
-    /// no lock.
+    /// a writer to look at ([`Self::settle`]). Reads the marker, unless
+    /// the snapshot's note already said there are none, and takes no lock.
     pub fn unsettled(&self) -> bool {
-        self.oplog.unsettled()
+        !self.known_synced() && self.oplog.unsettled()
+    }
+
+    /// For a reader: the ops at the end of the log that were never synced
+    /// and make a ref point at an object `stored` does not vouch for, the
+    /// ops a writer would cut. Nothing changes, and nothing is read where
+    /// the snapshot's note says the log is synced.
+    pub fn unheld(
+        &self,
+        stored: impl Fn(&ObjectId) -> bool,
+    ) -> Result<Option<Unconfirmed>, RefError> {
+        if self.known_synced() {
+            return Ok(None);
+        }
+        self.unconfirmed(|op| Ok::<_, RefError>(named_objects(op)?.iter().all(&stored)))
     }
 
     /// For a reader: the ops at the end of the log that a writer would

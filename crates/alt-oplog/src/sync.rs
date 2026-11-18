@@ -45,6 +45,7 @@ impl OpLog {
             appended: self.deferred.clone(),
             durable_path: self.durable_path.clone(),
             named: self.named.clone(),
+            note: self.note.clone(),
         })
     }
 
@@ -56,6 +57,18 @@ impl OpLog {
     /// called with no lock of the log held.
     pub fn sync_named_with(&mut self, sync: SyncNamed) {
         self.named = Some(sync);
+    }
+
+    /// Has this log, and a sink made from it afterwards, note at `place`
+    /// how far the marker says the log is synced whenever they raise it.
+    pub fn note_synced_at(&mut self, place: crate::NotePlace) {
+        self.note = Some(place);
+    }
+
+    /// How far the marker says the log is synced, where it records a
+    /// boundary that holds. Reads the marker and takes no lock.
+    pub fn synced_to(&self) -> Option<u64> {
+        Marker::read(&self.durable_path).unsynced_from()
     }
 
     /// The fsync-coalescing core: fsync only if no other committer already made
@@ -93,7 +106,10 @@ impl OpLog {
                     Some(eof)
                 }
             };
-            synced::record(&self.durable_path, self.generation, target, eof)?;
+            let whole = synced::record(&self.durable_path, self.generation, target, eof)?;
+            if let (Some(note), Some(whole)) = (&self.note, whole) {
+                note.raise(whole);
+            }
             Ok(())
         })();
         let _ = unlock(&sync_lock);

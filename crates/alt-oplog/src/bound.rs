@@ -50,6 +50,9 @@ impl OpLog {
         } else if !marker.trusted() {
             self.file.sync_all()?;
             synced::establish(&self.durable_path, upto)?;
+            if let Some(note) = &self.note {
+                note.raise(upto);
+            }
         }
         Ok(())
     }

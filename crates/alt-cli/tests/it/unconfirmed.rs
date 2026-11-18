@@ -129,6 +129,13 @@ pub(super) fn power_cut(dir: &Path, lost: Lost) -> (String, String) {
         .open(dir.join(".alt/odb.lock"))
         .unwrap();
     lock.write_all_at(&[0u8; 48], 1176).unwrap();
+    // and the snapshot's of how far the operation log was
+    if let Ok(snapshot) = fs::OpenOptions::new()
+        .write(true)
+        .open(dir.join(".alt/refs/snapshot"))
+    {
+        snapshot.write_all_at(&[0u8; 16], 5).unwrap();
+    }
     (first, second)
 }
 
@@ -145,18 +152,19 @@ fn a_commit_the_log_kept_and_the_store_lost_is_passed_over_cut_and_made_again() 
         assert!(stderr(&log).contains("never synced"), "{lost:?}: {log:?}");
         let log = ok(log);
         assert!(log.contains(&first) && !log.contains(&second), "{log}");
-        // a command falls back when an object it reads is missing: with
-        // only the notes lost, the commit itself reads, and is shown
-        let whole = !matches!(lost, Lost::NotesCommit);
+        // every command answers without the operation, whichever of its
+        // objects is lost: with only the notes lost the commit itself
+        // reads, and the operation that names both still goes
         let head = alt(dir, &["cat-file", "-p", "HEAD"]);
-        assert_eq!(stderr(&head).contains("never synced"), whole, "{head:?}");
-        let subject = if whole { "first\n" } else { "second\n" };
-        assert!(ok(head).ends_with(subject), "{lost:?}");
+        assert!(stderr(&head).contains("never synced"), "{head:?}");
+        assert!(ok(head).ends_with("first\n"), "{lost:?}");
         let status = alt(dir, &["status"]);
-        assert_eq!(stderr(&status).contains("never synced"), whole, "{lost:?}");
-        assert_eq!(ok(status).contains("b.txt"), whole, "{lost:?}");
-        // a ref alone is read from the log as it is: no object is missed
-        assert_eq!(ok(alt(dir, &["rev-parse", "HEAD"])).trim(), second);
+        assert!(stderr(&status).contains("never synced"), "{lost:?}");
+        assert!(ok(status).contains("b.txt"), "{lost:?}");
+        // a ref alone is answered the same way, though no object is read
+        let head = alt(dir, &["rev-parse", "HEAD"]);
+        assert!(stderr(&head).contains("never synced"), "{head:?}");
+        assert_eq!(ok(head).trim(), first);
         // the check does not pass: a whole operation is about to go
         assert_eq!(alt(dir, &["fsck"]).status.code(), Some(3), "{lost:?}");
         assert!(

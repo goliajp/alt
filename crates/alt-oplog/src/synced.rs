@@ -362,24 +362,29 @@ pub(crate) fn update(path: &Path, next: impl Fn(&Marker) -> Option<State>) -> st
 /// Records that the records up to `whole` are synced and, for a committer
 /// that fsynced itself, the file length `eof` it did so at. Nothing is
 /// recorded under a generation other than the one the committer appended
-/// under.
+/// under. Returns the boundary the marker then holds, when it holds this
+/// one.
 pub(crate) fn record(
     path: &Path,
     generation: u32,
     whole: u64,
     eof: Option<u64>,
-) -> std::io::Result<()> {
+) -> std::io::Result<Option<u64>> {
+    let held = std::cell::Cell::new(None);
     update(path, |marker| {
         let state = marker.recorded().copied().unwrap_or_default();
         if state.generation() != generation {
             return None;
         }
+        let whole = state.whole.max(whole);
+        held.set(Some(whole));
         Some(State {
             eof: state.eof.max(eof.unwrap_or(0)),
-            whole: state.whole.max(whole),
+            whole,
             ..state
         })
-    })
+    })?;
+    Ok(held.get())
 }
 
 /// Cuts the log `file` back to `at`; the caller holds its exclusive lock.
@@ -450,6 +455,7 @@ pub struct OpLogSink {
     pub(crate) appended: Deferred,
     pub(crate) durable_path: PathBuf,
     pub(crate) named: Option<SyncNamed>,
+    pub(crate) note: Option<crate::NotePlace>,
 }
 
 impl OpLogSink {
@@ -462,7 +468,10 @@ impl OpLogSink {
         if target != 0 {
             // a boundary this log wrote, not a file length: only a cut of
             // whole records brings it down, and that changes the generation
-            record(&self.durable_path, generation, target, Some(target))?;
+            let whole = record(&self.durable_path, generation, target, Some(target))?;
+            if let (Some(note), Some(whole)) = (&self.note, whole) {
+                note.raise(whole);
+            }
         }
         Ok(())
     }
