@@ -53,6 +53,7 @@ alt-flow = { path = "crates/alt-flow" }
 alt-git-refs = { path = "crates/alt-git-refs" }
 alt-lfs = { path = "crates/alt-lfs" }
 alt-import = { path = "crates/alt-import" }
+alt-marker = { path = "crates/alt-marker" }
 alt-merge = { path = "crates/alt-merge" }
 alt-odb = { path = "crates/alt-odb" }
 alt-oplog = { path = "crates/alt-oplog" }

@@ -43,18 +43,13 @@
 //! then missing or does not read, a boundary was lost, not never written.
 
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::OpLogError;
 use crate::lock::{lock_exclusive, unlock};
 
-const MAGIC: [u8; 4] = *b"ALT2";
-const LEGACY_LEN: usize = 8;
-const SLOTS_AT: usize = 16;
-const SLOT_LEN: usize = 36;
-const LEN: usize = SLOTS_AT + 2 * SLOT_LEN;
 /// Every log starts with a five-byte header.
 const HEADER: u64 = 5;
 /// The flag of a marker past whose boundary appends were left unsynced.
@@ -100,38 +95,26 @@ impl State {
     pub fn generation(&self) -> u32 {
         self.flags >> GENERATION
     }
-
-    fn encode(&self, serial: u64) -> [u8; SLOT_LEN] {
-        let mut slot = Vec::with_capacity(SLOT_LEN);
-        slot.extend_from_slice(&serial.to_le_bytes());
-        slot.extend_from_slice(&self.flags.to_le_bytes());
-        slot.extend_from_slice(&self.eof.to_le_bytes());
-        slot.extend_from_slice(&self.whole.to_le_bytes());
-        let sum = check(&slot);
-        slot.extend_from_slice(&sum);
-        slot.try_into().unwrap()
-    }
-
-    /// The serial and state of a slot whose checksum holds.
-    fn decode(slot: &[u8]) -> Option<(u64, State)> {
-        let (body, sum) = slot.split_at(SLOT_LEN - 8);
-        if check(body) != *sum {
-            return None;
-        }
-        let word = |at: usize| u64::from_le_bytes(body[at..at + 8].try_into().unwrap());
-        let state = State {
-            flags: u32::from_le_bytes(body[8..12].try_into().unwrap()),
-            eof: word(12),
-            whole: word(20),
-        };
-        Some((word(0), state))
-    }
 }
 
-fn check(body: &[u8]) -> [u8; 8] {
-    alt_hash::blake3::hash(body).as_bytes()[..8]
-        .try_into()
-        .unwrap()
+impl alt_marker::Slot for State {
+    const LEGACY_LEN: usize = 8;
+    const BODY_LEN: usize = 20;
+
+    fn encode(&self, body: &mut [u8]) {
+        body[..4].copy_from_slice(&self.flags.to_le_bytes());
+        body[4..12].copy_from_slice(&self.eof.to_le_bytes());
+        body[12..].copy_from_slice(&self.whole.to_le_bytes());
+    }
+
+    fn decode(body: &[u8]) -> Self {
+        let word = |at: usize| u64::from_le_bytes(body[at..at + 8].try_into().unwrap());
+        State {
+            flags: u32::from_le_bytes(body[..4].try_into().unwrap()),
+            eof: word(4),
+            whole: word(12),
+        }
+    }
 }
 
 /// What the marker file says.
@@ -149,22 +132,7 @@ impl Marker {
     /// Reads the marker, taking no lock: one read of as much of the file
     /// as a marker takes up.
     pub fn read(path: &Path) -> Marker {
-        let mut file = match File::open(path) {
-            Ok(file) => file,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Marker::Absent,
-            Err(_) => return Marker::Unreadable,
-        };
-        let mut data = [0u8; LEN];
-        let mut have = 0;
-        while have < LEN {
-            match file.read(&mut data[have..]) {
-                Ok(0) => break,
-                Ok(n) => have += n,
-                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
-                Err(_) => return Marker::Unreadable,
-            }
-        }
-        parse(&data[..have]).0
+        alt_marker::read::<State>(path).into()
     }
 
     pub fn recorded(&self) -> Option<&State> {
@@ -285,90 +253,27 @@ pub(crate) fn distrust(path: &Path) -> std::io::Result<()> {
     })
 }
 
-/// What `data` says and, for a marker in this format, the slot the next
-/// write goes to with its serial.
-fn parse(data: &[u8]) -> (Marker, Option<(usize, u64)>) {
-    if data.len() < LEGACY_LEN {
-        return (Marker::Unreadable, None);
-    }
-    if data.get(LEGACY_LEN..LEGACY_LEN + 4) != Some(&MAGIC[..]) {
-        let eof = u64::from_le_bytes(data[..8].try_into().unwrap());
-        return (Marker::Legacy(eof), None);
-    }
-    let slot = |n: usize| {
-        let at = SLOTS_AT + n * SLOT_LEN;
-        data.get(at..at + SLOT_LEN).and_then(State::decode)
-    };
-    match (slot(0), slot(1)) {
-        (None, None) => (Marker::Unreadable, None),
-        (Some((serial, state)), None) => (Marker::Recorded(state), Some((1, serial + 1))),
-        (None, Some((serial, state))) => (Marker::Recorded(state), Some((0, serial + 1))),
-        (Some((first, state)), Some((second, _))) if first > second => {
-            (Marker::Recorded(state), Some((1, first + 1)))
+impl From<alt_marker::Marker<State>> for Marker {
+    fn from(read: alt_marker::Marker<State>) -> Marker {
+        match read {
+            alt_marker::Marker::Recorded(state) => Marker::Recorded(state),
+            alt_marker::Marker::Legacy(head) => {
+                Marker::Legacy(u64::from_le_bytes(head[..8].try_into().unwrap()))
+            }
+            alt_marker::Marker::Unreadable => Marker::Unreadable,
+            alt_marker::Marker::Absent => Marker::Absent,
         }
-        (Some(_), Some((second, state))) => (Marker::Recorded(state), Some((0, second + 1))),
     }
-}
-
-/// A whole marker file holding `state`, for a file that is not one in this
-/// format: it is replaced in one write.
-fn fresh(state: &State) -> Vec<u8> {
-    let mut file = vec![0u8; LEN];
-    file[LEGACY_LEN..LEGACY_LEN + 4].copy_from_slice(&MAGIC);
-    file[SLOTS_AT..SLOTS_AT + SLOT_LEN].copy_from_slice(&state.encode(1));
-    file
 }
 
 /// Changes the marker: `next` is given what it says and returns what it
-/// is to say, or `None` to leave it as it is. Reading, deciding and writing
-/// happen under an exclusive lock on the marker file, taken through a
-/// descriptor opened here, so that threads of one process exclude each
-/// other like processes do; nothing else is locked while it is held. The
-/// new state is fdatasynced before this returns. A marker that is absent
-/// is created only when there is something to write.
+/// is to say, or `None` to leave it as it is ([`alt_marker::update`]:
+/// under an exclusive lock on the marker file, nothing else locked while
+/// it is held, and fdatasynced before this returns).
 pub(crate) fn update(path: &Path, next: impl Fn(&Marker) -> Option<State>) -> std::io::Result<()> {
-    let open = |create: bool| {
-        OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(create)
-            .truncate(false)
-            .open(path)
-    };
-    let (mut file, created) = match open(false) {
-        Ok(file) => (file, false),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            if next(&Marker::Absent).is_none() {
-                return Ok(());
-            }
-            (open(true)?, true)
-        }
-        Err(e) => return Err(e),
-    };
-    lock_exclusive(&file)?;
-    let mut data = Vec::with_capacity(LEN);
-    file.read_to_end(&mut data)?;
-    let (marker, slot) = match created && data.is_empty() {
-        true => (Marker::Absent, None),
-        false => parse(&data),
-    };
-    let Some(state) = next(&marker) else {
-        return Ok(());
-    };
-    if marker == Marker::Recorded(state) {
-        return Ok(());
-    }
-    let (at, bytes) = match slot {
-        Some((n, serial)) => (SLOTS_AT + n * SLOT_LEN, state.encode(serial).to_vec()),
-        None => (0, fresh(&state)),
-    };
-    file.seek(SeekFrom::Start(at as u64))?;
-    file.write_all(&bytes)?;
-    file.sync_data()?;
-    if let (true, Some(dir)) = (created, path.parent()) {
-        File::open(dir)?.sync_all()?;
-    }
-    Ok(())
+    alt_marker::update(path, |read: &alt_marker::Marker<State>| {
+        next(&read.clone().into())
+    })
 }
 
 /// Records that the records up to `whole` are synced and, for a committer
@@ -505,159 +410,6 @@ mod tests {
         update(path, |_| Some(state(n))).unwrap();
     }
 
-    fn serials(path: &Path) -> [Option<u64>; 2] {
-        let data = std::fs::read(path).unwrap();
-        [0, 1].map(|n| {
-            let at = SLOTS_AT + n * SLOT_LEN;
-            let slot = data.get(at..at + SLOT_LEN)?;
-            State::decode(slot).map(|(serial, _)| serial)
-        })
-    }
-
-    fn flip(path: &Path, at: usize) {
-        let mut data = std::fs::read(path).unwrap();
-        data[at] ^= 0xff;
-        std::fs::write(path, data).unwrap();
-    }
-
-    #[test]
-    fn writes_take_turns_between_the_two_slots() {
-        let dir = alt_os::temp::tempdir().unwrap();
-        let path = dir.path().join("durable");
-        set(&path, 10);
-        let data = std::fs::read(&path).unwrap();
-        assert_eq!(data.len(), LEN);
-        assert_eq!(
-            data[..LEGACY_LEN],
-            [0u8; LEGACY_LEN],
-            "zero for an older alt"
-        );
-        assert_eq!(serials(&path), [Some(1), None]);
-        let mut turns = Vec::new();
-        for n in 11..15 {
-            set(&path, n);
-            assert_eq!(Marker::read(&path), Marker::Recorded(state(n)));
-            turns.push(serials(&path));
-        }
-        let expected = [
-            [Some(1), Some(2)],
-            [Some(3), Some(2)],
-            [Some(3), Some(4)],
-            [Some(5), Some(4)],
-        ];
-        assert_eq!(turns, expected);
-        // writing what is there already writes nothing
-        set(&path, 14);
-        assert_eq!(serials(&path), [Some(5), Some(4)]);
-    }
-
-    #[test]
-    fn a_slot_that_does_not_check_gives_way_to_the_other() {
-        let dir = alt_os::temp::tempdir().unwrap();
-        let path = dir.path().join("durable");
-        for n in 10..13 {
-            set(&path, n);
-        }
-        assert_eq!(serials(&path), [Some(3), Some(2)]);
-        // the write of serial 3 torn: the state before it stands
-        flip(&path, SLOTS_AT + 20);
-        assert_eq!(Marker::read(&path), Marker::Recorded(state(11)));
-        // and the next write goes to the broken slot
-        set(&path, 20);
-        assert_eq!(serials(&path), [Some(3), Some(2)]);
-        assert_eq!(Marker::read(&path), Marker::Recorded(state(20)));
-
-        flip(&path, SLOTS_AT + 20);
-        flip(&path, SLOTS_AT + SLOT_LEN + 20);
-        assert_eq!(Marker::read(&path), Marker::Unreadable);
-        set(&path, 30);
-        assert_eq!(serials(&path), [Some(1), None]);
-        assert_eq!(Marker::read(&path), Marker::Recorded(state(30)));
-    }
-
-    #[test]
-    fn the_slot_with_the_larger_serial_is_the_state() {
-        let dir = alt_os::temp::tempdir().unwrap();
-        let path = dir.path().join("durable");
-        for (first, second, current) in [(9, 7, 5), (7, 9, 50)] {
-            let mut data = vec![0u8; SLOTS_AT];
-            data[LEGACY_LEN..LEGACY_LEN + 4].copy_from_slice(&MAGIC);
-            data.extend_from_slice(&state(5).encode(first));
-            data.extend_from_slice(&state(50).encode(second));
-            std::fs::write(&path, data).unwrap();
-            assert_eq!(Marker::read(&path), Marker::Recorded(state(current)));
-        }
-    }
-
-    #[test]
-    fn an_older_marker_is_told_from_a_broken_one_and_from_none() {
-        let dir = alt_os::temp::tempdir().unwrap();
-        let path = dir.path().join("durable");
-        assert_eq!(Marker::read(&path), Marker::Absent);
-        // an update with nothing to write does not create it
-        update(&path, |_| None).unwrap();
-        assert!(!path.exists());
-
-        let older = 7u64.to_le_bytes();
-        for extra in [
-            &b""[..],
-            &b"ALTD and what an unreleased build put after it"[..],
-        ] {
-            std::fs::write(&path, [&older[..], extra].concat()).unwrap();
-            assert_eq!(Marker::read(&path), Marker::Legacy(7));
-        }
-        for short in [0, 1, LEGACY_LEN - 1] {
-            std::fs::write(&path, vec![0u8; short]).unwrap();
-            assert_eq!(Marker::read(&path), Marker::Unreadable, "{short} bytes");
-        }
-        let mut cut = vec![0u8; SLOTS_AT];
-        cut[LEGACY_LEN..LEGACY_LEN + 4].copy_from_slice(&MAGIC);
-        std::fs::write(&path, cut).unwrap();
-        assert_eq!(Marker::read(&path), Marker::Unreadable, "no slot");
-
-        // an older marker is replaced whole
-        std::fs::write(&path, older).unwrap();
-        set(&path, 10);
-        assert_eq!(Marker::read(&path), Marker::Recorded(state(10)));
-        let data = std::fs::read(&path).unwrap();
-        assert_eq!(
-            (data.len(), &data[..LEGACY_LEN]),
-            (LEN, &[0u8; LEGACY_LEN][..])
-        );
-    }
-
-    #[test]
-    fn updates_from_many_threads_are_all_kept() {
-        const THREADS: u64 = 8;
-        const EACH: u64 = 100;
-        let dir = alt_os::temp::tempdir().unwrap();
-        let path = dir.path().join("durable");
-        let threads: Vec<_> = (0..THREADS)
-            .map(|_| {
-                let path = path.clone();
-                std::thread::spawn(move || {
-                    for _ in 0..EACH {
-                        let count = |marker: &Marker| {
-                            let state = marker.recorded().copied().unwrap_or_default();
-                            Some(State {
-                                eof: state.eof + 1,
-                                ..state
-                            })
-                        };
-                        update(&path, count).unwrap();
-                    }
-                })
-            })
-            .collect();
-        for thread in threads {
-            thread.join().unwrap();
-        }
-        assert_eq!(
-            Marker::read(&path).recorded().map(|state| state.eof),
-            Some(THREADS * EACH)
-        );
-    }
-
     #[test]
     fn a_boundary_is_recorded_without_a_file_length_it_was_not_synced_at() {
         let dir = alt_os::temp::tempdir().unwrap();
@@ -676,20 +428,19 @@ mod tests {
     }
 
     #[test]
-    fn a_marker_reads_the_same_whatever_follows_it_in_the_file() {
+    fn an_older_marker_gives_the_length_it_recorded() {
         let dir = alt_os::temp::tempdir().unwrap();
         let path = dir.path().join("durable");
         assert_eq!(Marker::read(&path), Marker::Absent);
-        update(&path, |_| Some(state(40))).unwrap();
-        assert_eq!(Marker::read(&path), Marker::Recorded(state(40)));
-        let mut longer = std::fs::read(&path).unwrap();
-        longer.extend_from_slice(&[7; 300]);
-        std::fs::write(&path, longer).unwrap();
-        assert_eq!(Marker::read(&path), Marker::Recorded(state(40)));
-        // an older alt's marker is shorter than this one
         std::fs::write(&path, 9u64.to_le_bytes()).unwrap();
         assert_eq!(Marker::read(&path), Marker::Legacy(9));
         std::fs::write(&path, b"abc").unwrap();
         assert_eq!(Marker::read(&path), Marker::Unreadable);
+        // an older marker is replaced whole
+        std::fs::write(&path, 9u64.to_le_bytes()).unwrap();
+        set(&path, 10);
+        assert_eq!(Marker::read(&path), Marker::Recorded(state(10)));
+        let data = std::fs::read(&path).unwrap();
+        assert_eq!((data.len(), &data[..8]), (88, &[0u8; 8][..]));
     }
 }

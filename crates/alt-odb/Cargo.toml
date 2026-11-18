@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 alt-git-codec.workspace = true
 alt-hash.workspace = true
+alt-marker.workspace = true
 alt-prism.workspace = true
 alt-prism-deflate.workspace = true
 alt-prism-png.workspace = true
