@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: keep what is asked of fewer groups and of a text that begins a pattern everywhere in tests of their own
+author-type: human
+author: doracawl
+touched: crates/alt-regex/src/lib.rs
+touched: crates/alt-regex/tests/it/regcomp/asked.rs
