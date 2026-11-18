@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: test
+summary: enter the alt-threads tests through the c main and check that a pool thread reports a stack overflow
+author-type: human
+author: doracawl
+touched: crates/alt-threads/Cargo.toml
+touched: crates/alt-threads/tests/it/main.rs
+touched: crates/alt-threads/tests/it/slices.rs
