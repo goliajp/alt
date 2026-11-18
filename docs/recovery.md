@@ -292,26 +292,38 @@ update in the log and the objects nowhere. Such an update starts past the
 log's synced point: the command that made it never finished. The next command
 that writes, whatever it writes, cuts the records above off the object store's
 files, then cuts the log from the first such update on, and says on stderr
-what it discarded: the operations, each ref they moved, and the bytes that
-went off each file under `.alt`:
+what it discarded: the operations, each ref they moved, the bytes that went
+off each file under `.alt`, and the index entries whose blobs went with them:
 
 ```
-warning: discarded 1 operation(s) at the end of the operation log: they were never synced to disk and name objects that are not stored
-warning:   refs/heads/main: 1 update(s), from 654cf34e96f703ed9c41033c6cd7521e8aa8379a to 5f7c0ecf7954cfadfe6457220a8f9fcb5c8a32c0
-warning:   refs/notes/alt/meta: 1 update(s), from 96d5f1108b12796393beafa150cecb81708d646c to 68c82a443416ff1882cca9b5f8d20c4fad5483b7
+warning: discarded 3 operation(s) at the end of the operation log: they were never synced to disk and name objects that are not stored
+warning:   refs/heads/main: 1 update(s), from 2787d1069b09367ee255f0ccd4215d630b15d885 to 9268782b52d7b1e2da451ee848d0b44c3da19fea
+warning:   refs/notes/alt/meta: 1 update(s), from 6e4aa428b3140147060625c297c31328a7d06a08 to 26b9469c381bd19c876083e90fb124f88a46db96
+warning:   2 operation(s) that move no ref
 warning: discarded 574 byte(s) at the end of map.alt: they were never confirmed as synced to disk
-warning: discarded 485 byte(s) at the end of oplog/log: they were never confirmed as synced to disk
+warning: discarded 1330 byte(s) at the end of oplog/log: they were never confirmed as synced to disk
+warning: index entry b.txt names blob 39b06ed55e6f8670685412ead3dd38b50b038047, which is not stored: add the file again
 ```
 
 A ref line gives the id the ref is back at, then the id the discarded
 operations had moved it to.
+
+An `alt add` is held to the rule as well. It writes the blobs, then its intent
+to the log, syncs both, and only then replaces the index. A power cut can
+leave the intent in the log and the blobs nowhere. That intent starts past the
+log's synced point too: it is discarded with whatever follows it, and counted
+among the `operation(s) that move no ref`. It asks for no
+`alt operation recover`, and no later command stops at `recovery required`
+for it: the index had not been replaced, and the files are added again. In
+the warning above, the two operations that move no ref are the intent and the
+completion of the `alt add` whose blob went with the commit.
 
 The commit can then be made again; no step by hand is needed. Until a command
 writes, every command that only reads answers from the log as it stood before
 those operations, changes no file, and says so:
 
 ```
-warning: the last 1 operation(s) in the operation log were never synced to disk and name objects that are not stored; this shows the repository as it was before them. The next command that writes discards them.
+warning: the last 3 operation(s) in the operation log were never synced to disk and name objects that are not stored; this shows the repository as it was before them. The next command that writes discards them.
 ```
 
 That holds for a command that reads no object too: `alt rev-parse HEAD` prints
@@ -332,13 +344,15 @@ and exits 3:
 
 ```
 574 byte(s) of records at the end of map.alt were never synced and name content that is not stored: the next command that writes cuts them off
-1 operation(s) at the end of the operation log were never synced and name objects that are not stored: the next command that writes discards them
+3 operation(s) at the end of the operation log were never synced and name objects that are not stored: the next command that writes discards them
+index entry b.txt names blob 39b06ed55e6f8670685412ead3dd38b50b038047, which is not stored: add the file again
 the next command that writes discards:
          574 byte(s) at the end of map.alt
-         485 byte(s) at the end of oplog/log
-           1 operation(s) at the end of the operation log
-             refs/heads/main: 1 update(s), from 654cf34e96f703ed9c41033c6cd7521e8aa8379a to 5f7c0ecf7954cfadfe6457220a8f9fcb5c8a32c0
-             refs/notes/alt/meta: 1 update(s), from 96d5f1108b12796393beafa150cecb81708d646c to 68c82a443416ff1882cca9b5f8d20c4fad5483b7
+        1330 byte(s) at the end of oplog/log
+           3 operation(s) at the end of the operation log
+             refs/heads/main: 1 update(s), from 2787d1069b09367ee255f0ccd4215d630b15d885 to 9268782b52d7b1e2da451ee848d0b44c3da19fea
+             refs/notes/alt/meta: 1 update(s), from 6e4aa428b3140147060625c297c31328a7d06a08 to 26b9469c381bd19c876083e90fb124f88a46db96
+             2 operation(s) that move no ref
 to keep them, copy the .alt directory before you run a command that writes
 ```
 
@@ -346,29 +360,38 @@ The counts of what it verified follow, then `every record before the
 unconfirmed tail verified`, and on stderr:
 
 ```
-fatal: fsck: unconfirmed tail: the next command that writes discards 1059 byte(s) and 1 operation(s) that were never confirmed as synced; to keep them, copy the .alt directory first
+fatal: fsck: unconfirmed tail: the next command that writes discards 1904 byte(s) and 3 operation(s) that were never confirmed as synced; to keep them, copy the .alt directory first
 ```
 
 What it lists is what the command that writes then says it discarded (the
 warning above), count for count: `refs/heads/main` goes back to
-`654cf34e…`, and the commit `5f7c0ecf…` has to be made
+`2787d106…`, and the commit `9268782b…` has to be made
 again. To keep what is about to go, copy the whole `.alt` directory
 somewhere else before you run another command; `alt fsck` has cut nothing,
 however often it runs.
 
 The index is written with a sync of its own and can be ahead of the object
 store: after such a power cut it may still name the blobs of files that were
-added and whose content went. `alt fsck` lists those entries, with the
-unconfirmed tail while there is one, and on their own once a command that
-writes has cut it, when `alt fsck` exits 128:
+added and whose content went. The command that cuts says which entries those
+are, in the last lines of its warning (above): one `index entry PATH names
+blob ID, which is not stored: add the file again` for each. Add those paths
+again: `alt add b.txt` stores the file, and the commit that was discarded can
+then be made again. Until the paths are added, `alt fsck`
+lists the same entries, with the unconfirmed tail while there is one, and on
+their own once a command that writes has cut it, when `alt fsck` exits 128:
 
 ```
-fatal: fsck: index entry b.txt names blob 8067c2ab85b24c1b9015d7a4b82c0928bcf2b1ef, which is not stored: add the file again
+fatal: fsck: index entry b.txt names blob 39b06ed55e6f8670685412ead3dd38b50b038047, which is not stored: add the file again
 ```
 
 `alt commit` says the same of the entry and records nothing, rather than a
-tree that names a blob which is not there. `alt add b.txt` stores the file
-again; after that `alt fsck` exits 0.
+tree that names a blob which is not there. After `alt add b.txt`, `alt fsck`
+exits 0.
+
+Only entries whose blob is really gone are listed. A file that was added and
+synced before the commit that was discarded still has its blob: neither the
+command that cuts nor `alt fsck` says anything of its entry, and the commit
+is made again without another `alt add`.
 
 ### An unconfirmed tail
 
@@ -390,17 +413,19 @@ as damage, and not as a pass. It names each such file, says what goes from
 each file and from the operation log and with which command, and exits 3:
 
 ```
-unconfirmed tail: store/pack-00000001.altpack reads up to byte 716; the 8945 byte(s) after it were never confirmed as synced, the record at byte 716 does not read, and a whole record begins at byte 4370
+unconfirmed tail: store/pack-00000001.altpack reads up to byte 717; the 8945 byte(s) after it were never confirmed as synced, the record at byte 717 does not read, and a whole record begins at byte 4371
 1148 byte(s) of records at the end of map.alt were never synced and name content that is not stored: the next command that writes cuts them off
-4 operation(s) at the end of the operation log were never synced and name objects that are not stored: the next command that writes discards them
+6 operation(s) at the end of the operation log were never synced and name objects that are not stored: the next command that writes discards them
+index entry b.txt names blob c7d74a2f88d8aa805c5b06966873ffb156acc951, which is not stored: add the file again
+index entry c.txt names blob 1df96f73f37a06852d7447725de313dfd1c80a34, which is not stored: add the file again
 the next command that writes discards:
         8945 byte(s) at the end of store/pack-00000001.altpack
         1148 byte(s) at the end of map.alt
-        1815 byte(s) at the end of oplog/log
-           4 operation(s) at the end of the operation log
-             refs/heads/main: 2 update(s), from 654cf34e96f703ed9c41033c6cd7521e8aa8379a to bbf22c9ee25f3f0803427ad50d5ccbe100c32c2b
-             refs/notes/alt/meta: 2 update(s), from 96d5f1108b12796393beafa150cecb81708d646c to 31677e1d14073bc9f7a82df1a187edca6a6395dd
-             2 operation(s) that move no ref
+        2660 byte(s) at the end of oplog/log
+           6 operation(s) at the end of the operation log
+             refs/heads/main: 2 update(s), from 94ab9d87f902e9b0a0c612150161041c90097bef to 22728ac28cd5d6736aec08195d069d9e05b735af
+             refs/notes/alt/meta: 2 update(s), from f0878819ca8dae102021ce0f6b72643ee70bd5f2 to cf310565e7b7d1ae49c77d87b70174732dd711fd
+             4 operation(s) that move no ref
 to keep them, copy the .alt directory before you run a command that writes
 ```
 
@@ -408,7 +433,7 @@ The counts of what it verified follow, then `every record before the
 unconfirmed tail verified`, and on stderr:
 
 ```
-fatal: fsck: unconfirmed tail: the next command that writes discards 11908 byte(s) and 4 operation(s) that were never confirmed as synced; to keep them, copy the .alt directory first
+fatal: fsck: unconfirmed tail: the next command that writes discards 12753 byte(s) and 6 operation(s) that were never confirmed as synced; to keep them, copy the .alt directory first
 ```
 
 `alt fsck --json` exits 3 as well, with one failure object on stderr whose
@@ -420,24 +445,27 @@ operations. `alt fsck` changes no file, however often it runs.
 To keep what the tail holds, copy the whole `.alt` directory somewhere else
 before you run another command: `alt fsck` has cut nothing, and the copy
 holds every byte. A ref line shows what goes from the history:
-`refs/heads/main` above goes back to `654cf34e…`, and the two commits up to
-`bbf22c9e…` have to be made again from the files in the working tree.
+`refs/heads/main` above goes back to `94ab9d87…`, and the two commits up to
+`22728ac2…` have to be made again from the files in the working tree.
 
 The next command that writes then discards exactly what `alt fsck` listed,
 says so on stderr, and goes on:
 
 ```
-warning: discarded 4 operation(s) at the end of the operation log: they were never synced to disk and name objects that are not stored
-warning:   refs/heads/main: 2 update(s), from 654cf34e96f703ed9c41033c6cd7521e8aa8379a to bbf22c9ee25f3f0803427ad50d5ccbe100c32c2b
-warning:   refs/notes/alt/meta: 2 update(s), from 96d5f1108b12796393beafa150cecb81708d646c to 31677e1d14073bc9f7a82df1a187edca6a6395dd
-warning:   2 operation(s) that move no ref
+warning: discarded 6 operation(s) at the end of the operation log: they were never synced to disk and name objects that are not stored
+warning:   refs/heads/main: 2 update(s), from 94ab9d87f902e9b0a0c612150161041c90097bef to 22728ac28cd5d6736aec08195d069d9e05b735af
+warning:   refs/notes/alt/meta: 2 update(s), from f0878819ca8dae102021ce0f6b72643ee70bd5f2 to cf310565e7b7d1ae49c77d87b70174732dd711fd
+warning:   4 operation(s) that move no ref
 warning: discarded 8945 byte(s) at the end of store/pack-00000001.altpack: they were never confirmed as synced to disk
 warning: discarded 1148 byte(s) at the end of map.alt: they were never confirmed as synced to disk
-warning: discarded 1815 byte(s) at the end of oplog/log: they were never confirmed as synced to disk
+warning: discarded 2660 byte(s) at the end of oplog/log: they were never confirmed as synced to disk
+warning: index entry b.txt names blob c7d74a2f88d8aa805c5b06966873ffb156acc951, which is not stored: add the file again
+warning: index entry c.txt names blob 1df96f73f37a06852d7447725de313dfd1c80a34, which is not stored: add the file again
 ```
 
-After it `alt fsck` exits 0. A command that the daemon runs prints the same
-warning. When the operations that go follow a record of the operation log
+Its last lines name the files to add again (see Records whose content never
+arrived, above); once they are added, `alt fsck` exits 0. A command that the
+daemon runs prints the same warning. When the operations that go follow a record of the operation log
 that does not read, the first line ends in `and follow a record that does
 not read` instead.
 
@@ -449,13 +477,13 @@ command cuts nothing and prints no warning, and `alt fsck` goes on exiting
 what goes is listed under `the next command that writes objects discards:`,
 
 ```
-unconfirmed tail: store/pack-00000001.altpack reads up to byte 717; the 7289 byte(s) after it were never confirmed as synced, the record at byte 717 does not read, and a whole record begins at byte 4358
+unconfirmed tail: store/pack-00000001.altpack reads up to byte 716; the 7289 byte(s) after it were never confirmed as synced, the record at byte 716 does not read, and a whole record begins at byte 4357
 164 byte(s) of records at the end of map.alt were never synced and name content that is not stored: the next command that writes objects cuts them off
+index entry b.txt names blob 4d81287153304b7ef3977a499bbc03ec838044cb, which is not stored: add the file again
+index entry c.txt names blob 6dac614f5a9e683c37456a5cb2c1ffcb0616aa2c, which is not stored: add the file again
 the next command that writes objects discards:
         7289 byte(s) at the end of store/pack-00000001.altpack
          164 byte(s) at the end of map.alt
-to keep them, copy the .alt directory before you run a command that writes
-fatal: fsck: unconfirmed tail: the next command that writes objects discards 7453 byte(s) that were never confirmed as synced; to keep them, copy the .alt directory first
 ```
 
 and the command that writes an object prints the warning for those files.
