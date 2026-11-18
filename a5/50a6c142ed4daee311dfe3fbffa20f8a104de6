@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: fix
+summary: abandon an interrupted add whose blobs are not stored where the log has no boundary to cut it by
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/op_log.rs
+touched: crates/alt-cli/src/native/operation.rs
+touched: crates/alt-cli/src/native/recovery.rs
+touched: crates/alt-cli/src/native/recovery/index.rs
+touched: crates/alt-cli/tests/it/abandoned_add.rs
+touched: crates/alt-cli/tests/it/index_blobs.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: docs/recovery.md
