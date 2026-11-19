@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: feat
+summary: add value hints and hidden subcommands to the argument spec
+author-type: human
+author: doracawl
+touched: crates/alt-args-derive/src/generate.rs
+touched: crates/alt-args/src/error.rs
+touched: crates/alt-args/src/help.rs
+touched: crates/alt-args/src/level.rs
+touched: crates/alt-args/src/lib.rs
+touched: crates/alt-args/src/scope.rs
+touched: crates/alt-args/src/spec.rs
+touched: crates/alt-args/tests/it/hidden.rs
+touched: crates/alt-args/tests/it/main.rs
