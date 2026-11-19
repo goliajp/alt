@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: style
+summary: order the imports of the switch tests as rustfmt does
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/scan_daemon_switch.rs
