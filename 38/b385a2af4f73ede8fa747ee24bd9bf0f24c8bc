@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: let only the publication held by a row lock reach the work deadline
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/operator/observability.rs
