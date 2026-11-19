@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: a daemon that follows the log past a record that does not read hands a read back
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/readers/daemon.rs
