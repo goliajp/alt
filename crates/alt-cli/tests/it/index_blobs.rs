@@ -343,3 +343,103 @@ fn the_command_that_cuts_names_the_files_whose_blobs_went_and_no_others() {
         ok(alt(dir, &["fsck"]));
     }
 }
+
+fn git(repo: &Path, args: &[&str]) -> String {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_AUTHOR_NAME", "tester")
+        .env("GIT_AUTHOR_EMAIL", "t@e")
+        .env("GIT_COMMITTER_NAME", "tester")
+        .env("GIT_COMMITTER_EMAIL", "t@e")
+        .args(args)
+        .output()
+        .unwrap();
+    ok(out)
+}
+
+const CRLF: &str = "one\r\ntwo\r\n";
+
+/// One commit with `* text=auto`, then `crlf.txt` staged and its blob
+/// lost: the line endings of an `auto` path are decided by what the index
+/// holds for it, and that can no longer be read.
+fn crlf_staged_and_lost(dir: &Path) {
+    ok(alt(dir, &["init"]));
+    fs::write(dir.join(".gitattributes"), "* text=auto\n").unwrap();
+    ok(alt(dir, &["add", ".gitattributes"]));
+    ok(alt(dir, &["commit", "-m", "first"]));
+    fs::write(dir.join("crlf.txt"), CRLF).unwrap();
+    lose_objects_of(dir, || drop(ok(alt(dir, &["add", "crlf.txt"]))));
+}
+
+/// The same in git: the staged blob of `crlf.txt` is removed from the
+/// object directory.
+fn crlf_staged_and_lost_in_git(dir: &Path) {
+    git(dir, &["init", "-q", "-b", "main", "."]);
+    fs::write(dir.join(".gitattributes"), "* text=auto\n").unwrap();
+    git(dir, &["add", ".gitattributes"]);
+    git(dir, &["commit", "-qm", "first"]);
+    fs::write(dir.join("crlf.txt"), CRLF).unwrap();
+    git(dir, &["add", "crlf.txt"]);
+    let staged = git(dir, &["ls-files", "-s", "crlf.txt"]);
+    let id = staged.split_whitespace().nth(1).unwrap();
+    fs::remove_file(dir.join(".git/objects").join(&id[..2]).join(&id[2..])).unwrap();
+}
+
+fn tree_of(head: &str) -> &str {
+    head.lines().next().unwrap()
+}
+
+/// Git takes an index entry whose blob it cannot read for one without
+/// CRLF, and so stores the file as it stores a new one.
+#[test]
+fn a_text_file_whose_staged_blob_is_lost_is_added_again_as_a_new_file_is() {
+    for edit in ["", "three\r\n"] {
+        let (ours, theirs) = (
+            alt_os::temp::tempdir().unwrap(),
+            alt_os::temp::tempdir().unwrap(),
+        );
+        let (dir, reference) = (ours.path(), theirs.path());
+        crlf_staged_and_lost(dir);
+        crlf_staged_and_lost_in_git(reference);
+        for root in [dir, reference] {
+            fs::write(root.join("crlf.txt"), format!("{CRLF}{edit}")).unwrap();
+        }
+        ok(alt(dir, &["add", "crlf.txt"]));
+        ok(alt(dir, &["commit", "-m", "second"]));
+        ok(alt(dir, &["fsck"]));
+        // git only stores again a file whose stat changed
+        git(reference, &["add", "--renormalize", "crlf.txt"]);
+        git(reference, &["commit", "-qm", "second"]);
+        assert_eq!(
+            tree_of(&ok(alt(dir, &["cat-file", "-p", "HEAD"]))),
+            tree_of(&git(reference, &["cat-file", "-p", "HEAD"])),
+            "after {edit:?}"
+        );
+    }
+}
+
+#[test]
+fn status_reads_a_changed_text_file_whose_staged_blob_is_lost() {
+    let (ours, theirs) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
+    let (dir, reference) = (ours.path(), theirs.path());
+    crlf_staged_and_lost(dir);
+    crlf_staged_and_lost_in_git(reference);
+    for root in [dir, reference] {
+        fs::write(root.join("crlf.txt"), format!("{CRLF}three\r\n")).unwrap();
+    }
+    // staged as new, and changed since
+    let lines = ["new file:   crlf.txt", "modified:   crlf.txt"];
+    let theirs = git(reference, &["status"]);
+    let status = alt(dir, &["status"]);
+    assert!(status.status.success(), "{}", stderr(&status));
+    for line in lines {
+        assert!(theirs.contains(line), "{theirs}");
+        assert!(stdout(&status).contains(line), "{}", stdout(&status));
+    }
+}
