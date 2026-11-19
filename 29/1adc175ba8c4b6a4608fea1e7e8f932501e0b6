@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fixup
+summary: allow the large item
+author-type: human
+author: doracawl
+touched: crates/alt-args/src/spec.rs
