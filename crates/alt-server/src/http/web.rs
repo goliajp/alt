@@ -1,6 +1,7 @@
 mod cloud_login;
 mod execute;
 mod input;
+mod login;
 use super::*;
 use crate::web_route::{self, WebRoute};
 use alt_browser_auth::PublicOrigin;
@@ -256,12 +257,14 @@ async fn handle_inner(request: Request, state: Arc<App>, peer: IpAddr) -> Respon
             Ok(Err(error)) => return unreceived(Some(error)),
             Err(_) => return unreceived(None),
         };
+    let claim = Arc::new(login::Claim::default());
     let call = execute::Call {
         factory: state.factory.clone(),
         options: state.options.native.clone(),
         browser,
         token,
         peer,
+        claim: claim.clone(),
     };
     let outcome = tokio::time::timeout(
         state.options.work_timeout,
@@ -272,6 +275,7 @@ async fn handle_inner(request: Request, state: Arc<App>, peer: IpAddr) -> Respon
         }),
     )
     .await;
+    let unopened = login && outcome.is_err() && claim.abandon();
     match outcome {
         Ok(Ok(Ok((output, cookie)))) => {
             let download = matches!(output, Output::File { .. } | Output::Temporary { .. });
@@ -298,21 +302,7 @@ async fn handle_inner(request: Request, state: Arc<App>, peer: IpAddr) -> Respon
         }
         Ok(Ok(Err(Error::Unauthorized))) if login || session_request => unauthenticated(),
         Ok(Ok(Err(error))) => store_failure(error, None),
-        _ => failure(
-            503,
-            if writing {
-                ErrorCode::OutcomeUnknown
-            } else {
-                ErrorCode::TemporarilyUnavailable
-            },
-            "The response is unavailable; inspect the current state before retrying a change",
-            None,
-            if writing {
-                Retry::QueryOutcome
-            } else {
-                Retry::SameRequest
-            },
-        ),
+        _ => login::unfinished(writing, unopened),
     }
 }
 /// the worker permit and the body bound of a migration request, once its caller is
