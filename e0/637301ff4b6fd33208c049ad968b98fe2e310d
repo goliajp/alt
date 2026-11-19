@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: sync the cut of a failed append when the store is dropped
+author-type: human
+author: doracawl
+touched: crates/alt-store/src/durable.rs
+touched: crates/alt-store/src/lib.rs
