@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: chore
+summary: optimize alt-crypto in the dev profile
+author-type: human
+author: doracawl
+touched: Cargo.toml
