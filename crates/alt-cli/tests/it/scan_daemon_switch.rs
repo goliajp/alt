@@ -5,9 +5,9 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use crate::scan_daemon::{agree, output, run, served, write};
 #[cfg(target_os = "linux")]
 use crate::scan_daemon::{daemon_pid, instances};
-use crate::scan_daemon::{agree, output, run, served, write};
 
 #[test]
 fn a_switch_leaves_directories_shown_as_one_path_as_the_new_index_has_them() {
