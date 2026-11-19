@@ -135,4 +135,17 @@ impl Scope {
         }
         names
     }
+
+    /// The subcommands that are shown to the user.
+    pub(crate) fn listed_subcommands(&self) -> impl Iterator<Item = &'static Command> {
+        self.command.subcommands.iter().filter(|c| !c.hidden)
+    }
+
+    pub(crate) fn listed_subcommand_names(&self) -> Vec<&'static str> {
+        let mut names: Vec<_> = self.listed_subcommands().map(|c| c.name).collect();
+        if self.command.help_subcommand {
+            names.push("help");
+        }
+        names
+    }
 }

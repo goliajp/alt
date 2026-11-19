@@ -49,7 +49,7 @@ fn arg_item(arg: &ArgField) -> String {
          value_name: {value_name}, help: {help}, kind: ::alt_args::Kind::{kind}, required: {required}, \
          global: {global}, preset: {preset}, missing: {missing}, possible: {possible}, check: {check}, conflicts: {conflicts}, \
          requires: {requires}, required_unless: {required_unless}, group: {group}, trailing: {trailing}, \
-         hyphen_values: {hyphen_values} }})",
+         hyphen_values: {hyphen_values}, hint: ::alt_args::Hint::Unset }})",
         id = quote(&arg.id),
         long = quote(arg.long.as_deref().unwrap_or_default()),
         short = match arg.short {
@@ -180,7 +180,7 @@ pub(crate) fn parser(input: &Input) -> Result<String, Error> {
     Ok(format!(
         "impl ::alt_args::Parser for {ty} {{ \
            const COMMAND: &'static ::alt_args::Command = &::alt_args::Command {{ \
-             name: {name}, about: {about}, version: {version}, help_subcommand: {help_subcommand}, \
+             name: {name}, about: {about}, version: {version}, help_subcommand: {help_subcommand}, hidden: false, \
              items: &[{group}], subcommands: {subcommands} }}; \
            fn from_matches(m: &::alt_args::Matches) -> Self {{ Self {{ {values} }} }} }}",
         ty = input.name,
@@ -240,7 +240,7 @@ pub(crate) fn subcommand(input: &Input) -> Result<String, Error> {
             ),
         };
         commands.push(format!(
-            "::alt_args::Command {{ name: {name}, about: {about}, version: \"\", help_subcommand: false, \
+            "::alt_args::Command {{ name: {name}, about: {about}, version: \"\", help_subcommand: false, hidden: false, \
              items: &[{items}], subcommands: {subcommands} }}",
             name = quote(&name),
             about = quote(&attr::doc(&variant.attributes)?),

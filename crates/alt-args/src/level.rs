@@ -243,9 +243,8 @@ impl Level<'_> {
 
     /// A word no positional is left for.
     fn unexpected(&self, word: &str) -> Error {
-        let names = self.scope.subcommand_names();
-        if !names.is_empty() {
-            let close = similar(word, names.iter().copied());
+        if !self.scope.subcommand_names().is_empty() {
+            let close = similar(word, self.scope.listed_subcommand_names());
             if !close.is_empty() || !self.scope.has_positionals() {
                 return Error::unknown_subcommand(self.scope, word, &close);
             }
@@ -262,7 +261,7 @@ fn in_subcommand(
     rest: &[String],
 ) -> Option<(&'static str, &'static str)> {
     let mut best: Option<(usize, &'static str, &'static str)> = None;
-    for command in scope.command.subcommands {
+    for command in scope.listed_subcommands() {
         let Some(at) = rest.iter().position(|word| word == command.name) else {
             continue;
         };

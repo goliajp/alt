@@ -128,7 +128,7 @@ pub(crate) fn render(scope: &Scope) -> String {
     }
     text += &format!("{}\n", usage::full(scope));
     let mut commands: Vec<Row> = Vec::new();
-    for command in scope.command.subcommands {
+    for command in scope.listed_subcommands() {
         commands.push(Row {
             name: format!("  {}", command.name),
             measured: Some(command.name.len()),

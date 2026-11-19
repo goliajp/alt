@@ -11,10 +11,14 @@ pub struct Command {
     pub version: &'static str,
     /// whether `help [COMMAND]...` is a subcommand
     pub help_subcommand: bool,
+    /// left out of help, suggestions and completion; parsed like any other
+    pub hidden: bool,
     pub items: &'static [Item],
     pub subcommands: &'static [Command],
 }
 
+// items only ever sit in static tables, so the size of one costs no moves
+#[allow(clippy::large_enum_variant)]
 pub enum Item {
     Arg(Arg),
     /// arguments recorded together under a name, or under none when it is
@@ -44,6 +48,21 @@ pub enum Preset {
     None,
     Text(&'static str),
     Computed(fn() -> String),
+}
+
+/// What kind of thing a value is, for whoever offers candidates for it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Hint {
+    /// nothing was declared
+    Unset,
+    /// declared to have no candidates
+    None,
+    /// a file or directory
+    Path,
+    /// a directory
+    Dir,
+    /// a kind only the program knows, by name
+    Other(&'static str),
 }
 
 pub struct Arg {
@@ -77,6 +96,7 @@ pub struct Arg {
     pub trailing: bool,
     /// words starting with `-` are values of this positional
     pub hyphen_values: bool,
+    pub hint: Hint,
 }
 
 pub(crate) static HELP: Arg = Arg {
@@ -118,6 +138,7 @@ impl Arg {
         group: "",
         trailing: false,
         hyphen_values: false,
+        hint: Hint::Unset,
     };
 
     pub(crate) fn is_positional(&self) -> bool {
