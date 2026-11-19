@@ -106,7 +106,7 @@ impl NativeRepo<'_> {
 
         // a staged file whose blob went with records that were never
         // synced is stored again, though its stat is the one it was staged with
-        let lost = self.staged_unstored(&mut snapshot, &named)?;
+        let lost = self.staged_unstored(&mut snapshot, &before, &named)?;
         let plan = plan(&before, &delta, &lost, mode.renormalize, &named);
         self.ensure_paths_allowed(&before, &plan, &delta, &named)?;
         // stored anew, a file is cleaned without regard to what is staged

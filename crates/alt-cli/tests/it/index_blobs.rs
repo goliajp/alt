@@ -344,6 +344,32 @@ fn the_command_that_cuts_names_the_files_whose_blobs_went_and_no_others() {
     }
 }
 
+/// Few files are looked up in the store one by one, many by comparing
+/// the index with HEAD: both find the blobs that are gone.
+#[test]
+fn files_staged_and_lost_are_stored_again_however_many_are_named() {
+    for count in [3, 40] {
+        let tmp = alt_os::temp::tempdir().unwrap();
+        let dir = tmp.path();
+        ok(alt(dir, &["init"]));
+        fs::write(dir.join("a.txt"), "one\n").unwrap();
+        ok(alt(dir, &["add", "a.txt"]));
+        ok(alt(dir, &["commit", "-m", "first"]));
+        for n in 0..count {
+            fs::write(
+                dir.join(format!("new{n}.txt")),
+                format!("never arrived {n}\n"),
+            )
+            .unwrap();
+        }
+        lose_objects_of(dir, || drop(ok(alt(dir, &["add", "."]))));
+        assert!(!alt(dir, &["commit", "-m", "second"]).status.success());
+        ok(alt(dir, &["add", "."]));
+        ok(alt(dir, &["commit", "-m", "second"]));
+        ok(alt(dir, &["fsck"]));
+    }
+}
+
 fn git(repo: &Path, args: &[&str]) -> String {
     let out = std::process::Command::new("git")
         .arg("-C")
