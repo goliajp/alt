@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: perf
+summary: keep what few arguments set out of the relocated argument tables
+author-type: human
+author: doracawl
+touched: crates/alt-args-derive/src/generate.rs
+touched: crates/alt-args/src/help.rs
+touched: crates/alt-args/src/level.rs
+touched: crates/alt-args/src/lib.rs
+touched: crates/alt-args/src/scope.rs
+touched: crates/alt-args/src/spec.rs
+touched: crates/alt-args/src/validate.rs
