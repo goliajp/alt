@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: hold the unknown outcome of a sign-in whose session write outlived its request
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/sign_in_deadline.rs
