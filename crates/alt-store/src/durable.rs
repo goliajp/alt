@@ -1,6 +1,7 @@
 //! Making what a chunk store appended durable.
 
 use std::fs::OpenOptions;
+use std::io::{Seek, SeekFrom};
 use std::path::PathBuf;
 
 use crate::packs::{list_pack_seqs, pack_path};
@@ -46,6 +47,17 @@ impl ChunkStore {
         Ok(())
     }
 
+    /// Chops what an append that failed left behind, so that the next one
+    /// starts at a clean offset. The cut is a change to the file like an
+    /// append is: a drop syncs it.
+    pub(crate) fn cut_torn(&mut self) -> Result<(), StoreError> {
+        self.unsynced = true;
+        self.tail.cut(self.active.seq, self.active.len)?;
+        self.active.write.set_len(self.active.len)?;
+        self.active.write.seek(SeekFrom::Start(self.active.len))?;
+        Ok(())
+    }
+
     /// An independent fsync handle (the daemon's group commit fsyncs off the
     /// write path, without `&mut self`, so appends overlap the fsync). It
     /// re-finds the active pack on each call because the pack rolls; sealed
@@ -86,5 +98,19 @@ mod tests {
         // nothing is appended for a chunk the store already holds
         store.put(b"second").unwrap();
         assert!(!store.unsynced);
+    }
+
+    #[test]
+    fn an_append_that_fails_after_an_fsync_leaves_a_drop_owing_one() {
+        let dir = alt_os::temp::tempdir().unwrap();
+        let mut store = ChunkStore::open(dir.path()).unwrap();
+        store.put(b"first").unwrap();
+        store.fsync().unwrap();
+        assert!(!store.unsynced);
+        // a handle that cannot write: the append fails
+        let pack = crate::packs::pack_path(dir.path(), store.active.seq);
+        store.active.write = std::fs::File::open(pack).unwrap();
+        assert!(store.put(b"second").is_err());
+        assert!(store.unsynced);
     }
 }

@@ -54,7 +54,7 @@ pub use tail::{Basis, Tail};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt;
 use std::fs::File;
-use std::io::{Seek, SeekFrom, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -517,10 +517,7 @@ impl ChunkStore {
         self.index.remove_stale()?;
         let offset = self.active.len;
         if let Err(e) = self.append(&header.encode(), payload) {
-            // chop any torn bytes so the next append starts at a clean offset
-            self.tail.cut(self.active.seq, self.active.len)?;
-            self.active.write.set_len(self.active.len)?;
-            self.active.write.seek(SeekFrom::Start(self.active.len))?;
+            self.cut_torn()?;
             return Err(e.into());
         }
         self.unsynced = true;
