@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: feat
+summary: derive value hints and hidden subcommands from attributes
+author-type: human
+author: doracawl
+touched: crates/alt-args-derive/src/field.rs
+touched: crates/alt-args-derive/src/generate.rs
+touched: crates/alt-args-derive/src/lib.rs
+touched: crates/alt-args/tests/it/hints.rs
+touched: crates/alt-args/tests/it/main.rs
