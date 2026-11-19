@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: feat
+summary: say what may stand at the cursor of an unfinished command line
+author-type: human
+author: doracawl
+touched: crates/alt-args/src/complete.rs
+touched: crates/alt-args/src/lib.rs
+touched: crates/alt-args/src/validate.rs
+touched: crates/alt-args/tests/it/complete/mod.rs
+touched: crates/alt-args/tests/it/complete/options.rs
+touched: crates/alt-args/tests/it/complete/values.rs
+touched: crates/alt-args/tests/it/main.rs
