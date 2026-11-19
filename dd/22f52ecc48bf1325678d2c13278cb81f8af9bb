@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: fix
+summary: open no session for a sign-in that outlived its request
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/browser.rs
+touched: crates/alt-server-store/src/browser/login.rs
+touched: crates/alt-server/src/http/web.rs
+touched: crates/alt-server/src/http/web/execute.rs
+touched: crates/alt-server/src/http/web/login.rs
+touched: crates/alt-server/tests/it/database.rs
+touched: crates/alt-server/tests/it/database/running.rs
+touched: crates/alt-server/tests/it/database/sign_in_deadline.rs
