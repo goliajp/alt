@@ -49,7 +49,7 @@ fn arg_item(arg: &ArgField) -> String {
          value_name: {value_name}, help: {help}, kind: ::alt_args::Kind::{kind}, required: {required}, \
          global: {global}, preset: {preset}, missing: {missing}, possible: {possible}, check: {check}, conflicts: {conflicts}, \
          requires: {requires}, required_unless: {required_unless}, group: {group}, trailing: {trailing}, \
-         hyphen_values: {hyphen_values}, hint: ::alt_args::Hint::Unset }})",
+         hyphen_values: {hyphen_values}, hint: ::alt_args::Hint::{hint} }})",
         id = quote(&arg.id),
         long = quote(arg.long.as_deref().unwrap_or_default()),
         short = match arg.short {
@@ -68,6 +68,7 @@ fn arg_item(arg: &ArgField) -> String {
         group = quote(arg.group.as_deref().unwrap_or_default()),
         trailing = arg.trailing,
         hyphen_values = arg.hyphen_values,
+        hint = arg.hint,
     )
 }
 
@@ -212,9 +213,11 @@ pub(crate) fn subcommand(input: &Input) -> Result<String, Error> {
     let mut arms = String::new();
     for variant in variants {
         let mut name = kebab(&variant.name);
+        let mut hidden = false;
         for entry in attr::entries(&variant.attributes, "command")? {
             match entry.name.as_str() {
                 "name" => name = entry.string()?,
+                "hide" => hidden = entry.enabled()?,
                 other => {
                     return Err(Error::new(
                         entry.span,
@@ -240,7 +243,7 @@ pub(crate) fn subcommand(input: &Input) -> Result<String, Error> {
             ),
         };
         commands.push(format!(
-            "::alt_args::Command {{ name: {name}, about: {about}, version: \"\", help_subcommand: false, hidden: false, \
+            "::alt_args::Command {{ name: {name}, about: {about}, version: \"\", help_subcommand: false, hidden: {hidden}, \
              items: &[{items}], subcommands: {subcommands} }}",
             name = quote(&name),
             about = quote(&attr::doc(&variant.attributes)?),

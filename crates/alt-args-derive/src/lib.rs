@@ -12,7 +12,7 @@
 //!
 //! - `#[command(...)]` on a `Parser` struct: `name = "..."`, `version`,
 //!   `about = "..."`, `disable_help_subcommand = true`; on a variant:
-//!   `name = "..."`; on a field: `subcommand`, `flatten`
+//!   `name = "..."`, `hide`; on a field: `subcommand`, `flatten`
 //! - `#[arg(...)]` on a field: `long`, `long = "..."`, `short`, `short = 'c'`,
 //!   `id = "..."`, `visible_alias = "..."`, `value_name = "..."`, `global = true`,
 //!   `default_value = "..."`, `default_value_t = expr`,
@@ -21,7 +21,8 @@
 //!   `conflicts_with = "id"`, `conflicts_with_all = ["id", ...]`,
 //!   `requires = "id"`, `required_unless_present = "id"`,
 //!   `required_unless_present_any = ["id", ...]`, `group = "name"`,
-//!   `trailing_var_arg = true`, `allow_hyphen_values = true`
+//!   `trailing_var_arg = true`, `allow_hyphen_values = true`,
+//!   `hint = path`, `hint = dir`, `hint = none`, `hint = "name"`
 //!
 //! A field without `long` and `short` is positional. `bool` is a flag,
 //! `Option<T>` an optional value, `Vec<T>` a repeatable one, and any other

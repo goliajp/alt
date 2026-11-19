@@ -2,6 +2,7 @@
 mod cli;
 mod counted;
 mod hidden;
+mod hints;
 mod optional_value;
 mod portable;
 mod reference;

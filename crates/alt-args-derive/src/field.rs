@@ -48,6 +48,8 @@ pub(crate) struct ArgField {
     pub(crate) group: Option<String>,
     pub(crate) trailing: bool,
     pub(crate) hyphen_values: bool,
+    /// the `Hint` variant
+    pub(crate) hint: String,
 }
 
 /// `inner` when `ty` is `<wrapper><inner>`.
@@ -85,6 +87,16 @@ fn one_or_list(entry: &attr::Entry) -> Result<Vec<String>, Error> {
         Some(list) => Ok(list),
         None => Ok(vec![entry.string()?]),
     }
+}
+
+/// `none`, `path`, `dir`, or a string naming a kind of the program's own.
+fn hint(entry: &attr::Entry) -> Result<String, Error> {
+    Ok(match entry.text()?.as_str() {
+        "none" => "None".to_owned(),
+        "path" => "Path".to_owned(),
+        "dir" => "Dir".to_owned(),
+        _ => format!("Other({:?})", entry.string()?),
+    })
 }
 
 impl Member {
@@ -134,6 +146,7 @@ impl ArgField {
             group: None,
             trailing: false,
             hyphen_values: false,
+            hint: "Unset".to_owned(),
         };
         for entry in attr::entries(&field.attributes, "arg")? {
             match entry.name.as_str() {
@@ -166,6 +179,7 @@ impl ArgField {
                 "group" => arg.group = Some(entry.string()?),
                 "trailing_var_arg" => arg.trailing = entry.enabled()?,
                 "allow_hyphen_values" => arg.hyphen_values = entry.enabled()?,
+                "hint" => arg.hint = hint(&entry)?,
                 other => {
                     return Err(Error::new(
                         entry.span,
