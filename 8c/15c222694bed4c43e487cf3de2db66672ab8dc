@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: give bulk publication requests a lifetime a loaded machine cannot outrun
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/tests/it/database.rs
+touched: crates/alt-server-store/tests/it/database/bulk_publication.rs
