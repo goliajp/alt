@@ -294,7 +294,7 @@ fn bulk_begin_collision_rolls_back_earlier_batches_and_reservation() {
     f.client().execute("INSERT INTO alt_blobs(repository,blake3,bytes,state,created_at) VALUES('repository',$1,$2,'deleting',0)", &[&last.blake3,&(last.bytes as i64)]).unwrap();
     assert!(matches!(
         f.store
-            .begin(&f.credential, &p.publication, &p.manifest, 60_000),
+            .begin(&f.credential, &p.publication, &p.manifest, 3_600_000),
         Err(alt_server_store::Error::Precondition(_))
     ));
     let row = f.client().query_one("SELECT (SELECT count(*) FROM alt_blobs),(SELECT count(*) FROM alt_requests),(SELECT count(*) FROM alt_pins),(SELECT reserved_bytes FROM alt_repositories)", &[]).unwrap();
@@ -305,7 +305,7 @@ fn bulk_begin_collision_rolls_back_earlier_batches_and_reservation() {
         .execute("DELETE FROM alt_blobs WHERE blake3=$1", &[&last.blake3])
         .unwrap();
     f.store
-        .begin(&f.credential, &p.publication, &p.manifest, 60_000)
+        .begin(&f.credential, &p.publication, &p.manifest, 3_600_000)
         .unwrap();
     let unique: std::collections::BTreeMap<_, _> = p
         .manifest
@@ -483,7 +483,7 @@ fn bounded_registration_batches_publish_all_objects_without_duplicate_byte_charg
     f.store = larger_store(&f);
     let p = payload();
     f.store
-        .begin(&f.credential, &p.publication, &p.manifest, 60_000)
+        .begin(&f.credential, &p.publication, &p.manifest, 3_600_000)
         .unwrap();
     let objects: Vec<_> = p.manifest.entries.iter().zip(&p.contents).collect();
     // This fixture creates separate loose files, whose descriptor bound is

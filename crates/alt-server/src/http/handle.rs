@@ -69,6 +69,7 @@ pub(super) async fn handle(
         );
     };
     let gzip = request.headers().contains_key(header::CONTENT_ENCODING);
+    let reading = matches!(*request.method(), Method::GET | Method::HEAD);
     if let Some(message) = unsupported_media(&route, request.headers(), gzip) {
         return failure(
             415,
@@ -151,6 +152,14 @@ pub(super) async fn handle(
     .await;
     match result {
         Ok(Ok(result)) => render_output(result, request_key),
+        // a read changed nothing, so there is no outcome to look up
+        _ if reading => failure(
+            503,
+            ErrorCode::TemporarilyUnavailable,
+            "The response did not finish in time; retry the same request",
+            request_key,
+            Retry::SameRequest,
+        ),
         _ => failure(
             503,
             ErrorCode::OutcomeUnknown,

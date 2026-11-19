@@ -93,6 +93,9 @@ serde_json = "1"
 # the size of target/debug
 debug = 1
 
+[profile.dev.package.alt-crypto]
+opt-level = 3
+
 [profile.release]
 # optimized as one unit across crates
 lto = "fat"

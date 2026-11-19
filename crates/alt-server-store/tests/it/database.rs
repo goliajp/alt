@@ -246,7 +246,7 @@ impl Payload {
     }
     fn upload(&self, store: &mut Store, credential: &Credential) {
         store
-            .begin(credential, &self.publication, &self.manifest, 60_000)
+            .begin(credential, &self.publication, &self.manifest, 3_600_000)
             .unwrap();
         for (entry, bytes) in self.manifest.entries.iter().zip(&self.contents) {
             let proof = store
