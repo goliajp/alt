@@ -125,3 +125,41 @@ fn a_command_that_only_reads_is_answered_the_same_through_a_daemon() {
         assert_eq!(still, daemon, "{step:?}: another daemon took over");
     }
 }
+
+/// The same where the daemon held the store first and the log grew
+/// under it: a record that does not read past the synced point, whole
+/// operations after it. The daemon follows the log, passes them over,
+/// and hands the command back.
+#[test]
+fn a_daemon_that_follows_the_log_past_a_record_that_does_not_read_hands_the_command_back() {
+    let base = Base::build();
+    let dir = base.state("held", &[]);
+    ok(served(&dir, &["branch"]));
+    let daemon = fs::read(dir.join(".alt/daemon.meta")).unwrap();
+    // what another commit appends to the same log, its first record damaged
+    let ahead = base.state("ahead", &[]);
+    fs::write(ahead.join("later.txt"), "later\n").unwrap();
+    ok(alt(&ahead, &["add", "later.txt"]));
+    ok(alt(&ahead, &["commit", "-m", "later"]));
+    let log = fs::read(dir.join(".alt/oplog/log")).unwrap();
+    let mut grown = fs::read(ahead.join(".alt/oplog/log")).unwrap();
+    assert!(grown.starts_with(&log) && grown.len() > log.len());
+    grown[log.len() + 14] ^= 0xff;
+    fs::write(dir.join(".alt/oplog/log"), &grown).unwrap();
+    for args in [&["rev-parse", "HEAD"][..], &["log", "-n", "3"]] {
+        let direct = alt(&dir, args);
+        let said = stderr(&direct);
+        assert!(
+            said.contains("and follow a record that does not read"),
+            "{direct:?}"
+        );
+        let through = served(&dir, args);
+        assert_eq!(
+            (through.status.code(), &through.stdout, stderr(&through)),
+            (direct.status.code(), &direct.stdout, said),
+            "alt {args:?}"
+        );
+    }
+    let still = fs::read(dir.join(".alt/daemon.meta")).unwrap();
+    assert_eq!(still, daemon, "another daemon took over");
+}
