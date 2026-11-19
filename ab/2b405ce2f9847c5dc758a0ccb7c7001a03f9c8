@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: answer a read that outlived its request as retryable
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/http/handle.rs
+touched: crates/alt-server/tests/it/database.rs
+touched: crates/alt-server/tests/it/database/read_deadline.rs
