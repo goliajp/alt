@@ -2,8 +2,8 @@
 
 use crate::error::{Error, ErrorKind};
 use crate::matches::Matched;
-use crate::scope::Scope;
-use crate::spec::Kind;
+use crate::scope::{Letter, Scope, split_long};
+use crate::spec::{Command, Kind};
 use crate::suggest::similar;
 use crate::{help, usage, validate};
 
@@ -28,7 +28,66 @@ pub(crate) struct Level<'a> {
     pub(crate) trailing: bool,
 }
 
-impl Level<'_> {
+/// What reading one word led to.
+pub(crate) enum Step {
+    /// the word belongs to this level
+    Taken,
+    /// the word is `help`; the words after it name a command
+    Help,
+    /// the word names a subcommand; the words after it are its own
+    Subcommand(&'static Command),
+}
+
+impl<'a> Level<'a> {
+    pub(crate) fn new(scope: &'a Scope) -> Self {
+        Level {
+            scope,
+            entries: Vec::new(),
+            pending: None,
+            state: State::Idle,
+            filled: 0,
+            trailing: false,
+        }
+    }
+
+    /// Reads the next word; `rest` is what follows it on the line.
+    pub(crate) fn word(&mut self, word: &str, rest: &[String]) -> Result<Step, Error> {
+        if !self.trailing {
+            let command = self.scope.command;
+            if self.state == State::Idle {
+                if word == "help" && command.help_subcommand {
+                    return Ok(Step::Help);
+                }
+                if let Some(command) = command.subcommands.iter().find(|c| c.name == word) {
+                    return Ok(Step::Subcommand(command));
+                }
+            }
+            if word == "--" {
+                self.trailing = true;
+                return Ok(Step::Taken);
+            }
+            let is_option = if word.starts_with("--") {
+                self.long(word, rest)?
+            } else if word.starts_with('-') && word.len() > 1 {
+                self.short(word)?
+            } else {
+                false
+            };
+            if is_option {
+                return Ok(Step::Taken);
+            }
+            if self.state == State::Value {
+                if let Some((_, values)) = &mut self.pending {
+                    values.push(word.to_owned());
+                }
+                self.state = State::Idle;
+                return Ok(Step::Taken);
+            }
+        }
+        self.positional(word.to_owned())?;
+        Ok(Step::Taken)
+    }
+
     fn entry(&mut self, id: &'static str) -> &mut Matched {
         let at = self.entries.iter().position(|entry| entry.id == id);
         let at = at.unwrap_or_else(|| {
@@ -85,11 +144,11 @@ impl Level<'_> {
     }
 
     /// The positional the next plain word goes to.
-    fn next_positional(&self) -> Option<usize> {
+    pub(crate) fn next_positional(&self) -> Option<usize> {
         self.scope.positionals().nth(self.filled).map(|(at, _)| at)
     }
 
-    fn takes_hyphen_values(&self) -> bool {
+    pub(crate) fn takes_hyphen_values(&self) -> bool {
         self.next_positional()
             .is_some_and(|at| self.scope.slots[at].arg.hyphen_values)
     }
@@ -112,11 +171,8 @@ impl Level<'_> {
     }
 
     /// `--name` or `--name=value`; false when the word is a value instead.
-    pub(crate) fn long(&mut self, word: &str, rest: &[String]) -> Result<bool, Error> {
-        let (name, attached) = match word[2..].split_once('=') {
-            Some((name, value)) => (name, Some(value)),
-            None => (&word[2..], None),
-        };
+    fn long(&mut self, word: &str, rest: &[String]) -> Result<bool, Error> {
+        let (name, attached) = split_long(word);
         let Some(at) = self.scope.long(name) else {
             return match self.takes_hyphen_values() {
                 true => Ok(false),
@@ -178,47 +234,48 @@ impl Level<'_> {
     }
 
     /// `-abc`, where a letter that takes a value ends the cluster.
-    pub(crate) fn short(&mut self, word: &str) -> Result<bool, Error> {
-        let cluster = &word[1..];
-        for (offset, letter) in cluster.char_indices() {
-            let Some(at) = self.scope.short(letter) else {
-                if offset == 0 && self.takes_hyphen_values() {
-                    return Ok(false);
+    fn short(&mut self, word: &str) -> Result<bool, Error> {
+        for (offset, letter) in self.scope.cluster(word) {
+            match letter {
+                Letter::Unknown(letter) => {
+                    if offset == 0 && self.takes_hyphen_values() {
+                        return Ok(false);
+                    }
+                    let _ = self.settle();
+                    let word = format!("-{letter}");
+                    let tips: Vec<String> = self.pass_as_value(&word).into_iter().collect();
+                    return Err(Error::unknown_argument(
+                        &word,
+                        &tips,
+                        usage::full(self.scope),
+                    ));
                 }
-                let _ = self.settle();
-                let word = format!("-{letter}");
-                let tips: Vec<String> = self.pass_as_value(&word).into_iter().collect();
-                return Err(Error::unknown_argument(
-                    &word,
-                    &tips,
-                    usage::full(self.scope),
-                ));
-            };
-            self.settle()?;
-            let arg = self.scope.slots[at].arg;
-            if arg.is_builtin() {
-                return Err(self.builtin(arg.kind));
+                Letter::Flag(at) => {
+                    self.settle()?;
+                    let arg = self.scope.slots[at].arg;
+                    if arg.is_builtin() {
+                        return Err(self.builtin(arg.kind));
+                    }
+                    self.record(at, vec!["true".to_owned()])?;
+                }
+                Letter::Valued(at, attached) => {
+                    self.settle()?;
+                    let missing = self.scope.slots[at].arg.missing;
+                    match attached {
+                        Some(value) => self.record(at, vec![value.to_owned()])?,
+                        None if !missing.is_empty() => self.record(at, vec![missing.to_owned()])?,
+                        None => {
+                            self.pending = Some((at, Vec::new()));
+                            self.state = State::Value;
+                        }
+                    }
+                }
             }
-            if !arg.takes_value() {
-                self.record(at, vec!["true".to_owned()])?;
-                continue;
-            }
-            let attached = &cluster[offset + letter.len_utf8()..];
-            if attached.is_empty() && !arg.missing.is_empty() {
-                self.record(at, vec![arg.missing.to_owned()])?;
-            } else if attached.is_empty() {
-                self.pending = Some((at, Vec::new()));
-                self.state = State::Value;
-            } else {
-                let value = attached.strip_prefix('=').unwrap_or(attached);
-                self.record(at, vec![value.to_owned()])?;
-            }
-            break;
         }
         Ok(true)
     }
 
-    pub(crate) fn positional(&mut self, word: String) -> Result<(), Error> {
+    fn positional(&mut self, word: String) -> Result<(), Error> {
         let Some(at) = self.next_positional() else {
             let _ = self.settle();
             return Err(self.unexpected(&word));

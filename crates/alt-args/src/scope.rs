@@ -19,6 +19,23 @@ pub(crate) struct Scope {
     pub(crate) slots: Vec<Slot>,
 }
 
+/// One letter of a `-abc` word.
+pub(crate) enum Letter<'a> {
+    Unknown(char),
+    /// a flag, by slot
+    Flag(usize),
+    /// an option that takes a value, by slot, and the value attached to it
+    Valued(usize, Option<&'a str>),
+}
+
+/// The name and the attached value of `--name` or `--name=value`.
+pub(crate) fn split_long(word: &str) -> (&str, Option<&str>) {
+    match word[2..].split_once('=') {
+        Some((name, value)) => (name, Some(value)),
+        None => (&word[2..], None),
+    }
+}
+
 fn collect(
     items: &'static [Item],
     owner: &'static str,
@@ -102,6 +119,31 @@ impl Scope {
         self.slots
             .iter()
             .position(|slot| slot.arg.short == Some(name))
+    }
+
+    /// The letters of `-abc`, each with its offset behind the `-`, up to
+    /// the first that is unknown or takes a value.
+    pub(crate) fn cluster<'a>(&self, word: &'a str) -> Vec<(usize, Letter<'a>)> {
+        let cluster = &word[1..];
+        let mut letters = Vec::new();
+        for (offset, letter) in cluster.char_indices() {
+            let Some(at) = self.short(letter) else {
+                letters.push((offset, Letter::Unknown(letter)));
+                break;
+            };
+            if !self.slots[at].arg.takes_value() {
+                letters.push((offset, Letter::Flag(at)));
+                continue;
+            }
+            let attached = &cluster[offset + letter.len_utf8()..];
+            let value = attached.strip_prefix('=').unwrap_or(attached);
+            letters.push((
+                offset,
+                Letter::Valued(at, (!attached.is_empty()).then_some(value)),
+            ));
+            break;
+        }
+        letters
     }
 
     pub(crate) fn positionals(&self) -> impl Iterator<Item = (usize, &Slot)> {
