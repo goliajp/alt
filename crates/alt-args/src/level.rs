@@ -54,7 +54,7 @@ impl Level<'_> {
             return Err(Error::repeated(self.scope, arg));
         }
         self.entry(arg.id);
-        for group in [slot.owner, arg.group] {
+        for group in [slot.owner, arg.rare().group] {
             if !group.is_empty() {
                 self.entry(group).values.push(arg.id.to_owned());
             }
@@ -144,9 +144,9 @@ impl Level<'_> {
                 self.settle()?;
                 self.record(at, vec![value.to_owned()])?;
             }
-            (true, None) if !arg.missing.is_empty() => {
+            (true, None) if !arg.rare().missing.is_empty() => {
                 self.settle()?;
-                self.record(at, vec![arg.missing.to_owned()])?;
+                self.record(at, vec![arg.rare().missing.to_owned()])?;
             }
             (true, None) => {
                 self.settle()?;
@@ -204,8 +204,8 @@ impl Level<'_> {
                 continue;
             }
             let attached = &cluster[offset + letter.len_utf8()..];
-            if attached.is_empty() && !arg.missing.is_empty() {
-                self.record(at, vec![arg.missing.to_owned()])?;
+            if attached.is_empty() && !arg.rare().missing.is_empty() {
+                self.record(at, vec![arg.rare().missing.to_owned()])?;
             } else if attached.is_empty() {
                 self.pending = Some((at, Vec::new()));
                 self.state = State::Value;

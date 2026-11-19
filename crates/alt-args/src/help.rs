@@ -42,7 +42,7 @@ fn section(title: &str, rows: &[Row]) -> String {
 }
 
 fn preset(slot: &Slot) -> Option<String> {
-    match slot.arg.preset {
+    match slot.arg.rare().preset {
         Preset::None => None,
         Preset::Text(text) => Some(text.to_owned()),
         Preset::Computed(compute) => Some(compute()),
@@ -56,8 +56,8 @@ fn description(slot: &Slot) -> (String, usize) {
     if let Some(value) = preset(slot) {
         parts.push(format!("[default: {value}]"));
     }
-    if !arg.alias.is_empty() {
-        parts.push(format!("[aliases: --{}]", arg.alias));
+    if !arg.rare().alias.is_empty() {
+        parts.push(format!("[aliases: --{}]", arg.rare().alias));
     }
     if !arg.possible.is_empty() {
         parts.push(format!("[possible values: {}]", arg.possible.join(", ")));
@@ -110,7 +110,9 @@ fn options(scope: &Scope) -> Vec<Row> {
         .into_iter()
         .map(|slot| {
             let value = match slot.arg.takes_value() {
-                true if !slot.arg.missing.is_empty() => format!("[=<{}>]", slot.arg.value_name),
+                true if !slot.arg.rare().missing.is_empty() => {
+                    format!("[=<{}>]", slot.arg.value_name)
+                }
                 true => format!(" <{}>", slot.arg.value_name),
                 false => String::new(),
             };

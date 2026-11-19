@@ -16,10 +16,11 @@ pub(crate) fn given<'a>(scope: &Scope, entries: &'a [Matched]) -> Vec<&'a str> {
 
 /// What `slot` may not appear together with, as it declares it.
 fn excluded(scope: &Scope, slot: &Slot) -> Vec<&'static str> {
-    let mut ids = slot.arg.conflicts.to_vec();
-    if !slot.arg.group.is_empty() {
+    let mut ids = slot.arg.rare().conflicts.to_vec();
+    if !slot.arg.rare().group.is_empty() {
         let peers = scope.slots.iter().map(|peer| peer.arg);
-        let peers = peers.filter(|peer| peer.group == slot.arg.group && peer.id != slot.arg.id);
+        let peers = peers
+            .filter(|peer| peer.rare().group == slot.arg.rare().group && peer.id != slot.arg.id);
         ids.extend(peers.map(|peer| peer.id));
     }
     ids
@@ -56,7 +57,7 @@ fn conflicts(scope: &Scope, given: &[&str]) -> Result<(), Error> {
             .collect();
         let mut used: Vec<&str> = Vec::new();
         for slot in kept.iter().filter_map(|id| scope.find(id)) {
-            let needs = slot.arg.requires.iter();
+            let needs = slot.arg.rare().requires.iter();
             used.extend(needs.filter(|id| !kept.contains(id) && !clashing.contains(id)));
         }
         used.extend(&kept);
@@ -73,7 +74,7 @@ fn conflicts(scope: &Scope, given: &[&str]) -> Result<(), Error> {
 fn required(scope: &Scope, given: &[&str]) -> Result<(), Error> {
     let mut needed = usage::required(scope);
     for slot in given.iter().filter_map(|id| scope.find(id)) {
-        for id in slot.arg.requires {
+        for id in slot.arg.rare().requires {
             if !needed.contains(id) {
                 needed.push(id);
             }
@@ -83,7 +84,7 @@ fn required(scope: &Scope, given: &[&str]) -> Result<(), Error> {
     let mut missing: Vec<&str> = needed.iter().copied().filter(|id| absent(id)).collect();
     missing.retain(|id| clashes(scope, id, given).is_empty());
     for slot in scope.slots.iter().filter(|slot| absent(slot.arg.id)) {
-        let unless = slot.arg.required_unless;
+        let unless = slot.arg.rare().required_unless;
         if !unless.is_empty() && unless.iter().all(|id| absent(id)) {
             missing.push(slot.arg.id);
         }
@@ -132,7 +133,7 @@ fn defaults(scope: &Scope, entries: &mut Vec<Matched>) {
         if entries.iter().any(|entry| entry.id == slot.arg.id) {
             continue;
         }
-        let value = match (slot.arg.kind, &slot.arg.preset) {
+        let value = match (slot.arg.kind, &slot.arg.rare().preset) {
             (Kind::Help | Kind::Version | Kind::Count, _) => continue,
             (Kind::Flag, _) => "false".to_owned(),
             (_, Preset::Text(text)) => (*text).to_owned(),

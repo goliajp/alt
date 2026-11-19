@@ -44,28 +44,41 @@ fn arg_item(arg: &ArgField) -> String {
         ),
         (_, None, None) => (format!("{value}::POSSIBLE"), format!("{value}::CHECK")),
     };
+    let has_rare = arg.alias.is_some()
+        || !matches!(arg.preset, Preset::None)
+        || arg.missing.is_some()
+        || !arg.conflicts.is_empty()
+        || !arg.requires.is_empty()
+        || !arg.required_unless.is_empty()
+        || arg.group.is_some();
+    let rare = match has_rare {
+        false => "::core::option::Option::None".to_owned(),
+        true => format!(
+            "::core::option::Option::Some(&::alt_args::Rare {{ alias: {alias}, preset: {preset}, missing: {missing}, \
+             conflicts: {conflicts}, requires: {requires}, required_unless: {required_unless}, group: {group} }})",
+            alias = quote(arg.alias.as_deref().unwrap_or_default()),
+            missing = quote(arg.missing.as_deref().unwrap_or_default()),
+            conflicts = list(&arg.conflicts),
+            requires = list(&arg.requires),
+            required_unless = list(&arg.required_unless),
+            group = quote(arg.group.as_deref().unwrap_or_default()),
+        ),
+    };
     format!(
-        "::alt_args::Item::Arg(::alt_args::Arg {{ id: {id}, long: {long}, short: {short}, alias: {alias}, \
+        "::alt_args::Item::Arg(::alt_args::Arg {{ id: {id}, long: {long}, short: {short}, \
          value_name: {value_name}, help: {help}, kind: ::alt_args::Kind::{kind}, required: {required}, \
-         global: {global}, preset: {preset}, missing: {missing}, possible: {possible}, check: {check}, conflicts: {conflicts}, \
-         requires: {requires}, required_unless: {required_unless}, group: {group}, trailing: {trailing}, \
-         hyphen_values: {hyphen_values} }})",
+         global: {global}, possible: {possible}, check: {check}, trailing: {trailing}, \
+         hyphen_values: {hyphen_values}, rare: {rare} }})",
         id = quote(&arg.id),
         long = quote(arg.long.as_deref().unwrap_or_default()),
         short = match arg.short {
             Some(short) => format!("::core::option::Option::Some({short:?})"),
             None => "::core::option::Option::None".to_owned(),
         },
-        alias = quote(arg.alias.as_deref().unwrap_or_default()),
         value_name = quote(&arg.value_name),
         help = quote(&arg.help),
         required = arg.required,
         global = arg.global,
-        missing = quote(arg.missing.as_deref().unwrap_or_default()),
-        conflicts = list(&arg.conflicts),
-        requires = list(&arg.requires),
-        required_unless = list(&arg.required_unless),
-        group = quote(arg.group.as_deref().unwrap_or_default()),
         trailing = arg.trailing,
         hyphen_values = arg.hyphen_values,
     )

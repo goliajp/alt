@@ -60,7 +60,7 @@ pub use alt_args_derive::{Args, Parser, Subcommand, ValueEnum};
 pub use error::{Error, ErrorKind};
 pub use matches::{Matched, Matches};
 pub use parse::parse;
-pub use spec::{Arg, Command, Item, Kind, Preset};
+pub use spec::{Arg, Command, Item, Kind, Preset, Rare};
 pub use value::{Check, Value};
 
 /// A whole command line.

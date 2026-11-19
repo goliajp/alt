@@ -46,37 +46,58 @@ pub enum Preset {
     Computed(fn() -> String),
 }
 
+/// One argument. Every argument of every command sits in the data the
+/// loader relocates before `main`, a page of which costs each start a copy:
+/// what few arguments set is kept apart in [`Rare`].
 pub struct Arg {
     pub id: &'static str,
     /// empty for none; an argument with neither `long` nor `short` is positional
     pub long: &'static str,
     pub short: Option<char>,
-    /// a second long name shown in help, empty for none
-    pub alias: &'static str,
     pub value_name: &'static str,
     pub help: &'static str,
     pub kind: Kind,
     pub required: bool,
     /// also accepted by every subcommand below
     pub global: bool,
+    /// the only accepted values when not empty
+    pub possible: &'static [&'static str],
+    pub check: Option<Check>,
+    /// once this positional starts, every later word belongs to it
+    pub trailing: bool,
+    /// words starting with `-` are values of this positional
+    pub hyphen_values: bool,
+    /// `None` where none of it is set
+    pub rare: Option<&'static Rare>,
+}
+
+/// The settings of an argument that few arguments have.
+pub struct Rare {
+    /// a second long name shown in help, empty for none
+    pub alias: &'static str,
     pub preset: Preset,
     /// the value an option has when it is given without one; not empty
     /// makes the value optional, and one is then only taken when attached
     /// (`--name=value`, `-nvalue`), never from the next word
     pub missing: &'static str,
-    /// the only accepted values when not empty
-    pub possible: &'static [&'static str],
-    pub check: Option<Check>,
     pub conflicts: &'static [&'static str],
     pub requires: &'static [&'static str],
     /// required unless one of these is present
     pub required_unless: &'static [&'static str],
     /// at most one argument of a named group may be present
     pub group: &'static str,
-    /// once this positional starts, every later word belongs to it
-    pub trailing: bool,
-    /// words starting with `-` are values of this positional
-    pub hyphen_values: bool,
+}
+
+impl Rare {
+    pub const NONE: Rare = Rare {
+        alias: "",
+        preset: Preset::None,
+        missing: "",
+        conflicts: &[],
+        requires: &[],
+        required_unless: &[],
+        group: "",
+    };
 }
 
 pub(crate) static HELP: Arg = Arg {
@@ -102,23 +123,21 @@ impl Arg {
         id: "",
         long: "",
         short: None,
-        alias: "",
         value_name: "",
         help: "",
         kind: Kind::Flag,
         required: false,
         global: false,
-        preset: Preset::None,
-        missing: "",
         possible: &[],
         check: None,
-        conflicts: &[],
-        requires: &[],
-        required_unless: &[],
-        group: "",
         trailing: false,
         hyphen_values: false,
+        rare: None,
     };
+
+    pub(crate) fn rare(&self) -> &'static Rare {
+        self.rare.unwrap_or(&Rare::NONE)
+    }
 
     pub(crate) fn is_positional(&self) -> bool {
         self.long.is_empty() && self.short.is_none()
@@ -146,7 +165,7 @@ impl Arg {
         if !self.takes_value() {
             return text;
         }
-        if !self.missing.is_empty() {
+        if !self.rare().missing.is_empty() {
             return text + &format!("[=<{}>]", self.value_name);
         }
         if !self.is_positional() {
@@ -161,5 +180,22 @@ impl Arg {
             text += "...";
         }
         text
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn an_argument_takes_no_more_room_than_what_every_argument_sets() {
+        // four names, the accepted values, the check, the rare settings,
+        // the short name and five one-byte fields, rounded up to eight
+        assert_eq!(
+            size_of::<Arg>(),
+            (4 * 16 + 16 + 8 + 8 + 4 + 5_usize).next_multiple_of(8)
+        );
+        assert!(size_of::<Item>() <= size_of::<Arg>() + 8);
     }
 }

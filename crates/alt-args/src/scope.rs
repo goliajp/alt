@@ -93,9 +93,9 @@ impl Scope {
     }
 
     pub(crate) fn long(&self, name: &str) -> Option<usize> {
-        self.slots
-            .iter()
-            .position(|slot| !name.is_empty() && (slot.arg.long == name || slot.arg.alias == name))
+        self.slots.iter().position(|slot| {
+            !name.is_empty() && (slot.arg.long == name || slot.arg.rare().alias == name)
+        })
     }
 
     pub(crate) fn short(&self, name: char) -> Option<usize> {
@@ -120,7 +120,7 @@ impl Scope {
         let mut longs = Vec::new();
         for slot in &self.slots {
             longs.extend(
-                [slot.arg.long, slot.arg.alias]
+                [slot.arg.long, slot.arg.rare().alias]
                     .into_iter()
                     .filter(|name| !name.is_empty()),
             );
