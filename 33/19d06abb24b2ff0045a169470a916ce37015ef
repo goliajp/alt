@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: add a text file again when the blob the index names for it is gone
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/convert.rs
+touched: crates/alt-cli/tests/it/index_blobs.rs
