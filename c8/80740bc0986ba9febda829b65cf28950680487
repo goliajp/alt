@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: resolve the repository of a request only when it is spelled otherwise
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/execution.rs
