@@ -1507,7 +1507,7 @@ pub fn run_on_store<W: Write>(
     store: &mut Store,
     repo: &Repository,
     cwd: &Path,
-    id: Identity,
+    id: &Identity,
     request_id: Option<alt_refs::IdemKey>,
     out: &mut W,
 ) -> Res<u8> {
@@ -1518,7 +1518,7 @@ pub fn run_on_store<W: Write>(
             let (_alt_dir, coord) = native::resolve_workspace(cwd, cli.workspace.as_deref())?;
             // Execution has already claimed the whole request. The id here
             // attributes each operation; it is not a ref transaction dedup key.
-            let mut repo = NativeRepo::attach(store, coord, id, request_id);
+            let mut repo = NativeRepo::attach(store, coord, id.clone(), request_id);
             run_native(&mut repo, c, out)
         }
         c => {

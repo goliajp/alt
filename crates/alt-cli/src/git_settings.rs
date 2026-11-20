@@ -6,6 +6,7 @@ use std::borrow::Cow;
 use std::cell::RefCell;
 use std::ffi::OsString;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use alt_bytes::BString;
 use alt_git_config::{Config, Entry, IncludeContext};
@@ -30,18 +31,21 @@ pub const CALLER_ENV: &[&str] = &[
     "LANG",
 ];
 
+/// Variables by name, shared with whoever named them.
+type Env = Arc<Vec<(String, String)>>;
+
 thread_local! {
     /// the variables of the process this thread runs a command for
-    static CALLER: RefCell<Option<Vec<(String, String)>>> = const { RefCell::new(None) };
+    static CALLER: RefCell<Option<Env>> = const { RefCell::new(None) };
 }
 
 /// While it lives, this thread reads the variables of [`CALLER_ENV`]
 /// from the ones it was made with and not from the process.
-pub struct Caller(Option<Vec<(String, String)>>);
+pub struct Caller(Option<Env>);
 
 impl Caller {
-    pub fn new(env: Vec<(String, String)>) -> Self {
-        Caller(CALLER.replace(Some(env)))
+    pub fn new(env: impl Into<Env>) -> Self {
+        Caller(CALLER.replace(Some(env.into())))
     }
 }
 
@@ -216,7 +220,7 @@ mod tests {
     fn the_locale_says_whether_texts_are_utf8() {
         let says = |pairs: &[(&str, &str)]| {
             let env = pairs.iter().map(|(k, v)| (k.to_string(), v.to_string()));
-            let _caller = Caller::new(env.collect());
+            let _caller = Caller::new(env.collect::<Vec<_>>());
             utf8_locale()
         };
         // the one UTF-8 locale every system of its kind has

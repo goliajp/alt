@@ -152,7 +152,7 @@ impl Execution {
                 store,
                 repo,
                 &self.cwd,
-                self.identity.clone(),
+                &self.identity,
                 self.id,
                 &mut stdout,
             );
