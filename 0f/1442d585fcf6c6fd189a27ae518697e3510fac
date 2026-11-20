@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: perf
+summary: copy the identity of a request only for a command of the native store
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli.rs
+touched: crates/alt-cli/src/execution.rs
+touched: crates/alt-cli/src/git_settings.rs
+touched: crates/alt-cli/src/native/identity.rs
