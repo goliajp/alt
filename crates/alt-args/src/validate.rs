@@ -85,7 +85,7 @@ fn required(scope: &Scope, given: &[&str]) -> Result<(), Error> {
     missing.retain(|id| clashes(scope, id, given).is_empty());
     for slot in scope.slots.iter().filter(|slot| absent(slot.arg.id)) {
         let unless = slot.arg.required_unless();
-        if !unless.is_empty() && unless.iter().all(|id| absent(id)) {
+        if !unless.is_empty() && unless.iter().all(&absent) {
             missing.push(slot.arg.id);
         }
     }
