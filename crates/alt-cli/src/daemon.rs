@@ -194,24 +194,38 @@ impl Request {
     }
 }
 
-/// Writes a length-prefixed frame to `w`.
+/// Writes a length-prefixed frame to `w`: the length and the payload in
+/// one write where the writer takes both.
 pub fn write_frame(w: &mut impl Write, payload: &[u8]) -> io::Result<()> {
     let length = u32::try_from(payload.len())
-        .map_err(|_| bad("daemon frame exceeds the 32-bit length limit"))?;
-    w.write_all(&length.to_le_bytes())?;
-    w.write_all(payload)?;
+        .map_err(|_| bad("daemon frame exceeds the 32-bit length limit"))?
+        .to_le_bytes();
+    let written = w.write_vectored(&[io::IoSlice::new(&length), io::IoSlice::new(payload)])?;
+    match written.checked_sub(length.len()) {
+        Some(of_payload) => w.write_all(&payload[of_payload..])?,
+        None => {
+            w.write_all(&length[written..])?;
+            w.write_all(payload)?;
+        }
+    }
     w.flush()
 }
+
+/// How much of a frame is given room before any of it has arrived.
+const FIRST_ROOM: u64 = 64 << 10;
 
 /// Reads one length-prefixed frame from `r`.
 pub fn read_frame(r: &mut impl Read) -> io::Result<Vec<u8>> {
     let mut len = [0u8; 4];
     r.read_exact(&mut len)?;
     let len = u64::from(u32::from_le_bytes(len));
-    // grow with the bytes that actually arrive, so a length prefix alone
-    // cannot make the peer allocate up to 4 GiB
-    let mut payload = Vec::new();
-    r.take(len).read_to_end(&mut payload)?;
+    // a frame of ordinary size is read whole in one call; beyond that the
+    // room grows with the bytes that actually arrive, so a length prefix
+    // alone cannot make the peer allocate up to 4 GiB
+    let mut payload = vec![0; len.min(FIRST_ROOM) as usize];
+    r.read_exact(&mut payload)?;
+    r.take(len - payload.len() as u64)
+        .read_to_end(&mut payload)?;
     if payload.len() as u64 != len {
         return Err(io::Error::new(
             io::ErrorKind::UnexpectedEof,
@@ -307,6 +321,54 @@ mod tests {
         let mut cursor = std::io::Cursor::new(buf);
         let got = read_frame(&mut cursor).unwrap();
         assert_eq!(got, payload);
+    }
+
+    /// Takes at most `self.1` bytes of each write.
+    struct Trickle(Vec<u8>, usize);
+
+    impl Write for Trickle {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            let taken = bytes.len().min(self.1);
+            self.0.extend_from_slice(&bytes[..taken]);
+            Ok(taken)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_frame_is_whole_however_little_each_write_takes() {
+        let payload: Vec<u8> = (0..200u8).collect();
+        for at_once in [1, 3, 4, 5, 150, 204, 1000] {
+            let mut out = Trickle(Vec::new(), at_once);
+            write_frame(&mut out, &payload).unwrap();
+            assert_eq!(out.0[..4], 200u32.to_le_bytes(), "{at_once}");
+            assert_eq!(read_frame(&mut io::Cursor::new(out.0)).unwrap(), payload);
+        }
+    }
+
+    /// Counts the reads that reach it.
+    struct Counted<R>(R, usize);
+
+    impl<R: Read> Read for Counted<R> {
+        fn read(&mut self, into: &mut [u8]) -> io::Result<usize> {
+            self.1 += 1;
+            self.0.read(into)
+        }
+    }
+
+    #[test]
+    fn a_frame_of_ordinary_size_is_read_in_two_calls() {
+        for size in [0, 10, 31, 32, 33, 200, 5000, 60_000] {
+            let payload = vec![7u8; size];
+            let mut framed = Vec::new();
+            write_frame(&mut framed, &payload).unwrap();
+            let mut counted = Counted(io::Cursor::new(framed), 0);
+            assert_eq!(read_frame(&mut counted).unwrap(), payload);
+            assert!(counted.1 <= 2, "{size} bytes took {} reads", counted.1);
+        }
     }
 
     #[test]
