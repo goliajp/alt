@@ -110,6 +110,7 @@ fn options(scope: &Scope) -> Vec<Row> {
         .into_iter()
         .map(|slot| {
             let value = match slot.arg.takes_value() {
+                true if !slot.arg.missing.is_empty() => format!("[=<{}>]", slot.arg.value_name),
                 true => format!(" <{}>", slot.arg.value_name),
                 false => String::new(),
             };

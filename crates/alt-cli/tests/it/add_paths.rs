@@ -333,5 +333,5 @@ fn a_file_under_a_directory_that_became_a_file_can_be_staged_by_name() {
         tree_line(&ok(git(theirs.path(), &["cat-file", "-p", "HEAD"])))
     );
     let status = ok(alt(ours.path(), &["status"]));
-    assert!(status.contains("deleted:   node/b.txt"), "{status}");
+    assert!(status.contains("deleted:    node/b.txt"), "{status}");
 }

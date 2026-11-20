@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use crate::ignore::glob_match;
+use crate::glob::glob_match;
 
 /// How a path's content is converted, following git's attribute rules on a
 /// platform whose native line ending is LF.

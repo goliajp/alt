@@ -222,18 +222,14 @@ fn run() -> Response {
                 json,
             } => return cli::ci_validate(&cwd, paths, *json, &mut out),
             command => {
-                let (repo, head) = match native::resolve_workspace(
-                    &cwd,
-                    execution.parsed.cli.workspace.as_deref(),
-                ) {
-                    Ok((dir, coord)) => (
-                        Repository::open_alt(dir, Some(coord.root().to_owned()))?,
-                        coord.head_ref().to_owned(),
-                    ),
-                    Err(error) if execution.parsed.cli.workspace.is_some() => return Err(error),
-                    Err(_) => (Repository::discover(&cwd)?, "HEAD".to_owned()),
+                let named = execution.parsed.cli.workspace.as_deref();
+                let repo = match native::resolve_workspace(&cwd, named) {
+                    Ok((dir, coord)) => Repository::open_alt(dir, Some(coord.root().to_owned()))?,
+                    Err(error) if named.is_some() => return Err(error),
+                    Err(_) => Repository::discover(&cwd)?,
                 };
-                cli::run_git(&repo, command, &head, &mut out)?;
+                let at = native::pathspec::Place::of(&repo, &cwd, named)?;
+                cli::run_git(&repo, command, &at, &mut out)?;
             }
         }
         Ok(0)

@@ -15,12 +15,9 @@ struct Pair<'a> {
     similarity: Option<u32>,
 }
 
-/// What the working-tree side of a diff is read with: the index its paths
-/// came from, and the attribute files that say how content is stored.
-struct Worktree<'a> {
-    index: &'a Index,
-    attrs: convert::Converter,
-}
+mod worktree;
+
+use worktree::Worktree;
 
 impl NativeRepo<'_> {
     /// `alt diff` (index → working tree) or `alt diff --cached` (HEAD →
@@ -32,35 +29,22 @@ impl NativeRepo<'_> {
     pub fn diff(&self, cached: bool, json: bool, semantic: bool, out: &mut impl Write) -> Res<()> {
         // old side is always read from the object store; the new side is the
         // index (cached) or the live working tree (default).
-        let raw = self.index()?;
-        let disk = match cached {
-            true => None,
-            false => Some(Worktree {
-                index: &raw,
-                attrs: self.converter()?,
-            }),
-        };
-        let disk = disk.as_ref();
-        let (old, new, show_added) = if cached {
-            (self.head_entries()?, index_entries(&raw), true)
+        let (old, new, disk): (Vec<WorkEntry>, Vec<WorkEntry>, Option<Worktree>) = if cached {
+            let staged = self.staged_changes()?;
+            let side = |pick: fn(alt_worktree::Staged) -> Option<WorkEntry>| {
+                staged.iter().cloned().filter_map(pick).collect()
+            };
+            (side(|s| s.old), side(|s| s.new), None)
         } else {
-            // Sparse-from-index: no directory walk. One stat per
-            // indexed path, only read+hash on a stat mismatch. Untracked
-            // files are not in `alt diff`'s output (show_added=false), so
-            // skipping the dir traversal is correct — same shape git diff
-            // uses. Drops `alt diff` on a clean 50k-file monorepo from
-            // seconds to ≤100 ms.
-            let attrs = &disk.expect("the working tree side").attrs;
-            (
-                index_entries(&raw),
-                self.scan_index_paths(attrs, &raw)?,
-                false,
-            )
+            let (old, new, disk) = self.worktree_sides()?;
+            (old, new, Some(disk))
         };
+        // a working-tree file with no index entry is untracked, not a diff
+        let show_added = cached;
+        let disk = disk.as_ref();
 
         let changes: Vec<_> = alt_worktree::changes(&old, &new)
             .into_iter()
-            // a working-tree file with no index entry is untracked, not a diff
             .filter(|ch| ch.old.is_some() || show_added)
             .collect();
 
@@ -170,7 +154,7 @@ impl NativeRepo<'_> {
     fn diff_json(
         &self,
         pairs: &[Pair<'_>],
-        disk: Option<&Worktree<'_>>,
+        disk: Option<&Worktree>,
         semantic: bool,
         sections: &crate::funcname::Sections,
         out: &mut impl Write,
@@ -234,16 +218,22 @@ impl NativeRepo<'_> {
             } else {
                 Json::Null
             };
-            let oid = |w: Option<&WorkEntry>| match w {
-                Some(w) => Json::str(w.oid.to_string()),
-                None => Json::Null,
-            };
+            let id = |w: &WorkEntry| Json::str(w.oid.to_string());
+            let oid = |w: Option<&WorkEntry>| w.map_or(Json::Null, id);
             let mode = |w: Option<&WorkEntry>| match w {
                 Some(w) => Json::str(format!("{:06o}", w.mode)),
                 None => Json::Null,
             };
-            let mut fields = vec![
-                ("path", Json::str(ch.new_path)),
+            let mut fields = crate::json::path(ch.new_path);
+            // a renamed file says where it was and how alike the two are
+            if renamed {
+                fields.push(("old_path", Json::str(ch.old_path)));
+            }
+            if renamed && std::str::from_utf8(ch.old_path).is_err() {
+                let hex = crate::machine::hex(ch.old_path);
+                fields.push(("old_path_bytes", Json::str(hex)));
+            }
+            fields.extend([
                 ("status", Json::str(status)),
                 ("old_oid", oid(ch.old)),
                 ("new_oid", oid(ch.new)),
@@ -255,10 +245,8 @@ impl NativeRepo<'_> {
                 ("perceptual_diff", perceptual_diff_field),
                 ("part_diff", part_diff_field),
                 ("ast_diff", ast_diff_field),
-            ];
-            // a renamed file says where it was and how alike the two are
+            ]);
             if renamed {
-                fields.insert(1, ("old_path", Json::str(ch.old_path)));
                 let similarity = ch
                     .similarity
                     .map_or(Json::Null, |s| Json::Num(i64::from(s)));
@@ -283,7 +271,7 @@ impl NativeRepo<'_> {
         &self,
         buf: &mut Vec<u8>,
         pair: &Pair<'_>,
-        disk: Option<&Worktree<'_>>,
+        disk: Option<&Worktree>,
         semantic: bool,
         style: &Style<'_>,
     ) -> Res<()> {
@@ -400,22 +388,13 @@ impl NativeRepo<'_> {
 
     /// The content one side of a change is diffed as. A gitlink has no blob
     /// in this store: it diffs as the line git prints for a submodule.
-    fn side_bytes(&self, side: Option<&WorkEntry>, disk: Option<&Worktree<'_>>) -> Res<Vec<u8>> {
+    fn side_bytes(&self, side: Option<&WorkEntry>, disk: Option<&Worktree>) -> Res<Vec<u8>> {
         match (side, disk) {
             (None, _) => Ok(Vec::new()),
             (Some(w), _) if w.mode == 0o160000 => {
                 Ok(format!("Subproject commit {}\n", w.oid).into_bytes())
             }
-            (Some(w), Some(disk)) => {
-                let content = self.read_for(w)?;
-                if w.mode == 0o120000 {
-                    return Ok(content);
-                }
-                // compared as it would be stored, as the old side is
-                let stored = self.stored_form(&disk.attrs, disk.index, &w.path, &content);
-                disk.attrs.check()?;
-                Ok(stored.unwrap_or(content))
-            }
+            (Some(w), Some(disk)) => self.worktree_bytes(w, disk),
             (Some(w), None) => self.blob_bytes(w.oid),
         }
     }

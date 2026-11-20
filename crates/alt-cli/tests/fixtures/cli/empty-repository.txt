@@ -2,7 +2,7 @@ $ [repo] alt init .
 exit 0
 $ [repo] alt status --json
 exit 0
-out| {"schema_version":1,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[],"unstaged":[],"untracked":[],"unmerged":[],"clean":true}
+out| {"schema_version":2,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[],"unstaged":[],"untracked":[],"unmerged":[],"clean":true}
 $ [repo] alt branch --json
 exit 0
 out| {"schema_version":1,"current":"main","branches":[]}

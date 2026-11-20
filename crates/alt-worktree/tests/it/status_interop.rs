@@ -79,6 +79,26 @@ fn write_tree_matches_git_write_tree() {
 }
 
 #[test]
+fn a_tree_with_one_name_twice_is_not_written() {
+    let algo = HashAlgo::Sha1;
+    let dir = alt_os::temp::tempdir().unwrap();
+    let mut odb = NativeOdb::open(dir.path()).unwrap();
+    let oid = ObjectId::hash_object(algo, alt_git_codec::ObjectKind::Blob, b"");
+    let entry = |path: &str| alt_worktree::WorkEntry {
+        path: path.into(),
+        oid,
+        mode: 0o100644,
+    };
+    // a file and a directory of one name, with a name that sorts between
+    let clash = ["d/f", "d/f.txt", "d/f/x", "e"].map(entry);
+    let said = write_tree(&mut odb, &clash, algo).unwrap_err().to_string();
+    assert_eq!(said, "tree would hold 'd/f' twice");
+    let twice = ["a", "a"].map(entry);
+    assert!(write_tree(&mut odb, &twice, algo).is_err());
+    assert!(write_tree(&mut odb, &["d/f.txt", "d/f-x", "d/g/x"].map(entry), algo).is_ok());
+}
+
+#[test]
 fn write_commit_matches_git_commit_tree() {
     let src = alt_os::temp::tempdir().unwrap();
     common::git(src.path(), &["init", "-q"]);

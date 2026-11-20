@@ -60,7 +60,7 @@ fn clean_tree_reports_clean_with_empty_sections() {
 
     let json = ok(alt(root, &["status", "--json"]));
     assert_valid_json(&json);
-    assert!(json.contains("\"schema_version\":1"), "{json}");
+    assert!(json.contains("\"schema_version\":2"), "{json}");
     assert!(json.contains("\"branch\":\"main\""), "{json}");
     assert!(json.contains("\"clean\":true"), "{json}");
     assert!(json.contains("\"staged\":[]"), "{json}");
@@ -138,6 +138,34 @@ fn dirty_tree_classifies_staged_unstaged_untracked() {
         json.contains("\"untracked\":[\"untracked.txt\"]"),
         "untracked: {json}"
     );
+}
+
+#[test]
+fn a_path_of_another_type_is_a_change_of_its_own() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+    for name in ["staged", "unstaged", "target"] {
+        std::fs::write(root.join(name), format!("{name}\n")).unwrap();
+    }
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "first"]));
+    for name in ["staged", "unstaged"] {
+        std::fs::remove_file(root.join(name)).unwrap();
+        std::os::unix::fs::symlink("target", root.join(name)).unwrap();
+    }
+    ok(alt(root, &["add", "staged"]));
+
+    let json = ok(alt(root, &["status", "--json"]));
+    assert_valid_json(&json);
+    let lists = [
+        "\"staged\":[{\"path\":\"staged\",\"change\":\"typechange\"}]",
+        "\"unstaged\":[{\"path\":\"unstaged\",\"change\":\"typechange\"}]",
+    ];
+    for list in lists {
+        assert!(json.contains(list), "{json}");
+    }
+    assert!(json.starts_with("{\"schema_version\":2,"), "{json}");
 }
 
 #[test]

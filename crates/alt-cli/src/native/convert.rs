@@ -14,6 +14,7 @@ use super::*;
 use crate::git_settings::read_if_file;
 
 mod filter_process;
+mod stored;
 
 use filter_process::{FilterProcess, Malformed};
 
@@ -128,8 +129,9 @@ impl NativeRepo<'_> {
                 _ => {}
             }
         }
-        let info = self.store.alt_dir.join("git-import/info/attributes");
-        let fixed = crate::git_settings::outer_attributes(&settings, &info)?;
+        let user = self.user_attributes(&settings)?;
+        let info = self.info_attributes();
+        let fixed = crate::git_settings::outer_attributes(user.as_deref(), &info)?;
         Ok(Converter {
             root: self.root.clone(),
             tree,
@@ -140,34 +142,6 @@ impl NativeRepo<'_> {
             cleaned: RefCell::default(),
             algo: self.store.algo,
             failed: RefCell::default(),
-        })
-    }
-
-    /// Working-tree `content` of `path` as it is stored, when that differs.
-    /// `index` is where an `auto` path's staged content is looked up. A
-    /// failure is left with the converter: see [`Converter::check`].
-    pub(super) fn stored_form(
-        &self,
-        converter: &Converter,
-        index: &Index,
-        path: &[u8],
-        content: &[u8],
-    ) -> Option<Vec<u8>> {
-        converter.to_store(path, content, &|| {
-            // the index is ordered by path, then stage
-            let from = index.entries.partition_point(|e| e.path.as_slice() < path);
-            let staged = index.entries[from..]
-                .iter()
-                .take_while(|e| e.path.as_slice() == path)
-                .find(|e| e.stage() == 0);
-            match staged.map(|e| self.blob_bytes(e.oid)) {
-                Some(Ok(blob)) => attributes::stored_with_crlf(&blob),
-                Some(Err(e)) => {
-                    converter.fail(e);
-                    false
-                }
-                None => false,
-            }
         })
     }
 }

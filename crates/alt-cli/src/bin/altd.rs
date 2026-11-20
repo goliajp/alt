@@ -85,6 +85,8 @@ mod unix {
         // git-layer reads (`log`) — both opened once and refreshed per request,
         // and shared across request threads behind one Mutex
         let repo_root = alt_dir.parent().unwrap_or(&alt_dir).to_path_buf();
+        // the working-tree snapshots stay in memory between requests
+        alt_cli::native::hold_snapshots();
         let mut store = Store::open(alt_dir)?;
         // in-process group commit: a write appends under the per-request lock but
         // defers its fsync; `serve` coalesces the fsync in a separate, shorter

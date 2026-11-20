@@ -25,6 +25,16 @@ pub struct Entry {
     pub key: String,
     /// `None` for the valueless boolean shorthand (`[x] flag`).
     pub value: Option<BString>,
+    /// `None` for an entry that was not loaded from a file.
+    pub origin: Option<Origin>,
+}
+
+/// Where a variable was read: the file, and the line of it the variable
+/// begins on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Origin {
+    pub file: std::sync::Arc<Path>,
+    pub line: usize,
 }
 
 impl Entry {
@@ -49,15 +59,32 @@ pub struct Config {
 impl Config {
     /// Loads `path` and resolves `include` / `includeIf` directives.
     pub fn load(path: &Path, ctx: &IncludeContext) -> Result<Self, ConfigError> {
-        Ok(Self {
-            entries: include::load_with_includes(path, ctx)?,
-        })
+        Ok(Self::load_listing(path, ctx)?.0)
+    }
+
+    /// [`load`](Self::load), with every file the result was read from and
+    /// every included file that was looked for and is not there: a change
+    /// to any of them, or one of them coming to be, may change the result.
+    pub fn load_listing(
+        path: &Path,
+        ctx: &IncludeContext,
+    ) -> Result<(Self, Vec<std::path::PathBuf>), ConfigError> {
+        let (entries, files) = include::load_with_includes(path, ctx)?;
+        Ok((Self { entries }, files))
     }
 
     fn is_match(e: &Entry, section: &str, subsection: Option<&[u8]>, key: &str) -> bool {
         e.section == section
             && e.subsection.as_ref().map(|s| s.as_slice()) == subsection
             && e.key == key
+    }
+
+    /// The entry a variable is read from: the last one, like git.
+    pub fn entry(&self, section: &str, subsection: Option<&[u8]>, key: &str) -> Option<&Entry> {
+        self.entries
+            .iter()
+            .rev()
+            .find(|e| Self::is_match(e, section, subsection, key))
     }
 
     /// Last value wins, like git. `Some(None)` = valueless true shorthand.
@@ -67,10 +94,7 @@ impl Config {
         subsection: Option<&[u8]>,
         key: &str,
     ) -> Option<Option<&BStr>> {
-        self.entries
-            .iter()
-            .rev()
-            .find(|e| Self::is_match(e, section, subsection, key))
+        self.entry(section, subsection, key)
             .map(|e| e.value.as_ref().map(|v| v.as_bstr()))
     }
 

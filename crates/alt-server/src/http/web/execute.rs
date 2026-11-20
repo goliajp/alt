@@ -1,5 +1,5 @@
 //! A browser request once its body is received: session authority, then the store.
-use super::input::{DeviceDecision, Empty, Login, NewUser, UserState};
+use super::input::{DeviceDecision, Empty, NewUser, UserState};
 use super::*;
 use alt_json::{Value, json};
 use alt_server_store::{Credential, Store};
@@ -12,6 +12,7 @@ pub(super) struct Call {
     pub(super) browser: WebOptions,
     pub(super) token: Option<String>,
     pub(super) peer: IpAddr,
+    pub(super) claim: Arc<login::Claim>,
 }
 impl Call {
     /// the output and, when the session changes, the cookie to set
@@ -26,8 +27,8 @@ impl Call {
             browser,
             token,
             peer,
+            claim,
         } = self;
-        let login = route == WebRoute::Login;
         let mut source = source;
         source.as_file_mut().rewind()?;
         let mut store = factory.open()?;
@@ -60,30 +61,15 @@ impl Call {
                 None,
             ));
         }
-        if login {
-            let input: Login = alt_json::from_slice(&raw)?;
-            let authenticated = store
-                .browser_login(
-                    &browser.origin,
-                    &input.login_name,
-                    &input.password,
-                    peer,
-                    browser.session_ttl_ms,
-                )?
-                .ok_or(Error::Unauthorized)?;
-            let credential = store.authenticate(&authenticated.token)?;
-            let session = session(
+        if route == WebRoute::Login {
+            return login::run(
                 &mut store,
-                &credential,
-                &browser.origin,
-                &authenticated.token,
+                &browser,
                 &factory.signing_key,
-            )?;
-            let cookie = browser
-                .origin
-                .set_cookie(&authenticated.token, browser.session_ttl_ms / 1000)
-                .map_err(|_| Error::Integrity("session cookie"))?;
-            return Ok((Output::Json(session), Some(cookie)));
+                peer,
+                &claim,
+                &raw,
+            );
         }
         let token = token.ok_or(Error::Unauthorized)?;
         let credential = factory.authenticate(&mut store, &token)?;
@@ -196,7 +182,7 @@ impl Call {
         }
     }
 }
-fn session(
+pub(super) fn session(
     store: &mut Store,
     credential: &Credential,
     origin: &PublicOrigin,

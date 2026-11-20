@@ -15,8 +15,8 @@ use alt_refs::{IdemKey, OpId, RefChange, RefPolicy, RefStore, RefTarget};
 use crate::policy::{Capabilities, Policy};
 use alt_bytes::{BString, ByteSlice};
 use alt_worktree::{
-    ChangeKind, Sig, WorkEntry, build_commit_bytes, flatten_tree, index_entries, status,
-    write_commit, write_tree,
+    ChangeKind, Sig, WorkEntry, build_commit_bytes, flatten_tree, index_entries, write_commit,
+    write_tree,
 };
 use http_auth::{build_transport, http_auth};
 
@@ -28,14 +28,20 @@ mod checkout_recovery;
 mod cherry_pick;
 pub mod commit;
 mod convert;
+mod coord;
+pub use coord::{Coord, resolve_workspace};
 mod diff;
 mod http_auth;
 mod identity;
+mod index_file;
+use index_file::{empty_index, save_index};
 mod lfs;
 pub use identity::{Identity, Principal, PrincipalKind};
 mod merge;
 mod op_log;
 mod operation;
+mod path_gate;
+pub mod pathspec;
 use op_log::render_op_log_json;
 pub mod notes;
 use merge::Resolved;
@@ -45,9 +51,11 @@ mod requests;
 mod revert;
 mod sequence_editor;
 mod settings;
+mod status;
 mod task;
+mod tree_state;
+pub use tree_state::hold_snapshots;
 mod workspace;
-pub use workspace::resolve_workspace;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -221,62 +229,6 @@ impl StoreSink {
         self.odb.fsync()?;
         self.oplog.sync_all()?;
         Ok(())
-    }
-}
-
-/// The per-workspace coordinates within a repo: the working-tree root, the
-/// workspace name, the ref naming its HEAD, and its index file. Resolved per
-/// request and cheap to carry by value.
-#[derive(Clone)]
-pub struct Coord {
-    root: PathBuf,
-    workspace: String,
-    head_ref: String,
-    index_path: PathBuf,
-}
-
-impl Coord {
-    /// The ref this workspace's HEAD lives in: `HEAD` for the default
-    /// workspace, `workspaces/<name>/HEAD` for a named one.
-    pub fn head_ref(&self) -> &str {
-        &self.head_ref
-    }
-
-    /// The workspace's working-tree root.
-    pub fn root(&self) -> &Path {
-        &self.root
-    }
-
-    /// The default workspace's coordinates for the repo rooted at `repo_root`
-    /// (its HEAD stays the bare `HEAD` ref and its index `.alt/index`, so
-    /// existing repos are unchanged).
-    fn default_at(repo_root: &Path) -> Coord {
-        let alt_dir = repo_root.join(".alt");
-        Coord {
-            index_path: alt_dir.join("index"),
-            root: repo_root.to_path_buf(),
-            workspace: DEFAULT_WORKSPACE.to_owned(),
-            head_ref: "HEAD".to_owned(),
-        }
-    }
-
-    /// The coordinates of workspace `name` in the repo whose control dir is
-    /// `alt_dir`. The default workspace's working tree is the repo root; a
-    /// named one's comes from its registry `meta`.
-    fn for_name(alt_dir: &Path, name: &str) -> Res<Coord> {
-        let repo_root = alt_dir.parent().unwrap_or(alt_dir);
-        if name == DEFAULT_WORKSPACE {
-            return Ok(Coord::default_at(repo_root));
-        }
-        let ws_dir = alt_dir.join("workspaces").join(name);
-        let worktree = std::fs::read_to_string(ws_dir.join("meta"))
-            .map_err(|_| format!("no such workspace '{name}'"))?;
-        Ok(Coord {
-            root: PathBuf::from(worktree.trim()),
-            workspace: name.to_owned(),
-            head_ref: format!("workspaces/{name}/HEAD"),
-            index_path: ws_dir.join("index"),
-        })
     }
 }
 
@@ -636,6 +588,8 @@ pub struct NativeRepo<'a> {
     head_ref: String,
     /// This workspace's index file.
     index_path: PathBuf,
+    /// where beneath `root` the command was run: `sub/dir`, empty at the root
+    prefix: String,
     /// The caller acting through this view.
     id: Identity,
     /// The capability gate for this caller's [`Principal`], derived from
@@ -649,6 +603,11 @@ pub struct NativeRepo<'a> {
     write_lock: Option<std::fs::File>,
     inverse_of: Option<String>,
     checkout_intent: Option<checkout_recovery::CheckoutIntent>,
+    /// the files a checkout wrote, each with its stat right after
+    written: std::cell::RefCell<Vec<(BString, alt_worktree::FileStat)>>,
+    /// the checkout this command worked out from the entries of a tree:
+    /// the index it ends with, and what it writes at each path
+    planned: std::cell::RefCell<Option<tree_state::Planned>>,
 }
 
 impl<'a> NativeRepo<'a> {
@@ -667,12 +626,15 @@ impl<'a> NativeRepo<'a> {
             workspace: coord.workspace,
             head_ref: coord.head_ref,
             index_path: coord.index_path,
+            prefix: coord.prefix,
             id,
             caps,
             request_id,
             write_lock: None,
             inverse_of: None,
             checkout_intent: None,
+            written: std::cell::RefCell::default(),
+            planned: std::cell::RefCell::default(),
         }
     }
 
@@ -870,19 +832,6 @@ impl<'a> NativeRepo<'a> {
             ),
         )
         .into())
-    }
-
-    /// Reject staging/committing a path that the policy's `path_allow` does
-    /// not match. Empty allow-list = no constraint.
-    fn ensure_path_allowed(&self, path: &str) -> Res<()> {
-        if !self.caps.allows_path_name(path) {
-            return Err(crate::machine::Failure::refusal(
-                "capability_denied",
-                format!("capability denied: path '{path}' is not in path_allow"),
-            )
-            .into());
-        }
-        Ok(())
     }
 
     /// Reject a ref change that would be a non-fast-forward (or branch
@@ -1205,76 +1154,6 @@ impl<'a> NativeRepo<'a> {
             .join(w.path.to_path().map_err(|_| "non-utf8 path")?);
         let meta = std::fs::symlink_metadata(&abs)?;
         Ok(stat_entry(&meta, w))
-    }
-
-    /// `alt status`: staged / unstaged / untracked against HEAD and the index,
-    /// plus any unmerged (conflicted) paths left by a merge. With `json`, emits
-    /// the stable structured schema instead of the human view.
-    pub fn status(&self, json: bool, out: &mut impl Write) -> Res<()> {
-        let branch = self.head_branch()?;
-        let head = self.head_entries()?;
-        let raw = self.index()?;
-        let unmerged: std::collections::BTreeSet<BString> = raw
-            .entries
-            .iter()
-            .filter(|e| e.stage() > 0)
-            .map(|e| e.path.clone())
-            .collect();
-        let index = index_entries(&raw);
-        // Stat cache fast path: skip the read+hash on any file whose
-        // mtime/ctime/size/dev/ino/mode still matches the index entry —
-        // git's classic optimisation; on a 50k-file monorepo clean run
-        // this drops `alt status` from seconds to milliseconds.
-        let worktree = self.scan_tree(&raw)?;
-        let mut st = status(&head, &index, &worktree);
-        // unmerged paths are reported in their own section, not as
-        // staged/unstaged/untracked noise driven by the missing stage-0 entry
-        st.staged.retain(|(p, _)| !unmerged.contains(p));
-        st.unstaged.retain(|(p, _)| !unmerged.contains(p));
-        st.untracked.retain(|p| !unmerged.contains(p));
-
-        let short = branch.strip_prefix("refs/heads/").unwrap_or(&branch);
-        if json {
-            return render_status_json(out, short, &self.id.principal, &st, &unmerged);
-        }
-        writeln!(out, "On branch {short}")?;
-        let mark = |k: ChangeKind| match k {
-            ChangeKind::Added => "new file",
-            ChangeKind::Modified => "modified",
-            ChangeKind::Deleted => "deleted",
-        };
-        if !unmerged.is_empty() {
-            writeln!(out, "Unmerged paths:")?;
-            for p in &unmerged {
-                writeln!(out, "\tboth modified:   {p}")?;
-            }
-        }
-        if !st.staged.is_empty() {
-            writeln!(out, "Changes to be committed:")?;
-            for (p, k) in &st.staged {
-                writeln!(out, "\t{}:   {p}", mark(*k))?;
-            }
-        }
-        if !st.unstaged.is_empty() {
-            writeln!(out, "Changes not staged for commit:")?;
-            for (p, k) in &st.unstaged {
-                writeln!(out, "\t{}:   {p}", mark(*k))?;
-            }
-        }
-        if !st.untracked.is_empty() {
-            writeln!(out, "Untracked files:")?;
-            for p in &st.untracked {
-                writeln!(out, "\t{p}")?;
-            }
-        }
-        if unmerged.is_empty()
-            && st.staged.is_empty()
-            && st.unstaged.is_empty()
-            && st.untracked.is_empty()
-        {
-            writeln!(out, "nothing to commit, working tree clean")?;
-        }
-        Ok(())
     }
 
     /// The HEAD commit's tree flattened to entries (empty when unborn).
@@ -1795,27 +1674,6 @@ impl<'a> NativeRepo<'a> {
         report(out, "switched", &format!("Switched to branch '{name}'"))
     }
 
-    /// Refuses `action` if any tracked file has staged or unstaged changes, so
-    /// a tree-rewriting operation never clobbers uncommitted work.
-    fn ensure_clean(&self, action: &str) -> Res<()> {
-        let head = self.head_entries()?;
-        let raw = self.index()?;
-        let index = index_entries(&raw);
-        let worktree = self.scan_tree(&raw)?;
-        let st = status(&head, &index, &worktree);
-        // a submodule that checked out another commit is not overwritten:
-        // a checkout never touches what is inside it
-        let submodule = |p: &BString| index.iter().any(|e| e.path == *p && e.mode == 0o160000);
-        if !st.staged.is_empty() || st.unstaged.iter().any(|(p, _)| !submodule(p)) {
-            return Err(crate::machine::Failure::refusal(
-                "precondition_failed",
-                format!("your local changes would be overwritten by {action}; commit them first"),
-            )
-            .into());
-        }
-        Ok(())
-    }
-
     /// Materializes `target` into the working tree, removing tracked files in
     /// `old` that are absent from `target`, and rewrites the index to match.
     fn checkout(&mut self, old: &[WorkEntry], target: &[WorkEntry]) -> Res<()> {
@@ -1956,9 +1814,7 @@ impl<'a> NativeRepo<'a> {
                 if json {
                     self.report_merge(true, out, "conflicted", None, &conflicts, "")?;
                 } else {
-                    for p in &conflicts {
-                        writeln!(out, "CONFLICT (content): Merge conflict in {p}")?;
-                    }
+                    cherry_pick::say_conflicts(out, "Merge", &conflicts)?;
                     writeln!(
                         out,
                         "Automatic merge failed; fix conflicts and then commit the result."
@@ -1970,7 +1826,8 @@ impl<'a> NativeRepo<'a> {
     }
 
     /// Emits one merge outcome: the human line, or `{schema_version, result,
-    /// commit?, conflicts}` for `--json`.
+    /// commit?, conflicts}` for `--json`, with `conflicts_bytes` where a
+    /// conflicted path is not UTF-8.
     fn report_merge(
         &self,
         json: bool,
@@ -1982,23 +1839,15 @@ impl<'a> NativeRepo<'a> {
     ) -> Res<()> {
         if json {
             use crate::json::Json;
-            crate::json::emit(
-                out,
-                vec![
-                    ("result", Json::str(result)),
-                    (
-                        "commit",
-                        match commit {
-                            Some(c) => Json::str(c.to_string()),
-                            None => Json::Null,
-                        },
-                    ),
-                    (
-                        "conflicts",
-                        Json::Array(conflicts.iter().map(Json::str).collect()),
-                    ),
-                ],
-            )?;
+            let commit = commit.map_or(Json::Null, |c| Json::str(c.to_string()));
+            let mut fields = vec![("result", Json::str(result)), ("commit", commit)];
+            let conflicts = conflicts.iter().map(|path| path.as_slice());
+            fields.extend(crate::json::paths(
+                "conflicts",
+                "conflicts_bytes",
+                conflicts,
+            ));
+            crate::json::emit(out, fields)?;
         } else {
             writeln!(out, "{human}")?;
         }
@@ -3478,57 +3327,6 @@ impl<'a> NativeRepo<'a> {
     }
 }
 
-/// Renders `status` as the stable JSON schema (version 1):
-/// `{schema_version, branch, principal:{kind,id,session?}, staged:[…],
-/// unstaged:[…], untracked:[…], unmerged:[…], clean}`. `change` ∈
-/// `added`/`modified`/`deleted`; `principal` is the structured actor, so
-/// an agent can self-check "who am I to this repo" via the same
-/// machine-first surface it uses for everything else.
-fn render_status_json(
-    out: &mut impl Write,
-    branch: &str,
-    principal: &Principal,
-    st: &alt_worktree::Status,
-    unmerged: &std::collections::BTreeSet<BString>,
-) -> Res<()> {
-    use crate::json::Json;
-    let change = |k: ChangeKind| match k {
-        ChangeKind::Added => "added",
-        ChangeKind::Modified => "modified",
-        ChangeKind::Deleted => "deleted",
-    };
-    let entries = |v: &[(BString, ChangeKind)]| {
-        Json::Array(
-            v.iter()
-                .map(|(p, k)| {
-                    Json::Object(vec![
-                        ("path", Json::str(p)),
-                        ("change", Json::str(change(*k))),
-                    ])
-                })
-                .collect(),
-        )
-    };
-    let paths = |it: &mut dyn Iterator<Item = &BString>| Json::Array(it.map(Json::str).collect());
-    let clean = unmerged.is_empty()
-        && st.staged.is_empty()
-        && st.unstaged.is_empty()
-        && st.untracked.is_empty();
-    let doc = Json::Object(vec![
-        ("schema_version", Json::Num(1)),
-        ("branch", Json::str(branch)),
-        ("principal", principal_json(principal)),
-        ("staged", entries(&st.staged)),
-        ("unstaged", entries(&st.unstaged)),
-        ("untracked", paths(&mut st.untracked.iter())),
-        ("unmerged", paths(&mut unmerged.iter())),
-        ("clean", Json::Bool(clean)),
-    ]);
-    doc.write(out)?;
-    out.write_all(b"\n")?;
-    Ok(())
-}
-
 /// JSON shape for a perceptual hint:
 /// `{kind:"perceptual_diff", prism, distance}` where `prism` is the
 /// content kind (`"png"` today) and `distance` is the [0.0, 1.0]
@@ -4376,51 +4174,6 @@ fn check_remote_name(name: &str) -> Res<()> {
 /// git's default behavior).
 fn default_fetch_refspec(name: &str) -> String {
     format!("+refs/heads/*:refs/remotes/{name}/*")
-}
-
-/// A 7-hex-char object id abbreviation, or all-zero for an absent side.
-fn empty_index() -> Index {
-    Index {
-        version: 2,
-        entries: Vec::new(),
-        extensions: Vec::new(),
-    }
-}
-
-/// Atomic index write to `path`: temp file + rename (sibling temp).
-///
-/// Racily clean entries are handled as git does: an entry whose mtime is not
-/// older than the index file itself may be rewritten within the same clock
-/// tick (coarse on Linux) with the same size, which a stat compare cannot
-/// see. Those entries get a zero mtime, so the next scan re-hashes them.
-fn save_index(path: &Path, index: &Index, algo: HashAlgo) -> Res<()> {
-    let tmp = path.with_extension("tmp");
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    crate::durable::write(&tmp, index.serialize(algo))?;
-    let stamp = file_mtime(&std::fs::metadata(&tmp)?);
-    if index.entries.iter().any(|e| e.mtime >= stamp) {
-        let mut smudged = index.clone();
-        for e in smudged.entries.iter_mut().filter(|e| e.mtime >= stamp) {
-            e.mtime = (0, 0);
-        }
-        crate::durable::write(&tmp, smudged.serialize(algo))?;
-    }
-    crate::durable::rename(&tmp, path)?;
-    Ok(())
-}
-
-#[cfg(unix)]
-fn file_mtime(meta: &std::fs::Metadata) -> (u32, u32) {
-    use std::os::unix::fs::MetadataExt;
-    (meta.mtime() as u32, meta.mtime_nsec() as u32)
-}
-
-// stat is never trusted off unix, so no entry is ever racily clean
-#[cfg(not(unix))]
-fn file_mtime(_meta: &std::fs::Metadata) -> (u32, u32) {
-    (u32::MAX, u32::MAX)
 }
 
 /// Builds an index entry for a working-tree file, filling stat from its

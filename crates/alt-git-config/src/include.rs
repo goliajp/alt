@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use alt_bytes::{BStr, ByteSlice};
 
 use crate::wildmatch::wildmatch;
-use crate::{ConfigError, Entry, parse};
+use crate::{ConfigError, Entry, Origin, parse};
 
 /// git's include recursion cap (`MAX_INCLUDE_DEPTH`).
 pub(crate) const MAX_INCLUDE_DEPTH: usize = 10;
@@ -19,14 +19,16 @@ pub struct IncludeContext {
     pub home: Option<PathBuf>,
 }
 
-/// Loads `path`, splicing included files in place, recursively.
+/// Loads `path`, splicing included files in place, recursively. Also
+/// returns every file that was read or looked for and not found.
 pub(crate) fn load_with_includes(
     path: &Path,
     ctx: &IncludeContext,
-) -> Result<Vec<Entry>, ConfigError> {
+) -> Result<(Vec<Entry>, Vec<PathBuf>), ConfigError> {
     let mut out = Vec::new();
-    load_into(path, ctx, 0, &mut out)?;
-    Ok(out)
+    let mut files = Vec::new();
+    load_into(path, ctx, 0, &mut out, &mut files)?;
+    Ok((out, files))
 }
 
 fn load_into(
@@ -34,13 +36,20 @@ fn load_into(
     ctx: &IncludeContext,
     depth: usize,
     out: &mut Vec<Entry>,
+    files: &mut Vec<PathBuf>,
 ) -> Result<(), ConfigError> {
     if depth > MAX_INCLUDE_DEPTH {
         return Err(ConfigError::IncludeDepth);
     }
+    files.push(path.to_path_buf());
     let base = path.parent().unwrap_or(Path::new("."));
     let located = |(line, _)| ConfigError::Line(line, path.to_path_buf());
-    for entry in parse::parse_located(&std::fs::read(path)?).map_err(located)? {
+    let file: std::sync::Arc<Path> = path.into();
+    for (line, mut entry) in parse::parse_located(&std::fs::read(path)?).map_err(located)? {
+        entry.origin = Some(Origin {
+            file: file.clone(),
+            line,
+        });
         let include = match (
             entry.section.as_str(),
             &entry.subsection,
@@ -67,8 +76,9 @@ fn load_into(
         out.push(entry);
         if let Some(target) = target {
             // like git: a missing include target is silently skipped
-            if target.is_file() {
-                load_into(&target, ctx, depth + 1, out)?;
+            match target.is_file() {
+                true => load_into(&target, ctx, depth + 1, out, files)?,
+                false => files.push(target),
             }
         }
     }

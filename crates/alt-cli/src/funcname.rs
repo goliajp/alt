@@ -14,7 +14,7 @@ use alt_git_config::Config;
 use alt_regex::{Options, Regex, Syntax};
 use alt_worktree::attributes::{self, AutoCrlf, CoreEol, DiffAttribute, EolConfig, Layer};
 
-use crate::git_settings::{outer_attributes, read_if_file};
+use crate::git_settings::{outer_attributes, read_if_file, user_attributes};
 
 mod drivers;
 
@@ -139,7 +139,7 @@ impl Sections {
         }
         Ok(Sections {
             root: root.map(Path::to_path_buf),
-            outer: outer_attributes(settings, info)?,
+            outer: outer_attributes(user_attributes(settings, root)?.as_deref(), info)?,
             files: RefCell::default(),
             configured,
             finders: RefCell::default(),

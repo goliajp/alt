@@ -6,6 +6,8 @@ alt add a b --json
 {"subcommand":{"arguments":{"subcommand":null,"values":{"Add":["7061746873","6a736f6e"],"json":["74727565"],"paths":["61","62"]}},"name":"add"},"values":{}}
 alt add .
 {"subcommand":{"arguments":{"subcommand":null,"values":{"Add":["7061746873"],"json":["66616c7365"],"paths":["2e"]}},"name":"add"},"values":{}}
+alt add --renormalize .
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Add":["72656e6f726d616c697a65","7061746873"],"json":["66616c7365"],"paths":["2e"],"renormalize":["74727565"]}},"name":"add"},"values":{}}
 alt commit -m msg
 {"subcommand":{"arguments":{"subcommand":null,"values":{"Commit":["6d657373616765"],"allow_empty":["66616c7365"],"amend":["66616c7365"],"json":["66616c7365"],"message":["6d7367"],"no_edit":["66616c7365"],"no_verify":["66616c7365"],"validate":["66616c7365"]}},"name":"commit"},"values":{}}
 alt commit -mmsg --allow-empty -n
@@ -20,6 +22,10 @@ alt status
 {"subcommand":{"arguments":{"subcommand":null,"values":{"json":["66616c7365"]}},"name":"status"},"values":{}}
 alt status --json
 {"subcommand":{"arguments":{"subcommand":null,"values":{"Status":["6a736f6e"],"json":["74727565"]}},"name":"status"},"values":{}}
+alt status -uno
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Status":["756e747261636b65645f66696c6573"],"json":["66616c7365"],"untracked_files":["6e6f"]}},"name":"status"},"values":{}}
+alt status --untracked-files
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Status":["756e747261636b65645f66696c6573"],"json":["66616c7365"],"untracked_files":["616c6c"]}},"name":"status"},"values":{}}
 alt branch
 {"subcommand":{"arguments":{"subcommand":null,"values":{"json":["66616c7365"],"remotes":["66616c7365"]}},"name":"branch"},"values":{}}
 alt branch new
@@ -446,3 +452,7 @@ alt switch -
 {"subcommand":{"arguments":{"subcommand":null,"values":{"Switch":["6e616d65"],"create":["66616c7365"],"json":["66616c7365"],"name":["2d"]}},"name":"switch"},"values":{}}
 alt log -
 {"subcommand":{"arguments":{"subcommand":null,"values":{"LogArgs":["726576"],"combined":["66616c7365"],"json":["66616c7365"],"patch":["66616c7365"],"pretty":["6f6e656c696e65"],"rev":["2d"]}},"name":"log"},"values":{}}
+alt add -u
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Add":["757064617465"],"json":["66616c7365"],"update":["74727565"]}},"name":"add"},"values":{}}
+alt add -A .
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Add":["616c6c","7061746873"],"all":["74727565"],"json":["66616c7365"],"paths":["2e"]}},"name":"add"},"values":{}}

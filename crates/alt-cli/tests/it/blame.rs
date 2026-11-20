@@ -32,9 +32,7 @@ fn blame_single_commit_attributes_every_line_to_that_commit() {
     fs::write(tmp.path().join("a.txt"), "one\ntwo\nthree\n").unwrap();
     ok(alt(tmp.path(), &["add", "a.txt"]));
     ok(alt(tmp.path(), &["commit", "-m", "first"]));
-    let head = ok(alt(tmp.path(), &["rev-parse", "HEAD"]))
-        .trim()
-        .to_string();
+    let head = ok(alt(tmp.path(), &["rev-parse", "HEAD"]));
     let short = &head[..8];
 
     let blame_out = ok(alt(tmp.path(), &["blame", "a.txt"]));
@@ -88,7 +86,8 @@ fn blame_missing_file_fails_clearly() {
     let out = alt(tmp.path(), &["blame", "no/such/file.txt"]);
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("not found"), "stderr: {err}");
+    let whole = "fatal: no such path 'no/such/file.txt' in HEAD\n";
+    assert!(err.starts_with(whole), "{err}");
 }
 
 fn git(repo: &Path, date: u32, args: &[&str]) -> String {

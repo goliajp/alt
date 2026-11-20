@@ -70,6 +70,7 @@ fn set_one(repo: &Repository, key: &str, value: &str, out: &mut impl Write) -> R
             subsection: subsection.as_ref().map(|s| BString::from(s.clone())),
             key: name.clone(),
             value: Some(BString::from(value.as_bytes())),
+            origin: None,
         });
     }
     write_entries(&path, &entries)?;

@@ -62,8 +62,8 @@ $ [repo] alt merge absent --json
 exit 75
 err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"merge: absent - not something we can merge","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:4>","retryable":false},"schema_version":1}
 $ [repo] alt cherry-pick absent --json
-exit 75
-err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"bad revision 'absent'","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:5>","retryable":false},"schema_version":1}
+exit 128
+err| {"error":{"details":{"operation_ids":[]},"kind":"execution_error","message":"bad revision 'absent'","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:5>","retryable":false},"schema_version":1}
 $ [repo] alt branch -d absent --json
 exit 75
 err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"branch 'absent' not found","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:6>","retryable":false},"schema_version":1}

@@ -63,6 +63,10 @@ pub struct Arg {
     /// also accepted by every subcommand below
     pub global: bool,
     pub preset: Preset,
+    /// the value an option has when it is given without one; not empty
+    /// makes the value optional, and one is then only taken when attached
+    /// (`--name=value`, `-nvalue`), never from the next word
+    pub missing: &'static str,
     /// the only accepted values when not empty
     pub possible: &'static [&'static str],
     pub check: Option<Check>,
@@ -108,6 +112,7 @@ impl Arg {
         required: false,
         global: false,
         preset: Preset::None,
+        missing: "",
         possible: &[],
         check: None,
         conflicts: &[],
@@ -143,6 +148,9 @@ impl Arg {
         };
         if !self.takes_value() {
             return text;
+        }
+        if !self.missing.is_empty() {
+            return text + &format!("[=<{}>]", self.value_name);
         }
         if !self.is_positional() {
             text.push(' ');

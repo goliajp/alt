@@ -4,11 +4,14 @@
 
 use std::cell::RefCell;
 use std::ffi::OsString;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use alt_bytes::BString;
 use alt_git_config::{Config, Entry, IncludeContext};
-use alt_worktree::attributes::Layer;
+
+mod files;
+
+pub(crate) use files::{outer_attributes, read_if_file, user_attributes, user_excludes};
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -98,7 +101,7 @@ pub(crate) fn home() -> Option<PathBuf> {
 
 /// The directory the user's git files are in: `$XDG_CONFIG_HOME/git`, or
 /// `~/.config/git`.
-fn user_dir() -> Option<PathBuf> {
+pub(crate) fn user_dir() -> Option<PathBuf> {
     env_path("XDG_CONFIG_HOME")
         .or_else(|| home().map(|h| h.join(".config")))
         .map(|config| config.join("git"))
@@ -109,6 +112,15 @@ fn user_dir() -> Option<PathBuf> {
 /// `~/.gitconfig`. `GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_SYSTEM` and
 /// `GIT_CONFIG_GLOBAL` are honoured as git honours them.
 pub(crate) fn outer(git_dir: Option<PathBuf>, branch: Option<BString>) -> Res<Vec<Entry>> {
+    Ok(outer_listed(git_dir, branch)?.0)
+}
+
+/// [`outer`], with the files the entries were read from or would be
+/// once those exist.
+pub(crate) fn outer_listed(
+    git_dir: Option<PathBuf>,
+    branch: Option<BString>,
+) -> Res<(Vec<Entry>, Vec<PathBuf>)> {
     let ctx = IncludeContext {
         git_dir,
         branch,
@@ -135,15 +147,19 @@ pub(crate) fn outer(git_dir: Option<PathBuf>, branch: Option<BString>) -> Res<Ve
         }
     }
     let mut entries = Vec::new();
-    for file in files.iter().filter(|f| f.is_file()) {
+    let mut listed = Vec::new();
+    for file in files {
         // as in git, a file the user may not read is passed over
         let denied = |e: std::io::Error| e.kind() == std::io::ErrorKind::PermissionDenied;
-        if std::fs::File::open(file).is_err_and(denied) {
+        if !file.is_file() || std::fs::File::open(&file).is_err_and(denied) {
+            listed.push(file);
             continue;
         }
-        entries.extend(Config::load(file, &ctx)?.entries);
+        let (read, from) = Config::load_listing(&file, &ctx)?;
+        entries.extend(read.entries);
+        listed.extend(from);
     }
-    Ok(entries)
+    Ok((entries, listed))
 }
 
 /// `repository`'s configuration on top of the system's and the user's.
@@ -157,50 +173,13 @@ pub(crate) fn layered(
     Ok(Config { entries })
 }
 
-/// The content of a regular file; `None` when there is no such file. A
-/// symlink is not followed, as git does not follow one either.
-pub(crate) fn read_if_file(path: PathBuf) -> Res<Option<Vec<u8>>> {
-    match path.symlink_metadata() {
-        Ok(meta) if meta.is_file() => Ok(Some(std::fs::read(path)?)),
-        _ => Ok(None),
-    }
-}
-
-/// The content of a file, through a symlink too; `None` when there is
-/// no such file.
-fn read_followed(path: PathBuf) -> Res<Option<Vec<u8>>> {
-    match path.is_file() {
-        true => Ok(Some(std::fs::read(path)?)),
-        false => Ok(None),
-    }
-}
-
-/// The attribute files outside the tree: the user's, at
-/// `core.attributesFile` or in the user's git directory, and the
-/// repository's own at `info`. Unlike the files in the tree, git reads
-/// these through a symlink.
-pub(crate) fn outer_attributes(settings: &Config, info: &Path) -> Res<Vec<Layer>> {
-    let mut layers = Vec::new();
-    let user = match settings.get_str("core", None, "attributesfile") {
-        Some(path) => {
-            let path = std::str::from_utf8(path).map_err(|_| "core.attributesFile is not UTF-8")?;
-            Some(match (path.strip_prefix("~/"), home()) {
-                (Some(rest), Some(home)) => home.join(rest),
-                (Some(_), None) => {
-                    return Err(format!("failed to expand user dir in: '{path}'").into());
-                }
-                _ => PathBuf::from(path),
-            })
-        }
-        None => user_dir().map(|dir| dir.join("attributes")),
-    };
-    if let Some(content) = user.map(read_followed).transpose()?.flatten() {
-        layers.push(Layer::global(&content));
-    }
-    if let Some(content) = read_followed(info.to_path_buf())? {
-        layers.push(Layer::info(&content));
-    }
-    Ok(layers)
+/// A failure that changed nothing, with the exit status git has for it.
+pub(crate) fn fatal(message: String) -> Box<dyn std::error::Error> {
+    let refusal = crate::machine::Failure::refusal("execution_error", message);
+    Box::new(crate::machine::Failure {
+        exit_code: 128,
+        ..refusal
+    })
 }
 
 #[cfg(test)]

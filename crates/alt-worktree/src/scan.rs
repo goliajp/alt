@@ -1,5 +1,6 @@
-//! Reading the working tree: the full walk behind `status` and `add`, and
-//! the index-driven walk behind `diff`.
+//! Reading the whole working tree into entries: every file hashed, or taken
+//! from an index whose entries carry stat. `status`, `diff` and `add` use
+//! the snapshot-driven scan instead.
 
 use std::path::Path;
 
@@ -19,7 +20,8 @@ use crate::{WorkEntry, WorktreeError, ignore};
 /// nothing changed.
 pub fn scan_worktree(root: &Path, algo: HashAlgo) -> Result<Vec<WorkEntry>, WorktreeError> {
     let mut out = Vec::new();
-    let mut stack = ignore::IgnoreStack::with_global_excludes()?;
+    let user = ignore::default_excludes_file();
+    let mut stack = ignore::IgnoreStack::of_files(user.as_deref().as_slice())?;
     let tracked = Tracked::default();
     let ctx = ScanCtx {
         root,
@@ -38,20 +40,17 @@ pub fn scan_worktree(root: &Path, algo: HashAlgo) -> Result<Vec<WorkEntry>, Work
 /// read+hash on files whose `(mtime, ctime, size, dev, ino, mode)`
 /// reproduce the recorded stat — the matching index entry's oid + mode
 /// are reused verbatim. A status sweep over an unchanged monorepo then
-/// touches each file's inode once (the `symlink_metadata` syscall) and
-/// reads nothing.
-///
-/// The fast path is byte-identical to the slow path when the stat
-/// matches: the index stores the oid the working tree produced last time,
-/// so reusing it preserves the structural-fidelity invariant. A mismatch
-/// (the file was edited) falls through to the read+hash, so a stale stat
-/// can never report wrong content.
+/// touches each file's inode once and reads nothing. A mismatch (the file
+/// was edited) falls through to the read+hash, so a stale stat can never
+/// report wrong content. `excludes` are the ignore files outside the
+/// working tree, a later one above an earlier.
 pub fn scan_worktree_with_index(
     root: &Path,
     index: &Index,
     algo: HashAlgo,
     clean: Option<Clean<'_>>,
     head: Option<SubmoduleHead<'_>>,
+    excludes: &[&Path],
 ) -> Result<Vec<WorkEntry>, WorktreeError> {
     let mut by_path: std::collections::HashMap<&BString, &alt_git_index::IndexEntry> =
         std::collections::HashMap::with_capacity(index.entries.len());
@@ -61,7 +60,7 @@ pub fn scan_worktree_with_index(
         }
     }
     let mut out = Vec::new();
-    let mut stack = ignore::IgnoreStack::with_global_excludes()?;
+    let mut stack = ignore::IgnoreStack::of_files(excludes)?;
     let tracked = Tracked::of(index);
     let ctx = ScanCtx {
         root,
@@ -77,107 +76,6 @@ pub fn scan_worktree_with_index(
 }
 
 type StatCache<'a> = std::collections::HashMap<&'a BString, &'a alt_git_index::IndexEntry>;
-
-/// Sparse worktree view driven by the index alone (no directory walk).
-/// One stat per indexed path; matches the index → reuse `(oid, mode)`,
-/// stat differs → read+hash, file missing → skip the entry so a `diff`
-/// caller naturally sees "deleted" against the old (index) side. Untracked
-/// files are invisible here — exactly what `alt diff` (uncached) wants;
-/// `status` keeps `scan_worktree_with_index` so it can still report
-/// untracked.
-///
-/// Wins over the full walk: `git diff` shape rather than `git status`
-/// shape — O(index) stat syscalls instead of O(working-tree) read_dir +
-/// stat. On a 50k-file monorepo with nothing changed this drops `alt diff`
-/// from seconds (full walk + stat each) to ≤100 ms (one stat per index
-/// entry, no opendir traffic).
-pub fn scan_indexed_paths(
-    root: &Path,
-    index: &Index,
-    algo: HashAlgo,
-    clean: Option<Clean<'_>>,
-    head: Option<SubmoduleHead<'_>>,
-) -> Result<Vec<WorkEntry>, WorktreeError> {
-    let mut out = Vec::with_capacity(index.entries.len());
-    for idx in &index.entries {
-        if idx.stage() != 0 {
-            continue; // unmerged stages are reported via the merge UI
-        }
-        let rel = idx.path.to_path().map_err(|_| {
-            WorktreeError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "non-utf8 path",
-            ))
-        })?;
-        let abs = root.join(rel);
-        let meta = match std::fs::symlink_metadata(&abs) {
-            // a submodule changes this repository only by checking out
-            // another commit; the placeholder directory, or its absence,
-            // is no change
-            Ok(m) if idx.mode == 0o160000 && m.is_dir() => {
-                let checked_out = head.and_then(|head| head(&abs));
-                out.push(WorkEntry {
-                    oid: checked_out.unwrap_or(idx.oid),
-                    ..gitlink(idx)
-                });
-                continue;
-            }
-            Err(e) if idx.mode == 0o160000 && e.kind() == std::io::ErrorKind::NotFound => {
-                out.push(gitlink(idx));
-                continue;
-            }
-            Ok(m) => m,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                // file deleted from working tree → don't push; changes()
-                // detects the asymmetry against the old (index) list and
-                // emits a Deleted change
-                continue;
-            }
-            Err(e) => return Err(e.into()),
-        };
-        let wt_mode = if meta.is_symlink() {
-            0o120000
-        } else if meta.is_dir() {
-            // an indexed file path is now a directory — surface as a
-            // delete + an untracked (we don't emit untracked here, so the
-            // diff just sees a delete; status() catches the rest)
-            continue;
-        } else {
-            file_mode(&meta)
-        };
-        if stat_matches(idx, &meta, wt_mode) {
-            out.push(WorkEntry {
-                path: idx.path.clone(),
-                oid: idx.oid,
-                mode: idx.mode,
-            });
-            continue;
-        }
-        let content = if meta.is_symlink() {
-            std::fs::read_link(&abs)?
-                .as_os_str()
-                .as_encoded_bytes()
-                .to_vec()
-        } else {
-            cleaned(clean, &idx.path, std::fs::read(&abs)?)
-        };
-        out.push(WorkEntry {
-            path: idx.path.clone(),
-            oid: ObjectId::hash_object(algo, ObjectKind::Blob, &content),
-            mode: wt_mode,
-        });
-    }
-    out.sort_by(|a, b| a.path.cmp(&b.path));
-    Ok(out)
-}
-
-fn gitlink(idx: &alt_git_index::IndexEntry) -> WorkEntry {
-    WorkEntry {
-        path: idx.path.clone(),
-        oid: idx.oid,
-        mode: idx.mode,
-    }
-}
 
 /// The index's paths and every directory above them. Ignore rules only
 /// hide untracked files, as in git: a tracked file stays in the scan even
@@ -239,10 +137,10 @@ pub struct PathMatcher(ignore::IgnoreStack);
 
 impl PathMatcher {
     /// One pattern per entry, gitignore syntax.
-    pub fn new<'a>(patterns: impl IntoIterator<Item = &'a str>) -> PathMatcher {
-        let text: String = patterns.into_iter().map(|p| format!("{p}\n")).collect();
+    pub fn new<'a>(patterns: impl IntoIterator<Item = &'a [u8]>) -> PathMatcher {
+        let lines: Vec<&[u8]> = patterns.into_iter().collect();
         let mut stack = ignore::IgnoreStack::new();
-        stack.push(ignore::parse_layer(text.as_bytes(), b""));
+        stack.push(ignore::parse_layer(&lines.join(&b'\n'), b""));
         PathMatcher(stack)
     }
 
@@ -299,13 +197,13 @@ fn scan_dir(
             // separate repo, not working-tree content of this one — don't
             // recurse, and don't synthesize a worktree entry for it: the
             // submodule's HEAD oid is owned by the submodule, not us.
-            // status() filters spurious Deleted reports against the index.
             // The same holds for a directory the index records as a
             // submodule, with or without a repository in it: whatever lies
             // there is not this repository's to add. What it reports is
-            // the commit the submodule has checked out.
+            // the commit the submodule has checked out, or the recorded one
             if tracked.gitlinks.contains(&rel_b) {
-                if let Some(oid) = ctx.head.and_then(|head| head(&path)) {
+                let recorded = cache.and_then(|c| c.get(&rel_b)).map(|e| e.oid);
+                if let Some(oid) = ctx.head.and_then(|head| head(&path)).or(recorded) {
                     out.push(WorkEntry {
                         path: rel_b,
                         oid,

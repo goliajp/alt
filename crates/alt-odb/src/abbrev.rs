@@ -1,14 +1,11 @@
 //! Short forms of object ids: resolving a prefix to the object it names,
 //! and printing an id with as few digits as keep it apart from the rest.
 
-use std::cell::{Cell, OnceCell};
+use std::cell::OnceCell;
 
 use alt_git_codec::ObjectId;
 
 use crate::{MapEntry, NativeOdb};
-
-/// Lookups answered by scanning the map before a sorted list is built.
-const SCANS: usize = 32;
 
 /// Abbreviates object ids the way git does by default: the length grows
 /// with the size of the store, and an id that another object shares that
@@ -16,8 +13,51 @@ const SCANS: usize = 32;
 pub struct Abbrev<'a> {
     odb: &'a NativeOdb,
     min: usize,
-    asked: Cell<usize>,
-    sorted: OnceCell<Vec<ObjectId>>,
+    grouped: OnceCell<Grouped>,
+}
+
+/// Every id of the store, those with the same first two bytes next to
+/// each other. Two ids that differ there share fewer digits than the
+/// shortest abbreviation has, so only an id's own group matters to it.
+struct Grouped {
+    ids: Vec<ObjectId>,
+    /// where the group of each two-byte value begins; one more entry closes the last
+    starts: Vec<u32>,
+}
+
+fn group_of(oid: &ObjectId) -> usize {
+    let b = oid.as_bytes();
+    (b[0] as usize) << 8 | b[1] as usize
+}
+
+impl Grouped {
+    /// One pass to count and one to place: no id is compared with another.
+    fn of<'i, I: Iterator<Item = &'i ObjectId>>(ids: impl Fn() -> I) -> Grouped {
+        let mut starts = vec![0u32; (1 << 16) + 1];
+        for oid in ids() {
+            starts[group_of(oid) + 1] += 1;
+        }
+        for group in 0..1 << 16 {
+            starts[group + 1] += starts[group];
+        }
+        let total = starts[1 << 16] as usize;
+        let mut next = starts.clone();
+        let mut placed: Vec<Option<ObjectId>> = vec![None; total];
+        for oid in ids() {
+            let at = &mut next[group_of(oid)];
+            placed[*at as usize] = Some(*oid);
+            *at += 1;
+        }
+        Grouped {
+            ids: placed.into_iter().flatten().collect(),
+            starts,
+        }
+    }
+
+    fn with(&self, oid: &ObjectId) -> &[ObjectId] {
+        let group = group_of(oid);
+        &self.ids[self.starts[group] as usize..self.starts[group + 1] as usize]
+    }
 }
 
 impl NativeOdb {
@@ -53,8 +93,7 @@ impl NativeOdb {
         Abbrev {
             odb: self,
             min: Abbrev::default_len(self.len()),
-            asked: Cell::new(0),
-            sorted: OnceCell::new(),
+            grouped: OnceCell::new(),
         }
     }
 }
@@ -92,17 +131,10 @@ impl Abbrev<'_> {
     }
 
     fn shared_with_another(&self, oid: &ObjectId) -> usize {
-        self.asked.set(self.asked.get() + 1);
-        if self.asked.get() <= SCANS && self.sorted.get().is_none() {
-            return most_shared(self.odb.map.iter().map(|e: &MapEntry| &e.git), oid);
-        }
-        // many ids to print: sort once, then only the neighbours matter
-        let sorted = self.sorted.get_or_init(|| {
-            let mut ids: Vec<ObjectId> = self.odb.map.iter().map(|e| e.git).collect();
-            ids.sort_unstable_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
-            ids
-        });
-        most_shared(neighbours(sorted, oid), oid)
+        let grouped = self
+            .grouped
+            .get_or_init(|| Grouped::of(|| self.odb.map.iter().map(|e: &MapEntry| &e.git)));
+        most_shared(grouped.with(oid), oid)
     }
 }
 
@@ -110,12 +142,6 @@ impl Abbrev<'_> {
 fn most_shared<'i>(ids: impl IntoIterator<Item = &'i ObjectId>, oid: &ObjectId) -> usize {
     let others = ids.into_iter().filter(|e| *e != oid);
     others.map(|e| shared_digits(e, oid)).max().unwrap_or(0)
-}
-
-/// The ids next to where `oid` sorts: no other id shares more with it.
-fn neighbours<'s>(sorted: &'s [ObjectId], oid: &ObjectId) -> &'s [ObjectId] {
-    let at = sorted.partition_point(|e| e.as_bytes() < oid.as_bytes());
-    &sorted[at.saturating_sub(1)..(at + 2).min(sorted.len())]
 }
 
 #[cfg(test)]
@@ -133,9 +159,12 @@ mod tests {
             .map(|hex| id(hex))
             .collect();
         ids.sort_unstable_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
-        // by scanning every id, and from the sorted list
+        let grouped = Grouped::of(|| ids.iter());
+        assert_eq!(grouped.ids.len(), ids.len());
+        // by scanning every id, and from the id's own group: the same
+        // wherever the answer reaches the shortest abbreviation
         let ways: [&dyn Fn(&ObjectId) -> usize; 2] = [&|oid| most_shared(&ids, oid), &|oid| {
-            most_shared(neighbours(&ids, oid), oid)
+            most_shared(grouped.with(oid), oid)
         }];
         for shared in ways {
             assert_eq!(shared(&id("1234567")), 0);

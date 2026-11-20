@@ -5,11 +5,13 @@ use crate::{ConfigError, Entry};
 /// Parses one config file's syntax into entries, in order. No include
 /// processing here — `include.path` lines come out as plain entries.
 pub fn parse_file(data: &[u8]) -> Result<Vec<Entry>, ConfigError> {
-    parse_located(data).map_err(|(_, what)| ConfigError::Syntax(what))
+    let located = parse_located(data).map_err(|(_, what)| ConfigError::Syntax(what))?;
+    Ok(located.into_iter().map(|(_, entry)| entry).collect())
 }
 
-/// As [`parse_file`]; an error comes with the number of the line it is on.
-pub(crate) fn parse_located(data: &[u8]) -> Result<Vec<Entry>, (usize, &'static str)> {
+/// As [`parse_file`]; an entry and an error come with the number of the
+/// line they are on.
+pub(crate) fn parse_located(data: &[u8]) -> Result<Vec<(usize, Entry)>, (usize, &'static str)> {
     // as git reads a file: no byte order mark, and a line may end in CR LF
     let data = data.strip_prefix(b"\xef\xbb\xbf").unwrap_or(data);
     let mut text = Vec::with_capacity(data.len());
@@ -48,9 +50,10 @@ struct SectionCtx {
 }
 
 impl<'a> Parser<'a> {
-    fn run(&mut self) -> Result<Vec<Entry>, ConfigError> {
+    fn run(&mut self) -> Result<Vec<(usize, Entry)>, ConfigError> {
         let mut out = Vec::new();
         let mut ctx: Option<SectionCtx> = None;
+        let (mut line, mut counted) = (1, 0);
         loop {
             self.skip_ws_comments_and_newlines();
             let Some(byte) = self.peek() else {
@@ -64,13 +67,18 @@ impl<'a> Parser<'a> {
                     section: String::new(),
                     subsection: None,
                 });
+                let newline = |b: &&u8| **b == b'\n';
+                line += self.data[counted..self.pos].iter().filter(newline).count();
+                counted = self.pos;
                 let (key, value) = self.parse_variable()?;
-                out.push(Entry {
+                let entry = Entry {
                     section: here.section,
                     subsection: here.subsection,
                     key,
                     value,
-                });
+                    origin: None,
+                };
+                out.push((line, entry));
             }
         }
     }

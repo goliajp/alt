@@ -72,6 +72,39 @@ impl Json {
     }
 }
 
+/// How an object names the path `bytes`: as `path`, with U+FFFD where it
+/// is not UTF-8, and then as `path_bytes` too, its bytes in hex.
+pub fn path(bytes: &[u8]) -> Vec<(&'static str, Json)> {
+    let mut fields = vec![("path", Json::str(bytes))];
+    if std::str::from_utf8(bytes).is_err() {
+        fields.push(("path_bytes", Json::str(crate::machine::hex(bytes))));
+    }
+    fields
+}
+
+/// How an object names several paths: as the list `name` of them, each
+/// with U+FFFD where it is not UTF-8, and then as `bytes_name` too, which
+/// has for each such path its place in the list and its bytes in hex.
+pub fn paths<'a>(
+    name: &'static str,
+    bytes_name: &'static str,
+    paths: impl Iterator<Item = &'a [u8]>,
+) -> Vec<(&'static str, Json)> {
+    let paths: Vec<&[u8]> = paths.collect();
+    let odd = paths.iter().enumerate();
+    let odd = odd.filter(|(_, path)| std::str::from_utf8(path).is_err());
+    let bytes = |(at, path): (usize, &&[u8])| {
+        let hex = Json::str(crate::machine::hex(path));
+        Json::Object(vec![("index", Json::Num(at as i64)), ("path_bytes", hex)])
+    };
+    let bytes: Vec<Json> = odd.map(bytes).collect();
+    let mut fields = vec![(name, Json::Array(paths.iter().map(Json::str).collect()))];
+    if !bytes.is_empty() {
+        fields.push((bytes_name, Json::Array(bytes)));
+    }
+    fields
+}
+
 /// Writes `{schema_version:1, <fields>}` as one compact JSON line — the shape
 /// every native command's `--json` result takes.
 pub fn emit(
@@ -103,4 +136,35 @@ fn write_json_string(out: &mut (impl Write + ?Sized), bytes: &[u8]) -> std::io::
         }
     }
     out.write_all(b"\"")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn written(fields: Vec<(&'static str, Json)>) -> String {
+        let mut out = Vec::new();
+        Json::Object(fields).write(&mut out).unwrap();
+        String::from_utf8(out).unwrap()
+    }
+
+    #[test]
+    fn a_path_that_is_not_utf8_has_its_bytes_beside_it() {
+        assert_eq!(written(path(b"a.txt")), r#"{"path":"a.txt"}"#);
+        assert_eq!(
+            written(path(b"n\xff")),
+            "{\"path\":\"n\u{fffd}\",\"path_bytes\":\"6eff\"}"
+        );
+        let plain: [&[u8]; 2] = [b"a", b"b"];
+        let listed = written(paths("untracked", "untracked_bytes", plain.into_iter()));
+        assert_eq!(listed, r#"{"untracked":["a","b"]}"#);
+        let odd: [&[u8]; 3] = [b"a", b"\xfe", b"n\xff"];
+        let listed = written(paths("untracked", "untracked_bytes", odd.into_iter()));
+        let bytes = r#"[{"index":1,"path_bytes":"fe"},{"index":2,"path_bytes":"6eff"}]"#;
+        let names = "[\"a\",\"\u{fffd}\",\"n\u{fffd}\"]";
+        assert_eq!(
+            listed,
+            format!("{{\"untracked\":{names},\"untracked_bytes\":{bytes}}}")
+        );
+    }
 }

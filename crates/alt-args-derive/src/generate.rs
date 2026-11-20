@@ -48,7 +48,7 @@ fn arg_item(arg: &ArgField) -> String {
     format!(
         "::alt_args::Item::Arg(::alt_args::Arg {{ id: {id}, long: {long}, short: {short}, alias: {alias}, \
          value_name: {value_name}, help: {help}, kind: ::alt_args::Kind::{kind}, required: {required}, \
-         global: {global}, preset: {preset}, possible: {possible}, check: {check}, conflicts: {conflicts}, \
+         global: {global}, preset: {preset}, missing: {missing}, possible: {possible}, check: {check}, conflicts: {conflicts}, \
          requires: {requires}, required_unless: {required_unless}, group: {group}, trailing: {trailing}, \
          hyphen_values: {hyphen_values} }})",
         id = quote(&arg.id),
@@ -62,6 +62,7 @@ fn arg_item(arg: &ArgField) -> String {
         help = quote(&arg.help),
         required = arg.required,
         global = arg.global,
+        missing = quote(arg.missing.as_deref().unwrap_or_default()),
         conflicts = list(&arg.conflicts),
         requires = list(&arg.requires),
         required_unless = list(&arg.required_unless),

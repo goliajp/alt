@@ -42,11 +42,6 @@ impl NativeRepo<'_> {
         if self.bisect_in_progress() {
             return Err("commit: a bisect is in progress; end it with `alt bisect reset`".into());
         }
-        // Path gate is `add`-only on purpose: the restricted principal's
-        // *choice* of what to stage is what the policy constrains. Pre-existing
-        // index entries inherited from another principal (e.g. operator's
-        // baseline) ride through to the commit unchallenged — penalising the
-        // agent for paths it never touched is unhelpful.
         let tree = self.staged_tree()?;
 
         let branch = self.head_branch()?;
@@ -227,6 +222,8 @@ impl NativeRepo<'_> {
             if old.is_some_and(|o| o.oid == e.oid) {
                 continue;
             }
+            // what a submodule entry names is a commit of another store
+            let old = old.filter(|o| o.mode != 0o160000);
             let old = old.map(|o| self.blob_bytes(o.oid)).transpose()?;
             files.push((e.path.to_string(), old, self.blob_bytes(e.oid)?));
         }
@@ -265,6 +262,7 @@ impl NativeRepo<'_> {
         verb: &str,
         meta: &MetaInput,
     ) -> Res<ObjectId> {
+        self.ensure_commit_allowed(old, c.tree)?;
         let mut bytes = build_commit_bytes(c.tree, c.parents, c.author, c.committer, c.message);
         // when sign-policy is on and a sec key is on disk for
         // the principal, splice an `alt-sig` header into the commit and
