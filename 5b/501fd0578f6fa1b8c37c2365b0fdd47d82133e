@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: keep and merge the executable bit of a file both sides of a merge changed
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/merge.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/merge_modes.rs
