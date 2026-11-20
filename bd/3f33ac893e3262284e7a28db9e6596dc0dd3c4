@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: chore
+summary: build the corpus tests marked as needing --release with the release profile
+author-type: human
+author: doracawl
+touched: scripts/gate.sh
