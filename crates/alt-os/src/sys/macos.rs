@@ -17,6 +17,11 @@ pub const AT_SYMLINK_NOFOLLOW: c_int = 0x0020;
 
 pub const SIGCONT: c_int = 19;
 
+/// The character-type category in the mask `newlocale` takes.
+pub const LC_CTYPE_MASK: c_int = 1 << 1;
+/// The `nl_langinfo` item that names the character set.
+pub const CODESET: c_int = 0;
+
 pub const RLIMIT_NOFILE: rlimit_resource_t = 8;
 
 pub const SOL_SOCKET: c_int = 0xffff;

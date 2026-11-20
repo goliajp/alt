@@ -19,6 +19,8 @@ pub(crate) struct Style<'a> {
     pub(crate) quotepath: bool,
     /// absent for a store that cannot say which ids share a prefix
     pub(crate) abbrev: Option<alt_odb::Abbrev<'a>>,
+    /// what the hunk headers name
+    pub(crate) sections: crate::funcname::Sections,
 }
 
 impl Style<'_> {

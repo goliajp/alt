@@ -91,7 +91,7 @@ pub(super) fn interrupt_at_boundary(mut command: Command, phase: &str, log: &Pat
 fn refusal_with_deadline(work: &Path, token: &str, args: &[&str], log: &Path) -> String {
     let output = std::fs::File::create(log).unwrap();
     let mut child = ChildGuard(
-        Command::new(env!("CARGO_BIN_EXE_alt"))
+        crate::alt_command()
             .current_dir(work)
             .args(args)
             .env("ALT_NO_DAEMON", "1")
@@ -263,7 +263,7 @@ fn interrupted_received_task_adoption_can_be_explicitly_reauthorized() {
             request.join("response.bin")
         };
         let log = root.path().join(format!("{phase}.log"));
-        let mut command = Command::new(env!("CARGO_BIN_EXE_alt"));
+        let mut command = crate::alt_command();
         command
             .current_dir(&work)
             .args([
@@ -371,7 +371,7 @@ fn interrupted_received_task_adoption_can_be_explicitly_reauthorized() {
             let interrupted = format!("{:032x}", 400 + index);
             let next_request = bob.join(".alt/requests").join(&interrupted);
             let next_log = root.path().join("reconciliation-response.log");
-            let mut command = Command::new(env!("CARGO_BIN_EXE_alt"));
+            let mut command = crate::alt_command();
             command
                 .current_dir(&work)
                 .args([

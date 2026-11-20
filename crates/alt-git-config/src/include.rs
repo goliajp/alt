@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use alt_bytes::{BStr, ByteSlice};
 
 use crate::wildmatch::wildmatch;
-use crate::{ConfigError, Entry, parse};
+use crate::{ConfigError, Entry, Origin, parse};
 
 /// git's include recursion cap (`MAX_INCLUDE_DEPTH`).
 pub(crate) const MAX_INCLUDE_DEPTH: usize = 10;
@@ -43,7 +43,13 @@ fn load_into(
     }
     files.push(path.to_path_buf());
     let base = path.parent().unwrap_or(Path::new("."));
-    for entry in parse::parse_file(&std::fs::read(path)?)? {
+    let located = |(line, _)| ConfigError::Line(line, path.to_path_buf());
+    let file: std::sync::Arc<Path> = path.into();
+    for (line, mut entry) in parse::parse_located(&std::fs::read(path)?).map_err(located)? {
+        entry.origin = Some(Origin {
+            file: file.clone(),
+            line,
+        });
         let include = match (
             entry.section.as_str(),
             &entry.subsection,
@@ -56,14 +62,17 @@ fn load_into(
         // the directive entry itself stays in the list (as in git's
         // `--list --includes` output — and it must survive for config
         // restoration); included content is spliced right after it
-        let target = if include {
-            let Some(value) = &entry.value else {
-                return Err(ConfigError::Syntax("include.path without a value"));
+        let target =
+            if include {
+                let Some(value) = &entry.value else {
+                    return Err(ConfigError::Syntax("include.path without a value"));
+                };
+                Some(expand_path(value.as_bstr(), base, ctx).ok_or_else(|| {
+                    ConfigError::IncludePath(value.to_string(), path.to_path_buf())
+                })?)
+            } else {
+                None
             };
-            Some(expand_path(value.as_bstr(), base, ctx))
-        } else {
-            None
-        };
         out.push(entry);
         if let Some(target) = target {
             // like git: a missing include target is silently skipped
@@ -77,12 +86,13 @@ fn load_into(
 }
 
 /// `~/x` → home, relative → relative to the including file's directory.
-fn expand_path(value: &BStr, base: &Path, ctx: &IncludeContext) -> PathBuf {
+/// `None` for a path in the home directory when none is known.
+fn expand_path(value: &BStr, base: &Path, ctx: &IncludeContext) -> Option<PathBuf> {
     let s = PathBuf::from(value.to_os_str().expect("unix bytes").to_owned());
-    if let (Ok(rest), Some(home)) = (s.strip_prefix("~"), &ctx.home) {
-        return home.join(rest);
+    if let Ok(rest) = s.strip_prefix("~") {
+        return ctx.home.as_ref().map(|home| home.join(rest));
     }
-    if s.is_absolute() { s } else { base.join(s) }
+    Some(if s.is_absolute() { s } else { base.join(s) })
 }
 
 fn condition_holds(cond: &BStr, ctx: &IncludeContext) -> bool {

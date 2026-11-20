@@ -197,7 +197,8 @@ mod imp {
     /// Which daemon answers is told by `daemon.meta` ([`daemon_meta`]). A
     /// daemon of another build, or one that does not declare what this
     /// program needs of it, is sent SIGTERM and given two seconds to stop
-    /// answering. One that left no meta is not known and is left alone.
+    /// answering. One that left no meta is not known and is left alone, as
+    /// is this program's own daemon when it looks for locales elsewhere.
     fn connect_or_spawn(alt_dir: &Path, sock: &Path) -> Option<UnixStream> {
         let running = daemon_meta::read(alt_dir);
         if running == Daemon::Ours

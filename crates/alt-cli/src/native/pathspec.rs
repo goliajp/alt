@@ -174,7 +174,13 @@ impl Place {
         let rev = rev.unwrap_or("HEAD");
         let path = self.written(given)?;
         let at = self.at_head(rev);
-        let rules = super::settings::ensure_exclude_files(repo.config()?, &self.root, &info);
+        let branch = repo.branch_of(&self.head)?;
+        let settings = crate::git_settings::layered(
+            &*crate::git_settings::repository(repo)?,
+            Some(control),
+            branch,
+        )?;
+        let rules = super::settings::ensure_exclude_files(&settings, &self.root, &info);
         if let Err(ended) = rules {
             let known = |start| crate::tree_changes::blob_at(repo, start, &path).is_ok();
             if repo.rev_parse(&at)?.is_some_and(known) {

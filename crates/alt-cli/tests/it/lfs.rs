@@ -12,7 +12,7 @@ use alt_lfs::Pointer;
 const ATTRS: &str = "*.bin filter=lfs diff=lfs merge=lfs -text\n";
 
 fn alt(repo: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alt"))
+    crate::alt_command()
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
         .env("ALT_NO_CREDENTIAL_HELPER", "1")

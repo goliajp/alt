@@ -18,15 +18,21 @@ impl NativeRepo<'_> {
     /// Stores what the working tree has at each of `taken` and pushes its
     /// entry. A directory where a tracked file is to be stored again is
     /// to git a repository with no commit, which it says and goes on.
+    /// `scanned` is the converter the scan read the files with, if it
+    /// read any: stored with the same one, a file is filtered once.
     pub(super) fn stage_files(
         &mut self,
         taken: &[&BString],
         delta: &Delta,
         before: &Index,
         entries: &mut Vec<IndexEntry>,
+        scanned: Option<convert::Converter>,
     ) -> Res<Stored> {
         let lfs = self.lfs_rules()?;
-        let attrs = self.converter()?;
+        let attrs = match scanned {
+            Some(attrs) => attrs,
+            None => self.converter()?,
+        };
         let moved: HashMap<&[u8], &WorkEntry> = delta
             .changed
             .iter()

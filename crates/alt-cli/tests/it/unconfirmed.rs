@@ -13,7 +13,7 @@ const PACK: &str = ".alt/store/pack-00000001.altpack";
 const MARKERS: [&str; 2] = [".alt/odb.durable", ".alt/oplog/durable"];
 
 pub(super) fn alt_command(repo: &Path, args: &[&str]) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_alt"));
+    let mut command = crate::alt_command();
     command
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")

@@ -66,6 +66,7 @@ alt-prism-png = { path = "crates/alt-prism-png" }
 alt-prism-store = { path = "crates/alt-prism-store" }
 alt-prism-zip = { path = "crates/alt-prism-zip" }
 alt-refs = { path = "crates/alt-refs" }
+alt-regex = { path = "crates/alt-regex" }
 alt-repo = { path = "crates/alt-repo" }
 alt-sign = { path = "crates/alt-sign" }
 alt-treediff = { path = "crates/alt-treediff" }

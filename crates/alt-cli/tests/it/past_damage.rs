@@ -14,7 +14,7 @@ const PACK: &str = ".alt/store/pack-00000001.altpack";
 
 /// `alt` reading past damage.
 fn past(repo: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alt"))
+    crate::alt_command()
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
         .env("ALT_READ_PAST_DAMAGE", "1")

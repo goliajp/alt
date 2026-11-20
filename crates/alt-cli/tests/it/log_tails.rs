@@ -7,10 +7,10 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::FileExt;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 
 fn alt(repo: &Path, relaxed: bool, args: &[&str]) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_alt"));
+    let mut command = crate::alt_command();
     command
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")

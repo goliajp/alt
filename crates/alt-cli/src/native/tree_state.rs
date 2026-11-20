@@ -26,6 +26,10 @@ pub(super) struct Planned {
     pub(super) files: std::collections::HashMap<Vec<u8>, (u32, String)>,
 }
 
+/// What a scan found, the moment it began, and the converter it read
+/// files with when it read any.
+pub(super) type Scanned<R> = (R, alt_worktree::Clock, Option<convert::Converter>);
+
 /// What `status` and the commands that ask the same questions work from.
 pub(super) struct TreeState {
     pub(super) snapshot: Snapshot,
@@ -88,13 +92,15 @@ impl NativeRepo<'_> {
     /// [`scan_delta`](Self::scan_delta) over `within` and what lies beneath
     /// those paths, the whole tree when there are none. Also returns the
     /// moment the scan began: a file changed before it can be recorded as
-    /// unchanged.
+    /// unchanged. And the converter, when a file had to be read: what
+    /// goes on to store or show the files converts with the same one, so
+    /// that a filter runs once for a file.
     pub(super) fn scan_delta_within(
         &self,
         snapshot: &mut Snapshot,
         untracked: Untracked,
         within: &[&[u8]],
-    ) -> Res<(Delta, alt_worktree::Clock)> {
+    ) -> Res<Scanned<Delta>> {
         self.scanning(untracked, within, |options, settings| {
             // a watched tree holds its answer with directories as one path
             let held = matches!(untracked, Untracked::No | Untracked::Normal);
@@ -118,7 +124,7 @@ impl NativeRepo<'_> {
         untracked: Untracked,
         within: &[&[u8]],
         scan: impl FnOnce(&ScanOptions<'_>, (&[&Path], &[u8])) -> Res<R>,
-    ) -> Res<(R, alt_worktree::Clock)> {
+    ) -> Res<Scanned<R>> {
         // built when the first file has to be read
         let tools: OnceCell<Res<(Option<PathMatcher>, convert::Converter)>> = OnceCell::new();
         let get = || {
@@ -149,17 +155,16 @@ impl NativeRepo<'_> {
             clock,
         };
         let found = scan(&options, (files.as_slice(), inputs.branch.as_slice()));
-        let converted = match tools.into_inner() {
-            Some(tools) => tools.and_then(|(_, attrs)| attrs.check()),
-            None => Ok(()),
-        };
+        let made = tools.into_inner().transpose();
+        let converted = made.and_then(|tools| match tools {
+            Some((_, attrs)) => attrs.check().map(|()| Some(attrs)),
+            None => Ok(None),
+        });
         if found.is_err() || converted.is_err() {
             // a file that could not be compared is in no answer worth holding
             watching::forget(&self.root);
         }
-        let found = found?;
-        converted?;
-        Ok((found, clock))
+        Ok((found?, clock, converted?))
     }
 
     /// After this process put the index of `next` where that of `prior`

@@ -4,10 +4,10 @@
 //! transport into.
 
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 
 fn alt(repo: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alt"))
+    crate::alt_command()
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", "tester")

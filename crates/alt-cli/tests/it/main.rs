@@ -31,6 +31,9 @@ mod crash_fixture;
 mod credential_helper;
 mod cwd_paths;
 mod daemon_client;
+mod daemon_home;
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+mod daemon_locale;
 mod daemon_server;
 mod daemon_stop;
 mod damage_messages;
@@ -117,5 +120,21 @@ mod auth;
 mod cli_matrix;
 mod corpus_cli;
 mod corpus_history;
+mod filter_process;
+mod funcname;
+mod funcname_drivers;
+mod funcname_git;
+mod funcname_long;
+mod git_settings;
 mod recovery_kinds;
 mod stack_overflow;
+
+/// The `alt` binary under test, kept from the git configuration of the
+/// machine the tests run on, as the git they compare it with is. A test
+/// of that configuration gives the command a home of its own.
+pub fn alt_command() -> std::process::Command {
+    let mut alt = std::process::Command::new(env!("CARGO_BIN_EXE_alt"));
+    alt.env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null");
+    alt
+}

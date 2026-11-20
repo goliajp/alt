@@ -50,7 +50,7 @@ impl Level<'_> {
             return Err(Error::missing_value(arg));
         }
         let seen = self.entries.iter().any(|entry| entry.id == arg.id);
-        if seen && !matches!(arg.kind, Kind::Multiple | Kind::Count) {
+        if seen && !matches!(arg.kind, Kind::Multiple | Kind::Count | Kind::Attached) {
             return Err(Error::repeated(self.scope, arg));
         }
         self.entry(arg.id);
@@ -199,11 +199,20 @@ impl Level<'_> {
             if arg.is_builtin() {
                 return Err(self.builtin(arg.kind));
             }
+            let attached = &cluster[offset + letter.len_utf8()..];
+            if arg.kind == Kind::Attached && !attached.is_empty() {
+                self.record(at, vec![attached.to_owned()])?;
+                break;
+            }
+            if arg.kind == Kind::Attached {
+                // nothing against the letter: told apart from any value
+                self.record(at, vec![String::new()])?;
+                continue;
+            }
             if !arg.takes_value() {
                 self.record(at, vec!["true".to_owned()])?;
                 continue;
             }
-            let attached = &cluster[offset + letter.len_utf8()..];
             if attached.is_empty() && !arg.rare().missing.is_empty() {
                 self.record(at, vec![arg.rare().missing.to_owned()])?;
             } else if attached.is_empty() {

@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use alt_cli::daemon::{self, Request, Response};
 
 fn alt(cwd: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alt"))
+    crate::alt_command()
         .current_dir(cwd)
         .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", "tester")
@@ -575,7 +575,7 @@ fn daemon_reads_stay_coherent_under_concurrent_external_writers() {
             .map(|tree| {
                 std::thread::spawn(move || {
                     std::fs::write(tree.join("f.txt"), format!("round {r}\n")).unwrap();
-                    let add = Command::new(env!("CARGO_BIN_EXE_alt"))
+                    let add = crate::alt_command()
                         .current_dir(&tree)
                         .env("ALT_NO_DAEMON", "1")
                         .env("GIT_AUTHOR_NAME", "tester")
@@ -585,7 +585,7 @@ fn daemon_reads_stay_coherent_under_concurrent_external_writers() {
                         .status()
                         .unwrap();
                     assert!(add.success(), "add failed");
-                    let commit = Command::new(env!("CARGO_BIN_EXE_alt"))
+                    let commit = crate::alt_command()
                         .current_dir(&tree)
                         .env("ALT_NO_DAEMON", "1")
                         .env("GIT_AUTHOR_NAME", "tester")

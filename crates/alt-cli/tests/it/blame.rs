@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 fn alt(repo: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alt"))
+    crate::alt_command()
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", "tester")
@@ -363,4 +363,58 @@ fn blame_traces_moved_and_copied_lines_as_git_does() {
         short(gathered),
         "the line written in that commit"
     );
+}
+
+#[test]
+fn a_score_against_the_letter_decides_what_counts_as_moved_or_copied() {
+    let (src, dst) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
+    let (src, dst) = (src.path(), dst.path());
+    let commits = moved_and_copied(src);
+    let (base, others, moved, gathered) = (&commits[0], &commits[1], &commits[2], &commits[3]);
+    ok(alt(src, &["import", dst.to_str().unwrap()]));
+    let first8 = |text: String| -> Vec<String> {
+        text.lines()
+            .map(|l| l.trim_start_matches('^')[..8].to_owned())
+            .collect()
+    };
+    let mut seen = Vec::new();
+    for flags in [
+        &["-M1"][..],
+        &["-M100000"],
+        &["-C1"],
+        &["-C100000"],
+        &["-M100000", "-C", "-C3"],
+        &["-C", "-C", "-C100000"],
+        &["-Mx", "-C0"],
+        &["-M100000", "-M"],
+        &["-C100000", "-C", "-C"],
+        &["-M100000", "-Mtrue"],
+    ] {
+        let args =
+            |tail: &[&'static str]| -> Vec<&'static str> { [&["blame"], flags, tail].concat() };
+        let ours = first8(ok(alt(dst, &args(&["main.txt"]))));
+        let theirs = first8(git(src, 0, &args(&["-l", "--root", "main.txt"])));
+        assert_eq!(ours, theirs, "blame {flags:?}");
+        seen.push(ours);
+    }
+    let short = |c: &String| c[..8].to_owned();
+    // a paragraph is traced when it carries more than the score asks
+    assert_eq!(seen[0][12], short(base));
+    assert_eq!(seen[1][12], short(moved));
+    assert_eq!(seen[2][24], short(others));
+    assert_eq!(seen[3][24], short(gathered));
+    // each letter has its own score, and the last one given counts
+    assert_eq!(seen[4][12], short(moved));
+    assert_eq!(seen[4][24], short(others));
+    assert_eq!(seen[5][36], short(gathered));
+    // no number, or zero, is the usual score
+    assert_eq!(seen[6][12], short(base));
+    assert_eq!(seen[6][24], short(others));
+    // a letter alone leaves the score written before it
+    assert_eq!(seen[7][12], short(moved));
+    assert_eq!(seen[8][24], short(gathered));
+    assert_eq!(seen[9][12], short(base));
 }

@@ -3,9 +3,10 @@
 //! The daemon writes the file next to its socket once it listens; a client
 //! reads it to tell whether the daemon that answers there is one to give a
 //! request to. Its lines: the daemon's pid, the path of its binary, that
-//! file's mtime in nanoseconds and its size, and the capabilities the
-//! daemon declares, separated by spaces. A daemon from before capabilities
-//! were declared writes the first four.
+//! file's mtime in nanoseconds and its size, the capabilities the daemon
+//! declares, separated by spaces, and where it looks for locales
+//! ([`locale_path`](crate::daemon::locale_path)). A daemon from before
+//! capabilities were declared writes the first four.
 
 use std::path::Path;
 
@@ -30,8 +31,9 @@ pub fn write(alt_dir: &Path) -> Option<()> {
     let (mtime, size) = identity(&altd)?;
     let pid = std::process::id();
     let content = format!(
-        "{pid}\n{}\n{mtime}\n{size}\n{SYNCED_MARKERS}\n",
-        altd.display()
+        "{pid}\n{}\n{mtime}\n{size}\n{SYNCED_MARKERS}\n{}\n",
+        altd.display(),
+        crate::daemon::locale_path()
     );
     let path = alt_dir.join("daemon.meta");
     // renamed into place, so that a client never reads half of it
@@ -46,6 +48,10 @@ pub enum Daemon {
     /// a live process running the `altd` beside this program, declaring
     /// what this program needs of it
     Ours,
+    /// that daemon, looking for locales where this program does not: it
+    /// would match this program's texts in another locale than the one
+    /// named to it
+    Elsewhere,
     /// a live process that is not that: another build, or one that
     /// declares less
     Other(u32),
@@ -66,9 +72,10 @@ pub fn read(alt_dir: &Path) -> Daemon {
         let size: u64 = lines.next()?.parse().ok()?;
         let declared = lines.next().unwrap_or("");
         let markers = declared.split(' ').any(|word| word == SYNCED_MARKERS);
-        Some((pid, path, (mtime, size), markers))
+        let locales = lines.next().unwrap_or("") == crate::daemon::locale_path();
+        Some((pid, path, (mtime, size), markers, locales))
     })();
-    let Some((pid, path, identity_then, markers)) = parsed else {
+    let Some((pid, path, identity_then, markers, locales)) = parsed else {
         return Daemon::Unknown;
     };
     if alt_os::sys::kill(pid as i32, 0).is_err() {
@@ -79,8 +86,9 @@ pub fn read(alt_dir: &Path) -> Daemon {
         .map(|alt| alt.with_file_name("altd"))
         .filter(|altd| altd.display().to_string() == path)
         .and_then(|altd| identity(&altd));
-    match markers && ours == Some(identity_then) {
-        true => Daemon::Ours,
-        false => Daemon::Other(pid),
+    match (markers && ours == Some(identity_then), locales) {
+        (true, true) => Daemon::Ours,
+        (true, false) => Daemon::Elsewhere,
+        (false, _) => Daemon::Other(pid),
     }
 }

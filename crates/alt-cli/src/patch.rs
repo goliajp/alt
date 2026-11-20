@@ -90,11 +90,25 @@ pub(crate) enum Section {
 }
 
 /// How this repository prints names and ids.
-pub(crate) fn style(repo: &Repository) -> Res<Style<'_>> {
-    let quotepath = repo.config()?.get_bool("core", None, "quotepath");
+/// `head` is the ref that stands for `HEAD` in this workspace.
+pub(crate) fn style<'r>(repo: &'r Repository, head: &str) -> Res<Style<'r>> {
+    // where the copy of the git configuration and its files are kept
+    let kept = match repo.is_native() {
+        true => repo.git_dir().join("git-import"),
+        false => repo.git_dir().to_path_buf(),
+    };
+    let branch = repo.branch_of(head)?;
+    let settings = crate::git_settings::layered(
+        &*crate::git_settings::repository(repo)?,
+        Some(kept.clone()),
+        branch,
+    )?;
+    let quotepath = settings.get_bool("core", None, "quotepath");
+    let info = kept.join("info/attributes");
     Ok(Style {
         quotepath: quotepath.transpose()?.unwrap_or(true),
         abbrev: repo.abbrev()?,
+        sections: crate::funcname::Sections::new(repo.work_tree(), &info, &settings)?,
     })
 }
 
@@ -133,12 +147,24 @@ fn write_file(
     }
     let old_bytes = content(repo, file.old.as_ref())?;
     let new_bytes = content(repo, file.new.as_ref())?;
-    if alt_diff::is_binary(&old_bytes) || alt_diff::is_binary(&new_bytes) {
+    let regular = |f: &TreeFile| f.mode & 0o170000 == 0o100000;
+    let paths = [
+        file.old
+            .as_ref()
+            .filter(|f| regular(f))
+            .map(|_| header.old_path),
+        file.new
+            .as_ref()
+            .filter(|f| regular(f))
+            .map(|_| header.new_path),
+    ];
+    let sections = &style.sections;
+    if sections.binary(paths, &old_bytes, &new_bytes)? {
         header.write_binary_notice(out, style)?;
         return write_binary_summary(out, &old_bytes, &new_bytes);
     }
     let mut hunks = Vec::new();
-    if alt_diff::write_unified(&mut hunks, &old_bytes, &new_bytes, 3) {
+    if sections.write_hunks(&mut hunks, paths, &old_bytes, &new_bytes)? {
         header.write_hunk_names(out, style)?;
         out.write_all(&hunks)?;
     }

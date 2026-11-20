@@ -31,7 +31,27 @@ pub const FORWARDED_ENV: &[&str] = &[
     "VISUAL",
     "EDITOR",
     "ALT_NO_CREDENTIAL_HELPER",
+    // where the configuration outside the repository lies
+    "HOME",
+    "XDG_CONFIG_HOME",
+    "GIT_CONFIG_NOSYSTEM",
+    "GIT_CONFIG_SYSTEM",
+    "GIT_CONFIG_GLOBAL",
+    // which character set texts are in
+    "LC_ALL",
+    "LC_CTYPE",
+    "LANG",
 ];
+
+/// Where the C library of this process looks for locales, as the daemon
+/// writes it beside its socket: `LOCPATH` in hexadecimal, nothing when
+/// it is not set. A locale is found by the path of the process that asks
+/// for it, so a daemon answers only callers whose path is its own.
+pub fn locale_path() -> String {
+    let path = std::env::var_os("LOCPATH").unwrap_or_default();
+    let bytes = path.as_encoded_bytes().iter();
+    bytes.map(|byte| format!("{byte:02x}")).collect()
+}
 
 /// A client-chosen idempotency token: 16 bytes, unique per command invocation
 /// and stable across that invocation's retries. The daemon stamps it on the

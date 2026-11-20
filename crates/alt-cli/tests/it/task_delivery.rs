@@ -4,7 +4,7 @@ use std::{
     process::{Command, Output},
 };
 fn run(root: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alt"))
+    crate::alt_command()
         .current_dir(root)
         .args(args)
         .env("ALT_NO_DAEMON", "1")
@@ -596,7 +596,7 @@ impl ChildGroup {
         use std::os::unix::process::CommandExt;
         use std::process::Stdio;
         Self(Some(
-            Command::new(env!("CARGO_BIN_EXE_alt"))
+            crate::alt_command()
                 .current_dir(root)
                 .args(args)
                 .env("ALT_NO_DAEMON", "1")

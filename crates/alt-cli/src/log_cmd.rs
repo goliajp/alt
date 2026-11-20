@@ -104,10 +104,12 @@ impl LogArgs {
     }
 }
 
+/// `head` is the ref that stands for `HEAD` in this workspace.
 pub fn run(
     out: &mut impl Write,
     repo: &Repository,
     args: LogArgs,
+    head: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let start = repo
         .rev_parse(&args.rev)?
@@ -142,7 +144,7 @@ pub fn run(
             }
         }
         if args.patch {
-            write_patch(out, repo, &args, &oid, &mut style)?;
+            write_patch(out, repo, &args, &oid, head, &mut style)?;
         }
     }
     Ok(())
@@ -154,6 +156,7 @@ fn write_patch<'r>(
     repo: &'r Repository,
     args: &LogArgs,
     oid: &ObjectId,
+    head: &str,
     style: &mut Option<crate::file_header::Style<'r>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // as in git, a blank line sets a patch apart from every header
@@ -162,7 +165,7 @@ fn write_patch<'r>(
     let mut patch = Vec::new();
     let style = match &*style {
         Some(style) => style,
-        None => style.insert(crate::patch::style(repo)?),
+        None => style.insert(crate::patch::style(repo, head)?),
     };
     let shown = crate::patch::write_commit(&mut patch, repo, oid, args.combined, style)?;
     if shown == Section::Combined || (shown == Section::Patch && args.pretty != "oneline") {

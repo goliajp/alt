@@ -1,0 +1,9 @@
+[package]
+name = "alt-regex"
+description = "POSIX regular expressions over byte strings, matched in time linear in the input, with no third-party dependencies"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+alt-bytes.workspace = true

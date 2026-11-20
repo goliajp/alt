@@ -6,7 +6,7 @@
 
 pub(crate) use crate::daemon_stop::Stop;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 
 /// Runs `alt` in `repo`, through its daemon or not. The user's settings
 /// are looked for inside the control directory, where a test can put them
@@ -17,7 +17,7 @@ pub(crate) fn output(repo: &Path, args: &[&str], daemon: bool) -> Output {
         true => repo.join(".alt/test-config"),
         false => repo.join("test-config"),
     };
-    let mut command = Command::new(env!("CARGO_BIN_EXE_alt"));
+    let mut command = crate::alt_command();
     command
         .current_dir(repo)
         .env("GIT_AUTHOR_NAME", "tester")

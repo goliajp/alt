@@ -41,6 +41,8 @@ struct Found {
     clock: alt_worktree::Clock,
     /// the paths left alone because an ignore rule hides them
     hidden: Vec<BString>,
+    /// the converter the scan read files with, if it read any
+    attrs: Option<convert::Converter>,
 }
 
 impl NativeRepo<'_> {
@@ -114,7 +116,7 @@ impl NativeRepo<'_> {
         let staged_now = if mode.renormalize { &none } else { &before };
         let mut entries = plan.entries;
         let store::Stored { stats, blocked } =
-            self.stage_files(&plan.taken, &delta, staged_now, &mut entries)?;
+            self.stage_files(&plan.taken, &delta, staged_now, &mut entries, found.attrs)?;
         // what could not be stored stays as it was staged
         let kept = before.entries.iter().filter(|e| blocked.contains(&e.path));
         entries.extend(kept.cloned());
@@ -155,7 +157,8 @@ impl NativeRepo<'_> {
         if !tracked_only {
             named::ensure_walkable(specs)?;
         }
-        let (mut delta, clock) = self.scan_delta_within(snapshot, mode.untracked(), within)?;
+        let (mut delta, clock, attrs) =
+            self.scan_delta_within(snapshot, mode.untracked(), within)?;
         let known = match (mode.renormalize, mode.update) {
             (true, _) => named::Known::Tracked,
             (false, true) => named::Known::TrackedOrError,
@@ -179,6 +182,7 @@ impl NativeRepo<'_> {
             delta,
             clock,
             hidden,
+            attrs,
         })
     }
 

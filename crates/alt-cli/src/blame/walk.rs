@@ -42,7 +42,7 @@ pub(super) struct CommitInfo {
 }
 
 /// What to look for beyond changes in place and renames.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 pub struct Options {
     /// lines moved within the file (`-M`)
     pub moves: bool,
@@ -50,6 +50,42 @@ pub struct Options {
     /// files changed in the same commit, then from any file when the
     /// blamed file is created, then from any file in every commit
     pub copies: u8,
+    /// how many letters and digits moved lines must carry to be traced
+    pub move_score: usize,
+    /// the same for copied lines
+    pub copy_score: usize,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Options {
+            moves: false,
+            copies: 0,
+            move_score: 20,
+            copy_score: 40,
+        }
+    }
+}
+
+impl Options {
+    /// The options `-M` and `-C` ask for, each a list of what was written
+    /// against the letter each time it was given: nothing, or a score. As
+    /// in git the last score written counts, a letter alone changes none,
+    /// and a score that is no number or zero is the usual one.
+    pub fn of(moves: &[String], copies: &[String]) -> Self {
+        let score = |given: &[String], usual: usize| {
+            let last = given.iter().rev().find(|text| !text.is_empty());
+            let last = last.and_then(|text| text.parse::<usize>().ok());
+            last.filter(|score| *score > 0).unwrap_or(usual)
+        };
+        let usual = Options::default();
+        Options {
+            moves: !moves.is_empty() || !copies.is_empty(),
+            copies: u8::try_from(copies.len()).unwrap_or(u8::MAX),
+            move_score: score(moves, usual.move_score),
+            copy_score: score(copies, usual.copy_score),
+        }
+    }
 }
 
 pub(super) struct Board<'r> {

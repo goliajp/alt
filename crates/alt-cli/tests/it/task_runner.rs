@@ -1,10 +1,10 @@
 use alt_json::{Value, json};
 use std::{
     path::{Path, PathBuf},
-    process::{Command, Output},
+    process::Output,
 };
 fn run(root: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alt"))
+    crate::alt_command()
         .current_dir(root)
         .args(args)
         .env("ALT_NO_DAEMON", "1")

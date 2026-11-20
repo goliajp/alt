@@ -61,8 +61,9 @@ impl AltBackend {
         Ok(self.refs.get_or_init(|| refs))
     }
 
-    /// The preserved git config (`git-import/config`), with its includes.
-    pub fn load_config(&self) -> Result<Config, RepoError> {
+    /// The preserved git config (`git-import/config`), with its includes;
+    /// one of a file under `~` is looked for in `home`.
+    pub fn load_config(&self, home: Option<PathBuf>) -> Result<Config, RepoError> {
         let config_path = self.alt_dir.join("git-import/config");
         if !config_path.is_file() {
             return Ok(Config::default());
@@ -78,13 +79,35 @@ impl AltBackend {
         let ctx = IncludeContext {
             git_dir: Some(self.alt_dir.join("git-import")),
             branch,
-            home: std::env::var_os("HOME").map(PathBuf::from),
+            home,
         };
         Ok(Config::load(&config_path, &ctx)?)
     }
 }
 
 impl Repository {
+    /// The repository's own configuration as a process whose home is
+    /// `home` reads it: a file it includes from under `~` is looked for
+    /// there. Read anew at each call; [`config`](Self::config) keeps the
+    /// one this process reads.
+    pub fn config_at(&self, home: Option<PathBuf>) -> Result<Config, RepoError> {
+        match &self.backend {
+            Backend::Alt(alt) => alt.load_config(home),
+            Backend::Git { .. } => {
+                let path = self.repo_dir.join("config");
+                if !path.is_file() {
+                    return Ok(Config::default());
+                }
+                let ctx = IncludeContext {
+                    git_dir: Some(self.repo_dir.clone()),
+                    branch: self.branch_of("HEAD")?,
+                    home,
+                };
+                Ok(Config::load(&path, &ctx)?)
+            }
+        }
+    }
+
     /// The same repository for a command that only reads. Of a native
     /// store nothing is opened yet: what is opened from here on is opened
     /// to be read, and no file of it changes but its caches, a ref

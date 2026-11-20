@@ -237,7 +237,7 @@ impl Repository {
             return Ok(config);
         }
         let config = match &self.backend {
-            Backend::Alt(alt) => alt.load_config()?,
+            Backend::Alt(alt) => alt.load_config(std::env::var_os("HOME").map(PathBuf::from))?,
             Backend::Git { .. } => Config::default(),
         };
         Ok(self.config.get_or_init(|| config))
@@ -319,6 +319,25 @@ impl Repository {
     }
 
     /// Resolves a ref name (following symrefs) on either backend.
+    /// The short name of the branch the symbolic ref `head` names, if
+    /// it names one.
+    pub fn branch_of(&self, head: &str) -> Result<Option<BString>, RepoError> {
+        Ok(match &self.backend {
+            Backend::Git { refs, .. } => match refs.read(head)? {
+                Some(RefTarget::Symbolic(name)) => name
+                    .strip_prefix(b"refs/heads/")
+                    .map(|short| BString::from(short.to_vec())),
+                _ => None,
+            },
+            Backend::Alt(alt) => match alt.refs()?.get(head) {
+                Some(alt_refs::RefTarget::Symbolic(name)) => name
+                    .strip_prefix("refs/heads/")
+                    .map(|short| BString::from(short.as_bytes().to_vec())),
+                _ => None,
+            },
+        })
+    }
+
     pub fn resolve_ref(&self, name: &str) -> Result<Option<ObjectId>, RepoError> {
         match &self.backend {
             Backend::Git { refs, .. } => Ok(refs.resolve(name)?),

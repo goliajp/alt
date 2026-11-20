@@ -115,7 +115,7 @@ fn a_writer_giving_the_log_its_boundary_and_one_settling_it_do_not_wait_for_each
     let (marker, _) = left_by_an_older_alt(dir);
     make_the_marker_a_pipe(dir);
 
-    let writer = Command::new(env!("CARGO_BIN_EXE_alt"))
+    let writer = crate::alt_command()
         .current_dir(dir)
         .env("ALT_NO_DAEMON", "1")
         .env_remove("ALT_RELAXED_DURABILITY")
