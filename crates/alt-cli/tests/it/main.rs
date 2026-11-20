@@ -53,6 +53,7 @@ mod log_patch;
 mod machine_results;
 mod merge;
 mod merge_criss_cross;
+mod merge_modes;
 mod monorepo_bench;
 mod nested_repo;
 mod op_log;

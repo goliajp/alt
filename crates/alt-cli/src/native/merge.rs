@@ -85,20 +85,13 @@ impl NativeRepo<'_> {
                 out.extend(r.entry);
                 continue;
             }
-            let side = r
-                .stages
-                .iter()
-                .find(|(stage, _)| *stage == 2)
-                .or_else(|| r.stages.iter().find(|(stage, _)| *stage == 3))
-                .map(|(_, e)| e.mode)
-                .ok_or("conflict without either side")?;
             let bytes = r.worktree.ok_or("conflict without content")?;
             let oid = ObjectId::hash_object(self.store.algo, ObjectKind::Blob, &bytes);
             self.store.odb.put(oid, ObjectKind::Blob, &bytes)?;
             out.push(WorkEntry {
                 path: r.path,
                 oid,
-                mode: side,
+                mode: r.mode,
             });
         }
         Ok(out)
@@ -167,14 +160,15 @@ impl NativeRepo<'_> {
                 };
                 let ours_bytes = self.blob_bytes(a.oid)?;
                 let theirs_bytes = self.blob_bytes(t.oid)?;
-                let unmergeable = a.mode != t.mode
-                    || alt_diff::is_binary(&base_bytes)
+                let mode = merged_mode(bo.as_ref().map(|b| b.mode), a.mode, t.mode);
+                let binary = alt_diff::is_binary(&base_bytes)
                     || alt_diff::is_binary(&ours_bytes)
                     || alt_diff::is_binary(&theirs_bytes);
-                if unmergeable {
+                let (Some(mode), false) = (mode, binary) else {
                     // keep ours in the working tree, record all three stages
-                    return Ok(make_conflict(path, bo, ao, to, ours_bytes));
-                }
+                    let mode = mode.unwrap_or(a.mode);
+                    return Ok(make_conflict(path, bo, ao, to, ours_bytes, mode));
+                };
                 let labels = alt_merge::Labels {
                     ours: "HEAD",
                     theirs: their_label,
@@ -185,24 +179,20 @@ impl NativeRepo<'_> {
                     self.store.odb.put(oid, ObjectKind::Blob, &m.content)?;
                     Ok(Resolved::clean(
                         path.clone(),
-                        Some(WorkEntry {
-                            path,
-                            oid,
-                            mode: a.mode,
-                        }),
+                        Some(WorkEntry { path, oid, mode }),
                     ))
                 } else {
-                    Ok(make_conflict(path, bo, ao, to, m.content))
+                    Ok(make_conflict(path, bo, ao, to, m.content, mode))
                 }
             }
             // modify/delete: one side changed the file, the other removed it
             (Some(a), None) => {
-                let bytes = self.blob_bytes(a.oid)?;
-                Ok(make_conflict(path, bo, ao, to, bytes))
+                let (bytes, mode) = (self.blob_bytes(a.oid)?, a.mode);
+                Ok(make_conflict(path, bo, ao, to, bytes, mode))
             }
             (None, Some(t)) => {
-                let bytes = self.blob_bytes(t.oid)?;
-                Ok(make_conflict(path, bo, ao, to, bytes))
+                let (bytes, mode) = (self.blob_bytes(t.oid)?, t.mode);
+                Ok(make_conflict(path, bo, ao, to, bytes, mode))
             }
             (None, None) => unreachable!("same(ao, to) already handled both-None"),
         }
@@ -319,6 +309,7 @@ impl NativeRepo<'_> {
                 }
                 let converted = attrs.to_worktree(&r.path, bytes)?;
                 crate::durable::write(&abs, converted.as_deref().unwrap_or(bytes))?;
+                set_exec(&abs, r.mode == 0o100755)?;
             } else {
                 match &r.entry {
                     Some(e) => self.materialize(e, &attrs)?,
@@ -366,6 +357,8 @@ pub(super) struct Resolved {
     /// Bytes to write to the working tree on conflict (markers or the kept
     /// side); `None` for a clean resolution.
     pub(super) worktree: Option<Vec<u8>>,
+    /// The mode of the file those bytes are written as.
+    pub(super) mode: u32,
     /// Unmerged index entries `(stage, entry)` for a conflict.
     pub(super) stages: Vec<(u8, WorkEntry)>,
 }
@@ -377,19 +370,41 @@ impl Resolved {
             entry,
             conflicted: false,
             worktree: None,
+            mode: 0,
             stages: Vec::new(),
         }
     }
 }
 
-/// Builds a conflicted resolution: working-tree `bytes` plus stage 1/2/3
-/// index entries for whichever of base/ours/theirs are present.
+/// The mode of a file both sides have: the one they agree on, or the one a
+/// single side changed from the base. `None` when each side has its own.
+fn merged_mode(base: Option<u32>, ours: u32, theirs: u32) -> Option<u32> {
+    let regular = |mode: u32| mode & 0o170000 == 0o100000;
+    match base {
+        _ if ours == theirs => Some(ours),
+        Some(base) if regular(base) && regular(ours) && regular(theirs) => {
+            if ours == base {
+                Some(theirs)
+            } else if theirs == base {
+                Some(ours)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Builds a conflicted resolution: working-tree `bytes` written with `mode`,
+/// plus stage 1/2/3 index entries for whichever of base/ours/theirs are
+/// present.
 pub(super) fn make_conflict(
     path: BString,
     bo: Option<WorkEntry>,
     ao: Option<WorkEntry>,
     to: Option<WorkEntry>,
     bytes: Vec<u8>,
+    mode: u32,
 ) -> Resolved {
     let mut stages = Vec::new();
     if let Some(b) = bo {
@@ -406,6 +421,7 @@ pub(super) fn make_conflict(
         entry: None,
         conflicted: true,
         worktree: Some(bytes),
+        mode,
         stages,
     }
 }
