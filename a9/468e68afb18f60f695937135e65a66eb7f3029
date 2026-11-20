@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: test
+summary: hold the time limits of alt-regex against the processor time of the thread
+author-type: human
+author: doracawl
+touched: crates/alt-regex/tests/it/held.rs
+touched: crates/alt-regex/tests/it/limits.rs
+touched: crates/alt-regex/tests/it/main.rs
+touched: crates/alt-regex/tests/it/pathological.rs
