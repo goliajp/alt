@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: refactor
+summary: pass the check itself where a closure only called it
+author-type: human
+author: doracawl
+touched: crates/alt-args/src/validate.rs
