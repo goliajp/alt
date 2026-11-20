@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: write a daemon frame in one call and read it in two
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/daemon.rs
