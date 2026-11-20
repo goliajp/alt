@@ -37,6 +37,8 @@ are errors. The package class takes no scope/profile options and does not build
 Rust code. Workspace/release checks belong on a remote runner.
 Corpus runs ignored library and integration tests; --test restricts it to that
 integration target. Filters apply to both kinds when no target is selected.
+A package with an ignored test marked "needs --release" has its corpus run
+built with --release.
 EOF
 }
 
@@ -54,7 +56,7 @@ case "$class" in
     lint|unit|it|corpus|package|all) ;;
     *) die "unknown class: $class" ;;
 esac
-package='' scope='' target='' filter='' exact='' release='' help=''
+package='' scope='' target='' filter='' exact='' release='' help='' excluded=''
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -p|--package)
@@ -188,11 +190,19 @@ run_tests() {
         set -- --tests
     fi
     [ -z "$release" ] || set -- "$@" --release
+    for skipped in $excluded; do set -- "$@" --exclude "$skipped"; done
     set -- "$@" --
     [ "$kind" != corpus ] || set -- "$@" --ignored
     [ -z "$exact" ] || set -- "$@" --exact
     [ -z "$filter" ] || set -- "$@" "$filter"
     scoped_cargo test "$@"
+}
+
+# Packages with an ignored test whose reason says it needs --release: the
+# corpus class builds these optimized, whatever profile the rest uses.
+release_packages() {
+    grep -rl --include='*.rs' '#\[ignore = ".*needs --release"\]' crates |
+        sed -n 's|^crates/\([^/]*\)/.*|\1|p' | sort -u
 }
 
 run_corpus() {
@@ -203,7 +213,18 @@ run_corpus() {
         # Resolve overrides too, before Cargo changes the working directory.
         ALT_CORPUS=$(cd "$ALT_CORPUS" && pwd -P) || exit 2
         export ALT_CORPUS
-        run_tests corpus
+        optimized=$(release_packages)
+        if [ -n "$package" ]; then
+            case " $(echo $optimized) " in *" $package "*) release=1 ;; esac
+            run_tests corpus
+        elif [ -n "$release" ]; then
+            run_tests corpus
+        else
+            excluded=$optimized
+            run_tests corpus
+            excluded='' release=1
+            for package in $optimized; do run_tests corpus; done
+        fi
     )
 }
 
