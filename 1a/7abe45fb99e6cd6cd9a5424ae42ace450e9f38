@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: perf
+summary: serve the requests of a daemon on threads that are kept
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd.rs
+touched: crates/alt-cli/src/lib.rs
+touched: crates/alt-cli/src/workers.rs
