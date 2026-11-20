@@ -1,6 +1,6 @@
 //! Patterns that take a backtracking matcher exponential time.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use alt_regex::Regex;
 
@@ -22,14 +22,14 @@ fn nested_repetitions_take_time_linear_in_the_text_long() {
             // every prefix matches the repetition and nothing ends the match
             let mut text = vec![b'a'; len];
             text.push(b'd');
-            let begun = Instant::now();
+            let begun = crate::thread_time();
             assert!(!re.is_match(&text), "{pattern}");
             assert!(re.captures(&text).is_none(), "{pattern}");
             *text.last_mut().unwrap() = b'b';
             let found = re.captures(&text);
             let whole = matches!(pattern, "(a|aa)+$" | "^(a+)+$");
             assert_eq!(found.is_some(), !whole, "{pattern}");
-            let cost = begun.elapsed();
+            let cost = crate::thread_time() - begun;
             assert!(cost < limit, "{pattern} on {len} bytes took {cost:?}");
             costs.push(cost);
         }

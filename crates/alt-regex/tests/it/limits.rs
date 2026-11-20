@@ -225,7 +225,7 @@ fn filled(head: &str, unit: impl Fn(u32) -> String) -> Vec<u8> {
 /// pattern may; returns what that took.
 fn bounded(compiled: bool, options: Options, pattern: &[u8]) -> Duration {
     let shown = &pattern[..pattern.len().min(24)].escape_ascii();
-    let begun = Instant::now();
+    let begun = crate::thread_time();
     let most = crate::most_held(|| {
         let made = Regex::with_options(pattern, options);
         match compiled {
@@ -234,7 +234,7 @@ fn bounded(compiled: bool, options: Options, pattern: &[u8]) -> Duration {
         }
     });
     assert!(most < 32 << 20, "{most} bytes for {shown}");
-    begun.elapsed()
+    crate::thread_time() - begun
 }
 
 /// Patterns as long as a pattern may be, of the kinds that hold the

@@ -1,7 +1,7 @@
 //! What a search holds: bounded whatever the pattern and however long
 //! the text.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use alt_regex::{Cache, Error, Options, Regex};
 
@@ -12,7 +12,7 @@ const MOST: usize = 48 << 20;
 /// a pattern this crate does not compile.
 fn held(pattern: &[u8], options: Options, text: &[u8]) -> Option<usize> {
     let re = Regex::with_options(pattern, options).ok()?;
-    let begun = Instant::now();
+    let begun = crate::thread_time();
     let most = crate::most_held(|| {
         let whole = re.find(text);
         assert_eq!(re.is_match(text), whole.is_some());
@@ -29,7 +29,7 @@ fn held(pattern: &[u8], options: Options, text: &[u8]) -> Option<usize> {
         let first = re.captures_upto(text, 1);
         assert!(beyond || first.and_then(|found| found.get(0)) == whole);
     });
-    let cost = begun.elapsed();
+    let cost = crate::thread_time() - begun;
     let shown = &pattern[..pattern.len().min(32)].escape_ascii();
     assert!(cost < Duration::from_secs(120), "{cost:?} for {shown}");
     assert!(most < MOST, "{most} bytes for {shown}");

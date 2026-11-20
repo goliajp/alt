@@ -62,3 +62,27 @@ fn most_held(run: impl FnOnce()) -> usize {
     run();
     MOST.get().saturating_sub(before)
 }
+
+/// The processor time this thread has used so far. A limit on what a
+/// search or a compilation may take is held against this: the time on
+/// the clock is also that of whatever else the machine is doing.
+fn thread_time() -> std::time::Duration {
+    // as the c library lays it out where a pointer has 64 bits
+    #[repr(C)]
+    struct Timespec {
+        seconds: i64,
+        nanoseconds: std::ffi::c_long,
+    }
+    unsafe extern "C" {
+        fn clock_gettime(clock: i32, time: *mut Timespec) -> i32;
+    }
+    const THREAD_CPUTIME: i32 = if cfg!(target_os = "macos") { 16 } else { 3 };
+    let mut time = Timespec {
+        seconds: 0,
+        nanoseconds: 0,
+    };
+    // SAFETY: the call writes one timespec, and `time` is one
+    let failed = unsafe { clock_gettime(THREAD_CPUTIME, &mut time) };
+    assert_eq!(failed, 0, "the clock of this thread cannot be read");
+    std::time::Duration::new(time.seconds as u64, time.nanoseconds as u32)
+}
