@@ -132,7 +132,10 @@ impl Execution {
         let result = (|| -> Res<u8> {
             let (directory, _) =
                 native::resolve_workspace(&self.cwd, self.parsed.cli.workspace.as_deref())?;
-            if std::fs::canonicalize(directory)? != std::fs::canonicalize(store.alt_dir())? {
+            // the same spelling names the same directory
+            if directory != store.alt_dir()
+                && std::fs::canonicalize(directory)? != std::fs::canonicalize(store.alt_dir())?
+            {
                 return Err(Failure::refusal(
                     "repository_mismatch",
                     "request repository does not match this daemon",
