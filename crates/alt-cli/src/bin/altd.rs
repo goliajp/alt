@@ -7,7 +7,8 @@
 //! direct CLI uses — the daemon is just another reader/writer).
 //!
 //! Concurrency: a multi-threaded accept loop. Each connection is served
-//! on its own thread, but the held `(Store, Repository)` is wrapped in one
+//! on a thread of its own, one that waits for a connection or a new one
+//! ([`Workers`]), but the held `(Store, Repository)` is wrapped in one
 //! `Mutex`, so request *execution* is serialized while connection accept and
 //! response write-back run concurrently (a slow request never blocks accepting
 //! the next connection). The in-process `Mutex` is load-bearing: `flock` does
@@ -55,6 +56,7 @@ mod unix {
     use alt_cli::group_commit::GroupCommit;
     use alt_cli::machine::{self, Failure};
     use alt_cli::native::{Identity, Store, StoreSink};
+    use alt_cli::workers::Workers;
     use alt_repo::Repository;
 
     type Res<T> = Result<T, Box<dyn std::error::Error>>;
@@ -107,7 +109,14 @@ mod unix {
         // this thread before the worker spawns (so an immediate idle poll can't
         // race past an in-flight request), decremented when the worker is done.
         let active = Arc::new(AtomicUsize::new(0));
-        let mut workers: Vec<std::thread::JoinHandle<()>> = Vec::new();
+        let served = Arc::clone(&active);
+        let mut workers = Workers::new(move |stream| {
+            alt_os::stack::cover_thread();
+            if let Err(e) = serve(&shared, &group, &sink, stream) {
+                eprintln!("altd: request error: {e}");
+            }
+            served.fetch_sub(1, Ordering::SeqCst);
+        });
 
         // serve until an idle window with no request in flight, then exit and
         // let the next client respawn us. A slow request runs on its own thread,
@@ -117,28 +126,14 @@ mod unix {
             match accept_with_timeout(&listener, idle_ms)? {
                 Some(stream) => {
                     active.fetch_add(1, Ordering::SeqCst);
-                    let shared = Arc::clone(&shared);
-                    let group = Arc::clone(&group);
-                    let sink = Arc::clone(&sink);
-                    let active = Arc::clone(&active);
-                    workers.push(std::thread::spawn(move || {
-                        alt_os::stack::cover_thread();
-                        if let Err(e) = serve(&shared, &group, &sink, stream) {
-                            eprintln!("altd: request error: {e}");
-                        }
-                        active.fetch_sub(1, Ordering::SeqCst);
-                    }));
-                    // reap finished workers so the handle vec stays bounded
-                    workers.retain(|h| !h.is_finished());
+                    workers.give(stream);
                 }
                 None if active.load(Ordering::SeqCst) == 0 => break,
                 None => {} // idle window elapsed but a request is still in flight
             }
         }
-        // join any worker still finishing its write-back before we tear down
-        for h in workers {
-            let _ = h.join();
-        }
+        // any thread still finishing its write-back ends before we tear down
+        workers.finish();
         let _ = std::fs::remove_file(&sock_path);
         Ok(())
     }

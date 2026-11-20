@@ -36,6 +36,7 @@ pub mod quote;
 pub mod request;
 pub mod runner;
 mod tree_changes;
+pub mod workers;
 pub mod worktree_args;
 
 pub mod execution;
