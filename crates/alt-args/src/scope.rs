@@ -1,9 +1,10 @@
 //! One command level with the arguments it accepts.
 
-use crate::spec::{Arg, Command, HELP, Item, VERSION};
+use crate::arg::{Arg, HELP, VERSION};
+use crate::spec::{Command, Item, Items};
 
 pub(crate) struct Slot {
-    pub(crate) arg: &'static Arg,
+    pub(crate) arg: Arg,
     /// position among the options and subcommands of the declaring command
     pub(crate) order: usize,
     /// the enclosing group at the declaring command; empty once inherited
@@ -11,16 +12,18 @@ pub(crate) struct Slot {
 }
 
 pub(crate) struct Scope {
-    pub(crate) command: &'static Command,
+    pub(crate) command: Command,
     /// the program name and the subcommand names down to this command
     pub(crate) path: String,
     /// own arguments in declaration order, the inherited global ones, then
     /// the built-in help and version
     pub(crate) slots: Vec<Slot>,
+    /// how many of the slots are the command's own
+    pub(crate) own: usize,
 }
 
 fn collect(
-    items: &'static [Item],
+    items: Items,
     owner: &'static str,
     subcommands: usize,
     order: &mut usize,
@@ -45,11 +48,11 @@ fn collect(
 }
 
 impl Scope {
-    pub(crate) fn root(command: &'static Command, program: String) -> Scope {
+    pub(crate) fn root(command: Command, program: String) -> Scope {
         Scope::new(command, program, &[])
     }
 
-    pub(crate) fn child(&self, command: &'static Command) -> Scope {
+    pub(crate) fn child(&self, command: Command) -> Scope {
         Scope::new(
             command,
             format!("{} {}", self.path, command.name),
@@ -57,15 +60,16 @@ impl Scope {
         )
     }
 
-    fn new(command: &'static Command, path: String, inherited: &[Slot]) -> Scope {
+    fn new(command: Command, path: String, inherited: &[Slot]) -> Scope {
         let mut slots = Vec::new();
         collect(
-            command.items,
+            command.items(),
             "",
-            command.subcommands.len(),
+            command.subcommands().len(),
             &mut 0,
             &mut slots,
         );
+        let own = slots.len();
         for slot in inherited.iter().filter(|slot| slot.arg.global) {
             slots.push(Slot {
                 arg: slot.arg,
@@ -73,7 +77,7 @@ impl Scope {
                 owner: "",
             });
         }
-        let builtin = [&HELP, &VERSION].into_iter();
+        let builtin = [HELP, VERSION].into_iter();
         for arg in builtin.take(if command.version.is_empty() { 1 } else { 2 }) {
             slots.push(Slot {
                 arg,
@@ -85,6 +89,7 @@ impl Scope {
             command,
             path,
             slots,
+            own,
         }
     }
 
@@ -94,7 +99,7 @@ impl Scope {
 
     pub(crate) fn long(&self, name: &str) -> Option<usize> {
         self.slots.iter().position(|slot| {
-            !name.is_empty() && (slot.arg.long == name || slot.arg.rare().alias == name)
+            !name.is_empty() && (slot.arg.long == name || slot.arg.alias() == name)
         })
     }
 
@@ -120,7 +125,7 @@ impl Scope {
         let mut longs = Vec::new();
         for slot in &self.slots {
             longs.extend(
-                [slot.arg.long, slot.arg.rare().alias]
+                [slot.arg.long, slot.arg.alias()]
                     .into_iter()
                     .filter(|name| !name.is_empty()),
             );
@@ -128,8 +133,13 @@ impl Scope {
         longs
     }
 
+    /// Whether a word may name a subcommand here.
+    pub(crate) fn has_subcommands(&self) -> bool {
+        self.command.help_subcommand || !self.command.subcommands().is_empty()
+    }
+
     pub(crate) fn subcommand_names(&self) -> Vec<&'static str> {
-        let mut names: Vec<_> = self.command.subcommands.iter().map(|c| c.name).collect();
+        let mut names: Vec<_> = self.command.subcommands().map(|c| c.name).collect();
         if self.command.help_subcommand {
             names.push("help");
         }

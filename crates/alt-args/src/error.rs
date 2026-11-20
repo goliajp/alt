@@ -3,8 +3,8 @@
 
 use std::fmt;
 
+use crate::arg::Arg;
 use crate::scope::Scope;
-use crate::spec::Arg;
 use crate::usage;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -120,10 +120,11 @@ impl Error {
     }
 
     fn possible(arg: &Arg) -> String {
-        if arg.possible.is_empty() {
+        let possible = arg.possible();
+        if possible.is_empty() {
             return String::new();
         }
-        format!("\n  [possible values: {}]", arg.possible.join(", "))
+        format!("\n  [possible values: {}]", possible.to_vec().join(", "))
     }
 
     pub(crate) fn missing_value(arg: &Arg) -> Self {

@@ -3,7 +3,7 @@
 use crate::error::{Error, ErrorKind};
 use crate::matches::Matched;
 use crate::scope::Scope;
-use crate::spec::Kind;
+use crate::settings::Kind;
 use crate::suggest::similar;
 use crate::{help, usage, validate};
 
@@ -45,7 +45,7 @@ impl Level<'_> {
     /// Records one appearance of a slot with its values.
     fn record(&mut self, at: usize, values: Vec<String>) -> Result<(), Error> {
         let slot = &self.scope.slots[at];
-        let arg = slot.arg;
+        let arg = &slot.arg;
         if values.is_empty() {
             return Err(Error::missing_value(arg));
         }
@@ -54,18 +54,19 @@ impl Level<'_> {
             return Err(Error::repeated(self.scope, arg));
         }
         self.entry(arg.id);
-        for group in [slot.owner, arg.rare().group] {
+        for group in [slot.owner, arg.group()] {
             if !group.is_empty() {
                 self.entry(group).values.push(arg.id.to_owned());
             }
         }
         for value in values {
-            if !arg.possible.is_empty() && !arg.possible.contains(&value.as_str()) {
-                let close = similar(&value, arg.possible.iter().copied()).pop();
+            if let Err(reason) = arg.check(&value) {
+                let possible = arg.possible();
+                if possible.is_empty() || possible.contains(&value) {
+                    return Err(Error::invalid_value(&value, arg, &reason));
+                }
+                let close = similar(&value, possible.iter()).pop();
                 return Err(Error::not_possible(&value, arg, close));
-            }
-            if let Some(Err(reason)) = arg.check.map(|check| check(&value)) {
-                return Err(Error::invalid_value(&value, arg, &reason));
             }
             self.entry(arg.id).values.push(value);
         }
@@ -123,7 +124,7 @@ impl Level<'_> {
                 false => Err(self.unknown_long(name, rest)),
             };
         };
-        let arg = self.scope.slots[at].arg;
+        let arg = &self.scope.slots[at].arg;
         if arg.is_builtin() {
             self.settle()?;
             return Err(self.builtin(arg.kind));
@@ -144,9 +145,9 @@ impl Level<'_> {
                 self.settle()?;
                 self.record(at, vec![value.to_owned()])?;
             }
-            (true, None) if !arg.rare().missing.is_empty() => {
+            (true, None) if !arg.missing().is_empty() => {
                 self.settle()?;
-                self.record(at, vec![arg.rare().missing.to_owned()])?;
+                self.record(at, vec![arg.missing().to_owned()])?;
             }
             (true, None) => {
                 self.settle()?;
@@ -195,7 +196,7 @@ impl Level<'_> {
                 ));
             };
             self.settle()?;
-            let arg = self.scope.slots[at].arg;
+            let arg = &self.scope.slots[at].arg;
             if arg.is_builtin() {
                 return Err(self.builtin(arg.kind));
             }
@@ -213,8 +214,8 @@ impl Level<'_> {
                 self.record(at, vec!["true".to_owned()])?;
                 continue;
             }
-            if attached.is_empty() && !arg.rare().missing.is_empty() {
-                self.record(at, vec![arg.rare().missing.to_owned()])?;
+            if attached.is_empty() && !arg.missing().is_empty() {
+                self.record(at, vec![arg.missing().to_owned()])?;
             } else if attached.is_empty() {
                 self.pending = Some((at, Vec::new()));
                 self.state = State::Value;
@@ -232,7 +233,7 @@ impl Level<'_> {
             let _ = self.settle();
             return Err(self.unexpected(&word));
         };
-        let arg = self.scope.slots[at].arg;
+        let arg = &self.scope.slots[at].arg;
         self.trailing |= arg.trailing;
         match &mut self.pending {
             Some((open, values)) if *open == at && arg.kind == Kind::Multiple => values.push(word),
@@ -271,7 +272,7 @@ fn in_subcommand(
     rest: &[String],
 ) -> Option<(&'static str, &'static str)> {
     let mut best: Option<(usize, &'static str, &'static str)> = None;
-    for command in scope.command.subcommands {
+    for command in scope.command.subcommands() {
         let Some(at) = rest.iter().position(|word| word == command.name) else {
             continue;
         };

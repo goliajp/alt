@@ -1,7 +1,7 @@
 //! The `--help` text.
 
 use crate::scope::{Scope, Slot};
-use crate::spec::Preset;
+use crate::settings::Preset;
 use crate::usage;
 
 /// the width the layout rules assume; lines are never wrapped
@@ -42,32 +42,36 @@ fn section(title: &str, rows: &[Row]) -> String {
 }
 
 fn preset(slot: &Slot) -> Option<String> {
-    match slot.arg.rare().preset {
+    match slot.arg.preset() {
         Preset::None => None,
         Preset::Text(text) => Some(text.to_owned()),
-        Preset::Computed(compute) => Some(compute()),
+        Preset::Computed(computed) => Some(computed.value()),
     }
 }
 
 /// The help of an argument followed by its bracketed notes.
 fn description(slot: &Slot) -> (String, usize) {
-    let arg = slot.arg;
+    let arg = &slot.arg;
     let mut parts = Vec::new();
     if let Some(value) = preset(slot) {
         parts.push(format!("[default: {value}]"));
     }
-    if !arg.rare().alias.is_empty() {
-        parts.push(format!("[aliases: --{}]", arg.rare().alias));
+    if !arg.alias().is_empty() {
+        parts.push(format!("[aliases: --{}]", arg.alias()));
     }
-    if !arg.possible.is_empty() {
-        parts.push(format!("[possible values: {}]", arg.possible.join(", ")));
+    let possible = arg.possible();
+    if !possible.is_empty() {
+        parts.push(format!(
+            "[possible values: {}]",
+            possible.to_vec().join(", ")
+        ));
     }
     let notes = parts.join(" ");
-    let weight = arg.help.len() + notes.len();
-    match (arg.help.is_empty(), notes.is_empty()) {
-        (_, true) => (arg.help.to_owned(), weight),
+    let weight = arg.help().len() + notes.len();
+    match (arg.help().is_empty(), notes.is_empty()) {
+        (_, true) => (arg.help().to_owned(), weight),
         (true, false) => (notes, weight),
-        (false, false) => (format!("{} {notes}", arg.help), weight),
+        (false, false) => (format!("{} {notes}", arg.help()), weight),
     }
 }
 
@@ -110,10 +114,10 @@ fn options(scope: &Scope) -> Vec<Row> {
         .into_iter()
         .map(|slot| {
             let value = match slot.arg.takes_value() {
-                true if !slot.arg.rare().missing.is_empty() => {
-                    format!("[=<{}>]", slot.arg.value_name)
+                true if !slot.arg.missing().is_empty() => {
+                    format!("[=<{}>]", slot.arg.value_name())
                 }
-                true => format!(" <{}>", slot.arg.value_name),
+                true => format!(" <{}>", slot.arg.value_name()),
                 false => String::new(),
             };
             option(slot.arg.short, slot.arg.long, &value, description(slot))
@@ -130,7 +134,7 @@ pub(crate) fn render(scope: &Scope) -> String {
     }
     text += &format!("{}\n", usage::full(scope));
     let mut commands: Vec<Row> = Vec::new();
-    for command in scope.command.subcommands {
+    for command in scope.command.subcommands() {
         commands.push(Row {
             name: format!("  {}", command.name),
             measured: Some(command.name.len()),

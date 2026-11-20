@@ -136,7 +136,7 @@ pub fn parse(args: Vec<OsString>) -> Result<Parsed, Response> {
         }
     }
     let words = crate::log_count::with_count_option(words);
-    let matches = alt_args::parse(Cli::COMMAND, words).map_err(|error| match error.kind {
+    let matches = alt_args::parse(Cli::command(), words).map_err(|error| match error.kind {
         ErrorKind::Help | ErrorKind::Version => Response {
             exit_code: 0,
             stdout: error.to_string().into_bytes(),

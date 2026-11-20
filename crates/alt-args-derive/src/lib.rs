@@ -28,6 +28,7 @@
 //! type a single value that is required unless it has a default.
 
 mod attr;
+mod describe;
 mod field;
 mod generate;
 mod parse;

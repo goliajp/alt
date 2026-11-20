@@ -1,13 +1,14 @@
-//! Command-line argument parsing from static tables.
+//! Command-line argument parsing from descriptions kept as text.
 //!
-//! A program describes its command line as a [`Command`]: a constant tree
-//! of subcommands, each with a table of [`Arg`]s. [`parse`] reads the words
-//! of a command line against that tree into [`Matches`], one level per
-//! command, and reports anything unacceptable as an [`Error`] whose text
-//! names the argument and shows the usage line. `--help` and `--version`
-//! come back the same way, with the text to print.
+//! A program describes its command line as a [`Command`]: a tree of
+//! subcommands, each with its [`Arg`]s, which a type states as text
+//! ([`Spec`]). [`parse`] reads the words of a command line against that
+//! tree into [`Matches`], one level per command, and reports anything
+//! unacceptable as an [`Error`] whose text names the argument and shows
+//! the usage line. `--help` and `--version` come back the same way, with
+//! the text to print.
 //!
-//! The derive macros write the tables and the code that reads [`Matches`]
+//! The derive macros write the description and the code that reads [`Matches`]
 //! into a struct or enum:
 //!
 //! ```
@@ -44,34 +45,43 @@
 //! option parsing. A single-value option may appear once; an option whose
 //! field is a `Vec` may repeat.
 
+mod arg;
 mod error;
 mod help;
 mod level;
 mod matches;
 mod parse;
 mod scope;
+mod settings;
 mod spec;
 mod suggest;
+mod text;
 mod usage;
 mod validate;
 mod value;
 
 pub use alt_args_derive::{Args, Parser, Subcommand, ValueEnum};
+pub use arg::Arg;
 pub use error::{Error, ErrorKind};
 pub use matches::{Matched, Matches};
 pub use parse::parse;
-pub use spec::{Arg, Command, Item, Kind, Preset, Rare};
-pub use value::{Check, Value};
+pub use settings::{Computed, Kind, Preset, Rare, Words};
+pub use spec::{Command, Commands, Item, Items, Node, Spec};
+pub use text::{joined, joined_len};
+pub use value::{Check, Value, check_as};
 
 /// A whole command line.
-pub trait Parser: Sized {
-    const COMMAND: &'static Command;
-
+pub trait Parser: Spec + Sized {
     fn from_matches(matches: &Matches) -> Self;
+
+    /// The command the type describes.
+    fn command() -> Command {
+        Command::of::<Self>()
+    }
 
     /// Parses `words`, the first of which is the program path.
     fn try_parse_from(words: impl IntoIterator<Item = String>) -> Result<Self, Error> {
-        parse(Self::COMMAND, words).map(|matches| Self::from_matches(&matches))
+        parse(Self::command(), words).map(|matches| Self::from_matches(&matches))
     }
 
     /// Parses the arguments of the process. Help, version and errors are
@@ -92,17 +102,12 @@ pub trait Parser: Sized {
 }
 
 /// A set of arguments that can be spliced into a command.
-pub trait Args: Sized {
-    /// the arguments, grouped under the type's name
-    const GROUP: Item;
-
+pub trait Args: Spec + Sized {
     fn from_matches(matches: &Matches) -> Self;
 }
 
 /// A choice between subcommands.
-pub trait Subcommand: Sized {
-    const COMMANDS: &'static [Command];
-
+pub trait Subcommand: Spec + Sized {
     /// Reads the level of the chosen subcommand.
     fn from_matches(matches: &Matches) -> Self;
 }
