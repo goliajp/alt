@@ -1,0 +1,27 @@
+schema: alt-meta/1
+type: perf
+summary: describe command lines as text the loader has nothing to relocate in
+author-type: human
+author: doracawl
+touched: crates/alt-args-derive/src/describe.rs
+touched: crates/alt-args-derive/src/generate.rs
+touched: crates/alt-args-derive/src/lib.rs
+touched: crates/alt-args/Cargo.toml
+touched: crates/alt-args/src/arg.rs
+touched: crates/alt-args/src/error.rs
+touched: crates/alt-args/src/help.rs
+touched: crates/alt-args/src/level.rs
+touched: crates/alt-args/src/lib.rs
+touched: crates/alt-args/src/matches.rs
+touched: crates/alt-args/src/parse.rs
+touched: crates/alt-args/src/scope.rs
+touched: crates/alt-args/src/settings.rs
+touched: crates/alt-args/src/spec.rs
+touched: crates/alt-args/src/text.rs
+touched: crates/alt-args/src/usage.rs
+touched: crates/alt-args/src/validate.rs
+touched: crates/alt-args/src/value.rs
+touched: crates/alt-args/tests/it/description.rs
+touched: crates/alt-args/tests/it/main.rs
+touched: crates/alt-args/tests/it/values.rs
+touched: crates/alt-cli/src/machine.rs
