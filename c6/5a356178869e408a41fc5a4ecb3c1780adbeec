@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: announce the close after a response sent before the request body was read
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/http/connection.rs
+touched: crates/alt-server/tests/it/database/connections.rs
+touched: crates/alt-server/tests/it/database/connections/unread_body.rs
