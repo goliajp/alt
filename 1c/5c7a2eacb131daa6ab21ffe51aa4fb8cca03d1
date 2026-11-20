@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: chore
+summary: restore the executable bit of gate.sh
+author-type: human
+author: doracawl
+touched: scripts/gate.sh
