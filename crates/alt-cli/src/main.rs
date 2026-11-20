@@ -108,7 +108,7 @@ fn attempt() -> Response {
     if let Some((refused, run)) = own {
         return outside_repository(&parsed, refused, run);
     }
-    let identity = Identity::from_env();
+    let (forwarded, identity) = Identity::of_process();
     let native_write =
         cli::is_native(&parsed.cli.command) && cli::mutates_command(&parsed.cli.command);
     if native_write {
@@ -141,22 +141,22 @@ fn attempt() -> Response {
     #[cfg(unix)]
     if alt_cli::client::routes_through_daemon(&parsed.cli.command)
         && !alt_cli::client::disabled()
-        && cwd.to_str().is_some()
         && let Ok((alt_dir, _)) = native::resolve_workspace(&cwd, parsed.cli.workspace.as_deref())
     {
         use alt_cli::client::Outcome;
-        let argv = args
-            .iter()
-            .skip(1)
-            .map(|s| s.to_str().expect("validated arguments").to_owned())
-            .collect::<Vec<_>>();
+        let words = args.iter().skip(1);
+        let mut request = alt_cli::daemon::Request {
+            args: (words.map(|s| s.to_str().expect("validated arguments").to_owned())).collect(),
+            cwd: cwd.clone(),
+            env: forwarded,
+            id: None,
+        };
         let outcome = if native_write {
-            let id =
-                alt_cli::request::parse_id(parsed.cli.request_id.as_deref().expect("write id"))
-                    .expect("validated id");
-            alt_cli::client::serve_write(&alt_dir, &argv, id)
+            let id = parsed.cli.request_id.as_deref().expect("write id");
+            request.id = Some(alt_cli::request::parse_id(id).expect("validated id"));
+            alt_cli::client::serve_write(&alt_dir, &request)
         } else {
-            alt_cli::client::try_serve(&alt_dir, &argv)
+            alt_cli::client::try_serve(&alt_dir, &request)
         };
         match outcome {
             Outcome::Served(response) => {

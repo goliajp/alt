@@ -37,7 +37,7 @@ mod imp {
     use std::time::{Duration, Instant};
 
     use crate::cli::Command as Cmd;
-    use crate::daemon::{self, Request, RequestId, Response};
+    use crate::daemon::{self, Request, Response};
     use crate::daemon_meta::{self, Daemon};
 
     /// What came of trying to serve a request through the daemon. The three-way
@@ -121,8 +121,8 @@ mod imp {
     /// if none is listening. Reads are idempotent, so this is a single attempt
     /// with no id: the caller falls back to a direct run on `NotSent` *or*
     /// `LostAfterSend`.
-    pub fn try_serve(alt_dir: &Path, args: &[String]) -> Outcome {
-        send_once(alt_dir, args, None)
+    pub fn try_serve(alt_dir: &Path, request: &Request) -> Outcome {
+        send_once(alt_dir, request)
     }
 
     /// Serves a non-idempotent write through the daemon with exactly-once
@@ -137,11 +137,11 @@ mod imp {
     /// - `LostAfterSend` if the budget runs out after the request had gone out —
     ///   the caller surfaces the at-most-once error rather than risk a double run
     ///   (a direct run carries no id and could not be deduplicated).
-    pub fn serve_write(alt_dir: &Path, args: &[String], id: RequestId) -> Outcome {
+    pub fn serve_write(alt_dir: &Path, request: &Request) -> Outcome {
         let mut sent = false;
         let deadline = Instant::now() + WRITE_RETRY_BUDGET;
         loop {
-            match send_once(alt_dir, args, Some(id)) {
+            match send_once(alt_dir, request) {
                 Outcome::Served(resp) => return Outcome::Served(resp),
                 // first attempt never reached a daemon → nothing ran, fall back
                 Outcome::NotSent if !sent => return Outcome::NotSent,
@@ -161,21 +161,17 @@ mod imp {
         }
     }
 
-    /// One attempt to serve `args` (the argv tail, no program name) through the
-    /// daemon, carrying optional idempotency `id`, spawning a daemon if none is
-    /// listening. The boundary between `NotSent` and `LostAfterSend` is whether
+    /// One attempt to serve `request` through the daemon, spawning a daemon if
+    /// none is listening. The boundary between `NotSent` and `LostAfterSend` is whether
     /// the request frame was fully written: a partial/failed write leaves no
     /// decodable frame, so the daemon never executes; once the frame is out, it
     /// may.
-    fn send_once(alt_dir: &Path, args: &[String], id: Option<RequestId>) -> Outcome {
+    fn send_once(alt_dir: &Path, request: &Request) -> Outcome {
         let sock = alt_dir.join("daemon.sock");
-        let (Some(mut stream), Ok(req)) = (
-            connect_or_spawn(alt_dir, &sock),
-            Request::from_env(args.to_vec(), id),
-        ) else {
+        let Some(mut stream) = connect_or_spawn(alt_dir, &sock) else {
             return Outcome::NotSent;
         };
-        if daemon::write_frame(&mut stream, &req.encode()).is_err() {
+        if daemon::write_frame(&mut stream, &request.encode()).is_err() {
             return Outcome::NotSent;
         }
         // the request is out — from here a failure may have left the command

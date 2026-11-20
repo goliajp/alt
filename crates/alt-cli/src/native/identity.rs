@@ -133,6 +133,14 @@ impl Identity {
         Self::from_lookup(|k| std::env::var(k).ok())
     }
 
+    /// From the variables of this process a command reads, which are
+    /// taken once and given back for a daemon to be sent them.
+    pub fn of_process() -> (Vec<(String, String)>, Self) {
+        let forwarded = crate::daemon::forwarded_env();
+        let identity = Self::from_map(&forwarded);
+        (forwarded, identity)
+    }
+
     /// From a request's forwarded env vars (the daemon path).
     pub fn from_map(env: &[(String, String)]) -> Self {
         Self::from_lookup(|k| {

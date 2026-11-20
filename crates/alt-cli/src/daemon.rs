@@ -125,7 +125,7 @@ fn bad(msg: &'static str) -> io::Error {
 
 impl Request {
     pub fn encode(&self) -> Vec<u8> {
-        let mut out = Vec::new();
+        let mut out = Vec::with_capacity(512);
         out.extend_from_slice(&(self.args.len() as u32).to_le_bytes());
         for a in &self.args {
             put_bytes(&mut out, a.as_bytes());
@@ -180,18 +180,21 @@ impl Request {
         };
         Ok(Request { args, cwd, env, id })
     }
+}
 
-    /// Builds a request from the current process's argv tail, cwd, the
-    /// forwarded env vars that are set, and an optional idempotency `id` (set
-    /// by the client for a non-idempotent write, `None` for a read).
-    pub fn from_env(args: Vec<String>, id: Option<RequestId>) -> io::Result<Request> {
-        let cwd = std::env::current_dir()?;
-        let env = FORWARDED_ENV
-            .iter()
-            .filter_map(|&k| std::env::var(k).ok().map(|v| (k.to_owned(), v)))
-            .collect();
-        Ok(Request { args, cwd, env, id })
-    }
+/// The variables of [`FORWARDED_ENV`] this process has, in the order it
+/// holds them; one whose value is not UTF-8 is left out.
+pub fn forwarded_env() -> Vec<(String, String)> {
+    let mut env = Vec::new();
+    alt_os::env::each(|name, value| {
+        let forwarded = FORWARDED_ENV.iter().find(|key| key.as_bytes() == name);
+        if let (Some(key), Ok(value)) = (forwarded, std::str::from_utf8(value))
+            && !env.iter().any(|(seen, _)| seen == key)
+        {
+            env.push(((*key).to_owned(), value.to_owned()));
+        }
+    });
+    env
 }
 
 /// Writes a length-prefixed frame to `w`: the length and the payload in
@@ -251,6 +254,23 @@ mod tests {
             id: Some([7u8; 16]),
         };
         assert_eq!(Request::decode(&req.encode()).unwrap(), req);
+    }
+
+    #[test]
+    fn the_forwarded_variables_are_those_the_process_has_by_name() {
+        let mut by_name: Vec<(String, String)> = FORWARDED_ENV
+            .iter()
+            .filter_map(|&key| std::env::var(key).ok().map(|value| (key.to_owned(), value)))
+            .collect();
+        let mut forwarded = forwarded_env();
+        // a test run has a home and a user at least
+        assert!(
+            forwarded.iter().any(|(key, _)| key == "HOME"),
+            "{forwarded:?}"
+        );
+        by_name.sort();
+        forwarded.sort();
+        assert_eq!(forwarded, by_name);
     }
 
     #[test]
