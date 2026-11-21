@@ -127,6 +127,14 @@ impl NativeOdb {
             .map(|state| state.generation);
         let mut this = NativeOdb::open(alt_dir)?;
         let odb = this.odb_mut()?;
+        let marker = Marker::read(&durable_path);
+        if marker.recorded().is_some() && !marker.trusted() {
+            // appends were left unsynced: they are looked at before they
+            // are recorded as synced, as a writer that syncs does
+            odb.acquire()?;
+            odb.release();
+            return Ok(());
+        }
         let holds = odb.holds()?;
         odb.blobs.fsync()?;
         odb.tier1_mut()?.sync()?;

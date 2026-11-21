@@ -1,7 +1,8 @@
 //! Appends that were left unsynced, by the boot they were made in: in the
-//! running boot they are as they were written, and a record that names
-//! content which is not stored is damage; after another boot it is what a
-//! power cut leaves, and is cut with what it names.
+//! running boot they are as they were written, and to a writer that
+//! syncs nothing a record that names content which is not stored is
+//! damage; after another boot it is what a power cut leaves, and is cut
+//! with what it names. A writer that syncs cuts it in either.
 
 use std::fs;
 use std::os::unix::fs::FileExt;
@@ -56,7 +57,8 @@ fn appends_left_unsynced_in_another_boot_are_cut_where_they_name_content_that_ne
 }
 
 #[test]
-fn in_the_boot_appends_were_left_unsynced_in_a_record_naming_nothing_is_refused() {
+fn in_the_boot_appends_were_left_unsynced_in_a_record_naming_nothing_is_refused_by_a_writer_that_syncs_nothing()
+ {
     for (file, class) in CASES {
         for fault in [Fault::Torn, Fault::Zeroed] {
             let case = format!("{} {fault:?} class {class}", FILES[file]);
@@ -68,12 +70,34 @@ fn in_the_boot_appends_were_left_unsynced_in_a_record_naming_nothing_is_refused(
             damage(tmp.path(), file, fault, kept);
             reader_is_sound(tmp.path(), victim, &case);
             let before = snapshot(tmp.path());
-            let refused = try_put(tmp.path(), victim + 3).err();
+            let refused = {
+                let _unsynced = alt_os::durability::leave_unsynced(true);
+                try_put(tmp.path(), victim + 3).err()
+            };
             assert!(
                 matches!(refused, Some(OdbError::Dangling { .. })),
                 "{case}: {refused:?}"
             );
             assert_eq!(snapshot(tmp.path()), before, "{case}");
+        }
+    }
+}
+
+/// The cache of the kernel holds what was left unsynced only while the
+/// file system under it stays: a writer that syncs is about to record
+/// those appends as synced, and looks at them first.
+#[test]
+fn a_writer_that_syncs_cuts_what_the_running_boot_left_unsynced_and_names_content_that_is_gone() {
+    for (file, class) in CASES {
+        for fault in [Fault::Missing, Fault::Torn, Fault::Zeroed] {
+            let case = format!("{} {fault:?} class {class}", FILES[file]);
+            let tmp = alt_os::temp::tempdir().unwrap();
+            let (victim, kept, _) = store(tmp.path(), class);
+            synced_to(tmp.path(), kept, UNSYNCED_APPENDS);
+            left_unsynced(tmp.path(), kept, true);
+            damage(tmp.path(), file, fault, kept);
+            reader_is_sound(tmp.path(), victim, &case);
+            recovered(tmp.path(), victim, &case);
         }
     }
 }

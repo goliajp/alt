@@ -122,6 +122,7 @@ mod torn_pack;
 mod unconfirmed;
 mod unconfirmed_tails;
 mod undo_add;
+mod unsynced_lost;
 mod url_rewrite;
 mod verify_commit;
 mod wire_corpus;

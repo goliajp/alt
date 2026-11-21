@@ -16,6 +16,11 @@ impl Odb {
         }
         hold_exclusive(&self.lock)?;
         self.held = true;
+        if !alt_store::relaxed_durability() {
+            // a writer that syncs records all it finds as synced: what the
+            // running boot left unsynced is read as what another left
+            *self.left.lock().unwrap() = None;
+        }
         let ready = self.catch_up().and_then(|()| self.bound());
         if ready.is_err() {
             // nothing was appended; the next call looks at the store again
@@ -55,12 +60,16 @@ impl Odb {
     ///
     /// Appends left unsynced in a boot before this one are looked at
     /// first ([`Self::settle`]): what is kept of them is what the disk
-    /// holds.
+    /// holds. So are those of the running boot before a writer that
+    /// syncs records them as synced: the cache holds them as they were
+    /// written only while the file system under it is the one they were
+    /// written to, and what a ref is to reach has to be there.
     pub(super) fn bound(&mut self) -> Result<(), OdbError> {
         let marker = Marker::read(&self.durable_path);
         let note = unsynced::read(&self.lock);
-        *self.left.lock().unwrap() = note;
-        let cached = unsynced::cached(&marker, note);
+        let relaxed = alt_store::relaxed_durability();
+        *self.left.lock().unwrap() = note.filter(|_| relaxed);
+        let cached = relaxed && unsynced::cached(&marker, note);
         // a pack noted as synced is not, once the marker stops saying so
         let unseen = unsynced::unseen(&marker, note);
         if (!marker.trusted() || unseen.is_some()) && self.blobs.distrust_synced()? {
@@ -68,7 +77,6 @@ impl Odb {
         }
         let looked_by = (!cached).then(|| unseen.as_ref().unwrap_or(&marker));
         self.settle(&marker, looked_by)?;
-        let relaxed = alt_store::relaxed_durability();
         let behind = !marker.trusted() && !(relaxed && cached);
         if behind {
             self.blobs.fsync()?;
