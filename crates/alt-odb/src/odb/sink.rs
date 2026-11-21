@@ -83,6 +83,15 @@ impl NativeOdb {
         Ok(marker.trusted() && marker.recorded().is_some_and(recorded))
     }
 
+    /// [`Self::confirmed`] for a handle that may not have opened the
+    /// database: one that has not holds no record of it.
+    pub fn held_confirmed(&self) -> Result<bool, OdbError> {
+        match self.odb.get() {
+            Some(_) => self.confirmed(),
+            None => Ok(true),
+        }
+    }
+
     /// Syncs what the database under `alt_dir` holds, whoever wrote it,
     /// and records that: for a caller about to record as synced something
     /// of another writer that names objects, which that writer stored

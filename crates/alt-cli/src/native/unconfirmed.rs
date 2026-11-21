@@ -126,6 +126,17 @@ impl Store {
 }
 
 impl Store {
+    /// Syncs the object database and the log ([`StoreSink::fsync_all`])
+    /// unless their markers already record as synced every record this
+    /// store holds of them: what it read and what it wrote. A command that
+    /// synced each of its writes as it made them has nothing left to sync.
+    pub fn sync_held(&self) -> Res<()> {
+        if self.refs.confirmed() && self.odb.held_confirmed()? {
+            return Ok(());
+        }
+        self.sink()?.fsync_all()
+    }
+
     /// The refs that point at an object which does not read, as the refs
     /// were before the last `dropped` operations of the log.
     pub(crate) fn dangling_refs(&self, dropped: usize) -> Res<Vec<(String, ObjectId)>> {

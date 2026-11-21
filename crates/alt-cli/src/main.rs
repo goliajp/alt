@@ -284,7 +284,7 @@ fn on_native_store(execution: Execution, cwd: &std::path::Path) -> Response {
         .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
         .and_then(|()| {
             if execution.writing {
-                store.sink()?.fsync_all()
+                store.sync_held()
             } else {
                 Ok(())
             }

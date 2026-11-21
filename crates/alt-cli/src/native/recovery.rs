@@ -310,7 +310,7 @@ impl NativeRepo<'_> {
             .record_op(&actor, now_ms(), &encode(PREPARE, &intent)?)?;
         // Objects and then intent must be durable before replacing the index,
         // even when the daemon normally defers synchronization.
-        self.store.sink()?.fsync_all()?;
+        self.store.sync_held()?;
         self.check_guards(&intent.worktree)?;
         durable_write(&self.index_path, after)?;
         let done = Completion {
