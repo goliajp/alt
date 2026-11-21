@@ -3,6 +3,17 @@
 
 use super::*;
 
+/// The entries of the index that are in no conflict, by path.
+type Whole = std::collections::HashMap<BString, IndexEntry>;
+
+/// Whether a merge leaves the path of `r` as the index has it.
+fn kept(r: &Resolved, was: &Whole) -> bool {
+    match (&r.entry, was.get(&r.path)) {
+        (Some(e), Some(was)) => !r.conflicted && e.oid == was.oid && e.mode == was.mode,
+        _ => false,
+    }
+}
+
 impl NativeRepo<'_> {
     /// The attribute files among `resolved`, each with the directory it
     /// is in.
@@ -34,6 +45,21 @@ impl NativeRepo<'_> {
     /// bytes, then an index carrying stage-0 entries for clean paths and
     /// stage 1/2/3 entries for conflicted ones (so git tools see the merge).
     pub(in crate::native) fn write_merge_state(&mut self, resolved: &[Resolved]) -> Res<()> {
+        // a path the merge leaves as it was keeps its file and its index
+        // entry: only what changes is written
+        let index = self.index()?.entries.into_iter();
+        let was: Whole = index
+            .filter(|e| e.stage() == 0)
+            .map(|e| (e.path.clone(), e))
+            .collect();
+        let changed = resolved.iter().filter(|r| !kept(r, &was));
+        let changed: Vec<&BString> = changed.map(|r| &r.path).collect();
+        let before = self.step_unrecorded(&changed)?;
+        self.write_merged(resolved, &was)?;
+        self.step_wrote(before)
+    }
+
+    fn write_merged(&mut self, resolved: &[Resolved], was: &Whole) -> Res<()> {
         // the index written below names the blobs of the paths that merged
         self.store.odb.flush_synced()?;
         // converted under the attribute files of the merge result, as a
@@ -41,21 +67,8 @@ impl NativeRepo<'_> {
         let files = self.merged_attribute_files(resolved)?;
         let files: Vec<(&[u8], &[u8])> = files.iter().map(|(d, c)| (*d, c.as_slice())).collect();
         let attrs = self.converter_under(&files)?;
-        // a path the merge leaves as it was keeps its file and its index
-        // entry: only what changes is written
-        let was: std::collections::HashMap<BString, IndexEntry> = self
-            .index()?
-            .entries
-            .into_iter()
-            .filter(|e| e.stage() == 0)
-            .map(|e| (e.path.clone(), e))
-            .collect();
-        let kept = |r: &Resolved| match (&r.entry, was.get(&r.path)) {
-            (Some(e), Some(was)) => !r.conflicted && e.oid == was.oid && e.mode == was.mode,
-            _ => false,
-        };
         for r in resolved {
-            if kept(r) {
+            if kept(r, was) {
                 continue;
             }
             let abs = self.abs(&r.path)?;
@@ -88,7 +101,7 @@ impl NativeRepo<'_> {
                 for (stage, w) in &r.stages {
                     entries.push(stage_entry(w, *stage));
                 }
-            } else if kept(r) {
+            } else if kept(r, was) {
                 entries.push(was[&r.path].clone());
             } else if let Some(e) = &r.entry {
                 entries.push(self.make_entry(e)?);

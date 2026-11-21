@@ -6,6 +6,19 @@ use crate::json::Json;
 use checkout_recovery::{COMPLETE_CHECKOUT, CheckoutIntent, PREPARE_CHECKOUT};
 use recovery::{ABANDON, COMPLETE, IndexIntent, PREPARE, RefContext, WorkspaceIdentity, decode};
 
+/// The workspace a task operation was recorded in.
+fn task_workspace(op: &alt_oplog::Op) -> Res<WorkspaceIdentity> {
+    let operation: task::TaskOperation = decode(&op.payload, task::TASK_OPERATION)?;
+    if operation.version != 1 {
+        return Err(crate::machine::Failure::refusal(
+            "unsupported_record",
+            "unsupported task operation version",
+        )
+        .into());
+    }
+    Ok(operation.workspace)
+}
+
 impl NativeRepo<'_> {
     fn operation_by_id(&self, id: &str) -> Res<alt_oplog::Op> {
         if id.len() != 64 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
@@ -46,17 +59,9 @@ impl NativeRepo<'_> {
 
     fn operation_info(&self, op: &alt_oplog::Op) -> Res<(Option<WorkspaceIdentity>, bool, bool)> {
         match op.payload.first() {
-            Some(&task::TASK_OPERATION) => {
-                let operation: task::TaskOperation = decode(&op.payload, task::TASK_OPERATION)?;
-                if operation.version != 1 {
-                    return Err(crate::machine::Failure::refusal(
-                        "unsupported_record",
-                        "unsupported task operation version",
-                    )
-                    .into());
-                }
-                Ok((Some(operation.workspace), true, false))
-            }
+            Some(&task::TASK_OPERATION) => Ok((Some(task_workspace(op)?), true, false)),
+            // the record of a whole step is written when the step is done
+            Some(&in_progress::STEP) => Ok((Some(self.step_workspace(op)?), true, false)),
             Some(&PREPARE) => {
                 let intent: IndexIntent = decode(&op.payload, PREPARE)?;
                 let closed = self.operation_complete(op.id, COMPLETE)?

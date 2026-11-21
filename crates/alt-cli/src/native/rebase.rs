@@ -4,8 +4,8 @@
 //!
 //! While it runs, the workspace HEAD points at a scratch ref that carries the
 //! commits made so far; the branch itself only moves when the rebase finishes,
-//! in one ref transaction, so `alt undo` takes the whole rebase back and
-//! `--abort` has nothing to rewind.
+//! in one ref transaction, so `alt undo` takes a rebase that never stopped
+//! back whole and `--abort` has nothing to rewind.
 
 use super::commit::{NewCommit, parse_sig};
 use super::notes::MetaInput;
@@ -155,7 +155,10 @@ impl NativeRepo<'_> {
             .rebase_state()?
             .ok_or("rebase --abort: no rebase in progress")?;
         self.reset_worktree_to(state.orig)?;
-        self.leave_scratch(&state.branch)?;
+        // an abort cut short before the state was removed has left it already
+        if self.head_branch()? != state.branch {
+            self.leave_scratch(&state.branch)?;
+        }
         self.clear_rebase_state()?;
         writeln!(out, "Rebase aborted.")?;
         Ok(())
@@ -551,10 +554,7 @@ impl NativeRepo<'_> {
     }
 
     fn clear_rebase_state(&self) -> Res<()> {
-        match crate::durable::remove_file(self.rebase_state_path()) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
-            _ => Ok(()),
-        }
+        self.remove_state_file("REBASE_STATE")
     }
 
     /// An `alt commit` during a stopped rebase records that step itself;

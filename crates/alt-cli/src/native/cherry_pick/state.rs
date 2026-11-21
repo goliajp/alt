@@ -62,10 +62,7 @@ impl NativeRepo<'_> {
     }
 
     pub(super) fn clear_cherry_pick(&self) -> Res<()> {
-        match crate::durable::remove_file(self.cherry_pick_path()) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
-            _ => Ok(()),
-        }
+        self.remove_state_file("CHERRY_PICK_HEAD")
     }
 
     /// Before a command that writes: removes the file of a cherry-pick
@@ -80,6 +77,7 @@ impl NativeRepo<'_> {
     /// After `alt commit`: what a commit concludes of a sequence that
     /// stopped for it.
     pub(in crate::native) fn sequence_committed(&self) -> Res<()> {
+        self.finish_merge()?;
         self.revert_committed()?;
         self.rebase_committed()?;
         self.clear_cherry_pick()

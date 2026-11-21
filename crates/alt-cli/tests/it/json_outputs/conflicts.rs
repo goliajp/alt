@@ -77,6 +77,8 @@ fn rebase_stops_and_resumes() {
     s.json(&["rebase", "main", "--json"]);
     s.json(&["rebase", "--abort", "--json"]);
     s.json(&["undo", "--json"]);
+    s.json(&["status", "--json"]);
+    s.setup(&["rebase", "--abort"]);
     s.setup(&["switch", "main"]);
     s.setup(&["switch", "-c", "skipping"]);
     s.setup(&["switch", "feat"]);

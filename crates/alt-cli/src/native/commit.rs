@@ -85,9 +85,6 @@ impl NativeRepo<'_> {
             "commit",
             &opts.meta(None),
         )?;
-        if merging.is_some() {
-            self.finish_merge()?;
-        }
         self.sequence_committed()?;
         report_commit(&branch, commit, tree, json, out)
     }

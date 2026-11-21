@@ -102,3 +102,65 @@ fn a_pick_is_given_up_or_gone_on_with_only_where_the_new_program_stopped_it() {
     assert!(status().contains(r#""operation":null"#), "{}", status());
     same_reads(&old, repo);
 }
+
+/// The record of a whole step is one the older program does not know: it
+/// passes it over when it writes, refuses to undo it, and leaves it for the
+/// new program to undo.
+#[test]
+#[ignore = "run with ALT_OLD_BIN set to an alt built from the base branch"]
+fn the_older_program_refuses_to_undo_a_step_and_works_on() {
+    let (old, new) = (old_bin(), new_bin());
+    let dir = alt_os::temp::tempdir().unwrap();
+    let repo = dir.path();
+    diverged(repo);
+    let status = || ok(run(&new, repo, &["status", "--json"]));
+
+    // the older program stops the merge, the new one gives it up
+    let stopped = run(&old, repo, &["merge", "feature/side"]);
+    assert_eq!(stopped.status.code(), Some(1));
+    let merging = status();
+    ok(run(&new, repo, &["merge", "--abort"]));
+    let refused = run(&old, repo, &["undo"]);
+    assert!(!refused.status.success());
+    let said = String::from_utf8_lossy(&refused.stderr).into_owned();
+    assert!(said.contains("automatic undo refused"), "{said}");
+    assert!(status().contains(r#""clean":true"#), "{}", status());
+    same_reads(&old, repo);
+
+    // the record in the log is in no command's way
+    ok(run(&old, repo, &["branch", "kept"]));
+    ok(run(&old, repo, &["branch", "-d", "kept"]));
+    ok(run(&new, repo, &["fsck"]));
+
+    // what the older program does itself it still undoes
+    std::fs::write(repo.join("g.txt"), "g\n").unwrap();
+    ok(run(&old, repo, &["add", "g.txt"]));
+    ok(run(&old, repo, &["commit", "-m", "by the older program"]));
+    ok(run(&old, repo, &["undo"]));
+    ok(run(
+        &old,
+        repo,
+        &["commit", "-m", "by the older program, again"],
+    ));
+    same_reads(&old, repo);
+
+    // a step the new program takes back while it is the last record
+    let stopped = run(&new, repo, &["merge", "feature/side"]);
+    assert_eq!(stopped.status.code(), Some(1));
+    ok(run(&new, repo, &["merge", "--abort"]));
+    ok(run(&new, repo, &["undo"]));
+    assert!(repo.join(".alt/MERGE_HEAD").exists());
+    assert!(status().contains(r#""unmerged":["f.txt"]"#), "{}", status());
+    assert!(merging.contains(r#""operation":{"kind":"merge"}"#));
+    // the older program concludes the merge the undo brought back
+    std::fs::write(repo.join("f.txt"), "both\n").unwrap();
+    ok(run(&old, repo, &["add", "f.txt"]));
+    ok(run(
+        &old,
+        repo,
+        &["commit", "-m", "merged by the older program"],
+    ));
+    let merged = ok(run(&new, repo, &["cat-file", "-p", "HEAD"]));
+    assert_eq!(merged.matches("\nparent ").count(), 2, "{merged}");
+    same_reads(&old, repo);
+}

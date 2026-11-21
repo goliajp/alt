@@ -614,6 +614,8 @@ pub struct NativeRepo<'a> {
     /// the checkout this command worked out from the entries of a tree:
     /// the index it ends with, and what it writes at each path
     planned: std::cell::RefCell<Option<tree_state::Planned>>,
+    /// what a command that begins, goes on with or ends an operation has done
+    step: std::cell::RefCell<Option<in_progress::Tracked>>,
 }
 
 impl<'a> NativeRepo<'a> {
@@ -641,6 +643,7 @@ impl<'a> NativeRepo<'a> {
             checkout_intent: None,
             written: std::cell::RefCell::default(),
             planned: std::cell::RefCell::default(),
+            step: std::cell::RefCell::default(),
         }
     }
 
@@ -885,11 +888,6 @@ impl<'a> NativeRepo<'a> {
         self.commit_refs_with(verb, changes, None, recovery::RefEffects::Unknown)
     }
 
-    /// Intermediate ref transaction, attributed to the same whole command.
-    fn commit_refs_unkeyed(&mut self, verb: &str, changes: &[RefChange]) -> Res<OpId> {
-        self.commit_refs_with(verb, changes, None, recovery::RefEffects::Unknown)
-    }
-
     fn commit_refs_only(&mut self, verb: &str, changes: &[RefChange]) -> Res<OpId> {
         self.commit_refs_with(verb, changes, None, recovery::RefEffects::RefsOnly)
     }
@@ -925,7 +923,6 @@ impl<'a> NativeRepo<'a> {
         self.ensure_no_force(changes)?;
         let allow = self.caps.branch_allow.clone();
         let deny = self.caps.branch_deny.clone();
-        let read_only = self.caps.read_only;
         let has_constraint = !allow.is_empty() || !deny.is_empty();
         let is_branch_allowed = move |name: &str| {
             // deny wins over allow
@@ -939,7 +936,7 @@ impl<'a> NativeRepo<'a> {
             workspace::one_workspace_per_branch(&own_head, refs, changes)
         };
         let policy = RefPolicy {
-            read_only,
+            read_only: self.caps.read_only,
             is_branch_allowed: if has_constraint {
                 Some(&is_branch_allowed)
             } else {
@@ -968,6 +965,7 @@ impl<'a> NativeRepo<'a> {
             Some(&policy),
             Some(&context),
         )?;
+        self.step_refs(changes);
         // opt-in op-level signing. Best-effort — a missing sec key
         // logs nothing and is not fatal (signing is a per-repo capability,
         // not a hard requirement). Verification at read time tells the
@@ -1214,7 +1212,7 @@ impl<'a> NativeRepo<'a> {
     /// used by clone to seed `refs/heads/<branch>` from a fetched
     /// remote-tracking tip before switching to it.
     pub fn create_branch_at(&mut self, full_name: &str, oid: ObjectId) -> Res<()> {
-        self.commit_refs_unkeyed(
+        self.commit_refs(
             "branch",
             &[RefChange {
                 name: full_name.to_owned(),
@@ -1231,7 +1229,7 @@ impl<'a> NativeRepo<'a> {
     pub fn point_head_at(&mut self, target: &str) -> Res<()> {
         let head_ref = self.head_ref.clone();
         let old = self.store.refs.get(&head_ref).cloned();
-        self.commit_refs_unkeyed(
+        self.commit_refs(
             "switch",
             &[RefChange {
                 name: head_ref,
@@ -1635,7 +1633,7 @@ impl<'a> NativeRepo<'a> {
             if let Some(commit) = self.store.refs.resolve(&current)? {
                 // non-terminal tx of switch-with-create: the move_head below
                 // is the one that carries this command's idempotency key.
-                self.commit_refs_unkeyed(
+                self.commit_refs(
                     "branch",
                     &[RefChange {
                         name: full.clone(),

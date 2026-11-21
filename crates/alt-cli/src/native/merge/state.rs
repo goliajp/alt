@@ -31,10 +31,7 @@ impl NativeRepo<'_> {
 
     /// Forgets the unfinished merge once its commit is recorded.
     pub(in crate::native) fn finish_merge(&self) -> Res<()> {
-        match crate::durable::remove_file(self.merge_head_path()) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
-            _ => Ok(()),
-        }
+        self.remove_state_file("MERGE_HEAD")
     }
 
     /// Refuses `verb` while a merge, bisect, rebase or revert waits to be

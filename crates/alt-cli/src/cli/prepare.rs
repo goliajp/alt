@@ -46,6 +46,14 @@ pub(super) fn prepare(repo: &mut NativeRepo, cmd: &Command) -> Res<()> {
     if mutates_command(cmd) && !matches!(cmd, Command::Operation { .. }) {
         repo.begin_workspace_write()?;
         repo.forget_stale_cherry_pick()?;
+        let validate = matches!(cmd, Commit { validate: true, .. });
+        if matches!(
+            cmd,
+            Merge { .. } | CherryPick { .. } | Revert { .. } | Rebase { .. } | Commit { .. }
+        ) && !validate
+        {
+            repo.begin_step()?;
+        }
     }
     Ok(())
 }

@@ -104,6 +104,7 @@ mod status_json;
 mod status_labels;
 mod status_replaced;
 mod status_untracked;
+mod step_undo;
 mod stopped_trees;
 mod store_refresh;
 mod switch_kinds;

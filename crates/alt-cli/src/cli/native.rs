@@ -9,6 +9,15 @@ use crate::native::NativeRepo;
 /// Runs a native command against an attached repo, returning the process exit
 /// code (1 when a merge stops in conflict, else 0).
 pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> Res<u8> {
+    let done = prepare(repo, cmd).and_then(|()| dispatch(repo, cmd, out));
+    // what a command did before it failed is its step all the same
+    let ended = repo.end_step();
+    let code = done?;
+    ended?;
+    Ok(code)
+}
+
+fn dispatch<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> Res<u8> {
     if matches!(
         cmd,
         Command::Rebase {
@@ -23,7 +32,6 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
         )
         .into());
     }
-    prepare(repo, cmd)?;
     match cmd {
         Command::Task { op, json } => repo.task_command(op, *json, out)?,
         Command::Candidate { op, json } => repo.candidate_command(op, *json, out)?,

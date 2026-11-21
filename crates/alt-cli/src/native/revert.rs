@@ -377,10 +377,7 @@ impl NativeRepo<'_> {
     }
 
     fn clear_revert_state(&self) -> Res<()> {
-        match crate::durable::remove_file(self.revert_state_path()) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
-            _ => Ok(()),
-        }
+        self.remove_state_file("REVERT_STATE")
     }
 
     /// An `alt commit` in the middle of a stopped revert concludes that one

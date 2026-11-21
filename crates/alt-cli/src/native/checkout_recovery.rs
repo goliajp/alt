@@ -4,6 +4,8 @@
 use super::*;
 use recovery::{WorkspaceIdentity, canonical_index, decode, durable_write, encode, hash};
 
+mod prestate;
+
 pub(super) const PREPARE_CHECKOUT: u8 = 0x32;
 pub(super) const COMPLETE_CHECKOUT: u8 = 0x33;
 
@@ -108,67 +110,6 @@ impl NativeRepo<'_> {
             }
         }
         Ok(())
-    }
-
-    pub(super) fn snapshot_workspace(&self) -> Res<String> {
-        let index = self.index()?;
-        let mut files = Vec::new();
-        for entry in &index.entries {
-            let state = self.observed(&entry.path, true, entry.mode == 0o160000, &|_| false)?;
-            files.push((entry.path.to_vec(), state));
-        }
-        let snapshot = WorkspaceSnapshot {
-            version: 1,
-            workspace: self.workspace_identity()?,
-            index: self.snapshot(&canonical_index(index, self.store.algo()?))?,
-            files,
-        };
-        self.snapshot(&alt_json::to_vec(&snapshot)?)
-    }
-
-    pub(super) fn completed_workspace_delta(&self, snapshot: &str) -> Res<CheckoutIntent> {
-        let snapshot: WorkspaceSnapshot = alt_json::from_slice(&self.read_snapshot(snapshot)?)?;
-        if snapshot.version != 1 || snapshot.workspace != self.workspace_identity()? {
-            return Err("invalid workspace recovery snapshot".into());
-        }
-        Index::parse(&self.read_snapshot(&snapshot.index)?, self.store.algo()?)?;
-        let index = self.index()?;
-        let before: std::collections::BTreeMap<_, _> = snapshot.files.into_iter().collect();
-        let paths: std::collections::BTreeSet<_> = before
-            .keys()
-            .cloned()
-            .chain(index.entries.iter().map(|e| e.path.to_vec()))
-            .collect();
-        let gitlinks: std::collections::HashSet<&[u8]> = index
-            .entries
-            .iter()
-            .filter(|e| e.mode == 0o160000)
-            .map(|e| e.path.as_slice())
-            .collect();
-        let mut files = Vec::new();
-        for path in &paths {
-            let path_bytes = BString::from(path.clone());
-            let before = before.get(path).cloned().flatten();
-            let gitlink = gitlinks.contains(path.as_slice())
-                || before.as_ref().is_some_and(|s| s.mode == 0o160000);
-            let after = self.observed(&path_bytes, true, gitlink, &|p| paths.contains(p))?;
-            let path = path.clone();
-            if before != after {
-                files.push(FileChange {
-                    path,
-                    before,
-                    after,
-                });
-            }
-        }
-        Ok(CheckoutIntent {
-            version: 1,
-            workspace: snapshot.workspace,
-            request_id: self.request_id.map(|id| crate::machine::hex(&id)),
-            index_before: snapshot.index,
-            index_after: self.snapshot(&canonical_index(index, self.store.algo()?))?,
-            files,
-        })
     }
 
     /// A multi-step operation has already materialized this delta. Its ref
@@ -368,6 +309,7 @@ impl NativeRepo<'_> {
             .into());
         }
         self.ensure_directories_replaceable(intent)?;
+        self.step_checkout(intent);
         self.apply_changes(intent.files.iter())?;
         let index = self.read_snapshot(&intent.index_after)?;
         durable_write(&self.index_path, &index)?;
