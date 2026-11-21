@@ -138,10 +138,13 @@ impl NativeRepo<'_> {
             .store
             .refs
             .record_op_unsynced(&actor, now_ms(), &payload)?;
-        crash_point!("step-mark:after");
         if first {
-            self.step.borrow_mut().as_mut().expect("as above").begin = Some(id);
+            let guard = self.open_guard()?;
+            let mut step = self.step.borrow_mut();
+            let tracked = step.as_mut().expect("as above");
+            (tracked.begin, tracked.guard) = (Some(id), Some(guard));
         }
+        crash_point!("step-mark:after");
         Ok(())
     }
 

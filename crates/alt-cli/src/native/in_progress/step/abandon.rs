@@ -106,10 +106,16 @@ impl NativeRepo<'_> {
         let Some((begun, mark, false)) = self.last_step_mark()? else {
             return Ok(Vec::new());
         };
-        let Some(told) = self.told_after(&begun, &mark)? else {
-            let why = "another program has written since the operation was interrupted";
+        let told = self.told_after(&begun, &mark)?;
+        if told.foreign {
+            let id = begun.id;
+            let why = format!(
+                "operation {id} was interrupted and another program has written since: it \
+                 cannot be given up; see `alt status`, and close it with `alt operation \
+                 recover {id}`"
+            );
             return Err(refusal(why));
-        };
+        }
         let checkout = self.checkout_back(&told)?;
         let refs = self.refs_back(&told)?;
         let made = |file: &&StateText| {
@@ -147,7 +153,7 @@ impl NativeRepo<'_> {
             self.checkout_intent = None;
             moved?;
         }
-        self.recover_open_step()?;
+        self.recover_open_step(false)?;
         Ok(made)
     }
 
@@ -190,7 +196,7 @@ impl NativeRepo<'_> {
     /// is of is given up with it.
     pub fn begin_abort(&mut self, state: &str) -> Res<bool> {
         self.ensure_may_recover()?;
-        if self.recover_open_step().is_ok() {
+        if self.recover_open_step(false).is_ok() {
             return Ok(false);
         }
         let made = self.abandon_open_step()?;

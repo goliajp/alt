@@ -24,6 +24,7 @@ use super::super::recovery::{WorkspaceIdentity, decode, encode};
 use super::super::*;
 
 mod abandon;
+mod guard;
 mod mark;
 mod recover;
 mod undo;
@@ -89,6 +90,8 @@ pub(in crate::native) struct Tracked {
     inverse_of: Option<String>,
     /// the mark it began with, once that is in the log
     begin: Option<OpId>,
+    /// the guard written after that mark
+    guard: Option<OpId>,
     refs: Vec<RefChange>,
     checkouts: Vec<CheckoutIntent>,
     /// what state files become with the next record
@@ -270,6 +273,9 @@ impl NativeRepo<'_> {
         let applied = self.apply_state(true);
         let tracked = self.step.take().expect("a step was begun");
         applied?;
+        if let Some(guard) = tracked.guard {
+            self.close_guard(guard)?;
+        }
         self.record_step(
             "step",
             &StepRecord {

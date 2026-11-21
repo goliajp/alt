@@ -592,13 +592,38 @@ A merge, pick, revert or rebase that would have to write a file where a
 directory holds an untracked file is refused before it writes anything; a
 directory that holds only ignored files gives way, as in git.
 
-An alt from before the mark existed passes it over. Where such an alt wrote
-in the workspace after the interruption, what the command left is no longer
-what the log tells: nothing is touched, the mark is closed, and the command
-says:
+An alt from before the mark existed does not know it. While such a command
+is interrupted, that alt refuses every command that writes in the workspace:
+
+```
+fatal: operation bb168f47ecbc6c3ef0ad777041913435048015a6ec7f3a31a0da4cb9034a60ea has an incomplete checkout; recovery required (outcome unknown)
+```
+
+Its `alt operation recover` cannot finish that operation (`recovery
+precondition failed: index matches neither recorded state`), and is not meant
+to: it stands for the interrupted command as a whole. Run any command that
+writes with this alt, or newer, to bring the command to an end; from then on
+the older alt works in the workspace again. An `alt operation recover` of the
+older alt for another operation it lists finishes a checkout the command had
+begun, and nothing else; the newer alt then goes on from there.
+
+Where a power cut left the mark in the log without what keeps the older alt
+out, and the older alt wrote in the workspace after it, what the command left
+may no longer be what the log tells. An `alt add` alone changes nothing of
+that, and the command is brought to an end as above. Otherwise nothing is
+touched, the mark is closed, and the command says:
 
 ```
 warning: operation 5d0e8a1c6a3a2f0e1b9a4c7d8e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f was interrupted and another program has written since: it is left as it is; see `alt status`
+```
+
+Where in that case a file that says an operation is under way is not as the
+log says it should be, every command that writes is refused until the
+operation is closed by hand, since a commit made on such a state could record
+a merge that is none, or none where there is one:
+
+```
+fatal: operation 5d0e8a1c6a3a2f0e1b9a4c7d8e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f was interrupted and another program has written since: MERGE_HEAD is not as the operation log says, so what `alt status` shows of an operation under way may be wrong; put it right or accept it as it is, then close the operation with `alt operation recover 5d0e8a1c6a3a2f0e1b9a4c7d8e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f`
 ```
 
 ### A `durable` file that is gone or does not read

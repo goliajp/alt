@@ -26,39 +26,39 @@ $ [repo] alt switch feat
 exit 0
 $ [repo] alt rebase main --json
 exit 1
-err| {"error":{"details":{"command_output":{"encoding":"utf-8","text":"{\"schema_version\":1,\"result\":\"conflicted\",\"commit\":null,\"conflicts\":[\"f.txt\"]}\n","truncated":false},"operation_ids":["<id64:0>","<id64:1>","<id64:2>","<id64:3>","<id64:4>","<id64:5>","<id64:6>"]},"kind":"conflict","message":"command reported a conflict or failed validation","next_action":"Inspect the reported condition before submitting a new request","operation_id":"<id64:6>","outcome":"partial","request_id":"<id32:7>","retryable":false},"schema_version":1}
+err| {"error":{"details":{"command_output":{"encoding":"utf-8","text":"{\"schema_version\":1,\"result\":\"conflicted\",\"commit\":null,\"conflicts\":[\"f.txt\"]}\n","truncated":false},"operation_ids":["<id64:0>","<id64:1>","<id64:2>","<id64:3>","<id64:4>","<id64:5>","<id64:6>","<id64:7>","<id64:8>"]},"kind":"conflict","message":"command reported a conflict or failed validation","next_action":"Inspect the reported condition before submitting a new request","operation_id":"<id64:8>","outcome":"partial","request_id":"<id32:9>","retryable":false},"schema_version":1}
 $ [repo] alt status --json
 exit 0
 out| {"schema_version":2,"branch":"rebase/default","principal":{"kind":"human","id":"json-test","session":null},"staged":[{"path":"only-feat.txt","change":"added"}],"unstaged":[],"untracked":[],"unmerged":["f.txt"],"operation":{"kind":"rebase","step":1,"steps":2},"clean":false}
 $ [repo] alt rebase --continue --json
 exit 75
-err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"rebase --continue: resolve the conflicts and `alt add` them first","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:8>","retryable":false},"schema_version":1}
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"rebase --continue: resolve the conflicts and `alt add` them first","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:10>","retryable":false},"schema_version":1}
 $ [repo] alt rebase --abort --json
 exit 0
-out| {"command_output":{"encoding":"utf-8","text":"Rebase aborted.\n","truncated":false},"operation_ids":["<id64:9>","<id64:10>","<id64:11>","<id64:12>"],"request_id":"<id32:13>","schema_version":1}
+out| {"command_output":{"encoding":"utf-8","text":"Rebase aborted.\n","truncated":false},"operation_ids":["<id64:11>","<id64:12>","<id64:13>","<id64:14>","<id64:15>","<id64:16>"],"request_id":"<id32:17>","schema_version":1}
 $ [repo] alt status --json
 exit 0
 out| {"schema_version":2,"branch":"feat","principal":{"kind":"human","id":"json-test","session":null},"staged":[],"unstaged":[],"untracked":[],"unmerged":[],"operation":null,"clean":true}
 $ [repo] alt rebase main --json
 exit 1
-err| {"error":{"details":{"command_output":{"encoding":"utf-8","text":"{\"schema_version\":1,\"result\":\"conflicted\",\"commit\":null,\"conflicts\":[\"f.txt\"]}\n","truncated":false},"operation_ids":["<id64:14>","<id64:15>","<id64:16>","<id64:17>","<id64:18>","<id64:19>","<id64:20>"]},"kind":"conflict","message":"command reported a conflict or failed validation","next_action":"Inspect the reported condition before submitting a new request","operation_id":"<id64:20>","outcome":"partial","request_id":"<id32:21>","retryable":false},"schema_version":1}
+err| {"error":{"details":{"command_output":{"encoding":"utf-8","text":"{\"schema_version\":1,\"result\":\"conflicted\",\"commit\":null,\"conflicts\":[\"f.txt\"]}\n","truncated":false},"operation_ids":["<id64:18>","<id64:19>","<id64:20>","<id64:21>","<id64:22>","<id64:23>","<id64:24>","<id64:25>","<id64:26>"]},"kind":"conflict","message":"command reported a conflict or failed validation","next_action":"Inspect the reported condition before submitting a new request","operation_id":"<id64:26>","outcome":"partial","request_id":"<id32:27>","retryable":false},"schema_version":1}
 $ [repo] alt add f.txt
 exit 0
 $ [repo] alt rebase --continue --json
 exit 0
-out| {"branch":"feat","commit":"<id40:22>","onto":"<id40:23>","operation_ids":["<id64:24>","<id64:25>","<id64:26>","<id64:27>","<id64:28>","<id64:29>","<id64:30>","<id64:31>","<id64:32>"],"request_id":"<id32:33>","schema_version":1}
+out| {"branch":"feat","commit":"<id40:28>","onto":"<id40:29>","operation_ids":["<id64:30>","<id64:31>","<id64:32>","<id64:33>","<id64:34>","<id64:35>","<id64:36>","<id64:37>","<id64:38>","<id64:39>","<id64:40>"],"request_id":"<id32:41>","schema_version":1}
 $ [repo] alt log --json
 exit 0
-out| {"schema_version":1,"commits":[{"oid":"<id40:22>","tree":"<id40:34>","parents":["<id40:35>"],"author":"json-test <json@test> <digits> +0000","committer":"json-test <json@test> <digits> +0000","message":"feat: later\n","note_message":null},{"oid":"<id40:35>","tree":"<id40:36>","parents":["<id40:23>"],"author":"json-test <json@test> <digits> +0000","committer":"json-test <json@test> <digits> +0000","message":"feat: change line two\n","note_message":null},{"oid":"<id40:23>","tree":"<id40:37>","parents":["<id40:38>"],"author":"json-test <json@test> <digits> +0000","committer":"json-test <json@test> <digits> +0000","message":"main: change line two\n","note_message":null},{"oid":"<id40:38>","tree":"<id40:39>","parents":[],"author":"json-test <json@test> <digits> +0000","committer":"json-test <json@test> <digits> +0000","message":"base\n","note_message":null}]}
+out| {"schema_version":1,"commits":[{"oid":"<id40:28>","tree":"<id40:42>","parents":["<id40:43>"],"author":"json-test <json@test> <digits> +0000","committer":"json-test <json@test> <digits> +0000","message":"feat: later\n","note_message":null},{"oid":"<id40:43>","tree":"<id40:44>","parents":["<id40:29>"],"author":"json-test <json@test> <digits> +0000","committer":"json-test <json@test> <digits> +0000","message":"feat: change line two\n","note_message":null},{"oid":"<id40:29>","tree":"<id40:45>","parents":["<id40:46>"],"author":"json-test <json@test> <digits> +0000","committer":"json-test <json@test> <digits> +0000","message":"main: change line two\n","note_message":null},{"oid":"<id40:46>","tree":"<id40:47>","parents":[],"author":"json-test <json@test> <digits> +0000","committer":"json-test <json@test> <digits> +0000","message":"base\n","note_message":null}]}
 $ [repo] alt rebase main --json
 exit 0
-out| {"command_output":{"encoding":"utf-8","text":"Current branch feat is up to date.\n","truncated":false},"operation_ids":[],"request_id":"<id32:40>","schema_version":1}
+out| {"command_output":{"encoding":"utf-8","text":"Current branch feat is up to date.\n","truncated":false},"operation_ids":[],"request_id":"<id32:48>","schema_version":1}
 $ [repo] alt rebase --abort --json
 exit 75
-err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"rebase --abort: no rebase in progress","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:41>","retryable":false},"schema_version":1}
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"rebase --abort: no rebase in progress","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:49>","retryable":false},"schema_version":1}
 $ [repo] alt undo --json
 exit 0
-out| {"operation_ids":["<id64:42>","<id64:43>","<id64:44>","<id64:45>"],"request_id":"<id32:46>","schema_version":1,"undone":true}
+out| {"operation_ids":["<id64:50>","<id64:51>","<id64:52>","<id64:53>","<id64:54>","<id64:55>"],"request_id":"<id32:56>","schema_version":1,"undone":true}
 $ [repo] alt status --json
 exit 0
 out| {"schema_version":2,"branch":"rebase/default","principal":{"kind":"human","id":"json-test","session":null},"staged":[{"path":"f.txt","change":"modified"},{"path":"only-feat.txt","change":"added"}],"unstaged":[],"untracked":[],"unmerged":[],"operation":{"kind":"rebase","step":1,"steps":2},"clean":false}
@@ -72,10 +72,10 @@ $ [repo] alt switch feat
 exit 0
 $ [repo] alt rebase skipping --json
 exit 1
-err| {"error":{"details":{"command_output":{"encoding":"utf-8","text":"{\"schema_version\":1,\"result\":\"conflicted\",\"commit\":null,\"conflicts\":[\"f.txt\"]}\n","truncated":false},"operation_ids":["<id64:47>","<id64:48>","<id64:49>","<id64:50>","<id64:51>","<id64:52>","<id64:53>"]},"kind":"conflict","message":"command reported a conflict or failed validation","next_action":"Inspect the reported condition before submitting a new request","operation_id":"<id64:53>","outcome":"partial","request_id":"<id32:54>","retryable":false},"schema_version":1}
+err| {"error":{"details":{"command_output":{"encoding":"utf-8","text":"{\"schema_version\":1,\"result\":\"conflicted\",\"commit\":null,\"conflicts\":[\"f.txt\"]}\n","truncated":false},"operation_ids":["<id64:57>","<id64:58>","<id64:59>","<id64:60>","<id64:61>","<id64:62>","<id64:63>","<id64:64>","<id64:65>"]},"kind":"conflict","message":"command reported a conflict or failed validation","next_action":"Inspect the reported condition before submitting a new request","operation_id":"<id64:65>","outcome":"partial","request_id":"<id32:66>","retryable":false},"schema_version":1}
 $ [repo] alt rebase --skip --json
 exit 0
-out| {"branch":"feat","commit":"<id40:55>","onto":"<id40:23>","operation_ids":["<id64:56>","<id64:57>","<id64:58>","<id64:59>","<id64:60>","<id64:61>","<id64:62>","<id64:63>","<id64:64>","<id64:65>"],"request_id":"<id32:66>","schema_version":1}
+out| {"branch":"feat","commit":"<id40:67>","onto":"<id40:29>","operation_ids":["<id64:68>","<id64:69>","<id64:70>","<id64:71>","<id64:72>","<id64:73>","<id64:74>","<id64:75>","<id64:76>","<id64:77>","<id64:78>","<id64:79>"],"request_id":"<id32:80>","schema_version":1}
 $ [repo] alt op-log -n 4 --json
 exit 0
-out| {"schema_version":1,"ops":[{"id":"<id64:65>","request_id":"<id32:66>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"step","ref_changes":null},{"id":"<id64:64>","request_id":"<id32:66>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"rebase","ref_changes":[{"name":"HEAD","old":"@rebase/default","new":"@refs/heads/feat"},{"name":"rebase/default","old":"<id40:55>","new":null},{"name":"refs/heads/feat","old":"<id40:67>","new":"<id40:55>"}],"workspace":{"name":"default","instance":"<id64:68>"},"inverse_of":null},{"id":"<id64:63>","request_id":"<id32:66>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"step","ref_changes":null},{"id":"<id64:62>","request_id":"<id32:66>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"rebase","ref_changes":[{"name":"rebase/default","old":"<id40:23>","new":"<id40:55>"},{"name":"refs/notes/alt/meta","old":"<id40:69>","new":"<id40:70>"}],"workspace":{"name":"default","instance":"<id64:68>"},"inverse_of":null}]}
+out| {"schema_version":1,"ops":[{"id":"<id64:79>","request_id":"<id32:80>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"step","ref_changes":null},{"id":"<id64:78>","request_id":"<id32:80>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"step","ref_changes":null,"recovery":{"phase":"completed","prepared":"<id64:69>"}},{"id":"<id64:77>","request_id":"<id32:80>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"rebase","ref_changes":[{"name":"HEAD","old":"@rebase/default","new":"@refs/heads/feat"},{"name":"rebase/default","old":"<id40:67>","new":null},{"name":"refs/heads/feat","old":"<id40:81>","new":"<id40:67>"}],"workspace":{"name":"default","instance":"<id64:82>"},"inverse_of":null},{"id":"<id64:76>","request_id":"<id32:80>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"step","ref_changes":null}]}

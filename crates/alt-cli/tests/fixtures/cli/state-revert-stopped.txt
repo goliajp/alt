@@ -28,7 +28,7 @@ $ [repo] alt commit -m main: again
 exit 0
 $ [repo] alt revert HEAD~1 --json
 exit 1
-err| {"error":{"details":{"command_output":{"encoding":"utf-8","text":"{\"schema_version\":1,\"result\":\"conflicted\",\"commit\":null,\"conflicts\":[\"f.txt\"]}\n","truncated":false},"operation_ids":["<id64:0>","<id64:1>","<id64:2>","<id64:3>"]},"kind":"conflict","message":"command reported a conflict or failed validation","next_action":"Inspect the reported condition before submitting a new request","operation_id":"<id64:3>","outcome":"partial","request_id":"<id32:4>","retryable":false},"schema_version":1}
+err| {"error":{"details":{"command_output":{"encoding":"utf-8","text":"{\"schema_version\":1,\"result\":\"conflicted\",\"commit\":null,\"conflicts\":[\"f.txt\"]}\n","truncated":false},"operation_ids":["<id64:0>","<id64:1>","<id64:2>","<id64:3>","<id64:4>","<id64:5>"]},"kind":"conflict","message":"command reported a conflict or failed validation","next_action":"Inspect the reported condition before submitting a new request","operation_id":"<id64:5>","outcome":"partial","request_id":"<id32:6>","retryable":false},"schema_version":1}
 $ [repo] alt status --json
 exit 0
 out| {"schema_version":2,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[],"unstaged":[],"untracked":[],"unmerged":["f.txt"],"operation":{"kind":"revert"},"clean":false}

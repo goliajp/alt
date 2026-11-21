@@ -90,7 +90,14 @@ impl NativeRepo<'_> {
                         )
                         .into());
                     }
-                    if pending.workspace == identity && !completed.contains(&op.id.to_string()) {
+                    // one that changes nothing is the guard of a step, which
+                    // the recovery of the step has closed or this command holds
+                    let guard =
+                        pending.files.is_empty() && pending.index_before == pending.index_after;
+                    if !guard
+                        && pending.workspace == identity
+                        && !completed.contains(&op.id.to_string())
+                    {
                         return Err(crate::machine::Failure::pending(op.id, format!("operation {} has an incomplete checkout; recovery required (outcome unknown)", op.id)).into());
                     }
                 }
@@ -253,14 +260,18 @@ impl NativeRepo<'_> {
         Ok(())
     }
 
-    /// Writes the record that closes the checkout `prepared` is the intent of.
-    pub(super) fn record_checkout_done(&mut self, verb: &str, prepared: OpId) -> Res<()> {
+    /// The record that closes the checkout `prepared` is the intent of.
+    pub(super) fn checkout_done(&self, prepared: OpId) -> Res<Vec<u8>> {
         let done = CheckoutDone {
             version: 1,
             prepared: prepared.to_string(),
             request_id: self.request_id.map(|id| crate::machine::hex(&id)),
         };
-        let payload = encode(COMPLETE_CHECKOUT, &done)?;
+        encode(COMPLETE_CHECKOUT, &done)
+    }
+
+    pub(super) fn record_checkout_done(&mut self, verb: &str, prepared: OpId) -> Res<()> {
+        let payload = self.checkout_done(prepared)?;
         let actor = self.id.actor(verb);
         self.store.refs.record_op(&actor, now_ms(), &payload)?;
         Ok(())

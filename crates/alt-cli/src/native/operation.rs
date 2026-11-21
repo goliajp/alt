@@ -252,7 +252,7 @@ impl NativeRepo<'_> {
             );
         }
         // a step that was cut short is brought to an end as a whole
-        self.recover_open_step()?;
+        self.recover_open_step(true)?;
         if !self.operation_info(&op)?.1 {
             self.finish_prepared(&op)?;
         }

@@ -105,7 +105,7 @@ impl NativeRepo<'_> {
     /// end here, and an index change that cannot be completed is
     /// abandoned: neither is in a command's way.
     pub(in crate::native) fn ensure_no_pending_recovery(&mut self) -> Res<()> {
-        self.recover_open_step()?;
+        self.recover_open_step(false)?;
         self.ensure_no_pending_checkout()?;
         if let Some((id, intent)) = self.pending_index(&self.workspace_identity()?)?
             && !self.abandon_unstorable(id, &intent)?

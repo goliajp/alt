@@ -14,15 +14,22 @@
 //! that cannot be written in its way, leaves the step open and says so;
 //! `abandon` gives such a step up.
 //!
-//! Where a program that does not know the mark wrote in the workspace
-//! after it, what the step left is no longer what the log tells. The mark
-//! is closed, and nothing is touched.
+//! An alt from before steps is kept from writing while a step is open: see
+//! `guard`. Where a record of this workspace that is not the step's own
+//! lies after the mark all the same, what the step left may no longer be
+//! what the log tells. An index change alone, with every checkout of the
+//! step finished, is no such case: the state files are put as the log says
+//! and the step is closed. In any other nothing is touched. The mark is
+//! closed with a record that tells nothing, at once where the state files
+//! are as the log says, and only by `alt operation recover` where they are
+//! not: until then every command that writes is refused and says so.
 
 use std::collections::BTreeMap;
 
 use super::super::super::checkout_recovery::{CheckoutIntent, PREPARE_CHECKOUT};
 use super::super::super::recovery::{RefContext, decode};
 use super::super::super::*;
+use super::guard::is_guard;
 use super::mark::{StateText, StepMark};
 use super::{STATE_FILES, STEP, STEP_MARK, StepRecord, net_checkout, net_refs, state_changes};
 
@@ -40,6 +47,13 @@ pub(super) struct Told {
     pub(super) state: BTreeMap<String, Option<String>>,
     /// what they become if the next record is the one it holds with
     waiting: Vec<StateText>,
+    /// the guard of the step, where no record closes it
+    guard: Option<OpId>,
+    /// a record of the workspace that is not the step's own came after
+    /// the mark, other than an index change
+    pub(super) foreign: bool,
+    /// an index change that is not the step's own did
+    added: bool,
 }
 
 impl Told {
@@ -122,9 +136,8 @@ impl NativeRepo<'_> {
     }
 
     /// What the log tells of the step `mark` began, from the records
-    /// after it; nothing where a record of this workspace that is not the
-    /// step's own is among them.
-    pub(super) fn told_after(&self, begun: &alt_oplog::Op, mark: &StepMark) -> Res<Option<Told>> {
+    /// after it.
+    pub(super) fn told_after(&self, begun: &alt_oplog::Op, mark: &StepMark) -> Res<Told> {
         let ops = self.store.refs.oplog().ops()?;
         let at = ops.iter().rposition(|op| op.id == begun.id);
         let after = &ops[at.ok_or("operation not found")? + 1..];
@@ -137,20 +150,30 @@ impl NativeRepo<'_> {
             if workspace.as_ref() != Some(&mark.workspace) {
                 continue;
             }
-            if op.payload.first() == Some(&STEP_MARK) {
+            let kind = op.payload.first();
+            if kind == Some(&STEP_MARK) {
                 let later: StepMark = decode(&op.payload, STEP_MARK)?;
                 request = later.request_id;
                 told.mark(later.state, later.with_effect);
                 continue;
             }
             if requests::operation_request(op)? != request {
-                return Ok(None);
+                match kind == Some(&recovery::PREPARE) && complete {
+                    true => told.added = true,
+                    false => told.foreign = true,
+                }
+                continue;
             }
-            match op.payload.first() {
+            match kind {
                 Some(&PREPARE_CHECKOUT) => {
+                    let intent: CheckoutIntent = decode(&op.payload, PREPARE_CHECKOUT)?;
+                    if is_guard(&intent) {
+                        told.guard = (!complete).then_some(op.id);
+                        continue;
+                    }
                     told.effect();
                     told.given_up.append(&mut told.unfinished);
-                    told.checkouts.push(decode(&op.payload, PREPARE_CHECKOUT)?);
+                    told.checkouts.push(intent);
                 }
                 Some(&alt_refs::PAYLOAD_REF_TX) => {
                     told.effect();
@@ -163,17 +186,63 @@ impl NativeRepo<'_> {
                     }
                     told.checkouts.extend(context.checkout);
                 }
-                _ => return Ok(None),
+                _ => told.foreign = true,
             }
             if !complete {
                 told.unfinished.push(op.clone());
             }
         }
-        Ok(Some(told))
+        told.foreign |= told.added && !told.unfinished.is_empty();
+        Ok(told)
     }
 
-    /// Brings a step of this workspace that was cut short to an end.
-    pub(in crate::native) fn recover_open_step(&mut self) -> Res<()> {
+    /// Closes the mark `begun` of a step another program wrote after,
+    /// with a record that tells nothing. Where a state file is not as the
+    /// log says, only when `asked` to: `alt operation recover` is.
+    fn leave_as_it_is(
+        &mut self,
+        begun: &alt_oplog::Op,
+        told: &Told,
+        before: &[Option<String>],
+        mut step: StepRecord,
+        asked: bool,
+    ) -> Res<()> {
+        let id = begun.id;
+        let mut differ = Vec::new();
+        for (name, before) in STATE_FILES.iter().zip(before) {
+            if self.state_file(name)? != *told.state.get(*name).unwrap_or(before) {
+                differ.push(*name);
+            }
+        }
+        let differ = differ.join(", ");
+        if !differ.is_empty() && !asked {
+            let said = format!(
+                "operation {id} was interrupted and another program has written since: \
+                 {differ} is not as the operation log says, so what `alt status` shows of an \
+                 operation under way may be wrong; put it right or accept it as it is, then \
+                 close the operation with `alt operation recover {id}`"
+            );
+            return Err(crate::machine::Failure::pending(id, said).into());
+        }
+        let said = match differ.is_empty() {
+            true => String::new(),
+            false => format!(" ({differ} is not as the operation log says)"),
+        };
+        let said = format!(
+            "warning: operation {id} was interrupted and another program has written since: \
+             it is left as it is{said}; see `alt status`\n"
+        );
+        crate::diagnostics::emit(said.as_bytes())?;
+        step.abandoned = true;
+        if let Some(guard) = told.guard {
+            self.close_guard(guard)?;
+        }
+        self.record_step("recover", &step)
+    }
+
+    /// Brings a step of this workspace that was cut short to an end;
+    /// `asked` by `alt operation recover`.
+    pub(in crate::native) fn recover_open_step(&mut self, asked: bool) -> Res<()> {
         // the step this command is itself in the middle of is not cut short
         let in_step = |tracked: &super::Tracked| tracked.begin.is_some();
         if self.step.borrow().as_ref().is_some_and(in_step) {
@@ -193,19 +262,13 @@ impl NativeRepo<'_> {
             checkout: None,
             state: Vec::new(),
         };
-        let Some(told) = self.told_after(&begun, &mark)? else {
-            step.abandoned = true;
-            let said = format!(
-                "warning: operation {} was interrupted and another program has written since: \
-                 it is left as it is; see `alt status`\n",
-                begun.id
-            );
-            crate::diagnostics::emit(said.as_bytes())?;
-            return self.record_step("recover", &step);
-        };
+        let told = self.told_after(&begun, &mark)?;
         let before: Vec<Option<String>> = mark.before.iter().map(|f| f.text.clone()).collect();
         if before.len() != STATE_FILES.len() {
             return Err("corrupt step mark".into());
+        }
+        if told.foreign {
+            return self.leave_as_it_is(&begun, &told, &before, step, asked);
         }
         // the log is synced before a file is put as it says, and the state
         // files are put so before a checkout is finished, as the command
@@ -226,6 +289,9 @@ impl NativeRepo<'_> {
         step.refs = net_refs(&told.refs);
         step.checkout = net_checkout(told.checkouts);
         step.state = state_changes(&before, &told.state);
+        if let Some(guard) = told.guard {
+            self.close_guard(guard)?;
+        }
         self.record_step("recover", &step)
     }
 }
