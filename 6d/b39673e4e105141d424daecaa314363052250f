@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: perf
+summary: read each tree of the history served once when the trees of a push are looked at
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/added_commits/tree_tests.rs
+touched: crates/alt-cli/src/added_commits/trees.rs
