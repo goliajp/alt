@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: perf
+summary: sync the directories above a request's receipts once, when its directory is made
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/durable.rs
+touched: crates/alt-cli/src/request.rs
