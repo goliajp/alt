@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: take either end git's commit comes to when a filter process does not start, as for its add
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/filter_process.rs
