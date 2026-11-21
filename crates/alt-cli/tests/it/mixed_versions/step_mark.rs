@@ -18,7 +18,7 @@ fn killed(repo: &Path, args: &[&str], at: usize) {
     assert_eq!(killed.status.code(), None, "{args:?} at {at}");
 }
 
-fn crashing(repo: &Path, args: &[&str], crash: &str) -> Output {
+pub(super) fn crashing(repo: &Path, args: &[&str], crash: &str) -> Output {
     Command::new(new_bin())
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
@@ -175,7 +175,7 @@ fn a_conflict_the_older_program_finished_writing_is_a_merge_to_both() {
 }
 
 /// A step whose mark is in the log and whose guard a power cut took.
-fn marked_without_its_guard(repo: &Path) {
+pub(super) fn marked_without_its_guard(repo: &Path) {
     diverged(repo);
     merge_killed_at(repo, "step-mark:after");
     crate::crash_fixture::remove_final_log_frame(repo);
@@ -253,10 +253,14 @@ fn a_state_file_that_is_not_as_the_log_says_keeps_the_step_open_until_it_is_clos
             said(&refused)
         );
     }
+    let refused = said(&run(&new, repo, &["add", "f.txt"]));
+    let how = format!("MERGE_HEAD holds {side:?}, and the log says it is not there");
+    assert!(refused.contains(&how), "{refused}");
+    assert!(refused.contains("changes no file"), "{refused}");
     // the abort would give the step up, which cannot be done either
     let refused = run(&new, repo, &["merge", "--abort"]);
     assert!(!refused.status.success());
-    let how = "close it with `alt operation recover";
+    let how = "accept it as it is with `alt operation recover";
     assert!(said(&refused).contains(how), "{}", said(&refused));
     let pending = ok(run(&new, repo, &["operation", "pending"]));
     let id = pending.split(' ').next().unwrap();

@@ -99,3 +99,70 @@ fn a_rebase_the_policy_forbids_is_not_begun_and_one_begun_is_given_up() {
     ok(alt_as(repo, &["rebase", "--abort"], "bot"));
     assert_eq!(seen(repo), before);
 }
+
+/// As `principal`, killed at the `at`-th point it passes, or listing the
+/// points to `at`.
+#[cfg(debug_assertions)]
+fn crashing_as(repo: &Path, args: &[&str], principal: &str, at: &str) -> std::process::Output {
+    crate::alt_command()
+        .current_dir(repo)
+        .env("ALT_NO_DAEMON", "1")
+        .env("GIT_AUTHOR_NAME", principal)
+        .env("GIT_AUTHOR_EMAIL", format!("{principal}@e"))
+        .env("USER", "operator")
+        .env("ALT_PRINCIPAL_KIND", "agent")
+        .env("ALT_PRINCIPAL_ID", principal)
+        .env("ALT_CRASH_POINT", at)
+        .args(args)
+        .output()
+        .unwrap()
+}
+
+/// Giving a step up moves the branch back to where the command found it,
+/// as the undo of a commit does, and is refused to whom the policy
+/// forbids that, as that undo is: such a step is brought to an end.
+#[cfg(debug_assertions)]
+#[test]
+fn a_step_that_moved_the_branch_is_not_given_up_where_the_policy_forbids_moving_it_back() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let repo = fixture(&tmp);
+    for file in ["b.txt", "c.txt"] {
+        std::fs::write(repo.join(file), "more\n").unwrap();
+        ok(alt(repo, &["add", file]));
+        ok(alt(repo, &["commit", "-m", file]));
+    }
+    write_policy(repo, "agent:* -> forbid-force\n");
+    let revert = ["revert", "HEAD", "HEAD~1"];
+    let list = tmp.path().join(".alt/points");
+    let listing = format!("list:{}", list.display());
+    ok(crashing_as(repo, &revert, "bot", &listing));
+    ok(alt(repo, &["undo"]));
+    let before = seen(repo);
+    let points = std::fs::read_to_string(&list).unwrap();
+    // the first of the two commits is made and its file not yet removed
+    let at = points.lines().position(|p| p == "checkout-file:before");
+    let killed = crashing_as(repo, &revert, "bot", &(at.unwrap() + 1).to_string());
+    assert_eq!(killed.status.code(), None);
+    let found = seen(repo);
+    assert_ne!(found.1, before.1);
+    let pending = ok(alt(repo, &["operation", "pending"]));
+    let id = pending.split(' ').next().unwrap();
+
+    let denied = "capability denied: forbid_force is set and refs/heads/main would not be";
+    fails_with(alt_as(repo, &["operation", "abandon", id], "bot"), denied);
+    assert_eq!(seen(repo), found);
+    assert_eq!(ok(alt(repo, &["operation", "pending"])), pending);
+
+    // whom no rule holds gives it up
+    ok(alt(repo, &["operation", "abandon", id]));
+    assert_eq!(seen(repo), before);
+    assert!(repo.join("c.txt").exists());
+
+    // and whom the rule holds brings it to an end and goes on with it
+    let killed = crashing_as(repo, &revert, "bot", &(at.unwrap() + 1).to_string());
+    assert_eq!(killed.status.code(), None);
+    ok(alt_as(repo, &["revert", "--continue"], "bot"));
+    assert_eq!(ok(alt(repo, &["operation", "pending"])), "");
+    assert!(!repo.join("b.txt").exists() && !repo.join("c.txt").exists());
+    assert_eq!(seen(repo).0, [None, None, None, None]);
+}
