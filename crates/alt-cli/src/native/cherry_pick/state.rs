@@ -65,6 +65,19 @@ impl NativeRepo<'_> {
         self.remove_state_file("CHERRY_PICK_HEAD")
     }
 
+    /// Refuses a merge while a cherry-pick waits for its commit, as git does.
+    pub fn ensure_no_pick_to_conclude(&self) -> Res<()> {
+        if self.cherry_pick_in_progress()? {
+            return Err(crate::machine::Failure::refusal(
+                "precondition_failed",
+                "merge: a cherry-pick is in progress; conclude it with `alt cherry-pick \
+                 --continue` or give it up with `alt cherry-pick --abort` first",
+            )
+            .into());
+        }
+        Ok(())
+    }
+
     /// Before a command that writes: removes the file of a cherry-pick
     /// that HEAD has moved away from.
     pub fn forget_stale_cherry_pick(&self) -> Res<()> {

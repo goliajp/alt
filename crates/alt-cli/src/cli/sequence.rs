@@ -12,6 +12,7 @@ pub(super) fn merge<W: Write>(repo: &mut NativeRepo, args: &Merge, out: &mut W) 
         repo.merge_abort(out)?;
         return Ok(0);
     }
+    repo.ensure_no_pick_to_conclude()?;
     let branch = args.branch.as_deref().unwrap_or_default();
     Ok(u8::from(repo.merge(branch, args.json, out)?))
 }

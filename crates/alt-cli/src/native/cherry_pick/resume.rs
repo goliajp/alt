@@ -66,6 +66,11 @@ impl NativeRepo<'_> {
         let Some((picked, _)) = self.stopped_cherry_pick()? else {
             return Ok(None);
         };
+        // a commit that concludes another operation begun since is its own
+        let other = self.merge_head()?.is_some() || self.revert_state()?.is_some();
+        if other || self.rebase_in_progress() {
+            return Ok(None);
+        }
         let source = self.store.odb.get(&picked)?;
         let source = source.ok_or("commit missing from store")?;
         let source = alt_git_codec::Commit::parse(&source.data)?;
