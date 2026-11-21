@@ -1,0 +1,21 @@
+schema: alt-meta/1
+type: fix
+summary: restore an index file a power cut left torn to the last index the log vouches for
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/fsck.rs
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/merge/write.rs
+touched: crates/alt-cli/src/native/recovery.rs
+touched: crates/alt-cli/src/native/recovery/as_read.rs
+touched: crates/alt-cli/src/native/recovery/whole.rs
+touched: crates/alt-cli/src/native/tree_state.rs
+touched: crates/alt-cli/src/native/unconfirmed/staged.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/mixed_versions.rs
+touched: crates/alt-cli/tests/it/staged_durability.rs
+touched: crates/alt-cli/tests/it/torn_index.rs
+touched: crates/alt-cli/tests/it/torn_index/mixed_versions.rs
+touched: crates/alt-cli/tests/it/torn_index/states.rs
+touched: crates/alt-git-index/src/lib.rs
+touched: docs/recovery.md
