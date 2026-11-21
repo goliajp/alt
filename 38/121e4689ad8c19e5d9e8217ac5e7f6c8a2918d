@@ -1,0 +1,18 @@
+schema: alt-meta/1
+type: fix
+summary: write a push's objects only once nothing refuses it, and tell what it adds in one walk under the log's lock
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/added_commits.rs
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/bin/altd_server/pack_ingest.rs
+touched: crates/alt-cli/src/bin/altd_server/ref_tx.rs
+touched: crates/alt-cli/src/bin/altd_server/signed_commits.rs
+touched: crates/alt-cli/src/lib.rs
+touched: crates/alt-cli/src/native/unconfirmed.rs
+touched: crates/alt-cli/tests/it/altd_server_added_commits.rs
+touched: crates/alt-cli/tests/it/altd_server_signed_commits.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-odb/src/odb/cut.rs
+touched: crates/alt-odb/tests/it/rewind_batch.rs
+touched: crates/alt-refs/src/policy.rs
