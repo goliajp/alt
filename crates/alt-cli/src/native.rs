@@ -312,7 +312,8 @@ pub fn import(
         "cli/import@{}",
         std::env::var("USER").as_deref().unwrap_or("unknown")
     );
-    let report = alt_import::import_git(repo, &alt_dir, &actor, timestamp_ms)?;
+    let prepare = |refs: &mut RefStore| unconfirmed::sync_objects_first(refs, &alt_dir);
+    let report = alt_import::import_git_with(repo, &alt_dir, &actor, timestamp_ms, prepare)?;
     writeln!(
         out,
         "imported {} objects ({} new), {} refs ({} changed), \

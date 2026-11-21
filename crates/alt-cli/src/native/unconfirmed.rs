@@ -59,12 +59,19 @@ fn held(op: &Op, also: &alt_refs::AlsoNamed, stored: &dyn Fn(&ObjectId) -> Res<b
 /// the files an index change that was left unsynced wrote.
 pub(super) fn open_refs(alt_dir: &Path) -> Res<RefStore> {
     let mut refs = RefStore::open(alt_dir)?;
+    sync_objects_first(&mut refs, alt_dir);
+    Ok(refs)
+}
+
+/// Has `refs`, the ref store under `alt_dir`, sync the objects and what
+/// index changes wrote before it records operations of other writers as
+/// synced.
+pub(super) fn sync_objects_first(refs: &mut RefStore, alt_dir: &Path) {
     let alt_dir = alt_dir.to_owned();
     refs.sync_objects_with(std::sync::Arc::new(move |left| {
         NativeOdb::sync_stored(&alt_dir).map_err(std::io::Error::other)?;
         recovery::sync_left(&alt_dir, left)
     }));
-    Ok(refs)
 }
 
 impl Store {

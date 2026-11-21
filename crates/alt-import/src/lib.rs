@@ -11,6 +11,9 @@
 //! worst, never a ref pointing at missing objects. Re-running converges:
 //! object puts dedup, an unchanged ref set records no op at all.
 
+mod report;
+pub use report::ImportReport;
+
 use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::path::Path;
@@ -119,27 +122,6 @@ impl From<alt_git_codec::ObjectParseError> for ImportError {
     }
 }
 
-/// What one import run did.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ImportReport {
-    /// Objects enumerated in the source (packed + loose).
-    pub objects_seen: u64,
-    /// Objects actually written (the rest were already present).
-    pub objects_new: u64,
-    /// Refs (incl. HEAD) in the source.
-    pub refs_seen: usize,
-    /// Refs created or moved by this run.
-    pub refs_changed: usize,
-    /// Same-path versions re-encoded as lineage deltas (blobs + trees).
-    pub lineage_deltas: u64,
-    /// The subset of `lineage_deltas` that are tree objects.
-    pub tree_lineage_deltas: u64,
-    /// The subset of `lineage_deltas` that are commit objects.
-    pub commit_lineage_deltas: u64,
-    /// The import op — None when state was already converged (rerun).
-    pub op: Option<alt_refs::OpId>,
-}
-
 /// Imports `repo` into the `.alt` directory at `alt_dir` (created if
 /// missing). Idempotent: re-running against an unchanged source changes
 /// nothing and records no op.
@@ -149,9 +131,24 @@ pub fn import_git(
     actor: &str,
     timestamp_ms: u64,
 ) -> Result<ImportReport, ImportError> {
+    import_git_with(repo, alt_dir, actor, timestamp_ms, |_| ())
+}
+
+/// [`import_git`] into a store that others write to as well: `prepare`
+/// is given the ref store before anything is recorded in it, to have it
+/// sync what those writers left unsynced before it records their
+/// operations as synced.
+pub fn import_git_with(
+    repo: &Repository,
+    alt_dir: &Path,
+    actor: &str,
+    timestamp_ms: u64,
+    prepare: impl FnOnce(&mut RefStore),
+) -> Result<ImportReport, ImportError> {
     let git_refs = repo.git_refs().ok_or(ImportError::NotAGitSource)?;
     let mut odb = NativeOdb::open(alt_dir)?;
     let mut refs = RefStore::open(alt_dir)?;
+    prepare(&mut refs);
 
     // --- objects: packed first (bulk), then loose ---
     let mut seen = 0u64;
