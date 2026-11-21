@@ -37,7 +37,9 @@ impl NativeRepo<'_> {
             (None, Some(head)) => state.say("detached", head.to_string()[..8].to_owned()),
             (None, None) => {}
         }
-        if let Some(head) = head {
+        // a tag object has to be read to know its commit, so tags are only
+        // looked through where there is no branch to show
+        if let (None, Some(head)) = (&branch, head) {
             match self.tag_at(head) {
                 Ok(Some(tag)) => state.say("tag", tag),
                 Ok(None) => {}

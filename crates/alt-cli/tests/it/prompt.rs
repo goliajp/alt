@@ -110,20 +110,28 @@ fn a_repository_that_does_not_open_needs_attention() {
 }
 
 #[test]
-fn head_is_on_a_branch_born_or_not_or_at_a_tag() {
+fn head_is_on_a_branch_born_or_not_or_on_none_at_a_tag() {
     let dir = alt_os::temp::tempdir().unwrap();
     let repo = dir.path();
     alt(repo, &["init", "."]);
     assert_eq!(state(repo), "workspace default\nunborn main\n");
     commit(repo, "base\n", "base");
     assert_eq!(state(repo), "workspace default\nbranch main\n");
+    // a tag is told only where there is no branch to tell
     alt(repo, &["tag", "v1"]);
-    assert_eq!(state(repo), "workspace default\nbranch main\ntag v1\n");
+    assert_eq!(state(repo), "workspace default\nbranch main\n");
+    let tip = head(repo);
+    alt(repo, &["bisect", "start"]);
+    let detached = format!("workspace default\ndetached {}\n", &tip[..8]);
+    assert_eq!(state(repo), format!("{detached}tag v1\noperation bisect\n"));
+    alt(repo, &["bisect", "reset"]);
     // a tag object is followed to its commit
     alt(repo, &["tag", "release", "-a", "-m", "the first"]);
-    assert_eq!(state(repo), "workspace default\nbranch main\ntag release\n");
-    commit(repo, "more\n", "more");
-    assert_eq!(state(repo), "workspace default\nbranch main\n");
+    alt(repo, &["bisect", "start"]);
+    assert_eq!(
+        state(repo),
+        format!("{detached}tag release\noperation bisect\n")
+    );
 }
 
 #[test]

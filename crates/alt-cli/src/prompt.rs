@@ -9,7 +9,7 @@
 //! repo /path/to/root
 //! workspace default
 //! branch develop          or `detached 6d1f3128`, or `unborn main`
-//! tag v0.1.0              HEAD is the commit of this tag
+//! tag v0.1.0              HEAD is on no branch and at the commit of this tag
 //! operation rebase        merge, rebase, cherry-pick, revert or bisect
 //! step 3 7                which of how many commits the operation is at
 //! staged 2
