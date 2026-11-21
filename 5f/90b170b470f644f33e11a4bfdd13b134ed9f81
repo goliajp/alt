@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: refactor
+summary: move code out of three files that had grown past their size
+author-type: human
+author: doracawl
+touched: crates/alt-args-derive/src/generate.rs
+touched: crates/alt-args-derive/src/lib.rs
+touched: crates/alt-args-derive/src/value_enum.rs
+touched: crates/alt-args/src/arg.rs
+touched: crates/alt-args/src/usage.rs
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/remotes.rs
