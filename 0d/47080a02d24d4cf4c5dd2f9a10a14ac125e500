@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: perf
+summary: look through the tags for the prompt only where HEAD is on no branch
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/prompt.rs
+touched: crates/alt-cli/src/prompt.rs
+touched: crates/alt-cli/tests/it/prompt.rs
