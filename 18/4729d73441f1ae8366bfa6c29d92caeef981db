@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: perf
+summary: make no fsync of what the markers record as synced
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/main.rs
+touched: crates/alt-cli/src/native/recovery.rs
+touched: crates/alt-cli/src/native/unconfirmed.rs
+touched: crates/alt-cli/tests/it/sync_order.rs
+touched: crates/alt-odb/src/odb/sink.rs
