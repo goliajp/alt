@@ -45,7 +45,7 @@ pub(crate) fn pack_of(commits: &[(ObjectId, Vec<u8>)]) -> Vec<u8> {
     std::fs::read(&written.pack_path).unwrap()
 }
 
-fn require_signed_commits(origin: &Path) {
+pub(crate) fn require_signed_commits(origin: &Path) {
     std::fs::write(
         origin.join(".alt").join("policy"),
         "human:anonymous -> require-signed-commits\n",
@@ -53,12 +53,12 @@ fn require_signed_commits(origin: &Path) {
     .unwrap();
 }
 
-fn refused_over(report: &alt_wire::ReportStatus, word: &str) -> bool {
+pub(crate) fn refused_over(report: &alt_wire::ReportStatus, word: &str) -> bool {
     matches!(report.commands.as_slice(),
         [CommandStatus::Ng { reason, .. }] if reason.contains(word))
 }
 
-fn accepted(report: &alt_wire::ReportStatus) -> bool {
+pub(crate) fn accepted(report: &alt_wire::ReportStatus) -> bool {
     matches!(report.commands.as_slice(), [CommandStatus::Ok(_)])
 }
 
@@ -185,39 +185,66 @@ fn signed_commits_are_accepted_and_an_unsigned_one_among_them_refuses_all() {
     assert!(!branches.contains("mixed"), "{branches}");
 }
 
-/// A push the server fails on after it has written the pack: here a tag
-/// that does not read as one, met when the policy looks for what the push
-/// adds. The objects are taken out again all the same.
+/// The pack of one object.
+pub(crate) fn pack_of_one(kind: ObjectKind, data: &[u8]) -> (ObjectId, Vec<u8>) {
+    let oid = ObjectId::hash_object(HashAlgo::Sha1, kind, data);
+    let scratch = alt_os::temp::tempdir().unwrap();
+    let mut writer = alt_git_pack::PackWriter::create(scratch.path(), HashAlgo::Sha1, 1).unwrap();
+    writer.add(oid, kind, data).unwrap();
+    let pack = std::fs::read(writer.finish().unwrap().pack_path).unwrap();
+    (oid, pack)
+}
+
+/// What the push adds cannot be told through a tag that does not read
+/// as one: the push is refused, with a reason, and nothing of it kept.
 #[test]
-fn a_push_the_server_fails_on_leaves_none_of_its_objects() {
+fn a_new_value_at_a_tag_that_does_not_read_is_refused_and_not_kept() {
     let (origin, _) = seeded();
     require_signed_commits(origin.path());
     let server = spawn_server(origin.path());
     let url = format!("http://{}/", server.addr);
-    let tag = b"not a tag".to_vec();
-    let oid = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Tag, &tag);
-    let scratch = alt_os::temp::tempdir().unwrap();
-    let mut writer = alt_git_pack::PackWriter::create(scratch.path(), HashAlgo::Sha1, 1).unwrap();
-    writer.add(oid, ObjectKind::Tag, &tag).unwrap();
-    let pack = std::fs::read(writer.finish().unwrap().pack_path).unwrap();
+    let (oid, pack) = pack_of_one(ObjectKind::Tag, b"not a tag");
+    let name = oid.to_string();
+
+    let report = push(&url, &[creation("refs/tags/with-pack", &name)], &pack);
+    assert_eq!(report.unpack, Ok(()));
+    assert!(refused_over(&report, "unreadable"), "{report:?}");
+    let report = push(&url, &[creation("refs/tags/without-pack", &name)], &[]);
+    assert!(
+        refused_over(&report, "missing necessary objects"),
+        "{report:?}"
+    );
+}
+
+/// A push the server fails on: here the trust keys do not read when the
+/// policy asks for them. None of its objects is in the odb afterwards.
+#[test]
+fn a_push_the_server_fails_on_leaves_none_of_its_objects() {
+    let (origin, seed) = seeded();
+    let alt_dir = origin.path().join(".alt");
+    require_signed_commits(origin.path());
+    std::fs::write(alt_dir.join("trust"), "no directory").unwrap();
+    let server = spawn_server(origin.path());
+    let url = format!("http://{}/", server.addr);
+    let (oid, commit) = commit_object(&seed, 1_700_000_000, "", "unsigned");
+    let name = oid.to_string();
 
     let mut body = Vec::new();
     alt_wire::encode_push_request(
         &mut body,
-        &[creation("refs/tags/with-pack", &oid.to_string())],
+        &[creation("refs/heads/with-pack", &name)],
         &["report-status"],
         HashAlgo::Sha1,
-        &pack,
+        &pack_of(&[(oid, commit)]),
     )
     .unwrap();
     let reply = alt_wire_http::GitTransport::new(url.as_str())
         .command(alt_wire_http::Service::ReceivePack, &body);
     assert!(reply.is_err(), "{reply:?}");
-    let report = push(
-        &url,
-        &[creation("refs/tags/without-pack", &oid.to_string())],
-        &[],
-    );
+    // without the policy a ref may be created at any object the odb holds
+    std::fs::remove_file(alt_dir.join("policy")).unwrap();
+    std::fs::remove_file(alt_dir.join("trust")).unwrap();
+    let report = push(&url, &[creation("refs/heads/without-pack", &name)], &[]);
     assert!(
         refused_over(&report, "missing necessary objects"),
         "{report:?}"

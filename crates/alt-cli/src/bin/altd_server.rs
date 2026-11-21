@@ -31,15 +31,16 @@ use std::sync::{Arc, Mutex};
 
 use alt_cli::native::{Principal, PrincipalKind, Store};
 use alt_git_codec::{HashAlgo, ObjectId};
-use alt_refs::{RefChange, RefTarget};
 use alt_repo::Repository;
 use alt_wire::caps;
 use alt_wire::ls_refs::RefRecord;
-use alt_wire::push::{CommandStatus, RefUpdate};
+use alt_wire::push::CommandStatus;
 use tiny_http::{Header, Method, Response, Server, StatusCode};
 
 #[path = "altd_server/pack_ingest.rs"]
 mod pack_ingest;
+#[path = "altd_server/ref_tx.rs"]
+mod ref_tx;
 #[path = "altd_server/signed_commits.rs"]
 mod signed_commits;
 
@@ -1378,75 +1379,6 @@ fn pick_principal(outcome: &SigOutcome, auth_user: Option<&str>) -> (Principal, 
 fn require_signed_for(store: &Mutex<Store>, principal: &Principal) -> bool {
     let guard = store.lock().unwrap();
     guard.capabilities_for(principal).require_signed
-}
-
-/// Commit the ref tx under the store mutex the caller holds, then assign a
-/// group-commit ticket *still under that same mutex* so the appended bytes are
-/// visibly-ordered before the ticket is observable. The returned
-/// ticket should be passed to `writer.group.await_durable(&writer.sink, ticket)`
-/// **after** the store mutex is released — that's the overlap which
-/// lets N concurrent pushes coalesce onto ~1 fsync.
-///
-/// Returns `Ok(None)` for an empty-updates push (no append happened,
-/// no durability needed).
-fn commit_ref_updates(
-    store_guard: &mut Store,
-    group: &alt_cli::group_commit::GroupCommit,
-    updates: &[RefUpdate],
-    principal: &alt_cli::native::Principal,
-    sig_label: &str,
-) -> Result<Option<u64>, String> {
-    if updates.is_empty() {
-        return Ok(None);
-    }
-    let mut changes = Vec::with_capacity(updates.len());
-    for u in updates {
-        changes.push(RefChange {
-            name: u.name.clone(),
-            old: u.old.map(RefTarget::Oid),
-            new: u.new.map(RefTarget::Oid),
-        });
-    }
-    let caps = store_guard.capabilities_for(principal);
-    let actor = format!(
-        "{kind}:{id};verb:wire/receive-pack;sig:{sig}",
-        kind = match principal.kind {
-            alt_cli::native::PrincipalKind::Human => "human",
-            alt_cli::native::PrincipalKind::Agent => "agent",
-        },
-        id = principal.id,
-        sig = sig_label,
-    );
-    // combine branch_allow + branch_deny (deny wins) into a
-    // single closure that mirrors the local CLI path.
-    let allow = caps.branch_allow.clone();
-    let deny = caps.branch_deny.clone();
-    let has_constraint = !allow.is_empty() || !deny.is_empty();
-    let is_branch_allowed = move |name: &str| {
-        if deny.iter().any(|g| g.matches(name)) {
-            return false;
-        }
-        allow.is_empty() || allow.iter().any(|g| g.matches(name))
-    };
-    let policy = alt_refs::RefPolicy {
-        read_only: caps.read_only,
-        is_branch_allowed: if has_constraint {
-            Some(&is_branch_allowed)
-        } else {
-            None
-        },
-        // a served repository has no working trees to keep in step
-        state_check: None,
-    };
-    store_guard
-        .refs_mut()
-        .commit_idempotent(&actor, now_ms(), &changes, None, Some(&policy))
-        .map_err(|e| format!("ref tx: {e}"))?;
-    // Under the same lock: hand out the durability ticket. The bytes
-    // for this commit are on disk before the ticket is observable
-    // from outside the lock — that's the group-commit invariant.
-    let ticket = group.assign();
-    Ok(Some(ticket))
 }
 
 fn now_ms() -> u64 {

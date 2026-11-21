@@ -93,11 +93,12 @@ pub struct RefPolicy<'a> {
     /// to: `f` sees every ref as it stands after catching up on other
     /// writers, inside the same lock, so the verdict cannot go stale before
     /// the write. `Err(reason)` aborts it as [`RefError::Rejected`].
-    pub state_check: Option<&'a StateCheck>,
+    pub state_check: Option<&'a StateCheck<'a>>,
 }
 
 /// See [`RefPolicy::state_check`].
-pub type StateCheck = dyn Fn(&BTreeMap<String, RefTarget>, &[RefChange]) -> Result<(), String>;
+pub type StateCheck<'a> =
+    dyn Fn(&BTreeMap<String, RefTarget>, &[RefChange]) -> Result<(), String> + 'a;
 
 impl RefPolicy<'_> {
     /// The unconstrained policy: any ref, any direction. Pass this (or simply
