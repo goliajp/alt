@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: refactor
+summary: write the mark that gives a step up and the record that closes one in functions of their own
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/in_progress/step/abandon.rs
+touched: crates/alt-cli/src/native/in_progress/step/recover.rs
+touched: crates/alt-cli/tests/it/mixed_versions/step_mark.rs
+touched: crates/alt-cli/tests/it/step_notes.rs
