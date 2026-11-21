@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: perf
+summary: compare a file with the bytes it should hold a piece at a time
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/durable.rs
+touched: crates/alt-cli/src/native/recovery/as_read.rs
+touched: crates/alt-cli/src/native/recovery/prepared.rs
