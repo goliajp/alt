@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: refactor
+summary: run the commands that may stop in conflict in a function of their own
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli/native.rs
