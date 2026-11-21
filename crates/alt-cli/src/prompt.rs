@@ -105,7 +105,21 @@ impl State {
 pub fn respond(args: &PromptArgs, in_repository: impl FnOnce() -> Response) -> Response {
     let cwd = std::env::current_dir();
     let found = cwd.map(|cwd| crate::native::resolve_workspace(&cwd, None));
-    let Ok(Ok((_, coord))) = found else {
+    let root = match &found {
+        Ok(Ok((_, coord))) => Some(coord.root()),
+        _ => None,
+    };
+    respond_at(args, root, in_repository)
+}
+
+/// [`respond`] where `root` is the working tree of the repository the
+/// command is run in, if it is run in one.
+fn respond_at(
+    args: &PromptArgs,
+    root: Option<&std::path::Path>,
+    in_repository: impl FnOnce() -> Response,
+) -> Response {
+    let Some(root) = root else {
         return Response {
             exit_code: 1,
             stdout: Vec::new(),
@@ -115,9 +129,7 @@ pub fn respond(args: &PromptArgs, in_repository: impl FnOnce() -> Response) -> R
     let response = in_repository();
     let stdout = match response.exit_code {
         0 => response.stdout,
-        _ => State::unreadable(coord.root())
-            .render(&args.format)
-            .into_bytes(),
+        _ => State::unreadable(root).render(&args.format).into_bytes(),
     };
     Response {
         exit_code: 0,
@@ -161,5 +173,58 @@ mod tests {
             State::default().render("zsh"),
             "typeset -gA alt_prompt=()\n"
         );
+    }
+
+    fn asked(format: &str) -> PromptArgs {
+        PromptArgs {
+            format: format.to_owned(),
+            no_untracked: false,
+            no_ahead_behind: false,
+        }
+    }
+
+    fn said(exit_code: u8, stdout: &str, stderr: &str) -> Response {
+        Response {
+            exit_code,
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+        }
+    }
+
+    fn shown(response: Response) -> (u8, String, String) {
+        let text = |bytes: Vec<u8>| String::from_utf8(bytes).unwrap();
+        (
+            response.exit_code,
+            text(response.stdout),
+            text(response.stderr),
+        )
+    }
+
+    #[test]
+    fn outside_a_repository_the_command_is_not_run() {
+        let unasked = || -> Response { panic!("ran the command") };
+        let outside = respond_at(&asked("lines"), None, unasked);
+        assert_eq!(shown(outside), (1, String::new(), String::new()));
+    }
+
+    #[test]
+    fn what_the_command_says_is_given_without_its_stderr() {
+        let root = std::path::Path::new("/work/r");
+        let warned = || said(0, "repo /work/r\nbranch main\n", "warning: x\n");
+        let told = respond_at(&asked("lines"), Some(root), warned);
+        let expected = "repo /work/r\nbranch main\n".to_owned();
+        assert_eq!(shown(told), (0, expected, String::new()));
+    }
+
+    #[test]
+    fn a_command_that_fails_is_told_as_a_repository_that_needs_attention() {
+        let root = std::path::Path::new("/work/r");
+        let failed = || said(128, "half", "fatal: x\n");
+        let told = respond_at(&asked("lines"), Some(root), failed);
+        let expected = "repo /work/r\nattention damaged\n".to_owned();
+        assert_eq!(shown(told), (0, expected, String::new()));
+        let told = respond_at(&asked("zsh"), Some(root), failed);
+        let expected = "typeset -gA alt_prompt=('repo' '/work/r' 'attention' 'damaged')\n";
+        assert_eq!(shown(told), (0, expected.to_owned(), String::new()));
     }
 }

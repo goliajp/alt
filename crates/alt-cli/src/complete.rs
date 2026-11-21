@@ -208,6 +208,14 @@ pub fn respond(args: &CompleteArgs, in_repository: impl FnOnce() -> Response) ->
         let cwd = std::env::current_dir();
         cwd.is_ok_and(|cwd| crate::native::resolve_workspace(&cwd, None).is_ok())
     };
+    respond_where(args, has_repository, in_repository)
+}
+
+fn respond_where(
+    args: &CompleteArgs,
+    has_repository: impl FnOnce() -> bool,
+    in_repository: impl FnOnce() -> Response,
+) -> Response {
     let mut asks = false;
     let syntax = answer(args, &mut |_, _| asks = true).text;
     if asks && has_repository() {
@@ -253,5 +261,59 @@ mod tests {
         let mut answer = Answer::default();
         answer.listed::<&str>(group::TAGS, &[]);
         assert!(answer.text.is_empty());
+    }
+
+    fn asked(line: &str) -> CompleteArgs {
+        let words: Vec<String> = line.split(' ').map(String::from).collect();
+        CompleteArgs {
+            shell: "zsh".to_owned(),
+            current: words.len() - 1,
+            words,
+        }
+    }
+
+    fn said(exit_code: u8, stdout: &str, stderr: &str) -> Response {
+        Response {
+            exit_code,
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+        }
+    }
+
+    fn shown(response: Response) -> (u8, String, String) {
+        let text = |bytes: Vec<u8>| String::from_utf8(bytes).unwrap();
+        (
+            response.exit_code,
+            text(response.stdout),
+            text(response.stderr),
+        )
+    }
+
+    #[test]
+    fn the_repository_is_asked_only_for_what_it_alone_knows() {
+        let unasked = || -> Response { panic!("asked the repository") };
+        // a line that asks for subcommands needs no repository
+        let commands = respond_where(&asked("alt "), || true, unasked);
+        assert!(shown(commands).1.starts_with("group\tcommands\tcommand\n"));
+        // and there is none to ask outside one
+        let outside = respond_where(&asked("alt switch "), || false, unasked);
+        assert_eq!(shown(outside), (0, String::new(), String::new()));
+    }
+
+    #[test]
+    fn what_the_repository_answers_is_given_without_its_stderr() {
+        let warned = || said(0, "group\tbranches\tbranch\nmain\t\n", "warning: x\n");
+        let answered = respond_where(&asked("alt switch "), || true, warned);
+        let expected = "group\tbranches\tbranch\nmain\t\n".to_owned();
+        assert_eq!(shown(answered), (0, expected, String::new()));
+    }
+
+    #[test]
+    fn a_repository_that_fails_leaves_what_the_command_line_says() {
+        let failed = || said(128, "half an answer", "fatal: x\n");
+        let values = respond_where(&asked("alt init "), || true, || -> Response { panic!() });
+        assert_eq!(shown(values), (0, "files\tdir\n".to_owned(), String::new()));
+        let nothing = respond_where(&asked("alt switch "), || true, failed);
+        assert_eq!(shown(nothing), (0, String::new(), String::new()));
     }
 }
