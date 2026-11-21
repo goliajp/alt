@@ -576,17 +576,55 @@ that writes cannot finish the checkout either, it changes nothing more and
 says why and what can be done:
 
 ```
-fatal: operation 51484a277655b755cc0117ae784e7e114b51c5ad2df5acdfd4795189da7f2e16 was interrupted and cannot be brought to an end: cannot write 'z.txt': File too large (os error 27); clear what is in its way and run the command again, or give the operation up with `alt operation abandon 51484a277655b755cc0117ae784e7e114b51c5ad2df5acdfd4795189da7f2e16`
+fatal: operation 51484a277655b755cc0117ae784e7e114b51c5ad2df5acdfd4795189da7f2e16 was interrupted and cannot be brought to an end: cannot write 'z.txt': File too large (os error 27); move what is in its way aside and run the command again, or give the operation up with `alt operation abandon 51484a277655b755cc0117ae784e7e114b51c5ad2df5acdfd4795189da7f2e16`, which with `--keep-changes` leaves a file changed since as it is
 ```
+
+A file the interrupted command had to write may have been changed before the
+next command runs, by hand or by a tool. What becomes of it depends on what
+the command leaves there:
+
+- A file the command leaves in conflict is yours to work on. The command is
+  brought to an end around it, the file keeps what you wrote, and the
+  operation is under way as after any stop: resolve the file and go on, or
+  give the operation up with its `--abort`, which writes over a file in
+  conflict, changed or not, as in git.
+- Any other file is in the way, because the command has content of its own
+  to put there. Every command that writes is refused and names the file
+  (`'t.txt' was changed after the operation was interrupted, and the
+  operation has other content to put there`). Move the file aside and run
+  the command again: a file that is gone is written as the command has it.
+  Or give the command up and keep the file, see below.
 
 `alt operation abandon <id>` gives the interrupted command up as a whole:
 the refs it moved are moved back, the files it wrote and the index are put
 as the command found them, and no operation is under way that was not before
-it. It is refused, with nothing changed, where a file, the index or a ref is
-no longer as the command left it. The `--abort` of the operation does the
-same where the command that began it cannot be brought to an end. Giving up
-is itself finished by the next command that writes where it was interrupted,
-and leaves nothing for `alt undo` to take back.
+it. It is refused, with nothing changed, where a ref is no longer as the
+command left it, and where a file or the index was changed since: it names
+what was changed. `alt operation abandon <id> --keep-changes` gives the
+command up all the same, leaves what was changed as it is and says what
+that was:
+
+```
+51484a277655b755cc0117ae784e7e114b51c5ad2df5acdfd4795189da7f2e16 given up: the workspace is as it was before the command, but for what was changed since and is left as it is: t.txt
+```
+
+A kept file then shows in `alt status` as modified, or as untracked where
+the command had made it. The notes of commits the command had made are taken
+out of the notes ref; notes that other workspaces wrote meanwhile stay, as
+they do when `alt undo` takes such a command back. Giving up is itself
+finished by the next command that writes where it was interrupted, and
+leaves nothing for `alt undo` to take back.
+
+The `--abort` of the operation gives the command up the same way where the
+command cannot be brought to an end. The abort of another operation does
+not: `alt cherry-pick --abort` while an interrupted merge waits is refused
+and says that `alt merge --abort` gives the merge up.
+
+Giving a command up moves a branch it had moved back to where it was, as
+`alt undo` of a commit does. A principal the policy forbids forced updates
+(`forbid-force`) is refused both (`capability denied`): for it an interrupted
+command that moved a branch is brought to an end, with what is in its way
+moved aside, and never given up.
 
 A merge, pick, revert or rebase that would have to write a file where a
 directory holds an untracked file is refused before it writes anything; a
@@ -623,7 +661,7 @@ operation is closed by hand, since a commit made on such a state could record
 a merge that is none, or none where there is one:
 
 ```
-fatal: operation 5d0e8a1c6a3a2f0e1b9a4c7d8e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f was interrupted and another program has written since: MERGE_HEAD is not as the operation log says, so what `alt status` shows of an operation under way may be wrong; put it right or accept it as it is, then close the operation with `alt operation recover 5d0e8a1c6a3a2f0e1b9a4c7d8e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f`
+fatal: operation 5d0e8a1c6a3a2f0e1b9a4c7d8e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f was interrupted and another program has written since: MERGE_HEAD is not as the operation log says (MERGE_HEAD holds "3f2c9d1e8b7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e\n", and the log says it is not there), so what `alt status` shows of an operation under way may be wrong; put it as the log says, or accept it as it is with `alt operation recover 5d0e8a1c6a3a2f0e1b9a4c7d8e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f`: that closes the operation and changes no file, and from then on what the file says holds, for `alt status` and for the next commit, `--continue` or `--abort`
 ```
 
 ### A `durable` file that is gone or does not read
