@@ -145,6 +145,9 @@ mod funcname_drivers;
 mod funcname_git;
 mod funcname_long;
 mod git_settings;
+// the points to be killed at are in a debug build only
+#[cfg(debug_assertions)]
+mod recover_shared_refs;
 mod recovery_kinds;
 mod stack_overflow;
 mod value_hints;

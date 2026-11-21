@@ -270,7 +270,10 @@ impl NativeRepo<'_> {
             }
             Some(&alt_refs::PAYLOAD_REF_TX) => {
                 let tx = alt_refs::parse_tx(&op.payload)?.ok_or("not a ref operation")?;
-                for change in &tx.changes {
+                // the notes ref is shared: a commit of another workspace
+                // since has put its note on top of the one written here
+                let own = |c: &&RefChange| c.name != crate::meta::NOTES_REF;
+                for change in tx.changes.iter().filter(own) {
                     if self.store.refs.get(&change.name) != change.new.as_ref() {
                         return Err(crate::machine::Failure::refusal(
                             "precondition_failed",
