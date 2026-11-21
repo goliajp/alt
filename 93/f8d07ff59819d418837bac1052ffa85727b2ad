@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: have a writer that syncs read again the pack the running boot left unsynced
+author-type: human
+author: doracawl
+touched: crates/alt-odb/src/odb/bound.rs
+touched: crates/alt-odb/tests/it/left_unsynced.rs
+touched: crates/alt-store/src/blob/settle.rs
+touched: crates/alt-store/src/settle.rs
