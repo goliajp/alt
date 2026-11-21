@@ -405,3 +405,11 @@ mod tests {
         assert!(net_checkout(Vec::new()).is_none());
     }
 }
+
+#[cfg(test)]
+mod json_tests {
+    use super::mark::StepMark;
+    use super::*;
+    // each record as real logs hold it, and what does not read as one
+    alt_json_testkit::module_read_tests!("state-step"; StepRecord: StepRecord, StepMark: StepMark);
+}

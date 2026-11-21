@@ -14,7 +14,7 @@ use alt_odb::NativeOdb;
 use alt_refs::{RefChange, RefStore, RefTarget};
 
 /// The four append files of the object store, as its marker orders them.
-const FILES: [&str; 4] = [
+pub(super) const FILES: [&str; 4] = [
     "store/pack-00000001.altpack",
     "store/manifests/blobmap",
     "tier1",

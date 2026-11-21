@@ -10,11 +10,17 @@
 //! intent of each checkout, each file a checkout writes, its index and its
 //! completion, each state file written or removed, and the record of the
 //! step.
+//!
+//! The same holds where the kill is a power cut, which also takes what
+//! was written and not yet synced, and where the command runs in the
+//! daemon and the daemon is what dies.
 
 use std::path::Path;
 
 pub(crate) mod bench;
-use bench::{Bench, abort_killed_before_its_state_file, copy, killed_and_its_undo, restore, run};
+mod kill;
+use bench::{Bench, alt, copy, killed_and_its_undo, restore, run, said};
+use kill::How;
 
 /// `main` and `side` part after one commit: both change `f.txt`; `side`
 /// alone changes `t.txt`, adds `new.txt` and `in/a/n.txt`, removes `d.txt`.
@@ -223,4 +229,72 @@ fn a_rebase_killed_as_its_last_step_is_committed_is_whole_or_gone_on_with() {
     case(&to_rebase(), &steps, COMMIT, None);
     let steps = [REBASE, RESOLVE, stops_again, RESOLVE, COMMIT];
     case(&to_rebase(), &steps, (&["rebase", "--continue"], 0), None);
+}
+
+/// An abort killed before it removed its state file: the next command
+/// that writes brings it to its end, and there is nothing left to give up.
+fn abort_killed_before_its_state_file(
+    bench: &Bench,
+    stopped: &dyn Fn(&Path),
+    abort: &[&str],
+    points: &[String],
+) {
+    let repo = bench.repo();
+    restore(&repo, &bench.kept("fixture"));
+    let clean = bench.shape();
+    stopped(&repo);
+    let at = points.iter().rposition(|p| p == "state-file:before");
+    let killed = alt(&repo, abort, Some(&(at.unwrap() + 1).to_string()));
+    assert_eq!(killed.status.code(), None, "{abort:?}");
+    let again = alt(&repo, abort, None);
+    assert!(!again.status.success(), "{abort:?} again");
+    assert!(said(&again).contains("in progress"), "{}", said(&again));
+    assert_eq!(bench.shape(), clean, "{abort:?} killed and ended");
+}
+
+#[test]
+fn a_power_cut_as_an_operation_begins_or_a_commit_concludes_it_leaves_it_whole_or_not_at_all() {
+    kill::how(How::PowerCut);
+    a_merge_killed_as_it_stops_is_whole_or_not_at_all();
+    a_merge_killed_as_a_commit_concludes_it_is_whole_or_not_at_all();
+    a_cherry_pick_killed_as_it_stops_is_whole_or_not_at_all();
+    a_cherry_pick_killed_as_it_is_gone_on_with_is_whole_or_not_at_all();
+}
+
+#[test]
+fn a_power_cut_as_a_sequence_begins_or_a_commit_concludes_it_leaves_it_whole_or_gone_on_with() {
+    kill::how(How::PowerCut);
+    a_revert_killed_as_it_stops_is_whole_or_gone_on_with();
+    a_revert_killed_as_it_is_gone_on_with_is_whole_or_gone_on_with();
+    a_rebase_killed_as_it_stops_is_whole_or_gone_on_with();
+    a_rebase_killed_as_its_last_step_is_committed_is_whole_or_gone_on_with();
+}
+
+#[test]
+fn a_merge_or_a_pick_the_daemon_dies_in_is_whole_or_not_at_all() {
+    kill::how(How::Daemon);
+    a_merge_killed_as_it_stops_is_whole_or_not_at_all();
+    a_merge_killed_as_it_is_given_up_is_whole_or_not_at_all();
+    a_merge_killed_as_a_commit_concludes_it_is_whole_or_not_at_all();
+    a_cherry_pick_killed_as_it_stops_is_whole_or_not_at_all();
+    a_cherry_pick_killed_as_it_is_given_up_is_whole_or_not_at_all();
+    a_cherry_pick_killed_as_it_is_gone_on_with_is_whole_or_not_at_all();
+    assert!(kill::served() > 20, "the daemon served {}", kill::served());
+}
+
+#[test]
+fn a_revert_the_daemon_dies_in_is_whole_or_gone_on_with() {
+    kill::how(How::Daemon);
+    a_revert_killed_as_it_stops_is_whole_or_gone_on_with();
+    a_revert_killed_as_it_is_given_up_is_whole_or_not_at_all();
+    a_revert_killed_as_it_is_gone_on_with_is_whole_or_gone_on_with();
+}
+
+#[test]
+fn a_rebase_the_daemon_dies_in_is_whole_or_gone_on_with() {
+    kill::how(How::Daemon);
+    a_rebase_killed_as_it_stops_is_whole_or_gone_on_with();
+    a_rebase_killed_as_it_is_given_up_is_whole_or_not_at_all();
+    a_rebase_killed_as_a_step_is_gone_on_with_or_skipped_is_whole_or_gone_on_with();
+    a_rebase_killed_as_its_last_step_is_committed_is_whole_or_gone_on_with();
 }

@@ -225,8 +225,7 @@ fn killed_everywhere(
     for (at, point) in points.iter().enumerate() {
         let when = format!("{command:?} killed at point {} ({point})", at + 1);
         restore(&repo, &began);
-        let killed = alt(&repo, command, Some(&(at + 1).to_string()));
-        assert_eq!(killed.status.code(), None, "{when}: {}", said(&killed));
+        super::kill::killed(&repo, command, at + 1, &when);
 
         // a command that writes, and here finds nothing to write
         let next = alt(&repo, &["branch", "-d", "no-such-branch"], None);
@@ -279,31 +278,14 @@ pub(crate) fn killed_and_its_undo(
     resume: Option<(&[&str], i32)>,
 ) -> Vec<String> {
     let points = killed_everywhere(bench, setup, command, exit, resume);
+    // the undo is walked where the kill is of the process alone
+    if !super::kill::plain() {
+        return points;
+    }
     let through = |repo: &Path| {
         setup(repo);
         run(repo, command, exit);
     };
     killed_everywhere(bench, &through, &["undo"], 0, None);
     points
-}
-
-/// An abort killed before it removed its state file: the next command
-/// that writes brings it to its end, and there is nothing left to give up.
-pub(crate) fn abort_killed_before_its_state_file(
-    bench: &Bench,
-    stopped: &dyn Fn(&Path),
-    abort: &[&str],
-    points: &[String],
-) {
-    let repo = bench.repo();
-    restore(&repo, &bench.kept("fixture"));
-    let clean = bench.shape();
-    stopped(&repo);
-    let at = points.iter().rposition(|p| p == "state-file:before");
-    let killed = alt(&repo, abort, Some(&(at.unwrap() + 1).to_string()));
-    assert_eq!(killed.status.code(), None, "{abort:?}");
-    let again = alt(&repo, abort, None);
-    assert!(!again.status.success(), "{abort:?} again");
-    assert!(said(&again).contains("in progress"), "{}", said(&again));
-    assert_eq!(bench.shape(), clean, "{abort:?} killed and ended");
 }
