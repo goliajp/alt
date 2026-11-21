@@ -38,6 +38,10 @@ use alt_wire::ls_refs::RefRecord;
 use alt_wire::push::{CommandStatus, RefUpdate};
 use tiny_http::{Header, Method, Response, Server, StatusCode};
 
+#[path = "altd_server/pack_ingest.rs"]
+mod pack_ingest;
+use pack_ingest::{absent_tip_block, apply_pack_into_store, prepare_pack_for_ingest};
+
 const AGENT: &str = concat!("alt-server/", env!("CARGO_PKG_VERSION"));
 
 /// per-request log context filled in as dispatch progresses.
@@ -1269,7 +1273,11 @@ fn handle_receive_pack(
     // signature gate(s) passed; otherwise mark every command `ng` so
     // the client sees a coherent reason.
     let mut command_status: Vec<CommandStatus> = Vec::new();
-    let any_block = sig_block.clone().or(commit_block);
+    let absent_block = match &unpack_result {
+        Ok(()) => absent_tip_block(store, &head.updates)?,
+        Err(_) => None,
+    };
+    let any_block = sig_block.clone().or(commit_block).or(absent_block);
     // flips to true the moment commit_ref_updates returns Ok.
     // While this is still false at the rewind site below, the new
     // append-only writes are rolled back to `ingest_ckpt` so the odb is
@@ -1376,55 +1384,6 @@ fn handle_receive_pack(
     respond_logged(req, resp, log)?;
     let _ = repo; // borrow keepalive across response
     Ok(())
-}
-
-/// A pack indexed and ready to replay (file-system reads done, lock not
-/// yet taken). The second tuple element is the order of `(offset, idx)`
-/// pairs so the put loop visits records in file order.
-type PreparedPack = (alt_git_pack::IndexedPack, Vec<(u64, u32)>);
-
-/// Index the pack already on disk at `path` (no store lock needed —
-/// `index_pack` walks the file and builds the .idx, a CPU + disk task
-/// orthogonal to in-process odb state). The returned (`IndexedPack`,
-/// offset order) is paired with [`apply_pack_into_store`] which takes
-/// the store lock and replays the puts.
-fn prepare_pack_for_ingest(
-    path: &std::path::Path,
-) -> Result<PreparedPack, Box<dyn std::error::Error>> {
-    let indexed = alt_git_pack::index_pack(path, HashAlgo::Sha1, true)?;
-    let ip = alt_git_pack::IndexedPack::open(&indexed.pack_path, HashAlgo::Sha1)?;
-    let idx = ip.idx();
-    let mut order: Vec<(u64, u32)> = (0..idx.len())
-        .map(|i| (idx.offset_at(i).expect("idx in range"), i))
-        .collect();
-    order.sort_unstable();
-    Ok((ip, order))
-}
-
-/// Apply a prepared pack into the server odb under an already-held
-/// store guard, returning the list of new commit oids. Holding the
-/// guard across the whole put loop is what makes the checkpoint /
-/// rewind window indivisible against concurrent receive-pack flows:
-/// no other writer can advance `appended_lens` between the surrounding
-/// `checkpoint()` calls, so a downstream rewind is guaranteed to drop
-/// exactly this push's bytes (and only this push's).
-fn apply_pack_into_store(
-    store: &mut Store,
-    ip: &alt_git_pack::IndexedPack,
-    order: &[(u64, u32)],
-) -> Result<Vec<ObjectId>, Box<dyn std::error::Error>> {
-    let idx = ip.idx();
-    let mut new_commits = Vec::new();
-    for &(offset, i) in order {
-        let obj = ip.read_at(offset)?;
-        let oid = idx.oid_at(i);
-        if obj.kind == alt_git_codec::ObjectKind::Commit {
-            new_commits.push(oid);
-        }
-        store.odb_mut().put(oid, obj.kind, &obj.data)?;
-    }
-    store.odb_mut().flush()?;
-    Ok(new_commits)
 }
 
 /// Apply the client's ref updates as a single ref transaction so the

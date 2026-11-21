@@ -37,8 +37,8 @@ out| {"schema_version":1,"current":"main","branches":[{"name":"main","current":t
 $ [repo] alt tag v1
 exit 0
 $ [repo] alt push origin refs/tags/v1:refs/tags/v1 --json
-exit 75
-err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"server rejected push: unpack eof before pack header was fully read","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:10>","retryable":false},"schema_version":1}
+exit 0
+out| {"objects":0,"operation_ids":[],"pack_bytes":<volatile>,"refs":[{"name":"refs/tags/v1","status":"ok"}],"remote":"origin","request_id":"<id32:10>","schema_version":1}
 $ alt clone <server> copy --json
 exit 0
 out| Initialized empty alt repository in copy/.alt

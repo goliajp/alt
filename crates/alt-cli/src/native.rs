@@ -2976,7 +2976,7 @@ impl<'a> NativeRepo<'a> {
         let excludes: Vec<ObjectId> = ad.refs.values().copied().collect();
         let outgoing = repo.reachable_objects(&local_tips, &excludes)?;
 
-        let pack_bytes = self.push_pack(&repo, remote_name, &outgoing)?;
+        let pack_bytes = self.push_pack(&repo, remote_name, &updates, &outgoing)?;
 
         // capabilities to declare on the push request
         let agent = format!("agent=alt/{}", env!("CARGO_PKG_VERSION"));
