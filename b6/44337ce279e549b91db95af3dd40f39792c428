@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: refactor
+summary: split the command definitions and dispatch into modules by group
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli.rs
+touched: crates/alt-cli/src/cli/classify.rs
+touched: crates/alt-cli/src/cli/command.rs
+touched: crates/alt-cli/src/cli/git.rs
+touched: crates/alt-cli/src/cli/native.rs
+touched: crates/alt-cli/src/cli/platform.rs
+touched: crates/alt-cli/src/cli/prepare.rs
+touched: crates/alt-cli/src/cli/task.rs
+touched: crates/alt-cli/src/cli/vcs.rs
