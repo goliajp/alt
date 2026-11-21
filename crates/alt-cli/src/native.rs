@@ -34,6 +34,7 @@ pub use coord::{Coord, resolve_workspace};
 mod diff;
 mod http_auth;
 mod identity;
+mod in_progress;
 mod index_file;
 use index_file::{empty_index, save_index};
 mod lfs;

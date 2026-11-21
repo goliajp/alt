@@ -17,13 +17,13 @@ struct RevertStateParts {
 pub(super) struct RevertState {
     /// The commit whose revert stopped on a conflict; `None` once that revert
     /// has been committed (by `alt commit`) and only the rest is left.
-    current: Option<ObjectId>,
+    pub(super) current: Option<ObjectId>,
     /// Commits still to revert, in order.
-    todo: Vec<ObjectId>,
+    pub(super) todo: Vec<ObjectId>,
     /// The parent to revert against, for merge commits (1-based, as `-m`).
     mainline: Option<usize>,
     /// Where the branch stood before the sequence, for `--abort`.
-    orig: ObjectId,
+    pub(super) orig: ObjectId,
 }
 
 enum Reverted {

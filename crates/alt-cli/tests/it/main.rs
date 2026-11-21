@@ -70,6 +70,7 @@ mod monorepo_bench;
 mod nested_repo;
 mod old_daemon;
 mod op_log;
+mod operation_state;
 mod past_damage;
 mod path_gate;
 mod pathspec_git;

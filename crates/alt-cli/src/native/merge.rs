@@ -227,34 +227,28 @@ impl NativeRepo<'_> {
         }
     }
 
-    /// Refuses `verb` while a merge is waiting for its resolving commit.
+    /// Refuses `verb` while a merge, bisect, rebase or revert waits to be
+    /// finished.
     pub(super) fn ensure_no_merge_in_progress(&self, verb: &str) -> Res<()> {
-        if self.merge_head()?.is_some() {
-            return Err(format!(
-                "{verb}: a merge is in progress; resolve the conflicts and commit it first"
-            )
-            .into());
-        }
-        if self.bisect_in_progress() {
-            return Err(
-                format!("{verb}: a bisect is in progress; end it with `alt bisect reset`").into(),
-            );
-        }
-        if self.rebase_in_progress() {
-            return Err(format!(
-                "{verb}: a rebase is in progress; finish it with `alt rebase --continue`, \
+        use in_progress::OperationKind;
+        let hint = match self.operation_kind(false)? {
+            None | Some(OperationKind::CherryPick) => return Ok(()),
+            Some(OperationKind::Merge) => {
+                "a merge is in progress; resolve the conflicts and commit it first"
+            }
+            Some(OperationKind::Bisect) => {
+                "a bisect is in progress; end it with `alt bisect reset`"
+            }
+            Some(OperationKind::Rebase) => {
+                "a rebase is in progress; finish it with `alt rebase --continue`, \
                  `--skip` or `--abort`"
-            )
-            .into());
-        }
-        if self.revert_state()?.is_some() {
-            return Err(format!(
-                "{verb}: a revert is in progress; finish it with `alt revert --continue` \
+            }
+            Some(OperationKind::Revert) => {
+                "a revert is in progress; finish it with `alt revert --continue` \
                  or `alt revert --abort`"
-            )
-            .into());
-        }
-        Ok(())
+            }
+        };
+        Err(format!("{verb}: {hint}").into())
     }
 }
 
