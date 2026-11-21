@@ -4,6 +4,7 @@
 use super::*;
 use recovery::{WorkspaceIdentity, canonical_index, decode, durable_write, encode, hash};
 
+mod finish;
 mod inverse;
 mod prestate;
 
@@ -118,68 +119,6 @@ impl NativeRepo<'_> {
             }
         }
         Ok(())
-    }
-
-    pub(super) fn finish_interrupted_checkout(
-        &mut self,
-        operation: OpId,
-        intent: CheckoutIntent,
-    ) -> Res<()> {
-        if intent.version != 1 || intent.workspace != self.workspace_identity()? {
-            return Err(crate::machine::Failure::refusal(
-                "precondition_failed",
-                "recovery workspace instance does not match",
-            )
-            .into());
-        }
-        // Check every path and snapshot before changing the first byte.
-        let mut outstanding = Vec::new();
-        let paths: std::collections::HashSet<&[u8]> =
-            intent.files.iter().map(|c| c.path.as_slice()).collect();
-        for change in &intent.files {
-            let path = BString::from(change.path.clone());
-            self.ensure_path_allowed(&path)?;
-            for state in [&change.before, &change.after].into_iter().flatten() {
-                if state.mode != 0o160000 {
-                    self.read_snapshot(&state.contents)?;
-                }
-            }
-            let actual = self.observed_among(&paths, change)?;
-            // a path that changes between a submodule directory and a file
-            // is absent for a moment: the one goes before the other comes
-            let kinds =
-                [&change.before, &change.after].map(|s| s.as_ref().map(|s| s.mode == 0o160000));
-            let between = actual.is_none() && matches!(kinds, [Some(a), Some(b)] if a != b);
-            if actual != change.before && actual != change.after && !between {
-                return Err(crate::machine::Failure::refusal(
-                    "precondition_failed",
-                    "recovery precondition failed: path matches neither recorded state",
-                )
-                .into());
-            }
-            if actual != change.after {
-                outstanding.push(change);
-            }
-        }
-        let before = self.read_snapshot(&intent.index_before)?;
-        let after = self.read_snapshot(&intent.index_after)?;
-        Index::parse(&before, self.store.algo()?)?;
-        Index::parse(&after, self.store.algo()?)?;
-        let current = hash(&canonical_index(self.index()?, self.store.algo()?));
-        if current != intent.index_before && current != intent.index_after {
-            return Err(crate::machine::Failure::refusal(
-                "precondition_failed",
-                "recovery precondition failed: index matches neither recorded state",
-            )
-            .into());
-        }
-        self.ensure_directories_replaceable(&intent)?;
-        self.apply_changes(outstanding.iter().copied())?;
-        if current != intent.index_after {
-            durable_write(&self.index_path, &after)?;
-        }
-        self.snapshot_checked_out(&after)?;
-        self.record_checkout_done("recover", operation)
     }
 
     pub(super) fn recoverable_checkout(

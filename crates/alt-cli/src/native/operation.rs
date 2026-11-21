@@ -254,18 +254,19 @@ impl NativeRepo<'_> {
         // a step that was cut short is brought to an end as a whole
         self.recover_open_step(true)?;
         if !self.operation_info(&op)?.1 {
-            self.finish_prepared(&op)?;
+            self.finish_prepared(&op, false)?;
         }
         self.operation_status(id, json, out)
     }
 
     /// Finishes the index change or the checkout that `op` prepared and
-    /// no record completes.
-    pub(super) fn finish_prepared(&mut self, op: &alt_oplog::Op) -> Res<()> {
+    /// no record completes; `of_step` where it is a record of a step.
+    pub(super) fn finish_prepared(&mut self, op: &alt_oplog::Op, of_step: bool) -> Res<()> {
         match op.payload.first() {
             Some(&PREPARE) => self.recover_index(op.id, decode(&op.payload, PREPARE)?),
             Some(&PREPARE_CHECKOUT) => {
-                self.finish_interrupted_checkout(op.id, decode(&op.payload, PREPARE_CHECKOUT)?)
+                let intent = decode(&op.payload, PREPARE_CHECKOUT)?;
+                self.finish_interrupted_checkout(op.id, intent, of_step)
             }
             Some(&alt_refs::PAYLOAD_REF_TX) => {
                 let tx = alt_refs::parse_tx(&op.payload)?.ok_or("not a ref operation")?;
@@ -283,10 +284,8 @@ impl NativeRepo<'_> {
                 }
                 let context: RefContext =
                     alt_json::from_slice(&tx.context.ok_or("missing recovery scope")?)?;
-                self.finish_interrupted_checkout(
-                    op.id,
-                    context.checkout.ok_or("missing checkout intent")?,
-                )
+                let intent = context.checkout.ok_or("missing checkout intent")?;
+                self.finish_interrupted_checkout(op.id, intent, of_step)
             }
             _ => Err(crate::machine::Failure::refusal(
                 "unsupported_record",

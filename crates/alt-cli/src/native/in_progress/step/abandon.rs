@@ -24,14 +24,26 @@ fn refusal(why: impl Into<String>) -> Box<dyn std::error::Error> {
     crate::machine::Failure::refusal("precondition_failed", why).into()
 }
 
+/// What was changed since the step `begun` began was cut short is in the
+/// way of giving it up, and how it is given up all the same.
+fn changed(what: &str, begun: OpId) -> Box<dyn std::error::Error> {
+    refusal(format!(
+        "{what} was changed after the operation was interrupted; `alt operation abandon {begun} \
+         --keep-changes` gives the operation up and leaves it as it is"
+    ))
+}
+
 impl NativeRepo<'_> {
-    /// The checkout that puts each file the step wrote, and the index, as
-    /// the step found them: from what is there now, which for each must
-    /// be one of the states the step recorded.
-    fn checkout_back(&self, told: &Told) -> Res<Option<CheckoutIntent>> {
-        let Some(first) = told.checkouts.first() else {
-            return Ok(None);
-        };
+    /// Each file the step wrote, from what is there now to what the step
+    /// found. A file that is none of the states the step recorded was
+    /// changed since: the step is not given up over it unless asked to
+    /// `keep` it, and then it is left as it is. The files kept so, by name.
+    fn files_back(
+        &self,
+        told: &Told,
+        begun: OpId,
+        keep: bool,
+    ) -> Res<(Vec<FileChange>, Vec<String>)> {
         let mut known: BTreeMap<&[u8], Recorded> = BTreeMap::new();
         for change in told.checkouts.iter().flat_map(|c| &c.files) {
             let path = known
@@ -40,17 +52,20 @@ impl NativeRepo<'_> {
             path.1.extend([&change.before, &change.after]);
         }
         let paths: HashSet<&[u8]> = known.keys().copied().collect();
-        let mut files = Vec::new();
+        let (mut files, mut kept) = (Vec::new(), Vec::new());
         for (path, (found, states)) in &known {
             let named = BString::from(path.to_vec());
             let gitlink = states
                 .iter()
                 .any(|s| s.as_ref().is_some_and(|s| s.mode == 0o160000));
             let now = self.observed(&named, false, gitlink, &|p| paths.contains(p))?;
-            if !states.contains(&&now) {
-                let why =
-                    format!("'{named}' is neither as the operation found it nor as it left it");
-                return Err(refusal(why));
+            // nothing is lost where a file is gone
+            if now.is_some() && !states.contains(&&now) {
+                if !keep {
+                    return Err(changed(&format!("'{named}'"), begun));
+                }
+                kept.push(named.to_string());
+                continue;
             }
             files.push(FileChange {
                 path: path.to_vec(),
@@ -58,23 +73,44 @@ impl NativeRepo<'_> {
                 after: (*found).clone(),
             });
         }
-        let index = hash(&canonical_index(self.index()?, self.store.algo()?));
-        let recorded = |c: &CheckoutIntent| c.index_before == index || c.index_after == index;
-        if !told.checkouts.iter().any(recorded) {
-            return Err(refusal(
-                "the index is neither as the operation found it nor as it left it",
-            ));
-        }
+        Ok((files, kept))
+    }
+
+    /// The checkout that puts each file the step wrote, and the index, as
+    /// the step found them, from what is there now; and what is left as it
+    /// is because asked to `keep` it: a file that was changed since, and an
+    /// index that is neither as the step found it nor as it left it.
+    fn checkout_back(
+        &self,
+        told: &Told,
+        begun: OpId,
+        keep: bool,
+    ) -> Res<(Option<CheckoutIntent>, Vec<String>)> {
+        let Some(first) = told.checkouts.first() else {
+            return Ok((None, Vec::new()));
+        };
+        let (files, mut kept) = self.files_back(told, begun, keep)?;
+        let index = canonical_index(self.index()?, self.store.algo()?);
+        let now = hash(&index);
+        let recorded = |c: &CheckoutIntent| c.index_before == now || c.index_after == now;
+        let index_after = match told.checkouts.iter().any(recorded) {
+            true => first.index_before.clone(),
+            false if keep => {
+                kept.push("the index".to_owned());
+                self.snapshot(&index)?
+            }
+            false => return Err(changed("the index", begun)),
+        };
         let back = CheckoutIntent {
             version: 1,
             workspace: first.workspace.clone(),
             request_id: self.request_id.map(|id| crate::machine::hex(&id)),
-            index_before: index,
-            index_after: first.index_before.clone(),
+            index_before: now,
+            index_after,
             files,
         };
         self.ensure_directories_replaceable(&back)?;
-        Ok(Some(back))
+        Ok((Some(back), kept))
     }
 
     /// The ref changes that take back what the step moved. The note of a
@@ -101,10 +137,14 @@ impl NativeRepo<'_> {
     /// Gives up the step of this workspace that was cut short: the
     /// workspace is as before the command of that step. Refused, with
     /// nothing changed, where it is no longer as the step left it. The
-    /// state files the step had made, none where there was no such step.
-    pub(in crate::native) fn abandon_open_step(&mut self) -> Res<Vec<String>> {
+    /// state files the step had made, none where there was no such step,
+    /// and what was left as it is because asked to `keep` it.
+    pub(in crate::native) fn abandon_open_step(
+        &mut self,
+        keep: bool,
+    ) -> Res<(Vec<String>, Vec<String>)> {
         let Some((begun, mark, false)) = self.last_step_mark()? else {
-            return Ok(Vec::new());
+            return Ok(Default::default());
         };
         let told = self.told_after(&begun, &mark)?;
         if told.foreign {
@@ -116,7 +156,7 @@ impl NativeRepo<'_> {
             );
             return Err(refusal(why));
         }
-        let checkout = self.checkout_back(&told)?;
+        let (checkout, kept) = self.checkout_back(&told, begun.id, keep)?;
         let refs = self.refs_back(&told)?;
         let made = |file: &&StateText| {
             file.text.is_none() && told.state.get(&file.name).is_some_and(Option::is_some)
@@ -154,12 +194,18 @@ impl NativeRepo<'_> {
             moved?;
         }
         self.recover_open_step(false)?;
-        Ok(made)
+        Ok((made, kept))
     }
 
-    /// `alt operation abandon <id>`: gives up the step that was
-    /// cut short and `id` is a record of.
-    pub fn operation_abandon(&mut self, id: &str, json: bool, out: &mut impl Write) -> Res<()> {
+    /// `alt operation abandon <id> [--keep-changes]`: gives up the step
+    /// that was cut short and `id` is a record of.
+    pub fn operation_abandon(
+        &mut self,
+        id: &str,
+        keep: bool,
+        json: bool,
+        out: &mut impl Write,
+    ) -> Res<()> {
         self.ensure_may_recover()?;
         let op = self.operation_by_id(id)?;
         let open = self.last_step_mark()?.filter(|(_, _, closed)| !closed);
@@ -172,19 +218,27 @@ impl NativeRepo<'_> {
         if !own || at(op.id) < at(begun.id) {
             return Err(refusal(nothing));
         }
-        self.abandon_open_step()?;
+        let (_, kept) = self.abandon_open_step(keep)?;
         if json {
             use crate::json::Json;
             let fields = vec![
                 ("operation_id", Json::str(begun.id.to_string())),
                 ("abandoned", Json::Bool(true)),
+                ("kept", Json::Array(kept.iter().map(Json::str).collect())),
             ];
             crate::json::emit(out, fields)?;
         } else {
             let id = begun.id;
+            let but = match kept.is_empty() {
+                true => String::new(),
+                false => format!(
+                    ", but for what was changed since and is left as it is: {}",
+                    kept.join(", ")
+                ),
+            };
             writeln!(
                 out,
-                "{id} given up: the workspace is as it was before the command"
+                "{id} given up: the workspace is as it was before the command{but}"
             )?;
         }
         Ok(())
@@ -199,7 +253,7 @@ impl NativeRepo<'_> {
         if self.recover_open_step(false).is_ok() {
             return Ok(false);
         }
-        let made = self.abandon_open_step()?;
+        let (made, _) = self.abandon_open_step(false)?;
         Ok(made.iter().any(|name| name == state))
     }
 }

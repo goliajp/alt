@@ -78,8 +78,9 @@ fn stuck(begun: &alt_oplog::Op, why: &dyn std::error::Error) -> Box<dyn std::err
     let id = begun.id;
     let said = format!(
         "operation {id} was interrupted and cannot be brought to an end: {why}; \
-         clear what is in its way and run the command again, \
-         or give the operation up with `alt operation abandon {id}`"
+         move what is in its way aside and run the command again, or give the operation \
+         up with `alt operation abandon {id}`, which with `--keep-changes` leaves a file \
+         changed since as it is"
     );
     crate::machine::Failure::pending(id, said).into()
 }
@@ -281,7 +282,8 @@ impl NativeRepo<'_> {
             }
         }
         for op in &told.unfinished {
-            self.finish_prepared(op).map_err(|e| stuck(&begun, &*e))?;
+            self.finish_prepared(op, true)
+                .map_err(|e| stuck(&begun, &*e))?;
         }
         for op in &told.given_up {
             self.record_checkout_done("recover", op.id)?;

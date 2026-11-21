@@ -148,7 +148,9 @@ fn dispatch<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> Res<
             OperationOp::Pending => repo.operation_pending(*json, out)?,
             OperationOp::Status { id } => repo.operation_status(id, *json, out)?,
             OperationOp::Recover { id } => repo.operation_recover(id, *json, out)?,
-            OperationOp::Abandon { id } => repo.operation_abandon(id, *json, out)?,
+            OperationOp::Abandon { id, keep_changes } => {
+                repo.operation_abandon(id, *keep_changes, *json, out)?
+            }
         },
         Command::Workspace { op, json } => match op {
             WorkspaceOp::Add { name, path, branch } => {

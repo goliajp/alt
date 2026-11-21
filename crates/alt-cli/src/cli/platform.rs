@@ -108,6 +108,9 @@ pub enum OperationOp {
     Abandon {
         #[arg(hint = none)]
         id: String,
+        /// Leave a file that was changed since the command was interrupted as it is
+        #[arg(long)]
+        keep_changes: bool,
     },
 }
 

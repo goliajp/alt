@@ -111,6 +111,8 @@ mod status_replaced;
 mod status_untracked;
 // the points to be killed at are in a debug build only
 #[cfg(debug_assertions)]
+mod step_changed;
+#[cfg(debug_assertions)]
 mod step_crash;
 mod step_refused;
 #[cfg(debug_assertions)]
