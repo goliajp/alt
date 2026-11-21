@@ -100,7 +100,8 @@ impl NativeRepo<'_> {
         let mut snapshot = self.worktree_snapshot()?;
         let found = self.find(&specs, &before, mode, &mut snapshot)?;
         let (mut delta, hidden) = (found.delta, found.hidden);
-        let named = |path: &[u8]| pathspec::named(&specs, path);
+        let given = pathspec::Named::of(&specs);
+        let named = |path: &[u8]| given.has(path);
         let embedded = self.take_embedded(&mut delta, &named)?;
         let advice = embedded::warning(&embedded, &self.settings()?)?;
 
@@ -175,7 +176,8 @@ impl NativeRepo<'_> {
             false => self.hidden(specs, before)?,
         };
         // the scan looked at more than is named where a path has wildcards
-        let named = |path: &[u8]| pathspec::named(specs, path);
+        let given = pathspec::Named::of(specs);
+        let named = |path: &[u8]| given.has(path);
         delta.changed.retain(|w| named(&w.path));
         delta.deleted.retain(|path| named(path));
         delta.unmerged.retain(|path| named(path));

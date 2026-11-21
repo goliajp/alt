@@ -227,6 +227,12 @@ impl Spec {
         }
     }
 
+    /// Whether every name this names is the path or lies beneath it,
+    /// byte for byte.
+    pub(super) fn is_plain(&self) -> bool {
+        !self.fold_case && self.plain_len() == self.path.len()
+    }
+
     /// Whether this is a path written out, which git looks up when
     /// nothing matched it.
     pub fn written_out(&self) -> bool {
@@ -259,24 +265,13 @@ pub fn keep_named(specs: &[Spec], names: &mut Vec<BString>) {
     });
 }
 
-/// Whether `name` is among what the `specs` name together: what one of
-/// them names and none takes away. Where all of them take away, they take
-/// away from the whole tree.
-pub fn named(specs: &[Spec], name: &[u8]) -> bool {
-    let mut any = !specs.is_empty() && specs.iter().all(|spec| spec.exclude);
-    for spec in specs {
-        match (spec.exclude, spec.matches(name)) {
-            (true, true) => return false,
-            (false, true) => any = true,
-            _ => {}
-        }
-    }
-    any
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn named(specs: &[Spec], name: &[u8]) -> bool {
+        super::super::Named::of(specs).has(name)
+    }
 
     fn spec(prefix: &str, given: &str) -> Spec {
         Spec::parse(Path::new("/r"), prefix, given).unwrap()

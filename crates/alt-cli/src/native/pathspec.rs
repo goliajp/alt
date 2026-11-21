@@ -7,10 +7,12 @@ use alt_repo::Repository;
 
 use super::Res;
 
+mod set;
 mod spec;
 mod wild;
 
-pub use spec::{Spec, keep_named, named};
+pub use set::Named;
+pub use spec::{Spec, keep_named};
 
 /// Where `cwd` lies beneath the working tree at `root`: `sub/dir`, empty
 /// for the root itself and for a directory outside the tree.
