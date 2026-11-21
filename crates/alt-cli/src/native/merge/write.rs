@@ -14,6 +14,13 @@ fn kept(r: &Resolved, was: &Whole) -> bool {
     }
 }
 
+/// Whether a merge has nothing to write at the path of `r`: it leaves it
+/// as it is, or has no file there where the index has none either.
+fn untouched(r: &Resolved, was: &Whole) -> bool {
+    let absent = r.entry.is_none() && !r.conflicted && !was.contains_key(&r.path);
+    absent || kept(r, was)
+}
+
 impl NativeRepo<'_> {
     /// The attribute files among `resolved`, each with the directory it
     /// is in.
@@ -52,8 +59,19 @@ impl NativeRepo<'_> {
             .filter(|e| e.stage() == 0)
             .map(|e| (e.path.clone(), e))
             .collect();
-        let changed = resolved.iter().filter(|r| !kept(r, &was));
+        let changed = resolved.iter().filter(|r| !untouched(r, &was));
         let changed: Vec<&BString> = changed.map(|r| &r.path).collect();
+        // refused before the first write, as a checkout is
+        for path in changed.iter().filter(|path| !was.contains_key(**path)) {
+            if self
+                .abs(path)?
+                .symlink_metadata()
+                .is_ok_and(|m| !m.is_dir())
+            {
+                let why = format!("untracked working tree file '{path}' would be overwritten");
+                return Err(crate::machine::Failure::refusal("precondition_failed", why).into());
+            }
+        }
         let before = self.step_unrecorded(&changed)?;
         self.write_merged(resolved, &was)?;
         self.step_wrote(before)
@@ -68,7 +86,7 @@ impl NativeRepo<'_> {
         let files: Vec<(&[u8], &[u8])> = files.iter().map(|(d, c)| (*d, c.as_slice())).collect();
         let attrs = self.converter_under(&files)?;
         for r in resolved {
-            if kept(r, was) {
+            if untouched(r, was) {
                 continue;
             }
             let abs = self.abs(&r.path)?;

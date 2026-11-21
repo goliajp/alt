@@ -30,6 +30,7 @@ mod config;
 #[cfg(target_os = "linux")]
 mod config_paths;
 mod conflict_reset;
+mod conflict_untracked;
 mod crash_fixture;
 mod credential_helper;
 mod cwd_paths;
