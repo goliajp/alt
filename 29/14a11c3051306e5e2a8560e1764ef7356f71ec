@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: say what becomes of a file changed while a command waits to be brought to an end, and what giving a command up keeps
+author-type: human
+author: doracawl
+touched: docs/recovery.md
