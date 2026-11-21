@@ -87,6 +87,7 @@ pub struct Store {
     /// the zero-regression default. Daemon re-reads in [`refresh`](Self::refresh)
     /// so an operator edit is picked up on the next request.
     policy: Policy,
+    attributed: std::sync::Mutex<requests::Attributed>,
     /// where and what [`Self::keep_checked`] writes
     checked: Option<(PathBuf, Vec<u8>)>,
 }
@@ -99,6 +100,7 @@ impl Store {
             refs: unconfirmed::open_refs(&alt_dir)?,
             policy: Policy::load(&alt_dir)?,
             algo: std::sync::OnceLock::new(),
+            attributed: Default::default(),
             checked: None,
             alt_dir,
         })

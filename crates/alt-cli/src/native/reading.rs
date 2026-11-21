@@ -53,6 +53,7 @@ impl Store {
             refs,
             policy: Policy::load(&alt_dir)?,
             algo: std::sync::OnceLock::new(),
+            attributed: Default::default(),
             checked: None,
             alt_dir,
         })

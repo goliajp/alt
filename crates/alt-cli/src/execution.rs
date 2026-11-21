@@ -15,6 +15,9 @@ pub struct Execution {
     pub id: Option<RequestId>,
     pub cwd: PathBuf,
     pub writing: bool,
+    /// the request id was drawn at random for this very run: no operation
+    /// recorded before it can carry it
+    drawn: bool,
     claim: Option<Claim>,
     outcome: std::cell::Cell<&'static str>,
 }
@@ -35,7 +38,42 @@ pub fn binding(
     Ok((alt_dir, repository, workspace, value))
 }
 
+/// Gives a native write the request id it runs under and records that it
+/// was submitted. Where the caller named none, one is drawn and put among
+/// `args`. Returns the command as it parses then, and whether the id was
+/// drawn here.
+pub fn submit(
+    args: &mut Vec<std::ffi::OsString>,
+    mut parsed: Parsed,
+    cwd: &Path,
+    identity: &Identity,
+) -> Result<(Parsed, bool), Response> {
+    let drawn = parsed.cli.request_id.is_none();
+    let id = match parsed.cli.request_id.as_deref() {
+        Some(id) => request::parse_id(id).map_err(|e| e.response(parsed.json, Some(id)))?,
+        None => request::new_id()
+            .map_err(|e| machine::from_error(&e, false).response(parsed.json, None))?,
+    };
+    if drawn {
+        args.splice(1..1, ["--request-id".into(), machine::hex(&id).into()]);
+        parsed = machine::parse(args.clone())?;
+    }
+    binding(&parsed, cwd, identity)
+        .and_then(|(dir, _, _, value)| request::record_submission(&dir, id, &value))
+        .map_err(|error| {
+            machine::from_error(error.as_ref(), false)
+                .response(parsed.json, Some(&machine::hex(&id)))
+        })?;
+    Ok((parsed, drawn))
+}
+
 impl Execution {
+    /// Says whether the request id was drawn for this run ([`submit`]).
+    pub fn with_its_id_drawn(mut self, drawn: bool) -> Self {
+        self.drawn = drawn;
+        self
+    }
+
     /// Claim before acquiring any daemon store mutex. A retry can block here
     /// while the original publishes its result, without holding up durability.
     pub fn prepare(
@@ -91,6 +129,7 @@ impl Execution {
                 id,
                 cwd,
                 writing,
+                drawn: false,
                 claim,
                 outcome: std::cell::Cell::new("unknown"),
             }),
@@ -128,6 +167,8 @@ impl Execution {
     ) -> (Response, Vec<String>) {
         let capture = crate::diagnostics::Capture::start(self.parsed.json);
         let _caller = self.identity.outer_environment();
+        // an id drawn for this run is on no operation older than the run
+        let began = self.drawn.then(|| store.log_anchor());
         let mut stdout = Vec::new();
         let result = (|| -> Res<u8> {
             let (directory, _) =
@@ -143,6 +184,7 @@ impl Execution {
                 .into());
             }
             if let Some(id) = self.id
+                && !self.drawn
                 && store.legacy_request(&id)?
             {
                 return Err(Failure::unknown("legacy request has recorded effects but no complete response; inspect operations before recovery").into());
@@ -163,7 +205,7 @@ impl Execution {
         })();
         let operations = self
             .id
-            .map(|id| store.request_operations(&machine::hex(&id)))
+            .map(|id| store.request_operations_since(began, &machine::hex(&id)))
             .transpose();
         let (result, operations) = match operations {
             Ok(operations) => (result, operations.unwrap_or_default()),

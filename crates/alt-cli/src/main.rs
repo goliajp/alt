@@ -111,32 +111,12 @@ fn attempt() -> Response {
     let (forwarded, identity) = Identity::of_process();
     let native_write =
         cli::is_native(&parsed.cli.command) && cli::mutates_command(&parsed.cli.command);
+    let mut drawn = false;
     if native_write {
-        let id = match parsed.cli.request_id.as_deref() {
-            Some(id) => match alt_cli::request::parse_id(id) {
-                Ok(id) => id,
-                Err(error) => return error.response(parsed.json, Some(id)),
-            },
-            None => match alt_cli::request::new_id() {
-                Ok(id) => id,
-                Err(error) => {
-                    return machine::from_error(&error, false).response(parsed.json, None);
-                }
-            },
+        (parsed, drawn) = match alt_cli::execution::submit(&mut args, parsed, &cwd, &identity) {
+            Ok(submitted) => submitted,
+            Err(response) => return response,
         };
-        if parsed.cli.request_id.is_none() {
-            args.splice(1..1, ["--request-id".into(), machine::hex(&id).into()]);
-            parsed = match machine::parse(args.clone()) {
-                Ok(parsed) => parsed,
-                Err(response) => return response,
-            };
-        }
-        let submitted = alt_cli::execution::binding(&parsed, &cwd, &identity)
-            .and_then(|(dir, _, _, value)| alt_cli::request::record_submission(&dir, id, &value));
-        if let Err(error) = submitted {
-            return machine::from_error(error.as_ref(), false)
-                .response(parsed.json, Some(&machine::hex(&id)));
-        }
     }
     #[cfg(unix)]
     if alt_cli::client::routes_through_daemon(&parsed.cli.command)
@@ -184,7 +164,7 @@ fn attempt() -> Response {
         }
     }
     let execution = match Execution::prepare(parsed, cwd.clone(), identity, None) {
-        Ok(execution) => execution,
+        Ok(execution) => execution.with_its_id_drawn(drawn),
         Err(response) => return response,
     };
     if cli::is_native(&execution.parsed.cli.command) {
