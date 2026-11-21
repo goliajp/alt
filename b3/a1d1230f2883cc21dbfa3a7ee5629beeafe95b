@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: fix
+summary: tell the guard of a step by the index it is kept for and a giving up by its mark, and write no checkout where giving up has nothing to put back
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/checkout_recovery.rs
+touched: crates/alt-cli/src/native/in_progress/step.rs
+touched: crates/alt-cli/src/native/in_progress/step/abandon.rs
+touched: crates/alt-cli/src/native/in_progress/step/guard.rs
+touched: crates/alt-cli/src/native/in_progress/step/left.rs
+touched: crates/alt-cli/src/native/in_progress/step/mark.rs
+touched: crates/alt-cli/src/native/in_progress/step/recover.rs
+touched: crates/alt-cli/tests/fixtures/json-read/state-step-StepMark.txt
